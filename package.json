@@ -30,27 +30,40 @@
       "package.json"
     ],
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "category": "Office"
+      "category": "Office",
+      "icon": "build/icon.png",
+      "syncDesktopName": true,
+      "synopsis": "Gratis boekhouding voor zzp en vakmensen",
+      "maintainer": "Martin <info@shipdocs.app>"
     },
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "build/icon.png"
     },
     "publish": [
       {
         "provider": "github",
         "owner": "shipdocs",
-        "repo": "gratis-boekhouden"
+        "repo": "gratis-boekhouden",
+        "releaseType": "release"
       }
-    ]
+    ],
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Gratis Boekhouden"
+    }
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
@@ -59,7 +72,8 @@
     "mt940-js": "^1.0.0",
     "nodemailer": "^10.0.10",
     "papaparse": "^5.7.0",
-    "pdfjs-dist": "^6.3.289"
+    "pdfjs-dist": "^6.3.289",
+    "tslib": "^2.8.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
@@ -82,5 +96,7 @@
   },
   "engines": {
     "node": ">=22.12"
-  }
+  },
+  "homepage": "https://shipdocs.github.io/gratis-boekhouden/",
+  "desktopName": "gratis-boekhouden.desktop"
 }

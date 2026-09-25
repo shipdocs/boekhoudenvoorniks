@@ -213,9 +213,41 @@ function createWindow(): void {
   if (devUrl) void mainWindow.loadURL(devUrl);
   else void mainWindow.loadFile(join(__dirname, '..', '..', 'renderer', 'index.html'));
   mainWindow.on('closed', () => (mainWindow = null));
+  if (SMOKE_TEST) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      try {
+        const ok = await mainWindow!.webContents.executeJavaScript('window.bridge.call("app.version", [])');
+        console.log(`SMOKE OK ${ok}`);
+        app.exit(0);
+      } catch (e) {
+        console.error('SMOKE FAIL', e);
+        app.exit(1);
+      }
+    });
+    mainWindow.webContents.once('did-fail-load', (_e, code, desc) => {
+      console.error('SMOKE FAIL: laden mislukt', code, desc);
+      app.exit(1);
+    });
+  }
 }
 
-const gotLock = app.requestSingleInstanceLock();
+/**
+ * Rooktest voor de verpakte app (release-workflow): start, open de database, laad het venster
+ * en sluit af met code 0. Elke fout in het hoofdproces → code 1 in plaats van een verborgen dialoog.
+ */
+const SMOKE_TEST = process.env.GRATIS_BOEKHOUDEN_SMOKE_TEST === '1';
+if (SMOKE_TEST) {
+  process.on('uncaughtException', (e) => {
+    console.error('SMOKE FAIL', e);
+    app.exit(1);
+  });
+  setTimeout(() => {
+    console.error('SMOKE FAIL: timeout');
+    app.exit(1);
+  }, 60_000).unref();
+}
+
+const gotLock = SMOKE_TEST || app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
@@ -230,6 +262,7 @@ if (!gotLock) {
     initServices();
     registerIpc();
     createWindow();
+    if (SMOKE_TEST) return;
     setTimeout(() => void backgroundTasks(), 10_000);
     setInterval(() => void backgroundTasks(), SIX_HOURS);
     if (app.isPackaged) {
