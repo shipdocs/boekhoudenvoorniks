@@ -44,7 +44,7 @@ function Ledger({ from, to }: { from: string; to: string }) {
         <thead><tr><th>Nr</th><th>RGS</th><th>Rekening</th><th>Categorie</th><th className="num">Debet</th><th className="num">Credit</th><th className="num">Saldo</th></tr></thead>
         <tbody>
           {(b.data ?? []).filter((x) => x.debit || x.credit).map((x) => (
-            <tr key={x.account_id}><td>{x.code}</td><td>{x.rgs_code}</td><td>{x.name}</td><td>{x.category}</td><td className="num"><Euro cents={x.debit} /></td><td className="num"><Euro cents={x.credit} /></td><td className="num"><Euro cents={x.balance} /></td></tr>
+            <tr key={x.account_id}><td>{x.code}</td><td title={x.rgs_code}>{x.rgs_ref ?? '—'}</td><td>{x.name}</td><td>{x.category}</td><td className="num"><Euro cents={x.debit} /></td><td className="num"><Euro cents={x.credit} /></td><td className="num"><Euro cents={x.balance} /></td></tr>
           ))}
         </tbody>
       </table>

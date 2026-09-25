@@ -113,7 +113,7 @@ describe('exports & dashboard', () => {
     const doc = new XMLParser().parse(xml);
     const t = doc.auditfile.company.transactions;
     expect(t.totalDebit).toBe(t.totalCredit);
-    expect(s.exports.journalCsv('2026-01-01', '2026-12-31')).toContain('WOmzNopOlh');
+    expect(s.exports.journalCsv('2026-01-01', '2026-12-31')).toContain('WOmzNodOdh');
   });
 
   it('dashboard: omzet, openstaand, BTW-schuld', () => {

@@ -17,7 +17,7 @@ export class AccountantExport {
   journalCsv(from: IsoDate, to: IsoDate): string {
     const rows = this.db
       .prepare(
-        `SELECT e.id, e.entry_date, e.description, e.source, e.status, a.code, a.rgs_code, a.name, l.debit, l.credit, l.vat_code, r.name AS relation
+        `SELECT e.id, e.entry_date, e.description, e.source, e.status, a.code, a.rgs_ref, a.name, l.debit, l.credit, l.vat_code, r.name AS relation
          FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
          JOIN chart_of_accounts a ON a.id = l.account_id LEFT JOIN relations r ON r.id = l.relation_id
          WHERE e.entry_date BETWEEN ? AND ? ORDER BY e.entry_date, e.id, l.id`,
@@ -25,7 +25,7 @@ export class AccountantExport {
       .all(from, to) as Record<string, unknown>[];
     const header = ['Boekstuk', 'Datum', 'Omschrijving', 'Bron', 'Status', 'Rekening', 'RGS', 'Rekeningnaam', 'Debet', 'Credit', 'BTW-code', 'Relatie'];
     const lines = rows.map((r) =>
-      [r.id, r.entry_date, r.description, r.source, r.status, r.code, r.rgs_code, r.name, centsToDecimalString(r.debit as number), centsToDecimalString(r.credit as number), r.vat_code, r.relation].map(csvCell).join(';'),
+      [r.id, r.entry_date, r.description, r.source, r.status, r.code, r.rgs_ref, r.name, centsToDecimalString(r.debit as number), centsToDecimalString(r.credit as number), r.vat_code, r.relation].map(csvCell).join(';'),
     );
     return [header.join(';'), ...lines].join('\r\n') + '\r\n';
   }
@@ -35,7 +35,7 @@ export class AccountantExport {
     const lines = this.ledger
       .balances({ from, to })
       .filter((b) => b.debit !== 0 || b.credit !== 0)
-      .map((b) => [b.code, b.rgs_code, b.name, b.category, centsToDecimalString(b.debit), centsToDecimalString(b.credit), centsToDecimalString(b.balance)].map(csvCell).join(';'));
+      .map((b) => [b.code, b.rgs_ref ?? '', b.name, b.category, centsToDecimalString(b.debit), centsToDecimalString(b.credit), centsToDecimalString(b.balance)].map(csvCell).join(';'));
     return [header.join(';'), ...lines].join('\r\n') + '\r\n';
   }
 
@@ -94,7 +94,7 @@ ${r.iban ? `        <bankAccount><bankAccNr>${x(r.iban)}</bankAccNr></bankAccoun
   .join('\n')}
     </customersSuppliers>
     <generalLedger>
-${accounts.map((a) => `      <ledgerAccount><accID>${x(a.code)}</accID><accDesc>${x(a.name)}</accDesc><accTp>${accTp(a.category)}</accTp><taxonomies><taxonomy><txAcctMap><txLink>${x(a.rgs_code)}</txLink></txAcctMap></taxonomy></taxonomies></ledgerAccount>`).join('\n')}
+${accounts.map((a) => `      <ledgerAccount><accID>${x(a.code)}</accID><accDesc>${x(a.name)}</accDesc><accTp>${accTp(a.category)}</accTp>${a.rgs_ref ? `<taxonomies><taxonomy><txAcctMap><txLink>${x(a.rgs_ref)}</txLink></txAcctMap></taxonomy></taxonomies>` : ''}</ledgerAccount>`).join('\n')}
     </generalLedger>
     <transactions>
       <linesCount>${lines.length}</linesCount>

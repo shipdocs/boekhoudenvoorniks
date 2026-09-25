@@ -15,6 +15,8 @@ import { Overview } from './screens/Overview';
 import { SettingsScreen } from './screens/Settings';
 import { TemplateEditor } from './screens/TemplateEditor';
 import { Expert } from './screens/Expert';
+import { TermsGate } from './screens/Terms';
+import { TERMS_VERSION } from '../shared/legal';
 
 const NAV: { screen: Screen; label: string; icon: string; also?: Screen[] }[] = [
   { screen: 'home', label: 'Vandaag', icon: '🏠' },
@@ -128,6 +130,7 @@ export function App() {
           {screen}
         </main>
       </div>
+      {settings.onboardingDone && settings.termsAcceptedVersion !== TERMS_VERSION && route.screen !== 'welkom' && <TermsGate onAccepted={() => void reloadSettings()} />}
       <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind === 'error' ? 'error' : ''}`}>

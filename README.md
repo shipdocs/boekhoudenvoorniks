@@ -75,6 +75,18 @@ Electron (`electron-builder install-app-deps`).
 Lokale OCR en AI zijn optioneel; zie [`docs/ocr-sidecar.md`](docs/ocr-sidecar.md). De benchmark draai je met
 `npm run benchmark:ocr -- <map> <ocr-url> <engine>`.
 
+## Installeren
+
+Download de installer van de [laatste release](https://github.com/shipdocs/gratis-boekhouden/releases/latest): AppImage of `.deb` voor Linux, `Setup.exe` voor Windows.
+
+Op **Windows** kan SmartScreen melden dat "Windows uw pc heeft beveiligd". Dat komt doordat de installer (nog) niet met een betaald certificaat ondertekend is. Download de installer alleen van de [GitHub-release](https://github.com/shipdocs/gratis-boekhouden/releases) en controleer eventueel het controlegetal:
+
+```powershell
+Get-FileHash '.\Gratis Boekhouden Setup 0.1.0.exe' -Algorithm SHA256   # vergelijk met SHA256SUMS-Windows.txt
+```
+
+Klopt het, klik dan op **Meer informatie → Toch uitvoeren**. Op Linux: `sha256sum -c SHA256SUMS-Linux.txt --ignore-missing`.
+
 ## Releases en updates
 
 Een tag `v*` bouwt via GitHub Actions de installers voor Linux en Windows en publiceert ze als
@@ -82,11 +94,12 @@ GitHub-release. De geïnstalleerde app werkt zichzelf bij via `electron-updater`
 
 ## Status en open punten
 
-De fases MVP, V2 en V3 uit het technisch plan zijn gebouwd. Wat nog een beslissing of externe actie
-nodig heeft, staat als issue in GitHub (milestones *MVP livegang*, *V2*, *V3*). De belangrijkste:
+De fases MVP, V2 en V3 uit het technisch plan zijn gebouwd en uitgebracht als v0.1.0. Openstaand werk
+staat als issue in GitHub, per milestone en met prioriteit.
 
-- **BTW-logica laten reviewen door een boekhouder of fiscalist** vóór livegang (zie `src/btw`, `src/shared/vat.ts`, `src/shared/trades.ts`).
-- RGS-codes controleren tegen de officiële RGS-release.
-- Directe BTW-aangifte via SBR/Digipoort (PKIoverheid-certificaat, ODB-aanmelding).
-- Keuze van de OCR-engine op basis van een benchmark met ~200 echte documenten.
-- Open-banking-partner kiezen (PSD2 AIS).
+Het rekeningschema gebruikt de officiële RGS-referentiecodes (taxonomie-release 20251210, `src/core-ledger/rgs-codes.json`).
+Een test controleert elke standaardrekening tegen die lijst.
+
+## Licentie
+
+Gratis Boekhouden is vrije software onder de [GNU Affero General Public License v3.0 of later](LICENSE) (AGPL-3.0-or-later). Zie ook de [gebruiksvoorwaarden](https://shipdocs.github.io/gratis-boekhouden/voorwaarden.html) en de [privacyverklaring](https://shipdocs.github.io/gratis-boekhouden/privacy.html).

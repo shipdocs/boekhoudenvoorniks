@@ -5,6 +5,7 @@
 Belangrijke feiten:
 
 - Prijs: gratis. Geen abonnement.
+- Licentie: open source, AGPL-3.0-or-later.
 - Platform: Windows en Linux (Electron). Werkt offline; gegevens in een lokale SQLite-database met dagelijkse automatische back-up.
 - Taal en markt: Nederlands, Nederlandse btw-regels.
 - Facturen en offertes: pdf en e-mail via eigen mailserver (SMTP), doorlopende factuurnummering, creditfacturen, automatische betalingsherinneringen, eigen opmaak (logo, kleuren, teksten).
@@ -55,6 +56,14 @@ Voor zzp'ers en kleine ondernemers, met name vakmensen: stukadoors, schilders, t
 ### Op welke computers werkt het?
 
 Op Windows en Linux. Het programma werkt ook zonder internetverbinding; alleen voor het versturen van e-mail en updates is internet nodig.
+
+### Windows zegt "Windows heeft uw pc beveiligd". Is dat veilig?
+
+Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. Download de installer alleen van github.com/shipdocs/gratis-boekhouden/releases. Controleer eventueel het SHA-256-controlegetal met SHA256SUMS-Windows.txt bij de release (PowerShell: Get-FileHash). Klopt het, klik dan op "Meer informatie" en daarna op "Toch uitvoeren".
+
+### Is de broncode openbaar?
+
+Ja. Gratis Boekhouden is open source onder de GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later). Iedereen kan de code bekijken en controleren wat het programma doet.
 
 ## Hoe het werkt
 

@@ -22,12 +22,36 @@ describe('klussen', () => {
 });
 
 describe('inbox: "Ben ik bij?"', () => {
-  it('lege administratie is bij', () => {
+  it('lege administratie is bij, op het eerste bankafschrift na', () => {
     const { s } = setup();
     s.settings.update({ onboardingDone: true });
+    expect(s.inbox.tasks('2026-09-25').map((t) => t.kind)).toEqual(['bank-stale']);
+    s.settings.update({ profile: { ...s.settings.get().profile, hasBusinessAccount: false } });
     const home = s.inbox.home('2026-09-25');
     expect(home.upToDate).toBe(true);
     expect(home.checklist.every((c) => c.ok)).toBe(true);
+  });
+
+  it('toont per rekening de laatste import en de periode, en waarschuwt als de bank verouderd is', () => {
+    const { s } = setup();
+    s.settings.update({ onboardingDone: true });
+    const r1 = s.bank.import({ source: 'csv', warnings: [], transactions: [
+      { date: '2026-08-01', amount: 100, description: 'a' },
+      { date: '2026-08-31', amount: 200, description: 'b' },
+    ] }, { filename: 'augustus.csv' });
+    expect(r1.periods).toEqual([{ bankAccountId: 1, from: '2026-08-01', to: '2026-08-31' }]);
+    // tweede afschrift overlapt: alleen dubbelen + één nieuwe
+    s.bank.import({ source: 'mt940', warnings: [], transactions: [
+      { date: '2026-08-31', amount: 200, description: 'b' },
+      { date: '2026-09-10', amount: 300, description: 'c' },
+    ] }, { filename: 'sept.sta' });
+    const [st] = s.bank.importStatus();
+    expect(st).toMatchObject({ coverageFrom: '2026-08-01', coverageTo: '2026-09-10', totalTransactions: 3 });
+    expect(st!.lastImport).toMatchObject({ filename: 'sept.sta', from: '2026-08-31', to: '2026-09-10', transactions: 2, imported: 1, duplicates: 1 });
+    expect(s.inbox.tasks('2026-09-20').some((t) => t.kind === 'bank-stale')).toBe(false);
+    const stale = s.inbox.tasks('2026-09-25').find((t) => t.kind === 'bank-stale')!;
+    expect(stale.title).toContain('t/m 10 september 2026');
+    expect(s.inbox.home('2026-09-25').bankUpdatedTo).toBe('2026-09-10');
   });
 
   it('stelt alleen vragen over uitzonderingen en leert van antwoorden', () => {

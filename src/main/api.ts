@@ -40,7 +40,8 @@ export interface HostContext {
   hasSmtpPassword(): boolean;
   testSmtp(): Promise<void>;
   backupNow(): Promise<string | null>;
-  restoreBackup(): Promise<boolean>;
+  restoreBackup(password?: string): Promise<boolean>;
+  exportEncrypted(password: string): Promise<string | null>;
   appVersion(): string;
   checkForUpdates(): Promise<string>;
 }
@@ -69,7 +70,8 @@ export function createApi(s: Services, host: HostContext) {
       openExternal: (url: string) => host.openExternal(url),
       openAttachment: (path: string) => host.openPath(path),
       backup: () => host.backupNow(),
-      restore: () => host.restoreBackup(),
+      restore: (password?: string) => host.restoreBackup(password),
+      exportEncrypted: (password: string) => host.exportEncrypted(password),
       meta: () => ({
         expenseCategories: EXPENSE_CATEGORIES,
         otherDestinations: OTHER_DESTINATIONS,
@@ -205,6 +207,7 @@ export function createApi(s: Services, host: HostContext) {
               'invoice-overdue': ['factuur', r.invoiceId],
               'invoice-concept': ['factuur', r.invoiceId],
               'vat-due': ['belasting', r.periodKey],
+              'bank-stale': ['bank', undefined],
             };
             const target = screens[task.kind];
             return target ? { navigate: { screen: target[0], id: target[1] } } : undefined;
@@ -278,6 +281,7 @@ export function createApi(s: Services, host: HostContext) {
     },
     bank: {
       accounts: () => s.bank.listAccounts(),
+      importStatus: () => s.bank.importStatus(),
       addAccount: (name: string, iban: string) => s.bank.addAccount(name, iban),
       updateAccount: (id: number, patch: { name?: string; iban?: string | null }) => s.bank.updateAccount(id, patch),
       openingBalance: (bankAccountId: number, amount: Cents, date: IsoDate) => s.bank.setOpeningBalance(bankAccountId, amount, date),
@@ -324,7 +328,7 @@ export function createApi(s: Services, host: HostContext) {
     },
     ledger: {
       accounts: () => s.ledger.listAccounts(),
-      createAccount: (input: { code: string; rgs: string; name: string; category: AccountCategory }) => s.ledger.createAccount(input),
+      createAccount: (input: { code: string; rgs: string; rgsRef?: string | null; name: string; category: AccountCategory }) => s.ledger.createAccount(input),
       renameAccount: (id: number, name: string) => s.ledger.renameAccount(id, name),
       archiveAccount: (id: number) => s.ledger.archiveAccount(id),
       entries: (filter?: { from?: IsoDate; to?: IsoDate; source?: EntrySource; accountRgs?: string; limit?: number }) => s.ledger.listEntries(filter),

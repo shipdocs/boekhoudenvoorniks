@@ -61,6 +61,8 @@ export interface AppSettings {
   reminderDays: number[];
   advancedMode: boolean;
   onboardingDone: boolean;
+  /** versie van de voorwaarden waarmee akkoord is gegeven (leeg = nog niet) */
+  termsAcceptedVersion: string;
   invoiceEmailSubject: string;
   invoiceEmailBody: string;
   quoteEmailSubject: string;
@@ -98,6 +100,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reminderDays: [7, 21],
   advancedMode: false,
   onboardingDone: false,
+  termsAcceptedVersion: '',
   invoiceEmailSubject: 'Factuur {nummer} van {bedrijf}',
   invoiceEmailBody:
     'Beste {klant},\n\nIn de bijlage vindt u factuur {nummer} voor een bedrag van {bedrag}.\nWij verzoeken u vriendelijk dit bedrag vóór {vervaldatum} over te maken op {iban} o.v.v. het factuurnummer.\n\nMet vriendelijke groet,\n{bedrijf}',

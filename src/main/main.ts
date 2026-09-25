@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, type Db } from '../db/database';
@@ -10,6 +10,8 @@ import { createApi, type Api } from './api';
 import { renderPdf } from './pdf';
 import { SafeStorageSecretStore } from './secrets';
 import { backupTo, dailyBackup, restoreFrom } from './backup';
+import { decryptBackup, encryptBackup, isEncryptedBackup } from './encrypted-backup';
+import { tmpdir } from 'node:os';
 import { HttpOcrProvider } from '../intake/ocr';
 import { OllamaClassifier } from '../intake/llm-ollama';
 import type { FetchLike } from '../integrations/types';
@@ -115,20 +117,61 @@ function initServices(): void {
       await backupTo(db, result.filePath);
       return result.filePath;
     },
-    async restoreBackup() {
-      const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile'], filters: [{ name: 'Back-up', extensions: ['sqlite'] }] });
-      if (result.canceled || !result.filePaths[0]) return false;
-      const confirm = await dialog.showMessageBox(mainWindow!, {
-        type: 'warning',
-        buttons: ['Annuleren', 'Terugzetten'],
-        defaultId: 0,
-        message: 'Weet je zeker dat je deze back-up wilt terugzetten?',
-        detail: 'De huidige administratie wordt vervangen (er wordt eerst een kopie van gemaakt). De app start daarna opnieuw.',
+    async exportEncrypted(password) {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        defaultPath: join(app.getPath('documents'), `boekhouding-versleuteld-${new Date().toISOString().slice(0, 10)}.gbbackup`),
+        filters: [{ name: 'Versleutelde back-up', extensions: ['gbbackup'] }],
       });
-      if (confirm.response !== 1) return false;
-      await dailyBackup(db, join(dataDir(), 'backups'));
-      db.close();
-      restoreFrom(result.filePaths[0], dbPath());
+      if (result.canceled || !result.filePath) return null;
+      const tmp = join(tmpdir(), `gb-export-${randomUUID()}.sqlite`);
+      try {
+        await backupTo(db, tmp);
+        writeFileSync(result.filePath, encryptBackup(readFileSync(tmp), password));
+      } finally {
+        try {
+          unlinkSync(tmp);
+        } catch {
+          /* al weg */
+        }
+      }
+      return result.filePath;
+    },
+    async restoreBackup(password) {
+      const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile'], filters: [{ name: 'Back-up', extensions: ['sqlite', 'gbbackup'] }] });
+      if (result.canceled || !result.filePaths[0]) return false;
+      let source = result.filePaths[0];
+      const raw = readFileSync(source);
+      // ontsleutelde kopie: altijd opruimen, ook bij annuleren of een fout
+      let decrypted: string | null = null;
+      const cleanup = () => {
+        if (!decrypted) return;
+        try {
+          unlinkSync(decrypted);
+        } catch {
+          /* al weg */
+        }
+        decrypted = null;
+      };
+      try {
+        if (isEncryptedBackup(raw)) {
+          if (!password) throw new Error('Dit is een versleutelde back-up: vul eerst het wachtwoord in');
+          decrypted = source = join(tmpdir(), `gb-restore-${randomUUID()}.sqlite`);
+          writeFileSync(source, decryptBackup(raw, password), { mode: 0o600 });
+        }
+        const confirm = await dialog.showMessageBox(mainWindow!, {
+          type: 'warning',
+          buttons: ['Annuleren', 'Terugzetten'],
+          defaultId: 0,
+          message: 'Weet je zeker dat je deze back-up wilt terugzetten?',
+          detail: 'De huidige administratie wordt vervangen (er wordt eerst een kopie van gemaakt). De app start daarna opnieuw.',
+        });
+        if (confirm.response !== 1) return false;
+        await dailyBackup(db, join(dataDir(), 'backups'));
+        db.close();
+        restoreFrom(source, dbPath());
+      } finally {
+        cleanup();
+      }
       app.relaunch();
       app.exit(0);
       return true;

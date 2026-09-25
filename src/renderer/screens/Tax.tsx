@@ -3,6 +3,7 @@ import { api } from '../api';
 import { Button, ErrorBox, Euro, useAction, useApp, useLoad } from '../ui';
 import { formatDateNl } from '../../shared/dates';
 import { vatDeadline } from '../../inbox/inbox';
+import { VAT_DISCLAIMER } from '../../shared/legal';
 
 export function Tax({ periodKey }: { periodKey?: string }) {
   const { settings, meta, toast, go } = useApp();
@@ -82,6 +83,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
             <div className="card" style={{ marginTop: 14 }}>
               <h2 style={{ marginTop: 0 }}>BTW-aangifte {r.period.label}</h2>
               <p className="muted small">Neem deze bedragen over in Mijn Belastingdienst Zakelijk. Klik op een bedrag om het te kopiëren. Bedragen zijn in hele euro's, afgerond in jouw voordeel.</p>
+              <div className="notice small">{VAT_DISCLAIMER}</div>
               <div className="rubriek small muted"><span>Vak</span><span /><span className="num">Omzet</span><span className="num">Omzetbelasting</span></div>
               {r.rubrieken.filter((x) => x.code !== '5c').map((x) => (
                 <div key={x.code} className="rubriek">

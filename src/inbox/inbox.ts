@@ -12,7 +12,10 @@ import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
 import { EXPENSE_CATEGORIES } from '../shared/categories';
 import { KNOWN_SUPPLIERS } from '../intake/suppliers';
-import { addDays, formatDateNl, periodFor, today, type IsoDate } from '../shared/dates';
+import { addDays, diffDays, formatDateNl, periodFor, today, type IsoDate } from '../shared/dates';
+
+/** Na zoveel dagen zonder nieuwe bankgegevens vragen we om een afschrift in te lezen. */
+export const BANK_STALE_DAYS = 14;
 import { formatEuro, type Cents } from '../shared/money';
 
 export type TaskKind =
@@ -27,7 +30,8 @@ export type TaskKind =
   | 'invoice-concept'
   | 'job-done'
   | 'quote-expired'
-  | 'vat-due';
+  | 'vat-due'
+  | 'bank-stale';
 
 export interface TaskAction {
   id: string;
@@ -44,13 +48,15 @@ export interface Task {
   question: string;
   amount?: Cents;
   actions: TaskAction[];
-  ref: { bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; categoryKey?: string; vatCode?: string };
+  ref: { bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; categoryKey?: string; vatCode?: string };
 }
 
 export interface HomeData {
   asOf: IsoDate;
   greeting: string;
   money: { bank: Cents; toReceive: Cents; toPay: Cents; vatReserve: Cents };
+  /** t/m welke datum de bankgegevens bijgewerkt zijn (laatste transactiedatum over alle rekeningen) */
+  bankUpdatedTo: IsoDate | null;
   vat: { periodLabel: string; deadline: IsoDate; deadlineLabel: string; estimate: Cents };
   tasks: Task[];
   checklist: { label: string; ok: boolean }[];
@@ -219,6 +225,22 @@ export class InboxService {
       }
     }
 
+    if (s.onboardingDone && s.profile.hasBusinessAccount) {
+      for (const st of this.bank.importStatus()) {
+        const days = st.coverageTo ? diffDays(st.coverageTo, asOf) : null;
+        if (days !== null && days < BANK_STALE_DAYS) continue;
+        tasks.push({
+          key: `bank-stale-${st.bankAccountId}`,
+          kind: 'bank-stale',
+          icon: '🏦',
+          title: st.coverageTo ? `${st.name}: bankgegevens lopen t/m ${formatDateNl(st.coverageTo)}` : `${st.name}: nog geen bankafschrift ingelezen`,
+          question: st.coverageTo ? `Dat is ${days} dagen geleden. Lees een nieuw afschrift in, dan kunnen we betalingen koppelen.` : 'Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes.',
+          actions: [{ id: 'open', label: 'Afschrift inlezen', primary: true }],
+          ref: { bankAccountId: st.bankAccountId },
+        });
+      }
+    }
+
     for (const d of this.intake.list('controle')) {
       const bad = d.issues.find((i) => i.severity === 'fout');
       const name = d.result?.supplier?.value ?? d.original_name;
@@ -320,8 +342,11 @@ export class InboxService {
     const current = this.vat.currentPeriod(asOf);
     const deadline = vatDeadline(current.end, s.vatPeriod);
     const kinds = new Set(tasks.map((t) => t.kind));
+    const status = this.bank.importStatus();
+    const bankUpdatedTo = status.map((st) => st.coverageTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
-      { label: 'Alle banktransacties verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-')) },
+      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') },
+      { label: 'Alle banktransacties verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && k !== 'bank-stale') },
       { label: 'Alle bonnetjes verwerkt', ok: !kinds.has('document-review') },
       { label: 'Geen facturen te laat', ok: !kinds.has('invoice-overdue') },
       { label: 'BTW bijgewerkt', ok: !kinds.has('vat-due') },
@@ -330,6 +355,7 @@ export class InboxService {
       asOf,
       greeting: greeting(),
       money: { bank: ledgerBank + pending, toReceive, toPay, vatReserve: Math.max(0, vatReserve) },
+      bankUpdatedTo,
       vat: { periodLabel: current.label, deadline, deadlineLabel: formatDateNl(deadline), estimate: this.vat.calculate(current.key).summary.teBetalen },
       tasks,
       checklist,

@@ -38,8 +38,22 @@ export interface BankTransaction {
   matched_purchase_invoice_id: number | null;
 }
 
+export interface BankImportStatus {
+  bankAccountId: number;
+  name: string;
+  iban: string | null;
+  /** laatste import voor deze rekening; `at` is het moment van inlezen (UTC, SQLite-formaat) */
+  lastImport: { at: string; filename: string | null; source: string; from: string; to: string; transactions: number; imported: number; duplicates: number } | null;
+  /** eerste en laatste transactiedatum van alle ingelezen afschriften samen */
+  coverageFrom: string | null;
+  coverageTo: string | null;
+  totalTransactions: number;
+}
+
 export interface ImportSummary {
   batchId: number;
+  /** per bankrekening de periode die het afschrift besloeg */
+  periods: { bankAccountId: number; from: string; to: string }[];
   imported: number;
   duplicates: number;
   warnings: string[];
@@ -97,7 +111,9 @@ export class BankService {
       const n = this.listAccounts().length;
       // tweede en volgende rekeningen krijgen een eigen grootboekrekening
       const rgs = n === 0 ? ACCOUNTS.bank : `${ACCOUNTS.bank}${n + 1}`;
-      const ledgerAccount = n === 0 ? this.ledger.getAccount(ACCOUNTS.bank) : this.ledger.createAccount({ code: String(1100 + n), rgs, name: `Bank ${name}`, category: 'activa' });
+      // RGS: 'Rekening-courant bank - Naam A..E' (BLimBanRbb..f) voor extra rekeningen
+      const rgsRef = n >= 1 && n <= 5 ? `BLimBanRb${String.fromCharCode(97 + n)}` : null;
+      const ledgerAccount = n === 0 ? this.ledger.getAccount(ACCOUNTS.bank) : this.ledger.createAccount({ code: String(1100 + n), rgs, rgsRef, name: `Bank ${name}`, category: 'activa' });
       this.db.prepare('INSERT INTO bank_accounts (name, iban, account_id) VALUES (?, ?, ?)').run(name, clean, ledgerAccount.id);
       return this.listAccounts().find((a) => a.iban === clean)!;
     });
@@ -163,18 +179,59 @@ export class BankService {
       const seen = new Map<string, number>();
       let imported = 0;
       let duplicates = 0;
+      const perAccount = new Map<number, { from: string; to: string; transactions: number; imported: number; duplicates: number }>();
       for (const t of result.transactions) {
         const account = opts.bankAccountId ? this.getAccount(opts.bankAccountId) : this.accountForIban(t.ownIban);
+        const stat = perAccount.get(account.id) ?? { from: t.date, to: t.date, transactions: 0, imported: 0, duplicates: 0 };
+        if (t.date < stat.from) stat.from = t.date;
+        if (t.date > stat.to) stat.to = t.date;
+        stat.transactions++;
+        perAccount.set(account.id, stat);
         const key = [account.id, t.date, t.amount, t.counterIban, t.description].join('|');
         const occurrence = (seen.get(key) ?? 0) + 1;
         seen.set(key, occurrence);
         const hash = BankService.hash(t, account.iban, occurrence);
         const r = insert.run(account.id, t.date, t.amount, t.counterIban ?? null, t.counterName ?? null, t.description ?? '', t.reference ?? null, result.source, batchId, hash);
-        if (r.changes > 0) imported++;
-        else duplicates++;
+        if (r.changes > 0) (imported++, stat.imported++);
+        else (duplicates++, stat.duplicates++);
       }
+      const insertStat = this.db.prepare(
+        'INSERT INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      );
+      for (const [accountId, s] of perAccount) insertStat.run(batchId, accountId, s.from, s.to, s.transactions, s.imported, s.duplicates);
       this.db.prepare('UPDATE import_batches SET imported_count = ?, duplicate_count = ? WHERE id = ?').run(imported, duplicates, batchId);
-      return { batchId, imported, duplicates, warnings: result.warnings };
+      const periods = [...perAccount].map(([bankAccountId, s]) => ({ bankAccountId, from: s.from, to: s.to }));
+      return { batchId, periods, imported, duplicates, warnings: result.warnings };
+    });
+  }
+
+  /**
+   * Per bankrekening: wanneer is er voor het laatst een afschrift ingelezen, welke periode besloeg
+   * dat afschrift, en t/m welke datum zijn de bankgegevens in totaal bijgewerkt.
+   */
+  importStatus(): BankImportStatus[] {
+    return this.listAccounts().map((a) => {
+      const last = this.db
+        .prepare(
+          `SELECT b.imported_at, b.filename, b.source, s.period_from, s.period_to, s.transactions, s.imported, s.duplicates
+           FROM import_batch_accounts s JOIN import_batches b ON b.id = s.batch_id
+           WHERE s.bank_account_id = ? ORDER BY b.imported_at DESC, b.id DESC LIMIT 1`,
+        )
+        .get(a.id) as { imported_at: string; filename: string | null; source: string; period_from: string; period_to: string; transactions: number; imported: number; duplicates: number } | undefined;
+      const coverage = this.db
+        .prepare('SELECT MIN(transaction_date) AS f, MAX(transaction_date) AS t, COUNT(*) AS n FROM bank_transactions WHERE bank_account_id = ?')
+        .get(a.id) as { f: string | null; t: string | null; n: number };
+      return {
+        bankAccountId: a.id,
+        name: a.name,
+        iban: a.iban,
+        lastImport: last
+          ? { at: last.imported_at, filename: last.filename, source: last.source, from: last.period_from, to: last.period_to, transactions: last.transactions, imported: last.imported, duplicates: last.duplicates }
+          : null,
+        coverageFrom: coverage.f,
+        coverageTo: coverage.t,
+        totalTransactions: coverage.n,
+      };
     });
   }
 
