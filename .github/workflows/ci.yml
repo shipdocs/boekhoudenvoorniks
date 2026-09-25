@@ -24,6 +24,7 @@ jobs:
   # Verpakt de app en start hem echt: vangt ontbrekende runtime-afhankelijkheden in het installatiepakket.
   package-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

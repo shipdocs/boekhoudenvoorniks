@@ -247,9 +247,11 @@ if (SMOKE_TEST) {
   }, 60_000).unref();
 }
 
-const gotLock = SMOKE_TEST || app.requestSingleInstanceLock();
+const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  app.quit();
+  // In rooktestmodus is een tweede instantie een fout, geen stille succesvolle exit.
+  if (SMOKE_TEST) console.error('SMOKE FAIL: er draait al een instantie');
+  app.exit(SMOKE_TEST ? 1 : 0);
 } else {
   app.on('second-instance', () => {
     if (mainWindow) {

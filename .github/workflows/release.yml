@@ -17,6 +17,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,7 +41,15 @@ jobs:
         run: |
           $env:GRATIS_BOEKHOUDEN_SMOKE_TEST = '1'
           $env:GRATIS_BOEKHOUDEN_DATA = "$env:RUNNER_TEMP\smoke"
-          $p = Start-Process -FilePath "release\win-unpacked\Gratis Boekhouden.exe" -PassThru -Wait -NoNewWindow
+          $p = Start-Process -FilePath "release\win-unpacked\Gratis Boekhouden.exe" -PassThru -NoNewWindow
+          $null = $p.Handle  # nodig zodat ExitCode na afloop beschikbaar is
+          try {
+            Wait-Process -Id $p.Id -Timeout 120 -ErrorAction Stop
+          } catch {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            throw 'Rooktest mislukt: de app sloot niet binnen 120 seconden af'
+          }
+          $p.WaitForExit()
           if ($p.ExitCode -ne 0) { throw "Rooktest mislukt (exit $($p.ExitCode))" }
 
       - name: Installers bouwen en publiceren
