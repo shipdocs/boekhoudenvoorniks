@@ -25,7 +25,7 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
   { key: 'boekhouder', label: 'Boekhouder / advies', hint: '', account: 'WBedAlkAdv', defaultVat: 'hoog' },
   { key: 'huur', label: 'Huur werkplaats / opslag', hint: '', account: 'WBedHuiHur', defaultVat: 'hoog' },
   { key: 'bank', label: 'Bankkosten', hint: '', account: 'WFbeBan', defaultVat: 'geen' },
-  { key: 'onderaannemer', label: 'Onderaannemer (btw verlegd)', hint: 'factuur met "btw verlegd"', account: 'WKprInkMat', defaultVat: 'verlegd' },
+  { key: 'onderaannemer', label: 'Onderaannemer (btw verlegd)', hint: 'factuur met "btw verlegd"', account: 'WKprKuwKuw', defaultVat: 'verlegd' },
   { key: 'overig', label: 'Overige kosten', hint: '', account: 'WBedAlkOvr', defaultVat: 'hoog' },
 ];
 

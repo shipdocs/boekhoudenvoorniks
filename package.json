@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Gratis boekhouding voor zzp en mkb: offertes, facturen, bankimport en BTW-overzicht op een echte dubbele boekhouding.",
   "author": "Martin <info@shipdocs.app>",
-  "license": "UNLICENSED",
+  "license": "AGPL-3.0-or-later",
   "private": true,
   "main": "dist/main/main/main.js",
   "scripts": {

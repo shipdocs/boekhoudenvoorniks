@@ -320,4 +320,47 @@ export const migrations: string[] = [
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  /* 3: officiële RGS-referentiecodes (RGS-taxonomie 20251210) naast de interne sleutel */ `
+  ALTER TABLE chart_of_accounts ADD COLUMN rgs_ref TEXT;
+  UPDATE chart_of_accounts SET rgs_ref = 'BLimKasKas' WHERE rgs_code = 'BLiqKas';
+  UPDATE chart_of_accounts SET rgs_ref = 'BLimBanRba' WHERE rgs_code = 'BLiqBanRba';
+  UPDATE chart_of_accounts SET rgs_ref = 'BLimKruSto' WHERE rgs_code = 'BLiqKru';
+  UPDATE chart_of_accounts SET rgs_ref = 'BVorTusTonTcv' WHERE rgs_code = 'BLiqKruPsp';
+  UPDATE chart_of_accounts SET rgs_ref = 'BVorDebHad' WHERE rgs_code = 'BVorDebHad';
+  UPDATE chart_of_accounts SET rgs_ref = 'BMvaTevVvp' WHERE rgs_code = 'BMvaTraVrt';
+  UPDATE chart_of_accounts SET rgs_ref = 'BMvaBeiVvp' WHERE rgs_code = 'BMvaBedIna';
+  UPDATE chart_of_accounts SET rgs_ref = 'BEivKapOnd' WHERE rgs_code = 'BEivKap';
+  UPDATE chart_of_accounts SET rgs_ref = 'BEivKapProOvp' WHERE rgs_code = 'BEivPriPrv';
+  UPDATE chart_of_accounts SET rgs_ref = 'BEivKapPrsOps' WHERE rgs_code = 'BEivPriStr';
+  UPDATE chart_of_accounts SET rgs_ref = 'BSchCreHac' WHERE rgs_code = 'BSchCreHac';
+  UPDATE chart_of_accounts SET rgs_ref = 'BSchTusTovTvp' WHERE rgs_code = 'BSchOvsVrp';
+  UPDATE chart_of_accounts SET rgs_ref = 'BSchBepBtwOla' WHERE rgs_code = 'BSchBepBtwAfdHoo';
+  UPDATE chart_of_accounts SET rgs_ref = 'BSchBepBtwOlt' WHERE rgs_code = 'BSchBepBtwAfdLaa';
+  UPDATE chart_of_accounts SET rgs_ref = 'BSchBepBtwOlw' WHERE rgs_code = 'BSchBepBtwAfdVer';
+  UPDATE chart_of_accounts SET rgs_ref = 'BSchBepBtwVoo' WHERE rgs_code = 'BSchBepBtwVoo';
+  UPDATE chart_of_accounts SET rgs_ref = 'BSchBepBtwAfo' WHERE rgs_code = 'BSchBepBtwAfr';
+  UPDATE chart_of_accounts SET rgs_ref = 'WOmzNodOdh' WHERE rgs_code = 'WOmzNopOlh';
+  UPDATE chart_of_accounts SET rgs_ref = 'WOmzNodOdl' WHERE rgs_code = 'WOmzNopOll';
+  UPDATE chart_of_accounts SET rgs_ref = 'WOmzNodOdg' WHERE rgs_code = 'WOmzNopOln';
+  UPDATE chart_of_accounts SET rgs_ref = 'WOmzNodOdg' WHERE rgs_code = 'WOmzNopOlv';
+  UPDATE chart_of_accounts SET rgs_ref = 'WOmzNodNod' WHERE rgs_code = 'WOmzNopOvr';
+  UPDATE chart_of_accounts SET rgs_ref = 'WKprInpInp' WHERE rgs_code = 'WKprInkMat';
+  UPDATE chart_of_accounts SET rgs_ref = 'WKprKuwKuw' WHERE rgs_code = 'WKprKuwKuw';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedHuiBeh' WHERE rgs_code = 'WBedHuiHur';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedAutBra' WHERE rgs_code = 'WBedAutBra';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedAutRoa' WHERE rgs_code = 'WBedAutOnd';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedKanKan' WHERE rgs_code = 'WBedKanKan';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedKanTef' WHERE rgs_code = 'WBedKanTel';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedKanSof' WHERE rgs_code = 'WBedKanSof';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedVkkRea' WHERE rgs_code = 'WBedVkkRec';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedEemGsk' WHERE rgs_code = 'WBedAlkGer';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedAssOva' WHERE rgs_code = 'WBedAlkVer';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedAeaAdv' WHERE rgs_code = 'WBedAlkAdv';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedOvpWkv' WHERE rgs_code = 'WBedAlkWkl';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedAlkOal' WHERE rgs_code = 'WBedAlkOvr';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedAdlBet' WHERE rgs_code = 'WBedAlkBev';
+  UPDATE chart_of_accounts SET rgs_ref = 'WBedAdlBan' WHERE rgs_code = 'WFbeBan';
+  -- extra bankrekeningen (interne sleutel BLiqBanRba2..6) → RGS 'Rekening-courant bank - Naam A..E'
+  UPDATE chart_of_accounts SET rgs_ref = 'BLimBanRb' || char(96 + CAST(substr(rgs_code, 11) AS INTEGER)) WHERE rgs_code GLOB 'BLiqBanRba[2-6]';
+  `,
 ];

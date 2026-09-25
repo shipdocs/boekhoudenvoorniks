@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { api } from '../api';
 import { Button, DropZone, Field, readAsText, useAction, useApp } from '../ui';
 import { isValidIban, isValidKvk, isValidVatNumber } from '../../shared/validation';
+import { TERMS_VERSION } from '../../shared/legal';
+import { TermsBlock } from './Terms';
 
 /**
  * Onboarding zonder boekhoudtermen: wat voor werk, alleen of niet, bedrijf, BTW, bank, eerste factuur.
@@ -16,6 +18,7 @@ export function Onboarding() {
   const [kor, setKor] = useState(settings.kor);
   const [vatPeriod, setVatPeriod] = useState(settings.vatPeriod);
   const [lastNumber, setLastNumber] = useState('');
+  const [terms, setTerms] = useState(settings.termsAcceptedVersion === TERMS_VERSION);
   const steps = 6;
   const year = new Date().getFullYear();
 
@@ -24,7 +27,7 @@ export function Onboarding() {
 
   const finish = async (then: 'factuur' | 'home') => {
     const ok = await run(async () => {
-      await api.settings.update({ profile, company, kor, vatPeriod, defaultVatCode: kor ? 'vrijgesteld' : 'hoog', onboardingDone: true, smtp: { ...settings.smtp, fromName: company.name, fromEmail: settings.smtp.fromEmail || company.email } });
+      await api.settings.update({ profile, company, kor, vatPeriod, defaultVatCode: kor ? 'vrijgesteld' : 'hoog', onboardingDone: true, termsAcceptedVersion: TERMS_VERSION, smtp: { ...settings.smtp, fromName: company.name, fromEmail: settings.smtp.fromEmail || company.email } });
       const accounts = await api.bank.accounts();
       if (company.iban && accounts[0] && !accounts[0].iban) await api.bank.updateAccount(accounts[0].id, { iban: company.iban });
       const n = Number(lastNumber.replace(/\D/g, '').slice(-4));
@@ -170,11 +173,13 @@ export function Onboarding() {
           <Field label="Wat was je laatste factuurnummer dit jaar?" hint="leeg laten als dit je eerste is">
             <input value={lastNumber} onChange={(e) => setLastNumber(e.target.value)} placeholder={`bv. ${year}-0012`} />
           </Field>
+          <h2>Afspraken</h2>
+          <TermsBlock checked={terms} onChange={setTerms} />
           <div className="row between" style={{ marginTop: 28 }}>
             <Button onClick={prev}>Terug</Button>
             <div className="row">
-              <Button disabled={busy} onClick={() => void finish('home')}>Klaar</Button>
-              <Button kind="primary" disabled={busy} onClick={() => void finish('factuur')}>Maak mijn eerste factuur</Button>
+              <Button disabled={busy || !terms} onClick={() => void finish('home')}>Klaar</Button>
+              <Button kind="primary" disabled={busy || !terms} onClick={() => void finish('factuur')}>Maak mijn eerste factuur</Button>
             </div>
           </div>
         </>

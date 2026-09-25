@@ -40,7 +40,8 @@ export interface HostContext {
   hasSmtpPassword(): boolean;
   testSmtp(): Promise<void>;
   backupNow(): Promise<string | null>;
-  restoreBackup(): Promise<boolean>;
+  restoreBackup(password?: string): Promise<boolean>;
+  exportEncrypted(password: string): Promise<string | null>;
   appVersion(): string;
   checkForUpdates(): Promise<string>;
 }
@@ -69,7 +70,8 @@ export function createApi(s: Services, host: HostContext) {
       openExternal: (url: string) => host.openExternal(url),
       openAttachment: (path: string) => host.openPath(path),
       backup: () => host.backupNow(),
-      restore: () => host.restoreBackup(),
+      restore: (password?: string) => host.restoreBackup(password),
+      exportEncrypted: (password: string) => host.exportEncrypted(password),
       meta: () => ({
         expenseCategories: EXPENSE_CATEGORIES,
         otherDestinations: OTHER_DESTINATIONS,

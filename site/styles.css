@@ -69,3 +69,7 @@ section { padding: 56px 0; }
 .faq details { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; }
 .faq summary { cursor: pointer; font-weight: 600; }
 .faq details p { margin: 10px 0 0; color: var(--muted); }
+.legal { max-width: 780px; padding-top: 40px; padding-bottom: 60px; }
+.legal h1 { font-size: clamp(28px, 4vw, 40px); }
+.legal h2 { font-size: 22px; margin-top: 32px; }
+.legal li { margin-bottom: 8px; }

@@ -2,8 +2,9 @@ import { useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { Button, DateNl, ErrorBox, Field, useAction, useApp, useLoad, type Settings } from '../ui';
 import type { AppSettings } from '../../settings/settings';
+import { LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 
-type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'koppelingen' | 'ai' | 'backup' | 'geavanceerd';
+type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'koppelingen' | 'ai' | 'backup' | 'geavanceerd' | 'over';
 
 const TABS: [Tab, string][] = [
   ['bedrijf', 'Je bedrijf'],
@@ -14,6 +15,7 @@ const TABS: [Tab, string][] = [
   ['ai', 'Slimme herkenning'],
   ['backup', 'Back-up & updates'],
   ['geavanceerd', 'Voor de boekhouder'],
+  ['over', 'Over'],
 ];
 
 export function SettingsScreen() {
@@ -122,6 +124,7 @@ export function SettingsScreen() {
         </>,
       )}
       {tab === 'backup' && <BackupSettings />}
+      {tab === 'over' && <About />}
       {tab === 'geavanceerd' && section(
         <>
           <label className="row"><input type="checkbox" checked={draft.advancedMode} onChange={(e) => set({ advancedMode: e.target.checked })} /> Toon de boekhouding (grootboek, journaal, balans, exports)</label>
@@ -206,18 +209,47 @@ function Integrations() {
 function BackupSettings() {
   const { run, busy } = useAction();
   const version = useLoad(() => api.app.version());
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [restorePw, setRestorePw] = useState('');
   return (
     <div className="card grid">
       <p>Je administratie staat op deze computer. Er wordt elke dag automatisch een back-up gemaakt (de laatste 14 dagen). Maak af en toe ook een kopie op een USB-stick of in je eigen cloudmap.</p>
       <div className="row">
         <Button kind="primary" disabled={busy} onClick={() => void run(() => api.app.backup(), 'Back-up opgeslagen')}>Back-up maken</Button>
-        <Button disabled={busy} onClick={() => void run(() => api.app.restore())}>Back-up terugzetten…</Button>
+        <Button disabled={busy} onClick={() => void run(() => api.app.restore(restorePw || undefined))}>Back-up terugzetten…</Button>
+        <input type="password" placeholder="wachtwoord (alleen bij versleutelde back-up)" value={restorePw} onChange={(e) => setRestorePw(e.target.value)} style={{ minWidth: 280 }} />
+      </div>
+      <h3>Versleutelde kopie voor je boekhouder</h3>
+      <p className="small muted">Maakt een kopie van je hele administratie die alleen met het wachtwoord te openen is, in Gratis Boekhouden via "Back-up terugzetten". Geef het wachtwoord apart door (bijvoorbeeld telefonisch), niet in dezelfde mail.</p>
+      <div className="row">
+        <input type="password" placeholder="wachtwoord (min. 10 tekens)" value={pw} onChange={(e) => setPw(e.target.value)} />
+        <input type="password" placeholder="herhaal wachtwoord" value={pw2} onChange={(e) => setPw2(e.target.value)} />
+        <Button disabled={busy || pw.length < 10 || pw !== pw2} onClick={async () => { const r = await run(() => api.app.exportEncrypted(pw), 'Versleutelde kopie opgeslagen'); if (r) { setPw(''); setPw2(''); } }}>Versleutelde kopie maken</Button>
       </div>
       <h3>Updates</h3>
       <div className="row">
         <span className="muted">Versie {version.data}</span>
         <Button disabled={busy} onClick={async () => { const r = await run(() => api.app.checkForUpdates()); if (r) alert(r); }}>Zoek naar updates</Button>
       </div>
+    </div>
+  );
+}
+
+function About() {
+  const version = useLoad(() => api.app.version());
+  const open = (url: string) => (e: { preventDefault(): void }) => {
+    e.preventDefault();
+    void api.app.openExternal(url);
+  };
+  return (
+    <div className="card grid">
+      <h3>Gratis Boekhouden {version.data}</h3>
+      <p>Gratis en open source onder de {LICENSE_NAME}. Je mag de software gebruiken, bestuderen, aanpassen en delen onder de voorwaarden van die licentie.</p>
+      <p>
+        <a href="#" onClick={open(SOURCE_URL)}>Broncode</a> · <a href="#" onClick={open(TERMS_URL)}>Gebruiksvoorwaarden</a> · <a href="#" onClick={open(PRIVACY_URL)}>Privacyverklaring</a>
+      </p>
+      <p className="small muted">De software wordt geleverd zonder garantie. Jij blijft verantwoordelijk voor je administratie en aangiften.</p>
     </div>
   );
 }

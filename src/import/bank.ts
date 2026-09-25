@@ -97,7 +97,9 @@ export class BankService {
       const n = this.listAccounts().length;
       // tweede en volgende rekeningen krijgen een eigen grootboekrekening
       const rgs = n === 0 ? ACCOUNTS.bank : `${ACCOUNTS.bank}${n + 1}`;
-      const ledgerAccount = n === 0 ? this.ledger.getAccount(ACCOUNTS.bank) : this.ledger.createAccount({ code: String(1100 + n), rgs, name: `Bank ${name}`, category: 'activa' });
+      // RGS: 'Rekening-courant bank - Naam A..E' (BLimBanRbb..f) voor extra rekeningen
+      const rgsRef = n >= 1 && n <= 5 ? `BLimBanRb${String.fromCharCode(97 + n)}` : null;
+      const ledgerAccount = n === 0 ? this.ledger.getAccount(ACCOUNTS.bank) : this.ledger.createAccount({ code: String(1100 + n), rgs, rgsRef, name: `Bank ${name}`, category: 'activa' });
       this.db.prepare('INSERT INTO bank_accounts (name, iban, account_id) VALUES (?, ?, ?)').run(name, clean, ledgerAccount.id);
       return this.listAccounts().find((a) => a.iban === clean)!;
     });

@@ -44,6 +44,7 @@
         "operatingSystem": "Windows, Linux",
         "inLanguage": "nl-NL",
         "isAccessibleForFree": true,
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
         "areaServed": { "@type": "Country", "name": "Nederland" },
         "audience": { "@type": "BusinessAudience", "audienceType": "zzp'ers, eenmanszaken en vakmensen zoals stukadoors, schilders, timmerlieden, loodgieters en elektriciens" },
@@ -154,6 +155,22 @@
             "acceptedAnswer": {
               "@type": "Answer",
               "text": "Op Windows en Linux. Het programma werkt ook zonder internetverbinding; alleen voor het versturen van e-mail en updates is internet nodig."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Windows zegt \"Windows heeft uw pc beveiligd\". Is dat veilig?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. De installer komt rechtstreeks uit onze openbare GitHub-release, en de broncode is openbaar. Klik op \"Meer informatie\" en daarna op \"Toch uitvoeren\" om te installeren."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is de broncode openbaar?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja. Gratis Boekhouden is open source onder de GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later). Iedereen kan de code bekijken en controleren wat het programma doet."
             }
           }
         ]
@@ -279,6 +296,8 @@
         <details><summary>Kan mijn boekhouder ermee werken?</summary><p>Ja. In de expertmodus staan het grootboek volgens RGS, het journaal, balans en winst-en-verliesrekening. Je kunt een auditfile (XAF 3.2), journaal en saldibalans exporteren.</p></details>
         <details><summary>Voor welke beroepen is het bedoeld?</summary><p>Voor zzp'ers en kleine ondernemers, met name vakmensen: stukadoors, schilders, timmerlieden, loodgieters, elektriciens en klusbedrijven. Bij het instellen kies je je vak, zodat veelgebruikte factuurregels klaarstaan.</p></details>
         <details><summary>Op welke computers werkt het?</summary><p>Op Windows en Linux. Het programma werkt ook zonder internetverbinding; alleen voor het versturen van e-mail en updates is internet nodig.</p></details>
+        <details><summary>Windows zegt "Windows heeft uw pc beveiligd". Is dat veilig?</summary><p>Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. De installer komt rechtstreeks uit onze openbare GitHub-release, en de broncode is openbaar. Klik op "Meer informatie" en daarna op "Toch uitvoeren" om te installeren.</p></details>
+        <details><summary>Is de broncode openbaar?</summary><p>Ja. Gratis Boekhouden is open source onder de GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later). Iedereen kan de code bekijken en controleren wat het programma doet.</p></details>
     </section>
 
     <section id="privacy" class="band">
@@ -299,13 +318,13 @@
       <h2>Klaar met boekhouden?</h2>
       <p class="lead">Installeren, vijf vragen beantwoorden, eerste factuur maken.</p>
       <a class="btn" href="https://github.com/shipdocs/gratis-boekhouden/releases/latest">Download Gratis Boekhouden</a>
-      <p class="fine">Laat de BTW-aangifte altijd controleren als je twijfelt. Deze software is in ontwikkeling.</p>
+      <p class="fine">Windows: klik bij de SmartScreen-melding op "Meer informatie" → "Toch uitvoeren". Controleer je btw-aangifte altijd zelf; zie de <a href="voorwaarden.html">voorwaarden</a>.</p>
     </section>
   </main>
 
   <footer class="wrap foot">
-    <span>Gratis Boekhouden, een project van <a href="https://github.com/shipdocs">Shipdocs</a></span>
-    <a href="https://github.com/shipdocs/gratis-boekhouden/issues">Feedback & vragen</a>
+    <span>Gratis Boekhouden, een project van <a href="https://github.com/shipdocs">Shipdocs</a> · open source onder AGPL-3.0-or-later</span>
+    <span><a href="voorwaarden.html">Voorwaarden</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/shipdocs/gratis-boekhouden/issues">Feedback & vragen</a></span>
   </footer>
 </body>
 </html>

@@ -5,6 +5,7 @@
 Belangrijke feiten:
 
 - Prijs: gratis. Geen abonnement.
+- Licentie: open source, AGPL-3.0-or-later.
 - Platform: Windows en Linux (Electron). Werkt offline; gegevens in een lokale SQLite-database met dagelijkse automatische back-up.
 - Taal en markt: Nederlands, Nederlandse btw-regels.
 - Facturen en offertes: pdf en e-mail via eigen mailserver (SMTP), doorlopende factuurnummering, creditfacturen, automatische betalingsherinneringen, eigen opmaak (logo, kleuren, teksten).
@@ -23,4 +24,6 @@ Belangrijke feiten:
 - [Website](https://shipdocs.github.io/gratis-boekhouden/): productpagina met veelgestelde vragen
 - [Downloads](https://github.com/shipdocs/gratis-boekhouden/releases/latest): installers voor Windows en Linux
 - [Uitgebreide beschrijving voor LLM's](https://shipdocs.github.io/gratis-boekhouden/llms-full.txt)
+- [Gebruiksvoorwaarden en disclaimer](https://shipdocs.github.io/gratis-boekhouden/voorwaarden.html)
+- [Privacyverklaring](https://shipdocs.github.io/gratis-boekhouden/privacy.html)
 - [Broncode en documentatie](https://github.com/shipdocs/gratis-boekhouden)

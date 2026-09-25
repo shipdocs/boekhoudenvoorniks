@@ -3,6 +3,13 @@ import { tx } from '../db/database';
 import { assertCents, type Cents } from '../shared/money';
 import { assertIsoDate, type IsoDate } from '../shared/dates';
 import { DEFAULT_ACCOUNTS, type AccountCategory } from './accounts';
+import rgsTaxonomy from './rgs-codes.json';
+
+/** Officiële RGS-codes (taxonomie-release in rgs-codes.json). */
+export const RGS_VERSION: string = rgsTaxonomy.version;
+export function rgsLabel(code: string): string | undefined {
+  return (rgsTaxonomy.codes as Record<string, string>)[code];
+}
 
 export type EntrySource = 'factuur' | 'inkoop' | 'bank' | 'handmatig' | 'btw' | 'opening' | 'integratie';
 
@@ -28,7 +35,10 @@ export interface PostEntry {
 
 export interface Account {
   id: number;
+  /** interne sleutel */
   rgs_code: string;
+  /** officiële RGS-referentiecode */
+  rgs_ref: string | null;
   code: string;
   name: string;
   category: AccountCategory;
@@ -66,6 +76,7 @@ export interface JournalEntry {
 export interface AccountBalance {
   account_id: number;
   rgs_code: string;
+  rgs_ref: string | null;
   code: string;
   name: string;
   category: AccountCategory;
@@ -101,12 +112,14 @@ export class Ledger {
 
   seedDefaultAccounts(): void {
     const insert = this.db.prepare(
-      `INSERT OR IGNORE INTO chart_of_accounts (rgs_code, code, name, category, vat_code, is_system)
-       VALUES (@rgs, @code, @name, @category, @vatCode, @system)`,
+      `INSERT OR IGNORE INTO chart_of_accounts (rgs_code, rgs_ref, code, name, category, vat_code, is_system)
+       VALUES (@rgs, @ref, @code, @name, @category, @vatCode, @system)`,
     );
+    const fillRef = this.db.prepare('UPDATE chart_of_accounts SET rgs_ref = ? WHERE rgs_code = ? AND rgs_ref IS NULL');
     tx(this.db, () => {
       for (const a of DEFAULT_ACCOUNTS) {
-        insert.run({ rgs: a.rgs, code: a.code, name: a.name, category: a.category, vatCode: a.vatCode ?? null, system: a.system ? 1 : 0 });
+        insert.run({ rgs: a.rgs, ref: a.ref, code: a.code, name: a.name, category: a.category, vatCode: a.vatCode ?? null, system: a.system ? 1 : 0 });
+        fillRef.run(a.ref, a.rgs);
       }
     });
   }
@@ -129,13 +142,19 @@ export class Ledger {
     return account;
   }
 
-  createAccount(input: { code: string; rgs: string; name: string; category: AccountCategory; vatCode?: string | null }): Account {
+  createAccount(input: { code: string; rgs: string; rgsRef?: string | null; name: string; category: AccountCategory; vatCode?: string | null }): Account {
     if (!/^\d{3,6}$/.test(input.code)) throw new LedgerError('Rekeningnummer moet 3 tot 6 cijfers zijn');
     if (!input.name.trim()) throw new LedgerError('Naam is verplicht');
+    if (input.rgsRef && !rgsLabel(input.rgsRef)) throw new LedgerError(`${input.rgsRef} is geen officiële RGS-code (release ${RGS_VERSION})`);
     this.db
-      .prepare('INSERT INTO chart_of_accounts (rgs_code, code, name, category, vat_code) VALUES (?, ?, ?, ?, ?)')
-      .run(input.rgs, input.code, input.name.trim(), input.category, input.vatCode ?? null);
+      .prepare('INSERT INTO chart_of_accounts (rgs_code, rgs_ref, code, name, category, vat_code) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(input.rgs, input.rgsRef ?? null, input.code, input.name.trim(), input.category, input.vatCode ?? null);
     return this.getAccount(input.rgs);
+  }
+
+  setRgsRef(id: number, rgsRef: string | null): void {
+    if (rgsRef && !rgsLabel(rgsRef)) throw new LedgerError(`${rgsRef} is geen officiële RGS-code (release ${RGS_VERSION})`);
+    this.db.prepare('UPDATE chart_of_accounts SET rgs_ref = ? WHERE id = ?').run(rgsRef, id);
   }
 
   renameAccount(id: number, name: string): void {
@@ -295,7 +314,7 @@ export class Ledger {
     const { where, params } = rangeClause(range);
     return this.db
       .prepare(
-        `SELECT a.id AS account_id, a.rgs_code, a.code, a.name, a.category, a.vat_code,
+        `SELECT a.id AS account_id, a.rgs_code, a.rgs_ref, a.code, a.name, a.category, a.vat_code,
                 COALESCE(SUM(x.debit), 0) AS debit, COALESCE(SUM(x.credit), 0) AS credit,
                 COALESCE(SUM(x.debit), 0) - COALESCE(SUM(x.credit), 0) AS balance
          FROM chart_of_accounts a
