@@ -101,6 +101,7 @@ export function Bank({ focus }: { focus?: number }) {
       )}
 
       <h2>Rekeningen</h2>
+      <ErrorBox error={status.error} />
       <table className="list">
         <thead><tr><th>Rekening</th><th>Laatste import</th><th>Dat afschrift bevatte</th><th>Bijgewerkt t/m</th></tr></thead>
         <tbody>
