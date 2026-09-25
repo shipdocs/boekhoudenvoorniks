@@ -92,8 +92,8 @@ export class MatchingEngine {
   }
 
   /** Koppelt nieuwe transacties automatisch als er één duidelijke kandidaat is. */
-  autoMatch(asOf: IsoDate = today()): { matched: number; details: { txId: number; label: string }[] } {
-    const details: { txId: number; label: string }[] = [];
+  autoMatch(asOf: IsoDate = today()): { matched: number; details: { txId: number; label: string; reasons: string[] }[] } {
+    const details: { txId: number; label: string; reasons: string[] }[] = [];
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 }).reverse()) {
       const suggestions = this.suggest(t, this.invoices.listOpen(asOf), this.purchases.listOpen()).filter((s) => s.kind !== 'rekening');
       const [best, second] = suggestions;
@@ -102,7 +102,7 @@ export class MatchingEngine {
       try {
         if (best.kind === 'factuur') this.bank.matchInvoice(t.id, best.invoiceId);
         else if (best.kind === 'inkoop') this.bank.matchPurchase(t.id, best.purchaseId);
-        details.push({ txId: t.id, label: best.label });
+        details.push({ txId: t.id, label: best.label, reasons: best.reasons });
       } catch {
         // bv. periode afgesloten — laat staan voor handmatige verwerking
       }

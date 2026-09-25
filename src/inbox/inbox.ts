@@ -1,4 +1,5 @@
 import type { Db } from '../db/database';
+import { tx } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import type { BankService, BankTransaction } from '../import/bank';
@@ -104,7 +105,11 @@ export class InboxService {
    * die de gebruiker al vaak genoeg heeft bevestigd. Deterministisch, geen AI.
    */
   autoProcess(asOf: IsoDate = today()): { matched: number; booked: number } {
-    const matched = this.matching.autoMatch(asOf).matched;
+    const auto = this.matching.autoMatch(asOf);
+    const matched = auto.matched;
+    for (const d of auto.details) {
+      logAutomation(this.db, { kind: 'bank-match', ref_id: d.txId, summary: `Betaling gekoppeld: ${d.label}`, reason: d.reasons.join(', ') || 'zeker genoeg' });
+    }
     let booked = 0;
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
       if (t.amount >= 0 || !t.counter_name) continue;
@@ -114,13 +119,16 @@ export class InboxService {
       const openPurchase = this.db.prepare(`SELECT 1 FROM purchase_invoices WHERE status = 'open' AND total - amount_paid = ?`).get(-t.amount);
       if (openPurchase) continue;
       try {
-        this.bookCategory(t, rule!.category_key, rule!.vat_code, Boolean(rule!.business), false);
-        const label = rule!.business ? EXPENSE_CATEGORIES.find((c) => c.key === rule!.category_key)?.label.toLowerCase() ?? rule!.category_key : 'privé';
-        logAutomation(this.db, {
-          kind: 'bank-auto',
-          ref_id: t.id,
-          summary: `${formatEuro(-t.amount)} aan ${rule!.display_name} geboekt als ${label}`,
-          reason: `Je hebt gezegd dat ${rule!.display_name} voortaan automatisch mag`,
+        // boeken en vastleggen in één transactie: nooit een automatische boeking zonder logregel
+        tx(this.db, () => {
+          this.bookCategory(t, rule!.category_key, rule!.vat_code, Boolean(rule!.business), false);
+          const label = rule!.business ? EXPENSE_CATEGORIES.find((c) => c.key === rule!.category_key)?.label.toLowerCase() ?? rule!.category_key : 'privé';
+          logAutomation(this.db, {
+            kind: 'bank-auto',
+            ref_id: t.id,
+            summary: `${formatEuro(-t.amount)} aan ${rule!.display_name} geboekt als ${label}`,
+            reason: `Je hebt gezegd dat ${rule!.display_name} voortaan automatisch mag`,
+          });
         });
         booked++;
       } catch {
