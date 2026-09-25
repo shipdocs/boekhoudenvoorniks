@@ -28,9 +28,9 @@ eigen computer, zonder account, cloud of abonnement.
 ## Ontwerpregels
 
 1. **Wat is er gebeurd?** in plaats van *wat wilt u boeken?* Boekhoudtermen staan alleen in de expertmodus.
-2. **De software doet het werk en vraagt alleen om uitzonderingen** (HIGH → automatisch, MEDIUM → één vraag, LOW → controle).
+2. **De software doet het werk en vraagt alleen om uitzonderingen** (HIGH → automatisch, MEDIUM → één vraag, LOW → controle). Een leverancier wordt pas automatisch verwerkt als jij daar ja op zegt, en alles wat de app zelf deed staat onder "Automatisch gedaan".
 3. **AI verzint nooit de boekhouding.** Extractie (*wat staat er?*), classificatie (*wat is dit?*) en boeking (*hoe boeken we dit?*) zijn strikt gescheiden. Een lokale LLM mag alleen een categorie voorstellen; boekingen worden altijd met vaste, testbare regels in code gemaakt.
-4. **Journaalposten zijn onveranderlijk** (afgedwongen met database-triggers); corrigeren gaat via een tegenboeking. Elke post is in balans, en een ingediende BTW-periode is dicht.
+4. **Journaalposten zijn onveranderlijk** (afgedwongen met database-triggers); corrigeren gaat via een tegenboeking. Elke post is in balans. Een ingediende BTW-periode verandert nooit: wat later nog in die periode geboekt wordt, telt mee in de volgende aangifte (boven € 1.000 btw: een suppletie).
 5. **Bedragen in centen** (integers), BTW-percentage per regel, BTW per tarief berekend over de som van de regels.
 
 ## Architectuur

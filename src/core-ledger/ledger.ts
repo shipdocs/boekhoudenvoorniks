@@ -1,7 +1,7 @@
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { assertCents, type Cents } from '../shared/money';
-import { assertIsoDate, type IsoDate } from '../shared/dates';
+import { addDays, assertIsoDate, type IsoDate } from '../shared/dates';
 import { DEFAULT_ACCOUNTS, type AccountCategory } from './accounts';
 import rgsTaxonomy from './rgs-codes.json';
 
@@ -69,6 +69,8 @@ export interface JournalEntry {
   source_ref: string | null;
   status: 'definitief' | 'teruggedraaid';
   reverses_entry_id: number | null;
+  vat_date: IsoDate | null;
+  vat_correction_of: string | null;
   created_at: string;
   lines: JournalLine[];
 }
@@ -105,7 +107,7 @@ export class LedgerError extends Error {
  *  - elke journaalpost heeft ≥ 2 regels en debet = credit
  *  - bedragen zijn positieve gehele centen; een regel is óf debet óf credit
  *  - journaalposten zijn onveranderlijk; corrigeren = reverse()
- *  - geen boekingen in een BTW-periode die als 'ingediend' is gemarkeerd
+ *  - een post in een al aangegeven BTW-periode krijgt een btw-datum in de eerstvolgende open periode
  */
 export class Ledger {
   constructor(private readonly db: Db) {}
@@ -168,6 +170,29 @@ export class Ledger {
     this.db.prepare('UPDATE chart_of_accounts SET archived = 1 WHERE id = ?').run(id);
   }
 
+  /** De ingediende btw-periode waar deze datum in valt, of null. */
+  lockedPeriodFor(date: IsoDate): { period_key: string; end_date: string } | null {
+    return (this.db
+      .prepare(`SELECT period_key, end_date FROM vat_periods WHERE status = 'ingediend' AND ? BETWEEN start_date AND end_date LIMIT 1`)
+      .get(date) as { period_key: string; end_date: string } | undefined) ?? null;
+  }
+
+  /**
+   * Btw-datum van een post: de eigen datum, of — als die periode al is aangegeven — de eerste dag
+   * van de eerstvolgende open periode. Het document behoudt zijn echte datum (#27).
+   */
+  vatDateFor(date: IsoDate): { vatDate: IsoDate; correctionOf: string | null } {
+    const first = this.lockedPeriodFor(date);
+    if (!first) return { vatDate: date, correctionOf: null };
+    let d = date;
+    let locked: { end_date: string } | null = first;
+    while (locked) {
+      d = addDays(locked.end_date, 1);
+      locked = this.lockedPeriodFor(d);
+    }
+    return { vatDate: d, correctionOf: first.period_key };
+  }
+
   isDateLocked(date: IsoDate): boolean {
     const row = this.db
       .prepare(`SELECT 1 FROM vat_periods WHERE status = 'ingediend' AND ? BETWEEN start_date AND end_date LIMIT 1`)
@@ -201,8 +226,12 @@ export class Ledger {
   post(entry: PostEntry): number {
     this.validate(entry);
     return tx(this.db, () => {
-      if (this.isDateLocked(entry.date)) {
-        throw new LedgerError(`De BTW-periode van ${entry.date} is al ingediend; boek in een open periode`);
+      // Een al aangegeven btw-periode verandert nooit: het btw-effect gaat naar de volgende open periode.
+      let { vatDate, correctionOf } = entry.source === 'btw' ? { vatDate: entry.date, correctionOf: null as string | null } : this.vatDateFor(entry.date);
+      if (entry.reversesEntryId && entry.source !== 'btw') {
+        // Een tegenboeking hoort bij dezelfde correctie als het origineel, anders blijft die correctie openstaan.
+        const original = this.db.prepare('SELECT vat_correction_of FROM journal_entries WHERE id = ?').get(entry.reversesEntryId) as { vat_correction_of: string | null } | undefined;
+        if (original?.vat_correction_of) correctionOf = original.vat_correction_of;
       }
       const accountIds = entry.lines.map((l) => {
         const account = this.getAccount(l.account);
@@ -210,8 +239,8 @@ export class Ledger {
         return account.id;
       });
       const result = this.db
-        .prepare('INSERT INTO journal_entries (entry_date, description, source, source_ref, reverses_entry_id) VALUES (?, ?, ?, ?, ?)')
-        .run(entry.date, entry.description.trim(), entry.source, entry.sourceRef ?? null, entry.reversesEntryId ?? null);
+        .prepare('INSERT INTO journal_entries (entry_date, description, source, source_ref, reverses_entry_id, vat_date, vat_correction_of) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(entry.date, entry.description.trim(), entry.source, entry.sourceRef ?? null, entry.reversesEntryId ?? null, vatDate, correctionOf);
       const entryId = Number(result.lastInsertRowid);
       const insertLine = this.db.prepare(
         `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit, relation_id, vat_code, description)

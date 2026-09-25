@@ -66,14 +66,33 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                 <tr><td>BTW die je hebt ontvangen</td><td><Euro cents={r.summary.btwOverOmzet} /></td></tr>
                 <tr><td>BTW die je terugkrijgt (aankopen)</td><td><Euro cents={-r.summary.voorbelasting} /></td></tr>
                 <tr className="total"><td>{r.summary.teBetalen >= 0 ? 'Te betalen' : 'Je krijgt terug'}</td><td><Euro cents={Math.abs(r.summary.teBetalen)} /></td></tr>
+                {r.corrections.filter((c) => !c.suppletie).map((c) => (
+                  <tr key={c.periodKey} className="muted small"><td>Waarvan correctie op {c.label}</td><td><Euro cents={c.btw} /></td></tr>
+                ))}
               </tbody>
             </table>
+            {r.corrections.some((c) => !c.suppletie) && (
+              <p className="muted small">Iets geboekt in een periode die je al had aangegeven? Dan telt het hier mee. Tot € 1.000 mag dat in de volgende aangifte.</p>
+            )}
+            {r.corrections.filter((c) => c.suppletie).map((c) => (
+              <div key={c.periodKey} className="notice warn">
+                <strong>Suppletie nodig voor {c.label}:</strong> er is achteraf <Euro cents={Math.abs(c.btw)} /> btw {c.btw >= 0 ? 'bijgekomen' : 'afgegaan'}. Dat is meer dan € 1.000, dus dat verbeter je apart in Mijn Belastingdienst Zakelijk. Het zit niet in de bedragen hierboven.
+                <div className="row" style={{ marginTop: 8 }}>
+                  <Button small onClick={() => void run(() => api.app.openExternal(meta.vatSuppletieUrl))}>Hoe werkt een suppletie?</Button>
+                  <Button small disabled={busy} onClick={async () => {
+                    if (!confirm(`Heb je de suppletie voor ${c.label} verstuurd?`)) return;
+                    await run(() => api.vat.markSuppletieSubmitted(c.periodKey), 'Suppletie vastgelegd ✓');
+                    await report.reload();
+                  }}>Suppletie is gedaan</Button>
+                </div>
+              </div>
+            ))}
             {r.status === 'ingediend' ? (
               <div className="notice good">✓ Je hebt deze aangifte gedaan{r.submittedAt ? ` (${formatDateNl(r.submittedAt.slice(0, 10))})` : ''}.</div>
             ) : (
               deadline && r.summary.teBetalen > 0 && <p style={{ marginTop: 14 }}>Zorg dat uiterlijk <strong>{formatDateNl(deadline)}</strong> ongeveer <strong><Euro cents={r.summary.teBetalen} /></strong> beschikbaar is.</p>
             )}
-            {r.warnings.map((w) => <div key={w} className="notice warn">{w}</div>)}
+            {r.warnings.filter((w) => !/suppletie-aangifte/.test(w)).map((w) => <div key={w} className="notice warn">{w}</div>)}
             <div className="row" style={{ marginTop: 14 }}>
               <Button onClick={() => setDetails((d) => !d)}>{details ? 'Verberg berekening' : 'Bekijk berekening'}</Button>
             </div>
@@ -97,7 +116,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                 <Button kind="primary" onClick={() => void run(() => api.app.openExternal(meta.vatPortalUrl))}>Open Mijn Belastingdienst Zakelijk</Button>
                 {r.status !== 'ingediend' ? (
                   <Button disabled={busy} onClick={async () => {
-                    if (!confirm(`Heb je de aangifte voor ${r.period.label} verstuurd? Daarna kun je in deze periode niets meer wijzigen.`)) return;
+                    if (!confirm(`Heb je de aangifte voor ${r.period.label} verstuurd? Wat je daarna nog in deze periode boekt, telt mee in je volgende aangifte.`)) return;
                     await run(() => api.vat.markSubmitted(r.period.key), 'Aangifte vastgelegd ✓');
                     await report.reload();
                     await periods.reload();

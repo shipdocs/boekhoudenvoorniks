@@ -8,7 +8,8 @@ import { ACCOUNTS } from '../core-ledger/accounts';
 import { EXPENSE_CATEGORIES } from '../shared/categories';
 import { PURCHASE_VAT_RATES, type PurchaseVatCode } from '../shared/vat';
 import { diffDays, today, type IsoDate } from '../shared/dates';
-import type { Cents } from '../shared/money';
+import { formatEuro, type Cents } from '../shared/money';
+import { logAutomation } from '../inbox/automation-log';
 import { ValidationError } from '../shared/validation';
 import { isUbl, parseUbl, findEmbeddedUbl } from './ubl';
 import { extractPdf } from './pdf-text';
@@ -34,6 +35,8 @@ export interface IntakeDocument {
   confidence: ConfidenceLevel | null;
   issues: Issue[];
   purchase_invoice_id: number | null;
+  /** dit document is een kopie van een eerder document (#31) */
+  duplicate_of_document_id: number | null;
   created_at: string;
   bank_match: BankTransaction | null;
 }
@@ -79,6 +82,24 @@ function emptyResult(): DocumentResult {
     reverseCharge: false,
     rawText: '',
   };
+}
+
+/** Hoe betrouwbaar is de bron? Bij dubbele documenten bewaren we het beste bewijs. */
+export function evidenceRank(source: string | null): number {
+  if (source === 'ubl') return 3;
+  if (source === 'pdf-text') return 2;
+  if (source?.startsWith('ocr')) return 1;
+  return 0;
+}
+
+const normalizeInvoiceNumber = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
+
+export interface DuplicateMatch {
+  /** zeker: zelfde leverancier, factuurnummer en bedrag. Mogelijk: zelfde leverancier en bedrag rond dezelfde datum. */
+  strength: 'zeker' | 'mogelijk';
+  documentId: number | null;
+  purchaseId: number | null;
+  label: string;
 }
 
 /**
@@ -154,6 +175,19 @@ export class IntakeService {
   async evaluate(id: number, extraIssues: Issue[] = [], asOf: IsoDate = today()): Promise<IntakeDocument> {
     const doc = this.get(id);
     const result = doc.result ?? emptyResult();
+    // Eerst: hebben we dit al? Hetzelfde document komt vaak twee keer binnen (mail + foto, PDF + e-factuur).
+    let duplicate = this.findDuplicate(id, result);
+    if (duplicate?.strength === 'zeker') {
+      const original = duplicate.documentId ? this.get(duplicate.documentId) : null;
+      if (original && original.status !== 'verwerkt' && evidenceRank(doc.extraction_source) > evidenceRank(original.extraction_source)) {
+        // het nieuwe document is beter bewijs en het oude is nog niet geboekt: het oude wordt de kopie
+        this.markDuplicate(original.id, { documentId: id, purchaseId: null });
+        duplicate = null;
+      } else {
+        this.markDuplicate(id, duplicate);
+        return this.get(id);
+      }
+    }
     const alreadyBooked = this.findBookedBankTransaction(result);
     if (alreadyBooked) {
       // De betaling is al rechtstreeks als kosten geboekt (bv. automatisch herkende leverancier):
@@ -165,6 +199,9 @@ export class IntakeService {
     }
     const classification = await this.classifier.classify(result);
     const issues = [...extraIssues, ...validateDocument(result, asOf)];
+    if (duplicate) {
+      issues.push({ field: 'duplicate', severity: 'fout', message: `Lijkt op ${duplicate.label}. Is dit dezelfde aankoop?`, suggestion: duplicate });
+    }
     const bankMatch = this.findBankMatch(result);
     const confidence = assessConfidence({ document: result, issues, classification, bankMatch: !!bankMatch });
     this.db
@@ -181,7 +218,80 @@ export class IntakeService {
         business: classification.business,
         paidWith: bankMatch ? 'bank' : 'later',
       }, { learn: false });
+      logAutomation(this.db, {
+        kind: 'document-auto',
+        ref_id: id,
+        summary: `${result.supplier.value} ${formatEuro(result.total.value)} verwerkt als ${EXPENSE_CATEGORIES.find((c) => c.key === classification.categoryKey)?.label.toLowerCase() ?? classification.categoryKey}`,
+        reason: confidence.signals.join(' · '),
+      });
     }
+    return this.get(id);
+  }
+
+  /**
+   * Zoekt of dit document al eerder binnenkwam of al geboekt is.
+   * Zeker = zelfde leverancier + factuurnummer + totaal. Mogelijk = zelfde leverancier + totaal, datum ±3 dagen.
+   */
+  findDuplicate(id: number, result: DocumentResult): DuplicateMatch | null {
+    if (!result.total || !result.supplier) return null;
+    const key = supplierKey(result.supplier.value);
+    if (!key) return null;
+    const number = result.invoiceNumber?.value ? normalizeInvoiceNumber(result.invoiceNumber.value) : null;
+    const date = result.invoiceDate?.value ?? null;
+    const total = result.total.value;
+
+    const purchases = this.db
+      .prepare(
+        `SELECT p.id, p.supplier_reference, p.invoice_date, p.document_id, r.name AS supplier
+         FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id WHERE p.total = ?`,
+      )
+      .all(total) as { id: number; supplier_reference: string | null; invoice_date: string; document_id: number | null; supplier: string | null }[];
+    const docs = this.db
+      .prepare(`SELECT id, result, status, purchase_invoice_id FROM documents WHERE id < ? AND status IN ('nieuw','controle','verwerkt') AND result IS NOT NULL`)
+      .all(id) as { id: number; result: string; status: string; purchase_invoice_id: number | null }[];
+
+    let weak: DuplicateMatch | null = null;
+    const near = (d: string | null) => !!date && !!d && Math.abs(diffDays(date, d)) <= 3;
+    for (const p of purchases) {
+      if (!p.supplier || supplierKey(p.supplier) !== key) continue;
+      const label = `de aankoop bij ${p.supplier} van ${p.invoice_date}`;
+      if (number && p.supplier_reference && normalizeInvoiceNumber(p.supplier_reference) === number) {
+        return { strength: 'zeker', documentId: p.document_id, purchaseId: p.id, label };
+      }
+      if (!weak && near(p.invoice_date) && !(number && p.supplier_reference)) weak = { strength: 'mogelijk', documentId: p.document_id, purchaseId: p.id, label };
+    }
+    for (const d of docs) {
+      const r = JSON.parse(d.result) as DocumentResult;
+      if (!r.total || r.total.value !== total || !r.supplier || supplierKey(r.supplier.value) !== key) continue;
+      const label = `het document van ${r.supplier.value}${r.invoiceDate ? ` van ${r.invoiceDate.value}` : ''}`;
+      const otherNumber = r.invoiceNumber?.value ? normalizeInvoiceNumber(r.invoiceNumber.value) : null;
+      if (number && otherNumber === number) return { strength: 'zeker', documentId: d.id, purchaseId: d.purchase_invoice_id, label };
+      if (!weak && near(r.invoiceDate?.value ?? null) && !(number && otherNumber)) weak = { strength: 'mogelijk', documentId: d.id, purchaseId: d.purchase_invoice_id, label };
+    }
+    return weak;
+  }
+
+  /**
+   * Legt vast dat een document een kopie is. Is de kopie beter bewijs (bv. e-factuur i.p.v. foto),
+   * dan wordt die de bijlage van de aankoop; er wordt nooit iets dubbel geboekt.
+   */
+  markDuplicate(id: number, match: Pick<DuplicateMatch, 'documentId' | 'purchaseId'>): IntakeDocument {
+    tx(this.db, () => {
+      const doc = this.get(id);
+      if (doc.status === 'verwerkt') throw new ValidationError('Dit document is al verwerkt');
+      const original = match.documentId ? this.get(match.documentId) : null;
+      const purchaseId = match.purchaseId ?? original?.purchase_invoice_id ?? null;
+      if (purchaseId) {
+        const current = this.db.prepare('SELECT document_id FROM purchase_invoices WHERE id = ?').get(purchaseId) as { document_id: number | null } | undefined;
+        const currentDoc = current?.document_id ? this.get(current.document_id) : null;
+        if (current && evidenceRank(doc.extraction_source) > evidenceRank(currentDoc?.extraction_source ?? null)) {
+          this.db.prepare('UPDATE purchase_invoices SET attachment_path = ?, document_id = ? WHERE id = ?').run(doc.file_path, id, purchaseId);
+        }
+      }
+      this.db
+        .prepare(`UPDATE documents SET status = 'genegeerd', duplicate_of_document_id = ?, purchase_invoice_id = ?, issues = ? WHERE id = ?`)
+        .run(match.documentId, purchaseId, JSON.stringify([{ field: 'duplicate', severity: 'waarschuwing', message: 'Dubbel: dit document hadden we al. Niet opnieuw geboekt.' }]), id);
+    });
     return this.get(id);
   }
 

@@ -167,12 +167,12 @@ function SupplierRules() {
   const rules = useLoad(() => api.documents.suppliers());
   return (
     <>
-      <p className="muted">Wat de app heeft geleerd van je bevestigingen. Na 2 bevestigingen zonder correctie wordt een leverancier automatisch verwerkt.</p>
+      <p className="muted">Wat de app heeft geleerd van je bevestigingen. Na 3 gelijke bevestigingen vragen we of een leverancier voortaan automatisch mag. Alleen na jouw ja gebeurt dat.</p>
       <table className="list small">
-        <thead><tr><th>Leverancier</th><th>Categorie</th><th>BTW</th><th>Zakelijk</th><th className="num">Bevestigd</th><th /></tr></thead>
+        <thead><tr><th>Leverancier</th><th>Categorie</th><th>BTW</th><th>Zakelijk</th><th className="num">Bevestigd</th><th>Verwerking</th><th /></tr></thead>
         <tbody>
           {(rules.data ?? []).map((r) => (
-            <tr key={r.supplier_key}><td>{r.display_name}</td><td>{r.category_key}</td><td>{r.vat_code}</td><td>{r.business ? 'ja' : 'privé'}</td><td className="num">{r.confirmations}×</td><td><Button small kind="ghost" onClick={async () => { await run(() => api.documents.forgetSupplier(r.supplier_key)); await rules.reload(); }}>Vergeten</Button></td></tr>
+            <tr key={r.supplier_key}><td>{r.display_name}</td><td>{r.category_key}</td><td>{r.vat_code}</td><td>{r.business ? 'ja' : 'privé'}</td><td className="num">{r.confirmations}×</td><td>{r.auto_approved === 1 ? 'automatisch' : r.auto_approved === -1 ? 'altijd vragen' : 'vragen'}</td><td>{r.auto_approved === 1 ? <Button small kind="ghost" onClick={async () => { await run(() => api.documents.setSupplierAutomatic(r.supplier_key, false)); await rules.reload(); }}>Weer vragen</Button> : null}<Button small kind="ghost" onClick={async () => { await run(() => api.documents.forgetSupplier(r.supplier_key)); await rules.reload(); }}>Vergeten</Button></td></tr>
           ))}
         </tbody>
       </table>

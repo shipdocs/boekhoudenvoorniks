@@ -99,7 +99,7 @@ export function DocumentReview({ id }: { id: number }) {
       <div className="row between">
         <div>
           <h1>{form.supplier || d.original_name}</h1>
-          <p className="sub">{d.status === 'verwerkt' ? '✓ Verwerkt' : d.confidence === 'LOW' ? 'We weten het niet zeker — kijk even mee.' : 'Klopt alles?'}</p>
+          <p className="sub">{d.duplicate_of_document_id || (d.status === 'genegeerd' && d.issues.some((i) => i.field === 'duplicate')) ? 'Dubbel document — niet opnieuw geboekt' : d.status === 'verwerkt' ? '✓ Verwerkt' : d.confidence === 'LOW' ? 'We weten het niet zeker — kijk even mee.' : 'Klopt alles?'}</p>
         </div>
         <Button kind="ghost" onClick={() => go({ screen: 'aankopen' })}>← Aankopen</Button>
       </div>
@@ -118,7 +118,20 @@ export function DocumentReview({ id }: { id: number }) {
               );
             })}
           </div>
-          {d.issues.filter((i) => i.severity === 'fout').map((i) => <div key={i.field + i.message} className="notice warn">{i.message}</div>)}
+          {d.issues.filter((i) => i.severity === 'fout' || i.field === 'duplicate').map((i) => (
+            <div key={i.field + i.message} className="notice warn">
+              {i.message}
+              {i.field === 'duplicate' && d.status === 'controle' && (
+                <div className="row" style={{ marginTop: 8 }}>
+                  <Button small disabled={busy} onClick={async () => {
+                    const done = await run(() => api.documents.markDuplicate(d.id, i.suggestion as { documentId: number | null; purchaseId: number | null }), 'Dubbel document weggelegd');
+                    if (done) go({ screen: 'aankopen' });
+                  }}>Ja, zelfde aankoop</Button>
+                  <span className="small muted">Anders: controleer de gegevens hieronder en verwerk het gewoon.</span>
+                </div>
+              )}
+            </div>
+          ))}
           {d.bank_match && <div className="notice good">✓ Betaling gevonden op de bank: {formatDateNl(d.bank_match.transaction_date)} · <Euro cents={d.bank_match.amount} /></div>}
           {d.classification && <p className="small muted">{d.classification.reasons.join(' · ')}</p>}
 

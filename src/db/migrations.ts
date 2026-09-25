@@ -378,4 +378,35 @@ export const migrations: string[] = [
     SELECT import_batch_id, bank_account_id, MIN(transaction_date), MAX(transaction_date), COUNT(*), COUNT(*), 0
     FROM bank_transactions WHERE import_batch_id IS NOT NULL GROUP BY import_batch_id, bank_account_id;
   `,
+  /* 5: btw-correcties naar een open periode, dubbele documenten, opt-in voor automatisch verwerken */ `
+  -- Datum waarop het btw-effect van een post meetelt. Wijkt af van entry_date als de periode
+  -- van entry_date al is aangegeven; vat_correction_of noemt dan die periode.
+  ALTER TABLE journal_entries ADD COLUMN vat_date TEXT;
+  ALTER TABLE journal_entries ADD COLUMN vat_correction_of TEXT;
+  ALTER TABLE documents ADD COLUMN duplicate_of_document_id INTEGER REFERENCES documents(id);
+  -- 0 = nog niet gevraagd, 1 = gebruiker wil automatisch, -1 = gebruiker wil blijven kiezen
+  ALTER TABLE supplier_rules ADD COLUMN auto_approved INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE automation_log (
+    id INTEGER PRIMARY KEY,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    kind TEXT NOT NULL,
+    ref_id INTEGER,
+    summary TEXT NOT NULL,
+    reason TEXT NOT NULL
+  );
+  -- De btw-toewijzing van een post is net zo onveranderlijk als de post zelf.
+  CREATE TRIGGER journal_entries_vat_no_update BEFORE UPDATE ON journal_entries
+  WHEN NEW.vat_date IS NOT OLD.vat_date OR NEW.vat_correction_of IS NOT OLD.vat_correction_of
+  BEGIN SELECT RAISE(ABORT, 'De btw-periode van een journaalpost ligt vast; maak een tegenboeking'); END;
+  -- Ingediende suppletie-aangiftes: posten met vat_correction_of = correction_period_key en
+  -- id <= max_entry_id zijn daarmee afgehandeld en tellen niet meer mee in een gewone aangifte.
+  CREATE TABLE vat_suppleties (
+    id INTEGER PRIMARY KEY,
+    correction_period_key TEXT NOT NULL,
+    btw INTEGER NOT NULL,
+    max_entry_id INTEGER NOT NULL,
+    journal_entry_id INTEGER REFERENCES journal_entries(id),
+    submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];
