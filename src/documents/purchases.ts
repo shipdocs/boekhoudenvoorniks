@@ -1,0 +1,177 @@
+import type { Db } from '../db/database';
+import { tx } from '../db/database';
+import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
+import { ACCOUNTS } from '../core-ledger/accounts';
+import { PURCHASE_VAT_RATES, type PurchaseVatCode } from '../shared/vat';
+import { assertIsoDate, type IsoDate } from '../shared/dates';
+import { assertCents, roundHalfAwayFromZero, type Cents } from '../shared/money';
+import { ValidationError } from '../shared/validation';
+
+export interface PurchaseLineInput {
+  /** RGS-code van de kostenrekening (of activa bij investering) */
+  account: string;
+  description?: string | null;
+  /** bedrag exclusief BTW */
+  netAmount: Cents;
+  vatCode: PurchaseVatCode;
+  /** optioneel afwijkend BTW-bedrag (zoals op de bon); anders berekend */
+  vatAmount?: Cents;
+}
+
+export interface PurchaseInvoiceInput {
+  relationId?: number | null;
+  supplierReference?: string | null;
+  invoiceDate: IsoDate;
+  dueDate?: IsoDate | null;
+  description: string;
+  lines: PurchaseLineInput[];
+  attachmentPath?: string | null;
+  jobId?: number | null;
+  documentId?: number | null;
+  externalSource?: string | null;
+  externalId?: string | null;
+}
+
+export interface PurchaseInvoice {
+  id: number;
+  relation_id: number | null;
+  relation_name: string | null;
+  supplier_reference: string | null;
+  invoice_date: IsoDate;
+  due_date: IsoDate | null;
+  description: string;
+  subtotal: Cents;
+  vat_total: Cents;
+  total: Cents;
+  amount_paid: Cents;
+  status: 'open' | 'betaald';
+  journal_entry_id: number | null;
+  attachment_path: string | null;
+  job_id: number | null;
+  document_id: number | null;
+  open_amount: Cents;
+}
+
+/** Berekent de BTW op een inkoopregel. Bij verlegd is de BTW wel te berekenen maar niet te betalen aan de leverancier. */
+export function purchaseVat(line: PurchaseLineInput): Cents {
+  if (line.vatAmount !== undefined) return line.vatAmount;
+  return roundHalfAwayFromZero((line.netAmount * PURCHASE_VAT_RATES[line.vatCode].percentage) / 100);
+}
+
+/**
+ * Journaalregels voor kosten met BTW. Wordt ook gebruikt voor het direct boeken van
+ * banktransacties op een kostenrekening.
+ *   - hoog/laag: kosten (netto) + voorbelasting aan crediteur/bank (bruto)
+ *   - verlegd:   kosten (netto) + voorbelasting aan af te dragen btw verlegd; crediteur/bank alleen netto
+ *   - nul/geen:  alleen kosten
+ * Retourneert de regels en het bedrag dat daadwerkelijk betaald wordt.
+ */
+export function expenseLines(lines: PurchaseLineInput[], counterAccount: string, relationId: number | null, description?: string): { lines: PostLine[]; payable: Cents; vat: Cents; net: Cents } {
+  const out: (PostLine | null)[] = [];
+  let payable = 0;
+  let vatTotal = 0;
+  let netTotal = 0;
+  for (const l of lines) {
+    assertCents(l.netAmount, 'bedrag');
+    if (!(l.vatCode in PURCHASE_VAT_RATES)) throw new ValidationError(`Onbekende BTW-code ${l.vatCode}`);
+    const vat = purchaseVat(l);
+    netTotal += l.netAmount;
+    out.push(signedLine(l.account, l.netAmount, { relationId, vatCode: l.vatCode, description: l.description ?? null }));
+    if (vat !== 0) {
+      out.push(signedLine(ACCOUNTS.btwVoorbelasting, vat, { relationId, vatCode: l.vatCode }));
+      vatTotal += vat;
+      if (l.vatCode === 'verlegd') {
+        out.push(signedLine(ACCOUNTS.btwAfdragenVerlegd, -vat, { relationId, vatCode: 'verlegd' }));
+      }
+    }
+    payable += l.netAmount + (l.vatCode === 'verlegd' ? 0 : vat);
+  }
+  out.push(signedLine(counterAccount, -payable, { relationId, description: description ?? null }));
+  return { lines: out.filter((l): l is PostLine => l !== null), payable, vat: vatTotal, net: netTotal };
+}
+
+export class PurchaseService {
+  constructor(private readonly db: Db, private readonly ledger: Ledger) {}
+
+  create(input: PurchaseInvoiceInput): PurchaseInvoice {
+    assertIsoDate(input.invoiceDate, 'factuurdatum');
+    if (input.dueDate) assertIsoDate(input.dueDate, 'vervaldatum');
+    if (!input.description?.trim()) throw new ValidationError('Omschrijving is verplicht');
+    if (input.lines.length === 0) throw new ValidationError('Voeg minimaal één regel toe');
+    return tx(this.db, () => {
+      const booking = expenseLines(input.lines, ACCOUNTS.crediteuren, input.relationId ?? null, input.supplierReference ?? undefined);
+      const vatPaid = booking.payable - booking.net;
+      const result = this.db
+        .prepare(
+          `INSERT INTO purchase_invoices (relation_id, supplier_reference, invoice_date, due_date, description, subtotal, vat_total, total, attachment_path, job_id, document_id, external_source, external_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(input.relationId ?? null, input.supplierReference ?? null, input.invoiceDate, input.dueDate ?? null, input.description.trim(), booking.net, vatPaid, booking.payable, input.attachmentPath ?? null, input.jobId ?? null, input.documentId ?? null, input.externalSource ?? null, input.externalId ?? null);
+      const id = Number(result.lastInsertRowid);
+      const entryId = this.ledger.post({
+        date: input.invoiceDate,
+        description: `Inkoop: ${input.description.trim()}`,
+        source: 'inkoop',
+        sourceRef: `purchase:${id}`,
+        lines: booking.lines,
+      });
+      const insertLine = this.db.prepare('INSERT INTO purchase_invoice_lines (purchase_invoice_id, account_id, description, net_amount, vat_code, vat_amount) VALUES (?, ?, ?, ?, ?, ?)');
+      for (const l of input.lines) insertLine.run(id, this.ledger.getAccount(l.account).id, l.description ?? null, l.netAmount, l.vatCode, purchaseVat(l));
+      this.db.prepare('UPDATE purchase_invoices SET journal_entry_id = ? WHERE id = ?').run(entryId, id);
+      return this.get(id);
+    });
+  }
+
+  registerPayment(id: number, payment: { amount: Cents; date: IsoDate; moneyAccount?: string; bankTransactionId?: number | null }): PurchaseInvoice {
+    assertCents(payment.amount);
+    assertIsoDate(payment.date);
+    return tx(this.db, () => {
+      const p = this.get(id);
+      const entryId = this.ledger.post({
+        date: payment.date,
+        description: `Betaling inkoop: ${p.description}`,
+        source: 'bank',
+        sourceRef: `purchase:${id}`,
+        lines: [signedLine(ACCOUNTS.crediteuren, payment.amount, { relationId: p.relation_id })!, signedLine(payment.moneyAccount ?? ACCOUNTS.bank, -payment.amount)!],
+      });
+      const paid = p.amount_paid + payment.amount;
+      this.db.prepare('UPDATE purchase_invoices SET amount_paid = ?, status = ? WHERE id = ?').run(paid, paid >= p.total ? 'betaald' : 'open', id);
+      if (payment.bankTransactionId) {
+        this.db
+          .prepare(`UPDATE bank_transactions SET status = 'gematcht', matched_journal_entry_id = ?, matched_purchase_invoice_id = ? WHERE id = ?`)
+          .run(entryId, id, payment.bankTransactionId);
+      }
+      return this.get(id);
+    });
+  }
+
+  undoPayment(id: number, amount: Cents, journalEntryId: number, date: IsoDate): PurchaseInvoice {
+    return tx(this.db, () => {
+      this.ledger.reverse(journalEntryId, date);
+      const p = this.get(id);
+      const paid = p.amount_paid - amount;
+      this.db.prepare('UPDATE purchase_invoices SET amount_paid = ?, status = ? WHERE id = ?').run(paid, paid >= p.total ? 'betaald' : 'open', id);
+      return this.get(id);
+    });
+  }
+
+  get(id: number): PurchaseInvoice {
+    const row = this.db
+      .prepare('SELECT p.*, r.name AS relation_name FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id WHERE p.id = ?')
+      .get(id) as Omit<PurchaseInvoice, 'open_amount'> | undefined;
+    if (!row) throw new ValidationError(`Inkoopfactuur ${id} bestaat niet`);
+    return { ...row, open_amount: row.total - row.amount_paid };
+  }
+
+  list(filter: { status?: 'open' | 'betaald' } = {}): PurchaseInvoice[] {
+    const rows = this.db
+      .prepare(`SELECT p.*, r.name AS relation_name FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id ${filter.status ? 'WHERE p.status = ?' : ''} ORDER BY p.invoice_date DESC, p.id DESC`)
+      .all(...(filter.status ? [filter.status] : [])) as Omit<PurchaseInvoice, 'open_amount'>[];
+    return rows.map((r) => ({ ...r, open_amount: r.total - r.amount_paid }));
+  }
+
+  listOpen(): PurchaseInvoice[] {
+    return this.list({ status: 'open' });
+  }
+}
+

@@ -1,0 +1,111 @@
+{
+  "milestones": [
+    { "title": "MVP livegang", "description": "Alles wat nodig is om de MVP veilig aan echte gebruikers te geven (review, release, website, juridisch)." },
+    { "title": "V2", "description": "Documentherkenning (OCR/AI) en verzending — de code staat, de keuzes en data moeten van de eigenaar komen." },
+    { "title": "V3", "description": "Externe koppelingen: open banking, directe btw-aangifte (SBR/Digipoort), webshops/betaalproviders, multi-user." }
+  ],
+  "labels": [
+    { "name": "input nodig", "color": "d93f0b", "description": "Kan niet zonder beslissing of actie van de eigenaar" },
+    { "name": "btw", "color": "1d76db", "description": "Btw-logica en aangifte" },
+    { "name": "juridisch", "color": "5319e7", "description": "Juridisch / compliance" },
+    { "name": "infra", "color": "0e8a16", "description": "Release, website, signing" }
+  ],
+  "issues": [
+    {
+      "title": "BTW-rekenlogica laten reviewen door boekhouder/fiscalist vóór livegang",
+      "milestone": "MVP livegang",
+      "labels": ["input nodig", "btw"],
+      "body": "**Waarom input nodig:** dit is het enige onderdeel waar een fout een gebruiker geld of een boete kan kosten. Het plan schrijft een review door een boekhouder of fiscalist voor. Die persoon moet jij kiezen en inschakelen.\n\n**Te reviewen**\n- `src/shared/vat.ts`: btw-codes per regel en de rubriek-indeling\n- `src/btw/btw.ts`: berekening uit `journal_lines`, rubrieken 1a/1b/1e/2a/5a/5b/5g, afronding in hele euro's (omzet en verschuldigde btw naar beneden, voorbelasting naar boven), afsluitboeking en periodevergrendeling\n- `src/core-ledger/accounts.ts` (`SALES_ACCOUNTS`): welke omzet-/btw-rekening bij welke code hoort\n- `src/documents/purchases.ts` (`expenseLines`): voorbelasting, en verlegde inkoop als voorbelasting plus af te dragen verlegd\n- `src/import/bank.ts` (`splitGross`): bruto naar netto + btw bij bonnetjes en banktransacties\n- `src/shared/trades.ts`: voorstel 9% op arbeid bij schilderen/stukadoren van woningen ouder dan 2 jaar\n\n**Bestaande testscenario's:** `tests/btw.test.ts`.\n\n**Klaar wanneer:** er een schriftelijke bevinding is, correcties zijn doorgevoerd en de reviewer de testscenario's heeft aangevuld."
+    },
+    {
+      "title": "RGS-codes van het standaard rekeningschema verifiëren tegen de officiële RGS-release",
+      "milestone": "MVP livegang",
+      "labels": ["input nodig"],
+      "body": "`src/core-ledger/accounts.ts` bevat een subset van het Referentie GrootboekSchema voor zzp'ers. De codes volgen de RGS-naamgeving, maar moeten worden gecontroleerd tegen de actuele officiële release (referentiegrootboekschema.nl). Daarbij hoort ook de keuze welke RGS-versie en welke rekeningen we standaard aanbieden.\n\n**Input nodig:** welke RGS-versie en (liefst) een boekhouder die de mapping aftekent.\n\n**Let op:** de RGS-codes zijn vaste sleutels in de database. Wijzig ze vóór de eerste echte gebruikers, of voeg een migratie toe."
+    },
+    {
+      "title": "Licentie kiezen voor de broncode",
+      "milestone": "MVP livegang",
+      "labels": ["input nodig", "juridisch"],
+      "body": "`package.json` staat nu op `UNLICENSED`. Het is een gratis product met publieke broncode; kies een licentie (bijv. MIT, Apache-2.0 of AGPL-3.0, afhankelijk van of anderen het commercieel mogen hergebruiken) en voeg een `LICENSE`-bestand toe.\n\nControleer ook de licenties van de afhankelijkheden (o.a. mt940-js MIT, pdfjs-dist Apache-2.0)."
+    },
+    {
+      "title": "GitHub Pages aanzetten (en eventueel een eigen domein)",
+      "milestone": "MVP livegang",
+      "labels": ["input nodig", "infra"],
+      "body": "De website staat in `site/` en wordt gepubliceerd door `.github/workflows/pages.yml`.\n\n**Actie (repo-admin):** Settings → Pages → *Build and deployment* → Source: **GitHub Actions**. Start daarna de workflow *Website (GitHub Pages)* of push naar `main`.\n\nDe site gaat uit van `https://shipdocs.github.io/gratis-boekhouden/`: canonical, sitemap, Open Graph en `llms.txt`. Kies je een eigen domein, dan moeten die URL's mee worden aangepast (zoek op `shipdocs.github.io`), plus een `site/CNAME`.\n\nDaarna: de site aanmelden bij Google Search Console en Bing Webmaster Tools en `sitemap.xml` indienen."
+    },
+    {
+      "title": "Code signing voor de Windows-installer",
+      "milestone": "MVP livegang",
+      "labels": ["input nodig", "infra"],
+      "body": "Zonder code signing toont Windows SmartScreen een waarschuwing bij installeren. Dat schrikt de doelgroep af.\n\n**Input nodig:** een code-signing-certificaat aanschaffen (OV/EV, of bijv. Azure Trusted Signing) op naam van de onderneming.\n\nDe release-workflow leest al de secrets `WINDOWS_CSC_LINK` en `WINDOWS_CSC_KEY_PASSWORD` (`.github/workflows/release.yml`)."
+    },
+    {
+      "title": "Eerste release publiceren (v0.1.0)",
+      "milestone": "MVP livegang",
+      "labels": ["input nodig", "infra"],
+      "body": "Een tag `v*` bouwt installers voor Linux (AppImage, .deb) en Windows (NSIS) en publiceert ze als GitHub-release. De auto-updater in de app haalt updates daar vandaan, en de downloadknoppen op de website verwijzen naar `releases/latest`.\n\n**Beslissing:** wanneer de eerste release uitgaat (bij voorkeur na de btw-review en de code signing). Daarna: `git tag v0.1.0 && git push --tags`."
+    },
+    {
+      "title": "Disclaimer, gebruiksvoorwaarden en privacyverklaring",
+      "milestone": "MVP livegang",
+      "labels": ["input nodig", "juridisch"],
+      "body": "De app is local-first: er gaan geen gegevens naar ons. Toch zijn nodig:\n- een disclaimer over de btw-berekening (de gebruiker blijft verantwoordelijk voor de aangifte)\n- gebruiksvoorwaarden / aansprakelijkheid\n- een privacyverklaring voor website en app (AVG), incl. wat de auto-updater en de optionele koppelingen doen\n\n**Input nodig:** juridische tekst (of een jurist), plus waar de teksten komen (website-footer, onboarding, Over-scherm)."
+    },
+    {
+      "title": "OCR-engine kiezen met een benchmark op ~200 echte Nederlandse documenten",
+      "milestone": "V2",
+      "labels": ["input nodig"],
+      "body": "De OCR is modulair (`src/intake/ocr.ts`, contract in `docs/ocr-sidecar.md`). Kandidaten: GLM-OCR 0.9B, PaddleOCR-VL, GRM-OCR 300M.\n\n**Input nodig:** een set van ~200 echte, geanonimiseerde documenten (Gamma, Praxis, Hornbach, Bouwmaat, Toolstation, tankstations, telecom, verzekeringen, groothandels, webshops, handgeschreven bonnen) met per document een `.json` met de juiste waarden.\n\n**Uitvoeren:** `npm run benchmark:ocr -- <map> <ocr-url> <engine>` per engine. Vergelijk leverancier, datum, totaal, btw en de snelheid op een gewone laptop."
+    },
+    {
+      "title": "Lokale OCR en AI meeleveren (bundeling, hardware, modellicenties)",
+      "milestone": "V2",
+      "labels": ["input nodig"],
+      "body": "Nu verwacht de app een lokaal draaiende OCR-dienst en optioneel een Ollama-compatibele LLM (Instellingen → Slimme herkenning). Voor gewone gebruikers moet dat meegeleverd worden.\n\n**Beslissingen:**\n- meeleveren in de installer (+1–3 GB) of een aparte download bij eerste gebruik?\n- minimale hardware (CPU-only?)\n- licenties van de gekozen modellen (commercieel gebruik, herdistributie)\n- welke kleine LLM voor classificatievoorstellen (die mag nooit boeken; zie `src/intake/classify.ts`)"
+    },
+    {
+      "title": "Status 'geopend' bij verstuurde facturen: wel of niet?",
+      "milestone": "V2",
+      "labels": ["input nodig"],
+      "body": "Het plan noemt status-tracking *verzonden/geopend/betaald*. *Verzonden* en *betaald* werken. *Geopend* vraagt een trackingpixel of -link en dus een server, wat botst met local-first en privacy.\n\n**Beslissing:** schrappen, óf een optionele dienst bouwen (wie host die, en wat staat er in de privacyverklaring?)."
+    },
+    {
+      "title": "Inloggen met Gmail / Microsoft 365 voor het versturen van facturen (OAuth)",
+      "milestone": "V2",
+      "labels": ["input nodig"],
+      "body": "Versturen gaat nu via SMTP met wachtwoord (versleuteld via het OS-sleutelbeheer). Veel gebruikers hebben Gmail of Microsoft 365, waar een app-wachtwoord lastig is.\n\n**Input nodig:** app-registraties (client-ID's) bij Google Cloud en Microsoft Entra op naam van de uitgever, plus de verificatie-/reviewprocedure bij Google voor de gmail.send-scope."
+    },
+    {
+      "title": "Open banking: live bankkoppeling via een gelicentieerde AISP-partner",
+      "milestone": "V3",
+      "labels": ["input nodig"],
+      "body": "De interface staat klaar (`src/integrations/openbanking.ts`). Transacties gaan door dezelfde import- en matchingstraat als CSV/MT940/CAMT.\n\n**Input nodig:** keuze voor een partner (bijv. Enable Banking, Tink, Yapily, GoCardless Bank Account Data), met contract, kosten, verwerkersovereenkomst en API-sleutels. Toestemmingen verlopen na maximaal 180 dagen (PSD2); de app moet dan opnieuw toestemming vragen."
+    },
+    {
+      "title": "Directe btw-aangifte via SBR/Digipoort",
+      "milestone": "V3",
+      "labels": ["input nodig", "btw", "juridisch"],
+      "body": "De app maakt de aangifte al klaar en genereert een XBRL-instance (`src/btw/xbrl.ts`, alleen als test-export). Voor echt indienen is nodig:\n- aanmelding bij de Belastingdienst Ondersteuning Digitaal Berichtenverkeer (ODB) als softwareontwikkelaar (aangifte omzetbelasting, XBRL, Digipoort)\n- een PKIoverheid services-servercertificaat\n- validatie tegen de actuele Nederlandse Taxonomie (NT) en de testomgeving\n- juridisch: machtiging/intermediair, bewaren van verzendbewijzen\n\n**Input nodig:** de aanmelding, het certificaat en de juridische keuzes. Daarna kan de `VatSubmissionChannel` worden geïmplementeerd."
+    },
+    {
+      "title": "Webshop- en betaalproviderkoppelingen testen met echte (sandbox-)accounts",
+      "milestone": "V3",
+      "labels": ["input nodig"],
+      "body": "WooCommerce, Shopify, Mollie en Stripe zijn gebouwd en getest met gesimuleerde API-antwoorden (`tests/integrations.test.ts`).\n\n**Input nodig:** testaccounts of sandbox-sleutels om tegen de echte API's te testen (paginering, afrondingen, terugbetalingen, deelbetalingen)."
+    },
+    {
+      "title": "Buitenlandse klanten en leveranciers: ICP, OSS en rubrieken 3b / 4a / 4b",
+      "milestone": "V3",
+      "labels": ["input nodig", "btw"],
+      "body": "Nog niet ondersteund: intracommunautaire leveringen (3b), diensten van buiten/binnen de EU aan jou (4a/4b, bijv. Stripe-kosten uit Ierland), OSS voor webshopverkopen aan EU-consumenten en de ICP-opgaaf. De app waarschuwt nu alleen.\n\n**Input nodig:** fiscaal advies over welke gevallen de doelgroep echt tegenkomt en hoe ze geboekt moeten worden. Neem dit mee in de btw-review."
+    },
+    {
+      "title": "Besluit: multi-user en/of cloud-sync",
+      "milestone": "V3",
+      "labels": ["input nodig"],
+      "body": "Het plan noemt multi-user/cloud-sync als 'eventueel'. De app is bewust local-first (één SQLite-bestand, dagelijkse back-up, handmatige export/import).\n\n**Beslissing nodig:** is er vraag naar (bijv. boekhouder die meekijkt, twee apparaten)? Zo ja, welk model: end-to-end versleutelde sync, gedeelde map, of een betaalde optionele dienst? Dat heeft gevolgen voor privacy en kosten."
+    }
+  ]
+}

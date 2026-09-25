@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <GrpHdr><MsgId>1</MsgId><CreDtTm>2026-09-30T10:00:00</CreDtTm></GrpHdr>
+    <Stmt>
+      <Id>1</Id>
+      <Acct><Id><IBAN>NL91ABNA0417164300</IBAN></Id></Acct>
+      <Ntry>
+        <Amt Ccy="EUR">242.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2026-09-29</Dt></BookgDt>
+        <AcctSvcrRef>REF-1</AcctSvcrRef>
+        <NtryDtls><TxDtls>
+          <Refs><EndToEndId>NOTPROVIDED</EndToEndId></Refs>
+          <RltdPties><Dbtr><Nm>Familie Jansen</Nm></Dbtr><DbtrAcct><Id><IBAN>NL44RABO0123456789</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>factuur 2026-0004</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">15.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2026-09-29</Dt></BookgDt>
+        <AcctSvcrRef>REF-2</AcctSvcrRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Cdtr><Nm>KPN</Nm></Cdtr><CdtrAcct><Id><IBAN>NL20INGB0001234567</IBAN></Id></CdtrAcct></RltdPties>
+          <RmtInf><Ustrd>Mobiel abonnement</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">99.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>PDNG</Sts>
+        <BookgDt><Dt>2026-09-30</Dt></BookgDt>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>

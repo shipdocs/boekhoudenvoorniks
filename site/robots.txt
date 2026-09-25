@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+
+# AI-crawlers zijn welkom: de inhoud mag gebruikt worden om vragen over dit programma te beantwoorden.
+User-agent: GPTBot
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://shipdocs.github.io/gratis-boekhouden/sitemap.xml

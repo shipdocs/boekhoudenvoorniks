@@ -1,0 +1,56 @@
+name: Backlog (milestones & issues)
+
+# Maakt de milestones, labels en issues uit .github/backlog.json aan.
+# Idempotent: bestaande milestones/labels/issues (op titel) worden overgeslagen.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'claude/**']
+    paths: ['.github/backlog.json', '.github/workflows/backlog.yml']
+
+permissions:
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const backlog = JSON.parse(fs.readFileSync('.github/backlog.json', 'utf8'));
+            const { owner, repo } = context.repo;
+
+            const labels = await github.paginate(github.rest.issues.listLabelsForRepo, { owner, repo, per_page: 100 });
+            for (const l of backlog.labels) {
+              if (!labels.some((x) => x.name === l.name)) {
+                await github.rest.issues.createLabel({ owner, repo, ...l });
+                core.info(`Label aangemaakt: ${l.name}`);
+              }
+            }
+
+            const milestones = await github.paginate(github.rest.issues.listMilestones, { owner, repo, state: 'all', per_page: 100 });
+            const msNumber = {};
+            for (const m of backlog.milestones) {
+              let found = milestones.find((x) => x.title === m.title);
+              if (!found) {
+                found = (await github.rest.issues.createMilestone({ owner, repo, title: m.title, description: m.description })).data;
+                core.info(`Milestone aangemaakt: ${m.title}`);
+              }
+              msNumber[m.title] = found.number;
+            }
+
+            const existing = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'all', per_page: 100 });
+            for (const i of backlog.issues) {
+              const match = existing.find((x) => x.title === i.title && !x.pull_request);
+              if (match) {
+                if (!match.milestone && msNumber[i.milestone]) {
+                  await github.rest.issues.update({ owner, repo, issue_number: match.number, milestone: msNumber[i.milestone] });
+                }
+                continue;
+              }
+              await github.rest.issues.create({ owner, repo, title: i.title, body: i.body, labels: i.labels, milestone: msNumber[i.milestone] });
+              core.info(`Issue aangemaakt: ${i.title}`);
+            }

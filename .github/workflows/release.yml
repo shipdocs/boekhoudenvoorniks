@@ -1,0 +1,33 @@
+name: Release
+
+# Bouwt installers voor Linux en Windows en publiceert ze als GitHub-release;
+# electron-updater in de app haalt updates daar vandaan.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Installers bouwen en publiceren
+        run: npx electron-builder ${{ matrix.os == 'windows-latest' && '--win' || '--linux' }} --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Windows code signing: zie issue "Code signing certificaat Windows"
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
