@@ -2,6 +2,7 @@ name: Release
 
 # Bouwt installers voor Linux en Windows en publiceert ze als GitHub-release;
 # electron-updater in de app haalt updates daar vandaan.
+# Vóór publicatie draait een rooktest op de verpakte app (start, database, venster, IPC).
 on:
   push:
     tags: ['v*']
@@ -12,9 +13,11 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: true
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,10 +27,35 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+      - name: Verpakken (zonder installer) voor de rooktest
+        run: npx electron-builder ${{ matrix.os == 'windows-latest' && '--win' || '--linux' }} --dir --publish never
+
+      - name: Rooktest verpakte app (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: GRATIS_BOEKHOUDEN_SMOKE_TEST=1 GRATIS_BOEKHOUDEN_DATA="$RUNNER_TEMP/smoke" timeout 120 xvfb-run -a release/linux-unpacked/gratis-boekhouden --no-sandbox
+
+      - name: Rooktest verpakte app (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $env:GRATIS_BOEKHOUDEN_SMOKE_TEST = '1'
+          $env:GRATIS_BOEKHOUDEN_DATA = "$env:RUNNER_TEMP\smoke"
+          $p = Start-Process -FilePath "release\win-unpacked\Gratis Boekhouden.exe" -PassThru -NoNewWindow
+          $null = $p.Handle  # nodig zodat ExitCode na afloop beschikbaar is
+          try {
+            Wait-Process -Id $p.Id -Timeout 120 -ErrorAction Stop
+          } catch {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            throw 'Rooktest mislukt: de app sloot niet binnen 120 seconden af'
+          }
+          $p.WaitForExit()
+          if ($p.ExitCode -ne 0) { throw "Rooktest mislukt (exit $($p.ExitCode))" }
+
       - name: Installers bouwen en publiceren
         run: npx electron-builder ${{ matrix.os == 'windows-latest' && '--win' || '--linux' }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Windows code signing: zie issue "Code signing certificaat Windows"
+          # Windows code signing: zie issue "Code signing voor de Windows-installer"
           CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
