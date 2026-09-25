@@ -12,7 +12,7 @@ html { scroll-behavior: smooth; }
 body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.6; font-size: 17px; }
 a { color: var(--primary); }
 img { max-width: 100%; height: auto; display: block; }
-.wrap { max-width: 1140px; margin: 0 auto; padding: 0 16px; }
+.wrap { max-width: 1140px; margin: 0 auto; padding-left: 16px; padding-right: 16px; }
 .center { text-align: center; }
 .muted { color: var(--muted); }
 .top { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
@@ -65,3 +65,7 @@ section { padding: 56px 0; }
   .grid4, .features, .three { grid-template-columns: 1fr; }
   .hero { padding-top: 36px; }
 }
+.sr-intro { font-weight: 600; margin: -6px 0 14px; }
+.faq details { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; }
+.faq summary { cursor: pointer; font-weight: 600; }
+.faq details p { margin: 10px 0 0; color: var(--muted); }

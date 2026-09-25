@@ -1,0 +1,66 @@
+# Gratis Boekhouden
+
+> Gratis, lokaal boekhoudprogramma (desktop-app voor Windows en Linux) voor zzp'ers en kleine ondernemers in Nederland, vooral vakmensen zoals stukadoors, schilders, timmerlieden, loodgieters en elektriciens. De gebruiker werkt met klanten, klussen, offertes, facturen, bonnetjes en de bank; het programma maakt daar automatisch een dubbele boekhouding van (RGS-grootboekschema) en rekent de btw-aangifte uit. Geen abonnement, geen account, de administratie staat op de eigen computer.
+
+Belangrijke feiten:
+
+- Prijs: gratis. Geen abonnement.
+- Platform: Windows en Linux (Electron). Werkt offline; gegevens in een lokale SQLite-database met dagelijkse automatische back-up.
+- Taal en markt: Nederlands, Nederlandse btw-regels.
+- Facturen en offertes: pdf en e-mail via eigen mailserver (SMTP), doorlopende factuurnummering, creditfacturen, automatische betalingsherinneringen, eigen opmaak (logo, kleuren, teksten).
+- Btw per factuurregel: 21%, 9%, 0%, btw verlegd, vrijgesteld/KOR. Bij btw verlegd verplicht btw-nummer van de klant.
+- Btw-aangifte: berekening per kwartaal, maand of jaar met rubrieken 1a, 1b, 1e, 2a, 5a, 5b en 5g. De gebruiker neemt de bedragen over in Mijn Belastingdienst Zakelijk. Direct indienen via SBR/Digipoort is in voorbereiding (nog niet beschikbaar).
+- Bank: import van CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos, eigen kolomindeling), MT940 en CAMT.053; automatische koppeling van betalingen aan facturen en bonnetjes. Een live bankkoppeling (open banking) is nog niet beschikbaar.
+- Bonnetjes: e-facturen (UBL/XML) en pdf's met tekst worden automatisch gelezen; foto's via een optionele lokale tekstherkenning (OCR). AI doet alleen voorstellen; boekingen worden door vaste regels gemaakt.
+- Klussen: offerte → klus → factuur, met kosten per klus.
+- Voor de boekhouder: expertmodus met grootboek (RGS), journaal, balans, winst-en-verliesrekening, correctieboekingen, auditfile (XAF 3.2) en CSV-exports.
+- Koppelingen: WooCommerce, Shopify, Mollie, Stripe.
+- Broncode: https://github.com/shipdocs/gratis-boekhouden
+- Uitgever: Shipdocs (info@shipdocs.app)
+
+## Veelgestelde vragen
+
+### Is Gratis Boekhouden echt gratis?
+
+Ja. Het programma is gratis te downloaden en te gebruiken, zonder abonnement en zonder account. Je administratie staat op je eigen computer.
+
+### Kan ik als zzp'er mijn btw-aangifte ermee doen?
+
+Ja. Het programma rekent je btw per kwartaal (of maand) uit uit je facturen en aankopen, en laat precies zien wat je invult bij de rubrieken 1a, 1b, 1e, 2a en 5b in Mijn Belastingdienst Zakelijk. Direct elektronisch indienen via Digipoort is nog in voorbereiding.
+
+### Werkt het met btw verlegd en de kleineondernemersregeling (KOR)?
+
+Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij btw verlegd controleert het programma of het btw-nummer van je klant op de factuur staat.
+
+### Welke banken worden ondersteund?
+
+Je leest een bankafschrift in als CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of een eigen kolomindeling), MT940 of CAMT.053. Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes.
+
+### Heb ik boekhoudkennis nodig?
+
+Nee. Je werkt met klanten, klussen, offertes, facturen en bonnetjes. Het programma maakt daar automatisch een dubbele boekhouding van en vraagt alleen iets als het niet zeker is.
+
+### Waar staat mijn administratie?
+
+Op je eigen computer, in een lokaal databasebestand. Er is geen cloud nodig. Elke dag wordt automatisch een back-up gemaakt en je kunt zelf een kopie maken op een USB-stick.
+
+### Kan mijn boekhouder ermee werken?
+
+Ja. In de expertmodus staan het grootboek volgens RGS, het journaal, balans en winst-en-verliesrekening. Je kunt een auditfile (XAF 3.2), journaal en saldibalans exporteren.
+
+### Voor welke beroepen is het bedoeld?
+
+Voor zzp'ers en kleine ondernemers, met name vakmensen: stukadoors, schilders, timmerlieden, loodgieters, elektriciens en klusbedrijven. Bij het instellen kies je je vak, zodat veelgebruikte factuurregels klaarstaan.
+
+### Op welke computers werkt het?
+
+Op Windows en Linux. Het programma werkt ook zonder internetverbinding; alleen voor het versturen van e-mail en updates is internet nodig.
+
+## Hoe het werkt
+
+1. Installeren en vijf vragen beantwoorden (vak, werk je alleen, bedrijfsgegevens, btw of KOR, bankrekening).
+2. Offertes en facturen maken; na versturen wordt de boeking automatisch gemaakt.
+3. Bonnetjes toevoegen als foto, pdf of e-factuur.
+4. Bankafschrift inlezen; betalingen worden gekoppeld.
+5. Het startscherm toont saldo, nog te ontvangen, btw om apart te houden en de paar dingen die aandacht nodig hebben ("Je bent bij").
+6. Aan het eind van het kwartaal: btw-overzicht bekijken en overnemen in Mijn Belastingdienst Zakelijk.

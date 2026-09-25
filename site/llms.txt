@@ -1,0 +1,26 @@
+# Gratis Boekhouden
+
+> Gratis, lokaal boekhoudprogramma (desktop-app voor Windows en Linux) voor zzp'ers en kleine ondernemers in Nederland, vooral vakmensen zoals stukadoors, schilders, timmerlieden, loodgieters en elektriciens. De gebruiker werkt met klanten, klussen, offertes, facturen, bonnetjes en de bank; het programma maakt daar automatisch een dubbele boekhouding van (RGS-grootboekschema) en rekent de btw-aangifte uit. Geen abonnement, geen account, de administratie staat op de eigen computer.
+
+Belangrijke feiten:
+
+- Prijs: gratis. Geen abonnement.
+- Platform: Windows en Linux (Electron). Werkt offline; gegevens in een lokale SQLite-database met dagelijkse automatische back-up.
+- Taal en markt: Nederlands, Nederlandse btw-regels.
+- Facturen en offertes: pdf en e-mail via eigen mailserver (SMTP), doorlopende factuurnummering, creditfacturen, automatische betalingsherinneringen, eigen opmaak (logo, kleuren, teksten).
+- Btw per factuurregel: 21%, 9%, 0%, btw verlegd, vrijgesteld/KOR. Bij btw verlegd verplicht btw-nummer van de klant.
+- Btw-aangifte: berekening per kwartaal, maand of jaar met rubrieken 1a, 1b, 1e, 2a, 5a, 5b en 5g. De gebruiker neemt de bedragen over in Mijn Belastingdienst Zakelijk. Direct indienen via SBR/Digipoort is in voorbereiding (nog niet beschikbaar).
+- Bank: import van CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos, eigen kolomindeling), MT940 en CAMT.053; automatische koppeling van betalingen aan facturen en bonnetjes. Een live bankkoppeling (open banking) is nog niet beschikbaar.
+- Bonnetjes: e-facturen (UBL/XML) en pdf's met tekst worden automatisch gelezen; foto's via een optionele lokale tekstherkenning (OCR). AI doet alleen voorstellen; boekingen worden door vaste regels gemaakt.
+- Klussen: offerte → klus → factuur, met kosten per klus.
+- Voor de boekhouder: expertmodus met grootboek (RGS), journaal, balans, winst-en-verliesrekening, correctieboekingen, auditfile (XAF 3.2) en CSV-exports.
+- Koppelingen: WooCommerce, Shopify, Mollie, Stripe.
+- Broncode: https://github.com/shipdocs/gratis-boekhouden
+- Uitgever: Shipdocs (info@shipdocs.app)
+
+## Links
+
+- [Website](https://shipdocs.github.io/gratis-boekhouden/): productpagina met veelgestelde vragen
+- [Downloads](https://github.com/shipdocs/gratis-boekhouden/releases/latest): installers voor Windows en Linux
+- [Uitgebreide beschrijving voor LLM's](https://shipdocs.github.io/gratis-boekhouden/llms-full.txt)
+- [Broncode en documentatie](https://github.com/shipdocs/gratis-boekhouden)
