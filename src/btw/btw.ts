@@ -3,7 +3,7 @@ import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import type { SettingsService } from '../settings/settings';
-import { centsToDecimalString, type Cents } from '../shared/money';
+import { centsToDecimalString, formatEuro, type Cents } from '../shared/money';
 import { periodFor, periodFromKey, today, type IsoDate, type Period } from '../shared/dates';
 import { ValidationError } from '../shared/validation';
 
@@ -39,9 +39,36 @@ export interface VatReport {
     teBetalenEuro: number;
   };
   breakdown: { vatCode: string; label: string; omzet: Cents; btw: Cents }[];
+  /** correcties op eerdere, al aangegeven periodes die in dit bedrag zitten */
+  corrections: VatCorrection[];
   warnings: string[];
   submittedAt: string | null;
 }
+
+export interface VatCorrection {
+  /** de al aangegeven periode waar de correctie over gaat */
+  periodKey: string;
+  label: string;
+  /** effect op het te betalen bedrag, in centen (positief = meer betalen) */
+  btw: Cents;
+  entries: number;
+  /** hoogste journaalpost-id in deze correctie (voor het afhandelen via suppletie) */
+  maxEntryId: number;
+  /** boven de grens: een suppletie-aangifte is nodig in plaats van meenemen in de volgende aangifte */
+  suppletie: boolean;
+}
+
+/** Correcties tot en met € 1.000 btw mag je meenemen in de volgende aangifte; daarboven een suppletie. */
+export const SUPPLETIE_THRESHOLD: Cents = 100000;
+export const SUPPLETIE_URL = 'https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-aangifte-corrigeren';
+
+const safeLabel = (key: string) => {
+  try {
+    return periodFromKey(key).label;
+  } catch {
+    return key;
+  }
+};
 
 export const PORTAL_URL = 'https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-aangifte-doen';
 
@@ -55,23 +82,98 @@ export class VatService {
     private readonly settings: SettingsService,
   ) {}
 
-  /** Som van (credit − debet) per rekening/btw-code in een periode, exclusief afsluitboekingen. */
-  private sums(start: IsoDate, end: IsoDate) {
+  /** Posten die al met een suppletie-aangifte zijn afgehandeld. */
+  private static readonly SETTLED = `EXISTS (SELECT 1 FROM vat_suppleties s WHERE s.correction_period_key = e.vat_correction_of AND e.id <= s.max_entry_id)`;
+
+  /**
+   * Som van (credit − debet) per rekening/btw-code in een periode, exclusief afsluitboekingen,
+   * correcties die via een suppletie lopen (of al gelopen hebben).
+   */
+  private sums(start: IsoDate, end: IsoDate, excludeCorrectionsOf: string[] = []) {
+    const excl = excludeCorrectionsOf.length ? `AND (e.vat_correction_of IS NULL OR e.vat_correction_of NOT IN (${excludeCorrectionsOf.map(() => '?').join(',')}))` : '';
     return this.db
       .prepare(
         `SELECT a.rgs_code, a.category, l.vat_code, SUM(l.credit) - SUM(l.debit) AS net
          FROM journal_lines l
          JOIN journal_entries e ON e.id = l.journal_entry_id
          JOIN chart_of_accounts a ON a.id = l.account_id
-         WHERE e.entry_date BETWEEN ? AND ? AND e.source <> 'btw'
+         WHERE COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source <> 'btw'
+           AND NOT ${VatService.SETTLED} ${excl}
          GROUP BY a.rgs_code, a.category, l.vat_code`,
       )
-      .all(start, end) as { rgs_code: string; category: string; vat_code: string | null; net: number }[];
+      .all(start, end, ...excludeCorrectionsOf) as { rgs_code: string; category: string; vat_code: string | null; net: number }[];
+  }
+
+  /**
+   * Nog niet afgehandelde correcties op al aangegeven periodes (#27), per oorspronkelijke periode.
+   * Zonder datumbereik: alle openstaande correcties (voor de inbox).
+   * `btw` is het effect op het te betalen bedrag (positief = meer betalen).
+   */
+  corrections(start?: IsoDate, end?: IsoDate): VatCorrection[] {
+    const range = start && end ? 'AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ?' : '';
+    const rows = this.db
+      .prepare(
+        `SELECT e.vat_correction_of AS period_key, a.rgs_code, SUM(l.credit) - SUM(l.debit) AS net, MAX(e.id) AS max_id,
+                COUNT(DISTINCT e.id) AS entries
+         FROM journal_lines l
+         JOIN journal_entries e ON e.id = l.journal_entry_id
+         JOIN chart_of_accounts a ON a.id = l.account_id
+         WHERE e.vat_correction_of IS NOT NULL AND e.source <> 'btw' AND NOT ${VatService.SETTLED} ${range}
+         GROUP BY e.vat_correction_of, a.rgs_code`,
+      )
+      .all(...(start && end ? [start, end] : [])) as { period_key: string; rgs_code: string; net: number; max_id: number; entries: number }[];
+    const vatAccounts = new Set<string>([ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag, ACCOUNTS.btwAfdragenVerlegd, ACCOUNTS.btwVoorbelasting]);
+    const byPeriod = new Map<string, VatCorrection>();
+    for (const r of rows) {
+      const c = byPeriod.get(r.period_key) ?? { periodKey: r.period_key, label: safeLabel(r.period_key), btw: 0, entries: 0, maxEntryId: 0, suppletie: false };
+      if (vatAccounts.has(r.rgs_code)) c.btw += r.net;
+      c.entries = Math.max(c.entries, r.entries);
+      c.maxEntryId = Math.max(c.maxEntryId, r.max_id);
+      byPeriod.set(r.period_key, c);
+    }
+    const list = [...byPeriod.values()].filter((c) => c.btw !== 0).sort((a, b) => a.periodKey.localeCompare(b.periodKey));
+    for (const c of list) c.suppletie = Math.abs(c.btw) > SUPPLETIE_THRESHOLD;
+    return list;
+  }
+
+  /**
+   * De gebruiker heeft de suppletie-aangifte voor een eerdere periode gedaan: boek het bedrag
+   * over naar "af te dragen omzetbelasting" en haal de correcties uit de gewone aangifte.
+   */
+  markSuppletieSubmitted(correctionPeriodKey: string): VatCorrection {
+    return tx(this.db, () => {
+      const c = this.corrections().find((x) => x.periodKey === correctionPeriodKey);
+      if (!c) throw new ValidationError(`Er staan geen correcties open voor ${safeLabel(correctionPeriodKey)}`);
+      const rows = this.db
+        .prepare(
+          `SELECT a.rgs_code, SUM(l.credit) - SUM(l.debit) AS net
+           FROM journal_lines l
+           JOIN journal_entries e ON e.id = l.journal_entry_id
+           JOIN chart_of_accounts a ON a.id = l.account_id
+           WHERE e.vat_correction_of = ? AND e.id <= ? AND e.source <> 'btw' AND NOT ${VatService.SETTLED}
+           GROUP BY a.rgs_code`,
+        )
+        .all(correctionPeriodKey, c.maxEntryId) as { rgs_code: string; net: number }[];
+      const net = (rgs: string) => rows.find((r) => r.rgs_code === rgs)?.net ?? 0;
+      const lines = [
+        signedLine(ACCOUNTS.btwAfdragenHoog, net(ACCOUNTS.btwAfdragenHoog)),
+        signedLine(ACCOUNTS.btwAfdragenLaag, net(ACCOUNTS.btwAfdragenLaag)),
+        signedLine(ACCOUNTS.btwAfdragenVerlegd, net(ACCOUNTS.btwAfdragenVerlegd)),
+        signedLine(ACCOUNTS.btwVoorbelasting, net(ACCOUNTS.btwVoorbelasting)),
+        signedLine(ACCOUNTS.btwAfrekening, -c.btw),
+      ].filter((l): l is PostLine => l !== null);
+      const entryId = this.ledger.post({ date: today(), description: `Suppletie btw ${c.label}`, source: 'btw', sourceRef: `suppletie:${c.periodKey}`, lines });
+      this.db
+        .prepare('INSERT INTO vat_suppleties (correction_period_key, btw, max_entry_id, journal_entry_id) VALUES (?, ?, ?, ?)')
+        .run(c.periodKey, c.btw, c.maxEntryId, entryId);
+      return c;
+    });
   }
 
   calculate(periodKey: string): VatReport {
     const period = periodFromKey(periodKey);
-    const rows = this.sums(period.start, period.end);
+    const corrections = this.corrections(period.start, period.end);
+    const rows = this.sums(period.start, period.end, corrections.filter((c) => c.suppletie).map((c) => c.periodKey));
     const byAccount = (rgs: string) => rows.filter((r) => r.rgs_code === rgs).reduce((s, r) => s + r.net, 0);
 
     const omzetHoog = byAccount(ACCOUNTS.omzetHoog);
@@ -113,6 +215,11 @@ export class VatService {
     if (drafts > 0) warnings.push(`Er staan nog ${drafts} conceptfacturen in deze periode. Die tellen pas mee als ze definitief zijn.`);
     if (this.settings.get().kor) warnings.push('Je gebruikt de kleineondernemersregeling (KOR): je hoeft in principe geen BTW-aangifte te doen.');
     if (omzetVrijgesteld !== 0 && !this.settings.get().kor) warnings.push('Er is omzet geboekt als vrijgesteld/KOR terwijl KOR niet aan staat. Controleer dit.');
+    for (const c of corrections) {
+      if (c.suppletie) {
+        warnings.push(`Er is ${formatEuro(Math.abs(c.btw))} btw gecorrigeerd over ${c.label}. Dat is meer dan € 1.000, dus dat gaat via een suppletie-aangifte. Het zit niet in de bedragen hieronder.`);
+      }
+    }
     const rounding = btwHoog - (r1a.btwEuro ?? 0) * 100;
     if (Math.abs(rounding) > 100) warnings.push('Controleer de afronding van rubriek 1a.');
 
@@ -135,6 +242,7 @@ export class VatService {
         { vatCode: 'vrijgesteld', label: 'Vrijgesteld / KOR', omzet: omzetVrijgesteld, btw: 0 },
         { vatCode: 'verlegd-inkoop', label: 'Inkoop btw verlegd', omzet: verlegdInkoop, btw: btwVerlegd },
       ],
+      corrections,
       warnings,
       submittedAt: stored?.submitted_at ?? null,
     };

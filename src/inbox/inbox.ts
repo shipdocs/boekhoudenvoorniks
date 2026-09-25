@@ -17,6 +17,7 @@ import { addDays, diffDays, formatDateNl, periodFor, today, type IsoDate } from 
 /** Na zoveel dagen zonder nieuwe bankgegevens vragen we om een afschrift in te lezen. */
 export const BANK_STALE_DAYS = 14;
 import { formatEuro, type Cents } from '../shared/money';
+import { logAutomation, recentAutomation, type AutomationEntry } from './automation-log';
 
 export type TaskKind =
   | 'setup'
@@ -31,7 +32,9 @@ export type TaskKind =
   | 'job-done'
   | 'quote-expired'
   | 'vat-due'
-  | 'bank-stale';
+  | 'bank-stale'
+  | 'vat-suppletie'
+  | 'supplier-auto';
 
 export interface TaskAction {
   id: string;
@@ -48,7 +51,7 @@ export interface Task {
   question: string;
   amount?: Cents;
   actions: TaskAction[];
-  ref: { bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; categoryKey?: string; vatCode?: string };
+  ref: { bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
 }
 
 export interface HomeData {
@@ -62,6 +65,8 @@ export interface HomeData {
   checklist: { label: string; ok: boolean }[];
   upToDate: boolean;
   processedToday: { bankChecked: number };
+  /** wat de app de afgelopen week zelf heeft gedaan */
+  automated: AutomationEntry[];
 }
 
 function greeting(): string {
@@ -110,6 +115,13 @@ export class InboxService {
       if (openPurchase) continue;
       try {
         this.bookCategory(t, rule!.category_key, rule!.vat_code, Boolean(rule!.business), false);
+        const label = rule!.business ? EXPENSE_CATEGORIES.find((c) => c.key === rule!.category_key)?.label.toLowerCase() ?? rule!.category_key : 'privé';
+        logAutomation(this.db, {
+          kind: 'bank-auto',
+          ref_id: t.id,
+          summary: `${formatEuro(-t.amount)} aan ${rule!.display_name} geboekt als ${label}`,
+          reason: `Je hebt gezegd dat ${rule!.display_name} voortaan automatisch mag`,
+        });
         booked++;
       } catch {
         // bv. afgesloten periode: laat staan
@@ -251,7 +263,9 @@ export class InboxService {
         title: `${name}${d.result?.total ? ' ' + formatEuro(d.result.total.value) : ''}`,
         question: bad ? bad.message : d.classification ? `We denken: ${EXPENSE_CATEGORIES.find((c) => c.key === d.classification!.categoryKey)?.label.toLowerCase()}. Alles klopt?` : 'Even controleren?',
         amount: d.result?.total?.value,
-        actions: bad ? [{ id: 'open', label: 'Bekijken', primary: true }] : [{ id: 'klopt', label: 'Ja', primary: true }, { id: 'open', label: 'Aanpassen' }],
+        actions: bad?.field === 'duplicate'
+          ? [{ id: 'dubbel', label: 'Ja, zelfde', primary: true }, { id: 'open', label: 'Nee, bekijken' }]
+          : bad ? [{ id: 'open', label: 'Bekijken', primary: true }] : [{ id: 'klopt', label: 'Ja', primary: true }, { id: 'open', label: 'Aanpassen' }],
         ref: { documentId: d.id },
       });
     }
@@ -326,6 +340,31 @@ export class InboxService {
         });
       }
     }
+    for (const rule of this.memory.pendingApprovals()) {
+      const label = rule.business ? EXPENSE_CATEGORIES.find((c) => c.key === rule.category_key)?.label.toLowerCase() ?? rule.category_key : 'privé';
+      tasks.push({
+        key: `supplier-auto-${rule.supplier_key}`,
+        kind: 'supplier-auto',
+        icon: '🤖',
+        title: `${rule.display_name} is bij jou altijd ${label}`,
+        question: `Je hebt dit ${rule.confirmations}× zo gekozen. Voortaan automatisch verwerken? Je ziet het terug onder "Automatisch gedaan" en kunt het altijd terugdraaien.`,
+        actions: [{ id: 'ja', label: 'Ja, voortaan automatisch', primary: true }, { id: 'nee', label: 'Nee, blijf het vragen' }],
+        ref: { supplierKey: rule.supplier_key },
+      });
+    }
+
+    for (const c of this.vat.corrections().filter((x) => x.suppletie)) {
+      tasks.push({
+        key: `suppletie-${c.periodKey}`,
+        kind: 'vat-suppletie',
+        icon: '📮',
+        title: `BTW ${c.label} verbeteren`,
+        question: `Er is achteraf ${formatEuro(Math.abs(c.btw))} btw ${c.btw >= 0 ? 'bijgekomen' : 'afgegaan'}. Dat is meer dan € 1.000, dus dat doe je met een suppletie-aangifte in Mijn Belastingdienst Zakelijk.`,
+        amount: c.btw,
+        actions: [{ id: 'gedaan', label: 'Suppletie is gedaan', primary: true }, { id: 'open', label: 'Bekijken' }],
+        ref: { periodKey: c.periodKey },
+      });
+    }
     return tasks;
   }
 
@@ -361,6 +400,7 @@ export class InboxService {
       checklist,
       upToDate: tasks.length === 0,
       processedToday: { bankChecked: (this.db.prepare(`SELECT COUNT(*) AS n FROM bank_transactions WHERE date(created_at) = date('now')`).get() as { n: number }).n },
+      automated: recentAutomation(this.db),
     };
   }
 }

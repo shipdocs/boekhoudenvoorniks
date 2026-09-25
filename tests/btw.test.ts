@@ -57,12 +57,47 @@ describe('BTW-aangifte', () => {
     expect(r.summary.teBetalen).toBe(21000); // rapport blijft gelijk na afsluitboeking
     expect(s.ledger.balance(ACCOUNTS.btwAfdragenHoog)).toBe(0);
     expect(s.ledger.balance(ACCOUNTS.btwAfrekening)).toBe(-21000);
-    const late = s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-08-01', lines: [{ description: 'y', quantity: 1, unitPrice: 100, vatCode: 'hoog' }] });
-    expect(() => s.invoices.finalize(late.id)).toThrow(/al ingediend/);
     expect(() => s.vat.markSubmitted('2026-Q3')).toThrow(/al ingediend/);
     s.vat.reopen('2026-Q3');
     expect(s.ledger.balance(ACCOUNTS.btwAfdragenHoog)).toBe(-21000);
-    expect(s.invoices.finalize(late.id).status).toBe('verzonden');
+    expect(s.ledger.checkIntegrity().balanced).toBe(true);
+  });
+
+  it('een late factuur in een aangegeven periode telt mee in de volgende aangifte (#27)', () => {
+    const { s, klant } = setup();
+    s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-07-10', lines: [{ description: 'x', quantity: 1, unitPrice: 100000, vatCode: 'hoog' }] }).id);
+    s.vat.markSubmitted('2026-Q3');
+    const late = s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-08-01', lines: [{ description: 'y', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] });
+    const inv = s.invoices.finalize(late.id);
+    expect(inv.status).toBe('verzonden');
+    expect(inv.invoice_date).toBe('2026-08-01'); // de factuur houdt haar echte datum
+
+    const q3 = s.vat.calculate('2026-Q3');
+    expect(q3.summary.teBetalen).toBe(21000); // ingediend blijft ingediend
+    const q4 = s.vat.calculate('2026-Q4');
+    expect(q4.summary.teBetalen).toBe(2100);
+    expect(q4.corrections).toMatchObject([{ periodKey: '2026-Q3', btw: 2100, suppletie: false }]);
+    expect(q4.warnings.join(' ')).not.toMatch(/suppletie/);
+    expect(s.ledger.checkIntegrity().balanced).toBe(true);
+  });
+
+  it('een correctie boven € 1.000 gaat via een suppletie, niet via de volgende aangifte', () => {
+    const { s, klant } = setup();
+    s.vat.markSubmitted('2026-Q3');
+    s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-08-01', lines: [{ description: 'groot', quantity: 1, unitPrice: 1000000, vatCode: 'hoog' }] }).id);
+    let q4 = s.vat.calculate('2026-Q4');
+    expect(q4.corrections).toMatchObject([{ periodKey: '2026-Q3', btw: 210000, suppletie: true }]);
+    expect(q4.summary.teBetalen).toBe(0); // niet in de gewone aangifte
+    expect(q4.warnings.join(' ')).toMatch(/suppletie/);
+    expect(s.inbox.tasks().some((t) => t.kind === 'vat-suppletie')).toBe(true);
+
+    s.vat.markSuppletieSubmitted('2026-Q3');
+    q4 = s.vat.calculate('2026-Q4');
+    expect(q4.corrections).toEqual([]);
+    expect(q4.summary.teBetalen).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.btwAfdragenHoog)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.btwAfrekening)).toBe(-210000);
+    expect(s.inbox.tasks().some((t) => t.kind === 'vat-suppletie')).toBe(false);
     expect(s.ledger.checkIntegrity().balanced).toBe(true);
   });
 

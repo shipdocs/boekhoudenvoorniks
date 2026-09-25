@@ -14,7 +14,7 @@ import { parseCamt053 } from '../import/camt053';
 import { detectFormat } from '../import/detect';
 import type { ParseResult } from '../import/types';
 import { buildVatXbrl } from '../btw/xbrl';
-import { PORTAL_URL } from '../btw/btw';
+import { PORTAL_URL, SUPPLETIE_URL } from '../btw/btw';
 import type { ExpenseInput, CashSaleInput } from '../quick/quick';
 import { EXPENSE_CATEGORIES, OTHER_DESTINATIONS } from '../shared/categories';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES } from '../shared/vat';
@@ -80,6 +80,7 @@ export function createApi(s: Services, host: HostContext) {
         fonts: FONTS,
         trades: TRADES,
         vatPortalUrl: PORTAL_URL,
+        vatSuppletieUrl: SUPPLETIE_URL,
       }),
     },
     settings: {
@@ -184,6 +185,13 @@ export function createApi(s: Services, host: HostContext) {
             });
             return;
           }
+          case 'document-review:dubbel': {
+            const issue = s.intake.get(r.documentId!).issues.find((i) => i.field === 'duplicate');
+            const match = issue?.suggestion as { documentId: number | null; purchaseId: number | null } | undefined;
+            if (!match) return { navigate: { screen: 'document', id: r.documentId } };
+            s.intake.markDuplicate(r.documentId!, match);
+            return;
+          }
           case 'invoice-overdue:herinnering':
             await s.sender.sendReminder(r.invoiceId!);
             return;
@@ -193,6 +201,16 @@ export function createApi(s: Services, host: HostContext) {
           }
           case 'quote-expired:akkoord':
             s.jobs.acceptQuote(r.quoteId!);
+            return;
+          case 'supplier-auto:ja':
+            s.memory.setAutomatic(r.supplierKey!, true);
+            s.inbox.autoProcess();
+            return;
+          case 'supplier-auto:nee':
+            s.memory.setAutomatic(r.supplierKey!, false);
+            return;
+          case 'vat-suppletie:gedaan':
+            s.vat.markSuppletieSubmitted(r.periodKey!);
             return;
           case 'quote-expired:afgewezen':
             s.quotes.setStatus(r.quoteId!, 'afgewezen');
@@ -208,6 +226,7 @@ export function createApi(s: Services, host: HostContext) {
               'invoice-concept': ['factuur', r.invoiceId],
               'vat-due': ['belasting', r.periodKey],
               'bank-stale': ['bank', undefined],
+              'vat-suppletie': ['belasting', undefined],
             };
             const target = screens[task.kind];
             return target ? { navigate: { screen: target[0], id: target[1] } } : undefined;
@@ -231,6 +250,7 @@ export function createApi(s: Services, host: HostContext) {
       get: (id: number) => s.intake.get(id),
       confirm: (id: number, c: Confirmation) => s.intake.confirm(id, c),
       ignore: (id: number) => s.intake.ignore(id),
+      markDuplicate: (id: number, match: { documentId: number | null; purchaseId: number | null }) => s.intake.markDuplicate(id, match),
       /** Bestand als data-URL voor de controle-weergave (document links, velden rechts). */
       file: (id: number) => {
         const d = s.intake.get(id);
@@ -238,6 +258,7 @@ export function createApi(s: Services, host: HostContext) {
       },
       suppliers: () => s.memory.list(),
       forgetSupplier: (key: string) => s.memory.forget(key),
+      setSupplierAutomatic: (key: string, automatic: boolean) => s.memory.setAutomatic(key, automatic),
     },
     purchases: {
       list: (filter?: { status?: 'open' | 'betaald' }) => s.purchases.list(filter),
@@ -319,6 +340,8 @@ export function createApi(s: Services, host: HostContext) {
       periods: (year: number) => s.vat.listPeriods(year),
       markSubmitted: (periodKey: string) => s.vat.markSubmitted(periodKey),
       reopen: (periodKey: string) => s.vat.reopen(periodKey),
+      corrections: () => s.vat.corrections(),
+      markSuppletieSubmitted: (periodKey: string) => s.vat.markSuppletieSubmitted(periodKey),
       exportCsv: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.csv`, s.vat.exportCsv(periodKey), [{ name: 'CSV', extensions: ['csv'] }]),
       exportXbrl: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.xbrl`, buildVatXbrl(s.vat.calculate(periodKey), s.settings.get().company), [{ name: 'XBRL', extensions: ['xbrl', 'xml'] }]),
     },

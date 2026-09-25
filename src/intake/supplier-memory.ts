@@ -8,10 +8,12 @@ export interface SupplierRule {
   business: number;
   confirmations: number;
   corrections: number;
+  /** 0 = nog niet gevraagd, 1 = gebruiker wil automatisch, -1 = gebruiker wil blijven kiezen */
+  auto_approved: number;
 }
 
-/** Na zoveel bevestigingen zonder correctie verwerken we een leverancier automatisch. */
-export const AUTO_AFTER_CONFIRMATIONS = 2;
+/** Na zoveel gelijke bevestigingen vragen we of de leverancier voortaan automatisch mag. */
+export const ASK_AUTO_AFTER_CONFIRMATIONS = 3;
 
 /** Normaliseert een leveranciers-/tegenpartijnaam: "GAMMA UTRECHT B.V. 1234" → "gamma utrecht". */
 export function supplierKey(name: string): string {
@@ -31,7 +33,8 @@ export function supplierKey(name: string): string {
  * te nemen: bevestigingen van de gebruiker worden hier vastgelegd.
  *   0 bevestigingen → vragen
  *   1 bevestiging   → voorstellen ("We denken dat dit materiaal is")
- *   ≥ 2, geen correcties sinds → automatisch verwerken
+ *   ≥ 3, geen correcties → de gebruiker vragen of het voortaan automatisch mag
+ *   alleen na "ja" → automatisch verwerken (#22). Een correctie zet dat weer uit.
  */
 export class SupplierMemory {
   constructor(private readonly db: Db) {}
@@ -44,7 +47,19 @@ export class SupplierMemory {
   }
 
   isAutomatic(rule: SupplierRule | null): boolean {
-    return !!rule && rule.confirmations >= AUTO_AFTER_CONFIRMATIONS && rule.corrections === 0;
+    return !!rule && rule.auto_approved === 1 && rule.corrections === 0;
+  }
+
+  /** Leveranciers waarvoor we kunnen voorstellen om ze voortaan automatisch te verwerken. */
+  pendingApprovals(): SupplierRule[] {
+    return this.db
+      .prepare('SELECT * FROM supplier_rules WHERE auto_approved = 0 AND corrections = 0 AND confirmations >= ? ORDER BY display_name')
+      .all(ASK_AUTO_AFTER_CONFIRMATIONS) as SupplierRule[];
+  }
+
+  /** De keuze van de gebruiker: true = voortaan automatisch, false = blijf het vragen. */
+  setAutomatic(key: string, automatic: boolean): void {
+    this.db.prepare(`UPDATE supplier_rules SET auto_approved = ?, updated_at = datetime('now') WHERE supplier_key = ?`).run(automatic ? 1 : -1, key);
   }
 
   /** Legt een beslissing van de gebruiker vast. Afwijkend van het vorige voorstel = correctie. */
@@ -63,9 +78,10 @@ export class SupplierMemory {
           `UPDATE supplier_rules SET category_key = ?, vat_code = ?, business = ?,
              confirmations = CASE WHEN ? THEN confirmations + 1 ELSE 1 END,
              corrections = CASE WHEN ? THEN 0 ELSE corrections + 1 END,
+             auto_approved = CASE WHEN ? OR auto_approved = -1 THEN auto_approved ELSE 0 END,
              updated_at = datetime('now') WHERE supplier_key = ?`,
         )
-        .run(decision.categoryKey, decision.vatCode, decision.business ? 1 : 0, same ? 1 : 0, same ? 1 : 0, key);
+        .run(decision.categoryKey, decision.vatCode, decision.business ? 1 : 0, same ? 1 : 0, same ? 1 : 0, same ? 1 : 0, key);
     }
     return this.get(name)!;
   }

@@ -86,8 +86,17 @@ describe('inbox: "Ben ik bij?"', () => {
     expect(second).toMatchObject({ kind: 'bank-category', question: 'We denken dat dit materiaal is.' });
     s.inbox.answerBank(second.ref.bankTransactionId!, { business: true, categoryKey: 'materiaal' });
     s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-16', amount: -8700, description: 'Pin', counterName: 'PRAXIS UTRECHT' }] });
+    // nog niet automatisch: pas na 3× dezelfde keuze vragen we het, en pas na "ja" doen we het (#22)
+    expect(s.inbox.autoProcess('2026-09-16')).toMatchObject({ booked: 0 });
+    const third = s.inbox.tasks('2026-09-16').find((t) => t.amount === -8700)!;
+    s.inbox.answerBank(third.ref.bankTransactionId!, { business: true, categoryKey: 'materiaal' });
+    const ask = s.inbox.tasks('2026-09-16').find((t) => t.kind === 'supplier-auto')!;
+    expect(ask.actions.map((a) => a.id)).toEqual(['ja', 'nee']);
+    s.memory.setAutomatic(ask.ref.supplierKey!, true);
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-16', amount: -8800, description: 'Pin', counterName: 'PRAXIS UTRECHT' }] });
     expect(s.inbox.autoProcess('2026-09-16')).toMatchObject({ booked: 1 });
-    expect(s.inbox.tasks('2026-09-16').some((t) => t.amount === -8700)).toBe(false);
+    expect(s.inbox.home('2026-09-16').automated[0]!.summary).toContain('PRAXIS');
+    expect(s.inbox.tasks('2026-09-16').some((t) => t.amount === -8800)).toBe(false);
 
     const onbekend = s.inbox.tasks('2026-09-16').find((t) => t.amount === -85000)!;
     s.inbox.answerBank(onbekend.ref.bankTransactionId!, { business: false });

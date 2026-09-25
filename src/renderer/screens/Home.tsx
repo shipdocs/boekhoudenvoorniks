@@ -93,6 +93,18 @@ export function Home() {
         </div>
       )}
 
+      {data.automated.length > 0 && (
+        <details className="card" style={{ marginTop: 18 }}>
+          <summary><strong>Automatisch gedaan</strong> <span className="muted small">({data.automated.length} deze week)</span></summary>
+          <ul className="small" style={{ margin: '10px 0 0', paddingLeft: 18 }}>
+            {data.automated.map((a) => (
+              <li key={a.id}>{a.summary} <span className="muted">· {a.reason}</span></li>
+            ))}
+          </ul>
+          <p className="muted small">Klopt er iets niet? Pas het aan bij de boeking; dan vragen we het voortaan weer.</p>
+        </details>
+      )}
+
       {data.vat.estimate !== 0 && (
         <p className="muted small" style={{ marginTop: 18 }}>
           BTW {data.vat.periodLabel} tot nu toe: <Euro cents={data.vat.estimate} /> — aangeven vóór {data.vat.deadlineLabel}.

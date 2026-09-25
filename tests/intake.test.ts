@@ -71,29 +71,111 @@ describe('validatie', () => {
 describe('documentinbox', () => {
   const ocr = (lines: string[]): OcrProvider => ({ id: 'test', label: 'Test OCR', available: async () => true, recognize: async () => ({ items: items(lines) }) });
 
-  it('eerste keer: vraag; na bevestigingen: automatisch — en nooit dubbel boeken', async () => {
-    const lines = ['Bouwmaat Utrecht', 'Datum: 23-09-2026', 'Gips 100,00', 'Subtotaal 100,00', 'BTW 21% 100,00 21,00', 'Totaal 121,00'];
-    const { s } = setup({ ocr: ocr(lines) });
+  const bouwmaat = (day: number, total = '121,00', nr?: string) => [
+    'Bouwmaat Utrecht',
+    ...(nr ? [`Factuurnummer: ${nr}`] : []),
+    `Datum: ${String(day).padStart(2, '0')}-09-2026`,
+    'Gips 100,00',
+    'Subtotaal 100,00',
+    'BTW 21% 100,00 21,00',
+    `Totaal ${total}`,
+  ];
+  const varOcr = () => {
+    const state = { lines: [] as string[] };
+    const provider: OcrProvider = { id: 'test', label: 'Test OCR', available: async () => true, recognize: async () => ({ items: items(state.lines) }) };
+    return { state, provider };
+  };
+  const confirmBouwmaat = (s: ReturnType<typeof setup>['s'], id: number, date: string) =>
+    s.intake.confirm(id, { supplier: 'Bouwmaat', date, total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+
+  it('eerste keer: vraag; na bevestigingen: pas automatisch na jouw ja (#22) — en nooit dubbel boeken', async () => {
+    const { state, provider } = varOcr();
+    const { s } = setup({ ocr: provider });
+    s.settings.update({ onboardingDone: true });
+    state.lines = bouwmaat(1);
     const d1 = await s.intake.add('bon1.jpg', new Uint8Array([1]), '2026-09-25');
     expect(d1.status).toBe('controle');
     expect(d1.confidence).toBe('MEDIUM');
     expect(d1.classification).toMatchObject({ categoryKey: 'materiaal', vatCode: 'hoog', source: 'regel' });
-    s.intake.confirm(d1.id, { supplier: 'Bouwmaat', date: '2026-09-23', total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    confirmBouwmaat(s, d1.id, '2026-09-01');
     expect(s.ledger.balance('WKprInkMat')).toBe(10000);
     expect(s.ledger.balance(ACCOUNTS.btwVoorbelasting)).toBe(2100);
 
-    const d2 = await s.intake.add('bon2.jpg', new Uint8Array([2]), '2026-09-25');
-    expect(d2.classification).toMatchObject({ source: 'geheugen', automatic: false });
-    s.intake.confirm(d2.id, { supplier: 'Bouwmaat', date: '2026-09-23', total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    for (const [i, day] of [[2, 8], [3, 15]] as const) {
+      state.lines = bouwmaat(day);
+      const d = await s.intake.add(`bon${i}.jpg`, new Uint8Array([i]), '2026-09-25');
+      expect(d.classification).toMatchObject({ source: 'geheugen', automatic: false });
+      expect(d.status).toBe('controle');
+      confirmBouwmaat(s, d.id, `2026-09-${String(day).padStart(2, "0")}`);
+    }
+    // Na 3× hetzelfde: de app vraagt het, maar doet het nog niet zelf
+    const ask = s.inbox.tasks('2026-09-25').find((t) => t.kind === 'supplier-auto')!;
+    expect(ask.title).toContain('Bouwmaat');
+    state.lines = bouwmaat(20);
+    const d4 = await s.intake.add('bon4.jpg', new Uint8Array([4]), '2026-09-25');
+    expect(d4.status).toBe('controle');
+    confirmBouwmaat(s, d4.id, '2026-09-20');
 
-    const d3 = await s.intake.add('bon3.jpg', new Uint8Array([3]), '2026-09-25');
-    expect(d3.confidence).toBe('HIGH');
-    expect(d3.status).toBe('verwerkt');
-    expect(s.ledger.balance('WKprInkMat')).toBe(30000);
+    s.memory.setAutomatic(ask.ref.supplierKey!, true);
+    expect(s.inbox.tasks('2026-09-25').some((t) => t.kind === 'supplier-auto')).toBe(false);
+    state.lines = bouwmaat(24);
+    const d5 = await s.intake.add('bon5.jpg', new Uint8Array([5]), '2026-09-25');
+    expect(d5.confidence).toBe('HIGH');
+    expect(d5.status).toBe('verwerkt');
+    expect(s.ledger.balance('WKprInkMat')).toBe(50000);
+    expect(s.inbox.home('2026-09-25').automated[0]).toMatchObject({ kind: 'document-auto' });
     // zelfde bestand nogmaals = geen nieuwe boeking
-    const again = await s.intake.add('bon3-kopie.jpg', new Uint8Array([3]), '2026-09-25');
-    expect(again.id).toBe(d3.id);
-    expect(s.ledger.balance('WKprInkMat')).toBe(30000);
+    const again = await s.intake.add('bon5-kopie.jpg', new Uint8Array([5]), '2026-09-25');
+    expect(again.id).toBe(d5.id);
+    expect(s.ledger.balance('WKprInkMat')).toBe(50000);
+
+    // een correctie zet automatisch weer uit
+    s.memory.learn('Bouwmaat', { categoryKey: 'gereedschap', vatCode: 'hoog', business: true });
+    expect(s.memory.isAutomatic(s.memory.get('Bouwmaat'))).toBe(false);
+  });
+
+  it('dubbele documenten: zeker dubbel wordt niet geboekt, beste bewijs blijft bewaard (#31)', async () => {
+    const { state, provider } = varOcr();
+    const { s } = setup({ ocr: provider });
+    state.lines = bouwmaat(10, '121,00', 'F-2026-001');
+    const foto = await s.intake.add('foto.jpg', new Uint8Array([1]), '2026-09-25');
+    const done = confirmBouwmaat(s, foto.id, '2026-09-10');
+    expect(done.status).toBe('verwerkt');
+
+    // dezelfde factuur komt later als PDF-mail binnen (ander bestand, zelfde nummer + bedrag)
+    const pdf = makePdf(bouwmaat(10, '121,00', 'F2026001'));
+    const kopie = await s.intake.add('factuur.pdf', pdf, '2026-09-25');
+    expect(kopie.status).toBe('genegeerd');
+    expect(kopie.duplicate_of_document_id).toBe(foto.id);
+    expect(s.ledger.balance('WKprInkMat')).toBe(10000);
+    // de PDF-tekst is beter bewijs dan de foto: die wordt de bijlage
+    const purchase = s.purchases.list()[0]!;
+    expect(purchase.document_id).toBe(kopie.id);
+    expect(purchase.attachment_path).toBe(kopie.file_path);
+  });
+
+  it('dubbele documenten: mogelijk dubbel wordt gevraagd, niet automatisch geboekt (#31)', async () => {
+    const { state, provider } = varOcr();
+    const { s } = setup({ ocr: provider });
+    s.settings.update({ onboardingDone: true });
+    state.lines = bouwmaat(10);
+    const a = await s.intake.add('a.jpg', new Uint8Array([1]), '2026-09-25');
+    confirmBouwmaat(s, a.id, '2026-09-10');
+    state.lines = bouwmaat(11);
+    const b = await s.intake.add('b.jpg', new Uint8Array([2]), '2026-09-25');
+    expect(b.status).toBe('controle');
+    expect(b.confidence).toBe('LOW');
+    const task = s.inbox.tasks('2026-09-25').find((t) => t.ref.documentId === b.id)!;
+    expect(task.actions[0]!.id).toBe('dubbel');
+    const issue = b.issues.find((i) => i.field === 'duplicate')!;
+    s.intake.markDuplicate(b.id, issue.suggestion as { documentId: number | null; purchaseId: number | null });
+    expect(s.intake.get(b.id).status).toBe('genegeerd');
+    expect(s.ledger.balance('WKprInkMat')).toBe(10000);
+
+    // een week later, zelfde bedrag = gewoon een nieuwe aankoop
+    state.lines = bouwmaat(20);
+    const c = await s.intake.add('c.jpg', new Uint8Array([3]), '2026-09-25');
+    expect(c.issues.some((i) => i.field === 'duplicate')).toBe(false);
   });
 
   it('inconsistent document wordt nooit stilletjes geboekt', async () => {
