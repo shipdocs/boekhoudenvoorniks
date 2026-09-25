@@ -227,7 +227,12 @@ export class Ledger {
     this.validate(entry);
     return tx(this.db, () => {
       // Een al aangegeven btw-periode verandert nooit: het btw-effect gaat naar de volgende open periode.
-      const { vatDate, correctionOf } = entry.source === 'btw' ? { vatDate: entry.date, correctionOf: null } : this.vatDateFor(entry.date);
+      let { vatDate, correctionOf } = entry.source === 'btw' ? { vatDate: entry.date, correctionOf: null as string | null } : this.vatDateFor(entry.date);
+      if (entry.reversesEntryId && entry.source !== 'btw') {
+        // Een tegenboeking hoort bij dezelfde correctie als het origineel, anders blijft die correctie openstaan.
+        const original = this.db.prepare('SELECT vat_correction_of FROM journal_entries WHERE id = ?').get(entry.reversesEntryId) as { vat_correction_of: string | null } | undefined;
+        if (original?.vat_correction_of) correctionOf = original.vat_correction_of;
+      }
       const accountIds = entry.lines.map((l) => {
         const account = this.getAccount(l.account);
         if (account.archived) throw new LedgerError(`Rekening ${account.code} ${account.name} is gearchiveerd`);

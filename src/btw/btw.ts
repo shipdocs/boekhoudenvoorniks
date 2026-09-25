@@ -144,6 +144,7 @@ export class VatService {
     return tx(this.db, () => {
       const c = this.corrections().find((x) => x.periodKey === correctionPeriodKey);
       if (!c) throw new ValidationError(`Er staan geen correcties open voor ${safeLabel(correctionPeriodKey)}`);
+      if (!c.suppletie) throw new ValidationError(`De correctie op ${c.label} is € 1.000 of minder en gaat mee in de gewone aangifte, niet via een suppletie`);
       const rows = this.db
         .prepare(
           `SELECT a.rgs_code, SUM(l.credit) - SUM(l.debit) AS net

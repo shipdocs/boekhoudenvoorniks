@@ -394,6 +394,10 @@ export const migrations: string[] = [
     summary TEXT NOT NULL,
     reason TEXT NOT NULL
   );
+  -- De btw-toewijzing van een post is net zo onveranderlijk als de post zelf.
+  CREATE TRIGGER journal_entries_vat_no_update BEFORE UPDATE ON journal_entries
+  WHEN NEW.vat_date IS NOT OLD.vat_date OR NEW.vat_correction_of IS NOT OLD.vat_correction_of
+  BEGIN SELECT RAISE(ABORT, 'De btw-periode van een journaalpost ligt vast; maak een tegenboeking'); END;
   -- Ingediende suppletie-aangiftes: posten met vat_correction_of = correction_period_key en
   -- id <= max_entry_id zijn daarmee afgehandeld en tellen niet meer mee in een gewone aangifte.
   CREATE TABLE vat_suppleties (

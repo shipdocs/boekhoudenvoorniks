@@ -124,8 +124,8 @@ export function DocumentReview({ id }: { id: number }) {
               {i.field === 'duplicate' && d.status === 'controle' && (
                 <div className="row" style={{ marginTop: 8 }}>
                   <Button small disabled={busy} onClick={async () => {
-                    await run(() => api.documents.markDuplicate(d.id, i.suggestion as { documentId: number | null; purchaseId: number | null }), 'Dubbel document weggelegd');
-                    go({ screen: 'aankopen' });
+                    const done = await run(() => api.documents.markDuplicate(d.id, i.suggestion as { documentId: number | null; purchaseId: number | null }), 'Dubbel document weggelegd');
+                    if (done) go({ screen: 'aankopen' });
                   }}>Ja, zelfde aankoop</Button>
                   <span className="small muted">Anders: controleer de gegevens hieronder en verwerk het gewoon.</span>
                 </div>
