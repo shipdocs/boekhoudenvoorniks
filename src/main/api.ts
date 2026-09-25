@@ -351,7 +351,7 @@ export function createApi(s: Services, host: HostContext) {
     },
     ledger: {
       accounts: () => s.ledger.listAccounts(),
-      createAccount: (input: { code: string; rgs: string; name: string; category: AccountCategory }) => s.ledger.createAccount(input),
+      createAccount: (input: { code: string; rgs: string; rgsRef?: string | null; name: string; category: AccountCategory }) => s.ledger.createAccount(input),
       renameAccount: (id: number, name: string) => s.ledger.renameAccount(id, name),
       archiveAccount: (id: number) => s.ledger.archiveAccount(id),
       entries: (filter?: { from?: IsoDate; to?: IsoDate; source?: EntrySource; accountRgs?: string; limit?: number }) => s.ledger.listEntries(filter),

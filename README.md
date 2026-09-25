@@ -79,7 +79,13 @@ Lokale OCR en AI zijn optioneel; zie [`docs/ocr-sidecar.md`](docs/ocr-sidecar.md
 
 Download de installer van de [laatste release](https://github.com/shipdocs/gratis-boekhouden/releases/latest): AppImage of `.deb` voor Linux, `Setup.exe` voor Windows.
 
-Op **Windows** kan SmartScreen melden dat "Windows uw pc heeft beveiligd". Dat komt doordat de installer (nog) niet met een betaald certificaat ondertekend is. Klik op **Meer informatie → Toch uitvoeren**. De installer komt rechtstreeks uit de openbare GitHub-release.
+Op **Windows** kan SmartScreen melden dat "Windows uw pc heeft beveiligd". Dat komt doordat de installer (nog) niet met een betaald certificaat ondertekend is. Download de installer alleen van de [GitHub-release](https://github.com/shipdocs/gratis-boekhouden/releases) en controleer eventueel het controlegetal:
+
+```powershell
+Get-FileHash '.\Gratis Boekhouden Setup 0.1.0.exe' -Algorithm SHA256   # vergelijk met SHA256SUMS-Windows.txt
+```
+
+Klopt het, klik dan op **Meer informatie → Toch uitvoeren**. Op Linux: `sha256sum -c SHA256SUMS-Linux.txt --ignore-missing`.
 
 ## Releases en updates
 

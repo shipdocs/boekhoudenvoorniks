@@ -33,8 +33,14 @@ export function TermsGate({ onAccepted }: { onAccepted: () => void }) {
         <div className="row end" style={{ marginTop: 16 }}>
           <Button kind="primary" disabled={!checked || busy} onClick={async () => {
             setBusy(true);
-            await api.settings.update({ termsAcceptedVersion: TERMS_VERSION });
-            onAccepted();
+            try {
+              await api.settings.update({ termsAcceptedVersion: TERMS_VERSION });
+              onAccepted();
+            } catch (e) {
+              alert(`Opslaan lukte niet: ${e instanceof Error ? e.message : String(e)}`);
+            } finally {
+              setBusy(false);
+            }
           }}>Akkoord</Button>
         </div>
       </div>

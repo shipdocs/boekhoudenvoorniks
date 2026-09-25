@@ -141,22 +141,37 @@ function initServices(): void {
       if (result.canceled || !result.filePaths[0]) return false;
       let source = result.filePaths[0];
       const raw = readFileSync(source);
-      if (isEncryptedBackup(raw)) {
-        if (!password) throw new Error('Dit is een versleutelde back-up: vul eerst het wachtwoord in');
-        source = join(tmpdir(), `gb-restore-${randomUUID()}.sqlite`);
-        writeFileSync(source, decryptBackup(raw, password));
+      // ontsleutelde kopie: altijd opruimen, ook bij annuleren of een fout
+      let decrypted: string | null = null;
+      const cleanup = () => {
+        if (!decrypted) return;
+        try {
+          unlinkSync(decrypted);
+        } catch {
+          /* al weg */
+        }
+        decrypted = null;
+      };
+      try {
+        if (isEncryptedBackup(raw)) {
+          if (!password) throw new Error('Dit is een versleutelde back-up: vul eerst het wachtwoord in');
+          decrypted = source = join(tmpdir(), `gb-restore-${randomUUID()}.sqlite`);
+          writeFileSync(source, decryptBackup(raw, password), { mode: 0o600 });
+        }
+        const confirm = await dialog.showMessageBox(mainWindow!, {
+          type: 'warning',
+          buttons: ['Annuleren', 'Terugzetten'],
+          defaultId: 0,
+          message: 'Weet je zeker dat je deze back-up wilt terugzetten?',
+          detail: 'De huidige administratie wordt vervangen (er wordt eerst een kopie van gemaakt). De app start daarna opnieuw.',
+        });
+        if (confirm.response !== 1) return false;
+        await dailyBackup(db, join(dataDir(), 'backups'));
+        db.close();
+        restoreFrom(source, dbPath());
+      } finally {
+        cleanup();
       }
-      const confirm = await dialog.showMessageBox(mainWindow!, {
-        type: 'warning',
-        buttons: ['Annuleren', 'Terugzetten'],
-        defaultId: 0,
-        message: 'Weet je zeker dat je deze back-up wilt terugzetten?',
-        detail: 'De huidige administratie wordt vervangen (er wordt eerst een kopie van gemaakt). De app start daarna opnieuw.',
-      });
-      if (confirm.response !== 1) return false;
-      await dailyBackup(db, join(dataDir(), 'backups'));
-      db.close();
-      restoreFrom(source, dbPath());
       app.relaunch();
       app.exit(0);
       return true;

@@ -59,3 +59,15 @@ jobs:
           # Windows code signing: zie issue "Code signing voor de Windows-installer"
           CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+
+      - name: Controlegetallen (SHA-256) bij de release zetten
+        shell: bash
+        run: |
+          shopt -s nullglob
+          cd release
+          files=(*.AppImage *.deb *.exe)
+          sha256sum "${files[@]}" > "SHA256SUMS-${{ runner.os }}.txt"
+          cat "SHA256SUMS-${{ runner.os }}.txt"
+          gh release upload "${{ github.ref_name }}" "SHA256SUMS-${{ runner.os }}.txt" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

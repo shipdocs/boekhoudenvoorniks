@@ -59,7 +59,7 @@ Op Windows en Linux. Het programma werkt ook zonder internetverbinding; alleen v
 
 ### Windows zegt "Windows heeft uw pc beveiligd". Is dat veilig?
 
-Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. De installer komt rechtstreeks uit onze openbare GitHub-release, en de broncode is openbaar. Klik op "Meer informatie" en daarna op "Toch uitvoeren" om te installeren.
+Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. Download de installer alleen van github.com/shipdocs/gratis-boekhouden/releases. Controleer eventueel het SHA-256-controlegetal met SHA256SUMS-Windows.txt bij de release (PowerShell: Get-FileHash). Klopt het, klik dan op "Meer informatie" en daarna op "Toch uitvoeren".
 
 ### Is de broncode openbaar?
 
