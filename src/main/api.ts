@@ -207,6 +207,7 @@ export function createApi(s: Services, host: HostContext) {
               'invoice-overdue': ['factuur', r.invoiceId],
               'invoice-concept': ['factuur', r.invoiceId],
               'vat-due': ['belasting', r.periodKey],
+              'bank-stale': ['bank', undefined],
             };
             const target = screens[task.kind];
             return target ? { navigate: { screen: target[0], id: target[1] } } : undefined;
@@ -280,6 +281,7 @@ export function createApi(s: Services, host: HostContext) {
     },
     bank: {
       accounts: () => s.bank.listAccounts(),
+      importStatus: () => s.bank.importStatus(),
       addAccount: (name: string, iban: string) => s.bank.addAccount(name, iban),
       updateAccount: (id: number, patch: { name?: string; iban?: string | null }) => s.bank.updateAccount(id, patch),
       openingBalance: (bankAccountId: number, amount: Cents, date: IsoDate) => s.bank.setOpeningBalance(bankAccountId, amount, date),

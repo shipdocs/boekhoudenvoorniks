@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, Modal, useAction, useApp, useLoad } from '../ui';
 import type { Task } from '../../inbox/inbox';
+import { formatDateNl } from '../../shared/dates';
 import { CategoryPicker } from './Bank';
 
 export function Home() {
@@ -35,7 +36,7 @@ export function Home() {
       <div className="hero">
         <div className="card">
           <div className="value"><Euro cents={data.money.bank} /></div>
-          <div className="label">op de bank</div>
+          <div className="label">op de bank{data.bankUpdatedTo ? ` · bijgewerkt t/m ${formatDateNl(data.bankUpdatedTo)}` : ''}</div>
         </div>
         <div className="card clickable" onClick={() => go({ screen: 'werk', extra: { filter: 'open' } })}>
           <div className="value"><Euro cents={data.money.toReceive} /></div>

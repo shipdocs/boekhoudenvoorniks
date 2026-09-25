@@ -3,6 +3,17 @@ import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
 import type { CsvMapping } from '../../import/csv';
 import type { PurchaseVatCode } from '../../shared/vat';
+import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
+
+/** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
+function formatDateTime(sqlite: string): string {
+  const d = new Date(`${sqlite.replace(' ', 'T')}Z`);
+  return `${formatDateNl(toIsoDate(d))}, ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function staleDays(date: string): number {
+  return diffDays(date, today());
+}
 
 export function Bank({ focus }: { focus?: number }) {
   const { go, toast } = useApp();
@@ -10,8 +21,9 @@ export function Bank({ focus }: { focus?: number }) {
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
   const txs = useLoad(() => api.bank.transactions(view === 'hulp' ? { status: 'nieuw' } : {}), [view]);
   const accounts = useLoad(() => api.bank.accounts());
+  const status = useLoad(() => api.bank.importStatus());
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
-  const [last, setLast] = useState<{ imported: number; duplicates: number; autoMatched: number } | null>(null);
+  const [last, setLast] = useState<{ imported: number; duplicates: number; autoMatched: number; periods: { from: string; to: string }[] } | null>(null);
   const [opening, setOpening] = useState(false);
 
   const importFile = async (file: File) => {
@@ -29,6 +41,7 @@ export function Bank({ focus }: { focus?: number }) {
     const r = await run(() => api.bank.importFile(filename, content, m));
     if (!r) return;
     setLast(r);
+    await status.reload();
     if (r.warnings.length) toast(`${r.warnings.length} regels overgeslagen: ${r.warnings[0]}`, 'error');
     await txs.reload();
   };
@@ -55,6 +68,7 @@ export function Bank({ focus }: { focus?: number }) {
 
       {last && (
         <div className="notice good" style={{ marginTop: 14 }}>
+          {last.periods.length > 0 && <>Afschrift van <DateNl date={last.periods.map((p) => p.from).sort()[0]} /> t/m <DateNl date={last.periods.map((p) => p.to).sort().at(-1)} />: </>}
           {last.imported + last.duplicates} betalingen gecontroleerd{last.duplicates ? ` (${last.duplicates} hadden we al)` : ''}. {last.autoMatched} automatisch verwerkt.{' '}
           {help > 0 ? `Bij ${help} hebben we je hulp nodig.` : 'Alles is verwerkt ✓'}
         </div>
@@ -88,9 +102,15 @@ export function Bank({ focus }: { focus?: number }) {
 
       <h2>Rekeningen</h2>
       <table className="list">
+        <thead><tr><th>Rekening</th><th>Laatste import</th><th>Dat afschrift bevatte</th><th>Bijgewerkt t/m</th></tr></thead>
         <tbody>
-          {(accounts.data ?? []).map((a) => (
-            <tr key={a.id}><td>{a.name}</td><td>{a.iban ?? <span className="muted">nog onbekend</span>}</td></tr>
+          {(status.data ?? []).map((st) => (
+            <tr key={st.bankAccountId}>
+              <td>{st.name}<div className="small muted">{st.iban ?? 'IBAN nog onbekend'}</div></td>
+              <td>{st.lastImport ? <>{formatDateTime(st.lastImport.at)}<div className="small muted">{st.lastImport.filename ?? st.lastImport.source.toUpperCase()}</div></> : <span className="muted">nog nooit</span>}</td>
+              <td>{st.lastImport ? <><DateNl date={st.lastImport.from} /> t/m <DateNl date={st.lastImport.to} /><div className="small muted">{st.lastImport.transactions} betalingen, {st.lastImport.imported} nieuw</div></> : '—'}</td>
+              <td>{st.coverageTo ? <><DateNl date={st.coverageTo} />{staleDays(st.coverageTo) >= 14 && <div><span className="pill warn">{staleDays(st.coverageTo)} dagen geleden</span></div>}</> : '—'}</td>
+            </tr>
           ))}
         </tbody>
       </table>

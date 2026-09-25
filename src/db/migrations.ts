@@ -363,4 +363,19 @@ export const migrations: string[] = [
   -- extra bankrekeningen (interne sleutel BLiqBanRba2..6) → RGS 'Rekening-courant bank - Naam A..E'
   UPDATE chart_of_accounts SET rgs_ref = 'BLimBanRb' || char(96 + CAST(substr(rgs_code, 11) AS INTEGER)) WHERE rgs_code GLOB 'BLiqBanRba[2-6]';
   `,
+  /* 4: per import en per bankrekening de periode die het afschrift besloeg */ `
+  CREATE TABLE import_batch_accounts (
+    batch_id INTEGER NOT NULL REFERENCES import_batches(id),
+    bank_account_id INTEGER NOT NULL REFERENCES bank_accounts(id),
+    period_from TEXT NOT NULL,
+    period_to TEXT NOT NULL,
+    transactions INTEGER NOT NULL,
+    imported INTEGER NOT NULL,
+    duplicates INTEGER NOT NULL,
+    PRIMARY KEY (batch_id, bank_account_id)
+  );
+  INSERT INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates)
+    SELECT import_batch_id, bank_account_id, MIN(transaction_date), MAX(transaction_date), COUNT(*), COUNT(*), 0
+    FROM bank_transactions WHERE import_batch_id IS NOT NULL GROUP BY import_batch_id, bank_account_id;
+  `,
 ];
