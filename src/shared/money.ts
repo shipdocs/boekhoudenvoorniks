@@ -63,7 +63,7 @@ export function parseEuro(input: string | number): Cents {
 const formatter = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' });
 
 export function formatEuro(cents: Cents): string {
-  return formatter.format(cents / 100);
+  return formatter.format((cents || 0) / 100); // voorkomt "€ -0,00"
 }
 
 /** "1234.50" — voor exports/CSV. */

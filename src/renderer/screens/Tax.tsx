@@ -63,7 +63,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
               <tbody>
                 <tr><td>Omzet</td><td><Euro cents={r.summary.omzet} /></td></tr>
                 <tr><td>BTW die je hebt ontvangen</td><td><Euro cents={r.summary.btwOverOmzet} /></td></tr>
-                <tr><td>BTW die je terugkrijgt (aankopen)</td><td>−<Euro cents={r.summary.voorbelasting} /></td></tr>
+                <tr><td>BTW die je terugkrijgt (aankopen)</td><td><Euro cents={-r.summary.voorbelasting} /></td></tr>
                 <tr className="total"><td>{r.summary.teBetalen >= 0 ? 'Te betalen' : 'Je krijgt terug'}</td><td><Euro cents={Math.abs(r.summary.teBetalen)} /></td></tr>
               </tbody>
             </table>
