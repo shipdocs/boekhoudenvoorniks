@@ -5,8 +5,8 @@ name: Backlog (milestones & issues)
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths: ['.github/backlog.json']
+    branches: [main, 'claude/**']
+    paths: ['.github/backlog.json', '.github/workflows/backlog.yml']
 
 permissions:
   issues: write
