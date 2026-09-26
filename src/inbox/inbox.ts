@@ -11,7 +11,7 @@ import type { IntakeService } from '../intake/intake';
 import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
 import type { PurchaseService } from '../documents/purchases';
 import type { RecurringService } from '../import/recurring';
-import { normalizeIban, ValidationError } from '../shared/validation';
+import { ValidationError } from '../shared/validation';
 import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
 import { EXPENSE_CATEGORIES, PRIVATE_CAR_CATEGORIES } from '../shared/categories';
@@ -47,6 +47,7 @@ export type TaskKind =
   | 'vat-check'
   | 'purchase-due'
   | 'bank-pot'
+  | 'bank-own'
   | 'job-link'
   | 'recurring-confirm'
   | 'recurring-missing-payment'
@@ -153,6 +154,7 @@ export class InboxService {
     this.recurring.detect(); // vaste lasten herkennen (alleen voorstellen, niets boeken)
     const level = this.settings.get().autopilot;
     if (level === 'voorzichtig') return { matched: 0, booked: 0 }; // alles blijft geel: de gebruiker bevestigt
+    let booked = this.autoOwnTransfers();
     const auto = this.matching.autoMatch(asOf, level);
     const matched = auto.matched;
     for (const d of auto.details) {
@@ -160,9 +162,9 @@ export class InboxService {
       logAutomation(this.db, { kind: 'bank-match', ref_id: d.txId, summary: `Betaling hoort bij ${d.label}`, reason: explanation.sentence, details: explanation });
       countDecision(this.db, 'bankkoppeling', 'automatic');
     }
-    let booked = 0;
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
       if (t.amount >= 0 || !t.counter_name) continue;
+      if (this.bank.ownTransferTarget(t)) continue; // eigen overboeking: nooit als kosten
       const rule = this.memory.get(t.counter_name);
       if (!this.memory.isAutomatic(rule)) continue;
       // privéauto: tanken en parkeren nooit automatisch als zakelijke kosten
@@ -193,6 +195,37 @@ export class InboxService {
       }
     }
     return { matched, booked };
+  }
+
+  /**
+   * Overboekingen tussen eigen rekeningen: het rekeningnummer aan de andere kant is een van je eigen
+   * rekeningen, dus dit is zeker geen omzet of kosten. Wat de gebruiker eerder terugdraaide
+   * ("klopt niet"), blijft een vraag.
+   */
+  private autoOwnTransfers(): number {
+    let n = 0;
+    for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
+      const other = this.bank.ownTransferTarget(t);
+      if (!other) continue;
+      if (this.db.prepare(`SELECT 1 FROM automation_log WHERE kind = 'bank-own' AND ref_id = ? AND status = 'klopt_niet'`).get(t.id)) continue;
+      try {
+        tx(this.db, () => {
+          this.bank.bookOwnTransfer(t.id);
+          const explanation = explain([{ type: 'bankbetaling', label: `het geld ${t.amount < 0 ? 'naar' : 'van'} je eigen rekening ${other.name} ging`, value: 0.99 }]);
+          logAutomation(this.db, {
+            kind: 'bank-own',
+            ref_id: t.id,
+            summary: `${formatEuro(Math.abs(t.amount))} ${t.amount < 0 ? 'naar' : 'van'} je rekening ${other.name}: geen omzet of kosten`,
+            reason: explanation.sentence,
+            details: explanation,
+          });
+        });
+        n++;
+      } catch {
+        // bv. afgesloten periode: laat staan als vraag
+      }
+    }
+    return n;
   }
 
   private bookCategory(t: BankTransaction, categoryKey: string, vatCode: string, business: boolean, learn: boolean): void {
@@ -246,22 +279,38 @@ export class InboxService {
       tasks.push({ key: 'setup', kind: 'setup', icon: '👋', title: 'Maak je bedrijf compleet', question: 'We hebben nog een paar gegevens nodig voor je facturen.', actions: [{ id: 'open', label: 'Afronden', primary: true }], ref: {} });
     }
 
-    const potAccount = s.vatPotAccountId ? this.bank.listAccounts().find((a) => a.id === s.vatPotAccountId) : undefined;
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
       const who = t.counter_name || t.description.slice(0, 40) || 'Onbekend';
-      // overboeking van/naar het belastingpotje eerst: een opname uit het potje is geen omzet
-      if (potAccount && potAccount.id !== t.bank_account_id && potAccount.iban && t.counter_iban && normalizeIban(t.counter_iban) === normalizeIban(potAccount.iban)) {
-        tasks.push({
-          key: `bank-${t.id}`,
-          kind: 'bank-pot',
-          icon: '🐷',
-          title: `${formatEuro(Math.abs(t.amount))} ${t.amount < 0 ? 'naar' : 'uit'} je belastingpotje`,
-          question: t.amount < 0 ? 'Opzijgezet voor de btw. Dit telt niet als kosten.' : 'Terug van je belastingpotje (bv. om de btw te betalen).',
-          amount: t.amount,
-          actions: [{ id: 'klopt', label: 'Klopt', primary: true }],
-          group: { key: 'bank-pot', label: 'Alle overboekingen met je potje' },
-          ref: { bankTransactionId: t.id, bankAccountId: potAccount.id },
-        });
+      // overboeking tussen eigen rekeningen eerst: geld uit je spaarrekening of potje is geen omzet
+      const other = this.bank.ownTransferTarget(t);
+      if (other) {
+        const potSide = s.vatPotAccountId === other.id ? 'naar' : s.vatPotAccountId === t.bank_account_id ? 'van' : null;
+        if (potSide) {
+          const intoPot = potSide === 'naar' ? t.amount < 0 : t.amount > 0;
+          tasks.push({
+            key: `bank-${t.id}`,
+            kind: 'bank-pot',
+            icon: '🐷',
+            title: `${formatEuro(Math.abs(t.amount))} ${intoPot ? 'naar' : 'uit'} je belastingpotje`,
+            question: intoPot ? 'Opzijgezet voor de btw. Dit telt niet als kosten.' : 'Terug van je belastingpotje (bv. om de btw te betalen). Dit is geen omzet.',
+            amount: t.amount,
+            actions: [{ id: 'klopt', label: 'Klopt', primary: true }],
+            group: { key: 'bank-pot', label: 'Alle overboekingen met je potje' },
+            ref: { bankTransactionId: t.id },
+          });
+        } else {
+          tasks.push({
+            key: `bank-${t.id}`,
+            kind: 'bank-own',
+            icon: '🔁',
+            title: `${formatEuro(Math.abs(t.amount))} ${t.amount < 0 ? 'naar' : 'van'} je rekening ${other.name}`,
+            question: 'Geld verplaatst tussen je eigen rekeningen. Dit is geen omzet en geen kosten.',
+            amount: t.amount,
+            actions: [{ id: 'klopt', label: 'Klopt', primary: true }],
+            group: { key: 'bank-own', label: 'Alle overboekingen tussen je eigen rekeningen' },
+            ref: { bankTransactionId: t.id },
+          });
+        }
         continue;
       }
       const suggestions = this.matching.suggest(t);
@@ -659,7 +708,10 @@ export class InboxService {
     if (!entry || entry.actor !== 'systeem') throw new ValidationError('Onbekende automatische verwerking');
     if (entry.status === 'klopt_niet') throw new ValidationError('Dit is al teruggedraaid');
     tx(this.db, () => {
-      if (entry.kind === 'bank-match' || entry.kind === 'bank-auto') {
+      if (entry.kind === 'bank-own') {
+        const t = this.bank.get(entry.ref_id!);
+        if (t.status === 'gematcht') this.bank.unmatch(t.id, date);
+      } else if (entry.kind === 'bank-match' || entry.kind === 'bank-auto') {
         const t = this.bank.get(entry.ref_id!);
         if (t.status === 'gematcht') this.bank.unmatch(t.id, date);
         if (entry.kind === 'bank-auto' && t.counter_name) this.memory.markCorrected(t.counter_name);
