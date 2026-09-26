@@ -72,6 +72,25 @@ export function needsCustomerVatNumber(code: string): boolean {
   return code === 'verlegd' || code === 'icp';
 }
 
+/** Drempel voor verkoop aan particulieren in andere EU-landen; daarboven btw van het land van de klant (OSS). */
+export const EU_B2C_THRESHOLD = 10_000_00;
+
+export type CustomerVatSituation = 'nl' | 'eu-bedrijf' | 'eu-particulier' | 'buiten-eu' | 'onbekend';
+
+/** Waar een klant woont, voor de btw op de factuur. */
+export function customerVatSituation(country: string | null | undefined, vatNumber: string | null | undefined): CustomerVatSituation {
+  const c = countryCode(country ?? 'NL');
+  if (!c) return 'onbekend';
+  if (c === 'NL') return 'nl';
+  if (EU_COUNTRIES.has(c)) return vatNumber && vatNumber.trim() ? 'eu-bedrijf' : 'eu-particulier';
+  return 'buiten-eu';
+}
+
+/** Welke btw-keuze meestal hoort bij deze klant (null = gewoon Nederlandse btw). */
+export function suggestedSalesVat(situation: CustomerVatSituation): SalesVatCode | null {
+  return situation === 'eu-bedrijf' ? 'icp' : situation === 'buiten-eu' ? 'export' : null;
+}
+
 /** Wettelijke vermelding op de factuur bij een intracommunautaire levering/dienst. */
 export const ICP_TEXT = 'Intracommunautaire levering/dienst, btw verlegd (art. 138 / art. 196 Btw-richtlijn)';
 

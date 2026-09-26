@@ -223,10 +223,10 @@ export class InvoiceService {
     }
     const country = countryCode(relation.country);
     if (inv.lines.some((l) => l.vat_code === 'icp') && (!country || country === 'NL' || !EU_COUNTRIES.has(country))) {
-      throw new ValidationError(`"Bedrijf in de EU (0%)" is alleen voor klanten in een ander EU-land. Vul bij ${relation.name} het land in (bv. DE of BE)`);
+      throw new ValidationError(`"Bedrijf in een ander EU-land (0%)" is alleen voor klanten in een ander EU-land. Vul bij ${relation.name} het land in (bv. DE of BE)`);
     }
     if (inv.lines.some((l) => l.vat_code === 'export') && (!country || EU_COUNTRIES.has(country))) {
-      throw new ValidationError(`"Uitvoer buiten de EU (0%)" is alleen voor klanten buiten de EU. Vul bij ${relation.name} het land in (bv. CH of US)`);
+      throw new ValidationError(`"Klant buiten de EU (0%)" is alleen voor klanten buiten de EU. Vul bij ${relation.name} het land in (bv. CH of US)`);
     }
     if (kor && inv.lines.some((l) => l.vat_percentage > 0)) {
       throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw. Kies bij elke regel "Geen btw".');
@@ -305,6 +305,26 @@ export class InvoiceService {
       this.applyPaymentAmount(id, -amount, date);
       return this.get(id);
     });
+  }
+
+  /**
+   * Klanten die meer betaalden dan ze moesten (debiteurensaldo onder nul), bv. een factuur twee keer
+   * betaald of een te hoog bedrag overgemaakt. Het verschil hoort terugbetaald of verrekend te worden.
+   */
+  overpaidCustomers(): { relationId: number; name: string; amount: Cents }[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT r.id AS relationId, r.name, -SUM(l.debit - l.credit) AS amount
+           FROM journal_lines l
+           JOIN chart_of_accounts a ON a.id = l.account_id
+           JOIN relations r ON r.id = l.relation_id
+           WHERE a.rgs_code = ?
+           GROUP BY r.id HAVING SUM(l.debit - l.credit) < 0
+           ORDER BY amount DESC`,
+        )
+        .all(ACCOUNTS.debiteuren) as { relationId: number; name: string; amount: Cents }[]
+    );
   }
 
   /** Boekt een klein restverschil af (bv. klant betaalde € 0,02 te weinig). */

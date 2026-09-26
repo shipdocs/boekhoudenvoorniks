@@ -25,7 +25,7 @@ import { hasRealData } from './reset';
 import type { ExpenseInput, CashSaleInput } from '../quick/quick';
 import { EXPENSE_CATEGORIES, OTHER_DESTINATIONS } from '../shared/categories';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES } from '../shared/vat';
-import type { AccountCategory } from '../core-ledger/accounts';
+import { ACCOUNTS, type AccountCategory } from '../core-ledger/accounts';
 import { TRADES } from '../shared/trades';
 import type { Confirmation } from '../intake/intake';
 import type { JobStatus } from '../jobs/jobs';
@@ -158,6 +158,17 @@ export function createApi(s: Services, host: HostContext) {
       }
       case 'job-link:algemeen':
         s.inbox.skipTask(task.key, 'algemeen');
+        return;
+      case 'bank-refund:klopt':
+        s.bank.bookToAccount(r.bankTransactionId!, { account: ACCOUNTS.debiteuren, relationId: r.relationId!, description: 'Terugbetaling: klant had te veel betaald' });
+        return;
+      case 'bank-refund:anders':
+        s.inbox.skipTask(`bank-refund-${r.bankTransactionId}`, 'geen terugbetaling');
+        return { navigate: { screen: 'categorie', id: r.bankTransactionId } };
+      case 'customer-overpaid:open':
+        return { navigate: { screen: 'klant', id: r.relationId } };
+      case 'customer-overpaid:klopt':
+        s.inbox.skipTask(task.key, 'klopt zo');
         return;
       case 'bank-pot:klopt':
       case 'bank-own:klopt':

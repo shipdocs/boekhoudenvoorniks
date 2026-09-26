@@ -4,6 +4,7 @@ import { ACCOUNTS } from '../core-ledger/accounts';
 import { formatEuro, type Cents } from '../shared/money';
 import type { Period } from '../shared/dates';
 import type { CarPrivateUse } from './car';
+import { EU_B2C_THRESHOLD, EU_COUNTRIES, countryCode } from '../shared/vat';
 
 /**
  * Controles vóór de btw-aangifte (#20): alles wat de aangifte fout kan maken. Blokkerende
@@ -172,6 +173,58 @@ export function runVatChecks(
         screen: 'bank',
       });
     }
+  }
+
+  // Buitenlandse klanten: btw-keuze op de factuur
+  const invoices = db
+    .prepare(
+      `SELECT i.id, i.number, r.name, r.country, r.vat_number, GROUP_CONCAT(DISTINCT l.vat_code) AS codes
+       FROM invoices i JOIN relations r ON r.id = i.relation_id JOIN invoice_lines l ON l.invoice_id = i.id
+       WHERE i.number IS NOT NULL AND i.invoice_date BETWEEN ? AND ? AND UPPER(COALESCE(r.country, 'NL')) <> 'NL'
+       GROUP BY i.id ORDER BY i.number`,
+    )
+    .all(start, end) as { id: number; number: string; name: string; country: string; vat_number: string | null; codes: string }[];
+  const euBusinessWithVat = invoices.filter((i) => {
+    const c = countryCode(i.country);
+    return c && EU_COUNTRIES.has(c) && i.vat_number && i.codes.split(',').some((x) => x === 'hoog' || x === 'laag');
+  });
+  if (euBusinessWithVat.length > 0) {
+    const first = euBusinessWithVat[0]!;
+    found.push({
+      key: 'eu-bedrijf-met-btw',
+      blocking: false,
+      title: `${euBusinessWithVat.length === 1 ? `Factuur ${first.number}` : `${euBusinessWithVat.length} facturen`} aan een bedrijf in een ander EU-land met Nederlandse btw`,
+      detail: `Bij een bedrijf in een ander EU-land (zoals ${first.name}) verleg je de btw meestal: "Bedrijf in een ander EU-land (0%)". Alleen bij werk aan een gebouw of grond in Nederland reken je Nederlandse btw. Klopt het niet? Maak een creditfactuur en een nieuwe factuur. Twijfel je? Vraag je boekhouder.`,
+      count: euBusinessWithVat.length,
+      fingerprint: euBusinessWithVat.map((i) => i.id).join(','),
+      screen: 'werk',
+    });
+  }
+  // Particulieren in andere EU-landen: boven € 10.000 per jaar geldt de btw van het land van de klant (OSS)
+  const year = end.slice(0, 4);
+  const euConsumers = (
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS s FROM journal_lines l
+         JOIN journal_entries e ON e.id = l.journal_entry_id
+         JOIN chart_of_accounts a ON a.id = l.account_id
+         JOIN relations r ON r.id = l.relation_id
+         WHERE a.rgs_code IN (?, ?) AND e.entry_date BETWEEN ? AND ?
+           AND UPPER(COALESCE(r.country, 'NL')) IN (${[...EU_COUNTRIES].filter((c) => c !== 'NL').map(() => '?').join(',')})
+           AND COALESCE(r.vat_number, '') = ''`,
+      )
+      .get(ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, `${year}-01-01`, end, ...[...EU_COUNTRIES].filter((c) => c !== 'NL')) as { s: number }
+  ).s;
+  if (euConsumers > EU_B2C_THRESHOLD) {
+    found.push({
+      key: 'oss-drempel',
+      blocking: false,
+      title: `Meer dan ${formatEuro(EU_B2C_THRESHOLD)} verkocht aan particulieren in andere EU-landen`,
+      detail: `Dit jaar al ${formatEuro(euConsumers)}. Boven ${formatEuro(EU_B2C_THRESHOLD)} per jaar reken je de btw van het land van de klant en geef je die aan via de "OSS-regeling" (éénloketsysteem). Dat regelt de app niet: vraag je boekhouder.`,
+      count: 1,
+      fingerprint: `${year}`,
+      screen: 'belasting',
+    });
   }
 
   if (car && car.due.state === 'onbekend') {

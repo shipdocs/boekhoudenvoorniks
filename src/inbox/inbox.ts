@@ -11,7 +11,7 @@ import type { IntakeService } from '../intake/intake';
 import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
 import type { PurchaseService } from '../documents/purchases';
 import type { RecurringService } from '../import/recurring';
-import { ValidationError } from '../shared/validation';
+import { normalizeIban, ValidationError } from '../shared/validation';
 import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
 import { EXPENSE_CATEGORIES, PRIVATE_CAR_CATEGORIES } from '../shared/categories';
@@ -48,6 +48,8 @@ export type TaskKind =
   | 'purchase-due'
   | 'bank-pot'
   | 'bank-own'
+  | 'bank-refund'
+  | 'customer-overpaid'
   | 'job-link'
   | 'recurring-confirm'
   | 'recurring-missing-payment'
@@ -76,7 +78,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
+  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
 }
 
 export interface HomeData {
@@ -279,8 +281,27 @@ export class InboxService {
       tasks.push({ key: 'setup', kind: 'setup', icon: '👋', title: 'Maak je bedrijf compleet', question: 'We hebben nog een paar gegevens nodig voor je facturen.', actions: [{ id: 'open', label: 'Afronden', primary: true }], ref: {} });
     }
 
+    const overpaid = this.invoices.overpaidCustomers();
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
       const who = t.counter_name || t.description.slice(0, 40) || 'Onbekend';
+      // terugbetaling aan een klant die te veel betaalde: geen kosten
+      if (t.amount < 0 && t.counter_iban) {
+        const rel = this.db.prepare('SELECT id, name FROM relations WHERE iban = ? AND archived = 0').get(normalizeIban(t.counter_iban)) as { id: number; name: string } | undefined;
+        const credit = rel ? overpaid.find((o) => o.relationId === rel.id) : undefined;
+        if (rel && credit && -t.amount <= credit.amount && !this.isSkipped(`bank-refund-${t.id}`)) {
+          tasks.push({
+            key: `bank-${t.id}`,
+            kind: 'bank-refund',
+            icon: '↩️',
+            title: `${formatEuro(-t.amount)} terugbetaald aan ${rel.name}?`,
+            question: `${rel.name} had ${formatEuro(credit.amount)} te veel betaald. Een terugbetaling is geen kosten.`,
+            amount: t.amount,
+            actions: [{ id: 'klopt', label: 'Klopt, terugbetaling', primary: true }, { id: 'anders', label: 'Nee, iets anders' }],
+            ref: { bankTransactionId: t.id, relationId: rel.id },
+          });
+          continue;
+        }
+      }
       // overboeking tussen eigen rekeningen eerst: geld uit je spaarrekening of potje is geen omzet
       const other = this.bank.ownTransferTarget(t);
       if (other) {
@@ -424,6 +445,22 @@ export class InboxService {
         group: bad ? undefined : { key: 'document-klopt', label: 'Alle bonnetjes bevestigen' },
         why: d.classification ? `Omdat ${d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(', ')}.` : undefined,
         ref: { documentId: d.id },
+      });
+    }
+
+    for (const o of this.invoices.overpaidCustomers()) {
+      const key = `customer-overpaid-${o.relationId}-${o.amount}`;
+      if (this.isSkipped(key)) continue;
+      tasks.push({
+        key,
+        kind: 'customer-overpaid',
+        icon: '💶',
+        title: `${o.name} heeft ${formatEuro(o.amount)} te veel betaald`,
+        question: 'Bijvoorbeeld een factuur twee keer betaald. Maak het terug over; zodra die betaling op je bankafschrift staat, koppelt de app hem aan deze klant. Spreek je af dat het van de volgende factuur afgaat? Vraag je boekhouder hoe je dat verwerkt.',
+        amount: o.amount,
+        actions: [{ id: 'open', label: 'Bekijk klant', primary: true }, { id: 'klopt', label: 'Klopt, laat staan' }],
+        priority: 2,
+        ref: { relationId: o.relationId },
       });
     }
 

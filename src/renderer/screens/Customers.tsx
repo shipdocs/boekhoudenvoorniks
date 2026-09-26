@@ -3,6 +3,42 @@ import { api } from '../api';
 import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, StatusPill, useAction, useApp, useLoad } from '../ui';
 import { EarningsPerJob } from './Jobs';
 import type { Relation, RelationInput } from '../../relations/relations';
+import { COUNTRIES, countryName } from '../../shared/countries';
+import { EU_B2C_THRESHOLD, customerVatSituation } from '../../shared/vat';
+import { formatEuro } from '../../shared/money';
+
+/** Land kiezen; een land dat niet in de lijst staat kan als landcode (bv. "ZA"). */
+export function CountrySelect({ value, onChange }: { value: string | null | undefined; onChange: (code: string) => void }) {
+  const code = (value || 'NL').toUpperCase();
+  const known = COUNTRIES.some((c) => c.code === code);
+  const [other, setOther] = useState(!known);
+  return (
+    <div className="row">
+      <select value={other ? '' : code} onChange={(e) => { if (e.target.value) { setOther(false); onChange(e.target.value); } else setOther(true); }} aria-label="Land">
+        {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+        <option value="">Ander land…</option>
+      </select>
+      {other && <input value={known ? '' : code} maxLength={2} placeholder="landcode, bv. ZA" onChange={(e) => onChange(e.target.value.toUpperCase())} style={{ width: 150 }} aria-label="Landcode" />}
+    </div>
+  );
+}
+
+/** Uitleg over de btw bij een klant in het buitenland. */
+export function CustomerVatHint({ country, vatNumber }: { country: string | null | undefined; vatNumber: string | null | undefined }) {
+  const land = countryName(country);
+  switch (customerVatSituation(country, vatNumber)) {
+    case 'eu-bedrijf':
+      return <div className="notice small">Bedrijf in {land}: meestal verleg je de btw naar de klant. Op de factuur kies je dan <strong>Bedrijf in een ander EU-land (0%)</strong>. Uitzondering: werk aan een gebouw of grond in Nederland, dan gewoon Nederlandse btw. Twijfel je? Vraag je boekhouder.</div>;
+    case 'eu-particulier':
+      return <div className="notice small">Particulier in {land}: je rekent gewoon Nederlandse btw, zolang je in totaal minder dan {formatEuro(EU_B2C_THRESHOLD)} per jaar aan particulieren in andere EU-landen verkoopt. Is dit een bedrijf? Vul dan het btw-nummer in.</div>;
+    case 'buiten-eu':
+      return <div className="notice small">Klant buiten de EU ({land}): voor spullen die de EU uitgaan en voor de meeste diensten aan bedrijven reken je 0%. Op de factuur kies je dan <strong>Klant buiten de EU (0%)</strong>. Werk je in Nederland voor deze klant, of is het een particulier? Vraag je boekhouder welke btw geldt.</div>;
+    case 'onbekend':
+      return <div className="notice warn small">Deze landcode kennen we niet. Gebruik twee letters, bijvoorbeeld DE of US.</div>;
+    default:
+      return null;
+  }
+}
 
 export function Customers() {
   const { go } = useApp();
@@ -77,6 +113,13 @@ export function CustomerDetail({ id }: { id?: number }) {
           <Field label="Postcode"><input value={r.postcode ?? ''} onChange={(e) => set({ postcode: e.target.value })} /></Field>
           <Field label="Plaats"><input value={r.city ?? ''} onChange={(e) => set({ city: e.target.value })} /></Field>
         </div>
+        <Field label="Land"><CountrySelect value={r.country} onChange={(country) => set({ country })} /></Field>
+        {(r.country ?? 'NL').toUpperCase() !== 'NL' && (
+          <>
+            <Field label="Btw-nummer van de klant" hint="alleen als het een bedrijf is"><input value={r.vat_number ?? ''} onChange={(e) => set({ vat_number: e.target.value })} placeholder="bv. DE123456789" /></Field>
+            <CustomerVatHint country={r.country} vatNumber={r.vat_number} />
+          </>
+        )}
         <div className="grid cols-2">
           <Field label="E-mail"><input type="email" value={r.email ?? ''} onChange={(e) => set({ email: e.target.value })} /></Field>
           <Field label="Telefoon"><input value={r.phone ?? ''} onChange={(e) => set({ phone: e.target.value })} /></Field>
@@ -85,7 +128,7 @@ export function CustomerDetail({ id }: { id?: number }) {
           <summary className="muted">Zakelijke klant (btw-nummer, KvK, contactpersoon)</summary>
           <div className="grid cols-2" style={{ marginTop: 10 }}>
             <Field label="Contactpersoon"><input value={r.contact_name ?? ''} onChange={(e) => set({ contact_name: e.target.value })} /></Field>
-            <Field label="Btw-nummer" hint="nodig als je btw verlegt (klant is een bedrijf dat de btw zelf regelt)"><input value={r.vat_number ?? ''} onChange={(e) => set({ vat_number: e.target.value })} /></Field>
+            {(r.country ?? 'NL').toUpperCase() === 'NL' && <Field label="Btw-nummer" hint="nodig als je btw verlegt (klant is een bedrijf dat de btw zelf regelt)"><input value={r.vat_number ?? ''} onChange={(e) => set({ vat_number: e.target.value })} /></Field>}
             <Field label="KvK-nummer"><input value={r.kvk_number ?? ''} onChange={(e) => set({ kvk_number: e.target.value })} /></Field>
             <Field label="IBAN"><input value={r.iban ?? ''} onChange={(e) => set({ iban: e.target.value })} /></Field>
             <Field label="Eigen betaaltermijn (dagen)"><input className="num" value={r.payment_term_days ?? ''} onChange={(e) => set({ payment_term_days: e.target.value ? Number(e.target.value) : null })} /></Field>
@@ -137,6 +180,8 @@ export function QuickCustomer({ onClose, onCreated }: { onClose: () => void; onC
   const [postcode, setPostcode] = useState('');
   const [city, setCity] = useState('');
   const [email, setEmail] = useState('');
+  const [country, setCountry] = useState('NL');
+  const [vatNumber, setVatNumber] = useState('');
   return (
     <Modal title="Nieuwe klant" onClose={onClose}>
       <div className="grid">
@@ -146,11 +191,18 @@ export function QuickCustomer({ onClose, onCreated }: { onClose: () => void; onC
           <Field label="Postcode"><input value={postcode} onChange={(e) => setPostcode(e.target.value)} /></Field>
           <Field label="Plaats"><input value={city} onChange={(e) => setCity(e.target.value)} /></Field>
         </div>
+        <Field label="Land"><CountrySelect value={country} onChange={setCountry} /></Field>
+        {country !== 'NL' && (
+          <>
+            <Field label="Btw-nummer van de klant" hint="alleen als het een bedrijf is"><input value={vatNumber} onChange={(e) => setVatNumber(e.target.value)} placeholder="bv. DE123456789" /></Field>
+            <CustomerVatHint country={country} vatNumber={vatNumber} />
+          </>
+        )}
         <Field label="E-mail"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
       </div>
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
-        <Button kind="primary" disabled={busy || !name} onClick={async () => { const r = await run(() => api.relations.create({ name, address, postcode, city, email, type: 'klant' })); if (r) onCreated(r); }}>Toevoegen</Button>
+        <Button kind="primary" disabled={busy || !name} onClick={async () => { const r = await run(() => api.relations.create({ name, address, postcode, city, email, type: 'klant', country, vat_number: country !== 'NL' ? vatNumber || null : null })); if (r) onCreated(r); }}>Toevoegen</Button>
       </div>
     </Modal>
   );
