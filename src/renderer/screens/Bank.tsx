@@ -227,7 +227,8 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
   const done = async (p: Promise<unknown>) => {
-    if ((await run(() => p, 'Verwerkt ✓')) !== undefined) go({ screen: 'bank' });
+    // ook acties die niets teruggeven (bv. ongedaan maken) tellen als gelukt als ze niet falen
+    if ((await run(async () => { await p; return true; }, 'Verwerkt ✓')) !== undefined) go({ screen: 'bank' });
   };
   const invoices = [...(overdue.data ?? []), ...(openInvoices.data ?? [])];
   return (
