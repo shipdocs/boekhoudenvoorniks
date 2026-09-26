@@ -34,7 +34,22 @@ export function parseUbl(xml: string): DocumentResult {
     amount: sign * parseEuro(t(s.TaxAmount) || '0'),
   }));
   const reverseCharge = ((taxTotal.TaxSubtotal ?? []) as X[]).some((s) => t(s.TaxCategory?.ID) === 'AE');
-  const lines = ((inv.InvoiceLine ?? inv.CreditNoteLine ?? []) as X[]).map((l) => t(l.Item?.Name) || t(l.Item?.Description)).filter(Boolean);
+  const rawLines = (inv.InvoiceLine ?? inv.CreditNoteLine ?? []) as X[];
+  const lines = rawLines.map((l) => t(l.Item?.Name) || t(l.Item?.Description)).filter(Boolean);
+  const items = rawLines.map((l) => {
+    const qtyRaw = t(l.InvoicedQuantity ?? l.CreditedQuantity);
+    const price = t(l.Price?.PriceAmount);
+    const rate = t(l.Item?.ClassifiedTaxCategory?.Percent);
+    return f({
+      description: t(l.Item?.Name) || t(l.Item?.Description) || 'Regel',
+      quantity: qtyRaw ? sign * Number(qtyRaw) : null,
+      unitPrice: price ? parseEuro(price) : null,
+      amount: sign * parseEuro(t(l.LineExtensionAmount) || '0'),
+      vatRate: rate !== '' ? Number(rate) : null,
+    });
+  });
+  const subtotalCents = t(totals.LineExtensionAmount || totals.TaxExclusiveAmount) ? sign * parseEuro(t(totals.LineExtensionAmount || totals.TaxExclusiveAmount)) : null;
+  const linesBasis = items.length && subtotalCents !== null && items.reduce((s, i) => s + i.value.amount, 0) === subtotalCents ? ('excl' as const) : null;
   return {
     documentType: f(isCredit ? 'credit_note' : 'purchase_invoice'),
     supplier: name ? f(name) : null,
@@ -48,6 +63,8 @@ export function parseUbl(xml: string): DocumentResult {
     vat: f(vat),
     total: t(totals.PayableAmount || totals.TaxInclusiveAmount) ? f(sign * parseEuro(t(totals.PayableAmount || totals.TaxInclusiveAmount))) : null,
     lineDescriptions: lines,
+    lines: items,
+    linesBasis,
     reverseCharge,
     rawText: '',
   };

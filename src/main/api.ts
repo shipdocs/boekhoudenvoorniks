@@ -263,6 +263,11 @@ export function createApi(s: Services, host: HostContext) {
         const pdf = await s.sender.invoicePdf(id);
         return host.saveFile(pdf.filename, pdf.content, [{ name: 'PDF', extensions: ['pdf'] }]);
       },
+      /** E-factuur (UBL, Peppol BIS 3.0) opslaan (#24). */
+      saveUbl: (id: number) => {
+        const inv = s.invoices.get(id);
+        return host.saveFile(`factuur-${inv.number ?? id}.xml`, s.invoices.ublXml(id), [{ name: 'E-factuur (UBL)', extensions: ['xml'] }]);
+      },
       dueReminders: () => s.sender.dueReminders().map((i) => ({ id: i.id, number: i.number, relation_name: i.relation_name, open_amount: i.open_amount, reminder_count: i.reminder_count })),
     },
     home: {

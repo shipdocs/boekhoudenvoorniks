@@ -16,6 +16,8 @@ import { ValidationError } from '../shared/validation';
 export type InvoiceStatus = 'concept' | 'verzonden' | 'betaald';
 export type InvoiceDisplayStatus = 'concept' | 'openstaand' | 'vervallen' | 'betaald';
 
+import { buildInvoiceUbl } from './ubl-out';
+
 export interface InvoiceRow {
   id: number;
   relation_id: number;
@@ -390,6 +392,16 @@ export class InvoiceService {
   /** Openstaande (definitieve, niet volledig betaalde) facturen — voor matching en dashboard. */
   listOpen(asOf: IsoDate = today()): InvoiceSummary[] {
     return this.list({}, asOf).filter((i) => i.status === 'verzonden');
+  }
+
+  /** E-factuur (UBL, Peppol BIS 3.0) met de gegevens zoals ze op de definitieve factuur staan (#24). */
+  ublXml(id: number): string {
+    const inv = this.get(id);
+    if (inv.status === 'concept') throw new ValidationError('Maak de factuur eerst definitief');
+    const company = inv.company_snapshot ? { ...this.settings.get().company, ...JSON.parse(inv.company_snapshot) } : this.settings.get().company;
+    const snap = inv.relation_snapshot ? (JSON.parse(inv.relation_snapshot) as Partial<Relation>) : {};
+    const rel = { ...this.relations.get(inv.relation_id), ...snap };
+    return buildInvoiceUbl(inv, company, { name: rel.name, address: rel.address ?? null, postcode: rel.postcode ?? null, city: rel.city ?? null, country: rel.country ?? 'NL', vat_number: rel.vat_number ?? null, kvk_number: rel.kvk_number ?? null, email: rel.email ?? null });
   }
 
   renderHtml(id: number): string {

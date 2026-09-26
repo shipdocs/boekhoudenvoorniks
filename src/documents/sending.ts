@@ -91,7 +91,16 @@ export class DocumentSender {
     const subject = fillPlaceholders(opts.subject ?? s.invoiceEmailSubject, values);
     const text = fillPlaceholders(opts.body ?? s.invoiceEmailBody, values);
     const attachment = await this.invoicePdf(id);
-    await this.deliver(mailer, 'factuur', id, { to, bcc: s.smtp.bcc || undefined, subject, text, attachments: [{ ...attachment, contentType: 'application/pdf' }] });
+    const attachments: MailMessage['attachments'] = [{ ...attachment, contentType: 'application/pdf' }];
+    if (s.sendUbl) {
+      // e-factuur mee als de gegevens compleet zijn; anders alleen de PDF (de factuur zelf blijft geldig)
+      try {
+        attachments.push({ filename: attachment.filename.replace(/\.pdf$/i, '') + '.xml', content: Buffer.from(this.invoices.ublXml(id), 'utf8'), contentType: 'application/xml' });
+      } catch {
+        /* onvolledige gegevens voor een e-factuur: zie Werk & facturen → e-factuur */
+      }
+    }
+    await this.deliver(mailer, 'factuur', id, { to, bcc: s.smtp.bcc || undefined, subject, text, attachments });
     this.invoices.markSent(id);
     return this.invoices.get(id);
   }

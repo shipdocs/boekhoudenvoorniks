@@ -60,6 +60,8 @@ export interface AppSettings {
   /** Dagen na vervaldatum waarop herinneringen gestuurd worden, bv. [7, 21]. */
   reminderDays: number[];
   advancedMode: boolean;
+  /** E-factuur (UBL) als bijlage meesturen met elke factuur (#24). */
+  sendUbl: boolean;
   /** Bankrekening (bank_accounts.id) die dient als belastingpotje (#33), of null. */
   vatPotAccountId: number | null;
   /** Hoe automatisch: voorzichtig (niets zelf), normaal, maximaal (iets lagere drempels). */
@@ -105,6 +107,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   advancedMode: false,
   autopilot: 'normaal',
   vatPotAccountId: null,
+  sendUbl: true,
   onboardingDone: false,
   termsAcceptedVersion: '',
   invoiceEmailSubject: 'Factuur {nummer} van {bedrijf}',

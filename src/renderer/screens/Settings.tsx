@@ -72,6 +72,7 @@ export function SettingsScreen() {
 
       {tab === 'facturen' && section(
         <>
+          <label className="row"><input type="checkbox" checked={draft.sendUbl} onChange={(e) => set({ sendUbl: e.target.checked })} /> Stuur ook een e-factuur (UBL) mee, zodat de klant de factuur zonder overtypen kan inlezen</label>
           <div className="grid cols-3">
             <Field label="Betaaltermijn (dagen)"><input className="num" type="number" value={draft.paymentTermDays} onChange={(e) => set({ paymentTermDays: Number(e.target.value) })} /></Field>
             <Field label="Offerte geldig (dagen)"><input className="num" type="number" value={draft.quoteValidityDays} onChange={(e) => set({ quoteValidityDays: Number(e.target.value) })} /></Field>
