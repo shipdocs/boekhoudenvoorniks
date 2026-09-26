@@ -30,6 +30,7 @@ import type { OcrProvider } from './intake/ocr';
 import { JobService } from './jobs/jobs';
 import { InboxService } from './inbox/inbox';
 import { ChecklistService } from './onboarding/checklist';
+import { CategoryService } from './settings/categories';
 
 export interface ServiceDeps {
   pdf: PdfRenderer;
@@ -47,6 +48,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const ledger = new Ledger(db);
   const settings = new SettingsService(db);
   const relations = new RelationsService(db);
+  const categories = new CategoryService(db);
   const templates = new TemplateService(db);
   const invoices = new InvoiceService(db, ledger, settings, relations, templates);
   const quotes = new QuoteService(db, settings, relations, templates, invoices);
@@ -62,12 +64,12 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const matching = new MatchingEngine(bank, invoices, purchases, relations);
   const vat = new VatService(db, ledger, settings);
   const dashboard = new DashboardService(db, ledger, invoices, bank, vat);
-  const quick = new QuickActions(db, ledger, purchases, invoices, relations);
+  const quick = new QuickActions(db, ledger, purchases, invoices, relations, categories);
   const integrations = new IntegrationService(db, ledger, invoices, relations, deps.secrets, deps.fetch);
   const exports = new AccountantExport(db, ledger);
   const memory = new SupplierMemory(db);
-  const classifier = new Classifier(memory, deps.llm ?? null);
-  const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse);
+  const classifier = new Classifier(memory, categories, deps.llm ?? null);
+  const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, categories, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);
   const assets = new AssetService(db, ledger);
@@ -77,14 +79,14 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const incomeTax = new IncomeTaxService(db, settings, { assets, overview: taxOverview });
   const jobs = new JobService(db, quotes, invoices, relations);
   const investments = new InvestmentCheck(db, purchases, bank);
-  const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases, recurring, investments);
+  const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases, recurring, categories, investments);
   const checklist = new ChecklistService(db, settings);
 
   ledger.seedDefaultAccounts();
   templates.seedDefaults();
   bank.ensureDefaultAccount();
 
-  return { db, ledger, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, investments, assets, mileage, hours, taxOverview };
+  return { db, ledger, categories, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;

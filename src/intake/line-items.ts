@@ -1,13 +1,12 @@
 import type { DocumentResult, LineItem } from './types';
 import type { Cents } from '../shared/money';
 import { formatEuro } from '../shared/money';
-import { EXPENSE_CATEGORIES } from '../shared/categories';
 
 /**
  * Regels van één bon over categorieën verdelen (#23): vaste trefwoorden (geen AI) per regel.
  * Alleen als de regels precies optellen tot het totaal; anders boeken we op totaalniveau.
  */
-export type LineCategory = string; // een EXPENSE_CATEGORIES-key of 'prive'
+export type LineCategory = string; // een categorie-key of 'prive'
 
 const RULES: [RegExp, LineCategory][] = [
   [/werk(broek|jas|jack|schoen|kleding|shirt|trui|handschoen)|veiligheidsschoen|kniebeschermer|overall|handschoen|softshell|fleece|bodywarmer|oorbescherm|stofmasker|veiligheidsbril/i, 'werkkleding'],
@@ -81,8 +80,8 @@ export function suggestSplit(doc: DocumentResult): SplitPart[] | null {
   return list;
 }
 
-export function splitQuestion(parts: SplitPart[]): string {
+export function splitQuestion(parts: SplitPart[], categoryLabel: (key: string) => string): string {
   const [main, ...rest] = parts;
-  const label = (k: string) => (k === 'prive' ? 'privé' : EXPENSE_CATEGORIES.find((c) => c.key === k)?.label.toLowerCase() ?? k);
+  const label = (k: string) => (k === 'prive' ? 'privé' : categoryLabel(k));
   return `Op deze bon staat ook: ${rest.map((p) => `${p.items.slice(0, 2).join(', ')} (${formatEuro(p.gross)}, ${label(p.categoryKey)})`).join(' en ')}. Apart verwerken? De rest (${formatEuro(main!.gross)}) is ${label(main!.categoryKey)}.`;
 }

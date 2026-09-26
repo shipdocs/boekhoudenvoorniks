@@ -104,6 +104,7 @@ input.num { text-align: right; font-variant-numeric: tabular-nums; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chips button { border: 1px solid var(--border); background: var(--surface); padding: 8px 14px; border-radius: 99px; cursor: pointer; }
 .chips button.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
+.chips button.ghost { border-style: dashed; color: var(--text-2); background: transparent; }
 
 table.list { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
 table.list th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); }

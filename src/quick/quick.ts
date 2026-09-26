@@ -7,7 +7,7 @@ import type { PurchaseService, PurchaseInvoice } from '../documents/purchases';
 import type { InvoiceService, Invoice } from '../documents/invoices';
 import type { RelationsService } from '../relations/relations';
 import { splitGross } from '../import/bank';
-import { EXPENSE_CATEGORIES } from '../shared/categories';
+import type { CategoryLookup } from '../shared/categories';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isReverseCharge, type PurchaseVatCode, type SalesVatCode } from '../shared/vat';
 import { assertIsoDate, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
@@ -48,12 +48,13 @@ export class QuickActions {
     private readonly purchases: PurchaseService,
     private readonly invoices: InvoiceService,
     private readonly relations: RelationsService,
+    private readonly categories: CategoryLookup,
   ) {}
 
   /** Bonnetje / inkoopfactuur. Bij 'bank' blijft hij open tot de bankimport hem koppelt. */
   recordExpense(input: ExpenseInput): PurchaseInvoice {
     assertIsoDate(input.date);
-    const category = EXPENSE_CATEGORIES.find((c) => c.key === input.categoryKey);
+    const category = this.categories.find(input.categoryKey);
     if (!category) throw new ValidationError('Kies waar de aankoop voor was');
     if (!isPurchaseVatCode(input.vatCode)) throw new ValidationError('Kies of er btw op de bon stond');
     if (!Number.isSafeInteger(input.grossAmount) || input.grossAmount === 0) throw new ValidationError('Vul een bedrag in');

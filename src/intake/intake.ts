@@ -5,7 +5,7 @@ import type { PurchaseService, PurchaseLineInput } from '../documents/purchases'
 import type { RelationsService } from '../relations/relations';
 import type { BankService, BankTransaction } from '../import/bank';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import { EXPENSE_CATEGORIES, PRIVATE_CAR_CATEGORIES } from '../shared/categories';
+import { PRIVATE_CAR_CATEGORIES, type CategoryLookup } from '../shared/categories';
 import { PURCHASE_VAT_RATES, isPurchaseVatCode, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
 import { diffDays, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
@@ -127,6 +127,7 @@ export class IntakeService {
     private readonly bank: BankService,
     private readonly memory: SupplierMemory,
     private readonly classifier: Classifier,
+    private readonly categories: CategoryLookup,
     private readonly storeFile: (name: string, data: Uint8Array) => Promise<string>,
     private ocr: OcrProvider | null = null,
     private readonly autopilot: () => AutopilotLevel = () => 'normaal',
@@ -259,11 +260,11 @@ export class IntakeService {
     const bankMatch = this.findBankMatch(result);
     const assessed = assessConfidence({ document: result, issues, classification, bankMatch: !!bankMatch });
     const rule = this.memory.get(result.supplier?.value);
-    const { decisions, signals } = documentDecisions({ doc: result, issues, classification, bankMatch, rule, level: this.autopilot() });
+    const { decisions, signals } = documentDecisions({ doc: result, issues, classification, bankMatch, rule, level: this.autopilot(), categoryLabel: this.categories.label(classification.categoryKey) });
     // HIGH alleen als álle velden en beslissingen boven hun drempel zitten (#21)
     // Gemengde bon (bv. materiaal + werkbroek): nooit automatisch, eerst vragen of we splitsen (#23)
     const split = suggestSplit(result);
-    if (split) issues.push({ field: 'lines', severity: 'waarschuwing', message: splitQuestion(split), suggestion: split });
+    if (split) issues.push({ field: 'lines', severity: 'waarschuwing', message: splitQuestion(split, (k) => this.categories.label(k)), suggestion: split });
     const level: ConfidenceLevel = assessed.level === 'HIGH' && (!allCertain(decisions) || split) ? 'MEDIUM' : assessed.level;
     this.db
       .prepare(`UPDATE documents SET classification = ?, confidence = ?, issues = ?, decisions = ?, status = 'controle' WHERE id = ?`)
@@ -283,7 +284,7 @@ export class IntakeService {
       logAutomation(this.db, {
         kind: 'document-auto',
         ref_id: id,
-        summary: `${result.supplier.value} ${formatEuro(result.total.value)} verwerkt als ${EXPENSE_CATEGORIES.find((c) => c.key === classification.categoryKey)?.label.toLowerCase() ?? classification.categoryKey}`,
+        summary: `${result.supplier.value} ${formatEuro(result.total.value)} verwerkt als ${this.categories.label(classification.categoryKey)}`,
         reason: explanation.sentence,
         details: explanation,
       });
@@ -405,7 +406,7 @@ export class IntakeService {
     if (doc.status === 'verwerkt') throw new ValidationError('Dit bonnetje is al verwerkt');
     if (!c.supplier?.trim()) throw new ValidationError('Vul de winkel of leverancier in');
     if (!Number.isSafeInteger(c.total) || c.total === 0) throw new ValidationError('Vul het totaalbedrag in');
-    const category = EXPENSE_CATEGORIES.find((x) => x.key === c.categoryKey);
+    const category = this.categories.find(c.categoryKey);
     if (!category) throw new ValidationError('Kies waar de aankoop voor was');
     if (!isPurchaseVatCode(c.vatCode)) throw new ValidationError('Kies of er btw op de bon stond');
 
@@ -455,7 +456,7 @@ export class IntakeService {
         const vatCode = codeFor(sp.vatRate);
         const rate = PURCHASE_VAT_RATES[vatCode].percentage;
         if (sp.categoryKey === 'prive') return { account: ACCOUNTS.priveOpnamen, netAmount: sp.gross, vatCode: 'geen' as const, description: 'Privé-deel van de bon' };
-        const cat = EXPENSE_CATEGORIES.find((x) => x.key === sp.categoryKey);
+        const cat = this.categories.find(sp.categoryKey);
         if (!cat) throw new ValidationError('Kies bij elk deel waar het voor was');
         const { net, vat } = splitGross(sp.gross, rate, isReverseCharge(vatCode));
         return { account: cat.account, netAmount: net, vatCode, vatAmount: vat, description: cat.label };

@@ -4,6 +4,7 @@ import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInp
 import type { CsvMapping } from '../../import/csv';
 import type { PurchaseVatCode } from '../../shared/vat';
 import { InvestmentHint, investmentInfo } from './Purchases';
+import { CategoryChips } from './Categories';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
 
 /** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
@@ -264,11 +265,7 @@ export function CategoryPicker({ initial, onPick, incoming, amount }: { initial?
   return (
     <div className="grid">
       <Field label={incoming ? 'Waar was dit geld voor?' : 'Waar was deze betaling voor?'}>
-        <div className="chips">
-          {meta.expenseCategories.map((c) => (
-            <button key={c.key} className={cat === c.key ? 'selected' : ''} title={c.hint} onClick={() => { setCat(c.key); setVat(c.defaultVat); }}>{c.label}</button>
-          ))}
-        </div>
+        <CategoryChips value={cat} onChange={(key, defaultVat) => { setCat(key); setVat(defaultVat); }} />
       </Field>
       {!incoming && <InvestmentHint categoryKey={cat} gross={amount} vatCode={vat} onUse={() => { setCat('investering'); setVat('hoog'); }} />}
       <Field label="Stond er btw op?">
@@ -376,7 +373,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
                   key={String(suggestions.data?.length)}
                   initial={(() => {
                     const s = (suggestions.data ?? []).find((x) => x.kind === 'rekening');
-                    return s && s.kind === 'rekening' ? meta.expenseCategories.find((c) => c.account === s.account)?.key : undefined;
+                    return s && s.kind === 'rekening' ? (meta.expenseCategories.find((c) => c.account === s.account && !c.key.startsWith('eigen-')) ?? meta.expenseCategories.find((c) => c.account === s.account))?.key : undefined;
                   })()}
                   onPick={(categoryKey, vatCode) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode }), inv(categoryKey, vatCode))}
                 />

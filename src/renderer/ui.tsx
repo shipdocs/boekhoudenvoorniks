@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { formatEuro, parseEuro } from '../shared/money';
 import { formatDateNl } from '../shared/dates';
+import { createPortal } from 'react-dom';
 import { api } from './api';
 
 // ---------- navigatie ----------
@@ -23,6 +24,8 @@ interface AppCtx {
   meta: Meta;
   settings: Settings;
   reloadSettings(): Promise<void>;
+  /** na het aanpassen van categorieën */
+  reloadMeta(): Promise<void>;
   refreshBadge(): void;
   /** Na het opslaan van een investering: uitleg wat de app nu doet en wat jij nog moet doen. */
   showInvestmentSaved(info: InvestmentSavedInfo): void;
@@ -154,7 +157,8 @@ export function Modal({ title, children, onClose, wide }: { title: string; child
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
-  return (
+  // via een portal: een venster binnen een formulierveld (label) of kaart erft dan geen opmaak of klikgedrag
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-label={title}>
         <div className="row between" style={{ marginBottom: 14 }}>
@@ -163,7 +167,8 @@ export function Modal({ title, children, onClose, wide }: { title: string; child
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

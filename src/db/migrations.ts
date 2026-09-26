@@ -677,4 +677,20 @@ export const migrations: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  /* 12: eigen en aangepaste kostencategorieën */ `
+  -- Alleen afwijkingen van de ingebouwde lijst (naam, uitleg, btw, verborgen) en eigen categorieën.
+  -- Een eigen categorie boekt op de rekening van een ingebouwde categorie ("hoort bij"), zodat de
+  -- grootboekrekeningen (RGS) voor de boekhouder hetzelfde blijven. Nooit verwijderen: alleen verbergen.
+  CREATE TABLE expense_categories (
+    key TEXT PRIMARY KEY,
+    built_in INTEGER NOT NULL DEFAULT 0,
+    label TEXT,
+    hint TEXT,
+    default_vat TEXT,
+    group_key TEXT,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];

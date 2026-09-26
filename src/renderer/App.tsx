@@ -61,6 +61,7 @@ export function App() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 7000 : 3500);
   }, []);
   const reloadSettings = useCallback(async () => setSettings(await api.settings.get()), []);
+  const reloadMeta = useCallback(async () => setMeta(await api.app.meta()), []);
   const refreshBadge = useCallback(() => {
     api.home.get().then((h) => setBadge(h.tasks.length)).catch(() => undefined);
   }, []);
@@ -91,7 +92,7 @@ export function App() {
 
   const go = (r: Route) => setHistory((h) => (r.screen === 'home' ? [r] : [...h.slice(-20), r]));
   const back = () => setHistory((h) => (h.length > 1 ? h.slice(0, -1) : h));
-  const ctx = { route, go, back, toast, meta, settings, reloadSettings, refreshBadge, showInvestmentSaved: setInvestmentSaved };
+  const ctx = { route, go, back, toast, meta, settings, reloadSettings, reloadMeta, refreshBadge, showInvestmentSaved: setInvestmentSaved };
 
   const screen = (() => {
     switch (route.screen) {
