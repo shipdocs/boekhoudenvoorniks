@@ -216,6 +216,7 @@ export class JobService {
   /** Een inkoop aan een klus koppelen (of loskoppelen met null). Geldt ook voor de boeking erachter. */
   linkPurchase(purchaseId: number, jobId: number | null): void {
     if (jobId) this.get(jobId);
+    if (!this.db.prepare('SELECT 1 FROM purchase_invoices WHERE id = ?').get(purchaseId)) throw new ValidationError('Deze aankoop bestaat niet (meer)');
     tx(this.db, () => {
       this.db.prepare('UPDATE purchase_invoices SET job_id = ? WHERE id = ?').run(jobId, purchaseId);
       this.db
@@ -273,9 +274,11 @@ export class JobService {
   }
 
   addWorkItem(jobId: number, item: { date: IsoDate; description: string; quantity: number; unit?: string | null; unitPrice: Cents; vatCode: string }): WorkItem {
-    this.get(jobId);
+    const job = this.get(jobId);
+    if (job.status === 'gefactureerd' || job.status === 'geannuleerd') throw new ValidationError(`Deze klus is ${job.status}; de werkbon kan niet meer aangevuld worden`);
     if (!item.description.trim()) throw new ValidationError('Omschrijving is verplicht');
     if (!(item.quantity > 0)) throw new ValidationError('Aantal moet groter dan 0 zijn');
+    if (!Number.isSafeInteger(item.unitPrice) || item.unitPrice < 0) throw new ValidationError('De prijs mag niet negatief zijn');
     const id = Number(
       this.db
         .prepare('INSERT INTO job_work_items (job_id, work_date, description, quantity, unit, unit_price, vat_code) VALUES (?, ?, ?, ?, ?, ?, ?)')

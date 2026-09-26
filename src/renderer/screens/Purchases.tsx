@@ -84,7 +84,9 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                     <Button small kind="ghost" title="Garantietermijn vastleggen" onClick={async () => {
                       const v = prompt('Hoeveel maanden garantie? (leeg = geen)', p.warranty_months ? String(p.warranty_months) : '24');
                       if (v === null) return;
-                      await run(() => api.search.setWarranty(p.id, v.trim() ? Number(v) : null));
+                      const months = v.trim() ? Number(v.trim().replace(',', '.')) : null;
+                      if (months !== null && !Number.isFinite(months)) return toast('Vul een aantal maanden in, bv. 24', 'error');
+                      await run(() => api.search.setWarranty(p.id, months));
                       await purchases.reload();
                     }}>🛡️</Button>
                   </span>

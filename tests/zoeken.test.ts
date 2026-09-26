@@ -73,3 +73,17 @@ describe('zoeken (#26)', () => {
     expect(s.search.search('artikel 9999')).toHaveLength(1);
   });
 });
+
+describe('review-bevindingen #43 (zoeken)', () => {
+  it('">" en "<" zijn exclusief; alleen een einddatum werkt ook; garantie moet een getal zijn', () => {
+    expect(parseQuery('> 400').filters.minAmount).toBe(40001);
+    expect(parseQuery('>= 400').filters.minAmount).toBe(40000);
+    expect(parseQuery('< 50').filters.maxAmount).toBe(4999);
+    const { s, klant } = setup();
+    s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-10', lines: [{ description: 'Gevel', quantity: 1, unitPrice: 40000, vatCode: 'nul' }] }).id);
+    expect(s.search.search('gevel > 400')).toHaveLength(0);
+    expect(s.search.search('gevel >= 400')).toHaveLength(1);
+    expect(s.search.search('', { to: '2026-12-31' }).length).toBeGreaterThan(0);
+    expect(() => s.search.setWarranty(1, Number.NaN)).toThrow(/getal/);
+  });
+});

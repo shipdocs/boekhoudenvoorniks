@@ -20,15 +20,22 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => input.current?.focus(), []);
   useEffect(() => {
+    // een oudere, tragere zoekopdracht mag de resultaten van een nieuwere niet overschrijven
+    let current = true;
     const t = setTimeout(async () => {
       try {
-        setResults(q.trim() ? await api.search.query(q) : []);
+        const r = q.trim() ? await api.search.query(q) : [];
+        if (!current) return;
+        setResults(r);
         setError(null);
       } catch (e) {
-        setError((e as Error).message);
+        if (current) setError((e as Error).message);
       }
     }, 120);
-    return () => clearTimeout(t);
+    return () => {
+      current = false;
+      clearTimeout(t);
+    };
   }, [q]);
 
   const open = (kind: string, id: number) => {
