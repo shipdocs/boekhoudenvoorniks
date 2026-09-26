@@ -200,3 +200,15 @@ input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--primary)
 .automation-list .row.between { flex-wrap: nowrap; align-items: baseline; gap: 12px; }
 .automation-list .row.between > span:first-child { flex: 1; }
 .automation-list .row.between > span:last-child { flex: none; gap: 8px; }
+
+/* Zoeken (#26) */
+.nav .search-btn { opacity: 0.85; }
+.nav .search-btn kbd { margin-left: auto; font-size: 11px; opacity: 0.7; }
+.search-modal { max-width: 720px; width: 100%; align-self: flex-start; margin-top: 8vh; }
+.search-input { width: 100%; font-size: 17px; padding: 12px 14px; }
+.search-results { max-height: 60vh; overflow: auto; margin-top: 10px; }
+.search-group { padding: 10px 4px; border-bottom: 1px solid var(--border); }
+.search-group:last-child { border-bottom: 0; }
+.search-main { display: flex; gap: 10px; align-items: baseline; width: 100%; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.search-group mark { background: var(--warn-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
+.chip-link { background: var(--primary-soft); border: 0; border-radius: 999px; padding: 2px 10px; cursor: pointer; font: inherit; color: inherit; }

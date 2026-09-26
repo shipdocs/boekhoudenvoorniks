@@ -46,6 +46,8 @@ export interface PurchaseInvoice {
   job_id: number | null;
   document_id: number | null;
   payee_iban: string | null;
+  /** garantietermijn in maanden (gereedschap, machines) */
+  warranty_months: number | null;
   open_amount: Cents;
 }
 

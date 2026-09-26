@@ -2,6 +2,99 @@
  * Schema-migraties. Elke migratie draait precies één keer, bijgehouden via PRAGMA user_version.
  * Bestaande migraties NOOIT wijzigen na een release — voeg een nieuwe toe.
  */
+/**
+ * Zoekindex (#26): één FTS5-tabel over documenten, facturen (incl. regels), offertes, relaties,
+ * banktransacties, klussen en inkopen. Triggers houden hem bij; alles blijft in dit bestand.
+ */
+function searchMigration(): string {
+  const sources: { kind: string; table: string; title: string; body: string; date: string; amount: string; children?: { table: string; fk: string }[] }[] = [
+    {
+      kind: 'document',
+      table: 'documents',
+      title: "COALESCE(json_extract(r.result, '$.supplier.value'), r.original_name)",
+      body: "COALESCE(json_extract(r.result, '$.rawText'), '') || ' ' || COALESCE((SELECT group_concat(value, ' ') FROM json_each(COALESCE(json_extract(r.result, '$.lineDescriptions'), '[]'))), '') || ' ' || COALESCE(json_extract(r.result, '$.invoiceNumber.value'), '') || ' ' || r.original_name",
+      date: "json_extract(r.result, '$.invoiceDate.value')",
+      amount: "json_extract(r.result, '$.total.value')",
+    },
+    {
+      kind: 'factuur',
+      table: 'invoices',
+      title: "COALESCE(r.number, 'concept') || ' ' || COALESCE((SELECT name FROM relations WHERE id = r.relation_id), '')",
+      body: "COALESCE(r.reference, '') || ' ' || COALESCE(r.intro, '') || ' ' || COALESCE(r.notes, '') || ' ' || COALESCE((SELECT group_concat(description, ' ') FROM invoice_lines WHERE invoice_id = r.id), '')",
+      date: 'r.invoice_date',
+      amount: 'r.total',
+      children: [{ table: 'invoice_lines', fk: 'invoice_id' }],
+    },
+    {
+      kind: 'offerte',
+      table: 'quotes',
+      title: "COALESCE(r.number, 'concept') || ' ' || COALESCE((SELECT name FROM relations WHERE id = r.relation_id), '')",
+      body: "COALESCE(r.reference, '') || ' ' || COALESCE(r.intro, '') || ' ' || COALESCE(r.notes, '') || ' ' || COALESCE((SELECT group_concat(description, ' ') FROM quote_lines WHERE quote_id = r.id), '')",
+      date: 'r.quote_date',
+      amount: 'NULL',
+      children: [{ table: 'quote_lines', fk: 'quote_id' }],
+    },
+    {
+      kind: 'relatie',
+      table: 'relations',
+      title: 'r.name',
+      body: "COALESCE(r.contact_name, '') || ' ' || COALESCE(r.email, '') || ' ' || COALESCE(r.address, '') || ' ' || COALESCE(r.city, '') || ' ' || COALESCE(r.iban, '') || ' ' || COALESCE(r.vat_number, '') || ' ' || COALESCE(r.kvk_number, '')",
+      date: 'NULL',
+      amount: 'NULL',
+    },
+    {
+      kind: 'bank',
+      table: 'bank_transactions',
+      title: "COALESCE(r.counter_name, 'Banktransactie')",
+      body: "r.description || ' ' || COALESCE(r.counter_iban, '') || ' ' || COALESCE(r.reference, '')",
+      date: 'r.transaction_date',
+      amount: 'r.amount',
+    },
+    {
+      kind: 'klus',
+      table: 'jobs',
+      title: 'r.title',
+      body: "COALESCE(r.address, '') || ' ' || COALESCE(r.notes, '') || ' ' || COALESCE((SELECT name FROM relations WHERE id = r.relation_id), '')",
+      date: 'r.start_date',
+      amount: 'NULL',
+    },
+    {
+      kind: 'inkoop',
+      table: 'purchase_invoices',
+      title: "COALESCE((SELECT name FROM relations WHERE id = r.relation_id), r.description)",
+      body: "r.description || ' ' || COALESCE(r.supplier_reference, '') || ' ' || COALESCE((SELECT group_concat(description, ' ') FROM purchase_invoice_lines WHERE purchase_invoice_id = r.id), '')",
+      date: 'r.invoice_date',
+      amount: 'r.total',
+      children: [{ table: 'purchase_invoice_lines', fk: 'purchase_invoice_id' }],
+    },
+  ];
+  // rowid = soort * 1e9 + id: bijwerken en verwijderen via de rowid is direct, zonder de index te doorzoeken
+  const code = (src: (typeof sources)[number]) => sources.indexOf(src) + 1;
+  const insert = (src: (typeof sources)[number], where: string) =>
+    `INSERT INTO search_index (rowid, kind, ref_id, title, body, date, amount) SELECT ${code(src)} * 1000000000 + r.id, '${src.kind}', r.id, ${src.title}, ${src.body}, ${src.date}, ${src.amount} FROM ${src.table} r WHERE ${where};`;
+  const parts = [
+    `CREATE VIRTUAL TABLE search_index USING fts5(kind UNINDEXED, ref_id UNINDEXED, title, body, date UNINDEXED, amount UNINDEXED, tokenize = 'unicode61 remove_diacritics 2');`,
+  ];
+  for (const src of sources) {
+    const refresh = (id: string) => `DELETE FROM search_index WHERE rowid = ${code(src)} * 1000000000 + ${id}; ${insert(src, `r.id = ${id}`)}`;
+    parts.push(
+      insert(src, '1'),
+      `CREATE TRIGGER search_${src.table}_ai AFTER INSERT ON ${src.table} BEGIN ${refresh('NEW.id')} END;`,
+      `CREATE TRIGGER search_${src.table}_au AFTER UPDATE ON ${src.table} BEGIN ${refresh('NEW.id')} END;`,
+      `CREATE TRIGGER search_${src.table}_ad AFTER DELETE ON ${src.table} BEGIN DELETE FROM search_index WHERE rowid = ${code(src)} * 1000000000 + OLD.id; END;`,
+    );
+    for (const c of src.children ?? []) {
+      parts.push(
+        `CREATE TRIGGER search_${c.table}_ai AFTER INSERT ON ${c.table} BEGIN ${refresh(`NEW.${c.fk}`)} END;`,
+        `CREATE TRIGGER search_${c.table}_ad AFTER DELETE ON ${c.table} BEGIN ${refresh(`OLD.${c.fk}`)} END;`,
+      );
+    }
+  }
+  // garantie bij gereedschap en investeringen
+  parts.push('ALTER TABLE purchase_invoices ADD COLUMN warranty_months INTEGER;');
+  return parts.join('\n');
+}
+
 export const migrations: string[] = [
   /* 1: kernschema */ `
   CREATE TABLE settings (
@@ -504,4 +597,5 @@ export const migrations: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  /* 9: zoeken (#26) */ searchMigration(),
 ];

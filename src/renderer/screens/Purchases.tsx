@@ -71,11 +71,24 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
               <tr key={p.id} className={p.attachment_path ? 'clickable' : ''} onClick={() => p.attachment_path && void run(() => api.app.openAttachment(p.attachment_path!))}>
                 <td><DateNl date={p.invoice_date} /></td>
                 <td>{p.relation_name ?? '—'}</td>
-                <td>{p.description} {p.attachment_path && <span title="Bewijsstuk aanwezig">📎</span>}</td>
+                <td>
+                  {p.description} {p.attachment_path && <span title="Bewijsstuk aanwezig">📎</span>}
+                  {p.warranty_months ? <div className="small muted">🛡️ {warrantyText(p.invoice_date, p.warranty_months)}</div> : null}
+                </td>
                 <td><StatusPill status={p.status} /></td>
                 <td className="num"><Euro cents={p.vat_total} /></td>
                 <td className="num"><Euro cents={p.total} /></td>
-                <td onClick={(e) => e.stopPropagation()}>{p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}</td>
+                <td onClick={(e) => e.stopPropagation()}>
+                  <span className="row">
+                    {p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}
+                    <Button small kind="ghost" title="Garantietermijn vastleggen" onClick={async () => {
+                      const v = prompt('Hoeveel maanden garantie? (leeg = geen)', p.warranty_months ? String(p.warranty_months) : '24');
+                      if (v === null) return;
+                      await run(() => api.search.setWarranty(p.id, v.trim() ? Number(v) : null));
+                      await purchases.reload();
+                    }}>🛡️</Button>
+                  </span>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -188,4 +201,14 @@ export function CategoryChoice({ value, onChange }: { value: string; onChange: (
       </div>
     </Field>
   );
+}
+
+/** "nog 14 maanden garantie" / "garantie verlopen". */
+function warrantyText(from: string, months: number): string {
+  const d = new Date(`${from}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const left = (d.getTime() - Date.now()) / 86400000;
+  if (left < 0) return `garantie verlopen op ${d.toISOString().slice(0, 10)}`;
+  const m = Math.floor(left / 30.44);
+  return m >= 1 ? `nog ${m} ${m === 1 ? 'maand' : 'maanden'} garantie` : `nog ${Math.ceil(left)} dagen garantie`;
 }

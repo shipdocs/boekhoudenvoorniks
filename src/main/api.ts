@@ -413,6 +413,12 @@ export function createApi(s: Services, host: HostContext) {
       exportCsv: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.csv`, s.vat.exportCsv(periodKey), [{ name: 'CSV', extensions: ['csv'] }]),
       exportXbrl: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.xbrl`, buildVatXbrl(s.vat.calculate(periodKey), s.settings.get().company), [{ name: 'XBRL', extensions: ['xbrl', 'xml'] }]),
     },
+    search: {
+      /** Zoeken over alles (#26); filters: periode, bedrag, klus. */
+      query: (q: string, filters?: { from?: IsoDate; to?: IsoDate; minAmount?: Cents; maxAmount?: Cents; jobId?: number }) => s.search.search(q, filters),
+      setWarranty: (purchaseId: number, months: number | null) => s.search.setWarranty(purchaseId, months),
+      rebuild: () => s.search.rebuild(),
+    },
     recurring: {
       /** Vaste lasten met hun stand (laatst gezien, volgende, per maand, prijsverschil) */
       list: () => s.recurring.list().filter((x) => x.status === 'actief').map((x) => s.recurring.state(x)),
