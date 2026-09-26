@@ -1,5 +1,5 @@
 import type { Db } from '../db/database';
-import { isValidEmail, isValidIban, isValidKvk, isValidVatNumber, normalizeIban, ValidationError } from '../shared/validation';
+import { isValidEmail, isValidForeignRegistration, isValidIban, isValidKvk, isValidVatNumber, normalizeIban, normalizeVatNumber, ValidationError } from '../shared/validation';
 import { countryCode } from '../shared/vat';
 
 export type RelationType = 'klant' | 'leverancier' | 'beide';
@@ -95,10 +95,13 @@ export class RelationsService {
     if (email && !isValidEmail(email)) throw new ValidationError(`Dit e-mailadres klopt niet: ${email}`);
     const iban = input.iban ? normalizeIban(input.iban) : null;
     if (iban && !isValidIban(iban)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${input.iban}`);
-    const vat = input.vat_number ? input.vat_number.replace(/[\s.]/g, '').toUpperCase() : null;
+    const vat = input.vat_number && input.vat_number.trim() ? normalizeVatNumber(input.vat_number) : null;
     if (vat && !isValidVatNumber(vat)) throw new ValidationError(`Dit btw-nummer klopt niet: ${input.vat_number}`);
-    const kvk = input.kvk_number ? input.kvk_number.replace(/\s/g, '') : null;
-    if (kvk && !isValidKvk(kvk)) throw new ValidationError(`Dit KvK-nummer klopt niet (het heeft 8 cijfers): ${input.kvk_number}`);
+    // KvK alleen bij een Nederlands bedrijf; een buitenlands bedrijf heeft een eigen handelsregisternummer
+    const dutch = (countryCode(input.country && input.country.trim() ? input.country : 'NL') ?? 'NL') === 'NL';
+    const kvk = input.kvk_number && input.kvk_number.trim() ? (dutch ? input.kvk_number.replace(/\s/g, '') : input.kvk_number.trim()) : null;
+    if (kvk && dutch && !isValidKvk(kvk)) throw new ValidationError(`Dit KvK-nummer klopt niet (het heeft 8 cijfers): ${input.kvk_number}`);
+    if (kvk && !dutch && !isValidForeignRegistration(kvk)) throw new ValidationError(`Dit handelsregisternummer klopt niet: ${input.kvk_number}`);
     const type = input.type ?? 'klant';
     if (!['klant', 'leverancier', 'beide'].includes(type)) throw new ValidationError('Kies klant, leverancier of allebei');
     const term = input.payment_term_days;

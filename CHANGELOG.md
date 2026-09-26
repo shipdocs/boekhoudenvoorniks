@@ -2,6 +2,11 @@
 
 ## Nog niet uitgebracht
 
+- **Buitenlandse klant met eigen bedrijfsnummer**: bij een klant buiten Nederland heet het veld
+  "Handelsregisternummer" en hoeft het geen 8-cijferig KvK-nummer te zijn (bijvoorbeeld een Zwitserse UID
+  `CHE-253.742.182`). Een Zwitsers btw-nummer mag met streepjes, punten en "MWST". Op de e-factuur komt een
+  buitenlands nummer niet meer als Nederlands KvK-nummer te staan.
+
 ## 0.3.2 — buitenlandse klanten en te veel betaald
 
 - **Land bij een klant**: het klantformulier (ook "Nieuwe klant" vanuit een factuur) heeft nu een landkeuze,
