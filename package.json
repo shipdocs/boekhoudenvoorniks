@@ -70,6 +70,8 @@
     "better-sqlite3": "^13.0.3",
     "electron-updater": "^6.8.9",
     "fast-xml-parser": "^5.11.1",
+    "imapflow": "^2.0.7",
+    "mailparser": "^3.9.28",
     "mt940-js": "^1.0.0",
     "nodemailer": "^10.0.10",
     "papaparse": "^5.7.0",
@@ -79,6 +81,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^22.20.4",
     "@types/nodemailer": "^8.0.2",
     "@types/papaparse": "^5.5.2",

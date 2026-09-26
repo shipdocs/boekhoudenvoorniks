@@ -36,6 +36,8 @@ export function createSmtpMailer(smtp: SmtpSettings, password: string | null): M
         from: smtp.fromName ? { name: smtp.fromName, address: smtp.fromEmail } : smtp.fromEmail,
         to: message.to,
         bcc: message.bcc,
+        // "Antwoorden gaan naar": alleen een geldig adres, anders gewoon het afzenderadres
+        replyTo: /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(smtp.replyTo?.trim() ?? '') ? smtp.replyTo.trim() : undefined,
         subject: message.subject,
         text: message.text,
         attachments: message.attachments,

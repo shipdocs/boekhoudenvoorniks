@@ -271,6 +271,7 @@ function EmailSettings({ draft, set, section }: { draft: Settings; set: (p: Part
             <Field label="Afzendernaam"><input value={draft.smtp.fromName} onChange={(e) => set({ smtp: { ...draft.smtp, fromName: e.target.value } })} /></Field>
             <Field label="Afzenderadres"><input value={draft.smtp.fromEmail} onChange={(e) => set({ smtp: { ...draft.smtp, fromEmail: e.target.value } })} /></Field>
             <Field label="Stuur mij een stille kopie op" hint="optioneel, e-mailadres"><input value={draft.smtp.bcc} onChange={(e) => set({ smtp: { ...draft.smtp, bcc: e.target.value } })} /></Field>
+            <Field label="Antwoorden gaan naar" hint="optioneel: als een klant op je factuur antwoordt, komt dat hier binnen"><input value={draft.smtp.replyTo} placeholder="bv. je gewone mailadres" onChange={(e) => set({ smtp: { ...draft.smtp, replyTo: e.target.value } })} /></Field>
           </div>
           {(() => {
             // tikfout in het afzenderadres (bv. .ap i.p.v. .app) valt op als het domein afwijkt van de gebruikersnaam
@@ -296,7 +297,132 @@ function EmailSettings({ draft, set, section }: { draft: Settings; set: (p: Part
           }}>Test verbinding</Button>
         </div>
       </div>
+      <IncomingMail />
     </>
+  );
+}
+
+const OUTCOME_LABEL: Record<string, string> = {
+  bijlage: 'bonnetje/factuur opgehaald',
+  'online-factuur': 'factuur staat online',
+  klant: 'van een klant (niet aangeraakt)',
+  eigen: 'van jezelf',
+  overig: 'niets mee gedaan',
+  fout: 'kon niet gelezen worden',
+};
+
+/**
+ * Inkomende post: een apart mailadres voor de administratie. Eigen opslaan-knop, los van de
+ * uitgaande mail erboven.
+ */
+function IncomingMail() {
+  const { settings, reloadSettings, toast } = useApp();
+  const { run, busy } = useAction();
+  const status = useLoad(() => api.mail.summary());
+  const [cfg, setCfg] = useState(settings.mailIn);
+  const [pw, setPw] = useState('');
+  const [folders, setFolders] = useState<string[] | null>(null);
+  const change = (patch: Partial<typeof cfg>) => setCfg({ ...cfg, ...patch });
+  const dirty = JSON.stringify(cfg) !== JSON.stringify(settings.mailIn);
+  const save = async (next = cfg) => {
+    // eerste keer aanzetten: alleen mail van de laatste 30 dagen, geen jaren archief
+    const since = next.since || new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+    const ok = await run(async () => {
+      await api.settings.update({ mailIn: { ...next, since } });
+      if (pw) await api.mail.setPassword(pw);
+      return true;
+    }, 'Opgeslagen');
+    if (ok) {
+      setCfg({ ...next, since });
+      setPw('');
+      await reloadSettings();
+      await status.reload();
+    }
+  };
+  const address = cfg.user.includes('@') ? cfg.user : 'administratie@jouwbedrijf.nl';
+  const supplierText = `Wilt u vanaf nu uw facturen sturen naar ${address}? Graag als PDF-bijlage of e-factuur (UBL). Alvast bedankt!`;
+
+  return (
+    <div className="card grid" style={{ marginTop: 14 }}>
+      <h3 style={{ margin: 0 }}>Inkomende post (bonnetjes per mail)</h3>
+      <p className="small muted">
+        Maak een apart mailadres voor je administratie, bijvoorbeeld <strong>administratie@jouwbedrijf.nl</strong>, en vraag leveranciers hun facturen daarheen te sturen.
+        De app haalt de bijlagen eruit (bij het opstarten en elk kwartier) en zet ze klaar om te controleren.
+      </p>
+      <details>
+        <summary className="small">Wat gebeurt er met de mail?</summary>
+        <ul className="small">
+          <li><strong>Met een factuur of bon als bijlage</strong> (PDF, foto of e-factuur): komt bij Aankopen &amp; bonnetjes, wacht op jouw controle. Er wordt niets vanzelf geboekt. De mail gaat naar de map "{cfg.processedFolder || 'Verwerkt'}".</li>
+          <li><strong>"Je factuur staat online"</strong> zonder bijlage: een taak op Vandaag om hem te downloaden.</li>
+          <li><strong>Van een klant</strong>: blijft ongelezen en onaangeroerd in je mailbox; je krijgt een seintje op Vandaag.</li>
+          <li><strong>Andere mail</strong>: blijft gewoon staan.</li>
+          <li>Er wordt <strong>nooit mail verwijderd</strong>, en gelezen of gearchiveerde mail wordt niet dubbel verwerkt: de app onthoudt welke berichten hij al zag.</li>
+        </ul>
+      </details>
+      <label className="row"><input type="checkbox" checked={cfg.enabled} onChange={(e) => change({ enabled: e.target.checked })} /> Bonnetjes en facturen uit deze mailbox ophalen</label>
+      <div className="grid cols-3">
+        <Field label="Server" hint="zoek bij je provider op 'IMAP-instellingen'"><input value={cfg.host} placeholder="imap.jouwprovider.nl" onChange={(e) => change({ host: e.target.value.trim() })} /></Field>
+        <Field label="Poort"><input className="num" type="number" value={cfg.port} onChange={(e) => change({ port: Number(e.target.value) })} /></Field>
+        <Field label="Beveiliging"><select value={cfg.secure ? 'ssl' : 'starttls'} onChange={(e) => {
+          const secure = e.target.value === 'ssl';
+          change({ secure, port: cfg.port === (secure ? 143 : 993) ? (secure ? 993 : 143) : cfg.port });
+        }}><option value="ssl">SSL/TLS (993)</option><option value="starttls">STARTTLS (143)</option></select></Field>
+        <Field label="Gebruikersnaam" hint="meestal het mailadres"><input value={cfg.user} onChange={(e) => change({ user: e.target.value.trim() })} /></Field>
+        <Field label="Wachtwoord" hint={status.data?.passwordSet ? 'is ingesteld — veilig opgeslagen' : 'wordt versleuteld opgeslagen'}><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
+        <Field label="Verwerkte mail naar map" hint="leeg = laten staan"><input value={cfg.processedFolder} onChange={(e) => change({ processedFolder: e.target.value })} /></Field>
+      </div>
+      <Field label="Ook doorzoeken" hint="bv. je archiefmap, voor mail die je al had opgeruimd; daar wordt nooit iets verplaatst">
+        {folders ? (
+          <div className="chips">
+            {folders.filter((f) => f !== cfg.folder && f !== cfg.processedFolder).map((f) => {
+              const on = cfg.extraFolders.includes(f);
+              return <button key={f} className={on ? 'selected' : ''} onClick={() => change({ extraFolders: on ? cfg.extraFolders.filter((x) => x !== f) : [...cfg.extraFolders, f] })}>{f}</button>;
+            })}
+          </div>
+        ) : (
+          <span className="small muted">{cfg.extraFolders.length ? cfg.extraFolders.join(', ') : 'Klik op "Test verbinding" om je mappen te zien.'}</span>
+        )}
+      </Field>
+      <Field label="Mail vanaf" hint="oudere mail wordt overgeslagen"><input type="date" value={cfg.since} onChange={(e) => change({ since: e.target.value })} style={{ maxWidth: 200 }} /></Field>
+      <div className="row">
+        <Button kind="primary" disabled={busy || (!dirty && !pw)} onClick={() => void save()}>Opslaan</Button>
+        <Button disabled={busy || !cfg.host || !cfg.user} onClick={async () => {
+          const r = await run(() => api.mail.test(cfg, pw || undefined), pw ? 'Verbinding werkt ✓ en het wachtwoord is opgeslagen' : 'Verbinding werkt ✓');
+          if (r) { setFolders(r.folders); setPw(''); await status.reload(); }
+        }}>Test verbinding</Button>
+        <Button disabled={busy || dirty || !settings.mailIn.enabled} title={dirty ? 'Eerst opslaan' : undefined} onClick={async () => {
+          const r = await run(() => api.mail.fetchNow());
+          if (r) {
+            const parts = [`${r.documents} ${r.documents === 1 ? 'bonnetje' : 'bonnetjes'}`, r.onlineInvoices && `${r.onlineInvoices} online`, r.fromCustomers && `${r.fromCustomers} van klanten`, r.errors && `${r.errors} niet te lezen`].filter(Boolean);
+            toast(`Mail opgehaald: ${parts.join(', ')}${r.missingFolders.length ? `. Map niet gevonden: ${r.missingFolders.join(', ')}` : ''}`);
+            await status.reload();
+          }
+        }}>Nu ophalen</Button>
+      </div>
+      {status.data?.lastChecked && (
+        <div className="small muted">
+          Laatst gekeken: {status.data.lastChecked.replace('T', ' ').slice(0, 16)} · {status.data.counts.bijlage} opgehaald · {status.data.counts['online-factuur']} online · {status.data.counts.klant} van klanten · {status.data.counts.overig + status.data.counts.eigen} overige
+        </div>
+      )}
+      {status.data && status.data.recent.length > 0 && (
+        <details>
+          <summary className="small">Laatste berichten</summary>
+          <table className="list small">
+            <tbody>
+              {status.data.recent.map((m) => (
+                <tr key={m.id}><td><DateNl date={m.received_on} /></td><td>{m.from_name || m.from_address}</td><td>{m.subject}</td><td className="muted">{OUTCOME_LABEL[m.outcome]}{m.note ? `: ${m.note}` : ''}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+      <Field label="Tekst voor je leveranciers" hint="kopieer en stuur door">
+        <div className="row" style={{ flexWrap: 'nowrap' }}>
+          <input className="grow" readOnly value={supplierText} onFocus={(e) => e.target.select()} />
+          <Button onClick={() => void navigator.clipboard.writeText(supplierText).then(() => toast('Gekopieerd'))}>Kopiëren</Button>
+        </div>
+      </Field>
+    </div>
   );
 }
 

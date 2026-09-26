@@ -74,7 +74,7 @@ describe('uitgaande e-factuur (UBL, Peppol BIS 3.0) (#24)', () => {
 
   it('gaat als bijlage mee met de factuurmail', async () => {
     const { s, klant, sent } = setup();
-    s.settings.update({ smtp: { host: 'smtp.example.nl', port: 587, secure: false, user: 'u', fromName: 'Piet', fromEmail: 'piet@example.nl', bcc: '' } });
+    s.settings.update({ smtp: { host: 'smtp.example.nl', port: 587, secure: false, user: 'u', fromName: 'Piet', fromEmail: 'piet@example.nl', bcc: '', replyTo: '' } });
     const draft = s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-10', lines: [{ description: 'x', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] });
     await s.sender.sendInvoice(draft.id);
     const names = sent[0]!.attachments.map((a) => a.filename);

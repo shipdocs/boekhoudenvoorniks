@@ -103,6 +103,24 @@ export const PORTAL_URL = 'https://www.belastingdienst.nl/wps/wcm/connect/nl/btw
 const floorEuro = (c: Cents) => Math.floor(c / 100);
 const ceilEuro = (c: Cents) => Math.ceil(c / 100);
 
+/** Eén boeking achter een vak van de aangifte. */
+export interface VatDetailLine {
+  entryId: number;
+  date: IsoDate;
+  description: string;
+  source: string;
+  /** deze boeking is later teruggedraaid (de tegenboeking staat er dan ook) */
+  reversed: boolean;
+  /** dit is een tegenboeking */
+  reversal: boolean;
+  omzet: Cents;
+  btw: Cents;
+  invoiceId: number | null;
+  purchaseId: number | null;
+  bankTransactionId: number | null;
+  counterparty: string | null;
+}
+
 export class VatService {
   constructor(
     private readonly db: Db,
@@ -200,6 +218,87 @@ export class VatService {
         .run(c.periodKey, c.btw, c.maxEntryId, entryId);
       return c;
     });
+  }
+
+  /**
+   * "Waar komt dit bedrag vandaan?": de boekingen achter één vak van de aangifte, met waar ze
+   * vandaan komen (factuur, bank, bonnetje, handmatig). Zelfde filters als calculate(), dus de
+   * regels tellen op tot het bedrag in het vak.
+   */
+  rubriekDetails(periodKey: string, code: string): { code: string; lines: VatDetailLine[]; omzet: Cents; btw: Cents } {
+    const period = periodFromKey(periodKey);
+    const corrections = this.corrections(period.start, period.end).filter((c) => c.suppletie).map((c) => c.periodKey);
+    const afdragen = [ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag, ACCOUNTS.btwPriveGebruik, ACCOUNTS.btwAfdragenVerlegd, ACCOUNTS.btwAfdragenEu, ACCOUNTS.btwAfdragenBuitenEu];
+    // per vak: welke rekeningen tellen als omzet/grondslag en welke als btw; inkoop = kosten/activa met die btw-code
+    const spec: Record<string, { omzet?: string[]; inkoop?: string; btw?: string[]; btwSign?: 1 | -1 }> = {
+      '1a': { omzet: [ACCOUNTS.omzetHoog], btw: [ACCOUNTS.btwAfdragenHoog] },
+      '1b': { omzet: [ACCOUNTS.omzetLaag], btw: [ACCOUNTS.btwAfdragenLaag] },
+      '1d': { btw: [ACCOUNTS.btwPriveGebruik] },
+      '1e': { omzet: [ACCOUNTS.omzetNul, ACCOUNTS.omzetVerlegd] },
+      '2a': { inkoop: 'verlegd', btw: [ACCOUNTS.btwAfdragenVerlegd] },
+      '3a': { omzet: [ACCOUNTS.omzetExport] },
+      '3b': { omzet: [ACCOUNTS.omzetIcp] },
+      '4a': { inkoop: 'buiten-eu', btw: [ACCOUNTS.btwAfdragenBuitenEu] },
+      '4b': { inkoop: 'eu', btw: [ACCOUNTS.btwAfdragenEu] },
+      '5a': { btw: afdragen },
+      '5b': { btw: [ACCOUNTS.btwVoorbelasting], btwSign: -1 },
+      // regels uit de samenvatting bovenaan
+      omzet: { omzet: [ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, ACCOUNTS.omzetNul, ACCOUNTS.omzetVerlegd, ACCOUNTS.omzetVrijgesteld, ACCOUNTS.omzetExport, ACCOUNTS.omzetIcp] },
+      'btw-omzet': { btw: [ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag] },
+    };
+    const s = spec[code];
+    if (!s) throw new ValidationError(`Onbekend vak ${code}`);
+    const excl = corrections.length ? `AND (e.vat_correction_of IS NULL OR e.vat_correction_of NOT IN (${corrections.map(() => '?').join(',')}))` : '';
+    const rows = this.db
+      .prepare(
+        `SELECT e.id, e.entry_date, COALESCE(e.vat_date, e.entry_date) AS vat_date, e.description, e.source, e.source_ref, e.status, e.reverses_entry_id,
+                a.rgs_code, a.category, l.vat_code, l.credit - l.debit AS net
+         FROM journal_lines l
+         JOIN journal_entries e ON e.id = l.journal_entry_id
+         JOIN chart_of_accounts a ON a.id = l.account_id
+         WHERE COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source <> 'btw'
+           AND NOT ${VatService.SETTLED} ${excl}
+         ORDER BY COALESCE(e.vat_date, e.entry_date), e.id`,
+      )
+      .all(period.start, period.end, ...corrections) as {
+      id: number; entry_date: string; vat_date: string; description: string; source: string; source_ref: string | null; status: string; reverses_entry_id: number | null;
+      rgs_code: string; category: string; vat_code: string | null; net: number;
+    }[];
+    const byEntry = new Map<number, VatDetailLine>();
+    for (const r of rows) {
+      const omzet = s.omzet?.includes(r.rgs_code) ? r.net : s.inkoop && r.vat_code === s.inkoop && (r.category === 'kosten' || r.category === 'activa') ? -r.net : 0;
+      const btw = s.btw?.includes(r.rgs_code) ? r.net * (s.btwSign ?? 1) : 0;
+      if (omzet === 0 && btw === 0) continue;
+      const line = byEntry.get(r.id) ?? {
+        entryId: r.id,
+        date: r.vat_date,
+        description: r.description,
+        source: r.source,
+        reversed: r.status === 'teruggedraaid',
+        reversal: r.reverses_entry_id !== null,
+        omzet: 0,
+        btw: 0,
+        ...this.origin(r.id, r.source_ref),
+      };
+      line.omzet += omzet;
+      line.btw += btw;
+      byEntry.set(r.id, line);
+    }
+    const lines = [...byEntry.values()].filter((l) => l.omzet !== 0 || l.btw !== 0);
+    return { code, lines, omzet: lines.reduce((x, l) => x + l.omzet, 0), btw: lines.reduce((x, l) => x + l.btw, 0) };
+  }
+
+  /** Waar komt een boeking vandaan? Voor de knop "Bekijken" in de details. */
+  private origin(entryId: number, sourceRef: string | null): Pick<VatDetailLine, 'invoiceId' | 'purchaseId' | 'bankTransactionId' | 'counterparty'> {
+    const invoiceId = sourceRef?.startsWith('invoice:') ? Number(sourceRef.slice(8)) : null;
+    const purchaseId = sourceRef?.startsWith('purchase:') ? Number(sourceRef.slice(9)) : null;
+    const bank = this.db.prepare('SELECT id, counter_name FROM bank_transactions WHERE matched_journal_entry_id = ? LIMIT 1').get(entryId) as { id: number; counter_name: string | null } | undefined;
+    const rel = this.db
+      .prepare(
+        `SELECT r.name FROM journal_lines l JOIN relations r ON r.id = l.relation_id WHERE l.journal_entry_id = ? LIMIT 1`,
+      )
+      .get(entryId) as { name: string } | undefined;
+    return { invoiceId, purchaseId, bankTransactionId: bank?.id ?? null, counterparty: rel?.name ?? bank?.counter_name ?? null };
   }
 
   calculate(periodKey: string): VatReport {

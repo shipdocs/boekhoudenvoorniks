@@ -48,7 +48,7 @@ function fillDemo(s: Services, asOf: IsoDate): void {
     homeWorkspace: 'thuis',
     startYear: Number(asOf.slice(0, 4)) - 1,
     startersaftrekUsed: { count: 1, asOfYear: Number(asOf.slice(0, 4)) },
-    smtp: { host: '', port: 587, secure: false, user: '', fromName: DEMO_COMPANY, fromEmail: 'demo@example.nl', bcc: '' },
+    smtp: { host: '', port: 587, secure: false, user: '', fromName: DEMO_COMPANY, fromEmail: 'demo@example.nl', bcc: '', replyTo: '' },
   });
   s.settings.update({ onboardingSteps: markSeen(settings, ONBOARDING_STEPS.map((st) => st.id)) });
 

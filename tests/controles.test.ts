@@ -140,3 +140,35 @@ describe('btw over privégebruik van de auto van de zaak', () => {
     expect(status()).toBe('warn');
   });
 });
+
+describe('btw-berekening: waar komt een bedrag vandaan?', () => {
+  it('omzet zonder factuur (van de bank) is terug te vinden en telt op tot het vak', () => {
+    const { s, main, tx } = withAccounts();
+    const t = tx(main.id, '2026-05-02', 12100, 'NL02ABNA0123456789');
+    s.bank.bookToAccount(t.id, { account: ACCOUNTS.omzetHoog, vatCode: 'hoog', description: 'Contant/pin' });
+    const r = s.vat.calculate('2026-Q2');
+    const d = s.vat.rubriekDetails('2026-Q2', '1a');
+    expect(d.omzet).toBe(r.rubrieken.find((x) => x.code === '1a')!.omzet);
+    expect(d.btw).toBe(r.rubrieken.find((x) => x.code === '1a')!.btw);
+    expect(d.lines).toHaveLength(1);
+    expect(d.lines[0]).toMatchObject({ source: 'bank', bankTransactionId: t.id, invoiceId: null, omzet: 10000, btw: 2100 });
+    expect(s.vat.rubriekDetails('2026-Q2', 'omzet').omzet).toBe(r.summary.omzet);
+    // ongedaan maken: boeking en tegenboeking heffen elkaar op
+    s.bank.unmatch(t.id, '2026-05-03');
+    const after = s.vat.rubriekDetails('2026-Q2', '1a');
+    expect(after.omzet).toBe(0);
+    expect(after.lines.every((l) => l.reversed || l.reversal)).toBe(true);
+    expect(() => s.vat.rubriekDetails('2026-Q2', 'x')).toThrow(/Onbekend vak/);
+  });
+
+  it('factuur en voorbelasting', () => {
+    const { s } = withAccounts();
+    const klant = s.relations.list()[0]!;
+    const inv = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-05-10', lines: [{ description: 'Werk', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
+    expect(s.vat.rubriekDetails('2026-Q2', '1a').lines[0]).toMatchObject({ source: 'factuur', invoiceId: inv.id, counterparty: klant.name });
+    s.quick.recordExpense({ date: '2026-05-02', supplierName: 'Gamma', description: '', categoryKey: 'materiaal', grossAmount: 12100, vatCode: 'hoog', paidWith: 'kas' });
+    const v = s.vat.rubriekDetails('2026-Q2', '5b');
+    expect(v.btw).toBe(s.vat.calculate('2026-Q2').summary.voorbelasting);
+    expect(v.lines[0]!.purchaseId).not.toBeNull();
+  });
+});
