@@ -2,6 +2,7 @@ import type { Db } from './db/database';
 import { Ledger } from './core-ledger/ledger';
 import { EventService } from './core-ledger/events';
 import { RecurringService } from './import/recurring';
+import { IncomeTaxService } from './tax/income-tax';
 import { SearchService } from './search/search';
 import { SettingsService } from './settings/settings';
 import { RelationsService } from './relations/relations';
@@ -59,6 +60,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);
+  const incomeTax = new IncomeTaxService(db, settings);
   const jobs = new JobService(db, quotes, invoices, relations);
   const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases, recurring);
 
@@ -66,7 +68,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   templates.seedDefaults();
   bank.ensureDefaultAccount();
 
-  return { db, ledger, events, recurring, search, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox };
+  return { db, ledger, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox };
 }
 
 export type Services = ReturnType<typeof createServices>;

@@ -2,6 +2,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS, SALES_ACCOUNTS } from '../core-ledger/accounts';
+import { EU_COUNTRIES, countryCode, needsCustomerVatNumber } from '../shared/vat';
 import type { SettingsService } from '../settings/settings';
 import type { RelationsService, Relation } from '../relations/relations';
 import type { TemplateService } from './templates';
@@ -217,8 +218,15 @@ export class InvoiceService {
     if (!kor && !company.vatNumber) missing.push('btw-nummer');
     if (missing.length) throw new ValidationError(`Vul eerst je bedrijfsgegevens aan bij Instellingen: ${missing.join(', ')}`);
     if (!relation.address || !relation.city) throw new ValidationError(`Adres van ${relation.name} ontbreekt (verplicht op een factuur)`);
-    if (inv.lines.some((l) => l.vat_code === 'verlegd') && !relation.vat_number) {
+    if (inv.lines.some((l) => needsCustomerVatNumber(l.vat_code)) && !relation.vat_number) {
       throw new ValidationError(`Bij verlegde BTW moet het btw-nummer van ${relation.name} op de factuur staan`);
+    }
+    const country = countryCode(relation.country);
+    if (inv.lines.some((l) => l.vat_code === 'icp') && (!country || country === 'NL' || !EU_COUNTRIES.has(country))) {
+      throw new ValidationError(`"Bedrijf in de EU (0%)" is alleen voor klanten in een ander EU-land. Vul bij ${relation.name} het land in (bv. DE of BE)`);
+    }
+    if (inv.lines.some((l) => l.vat_code === 'export') && (!country || EU_COUNTRIES.has(country))) {
+      throw new ValidationError(`"Uitvoer buiten de EU (0%)" is alleen voor klanten buiten de EU. Vul bij ${relation.name} het land in (bv. CH of US)`);
     }
     if (kor && inv.lines.some((l) => l.vat_percentage > 0)) {
       throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): factuurregels mogen geen BTW bevatten');

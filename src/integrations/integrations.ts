@@ -2,7 +2,9 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Ledger, PostLine } from '../core-ledger/ledger';
 import { signedLine } from '../core-ledger/ledger';
-import { ACCOUNTS } from '../core-ledger/accounts';
+import { ACCOUNTS, REVERSE_CHARGE_ACCOUNTS } from '../core-ledger/accounts';
+import { PURCHASE_VAT_RATES } from '../shared/vat';
+import { roundHalfAwayFromZero } from '../shared/money';
 import type { InvoiceService } from '../documents/invoices';
 import type { RelationsService } from '../relations/relations';
 import type { SalesVatCode } from '../shared/vat';
@@ -13,6 +15,12 @@ import { STRIPE, fetchStripePayouts } from './stripe';
 import type { ExternalOrder, ExternalPayout, FetchLike, IntegrationDefinition, SecretStore, SyncResult } from './types';
 
 export const INTEGRATIONS: IntegrationDefinition[] = [WOOCOMMERCE, SHOPIFY, MOLLIE, STRIPE];
+
+/** Verlegde btw over buitenlandse transactiekosten: aangeven en tegelijk aftrekken (per saldo nul). */
+function reverseChargeLines(net: number): (PostLine | null)[] {
+  const vat = roundHalfAwayFromZero((net * PURCHASE_VAT_RATES.eu.percentage) / 100);
+  return [signedLine(ACCOUNTS.btwVoorbelasting, vat, { vatCode: 'eu' }), signedLine(REVERSE_CHARGE_ACCOUNTS.eu, -vat, { vatCode: 'eu' })];
+}
 
 export interface IntegrationState {
   definition: IntegrationDefinition;
@@ -210,7 +218,8 @@ export class IntegrationService {
       }
       const lines = [
         signedLine(ACCOUNTS.kruisposten, p.amount),
-        signedLine(ACCOUNTS.bankkosten, p.feesNet, { description: `${source} transactiekosten` }),
+        signedLine(ACCOUNTS.bankkosten, p.feesNet, { description: `${source} transactiekosten`, vatCode: p.feesReverseCharge ?? null }),
+        ...(p.feesReverseCharge ? reverseChargeLines(p.feesNet) : []),
         signedLine(ACCOUNTS.btwVoorbelasting, p.feesVat, { vatCode: 'hoog' }),
         signedLine(ACCOUNTS.tussenrekeningPsp, -(p.amount + p.feesNet + p.feesVat)),
       ].filter((l): l is PostLine => l !== null);

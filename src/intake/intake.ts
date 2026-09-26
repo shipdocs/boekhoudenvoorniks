@@ -6,7 +6,7 @@ import type { RelationsService } from '../relations/relations';
 import type { BankService, BankTransaction } from '../import/bank';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { EXPENSE_CATEGORIES } from '../shared/categories';
-import { PURCHASE_VAT_RATES, type PurchaseVatCode } from '../shared/vat';
+import { PURCHASE_VAT_RATES, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
 import { diffDays, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { countDecision, logAutomation } from '../inbox/automation-log';
@@ -28,11 +28,6 @@ import type { OcrProvider } from './ocr';
 import type { ConfidenceLevel, DocumentResult, Issue } from './types';
 import { splitGross } from '../import/bank';
 
-
-/** Verlegde btw: je betaalt de leverancier alleen netto. */
-function isReverseChargeCode(code: string): boolean {
-  return code === 'verlegd';
-}
 
 export interface IntakeDocument {
   id: number;
@@ -444,14 +439,14 @@ export class IntakeService {
     if (c.splits && c.splits.length > 1) {
       if (c.splits.reduce((s, x) => s + x.gross, 0) !== c.total) throw new ValidationError('De delen tellen niet op tot het totaal');
       // een deel met een eigen tarief (van de bonregels) krijgt dat tarief; anders het tarief van de bon
-      const codeFor = (r: number | undefined): PurchaseVatCode => (r === undefined || isReverseChargeCode(c.vatCode) ? c.vatCode : r === 21 ? 'hoog' : r === 9 ? 'laag' : r === 0 ? 'nul' : c.vatCode);
+      const codeFor = (r: number | undefined): PurchaseVatCode => (r === undefined || isReverseCharge(c.vatCode) ? c.vatCode : r === 21 ? 'hoog' : r === 9 ? 'laag' : r === 0 ? 'nul' : c.vatCode);
       return c.splits.map((sp) => {
         const vatCode = codeFor(sp.vatRate);
         const rate = PURCHASE_VAT_RATES[vatCode].percentage;
         if (sp.categoryKey === 'prive') return { account: ACCOUNTS.priveOpnamen, netAmount: sp.gross, vatCode: 'geen' as const, description: 'Privé-deel van de bon' };
         const cat = EXPENSE_CATEGORIES.find((x) => x.key === sp.categoryKey);
         if (!cat) throw new ValidationError(`Onbekende categorie ${sp.categoryKey}`);
-        const { net, vat } = splitGross(sp.gross, rate, isReverseChargeCode(vatCode));
+        const { net, vat } = splitGross(sp.gross, rate, isReverseCharge(vatCode));
         return { account: cat.account, netAmount: net, vatCode, vatAmount: vat, description: cat.label };
       });
     }
@@ -467,10 +462,10 @@ export class IntakeService {
       }));
     }
     const rate = PURCHASE_VAT_RATES[c.vatCode].percentage;
-    const { net, vat: vatAmount } = splitGross(c.total, rate, c.vatCode === 'verlegd');
+    const { net, vat: vatAmount } = splitGross(c.total, rate, isReverseCharge(c.vatCode));
     // Gebruik het BTW-bedrag van het document als dat binnen 2 cent klopt (bonnen ronden soms per regel af)
     const docVat = vat.length === 1 ? vat[0]!.amount : null;
-    const useDoc = docVat !== null && c.vatCode !== 'verlegd' && Math.abs(docVat - vatAmount) <= 2;
+    const useDoc = docVat !== null && !isReverseCharge(c.vatCode) && Math.abs(docVat - vatAmount) <= 2;
     return [{ account, netAmount: useDoc ? c.total - docVat! : net, vatCode: c.vatCode, vatAmount: useDoc ? docVat! : vatAmount }];
   }
 

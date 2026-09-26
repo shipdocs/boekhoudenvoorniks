@@ -34,7 +34,10 @@ export interface VatReport {
   /** Voor de gebruiker: de vier getallen die ertoe doen */
   summary: {
     omzet: Cents;
+    /** btw over je eigen omzet (1a/1b) */
     btwOverOmzet: Cents;
+    /** verlegde btw op inkoop (2a/4a/4b): aangegeven én als voorbelasting afgetrokken */
+    btwVerlegd: Cents;
     voorbelasting: Cents;
     teBetalen: Cents;
     teBetalenEuro: number;
@@ -44,6 +47,23 @@ export interface VatReport {
   corrections: VatCorrection[];
   warnings: string[];
   submittedAt: string | null;
+}
+
+export interface IcpLine {
+  relationId: number | null;
+  name: string;
+  /** landcode uit het btw-nummer (EL = Griekenland) */
+  country: string;
+  vatNumber: string;
+  amount: Cents;
+  amountEuro: number;
+  problems: string[];
+}
+
+export interface IcpReport {
+  period: Period;
+  lines: IcpLine[];
+  total: Cents;
 }
 
 export interface VatCorrection {
@@ -70,6 +90,10 @@ const safeLabel = (key: string) => {
     return key;
   }
 };
+
+/** #16: buitenland is gebouwd zonder fiscale review; altijd tonen als deze rubrieken gevuld zijn. */
+export const BUITENLAND_DISCLAIMER =
+  'Let op: de rubrieken voor het buitenland (3a, 3b, 4a, 4b) zijn nog niet door een fiscalist gecontroleerd. Controleer ze voordat je de aangifte doet. Verkoop je aan particulieren in andere EU-landen (webshop), dan geldt vaak de OSS-regeling; die zit niet in deze app.';
 
 export const PORTAL_URL = 'https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-aangifte-doen';
 
@@ -123,7 +147,7 @@ export class VatService {
          GROUP BY e.vat_correction_of, a.rgs_code`,
       )
       .all(...(start && end ? [start, end] : [])) as { period_key: string; rgs_code: string; net: number; max_id: number; entries: number }[];
-    const vatAccounts = new Set<string>([ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag, ACCOUNTS.btwAfdragenVerlegd, ACCOUNTS.btwVoorbelasting]);
+    const vatAccounts = new Set<string>([ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag, ACCOUNTS.btwAfdragenVerlegd, ACCOUNTS.btwAfdragenEu, ACCOUNTS.btwAfdragenBuitenEu, ACCOUNTS.btwVoorbelasting]);
     const byPeriod = new Map<string, VatCorrection>();
     for (const r of rows) {
       const c = byPeriod.get(r.period_key) ?? { periodKey: r.period_key, label: safeLabel(r.period_key), btw: 0, entries: 0, maxEntryId: 0, suppletie: false };
@@ -161,6 +185,8 @@ export class VatService {
         signedLine(ACCOUNTS.btwAfdragenHoog, net(ACCOUNTS.btwAfdragenHoog)),
         signedLine(ACCOUNTS.btwAfdragenLaag, net(ACCOUNTS.btwAfdragenLaag)),
         signedLine(ACCOUNTS.btwAfdragenVerlegd, net(ACCOUNTS.btwAfdragenVerlegd)),
+        signedLine(ACCOUNTS.btwAfdragenEu, net(ACCOUNTS.btwAfdragenEu)),
+        signedLine(ACCOUNTS.btwAfdragenBuitenEu, net(ACCOUNTS.btwAfdragenBuitenEu)),
         signedLine(ACCOUNTS.btwVoorbelasting, net(ACCOUNTS.btwVoorbelasting)),
         signedLine(ACCOUNTS.btwAfrekening, -c.btw),
       ].filter((l): l is PostLine => l !== null);
@@ -185,11 +211,19 @@ export class VatService {
     const omzetNul = byAccount(ACCOUNTS.omzetNul) + byAccount(ACCOUNTS.omzetVerlegd);
     const omzetVrijgesteld = byAccount(ACCOUNTS.omzetVrijgesteld);
     // 2a: grondslag = kosten/activa-regels met btw-code 'verlegd' (debet, dus −net)
-    const verlegdInkoop = -rows.filter((r) => r.vat_code === 'verlegd' && (r.category === 'kosten' || r.category === 'activa')).reduce((s, r) => s + r.net, 0);
+    const inkoopGrondslag = (code: string) => 0 - rows.filter((r) => r.vat_code === code && (r.category === 'kosten' || r.category === 'activa')).reduce((s, r) => s + r.net, 0) || 0;
+    const verlegdInkoop = inkoopGrondslag('verlegd');
     const btwVerlegd = byAccount(ACCOUNTS.btwAfdragenVerlegd);
+    // buitenland (#16): 3a uitvoer, 3b EU-bedrijven (ICP), 4a/4b verlegde inkoop van buiten/binnen de EU
+    const omzetExport = byAccount(ACCOUNTS.omzetExport);
+    const omzetIcp = byAccount(ACCOUNTS.omzetIcp);
+    const inkoopBuitenEu = inkoopGrondslag('buiten-eu');
+    const btwBuitenEu = byAccount(ACCOUNTS.btwAfdragenBuitenEu);
+    const inkoopEu = inkoopGrondslag('eu');
+    const btwEu = byAccount(ACCOUNTS.btwAfdragenEu);
     const voorbelasting = -byAccount(ACCOUNTS.btwVoorbelasting);
 
-    const btw5a = btwHoog + btwLaag + btwVerlegd;
+    const btw5a = btwHoog + btwLaag + btwVerlegd + btwBuitenEu + btwEu;
     const rub = (code: string, label: string, omzet: Cents | null, btw: Cents | null, roundUpBtw = false): Rubriek => ({
       code,
       label,
@@ -202,9 +236,13 @@ export class VatService {
     const r1b = rub('1b', 'Leveringen/diensten belast met laag tarief', omzetLaag, btwLaag);
     const r1e = rub('1e', 'Leveringen/diensten belast met 0% of niet bij u belast', omzetNul, null);
     const r2a = rub('2a', 'Leveringen/diensten waarbij de heffing van omzetbelasting naar u is verlegd', verlegdInkoop, btwVerlegd);
+    const r3a = rub('3a', 'Leveringen naar landen buiten de EU (uitvoer)', omzetExport, null);
+    const r3b = rub('3b', 'Leveringen naar of diensten in landen binnen de EU', omzetIcp, null);
+    const r4a = rub('4a', 'Leveringen/diensten uit landen buiten de EU', inkoopBuitenEu, btwBuitenEu);
+    const r4b = rub('4b', 'Leveringen/diensten uit landen binnen de EU', inkoopEu, btwEu);
     const r5a = rub('5a', 'Verschuldigde omzetbelasting (rubrieken 1a t/m 4b)', null, btw5a);
     const r5b = rub('5b', 'Voorbelasting', null, voorbelasting, true);
-    const saldoEuro = (r1a.btwEuro ?? 0) + (r1b.btwEuro ?? 0) + (r2a.btwEuro ?? 0) - (r5b.btwEuro ?? 0);
+    const saldoEuro = (r1a.btwEuro ?? 0) + (r1b.btwEuro ?? 0) + (r2a.btwEuro ?? 0) + (r4a.btwEuro ?? 0) + (r4b.btwEuro ?? 0) - (r5b.btwEuro ?? 0);
     const r5c: Rubriek = { code: '5c', label: 'Subtotaal (5a min 5b)', omzet: null, btw: btw5a - voorbelasting, omzetEuro: null, btwEuro: saldoEuro };
     const r5g: Rubriek = { code: '5g', label: 'Totaal te betalen / terug te vragen', omzet: null, btw: btw5a - voorbelasting, omzetEuro: null, btwEuro: saldoEuro };
 
@@ -219,6 +257,10 @@ export class VatService {
         warnings.push(`Er is ${formatEuro(Math.abs(c.btw))} btw gecorrigeerd over ${c.label}. Dat is meer dan € 1.000, dus dat gaat via een suppletie-aangifte. Het zit niet in de bedragen hieronder.`);
       }
     }
+    if (omzetExport !== 0 || omzetIcp !== 0 || btwBuitenEu !== 0 || btwEu !== 0) {
+      warnings.push(BUITENLAND_DISCLAIMER);
+    }
+    if (omzetIcp !== 0) warnings.push('Je hebt aan bedrijven in andere EU-landen verkocht (3b). Doe daarnaast de opgaaf intracommunautaire prestaties (ICP); het overzicht staat hieronder.');
     const rounding = btwHoog - (r1a.btwEuro ?? 0) * 100;
     if (Math.abs(rounding) > 100) warnings.push('Controleer de afronding van rubriek 1a.');
 
@@ -226,10 +268,11 @@ export class VatService {
     return {
       period,
       status: stored?.status ?? 'open',
-      rubrieken: [r1a, r1b, r1e, r2a, r5a, r5b, r5c, r5g],
+      rubrieken: [r1a, r1b, r1e, r2a, r3a, r3b, r4a, r4b, r5a, r5b, r5c, r5g],
       summary: {
-        omzet: omzetHoog + omzetLaag + omzetNul + omzetVrijgesteld,
-        btwOverOmzet: btw5a,
+        omzet: omzetHoog + omzetLaag + omzetNul + omzetVrijgesteld + omzetExport + omzetIcp,
+        btwOverOmzet: btwHoog + btwLaag,
+        btwVerlegd: btwVerlegd + btwBuitenEu + btwEu,
         voorbelasting,
         teBetalen: btw5a - voorbelasting,
         teBetalenEuro: saldoEuro,
@@ -240,11 +283,61 @@ export class VatService {
         { vatCode: 'nul', label: '0% / verlegd', omzet: omzetNul, btw: 0 },
         { vatCode: 'vrijgesteld', label: 'Vrijgesteld / KOR', omzet: omzetVrijgesteld, btw: 0 },
         { vatCode: 'verlegd-inkoop', label: 'Inkoop btw verlegd', omzet: verlegdInkoop, btw: btwVerlegd },
+        { vatCode: 'icp', label: 'Bedrijven in de EU (0%)', omzet: omzetIcp, btw: 0 },
+        { vatCode: 'export', label: 'Uitvoer buiten de EU (0%)', omzet: omzetExport, btw: 0 },
+        { vatCode: 'eu', label: 'Inkoop uit de EU, btw verlegd', omzet: inkoopEu, btw: btwEu },
+        { vatCode: 'buiten-eu', label: 'Inkoop van buiten de EU, btw verlegd', omzet: inkoopBuitenEu, btw: btwBuitenEu },
       ],
       corrections,
       warnings,
       submittedAt: stored?.submitted_at ?? null,
     };
+  }
+
+  /**
+   * Overzicht voor de opgaaf intracommunautaire prestaties (ICP, #16): per afnemer in een ander
+   * EU-land het btw-nummer en het bedrag van rubriek 3b in deze periode. De opgaaf zelf doe je in
+   * Mijn Belastingdienst Zakelijk; daar geef je ook aan of het om goederen of diensten gaat.
+   */
+  icp(periodKey: string): IcpReport {
+    const period = periodFromKey(periodKey);
+    const rows = this.db
+      .prepare(
+        `SELECT l.relation_id, r.name, r.country, r.vat_number, SUM(l.credit) - SUM(l.debit) AS net
+         FROM journal_lines l
+         JOIN journal_entries e ON e.id = l.journal_entry_id
+         JOIN chart_of_accounts a ON a.id = l.account_id
+         LEFT JOIN relations r ON r.id = l.relation_id
+         WHERE a.rgs_code = ? AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source <> 'btw'
+         GROUP BY l.relation_id
+         HAVING net <> 0
+         ORDER BY r.name`,
+      )
+      .all(ACCOUNTS.omzetIcp, period.start, period.end) as { relation_id: number | null; name: string | null; country: string | null; vat_number: string | null; net: number }[];
+    const lines: IcpLine[] = rows.map((r) => {
+      const vatNumber = (r.vat_number ?? '').replace(/[\s.]/g, '').toUpperCase();
+      const problems: string[] = [];
+      if (!vatNumber) problems.push('btw-nummer ontbreekt');
+      else if (!/^[A-Z]{2}[0-9A-Z]{2,13}$/.test(vatNumber)) problems.push('btw-nummer lijkt niet geldig');
+      else if (vatNumber.startsWith('NL')) problems.push('Nederlands btw-nummer: dit is geen ICP');
+      return {
+        relationId: r.relation_id,
+        name: r.name ?? 'Onbekende klant',
+        country: (vatNumber.slice(0, 2) || r.country || '').toUpperCase(),
+        vatNumber,
+        amount: r.net,
+        amountEuro: Math.round(r.net / 100),
+        problems,
+      };
+    });
+    return { period, lines, total: lines.reduce((s, l) => s + l.amount, 0) };
+  }
+
+  icpCsv(periodKey: string): string {
+    const r = this.icp(periodKey);
+    const out = ['Land;Btw-nummer;Klant;Bedrag;Bedrag (hele euro)'];
+    for (const l of r.lines) out.push([l.country, l.vatNumber, `"${l.name.replace(/"/g, '""')}"`, centsToDecimalString(l.amount), l.amountEuro].join(';'));
+    return out.join('\r\n') + '\r\n';
   }
 
   currentPeriod(date: IsoDate = today()): Period {
@@ -305,9 +398,13 @@ export class VatService {
       const hoog = report.rubrieken.find((r) => r.code === '1a')!.btw ?? 0;
       const laag = report.rubrieken.find((r) => r.code === '1b')!.btw ?? 0;
       const verlegd = report.rubrieken.find((r) => r.code === '2a')!.btw ?? 0;
+      const buitenEu = report.rubrieken.find((r) => r.code === '4a')!.btw ?? 0;
+      const eu = report.rubrieken.find((r) => r.code === '4b')!.btw ?? 0;
       lines.push(signedLine(ACCOUNTS.btwAfdragenHoog, hoog));
       lines.push(signedLine(ACCOUNTS.btwAfdragenLaag, laag));
       lines.push(signedLine(ACCOUNTS.btwAfdragenVerlegd, verlegd));
+      lines.push(signedLine(ACCOUNTS.btwAfdragenBuitenEu, buitenEu));
+      lines.push(signedLine(ACCOUNTS.btwAfdragenEu, eu));
       lines.push(signedLine(ACCOUNTS.btwVoorbelasting, -report.summary.voorbelasting));
       lines.push(signedLine(ACCOUNTS.btwAfrekening, -report.summary.teBetalen));
       const clean = lines.filter((l): l is PostLine => l !== null);
@@ -323,7 +420,7 @@ export class VatService {
              balance = excluded.balance, details = excluded.details, status = 'ingediend', submitted_at = excluded.submitted_at,
              journal_entry_id = excluded.journal_entry_id`,
         )
-        .run(period.key, period.start, period.end, report.summary.btwOverOmzet, report.summary.voorbelasting, report.summary.teBetalen, JSON.stringify(report.rubrieken), entryId);
+        .run(period.key, period.start, period.end, report.summary.btwOverOmzet + report.summary.btwVerlegd, report.summary.voorbelasting, report.summary.teBetalen, JSON.stringify(report.rubrieken), entryId);
       return this.calculate(periodKey);
     });
   }

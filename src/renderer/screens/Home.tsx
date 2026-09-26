@@ -9,6 +9,7 @@ import { CategoryPicker } from './Bank';
 export function Home() {
   const { go, settings, refreshBadge, toast } = useApp();
   const { data, error, reload } = useLoad(() => api.home.get());
+  const ib = useLoad(() => api.incomeTax.estimate());
   const { run, busy } = useAction();
   const [picking, setPicking] = useState<Task | null>(null);
   const [pickingJob, setPickingJob] = useState<Task | null>(null);
@@ -104,6 +105,14 @@ export function Home() {
 
       <p className="muted small" style={{ marginTop: -6 }}>
         Vrij te besteden: <strong><Euro cents={data.money.freeToSpend} /></strong> <span title="banksaldo min de btw die je nog moet betalen en je openstaande rekeningen">(banksaldo min btw en openstaande rekeningen)</span>
+        {ib.data && ib.data.reserveToDate > 0 && (
+          <>
+            {' · '}
+            <span className="clickable" title={ib.data.disclaimer} onClick={() => go({ screen: 'belasting' })}>
+              inkomstenbelasting tot nu ± <Euro cents={ib.data.reserveToDate} /> <em>(schatting)</em>, daarna vrij ± <Euro cents={Math.max(0, data.money.freeToSpend - ib.data.reserveToDate)} />
+            </span>
+          </>
+        )}
       </p>
 
       <h2>Wat wil je doen?</h2>

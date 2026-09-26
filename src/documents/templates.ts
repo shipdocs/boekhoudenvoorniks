@@ -3,7 +3,7 @@ import { DEFAULT_HTML_TEMPLATE } from './default-template';
 import { renderTemplate, textToHtml } from './render';
 import { formatEuro } from '../shared/money';
 import { formatDateNl } from '../shared/dates';
-import type { SalesVatCode } from '../shared/vat';
+import { ICP_TEXT, type SalesVatCode } from '../shared/vat';
 import { computeTotals, lineNet } from './totals';
 import type { CompanySettings } from '../settings/settings';
 import { formatIban } from '../shared/validation';
@@ -203,6 +203,9 @@ export function renderDocumentHtml(doc: RenderableDocument, customer: Renderable
       notes: doc.notes,
       notesHtml: textToHtml(doc.notes),
       verlegd: doc.lines.some((l) => l.vat_code === 'verlegd'),
+      icp: doc.lines.some((l) => l.vat_code === 'icp'),
+      icpText: ICP_TEXT,
+      export: doc.lines.some((l) => l.vat_code === 'export'),
       kor: opts.kor || doc.lines.some((l) => l.vat_code === 'vrijgesteld'),
       isInvoice,
       isCredit,
@@ -212,7 +215,7 @@ export function renderDocumentHtml(doc: RenderableDocument, customer: Renderable
       quantity: formatQuantity(l.quantity),
       unit: l.unit ?? '',
       unitPrice: formatEuro(l.unit_price),
-      vatLabel: l.vat_code === 'verlegd' ? 'verlegd' : l.vat_code === 'vrijgesteld' ? '—' : `${l.vat_percentage}%`,
+      vatLabel: l.vat_code === 'verlegd' ? 'verlegd' : l.vat_code === 'icp' ? '0% ICP' : l.vat_code === 'export' ? '0% uitvoer' : l.vat_code === 'vrijgesteld' ? '—' : `${l.vat_percentage}%`,
       net: formatEuro(lineNet({ quantity: l.quantity, unitPrice: l.unit_price })),
     })),
     totals: {
