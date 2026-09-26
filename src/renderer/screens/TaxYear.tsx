@@ -93,20 +93,23 @@ export function TaxYear() {
 
 type OverviewData = Awaited<ReturnType<typeof api.incomeTax.overview>>;
 
-/** Het overzicht als platte tekst, om te mailen naar je boekhouder. */
+/** Het overzicht als platte tekst, om te mailen naar je boekhouder: met alle vaktermen en notities. */
 async function copyForAccountant(d: OverviewData): Promise<void> {
+  const item = (i: OverviewData['items'][number]) => `- ${i.label}${i.amount !== null ? `: ${euro(i.amount)}` : ''}\n  ${i.explain}${i.note ? `\n  Voor de boekhouder: ${i.note}` : ''}`;
   const lines = [
     `Overzicht inkomstenbelasting ${d.year} uit Gratis Boekhouden${d.running ? ` (tot en met ${d.asOf}, jaar nog bezig)` : ''}`,
-    'Graag controleren; dit is berekend door software, niet door een deskundige.',
+    'Graag controleren: dit is berekend door software, niet door een deskundige.',
     '',
-    ...d.items.filter((i) => i.amount !== null).map((i) => `${i.label}: ${euro(i.amount!)}\n  ${i.explain}${i.where ? `\n  Aangifte: ${i.where}` : ''}`),
+    'Bedragen:',
+    ...d.items.filter((i) => i.amount !== null).map(item),
     `Belastbare winst uit onderneming (geschat): € ${d.breakdown.taxableIncome.toLocaleString('nl-NL')}`,
     '',
     'Aandachtspunten:',
-    ...d.items.filter((i) => i.amount === null).map((i) => `- ${i.label}: ${i.explain}`),
+    ...d.items.filter((i) => i.amount === null).map(item),
     '',
     `Uren: ${d.hours.total} (urencriterium ${d.hours.target}). Zakelijke km privéauto: ${d.km.km} km = ${euro(d.km.amount)}.`,
     `Bedragen/tarieven van ${d.rulesYear}${d.rulesChecked ? '' : ' (tabel in de app nog niet door een fiscalist gecontroleerd)'}.`,
+    'Niet meegenomen: partner, andere inkomsten, box 2/3, willekeurige afschrijving, EIA/MIA/Vamil.',
   ];
   try {
     await navigator.clipboard.writeText(lines.join('\n'));
@@ -123,51 +126,67 @@ function Overview({ year }: { year: number }) {
   if (!o.data) return <ErrorBox error={o.error} />;
   const d = o.data;
   const b = d.breakdown;
+  const shown = d.items.filter((i) => i.amount !== null && !i.forAccountant);
+  const hiddenTotal = d.items.filter((i) => i.amount !== null && i.forAccountant).reduce((t, i) => t + i.amount!, 0);
+  const notes = d.items.filter((i) => i.note || i.forAccountant);
   return (
     <>
       <div className="row between">
         <p className="muted small" style={{ margin: 0 }}>{d.disclaimer}</p>
         <Button small onClick={() => void copyForAccountant(d)}>📋 Kopieer voor je boekhouder</Button>
       </div>
-      {d.running && <p className="muted small">{year} is nog bezig: de bedragen zijn tot en met vandaag.</p>}
+      {d.running && <p className="muted small">{year} is nog niet voorbij: dit zijn de bedragen tot en met vandaag.</p>}
       <div className="card">
         <table className="sumtable">
           <tbody>
-            {d.items.filter((i) => i.amount !== null).map((i) => (
-              <tr key={i.key} title={i.explain}>
+            {shown.map((i) => (
+              <tr key={i.key}>
                 <td>
                   {i.label}
-                  <div className="small muted">{i.explain}{i.where ? ` · In de aangifte: ${i.where}` : ''}</div>
+                  <div className="small muted">{i.explain}</div>
                 </td>
                 <td className="num">{i.amount! > 0 && i.key !== 'winst' ? '+ ' : ''}{euro(i.amount!)}</td>
               </tr>
             ))}
-            <tr className="total"><td>Belastbare winst uit onderneming (geschat)</td><td className="num">€ {b.taxableIncome.toLocaleString('nl-NL')}</td></tr>
+            {hiddenTotal !== 0 && (
+              <tr>
+                <td>Overige correcties<div className="small muted">Staat in de notities voor je boekhouder.</div></td>
+                <td className="num">{hiddenTotal > 0 ? '+ ' : ''}{euro(hiddenTotal)}</td>
+              </tr>
+            )}
+            <tr className="total"><td>Winst waarover je belasting betaalt (schatting)</td><td className="num">€ {b.taxableIncome.toLocaleString('nl-NL')}</td></tr>
           </tbody>
         </table>
       </div>
-      {d.items.filter((i) => i.amount === null).map((i) => (
+      {d.items.filter((i) => i.amount === null && !i.forAccountant).map((i) => (
         <div key={i.key} className={`notice ${i.status === 'warn' ? 'warn' : ''}`}>
           <strong>{i.label}</strong>
           <div className="small">{i.explain}</div>
         </div>
       ))}
+      <details style={{ marginTop: 12 }}>
+        <summary className="small">📎 Notities voor je boekhouder ({notes.length})</summary>
+        <p className="small muted">Hier staan de vaktermen en details. Jij hoeft hier niets mee; ze gaan mee met "Kopieer voor je boekhouder".</p>
+        <ul className="small">
+          {notes.map((i) => <li key={i.key}><strong>{i.label}</strong>{i.amount !== null ? ` (${euro(i.amount)})` : ''}: {i.note ?? i.explain}</li>)}
+        </ul>
+      </details>
       <div className="hero" style={{ marginTop: 14 }}>
         <div className="card">
           <div className="value">{d.hours.total.toLocaleString('nl-NL')} uur</div>
-          <div className="label">gewerkt{d.running ? `, op koers voor ± ${d.hours.projected.toLocaleString('nl-NL')}` : ''} · urencriterium {d.hours.target.toLocaleString('nl-NL')}</div>
+          <div className="label">gewerkt{d.running ? `, op weg naar ± ${d.hours.projected.toLocaleString('nl-NL')}` : ''} · nodig voor de aftrek: {d.hours.target.toLocaleString('nl-NL')}</div>
         </div>
         <div className="card">
           <div className="value">{d.km.km.toLocaleString('nl-NL')} km</div>
-          <div className="label">zakelijk met je privéauto · {euro(d.km.amount)} aftrek</div>
+          <div className="label">zakelijk met je eigen auto · {euro(d.km.amount)} aftrek</div>
         </div>
         <div className="card">
           <div className="value">€ {b.total.toLocaleString('nl-NL')}</div>
-          <div className="label">inkomstenbelasting + Zvw over deze winst (schatting)</div>
+          <div className="label">inkomstenbelasting en zorgpremie (Zvw) over deze winst · schatting</div>
         </div>
       </div>
       <p className="muted small">
-        Bedragen van {d.rulesYear}{d.rulesChecked ? '' : '; deze tabel is nog niet door een fiscalist gecontroleerd'}. Niet meegenomen: partner, andere inkomsten, willekeurige afschrijving en EIA/MIA/Vamil.
+        Alleen je bedrijf telt mee. Je partner, je huis, ander inkomen en spaargeld niet: die neemt je boekhouder mee.
       </p>
     </>
   );

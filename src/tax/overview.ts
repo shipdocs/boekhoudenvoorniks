@@ -37,9 +37,12 @@ export interface OverviewItem {
   label: string;
   /** effect op de fiscale winst in centen: + bijtelling, − aftrek; null = alleen informatie */
   amount: Cents | null;
+  /** uitleg in gewone taal, voor de gebruiker */
   explain: string;
-  /** waar het in de aangifte hoort */
-  where?: string;
+  /** vaktaal en details voor de boekhouder (fiscale term, waar in de aangifte); niet in beeld, wel in "Kopieer voor je boekhouder" */
+  note?: string;
+  /** te technisch voor de gebruiker: alleen als notitie voor de boekhouder (het bedrag telt wel mee) */
+  forAccountant?: boolean;
   status?: 'ok' | 'warn' | 'info';
 }
 
@@ -173,119 +176,121 @@ export class TaxOverviewService {
       partnerHours: s.partnerHours,
     });
     const fuel = this.costsOn('WBedAutBra', `${year}-01-01`, to) + this.costsOn('WBedAutOnd', `${year}-01-01`, to);
+    const eur = (c: number) => `€ ${(c / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     const items: OverviewItem[] = [];
     items.push({
       key: 'winst',
-      label: 'Winst volgens je boekhouding',
+      label: 'Je winst',
       amount: profit,
-      explain: adj.unbookedDepreciation > 0
-        ? `Inclusief € ${(adj.unbookedDepreciation / 100).toFixed(2).replace('.', ',')} afschrijving ${running ? 'tot nu toe; die boekt de app na afloop van het jaar' : 'die nog niet geboekt is'}.`
-        : 'Omzet min kosten, inclusief afschrijving en kilometers.',
-      where: 'Winst uit onderneming → winst- en verliesrekening',
+      explain: 'Wat je verdiende min je zakelijke kosten. Ook de kilometers en het deel van je investeringen voor dit jaar zijn er al af.',
+      note: `Winst uit onderneming volgens de boekhouding${adj.unbookedDepreciation > 0 ? `, inclusief ${eur(adj.unbookedDepreciation)} afschrijving ${running ? 'tot nu toe (wordt na afloop van het jaar geboekt)' : 'die nog niet geboekt is'}` : ''}.`,
     });
     if (adj.representatie.total > 0) {
       items.push({
         key: 'representatie',
-        label: 'Bijtelling etentjes, borrels en relatiegeschenken',
+        label: 'Etentjes, borrels en relatiegeschenken',
         amount: adj.representatie.bijtelling,
-        explain: `Deze kosten zijn beperkt aftrekbaar: 20% telt weer bij de winst (of alles tot € ${rules.representatie.drempel.toLocaleString('nl-NL')}, als dat minder is). Je had € ${(adj.representatie.total / 100).toFixed(2).replace('.', ',')} aan zulke kosten.`,
-        where: 'Winst uit onderneming → niet-aftrekbare kosten',
+        explain: `Deze kosten (${eur(adj.representatie.total)}) mag je niet helemaal aftrekken. Een klein deel telt daarom weer mee als winst. De app rekent dat voor je uit.`,
+        note: `Beperkt aftrekbare kosten (representatie): bijtelling = min(20%, drempel € ${rules.representatie.drempel.toLocaleString('nl-NL')}). Aangifte: winst uit onderneming → niet-aftrekbare kosten.`,
       });
     }
     if (adj.phonePrivate.bijtelling > 0) {
       items.push({
         key: 'telefoon-prive',
-        label: `Privégebruik telefoon & internet (${adj.phonePrivate.pct}%)`,
+        label: 'Telefoon en internet: privédeel',
         amount: adj.phonePrivate.bijtelling,
-        explain: `Je gebruikt telefoon en internet ook privé; dat deel van de € ${(adj.phonePrivate.costs / 100).toFixed(2).replace('.', ',')} telt weer bij de winst.${adj.phonePrivate.vat > 0 ? ` De btw daarover (± € ${(adj.phonePrivate.vat / 100).toFixed(2).replace('.', ',')}) mag je ook niet aftrekken: corrigeer die in je laatste btw-aangifte van het jaar (minder voorbelasting, rubriek 5b).` : ''}`,
-        where: 'Winst uit onderneming → privégebruik',
+        explain: `Je gebruikt je telefoon en internet voor ${adj.phonePrivate.pct}% privé. Dat deel telt niet als zakelijke kosten.`,
+        note: `Privégebruik ${adj.phonePrivate.pct}% van ${eur(adj.phonePrivate.costs)} (WBedKanTel) bijgeteld.${adj.phonePrivate.vat > 0 ? ` Btw-correctie privégebruik ± ${eur(adj.phonePrivate.vat)}: minder voorbelasting (5b) in de laatste aangifte van het jaar; nog niet geboekt.` : ''}`,
       });
     }
     if (adj.investments > 0) {
       items.push({
         key: 'kia',
-        label: 'Kleinschaligheidsinvesteringsaftrek (KIA)',
+        label: 'Extra aftrek voor je investeringen',
         amount: -adj.kia,
         explain:
           adj.kia > 0
-            ? `Je investeerde € ${(adj.investments / 100).toLocaleString('nl-NL')} in bedrijfsmiddelen van minstens € 450 per stuk. Daarover krijg je extra aftrek.`
-            : `Je investeerde € ${(adj.investments / 100).toLocaleString('nl-NL')}. De KIA geldt vanaf € ${rules.kia.min.toLocaleString('nl-NL')} per jaar${running ? '; investeringen later dit jaar tellen mee' : ''}.`,
-        where: 'Winst uit onderneming → investeringsaftrek',
+            ? `Je kocht dit jaar voor ${eur(adj.investments)} aan dingen die jaren meegaan (vanaf € 450 per stuk). Daarvoor krijg je extra aftrek.`
+            : `Je kocht dit jaar voor ${eur(adj.investments)} aan dingen die jaren meegaan. Extra aftrek krijg je pas vanaf € ${rules.kia.min.toLocaleString('nl-NL')} per jaar${running ? '; wat je later dit jaar nog koopt, telt mee' : ''}.`,
+        note: `Kleinschaligheidsinvesteringsaftrek (KIA) over ${eur(adj.investments)} investeringen. Aangifte: winst uit onderneming → investeringsaftrek.`,
         status: adj.kia > 0 ? 'ok' : 'info',
       });
     }
     if (adj.desinvesteringsbijtelling > 0) {
       items.push({
         key: 'desinvestering',
-        label: 'Desinvesteringsbijtelling',
+        label: 'Verkocht binnen 5 jaar: deel van de extra aftrek terug',
         amount: adj.desinvesteringsbijtelling,
-        explain: 'Je verkocht een bedrijfsmiddel binnen 5 jaar na de investering; een deel van de KIA van toen telt weer bij de winst.',
-        where: 'Winst uit onderneming → investeringsaftrek (desinvestering)',
+        explain: 'Je verkocht iets dat je minder dan 5 jaar geleden kocht. Een deel van de extra aftrek van toen moet je terugbetalen.',
+        note: 'Desinvesteringsbijtelling: effectief KIA-percentage van het investeringsjaar × verkoopprijs (max. over aanschafprijs).',
+        forAccountant: true,
       });
     }
     items.push({
       key: 'zelfstandigenaftrek',
-      label: 'Zelfstandigenaftrek',
+      label: 'Aftrek voor zelfstandigen',
       amount: -Math.round(breakdown.zelfstandigenaftrek * 100),
       explain: s.urencriterium
-        ? `Omdat je aan het urencriterium voldoet (${rules.urencriterium.toLocaleString('nl-NL')} uur per jaar).`
-        : `Je hebt aangegeven niet aan het urencriterium (${rules.urencriterium.toLocaleString('nl-NL')} uur) te voldoen, dus geen zelfstandigenaftrek.`,
-      where: 'Ondernemersaftrek',
+        ? `Omdat je minstens ${rules.urencriterium.toLocaleString('nl-NL')} uur per jaar aan je bedrijf werkt.`
+        : `Die krijg je alleen als je minstens ${rules.urencriterium.toLocaleString('nl-NL')} uur per jaar aan je bedrijf werkt. Je hebt aangegeven dat je dat niet haalt.`,
+      note: 'Zelfstandigenaftrek (ondernemersaftrek), met urencriterium.',
       status: s.urencriterium ? 'ok' : 'info',
     });
     if (adj.starter || (s.startYear && year - s.startYear < 5)) {
       items.push({
         key: 'startersaftrek',
-        label: 'Startersaftrek',
+        label: 'Extra aftrek voor starters',
         amount: -Math.round(breakdown.startersaftrek * 100),
         explain: adj.starter
-          ? 'Je bent gestart in de afgelopen 5 jaar en gebruikte de startersaftrek nog geen 3 keer.'
-          : 'Je hebt de startersaftrek al 3 keer gebruikt, of hij geldt niet meer (in 2027 nog € 10, vanaf 2028 afgeschaft).',
-        where: 'Ondernemersaftrek',
+          ? 'Omdat je bedrijf nog geen 5 jaar bestaat. Je krijgt deze aftrek hooguit 3 keer, en na 2027 bestaat hij niet meer.'
+          : 'Deze aftrek heb je al 3 keer gehad, of hij bestaat niet meer (na 2027 afgeschaft).',
+        note: 'Startersaftrek (ondernemersaftrek); aanname: sinds opgave elk jaar gebruikt. 2027: € 10, vanaf 2028 vervallen.',
         status: adj.starter ? 'ok' : 'info',
       });
     }
     if (breakdown.meewerkaftrek > 0) {
       items.push({
         key: 'meewerkaftrek',
-        label: 'Meewerkaftrek',
+        label: 'Aftrek omdat je partner meewerkt',
         amount: -Math.round(breakdown.meewerkaftrek * 100),
-        explain: `Je partner werkt ${s.partnerHours.toLocaleString('nl-NL')} uur per jaar onbetaald mee (minder dan € 5.000 vergoeding).`,
-        where: 'Ondernemersaftrek',
+        explain: `Je partner helpt ${s.partnerHours.toLocaleString('nl-NL')} uur per jaar mee zonder (veel) loon.`,
+        note: 'Meewerkaftrek naar uren partner; aanname: vergoeding partner < € 5.000.',
         status: 'ok',
       });
     }
     items.push({
       key: 'mkb',
-      label: `Mkb-winstvrijstelling (${(rules.mkbWinstvrijstelling * 100).toLocaleString('nl-NL')}%)`,
+      label: 'Korting voor kleine bedrijven',
       amount: -Math.round(breakdown.mkbWinstvrijstelling * 100),
-      explain: 'Over de winst na ondernemersaftrek. Die rekent de aangifte zelf uit.',
-      where: 'Mkb-winstvrijstelling',
+      explain: `Over je winst hoef je ${(rules.mkbWinstvrijstelling * 100).toLocaleString('nl-NL')}% geen belasting te betalen. Dat gaat vanzelf.`,
+      note: 'Mkb-winstvrijstelling over de winst na ondernemersaftrek.',
     });
     if (s.carUse === 'prive' && fuel > 0) {
       items.push({
         key: 'brandstof',
-        label: 'Let op: autokosten geboekt terwijl je privé rijdt',
+        label: 'Controleer je autokosten',
         amount: null,
-        explain: `Je rijdt met een privéauto, maar er staat € ${(fuel / 100).toFixed(2).replace('.', ',')} aan tanken, parkeren of onderhoud als kosten. Met een privéauto is alleen € ${(rules.kmRate / 100).toFixed(2).replace('.', ',')} per zakelijke km aftrekbaar: zet die betalingen op "privé" en vul je kilometers in.`,
+        explain: `Je rijdt met je eigen auto, maar er staat ${eur(fuel)} aan tanken, parkeren of onderhoud bij je zakelijke kosten. Dat mag niet: je krijgt al € ${(rules.kmRate / 100).toFixed(2).replace('.', ',')} per zakelijke kilometer. Zet die betalingen op "privé" en vul je kilometers in.`,
         status: 'warn',
       });
     }
     if (s.carUse === 'prive' || km.trips > 0) {
       items.push({
         key: 'km',
-        label: 'Zakelijke kilometers (privéauto)',
+        label: 'Kilometers met je eigen auto',
         amount: null,
-        explain: `${km.km.toLocaleString('nl-NL')} km × € ${(rules.kmRate / 100).toFixed(2).replace('.', ',')} = € ${(km.amount / 100).toFixed(2).replace('.', ',')}; zit al in de winst.`,
+        explain: `${km.km.toLocaleString('nl-NL')} km × € ${(rules.kmRate / 100).toFixed(2).replace('.', ',')} = ${eur(km.amount)}. Dat zit al in je winst.`,
         status: km.trips > 0 ? 'ok' : 'info',
       });
     }
     for (const a of this.assets.list({}, asOf).filter((x) => x.energyHint)) {
+      const deadline = a.energyHint!.deadline.split('-').reverse().join('-');
       items.push({
         key: `energie-${a.id}`,
-        label: `Mogelijk energie- of milieu-aftrek: ${a.name}`,
+        label: `Misschien extra aftrek: ${a.name}`,
         amount: null,
-        explain: `Staat dit op de Energielijst of Milieulijst (EIA 40%, MIA tot 45%, Vamil)? Dan moet je het binnen 3 maanden na de opdracht melden bij RVO — uiterlijk rond ${a.energyHint!.deadline.split('-').reverse().join('-')}. De app kan dat niet voor je doen.`,
+        explain: `Voor sommige energiezuinige of milieuvriendelijke aankopen krijg je veel extra aftrek. Dat moet je wel snel aanvragen. Vraag je boekhouder vóór ${deadline} of dit meetelt.`,
+        note: `Mogelijk EIA/MIA/Vamil (Energielijst/Milieulijst). Melden bij RVO binnen 3 maanden na opdracht; aankoopdatum ${a.acquired_on}.`,
         status: 'warn',
       });
     }
@@ -296,20 +301,22 @@ export class TaxOverviewService {
         amount: null,
         explain:
           s.homeWorkspace === 'zelfstandig'
-            ? 'Een zelfstandige werkruimte (eigen ingang en sanitair) kan aftrekbaar zijn als je er genoeg van je inkomen verdient (70%, of 30% als je ook elders een werkplek hebt). Dat rekent de app niet uit: vraag je boekhouder. Inrichting (bureau, stoel, kast) is sowieso aftrekbaar.'
-            : 'Een werkplek in je woning zonder eigen ingang en sanitair is niet aftrekbaar, en energie of huur van je huis dus ook niet. Inrichting (bureau, stoel, kast) en apparaten die je zakelijk gebruikt wel.',
+            ? 'Een aparte werkruimte met eigen ingang kan aftrekbaar zijn. Dat hangt af van hoeveel je daar verdient. Je boekhouder rekent dat uit. Je bureau, stoel en kast mag je altijd aftrekken.'
+            : 'Je kamer of werkhoek thuis zelf mag je niet aftrekken, ook de energie of huur niet. Je bureau, stoel, kast en apparaten wel.',
+        note: s.homeWorkspace === 'zelfstandig' ? 'Zelfstandige werkruimte opgegeven: toets inkomenseis (70%/30%) en bereken aftrek (niet door de app gedaan).' : undefined,
         status: 'info',
       });
     }
     items.push({
       key: 'aov',
-      label: 'AOV, pensioen en lijfrente',
+      label: 'Arbeidsongeschiktheidsverzekering (AOV) en pensioen',
       amount: null,
-      explain: 'Premies voor een arbeidsongeschiktheidsverzekering (AOV) en lijfrente of pensioen zijn geen bedrijfskosten. Betaal je ze van je zakelijke rekening, boek ze dan als privé. Je trekt ze wél af in je aangifte: de AOV bij de uitgaven voor inkomensvoorzieningen, lijfrente binnen je jaarruimte.',
+      explain: 'Dit zijn geen bedrijfskosten: zet ze op "privé". Je mag ze wel aftrekken in je aangifte. Geef je boekhouder door hoeveel je betaalde.',
+      note: 'AOV: uitgaven voor inkomensvoorzieningen. Lijfrente/pensioen: binnen jaarruimte/reserveringsruimte.',
       status: 'info',
     });
     if (fallback) {
-      items.push({ key: 'regels', label: `Bedragen van ${rules.year}`, amount: null, explain: `De bedragen voor ${year} zijn nog niet bekend in de app; gerekend met die van ${rules.year}.`, status: 'warn' });
+      items.push({ key: 'regels', label: `Bedragen van ${rules.year}`, amount: null, explain: `Voor ${year} kent de app nog niet alle bedragen.`, note: `Gerekend met de tabel van ${rules.year} (plus bekende wijzigingen); controleren.`, forAccountant: true, status: 'warn' });
     }
     return {
       year,

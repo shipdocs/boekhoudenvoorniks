@@ -232,7 +232,7 @@ describe('jaaroverzicht en schatting', () => {
     const { s } = setup();
     buy(s, '2026-05-01', 12100_00, 'Zonnepanelen werkplaats');
     const o = s.taxOverview.year(2026, '2026-06-01');
-    expect(o.items.find((i) => i.key.startsWith('energie-'))?.explain).toMatch(/RVO/);
+    expect(o.items.find((i) => i.key.startsWith('energie-'))?.note).toMatch(/RVO/);
   });
 });
 
@@ -312,7 +312,7 @@ describe('thuis werken, meewerkende partner en AOV', () => {
     expect(adj.phonePrivate).toMatchObject({ costs: 100_00, pct: 50, bijtelling: 50_00, vat: 10_50 });
     const item = s.taxOverview.year(2026, '2026-06-30').items.find((i) => i.key === 'telefoon-prive');
     expect(item?.amount).toBe(50_00);
-    expect(item?.explain).toMatch(/btw/);
+    expect(item?.note).toMatch(/btw/i);
   });
 
   it('meewerkaftrek naar uren van de partner, alleen met urencriterium', () => {
