@@ -121,7 +121,7 @@ function initServices(): void {
     },
     setSmtpPassword: (pw) => (pw ? secrets.set(SMTP_SECRET, pw) : secrets.delete(SMTP_SECRET)),
     hasSmtpPassword: () => secrets.get(SMTP_SECRET) !== null,
-    testSmtp: () => verifySmtp(services.settings.get().smtp, secrets.get(SMTP_SECRET)),
+    testSmtp: (smtp, password) => verifySmtp(smtp ?? services.settings.get().smtp, password || secrets.get(SMTP_SECRET)),
     async backupNow() {
       const result = await dialog.showSaveDialog(mainWindow!, {
         defaultPath: join(app.getPath('documents'), `boekhouding-backup-${new Date().toISOString().slice(0, 10)}.sqlite`),

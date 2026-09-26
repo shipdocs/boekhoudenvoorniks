@@ -46,7 +46,8 @@ export interface HostContext {
   openExternal(url: string): Promise<void>;
   setSmtpPassword(password: string): void;
   hasSmtpPassword(): boolean;
-  testSmtp(): Promise<void>;
+  /** test met de ingevulde (nog niet opgeslagen) gegevens en het ingetypte wachtwoord, anders het opgeslagen */
+  testSmtp(smtp?: AppSettings['smtp'], password?: string): Promise<void>;
   backupNow(): Promise<string | null>;
   restoreBackup(password?: string): Promise<boolean>;
   exportEncrypted(password: string): Promise<string | null>;
@@ -272,7 +273,7 @@ export function createApi(s: Services, host: HostContext) {
         return r;
       },
       setSmtpPassword: (pw: string) => host.setSmtpPassword(pw),
-      testSmtp: () => host.testSmtp(),
+      testSmtp: (smtp?: AppSettings['smtp'], password?: string) => host.testSmtp(smtp, password),
       counters: (year: number) => ({ factuur: s.settings.peekCounter(`factuur:${year}`), offerte: s.settings.peekCounter(`offerte:${year}`) }),
       setInvoiceCounter: (year: number, value: number) => s.settings.setCounter(`factuur:${year}`, value),
     },
