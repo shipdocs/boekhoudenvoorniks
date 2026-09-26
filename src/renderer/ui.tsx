@@ -104,9 +104,9 @@ export const Euro = ({ cents, sign = false }: { cents: number | null | undefined
 
 export const DateNl = ({ date }: { date: string | null | undefined }) => <>{date ? formatDateNl(date) : '—'}</>;
 
-export function Button(props: { children: ReactNode; onClick?: () => void; kind?: 'primary' | 'danger' | 'ghost'; small?: boolean; disabled?: boolean; type?: 'button' | 'submit'; title?: string }) {
+export function Button(props: { children: ReactNode; onClick?: () => void; kind?: 'primary' | 'danger' | 'ghost'; small?: boolean; disabled?: boolean; type?: 'button' | 'submit'; title?: string; ariaLabel?: string }) {
   return (
-    <button type={props.type ?? 'button'} title={props.title} className={`btn ${props.kind ?? ''} ${props.small ? 'small' : ''}`} onClick={props.onClick} disabled={props.disabled}>
+    <button type={props.type ?? 'button'} title={props.title} aria-label={props.ariaLabel} className={`btn ${props.kind ?? ''} ${props.small ? 'small' : ''}`} onClick={props.onClick} disabled={props.disabled}>
       {props.children}
     </button>
   );
@@ -124,7 +124,7 @@ export function Field(props: { label: string; hint?: string; children: ReactNode
 }
 
 /** Invoer voor bedragen in euro's (NL-notatie), waarde in centen. */
-export function MoneyInput({ value, onChange, placeholder, autoFocus }: { value: number | null; onChange: (cents: number | null) => void; placeholder?: string; autoFocus?: boolean }) {
+export function MoneyInput({ value, onChange, placeholder, autoFocus, ariaLabel }: { value: number | null; onChange: (cents: number | null) => void; placeholder?: string; autoFocus?: boolean; ariaLabel?: string }) {
   const [text, setText] = useState(value == null ? '' : (value / 100).toFixed(2).replace('.', ','));
   const [focused, setFocused] = useState(false);
   useEffect(() => {
@@ -134,6 +134,7 @@ export function MoneyInput({ value, onChange, placeholder, autoFocus }: { value:
     <input
       className="num"
       inputMode="decimal"
+      aria-label={ariaLabel}
       autoFocus={autoFocus}
       placeholder={placeholder ?? '0,00'}
       value={text}
@@ -151,12 +152,24 @@ export function MoneyInput({ value, onChange, placeholder, autoFocus }: { value:
   );
 }
 
+/** Open vensters, bovenste laatst: Esc sluit alleen het bovenste (een venster in een venster). */
+const openModals: symbol[] = [];
+
 export function Modal({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
+  const [self] = useState(() => Symbol(title));
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    openModals.push(self);
+    return () => {
+      openModals.splice(openModals.indexOf(self), 1);
+    };
+  }, [self]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && openModals[openModals.length - 1] === self) onClose();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, self]);
   // via een portal: een venster binnen een formulierveld (label) of kaart erft dan geen opmaak of klikgedrag
   return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>

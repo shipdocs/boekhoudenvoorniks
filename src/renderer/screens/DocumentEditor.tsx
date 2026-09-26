@@ -17,7 +17,7 @@ interface EditLine {
 const toNumber = (s: string) => Number(s.replace(',', '.'));
 
 export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?: number }) {
-  const { go, meta, settings, toast } = useApp();
+  const { go, meta, settings, toast, route } = useApp();
   const { run, busy } = useAction();
   const isInvoice = kind === 'factuur';
   const relations = useLoad(() => api.relations.list({ type: 'klant' }));
@@ -26,7 +26,8 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
   const [newCustomer, setNewCustomer] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [payment, setPayment] = useState(false);
-  const [sending, setSending] = useState(false);
+  // "Versturen" op een nieuwe factuur/offerte: eerst opslaan, dan opent het verstuurvenster op het opgeslagen document
+  const [sending, setSending] = useState(Boolean(route.extra?.send));
 
   const defaultVat: SalesVatCode = settings.kor ? 'vrijgesteld' : settings.defaultVatCode;
   const trade = meta.trades.find((t) => t.key === settings.profile.trade);
@@ -60,7 +61,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
 
   const setLine = (i: number, patch: Partial<EditLine>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
-  const save = async (): Promise<number | undefined> => {
+  const save = async (then?: 'send'): Promise<number | undefined> => {
     if (!relationId) {
       toast('Kies eerst een klant', 'error');
       return;
@@ -81,7 +82,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
       const p = { ...payload, quoteDate: date, validUntil: secondDate || undefined };
       return id ? api.quotes.update(id, p) : api.quotes.create(p);
     }, 'Opgeslagen');
-    if (r && !id) go({ screen: kind, id: r.id });
+    if (r && !id) go({ screen: kind, id: r.id, extra: then ? { send: true } : undefined });
     else await doc.reload();
     return r?.id;
   };
@@ -169,12 +170,12 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
               const lineTotal = l.unitPrice !== null && Number.isFinite(q) ? Math.round(q * l.unitPrice) : null;
               return (
                 <tr key={i}>
-                  <td><input value={l.description} disabled={!editable} onChange={(e) => setLine(i, { description: e.target.value })} placeholder="bv. Stucwerk wanden" /></td>
-                  <td><input className="num" value={l.quantity} disabled={!editable} onChange={(e) => setLine(i, { quantity: e.target.value })} /></td>
-                  <td><input value={l.unit} disabled={!editable} onChange={(e) => setLine(i, { unit: e.target.value })} placeholder="m²" /></td>
-                  <td>{editable ? <MoneyInput value={l.unitPrice} onChange={(v) => setLine(i, { unitPrice: v })} /> : <Euro cents={l.unitPrice} />}</td>
+                  <td><input aria-label={`Omschrijving regel ${i + 1}`} value={l.description} disabled={!editable} onChange={(e) => setLine(i, { description: e.target.value })} placeholder="bv. Stucwerk wanden" /></td>
+                  <td><input aria-label={`Aantal regel ${i + 1}`} className="num" value={l.quantity} disabled={!editable} onChange={(e) => setLine(i, { quantity: e.target.value })} /></td>
+                  <td><input aria-label={`Eenheid regel ${i + 1}`} value={l.unit} disabled={!editable} onChange={(e) => setLine(i, { unit: e.target.value })} placeholder="m²" /></td>
+                  <td>{editable ? <MoneyInput ariaLabel={`Prijs regel ${i + 1}`} value={l.unitPrice} onChange={(v) => setLine(i, { unitPrice: v })} /> : <Euro cents={l.unitPrice} />}</td>
                   <td>
-                    <select value={l.vatCode} disabled={!editable || settings.kor} onChange={(e) => setLine(i, { vatCode: e.target.value as SalesVatCode })}>
+                    <select aria-label={`Btw regel ${i + 1}`} value={l.vatCode} disabled={!editable || settings.kor} onChange={(e) => setLine(i, { vatCode: e.target.value as SalesVatCode })}>
                       {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
                     </select>
                   </td>
@@ -227,11 +228,12 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
       </div>
 
       <div className="row" style={{ marginTop: 16 }}>
-        {editable && <Button kind={id ? undefined : 'primary'} disabled={busy} onClick={() => void save()}>Opslaan</Button>}
+        {editable && <Button disabled={busy} onClick={() => void save()}>Opslaan</Button>}
         <Button disabled={busy} onClick={() => void showPreview()}>Voorbeeld</Button>
         {id && <Button disabled={busy} onClick={() => void run(() => (isInvoice ? api.invoices.savePdf(id) : api.quotes.savePdf(id)), 'PDF opgeslagen')}>PDF opslaan</Button>}
         {id && isInvoice && invoice && invoice.status !== 'concept' && <Button disabled={busy} title="Een bestand dat boekhoudprogramma's zonder overtypen inlezen" onClick={() => void run(() => api.invoices.saveUbl(id), 'E-factuur opgeslagen')}>E-factuur (XML)</Button>}
         <span className="grow" />
+        {!id && <Button kind="primary" disabled={busy} title="Slaat op en opent het verstuurvenster" onClick={() => void save('send')}>Versturen</Button>}
         {isInvoice && invoice?.status === 'concept' && (
           <>
             <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Deze factuur (nog niet verstuurd) verwijderen?') && (await run(async () => { await api.invoices.deleteDraft(invoice.id); return true; }, 'Verwijderd'))) go({ screen: 'werk' }); }}>Verwijderen</Button>
@@ -277,7 +279,8 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           <iframe className="preview-frame" sandbox="" srcDoc={preview} title="Voorbeeld" />
         </Modal>
       )}
-      {sending && id && (
+      {/* pas openen als het document geladen is: anders blijft "Naar" leeg (het adres van de klant komt uit het document) */}
+      {sending && id && d && (
         <SendDialog
           kind={kind}
           id={id}
