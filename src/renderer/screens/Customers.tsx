@@ -113,7 +113,15 @@ export function CustomerDetail({ id }: { id?: number }) {
           <Field label="Postcode"><input value={r.postcode ?? ''} onChange={(e) => set({ postcode: e.target.value })} /></Field>
           <Field label="Plaats"><input value={r.city ?? ''} onChange={(e) => set({ city: e.target.value })} /></Field>
         </div>
-        <Field label="Land"><CountrySelect value={r.country} onChange={(country) => set({ country, vat_number: vatNumberMatchesCountry(r.vat_number, country) ? r.vat_number : null })} /></Field>
+        <Field label="Land"><CountrySelect
+            value={r.country}
+            onChange={(country) => {
+              // van of naar Nederland: een KvK-nummer en een buitenlands handelsregisternummer passen niet bij elkaar
+              const wasNl = (r.country ?? 'NL').toUpperCase() === 'NL';
+              const isNl = country === 'NL';
+              set({ country, vat_number: vatNumberMatchesCountry(r.vat_number, country) ? r.vat_number : null, kvk_number: wasNl === isNl ? r.kvk_number : null });
+            }}
+          /></Field>
         {(r.country ?? 'NL').toUpperCase() !== 'NL' && (
           <>
             <div className="grid cols-2">
