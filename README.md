@@ -94,8 +94,9 @@ Klopt het, klik dan op **Meer informatie → Toch uitvoeren**. Op Linux: `sha256
 
 ## Releases en updates
 
-Een tag `v*` bouwt via GitHub Actions de installers voor Linux en Windows en publiceert ze als
-GitHub-release. De geïnstalleerde app werkt zichzelf bij via `electron-updater`.
+Een tag `v*`, of het handmatig starten van de workflow *Release* op main (Actions → Release → Run
+workflow), bouwt via GitHub Actions de installers voor Linux en Windows en publiceert ze als
+GitHub-release. De versie komt uit `package.json`. De geïnstalleerde app werkt zichzelf bij via `electron-updater`.
 
 ## Status en open punten
 

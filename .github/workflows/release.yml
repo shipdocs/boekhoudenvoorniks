@@ -3,9 +3,12 @@ name: Release
 # Bouwt installers voor Linux en Windows en publiceert ze als GitHub-release;
 # electron-updater in de app haalt updates daar vandaan.
 # Vóór publicatie draait een rooktest op de verpakte app (start, database, venster, IPC).
+# Starten kan op twee manieren: een tag `v*` pushen, of handmatig (workflow_dispatch) op main.
+# Handmatig maakt electron-builder de release én de tag `v<versie uit package.json>` zelf aan.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,6 +23,17 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Versie en tag bepalen
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.ref_name }}" != "main" ]; then
+            echo "Handmatig releasen kan alleen vanaf main" >&2; exit 1
+          fi
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" != "v$version" ]; then
+            echo "Tag ${{ github.ref_name }} past niet bij versie $version in package.json" >&2; exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -68,6 +82,6 @@ jobs:
           files=(*.AppImage *.deb *.exe)
           sha256sum "${files[@]}" > "SHA256SUMS-${{ runner.os }}.txt"
           cat "SHA256SUMS-${{ runner.os }}.txt"
-          gh release upload "${{ github.ref_name }}" "SHA256SUMS-${{ runner.os }}.txt" --clobber
+          gh release upload "$RELEASE_TAG" "SHA256SUMS-${{ runner.os }}.txt" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
