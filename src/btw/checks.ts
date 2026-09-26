@@ -209,7 +209,7 @@ export function runVatChecks(
          JOIN journal_entries e ON e.id = l.journal_entry_id
          JOIN chart_of_accounts a ON a.id = l.account_id
          JOIN relations r ON r.id = l.relation_id
-         WHERE a.rgs_code IN (?, ?) AND e.entry_date BETWEEN ? AND ?
+         WHERE a.rgs_code IN (?, ?) AND e.entry_date BETWEEN ? AND ? AND e.source = 'factuur'
            AND UPPER(COALESCE(r.country, 'NL')) IN (${[...EU_COUNTRIES].filter((c) => c !== 'NL').map(() => '?').join(',')})
            AND COALESCE(r.vat_number, '') = ''`,
       )

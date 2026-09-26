@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { setup } from './helpers';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
-import { customerVatSituation, suggestedSalesVat } from '../src/shared/vat';
+import { customerVatSituation, suggestedSalesVat, vatNumberMatchesCountry } from '../src/shared/vat';
 
 const KLANT_IBAN = 'NL44RABO0123456789'; // staat al bij de klant in tests/helpers.ts
 
@@ -16,6 +16,11 @@ describe('land van de klant en btw', () => {
     expect(suggestedSalesVat('eu-bedrijf')).toBe('icp');
     expect(suggestedSalesVat('buiten-eu')).toBe('export');
     expect(suggestedSalesVat('eu-particulier')).toBeNull();
+    // bij een ander land hoort het oude btw-nummer niet meer
+    expect(vatNumberMatchesCountry('DE 123456789', 'DE')).toBe(true);
+    expect(vatNumberMatchesCountry('EL123456789', 'GR')).toBe(true);
+    expect(vatNumberMatchesCountry('DE123456789', 'NL')).toBe(false);
+    expect(vatNumberMatchesCountry(null, 'NL')).toBe(false);
   });
 
   it('land bij een klant: landcode in hoofdletters, onbekende code geweigerd', () => {
@@ -38,6 +43,9 @@ describe('land van de klant en btw', () => {
     const fr = s.relations.create({ name: 'Mme Dupont', address: 'Rue 1', postcode: '75001', city: 'Paris', country: 'FR' });
     s.invoices.finalize(s.invoices.createDraft({ relationId: fr.id, invoiceDate: '2026-03-10', lines: [{ description: 'Advies', quantity: 1, unitPrice: 600000, vatCode: 'hoog' }] }).id);
     expect(s.vat.checks('2026-Q1').map((c) => c.key)).not.toContain('oss-drempel');
+    // een losse (handmatige) boeking op omzet bij deze klant telt niet mee
+    s.ledger.post({ date: '2026-04-01', description: 'correctie', source: 'handmatig', lines: [{ account: ACCOUNTS.kas, debit: 900000, credit: 0 }, { account: ACCOUNTS.omzetHoog, debit: 0, credit: 900000, relationId: fr.id }] });
+    expect(s.vat.checks('2026-Q2').map((c) => c.key)).not.toContain('oss-drempel');
     s.invoices.finalize(s.invoices.createDraft({ relationId: fr.id, invoiceDate: '2026-05-10', lines: [{ description: 'Advies', quantity: 1, unitPrice: 500000, vatCode: 'hoog' }] }).id);
     expect(s.vat.checks('2026-Q2').find((c) => c.key === 'oss-drempel')?.detail).toMatch(/11\.000,00/);
   });

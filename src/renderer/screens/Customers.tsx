@@ -4,7 +4,7 @@ import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, StatusPill, useAct
 import { EarningsPerJob } from './Jobs';
 import type { Relation, RelationInput } from '../../relations/relations';
 import { COUNTRIES, countryName } from '../../shared/countries';
-import { EU_B2C_THRESHOLD, customerVatSituation } from '../../shared/vat';
+import { EU_B2C_THRESHOLD, customerVatSituation, vatNumberMatchesCountry } from '../../shared/vat';
 import { formatEuro } from '../../shared/money';
 
 /** Land kiezen; een land dat niet in de lijst staat kan als landcode (bv. "ZA"). */
@@ -113,7 +113,7 @@ export function CustomerDetail({ id }: { id?: number }) {
           <Field label="Postcode"><input value={r.postcode ?? ''} onChange={(e) => set({ postcode: e.target.value })} /></Field>
           <Field label="Plaats"><input value={r.city ?? ''} onChange={(e) => set({ city: e.target.value })} /></Field>
         </div>
-        <Field label="Land"><CountrySelect value={r.country} onChange={(country) => set({ country })} /></Field>
+        <Field label="Land"><CountrySelect value={r.country} onChange={(country) => set({ country, vat_number: vatNumberMatchesCountry(r.vat_number, country) ? r.vat_number : null })} /></Field>
         {(r.country ?? 'NL').toUpperCase() !== 'NL' && (
           <>
             <Field label="Btw-nummer van de klant" hint="alleen als het een bedrijf is"><input value={r.vat_number ?? ''} onChange={(e) => set({ vat_number: e.target.value })} placeholder="bv. DE123456789" /></Field>
@@ -191,7 +191,7 @@ export function QuickCustomer({ onClose, onCreated }: { onClose: () => void; onC
           <Field label="Postcode"><input value={postcode} onChange={(e) => setPostcode(e.target.value)} /></Field>
           <Field label="Plaats"><input value={city} onChange={(e) => setCity(e.target.value)} /></Field>
         </div>
-        <Field label="Land"><CountrySelect value={country} onChange={setCountry} /></Field>
+        <Field label="Land"><CountrySelect value={country} onChange={(c) => { setCountry(c); if (!vatNumberMatchesCountry(vatNumber, c)) setVatNumber(''); }} /></Field>
         {country !== 'NL' && (
           <>
             <Field label="Btw-nummer van de klant" hint="alleen als het een bedrijf is"><input value={vatNumber} onChange={(e) => setVatNumber(e.target.value)} placeholder="bv. DE123456789" /></Field>

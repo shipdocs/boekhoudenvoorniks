@@ -86,6 +86,12 @@ export function customerVatSituation(country: string | null | undefined, vatNumb
   return 'buiten-eu';
 }
 
+/** Past een btw-nummer bij dit land? (het nummer begint met de landcode; Griekenland: EL) */
+export function vatNumberMatchesCountry(vatNumber: string | null | undefined, country: string | null | undefined): boolean {
+  const prefix = (vatNumber ?? '').replace(/[\s.]/g, '').slice(0, 2).toUpperCase();
+  return !!prefix && countryCode(prefix) === countryCode(country ?? 'NL');
+}
+
 /** Welke btw-keuze meestal hoort bij deze klant (null = gewoon Nederlandse btw). */
 export function suggestedSalesVat(situation: CustomerVatSituation): SalesVatCode | null {
   return situation === 'eu-bedrijf' ? 'icp' : situation === 'buiten-eu' ? 'export' : null;
