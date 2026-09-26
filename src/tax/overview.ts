@@ -155,7 +155,7 @@ export class TaxOverviewService {
       kia: adj.kia / 100,
       bijtellingen: (adj.representatie.bijtelling + adj.desinvesteringsbijtelling) / 100,
     });
-    const fuel = this.costsOn('WBedAutBra', `${year}-01-01`, to);
+    const fuel = this.costsOn('WBedAutBra', `${year}-01-01`, to) + this.costsOn('WBedAutOnd', `${year}-01-01`, to);
     const items: OverviewItem[] = [];
     items.push({
       key: 'winst',
@@ -229,9 +229,9 @@ export class TaxOverviewService {
     if (s.carUse === 'prive' && fuel > 0) {
       items.push({
         key: 'brandstof',
-        label: 'Let op: brandstof als kosten geboekt',
+        label: 'Let op: autokosten geboekt terwijl je privé rijdt',
         amount: null,
-        explain: `Je rijdt met een privéauto, maar er staat € ${(fuel / 100).toFixed(2).replace('.', ',')} aan brandstof/parkeren als kosten. Met een privéauto is alleen € ${(rules.kmRate / 100).toFixed(2).replace('.', ',')} per zakelijke km aftrekbaar: zet die betalingen op "privé" en vul je kilometers in.`,
+        explain: `Je rijdt met een privéauto, maar er staat € ${(fuel / 100).toFixed(2).replace('.', ',')} aan tanken, parkeren of onderhoud als kosten. Met een privéauto is alleen € ${(rules.kmRate / 100).toFixed(2).replace('.', ',')} per zakelijke km aftrekbaar: zet die betalingen op "privé" en vul je kilometers in.`,
         status: 'warn',
       });
     }

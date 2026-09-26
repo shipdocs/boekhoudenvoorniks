@@ -92,6 +92,8 @@ export class AssetService {
            JOIN chart_of_accounts a ON a.id = l.account_id
            WHERE a.rgs_code IN (${accounts.map(() => '?').join(',')}) AND l.debit > 0
              AND e.status = 'definitief' AND e.reverses_entry_id IS NULL
+             -- een beginbalans is geen nieuwe investering (geen KIA, en de afschrijving liep al)
+             AND e.source != 'opening'
              AND NOT EXISTS (SELECT 1 FROM assets s WHERE s.journal_line_id = l.id)`,
         )
         .all(...accounts) as { id: number; rgs_code: string; name: string; entry_date: IsoDate; debit: Cents }[];
@@ -262,7 +264,25 @@ export class AssetService {
     return tx(this.db, () => {
       this.bookDue(date);
       // afschrijving in het verkoopjaar: tot en met de maand vóór de verkoop
-      if (!this.db.prepare('SELECT 1 FROM asset_depreciation WHERE asset_id = ? AND year = ?').get(a.id, year)) {
+      const bookedYear = this.db.prepare('SELECT amount, journal_entry_id FROM asset_depreciation WHERE asset_id = ? AND year = ?').get(a.id, year) as { amount: Cents } | undefined;
+      if (bookedYear) {
+        // verkoop in een jaar dat al (heel) geboekt is: het teveel terugnemen
+        const target = Math.max(0, cumulativeDepreciation(a, year, Number(date.slice(5, 7)) - 1) - this.booked(a.id, year - 1) - this.elsewhere(a, year - 1));
+        const excess = bookedYear.amount - target;
+        if (excess > 0) {
+          this.ledger.post({
+            date,
+            description: `Afschrijving ${year} gecorrigeerd tot verkoop: ${a.name}`,
+            source: 'handmatig',
+            sourceRef: `afschrijving-correctie:${a.id}:${year}`,
+            lines: [
+              { account: acc.cumulative, debit: excess, description: a.name },
+              { account: acc.expense, credit: excess, description: a.name },
+            ],
+          });
+          this.db.prepare('UPDATE asset_depreciation SET amount = amount - ? WHERE asset_id = ? AND year = ?').run(excess, a.id, year);
+        }
+      } else {
         const amount = this.dueFor(a, year, Number(date.slice(5, 7)) - 1);
         if (amount > 0) {
           const entryId = this.ledger.post({

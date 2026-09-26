@@ -5,7 +5,7 @@ import type { PurchaseService, PurchaseLineInput } from '../documents/purchases'
 import type { RelationsService } from '../relations/relations';
 import type { BankService, BankTransaction } from '../import/bank';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import { EXPENSE_CATEGORIES } from '../shared/categories';
+import { EXPENSE_CATEGORIES, PRIVATE_CAR_CATEGORIES } from '../shared/categories';
 import { PURCHASE_VAT_RATES, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
 import { diffDays, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
@@ -248,9 +248,9 @@ export class IntakeService {
       return this.get(id);
     }
     let classification = await this.classifier.classify(result);
-    if (classification.categoryKey === 'brandstof' && classification.business && this.carUse() === 'prive') {
+    if (PRIVATE_CAR_CATEGORIES.includes(classification.categoryKey) && classification.business && this.carUse() === 'prive') {
       // privéauto: bon van tanken/parkeren is privé (aftrek via de kilometers)
-      classification = { ...classification, business: false, automatic: false, reasons: [...classification.reasons, 'privéauto: brandstof en parkeren zijn privé; zakelijke km vul je apart in'] };
+      classification = { ...classification, business: false, automatic: false, reasons: [...classification.reasons, 'privéauto: tanken, parkeren en onderhoud zijn privé; zakelijke km vul je apart in'] };
     }
     const issues = [...extraIssues, ...validateDocument(result, asOf)];
     if (duplicate) {

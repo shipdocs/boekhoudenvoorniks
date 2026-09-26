@@ -33,6 +33,9 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
 ];
 
 /** Voor banktransacties zonder factuur: bestemmingen die geen kosten zijn. */
+/** Met een privéauto niet aftrekbaar (zit in het bedrag per km): tanken, parkeren, onderhoud, verzekering. */
+export const PRIVATE_CAR_CATEGORIES = ['brandstof', 'auto'];
+
 export const OTHER_DESTINATIONS = [
   { key: 'prive-opname', label: 'Privé opgenomen (naar mezelf)', account: 'BEivPriPrv' },
   { key: 'prive-storting', label: 'Privé gestort (van mezelf)', account: 'BEivPriStr' },

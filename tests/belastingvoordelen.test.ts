@@ -110,6 +110,24 @@ describe('bedrijfsmiddelen en afschrijving', () => {
     expect(s.taxOverview.adjustments(2026, '2026-05-01').desinvesteringsbijtelling).toBe(840_00);
   });
 
+  it('verkoop in een jaar dat al geboekt is: het teveel aan afschrijving gaat terug', () => {
+    const { s } = setup();
+    buy(s, '2024-01-05', 3630_00);
+    s.assets.bookDue('2026-01-10'); // 2024 en 2025 volledig: 2 × 600
+    const [a] = s.assets.list({}, '2026-01-10');
+    const sold = s.assets.dispose(a!.id, '2025-07-01', 0);
+    expect(sold.booked).toBe(600_00 + 300_00); // 2025 alleen jan–jun
+    expect(balance(s, 'BMvaBedCae')).toBe(0);
+    expect(balance(s, 'WAfsRvmBei')).toBe(3000_00 - 900_00);
+    expect(s.ledger.checkIntegrity().balanced).toBe(true);
+  });
+
+  it('beginbalans op inventaris wordt geen nieuw bedrijfsmiddel', () => {
+    const { s } = setup();
+    s.ledger.post({ date: '2026-01-01', description: 'Beginbalans', source: 'opening', lines: [{ account: 'BMvaBedIna', debit: 5000_00 }, { account: 'BEivKap', credit: 5000_00 }] });
+    expect(s.assets.list({}, '2026-02-01')).toEqual([]);
+  });
+
   it('aankoop teruggedraaid: bedrijfsmiddel vervalt, geboekte afschrijving gaat terug', () => {
     const { s } = setup();
     const p = buy(s, '2025-07-10', 3630_00);
@@ -142,6 +160,14 @@ describe('kilometers, uren en privéauto', () => {
     expect(s.mileage.totals(2026)).toEqual({ km: 0, amount: 0, trips: 0 });
   });
 
+  it('privéauto: ook onderhoud en verzekering worden als privé voorgesteld', () => {
+    const { s } = setup();
+    s.settings.update({ carUse: 'prive' });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-03-01', amount: -250_00, counterName: 'Garage Pietersen', description: 'APK en onderhoud' }] });
+    s.memory.learn('Garage Pietersen', { categoryKey: 'auto', vatCode: 'hoog', business: true });
+    expect(s.inbox.tasks('2026-03-02').find((t) => t.kind === 'bank-business')?.actions[0]).toMatchObject({ id: 'prive', primary: true });
+  });
+
   it('urencriterium: uren van werkbonnen plus losse uren', () => {
     const { s, klant } = setup();
     const job = s.jobs.create({ relationId: klant.id, title: 'Badkamer' });
@@ -163,6 +189,7 @@ describe('kilometers, uren en privéauto', () => {
     s.memory.learn('Shell Utrecht', { categoryKey: 'brandstof', vatCode: 'hoog', business: true });
     s.memory.learn('Shell Utrecht', { categoryKey: 'brandstof', vatCode: 'hoog', business: true });
     s.memory.setAutomatic('Shell Utrecht', true);
+    expect(s.inbox.tasks('2026-03-02').find((t) => t.kind === 'bank-business')?.actions[0]?.id).toBe('prive');
     s.settings.update({ autopilot: 'maximaal' });
     s.inbox.autoProcess('2026-03-02');
     expect(s.bank.list({ status: 'nieuw' }).length).toBe(1);

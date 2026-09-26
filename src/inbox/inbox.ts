@@ -14,7 +14,7 @@ import type { RecurringService } from '../import/recurring';
 import { normalizeIban, ValidationError } from '../shared/validation';
 import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
-import { EXPENSE_CATEGORIES } from '../shared/categories';
+import { EXPENSE_CATEGORIES, PRIVATE_CAR_CATEGORIES } from '../shared/categories';
 import { KNOWN_SUPPLIERS } from '../intake/suppliers';
 import { addDays, diffDays, formatDateNl, periodFor, today, vatDeadline, type IsoDate } from '../shared/dates';
 
@@ -211,15 +211,15 @@ export class InboxService {
     this.bookCategory(t, category, vatCode, answer.business, true);
   }
 
-  /** Met een privéauto is brandstof/parkeren privé: je krijgt een bedrag per zakelijke km. */
+  /** Met een privéauto zijn autokosten (tanken, parkeren, onderhoud) privé: je krijgt een bedrag per zakelijke km. */
   private fuelIsPrivate(categoryKey: string): boolean {
-    return categoryKey === 'brandstof' && this.settings.get().carUse === 'prive';
+    return PRIVATE_CAR_CATEGORIES.includes(categoryKey) && this.settings.get().carUse === 'prive';
   }
 
   private suggestionFor(t: BankTransaction): { categoryKey: string; vatCode: string; business: boolean; confident: boolean; why: string } | null {
     const sug = this.rawSuggestionFor(t);
     if (sug && sug.business && this.fuelIsPrivate(sug.categoryKey)) {
-      return { ...sug, business: false, confident: false, why: 'Je rijdt met een privéauto: tanken en parkeren zijn dan privé. Zakelijke kilometers vul je in bij Belasting → Kilometers.' };
+      return { ...sug, business: false, confident: false, why: 'Je rijdt met een privéauto: tanken, parkeren en onderhoud zijn dan privé. Zakelijke kilometers vul je in bij Belasting → Kilometers.' };
     }
     return sug;
   }
@@ -328,7 +328,7 @@ export class InboxService {
           kind: 'bank-business',
           icon: '🧾',
           title: `${who} ${formatEuro(-t.amount)}`,
-          question: sug && !sug.business && this.fuelIsPrivate(sug.categoryKey) ? 'Tanken of parkeren met je privéauto telt als privé; je zakelijke kilometers vul je apart in.' : guess ? `Was dit zakelijk (${guess}) of privé?` : 'Was dit zakelijk of privé?',
+          question: sug && !sug.business && this.fuelIsPrivate(sug.categoryKey) ? 'Autokosten van je privéauto tellen als privé; je zakelijke kilometers vul je apart in.' : guess ? `Was dit zakelijk (${guess}) of privé?` : 'Was dit zakelijk of privé?',
           amount: t.amount,
           actions: sug && !sug.business && this.fuelIsPrivate(sug.categoryKey)
             ? [{ id: 'prive', label: 'Privé', primary: true }, { id: 'zakelijk', label: 'Toch zakelijk' }]
