@@ -32,6 +32,9 @@ describe('gebeurtenissen als bron van waarheid (#19)', () => {
     const reversal = db.prepare('SELECT event_id, reverses_entry_id FROM journal_entries WHERE reverses_entry_id IS NOT NULL').get() as { event_id: number; reverses_entry_id: number };
     const original = db.prepare('SELECT event_id FROM journal_entries WHERE id = ?').get(reversal.reverses_entry_id) as { event_id: number };
     expect(reversal.event_id).toBe(original.event_id);
+    // ook de regelversie van de tegenboeking is die van het origineel
+    const versions = db.prepare('SELECT DISTINCT rules_version FROM journal_entries WHERE event_id = ?').all(reversal.event_id);
+    expect(versions).toHaveLength(1);
     const bankEvent = s.events.forEntry(reversal.reverses_entry_id)!;
     expect(bankEvent.type).toBe('bank-categorie');
     expect(bankEvent.evidence).toEqual([expect.objectContaining({ kind: 'bank', refId: shell.id })]);

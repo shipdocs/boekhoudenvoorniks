@@ -245,8 +245,12 @@ export class Ledger {
       });
       // Elke post volgt uit precies één gebeurtenis (#19); een tegenboeking hoort bij die van het origineel.
       let eventId = entry.eventId ?? null;
+      let rulesVersion = RULES_VERSION;
       if (!eventId && entry.reversesEntryId) {
-        eventId = (this.db.prepare('SELECT event_id FROM journal_entries WHERE id = ?').get(entry.reversesEntryId) as { event_id: number | null } | undefined)?.event_id ?? null;
+        // een tegenboeking is geen nieuwe compilatie: zelfde gebeurtenis én zelfde regelversie als het origineel
+        const original = this.db.prepare('SELECT event_id, rules_version FROM journal_entries WHERE id = ?').get(entry.reversesEntryId) as { event_id: number | null; rules_version: string | null } | undefined;
+        eventId = original?.event_id ?? null;
+        rulesVersion = original?.rules_version ?? RULES_VERSION;
       }
       if (!eventId) {
         const { reversesEntryId: _r, eventId: _e, ...payload } = entry;
@@ -265,7 +269,7 @@ export class Ledger {
       }
       const result = this.db
         .prepare('INSERT INTO journal_entries (entry_date, description, source, source_ref, reverses_entry_id, vat_date, vat_correction_of, event_id, rules_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(entry.date, entry.description.trim(), entry.source, entry.sourceRef ?? null, entry.reversesEntryId ?? null, vatDate, correctionOf, eventId, RULES_VERSION);
+        .run(entry.date, entry.description.trim(), entry.source, entry.sourceRef ?? null, entry.reversesEntryId ?? null, vatDate, correctionOf, eventId, rulesVersion);
       const entryId = Number(result.lastInsertRowid);
       const insertLine = this.db.prepare(
         `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit, relation_id, vat_code, description)
