@@ -17,7 +17,7 @@ function staleDays(date: string): number {
 }
 
 export function Bank({ focus }: { focus?: number }) {
-  const { go, toast } = useApp();
+  const { go, toast, settings } = useApp();
   const { run } = useAction();
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
   const txs = useLoad(() => api.bank.transactions(view === 'hulp' ? { status: 'nieuw' } : {}), [view]);
@@ -25,7 +25,8 @@ export function Bank({ focus }: { focus?: number }) {
   const status = useLoad(() => api.bank.importStatus());
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
   const [last, setLast] = useState<{ imported: number; duplicates: number; autoMatched: number; periods: { from: string; to: string }[] } | null>(null);
-  const [opening, setOpening] = useState(false);
+  const [opening, setOpening] = useState<{ id: number; name: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: number; name: string; iban: string | null } | 'nieuw' | null>(null);
 
   const importFile = async (file: File) => {
     const content = await readAsText(file);
@@ -101,39 +102,101 @@ export function Bank({ focus }: { focus?: number }) {
         </table>
       )}
 
-      <h2>Rekeningen</h2>
+      <div className="row between" style={{ marginTop: 24 }}>
+        <h2 style={{ margin: 0 }}>Rekeningen</h2>
+        <Button small onClick={() => setEditing('nieuw')}>+ Rekening toevoegen</Button>
+      </div>
+      <p className="small muted">Heb je een spaarrekening of een potje voor de btw? Voeg hem toe. Geld dat je tussen je eigen rekeningen verplaatst, telt dan niet als omzet of kosten.</p>
       <ErrorBox error={status.error} />
       <table className="list">
-        <thead><tr><th>Rekening</th><th>Laatst ingelezen</th><th>Dat afschrift bevatte</th><th>Bijgewerkt t/m</th></tr></thead>
+        <thead><tr><th>Rekening</th><th>Laatst ingelezen</th><th>Dat afschrift bevatte</th><th>Bijgewerkt t/m</th><th /></tr></thead>
         <tbody>
           {(status.data ?? []).map((st) => (
             <tr key={st.bankAccountId}>
-              <td>{st.name}<div className="small muted">{st.iban ?? 'IBAN nog onbekend'}</div></td>
+              <td>{st.name}{settings.vatPotAccountId === st.bankAccountId && <> <span className="pill">btw-potje</span></>}<div className="small muted">{st.iban ?? 'IBAN nog onbekend'}</div></td>
               <td>{st.lastImport ? <>{formatDateTime(st.lastImport.at)}<div className="small muted">{st.lastImport.filename ?? st.lastImport.source.toUpperCase()}</div></> : <span className="muted">nog nooit</span>}</td>
               <td>{st.lastImport ? <><DateNl date={st.lastImport.from} /> t/m <DateNl date={st.lastImport.to} /><div className="small muted">{st.lastImport.transactions} betalingen, {st.lastImport.imported} nieuw</div></> : '—'}</td>
               <td>{st.coverageTo ? <><DateNl date={st.coverageTo} />{staleDays(st.coverageTo) >= 14 && <div><span className="pill warn">{staleDays(st.coverageTo)} dagen geleden</span></div>}</> : '—'}</td>
+              <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                <Button small kind="ghost" onClick={() => setEditing({ id: st.bankAccountId, name: st.name, iban: st.iban })}>Wijzigen</Button>
+                <Button small kind="ghost" onClick={() => setOpening({ id: st.bankAccountId, name: st.name })}>Beginsaldo</Button>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
-      <div className="row" style={{ marginTop: 10 }}>
-        <Button small onClick={() => setOpening(true)}>Beginsaldo invoeren</Button>
-        <span className="small muted">Automatisch ophalen bij je bank komt later.</span>
-      </div>
+      <p className="small muted">Een nieuwe rekening komt er ook vanzelf bij als je een afschrift inleest met een rekeningnummer dat de app nog niet kent. Automatisch ophalen bij je bank komt later.</p>
 
       {mapping && <CsvMappingDialog {...mapping} onClose={() => setMapping(null)} onConfirm={async (m) => { const x = mapping; setMapping(null); await doImport(x.filename, x.content, m); }} />}
-      {opening && accounts.data?.[0] && <OpeningBalance accountId={accounts.data[0].id} onClose={() => setOpening(false)} />}
+      {opening && <OpeningBalance accountId={opening.id} name={opening.name} onClose={() => setOpening(null)} />}
+      {editing && <AccountDialog account={editing === 'nieuw' ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await Promise.all([status.reload(), accounts.reload()]); }} />}
     </div>
   );
 }
 
-function OpeningBalance({ accountId, onClose }: { accountId: number; onClose: () => void }) {
+/** Rekening toevoegen of wijzigen: naam, IBAN, of het je btw-potje is en (bij nieuw) het beginsaldo. */
+function AccountDialog({ account, onClose, onSaved }: { account: { id: number; name: string; iban: string | null } | null; onClose: () => void; onSaved: () => Promise<void> }) {
+  const { settings, reloadSettings } = useApp();
   const { run, busy } = useAction();
+  const [name, setName] = useState(account?.name ?? '');
+  const [iban, setIban] = useState(account?.iban ?? '');
+  const [pot, setPot] = useState(account ? settings.vatPotAccountId === account.id : false);
+  const [amount, setAmount] = useState<number | null>(null);
+  const [date, setDate] = useState(`${new Date().getFullYear()}-01-01`);
+  const save = async () => {
+    const ok = await run(async () => {
+      const id = account ? (await api.bank.updateAccount(account.id, { name, iban: iban.trim() || null }), account.id) : (await api.bank.addAccount(name, iban)).id;
+      if (!account && amount) await api.bank.openingBalance(id, amount, date);
+      const potId = pot ? id : settings.vatPotAccountId === id ? null : settings.vatPotAccountId;
+      if (potId !== settings.vatPotAccountId) {
+        await api.settings.update({ vatPotAccountId: potId });
+        await reloadSettings();
+      }
+      return true;
+    }, account ? 'Rekening opgeslagen' : 'Rekening toegevoegd');
+    if (ok) await onSaved();
+  };
+  return (
+    <Modal title={account ? 'Rekening wijzigen' : 'Rekening toevoegen'} onClose={onClose}>
+      <div className="grid cols-2">
+        <Field label="Naam" hint="zoals jij hem noemt"><input value={name} placeholder="bv. Spaarrekening" onChange={(e) => setName(e.target.value)} autoFocus /></Field>
+        <Field label="Rekeningnummer (IBAN)" hint="zo herkent de app betalingen van en naar deze rekening"><input value={iban} placeholder="NL00 BANK 0123 4567 89" onChange={(e) => setIban(e.target.value)} /></Field>
+      </div>
+      {!settings.kor && (
+        <label className="row" style={{ marginTop: 10 }}>
+          <input type="checkbox" checked={pot} onChange={(e) => setPot(e.target.checked)} /> Hier zet ik geld opzij voor de btw (btw-potje)
+        </label>
+      )}
+      {pot && <p className="small muted">Op Vandaag zie je dan hoeveel je al opzij hebt gezet en hoeveel er nog bij moet.</p>}
+      {!account && (
+        <>
+          <h3>Staat er al geld op?</h3>
+          <p className="small muted">Vul in wat erop stond op de dag dat je met deze administratie begint. Leeg laten mag ook.</p>
+          <div className="grid cols-2">
+            <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+            <Field label="Saldo"><MoneyInput value={amount} onChange={setAmount} /></Field>
+          </div>
+        </>
+      )}
+      <div className="row end" style={{ marginTop: 14 }}>
+        <Button onClick={onClose}>Annuleren</Button>
+        <Button kind="primary" disabled={busy || !name.trim() || (!account && !iban.trim())} onClick={() => void save()}>Opslaan</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function OpeningBalance({ accountId, name, onClose }: { accountId: number; name: string; onClose: () => void }) {
+  const { run, busy } = useAction();
+  const current = useLoad(() => api.bank.getOpeningBalance(accountId), [accountId]);
   const [amount, setAmount] = useState<number | null>(null);
   const [date, setDate] = useState(`${new Date().getFullYear()}-01-01`);
   return (
-    <Modal title="Beginsaldo" onClose={onClose}>
-      <p className="muted small">Hoeveel stond er op je zakelijke rekening op de dag dat je met deze administratie begint?</p>
+    <Modal title={`Beginsaldo ${name}`} onClose={onClose}>
+      <p className="muted small">Hoeveel stond er op deze rekening op de dag dat je met deze administratie begint?</p>
+      {current.data?.date && (
+        <p className="small">Nu ingevuld: <Euro cents={current.data.amount} /> op <DateNl date={current.data.date} />. Een nieuw bedrag vervangt dit.</p>
+      )}
       <div className="grid cols-2">
         <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label="Saldo"><MoneyInput value={amount} onChange={setAmount} /></Field>
@@ -226,6 +289,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const openInvoices = useLoad(() => api.invoices.list({ status: 'openstaand' }));
   const overdue = useLoad(() => api.invoices.list({ status: 'vervallen' }));
   const [recat, setRecat] = useState(false);
+  const own = useLoad(() => api.bank.ownTransfer(id), [id]);
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
   const done = async (p: Promise<unknown>, investment?: string) => {
@@ -265,6 +329,13 @@ export function CategorizeTransaction({ id }: { id: number }) {
         </div>
       ) : (
         <>
+          {own.data && (
+            <div className="card">
+              <strong>{t.amount < 0 ? 'Naar' : 'Van'} je eigen rekening {own.data.name}</strong>
+              <p className="small muted">Je hebt geld verplaatst tussen je eigen rekeningen. Dit is geen omzet en geen kosten. Lees je ook het afschrift van die andere rekening in, dan koppelt de app die kant er vanzelf aan.</p>
+              <Button kind="primary" disabled={busy} onClick={() => void done(api.bank.bookOwnTransfer(t.id))}>Klopt, verwerk als overboeking</Button>
+            </div>
+          )}
           {(suggestions.data ?? []).filter((s) => s.kind !== 'rekening').length > 0 && (
             <>
               <h2>Hoort dit hierbij?</h2>

@@ -102,6 +102,9 @@ export class BankService {
   addAccount(name: string, iban: string): BankAccount {
     const clean = normalizeIban(iban);
     if (!isValidIban(clean)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${iban}`);
+    if (!name.trim()) throw new ValidationError('Geef de rekening een naam, bijvoorbeeld "Spaarrekening"');
+    if (this.listAccounts().some((a) => a.iban === clean)) throw new ValidationError('Deze rekening staat er al in');
+    name = name.trim();
     return tx(this.db, () => {
       const n = this.listAccounts().length;
       // tweede en volgende rekeningen krijgen een eigen grootboekrekening
@@ -118,6 +121,9 @@ export class BankService {
     const iban = patch.iban ? normalizeIban(patch.iban) : patch.iban;
     if (iban && !isValidIban(iban)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${patch.iban}`);
     const current = this.getAccount(id);
+    if (patch.name !== undefined && !patch.name.trim()) throw new ValidationError('Geef de rekening een naam');
+    if (iban && this.listAccounts().some((a) => a.id !== id && a.iban === iban)) throw new ValidationError('Deze rekening staat er al in');
+    if (patch.name !== undefined) patch = { ...patch, name: patch.name.trim() };
     this.db.prepare('UPDATE bank_accounts SET name = ?, iban = ? WHERE id = ?').run(patch.name ?? current.name, iban === undefined ? current.iban : iban, id);
   }
 
@@ -143,15 +149,87 @@ export class BankService {
     return accounts[0] ?? this.ensureDefaultAccount();
   }
 
-  /** Beginsaldo van de bank tegen eigen vermogen. */
+  /**
+   * Beginsaldo van een bankrekening tegen eigen vermogen. Een eerder beginsaldo van dezelfde rekening
+   * wordt eerst teruggedraaid, zodat opnieuw invoeren het saldo vervangt in plaats van optelt.
+   */
   setOpeningBalance(bankAccountId: number, amount: Cents, date: IsoDate): number {
+    if (!Number.isSafeInteger(amount)) throw new ValidationError('Vul het saldo in');
     const account = this.getAccount(bankAccountId);
-    return this.ledger.post({
-      date,
-      description: `Beginsaldo ${account.name}`,
-      source: 'opening',
-      lines: [signedLine(account.rgs_code, amount)!, signedLine(ACCOUNTS.eigenVermogen, -amount)!],
+    return tx(this.db, () => {
+      for (const e of this.openingEntries(account)) this.ledger.reverse(e.id, e.entry_date, `Beginsaldo ${account.name} vervangen`);
+      if (amount === 0) return 0;
+      return this.ledger.post({
+        date,
+        description: `Beginsaldo ${account.name}`,
+        source: 'opening',
+        lines: [signedLine(account.rgs_code, amount)!, signedLine(ACCOUNTS.eigenVermogen, -amount)!],
+      });
     });
+  }
+
+  /** Het huidige beginsaldo van een rekening (0 als er geen is). */
+  openingBalance(bankAccountId: number): { amount: Cents; date: IsoDate | null } {
+    const account = this.getAccount(bankAccountId);
+    const entries = this.openingEntries(account);
+    const amount = entries.reduce((sum, e) => sum + e.amount, 0);
+    return { amount, date: entries.at(-1)?.entry_date ?? null };
+  }
+
+  private openingEntries(account: BankAccount): { id: number; entry_date: IsoDate; amount: Cents }[] {
+    return this.db
+      .prepare(
+        `SELECT e.id, e.entry_date, SUM(l.debit - l.credit) AS amount FROM journal_entries e
+         JOIN journal_lines l ON l.journal_entry_id = e.id
+         WHERE e.source = 'opening' AND l.account_id = ? AND e.reverses_entry_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reverses_entry_id = e.id)
+         GROUP BY e.id ORDER BY e.id`,
+      )
+      .all(account.account_id) as { id: number; entry_date: IsoDate; amount: Cents }[];
+  }
+
+  // ---------- overboekingen tussen eigen rekeningen ----------
+
+  /** De eigen rekening aan de andere kant van deze betaling, of null als het geld van/naar iemand anders ging. */
+  ownTransferTarget(t: Pick<BankTransaction, 'bank_account_id' | 'counter_iban'>): BankAccount | null {
+    if (!t.counter_iban) return null;
+    const iban = normalizeIban(t.counter_iban);
+    return this.listAccounts().find((a) => a.id !== t.bank_account_id && a.iban === iban) ?? null;
+  }
+
+  /**
+   * Overboeking tussen eigen rekeningen: telt niet als omzet of kosten. Staat dezelfde overboeking
+   * al verwerkt op de andere rekening (die kant is eerder ingelezen), dan wordt deze kant daaraan
+   * gekoppeld zonder nieuwe boeking; anders boekt de app van de ene bankrekening naar de andere.
+   */
+  bookOwnTransfer(txId: number): number {
+    const t = this.get(txId);
+    this.assertOpen(t);
+    const other = this.ownTransferTarget(t);
+    if (!other) throw new ValidationError('Het rekeningnummer van de andere kant is niet een van je eigen rekeningen');
+    const own = this.getAccount(t.bank_account_id);
+    const counterpart = this.db
+      .prepare(
+        `SELECT c.id, c.matched_journal_entry_id AS entryId,
+                EXISTS (SELECT 1 FROM journal_lines l WHERE l.journal_entry_id = c.matched_journal_entry_id AND l.account_id = ?) AS toThis,
+                EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = c.matched_journal_entry_id AND a.rgs_code = ?) AS viaKruis
+         FROM bank_transactions c
+         WHERE c.bank_account_id = ? AND c.amount = ? AND c.status = 'gematcht' AND c.matched_journal_entry_id IS NOT NULL
+           AND c.matched_invoice_id IS NULL AND c.matched_purchase_invoice_id IS NULL
+           AND ABS(julianday(c.transaction_date) - julianday(?)) <= 5
+           AND (SELECT COUNT(*) FROM bank_transactions x WHERE x.matched_journal_entry_id = c.matched_journal_entry_id) = 1
+         ORDER BY ABS(julianday(c.transaction_date) - julianday(?)), c.id`,
+      )
+      .all(own.account_id, ACCOUNTS.kruisposten, other.id, -t.amount, t.transaction_date, t.transaction_date) as { id: number; entryId: number; toThis: number; viaKruis: number }[];
+    const linked = counterpart.find((c) => c.toThis);
+    if (linked) {
+      // de andere kant boekte al naar deze rekening: alleen koppelen, niets dubbel boeken
+      this.db.prepare(`UPDATE bank_transactions SET status = 'gematcht', matched_journal_entry_id = ? WHERE id = ?`).run(linked.entryId, txId);
+      return linked.entryId;
+    }
+    // de andere kant staat op "overboeking" (kruisposten): deze kant haalt het daar weer af
+    const account = counterpart.some((c) => c.viaKruis) ? ACCOUNTS.kruisposten : other.rgs_code;
+    return this.bookToAccount(txId, { account, description: `${t.amount < 0 ? 'Naar' : 'Van'} ${other.name} (eigen rekening)` });
   }
 
   // ---------- import ----------
@@ -323,6 +401,7 @@ export class BankService {
     if (t.status !== 'gematcht' || !t.matched_journal_entry_id || t.matched_invoice_id || t.matched_purchase_invoice_id) {
       throw new ValidationError('Alleen een betaling waar je zelf een soort kosten bij koos, kun je zo aanpassen');
     }
+    if (this.sharedWith(t).length > 0) throw new ValidationError('Dit is een overboeking tussen je eigen rekeningen. Klopt dat niet? Maak het dan ongedaan.');
     const event = this.events.forEntry(t.matched_journal_entry_id);
     if (!event || event.type !== 'bank-categorie') throw new ValidationError('Deze betaling is met een oudere versie van de app verwerkt. Maak de verwerking ongedaan en doe het opnieuw.');
     const target = this.ledger.getAccount(change.account);
@@ -347,9 +426,19 @@ export class BankService {
     this.db.prepare(`UPDATE bank_transactions SET status = 'genegeerd' WHERE id = ?`).run(txId);
   }
 
-  /** Maakt een verwerking ongedaan via een tegenboeking; de transactie komt weer op 'nieuw'. */
+  /** Andere bankregels die aan dezelfde boeking gekoppeld zijn (de andere kant van een eigen overboeking). */
+  private sharedWith(t: BankTransaction): number[] {
+    if (!t.matched_journal_entry_id) return [];
+    return (this.db.prepare('SELECT id FROM bank_transactions WHERE matched_journal_entry_id = ? AND id <> ?').all(t.matched_journal_entry_id, t.id) as { id: number }[]).map((r) => r.id);
+  }
+
+  /**
+   * Maakt een verwerking ongedaan via een tegenboeking; de transactie komt weer op 'nieuw'.
+   * Bij een overboeking tussen eigen rekeningen gaan beide kanten terug.
+   */
   unmatch(txId: number, date: IsoDate = today()): void {
     const t = this.get(txId);
+    const shared = this.sharedWith(t);
     tx(this.db, () => {
       if (t.status === 'gematcht' && t.matched_journal_entry_id) {
         if (t.matched_invoice_id) this.invoices.undoPayment(t.matched_invoice_id, t.amount, t.matched_journal_entry_id, date);
@@ -359,6 +448,11 @@ export class BankService {
       this.db
         .prepare(`UPDATE bank_transactions SET status = 'nieuw', matched_journal_entry_id = NULL, matched_invoice_id = NULL, matched_purchase_invoice_id = NULL WHERE id = ?`)
         .run(txId);
+      for (const id of shared) {
+        this.db
+          .prepare(`UPDATE bank_transactions SET status = 'nieuw', matched_journal_entry_id = NULL WHERE id = ?`)
+          .run(id);
+      }
     });
   }
 

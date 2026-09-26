@@ -109,6 +109,7 @@ export class MatchingEngine {
     const details: { txId: number; label: string; reasons: string[]; confidence: number }[] = [];
     const threshold = thresholdFor('bankkoppeling', level);
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 }).reverse()) {
+      if (this.bank.ownTransferTarget(t)) continue; // eigen overboeking: nooit een factuur
       const suggestions = this.suggest(t, this.invoices.listOpen(asOf), this.purchases.listOpen()).filter((s) => s.kind !== 'rekening');
       const [best, second] = suggestions;
       if (!best) continue;

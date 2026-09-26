@@ -160,7 +160,8 @@ export function createApi(s: Services, host: HostContext) {
         s.inbox.skipTask(task.key, 'algemeen');
         return;
       case 'bank-pot:klopt':
-        s.bank.bookToAccount(r.bankTransactionId!, { account: s.bank.getAccount(r.bankAccountId!).rgs_code, description: 'Belastingpotje' });
+      case 'bank-own:klopt':
+        s.bank.bookOwnTransfer(r.bankTransactionId!);
         return;
       case 'recurring-confirm:ja':
         s.recurring.confirm(r.seriesId!);
@@ -414,6 +415,9 @@ export function createApi(s: Services, host: HostContext) {
       addAccount: (name: string, iban: string) => s.bank.addAccount(name, iban),
       updateAccount: (id: number, patch: { name?: string; iban?: string | null }) => s.bank.updateAccount(id, patch),
       openingBalance: (bankAccountId: number, amount: Cents, date: IsoDate) => s.bank.setOpeningBalance(bankAccountId, amount, date),
+      getOpeningBalance: (bankAccountId: number) => s.bank.openingBalance(bankAccountId),
+      ownTransfer: (txId: number) => s.bank.ownTransferTarget(s.bank.get(txId)),
+      bookOwnTransfer: (txId: number) => s.bank.bookOwnTransfer(txId),
       previewFile: (filename: string, content: string) => {
         const format = detectFormat(filename, content);
         if (format !== 'csv') return { format, csv: null, savedMapping: null };

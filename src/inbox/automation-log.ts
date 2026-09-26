@@ -5,7 +5,7 @@ import type { Explanation } from '../automation/explain';
  * Logboek van wat er verwerkt is: door de app zelf (groen, #29) of door de gebruiker vanuit
  * een taak. Met de "Waarom?"-uitleg erbij (#28).
  */
-export type AutomationKind = 'bank-auto' | 'document-auto' | 'bank-match' | 'gebruiker';
+export type AutomationKind = 'bank-auto' | 'bank-own' | 'document-auto' | 'bank-match' | 'gebruiker';
 export type AutomationStatus = 'auto' | 'done_by_user' | 'klopt_niet';
 
 export interface AutomationEntry {

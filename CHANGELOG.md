@@ -2,6 +2,13 @@
 
 ## Nog niet uitgebracht
 
+- **Extra bankrekeningen** (Bank → Rekeningen → *Rekening toevoegen*): een spaarrekening, een btw-potje of
+  een gewone tweede rekening. Naam en IBAN zijn te wijzigen, en elke rekening heeft een eigen beginsaldo
+  (opnieuw invoeren vervangt het oude bedrag).
+- **Overboekingen tussen eigen rekeningen** herkent de app aan het rekeningnummer. Ze tellen niet als omzet
+  of kosten. Lees je van beide rekeningen het afschrift in, dan wordt de overboeking één keer geboekt en
+  koppelt de app de andere kant eraan. Ongedaan maken draait beide kanten terug. Bij "voorzichtig" staat
+  het als vraag op Vandaag, anders gebeurt het vanzelf.
 - Releases krijgen de tekst uit deze CHANGELOG. De controlegetallen (`SHA256SUMS-*.txt`) gebruiken de
   bestandsnamen zoals ze op GitHub staan, zodat `sha256sum -c` de AppImage ook echt controleert.
 
