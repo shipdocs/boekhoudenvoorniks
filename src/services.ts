@@ -1,5 +1,6 @@
 import type { Db } from './db/database';
 import { Ledger } from './core-ledger/ledger';
+import { EventService } from './core-ledger/events';
 import { SettingsService } from './settings/settings';
 import { RelationsService } from './relations/relations';
 import { TemplateService } from './documents/templates';
@@ -41,9 +42,10 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const templates = new TemplateService(db);
   const invoices = new InvoiceService(db, ledger, settings, relations, templates);
   const quotes = new QuoteService(db, settings, relations, templates, invoices);
-  const purchases = new PurchaseService(db, ledger);
+  const events = new EventService(db, ledger);
+  const purchases = new PurchaseService(db, ledger, events);
   const sender = new DocumentSender(db, settings, invoices, quotes, deps.pdf, deps.mailerFactory);
-  const bank = new BankService(db, ledger, invoices, purchases, relations);
+  const bank = new BankService(db, ledger, invoices, purchases, relations, events);
   const matching = new MatchingEngine(bank, invoices, purchases, relations);
   const vat = new VatService(db, ledger, settings);
   const dashboard = new DashboardService(db, ledger, invoices, bank, vat);
@@ -60,7 +62,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   templates.seedDefaults();
   bank.ensureDefaultAccount();
 
-  return { db, ledger, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox };
+  return { db, ledger, events, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox };
 }
 
 export type Services = ReturnType<typeof createServices>;

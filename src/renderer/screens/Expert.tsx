@@ -66,6 +66,7 @@ function Journal({ from, to }: { from: string; to: string }) {
             <span><strong>#{e.id}</strong> <DateNl date={e.entry_date} /> · {e.description} <span className="pill">{e.source}</span> {e.status === 'teruggedraaid' && <span className="pill warn">teruggedraaid</span>}{e.reverses_entry_id && <span className="pill">correctie op #{e.reverses_entry_id}</span>}</span>
             {e.status === 'definitief' && !e.reverses_entry_id && e.source === 'handmatig' && <Button small kind="ghost" onClick={async () => { if (confirm('Tegenboeking maken?')) { await run(() => api.ledger.reverse(e.id, today()), 'Tegenboeking gemaakt'); await entries.reload(); } }}>Terugdraaien</Button>}
           </div>
+          <Origin entryId={e.id} />
           <table style={{ width: '100%' }} className="small">
             <tbody>
               {e.lines.map((l) => (
@@ -195,6 +196,27 @@ function Integrity() {
   return (
     <div className={`notice ${r.data.balanced ? 'good' : 'bad'}`}>
       {r.data.balanced ? '✓ Alle journaalposten zijn in balans.' : `Let op: ${r.data.unbalancedEntries.length} journaalposten zijn niet in balans.`} Totaal debet <Euro cents={r.data.totalDebit} />, credit <Euro cents={r.data.totalCredit} />.
+    </div>
+  );
+}
+
+const EVIDENCE_LABEL: Record<string, string> = { document: 'document', bank: 'banktransactie', factuur: 'factuur', inkoop: 'inkoop', antwoord: 'jouw antwoord', bron: 'bron' };
+
+/** Herkomst van een post: de gebeurtenis, de regelversie en het bewijs (#19). */
+function Origin({ entryId }: { entryId: number }) {
+  const [open, setOpen] = useState(false);
+  const origin = useLoad(async () => (open ? api.ledger.origin(entryId) : null), [open, entryId]);
+  const o = origin.data;
+  return (
+    <div className="small">
+      <button className="linklike" onClick={() => setOpen(!open)}>Herkomst</button>
+      {open && o && (
+        <div className="muted">
+          Gebeurtenis #{o.id} ({o.type}{o.status === 'vervangen' ? ', vervangen' : ''}), regels {o.rules_version}
+          {o.supersedes_event_id ? `, vervangt #${o.supersedes_event_id}` : ''} · bewijs:{' '}
+          {o.evidence.length ? o.evidence.map((x) => `${EVIDENCE_LABEL[x.kind] ?? x.kind}${x.refId ? ` #${x.refId}` : ''}${x.note && x.kind === 'antwoord' ? ` ("${x.note}")` : ''}`).join(', ') : 'geen'}
+        </div>
+      )}
     </div>
   );
 }

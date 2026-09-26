@@ -31,13 +31,14 @@ eigen computer, zonder account, cloud of abonnement.
 2. **De software doet het werk en vraagt alleen om uitzonderingen** (HIGH → automatisch, MEDIUM → één vraag, LOW → controle). Een leverancier wordt pas automatisch verwerkt als jij daar ja op zegt, en alles wat de app zelf deed staat onder "Automatisch gedaan". Zekerheid wordt per veld en per beslissing bepaald; automatisch alleen als álles boven de drempel zit. Instelbaar: voorzichtig / normaal / maximaal. Elke automatische verwerking heeft een "Waarom?" (vaste sjablonen, geen AI) en een knop "Klopt niet" die het terugdraait.
 3. **AI verzint nooit de boekhouding.** Extractie (*wat staat er?*), classificatie (*wat is dit?*) en boeking (*hoe boeken we dit?*) zijn strikt gescheiden. Een lokale LLM mag alleen een categorie voorstellen; boekingen worden altijd met vaste, testbare regels in code gemaakt.
 4. **Journaalposten zijn onveranderlijk** (afgedwongen met database-triggers); corrigeren gaat via een tegenboeking. Elke post is in balans. Een ingediende BTW-periode verandert nooit: wat later nog in die periode geboekt wordt, telt mee in de volgende aangifte (boven € 1.000 btw: een suppletie).
+6. **Gebeurtenissen zijn de bron van waarheid.** Wat er gebeurd is (een bankbetaling, een inkoop) wordt met bewijs vastgelegd; de journaalregels worden daar met vaste, geversioneerde regels uit gecompileerd (`src/core-ledger/rules.ts`). Een andere categorie kiezen vervangt de gebeurtenis: tegenboeking van de oude post en een nieuwe post, nooit een stille wijziging. In de expertmodus toont elke post zijn herkomst.
 5. **Bedragen in centen** (integers), BTW-percentage per regel, BTW per tarief berekend over de som van de regels.
 
 ## Architectuur
 
 ```
 src/
-  core-ledger/   dubbele boekhouding: journaalposten, saldi, RGS-rekeningschema   ← het risicovolle deel, eigen tests
+  core-ledger/   dubbele boekhouding: journaalposten, saldi, RGS-rekeningschema, gebeurtenissen + boekingsregels   ← het risicovolle deel, eigen tests
   documents/     offertes, facturen, inkoop, templates, PDF/e-mail, herinneringen
   import/        CSV/MT940/CAMT.053 → genormaliseerde transacties, matching-engine
   intake/        documentinbox: UBL, PDF-tekst, OCR-interface, validatie, classificatie, confidence, leveranciersgeheugen

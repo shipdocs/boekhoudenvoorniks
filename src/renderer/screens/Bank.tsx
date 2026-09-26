@@ -223,6 +223,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const suggestions = useLoad(() => api.bank.suggestions(id), [id]);
   const openInvoices = useLoad(() => api.invoices.list({ status: 'openstaand' }));
   const overdue = useLoad(() => api.invoices.list({ status: 'vervallen' }));
+  const [recat, setRecat] = useState(false);
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
   const done = async (p: Promise<unknown>) => {
@@ -241,7 +242,18 @@ export function CategorizeTransaction({ id }: { id: number }) {
         <div className="card">
           <StatusPill status={t.status} />
           <p className="muted small">Verkeerd verwerkt? Maak het ongedaan; er wordt netjes een correctie geboekt.</p>
-          <Button onClick={() => void done(api.bank.unmatch(t.id))}>Ongedaan maken</Button>
+          <div className="row">
+            <Button onClick={() => void done(api.bank.unmatch(t.id))}>Ongedaan maken</Button>
+            {t.status === 'gematcht' && !t.matched_invoice_id && !t.matched_purchase_invoice_id && t.amount < 0 && (
+              <Button onClick={() => setRecat(!recat)}>Andere categorie</Button>
+            )}
+          </div>
+          {recat && (
+            <div style={{ marginTop: 12 }}>
+              <CategoryPicker onPick={(categoryKey, vatCode) => void done(api.bank.reclassify(t.id, categoryKey, vatCode))} />
+              <p className="small muted">De oude boeking krijgt een tegenboeking en de nieuwe wordt gemaakt. Was de btw-periode al aangegeven, dan telt het verschil mee in je volgende aangifte.</p>
+            </div>
+          )}
         </div>
       ) : (
         <>

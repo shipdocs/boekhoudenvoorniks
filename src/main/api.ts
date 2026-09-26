@@ -351,6 +351,15 @@ export function createApi(s: Services, host: HostContext) {
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(txId, purchaseId),
       book: (txId: number, input: BookToAccountInput) => s.bank.bookToAccount(txId, input),
       ignore: (txId: number) => s.bank.ignore(txId),
+      /** Andere categorie voor een al geboekte betaling: tegenboeking + nieuwe boeking (#19), en leren. */
+      reclassify: (txId: number, categoryKey: string, vatCode: string) => {
+        const category = EXPENSE_CATEGORIES.find((c) => c.key === categoryKey);
+        if (!category) throw new Error('Onbekende categorie');
+        const entryId = s.bank.reclassify(txId, { account: category.account, vatCode }, `categorie gewijzigd naar ${category.label.toLowerCase()}`);
+        const t = s.bank.get(txId);
+        if (t.counter_name) s.memory.learn(t.counter_name, { categoryKey, vatCode, business: true });
+        return entryId;
+      },
       unmatch: (txId: number) => s.bank.unmatch(txId),
       autoMatch: () => s.matching.autoMatch(undefined, s.settings.get().autopilot),
     },
@@ -381,6 +390,8 @@ export function createApi(s: Services, host: HostContext) {
       manualEntry: (entry: { date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents }[] }) => s.ledger.post({ ...entry, source: 'handmatig' }),
       reverse: (id: number, date: IsoDate) => s.ledger.reverse(id, date),
       integrity: () => s.ledger.checkIntegrity(),
+      /** "Waarom bestaat deze boeking?": de gebeurtenis met bewijs (#19). */
+      origin: (entryId: number) => s.events.forEntry(entryId),
     },
     exports: {
       journal: (from: IsoDate, to: IsoDate) => host.saveFile(`journaal-${from}-${to}.csv`, s.exports.journalCsv(from, to), [{ name: 'CSV', extensions: ['csv'] }]),

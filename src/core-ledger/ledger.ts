@@ -3,6 +3,7 @@ import { tx } from '../db/database';
 import { assertCents, type Cents } from '../shared/money';
 import { addDays, assertIsoDate, type IsoDate } from '../shared/dates';
 import { DEFAULT_ACCOUNTS, type AccountCategory } from './accounts';
+import { RULES_VERSION } from './rules-version';
 import rgsTaxonomy from './rgs-codes.json';
 
 /** Officiële RGS-codes (taxonomie-release in rgs-codes.json). */
@@ -31,6 +32,8 @@ export interface PostEntry {
   lines: PostLine[];
   /** Alleen intern gebruikt door reverse(). */
   reversesEntryId?: number | null;
+  /** De gebeurtenis waar deze post uit volgt (#19). Zonder: er wordt een gebeurtenis "boeking" vastgelegd. */
+  eventId?: number | null;
 }
 
 export interface Account {
@@ -71,6 +74,8 @@ export interface JournalEntry {
   reverses_entry_id: number | null;
   vat_date: IsoDate | null;
   vat_correction_of: string | null;
+  event_id: number | null;
+  rules_version: string | null;
   created_at: string;
   lines: JournalLine[];
 }
@@ -238,9 +243,29 @@ export class Ledger {
         if (account.archived) throw new LedgerError(`Rekening ${account.code} ${account.name} is gearchiveerd`);
         return account.id;
       });
+      // Elke post volgt uit precies één gebeurtenis (#19); een tegenboeking hoort bij die van het origineel.
+      let eventId = entry.eventId ?? null;
+      if (!eventId && entry.reversesEntryId) {
+        eventId = (this.db.prepare('SELECT event_id FROM journal_entries WHERE id = ?').get(entry.reversesEntryId) as { event_id: number | null } | undefined)?.event_id ?? null;
+      }
+      if (!eventId) {
+        const { reversesEntryId: _r, eventId: _e, ...payload } = entry;
+        eventId = Number(
+          this.db
+            .prepare(`INSERT INTO events (type, event_date, payload, rules_version) VALUES ('boeking', ?, ?, ?)`)
+            .run(entry.date, JSON.stringify(payload), RULES_VERSION).lastInsertRowid,
+        );
+        if (entry.sourceRef) {
+          const [kind, ref] = entry.sourceRef.split(':');
+          const known: Record<string, string> = { invoice: 'factuur', purchase: 'inkoop', bank: 'bank' };
+          this.db
+            .prepare('INSERT INTO event_evidence (event_id, kind, ref_id, note) VALUES (?, ?, ?, ?)')
+            .run(eventId, known[kind ?? ''] ?? 'bron', known[kind ?? ''] ? Number(ref) : null, entry.sourceRef);
+        }
+      }
       const result = this.db
-        .prepare('INSERT INTO journal_entries (entry_date, description, source, source_ref, reverses_entry_id, vat_date, vat_correction_of) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(entry.date, entry.description.trim(), entry.source, entry.sourceRef ?? null, entry.reversesEntryId ?? null, vatDate, correctionOf);
+        .prepare('INSERT INTO journal_entries (entry_date, description, source, source_ref, reverses_entry_id, vat_date, vat_correction_of, event_id, rules_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(entry.date, entry.description.trim(), entry.source, entry.sourceRef ?? null, entry.reversesEntryId ?? null, vatDate, correctionOf, eventId, RULES_VERSION);
       const entryId = Number(result.lastInsertRowid);
       const insertLine = this.db.prepare(
         `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit, relation_id, vat_code, description)

@@ -7,16 +7,10 @@ import { assertIsoDate, type IsoDate } from '../shared/dates';
 import { assertCents, roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
 
-export interface PurchaseLineInput {
-  /** RGS-code van de kostenrekening (of activa bij investering) */
-  account: string;
-  description?: string | null;
-  /** bedrag exclusief BTW */
-  netAmount: Cents;
-  vatCode: PurchaseVatCode;
-  /** optioneel afwijkend BTW-bedrag (zoals op de bon); anders berekend */
-  vatAmount?: Cents;
-}
+export type { PurchaseLineInput } from '../core-ledger/rules';
+export { expenseLines, purchaseVat } from '../core-ledger/rules';
+import { expenseLines, purchaseVat, type InkoopPayload, type PurchaseLineInput } from '../core-ledger/rules';
+import type { EventService, Evidence } from '../core-ledger/events';
 
 export interface PurchaseInvoiceInput {
   relationId?: number | null;
@@ -52,46 +46,12 @@ export interface PurchaseInvoice {
   open_amount: Cents;
 }
 
-/** Berekent de BTW op een inkoopregel. Bij verlegd is de BTW wel te berekenen maar niet te betalen aan de leverancier. */
-export function purchaseVat(line: PurchaseLineInput): Cents {
-  if (line.vatAmount !== undefined) return line.vatAmount;
-  return roundHalfAwayFromZero((line.netAmount * PURCHASE_VAT_RATES[line.vatCode].percentage) / 100);
-}
-
-/**
- * Journaalregels voor kosten met BTW. Wordt ook gebruikt voor het direct boeken van
- * banktransacties op een kostenrekening.
- *   - hoog/laag: kosten (netto) + voorbelasting aan crediteur/bank (bruto)
- *   - verlegd:   kosten (netto) + voorbelasting aan af te dragen btw verlegd; crediteur/bank alleen netto
- *   - nul/geen:  alleen kosten
- * Retourneert de regels en het bedrag dat daadwerkelijk betaald wordt.
- */
-export function expenseLines(lines: PurchaseLineInput[], counterAccount: string, relationId: number | null, description?: string): { lines: PostLine[]; payable: Cents; vat: Cents; net: Cents } {
-  const out: (PostLine | null)[] = [];
-  let payable = 0;
-  let vatTotal = 0;
-  let netTotal = 0;
-  for (const l of lines) {
-    assertCents(l.netAmount, 'bedrag');
-    if (!(l.vatCode in PURCHASE_VAT_RATES)) throw new ValidationError(`Onbekende BTW-code ${l.vatCode}`);
-    const vat = purchaseVat(l);
-    netTotal += l.netAmount;
-    out.push(signedLine(l.account, l.netAmount, { relationId, vatCode: l.vatCode, description: l.description ?? null }));
-    if (vat !== 0) {
-      out.push(signedLine(ACCOUNTS.btwVoorbelasting, vat, { relationId, vatCode: l.vatCode }));
-      vatTotal += vat;
-      if (l.vatCode === 'verlegd') {
-        out.push(signedLine(ACCOUNTS.btwAfdragenVerlegd, -vat, { relationId, vatCode: 'verlegd' }));
-      }
-    }
-    payable += l.netAmount + (l.vatCode === 'verlegd' ? 0 : vat);
-  }
-  out.push(signedLine(counterAccount, -payable, { relationId, description: description ?? null }));
-  return { lines: out.filter((l): l is PostLine => l !== null), payable, vat: vatTotal, net: netTotal };
-}
-
 export class PurchaseService {
-  constructor(private readonly db: Db, private readonly ledger: Ledger) {}
+  constructor(
+    private readonly db: Db,
+    private readonly ledger: Ledger,
+    private readonly events: EventService,
+  ) {}
 
   create(input: PurchaseInvoiceInput): PurchaseInvoice {
     assertIsoDate(input.invoiceDate, 'factuurdatum');
@@ -108,16 +68,43 @@ export class PurchaseService {
         )
         .run(input.relationId ?? null, input.supplierReference ?? null, input.invoiceDate, input.dueDate ?? null, input.description.trim(), booking.net, vatPaid, booking.payable, input.attachmentPath ?? null, input.jobId ?? null, input.documentId ?? null, input.externalSource ?? null, input.externalId ?? null);
       const id = Number(result.lastInsertRowid);
-      const entryId = this.ledger.post({
-        date: input.invoiceDate,
-        description: `Inkoop: ${input.description.trim()}`,
-        source: 'inkoop',
-        sourceRef: `purchase:${id}`,
-        lines: booking.lines,
-      });
+      const evidence: Evidence[] = [{ kind: 'inkoop', refId: id }];
+      if (input.documentId) evidence.push({ kind: 'document', refId: input.documentId });
+      const { entryId } = this.events.record(
+        {
+          type: 'inkoop',
+          payload: { purchaseId: id, date: input.invoiceDate, description: input.description.trim(), relationId: input.relationId ?? null, supplierReference: input.supplierReference ?? null, lines: input.lines },
+        },
+        evidence,
+      );
       const insertLine = this.db.prepare('INSERT INTO purchase_invoice_lines (purchase_invoice_id, account_id, description, net_amount, vat_code, vat_amount) VALUES (?, ?, ?, ?, ?, ?)');
       for (const l of input.lines) insertLine.run(id, this.ledger.getAccount(l.account).id, l.description ?? null, l.netAmount, l.vatCode, purchaseVat(l));
       this.db.prepare('UPDATE purchase_invoices SET journal_entry_id = ? WHERE id = ?').run(entryId, id);
+      return this.get(id);
+    });
+  }
+
+  /**
+   * Andere kostensoort of btw-keuze voor een geboekte inkoop (#19): de gebeurtenis wordt vervangen
+   * (tegenboeking + nieuwe post). Het te betalen bedrag mag niet veranderen als er al betaald is.
+   */
+  reclassify(id: number, lines: PurchaseLineInput[], reason = 'andere categorie'): PurchaseInvoice {
+    if (lines.length === 0) throw new ValidationError('Voeg minimaal één regel toe');
+    return tx(this.db, () => {
+      const p = this.get(id);
+      if (!p.journal_entry_id) throw new ValidationError('Deze inkoop heeft geen boeking');
+      const event = this.events.forEntry(p.journal_entry_id);
+      if (!event || event.type !== 'inkoop') throw new ValidationError('Deze inkoop is van vóór het gebeurtenissenmodel en kan zo niet aangepast worden');
+      const booking = expenseLines(lines, ACCOUNTS.crediteuren, p.relation_id, p.supplier_reference ?? undefined);
+      if (p.amount_paid !== 0 && booking.payable !== p.total) throw new ValidationError('Het te betalen bedrag verandert; maak eerst de betaling ongedaan');
+      const old = event.payload as InkoopPayload;
+      const { entryId } = this.events.replace(event.id, { type: 'inkoop', payload: { ...old, lines } }, reason);
+      this.db
+        .prepare('UPDATE purchase_invoices SET journal_entry_id = ?, subtotal = ?, vat_total = ?, total = ?, status = ? WHERE id = ?')
+        .run(entryId, booking.net, booking.payable - booking.net, booking.payable, p.amount_paid >= booking.payable ? 'betaald' : 'open', id);
+      this.db.prepare('DELETE FROM purchase_invoice_lines WHERE purchase_invoice_id = ?').run(id);
+      const insertLine = this.db.prepare('INSERT INTO purchase_invoice_lines (purchase_invoice_id, account_id, description, net_amount, vat_code, vat_amount) VALUES (?, ?, ?, ?, ?, ?)');
+      for (const l of lines) insertLine.run(id, this.ledger.getAccount(l.account).id, l.description ?? null, l.netAmount, l.vatCode, purchaseVat(l));
       return this.get(id);
     });
   }
