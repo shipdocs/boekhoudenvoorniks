@@ -18,7 +18,14 @@ export const test = base.extend<{ problems: Problems }>({
     const problems: Problems = { pageErrors: [], consoleErrors: [], apiErrors: [] };
     page.on('pageerror', (e) => problems.pageErrors.push(e.message));
     page.on('console', (m) => {
-      if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) problems.consoleErrors.push(m.text());
+      if (m.type() !== 'error') return;
+      // favicon e.d. bestaat niet op de testserver
+      if (/Failed to load resource/.test(m.text())) return;
+      // het factuurvoorbeeld staat bewust in een iframe zonder scripts (sandbox); onze eigen
+      // addInitScript hieronder probeert daar ook te draaien en wordt terecht geblokkeerd.
+      // In de echte app is er geen init-script, dus dit is alleen een melding van de testopzet.
+      if (/Blocked script execution in 'about:srcdoc'.*sandboxed/.test(m.text())) return;
+      problems.consoleErrors.push(m.text());
     });
     await page.exposeFunction('__e2eApiError', (method: string, error: string) => problems.apiErrors.push({ method, error }));
     await page.addInitScript(() => {

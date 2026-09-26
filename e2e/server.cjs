@@ -21,6 +21,8 @@ const { seedDemo } = require(path.join(ROOT, 'main/demo/demo.js'));
 
 const PORT = Number(process.env.E2E_PORT || 5190);
 let dir, file, db, services, api;
+/** api-verzoeken die nog lopen: een reset wacht tot ze klaar zijn */
+let inflight = 0;
 /** wat de app "verstuurde" (e-mail) en "opsloeg" (bestanden), voor controles in de tests */
 let sent = [];
 
@@ -34,6 +36,8 @@ async function storeFile(name, data) {
 function init(fresh) {
   if (fresh) {
     try { db?.close(); } catch { /* al dicht */ }
+    // de vorige (tijdelijke) administratie opruimen
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gb-e2e-'));
     file = path.join(dir, 'boekhouding.sqlite');
   }
@@ -85,6 +89,8 @@ http
       for await (const c of req) body += c;
       res.setHeader('content-type', 'application/json');
       if (req.url === '/__reset') {
+        // niet midden in een verzoek van de vorige test de database wisselen
+        for (let i = 0; inflight > 0 && i < 100; i++) await new Promise((r) => setTimeout(r, 50));
         sent = [];
         init(true);
         return res.end('{"ok":true}');
@@ -94,11 +100,14 @@ http
       const [ns, fn] = String(method).split('.');
       const handler = Object.hasOwn(api, ns) && Object.hasOwn(api[ns], fn) ? api[ns][fn] : null;
       if (typeof handler !== 'function') return res.end(JSON.stringify({ error: `Onbekende functie: ${method}` }));
+      inflight++;
       try {
         const r = await handler(...args);
         res.end(JSON.stringify({ ok: r === undefined ? null : r }, replace));
       } catch (e) {
         res.end(JSON.stringify({ error: e.message }));
+      } finally {
+        inflight--;
       }
       return;
     }
@@ -112,3 +121,9 @@ http
     res.end(fs.readFileSync(p));
   })
   .listen(PORT, () => console.log(`e2e-server op http://localhost:${PORT}`));
+
+process.on('exit', () => {
+  try { db?.close(); } catch { /* al dicht */ }
+  if (dir) fs.rmSync(dir, { recursive: true, force: true });
+});
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));
