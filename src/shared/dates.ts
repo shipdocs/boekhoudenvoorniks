@@ -96,3 +96,9 @@ export function formatDateNl(date: IsoDate): string {
   const [y, m, d] = date.split('-');
   return `${Number(d)} ${MONTHS[Number(m) - 1]} ${y}`;
 }
+
+/** Uiterste aangiftedatum: einde van de maand na het tijdvak (kwartaal/maand), 31 maart bij jaar. */
+export function vatDeadline(periodEnd: IsoDate, type: 'maand' | 'kwartaal' | 'jaar'): IsoDate {
+  if (type === 'jaar') return `${Number(periodEnd.slice(0, 4)) + 1}-03-31`;
+  return periodFor(addDays(periodEnd, 1), 'maand').end;
+}
