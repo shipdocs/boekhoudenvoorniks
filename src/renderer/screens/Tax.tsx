@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, useAction, useApp, useLoad } from '../ui';
-import { formatDateNl } from '../../shared/dates';
-import { vatDeadline } from '../../inbox/inbox';
+import { formatDateNl, vatDeadline } from '../../shared/dates';
 import { VAT_DISCLAIMER } from '../../shared/legal';
 
 export function Tax({ periodKey }: { periodKey?: string }) {
