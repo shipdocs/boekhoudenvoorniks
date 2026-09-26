@@ -13,7 +13,7 @@ import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
 import { EXPENSE_CATEGORIES } from '../shared/categories';
 import { KNOWN_SUPPLIERS } from '../intake/suppliers';
-import { addDays, diffDays, formatDateNl, periodFor, today, type IsoDate } from '../shared/dates';
+import { addDays, diffDays, formatDateNl, periodFor, today, vatDeadline, type IsoDate } from '../shared/dates';
 
 /** Na zoveel dagen zonder nieuwe bankgegevens vragen we om een afschrift in te lezen. */
 export const BANK_STALE_DAYS = 14;
@@ -75,11 +75,7 @@ function greeting(): string {
   return h < 6 ? 'Goedenacht' : h < 12 ? 'Goedemorgen' : h < 18 ? 'Goedemiddag' : 'Goedenavond';
 }
 
-/** Uiterste aangiftedatum: einde van de maand na het tijdvak (kwartaal/maand), 31 maart bij jaar. */
-export function vatDeadline(periodEnd: IsoDate, type: 'maand' | 'kwartaal' | 'jaar'): IsoDate {
-  if (type === 'jaar') return `${Number(periodEnd.slice(0, 4)) + 1}-03-31`;
-  return periodFor(addDays(periodEnd, 1), 'maand').end;
-}
+export { vatDeadline };
 
 /**
  * "Wat is er gebeurd?" en "Ben ik bij?" — de administratie als inbox die leeg kan.
