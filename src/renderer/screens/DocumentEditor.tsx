@@ -112,6 +112,11 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         <Button kind="ghost" onClick={() => go({ screen: 'werk', extra: { tab: isInvoice ? 'facturen' : 'offertes' } })}>← Terug</Button>
       </div>
       <ErrorBox error={doc.error} />
+      {!isInvoice && editable && (
+        <p className="notice small">
+          Een offerte is een prijsvoorstel: nog geen factuur en nog niets in je boekhouding. Stuur hem naar je klant. Zegt de klant ja? Klik dan op <strong>Klant is akkoord</strong>; daarna maak je er met één klik een factuur van.
+        </p>
+      )}
 
       <div className="card">
         <div className="grid cols-3">
@@ -127,7 +132,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           <Field label={isInvoice ? 'Factuurdatum' : 'Datum'}>
             <input type="date" value={date} disabled={!editable} onChange={(e) => setDate(e.target.value)} />
           </Field>
-          <Field label={isInvoice ? 'Betalen vóór' : 'Geldig tot'} hint={isInvoice ? `standaard ${settings.paymentTermDays} dagen` : undefined}>
+          <Field label={isInvoice ? 'Betalen vóór' : 'Geldig tot'} hint={`standaard ${isInvoice ? settings.paymentTermDays : settings.quoteValidityDays} dagen`}>
             <input type="date" value={secondDate || addDays(date, isInvoice ? settings.paymentTermDays : settings.quoteValidityDays)} disabled={!editable} onChange={(e) => setSecondDate(e.target.value)} />
           </Field>
         </div>
@@ -145,22 +150,16 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
             </div>
           );
         })()}
-        <div className="grid cols-2" style={{ marginTop: 12 }}>
-          <Field label="Omschrijving / klus" hint="bv. Woonkamer stucen">
+        <div style={{ marginTop: 12 }}>
+          <Field label={isInvoice ? 'Omschrijving / klus' : 'Waar gaat de offerte over?'} hint="bv. Woonkamer stucen">
             <input value={reference} disabled={!editable} onChange={(e) => setReference(e.target.value)} />
-          </Field>
-          <Field label="Opmaak">
-            <select value={templateId ?? ''} disabled={!editable} onChange={(e) => setTemplateId(Number(e.target.value) || null)}>
-              <option value="">Standaard</option>
-              {(templates.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
           </Field>
         </div>
 
-        <h2>Wat heb je gedaan?</h2>
+        <h2>{isInvoice ? 'Wat heb je gedaan?' : 'Wat ga je doen?'}</h2>
         <table className="lines-table" style={{ width: '100%' }}>
           <thead>
-            <tr className="small muted"><td>Omschrijving</td><td style={{ width: 80 }}>Aantal</td><td style={{ width: 80 }}>Eenheid</td><td style={{ width: 120 }}>Prijs</td><td style={{ width: 150 }}>Btw</td><td style={{ width: 110 }} className="num">Totaal</td><td style={{ width: 36 }} /></tr>
+            <tr className="small muted"><td>Omschrijving</td><td style={{ width: 80 }}>Aantal</td><td style={{ width: 80 }}>Eenheid</td><td style={{ width: 120 }}>Prijs</td><td style={{ width: 190 }}>Btw</td><td style={{ width: 110 }} className="num">Totaal</td><td style={{ width: 36 }} /></tr>
           </thead>
           <tbody>
             {lines.map((l, i) => {
@@ -209,9 +208,19 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         </div>
 
         <div className="grid cols-2" style={{ marginTop: 12 }}>
-          <Field label="Tekst boven de regels" hint="optioneel"><textarea value={intro} disabled={!editable} onChange={(e) => setIntro(e.target.value)} /></Field>
-          <Field label="Opmerking onderaan" hint="optioneel"><textarea value={notes} disabled={!editable} onChange={(e) => setNotes(e.target.value)} /></Field>
+          <Field label="Tekst boven de regels" hint="optioneel"><textarea value={intro} disabled={!editable} onChange={(e) => setIntro(e.target.value)} placeholder={isInvoice ? 'bv. Bedankt voor de opdracht.' : 'bv. Bedankt voor je aanvraag. Hieronder de prijs voor het werk dat we bespraken.'} /></Field>
+          <Field label="Opmerking onderaan" hint="optioneel"><textarea value={notes} disabled={!editable} onChange={(e) => setNotes(e.target.value)} placeholder={isInvoice ? '' : 'bv. Inclusief materiaal. Na akkoord plannen we het werk in.'} /></Field>
         </div>
+        {/* opmaak: de standaard is goed; alleen wie een eigen opmaak heeft gemaakt, kiest hier */}
+        {(templates.data ?? []).length > 1 && (
+          <details style={{ marginTop: 10 }}>
+            <summary className="small muted">Andere opmaak kiezen ({(templates.data ?? []).find((t) => t.id === templateId)?.name ?? 'standaard'})</summary>
+            <select value={templateId ?? ''} disabled={!editable} onChange={(e) => setTemplateId(Number(e.target.value) || null)} style={{ marginTop: 8, maxWidth: 360 }}>
+              <option value="">Standaard</option>
+              {(templates.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </details>
+        )}
       </div>
 
       <div className="row" style={{ marginTop: 16 }}>

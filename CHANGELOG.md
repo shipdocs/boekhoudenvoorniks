@@ -2,6 +2,13 @@
 
 ## Nog niet uitgebracht
 
+- **Offerte ziet er niet meer uit als een factuur**: uitleg bovenaan (een prijsvoorstel, nog niets in je
+  boekhouding; bij "ja" wordt het met één klik een factuur), "Wat ga je doen?" in plaats van "Wat heb je
+  gedaan?", en voorbeeldteksten die bij een offerte passen.
+- **Geen opmaak-keuze meer in beeld** bij factuur en offerte: de standaard is goed. Wie zelf een opmaak
+  heeft gemaakt, kiest die onder "Andere opmaak kiezen".
+- **Omschrijving van een regel is weer breed**: een lang btw-label drukte het veld eerder samen.
+
 - **E-mail testen**: *Test verbinding* gebruikt nu wat je hebt ingevuld, ook een ingetypt wachtwoord dat
   nog niet was opgeslagen (na een geslaagde test wordt het meteen bewaard). Voorheen kwam dan de melding
   'Missing credentials for "PLAIN"'. Foutmeldingen van de mailserver staan nu in gewone taal (wachtwoord

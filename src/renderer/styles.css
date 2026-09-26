@@ -162,7 +162,9 @@ table.list tr.clickable:hover td { background: var(--surface-2); }
 .fieldcheck:hover, .fieldcheck.active { background: var(--primary-soft); }
 .fieldcheck .ok { color: var(--good); font-weight: 700; }
 .fieldcheck .warn { color: var(--warn); font-weight: 700; }
-.lines-table input { width: 100%; }
+/* vaste kolombreedtes: een lang btw-label mag de omschrijving niet wegdrukken */
+.lines-table { table-layout: fixed; }
+.lines-table input, .lines-table select { width: 100%; min-width: 0; }
 .lines-table td { padding: 4px 4px; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
