@@ -8,7 +8,7 @@ import { ASSET_THRESHOLD } from './assets';
 import type { HoursService, MileageService } from './mileage';
 import { estimateIncomeTax, kiaFor, profitBetween, representatieBijtelling, rulesFor, type IncomeTaxBreakdown } from './income-tax';
 
-/** De startersaftrek vervalt per 2028 (wetswijziging); tot die tijd max 3× in de eerste 5 jaar. */
+/** De startersaftrek is in 2027 nog € 10 en vervalt per 2028 (wetswijziging); tot die tijd max 3× in de eerste 5 jaar. */
 const STARTERSAFTREK_ENDS = 2028;
 
 export function isStarter(s: Pick<AppSettings, 'startYear' | 'startersaftrekUsed'>, year: number): boolean {
@@ -25,6 +25,8 @@ export interface FiscalAdjustments {
   kia: Cents;
   desinvesteringsbijtelling: Cents;
   representatie: { total: Cents; bijtelling: Cents };
+  /** privédeel van telefoon & internet: bijtelling en de btw die je dan niet mag aftrekken */
+  phonePrivate: { costs: Cents; pct: number; bijtelling: Cents; vat: Cents };
   /** nog niet geboekte afschrijving (lopend jaar: tot en met `untilMonth`) */
   unbookedDepreciation: Cents;
   starter: boolean;
@@ -57,7 +59,7 @@ export interface TaxYearOverview {
 }
 
 export const OVERVIEW_DISCLAIMER =
-  'Dit overzicht helpt je bij de aangifte inkomstenbelasting. Het is geen advies: controleer de bedragen (of laat je boekhouder dat doen). Jij blijft verantwoordelijk voor je aangifte.';
+  'Dit overzicht is een hulpmiddel om je aangifte voor te bereiden, geen advies. Laat het altijd controleren door een boekhouder of accountant voordat je iets indient: de regels veranderen, de software kan fouten maken en de app kent je hele situatie niet. Jij blijft verantwoordelijk voor je aangifte.';
 
 /**
  * Wat er in de aangifte inkomstenbelasting bij de winst komt, bovenop de boekhouding: de KIA,
@@ -123,12 +125,26 @@ export class TaxOverviewService {
     const running = year >= Number(asOf.slice(0, 4));
     const to = running ? asOf : `${year}-12-31`;
     const repr = this.costsOn(ACCOUNTS.representatie, `${year}-01-01`, to);
+    const phoneCosts = this.costsOn('WBedKanTel', `${year}-01-01`, to);
+    const phoneVatBase = (this.db
+      .prepare(
+        `SELECT COALESCE(SUM(l.debit - l.credit), 0) AS s FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
+         JOIN chart_of_accounts a ON a.id = l.account_id WHERE a.rgs_code = 'WBedKanTel' AND l.vat_code = 'hoog' AND e.entry_date BETWEEN ? AND ?`,
+      )
+      .get(`${year}-01-01`, to) as { s: number }).s;
+    const privatePct = 100 - (s.phoneInternetBusinessPct ?? 100);
     const unbookedDepreciation = year > Number(asOf.slice(0, 4)) ? 0 : this.assets.projected(year, running ? Number(asOf.slice(5, 7)) : 12);
     return {
       investments,
       kia,
       desinvesteringsbijtelling,
       representatie: { total: repr, bijtelling: Math.round(representatieBijtelling(repr / 100, rules.representatie) * 100) },
+      phonePrivate: {
+        costs: phoneCosts,
+        pct: privatePct,
+        bijtelling: Math.round((phoneCosts * privatePct) / 100),
+        vat: Math.round((phoneVatBase * 0.21 * privatePct) / 100),
+      },
       unbookedDepreciation,
       starter: isStarter(s, year),
     };
@@ -153,7 +169,8 @@ export class TaxOverviewService {
       urencriterium: s.urencriterium,
       starter: adj.starter,
       kia: adj.kia / 100,
-      bijtellingen: (adj.representatie.bijtelling + adj.desinvesteringsbijtelling) / 100,
+      bijtellingen: (adj.representatie.bijtelling + adj.desinvesteringsbijtelling + adj.phonePrivate.bijtelling) / 100,
+      partnerHours: s.partnerHours,
     });
     const fuel = this.costsOn('WBedAutBra', `${year}-01-01`, to) + this.costsOn('WBedAutOnd', `${year}-01-01`, to);
     const items: OverviewItem[] = [];
@@ -173,6 +190,15 @@ export class TaxOverviewService {
         amount: adj.representatie.bijtelling,
         explain: `Deze kosten zijn beperkt aftrekbaar: 20% telt weer bij de winst (of alles tot € ${rules.representatie.drempel.toLocaleString('nl-NL')}, als dat minder is). Je had € ${(adj.representatie.total / 100).toFixed(2).replace('.', ',')} aan zulke kosten.`,
         where: 'Winst uit onderneming → niet-aftrekbare kosten',
+      });
+    }
+    if (adj.phonePrivate.bijtelling > 0) {
+      items.push({
+        key: 'telefoon-prive',
+        label: `Privégebruik telefoon & internet (${adj.phonePrivate.pct}%)`,
+        amount: adj.phonePrivate.bijtelling,
+        explain: `Je gebruikt telefoon en internet ook privé; dat deel van de € ${(adj.phonePrivate.costs / 100).toFixed(2).replace('.', ',')} telt weer bij de winst.${adj.phonePrivate.vat > 0 ? ` De btw daarover (± € ${(adj.phonePrivate.vat / 100).toFixed(2).replace('.', ',')}) mag je ook niet aftrekken: corrigeer die in je laatste btw-aangifte van het jaar (minder voorbelasting, rubriek 5b).` : ''}`,
+        where: 'Winst uit onderneming → privégebruik',
       });
     }
     if (adj.investments > 0) {
@@ -214,9 +240,19 @@ export class TaxOverviewService {
         amount: -Math.round(breakdown.startersaftrek * 100),
         explain: adj.starter
           ? 'Je bent gestart in de afgelopen 5 jaar en gebruikte de startersaftrek nog geen 3 keer.'
-          : 'Je hebt de startersaftrek al 3 keer gebruikt, of hij geldt niet meer (vervalt per 2028).',
+          : 'Je hebt de startersaftrek al 3 keer gebruikt, of hij geldt niet meer (in 2027 nog € 10, vanaf 2028 afgeschaft).',
         where: 'Ondernemersaftrek',
         status: adj.starter ? 'ok' : 'info',
+      });
+    }
+    if (breakdown.meewerkaftrek > 0) {
+      items.push({
+        key: 'meewerkaftrek',
+        label: 'Meewerkaftrek',
+        amount: -Math.round(breakdown.meewerkaftrek * 100),
+        explain: `Je partner werkt ${s.partnerHours.toLocaleString('nl-NL')} uur per jaar onbetaald mee (minder dan € 5.000 vergoeding).`,
+        where: 'Ondernemersaftrek',
+        status: 'ok',
       });
     }
     items.push({
@@ -253,6 +289,25 @@ export class TaxOverviewService {
         status: 'warn',
       });
     }
+    if (s.homeWorkspace === 'thuis' || s.homeWorkspace === 'zelfstandig') {
+      items.push({
+        key: 'werkruimte',
+        label: 'Werkplek thuis',
+        amount: null,
+        explain:
+          s.homeWorkspace === 'zelfstandig'
+            ? 'Een zelfstandige werkruimte (eigen ingang en sanitair) kan aftrekbaar zijn als je er genoeg van je inkomen verdient (70%, of 30% als je ook elders een werkplek hebt). Dat rekent de app niet uit: vraag je boekhouder. Inrichting (bureau, stoel, kast) is sowieso aftrekbaar.'
+            : 'Een werkplek in je woning zonder eigen ingang en sanitair is niet aftrekbaar, en energie of huur van je huis dus ook niet. Inrichting (bureau, stoel, kast) en apparaten die je zakelijk gebruikt wel.',
+        status: 'info',
+      });
+    }
+    items.push({
+      key: 'aov',
+      label: 'AOV, pensioen en lijfrente',
+      amount: null,
+      explain: 'Premies voor een arbeidsongeschiktheidsverzekering (AOV) en lijfrente of pensioen zijn geen bedrijfskosten. Betaal je ze van je zakelijke rekening, boek ze dan als privé. Je trekt ze wél af in je aangifte: de AOV bij de uitgaven voor inkomensvoorzieningen, lijfrente binnen je jaarruimte.',
+      status: 'info',
+    });
     if (fallback) {
       items.push({ key: 'regels', label: `Bedragen van ${rules.year}`, amount: null, explain: `De bedragen voor ${year} zijn nog niet bekend in de app; gerekend met die van ${rules.year}.`, status: 'warn' });
     }

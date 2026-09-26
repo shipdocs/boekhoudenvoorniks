@@ -188,6 +188,12 @@ export function createApi(s: Services, host: HostContext) {
       case 'vat-suppletie:gedaan':
         s.vat.markSuppletieSubmitted(r.periodKey!);
         return;
+      case 'investment-check:ja':
+        s.investments.convert({ lineId: r.lineId!, purchaseId: r.purchaseId ?? null, bankTransactionId: r.bankTransactionId ?? null });
+        return;
+      case 'investment-check:nee':
+        s.inbox.skipTask(task.key, 'gewone kosten');
+        return;
       case 'quote-expired:afgewezen':
         s.quotes.setStatus(r.quoteId!, 'afgewezen');
         return;

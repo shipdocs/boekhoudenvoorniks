@@ -200,10 +200,33 @@ Code: `src/tax/assets.ts`, `src/tax/mileage.ts`, `src/tax/overview.ts`; bedragen
 - **EIA/MIA/Vamil**: alleen een signaal bij bedrijfsmiddelen waarvan de naam lijkt op iets van de
   Energie- of Milieulijst, met de meldtermijn van 3 maanden (gerekend vanaf de aankoopdatum).
 
+- **Investering of kosten**: bij € 450 of meer excl. btw in de categorieën gereedschap, kantoor, telefoon,
+  auto of overig vraagt de app al bij de invoer: "Gaat dit langer dan een jaar mee?". Op Vandaag staat daarna
+  nog een vangnet: "Was dit een investering?". Bij "ja" wordt de kostenregel omgeboekt naar Inventaris. De
+  bonherkenning gebruikt nu het bedrag excl. btw (subtotaal, of het totaal teruggerekend).
+- **Telefoon & internet**: de gebruiker geeft een zakelijk percentage op. Het privédeel van de kosten
+  (WBedKanTel) telt bij de winst. De btw daarover (± 21% van het privédeel van de kosten tegen 21%) wordt als
+  correctie genoemd voor de laatste btw-aangifte van het jaar (minder voorbelasting, 5b). Die boekt de
+  app nog niet automatisch.
+- **Werkplek thuis**: alleen uitleg. Een niet-zelfstandige werkruimte is niet aftrekbaar (inrichting wel).
+  Een zelfstandige werkruimte kan aftrekbaar zijn (inkomenseis 70%/30%); de app rekent dat niet uit.
+- **Meewerkaftrek**: vanaf 525 uur 1,25%, vanaf 875 uur 2%, vanaf 1.225 uur 3%, vanaf 1.750 uur 4% van de
+  winst. Alleen met urencriterium, en de app gaat ervan uit dat de partner minder dan € 5.000 krijgt.
+- **AOV, lijfrente en pensioen**: altijd de uitleg dat dit geen bedrijfskosten zijn, maar wel aftrekbaar in
+  de aangifte. De categorie *Verzekeringen* noemt de AOV niet langer.
+- **Latere jaren**: 2027 rekent met zelfstandigenaftrek € 900 en startersaftrek € 10; vanaf 2028 geen
+  startersaftrek. De overige bedragen zijn die van 2026, en dat staat erbij.
+- **Controle door een deskundige**: bij elke IB-berekening staat de melding dat een boekhouder of
+  accountant de aangifte moet controleren. Eén keer per jaar moet de gebruiker dat bevestigen voordat het
+  overzicht opent. Er is een knop om het overzicht als tekst naar de boekhouder te sturen.
+
 **Vragen**
 21. Is "tanken met een privéauto = privé" juist? De btw-aftrek op brandstof naar rato van zakelijk gebruik laten we nu liggen.
 22. Is 80% of de drempel voor representatie correct toegepast voor IB-ondernemers?
 23. Mag de aanname "elk jaar gebruikt" bij de startersaftrek, of moet de gebruiker per jaar aangeven of hij hem gebruikt?
+24. Is het privédeel van telefoon & internet als bijtelling, met een btw-correctie aan het eind van het jaar, een goede werkwijze? Of moet het per boeking worden gesplitst?
+25. Kloppen de percentages van de meewerkaftrek voor 2025 en 2026?
+26. Zijn de categorieën voor de investeringsvraag (gereedschap, kantoor, telefoon, auto, overig) goed gekozen?
 
 ---
 

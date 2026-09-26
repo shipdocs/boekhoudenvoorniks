@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { migrate } from '../src/db/database';
 import { createServices, MemorySecretStore } from '../src/services';
 import { cumulativeDepreciation } from '../src/tax/assets';
-import { kiaFor, representatieBijtelling, rulesFor } from '../src/tax/income-tax';
+import { estimateIncomeTax, kiaFor, meewerkaftrekFor, representatieBijtelling, rulesFor } from '../src/tax/income-tax';
+import { mightBeInvestment } from '../src/shared/investment';
+import type { DocumentResult } from '../src/intake/types';
 import { isStarter } from '../src/tax/overview';
 import { setup } from './helpers';
 
@@ -33,6 +35,12 @@ describe('KIA en beperkt aftrekbare kosten', () => {
     expect(representatieBijtelling(1000, r2026.representatie)).toBe(200);
     expect(representatieBijtelling(40000, r2026.representatie)).toBe(5700);
     expect(representatieBijtelling(0, r2026.representatie)).toBe(0);
+  });
+
+  it('latere jaren: bekende wetswijzigingen gaan voor (zelfstandigenaftrek 2027 € 900, startersaftrek weg)', () => {
+    expect(rulesFor(2027)).toMatchObject({ fallback: true, rules: { zelfstandigenaftrek: 900, startersaftrek: 10 } });
+    expect(rulesFor(2029).rules).toMatchObject({ zelfstandigenaftrek: 900, startersaftrek: 0 });
+    expect(rulesFor(2026).rules.zelfstandigenaftrek).toBe(1200);
   });
 
   it('startersaftrek: max 3× in de eerste 5 jaar, niet meer vanaf 2028', () => {
@@ -225,5 +233,99 @@ describe('jaaroverzicht en schatting', () => {
     buy(s, '2026-05-01', 12100_00, 'Zonnepanelen werkplaats');
     const o = s.taxOverview.year(2026, '2026-06-01');
     expect(o.items.find((i) => i.key.startsWith('energie-'))?.explain).toMatch(/RVO/);
+  });
+});
+
+describe('investeringen herkennen en aanbieden', () => {
+  const f = <T,>(value: T) => ({ value, confidence: 0.9, source: 'ocr' as const });
+  const doc = (supplier: string | null, lines: string[], total: number): DocumentResult => ({
+    documentType: f('bon' as never),
+    supplier: supplier ? f(supplier) : null,
+    supplierVatNumber: null,
+    supplierIban: null,
+    invoiceNumber: null,
+    invoiceDate: f('2026-03-01'),
+    dueDate: null,
+    currency: f('EUR'),
+    subtotal: null,
+    vat: f([{ rate: 21, base: null, amount: Math.round(total - (total * 100) / 121) }]),
+    total: f(total),
+    lineDescriptions: lines,
+    reverseCharge: false,
+    rawText: lines.join('\n'),
+  });
+
+  it('grens van € 450 is excl. btw (niet het bedrag op de bon)', async () => {
+    const { s } = setup();
+    // € 500 incl. = € 413 excl.: klein gereedschap
+    expect((await s.classifier.classify(doc('Gamma', ['Makita boormachine'], 500_00))).categoryKey).toBe('gereedschap');
+    // € 600 incl. = € 496 excl.: investering
+    expect((await s.classifier.classify(doc('Gamma', ['Makita boormachine'], 600_00))).categoryKey).toBe('investering');
+  });
+
+  it('apparaten zoals een laptop worden herkend', async () => {
+    const { s } = setup();
+    expect((await s.classifier.classify(doc(null, ['Lenovo laptop 15 inch'], 900_00))).categoryKey).toBe('investering');
+    expect((await s.classifier.classify(doc(null, ['Printer inktjet'], 120_00))).categoryKey).toBe('kantoor');
+  });
+
+  it('hint bij invoer: alleen vanaf € 450 excl. btw in een kandidaat-categorie', () => {
+    expect(mightBeInvestment('kantoor', 600_00, 'hoog')).toBe(true);
+    expect(mightBeInvestment('kantoor', 500_00, 'hoog')).toBe(false);
+    expect(mightBeInvestment('materiaal', 2000_00, 'hoog')).toBe(false);
+    expect(mightBeInvestment('overig', 450_00, 'geen')).toBe(true);
+  });
+
+  it('vangnet op Vandaag: € 450+ als kosten geboekt → "Was dit een investering?" → omzetten', () => {
+    const { s } = setup();
+    const p = s.quick.recordExpense({ date: '2026-03-01', supplierName: 'Coolblue', description: 'Laptop', categoryKey: 'kantoor', grossAmount: 1089_00, vatCode: 'hoog', paidWith: 'kas' });
+    s.quick.recordExpense({ date: '2026-03-01', supplierName: 'Bruna', description: 'Papier', categoryKey: 'kantoor', grossAmount: 30_00, vatCode: 'hoog', paidWith: 'kas' });
+    const tasks = s.inbox.tasks('2026-03-02').filter((t) => t.kind === 'investment-check');
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.ref.purchaseId).toBe(p.id);
+
+    s.investments.convert({ lineId: tasks[0]!.ref.lineId!, purchaseId: p.id, bankTransactionId: null });
+    expect(s.inbox.tasks('2026-03-02').filter((t) => t.kind === 'investment-check')).toHaveLength(0);
+    const [asset] = s.assets.list({}, '2026-03-02');
+    expect(asset).toMatchObject({ cost: 900_00, name: 'Laptop' });
+    expect(s.ledger.checkIntegrity().balanced).toBe(true);
+  });
+
+  it('vangnet werkt ook voor een banktransactie, en "nee" komt niet terug', () => {
+    const { s } = setup();
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-03-01', amount: -726_00, counterName: 'Apple', description: 'iPhone' }] });
+    const tx = s.bank.list({ status: 'nieuw' })[0]!;
+    s.inbox.answerBank(tx.id, { business: true, categoryKey: 'telefoon', vatCode: 'hoog' });
+    const task = s.inbox.tasks('2026-03-02').find((t) => t.kind === 'investment-check')!;
+    expect(task.ref.bankTransactionId).toBe(tx.id);
+    s.inbox.skipTask(task.key, 'gewone kosten');
+    expect(s.inbox.tasks('2026-03-02').find((t) => t.kind === 'investment-check')).toBeUndefined();
+  });
+});
+
+describe('thuis werken, meewerkende partner en AOV', () => {
+  it('privédeel telefoon & internet telt bij de winst, met de btw-correctie', () => {
+    const { s } = setup();
+    s.settings.update({ phoneInternetBusinessPct: 50 });
+    s.quick.recordExpense({ date: '2026-02-01', supplierName: 'KPN', description: 'Internet en mobiel', categoryKey: 'telefoon', grossAmount: 121_00, vatCode: 'hoog', paidWith: 'kas' });
+    const adj = s.taxOverview.adjustments(2026, '2026-06-30');
+    expect(adj.phonePrivate).toMatchObject({ costs: 100_00, pct: 50, bijtelling: 50_00, vat: 10_50 });
+    const item = s.taxOverview.year(2026, '2026-06-30').items.find((i) => i.key === 'telefoon-prive');
+    expect(item?.amount).toBe(50_00);
+    expect(item?.explain).toMatch(/btw/);
+  });
+
+  it('meewerkaftrek naar uren van de partner, alleen met urencriterium', () => {
+    const r = rulesFor(2026).rules;
+    expect(meewerkaftrekFor(50000, 500, r)).toBe(0);
+    expect(meewerkaftrekFor(50000, 600, r)).toBe(625);
+    expect(meewerkaftrekFor(50000, 1800, r)).toBe(2000);
+    expect(estimateIncomeTax(50000, r, { urencriterium: true, partnerHours: 900 }).meewerkaftrek).toBe(1000);
+    expect(estimateIncomeTax(50000, r, { urencriterium: false, partnerHours: 900 }).meewerkaftrek).toBe(0);
+  });
+
+  it('AOV/pensioen: altijd de uitleg dat het privé is maar wel aftrekbaar in de aangifte', () => {
+    const { s } = setup();
+    expect(s.taxOverview.year(2026, '2026-06-30').items.find((i) => i.key === 'aov')?.explain).toMatch(/geen bedrijfskosten/);
   });
 });

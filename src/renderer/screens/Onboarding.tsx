@@ -35,6 +35,9 @@ export function Onboarding() {
   const [carUse, setCarUse] = useState(settings.carUse);
   const [startYear, setStartYear] = useState(settings.startYear ? String(settings.startYear) : '');
   const [startersUsed, setStartersUsed] = useState(settings.startersaftrekUsed.count);
+  const [phonePct, setPhonePct] = useState<number | null>(settings.phoneInternetBusinessPct);
+  const [workspace, setWorkspace] = useState(settings.homeWorkspace);
+  const [partnerHours, setPartnerHours] = useState(settings.partnerHours ? String(settings.partnerHours) : '');
   const [lastNumber, setLastNumber] = useState('');
   const [terms, setTerms] = useState(settings.termsAcceptedVersion === TERMS_VERSION);
   const year = new Date().getFullYear();
@@ -53,6 +56,7 @@ export function Onboarding() {
       if (shows('btw')) Object.assign(patch, { kor, vatPeriod, defaultVatCode: kor ? 'vrijgesteld' : 'hoog' });
       if (shows('bedrijf')) patch.smtp = { ...settings.smtp, fromName: company.name, fromEmail: settings.smtp.fromEmail || company.email };
       if (shows('nummering')) patch.termsAcceptedVersion = TERMS_VERSION;
+      if (shows('thuis')) Object.assign(patch, { phoneInternetBusinessPct: phonePct, homeWorkspace: workspace, partnerHours: Number(partnerHours) || 0 });
       if (shows('fiscaal')) Object.assign(patch, { carUse, startYear: Number(startYear) || null, startersaftrekUsed: { count: startersUsed, asOfYear: year } });
       await api.settings.update(patch);
       if (shows('bank')) {
@@ -257,6 +261,39 @@ export function Onboarding() {
             )}
           </div>
           {footer(carUse !== 'onbekend' && Number(startYear) > 1900 && Number(startYear) <= year)}
+        </>
+      )}
+
+      {step.id === 'thuis' && (
+        <>
+          <h1>Telefoon, internet en werkplek</h1>
+          <p className="sub">Veel vakmensen doen hun administratie thuis en bellen met één telefoon. Dan telt alleen het zakelijke deel.</p>
+          <h2>Hoeveel gebruik je je telefoon en internet zakelijk?</h2>
+          <div className="chips">
+            {[[100, 'Alleen zakelijk'], [75, 'Vooral zakelijk (75%)'], [50, 'Half-half'], [25, 'Vooral privé (25%)']].map(([pct, label]) => (
+              <button key={pct} className={phonePct === pct ? 'selected' : ''} onClick={() => setPhonePct(pct as number)}>{label}</button>
+            ))}
+          </div>
+          <p className="small muted">Een redelijke schatting mag. Let op: een privé internetabonnement is alleen aftrekbaar voor zover je er extra kosten voor je bedrijf door hebt (bijvoorbeeld een sneller abonnement).</p>
+          <h2>Heb je een werkplek thuis?</h2>
+          <div className="choice">
+            {([
+              ['geen', 'Nee', ''],
+              ['thuis', 'Ja, een plek in huis', 'Bijvoorbeeld een bureau op zolder. De ruimte zelf is niet aftrekbaar; inrichting en apparaten wel.'],
+              ['zelfstandig', 'Ja, met eigen ingang en eigen sanitair', 'Dan kan de ruimte zelf aftrekbaar zijn, als je er genoeg van je inkomen verdient.'],
+            ] as const).map(([key, label, hint]) => (
+              <button key={key} className={workspace === key ? 'selected' : ''} onClick={() => setWorkspace(key)}>
+                {label}
+                {hint && <div className="hint">{hint}</div>}
+              </button>
+            ))}
+          </div>
+          {!profile.worksAlone && (
+            <Field label="Werkt je partner onbetaald mee? Hoeveel uur per jaar?" hint="vanaf 525 uur: meewerkaftrek">
+              <input value={partnerHours} onChange={(e) => setPartnerHours(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="0" inputMode="numeric" />
+            </Field>
+          )}
+          {footer(phonePct !== null && workspace !== null)}
         </>
       )}
 

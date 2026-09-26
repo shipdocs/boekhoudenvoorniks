@@ -110,7 +110,7 @@ export function Home() {
           <>
             {' · '}
             <span className="clickable" title={ib.data.disclaimer} onClick={() => go({ screen: 'belasting' })}>
-              inkomstenbelasting tot nu ± <Euro cents={ib.data.reserveToDate} /> <em>(schatting)</em>, daarna vrij ± <Euro cents={Math.max(0, data.money.freeToSpend - ib.data.reserveToDate)} />
+              inkomstenbelasting tot nu ± <Euro cents={ib.data.reserveToDate} /> <em>(schatting, laten controleren door je boekhouder)</em>, daarna vrij ± <Euro cents={Math.max(0, data.money.freeToSpend - ib.data.reserveToDate)} />
             </span>
           </>
         )}
@@ -222,6 +222,7 @@ export function Home() {
         <Modal title="Waar was deze betaling voor?" onClose={() => setPicking(null)}>
           <p className="muted">{picking.title}</p>
           <CategoryPicker
+            amount={picking.amount !== undefined ? Math.abs(picking.amount) : undefined}
             initial={picking.ref.categoryKey}
             onPick={async (categoryKey, vatCode) => {
               const t = picking;

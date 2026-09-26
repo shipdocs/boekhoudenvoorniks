@@ -18,3 +18,17 @@ export const TERMS_SUMMARY: string[] = [
 
 export const VAT_DISCLAIMER =
   'Deze berekening is gemaakt op basis van je eigen boekingen. Controleer de bedragen voordat je ze overneemt in je aangifte; jij blijft verantwoordelijk voor de juistheid.';
+
+/**
+ * Alles wat de app voor de inkomstenbelasting uitrekent, moet de gebruiker laten controleren door een
+ * boekhouder of accountant. Dat zeggen we overal waar een IB-bedrag staat, en eenmaal per jaar
+ * vragen we om te bevestigen dat de gebruiker dat begrijpt.
+ */
+export const ACCOUNTANT_CHECK_TITLE = 'Laat dit altijd controleren door een boekhouder of accountant';
+
+export const ACCOUNTANT_CHECK_REASONS: string[] = [
+  'De regels voor ondernemers veranderen elk jaar, soms halverwege. Een boekhouder kent de nieuwste regels; deze app loopt daar misschien achter.',
+  'De software kan fouten bevatten, en de uitkomst hangt af van wat jij hebt ingevoerd en gekozen. Een kleine vergissing kan veel geld kosten.',
+  'De app kent alleen je bedrijf. Je partner, je huis, ander inkomen, spaargeld en persoonlijke aftrekposten tellen ook mee.',
+  'Jij bent verantwoordelijk voor je aangifte. Een controle door een deskundige voorkomt naheffingen en boetes, en levert vaak meer aftrek op dan het kost.',
+];

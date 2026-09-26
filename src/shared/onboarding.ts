@@ -32,6 +32,13 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     satisfied: (s) => s.carUse !== 'onbekend' && s.startYear !== null,
   },
   {
+    id: 'thuis',
+    version: 1,
+    title: 'Telefoon, internet en werkplek',
+    whatsNew: 'Nieuw: gebruik je telefoon en internet ook privé, of werk je thuis? Dan rekent de app het zakelijke deel goed uit.',
+    satisfied: (s) => s.phoneInternetBusinessPct !== null && s.homeWorkspace !== null,
+  },
+  {
     id: 'automatisch',
     version: 1,
     title: 'Hoeveel mag de app zelf doen?',

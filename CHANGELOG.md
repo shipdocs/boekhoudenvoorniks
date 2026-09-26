@@ -14,6 +14,16 @@
   - **Startersaftrek** en een **urenteller** voor het urencriterium (werkbonnen + losse uren).
   - **Voor je aangifte**: jaaroverzicht met per regel het bedrag, de uitleg en waar het in de aangifte hoort.
     Plus een signaal voor mogelijke EIA/MIA/Vamil, met de RVO-termijn.
+  - **Investering of kosten?** Vanaf € 450 excl. btw vraagt de app bij het invoeren "Gaat dit langer dan
+    een jaar mee?". Op Vandaag staat een vangnet voor wat toch als kosten is geboekt. Ook laptops, telefoons en
+    aanhangers worden herkend. De grens rekent nu met het bedrag excl. btw.
+  - **Telefoon, internet en werkplek thuis**: het zakelijke deel instellen (het privédeel telt bij de winst,
+    met de btw-correctie), plus uitleg over de werkplek.
+  - **Meewerkaftrek** voor een partner die onbetaald meewerkt.
+  - **AOV en pensioen**: uitleg dat ze privé zijn, maar wel aftrekbaar in de aangifte.
+  - **2027**: zelfstandigenaftrek € 900, startersaftrek € 10; vanaf 2028 geen startersaftrek.
+  - **Altijd laten controleren**: bij elke IB-berekening de melding dat een boekhouder of accountant moet
+    meekijken, eens per jaar bevestigen, en een knop "Kopieer voor je boekhouder".
   - De schatting van de inkomstenbelasting rekent dit allemaal mee.
   - Bestaande gebruikers krijgen één nieuwe onboardingstap: *Auto en startjaar*.
 - **Demo**: bij de eerste start (of via Instellingen → Back-up, demo & updates) de app bekijken met een

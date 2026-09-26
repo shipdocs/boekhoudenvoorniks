@@ -143,6 +143,23 @@ export function SettingsScreen() {
               </Field>
             )}
           </div>
+          <div className="grid cols-2">
+            <Field label="Zakelijk deel telefoon & internet" hint="het privédeel telt niet als kosten">
+              <select value={draft.phoneInternetBusinessPct ?? 100} onChange={(e) => set({ phoneInternetBusinessPct: Number(e.target.value) })}>
+                {[100, 90, 75, 50, 25, 0].map((p) => <option key={p} value={p}>{p}%</option>)}
+              </select>
+            </Field>
+            <Field label="Werkplek thuis">
+              <select value={draft.homeWorkspace ?? 'geen'} onChange={(e) => set({ homeWorkspace: e.target.value as AppSettings['homeWorkspace'] })}>
+                <option value="geen">Geen</option>
+                <option value="thuis">Een plek in huis</option>
+                <option value="zelfstandig">Eigen ingang en sanitair</option>
+              </select>
+            </Field>
+          </div>
+          <Field label="Uren dat je partner onbetaald meewerkt, per jaar" hint="vanaf 525 uur: meewerkaftrek">
+            <input value={draft.partnerHours || ''} onChange={(e) => set({ partnerHours: Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || 0 })} placeholder="0" inputMode="numeric" />
+          </Field>
           <p className="muted small">Altijd een schatting: de app kent alleen de winst uit je bedrijf, niet je partner, hypotheek of ander inkomen.</p>
         </>,
       )}

@@ -25,6 +25,8 @@ export const PAY_REMINDER_DAYS = 3;
 import { formatEuro, type Cents } from '../shared/money';
 import { automationForMonth, countDecision, getAutomation, logAutomation, markCorrected, recentAutomation, type AutomationEntry } from './automation-log';
 import { explain } from '../automation/explain';
+import type { InvestmentCheck } from '../tax/investment-check';
+
 
 export type TaskKind =
   | 'setup'
@@ -49,7 +51,8 @@ export type TaskKind =
   | 'recurring-confirm'
   | 'recurring-missing-payment'
   | 'recurring-stopped'
-  | 'recurring-invoice';
+  | 'recurring-invoice'
+  | 'investment-check';
 
 export interface TaskAction {
   id: string;
@@ -72,7 +75,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
+  ref: { lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
 }
 
 export interface HomeData {
@@ -128,6 +131,7 @@ export class InboxService {
     private readonly vat: VatService,
     private readonly purchases: PurchaseService,
     private readonly recurring: RecurringService,
+    private readonly investments?: InvestmentCheck,
   ) {}
 
   /** Een taak bewust overslaan; komt niet terug zolang de sleutel gelijk blijft. */
@@ -591,6 +595,24 @@ export class InboxService {
         question: `Je hebt dit ${rule.confirmations}× zo gekozen. Voortaan automatisch verwerken? Je ziet het terug onder "Automatisch gedaan" en kunt het altijd terugdraaien.`,
         actions: [{ id: 'ja', label: 'Ja, voortaan automatisch', primary: true }, { id: 'nee', label: 'Nee, blijf het vragen' }],
         ref: { supplierKey: rule.supplier_key },
+      });
+    }
+
+    // vangnet: € 450+ als gewone kosten geboekt in een categorie waar dat vaak een investering is
+    for (const c of this.investments?.candidates(asOf) ?? []) {
+      const key = `investment-${c.lineId}`;
+      if (this.isSkipped(key)) continue;
+      tasks.push({
+        key,
+        kind: 'investment-check',
+        icon: '🧰',
+        title: `Was dit een investering? ${formatEuro(c.amount)} — ${c.description}`,
+        question: 'Gaat dit langer dan een jaar mee (een machine, laptop, telefoon, steiger)? Dan schrijf je het af over een paar jaar en telt het mee voor de investeringsaftrek (KIA).',
+        amount: -c.amount,
+        actions: [{ id: 'ja', label: 'Ja, investering', primary: true }, { id: 'nee', label: 'Nee, gewone kosten' }],
+        why: 'Vanaf € 450 excl. btw per stuk is iets dat jaren meegaat een bedrijfsmiddel: je trekt het niet in één keer af, maar verdeelt het over de jaren. Daarnaast krijg je mogelijk 28% investeringsaftrek.',
+        priority: 3,
+        ref: { lineId: c.lineId, purchaseId: c.purchaseId ?? undefined, bankTransactionId: c.bankTransactionId ?? undefined },
       });
     }
 

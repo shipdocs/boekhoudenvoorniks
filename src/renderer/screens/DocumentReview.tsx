@@ -3,7 +3,7 @@ import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useLoad } from '../ui';
-import { CategoryChoice } from './Purchases';
+import { CategoryChoice, InvestmentHint, investmentSavedMessage } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
 import type { PurchaseVatCode } from '../../shared/vat';
 import { formatDateNl } from '../../shared/dates';
@@ -199,6 +199,7 @@ export function DocumentReview({ id }: { id: number }) {
               {form.business && (
                 <>
                   <CategoryChoice value={form.categoryKey} onChange={(c) => setForm({ ...form, categoryKey: c })} />
+                  {!form.splits && <InvestmentHint categoryKey={form.categoryKey} gross={form.total} vatCode={form.vatCode} onUse={() => setForm({ ...form, categoryKey: 'investering' })} />}
                   <Field label="BTW op de bon">
                     <select value={form.vatCode} onChange={(e) => setForm({ ...form, vatCode: e.target.value as PurchaseVatCode })}>
                       {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
@@ -224,7 +225,7 @@ export function DocumentReview({ id }: { id: number }) {
               <div className="row end">
                 <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
                 <Button kind="primary" disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits }), 'Verwerkt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits }), form.business && !form.splits && form.categoryKey === 'investering' ? investmentSavedMessage(form.total!, form.vatCode) : 'Verwerkt ✓');
                   if (res) go({ screen: 'aankopen' });
                 }}>Klopt, verwerken</Button>
               </div>

@@ -2,6 +2,49 @@ import { useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
 import { today } from '../../shared/dates';
+import { ACCOUNTANT_CHECK_REASONS, ACCOUNTANT_CHECK_TITLE } from '../../shared/legal';
+import { kiaFor, rulesFor } from '../../tax/income-tax';
+
+/** Vaste, niet weg te klikken melding bij elke berekening voor de inkomstenbelasting. */
+export function AccountantNotice({ compact }: { compact?: boolean }) {
+  return (
+    <div className="notice warn" role="note">
+      <strong>⚠️ {ACCOUNTANT_CHECK_TITLE}.</strong>
+      {compact ? (
+        <div className="small">De app rekent voor je, maar kan fouten maken en kent de nieuwste regels en je hele situatie niet.</div>
+      ) : (
+        <ul className="small" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+          {ACCOUNTANT_CHECK_REASONS.map((r) => <li key={r}>{r}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Eenmaal per jaar: uitleg waarom, en bevestigen voordat de berekeningen te zien zijn. */
+function AccountantGate({ onAccepted }: { onAccepted: () => void }) {
+  const { run, busy } = useAction();
+  const [checked, setChecked] = useState(false);
+  return (
+    <div className="card grid" style={{ maxWidth: 720 }}>
+      <h2 style={{ margin: 0 }}>Eerst even dit</h2>
+      <p>
+        De app rekent je aftrekposten en een schatting van je inkomstenbelasting uit. Dat scheelt werk, maar het blijft een hulpmiddel.{' '}
+        <strong>Laat je aangifte altijd controleren door een boekhouder of accountant</strong>, ook als alles lijkt te kloppen. Waarom:
+      </p>
+      <ul style={{ margin: 0, paddingLeft: 18 }}>
+        {ACCOUNTANT_CHECK_REASONS.map((r) => <li key={r}>{r}</li>)}
+      </ul>
+      <p className="small muted">Tip: met de knop "Kopieer voor je boekhouder" geef je in één keer alle bedragen en de uitleg door.</p>
+      <label className="row"><input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /> Ik begrijp dat dit een hulpmiddel is en laat mijn aangifte controleren door een boekhouder of accountant.</label>
+      <div className="row end">
+        <Button kind="primary" disabled={!checked || busy} onClick={async () => {
+          if (await run(async () => { await api.settings.update({ taxCheckAcknowledgedYear: new Date().getFullYear() }); return true; })) onAccepted();
+        }}>Verder</Button>
+      </div>
+    </div>
+  );
+}
 
 type Tab = 'overzicht' | 'bedrijfsmiddelen' | 'kilometers' | 'uren';
 type AssetItem = Awaited<ReturnType<typeof api.assets.list>>[number];
@@ -11,13 +54,18 @@ type AssetItem = Awaited<ReturnType<typeof api.assets.list>>[number];
  * ondernemersaftrek), plus de bedrijfsmiddelen, kilometers en uren waar dat uit volgt.
  */
 export function TaxYear() {
-  const { route, go } = useApp();
+  const { route, go, settings, reloadSettings } = useApp();
   const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'overzicht');
   const [year, setYear] = useState(new Date().getFullYear());
   return (
     <div className="page">
       <h1>Aangifte &amp; aftrekposten</h1>
       <p className="sub">Wat je bij je aangifte inkomstenbelasting nodig hebt, en welke aftrek je krijgt.</p>
+      {settings.taxCheckAcknowledgedYear !== new Date().getFullYear() ? (
+        <AccountantGate onAccepted={() => void reloadSettings()} />
+      ) : (
+      <>
+      <AccountantNotice compact />
       <div className="row between" style={{ marginBottom: 16 }}>
         <div className="chips">
           {([['overzicht', 'Voor je aangifte'], ['bedrijfsmiddelen', 'Bedrijfsmiddelen'], ['kilometers', 'Kilometers'], ['uren', 'Uren']] as const).map(([k, l]) => (
@@ -34,11 +82,38 @@ export function TaxYear() {
       {tab === 'bedrijfsmiddelen' && <Assets />}
       {tab === 'kilometers' && <Trips year={year} />}
       {tab === 'uren' && <Hours year={year} />}
+      </>
+      )}
       <p className="muted small" style={{ marginTop: 18 }}>
         <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Auto, startjaar en urencriterium instellen</span>
       </p>
     </div>
   );
+}
+
+type OverviewData = Awaited<ReturnType<typeof api.incomeTax.overview>>;
+
+/** Het overzicht als platte tekst, om te mailen naar je boekhouder. */
+async function copyForAccountant(d: OverviewData): Promise<void> {
+  const lines = [
+    `Overzicht inkomstenbelasting ${d.year} uit Gratis Boekhouden${d.running ? ` (tot en met ${d.asOf}, jaar nog bezig)` : ''}`,
+    'Graag controleren; dit is berekend door software, niet door een deskundige.',
+    '',
+    ...d.items.filter((i) => i.amount !== null).map((i) => `${i.label}: ${euro(i.amount!)}\n  ${i.explain}${i.where ? `\n  Aangifte: ${i.where}` : ''}`),
+    `Belastbare winst uit onderneming (geschat): € ${d.breakdown.taxableIncome.toLocaleString('nl-NL')}`,
+    '',
+    'Aandachtspunten:',
+    ...d.items.filter((i) => i.amount === null).map((i) => `- ${i.label}: ${i.explain}`),
+    '',
+    `Uren: ${d.hours.total} (urencriterium ${d.hours.target}). Zakelijke km privéauto: ${d.km.km} km = ${euro(d.km.amount)}.`,
+    `Bedragen/tarieven van ${d.rulesYear}${d.rulesChecked ? '' : ' (tabel in de app nog niet door een fiscalist gecontroleerd)'}.`,
+  ];
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'));
+    alert('Gekopieerd. Plak het in een e-mail aan je boekhouder of accountant.');
+  } catch {
+    alert('Kopiëren lukte niet.');
+  }
 }
 
 const euro = (cents: number) => `${cents < 0 ? '− ' : ''}€ ${(Math.abs(cents) / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -50,7 +125,10 @@ function Overview({ year }: { year: number }) {
   const b = d.breakdown;
   return (
     <>
-      <div className="notice warn small">{d.disclaimer}</div>
+      <div className="row between">
+        <p className="muted small" style={{ margin: 0 }}>{d.disclaimer}</p>
+        <Button small onClick={() => void copyForAccountant(d)}>📋 Kopieer voor je boekhouder</Button>
+      </div>
       {d.running && <p className="muted small">{year} is nog bezig: de bedragen zijn tot en met vandaag.</p>}
       <div className="card">
         <table className="sumtable">
@@ -115,6 +193,7 @@ function Assets() {
         Alles vanaf € 450 (excl. btw) per stuk dat je jaren gebruikt, zoals een bus, steigers of een machine. De kosten verdeel je over de jaren (afschrijven, minstens 5 jaar).
         Na afloop van een jaar boekt de app de afschrijving zelf. Koop je via "Aankoop" iets als <em>groot gereedschap / machine</em>, dan komt het hier vanzelf bij.
       </p>
+      <KiaProgress assets={list.data} />
       {list.data.length === 0 ? (
         <Empty icon="🧰" title="Nog geen bedrijfsmiddelen">Kies bij een aankoop de categorie "Groot gereedschap / machine".</Empty>
       ) : (
@@ -161,6 +240,23 @@ function Assets() {
       {editing && <EditAsset asset={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); void list.reload(); }} />}
       {selling && <SellAsset asset={selling} onClose={() => setSelling(null)} onSaved={() => { setSelling(null); void list.reload(); }} />}
     </>
+  );
+}
+
+/** Alleen informatie, nooit een aansporing om iets te kopen. */
+function KiaProgress({ assets }: { assets: AssetItem[] }) {
+  const year = new Date().getFullYear();
+  const { rules } = rulesFor(year);
+  const total = assets.filter((a) => a.acquired_on.startsWith(String(year)) && !a.kia_excluded && !a.belowThreshold).reduce((t, a) => t + a.cost, 0);
+  if (total === 0) return null;
+  const kia = kiaFor(total / 100, rules.kia);
+  return (
+    <div className="card small" style={{ marginBottom: 12 }}>
+      <strong>Investeringen {year}: <Euro cents={total} /></strong>
+      {kia > 0
+        ? <> · investeringsaftrek (KIA) ± € {kia.toLocaleString('nl-NL')}</>
+        : <> · de investeringsaftrek (KIA) geldt vanaf € {rules.kia.min.toLocaleString('nl-NL')} per jaar; alles wat je dit jaar nog investeert telt mee.</>}
+    </div>
   );
 }
 

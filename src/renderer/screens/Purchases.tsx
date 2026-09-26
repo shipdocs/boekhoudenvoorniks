@@ -3,6 +3,7 @@ import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useLoad } from '../ui';
 import { today } from '../../shared/dates';
 import type { PurchaseVatCode } from '../../shared/vat';
+import { mightBeInvestment, netAmount } from '../../shared/investment';
 
 export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const { go, toast } = useApp();
@@ -159,6 +160,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
         </div>
         <Field label="Bedrag op de bon" hint="inclusief BTW"><MoneyInput value={amount} onChange={setAmount} /></Field>
         <CategoryChoice value={category} onChange={(c) => { setCategory(c); setVat(meta.expenseCategories.find((x) => x.key === c)?.defaultVat ?? 'hoog'); }} />
+        <InvestmentHint categoryKey={category} gross={amount} vatCode={vat} onUse={() => setCategory('investering')} />
         <Field label="Stond er BTW op de bon?">
           <select value={vat} onChange={(e) => setVat(e.target.value as PurchaseVatCode)}>
             {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
@@ -183,7 +185,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
         <Button kind="primary" disabled={busy || !amount} onClick={async () => {
-          const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, paidWith, jobId }), 'Aankoop verwerkt ✓');
+          const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, paidWith, jobId }), category === 'investering' ? investmentSavedMessage(amount!, vat) : 'Aankoop verwerkt ✓');
           if (r) onDone();
         }}>Opslaan</Button>
       </div>
@@ -203,6 +205,28 @@ export function CategoryChoice({ value, onChange }: { value: string; onChange: (
       </div>
     </Field>
   );
+}
+
+/**
+ * "Gaat dit langer dan een jaar mee?" — bij € 450+ excl. btw in een categorie waar dat vaak een
+ * investering is. Eén klik zet de categorie op investering; de gebruiker beslist.
+ */
+export function InvestmentHint({ categoryKey, gross, vatCode, onUse }: { categoryKey: string; gross: number | null | undefined; vatCode: string; onUse: () => void }) {
+  if (!mightBeInvestment(categoryKey, gross, vatCode)) return null;
+  const net = netAmount(gross!, vatCode);
+  return (
+    <div className="notice">
+      <strong>€ {(net / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2 })} excl. btw: gaat dit langer dan een jaar mee?</strong>
+      <div className="small">Dan is het een investering (bedrijfsmiddel): je schrijft het af over minstens 5 jaar en het telt mee voor de investeringsaftrek (KIA, 28% extra aftrek als je dit jaar samen meer dan € 2.900 investeert).</div>
+      <div style={{ marginTop: 8 }}><Button small kind="primary" onClick={onUse}>Maak er een investering van</Button></div>
+    </div>
+  );
+}
+
+/** Bevestiging na het opslaan van een investering: wat er nu gebeurt. */
+export function investmentSavedMessage(gross: number, vatCode: string): string {
+  const perYear = Math.round(netAmount(gross, vatCode) / 5 / 100);
+  return `Toegevoegd aan je bedrijfsmiddelen: ± € ${perYear.toLocaleString('nl-NL')} per jaar afschrijving, telt mee voor de investeringsaftrek. Zie Belasting → Aftrekposten.`;
 }
 
 /** "nog 14 maanden garantie" / "garantie verlopen". */
