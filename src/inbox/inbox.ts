@@ -8,7 +8,9 @@ import type { InvoiceService } from '../documents/invoices';
 import type { QuoteService } from '../documents/quotes';
 import type { JobService } from '../jobs/jobs';
 import type { IntakeService } from '../intake/intake';
-import type { SupplierMemory } from '../intake/supplier-memory';
+import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
+import type { PurchaseService } from '../documents/purchases';
+import { ValidationError } from '../shared/validation';
 import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
 import { EXPENSE_CATEGORIES } from '../shared/categories';
@@ -18,7 +20,8 @@ import { addDays, diffDays, formatDateNl, periodFor, today, vatDeadline, type Is
 /** Na zoveel dagen zonder nieuwe bankgegevens vragen we om een afschrift in te lezen. */
 export const BANK_STALE_DAYS = 14;
 import { formatEuro, type Cents } from '../shared/money';
-import { logAutomation, recentAutomation, type AutomationEntry } from './automation-log';
+import { automationForMonth, countDecision, getAutomation, logAutomation, markCorrected, recentAutomation, type AutomationEntry } from './automation-log';
+import { explain } from '../automation/explain';
 
 export type TaskKind =
   | 'setup'
@@ -35,7 +38,8 @@ export type TaskKind =
   | 'vat-due'
   | 'bank-stale'
   | 'vat-suppletie'
-  | 'supplier-auto';
+  | 'supplier-auto'
+  | 'vat-check';
 
 export interface TaskAction {
   id: string;
@@ -52,7 +56,13 @@ export interface Task {
   question: string;
   amount?: Cents;
   actions: TaskAction[];
-  ref: { bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
+  /** 1 = eerst (btw, deadlines), 2 = normaal, 3 = kan wachten */
+  priority?: 1 | 2 | 3;
+  /** taken met dezelfde groep kunnen in één keer bevestigd worden ("Alle 5 Shell: brandstof") */
+  group?: { key: string; label: string };
+  /** "Waarom?": waarom we dit voorstellen */
+  why?: string;
+  ref: { checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
 }
 
 export interface HomeData {
@@ -68,6 +78,8 @@ export interface HomeData {
   processedToday: { bankChecked: number };
   /** wat de app de afgelopen week zelf heeft gedaan */
   automated: AutomationEntry[];
+  /** deze maand: automatisch / door jou / nog aandacht (#29) */
+  monthCounts: { automatic: number; byUser: number; attention: number };
 }
 
 function greeting(): string {
@@ -94,6 +106,7 @@ export class InboxService {
     private readonly intake: IntakeService,
     private readonly memory: SupplierMemory,
     private readonly vat: VatService,
+    private readonly purchases: PurchaseService,
   ) {}
 
   /**
@@ -101,10 +114,14 @@ export class InboxService {
    * die de gebruiker al vaak genoeg heeft bevestigd. Deterministisch, geen AI.
    */
   autoProcess(asOf: IsoDate = today()): { matched: number; booked: number } {
-    const auto = this.matching.autoMatch(asOf);
+    const level = this.settings.get().autopilot;
+    if (level === 'voorzichtig') return { matched: 0, booked: 0 }; // alles blijft geel: de gebruiker bevestigt
+    const auto = this.matching.autoMatch(asOf, level);
     const matched = auto.matched;
     for (const d of auto.details) {
-      logAutomation(this.db, { kind: 'bank-match', ref_id: d.txId, summary: `Betaling gekoppeld: ${d.label}`, reason: d.reasons.join(', ') || 'zeker genoeg' });
+      const explanation = explain([{ type: 'matching', label: d.reasons.join(', ') || 'bedrag en omschrijving overeenkwamen', value: d.confidence }]);
+      logAutomation(this.db, { kind: 'bank-match', ref_id: d.txId, summary: `Betaling gekoppeld: ${d.label}`, reason: explanation.sentence, details: explanation });
+      countDecision(this.db, 'bankkoppeling', 'automatic');
     }
     let booked = 0;
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
@@ -119,12 +136,17 @@ export class InboxService {
         tx(this.db, () => {
           this.bookCategory(t, rule!.category_key, rule!.vat_code, Boolean(rule!.business), false);
           const label = rule!.business ? EXPENSE_CATEGORIES.find((c) => c.key === rule!.category_key)?.label.toLowerCase() ?? rule!.category_key : 'privé';
+          const explanation = explain([
+            { type: 'leveranciersregel', label: `je ${rule!.confirmations}× ${rule!.display_name} als ${label} hebt bevestigd en hebt gezegd dat dit voortaan automatisch mag`, value: 0.97 },
+          ]);
           logAutomation(this.db, {
             kind: 'bank-auto',
             ref_id: t.id,
             summary: `${formatEuro(-t.amount)} aan ${rule!.display_name} geboekt als ${label}`,
-            reason: `Je hebt gezegd dat ${rule!.display_name} voortaan automatisch mag`,
+            reason: explanation.sentence,
+            details: explanation,
           });
+          countDecision(this.db, 'categorie', 'automatic');
         });
         booked++;
       } catch {
@@ -154,11 +176,14 @@ export class InboxService {
     this.bookCategory(t, category, vatCode, answer.business, true);
   }
 
-  private suggestionFor(t: BankTransaction): { categoryKey: string; vatCode: string; business: boolean; confident: boolean } | null {
+  private suggestionFor(t: BankTransaction): { categoryKey: string; vatCode: string; business: boolean; confident: boolean; why: string } | null {
     const rule = t.counter_name ? this.memory.get(t.counter_name) : null;
-    if (rule) return { categoryKey: rule.category_key, vatCode: rule.vat_code, business: Boolean(rule.business), confident: rule.confirmations >= 1 };
+    if (rule) {
+      const label = EXPENSE_CATEGORIES.find((c) => c.key === rule.category_key)?.label.toLowerCase() ?? rule.category_key;
+      return { categoryKey: rule.category_key, vatCode: rule.vat_code, business: Boolean(rule.business), confident: rule.confirmations >= 1, why: `Omdat je ${rule.display_name} eerder ${rule.confirmations}× als ${label} hebt bevestigd.` };
+    }
     const known = KNOWN_SUPPLIERS.find((k) => k.pattern.test(`${t.counter_name ?? ''} ${t.description}`));
-    if (known) return { categoryKey: known.category, vatCode: known.vatCode, business: true, confident: false };
+    if (known) return { categoryKey: known.category, vatCode: known.vatCode, business: true, confident: false, why: 'Omdat de naam lijkt op een bekende winkel.' };
     return null;
   }
 
@@ -183,6 +208,8 @@ export class InboxService {
           question: `Dit lijkt betaling van ${inv.label.replace(/ — .*/, '').toLowerCase()}.`,
           amount: t.amount,
           actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'nee', label: 'Nee' }],
+          group: { key: 'bank-invoice', label: 'Alle betalingen koppelen' },
+          why: `Omdat ${inv.reasons.join(', ')}.`,
           ref: { bankTransactionId: t.id, invoiceId: inv.invoiceId },
         });
         continue;
@@ -196,6 +223,8 @@ export class InboxService {
           question: `Hoort dit bij ${pur.label.replace(/^Inkoop /, '')}?`,
           amount: t.amount,
           actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'nee', label: 'Nee' }],
+          group: { key: 'bank-purchase', label: 'Alle betalingen koppelen' },
+          why: `Omdat ${pur.reasons.join(', ')}.`,
           ref: { bankTransactionId: t.id, purchaseId: pur.purchaseId },
         });
         continue;
@@ -224,6 +253,8 @@ export class InboxService {
           question: `We denken dat dit ${label} is.`,
           amount: t.amount,
           actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'anders', label: 'Iets anders' }],
+          group: { key: `bank-category:${supplierKey(who)}:${sug.categoryKey}`, label: `Alle ${who}: ${label}` },
+          why: sug.why,
           ref: { bankTransactionId: t.id, categoryKey: sug.categoryKey, vatCode: sug.vatCode },
         });
       } else {
@@ -270,6 +301,8 @@ export class InboxService {
         actions: bad?.field === 'duplicate'
           ? [{ id: 'dubbel', label: 'Ja, zelfde', primary: true }, { id: 'open', label: 'Nee, bekijken' }]
           : bad ? [{ id: 'open', label: 'Bekijken', primary: true }] : [{ id: 'klopt', label: 'Ja', primary: true }, { id: 'open', label: 'Aanpassen' }],
+        group: bad ? undefined : { key: 'document-klopt', label: 'Alle bonnetjes bevestigen' },
+        why: d.classification ? `Omdat ${d.classification.reasons.join(', ')}.` : undefined,
         ref: { documentId: d.id },
       });
     }
@@ -340,11 +373,26 @@ export class InboxService {
           question: `Uiterlijk ${formatDateNl(deadline)}: ${report.summary.teBetalen >= 0 ? 'betalen' : 'terugkrijgen'} ongeveer ${formatEuro(Math.abs(report.summary.teBetalen))}.`,
           amount: report.summary.teBetalen,
           actions: [{ id: 'open', label: 'Aangifte bekijken', primary: true }],
+          priority: 1,
           ref: { periodKey: previous.key },
         });
+        // Controles vóór de aangifte (#20): in dezelfde lijst, blokkerend tot opgelost of bewust overgeslagen
+        for (const c of this.vat.checks(previous.key).filter((x) => !x.skipped)) {
+          tasks.push({
+            key: `vat-check-${previous.key}-${c.key}`,
+            kind: 'vat-check',
+            icon: c.blocking ? '⚠️' : '💡',
+            title: c.title,
+            question: `${c.detail}${c.blocking ? ` Nodig voor de btw-aangifte ${previous.label}.` : ''}`,
+            actions: [{ id: 'open', label: 'Oplossen', primary: true }, { id: 'overslaan', label: c.blocking ? 'Bewust overslaan' : 'Klopt' }],
+            priority: 1,
+            ref: { periodKey: previous.key, checkKey: c.key },
+          });
+        }
       }
     }
-    for (const rule of this.memory.pendingApprovals()) {
+    const askAfter = s.autopilot === 'voorzichtig' ? Number.POSITIVE_INFINITY : s.autopilot === 'maximaal' ? 2 : ASK_AUTO_AFTER_CONFIRMATIONS;
+    for (const rule of Number.isFinite(askAfter) ? this.memory.pendingApprovals(askAfter) : []) {
       const label = rule.business ? EXPENSE_CATEGORIES.find((c) => c.key === rule.category_key)?.label.toLowerCase() ?? rule.category_key : 'privé';
       tasks.push({
         key: `supplier-auto-${rule.supplier_key}`,
@@ -366,10 +414,57 @@ export class InboxService {
         question: `Er is achteraf ${formatEuro(Math.abs(c.btw))} btw ${c.btw >= 0 ? 'bijgekomen' : 'afgegaan'}. Dat is meer dan € 1.000, dus dat doe je met een suppletie-aangifte in Mijn Belastingdienst Zakelijk.`,
         amount: c.btw,
         actions: [{ id: 'gedaan', label: 'Suppletie is gedaan', primary: true }, { id: 'open', label: 'Bekijken' }],
+        priority: 1,
         ref: { periodKey: c.periodKey },
       });
     }
-    return tasks;
+    // stabiel sorteren op prioriteit; binnen een prioriteit blijft de volgorde gelijk
+    return tasks.map((t, i) => ({ t, i })).sort((a, b) => (a.t.priority ?? 2) - (b.t.priority ?? 2) || a.i - b.i).map((x) => x.t);
+  }
+
+  /** Legt vast dat de gebruiker een taak heeft afgehandeld (voor "door jou gecontroleerd", #29). */
+  recordUserAction(task: Task, actionId: string): void {
+    const action = task.actions.find((a) => a.id === actionId);
+    if (!action || actionId === 'open' || actionId === 'anders') return; // alleen afgehandelde beslissingen tellen
+    logAutomation(this.db, { kind: 'gebruiker', ref_id: null, summary: `${task.title}: ${action.label.toLowerCase()}`, reason: task.question, actor: 'gebruiker' });
+  }
+
+  /** Maandoverzicht (#29): wat ging automatisch, wat deed de gebruiker, wat staat nog open. */
+  month(month: string = today().slice(0, 7), asOf: IsoDate = today()): { month: string; automatic: AutomationEntry[]; byUser: AutomationEntry[]; attention: number } {
+    return {
+      month,
+      automatic: automationForMonth(this.db, month, 'systeem'),
+      byUser: automationForMonth(this.db, month, 'gebruiker'),
+      attention: this.tasks(asOf).length,
+    };
+  }
+
+  /**
+   * "Klopt niet" op iets dat automatisch ging: terugdraaien via tegenboekingen, weer vragen,
+   * en tellen als correctie voor de drempels (#21, #29). Het item komt terug als taak.
+   */
+  correctAutomation(logId: number, date: IsoDate = today()): void {
+    const entry = getAutomation(this.db, logId);
+    if (!entry || entry.actor !== 'systeem') throw new ValidationError('Onbekende automatische verwerking');
+    if (entry.status === 'klopt_niet') throw new ValidationError('Dit is al teruggedraaid');
+    tx(this.db, () => {
+      if (entry.kind === 'bank-match' || entry.kind === 'bank-auto') {
+        const t = this.bank.get(entry.ref_id!);
+        if (t.status === 'gematcht') this.bank.unmatch(t.id, date);
+        if (entry.kind === 'bank-auto' && t.counter_name) this.memory.markCorrected(t.counter_name);
+        countDecision(this.db, entry.kind === 'bank-match' ? 'bankkoppeling' : 'categorie', 'corrected');
+      } else if (entry.kind === 'document-auto') {
+        const doc = this.intake.get(entry.ref_id!);
+        if (doc.purchase_invoice_id) {
+          const paidBy = this.db.prepare('SELECT id FROM bank_transactions WHERE matched_purchase_invoice_id = ?').all(doc.purchase_invoice_id) as { id: number }[];
+          for (const b of paidBy) this.bank.unmatch(b.id, date);
+          this.purchases.cancel(doc.purchase_invoice_id, date);
+        }
+        if (doc.result?.supplier) this.memory.markCorrected(doc.result.supplier.value);
+        for (const d of entry.details?.decisions ?? []) countDecision(this.db, d.kind, 'corrected');
+      }
+      markCorrected(this.db, logId);
+    });
   }
 
   home(asOf: IsoDate = today()): HomeData {
@@ -405,6 +500,11 @@ export class InboxService {
       upToDate: tasks.length === 0,
       processedToday: { bankChecked: (this.db.prepare(`SELECT COUNT(*) AS n FROM bank_transactions WHERE date(created_at) = date('now')`).get() as { n: number }).n },
       automated: recentAutomation(this.db),
+      monthCounts: {
+        automatic: automationForMonth(this.db, asOf.slice(0, 7), 'systeem').filter((e) => e.status === 'auto').length,
+        byUser: automationForMonth(this.db, asOf.slice(0, 7), 'gebruiker').length,
+        attention: tasks.length,
+      },
     };
   }
 }

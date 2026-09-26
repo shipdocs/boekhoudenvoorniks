@@ -165,6 +165,7 @@ function Exports({ from, to }: { from: string; to: string }) {
 function SupplierRules() {
   const { run } = useAction();
   const rules = useLoad(() => api.documents.suppliers());
+  const stats = useLoad(() => api.home.decisionStats());
   return (
     <>
       <p className="muted">Wat de app heeft geleerd van je bevestigingen. Na 3 gelijke bevestigingen vragen we of een leverancier voortaan automatisch mag. Alleen na jouw ja gebeurt dat.</p>
@@ -174,6 +175,14 @@ function SupplierRules() {
           {(rules.data ?? []).map((r) => (
             <tr key={r.supplier_key}><td>{r.display_name}</td><td>{r.category_key}</td><td>{r.vat_code}</td><td>{r.business ? 'ja' : 'privé'}</td><td className="num">{r.confirmations}×</td><td>{r.auto_approved === 1 ? 'automatisch' : r.auto_approved === -1 ? 'altijd vragen' : 'vragen'}</td><td>{r.auto_approved === 1 ? <Button small kind="ghost" onClick={async () => { await run(() => api.documents.setSupplierAutomatic(r.supplier_key, false)); await rules.reload(); }}>Weer vragen</Button> : null}<Button small kind="ghost" onClick={async () => { await run(() => api.documents.forgetSupplier(r.supplier_key)); await rules.reload(); }}>Vergeten</Button></td></tr>
           ))}
+        </tbody>
+      </table>
+      <h3>Hoe vaak klopte het automatisch?</h3>
+      <p className="muted small">Per soort beslissing: hoe vaak de app het zelf deed en hoe vaak jij "Klopt niet" koos. Basis om drempels bij te stellen.</p>
+      <table className="list small">
+        <thead><tr><th>Beslissing</th><th className="num">Automatisch</th><th className="num">Gecorrigeerd</th></tr></thead>
+        <tbody>
+          {(stats.data ?? []).map((x) => <tr key={x.kind}><td>{x.kind}</td><td className="num">{x.automatic}</td><td className="num">{x.corrected}</td></tr>)}
         </tbody>
       </table>
     </>

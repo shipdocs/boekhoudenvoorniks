@@ -155,6 +155,20 @@ export class PurchaseService {
     });
   }
 
+  /**
+   * Draait een (nog onbetaalde) inkoop terug, bv. na "Klopt niet" op een automatische verwerking.
+   * De journaalpost krijgt een tegenboeking; het document gaat terug naar controle.
+   */
+  cancel(id: number, date: IsoDate): void {
+    tx(this.db, () => {
+      const p = this.get(id);
+      if (p.amount_paid !== 0) throw new ValidationError('Maak eerst de betaling van deze inkoop ongedaan');
+      if (p.journal_entry_id) this.ledger.reverse(p.journal_entry_id, date, `Teruggedraaid: ${p.description}`);
+      this.db.prepare(`UPDATE documents SET purchase_invoice_id = NULL, status = 'controle' WHERE purchase_invoice_id = ?`).run(id);
+      this.db.prepare('DELETE FROM purchase_invoices WHERE id = ?').run(id);
+    });
+  }
+
   get(id: number): PurchaseInvoice {
     const row = this.db
       .prepare('SELECT p.*, r.name AS relation_name FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id WHERE p.id = ?')

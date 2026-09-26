@@ -184,3 +184,19 @@ table.list tr.clickable:hover td { background: var(--surface-2); }
 .expert-banner { font-size: 12px; background: var(--warn-soft); color: var(--warn); padding: 4px 10px; border-radius: 6px; margin: 6px 10px; }
 input[type='color'] { padding: 2px; width: 64px; height: 36px; cursor: pointer; }
 input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--primary); }
+
+/* Autopilot, "Waarom?" en groepen (#20, #28, #29) */
+.linklike { background: none; border: 0; padding: 0; color: var(--primary); cursor: pointer; text-decoration: underline; font: inherit; }
+.task.group-head { background: var(--primary-soft); padding: 8px 18px; }
+.month-counts .row { gap: 18px; flex-wrap: wrap; margin: 8px 0; }
+.automation-list { list-style: none; padding: 0; margin: 10px 0 0; }
+.automation-list li { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.automation-list li:last-child { border-bottom: 0; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.fieldcheck.doubt { background: var(--warn-soft); }
+.checks { list-style: none; padding: 0; margin: 10px 0 0; }
+.checks li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.checks li:last-child { border-bottom: 0; }
+.automation-list .row.between { flex-wrap: nowrap; align-items: baseline; gap: 12px; }
+.automation-list .row.between > span:first-child { flex: 1; }
+.automation-list .row.between > span:last-child { flex: none; gap: 8px; }

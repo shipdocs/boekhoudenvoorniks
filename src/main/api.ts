@@ -15,6 +15,7 @@ import { detectFormat } from '../import/detect';
 import type { ParseResult } from '../import/types';
 import { buildVatXbrl } from '../btw/xbrl';
 import { PORTAL_URL, SUPPLETIE_URL } from '../btw/btw';
+import { decisionStats } from '../inbox/automation-log';
 import type { ExpenseInput, CashSaleInput } from '../quick/quick';
 import { EXPENSE_CATEGORIES, OTHER_DESTINATIONS } from '../shared/categories';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES } from '../shared/vat';
@@ -61,6 +62,108 @@ export function createApi(s: Services, host: HostContext) {
       return parseCsv(content, m);
     }
     throw new Error('Onbekend bestandsformaat. Gebruik CSV, MT940 of CAMT.053.');
+  };
+
+  /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
+  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
+    const r = task.ref;
+    switch (`${task.kind}:${actionId}`) {
+      case 'bank-invoice:klopt':
+        s.bank.matchInvoice(r.bankTransactionId!, r.invoiceId!);
+        return;
+      case 'bank-purchase:klopt':
+        s.bank.matchPurchase(r.bankTransactionId!, r.purchaseId!);
+        return;
+      case 'bank-category:klopt':
+        s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: r.categoryKey, vatCode: r.vatCode });
+        return;
+      case 'bank-business:prive':
+        s.inbox.answerBank(r.bankTransactionId!, { business: false, categoryKey: r.categoryKey ?? 'overig', vatCode: 'geen' });
+        return;
+      case 'bank-business:zakelijk':
+        if (!payload?.categoryKey && r.categoryKey) {
+          // bekende leverancier: één klik is genoeg
+          s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: r.categoryKey, vatCode: r.vatCode });
+          return;
+        }
+      // falls through
+      case 'bank-category:anders':
+        if (payload?.categoryKey) {
+          s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: payload.categoryKey, vatCode: payload.vatCode });
+          return;
+        }
+        return { navigate: { screen: 'categorie', id: r.bankTransactionId } };
+      case 'document-review:klopt': {
+        const d = s.intake.get(r.documentId!);
+        const res = d.result;
+        if (!res?.supplier || !res.total || !res.invoiceDate || !d.classification) return { navigate: { screen: 'document', id: d.id } };
+        s.intake.confirm(d.id, {
+          supplier: res.supplier.value,
+          date: res.invoiceDate.value,
+          total: res.total.value,
+          invoiceNumber: res.invoiceNumber?.value ?? null,
+          categoryKey: d.classification.categoryKey,
+          vatCode: d.classification.vatCode,
+          business: d.classification.business,
+          paidWith: d.bank_match ? 'bank' : 'later',
+        });
+        return;
+      }
+      case 'document-review:dubbel': {
+        const issue = s.intake.get(r.documentId!).issues.find((i) => i.field === 'duplicate');
+        const match = issue?.suggestion as { documentId: number | null; purchaseId: number | null } | undefined;
+        if (!match) return { navigate: { screen: 'document', id: r.documentId } };
+        s.intake.markDuplicate(r.documentId!, match);
+        return;
+      }
+      case 'invoice-overdue:herinnering':
+        await s.sender.sendReminder(r.invoiceId!);
+        return;
+      case 'job-done:factuur': {
+        const inv = s.jobs.makeInvoice(r.jobId!);
+        return { navigate: { screen: 'factuur', id: inv.id } };
+      }
+      case 'quote-expired:akkoord':
+        s.jobs.acceptQuote(r.quoteId!);
+        return;
+      case 'supplier-auto:ja':
+        s.memory.setAutomatic(r.supplierKey!, true);
+        s.inbox.autoProcess();
+        return;
+      case 'supplier-auto:nee':
+        s.memory.setAutomatic(r.supplierKey!, false);
+        return;
+      case 'vat-check:overslaan':
+        s.vat.skipCheck(r.periodKey!, r.checkKey!, 'overgeslagen vanuit Vandaag');
+        return;
+      case 'vat-check:open': {
+        const check = s.vat.checks(r.periodKey!).find((c) => c.key === r.checkKey);
+        const screen = check?.screen ?? 'belasting';
+        return { navigate: { screen, id: screen === 'belasting' ? r.periodKey : undefined } };
+      }
+      case 'vat-suppletie:gedaan':
+        s.vat.markSuppletieSubmitted(r.periodKey!);
+        return;
+      case 'quote-expired:afgewezen':
+        s.quotes.setStatus(r.quoteId!, 'afgewezen');
+        return;
+      default: {
+        const screens: Partial<Record<Task['kind'], [string, number | string | undefined]>> = {
+          setup: ['welkom', undefined],
+          'bank-invoice': ['bank', r.bankTransactionId],
+          'bank-purchase': ['bank', r.bankTransactionId],
+          'bank-income': ['bank', r.bankTransactionId],
+          'document-review': ['document', r.documentId],
+          'invoice-overdue': ['factuur', r.invoiceId],
+          'invoice-concept': ['factuur', r.invoiceId],
+          'vat-due': ['belasting', r.periodKey],
+          'bank-stale': ['bank', undefined],
+          'vat-suppletie': ['belasting', undefined],
+        };
+        const target = screens[task.kind];
+        return target ? { navigate: { screen: target[0], id: target[1] } } : undefined;
+      }
+    }
   };
 
   return {
@@ -142,97 +245,14 @@ export function createApi(s: Services, host: HostContext) {
       get: () => s.inbox.home(),
       /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
       act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
-        const r = task.ref;
-        switch (`${task.kind}:${actionId}`) {
-          case 'bank-invoice:klopt':
-            s.bank.matchInvoice(r.bankTransactionId!, r.invoiceId!);
-            return;
-          case 'bank-purchase:klopt':
-            s.bank.matchPurchase(r.bankTransactionId!, r.purchaseId!);
-            return;
-          case 'bank-category:klopt':
-            s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: r.categoryKey, vatCode: r.vatCode });
-            return;
-          case 'bank-business:prive':
-            s.inbox.answerBank(r.bankTransactionId!, { business: false, categoryKey: r.categoryKey ?? 'overig', vatCode: 'geen' });
-            return;
-          case 'bank-business:zakelijk':
-            if (!payload?.categoryKey && r.categoryKey) {
-              // bekende leverancier: één klik is genoeg
-              s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: r.categoryKey, vatCode: r.vatCode });
-              return;
-            }
-          // falls through
-          case 'bank-category:anders':
-            if (payload?.categoryKey) {
-              s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: payload.categoryKey, vatCode: payload.vatCode });
-              return;
-            }
-            return { navigate: { screen: 'categorie', id: r.bankTransactionId } };
-          case 'document-review:klopt': {
-            const d = s.intake.get(r.documentId!);
-            const res = d.result;
-            if (!res?.supplier || !res.total || !res.invoiceDate || !d.classification) return { navigate: { screen: 'document', id: d.id } };
-            s.intake.confirm(d.id, {
-              supplier: res.supplier.value,
-              date: res.invoiceDate.value,
-              total: res.total.value,
-              invoiceNumber: res.invoiceNumber?.value ?? null,
-              categoryKey: d.classification.categoryKey,
-              vatCode: d.classification.vatCode,
-              business: d.classification.business,
-              paidWith: d.bank_match ? 'bank' : 'later',
-            });
-            return;
-          }
-          case 'document-review:dubbel': {
-            const issue = s.intake.get(r.documentId!).issues.find((i) => i.field === 'duplicate');
-            const match = issue?.suggestion as { documentId: number | null; purchaseId: number | null } | undefined;
-            if (!match) return { navigate: { screen: 'document', id: r.documentId } };
-            s.intake.markDuplicate(r.documentId!, match);
-            return;
-          }
-          case 'invoice-overdue:herinnering':
-            await s.sender.sendReminder(r.invoiceId!);
-            return;
-          case 'job-done:factuur': {
-            const inv = s.jobs.makeInvoice(r.jobId!);
-            return { navigate: { screen: 'factuur', id: inv.id } };
-          }
-          case 'quote-expired:akkoord':
-            s.jobs.acceptQuote(r.quoteId!);
-            return;
-          case 'supplier-auto:ja':
-            s.memory.setAutomatic(r.supplierKey!, true);
-            s.inbox.autoProcess();
-            return;
-          case 'supplier-auto:nee':
-            s.memory.setAutomatic(r.supplierKey!, false);
-            return;
-          case 'vat-suppletie:gedaan':
-            s.vat.markSuppletieSubmitted(r.periodKey!);
-            return;
-          case 'quote-expired:afgewezen':
-            s.quotes.setStatus(r.quoteId!, 'afgewezen');
-            return;
-          default: {
-            const screens: Partial<Record<Task['kind'], [string, number | string | undefined]>> = {
-              setup: ['welkom', undefined],
-              'bank-invoice': ['bank', r.bankTransactionId],
-              'bank-purchase': ['bank', r.bankTransactionId],
-              'bank-income': ['bank', r.bankTransactionId],
-              'document-review': ['document', r.documentId],
-              'invoice-overdue': ['factuur', r.invoiceId],
-              'invoice-concept': ['factuur', r.invoiceId],
-              'vat-due': ['belasting', r.periodKey],
-              'bank-stale': ['bank', undefined],
-              'vat-suppletie': ['belasting', undefined],
-            };
-            const target = screens[task.kind];
-            return target ? { navigate: { screen: target[0], id: target[1] } } : undefined;
-          }
-        }
+        const result = await doAct(task, actionId, payload);
+        if (!result?.navigate) s.inbox.recordUserAction(task, actionId);
+        return result;
       },
+      month: (month?: string) => s.inbox.month(month),
+      /** "Klopt niet" op iets dat automatisch ging. */
+      correct: (logId: number) => s.inbox.correctAutomation(logId),
+      decisionStats: () => decisionStats(s.db),
       autoProcess: () => s.inbox.autoProcess(),
     },
     jobs: {
@@ -332,7 +352,7 @@ export function createApi(s: Services, host: HostContext) {
       book: (txId: number, input: BookToAccountInput) => s.bank.bookToAccount(txId, input),
       ignore: (txId: number) => s.bank.ignore(txId),
       unmatch: (txId: number) => s.bank.unmatch(txId),
-      autoMatch: () => s.matching.autoMatch(),
+      autoMatch: () => s.matching.autoMatch(undefined, s.settings.get().autopilot),
     },
     vat: {
       current: () => s.vat.currentPeriod(),
@@ -341,6 +361,8 @@ export function createApi(s: Services, host: HostContext) {
       markSubmitted: (periodKey: string) => s.vat.markSubmitted(periodKey),
       reopen: (periodKey: string) => s.vat.reopen(periodKey),
       corrections: () => s.vat.corrections(),
+      checks: (periodKey: string) => s.vat.checks(periodKey),
+      skipCheck: (periodKey: string, checkKey: string, reason?: string) => s.vat.skipCheck(periodKey, checkKey, reason),
       markSuppletieSubmitted: (periodKey: string) => s.vat.markSuppletieSubmitted(periodKey),
       exportCsv: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.csv`, s.vat.exportCsv(periodKey), [{ name: 'CSV', extensions: ['csv'] }]),
       exportXbrl: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.xbrl`, buildVatXbrl(s.vat.calculate(periodKey), s.settings.get().company), [{ name: 'XBRL', extensions: ['xbrl', 'xml'] }]),

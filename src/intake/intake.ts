@@ -9,7 +9,10 @@ import { EXPENSE_CATEGORIES } from '../shared/categories';
 import { PURCHASE_VAT_RATES, type PurchaseVatCode } from '../shared/vat';
 import { diffDays, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
-import { logAutomation } from '../inbox/automation-log';
+import { countDecision, logAutomation } from '../inbox/automation-log';
+import { allCertain, type AutopilotLevel, type Decision } from '../automation/decisions';
+import { explain } from '../automation/explain';
+import { documentDecisions } from './decisions';
 import { ValidationError } from '../shared/validation';
 import { isUbl, parseUbl, findEmbeddedUbl } from './ubl';
 import { extractPdf } from './pdf-text';
@@ -35,6 +38,8 @@ export interface IntakeDocument {
   confidence: ConfidenceLevel | null;
   issues: Issue[];
   purchase_invoice_id: number | null;
+  /** zekerheid per veld en per beslissing (#21) */
+  decisions: Decision[] | null;
   /** dit document is een kopie van een eerder document (#31) */
   duplicate_of_document_id: number | null;
   created_at: string;
@@ -54,7 +59,7 @@ export interface Confirmation {
   jobId?: number | null;
 }
 
-type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match'> & { result: string | null; classification: string | null; issues: string };
+type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'decisions'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
 
 const MIME: Record<string, string> = { pdf: 'application/pdf', xml: 'application/xml', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
 
@@ -119,6 +124,7 @@ export class IntakeService {
     private readonly classifier: Classifier,
     private readonly storeFile: (name: string, data: Uint8Array) => Promise<string>,
     private ocr: OcrProvider | null = null,
+    private readonly autopilot: () => AutopilotLevel = () => 'normaal',
   ) {}
 
   setOcrProvider(provider: OcrProvider | null): void {
@@ -203,11 +209,15 @@ export class IntakeService {
       issues.push({ field: 'duplicate', severity: 'fout', message: `Lijkt op ${duplicate.label}. Is dit dezelfde aankoop?`, suggestion: duplicate });
     }
     const bankMatch = this.findBankMatch(result);
-    const confidence = assessConfidence({ document: result, issues, classification, bankMatch: !!bankMatch });
+    const assessed = assessConfidence({ document: result, issues, classification, bankMatch: !!bankMatch });
+    const rule = this.memory.get(result.supplier?.value);
+    const { decisions, signals } = documentDecisions({ doc: result, issues, classification, bankMatch, rule, level: this.autopilot() });
+    // HIGH alleen als álle velden en beslissingen boven hun drempel zitten (#21)
+    const level: ConfidenceLevel = assessed.level === 'HIGH' && !allCertain(decisions) ? 'MEDIUM' : assessed.level;
     this.db
-      .prepare(`UPDATE documents SET classification = ?, confidence = ?, issues = ?, status = 'controle' WHERE id = ?`)
-      .run(JSON.stringify(classification), confidence.level, JSON.stringify(issues), id);
-    if (confidence.level === 'HIGH' && result.supplier && result.total && result.invoiceDate) {
+      .prepare(`UPDATE documents SET classification = ?, confidence = ?, issues = ?, decisions = ?, status = 'controle' WHERE id = ?`)
+      .run(JSON.stringify(classification), level, JSON.stringify(issues), JSON.stringify(decisions), id);
+    if (level === 'HIGH' && allCertain(decisions) && result.supplier && result.total && result.invoiceDate) {
       this.confirm(id, {
         supplier: result.supplier.value,
         date: result.invoiceDate.value,
@@ -218,12 +228,15 @@ export class IntakeService {
         business: classification.business,
         paidWith: bankMatch ? 'bank' : 'later',
       }, { learn: false });
+      const explanation = explain(signals, decisions);
       logAutomation(this.db, {
         kind: 'document-auto',
         ref_id: id,
         summary: `${result.supplier.value} ${formatEuro(result.total.value)} verwerkt als ${EXPENSE_CATEGORIES.find((c) => c.key === classification.categoryKey)?.label.toLowerCase() ?? classification.categoryKey}`,
-        reason: confidence.signals.join(' · '),
+        reason: explanation.sentence,
+        details: explanation,
       });
+      for (const d of decisions) countDecision(this.db, d.kind, 'automatic');
     }
     return this.get(id);
   }
@@ -410,6 +423,7 @@ export class IntakeService {
       result,
       classification: row.classification ? JSON.parse(row.classification) : null,
       issues: JSON.parse(row.issues),
+      decisions: row.decisions ? (JSON.parse(row.decisions) as Decision[]) : null,
       bank_match: row.status === 'verwerkt' || !result ? null : this.findBankMatch(result),
     };
   }

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, Modal, useAction, useApp, useLoad } from '../ui';
 import type { Task } from '../../inbox/inbox';
+import type { AutomationEntry } from '../../inbox/automation-log';
 import { formatDateNl } from '../../shared/dates';
 import { CategoryPicker } from './Bank';
 
@@ -11,6 +12,8 @@ export function Home() {
   const { run, busy } = useAction();
   const [picking, setPicking] = useState<Task | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [why, setWhy] = useState<string | null>(null);
+  const [monthOpen, setMonthOpen] = useState(false);
 
   const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string }) => {
     const r = await run(() => api.home.act(task, actionId, payload));
@@ -22,9 +25,23 @@ export function Home() {
     refreshBadge();
   };
 
+  /** "Alle 5 bevestigen": de hoofdknop voor elke taak in dezelfde groep (#20, #29) */
+  const actGroup = async (group: Task[]) => {
+    for (const t of group) {
+      const primary = t.actions.find((a) => a.primary);
+      if (!primary) continue;
+      await run(() => api.home.act(t, primary.id));
+    }
+    await reload();
+    refreshBadge();
+  };
+
   if (!data) return <div className="page"><ErrorBox error={error} /></div>;
   const name = settings.profile.firstName;
   const tasks = showAll ? data.tasks : data.tasks.slice(0, 6);
+  const groups = new Map<string, Task[]>();
+  for (const t of data.tasks) if (t.group) groups.set(t.group.key, [...(groups.get(t.group.key) ?? []), t]);
+  const shownGroup = new Set<string>();
 
   return (
     <div className="page">
@@ -71,12 +88,27 @@ export function Home() {
         </div>
       ) : (
         <div className="card" style={{ padding: 0 }}>
-          {tasks.map((t) => (
-            <div className="task" key={t.key}>
+          {tasks.map((t) => {
+            const group = t.group ? groups.get(t.group.key) ?? [] : [];
+            const header = t.group && group.length > 1 && !shownGroup.has(t.group.key);
+            if (t.group && header) shownGroup.add(t.group.key);
+            return (
+            <div key={t.key}>
+            {header && (
+              <div className="task group-head">
+                <div className="grow small"><strong>{group.length}×</strong> {t.group!.label}</div>
+                <Button small kind="primary" disabled={busy} onClick={() => void actGroup(group)}>Alle {group.length} bevestigen</Button>
+              </div>
+            )}
+            <div className="task">
               <div className="icon" aria-hidden>{t.icon}</div>
               <div className="grow">
                 <div className="title">{t.title}</div>
-                <div className="q">{t.question}</div>
+                <div className="q">
+                  {t.question}
+                  {t.why && <> <button className="linklike small" onClick={() => setWhy(why === t.key ? null : t.key)}>Waarom?</button></>}
+                </div>
+                {why === t.key && <div className="small muted">{t.why}</div>}
               </div>
               <div className="row">
                 {t.actions.map((a) => (
@@ -86,24 +118,33 @@ export function Home() {
                 ))}
               </div>
             </div>
-          ))}
+            </div>
+            );
+          })}
           {data.tasks.length > 6 && !showAll && (
             <div className="task"><Button kind="ghost" onClick={() => setShowAll(true)}>Toon alle {data.tasks.length}</Button></div>
           )}
         </div>
       )}
 
+      <div className="card month-counts" style={{ marginTop: 18 }}>
+        <strong>Deze maand</strong>
+        <div className="row">
+          <span>🟢 {data.monthCounts.automatic} automatisch verwerkt</span>
+          <span>🟡 {data.monthCounts.byUser} door jou gecontroleerd</span>
+          <span>🔴 {data.monthCounts.attention} {data.monthCounts.attention === 1 ? 'heeft' : 'hebben'} nog aandacht</span>
+        </div>
+        {data.monthCounts.automatic > 0 && <Button small kind="ghost" onClick={() => setMonthOpen(true)}>Bekijk wat automatisch ging</Button>}
+      </div>
+
       {data.automated.length > 0 && (
-        <details className="card" style={{ marginTop: 18 }}>
+        <details className="card" style={{ marginTop: 12 }}>
           <summary><strong>Automatisch gedaan</strong> <span className="muted small">({data.automated.length} deze week)</span></summary>
-          <ul className="small" style={{ margin: '10px 0 0', paddingLeft: 18 }}>
-            {data.automated.map((a) => (
-              <li key={a.id}>{a.summary} <span className="muted">· {a.reason}</span></li>
-            ))}
-          </ul>
-          <p className="muted small">Klopt er iets niet? Pas het aan bij de boeking; dan vragen we het voortaan weer.</p>
+          <AutomationList items={data.automated} expert={settings.advancedMode} onChanged={async () => { await reload(); refreshBadge(); }} />
         </details>
       )}
+
+      {monthOpen && <MonthModal expert={settings.advancedMode} onClose={() => setMonthOpen(false)} onChanged={async () => { await reload(); refreshBadge(); }} />}
 
       {data.vat.estimate !== 0 && (
         <p className="muted small" style={{ marginTop: 18 }}>
@@ -125,5 +166,54 @@ export function Home() {
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Lijst van automatische verwerkingen met "Waarom?" en [Klopt niet] (#28, #29). */
+function AutomationList({ items, expert, onChanged }: { items: AutomationEntry[]; expert: boolean; onChanged: () => Promise<void> }) {
+  const { run, busy } = useAction();
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <ul className="small automation-list">
+      {items.map((a) => (
+        <li key={a.id} className={a.status === 'klopt_niet' ? 'muted' : ''}>
+          <div className="row between">
+            <span>{a.status === 'klopt_niet' ? <s>{a.summary}</s> : a.summary}</span>
+            <span className="row">
+              <button className="linklike" onClick={() => setOpen(open === a.id ? null : a.id)}>Waarom?</button>
+              {a.status === 'auto' && (
+                <Button small kind="ghost" disabled={busy} onClick={async () => {
+                  if (!confirm('Terugdraaien? Het komt dan weer als vraag bij "Nog te doen", en de app vraagt het voortaan weer.')) return;
+                  await run(() => api.home.correct(a.id), 'Teruggedraaid');
+                  await onChanged();
+                }}>Klopt niet</Button>
+              )}
+            </span>
+          </div>
+          {open === a.id && (
+            <div className="muted">
+              {a.reason}
+              {expert && a.details?.expert && <div className="mono">{a.details.expert}</div>}
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function MonthModal({ expert, onClose, onChanged }: { expert: boolean; onClose: () => void; onChanged: () => Promise<void> }) {
+  const month = useLoad(() => api.home.month());
+  const m = month.data;
+  return (
+    <Modal title="Wat ging er automatisch deze maand" onClose={onClose}>
+      <ErrorBox error={month.error} />
+      {m && (
+        <>
+          <p className="muted small">{m.automatic.length} automatisch · {m.byUser.length} door jou gecontroleerd · {m.attention} nog aandacht</p>
+          <AutomationList items={m.automatic} expert={expert} onChanged={async () => { await month.reload(); await onChanged(); }} />
+        </>
+      )}
+    </Modal>
   );
 }
