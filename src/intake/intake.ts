@@ -178,7 +178,7 @@ export class IntakeService {
   }
 
   /** Voegt een document toe en verwerkt het zo ver als verantwoord is. */
-  async add(filename: string, data: Uint8Array, asOf: IsoDate = today()): Promise<IntakeDocument> {
+  async add(filename: string, data: Uint8Array, asOf: IsoDate = today(), opts: { autoConfirm?: boolean } = {}): Promise<IntakeDocument> {
     const sha = createHash('sha256').update(data).digest('hex');
     const existing = this.db.prepare('SELECT id FROM documents WHERE sha256 = ?').get(sha) as { id: number } | undefined;
     if (existing) return this.get(existing.id);
@@ -193,7 +193,7 @@ export class IntakeService {
       const gps = readJpegGps(data);
       if (gps) this.db.prepare('UPDATE documents SET gps_lat = ?, gps_lon = ? WHERE id = ?').run(gps.lat, gps.lon, id);
     }
-    await this.evaluate(id, extractionIssues, asOf);
+    await this.evaluate(id, extractionIssues, asOf, opts);
     return this.get(id);
   }
 
@@ -223,7 +223,8 @@ export class IntakeService {
   }
 
   /** CLASSIFICATIE + VALIDATIE + CONFIDENCE, en bij HIGH direct verwerken. */
-  async evaluate(id: number, extraIssues: Issue[] = [], asOf: IsoDate = today()): Promise<IntakeDocument> {
+  /** autoConfirm: false = nooit zelf boeken, altijd eerst laten controleren (bv. binnengekomen per e-mail) */
+  async evaluate(id: number, extraIssues: Issue[] = [], asOf: IsoDate = today(), opts: { autoConfirm?: boolean } = {}): Promise<IntakeDocument> {
     const doc = this.get(id);
     const result = doc.result ?? emptyResult();
     // Eerst: hebben we dit al? Hetzelfde document komt vaak twee keer binnen (mail + foto, PDF + e-factuur).
@@ -269,7 +270,7 @@ export class IntakeService {
     this.db
       .prepare(`UPDATE documents SET classification = ?, confidence = ?, issues = ?, decisions = ?, status = 'controle' WHERE id = ?`)
       .run(JSON.stringify(classification), level, JSON.stringify(issues), JSON.stringify(decisions), id);
-    if (level === 'HIGH' && allCertain(decisions) && result.supplier && result.total && result.invoiceDate) {
+    if (opts.autoConfirm !== false && level === 'HIGH' && allCertain(decisions) && result.supplier && result.total && result.invoiceDate) {
       this.confirm(id, {
         supplier: result.supplier.value,
         date: result.invoiceDate.value,

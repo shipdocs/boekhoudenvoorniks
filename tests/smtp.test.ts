@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { friendlySmtpError, verifySmtp } from '../src/documents/smtp-mailer';
 
-const smtp = { host: 'mail.example.nl', port: 465, secure: true, user: 'info@example.nl', fromName: 'Test', fromEmail: 'info@example.nl', bcc: '' };
+const smtp = { host: 'mail.example.nl', port: 465, secure: true, user: 'info@example.nl', fromName: 'Test', fromEmail: 'info@example.nl', bcc: '', replyTo: '' };
 
 describe('e-mail: begrijpelijke foutmeldingen', () => {
   it('zonder opgeslagen wachtwoord: zeg dat het wachtwoord ontbreekt (geen "Missing credentials for PLAIN")', async () => {

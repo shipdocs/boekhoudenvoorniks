@@ -693,4 +693,33 @@ export const migrations: string[] = [
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  /* 13: inkomende post (IMAP) */ `
+  -- Per map: tot welke UID we gelezen hebben. Verandert UIDVALIDITY (map opnieuw aangemaakt), dan
+  -- beginnen we opnieuw; dubbele berichten worden dan herkend aan de Message-ID.
+  CREATE TABLE mail_folders (
+    folder TEXT PRIMARY KEY,
+    uid_validity TEXT NOT NULL,
+    last_uid INTEGER NOT NULL DEFAULT 0,
+    checked_at TEXT
+  );
+  -- Elk bericht dat de app gezien heeft, ook als het gelezen, gearchiveerd of verplaatst is.
+  CREATE TABLE mail_messages (
+    id INTEGER PRIMARY KEY,
+    message_key TEXT NOT NULL UNIQUE,
+    folder TEXT NOT NULL,
+    uid INTEGER NOT NULL,
+    from_address TEXT,
+    from_name TEXT,
+    subject TEXT,
+    received_on TEXT,
+    outcome TEXT NOT NULL CHECK (outcome IN ('bijlage','online-factuur','klant','eigen','overig','fout')),
+    relation_id INTEGER REFERENCES relations(id),
+    link_domain TEXT,
+    document_ids TEXT NOT NULL DEFAULT '[]',
+    note TEXT,
+    moved_to TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX mail_messages_outcome ON mail_messages (outcome, created_at);
+  `,
 ];

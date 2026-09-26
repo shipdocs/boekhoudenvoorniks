@@ -82,6 +82,21 @@ export function Customers() {
 
 const EMPTY: RelationInput = { name: '', type: 'klant', email: '', phone: '', address: '', postcode: '', city: '', vat_number: '', kvk_number: '', iban: '', contact_name: '', notes: '' };
 
+/** Seintje: deze klant mailde naar je administratie-mailbox (de mail zelf blijft daar ongelezen staan). */
+export function CustomerMailNotice({ relationId }: { relationId: number | null | undefined }) {
+  const mails = useLoad(async () => (relationId ? api.mail.fromCustomer(relationId) : []), [relationId]);
+  const since = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+  const recent = (mails.data ?? []).filter((m) => (m.received_on ?? '') >= since);
+  if (recent.length === 0) return null;
+  const m = recent[0]!;
+  return (
+    <div className="notice small">
+      ✉️ Deze klant mailde naar je administratie-mailbox{m.subject ? <>: <strong>"{m.subject}"</strong></> : ''} (<DateNl date={m.received_on} />)
+      {recent.length > 1 ? ` en nog ${recent.length - 1} keer` : ''}. De mail staat daar nog ongelezen; beantwoord hem in je mailprogramma.
+    </div>
+  );
+}
+
 export function CustomerDetail({ id }: { id?: number }) {
   const { go } = useApp();
   const { run, busy } = useAction();
@@ -98,6 +113,7 @@ export function CustomerDetail({ id }: { id?: number }) {
         <h1>{id ? r.name : 'Nieuwe klant'}</h1>
         <Button kind="ghost" onClick={() => go({ screen: 'klanten' })}>← Klanten</Button>
       </div>
+      <CustomerMailNotice relationId={id} />
       {id && open > 0 && <div className="notice warn">Moet nog {new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(open / 100)} betalen.</div>}
       <div className="card grid">
         <div className="grid cols-2">

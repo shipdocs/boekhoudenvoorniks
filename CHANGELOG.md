@@ -2,6 +2,24 @@
 
 ## Nog niet uitgebracht
 
+- **Bonnetjes per mail**: geef je administratie een eigen mailadres (bijvoorbeeld administratie@jouwbedrijf.nl)
+  en vul het in bij Instellingen → E-mail → Inkomende post. De app kijkt bij het opstarten en elk kwartier
+  (of met *Nu ophalen*) en zet facturen en bonnen uit de bijlagen klaar bij Aankopen & bonnetjes. Er wordt
+  niets vanzelf geboekt: alles wacht op je controle. Veilig:
+  - alleen echte PDF's, foto's en e-facturen (gecontroleerd op de inhoud, niet op de naam), geen logo's,
+    hoogstens 10 MB per bijlage;
+  - mail wordt nooit verwijderd; mail met een opgehaalde bijlage gaat naar de map "Verwerkt";
+  - gelezen of gearchiveerde mail gaat niet mis en komt niet dubbel binnen: de app onthoudt welke berichten
+    hij al zag, en kan desgewenst ook je archiefmap doorzoeken (daar wordt niets verplaatst);
+  - mail van een klant blijft ongelezen en onaangeroerd; je krijgt een seintje op Vandaag, bij de klant en
+    op de factuur;
+  - "je factuur staat online" zonder bijlage wordt een taak op Vandaag, met alleen de naam van de website
+    (geen link om op te klikken: nep-mails met links zijn een bekende truc);
+  - andere mail blijft gewoon staan.
+  Met een kant-en-klare tekst om naar je leveranciers te sturen.
+- **Antwoorden gaan naar**: bij de uitgaande mail kun je instellen waar klanten op antwoorden, bijvoorbeeld
+  je gewone mailadres.
+
 - **Eigen categorieën** bij "Was dit zakelijk?" en bij bonnetjes: met *+ Eigen categorie* voeg je er een toe
   (bijvoorbeeld Vakliteratuur of Steigerhuur), met *✎ Aanpassen* verander je naam, uitleg en btw van alle
   categorieën, of verberg je wat je niet gebruikt. Ook onder Instellingen → Categorieën. Veilig: er wordt nooit

@@ -4,7 +4,7 @@ import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, u
 import { computeTotals, type LineInput } from '../../documents/totals';
 import { addDays, today } from '../../shared/dates';
 import { customerVatSituation, suggestedSalesVat, type SalesVatCode } from '../../shared/vat';
-import { CustomerVatHint, QuickCustomer } from './Customers';
+import { CustomerMailNotice, CustomerVatHint, QuickCustomer } from './Customers';
 
 interface EditLine {
   description: string;
@@ -112,6 +112,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         <Button kind="ghost" onClick={() => go({ screen: 'werk', extra: { tab: isInvoice ? 'facturen' : 'offertes' } })}>← Terug</Button>
       </div>
       <ErrorBox error={doc.error} />
+      {id && <CustomerMailNotice relationId={relationId} />}
       {!isInvoice && editable && (
         <p className="notice small">
           Een offerte is een prijsvoorstel: nog geen factuur en nog niets in je boekhouding. Stuur hem naar je klant. Zegt de klant ja? Klik dan op <strong>Klant is akkoord</strong>; daarna maak je er met één klik een factuur van.

@@ -24,6 +24,28 @@ export interface SmtpSettings {
   fromName: string;
   fromEmail: string;
   bcc: string;
+  /** "Antwoorden gaan naar": waar klanten op reageren (leeg = het afzenderadres) */
+  replyTo: string;
+}
+
+/**
+ * Inkomende post (IMAP): een apart mailadres voor de administratie. De app haalt bijlagen op als
+ * bonnetje; mail van klanten en andere mail blijft onaangeroerd (ook de gelezen-status).
+ */
+export interface MailInSettings {
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  /** de map die de app leest (meestal INBOX) */
+  folder: string;
+  /** ook deze mappen doorzoeken, bv. een archiefmap; daar wordt nooit iets verplaatst */
+  extraFolders: string[];
+  /** verwerkte mail met bijlage verplaatsen naar deze map (nooit verwijderen); leeg = laten staan */
+  processedFolder: string;
+  /** alleen mail vanaf deze datum (JJJJ-MM-DD); zo haalt de eerste keer geen jaren oude mail op */
+  since: string;
 }
 
 export interface BusinessProfile {
@@ -48,6 +70,7 @@ export interface AppSettings {
   profile: BusinessProfile;
   ocr: OcrSettings;
   smtp: SmtpSettings;
+  mailIn: MailInSettings;
   paymentTermDays: number;
   quoteValidityDays: number;
   invoiceNumberFormat: string;
@@ -134,7 +157,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   profile: { trade: '', worksAlone: true, hasBusinessAccount: true, firstName: '' },
   ocr: { url: '', engine: 'glm-ocr', llmUrl: '', llmModel: '' },
-  smtp: { host: '', port: 587, secure: false, user: '', fromName: '', fromEmail: '', bcc: '' },
+  smtp: { host: '', port: 587, secure: false, user: '', fromName: '', fromEmail: '', bcc: '', replyTo: '' },
+  mailIn: { enabled: false, host: '', port: 993, secure: true, user: '', folder: 'INBOX', extraFolders: [], processedFolder: 'Verwerkt', since: '' },
   paymentTermDays: 14,
   quoteValidityDays: 30,
   invoiceNumberFormat: '{JJJJ}-{NNNN}',
@@ -190,6 +214,7 @@ export class SettingsService {
       ...stored,
       company: { ...DEFAULT_SETTINGS.company, ...((stored.company as object) ?? {}) },
       smtp: { ...DEFAULT_SETTINGS.smtp, ...((stored.smtp as object) ?? {}) },
+      mailIn: { ...DEFAULT_SETTINGS.mailIn, ...((stored.mailIn as object) ?? {}) },
       profile: { ...DEFAULT_SETTINGS.profile, ...((stored.profile as object) ?? {}) },
       ocr: { ...DEFAULT_SETTINGS.ocr, ...((stored.ocr as object) ?? {}) },
     } as AppSettings;
@@ -201,7 +226,7 @@ export class SettingsService {
     this.db.transaction(() => {
       for (const [key, value] of Object.entries(patch)) {
         if (!(key in DEFAULT_SETTINGS) || value === undefined) continue;
-        const merged = ['company', 'smtp', 'profile', 'ocr'].includes(key) ? { ...(current[key as keyof AppSettings] as object), ...(value as object) } : value;
+        const merged = ['company', 'smtp', 'mailIn', 'profile', 'ocr'].includes(key) ? { ...(current[key as keyof AppSettings] as object), ...(value as object) } : value;
         upsert.run(key, JSON.stringify(merged));
       }
     })();

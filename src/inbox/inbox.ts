@@ -26,6 +26,7 @@ import { formatEuro, type Cents } from '../shared/money';
 import { automationForMonth, countDecision, getAutomation, logAutomation, markCorrected, recentAutomation, type AutomationEntry } from './automation-log';
 import { explain } from '../automation/explain';
 import type { InvestmentCheck } from '../tax/investment-check';
+import type { MailIntakeService } from '../mail/mail-intake';
 
 
 export type TaskKind =
@@ -55,7 +56,9 @@ export type TaskKind =
   | 'recurring-missing-payment'
   | 'recurring-stopped'
   | 'recurring-invoice'
-  | 'investment-check';
+  | 'investment-check'
+  | 'mail-online'
+  | 'mail-customer';
 
 export interface TaskAction {
   id: string;
@@ -78,7 +81,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
+  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; mailId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
 }
 
 export interface HomeData {
@@ -136,6 +139,7 @@ export class InboxService {
     private readonly recurring: RecurringService,
     private readonly categories: CategoryLookup,
     private readonly investments?: InvestmentCheck,
+    private readonly mail?: MailIntakeService,
   ) {}
 
   /** Een taak bewust overslaan; komt niet terug zolang de sleutel gelijk blijft. */
@@ -462,6 +466,37 @@ export class InboxService {
         why: d.classification ? `Omdat ${d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(', ')}.` : undefined,
         ref: { documentId: d.id },
       });
+    }
+
+    // inkomende post: een factuur die online staat, of mail van een klant (die blijft ongelezen in je mailbox)
+    for (const m of this.mail?.attention() ?? []) {
+      const key = `mail-${m.id}`;
+      if (this.isSkipped(key)) continue;
+      const who = m.relation_name ?? m.from_name ?? m.from_address ?? 'Iemand';
+      const subject = m.subject ? `"${m.subject}"` : 'Een bericht zonder onderwerp';
+      if (m.outcome === 'online-factuur') {
+        tasks.push({
+          key,
+          kind: 'mail-online',
+          icon: '📧',
+          title: `${who}: factuur staat online`,
+          question: `${subject}. Er zat geen bijlage bij. Log in op ${m.link_domain} (typ het adres zelf in; klik bij twijfel niet op de link in de mail), download de factuur en zet hem bij Aankopen & bonnetjes.`,
+          actions: [{ id: 'open', label: 'Bonnetje toevoegen', primary: true }, { id: 'klaar', label: 'Gedaan' }],
+          priority: 2,
+          ref: { mailId: m.id },
+        });
+      } else {
+        tasks.push({
+          key,
+          kind: 'mail-customer',
+          icon: '✉️',
+          title: `Mail van ${who}`,
+          question: `${subject}${m.received_on ? ` (${formatDateNl(m.received_on)})` : ''}. Staat in je administratie-mailbox; de app heeft hem niet aangeraakt. Beantwoord hem in je mailprogramma.`,
+          actions: [{ id: 'klaar', label: 'Gezien', primary: true }, ...(m.relation_id ? [{ id: 'open', label: 'Bekijk klant' }] : [])],
+          priority: 2,
+          ref: { mailId: m.id, relationId: m.relation_id ?? undefined },
+        });
+      }
     }
 
     for (const o of this.invoices.overpaidCustomers()) {

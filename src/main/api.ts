@@ -34,6 +34,7 @@ import type { Task } from '../inbox/inbox';
 import type { EntrySource } from '../core-ledger/ledger';
 import { today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
+import type { PollResult } from '../mail/mail-intake';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -55,6 +56,14 @@ export interface HostContext {
   checkForUpdates(): Promise<string>;
   /** Administratie wissen (met veiligheidskopie bij echte gegevens) en eventueel de demo erin zetten. */
   resetData(withDemo: boolean): Promise<{ backup: string | null }>;
+  /** inkomende post (IMAP); ontbreekt buiten Electron */
+  mail?: {
+    setPassword(password: string): void;
+    hasPassword(): boolean;
+    /** test met de ingevulde gegevens en het ingetypte wachtwoord; geeft de mappen terug */
+    test(cfg?: AppSettings['mailIn'], password?: string): Promise<{ folders: string[] }>;
+    fetchNow(): Promise<PollResult>;
+  };
   /** ingebouwde tekstherkenning (#9): downloaden bij eerste gebruik */
   localOcr: {
     status(): RuntimeStatus;
@@ -166,6 +175,14 @@ export function createApi(s: Services, host: HostContext) {
       case 'bank-refund:anders':
         s.inbox.skipTask(`bank-refund-${r.bankTransactionId}`, 'geen terugbetaling');
         return { navigate: { screen: 'categorie', id: r.bankTransactionId } };
+      case 'mail-online:klaar':
+      case 'mail-customer:klaar':
+        s.inbox.skipTask(task.key, 'gezien');
+        return;
+      case 'mail-online:open':
+        return { navigate: { screen: 'aankopen' } };
+      case 'mail-customer:open':
+        return { navigate: { screen: 'klant', id: r.relationId } };
       case 'customer-overpaid:open':
         return { navigate: { screen: 'klant', id: r.relationId } };
       case 'customer-overpaid:klopt':
@@ -284,6 +301,21 @@ export function createApi(s: Services, host: HostContext) {
       update: (key: string, input: { label?: string; hint?: string; defaultVat?: string; groupKey?: string }) => s.categories.update(key, input),
       setHidden: (key: string, hidden: boolean) => s.categories.setHidden(key, hidden),
       reset: (key: string) => s.categories.reset(key),
+    },
+    /** Inkomende post: een apart mailadres voor de administratie. */
+    mail: {
+      summary: () => ({ ...s.mail.summary(), passwordSet: host.mail?.hasPassword() ?? false }),
+      setPassword: (pw: string) => host.mail?.setPassword(pw),
+      test: (cfg?: AppSettings['mailIn'], password?: string) => {
+        if (!host.mail) throw new Error('Mail ophalen kan alleen in de app');
+        return host.mail.test(cfg, password);
+      },
+      fetchNow: () => {
+        if (!host.mail) throw new Error('Mail ophalen kan alleen in de app');
+        if (s.settings.get().demoMode) throw new Error('In de demo wordt geen mail opgehaald. Wis de demo om echt te beginnen.');
+        return host.mail.fetchNow();
+      },
+      fromCustomer: (relationId: number) => s.mail.fromCustomer(relationId),
     },
     relations: {
       list: (filter?: { type?: 'klant' | 'leverancier'; search?: string }) => s.relations.list(filter),

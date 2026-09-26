@@ -141,7 +141,7 @@ describe('offertes', () => {
 describe('verzenden', () => {
   it('verstuurt factuur met PDF en maakt hem definitief', async () => {
     const { s, klant, sent } = setup();
-    s.settings.update({ smtp: { host: 'smtp.example.nl', port: 587, secure: false, user: 'u', fromName: 'Piet', fromEmail: 'piet@example.nl', bcc: '' } });
+    s.settings.update({ smtp: { host: 'smtp.example.nl', port: 587, secure: false, user: 'u', fromName: 'Piet', fromEmail: 'piet@example.nl', bcc: '', replyTo: '' } });
     const d = s.invoices.createDraft({ relationId: klant.id, lines: [stucwerk] });
     const inv = await s.sender.sendInvoice(d.id);
     expect(inv.status).toBe('verzonden');

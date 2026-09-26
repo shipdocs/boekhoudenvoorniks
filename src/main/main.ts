@@ -19,8 +19,12 @@ import { HttpOcrProvider } from '../intake/ocr';
 import { LocalOcrRuntime } from '../ocr-runtime/runtime';
 import { OllamaClassifier } from '../intake/llm-ollama';
 import type { FetchLike } from '../integrations/types';
+import { ImapSource } from '../mail/imap-source';
+import type { PollResult } from '../mail/mail-intake';
 
 const SMTP_SECRET = 'smtp:password';
+const IMAP_SECRET = 'imap:password';
+const FIFTEEN_MINUTES = 15 * 60 * 1000;
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
 let mainWindow: BrowserWindow | null = null;
@@ -42,6 +46,35 @@ function dbPath(): string {
 
 function emit(event: string, payload: unknown): void {
   mainWindow?.webContents.send('app-event', event, payload);
+}
+
+/** Eén ophaalronde tegelijk; een tweede verzoek wacht op de lopende. */
+let mailRun: Promise<PollResult> | null = null;
+
+function fetchMail(): Promise<PollResult> {
+  mailRun ??= (async () => {
+    const source = await ImapSource.connect(services.settings.get().mailIn, secrets.get(IMAP_SECRET));
+    try {
+      const r = await services.mail.poll(source);
+      if (r.documents + r.onlineInvoices + r.fromCustomers > 0) emit('auto-processed', r);
+      return r;
+    } finally {
+      await source.close();
+    }
+  })().finally(() => {
+    mailRun = null;
+  });
+  return mailRun;
+}
+
+async function backgroundMail(): Promise<void> {
+  const s = services.settings.get();
+  if (!s.mailIn.enabled || s.demoMode || !secrets.get(IMAP_SECRET)) return;
+  try {
+    await fetchMail();
+  } catch (e) {
+    console.error('Mail ophalen mislukt', (e as Error).message);
+  }
 }
 
 const ALLOWED_ATTACHMENTS = ['.pdf', '.jpg', '.jpeg', '.png', '.heic', '.webp', '.xml'];
@@ -122,6 +155,22 @@ function initServices(): void {
     setSmtpPassword: (pw) => (pw ? secrets.set(SMTP_SECRET, pw) : secrets.delete(SMTP_SECRET)),
     hasSmtpPassword: () => secrets.get(SMTP_SECRET) !== null,
     testSmtp: (smtp, password) => verifySmtp(smtp ?? services.settings.get().smtp, password || secrets.get(SMTP_SECRET)),
+    mail: {
+      setPassword: (pw) => (pw ? secrets.set(IMAP_SECRET, pw) : secrets.delete(IMAP_SECRET)),
+      hasPassword: () => secrets.get(IMAP_SECRET) !== null,
+      async test(cfg, password) {
+        const source = await ImapSource.connect(cfg ?? services.settings.get().mailIn, password || secrets.get(IMAP_SECRET));
+        try {
+          const folders = (await source.folders()).map((f) => f.path);
+          // geslaagd met een ingetypt wachtwoord: meteen bewaren (zoals bij de uitgaande mail)
+          if (password) secrets.set(IMAP_SECRET, password);
+          return { folders };
+        } finally {
+          await source.close();
+        }
+      },
+      fetchNow: () => fetchMail(),
+    },
     async backupNow() {
       const result = await dialog.showSaveDialog(mainWindow!, {
         defaultPath: join(app.getPath('documents'), `boekhouding-backup-${new Date().toISOString().slice(0, 10)}.sqlite`),
@@ -360,6 +409,9 @@ if (!gotLock) {
     if (SMOKE_TEST) return;
     setTimeout(() => void backgroundTasks(), 10_000);
     setInterval(() => void backgroundTasks(), SIX_HOURS);
+    // inkomende post: kort na het opstarten en daarna elk kwartier
+    setTimeout(() => void backgroundMail(), 30_000);
+    setInterval(() => void backgroundMail(), FIFTEEN_MINUTES);
     if (app.isPackaged) {
       autoUpdater.autoDownload = true;
       void autoUpdater.checkForUpdatesAndNotify().catch((e) => console.error('Update-controle mislukt', e));
