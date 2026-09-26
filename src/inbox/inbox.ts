@@ -45,6 +45,7 @@ export type TaskKind =
   | 'vat-check'
   | 'purchase-due'
   | 'bank-pot'
+  | 'job-link'
   | 'recurring-confirm'
   | 'recurring-missing-payment'
   | 'recurring-stopped'
@@ -390,6 +391,48 @@ export class InboxService {
         actions: [{ id: 'akkoord', label: 'Ja, akkoord', primary: true }, { id: 'afgewezen', label: 'Nee' }],
         ref: { quoteId: q.id },
       });
+    }
+
+    // Aankopen voor een klus? (#32) Alleen materiaal/gereedschap van de laatste 30 dagen zonder klus.
+    if (this.jobs.list({ active: true }).length > 0) {
+      const JOB_ACCOUNTS = ['WKprInkMat', 'WBedAlkGer'];
+      const recentPurchases = this.db
+        .prepare(
+          `SELECT p.id, p.invoice_date, p.total, r.name AS supplier, d.gps_lat, d.gps_lon FROM purchase_invoices p
+           LEFT JOIN relations r ON r.id = p.relation_id LEFT JOIN documents d ON d.id = p.document_id
+           WHERE p.job_id IS NULL AND p.invoice_date >= ? AND EXISTS (
+             SELECT 1 FROM purchase_invoice_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.purchase_invoice_id = p.id AND a.rgs_code IN ('WKprInkMat','WBedAlkGer'))`,
+        )
+        .all(addDays(asOf, -30)) as { id: number; invoice_date: string; total: number; supplier: string | null; gps_lat: number | null; gps_lon: number | null }[];
+      const recentBank = (this.db
+        .prepare(
+          `SELECT b.id, b.transaction_date, b.amount, b.counter_name, ev.payload FROM bank_transactions b
+           JOIN journal_entries e ON e.id = b.matched_journal_entry_id JOIN events ev ON ev.id = e.event_id
+           WHERE ev.type = 'bank-categorie' AND ev.job_id IS NULL AND ev.status = 'actief' AND b.transaction_date >= ?`,
+        )
+        .all(addDays(asOf, -30)) as { id: number; transaction_date: string; amount: number; counter_name: string | null; payload: string }[]).filter((b) => JOB_ACCOUNTS.includes(JSON.parse(b.payload).account));
+      const items = [
+        ...recentPurchases.map((p) => ({ key: `job-link-p-${p.id}`, date: p.invoice_date, amount: p.total, supplier: p.supplier, gps: p.gps_lat != null && p.gps_lon != null ? { lat: p.gps_lat, lon: p.gps_lon } : null, ref: { purchaseId: p.id } })),
+        ...recentBank.map((b) => ({ key: `job-link-b-${b.id}`, date: b.transaction_date, amount: -b.amount, supplier: b.counter_name, gps: null, ref: { bankTransactionId: b.id } })),
+      ];
+      for (const it of items) {
+        if (this.isSkipped(it.key)) continue;
+        const [best] = this.jobs.suggest({ date: it.date, supplier: it.supplier, gps: it.gps });
+        if (!best) continue;
+        tasks.push({
+          key: it.key,
+          kind: 'job-link',
+          icon: '🔨',
+          title: `${it.supplier ?? 'Aankoop'} ${formatEuro(it.amount)}`,
+          question: `Was dit voor de klus bij ${best.job.relation_name} (${best.job.title})?`,
+          why: `Omdat ${best.reason}.`,
+          amount: -it.amount,
+          actions: [{ id: 'ja', label: 'Ja', primary: true }, { id: 'anders', label: 'Andere klus' }, { id: 'algemeen', label: 'Algemeen' }],
+          group: { key: `job-link-${best.job.id}`, label: `Allemaal voor ${best.job.relation_name} (${best.job.title})` },
+          priority: 3,
+          ref: { ...it.ref, jobId: best.job.id },
+        });
+      }
     }
 
     // Vaste lasten (#30)

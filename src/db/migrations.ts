@@ -598,4 +598,30 @@ export const migrations: string[] = [
   );
   `,
   /* 9: zoeken (#26) */ searchMigration(),
+  /* 10: klussen als dossier (#32) */ `
+  -- Alles kan aan een klus hangen: via de gebeurtenis (#19), niet alleen inkoopfacturen.
+  ALTER TABLE events ADD COLUMN job_id INTEGER REFERENCES jobs(id);
+  UPDATE events SET job_id = (
+    SELECT p.job_id FROM purchase_invoices p
+    WHERE p.journal_entry_id IN (SELECT id FROM journal_entries WHERE event_id = events.id) AND p.job_id IS NOT NULL LIMIT 1
+  );
+  -- Werkbon: uren en materiaal op de klus, vult later de factuurregels.
+  CREATE TABLE job_work_items (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER NOT NULL REFERENCES jobs(id),
+    work_date TEXT NOT NULL,
+    description TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    unit TEXT,
+    unit_price INTEGER NOT NULL,
+    vat_code TEXT NOT NULL,
+    invoice_id INTEGER REFERENCES invoices(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Locatie (alleen na toestemming, alleen lokaal): klus en foto van de bon.
+  ALTER TABLE jobs ADD COLUMN lat REAL;
+  ALTER TABLE jobs ADD COLUMN lon REAL;
+  ALTER TABLE documents ADD COLUMN gps_lat REAL;
+  ALTER TABLE documents ADD COLUMN gps_lon REAL;
+  `,
 ];

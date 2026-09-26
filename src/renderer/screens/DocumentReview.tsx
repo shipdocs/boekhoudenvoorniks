@@ -60,6 +60,8 @@ export function DocumentReview({ id }: { id: number }) {
   const { run, busy } = useAction();
   const doc = useLoad(() => api.documents.get(id), [id]);
   const jobs = useLoad(() => api.jobs.list({ active: true }));
+  const jobSuggestion = useLoad(() => api.jobs.suggestForDocument(id), [id]);
+  const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
   const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number }[] | null } | null>(null);
 
@@ -80,6 +82,14 @@ export function DocumentReview({ id }: { id: number }) {
       splits: null,
     });
   }, [d, form]);
+
+  // Klus-voorstel (#32): bij één actieve klus of een locatiematch alvast invullen
+  useEffect(() => {
+    const [best, second] = jobSuggestion.data ?? [];
+    if (jobSuggested.current || !form || !best || !d || d.status !== 'controle') return;
+    jobSuggested.current = true;
+    if (!second || best.score - second.score >= 40) setForm({ ...form, jobId: best.job.id });
+  }, [jobSuggestion.data, form, d]);
 
   if (!d || !form) return <div className="page"><ErrorBox error={doc.error} /></div>;
   const r = d.result;
@@ -203,7 +213,7 @@ export function DocumentReview({ id }: { id: number }) {
                   </Field>
                   {(jobs.data ?? []).length > 0 && (
                     <Field label="Voor een klus?" hint="optioneel">
-                      <select value={form.jobId ?? ''} onChange={(e) => setForm({ ...form, jobId: Number(e.target.value) || null })}>
+                      <select value={form.jobId ?? ''} onChange={(e) => { jobSuggested.current = true; setForm({ ...form, jobId: Number(e.target.value) || null }); }}>
                         <option value="">Nee / algemeen</option>
                         {jobs.data!.map((j) => <option key={j.id} value={j.id}>{j.title} — {j.relation_name}</option>)}
                       </select>

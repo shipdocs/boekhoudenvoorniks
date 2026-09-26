@@ -21,6 +21,7 @@ export interface StoredEvent {
   status: 'actief' | 'vervangen';
   rules_version: string;
   supersedes_event_id: number | null;
+  job_id: number | null;
   created_at: string;
   evidence: (Evidence & { id: number })[];
   entryIds: number[];
@@ -35,13 +36,13 @@ export interface StoredEvent {
 export class EventService {
   constructor(private readonly db: Db, private readonly ledger: Ledger) {}
 
-  record(event: DomainEvent, evidence: Evidence[] = [], opts: { supersedes?: number | null } = {}): { eventId: number; entryId: number } {
+  record(event: DomainEvent, evidence: Evidence[] = [], opts: { supersedes?: number | null; jobId?: number | null } = {}): { eventId: number; entryId: number } {
     return tx(this.db, () => {
       const compiled = compile(event);
       const eventId = Number(
         this.db
-          .prepare('INSERT INTO events (type, event_date, payload, rules_version, supersedes_event_id) VALUES (?, ?, ?, ?, ?)')
-          .run(event.type, compiled.date, JSON.stringify(event.payload), RULES_VERSION, opts.supersedes ?? null).lastInsertRowid,
+          .prepare('INSERT INTO events (type, event_date, payload, rules_version, supersedes_event_id, job_id) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(event.type, compiled.date, JSON.stringify(event.payload), RULES_VERSION, opts.supersedes ?? null, opts.jobId ?? null).lastInsertRowid,
       );
       const insert = this.db.prepare('INSERT INTO event_evidence (event_id, kind, ref_id, note, confidence) VALUES (?, ?, ?, ?, ?)');
       for (const e of evidence) insert.run(eventId, e.kind, e.refId ?? null, e.note ?? null, e.confidence ?? null);
@@ -87,7 +88,7 @@ export class EventService {
       for (const e of live) this.ledger.reverse(e.id, date ?? old.event_date, `Correctie: ${reason}`);
       this.db.prepare(`UPDATE events SET status = 'vervangen' WHERE id = ?`).run(id);
       const evidence: Evidence[] = [...old.evidence.map(({ id: _id, ...e }) => e), { kind: 'antwoord', note: reason }];
-      return this.record(next, evidence, { supersedes: id });
+      return this.record(next, evidence, { supersedes: id, jobId: old.job_id });
     });
   }
 }

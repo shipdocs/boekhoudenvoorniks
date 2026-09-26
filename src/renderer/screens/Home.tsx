@@ -11,14 +11,17 @@ export function Home() {
   const { data, error, reload } = useLoad(() => api.home.get());
   const { run, busy } = useAction();
   const [picking, setPicking] = useState<Task | null>(null);
+  const [pickingJob, setPickingJob] = useState<Task | null>(null);
+  const activeJobs = useLoad(async () => (pickingJob ? api.jobs.list({ active: true }) : []), [pickingJob]);
   const [showAll, setShowAll] = useState(false);
   const [why, setWhy] = useState<string | null>(null);
   const [monthOpen, setMonthOpen] = useState(false);
 
-  const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string }) => {
+  const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number }) => {
     const r = await run(() => api.home.act(task, actionId, payload));
     if (r && r.navigate) {
       if (r.navigate.screen === 'categorie') return setPicking(task);
+      if (r.navigate.screen === 'klus-kiezen') return setPickingJob(task);
       return go({ screen: r.navigate.screen as never, id: r.navigate.id });
     }
     await reload();
@@ -166,6 +169,19 @@ export function Home() {
         <p className="muted small" style={{ marginTop: 18 }}>
           BTW {data.vat.periodLabel} tot nu toe: <Euro cents={data.vat.estimate} /> — aangeven vóór {data.vat.deadlineLabel}.
         </p>
+      )}
+
+      {pickingJob && (
+        <Modal title="Voor welke klus was dit?" onClose={() => setPickingJob(null)}>
+          <p className="muted">{pickingJob.title}</p>
+          <div className="choice">
+            {(activeJobs.data ?? []).map((j) => (
+              <button key={j.id} onClick={async () => { const t = pickingJob; setPickingJob(null); await act(t, 'anders', { jobId: j.id }); }}>
+                {j.relation_name} · {j.title}
+              </button>
+            ))}
+          </div>
+        </Modal>
       )}
 
       {picking && (

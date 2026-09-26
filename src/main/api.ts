@@ -29,7 +29,7 @@ import type { JobStatus } from '../jobs/jobs';
 import type { LineInput } from '../documents/totals';
 import type { Task } from '../inbox/inbox';
 import type { EntrySource } from '../core-ledger/ledger';
-import type { IsoDate } from '../shared/dates';
+import { today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
@@ -68,7 +68,7 @@ export function createApi(s: Services, host: HostContext) {
   };
 
   /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
-  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
+  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
     const r = task.ref;
     switch (`${task.kind}:${actionId}`) {
       case 'bank-invoice:klopt':
@@ -135,6 +135,17 @@ export function createApi(s: Services, host: HostContext) {
         return;
       case 'supplier-auto:nee':
         s.memory.setAutomatic(r.supplierKey!, false);
+        return;
+      case 'job-link:ja':
+      case 'job-link:anders': {
+        const jobId = actionId === 'anders' ? payload?.jobId : r.jobId;
+        if (!jobId) return { navigate: { screen: 'klus-kiezen' } };
+        if (r.purchaseId) s.jobs.linkPurchase(r.purchaseId, jobId);
+        else if (r.bankTransactionId) s.jobs.linkBankTransaction(r.bankTransactionId, jobId);
+        return;
+      }
+      case 'job-link:algemeen':
+        s.inbox.skipTask(task.key, 'algemeen');
         return;
       case 'bank-pot:klopt':
         s.bank.bookToAccount(r.bankTransactionId!, { account: s.bank.getAccount(r.bankAccountId!).rgs_code, description: 'Belastingpotje' });
@@ -273,7 +284,7 @@ export function createApi(s: Services, host: HostContext) {
     home: {
       get: () => s.inbox.home(),
       /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
-      act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
+      act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
         const result = await doAct(task, actionId, payload);
         if (!result?.navigate) s.inbox.recordUserAction(task, actionId);
         return result;
@@ -292,6 +303,17 @@ export function createApi(s: Services, host: HostContext) {
       setStatus: (id: number, status: JobStatus) => s.jobs.setStatus(id, status),
       acceptQuote: (quoteId: number) => s.jobs.acceptQuote(quoteId),
       makeInvoice: (id: number, lines?: LineInput[]) => s.jobs.makeInvoice(id, lines),
+      result: (id: number) => s.jobs.result(id),
+      results: (filter?: { relationId?: number }) => s.jobs.results(filter),
+      suggestForDocument: (documentId: number) => {
+        const d = s.intake.get(documentId);
+        const gps = s.db.prepare('SELECT gps_lat, gps_lon FROM documents WHERE id = ?').get(documentId) as { gps_lat: number | null; gps_lon: number | null };
+        return s.jobs.suggest({ date: d.result?.invoiceDate?.value ?? today(), supplier: d.result?.supplier?.value ?? null, gps: gps.gps_lat != null && gps.gps_lon != null ? { lat: gps.gps_lat, lon: gps.gps_lon } : null });
+      },
+      linkPurchase: (purchaseId: number, jobId: number | null) => s.jobs.linkPurchase(purchaseId, jobId),
+      workItems: (id: number) => s.jobs.workItems(id),
+      addWorkItem: (id: number, item: { date: IsoDate; description: string; quantity: number; unit?: string | null; unitPrice: Cents; vatCode: string }) => s.jobs.addWorkItem(id, item),
+      removeWorkItem: (itemId: number) => s.jobs.removeWorkItem(itemId),
     },
     documents: {
       add: (name: string, data: Uint8Array) => s.intake.add(name, data),

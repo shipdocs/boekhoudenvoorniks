@@ -56,7 +56,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const exports = new AccountantExport(db, ledger);
   const memory = new SupplierMemory(db);
   const classifier = new Classifier(memory, deps.llm ?? null);
-  const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot);
+  const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);
   const jobs = new JobService(db, quotes, invoices, relations);
