@@ -87,6 +87,14 @@ describe('klant heeft te veel betaald', () => {
     expect(s.inbox.tasks('2026-07-13').some((t) => t.kind === 'customer-overpaid' || t.kind === 'bank-refund')).toBe(false);
   });
 
+  it('ook bij een gearchiveerde klant of een ander IBAN waarmee eerder betaald is', () => {
+    const { s, klant, pay } = paidTwice();
+    s.relations.update(klant.id, { iban: 'NL02ABNA0123456789' });
+    s.db.prepare('UPDATE relations SET archived = 1 WHERE id = ?').run(klant.id);
+    pay('2026-07-12', -12100); // naar het oude IBAN waarmee de facturen betaald zijn
+    expect(s.inbox.tasks('2026-07-13').find((t) => t.kind === 'bank-refund')?.ref.relationId).toBe(klant.id);
+  });
+
   it('een grotere uitgaande betaling aan dezelfde klant is geen terugbetaling', () => {
     const { s, pay } = paidTwice();
     pay('2026-07-12', -50000);

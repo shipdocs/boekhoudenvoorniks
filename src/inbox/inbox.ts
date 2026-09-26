@@ -282,12 +282,27 @@ export class InboxService {
     }
 
     const overpaid = this.invoices.overpaidCustomers();
+    // rekeningnummers van klanten met tegoed: het IBAN bij de klant én waarmee eerder facturen betaald zijn
+    // (ook bij een gearchiveerde klant of een ander rekeningnummer)
+    const refundIbans = new Map<string, number>();
+    if (overpaid.length > 0) {
+      const ids = overpaid.map((o) => o.relationId);
+      const rows = this.db
+        .prepare(
+          `SELECT id AS relationId, iban FROM relations WHERE iban IS NOT NULL AND id IN (${ids.map(() => '?').join(',')})
+           UNION SELECT i.relation_id, b.counter_iban FROM bank_transactions b JOIN invoices i ON i.id = b.matched_invoice_id
+           WHERE b.counter_iban IS NOT NULL AND i.relation_id IN (${ids.map(() => '?').join(',')})`,
+        )
+        .all(...ids, ...ids) as { relationId: number; iban: string }[];
+      for (const r of rows) refundIbans.set(normalizeIban(r.iban), r.relationId);
+    }
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
       const who = t.counter_name || t.description.slice(0, 40) || 'Onbekend';
       // terugbetaling aan een klant die te veel betaalde: geen kosten
       if (t.amount < 0 && t.counter_iban) {
-        const rel = this.db.prepare('SELECT id, name FROM relations WHERE iban = ? AND archived = 0').get(normalizeIban(t.counter_iban)) as { id: number; name: string } | undefined;
-        const credit = rel ? overpaid.find((o) => o.relationId === rel.id) : undefined;
+        const relationId = refundIbans.get(normalizeIban(t.counter_iban));
+        const credit = relationId ? overpaid.find((o) => o.relationId === relationId) : undefined;
+        const rel = credit ? { id: credit.relationId, name: credit.name } : undefined;
         if (rel && credit && -t.amount <= credit.amount && !this.isSkipped(`bank-refund-${t.id}`)) {
           tasks.push({
             key: `bank-${t.id}`,
