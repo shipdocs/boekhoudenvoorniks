@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Field, useAction, useApp, useLoad, type Settings } from '../ui';
+import { Button, DateNl, ErrorBox, Field, MoneyInput, useAction, useApp, useLoad, type Settings } from '../ui';
 import type { AppSettings } from '../../settings/settings';
 import { ResetCard } from './Reset';
 import { LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
@@ -130,7 +130,34 @@ export function SettingsScreen() {
             </select>
           </Field>
           {draft.carUse === 'prive' && <p className="small muted">Tanken en parkeren tellen dan als privé; je zakelijke kilometers vul je in bij Belasting → Aftrek → Kilometers.</p>}
-          {draft.carUse === 'zakelijk' && <p className="small muted">Rijd je ook privé in een auto van de zaak (meer dan 500 km per jaar)? Dan betaal je daar belasting over (bijtelling). Dat rekent de app niet uit: vraag je boekhouder.</p>}
+          {draft.carUse === 'zakelijk' && (
+            <div className="card" style={{ marginBottom: 12 }}>
+              <Field label="Rijd je er ook privé mee?" hint="woon-werk telt voor de btw als zakelijk">
+                <select value={draft.carPrivateUse === null ? '' : draft.carPrivateUse ? 'ja' : 'nee'} onChange={(e) => set({ carPrivateUse: e.target.value === '' ? null : e.target.value === 'ja' })}>
+                  <option value="">Nog niet opgegeven</option>
+                  <option value="ja">Ja, ik rijd er ook privé mee</option>
+                  <option value="nee">Nee, alleen zakelijk (bijvoorbeeld een bestelbus)</option>
+                </select>
+              </Field>
+              {draft.carPrivateUse && (
+                <>
+                  <div className="grid cols-2">
+                    <Field label="Cataloguswaarde" hint="nieuwprijs incl. btw en bpm; staat bij de RDW of vraag je dealer">
+                      <MoneyInput value={draft.carCatalogValue} onChange={(v) => set({ carCatalogValue: v })} />
+                    </Field>
+                    <Field label="Sinds welk jaar gebruik je deze auto?" hint="voor je bedrijf">
+                      <input inputMode="numeric" value={draft.carInUseSince ?? ''} onChange={(e) => set({ carInUseSince: Number(e.target.value) || null })} placeholder={String(new Date().getFullYear())} />
+                    </Field>
+                  </div>
+                  <p className="small muted">
+                    Over privégebruik betaal je één keer per jaar btw, in je laatste aangifte van het jaar: 2,7% van de cataloguswaarde (vanaf het 5e jaar na ingebruikname 1,5%). De app zet dat voor je klaar.
+                    Daarnaast telt privégebruik mee voor de inkomstenbelasting (bijtelling). Dat rekent de app niet uit: vraag je boekhouder.
+                  </p>
+                </>
+              )}
+              {draft.carPrivateUse === false && <p className="small muted">Rijd je toch meer dan 500 km per jaar privé? Dan betaal je btw over dat privégebruik en telt het mee voor de inkomstenbelasting. Vraag je boekhouder.</p>}
+            </div>
+          )}
           <div className="grid cols-2">
             <Field label="In welk jaar ben je gestart?" hint="voor de startersaftrek">
               <input value={draft.startYear ?? ''} onChange={(e) => set({ startYear: e.target.value ? Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || null : null })} placeholder="bv. 2024" inputMode="numeric" />

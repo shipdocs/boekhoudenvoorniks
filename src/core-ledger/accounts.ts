@@ -39,6 +39,10 @@ export const ACCOUNTS = {
   btwAfdragenBuitenEu: 'BSchBepBtwAfdBui',
   btwVoorbelasting: 'BSchBepBtwVoo',
   btwAfrekening: 'BSchBepBtwAfr',
+  /** 1d: btw over privégebruik (auto van de zaak) */
+  btwPriveGebruik: 'BSchBepBtwPri',
+  /** kosten: de btw-correctie privégebruik auto */
+  btwPriveAuto: 'WBedAutBop',
   omzetHoog: 'WOmzNopOlh',
   omzetLaag: 'WOmzNopOll',
   omzetNul: 'WOmzNopOln',
@@ -88,6 +92,7 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '1735', rgs: ACCOUNTS.btwAfdragenEu, ref: 'BSchBepBtwOlu', name: 'Af te dragen BTW verlegd uit de EU (4b)', category: 'btw', vatCode: 'eu', system: true },
   { code: '1736', rgs: ACCOUNTS.btwAfdragenBuitenEu, ref: 'BSchBepBtwOlb', name: 'Af te dragen BTW verlegd van buiten de EU (4a)', category: 'btw', vatCode: 'buiten-eu', system: true },
   { code: '1740', rgs: ACCOUNTS.btwVoorbelasting, ref: 'BSchBepBtwVoo', name: 'Voorbelasting', category: 'btw', vatCode: 'voorbelasting', system: true },
+  { code: '1745', rgs: ACCOUNTS.btwPriveGebruik, ref: 'BSchBepBtwOop', name: 'Af te dragen btw privégebruik (1d)', category: 'btw', system: true },
   { code: '1750', rgs: ACCOUNTS.btwAfrekening, ref: 'BSchBepBtwAfo', name: 'Af te dragen omzetbelasting (aangifte)', category: 'btw', system: true },
 
   // Omzet
@@ -115,6 +120,7 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '4430', rgs: 'WBedAlkWkl', ref: 'WBedOvpWkv', name: 'Werkkleding', category: 'kosten' },
   { code: '4490', rgs: 'WBedAlkOvr', ref: 'WBedAlkOal', name: 'Overige algemene kosten', category: 'kosten' },
   { code: '4495', rgs: ACCOUNTS.betalingsverschillen, ref: 'WBedAdlBet', name: 'Betalingsverschillen', category: 'kosten', system: true },
+  { code: '4130', rgs: ACCOUNTS.btwPriveAuto, ref: 'WBedAutBop', name: 'Btw privégebruik auto van de zaak', category: 'kosten', system: true },
   { code: '4120', rgs: ACCOUNTS.kilometervergoeding, ref: 'WBedAutKil', name: 'Kilometervergoeding privéauto', category: 'kosten', system: true },
   { code: '4320', rgs: ACCOUNTS.representatie, ref: 'WBedVkkRep', name: 'Representatie, etentjes en relatiegeschenken', category: 'kosten' },
   { code: '4600', rgs: ACCOUNTS.afschrijvingInventaris, ref: 'WAfsAmvBei', name: 'Afschrijving inventaris en gereedschap', category: 'kosten', system: true },

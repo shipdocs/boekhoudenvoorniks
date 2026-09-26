@@ -75,6 +75,12 @@ export interface AppSettings {
    * kilometers geven € per km aftrek. 'zakelijk' = bus/auto van de zaak (kosten aftrekbaar).
    */
   carUse: 'onbekend' | 'prive' | 'zakelijk' | 'geen';
+  /** auto van de zaak: rijd je er ook privé mee? (null = nog niet gevraagd) — voor de btw-correctie */
+  carPrivateUse: boolean | null;
+  /** cataloguswaarde van de auto van de zaak, incl. btw en bpm (centen) */
+  carCatalogValue: number | null;
+  /** jaar waarin de auto in gebruik is genomen voor je bedrijf */
+  carInUseSince: number | null;
   /** jaar waarin je onderneming begon (voor de startersaftrek), of null */
   startYear: number | null;
   /** hoe vaak je de startersaftrek al gebruikte vóór `asOfYear` (zo opgegeven door de gebruiker) */
@@ -139,6 +145,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   advancedMode: false,
   autopilot: 'normaal',
   carUse: 'onbekend',
+  carPrivateUse: null,
+  carCatalogValue: null,
+  carInUseSince: null,
   phoneInternetBusinessPct: null,
   homeWorkspace: null,
   partnerHours: 0,

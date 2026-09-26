@@ -3,6 +3,7 @@ import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { formatEuro, type Cents } from '../shared/money';
 import type { Period } from '../shared/dates';
+import type { CarPrivateUse } from './car';
 
 /**
  * Controles vóór de btw-aangifte (#20): alles wat de aangifte fout kan maken. Blokkerende
@@ -21,7 +22,9 @@ export interface VatCheck {
   skipped: boolean;
   skipReason: string | null;
   /** scherm om het op te lossen */
-  screen: 'bank' | 'aankopen' | 'werk' | 'expert' | 'belasting';
+  screen: 'bank' | 'aankopen' | 'werk' | 'expert' | 'belasting' | 'instellingen';
+  /** oplossen met één knop in plaats van naar een scherm te gaan */
+  action?: { id: 'auto-prive'; label: string };
 }
 
 /** Kosten vanaf dit bedrag (incl. btw) horen een bewijsstuk te hebben. */
@@ -33,7 +36,14 @@ export function skipKey(periodKey: string, checkKey: string): string {
   return `vat-check:${periodKey}:${checkKey}`;
 }
 
-export function runVatChecks(db: Db, ledger: Ledger, period: Period, payable: { current: Cents; previous: Cents | null }): VatCheck[] {
+export function runVatChecks(
+  db: Db,
+  ledger: Ledger,
+  period: Period,
+  payable: { current: Cents; previous: Cents | null },
+  /** alleen in de laatste aangifte van het jaar */
+  car: { year: number; due: CarPrivateUse; booked: Cents } | null = null,
+): VatCheck[] {
   const found: Omit<VatCheck, 'skipped' | 'skipReason'>[] = [];
   const { start, end } = period;
 
@@ -120,6 +130,74 @@ export function runVatChecks(db: Db, ledger: Ledger, period: Period, payable: { 
   const vraag = ledger.balance(ACCOUNTS.vraagposten);
   if (vraag !== 0) {
     found.push({ key: 'vraagposten', blocking: true, title: `${formatEuro(Math.abs(vraag))} staat nog bij "weet ik nog niet"`, detail: 'Zoek uit waar deze betalingen bij horen: er kan btw in zitten die je terugkrijgt.', count: 1, fingerprint: String(vraag), screen: 'bank' });
+  }
+
+  // Geld "onderweg" tussen eigen rekeningen of van een betaalprovider: dan mist er meestal een afschrift
+  const onderweg = ledger.balance(ACCOUNTS.kruisposten, { to: end });
+  if (onderweg !== 0) {
+    found.push({
+      key: 'onderweg',
+      blocking: false,
+      title: `${formatEuro(Math.abs(onderweg))} staat nog "onderweg" tussen je eigen rekeningen`,
+      detail: 'Er is geld overgemaakt tussen je eigen rekeningen, maar de andere kant staat er nog niet in. Lees het afschrift van die andere rekening in. Kwam het pas na deze periode binnen? Dan klopt het.',
+      count: 1,
+      fingerprint: String(onderweg),
+      screen: 'bank',
+    });
+  }
+  const psp = ledger.balance(ACCOUNTS.tussenrekeningPsp, { to: end });
+  if (psp !== 0) {
+    found.push({
+      key: 'psp',
+      blocking: false,
+      title: `${formatEuro(Math.abs(psp))} van je betaalprovider is nog niet op je bank binnen`,
+      detail: 'Betalingen via bijvoorbeeld Mollie of Stripe horen na een paar dagen op je bankrekening te staan. Lees je nieuwste bankafschrift in. Kwam de uitbetaling pas na deze periode? Dan klopt het.',
+      count: 1,
+      fingerprint: String(psp),
+      screen: 'bank',
+    });
+  }
+  // Een spaarrekening of potje kan niet negatief staan (de eerste, gewone rekening mag wel rood staan)
+  const extra = db.prepare('SELECT b.id, b.name, a.rgs_code FROM bank_accounts b JOIN chart_of_accounts a ON a.id = b.account_id ORDER BY b.id').all() as { id: number; name: string; rgs_code: string }[];
+  for (const acc of extra.slice(1)) {
+    const saldo = ledger.balance(acc.rgs_code, { to: end });
+    if (saldo < 0) {
+      found.push({
+        key: `rekening-negatief-${acc.id}`,
+        blocking: false,
+        title: `Je rekening ${acc.name} staat op ${formatEuro(saldo)}`,
+        detail: 'Een spaarrekening of potje kan niet negatief staan. Waarschijnlijk mist er een afschrift van die rekening, of het beginsaldo (Bank → Rekeningen → Beginsaldo).',
+        count: 1,
+        fingerprint: String(saldo),
+        screen: 'bank',
+      });
+    }
+  }
+
+  if (car && car.due.state === 'onbekend') {
+    found.push({
+      key: 'auto-prive',
+      blocking: true,
+      title: 'Rijd je ook privé in je auto van de zaak?',
+      detail: 'Dan betaal je in deze laatste aangifte van het jaar btw over dat privégebruik. Vul bij Instellingen → Btw en belasting in of je privé rijdt en wat de cataloguswaarde van je auto is; dan rekent de app het uit.',
+      count: 1,
+      fingerprint: `onbekend:${car.year}`,
+      screen: 'instellingen',
+    });
+  } else if (car && car.due.state === 'bekend' && car.due.amount !== car.booked) {
+    const { amount, pct, catalogValue, partialYear } = car.due;
+    found.push({
+      key: 'auto-prive',
+      blocking: true,
+      title: `Btw over privégebruik van je auto: ${formatEuro(amount)}`,
+      detail:
+        `Je rijdt ook privé in je auto van de zaak. Daarover betaal je één keer per jaar btw: ${(pct * 100).toLocaleString('nl-NL')}% van de cataloguswaarde (${formatEuro(catalogValue)}). ` +
+        `Dit komt in vak 1d van deze aangifte.${partialYear ? ' Je gebruikt de auto pas sinds dit jaar: dan is het bedrag lager (naar rato). Laat je boekhouder het narekenen.' : ''}`,
+      count: 1,
+      fingerprint: `${car.year}:${amount}:${car.booked}`,
+      screen: 'belasting',
+      action: { id: 'auto-prive', label: car.booked ? 'Bedrag bijwerken' : 'Neem op in deze aangifte' },
+    });
   }
 
   if (payable.previous !== null && payable.previous !== 0) {

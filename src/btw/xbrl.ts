@@ -16,6 +16,7 @@ const ENTRYPOINT = 'http://www.nltaxonomie.nl/nt/bd/20XX/entrypoints/bd-rpt-ob-a
 const CONCEPTS: Record<string, { omzet?: string; btw?: string }> = {
   '1a': { omzet: 'TurnoverSuppliesServicesGeneralTariff', btw: 'ValueAddedTaxSuppliesServicesGeneralTariff' },
   '1b': { omzet: 'TurnoverSuppliesServicesReducedTariff', btw: 'ValueAddedTaxSuppliesServicesReducedTariff' },
+  '1d': { btw: 'ValueAddedTaxPrivateUse' },
   '1e': { omzet: 'TurnoverSupplyServicesZeroOrNotTaxed' },
   '2a': { omzet: 'TurnoverSuppliesServicesByWhichVATTaxationIsTransferred', btw: 'ValueAddedTaxSuppliesServicesByWhichVATTaxationIsTransferred' },
   '3a': { omzet: 'TurnoverSuppliesToCountriesOutsideEC' },

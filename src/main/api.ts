@@ -505,6 +505,7 @@ export function createApi(s: Services, host: HostContext) {
       corrections: () => s.vat.corrections(),
       checks: (periodKey: string) => s.vat.checks(periodKey),
       skipCheck: (periodKey: string, checkKey: string, reason?: string) => s.vat.skipCheck(periodKey, checkKey, reason),
+      bookCarPrivateUse: (periodKey: string) => s.vat.bookCarPrivateUse(periodKey),
       markSuppletieSubmitted: (periodKey: string) => s.vat.markSuppletieSubmitted(periodKey),
       exportCsv: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.csv`, s.vat.exportCsv(periodKey), [{ name: 'CSV', extensions: ['csv'] }]),
       icp: (periodKey: string) => s.vat.icp(periodKey),

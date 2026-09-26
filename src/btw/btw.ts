@@ -6,6 +6,7 @@ import type { SettingsService } from '../settings/settings';
 import { centsToDecimalString, formatEuro, type Cents } from '../shared/money';
 import { addDays, periodFor, periodFromKey, today, type IsoDate, type Period } from '../shared/dates';
 import { runVatChecks, skipKey, type VatCheck } from './checks';
+import { carPrivateUse, type CarPrivateUse } from './car';
 import { ValidationError } from '../shared/validation';
 
 /**
@@ -38,6 +39,8 @@ export interface VatReport {
     btwOverOmzet: Cents;
     /** verlegde btw op inkoop (2a/4a/4b): aangegeven én als voorbelasting afgetrokken */
     btwVerlegd: Cents;
+    /** 1d: btw over privégebruik (auto van de zaak) */
+    btwPrive: Cents;
     voorbelasting: Cents;
     teBetalen: Cents;
     teBetalenEuro: number;
@@ -147,7 +150,7 @@ export class VatService {
          GROUP BY e.vat_correction_of, a.rgs_code`,
       )
       .all(...(start && end ? [start, end] : [])) as { period_key: string; rgs_code: string; net: number; max_id: number; entries: number }[];
-    const vatAccounts = new Set<string>([ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag, ACCOUNTS.btwAfdragenVerlegd, ACCOUNTS.btwAfdragenEu, ACCOUNTS.btwAfdragenBuitenEu, ACCOUNTS.btwVoorbelasting]);
+    const vatAccounts = new Set<string>([ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag, ACCOUNTS.btwPriveGebruik, ACCOUNTS.btwAfdragenVerlegd, ACCOUNTS.btwAfdragenEu, ACCOUNTS.btwAfdragenBuitenEu, ACCOUNTS.btwVoorbelasting]);
     const byPeriod = new Map<string, VatCorrection>();
     for (const r of rows) {
       const c = byPeriod.get(r.period_key) ?? { periodKey: r.period_key, label: safeLabel(r.period_key), btw: 0, entries: 0, maxEntryId: 0, suppletie: false };
@@ -184,6 +187,7 @@ export class VatService {
       const lines = [
         signedLine(ACCOUNTS.btwAfdragenHoog, net(ACCOUNTS.btwAfdragenHoog)),
         signedLine(ACCOUNTS.btwAfdragenLaag, net(ACCOUNTS.btwAfdragenLaag)),
+        signedLine(ACCOUNTS.btwPriveGebruik, net(ACCOUNTS.btwPriveGebruik)),
         signedLine(ACCOUNTS.btwAfdragenVerlegd, net(ACCOUNTS.btwAfdragenVerlegd)),
         signedLine(ACCOUNTS.btwAfdragenEu, net(ACCOUNTS.btwAfdragenEu)),
         signedLine(ACCOUNTS.btwAfdragenBuitenEu, net(ACCOUNTS.btwAfdragenBuitenEu)),
@@ -222,8 +226,9 @@ export class VatService {
     const inkoopEu = inkoopGrondslag('eu');
     const btwEu = byAccount(ACCOUNTS.btwAfdragenEu);
     const voorbelasting = -byAccount(ACCOUNTS.btwVoorbelasting);
+    const btwPrive = byAccount(ACCOUNTS.btwPriveGebruik);
 
-    const btw5a = btwHoog + btwLaag + btwVerlegd + btwBuitenEu + btwEu;
+    const btw5a = btwHoog + btwLaag + btwPrive + btwVerlegd + btwBuitenEu + btwEu;
     const rub = (code: string, label: string, omzet: Cents | null, btw: Cents | null, roundUpBtw = false): Rubriek => ({
       code,
       label,
@@ -234,6 +239,7 @@ export class VatService {
     });
     const r1a = rub('1a', 'Leveringen/diensten belast met hoog tarief', omzetHoog, btwHoog);
     const r1b = rub('1b', 'Leveringen/diensten belast met laag tarief', omzetLaag, btwLaag);
+    const r1d = rub('1d', 'Privégebruik', null, btwPrive);
     const r1e = rub('1e', 'Leveringen/diensten belast met 0% of niet bij u belast', omzetNul, null);
     const r2a = rub('2a', 'Leveringen/diensten waarbij de heffing van omzetbelasting naar u is verlegd', verlegdInkoop, btwVerlegd);
     const r3a = rub('3a', 'Leveringen naar landen buiten de EU (uitvoer)', omzetExport, null);
@@ -242,7 +248,7 @@ export class VatService {
     const r4b = rub('4b', 'Leveringen/diensten uit landen binnen de EU', inkoopEu, btwEu);
     const r5a = rub('5a', 'Verschuldigde omzetbelasting (rubrieken 1a t/m 4b)', null, btw5a);
     const r5b = rub('5b', 'Voorbelasting', null, voorbelasting, true);
-    const saldoEuro = (r1a.btwEuro ?? 0) + (r1b.btwEuro ?? 0) + (r2a.btwEuro ?? 0) + (r4a.btwEuro ?? 0) + (r4b.btwEuro ?? 0) - (r5b.btwEuro ?? 0);
+    const saldoEuro = (r1a.btwEuro ?? 0) + (r1b.btwEuro ?? 0) + (r1d.btwEuro ?? 0) + (r2a.btwEuro ?? 0) + (r4a.btwEuro ?? 0) + (r4b.btwEuro ?? 0) - (r5b.btwEuro ?? 0);
     const r5c: Rubriek = { code: '5c', label: 'Subtotaal (5a min 5b)', omzet: null, btw: btw5a - voorbelasting, omzetEuro: null, btwEuro: saldoEuro };
     const r5g: Rubriek = { code: '5g', label: 'Totaal te betalen / terug te vragen', omzet: null, btw: btw5a - voorbelasting, omzetEuro: null, btwEuro: saldoEuro };
 
@@ -266,11 +272,12 @@ export class VatService {
     return {
       period,
       status: stored?.status ?? 'open',
-      rubrieken: [r1a, r1b, r1e, r2a, r3a, r3b, r4a, r4b, r5a, r5b, r5c, r5g],
+      rubrieken: [r1a, r1b, ...(btwPrive !== 0 ? [r1d] : []), r1e, r2a, r3a, r3b, r4a, r4b, r5a, r5b, r5c, r5g],
       summary: {
         omzet: omzetHoog + omzetLaag + omzetNul + omzetVrijgesteld + omzetExport + omzetIcp,
         btwOverOmzet: btwHoog + btwLaag,
         btwVerlegd: btwVerlegd + btwBuitenEu + btwEu,
+        btwPrive,
         voorbelasting,
         teBetalen: btw5a - voorbelasting,
         teBetalenEuro: saldoEuro,
@@ -362,7 +369,53 @@ export class VatService {
     const prevPeriod = periodFor(addDays(period.start, -1), this.settings.get().vatPeriod);
     const prev = this.calculate(prevPeriod.key);
     const hadActivity = prev.summary.omzet !== 0 || prev.summary.voorbelasting !== 0;
-    return runVatChecks(this.db, this.ledger, period, { current, previous: hadActivity ? prev.summary.teBetalen : null });
+    const car = this.carPrivateUse(periodKey);
+    return runVatChecks(this.db, this.ledger, period, { current, previous: hadActivity ? prev.summary.teBetalen : null }, car.lastPeriod ? car : null);
+  }
+
+  /**
+   * Btw over privégebruik van de auto van de zaak voor het jaar waarin deze periode valt: wat het
+   * volgens het forfait moet zijn en wat er al geboekt is. Hoort in de laatste aangifte van het jaar.
+   */
+  carPrivateUse(periodKey: string): { year: number; lastPeriod: boolean; due: CarPrivateUse; booked: Cents } {
+    const period = periodFromKey(periodKey);
+    const year = Number(period.end.slice(0, 4));
+    const booked = this.carEntries(year).reduce((s, e) => s + e.amount, 0);
+    return { year, lastPeriod: period.end.endsWith('-12-31'), due: carPrivateUse(this.settings.get(), year), booked };
+  }
+
+  private carEntries(year: number): { id: number; entry_date: IsoDate; amount: Cents }[] {
+    return this.db
+      .prepare(
+        `SELECT e.id, e.entry_date, SUM(l.credit - l.debit) AS amount FROM journal_entries e
+         JOIN journal_lines l ON l.journal_entry_id = e.id
+         JOIN chart_of_accounts a ON a.id = l.account_id
+         WHERE e.source_ref = ? AND a.rgs_code = ? AND e.reverses_entry_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reverses_entry_id = e.id)
+         GROUP BY e.id ORDER BY e.id`,
+      )
+      .all(`auto-prive:${year}`, ACCOUNTS.btwPriveGebruik) as { id: number; entry_date: IsoDate; amount: Cents }[];
+  }
+
+  /** Neemt de btw over privégebruik van de auto op in de laatste aangifte van het jaar (vak 1d). */
+  bookCarPrivateUse(periodKey: string): VatReport {
+    const period = periodFromKey(periodKey);
+    const car = this.carPrivateUse(periodKey);
+    if (!car.lastPeriod) throw new ValidationError('De btw over privégebruik van je auto hoort in de laatste aangifte van het jaar');
+    if (this.calculate(periodKey).status === 'ingediend') throw new ValidationError(`${period.label} is al ingediend`);
+    if (car.due.state !== 'bekend') throw new ValidationError('Vul eerst bij Instellingen → Btw en belasting in of je privé rijdt en wat de cataloguswaarde van je auto is');
+    const { amount, pct } = car.due;
+    tx(this.db, () => {
+      for (const e of this.carEntries(car.year)) this.ledger.reverse(e.id, e.entry_date, `Btw privégebruik auto ${car.year} opnieuw berekend`);
+      this.ledger.post({
+        date: period.end,
+        description: `Btw privégebruik auto ${car.year} (${(pct * 100).toLocaleString('nl-NL')}% van de cataloguswaarde)`,
+        source: 'handmatig',
+        sourceRef: `auto-prive:${car.year}`,
+        lines: [signedLine(ACCOUNTS.btwPriveAuto, amount)!, signedLine(ACCOUNTS.btwPriveGebruik, -amount)!],
+      });
+    });
+    return this.calculate(periodKey);
   }
 
   /** Bewust overslaan; komt terug als de situatie verandert (andere fingerprint). */
@@ -395,11 +448,13 @@ export class VatService {
       const lines: (PostLine | null)[] = [];
       const hoog = report.rubrieken.find((r) => r.code === '1a')!.btw ?? 0;
       const laag = report.rubrieken.find((r) => r.code === '1b')!.btw ?? 0;
+      const prive = report.summary.btwPrive;
       const verlegd = report.rubrieken.find((r) => r.code === '2a')!.btw ?? 0;
       const buitenEu = report.rubrieken.find((r) => r.code === '4a')!.btw ?? 0;
       const eu = report.rubrieken.find((r) => r.code === '4b')!.btw ?? 0;
       lines.push(signedLine(ACCOUNTS.btwAfdragenHoog, hoog));
       lines.push(signedLine(ACCOUNTS.btwAfdragenLaag, laag));
+      lines.push(signedLine(ACCOUNTS.btwPriveGebruik, prive));
       lines.push(signedLine(ACCOUNTS.btwAfdragenVerlegd, verlegd));
       lines.push(signedLine(ACCOUNTS.btwAfdragenBuitenEu, buitenEu));
       lines.push(signedLine(ACCOUNTS.btwAfdragenEu, eu));
@@ -418,7 +473,7 @@ export class VatService {
              balance = excluded.balance, details = excluded.details, status = 'ingediend', submitted_at = excluded.submitted_at,
              journal_entry_id = excluded.journal_entry_id`,
         )
-        .run(period.key, period.start, period.end, report.summary.btwOverOmzet + report.summary.btwVerlegd, report.summary.voorbelasting, report.summary.teBetalen, JSON.stringify(report.rubrieken), entryId);
+        .run(period.key, period.start, period.end, report.summary.btwOverOmzet + report.summary.btwPrive + report.summary.btwVerlegd, report.summary.voorbelasting, report.summary.teBetalen, JSON.stringify(report.rubrieken), entryId);
       return this.calculate(periodKey);
     });
   }
