@@ -113,10 +113,21 @@ export function CustomerDetail({ id }: { id?: number }) {
           <Field label="Postcode"><input value={r.postcode ?? ''} onChange={(e) => set({ postcode: e.target.value })} /></Field>
           <Field label="Plaats"><input value={r.city ?? ''} onChange={(e) => set({ city: e.target.value })} /></Field>
         </div>
-        <Field label="Land"><CountrySelect value={r.country} onChange={(country) => set({ country, vat_number: vatNumberMatchesCountry(r.vat_number, country) ? r.vat_number : null })} /></Field>
+        <Field label="Land"><CountrySelect
+            value={r.country}
+            onChange={(country) => {
+              // van of naar Nederland: een KvK-nummer en een buitenlands handelsregisternummer passen niet bij elkaar
+              const wasNl = (r.country ?? 'NL').toUpperCase() === 'NL';
+              const isNl = country === 'NL';
+              set({ country, vat_number: vatNumberMatchesCountry(r.vat_number, country) ? r.vat_number : null, kvk_number: wasNl === isNl ? r.kvk_number : null });
+            }}
+          /></Field>
         {(r.country ?? 'NL').toUpperCase() !== 'NL' && (
           <>
-            <Field label="Btw-nummer van de klant" hint="alleen als het een bedrijf is"><input value={r.vat_number ?? ''} onChange={(e) => set({ vat_number: e.target.value })} placeholder="bv. DE123456789" /></Field>
+            <div className="grid cols-2">
+              <Field label="Btw-nummer van de klant" hint="alleen als het een bedrijf is"><input value={r.vat_number ?? ''} onChange={(e) => set({ vat_number: e.target.value })} placeholder="bv. DE123456789" /></Field>
+              <Field label="Handelsregisternummer" hint="het buitenlandse 'KvK-nummer', mag leeg"><input value={r.kvk_number ?? ''} onChange={(e) => set({ kvk_number: e.target.value })} placeholder="bv. CHE-123.456.789" /></Field>
+            </div>
             <CustomerVatHint country={r.country} vatNumber={r.vat_number} />
           </>
         )}
@@ -129,7 +140,7 @@ export function CustomerDetail({ id }: { id?: number }) {
           <div className="grid cols-2" style={{ marginTop: 10 }}>
             <Field label="Contactpersoon"><input value={r.contact_name ?? ''} onChange={(e) => set({ contact_name: e.target.value })} /></Field>
             {(r.country ?? 'NL').toUpperCase() === 'NL' && <Field label="Btw-nummer" hint="nodig als je btw verlegt (klant is een bedrijf dat de btw zelf regelt)"><input value={r.vat_number ?? ''} onChange={(e) => set({ vat_number: e.target.value })} /></Field>}
-            <Field label="KvK-nummer"><input value={r.kvk_number ?? ''} onChange={(e) => set({ kvk_number: e.target.value })} /></Field>
+            {(r.country ?? 'NL').toUpperCase() === 'NL' && <Field label="KvK-nummer" hint="8 cijfers"><input value={r.kvk_number ?? ''} onChange={(e) => set({ kvk_number: e.target.value })} /></Field>}
             <Field label="IBAN"><input value={r.iban ?? ''} onChange={(e) => set({ iban: e.target.value })} /></Field>
             <Field label="Eigen betaaltermijn (dagen)"><input className="num" value={r.payment_term_days ?? ''} onChange={(e) => set({ payment_term_days: e.target.value ? Number(e.target.value) : null })} /></Field>
           </div>

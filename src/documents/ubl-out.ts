@@ -41,9 +41,14 @@ export function taxCategory(vatCode: string, percentage: number): { id: string; 
   return { id: 'S', percent: percentage };
 }
 
+/** Alleen een Nederlands bedrijf heeft een KvK-nummer (schema 0106); een buitenlands handelsregisternummer niet. */
+function isDutch(p: Party): boolean {
+  return (p.country || 'NL').trim().toUpperCase() === 'NL';
+}
+
 /** Elektronisch adres (EAS): KvK (0106), NL-btw (9944), anders e-mail (EM). */
 function endpoint(p: Party): { scheme: string; id: string } | null {
-  if (p.kvk_number?.trim()) return { scheme: '0106', id: p.kvk_number.replace(/\s/g, '') };
+  if (p.kvk_number?.trim() && isDutch(p)) return { scheme: '0106', id: p.kvk_number.replace(/\s/g, '') };
   if (p.vat_number?.trim() && /^NL/i.test(p.vat_number.trim())) return { scheme: '9944', id: p.vat_number.replace(/\s/g, '').toUpperCase() };
   if (p.email?.trim()) return { scheme: 'EM', id: p.email.trim() };
   return null;
@@ -61,7 +66,7 @@ ${ep ? `<cbc:EndpointID schemeID="${ep.scheme}">${esc(ep.id)}</cbc:EndpointID>` 
 <cac:PartyName><cbc:Name>${esc(p.name)}</cbc:Name></cac:PartyName>
 <cac:PostalAddress>${splitStreet(p.address) ? `<cbc:StreetName>${esc(splitStreet(p.address))}</cbc:StreetName>` : ''}${p.city ? `<cbc:CityName>${esc(p.city)}</cbc:CityName>` : ''}${p.postcode ? `<cbc:PostalZone>${esc(p.postcode)}</cbc:PostalZone>` : ''}<cac:Country><cbc:IdentificationCode>${country}</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
 ${p.vat_number?.trim() ? `<cac:PartyTaxScheme><cbc:CompanyID>${esc(p.vat_number.replace(/\s/g, '').toUpperCase())}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
-<cac:PartyLegalEntity><cbc:RegistrationName>${esc(p.name)}</cbc:RegistrationName>${p.kvk_number?.trim() ? `<cbc:CompanyID schemeID="0106">${esc(p.kvk_number.replace(/\s/g, ''))}</cbc:CompanyID>` : ''}</cac:PartyLegalEntity>
+<cac:PartyLegalEntity><cbc:RegistrationName>${esc(p.name)}</cbc:RegistrationName>${p.kvk_number?.trim() && isDutch(p) ? `<cbc:CompanyID schemeID="0106">${esc(p.kvk_number.replace(/\s/g, ''))}</cbc:CompanyID>` : ''}</cac:PartyLegalEntity>
 </cac:Party></cac:${tag}>`;
 }
 
@@ -78,7 +83,7 @@ export function checkBisRules(inv: Invoice, seller: Party, buyer: Party, iban: s
   if (!inv.number) errors.push('De factuur heeft nog geen nummer (eerst definitief maken).');
   if (!seller.name.trim()) errors.push('Je bedrijfsnaam ontbreekt.');
   if (!endpoint(seller)) errors.push('Vul je KvK-nummer of e-mailadres in (elektronisch adres van de verkoper).');
-  if (!endpoint(buyer)) errors.push(`Vul het KvK-nummer, btw-nummer of e-mailadres van ${buyer.name} in (elektronisch adres van de koper).`);
+  if (!endpoint(buyer)) errors.push(isDutch(buyer) ? `Vul het KvK-nummer, btw-nummer of e-mailadres van ${buyer.name} in (elektronisch adres van de koper).` : `Vul het e-mailadres van ${buyer.name} in (elektronisch adres van de koper).`);
   if (!buyer.name.trim()) errors.push('De naam van de klant ontbreekt.');
   const categories = inv.totals.groups.map((g) => taxCategory(g.vatCode, g.percentage).id);
   if (categories.includes('S') && !seller.vat_number?.trim()) errors.push('Bij btw-plichtige omzet moet je btw-nummer op de factuur (BR-S-02).');

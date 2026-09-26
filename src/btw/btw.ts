@@ -7,7 +7,7 @@ import { centsToDecimalString, formatEuro, type Cents } from '../shared/money';
 import { addDays, periodFor, periodFromKey, today, type IsoDate, type Period } from '../shared/dates';
 import { runVatChecks, skipKey, type VatCheck } from './checks';
 import { carPrivateUse, carPrivateUseEntries, type CarPrivateUse } from './car';
-import { ValidationError } from '../shared/validation';
+import { normalizeVatNumber, ValidationError } from '../shared/validation';
 
 /**
  * BTW-engine. Leest uitsluitend uit journal_lines (via de BTW-code per regel en de
@@ -320,7 +320,7 @@ export class VatService {
       )
       .all(ACCOUNTS.omzetIcp, period.start, period.end) as { relation_id: number | null; name: string | null; country: string | null; vat_number: string | null; net: number }[];
     const lines: IcpLine[] = rows.map((r) => {
-      const vatNumber = (r.vat_number ?? '').replace(/[\s.]/g, '').toUpperCase();
+      const vatNumber = normalizeVatNumber(r.vat_number ?? '');
       const problems: string[] = [];
       if (!vatNumber) problems.push('btw-nummer ontbreekt');
       else if (!/^[A-Z]{2}[0-9A-Z]{2,13}$/.test(vatNumber)) problems.push('btw-nummer lijkt niet geldig');

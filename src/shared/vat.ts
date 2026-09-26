@@ -1,3 +1,5 @@
+import { normalizeVatNumber } from './validation';
+
 /**
  * BTW-codes per regel. Het percentage wordt per regel opgeslagen (niet hardcoded op de factuur),
  * zodat tariefwijzigingen historische documenten niet raken.
@@ -88,7 +90,7 @@ export function customerVatSituation(country: string | null | undefined, vatNumb
 
 /** Past een btw-nummer bij dit land? (het nummer begint met de landcode; Griekenland: EL) */
 export function vatNumberMatchesCountry(vatNumber: string | null | undefined, country: string | null | undefined): boolean {
-  const prefix = (vatNumber ?? '').replace(/[\s.]/g, '').slice(0, 2).toUpperCase();
+  const prefix = normalizeVatNumber(vatNumber ?? '').slice(0, 2);
   return !!prefix && countryCode(prefix) === countryCode(country ?? 'NL');
 }
 

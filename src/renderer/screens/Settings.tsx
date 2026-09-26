@@ -268,6 +268,15 @@ function EmailSettings({ draft, set, section }: { draft: Settings; set: (p: Part
             <Field label="Afzenderadres"><input value={draft.smtp.fromEmail} onChange={(e) => set({ smtp: { ...draft.smtp, fromEmail: e.target.value } })} /></Field>
             <Field label="Stuur mij een stille kopie op" hint="optioneel, e-mailadres"><input value={draft.smtp.bcc} onChange={(e) => set({ smtp: { ...draft.smtp, bcc: e.target.value } })} /></Field>
           </div>
+          {(() => {
+            // tikfout in het afzenderadres (bv. .ap i.p.v. .app) valt op als het domein afwijkt van de gebruikersnaam
+            const domain = (s: string) => (s.includes('@') ? s.split('@').pop()!.trim().toLowerCase() : '');
+            const from = domain(draft.smtp.fromEmail);
+            const user = domain(draft.smtp.user);
+            return from && user && from !== user ? (
+              <div className="notice warn small">Het afzenderadres eindigt op <strong>@{from}</strong>, je gebruikersnaam op <strong>@{user}</strong>. Klopt dat? Een tikfout in het afzenderadres zorgt dat klanten niet kunnen antwoorden, of dat je mail als spam wordt gezien.</div>
+            ) : null;
+          })()}
         </>,
       )}
       <div className="card grid" style={{ marginTop: 14 }}>
@@ -276,7 +285,11 @@ function EmailSettings({ draft, set, section }: { draft: Settings; set: (p: Part
         </Field>
         <div className="row">
           <Button disabled={busy || !pw} onClick={async () => { await run(() => api.settings.setSmtpPassword(pw), 'Wachtwoord opgeslagen'); setPw(''); await reloadSettings(); }}>Wachtwoord opslaan</Button>
-          <Button disabled={busy} onClick={() => void run(() => api.settings.testSmtp(), 'Verbinding werkt ✓')}>Test verbinding</Button>
+          <Button disabled={busy} onClick={async () => {
+            // test met wat er nu is ingevuld; een ingetypt wachtwoord wordt na een geslaagde test meteen bewaard
+            const ok = await run(async () => { await api.settings.testSmtp(draft.smtp, pw || undefined); return true; }, pw ? 'Verbinding werkt ✓ en het wachtwoord is opgeslagen' : 'Verbinding werkt ✓');
+            if (ok && pw) { await api.settings.setSmtpPassword(pw); setPw(''); await reloadSettings(); }
+          }}>Test verbinding</Button>
         </div>
       </div>
     </>

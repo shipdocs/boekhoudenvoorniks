@@ -29,6 +29,21 @@ describe('land van de klant en btw', () => {
     expect(() => s.relations.create({ name: 'X', country: 'Duitsland' })).toThrow(/landcode|twee letters/);
   });
 
+  it('Zwitserse klant: UID als handelsregisternummer, "CHE-… MWST" als btw-nummer; KvK alleen bij NL', () => {
+    const { s } = setup();
+    const ch = s.relations.create({ name: 'Uhren AG', email: 'info@uhren.example', address: 'Bahnhofstrasse 1', postcode: '8001', city: 'Zürich', country: 'CH', kvk_number: 'CHE-253.742.182', vat_number: 'CHE-253.742.182 MWST' });
+    expect(ch.kvk_number).toBe('CHE-253.742.182');
+    expect(ch.vat_number).toBe('CHE253742182');
+    expect(vatNumberMatchesCountry('CHE-253.742.182 MWST', 'CH')).toBe(true);
+    expect(() => s.relations.create({ name: 'Bakker BV', kvk_number: 'CHE-253.742.182' })).toThrow(/8 cijfers/);
+    expect(() => s.relations.create({ name: 'Rare GmbH', country: 'DE', kvk_number: '<script>' })).toThrow(/handelsregisternummer/);
+    // op de e-factuur geen buitenlands nummer als Nederlands KvK-nummer (schema 0106)
+    const inv = s.invoices.finalize(s.invoices.createDraft({ relationId: ch.id, invoiceDate: '2026-07-10', lines: [{ description: 'Advies', quantity: 1, unitPrice: 10000, vatCode: 'export' }] }).id);
+    const xml = s.invoices.ublXml(inv.id);
+    expect(xml).not.toContain('CHE-253.742.182');
+    expect(xml).toContain('schemeID="0106"'); // wel het eigen KvK-nummer van de verkoper
+  });
+
   it('signaal bij 21% btw op een factuur aan een bedrijf in een ander EU-land', () => {
     const { s } = setup();
     const de = s.relations.create({ name: 'Müller GmbH', address: 'Hauptstr. 1', postcode: '10115', city: 'Berlin', country: 'DE', vat_number: 'DE123456789' });
