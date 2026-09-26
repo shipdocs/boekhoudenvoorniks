@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { Button, DateNl, ErrorBox, Field, useAction, useApp, useLoad, type Settings } from '../ui';
 import type { AppSettings } from '../../settings/settings';
+import { ResetCard } from './Reset';
 import { LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 
 type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'koppelingen' | 'ai' | 'backup' | 'geavanceerd' | 'over';
@@ -13,7 +14,7 @@ const TABS: [Tab, string][] = [
   ['btw', 'BTW'],
   ['koppelingen', 'Koppelingen'],
   ['ai', 'Automatisch & herkenning'],
-  ['backup', 'Back-up & updates'],
+  ['backup', 'Back-up, demo & updates'],
   ['geavanceerd', 'Voor de boekhouder'],
   ['over', 'Over'],
 ];
@@ -153,7 +154,12 @@ export function SettingsScreen() {
           </details>
         </>,
       )}
-      {tab === 'backup' && <BackupSettings />}
+      {tab === 'backup' && (
+        <>
+          <BackupSettings />
+          <ResetCard />
+        </>
+      )}
       {tab === 'over' && <About />}
       {tab === 'geavanceerd' && section(
         <>

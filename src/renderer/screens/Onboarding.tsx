@@ -1,35 +1,60 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { Button, DropZone, Field, readAsText, useAction, useApp } from '../ui';
 import { isValidIban, isValidKvk, isValidVatNumber } from '../../shared/validation';
 import { TERMS_VERSION } from '../../shared/legal';
+import { markSeen, pendingSteps } from '../../shared/onboarding';
+import type { AppSettings } from '../../settings/settings';
 import { TermsBlock } from './Terms';
+
+const AUTOPILOT: [AppSettings['autopilot'], string, string][] = [
+  ['voorzichtig', 'Voorzichtig', 'Ik bevestig alles zelf. De app doet voorstellen, maar boekt niets zonder mij.'],
+  ['normaal', 'Normaal (aangeraden)', 'Wat zeker is (een betaling met je factuurnummer erin) gaat vanzelf. De rest vraagt de app.'],
+  ['maximaal', 'Maximaal', 'Iets lagere drempels. Alles wat automatisch ging, zie je terug met een knop "Klopt niet".'],
+];
 
 /**
  * Onboarding zonder boekhoudtermen: wat voor werk, alleen of niet, bedrijf, BTW, bank, eerste factuur.
  * Alleen gegevens die echt nodig zijn (wettelijke factuureisen).
+ *
+ * De stappen komen uit shared/onboarding.ts. Een nieuwe gebruiker krijgt ze allemaal; wie de app al
+ * gebruikt, krijgt na een update alleen de stappen die nieuw of gewijzigd zijn.
  */
 export function Onboarding() {
   const { meta, settings, reloadSettings, go, toast } = useApp();
   const { run, busy } = useAction();
-  const [step, setStep] = useState(0);
+  // vast bij binnenkomst: de lijst mag niet verspringen terwijl je invult
+  const [steps] = useState(() => pendingSteps(settings));
+  const update = settings.onboardingDone;
+  const [index, setIndex] = useState(0);
   const [profile, setProfile] = useState(settings.profile);
   const [company, setCompany] = useState(settings.company);
   const [kor, setKor] = useState(settings.kor);
   const [vatPeriod, setVatPeriod] = useState(settings.vatPeriod);
+  const [autopilot, setAutopilot] = useState(settings.autopilot);
   const [lastNumber, setLastNumber] = useState('');
   const [terms, setTerms] = useState(settings.termsAcceptedVersion === TERMS_VERSION);
-  const steps = 6;
   const year = new Date().getFullYear();
+  const ids = steps.map((s) => s.id);
+  const shows = (id: string) => ids.includes(id);
+  const step = steps[index];
+  const isLast = index === steps.length - 1;
 
-  const next = () => setStep((s) => Math.min(steps - 1, s + 1));
-  const prev = () => setStep((s) => Math.max(0, s - 1));
+  const next = () => setIndex((i) => Math.min(steps.length - 1, i + 1));
+  const prev = () => setIndex((i) => Math.max(0, i - 1));
 
   const finish = async (then: 'factuur' | 'home') => {
     const ok = await run(async () => {
-      await api.settings.update({ profile, company, kor, vatPeriod, defaultVatCode: kor ? 'vrijgesteld' : 'hoog', onboardingDone: true, termsAcceptedVersion: TERMS_VERSION, smtp: { ...settings.smtp, fromName: company.name, fromEmail: settings.smtp.fromEmail || company.email } });
-      const accounts = await api.bank.accounts();
-      if (company.iban && accounts[0] && !accounts[0].iban) await api.bank.updateAccount(accounts[0].id, { iban: company.iban });
+      // alleen opslaan wat in de getoonde stappen stond: een update mag eerdere keuzes niet overschrijven
+      const patch: Partial<AppSettings> = { profile, company, autopilot, onboardingDone: true, onboardingSteps: markSeen({ ...settings, company, kor }, ids) };
+      if (shows('btw')) Object.assign(patch, { kor, vatPeriod, defaultVatCode: kor ? 'vrijgesteld' : 'hoog' });
+      if (shows('bedrijf')) patch.smtp = { ...settings.smtp, fromName: company.name, fromEmail: settings.smtp.fromEmail || company.email };
+      if (shows('nummering')) patch.termsAcceptedVersion = TERMS_VERSION;
+      await api.settings.update(patch);
+      if (shows('bank')) {
+        const accounts = await api.bank.accounts();
+        if (company.iban && accounts[0] && !accounts[0].iban) await api.bank.updateAccount(accounts[0].id, { iban: company.iban });
+      }
       const n = Number(lastNumber.replace(/\D/g, '').slice(-4));
       if (lastNumber && Number.isInteger(n) && n > 0) await api.settings.setInvoiceCounter(year, n);
       return true;
@@ -39,6 +64,21 @@ export function Onboarding() {
     go(then === 'factuur' ? { screen: 'factuur' } : { screen: 'home' });
   };
 
+  const startDemo = async () => {
+    const ok = await run(() => api.app.startDemo());
+    if (ok) window.location.reload();
+  };
+
+  if (!step) {
+    // niets (meer) te doen, bv. na "Later" en opnieuw openen
+    return (
+      <div className="page-narrow" style={{ paddingTop: 30 }}>
+        <h1>Alles is ingesteld ✓</h1>
+        <Button kind="primary" onClick={() => go({ screen: 'home' })}>Naar Vandaag</Button>
+      </div>
+    );
+  }
+
   const companyErrors = [
     !company.name && 'bedrijfsnaam',
     !company.address && 'adres',
@@ -46,11 +86,27 @@ export function Onboarding() {
     company.kvkNumber && !isValidKvk(company.kvkNumber) && 'KvK-nummer (8 cijfers)',
   ].filter(Boolean);
 
+  const needsTerms = step.id === 'nummering';
+  const footer = (canContinue = true, back: ReactNode = index > 0 ? <Button onClick={prev}>Terug</Button> : update ? <Button kind="ghost" onClick={() => go({ screen: 'home' })}>Later</Button> : <span />) => (
+    <div className="row between" style={{ marginTop: 28 }}>
+      {back}
+      {isLast ? (
+        <div className="row">
+          <Button kind={update ? 'primary' : undefined} disabled={busy || !canContinue || (needsTerms && !terms)} onClick={() => void finish('home')}>Klaar</Button>
+          {!update && <Button kind="primary" disabled={busy || !canContinue || (needsTerms && !terms)} onClick={() => void finish('factuur')}>Maak mijn eerste factuur</Button>}
+        </div>
+      ) : (
+        <Button kind="primary" disabled={!canContinue} onClick={next}>Verder</Button>
+      )}
+    </div>
+  );
+
   return (
     <div className="page-narrow" style={{ paddingTop: 30 }}>
-      <div className="steps">{Array.from({ length: steps }, (_, i) => <span key={i} className={i <= step ? 'on' : ''} />)}</div>
+      {steps.length > 1 && <div className="steps">{steps.map((s, i) => <span key={s.id} className={i <= index ? 'on' : ''} />)}</div>}
+      {update && step.whatsNew && <div className="notice">✨ {step.whatsNew}</div>}
 
-      {step === 0 && (
+      {step.id === 'welkom' && (
         <>
           <h1>Welkom 👋</h1>
           <p className="sub">We stellen je in een paar vragen in. Geen boekhoudkennis nodig.</p>
@@ -63,23 +119,33 @@ export function Onboarding() {
               <button key={t.key} className={profile.trade === t.key ? 'selected' : ''} onClick={() => setProfile({ ...profile, trade: t.key })}>{t.label}</button>
             ))}
           </div>
-          <div className="row end" style={{ marginTop: 28 }}><Button kind="primary" disabled={!profile.trade} onClick={next}>Verder</Button></div>
+          {footer(!!profile.trade)}
+          {!update && (
+            <div className="card flat" style={{ marginTop: 28 }}>
+              <strong>Eerst rustig rondkijken?</strong>
+              <p className="small muted" style={{ margin: '4px 0 10px' }}>
+                Bekijk de app met een voorbeeldbedrijf: klanten, facturen, bonnetjes en een bankafschrift. Er gaat niets naar buiten.
+                Als je klaar bent, wis je de demo met één klik en begin je echt.
+              </p>
+              <Button disabled={busy} onClick={() => void startDemo()}>🧪 Bekijk de demo</Button>
+            </div>
+          )}
         </>
       )}
 
-      {step === 1 && (
+      {step.id === 'alleen' && (
         <>
           <h1>Werk je alleen?</h1>
           <p className="sub">Dan houden we het extra eenvoudig.</p>
           <div className="choice">
-            <button className={profile.worksAlone ? 'selected' : ''} onClick={() => { setProfile({ ...profile, worksAlone: true }); next(); }}>Ja, ik werk alleen</button>
-            <button className={!profile.worksAlone ? 'selected' : ''} onClick={() => { setProfile({ ...profile, worksAlone: false }); next(); }}>Nee, ik heb personeel of werk met anderen</button>
+            <button className={profile.worksAlone ? 'selected' : ''} onClick={() => { setProfile({ ...profile, worksAlone: true }); if (!isLast) next(); }}>Ja, ik werk alleen</button>
+            <button className={!profile.worksAlone ? 'selected' : ''} onClick={() => { setProfile({ ...profile, worksAlone: false }); if (!isLast) next(); }}>Nee, ik heb personeel of werk met anderen</button>
           </div>
-          <div className="row between" style={{ marginTop: 28 }}><Button onClick={prev}>Terug</Button></div>
+          {footer()}
         </>
       )}
 
-      {step === 2 && (
+      {step.id === 'bedrijf' && (
         <>
           <h1>Je bedrijf</h1>
           <p className="sub">Dit komt op je facturen. Het is wettelijk verplicht.</p>
@@ -97,14 +163,11 @@ export function Onboarding() {
             <Field label="Telefoon" hint="optioneel"><input value={company.phone} onChange={(e) => setCompany({ ...company, phone: e.target.value })} /></Field>
           </div>
           {companyErrors.length > 0 && <p className="muted small">Nog nodig: {companyErrors.join(', ')}</p>}
-          <div className="row between" style={{ marginTop: 28 }}>
-            <Button onClick={prev}>Terug</Button>
-            <Button kind="primary" disabled={companyErrors.length > 0} onClick={next}>Verder</Button>
-          </div>
+          {footer(companyErrors.length === 0)}
         </>
       )}
 
-      {step === 3 && (
+      {step.id === 'btw' && (
         <>
           <h1>Reken je BTW?</h1>
           <p className="sub">De meeste vakmensen wel. Twijfel je? Kijk op je brief van de Belastingdienst.</p>
@@ -132,14 +195,11 @@ export function Onboarding() {
               </Field>
             </div>
           )}
-          <div className="row between" style={{ marginTop: 28 }}>
-            <Button onClick={prev}>Terug</Button>
-            <Button kind="primary" disabled={!kor && !isValidVatNumber(company.vatNumber || '')} onClick={next}>Verder</Button>
-          </div>
+          {footer(kor || isValidVatNumber(company.vatNumber || ''))}
         </>
       )}
 
-      {step === 4 && (
+      {step.id === 'bank' && (
         <>
           <h1>Heb je een zakelijke bankrekening?</h1>
           <p className="sub">Je rekeningnummer komt op je facturen, en via je bank zien we wie er betaald heeft.</p>
@@ -159,14 +219,27 @@ export function Onboarding() {
           >
             📥 Sleep je bankafschrift hierheen of klik om te kiezen
           </DropZone>
-          <div className="row between" style={{ marginTop: 28 }}>
-            <Button onClick={prev}>Terug</Button>
-            <Button kind="primary" disabled={!!company.iban && !isValidIban(company.iban)} onClick={next}>Verder</Button>
-          </div>
+          {footer(!company.iban || isValidIban(company.iban))}
         </>
       )}
 
-      {step === 5 && (
+      {step.id === 'automatisch' && (
+        <>
+          <h1>Hoeveel mag de app zelf doen?</h1>
+          <p className="sub">De app kan betalingen en bonnetjes voor je verwerken. Jij bepaalt hoe ver dat gaat; je kunt het later altijd aanpassen bij Instellingen.</p>
+          <div className="choice">
+            {AUTOPILOT.map(([key, label, hint]) => (
+              <button key={key} className={autopilot === key ? 'selected' : ''} onClick={() => setAutopilot(key)}>
+                {label}
+                <div className="hint">{hint}</div>
+              </button>
+            ))}
+          </div>
+          {footer()}
+        </>
+      )}
+
+      {step.id === 'nummering' && (
         <>
           <h1>Heb je al eerder gefactureerd?</h1>
           <p className="sub">Dan gaan we verder met je nummering, zodat je factuurnummers netjes doorlopen.</p>
@@ -175,13 +248,7 @@ export function Onboarding() {
           </Field>
           <h2>Afspraken</h2>
           <TermsBlock checked={terms} onChange={setTerms} />
-          <div className="row between" style={{ marginTop: 28 }}>
-            <Button onClick={prev}>Terug</Button>
-            <div className="row">
-              <Button disabled={busy || !terms} onClick={() => void finish('home')}>Klaar</Button>
-              <Button kind="primary" disabled={busy || !terms} onClick={() => void finish('factuur')}>Maak mijn eerste factuur</Button>
-            </div>
-          </div>
+          {footer()}
         </>
       )}
     </div>

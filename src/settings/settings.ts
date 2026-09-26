@@ -73,6 +73,12 @@ export interface AppSettings {
   /** Hoe automatisch: voorzichtig (niets zelf), normaal, maximaal (iets lagere drempels). */
   autopilot: 'voorzichtig' | 'normaal' | 'maximaal';
   onboardingDone: boolean;
+  /** Per onboardingstap de versie die de gebruiker gezien heeft (zie shared/onboarding.ts). */
+  onboardingSteps: Record<string, number>;
+  /** "Aan de slag"-lijstje op Vandaag verborgen */
+  checklistHidden: boolean;
+  /** Deze administratie is de demo: voorbeelddata, er gaat geen e-mail naar buiten. */
+  demoMode: boolean;
   /** versie van de voorwaarden waarmee akkoord is gegeven (leeg = nog niet) */
   termsAcceptedVersion: string;
   invoiceEmailSubject: string;
@@ -118,6 +124,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sendUbl: true,
   jobLocation: false,
   onboardingDone: false,
+  onboardingSteps: {},
+  checklistHidden: false,
+  demoMode: false,
   termsAcceptedVersion: '',
   invoiceEmailSubject: 'Factuur {nummer} van {bedrijf}',
   invoiceEmailBody:

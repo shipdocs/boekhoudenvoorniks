@@ -10,6 +10,8 @@ import { createApi, type Api } from './api';
 import { renderPdf } from './pdf';
 import { SafeStorageSecretStore } from './secrets';
 import { backupTo, dailyBackup, restoreFrom } from './backup';
+import { wipeDatabase } from './reset';
+import { seedDemo } from '../demo/demo';
 import { decryptBackup, encryptBackup, isEncryptedBackup } from './encrypted-backup';
 import { tmpdir } from 'node:os';
 import { HttpOcrProvider } from '../intake/ocr';
@@ -186,6 +188,14 @@ function initServices(): void {
       app.relaunch();
       app.exit(0);
       return true;
+    },
+    async resetData(withDemo) {
+      localOcr.stop();
+      const backup = await wipeDatabase(db, dbPath(), join(dataDir(), 'backups'));
+      // nieuwe, lege database met verse services; de IPC-handler gebruikt daarna vanzelf de nieuwe api
+      initServices();
+      if (withDemo) seedDemo(services);
+      return { backup };
     },
     appVersion: () => app.getVersion(),
     localOcr: {

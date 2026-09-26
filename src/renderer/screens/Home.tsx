@@ -5,6 +5,7 @@ import type { Task } from '../../inbox/inbox';
 import type { AutomationEntry } from '../../inbox/automation-log';
 import { formatDateNl } from '../../shared/dates';
 import { CategoryPicker } from './Bank';
+import { hasOnboardingUpdate } from '../../shared/onboarding';
 
 export function Home() {
   const { go, settings, refreshBadge, toast } = useApp();
@@ -114,6 +115,8 @@ export function Home() {
           </>
         )}
       </p>
+
+      <GettingStarted />
 
       <h2>Wat wil je doen?</h2>
       <div className="actions4">
@@ -278,5 +281,54 @@ function MonthModal({ expert, onClose, onChanged }: { expert: boolean; onClose: 
         </>
       )}
     </Modal>
+  );
+}
+
+/**
+ * "Aan de slag": wordt uit de administratie zelf afgeleid (api.onboarding.checklist), dus vinkt
+ * zichzelf af zodra je iets gedaan hebt, waar in de app ook. Verdwijnt als alles klaar is.
+ */
+function GettingStarted() {
+  const { go, settings, reloadSettings } = useApp();
+  const { data } = useLoad(() => api.onboarding.checklist());
+  const { run } = useAction();
+  const update = hasOnboardingUpdate(settings);
+  const open = data?.filter((i) => !i.done) ?? [];
+  const showList = !settings.checklistHidden && !settings.demoMode && data && open.length > 0;
+  if (!update && !showList) return null;
+  const hide = async () => {
+    if ((await run(() => api.settings.update({ checklistHidden: true }))) !== undefined) await reloadSettings();
+  };
+  return (
+    <>
+      {update && (
+        <div className="notice row between">
+          <span>✨ Er is iets nieuws om in te stellen.</span>
+          <Button small kind="primary" onClick={() => go({ screen: 'welkom' })}>Bekijken</Button>
+        </div>
+      )}
+      {showList && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div className="row between">
+            <h3 style={{ margin: 0 }}>Aan de slag · {data.length - open.length} van {data.length} klaar</h3>
+            <Button small kind="ghost" onClick={() => void hide()} title="Niet meer tonen">Verbergen</Button>
+          </div>
+          <ul className="checklist" style={{ display: 'block' }}>
+            {data.map((i) => (
+              <li key={i.key} className={i.done ? 'ok' : 'no'}>
+                {i.done ? (
+                  <span className="muted">{i.label}</span>
+                ) : (
+                  <a href="#" onClick={(e) => { e.preventDefault(); go({ screen: i.screen, extra: i.screen === 'instellingen' ? { tab: i.key === 'email' ? 'email' : 'bedrijf' } : undefined }); }}>
+                    {i.label}
+                  </a>
+                )}
+                {!i.done && i.hint && <span className="small muted"> · {i.hint}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
   );
 }
