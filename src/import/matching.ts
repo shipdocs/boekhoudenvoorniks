@@ -71,11 +71,11 @@ export class MatchingEngine {
         const reasons: string[] = [];
         let score = 0;
         if (inv.open_amount === t.amount) (score += 50, reasons.push('bedrag klopt'));
-        else if (inv.total === t.amount) (score += 35, reasons.push('bedrag gelijk aan factuurtotaal'));
-        else if (t.amount < inv.open_amount && mentions(text, inv.number)) (score += 10, reasons.push('deelbetaling'));
-        if (mentions(text, inv.number)) (score += 60, reasons.push(`factuurnummer ${inv.number} in omschrijving`));
+        else if (inv.total === t.amount) (score += 35, reasons.push('bedrag is gelijk aan het totaal van de factuur'));
+        else if (t.amount < inv.open_amount && mentions(text, inv.number)) (score += 10, reasons.push('deel van het bedrag'));
+        if (mentions(text, inv.number)) (score += 60, reasons.push(`factuurnummer ${inv.number} staat in de omschrijving`));
         const rel = this.relations.get(inv.relation_id);
-        if (t.counter_iban && rel.iban && t.counter_iban === rel.iban) (score += 50, reasons.push('IBAN van klant'));
+        if (t.counter_iban && rel.iban && t.counter_iban === rel.iban) (score += 50, reasons.push('rekeningnummer van de klant'));
         else if (nameSimilar(t.counter_name, inv.relation_name)) (score += 15, reasons.push('naam lijkt op klant'));
         if (score >= 40) out.push({ kind: 'factuur', invoiceId: inv.id, label: `Factuur ${inv.number} — ${inv.relation_name}`, score, reasons });
       }
@@ -84,16 +84,16 @@ export class MatchingEngine {
         const reasons: string[] = [];
         let score = 0;
         if (p.open_amount === -t.amount) (score += 50, reasons.push('bedrag klopt'));
-        if (p.supplier_reference && mentions(text, p.supplier_reference)) (score += 60, reasons.push('factuurnummer leverancier in omschrijving'));
-        if (p.relation_name && nameSimilar(t.counter_name, p.relation_name)) (score += 20, reasons.push('naam leverancier'));
-        if (score >= 50) out.push({ kind: 'inkoop', purchaseId: p.id, label: `Inkoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''}`, score, reasons });
+        if (p.supplier_reference && mentions(text, p.supplier_reference)) (score += 60, reasons.push('factuurnummer staat in de omschrijving'));
+        if (p.relation_name && nameSimilar(t.counter_name, p.relation_name)) (score += 20, reasons.push('naam van de leverancier'));
+        if (score >= 50) out.push({ kind: 'inkoop', purchaseId: p.id, label: `Aankoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''}`, score, reasons });
       }
     }
 
     const previous = this.bank.previousBooking(t);
-    if (previous) out.push({ kind: 'rekening', account: previous.account, vatCode: previous.vatCode, label: 'Zelfde als vorige keer', score: 45, reasons: ['eerder zo geboekt'] });
+    if (previous) out.push({ kind: 'rekening', account: previous.account, vatCode: previous.vatCode, label: 'Zelfde als vorige keer', score: 45, reasons: ['eerder zo gedaan'] });
     if (/belastingdienst/i.test(t.counter_name ?? '') || /omzetbelasting|btw/i.test(t.description)) {
-      out.push({ kind: 'rekening', account: ACCOUNTS.btwAfrekening, vatCode: null, label: 'BTW-afdracht / teruggave', score: 40, reasons: ['Belastingdienst'] });
+      out.push({ kind: 'rekening', account: ACCOUNTS.btwAfrekening, vatCode: null, label: 'Btw betaald aan / terug van de Belastingdienst', score: 40, reasons: ['Belastingdienst'] });
     }
     if (/mollie|stripe/i.test(`${t.counter_name ?? ''} ${t.description}`) && t.amount > 0) {
       out.push({ kind: 'rekening', account: ACCOUNTS.kruisposten, vatCode: null, label: 'Uitbetaling betaalprovider', score: 60, reasons: ['uitbetaling Mollie/Stripe'] });

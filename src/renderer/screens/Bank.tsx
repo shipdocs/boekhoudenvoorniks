@@ -31,7 +31,7 @@ export function Bank({ focus }: { focus?: number }) {
     const content = await readAsText(file);
     const preview = await run(() => api.bank.previewFile(file.name, content));
     if (!preview) return;
-    if (preview.format === 'onbekend') return toast('Dit bestand herkennen we niet. Gebruik CSV, MT940 of CAMT.053.', 'error');
+    if (preview.format === 'onbekend') return toast('Dit bestand herkennen we niet. Download bij je bank een afschrift als CSV-, MT940- of CAMT-bestand (in je internetbankieren bij \'downloaden\' of \'exporteren\').', 'error');
     if (preview.format === 'csv' && !preview.csv?.detectedBank && !preview.savedMapping) {
       return setMapping({ filename: file.name, content, headers: preview.csv!.headers, rows: preview.csv!.rows, suggested: preview.csv!.suggestedMapping });
     }
@@ -43,7 +43,7 @@ export function Bank({ focus }: { focus?: number }) {
     if (!r) return;
     setLast(r);
     await status.reload();
-    if (r.warnings.length) toast(`${r.warnings.length} regels overgeslagen: ${r.warnings[0]}`, 'error');
+    if (r.warnings.length) toast(`${r.warnings.length} ${r.warnings.length === 1 ? 'regel kon' : 'regels konden'} we niet lezen (bv. ${r.warnings[0]!.charAt(0).toLowerCase()}${r.warnings[0]!.slice(1)})`, 'error');
     await txs.reload();
   };
 
@@ -57,14 +57,14 @@ export function Bank({ focus }: { focus?: number }) {
           <p className="sub">Lees je bankafschrift in; wij koppelen betalingen aan facturen en bonnetjes.</p>
         </div>
         <div className="row">
-          <Button onClick={() => void run(async () => { const r = await api.home.autoProcess(); toast(`${r.matched + r.booked} betalingen automatisch verwerkt`); await txs.reload(); })}>Opnieuw controleren</Button>
+          <Button onClick={() => void run(async () => { const r = await api.home.autoProcess(); toast(`${r.matched + r.booked} betalingen automatisch verwerkt`); await txs.reload(); })}>Opnieuw automatisch uitzoeken</Button>
         </div>
       </div>
 
       <DropZone accept=".csv,.txt,.sta,.940,.mt940,.xml" onFile={(f) => void importFile(f)}>
         <div style={{ fontSize: 30 }}>🏦</div>
         <strong>Sleep je bankafschrift hierheen</strong>
-        <div className="small">CSV, MT940 of CAMT.053 — te downloaden in je internetbankieren</div>
+        <div className="small">Download het bij je bank: internetbankieren → afschrift downloaden (CSV, MT940 of CAMT)</div>
       </DropZone>
 
       {last && (
@@ -104,7 +104,7 @@ export function Bank({ focus }: { focus?: number }) {
       <h2>Rekeningen</h2>
       <ErrorBox error={status.error} />
       <table className="list">
-        <thead><tr><th>Rekening</th><th>Laatste import</th><th>Dat afschrift bevatte</th><th>Bijgewerkt t/m</th></tr></thead>
+        <thead><tr><th>Rekening</th><th>Laatst ingelezen</th><th>Dat afschrift bevatte</th><th>Bijgewerkt t/m</th></tr></thead>
         <tbody>
           {(status.data ?? []).map((st) => (
             <tr key={st.bankAccountId}>
@@ -118,7 +118,7 @@ export function Bank({ focus }: { focus?: number }) {
       </table>
       <div className="row" style={{ marginTop: 10 }}>
         <Button small onClick={() => setOpening(true)}>Beginsaldo invoeren</Button>
-        <span className="small muted">Een directe bankkoppeling (live) volgt in een latere versie.</span>
+        <span className="small muted">Automatisch ophalen bij je bank komt later.</span>
       </div>
 
       {mapping && <CsvMappingDialog {...mapping} onClose={() => setMapping(null)} onConfirm={async (m) => { const x = mapping; setMapping(null); await doImport(x.filename, x.content, m); }} />}
@@ -163,13 +163,13 @@ function CsvMappingDialog({ headers, rows, suggested, onClose, onConfirm }: { he
         {col('date', 'Datum', false)}
         <Field label="Datumformaat">
           <select value={m.dateFormat} onChange={(e) => setM({ ...m, dateFormat: e.target.value })}>
-            {['DD-MM-YYYY', 'YYYY-MM-DD', 'YYYYMMDD', 'DD/MM/YYYY', 'D-M-YYYY'].map((f) => <option key={f}>{f}</option>)}
+            {([['DD-MM-YYYY', '31-12-2026'], ['YYYY-MM-DD', '2026-12-31'], ['YYYYMMDD', '20261231'], ['DD/MM/YYYY', '31/12/2026'], ['D-M-YYYY', '1-2-2026']] as const).map(([f, ex]) => <option key={f} value={f}>bv. {ex}</option>)}
           </select>
         </Field>
         {col('amount', 'Bedrag')}
-        {col('debitCredit', 'Af/Bij-kolom (als het bedrag geen min-teken heeft)')}
-        {col('counterName', 'Naam tegenpartij')}
-        {col('counterIban', 'Rekening tegenpartij')}
+        {col('debitCredit', 'Kolom met "Af" of "Bij" (alleen als bedragen geen min-teken hebben)')}
+        {col('counterName', 'Naam (van of aan wie)')}
+        {col('counterIban', 'Rekeningnummer (van of aan wie)')}
         {col('reference', 'Betalingskenmerk')}
         <Field label="Omschrijving">
           <select value={m.description?.[0] ?? ''} onChange={(e) => setM({ ...m, description: e.target.value ? [e.target.value] : [] })}>
@@ -249,7 +249,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
       {t.status !== 'nieuw' ? (
         <div className="card">
           <StatusPill status={t.status} />
-          <p className="muted small">Verkeerd verwerkt? Maak het ongedaan; er wordt netjes een correctie geboekt.</p>
+          <p className="muted small">Verkeerd verwerkt? Maak het ongedaan; de app draait het netjes terug.</p>
           <div className="row">
             <Button onClick={() => void done(api.bank.unmatch(t.id))}>Ongedaan maken</Button>
             {t.status === 'gematcht' && !t.matched_invoice_id && !t.matched_purchase_invoice_id && t.amount < 0 && (
@@ -259,7 +259,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
           {recat && (
             <div style={{ marginTop: 12 }}>
               <CategoryPicker amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode) => void done(api.bank.reclassify(t.id, categoryKey, vatCode), inv(categoryKey, vatCode))} />
-              <p className="small muted">De oude boeking krijgt een tegenboeking en de nieuwe wordt gemaakt. Was de btw-periode al aangegeven, dan telt het verschil mee in je volgende aangifte.</p>
+              <p className="small muted">De app draait de oude keuze terug en verwerkt de nieuwe. Had je de btw-aangifte al gedaan? Dan komt het verschil vanzelf in je volgende aangifte.</p>
             </div>
           )}
         </div>
@@ -319,7 +319,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
             </>
           )}
           <div className="row end" style={{ marginTop: 16 }}>
-            <Button kind="ghost" onClick={() => void done(api.bank.ignore(t.id))} title="Bijvoorbeeld een dubbele regel">Negeren</Button>
+            <Button kind="ghost" onClick={() => void done(api.bank.ignore(t.id))} title="Bijvoorbeeld een dubbele regel">Negeren (dubbel of niet belangrijk)</Button>
           </div>
         </>
       )}

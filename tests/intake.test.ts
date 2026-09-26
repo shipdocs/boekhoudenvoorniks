@@ -213,6 +213,6 @@ describe('documentinbox', () => {
     const { s } = setup();
     const d = await s.intake.add('foto.jpg', new Uint8Array([5]), '2026-09-25');
     expect(d.confidence).toBe('LOW');
-    expect(d.issues[0]!.message).toMatch(/OCR/);
+    expect(d.issues[0]!.message).toMatch(/herkenning/);
   });
 });

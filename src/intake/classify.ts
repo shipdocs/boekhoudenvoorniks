@@ -114,7 +114,7 @@ export class Classifier {
         const r = await this.llm.classify({ supplier, lines: doc.lineDescriptions, categories: EXPENSE_CATEGORIES.map(({ key, label, hint }) => ({ key, label, hint })) });
         if (r && EXPENSE_CATEGORIES.some((c) => c.key === r.categoryKey)) {
           // LLM-zekerheid wordt bewust afgetopt: nooit automatisch boeken op alleen een LLM-voorstel
-          return { categoryKey: r.categoryKey, vatCode: docVat ?? 'hoog', business: true, confidence: Math.min(0.7, r.confidence), source: 'llm', reasons: [`voorstel lokale AI: ${r.explanation}`], automatic: false };
+          return { categoryKey: r.categoryKey, vatCode: docVat ?? 'hoog', business: true, confidence: Math.min(0.7, r.confidence), source: 'llm', reasons: [`voorstel van de slimme herkenning: ${r.explanation}`], automatic: false };
         }
       } catch {
         // LLM is optioneel; val terug op standaard

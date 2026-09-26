@@ -76,7 +76,7 @@ export function createApi(s: Services, host: HostContext) {
       if (!m) throw new Error('Kolommen niet herkend; wijs ze handmatig aan');
       return parseCsv(content, m);
     }
-    throw new Error('Onbekend bestandsformaat. Gebruik CSV, MT940 of CAMT.053.');
+    throw new Error('Dit bestand herkennen we niet. Download bij je bank een afschrift als CSV-, MT940- of CAMT-bestand.');
   };
 
   /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */

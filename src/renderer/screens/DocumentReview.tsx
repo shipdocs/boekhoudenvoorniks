@@ -97,9 +97,9 @@ export function DocumentReview({ id }: { id: number }) {
   const fields: { key: string; label: string; field: DocField<unknown> | null | undefined; show: string }[] = [
     { key: 'supplier', label: 'Winkel / leverancier', field: r?.supplier, show: form.supplier || '?' },
     { key: 'invoiceDate', label: 'Datum', field: r?.invoiceDate, show: form.date ? formatDateNl(form.date) : '?' },
-    { key: 'invoiceNumber', label: 'Nummer', field: r?.invoiceNumber, show: form.invoiceNumber || '—' },
-    { key: 'subtotal', label: 'Netto', field: r?.subtotal, show: r?.subtotal ? new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(r.subtotal.value / 100) : '—' },
-    { key: 'vat', label: 'BTW', field: r?.vat, show: r?.vat.value.map((v) => `${v.rate}%: ${(v.amount / 100).toFixed(2).replace('.', ',')}`).join(' · ') || '—' },
+    { key: 'invoiceNumber', label: 'Factuurnummer', field: r?.invoiceNumber, show: form.invoiceNumber || '—' },
+    { key: 'subtotal', label: 'Zonder btw', field: r?.subtotal, show: r?.subtotal ? new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(r.subtotal.value / 100) : '—' },
+    { key: 'vat', label: 'Btw', field: r?.vat, show: r?.vat.value.map((v) => `${v.rate}%: ${(v.amount / 100).toFixed(2).replace('.', ',')}`).join(' · ') || '—' },
     { key: 'total', label: 'Totaal', field: r?.total, show: form.total !== null ? new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(form.total / 100) : '?' },
   ];
   const activeField = fields.find((f) => f.key === active)?.field ?? (active?.startsWith('line-') ? r?.lines?.[Number(active.slice(5))] ?? null : null);
@@ -123,7 +123,7 @@ export function DocumentReview({ id }: { id: number }) {
               const decision = d.decisions?.find((x) => x.field === f.key);
               const doubt = d.status === 'controle' && decision && !decision.ok;
               return (
-                <div key={f.key} className={`fieldcheck ${active === f.key ? 'active' : ''} ${doubt ? 'doubt' : ''}`} onClick={() => setActive(f.key)} title={f.field ? `bron: ${f.field.source}, zekerheid ${Math.round(f.field.confidence * 100)}%` : 'niet gevonden'}>
+                <div key={f.key} className={`fieldcheck ${active === f.key ? 'active' : ''} ${doubt ? 'doubt' : ''}`} onClick={() => setActive(f.key)} title={f.field ? `Gelezen van de bon, ${Math.round(f.field.confidence * 100)}% zeker` : 'Niet gevonden: vul het zelf in'}>
                   <span className="muted small" style={{ width: 130 }}>{f.label}</span>
                   <span className="grow">{f.show}</span>
                   {settings.advancedMode && decision && <span className="small muted mono">{Math.round(decision.confidence * 100)}%</span>}
@@ -158,7 +158,7 @@ export function DocumentReview({ id }: { id: number }) {
                 {i.message}
                 <div className="row" style={{ marginTop: 8 }}>
                   <Button small kind={form.splits ? 'primary' : undefined} onClick={() => setForm({ ...form, splits: form.splits ? null : parts.map((p) => ({ categoryKey: p.categoryKey, gross: p.gross, vatRate: p.vatRate })) })}>
-                    {form.splits ? '✓ Wordt apart geboekt' : 'Ja, apart boeken'}
+                    {form.splits ? '✓ Wordt apart verwerkt' : 'Ja, apart verwerken'}
                   </Button>
                 </div>
               </div>
@@ -166,7 +166,7 @@ export function DocumentReview({ id }: { id: number }) {
           })}
           {r?.lines && r.lines.length > 0 && (
             <details className="small" style={{ marginTop: 8 }}>
-              <summary>{r.lines.length} regels op het document{r.linesBasis ? '' : ' (tellen niet op tot het totaal)'}</summary>
+              <summary>{r.lines.length} regels op het document{r.linesBasis ? '' : ' (samen niet precies het totaal)'}</summary>
               <table className="list small">
                 <tbody>
                   {r.lines.map((l, idx) => (
@@ -181,7 +181,7 @@ export function DocumentReview({ id }: { id: number }) {
             </details>
           )}
           {d.bank_match && <div className="notice good">✓ Betaling gevonden op de bank: {formatDateNl(d.bank_match.transaction_date)} · <Euro cents={d.bank_match.amount} /></div>}
-          {d.classification && <p className="small muted">{d.classification.reasons.join(' · ')}</p>}
+          {d.classification && <p className="small muted">{d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(' · ')}</p>}
 
           {d.status !== 'verwerkt' && (
             <div className="card grid" style={{ marginTop: 12 }}>

@@ -160,7 +160,7 @@ export class IntakeService {
       return {
         result: emptyResult(),
         source: 'geen',
-        issues: [{ field: 'document', severity: 'fout', message: 'Tekstherkenning (OCR) is nog niet ingesteld. Vul de gegevens zelf in.' }],
+        issues: [{ field: 'document', severity: 'fout', message: 'Slimme herkenning staat nog niet aan (Instellingen → Automatisch & herkenning). Vul de gegevens zelf in.' }],
       };
     }
     let out;

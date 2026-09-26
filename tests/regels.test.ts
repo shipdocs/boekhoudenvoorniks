@@ -69,7 +69,7 @@ describe('factuurregels (#23)', () => {
     const d = await s.intake.add('praxis.jpg', new Uint8Array([1]), '2026-09-25');
     expect(d.status).toBe('controle');
     const issue = d.issues.find((i) => i.field === 'lines')!;
-    expect(issue.message).toMatch(/Deze bon bevat ook .*Kwast set.*Chips paprika/);
+    expect(issue.message).toMatch(/Op deze bon staat ook: .*Kwast set.*Chips paprika/);
     const parts = issue.suggestion as { categoryKey: string; gross: number }[];
     s.intake.confirm(d.id, { supplier: 'Praxis', date: '2026-09-14', total: 6483, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas', splits: parts.map(({ categoryKey, gross }) => ({ categoryKey, gross })) });
     expect(s.ledger.balance(ACCOUNTS.inkoopMaterialen)).toBe(4128); // 49,95 / 1,21
