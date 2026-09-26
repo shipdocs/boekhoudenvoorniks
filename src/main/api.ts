@@ -21,6 +21,7 @@ import { decisionStats } from '../inbox/automation-log';
 import { purchasePaymentQr } from '../documents/epc-qr';
 import { supplierKey } from '../intake/supplier-memory';
 import { tx } from '../db/database';
+import { hasRealData } from './reset';
 import type { ExpenseInput, CashSaleInput } from '../quick/quick';
 import { EXPENSE_CATEGORIES, OTHER_DESTINATIONS } from '../shared/categories';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES } from '../shared/vat';
@@ -51,6 +52,8 @@ export interface HostContext {
   exportEncrypted(password: string): Promise<string | null>;
   appVersion(): string;
   checkForUpdates(): Promise<string>;
+  /** Administratie wissen (met veiligheidskopie bij echte gegevens) en eventueel de demo erin zetten. */
+  resetData(withDemo: boolean): Promise<{ backup: string | null }>;
   /** ingebouwde tekstherkenning (#9): downloaden bij eerste gebruik */
   localOcr: {
     status(): RuntimeStatus;
@@ -219,6 +222,15 @@ export function createApi(s: Services, host: HostContext) {
       backup: () => host.backupNow(),
       restore: (password?: string) => host.restoreBackup(password),
       exportEncrypted: (password: string) => host.exportEncrypted(password),
+      /** Demo of echt? En staat er al iets in dat bewaard moet blijven? */
+      dataStatus: () => ({ demo: s.settings.get().demoMode, hasData: hasRealData(s.db) }),
+      /** Demo starten kan alleen in een lege administratie of vanuit de demo zelf. */
+      startDemo: () => {
+        if (hasRealData(s.db)) throw new Error('Je administratie bevat al gegevens. Wis die eerst als je de demo wilt bekijken.');
+        return host.resetData(true);
+      },
+      /** Alles wissen en schoon beginnen (de onboarding start opnieuw). */
+      clearData: () => host.resetData(false),
       meta: () => ({
         expenseCategories: EXPENSE_CATEGORIES,
         otherDestinations: OTHER_DESTINATIONS,
@@ -229,6 +241,10 @@ export function createApi(s: Services, host: HostContext) {
         vatPortalUrl: PORTAL_URL,
         vatSuppletieUrl: SUPPLETIE_URL,
       }),
+    },
+    onboarding: {
+      /** "Aan de slag": afgeleid uit de administratie zelf, dus altijd actueel */
+      checklist: () => s.checklist.items(),
     },
     settings: {
       get: () => ({ ...s.settings.get(), smtpPasswordSet: host.hasSmtpPassword() }),

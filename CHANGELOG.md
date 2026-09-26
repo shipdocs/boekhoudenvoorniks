@@ -1,5 +1,20 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Nieuw
+- **Demo**: bij de eerste start (of via Instellingen → Back-up, demo & updates) de app bekijken met een
+  voorbeeldbedrijf: klanten, offertes, facturen (betaald, open, vervallen), een klus, bonnetjes en een
+  bankafschrift. In de demo gaat er geen e-mail naar buiten; een balk bovenaan toont dat je in de demo zit.
+- **Wissen en echt beginnen**: de demo met één klik wissen, of de hele administratie leegmaken (met
+  bevestiging "WISSEN" en eerst automatisch een veiligheidskopie in de back-upmap). Daarna start de
+  onboarding opnieuw.
+- **Onboarding die zichzelf bijwerkt**: de stappen hebben een versie. Na een update zien bestaande
+  gebruikers alléén de nieuwe of gewijzigde stappen (met "Later"), niet de hele onboarding. Nieuwe stap:
+  "Hoeveel mag de app zelf doen?" (voorzichtig / normaal / maximaal).
+- **Aan de slag** op Vandaag: een lijstje (bedrijfsgegevens, IBAN, eerste klant, factuur, bankafschrift,
+  bonnetje, e-mail) dat zichzelf afvinkt op basis van wat er in je administratie staat.
+
 ## 0.2.0 — slimme automatisering
 
 Uitgangspunt: niet invoeren, maar uitzonderingen afhandelen. Boekingen komen altijd uit vaste,

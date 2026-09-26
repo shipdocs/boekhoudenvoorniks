@@ -25,6 +25,7 @@ import { IntakeService } from './intake/intake';
 import type { OcrProvider } from './intake/ocr';
 import { JobService } from './jobs/jobs';
 import { InboxService } from './inbox/inbox';
+import { ChecklistService } from './onboarding/checklist';
 
 export interface ServiceDeps {
   pdf: PdfRenderer;
@@ -47,7 +48,12 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const quotes = new QuoteService(db, settings, relations, templates, invoices);
   const events = new EventService(db, ledger);
   const purchases = new PurchaseService(db, ledger, events);
-  const sender = new DocumentSender(db, settings, invoices, quotes, deps.pdf, deps.mailerFactory);
+  // in de demo gaat er nooit e-mail naar de (verzonnen) klanten
+  const mailerFactory = async () => {
+    if (settings.get().demoMode) throw new Error('In de demo worden geen e-mails verstuurd. Wis de demo om echt te beginnen.');
+    return deps.mailerFactory();
+  };
+  const sender = new DocumentSender(db, settings, invoices, quotes, deps.pdf, mailerFactory);
   const bank = new BankService(db, ledger, invoices, purchases, relations, events);
   const matching = new MatchingEngine(bank, invoices, purchases, relations);
   const vat = new VatService(db, ledger, settings);
@@ -63,12 +69,13 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const incomeTax = new IncomeTaxService(db, settings);
   const jobs = new JobService(db, quotes, invoices, relations);
   const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases, recurring);
+  const checklist = new ChecklistService(db, settings);
 
   ledger.seedDefaultAccounts();
   templates.seedDefaults();
   bank.ensureDefaultAccount();
 
-  return { db, ledger, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox };
+  return { db, ledger, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist };
 }
 
 export type Services = ReturnType<typeof createServices>;

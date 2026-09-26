@@ -18,6 +18,8 @@ import { TemplateEditor } from './screens/TemplateEditor';
 import { Expert } from './screens/Expert';
 import { TermsGate } from './screens/Terms';
 import { TERMS_VERSION } from '../shared/legal';
+import { hasOnboardingUpdate } from '../shared/onboarding';
+import { DemoBanner } from './screens/Reset';
 
 const NAV: { screen: Screen; label: string; icon: string; also?: Screen[] }[] = [
   { screen: 'home', label: 'Vandaag', icon: '🏠' },
@@ -66,7 +68,8 @@ export function App() {
         setMeta(await api.app.meta());
         const s = await api.settings.get();
         setSettings(s);
-        if (!s.onboardingDone) setHistory([{ screen: 'welkom' }]);
+        // nieuwe gebruiker, of een update met nieuwe onboardingstappen: die eerst
+        if (!s.onboardingDone || hasOnboardingUpdate(s)) setHistory([{ screen: 'welkom' }]);
       } catch (e) {
         toast((e as Error).message, 'error');
       }
@@ -141,6 +144,7 @@ export function App() {
           </nav>
         )}
         <main className="main" style={route.screen === 'welkom' ? { gridColumn: '1 / -1' } : undefined}>
+          {settings.demoMode && route.screen !== 'welkom' && <DemoBanner />}
           {screen}
         </main>
       </div>
