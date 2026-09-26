@@ -261,8 +261,6 @@ export class VatService {
       warnings.push(BUITENLAND_DISCLAIMER);
     }
     if (omzetIcp !== 0) warnings.push('Je verkocht aan bedrijven in andere EU-landen. Dat geef je ook apart op (de "ICP-opgaaf"); het overzicht staat hieronder.');
-    const rounding = btwHoog - (r1a.btwEuro ?? 0) * 100;
-    if (Math.abs(rounding) > 100) warnings.push('Laat je boekhouder de afronding van vak 1a nakijken.');
 
     const stored = this.db.prepare('SELECT status, submitted_at FROM vat_periods WHERE period_key = ?').get(period.key) as { status: 'concept' | 'ingediend'; submitted_at: string | null } | undefined;
     return {
