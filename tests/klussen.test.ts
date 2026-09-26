@@ -87,4 +87,28 @@ describe('klussen als dossier (#32)', () => {
     expect(far.find((x) => x.job.id === badkamer.id)!.reason).not.toContain('kluslocatie');
     void keuken;
   });
+
+  it('review #43: werkbon na factureren dicht, geen negatieve prijs, concept verwijderen geeft regels vrij', () => {
+    const { s, klant } = setup();
+    const job = s.jobs.create({ relationId: klant.id, title: 'Plafond' });
+    expect(() => s.jobs.addWorkItem(job.id, { date: '2026-09-10', description: 'Korting', quantity: 1, unitPrice: -500, vatCode: 'hoog' })).toThrow(/negatief/);
+    s.jobs.addWorkItem(job.id, { date: '2026-09-10', description: 'Stucwerk', quantity: 2, unitPrice: 4800, vatCode: 'hoog' });
+    const inv = s.jobs.makeInvoice(job.id);
+    expect(s.jobs.get(job.id).status).toBe('gefactureerd');
+    expect(() => s.jobs.addWorkItem(job.id, { date: '2026-09-11', description: 'Nog iets', quantity: 1, unitPrice: 100, vatCode: 'hoog' })).toThrow(/gefactureerd/);
+    s.invoices.deleteDraft(inv.id);
+    expect(s.jobs.workItems(job.id).every((w) => w.invoice_id === null)).toBe(true);
+    expect(s.jobs.get(job.id).status).toBe('klaar');
+    expect(() => s.jobs.linkPurchase(99999, job.id)).toThrow(/bestaat niet/);
+    // zonder offerte of werkbon: een concept dat wél aan de klus hangt
+    const leeg = s.jobs.create({ relationId: klant.id, title: 'Losse klus' });
+    const inv2 = s.jobs.makeInvoice(leeg.id, [{ description: 'Losse klus', quantity: 1, unitPrice: 0, vatCode: 'hoog' }]);
+    expect(s.jobs.get(leeg.id).invoices.map((i) => i.id)).toEqual([inv2.id]);
+  });
+
+  it('review #43: kapotte EXIF (segment van lengte 0) en onmogelijke GPS-waarden', () => {
+    expect(readJpegGps(new Uint8Array([0xff, 0xd8, 0xff, 0xe1, 0x00, 0x00, 0xff, 0xd9]))).toBeNull();
+    expect(readJpegGps(makeJpegWithGps(95, 5))).toBeNull();
+    expect(readJpegGps(makeJpegWithGps(52.09, 5.12))).not.toBeNull();
+  });
 });

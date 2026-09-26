@@ -160,7 +160,15 @@ export class InvoiceService {
     if (inv.status !== 'concept') throw new ValidationError('Definitieve facturen kunnen niet verwijderd worden (bewaarplicht). Maak een creditfactuur.');
     tx(this.db, () => {
       this.db.prepare('UPDATE quotes SET status = ? WHERE id = ? AND status = ?').run('geaccepteerd', inv.quote_id, 'gefactureerd');
+      // werkbonregels komen weer vrij, en de klus is weer "klaar" als er geen andere factuur meer is (#32)
+      const jobId = (this.db.prepare('SELECT job_id FROM invoices WHERE id = ?').get(id) as { job_id: number | null } | undefined)?.job_id ?? null;
+      this.db.prepare('UPDATE job_work_items SET invoice_id = NULL WHERE invoice_id = ?').run(id);
       this.db.prepare('DELETE FROM invoices WHERE id = ?').run(id);
+      if (jobId) {
+        this.db
+          .prepare(`UPDATE jobs SET status = 'klaar' WHERE id = ? AND status = 'gefactureerd' AND NOT EXISTS (SELECT 1 FROM invoices WHERE job_id = ?)`)
+          .run(jobId, jobId);
+      }
     });
   }
 

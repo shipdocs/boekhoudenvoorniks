@@ -1,3 +1,4 @@
+import { ValidationError } from '../shared/validation';
 import type { Db } from '../db/database';
 import { parseEuro, type Cents } from '../shared/money';
 import { addMonths, diffDays, today, type IsoDate } from '../shared/dates';
@@ -44,8 +45,9 @@ export function parseQuery(input: string): { match: string | null; filters: Sear
   let rest = input;
   rest = rest.replace(/(>=?|<=?)\s*€?\s*(\d+(?:[.,]\d{1,2})?)/g, (_m, op: string, v: string) => {
     const cents = parseEuro(v.includes(',') || v.includes('.') ? v : `${v},00`);
-    if (op.startsWith('>')) filters.minAmount = cents;
-    else filters.maxAmount = cents;
+    // ">" en "<" zijn exclusief, ">=" en "<=" inclusief
+    if (op.startsWith('>')) filters.minAmount = op === '>' ? cents + 1 : cents;
+    else filters.maxAmount = op === '<' ? cents - 1 : cents;
     return ' ';
   });
   // periode: "2026" of "2026-09" (niet in een factuurnummer als "2026-0007")
@@ -76,7 +78,7 @@ export class SearchService {
   search(query: string, extra: SearchFilters = {}, limit = 50): SearchGroup[] {
     const { match, filters } = parseQuery(query);
     const f = { ...filters, ...extra };
-    if (!match && f.minAmount === undefined && f.maxAmount === undefined && !f.from && !f.jobId) return [];
+    if (!match && f.minAmount === undefined && f.maxAmount === undefined && !f.from && !f.to && !f.jobId) return [];
     const where: string[] = [];
     const params: unknown[] = [];
     if (match) {
@@ -93,7 +95,8 @@ export class SearchService {
          FROM search_index ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
          ORDER BY ${match ? 'rank' : 'date DESC'} LIMIT ?`,
       )
-      .all(...params, limit * 3) as SearchHit[];
+      // met een klusfilter wordt pas na de koppelingen gefilterd: dan niet vooraf afkappen
+      .all(...params, f.jobId ? -1 : limit * 3) as SearchHit[];
     const groups = new Map<string, SearchGroup>();
     for (const hit of rows) {
       const { key, links, jobId } = this.linksFor(hit);
@@ -176,6 +179,7 @@ export class SearchService {
   }
 
   setWarranty(purchaseId: number, months: number | null): void {
+    if (months !== null && (!Number.isFinite(months) || months < 0 || months > 600)) throw new ValidationError('Vul het aantal maanden garantie in als getal (bv. 24), of laat het leeg');
     this.db.prepare('UPDATE purchase_invoices SET warranty_months = ? WHERE id = ?').run(months && months > 0 ? Math.round(months) : null, purchaseId);
   }
 }
