@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, Modal, useAction, useApp, useLoad } from '../ui';
 import { formatDateNl, vatDeadline } from '../../shared/dates';
 import { VAT_DISCLAIMER } from '../../shared/legal';
 import { AccountantNotice } from './TaxYear';
@@ -34,6 +34,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
   const checksLoad = useLoad(async () => ({ key: selected, list: selected ? await api.vat.checks(selected) : [] }), [selected]);
   const checks = { data: checksLoad.data && checksLoad.data.key === selected ? checksLoad.data.list : undefined, reload: checksLoad.reload };
   const [details, setDetails] = useState(false);
+  const [detail, setDetail] = useState<{ code: string; title: string } | null>(null);
 
   if (settings.kor) {
     return (
@@ -82,11 +83,11 @@ export function Tax({ periodKey }: { periodKey?: string }) {
             <h2 style={{ marginTop: 0 }}>Btw {r.period.label}</h2>
             <table className="sumtable">
               <tbody>
-                <tr><td>Omzet</td><td><Euro cents={r.summary.omzet} /></td></tr>
-                <tr><td>Btw die je hebt ontvangen</td><td><Euro cents={r.summary.btwOverOmzet} /></td></tr>
+                <tr className="clickable" title="Klik om te zien waar dit bedrag vandaan komt" onClick={() => setDetail({ code: 'omzet', title: 'Omzet' })}><td>Omzet <span className="muted small">🔍</span></td><td><Euro cents={r.summary.omzet} /></td></tr>
+                <tr className="clickable" title="Klik om te zien waar dit bedrag vandaan komt" onClick={() => setDetail({ code: 'btw-omzet', title: 'Btw die je hebt ontvangen' })}><td>Btw die je hebt ontvangen <span className="muted small">🔍</span></td><td><Euro cents={r.summary.btwOverOmzet} /></td></tr>
                 {r.summary.btwPrive !== 0 && <tr><td>Btw over privégebruik van je auto</td><td><Euro cents={r.summary.btwPrive} /></td></tr>}
                 {r.summary.btwVerlegd !== 0 && <tr><td>Btw die naar jou is verlegd (door een onderaannemer of een buitenlandse leverancier; je betaalt hem en krijgt hem tegelijk terug: kost je niets)</td><td><Euro cents={r.summary.btwVerlegd} /></td></tr>}
-                <tr><td>Min: btw die je terugkrijgt (aankopen)</td><td><Euro cents={r.summary.voorbelasting} /></td></tr>
+                <tr className="clickable" title="Klik om te zien waar dit bedrag vandaan komt" onClick={() => setDetail({ code: '5b', title: 'Btw die je terugkrijgt (aankopen)' })}><td>Min: btw die je terugkrijgt (aankopen) <span className="muted small">🔍</span></td><td><Euro cents={r.summary.voorbelasting} /></td></tr>
                 <tr className="total"><td>{r.summary.teBetalen >= 0 ? 'Te betalen' : 'Je krijgt terug'}</td><td><Euro cents={Math.abs(r.summary.teBetalen)} /></td></tr>
                 {r.corrections.filter((c) => !c.suppletie).map((c) => (
                   <tr key={c.periodKey} className="muted small"><td>Waarvan verbetering van {c.label}</td><td><Euro cents={c.btw} /></td></tr>
@@ -158,13 +159,16 @@ export function Tax({ periodKey }: { periodKey?: string }) {
           {details && (
             <div className="card" style={{ marginTop: 14 }}>
               <h2 style={{ marginTop: 0 }}>Btw-aangifte {r.period.label}</h2>
-              <p className="muted small">Neem deze bedragen over in Mijn Belastingdienst Zakelijk. Klik op een bedrag om het te kopiëren. Bedragen zijn in hele euro's, afgerond in jouw voordeel.</p>
+              <p className="muted small">Neem deze bedragen over in Mijn Belastingdienst Zakelijk. Klik op een bedrag om het te kopiëren, of op 🔍 om te zien welke boekingen erin zitten. Bedragen zijn in hele euro's, afgerond in jouw voordeel.</p>
               <div className="notice small">{VAT_DISCLAIMER}</div>
               <div className="rubriek small muted"><span>Vak</span><span /><span className="num">Omzet</span><span className="num">Btw</span></div>
               {r.rubrieken.filter((x) => x.code !== '5c' && !(/^[34]/.test(x.code) && !x.omzet && !x.btw)).map((x) => (
                 <div key={x.code} className="rubriek">
                   <strong>{x.code}</strong>
-                  <span>{x.label}{RUBRIEK_UITLEG[x.code] && <span className="small muted"> · {RUBRIEK_UITLEG[x.code]}</span>}</span>
+                  <span>
+                    {x.label}{RUBRIEK_UITLEG[x.code] && <span className="small muted"> · {RUBRIEK_UITLEG[x.code]}</span>}
+                    {x.code !== '5g' && (x.omzet || x.btw) ? <> <button className="linklike small" title="Welke boekingen zitten hierin?" onClick={() => setDetail({ code: x.code, title: `Vak ${x.code}: ${RUBRIEK_UITLEG[x.code] ?? x.label}` })}>🔍 details</button></> : null}
+                  </span>
                   <span className="num">{x.omzetEuro !== null && <span className="copy" onClick={() => copy(x.omzetEuro)}>€ {x.omzetEuro.toLocaleString('nl-NL')}</span>}</span>
                   <span className="num">{x.btwEuro !== null && <span className="copy" onClick={() => copy(x.btwEuro)}>€ {x.btwEuro.toLocaleString('nl-NL')}</span>}</span>
                 </div>
@@ -194,10 +198,78 @@ export function Tax({ periodKey }: { periodKey?: string }) {
             </div>
           )}
           <IcpCard periodKey={r.period.key} />
+          {detail && <VatDetails periodKey={r.period.key} code={detail.code} title={detail.title} onClose={() => setDetail(null)} />}
         </>
       )}
       <IncomeTaxCard />
     </div>
+  );
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  factuur: 'factuur',
+  inkoop: 'aankoop / bonnetje',
+  bank: 'bankbetaling',
+  handmatig: 'handmatige boeking',
+  integratie: 'webshop / betaalprovider',
+  opening: 'beginbalans',
+};
+
+/**
+ * "Waar komt dit bedrag vandaan?": de boekingen achter een regel van de btw-berekening, met een
+ * knop naar de factuur, bon of betaling. Zo zie je meteen of er iets verkeerd geboekt is.
+ */
+function VatDetails({ periodKey, code, title, onClose }: { periodKey: string; code: string; title: string; onClose: () => void }) {
+  const { go } = useApp();
+  const d = useLoad(() => api.vat.details(periodKey, code), [periodKey, code]);
+  const lines = d.data?.lines ?? [];
+  const showOmzet = lines.some((l) => l.omzet !== 0);
+  const showBtw = lines.some((l) => l.btw !== 0);
+  const fromBankAsIncome = lines.some((l) => l.source === 'bank' && l.omzet > 0 && !l.invoiceId);
+  const open = (l: (typeof lines)[number]) => {
+    onClose();
+    if (l.invoiceId) go({ screen: 'factuur', id: l.invoiceId });
+    else if (l.bankTransactionId) go({ screen: 'categorie', id: l.bankTransactionId });
+    else if (l.purchaseId) go({ screen: 'aankopen' });
+  };
+  return (
+    <Modal title={title} onClose={onClose} wide>
+      <ErrorBox error={d.error} />
+      {d.data && lines.length === 0 && <p className="muted">Er zitten geen boekingen in.</p>}
+      {fromBankAsIncome && (
+        <div className="notice small">
+          Een deel komt van <strong>geld dat binnenkwam op de bank</strong> en als "omzet zonder factuur" is geboekt. Was dat geen omzet (bijvoorbeeld geld van
+          jezelf, een terugbetaling of een lening)? Klik op <strong>Bekijken</strong> en kies daar wat het wel was.
+        </div>
+      )}
+      {lines.length > 0 && (
+        <table className="list small">
+          <thead>
+            <tr><th>Datum</th><th>Wat</th><th>Waar vandaan</th>{showOmzet && <th className="num">Omzet</th>}{showBtw && <th className="num">Btw</th>}<th /></tr>
+          </thead>
+          <tbody>
+            {lines.map((l) => (
+              <tr key={l.entryId} className={l.reversed || l.reversal ? 'muted' : ''}>
+                <td><DateNl date={l.date} /></td>
+                <td>
+                  {l.description}
+                  {l.counterparty && <div className="muted">{l.counterparty}</div>}
+                  {l.reversed && <div className="muted">later teruggedraaid</div>}
+                  {l.reversal && <div className="muted">tegenboeking (draait een eerdere boeking terug)</div>}
+                </td>
+                <td>{SOURCE_LABEL[l.source] ?? l.source}</td>
+                {showOmzet && <td className="num"><Euro cents={l.omzet} /></td>}
+                {showBtw && <td className="num"><Euro cents={l.btw} /></td>}
+                <td>{(l.invoiceId || l.bankTransactionId || l.purchaseId) && <Button small onClick={() => open(l)}>Bekijken</Button>}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr><td /><td><strong>Totaal</strong></td><td />{showOmzet && <td className="num"><strong><Euro cents={d.data!.omzet} /></strong></td>}{showBtw && <td className="num"><strong><Euro cents={d.data!.btw} /></strong></td>}<td /></tr>
+          </tfoot>
+        </table>
+      )}
+    </Modal>
   );
 }
 

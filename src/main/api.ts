@@ -551,6 +551,8 @@ export function createApi(s: Services, host: HostContext) {
     vat: {
       current: () => s.vat.currentPeriod(),
       calculate: (periodKey: string) => s.vat.calculate(periodKey),
+      /** de boekingen achter één vak of regel van de berekening */
+      details: (periodKey: string, code: string) => s.vat.rubriekDetails(periodKey, code),
       periods: (year: number) => s.vat.listPeriods(year),
       markSubmitted: (periodKey: string) => s.vat.markSubmitted(periodKey),
       reopen: (periodKey: string) => s.vat.reopen(periodKey),
