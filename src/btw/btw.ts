@@ -6,7 +6,7 @@ import type { SettingsService } from '../settings/settings';
 import { centsToDecimalString, formatEuro, type Cents } from '../shared/money';
 import { addDays, periodFor, periodFromKey, today, type IsoDate, type Period } from '../shared/dates';
 import { runVatChecks, skipKey, type VatCheck } from './checks';
-import { carPrivateUse, type CarPrivateUse } from './car';
+import { carPrivateUse, carPrivateUseEntries, type CarPrivateUse } from './car';
 import { ValidationError } from '../shared/validation';
 
 /**
@@ -385,16 +385,7 @@ export class VatService {
   }
 
   private carEntries(year: number): { id: number; entry_date: IsoDate; amount: Cents }[] {
-    return this.db
-      .prepare(
-        `SELECT e.id, e.entry_date, SUM(l.credit - l.debit) AS amount FROM journal_entries e
-         JOIN journal_lines l ON l.journal_entry_id = e.id
-         JOIN chart_of_accounts a ON a.id = l.account_id
-         WHERE e.source_ref = ? AND a.rgs_code = ? AND e.reverses_entry_id IS NULL
-           AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reverses_entry_id = e.id)
-         GROUP BY e.id ORDER BY e.id`,
-      )
-      .all(`auto-prive:${year}`, ACCOUNTS.btwPriveGebruik) as { id: number; entry_date: IsoDate; amount: Cents }[];
+    return carPrivateUseEntries(this.db, year);
   }
 
   /** Neemt de btw over privégebruik van de auto op in de laatste aangifte van het jaar (vak 1d). */

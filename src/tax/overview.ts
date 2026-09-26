@@ -6,7 +6,7 @@ import type { Cents } from '../shared/money';
 import type { AssetService } from './assets';
 import { ASSET_THRESHOLD } from './assets';
 import type { HoursService, MileageService } from './mileage';
-import { carPrivateUse } from '../btw/car';
+import { carPrivateUse, carPrivateUseEntries } from '../btw/car';
 import { estimateIncomeTax, kiaFor, profitBetween, representatieBijtelling, rulesFor, type IncomeTaxBreakdown } from './income-tax';
 
 /** De startersaftrek is in 2027 nog € 10 en vervalt per 2028 (wetswijziging); tot die tijd max 3× in de eerste 5 jaar. */
@@ -279,14 +279,9 @@ export class TaxOverviewService {
     }
     if (s.carUse === 'zakelijk' && s.carPrivateUse !== false) {
       const car = carPrivateUse(s, year);
-      const booked = (
-        this.db
-          .prepare(
-            `SELECT COALESCE(SUM(l.debit - l.credit), 0) AS s FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
-             JOIN chart_of_accounts a ON a.id = l.account_id WHERE a.rgs_code = ? AND e.entry_date BETWEEN ? AND ?`,
-          )
-          .get(ACCOUNTS.btwPriveAuto, `${year}-01-01`, `${year}-12-31`) as { s: number }
-      ).s;
+      // alleen de correctie die de app zelf boekte, en alleen als het bedrag nog klopt
+      const bookedAmount = carPrivateUseEntries(this.db, year).reduce((sum, e) => sum + e.amount, 0);
+      const booked = car.state === 'bekend' && bookedAmount === car.amount;
       items.push({
         key: 'auto-prive',
         label: 'Privégebruik van je auto van de zaak',
@@ -297,7 +292,7 @@ export class TaxOverviewService {
             : 'Rijd je ook privé in je auto van de zaak? Vul dat in bij Instellingen → Btw. Dan betaal je btw over het privégebruik en telt het mee voor de inkomstenbelasting (bijtelling).',
         note:
           car.state === 'bekend'
-            ? `Auto van de zaak met privégebruik. Btw-correctie ${(car.pct * 100).toLocaleString('nl-NL')}% van cataloguswaarde ${eur(car.catalogValue)} = ${eur(car.amount)}${booked ? ', geboekt in vak 1d' : ', nog niet geboekt'}${car.partialYear ? '; auto dit jaar in gebruik genomen: naar rato herrekenen' : ''}. IB-bijtelling niet berekend; controleren of er een rittenregistratie is.`
+            ? `Auto van de zaak met privégebruik. Btw-correctie ${(car.pct * 100).toLocaleString('nl-NL')}% van cataloguswaarde ${eur(car.catalogValue)} = ${eur(car.amount)}${booked ? ', geboekt in vak 1d' : ', nog niet geboekt'}${car.months < 12 ? `; naar rato over ${car.months} maanden (auto dit jaar in gebruik genomen)` : ''}. IB-bijtelling niet berekend; controleren of er een rittenregistratie is.`
             : 'Auto van de zaak: privégebruik niet opgegeven. Btw-correctie (1d) en IB-bijtelling controleren.',
         forAccountant: true,
         status: car.state === 'bekend' && booked ? 'ok' : 'warn',

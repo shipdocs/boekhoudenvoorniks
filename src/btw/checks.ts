@@ -179,20 +179,20 @@ export function runVatChecks(
       key: 'auto-prive',
       blocking: true,
       title: 'Rijd je ook privé in je auto van de zaak?',
-      detail: 'Dan betaal je in deze laatste aangifte van het jaar btw over dat privégebruik. Vul bij Instellingen → Btw en belasting in of je privé rijdt en wat de cataloguswaarde van je auto is; dan rekent de app het uit.',
+      detail: 'Dan betaal je in deze laatste aangifte van het jaar btw over dat privégebruik. Vul bij Instellingen → Btw en belasting in of je privé rijdt, wat de cataloguswaarde van je auto is en sinds wanneer je hem gebruikt; dan rekent de app het uit.',
       count: 1,
       fingerprint: `onbekend:${car.year}`,
       screen: 'instellingen',
     });
   } else if (car && car.due.state === 'bekend' && car.due.amount !== car.booked) {
-    const { amount, pct, catalogValue, partialYear } = car.due;
+    const { amount, pct, catalogValue, months } = car.due;
     found.push({
       key: 'auto-prive',
       blocking: true,
       title: `Btw over privégebruik van je auto: ${formatEuro(amount)}`,
       detail:
         `Je rijdt ook privé in je auto van de zaak. Daarover betaal je één keer per jaar btw: ${(pct * 100).toLocaleString('nl-NL')}% van de cataloguswaarde (${formatEuro(catalogValue)}). ` +
-        `Dit komt in vak 1d van deze aangifte.${partialYear ? ' Je gebruikt de auto pas sinds dit jaar: dan is het bedrag lager (naar rato). Laat je boekhouder het narekenen.' : ''}`,
+        `${months < 12 ? `Je gebruikt de auto pas sinds dit jaar, dus over ${months} ${months === 1 ? 'maand' : 'maanden'}. ` : ''}Dit komt in vak 1d van deze aangifte.`,
       count: 1,
       fingerprint: `${car.year}:${amount}:${car.booked}`,
       screen: 'belasting',

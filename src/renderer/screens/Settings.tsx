@@ -145,12 +145,18 @@ export function SettingsScreen() {
                     <Field label="Cataloguswaarde" hint="nieuwprijs incl. btw en bpm; staat bij de RDW of vraag je dealer">
                       <MoneyInput value={draft.carCatalogValue} onChange={(v) => set({ carCatalogValue: v })} />
                     </Field>
-                    <Field label="Sinds welk jaar gebruik je deze auto?" hint="voor je bedrijf">
-                      <input inputMode="numeric" value={draft.carInUseSince ?? ''} onChange={(e) => set({ carInUseSince: Number(e.target.value) || null })} placeholder={String(new Date().getFullYear())} />
+                    <Field label="Sinds wanneer gebruik je deze auto?" hint="voor je bedrijf; de maand is nodig voor het eerste jaar">
+                      <div className="row">
+                        <select value={draft.carInUseMonth ?? ''} onChange={(e) => set({ carInUseMonth: Number(e.target.value) || null })} aria-label="Maand">
+                          <option value="">Maand</option>
+                          {['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'].map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                        </select>
+                        <input inputMode="numeric" value={draft.carInUseSince ?? ''} onChange={(e) => set({ carInUseSince: Number(e.target.value) || null })} placeholder={String(new Date().getFullYear())} aria-label="Jaar" />
+                      </div>
                     </Field>
                   </div>
                   <p className="small muted">
-                    Over privégebruik betaal je één keer per jaar btw, in je laatste aangifte van het jaar: 2,7% van de cataloguswaarde (vanaf het 5e jaar na ingebruikname 1,5%). De app zet dat voor je klaar.
+                    Over privégebruik betaal je één keer per jaar btw, in je laatste aangifte van het jaar: 2,7% van de cataloguswaarde (vanaf het 5e jaar na ingebruikname 1,5%; in het eerste jaar naar rato). De app zet dat voor je klaar.
                     Daarnaast telt privégebruik mee voor de inkomstenbelasting (bijtelling). Dat rekent de app niet uit: vraag je boekhouder.
                   </p>
                 </>

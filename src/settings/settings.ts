@@ -81,6 +81,8 @@ export interface AppSettings {
   carCatalogValue: number | null;
   /** jaar waarin de auto in gebruik is genomen voor je bedrijf */
   carInUseSince: number | null;
+  /** maand (1–12) van ingebruikname; alleen nodig voor het eerste jaar (naar rato) */
+  carInUseMonth: number | null;
   /** jaar waarin je onderneming begon (voor de startersaftrek), of null */
   startYear: number | null;
   /** hoe vaak je de startersaftrek al gebruikte vóór `asOfYear` (zo opgegeven door de gebruiker) */
@@ -148,6 +150,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   carPrivateUse: null,
   carCatalogValue: null,
   carInUseSince: null,
+  carInUseMonth: null,
   phoneInternetBusinessPct: null,
   homeWorkspace: null,
   partnerHours: 0,

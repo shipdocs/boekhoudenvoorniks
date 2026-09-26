@@ -117,9 +117,26 @@ describe('btw over privégebruik van de auto van de zaak', () => {
   it('in het jaaroverzicht staat een notitie voor de boekhouder', () => {
     const { s } = withAccounts();
     s.settings.update({ carUse: 'zakelijk', carPrivateUse: true, carCatalogValue: 40000_00, carInUseSince: 2026 });
+    // eerste jaar zonder maand: eerst vragen
+    expect(s.vat.checks('2026-Q4').find((c) => c.key === 'auto-prive')?.screen).toBe('instellingen');
+    s.settings.update({ carInUseMonth: 7 });
+    expect(s.vat.checks('2026-Q4').find((c) => c.key === 'auto-prive')?.title).toMatch(/540,00/);
     const item = s.taxOverview.year(2026, '2026-12-31').items.find((i) => i.key === 'auto-prive')!;
     expect(item.forAccountant).toBe(true);
-    expect(item.note).toMatch(/naar rato/);
+    expect(item.note).toMatch(/naar rato over 6 maanden/);
     expect(item.status).toBe('warn');
+  });
+
+  it('jaaroverzicht: "geboekt" alleen als de eigen correctie met het juiste bedrag er staat', () => {
+    const { s } = withAccounts();
+    s.settings.update({ carUse: 'zakelijk', carPrivateUse: true, carCatalogValue: 40000_00, carInUseSince: 2024 });
+    const status = () => s.taxOverview.year(2026, '2026-12-31').items.find((i) => i.key === 'auto-prive')!.status;
+    // een losse boeking op dezelfde kostenrekening telt niet als de correctie
+    s.ledger.post({ date: '2026-06-01', description: 'iets anders', source: 'handmatig', lines: [{ account: ACCOUNTS.btwPriveAuto, debit: 1080_00, credit: 0 }, { account: ACCOUNTS.priveStortingen, debit: 0, credit: 1080_00 }] });
+    expect(status()).toBe('warn');
+    s.vat.bookCarPrivateUse('2026-Q4');
+    expect(status()).toBe('ok');
+    s.settings.update({ carCatalogValue: 50000_00 });
+    expect(status()).toBe('warn');
   });
 });
