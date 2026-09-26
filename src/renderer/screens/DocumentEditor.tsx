@@ -3,8 +3,8 @@ import { api } from '../api';
 import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, useAction, useApp, useLoad } from '../ui';
 import { computeTotals, type LineInput } from '../../documents/totals';
 import { addDays, today } from '../../shared/dates';
-import type { SalesVatCode } from '../../shared/vat';
-import { QuickCustomer } from './Customers';
+import { customerVatSituation, suggestedSalesVat, type SalesVatCode } from '../../shared/vat';
+import { CustomerVatHint, QuickCustomer } from './Customers';
 
 interface EditLine {
   description: string;
@@ -131,6 +131,20 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
             <input type="date" value={secondDate || addDays(date, isInvoice ? settings.paymentTermDays : settings.quoteValidityDays)} disabled={!editable} onChange={(e) => setSecondDate(e.target.value)} />
           </Field>
         </div>
+        {editable && !settings.kor && (() => {
+          const rel = (relations.data ?? []).find((r) => r.id === relationId);
+          if (!rel || customerVatSituation(rel.country, rel.vat_number) === 'nl') return null;
+          const suggested = suggestedSalesVat(customerVatSituation(rel.country, rel.vat_number));
+          const label = suggested ? meta.salesVat.find((v) => v.code === suggested)?.pickLabel ?? suggested : null;
+          return (
+            <div style={{ marginTop: 12 }}>
+              <CustomerVatHint country={rel.country} vatNumber={rel.vat_number} />
+              {suggested && lines.some((l) => l.vatCode !== suggested) && (
+                <Button small onClick={() => setLines((ls) => ls.map((l) => ({ ...l, vatCode: suggested })))}>Zet alle regels op "{label}"</Button>
+              )}
+            </div>
+          );
+        })()}
         <div className="grid cols-2" style={{ marginTop: 12 }}>
           <Field label="Omschrijving / klus" hint="bv. Woonkamer stucen">
             <input value={reference} disabled={!editable} onChange={(e) => setReference(e.target.value)} />

@@ -1,5 +1,6 @@
 import type { Db } from '../db/database';
 import { isValidEmail, isValidIban, isValidKvk, isValidVatNumber, normalizeIban, ValidationError } from '../shared/validation';
+import { countryCode } from '../shared/vat';
 
 export type RelationType = 'klant' | 'leverancier' | 'beide';
 
@@ -102,6 +103,7 @@ export class RelationsService {
     if (!['klant', 'leverancier', 'beide'].includes(type)) throw new ValidationError('Kies klant, leverancier of allebei');
     const term = input.payment_term_days;
     if (term != null && (!Number.isInteger(term) || term < 0 || term > 365)) throw new ValidationError('Betaaltermijn moet tussen 0 en 365 dagen liggen');
+    if (input.country && input.country.trim() && !countryCode(input.country)) throw new ValidationError(`Dit land kennen we niet: ${input.country}. Gebruik twee letters, bijvoorbeeld DE of US.`);
     return {
       type,
       name,
