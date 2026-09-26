@@ -190,8 +190,12 @@ export class LocalOcrRuntime {
   /** Download met hervatten (Range) en sha256-controle. */
   private async download(f: ModelFile & { target: string }, onBytes: (n: number) => void): Promise<void> {
     if (existsSync(f.target) && statSync(f.target).size === f.size) {
-      onBytes(f.size);
-      return;
+      // al aanwezig: alleen gebruiken als het controlegetal klopt, anders opnieuw downloaden
+      if ((await sha256File(f.target)) === f.sha256) {
+        onBytes(f.size);
+        return;
+      }
+      rmSync(f.target, { force: true });
     }
     mkdirSync(dirname(f.target), { recursive: true });
     const part = `${f.target}.part`;
@@ -284,9 +288,28 @@ export class LocalOcrRuntime {
     if (this.status_.state === 'actief' || this.status_.state === 'starten') this.status_.state = 'geinstalleerd';
   }
 
-  uninstall(): RuntimeStatus {
+  /** Stopt de server en wacht tot het proces echt weg is (Windows houdt bestanden anders vast). */
+  private async stopAndWait(): Promise<void> {
+    const child = this.process;
     this.stop();
-    rmSync(this.dir, { recursive: true, force: true });
+    if (!child || child.exitCode !== null) return;
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        resolve();
+      }, 5000);
+      child.once('exit', done);
+      if (child.exitCode !== null) done();
+    });
+  }
+
+  async uninstall(): Promise<RuntimeStatus> {
+    await this.stopAndWait();
+    rmSync(this.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
     this.status_ = { state: 'niet-geinstalleerd', progress: null, error: null, llamaVersion: null, model: this.model.label };
     return this.status();
   }

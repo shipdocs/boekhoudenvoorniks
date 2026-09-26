@@ -172,6 +172,8 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     const a = amounts(line.text.replace(m[0], ' '));
     if (a.length === 0) continue;
     const word = VAT_WORD.test(line.text);
+    // zonder "btw" en met maar één bedrag: alleen een kale regel als "21%  14,74", geen artikelregel met tekst
+    if (!word && a.length === 1 && /[a-z]{3,}/i.test(line.text)) continue;
     if (a.length >= 2) {
       const [x, y] = [a[a.length - 2]!, a[a.length - 1]!];
       // grondslag en btw: bij tarieven ≤ 21% is de grondslag altijd het grootste bedrag

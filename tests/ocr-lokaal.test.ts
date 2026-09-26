@@ -90,7 +90,7 @@ describe('ingebouwde tekstherkenning: installeren (#9)', () => {
     expect(existsSync(join(dir, 'downloads'))).toBe(false); // archief opgeruimd
     // een nieuwe instantie (herstart van de app) ziet het ook
     expect(new LocalOcrRuntime(dir, { fetch, platform: 'linux', arch: 'x64', model }).isInstalled()).toBe(true);
-    rt.uninstall();
+    await rt.uninstall();
     expect(existsSync(dir)).toBe(false);
   });
 
@@ -111,6 +111,26 @@ describe('ingebouwde tekstherkenning: installeren (#9)', () => {
     await rt.install();
     expect(ranges).toEqual(['bytes=3000-']);
     expect(readFileSync(join(dir, 'models', 'a.gguf')).equals(MODEL_A)).toBe(true);
+  });
+
+  it('review #46: een bestaand modelbestand met de juiste grootte maar verkeerde inhoud wordt opnieuw gedownload', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ocr-'));
+    mkdirSync(join(dir, 'models'), { recursive: true });
+    writeFileSync(join(dir, 'models', 'a.gguf'), Buffer.alloc(MODEL_A.length, 1)); // juiste grootte, verkeerde inhoud
+    const fetch = fakeFetch();
+    const rt = new LocalOcrRuntime(dir, { fetch, extract: fakeExtract, platform: 'linux', arch: 'x64', model });
+    await rt.install();
+    expect(fetch.calls).toContain('https://hf.example/a.gguf');
+    expect(readFileSync(join(dir, 'models', 'a.gguf')).equals(MODEL_A)).toBe(true);
+  });
+
+  it('review #46: artikelregel met "21%" en één bedrag is geen btw-regel', () => {
+    const doc = parseDocumentText([
+      { text: 'GAMMA', page: 1, confidence: 1 },
+      { text: 'Muurverf wit 21% 49,95', page: 1, confidence: 1 },
+      { text: 'Totaal 49,95', page: 1, confidence: 1 },
+    ], 'ocr:test');
+    expect(doc.vat.value).toEqual([]);
   });
 
   it('niet-ondersteund platform: nette melding', async () => {

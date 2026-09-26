@@ -277,17 +277,29 @@ function LocalOcr({ engine }: { engine: string }) {
   // tijdens het downloaden de voortgang volgen; klaar = direct in gebruik nemen
   useEffect(() => {
     if (!downloading) return;
+    // één ronde tegelijk: een trage status-aanroep mag niet overlappen met de volgende
+    let busyTick = false;
+    let finished = false;
     const t = setInterval(async () => {
-      const next = await api.localOcr.status();
-      if (next.state === 'geinstalleerd') {
-        await api.localOcr.use();
-        await reloadSettings();
-        toast('Slimme herkenning is klaar ✓');
+      if (busyTick || finished) return;
+      busyTick = true;
+      try {
+        const next = await api.localOcr.status();
+        if (next.state === 'geinstalleerd') {
+          finished = true;
+          await api.localOcr.use();
+          await reloadSettings();
+          toast('Slimme herkenning is klaar ✓');
+        }
+        await status.reload();
+      } finally {
+        busyTick = false;
       }
-      if (next.state !== 'downloaden') await status.reload();
-      else status.reload();
     }, 1000);
-    return () => clearInterval(t);
+    return () => {
+      finished = true;
+      clearInterval(t);
+    };
   }, [downloading]);
   if (!st || !info.data) return null;
   const mb = (n: number) => `${Math.round(n / 1_000_000).toLocaleString('nl-NL')} MB`;

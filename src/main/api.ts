@@ -55,7 +55,7 @@ export interface HostContext {
   localOcr: {
     status(): RuntimeStatus;
     install(): RuntimeStatus;
-    uninstall(): RuntimeStatus;
+    uninstall(): Promise<RuntimeStatus>;
   };
 }
 
@@ -439,8 +439,8 @@ export function createApi(s: Services, host: HostContext) {
       status: () => host.localOcr.status(),
       info: () => ({ model: GLM_OCR.label, modelLicense: GLM_OCR.license, modelLicenseUrl: GLM_OCR.licenseUrl, runtime: LLAMA_CPP.label, runtimeLicense: LLAMA_CPP.license, runtimeLicenseUrl: LLAMA_CPP.licenseUrl, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS }),
       install: () => host.localOcr.install(),
-      uninstall: () => {
-        const st = host.localOcr.uninstall();
+      uninstall: async () => {
+        const st = await host.localOcr.uninstall();
         if (s.settings.get().ocr.engine === 'ingebouwd') s.settings.update({ ocr: { ...s.settings.get().ocr, engine: 'glm-ocr' } });
         host.reconfigureLocalAi();
         return st;
