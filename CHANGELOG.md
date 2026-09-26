@@ -19,7 +19,8 @@ uitlegbare regels; herkenning en AI doen alleen voorstellen.
   factuur of afschrijving, factuur direct aan de afschrijving koppelen, "gestopt?".
 - **Betalen met een betaal-QR** (EPC, #25) met waarschuwing als het IBAN anders is dan vorige keer.
 - **Belastingpotje** (#33): opzijgezet / nog te reserveren, en "vrij te besteden".
-- **E-factuur (UBL, Peppol BIS 3.0)** als bijlage bij elke factuur (#24).
+- **E-factuur (UBL, Peppol BIS 3.0)** standaard als bijlage bij de factuurmail (#24); uit te zetten in
+  Instellingen. Ontbreken er gegevens voor de e-factuur, dan gaat de PDF alleen mee.
 - **Factuurregels herkennen** en een gemengde bon per soort boeken (materiaal, gereedschap, werkkleding,
   privé), met btw per deel (#23).
 - **Zoeken over alles** met Ctrl+K, met bedrag- en periodefilters en garantie per aankoop (#26).
