@@ -607,7 +607,7 @@ export class InboxService {
         kind: 'investment-check',
         icon: '🧰',
         title: `Was dit een investering? ${formatEuro(c.amount)} — ${c.description}`,
-        question: 'Gaat dit langer dan een jaar mee (een machine, laptop, telefoon, steiger)? Dan schrijf je het af over een paar jaar en telt het mee voor de investeringsaftrek (KIA).',
+        question: 'Gaat dit langer dan een jaar mee (machine, laptop, telefoon, steiger)? Kies "Ja": de btw blijft gewoon terugkomen, de kosten verdeelt de app over 5 jaar en het telt mee voor de investeringsaftrek (KIA). Verder hoef je niets te doen.',
         amount: -c.amount,
         actions: [{ id: 'ja', label: 'Ja, investering', primary: true }, { id: 'nee', label: 'Nee, gewone kosten' }],
         why: 'Vanaf € 450 excl. btw per stuk is iets dat jaren meegaat een bedrijfsmiddel: je trekt het niet in één keer af, maar verdeelt het over de jaren. Daarnaast krijg je mogelijk 28% investeringsaftrek.',

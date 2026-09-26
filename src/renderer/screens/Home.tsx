@@ -5,10 +5,11 @@ import type { Task } from '../../inbox/inbox';
 import type { AutomationEntry } from '../../inbox/automation-log';
 import { formatDateNl } from '../../shared/dates';
 import { CategoryPicker } from './Bank';
+import { investmentInfo } from './Purchases';
 import { hasOnboardingUpdate } from '../../shared/onboarding';
 
 export function Home() {
-  const { go, settings, refreshBadge, toast } = useApp();
+  const { go, settings, refreshBadge, toast, showInvestmentSaved } = useApp();
   const { data, error, reload } = useLoad(() => api.home.get());
   const ib = useLoad(() => api.incomeTax.estimate());
   const { run, busy } = useAction();
@@ -33,8 +34,14 @@ export function Home() {
   };
 
   const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number }) => {
-    const r = await run(() => api.home.act(task, actionId, payload));
-    if (r && r.navigate) {
+    // `?? {}`: ook een actie zonder antwoord telt als gelukt (undefined = fout)
+    const r = await run(async () => (await api.home.act(task, actionId, payload)) ?? {});
+    if (r && !('navigate' in r && r.navigate)) {
+      // investering bevestigd: uitleg wat er nu gebeurt en wat je nog moet doen
+      if (task.kind === 'investment-check' && actionId === 'ja' && task.amount) showInvestmentSaved({ net: Math.abs(task.amount), vat: 0 });
+      else if (payload?.categoryKey === 'investering' && task.amount) showInvestmentSaved(investmentInfo(Math.abs(task.amount), payload.vatCode ?? 'hoog'));
+    }
+    if (r && 'navigate' in r && r.navigate) {
       if (r.navigate.screen === 'categorie') return setPicking(task);
       if (r.navigate.screen === 'klus-kiezen') return setPickingJob(task);
       if (r.navigate.screen === 'bewijs') {

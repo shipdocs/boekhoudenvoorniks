@@ -3,7 +3,7 @@ import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
 import type { CsvMapping } from '../../import/csv';
 import type { PurchaseVatCode } from '../../shared/vat';
-import { InvestmentHint } from './Purchases';
+import { InvestmentHint, investmentInfo } from './Purchases';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
 
 /** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
@@ -219,7 +219,7 @@ export function CategoryPicker({ initial, onPick, incoming, amount }: { initial?
 }
 
 export function CategorizeTransaction({ id }: { id: number }) {
-  const { go, meta } = useApp();
+  const { go, meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
   const txs = useLoad(() => api.bank.transactions({}), [id]);
   const suggestions = useLoad(() => api.bank.suggestions(id), [id]);
@@ -228,10 +228,15 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const [recat, setRecat] = useState(false);
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
-  const done = async (p: Promise<unknown>) => {
+  const done = async (p: Promise<unknown>, investment?: string) => {
     // ook acties die niets teruggeven (bv. ongedaan maken) tellen als gelukt als ze niet falen
-    if ((await run(async () => { await p; return true; }, 'Verwerkt ✓')) !== undefined) go({ screen: 'bank' });
+    if ((await run(async () => { await p; return true; }, investment ? undefined : 'Verwerkt ✓')) !== undefined) {
+      go({ screen: 'bank' });
+      if (investment) showInvestmentSaved(investmentInfo(Math.abs(t.amount), investment));
+    }
   };
+  /** categorie gekozen: bij een investering daarna uitleg tonen (met de gekozen btw) */
+  const inv = (categoryKey: string, vatCode: string) => (categoryKey === 'investering' ? vatCode : undefined);
   const invoices = [...(overdue.data ?? []), ...(openInvoices.data ?? [])];
   return (
     <div className="page-narrow">
@@ -253,7 +258,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
           </div>
           {recat && (
             <div style={{ marginTop: 12 }}>
-              <CategoryPicker amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode) => void done(api.bank.reclassify(t.id, categoryKey, vatCode))} />
+              <CategoryPicker amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode) => void done(api.bank.reclassify(t.id, categoryKey, vatCode), inv(categoryKey, vatCode))} />
               <p className="small muted">De oude boeking krijgt een tegenboeking en de nieuwe wordt gemaakt. Was de btw-periode al aangegeven, dan telt het verschil mee in je volgende aangifte.</p>
             </div>
           )}
@@ -302,7 +307,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
                     const s = (suggestions.data ?? []).find((x) => x.kind === 'rekening');
                     return s && s.kind === 'rekening' ? meta.expenseCategories.find((c) => c.account === s.account)?.key : undefined;
                   })()}
-                  onPick={(categoryKey, vatCode) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode }))}
+                  onPick={(categoryKey, vatCode) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode }), inv(categoryKey, vatCode))}
                 />
               </div>
               <div className="choice" style={{ marginTop: 12 }}>
