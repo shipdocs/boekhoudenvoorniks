@@ -61,7 +61,7 @@ export function DocumentReview({ id }: { id: number }) {
   const doc = useLoad(() => api.documents.get(id), [id]);
   const jobs = useLoad(() => api.jobs.list({ active: true }));
   const [active, setActive] = useState<string | null>(null);
-  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null } | null>(null);
+  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
 
   const d = doc.data;
   useEffect(() => {
@@ -77,6 +77,7 @@ export function DocumentReview({ id }: { id: number }) {
       business: d.classification?.business ?? true,
       paidWith: d.bank_match ? 'bank' : 'later',
       jobId: null,
+      splits: null,
     });
   }, [d, form]);
 
@@ -91,7 +92,7 @@ export function DocumentReview({ id }: { id: number }) {
     { key: 'vat', label: 'BTW', field: r?.vat, show: r?.vat.value.map((v) => `${v.rate}%: ${(v.amount / 100).toFixed(2).replace('.', ',')}`).join(' · ') || '—' },
     { key: 'total', label: 'Totaal', field: r?.total, show: form.total !== null ? new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(form.total / 100) : '?' },
   ];
-  const activeField = fields.find((f) => f.key === active)?.field ?? null;
+  const activeField = fields.find((f) => f.key === active)?.field ?? (active?.startsWith('line-') ? r?.lines?.[Number(active.slice(5))] ?? null : null);
   const pageSize = r?.pageSizes?.[(activeField?.page ?? 1) - 1];
 
   return (
@@ -140,6 +141,35 @@ export function DocumentReview({ id }: { id: number }) {
               Hier twijfelen we nog over: {(d.decisions ?? []).filter((x) => !x.field && !x.ok).map((x) => `${x.label.toLowerCase()} (${x.value})`).join(', ')}. Kies hieronder wat klopt.
             </div>
           )}
+          {d.status === 'controle' && d.issues.filter((i) => i.field === 'lines').map((i) => {
+            const parts = i.suggestion as { categoryKey: string; gross: number; items: string[]; vatRate?: number }[];
+            return (
+              <div key="split" className="notice">
+                {i.message}
+                <div className="row" style={{ marginTop: 8 }}>
+                  <Button small kind={form.splits ? 'primary' : undefined} onClick={() => setForm({ ...form, splits: form.splits ? null : parts.map((p) => ({ categoryKey: p.categoryKey, gross: p.gross, vatRate: p.vatRate })) })}>
+                    {form.splits ? '✓ Wordt apart geboekt' : 'Ja, apart boeken'}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+          {r?.lines && r.lines.length > 0 && (
+            <details className="small" style={{ marginTop: 8 }}>
+              <summary>{r.lines.length} regels op het document{r.linesBasis ? '' : ' (tellen niet op tot het totaal)'}</summary>
+              <table className="list small">
+                <tbody>
+                  {r.lines.map((l, idx) => (
+                    <tr key={idx} className={active === `line-${idx}` ? 'selected' : ''} onClick={() => setActive(`line-${idx}`)}>
+                      <td>{l.value.quantity !== null ? `${l.value.quantity}×` : ''}</td>
+                      <td>{l.value.description}</td>
+                      <td className="num"><Euro cents={l.value.amount} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          )}
           {d.bank_match && <div className="notice good">✓ Betaling gevonden op de bank: {formatDateNl(d.bank_match.transaction_date)} · <Euro cents={d.bank_match.amount} /></div>}
           {d.classification && <p className="small muted">{d.classification.reasons.join(' · ')}</p>}
 
@@ -184,7 +214,7 @@ export function DocumentReview({ id }: { id: number }) {
               <div className="row end">
                 <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
                 <Button kind="primary" disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId }), 'Verwerkt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits }), 'Verwerkt ✓');
                   if (res) go({ screen: 'aankopen' });
                 }}>Klopt, verwerken</Button>
               </div>

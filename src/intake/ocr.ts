@@ -1,3 +1,4 @@
+import { parseEuro } from '../shared/money';
 import type { DocumentResult, TextItem } from './types';
 import type { FetchLike } from '../integrations/types';
 
@@ -55,10 +56,26 @@ export class HttpOcrProvider implements OcrProvider {
       body: JSON.stringify({ mime_type: input.mimeType, filename: input.filename, data_base64: Buffer.from(input.data).toString('base64') }),
     });
     if (!res.ok) throw new Error(`OCR mislukt (HTTP ${res.status})`);
-    const body = (await res.json()) as { pages?: { width: number; height: number }[]; lines?: { text: string; page?: number; bbox?: [number, number, number, number]; confidence?: number }[] };
+    const body = (await res.json()) as {
+      pages?: { width: number; height: number }[];
+      lines?: { text: string; page?: number; bbox?: [number, number, number, number]; confidence?: number }[];
+      /** optioneel: artikelregels, als de engine tabellen herkent (#23) */
+      items?: { description: string; quantity?: number | null; unit_price?: number | string | null; amount: number | string; vat_rate?: number | null; page?: number; bbox?: [number, number, number, number]; confidence?: number }[];
+    };
+    const cents = (v: number | string) => parseEuro(typeof v === 'number' ? v.toFixed(2) : v);
+    const lineItems = (body.items ?? [])
+      .filter((i) => i.description && i.amount !== undefined && i.amount !== null)
+      .map((i) => ({
+        value: { description: i.description, quantity: i.quantity ?? null, unitPrice: i.unit_price != null ? cents(i.unit_price) : null, amount: cents(i.amount), vatRate: i.vat_rate ?? null },
+        confidence: i.confidence ?? 0.8,
+        source: `ocr:${this.id}` as const,
+        page: i.page ?? 1,
+        bbox: i.bbox,
+      }));
     return {
       pageSizes: body.pages,
       items: (body.lines ?? []).map((l) => ({ text: l.text, page: l.page ?? 1, bbox: l.bbox, confidence: l.confidence ?? 0.8 })),
+      structured: lineItems.length ? { lines: lineItems } : undefined,
     };
   }
 }

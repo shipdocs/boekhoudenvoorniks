@@ -1,7 +1,7 @@
 import { parseEuro, type Cents } from '../shared/money';
 import { isIsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban } from '../shared/validation';
-import type { DocumentResult, ExtractionSource, Field, TextItem, VatLine } from './types';
+import type { LineItem, DocumentResult, ExtractionSource, Field, TextItem, VatLine } from './types';
 import { KNOWN_SUPPLIERS } from './suppliers';
 
 /**
@@ -41,6 +41,23 @@ export function toLines(items: TextItem[]): Line[] {
       confidence: Math.min(...items.map((i) => i.confidence ?? 1)),
     };
   });
+}
+
+/**
+ * Bedragen op een artikelregel. Een spatie als duizendtalscheiding ("1 234,56") alleen als het getal
+ * los staat: in "TS55 649,00" hoort 55 bij de artikelcode, dus is het bedrag 649,00.
+ */
+const ITEM_AMOUNT_RE = /(?<![\w.,])(-?\d{1,3}(?: \d{3})+,\d{2})(?!\d)|(?<![\d.,])(-?\d{1,3}(?:\.\d{3})+,\d{2}|-?\d+[.,]\d{2})(?!\d)/g;
+/** Kortingsregel op een bon: hoort bij het artikel erboven, is zelf geen artikel. */
+const DISCOUNT_RE = /\b(korting|discount|actiekorting|voordeel)\b/i;
+function itemAmounts(text: string): Cents[] {
+  return [...text.matchAll(ITEM_AMOUNT_RE)].map((m) => {
+    try {
+      return parseEuro((m[1] ?? m[2])!);
+    } catch {
+      return NaN;
+    }
+  }).filter((n) => Number.isFinite(n));
 }
 
 function amounts(text: string): Cents[] {
@@ -172,6 +189,38 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
   const isInvoice = /factuur|invoice/i.test(rawText);
   const docLine = lines[0] ?? { text: '', page: 1, confidence: 1 };
 
+  // Regels (#23): tekst + bedrag aan het eind, vóór de totalen. Alleen gebruiken als ze optellen.
+  const NOT_ITEM = /totaal|total|btw|b\.t\.w|vat|subtotaal|pin|betaald|wisselgeld|contant|te betalen|iban|kvk|datum|factuur|bon\s*nr|kassa|korting totaal/i;
+  const itemLines: Field<LineItem>[] = [];
+  for (const line of lines) {
+    if (NOT_ITEM.test(line.text) || !/[a-z]{3,}/i.test(line.text)) continue;
+    const a = itemAmounts(line.text);
+    if (a.length === 0 || a.length > 3) continue;
+    const amount = a[a.length - 1]!;
+    if (DISCOUNT_RE.test(line.text)) {
+      // korting verlaagt het artikel erboven; zonder artikel erboven: negeren (dan klopt de som niet en splitsen we niet)
+      const prev = itemLines[itemLines.length - 1];
+      if (prev) {
+        prev.value.amount -= Math.abs(amount);
+        prev.value.unitPrice = null;
+      }
+      continue;
+    }
+    let quantity: number | null = null;
+    let unitPrice: Cents | null = null;
+    const qx = /(\d+(?:[.,]\d+)?)\s*(?:x|×|st\.?|stuks?)\s*(?:à\s*)?(?:€\s*)?(\d+[.,]\d{2})?/i.exec(line.text);
+    if (qx) {
+      quantity = Number(qx[1]!.replace(',', '.'));
+      if (qx[2]) unitPrice = parseEuro(qx[2]);
+      else if (a.length >= 2) unitPrice = a[a.length - 2]!;
+    }
+    const description = line.text.replace(ITEM_AMOUNT_RE, ' ').replace(/(\d+(?:[.,]\d+)?)\s*(?:x|×|st\.?|stuks?)\b/i, ' ').replace(/[€]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (description.length < 3) continue;
+    itemLines.push(field({ description, quantity, unitPrice, amount, vatRate: null }, line, 0.8));
+  }
+  const itemSum = itemLines.reduce((sum, l) => sum + l.value.amount, 0);
+  const linesBasis = itemLines.length === 0 ? null : total && itemSum === total.value ? ('incl' as const) : subtotal && itemSum === subtotal.value ? ('excl' as const) : null;
+
   return {
     documentType: field(/creditnota|credit\s*note|creditfactuur/i.test(rawText) ? 'credit_note' : isInvoice ? 'purchase_invoice' : 'receipt', docLine, 0.7),
     supplier,
@@ -184,6 +233,8 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     subtotal,
     vat: vatLine ? field(vatLines, vatLine, vatConf) : { value: [], confidence: 0.3, source },
     total,
+    lines: itemLines,
+    linesBasis,
     lineDescriptions: lines.filter((l) => amounts(l.text).length === 1 && /[a-z]{4,}/i.test(l.text) && !/totaal|btw|subtotaal|pin|betaald|wisselgeld/i.test(l.text)).map((l) => l.text).slice(0, 30),
     reverseCharge,
     rawText,

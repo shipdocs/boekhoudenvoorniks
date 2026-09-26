@@ -203,6 +203,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         {editable && <Button kind={id ? undefined : 'primary'} disabled={busy} onClick={() => void save()}>Opslaan</Button>}
         <Button disabled={busy} onClick={() => void showPreview()}>Voorbeeld</Button>
         {id && <Button disabled={busy} onClick={() => void run(() => (isInvoice ? api.invoices.savePdf(id) : api.quotes.savePdf(id)), 'PDF opgeslagen')}>PDF opslaan</Button>}
+        {id && isInvoice && invoice && invoice.status !== 'concept' && <Button disabled={busy} title="E-factuur (UBL) die boekhoudprogramma's zonder overtypen inlezen" onClick={() => void run(() => api.invoices.saveUbl(id), 'E-factuur opgeslagen')}>E-factuur (XML)</Button>}
         <span className="grow" />
         {isInvoice && invoice?.status === 'concept' && (
           <>

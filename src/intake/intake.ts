@@ -13,6 +13,7 @@ import { countDecision, logAutomation } from '../inbox/automation-log';
 import { allCertain, type AutopilotLevel, type Decision } from '../automation/decisions';
 import { explain } from '../automation/explain';
 import { documentDecisions } from './decisions';
+import { computeLinesBasis, splitQuestion, suggestSplit } from './line-items';
 import { ValidationError } from '../shared/validation';
 import { isUbl, parseUbl, findEmbeddedUbl } from './ubl';
 import { extractPdf } from './pdf-text';
@@ -25,6 +26,12 @@ import { supplierKey } from './supplier-memory';
 import type { OcrProvider } from './ocr';
 import type { ConfidenceLevel, DocumentResult, Issue } from './types';
 import { splitGross } from '../import/bank';
+
+
+/** Verlegde btw: je betaalt de leverancier alleen netto. */
+function isReverseChargeCode(code: string): boolean {
+  return code === 'verlegd';
+}
 
 export interface IntakeDocument {
   id: number;
@@ -57,6 +64,8 @@ export interface Confirmation {
   business: boolean;
   paidWith: 'bank' | 'kas' | 'prive' | 'later';
   jobId?: number | null;
+  /** bon splitsen over categorieën (#23); bedragen incl. btw, som = totaal. 'prive' = niet zakelijk. */
+  splits?: { categoryKey: string; gross: Cents; vatRate?: number }[] | null;
 }
 
 type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'decisions'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
@@ -158,6 +167,7 @@ export class IntakeService {
     }
     const out = await this.ocr.recognize({ data, mimeType: mime, filename });
     const result = { ...parseDocumentText(out.items, `ocr:${this.ocr.id}`), ...(out.structured ?? {}) } as DocumentResult;
+    if (out.structured?.lines) result.linesBasis = computeLinesBasis(result);
     result.pageSizes = out.pageSizes;
     return { result, source: `ocr:${this.ocr.id}`, issues: [] };
   }
@@ -238,7 +248,10 @@ export class IntakeService {
     const rule = this.memory.get(result.supplier?.value);
     const { decisions, signals } = documentDecisions({ doc: result, issues, classification, bankMatch, rule, level: this.autopilot() });
     // HIGH alleen als álle velden en beslissingen boven hun drempel zitten (#21)
-    const level: ConfidenceLevel = assessed.level === 'HIGH' && !allCertain(decisions) ? 'MEDIUM' : assessed.level;
+    // Gemengde bon (bv. materiaal + werkbroek): nooit automatisch, eerst vragen of we splitsen (#23)
+    const split = suggestSplit(result);
+    if (split) issues.push({ field: 'lines', severity: 'waarschuwing', message: splitQuestion(split), suggestion: split });
+    const level: ConfidenceLevel = assessed.level === 'HIGH' && (!allCertain(decisions) || split) ? 'MEDIUM' : assessed.level;
     this.db
       .prepare(`UPDATE documents SET classification = ?, confidence = ?, issues = ?, decisions = ?, status = 'controle' WHERE id = ?`)
       .run(JSON.stringify(classification), level, JSON.stringify(issues), JSON.stringify(decisions), id);
@@ -417,6 +430,20 @@ export class IntakeService {
 
   /** Splitst per BTW-tarief als het document dat laat zien en het klopt met het totaal; anders één regel. */
   private purchaseLines(result: DocumentResult | null, c: Confirmation, account: string): PurchaseLineInput[] {
+    if (c.splits && c.splits.length > 1) {
+      if (c.splits.reduce((s, x) => s + x.gross, 0) !== c.total) throw new ValidationError('De delen tellen niet op tot het totaal');
+      // een deel met een eigen tarief (van de bonregels) krijgt dat tarief; anders het tarief van de bon
+      const codeFor = (r: number | undefined): PurchaseVatCode => (r === undefined || isReverseChargeCode(c.vatCode) ? c.vatCode : r === 21 ? 'hoog' : r === 9 ? 'laag' : r === 0 ? 'nul' : c.vatCode);
+      return c.splits.map((sp) => {
+        const vatCode = codeFor(sp.vatRate);
+        const rate = PURCHASE_VAT_RATES[vatCode].percentage;
+        if (sp.categoryKey === 'prive') return { account: ACCOUNTS.priveOpnamen, netAmount: sp.gross, vatCode: 'geen' as const, description: 'Privé-deel van de bon' };
+        const cat = EXPENSE_CATEGORIES.find((x) => x.key === sp.categoryKey);
+        if (!cat) throw new ValidationError(`Onbekende categorie ${sp.categoryKey}`);
+        const { net, vat } = splitGross(sp.gross, rate, isReverseChargeCode(vatCode));
+        return { account: cat.account, netAmount: net, vatCode, vatAmount: vat, description: cat.label };
+      });
+    }
     const vat = result?.vat.value ?? [];
     const complete = vat.length > 1 && vat.every((v) => v.base !== null) && vat.reduce((s, v) => s + (v.base ?? 0) + v.amount, 0) === c.total;
     if (complete) {

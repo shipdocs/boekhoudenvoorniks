@@ -21,6 +21,16 @@ export interface VatLine {
   amount: Cents;
 }
 
+/** Eén regel (artikel) op een document (#23). Bedragen in centen. */
+export interface LineItem {
+  description: string;
+  quantity: number | null;
+  unitPrice: Cents | null;
+  /** regelbedrag; incl. of excl. btw staat in DocumentResult.linesBasis */
+  amount: Cents;
+  vatRate: number | null;
+}
+
 export type DocumentType = 'purchase_invoice' | 'receipt' | 'credit_note' | 'unknown';
 
 /**
@@ -41,6 +51,13 @@ export interface DocumentResult {
   total: Field<Cents> | null;
   /** omschrijvingen van regels/artikelen — input voor classificatie */
   lineDescriptions: string[];
+  /** regels met bedragen, als we ze betrouwbaar konden lezen (#23) */
+  lines?: Field<LineItem>[];
+  /**
+   * Tellen de regels op tot het totaal? 'incl' = som = totaal (kassabon), 'excl' = som = subtotaal
+   * (factuur), null = klopt niet: dan nooit splitsen.
+   */
+  linesBasis?: 'incl' | 'excl' | null;
   /** "btw verlegd" op het document */
   reverseCharge: boolean;
   /** ruwe tekst voor debugging en classificatie */

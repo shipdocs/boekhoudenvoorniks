@@ -35,6 +35,17 @@ Antwoord:
 - `confidence` 0..1 per regel. De app combineert dit met andere signalen (validatie, bankmatch,
   leveranciersgeheugen) tot HIGH / MEDIUM / LOW.
 - Een PDF zonder tekstlaag (scan) wordt als PDF gestuurd; de dienst rendert de pagina's zelf.
+- Optioneel `items`: artikelregels, als de engine tabellen herkent. Bedragen in euro's (getal of
+  tekst met punt als decimaalteken):
+
+  ```json
+  "items": [
+    { "description": "Knauf Goldband 25 kg", "quantity": 4, "unit_price": 12.95, "amount": 51.80, "vat_rate": 21, "page": 1, "bbox": [100, 420, 1050, 450], "confidence": 0.97 }
+  ]
+  ```
+
+  Zonder `items` haalt de app de regels zelf uit `lines`. Regels worden alleen gebruikt (bijvoorbeeld
+  om een bon over categorieën te splitsen) als ze precies optellen tot het totaal of subtotaal.
 
 ## Pijplijn in de app
 
