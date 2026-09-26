@@ -157,7 +157,7 @@ export class InboxService {
     const matched = auto.matched;
     for (const d of auto.details) {
       const explanation = explain([{ type: 'matching', label: d.reasons.join(', ') || 'bedrag en omschrijving overeenkwamen', value: d.confidence }]);
-      logAutomation(this.db, { kind: 'bank-match', ref_id: d.txId, summary: `Betaling gekoppeld: ${d.label}`, reason: explanation.sentence, details: explanation });
+      logAutomation(this.db, { kind: 'bank-match', ref_id: d.txId, summary: `Betaling hoort bij ${d.label}`, reason: explanation.sentence, details: explanation });
       countDecision(this.db, 'bankkoppeling', 'automatic');
     }
     let booked = 0;
@@ -181,7 +181,7 @@ export class InboxService {
           logAutomation(this.db, {
             kind: 'bank-auto',
             ref_id: t.id,
-            summary: `${formatEuro(-t.amount)} aan ${rule!.display_name} geboekt als ${label}`,
+            summary: `${formatEuro(-t.amount)} aan ${rule!.display_name} verwerkt als ${label}`,
             reason: explanation.sentence,
             details: explanation,
           });
@@ -223,7 +223,7 @@ export class InboxService {
   private suggestionFor(t: BankTransaction): { categoryKey: string; vatCode: string; business: boolean; confident: boolean; why: string } | null {
     const sug = this.rawSuggestionFor(t);
     if (sug && sug.business && this.fuelIsPrivate(sug.categoryKey)) {
-      return { ...sug, business: false, confident: false, why: 'Je rijdt met een privéauto: tanken, parkeren en onderhoud zijn dan privé. Zakelijke kilometers vul je in bij Belasting → Kilometers.' };
+      return { ...sug, business: false, confident: false, why: 'Je rijdt met een privéauto: tanken, parkeren en onderhoud zijn dan privé. Zakelijke kilometers vul je in bij Belasting → Aftrek → Kilometers.' };
     }
     return sug;
   }
@@ -273,7 +273,7 @@ export class InboxService {
           kind: 'bank-invoice',
           icon: '💳',
           title: `${formatEuro(t.amount)} ontvangen van ${who}`,
-          question: `Dit lijkt betaling van ${inv.label.replace(/ — .*/, '').toLowerCase()}.`,
+          question: `Dit lijkt de betaling van ${inv.label.replace(/ — .*/, '').toLowerCase()}.`,
           amount: t.amount,
           actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'nee', label: 'Nee' }],
           group: { key: 'bank-invoice', label: 'Alle betalingen koppelen' },
@@ -288,7 +288,7 @@ export class InboxService {
           kind: 'bank-purchase',
           icon: '🧾',
           title: `${formatEuro(-t.amount)} betaald aan ${who}`,
-          question: `Hoort dit bij ${pur.label.replace(/^Inkoop /, '')}?`,
+          question: `Hoort dit bij ${pur.label.replace(/^(Inkoop|Aankoop) /, '')}?`,
           amount: t.amount,
           actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'nee', label: 'Nee' }],
           group: { key: 'bank-purchase', label: 'Alle betalingen koppelen' },
@@ -351,8 +351,8 @@ export class InboxService {
           key: `bank-stale-${st.bankAccountId}`,
           kind: 'bank-stale',
           icon: '🏦',
-          title: st.coverageTo ? `${st.name}: bankgegevens lopen t/m ${formatDateNl(st.coverageTo)}` : `${st.name}: nog geen bankafschrift ingelezen`,
-          question: st.coverageTo ? `Dat is ${days} dagen geleden. Lees een nieuw afschrift in, dan kunnen we betalingen koppelen.` : 'Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes.',
+          title: st.coverageTo ? `${st.name}: bank bijgewerkt tot ${formatDateNl(st.coverageTo)}` : `${st.name}: nog geen bankafschrift ingelezen`,
+          question: st.coverageTo ? `Dat is ${days} dagen geleden. Download een nieuw afschrift bij je bank en sleep het in de app. Dan zoeken we uit wat bij welke factuur hoort.` : 'Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes.',
           actions: [{ id: 'open', label: 'Afschrift inlezen', primary: true }],
           ref: { bankAccountId: st.bankAccountId },
         });
@@ -384,7 +384,7 @@ export class InboxService {
         kind: 'invoice-overdue',
         icon: '⏰',
         title: `${inv.relation_name} moet nog ${formatEuro(inv.open_amount)} betalen`,
-        question: `Factuur ${inv.number} is te laat (vervaldatum ${formatDateNl(inv.due_date)}).`,
+        question: `Factuur ${inv.number} is te laat (had betaald moeten zijn op ${formatDateNl(inv.due_date)}).`,
         amount: inv.open_amount,
         actions: [{ id: 'herinnering', label: 'Herinnering sturen', primary: true }, { id: 'open', label: 'Bekijken' }],
         ref: { invoiceId: inv.id },
@@ -467,7 +467,7 @@ export class InboxService {
           kind: 'recurring-confirm',
           icon: '🔁',
           title: `${series.counter_name} lijkt een vaste last`,
-          question: `Ongeveer ${label}. Als vaste last houden we bij of de factuur en de afschrijving op tijd komen.`,
+          question: `Ongeveer ${label}. Als vaste last letten we erop dat de factuur en de betaling elke keer binnenkomen.`,
           actions: [{ id: 'ja', label: 'Ja, vaste last', primary: true }, { id: 'nee', label: 'Nee' }],
           priority: 3,
           ref: { seriesId: series.id },
@@ -484,7 +484,7 @@ export class InboxService {
             kind: 'recurring-stopped',
             icon: '🔁',
             title: `Is ${series.counter_name} gestopt?`,
-            question: `De laatste ${st.missed.length} verwachte afschrijvingen (${label}) zijn niet gebeurd.`,
+            question: `De laatste ${st.missed.length} verwachte betalingen (${label}) zijn niet van je rekening gegaan.`,
             actions: [{ id: 'ja', label: 'Ja, gestopt', primary: true }, { id: 'nee', label: 'Nee, loopt nog' }],
             ref: { seriesId: series.id },
           });
@@ -498,8 +498,8 @@ export class InboxService {
             key,
             kind: 'recurring-missing-payment',
             icon: '🔁',
-            title: `Afschrijving ${series.counter_name} niet gezien`,
-            question: `Rond ${formatDateNl(due)} verwachtten we ongeveer ${formatEuro(series.amount)}. Is je bankafschrift bijgewerkt?`,
+            title: `Betaling aan ${series.counter_name} niet gezien`,
+            question: `Rond ${formatDateNl(due)} verwachtten we ongeveer ${formatEuro(series.amount)}. Heb je je nieuwste bankafschrift al ingelezen?`,
             actions: [{ id: 'ok', label: 'Klopt, niets aan de hand', primary: true }, { id: 'open', label: 'Bank bekijken' }],
             priority: 3,
             ref: { seriesId: series.id },
@@ -514,7 +514,7 @@ export class InboxService {
           kind: 'recurring-invoice',
           icon: '🧾',
           title: `Factuur ${series.counter_name} ontbreekt`,
-          question: `Er is ${formatEuro(-t.amount)} afgeschreven op ${formatDateNl(t.transaction_date)}, maar we missen de factuur.`,
+          question: `Er is ${formatEuro(-t.amount)} van je rekening gegaan op ${formatDateNl(t.transaction_date)}, maar we missen de factuur.`,
           amount: t.amount,
           actions: [{ id: 'open', label: 'Factuur toevoegen', primary: true }, { id: 'geen', label: 'Geen factuur nodig' }],
           group: { key: `recurring-invoice-${series.id}`, label: `Facturen ${series.counter_name}` },
@@ -562,7 +562,7 @@ export class InboxService {
           key: `vat-${previous.key}`,
           kind: 'vat-due',
           icon: '📮',
-          title: `BTW ${previous.label} aangeven`,
+          title: `Btw-aangifte ${previous.label} doen`,
           question: `Uiterlijk ${formatDateNl(deadline)}: ${report.summary.teBetalen >= 0 ? 'betalen' : 'terugkrijgen'} ongeveer ${formatEuro(Math.abs(report.summary.teBetalen))}.`,
           amount: report.summary.teBetalen,
           actions: [{ id: 'open', label: 'Aangifte bekijken', primary: true }],
@@ -592,7 +592,7 @@ export class InboxService {
         kind: 'supplier-auto',
         icon: '🤖',
         title: `${rule.display_name} is bij jou altijd ${label}`,
-        question: `Je hebt dit ${rule.confirmations}× zo gekozen. Voortaan automatisch verwerken? Je ziet het terug onder "Automatisch gedaan" en kunt het altijd terugdraaien.`,
+        question: `Je koos dit al ${rule.confirmations} keer. Wil je dat de app dit voortaan zelf doet? Je ziet het terug op Vandaag en kunt het altijd terugdraaien.`,
         actions: [{ id: 'ja', label: 'Ja, voortaan automatisch', primary: true }, { id: 'nee', label: 'Nee, blijf het vragen' }],
         ref: { supplierKey: rule.supplier_key },
       });
@@ -607,10 +607,10 @@ export class InboxService {
         kind: 'investment-check',
         icon: '🧰',
         title: `Was dit een investering? ${formatEuro(c.amount)} — ${c.description}`,
-        question: 'Gaat dit langer dan een jaar mee (machine, laptop, telefoon, steiger)? Kies "Ja": de btw blijft gewoon terugkomen, de kosten verdeelt de app over 5 jaar en het telt mee voor de investeringsaftrek (KIA). Verder hoef je niets te doen.',
+        question: 'Gaat dit langer dan een jaar mee (machine, laptop, telefoon, steiger)? Kies dan "Ja". Verder hoef je niets te doen.',
         amount: -c.amount,
         actions: [{ id: 'ja', label: 'Ja, investering', primary: true }, { id: 'nee', label: 'Nee, gewone kosten' }],
-        why: 'Vanaf € 450 excl. btw per stuk is iets dat jaren meegaat een bedrijfsmiddel: je trekt het niet in één keer af, maar verdeelt het over de jaren. Daarnaast krijg je mogelijk 28% investeringsaftrek.',
+        why: 'Kost iets € 450 of meer (zonder btw) en gebruik je het jaren? Dan telt de app de kosten verdeeld over 5 jaar. De btw krijg je gewoon meteen terug, en je krijgt misschien 28% extra aftrek.',
         priority: 3,
         ref: { lineId: c.lineId, purchaseId: c.purchaseId ?? undefined, bankTransactionId: c.bankTransactionId ?? undefined },
       });
@@ -621,10 +621,10 @@ export class InboxService {
         key: `suppletie-${c.periodKey}`,
         kind: 'vat-suppletie',
         icon: '📮',
-        title: `BTW ${c.label} verbeteren`,
-        question: `Er is achteraf ${formatEuro(Math.abs(c.btw))} btw ${c.btw >= 0 ? 'bijgekomen' : 'afgegaan'}. Dat is meer dan € 1.000, dus dat doe je met een suppletie-aangifte in Mijn Belastingdienst Zakelijk.`,
+        title: `Btw ${c.label} verbeteren`,
+        question: `Er is achteraf ${formatEuro(Math.abs(c.btw))} btw ${c.btw >= 0 ? 'bijgekomen' : 'afgegaan'}. Dat is meer dan € 1.000. Dat verbeter je apart in Mijn Belastingdienst Zakelijk (dat heet een "suppletie": een verbetering van een oude aangifte).`,
         amount: c.btw,
-        actions: [{ id: 'gedaan', label: 'Suppletie is gedaan', primary: true }, { id: 'open', label: 'Bekijken' }],
+        actions: [{ id: 'gedaan', label: 'Verbetering is verstuurd', primary: true }, { id: 'open', label: 'Bekijken' }],
         priority: 1,
         ref: { periodKey: c.periodKey },
       });
@@ -703,10 +703,10 @@ export class InboxService {
     const bankUpdatedTo = status.map((st) => st.coverageTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
       { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') },
-      { label: 'Alle banktransacties verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && k !== 'bank-stale') },
+      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && k !== 'bank-stale') },
       { label: 'Alle bonnetjes verwerkt', ok: !kinds.has('document-review') },
       { label: 'Geen facturen te laat', ok: !kinds.has('invoice-overdue') },
-      { label: 'BTW bijgewerkt', ok: !kinds.has('vat-due') },
+      { label: 'Btw-aangifte op tijd', ok: !kinds.has('vat-due') },
     ];
     return {
       asOf,

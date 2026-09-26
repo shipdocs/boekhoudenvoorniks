@@ -20,7 +20,7 @@ export const TRADES: TradePreset[] = [
     items: [
       { description: 'Stucwerk wanden (arbeid)', unit: 'm²', vatCode: 'laag', note: RENOVATIE_NOTE },
       { description: 'Plafond spuiten (arbeid)', unit: 'm²', vatCode: 'laag', note: RENOVATIE_NOTE },
-      { description: 'Materiaal', unit: 'post', vatCode: 'hoog' },
+      { description: 'Materiaal', unit: 'totaal', vatCode: 'hoog' },
       { description: 'Voorrijkosten', unit: 'keer', vatCode: 'hoog' },
     ],
   },
@@ -30,12 +30,12 @@ export const TRADES: TradePreset[] = [
     items: [
       { description: 'Schilderwerk binnen (arbeid)', unit: 'm²', vatCode: 'laag', note: RENOVATIE_NOTE },
       { description: 'Schilderwerk buiten (arbeid)', unit: 'uur', vatCode: 'laag', note: RENOVATIE_NOTE },
-      { description: 'Verf en materiaal', unit: 'post', vatCode: 'hoog' },
+      { description: 'Verf en materiaal', unit: 'totaal', vatCode: 'hoog' },
     ],
   },
-  { key: 'timmerman', label: 'Timmerman', items: [{ description: 'Timmerwerk', unit: 'uur', vatCode: 'hoog' }, { description: 'Materiaal', unit: 'post', vatCode: 'hoog' }] },
-  { key: 'loodgieter', label: 'Loodgieter', items: [{ description: 'Arbeid', unit: 'uur', vatCode: 'hoog' }, { description: 'Materiaal', unit: 'post', vatCode: 'hoog' }, { description: 'Voorrijkosten', unit: 'keer', vatCode: 'hoog' }] },
-  { key: 'elektricien', label: 'Elektricien', items: [{ description: 'Arbeid', unit: 'uur', vatCode: 'hoog' }, { description: 'Materiaal', unit: 'post', vatCode: 'hoog' }] },
-  { key: 'klusbedrijf', label: 'Klusbedrijf', items: [{ description: 'Klussen', unit: 'uur', vatCode: 'hoog' }, { description: 'Materiaal', unit: 'post', vatCode: 'hoog' }] },
+  { key: 'timmerman', label: 'Timmerman', items: [{ description: 'Timmerwerk', unit: 'uur', vatCode: 'hoog' }, { description: 'Materiaal', unit: 'totaal', vatCode: 'hoog' }] },
+  { key: 'loodgieter', label: 'Loodgieter', items: [{ description: 'Arbeid', unit: 'uur', vatCode: 'hoog' }, { description: 'Materiaal', unit: 'totaal', vatCode: 'hoog' }, { description: 'Voorrijkosten', unit: 'keer', vatCode: 'hoog' }] },
+  { key: 'elektricien', label: 'Elektricien', items: [{ description: 'Arbeid', unit: 'uur', vatCode: 'hoog' }, { description: 'Materiaal', unit: 'totaal', vatCode: 'hoog' }] },
+  { key: 'klusbedrijf', label: 'Klusbedrijf', items: [{ description: 'Klussen', unit: 'uur', vatCode: 'hoog' }, { description: 'Materiaal', unit: 'totaal', vatCode: 'hoog' }] },
   { key: 'anders', label: 'Iets anders', items: [{ description: 'Werkzaamheden', unit: 'uur', vatCode: 'hoog' }] },
 ];

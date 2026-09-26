@@ -39,7 +39,7 @@ export function runVatChecks(db: Db, ledger: Ledger, period: Period, payable: { 
 
   const bank = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE status = 'nieuw' AND transaction_date BETWEEN ? AND ?`).get(start, end) as { n: number; s: number };
   if (bank.n > 0) {
-    found.push({ key: 'bank-open', blocking: true, title: `${bank.n} banktransacties zijn nog niet verwerkt`, detail: 'Verwerk ze eerst, anders mis je mogelijk btw die je terug kunt krijgen.', count: bank.n, fingerprint: `${bank.n}:${bank.s}`, screen: 'bank' });
+    found.push({ key: 'bank-open', blocking: true, title: `${bank.n} betalingen moet je nog uitzoeken`, detail: 'Verwerk ze eerst, anders mis je mogelijk btw die je terug kunt krijgen.', count: bank.n, fingerprint: `${bank.n}:${bank.s}`, screen: 'bank' });
   }
 
   const noEvidencePurchases = db
@@ -61,7 +61,7 @@ export function runVatChecks(db: Db, ledger: Ledger, period: Period, payable: { 
       key: 'bewijs',
       blocking: true,
       title: `${missing} ${missing === 1 ? 'uitgave' : 'uitgaven'} vanaf ${formatEuro(EVIDENCE_THRESHOLD)} zonder bonnetje of factuur`,
-      detail: 'Zonder bewijsstuk kan de Belastingdienst de btw terugvragen. Voeg een foto of PDF toe, of sla over als je het echt niet hebt.',
+      detail: 'Zonder bon of factuur kan de Belastingdienst de btw terugvragen. Voeg een foto of PDF toe, of sla over als je het echt niet hebt.',
       count: missing,
       fingerprint: [...noEvidencePurchases.map((p) => `p${p.id}`), ...noEvidenceBank.map((b) => `b${b.id}`)].join(','),
       screen: 'aankopen',
@@ -105,7 +105,7 @@ export function runVatChecks(db: Db, ledger: Ledger, period: Period, payable: { 
       key: 'verlegd-btwnummer',
       blocking: true,
       title: `${reverseNoVat.length} ${reverseNoVat.length === 1 ? 'factuur' : 'facturen'} met btw verlegd zonder btw-nummer van de klant`,
-      detail: `Bij btw verlegd moet het btw-nummer van de klant op de factuur staan (${reverseNoVat.map((i) => i.number ?? '?').join(', ')}). Vul het in bij de klant.`,
+      detail: `Btw verlegd betekent: jij rekent geen btw, je klant (een bedrijf) regelt die zelf. Daarom moet zijn btw-nummer op de factuur staan (${reverseNoVat.map((i) => i.number ?? '?').join(', ')}). Vul het in bij de klant.`,
       count: reverseNoVat.length,
       fingerprint: reverseNoVat.map((i) => i.id).join(','),
       screen: 'werk',
@@ -114,12 +114,12 @@ export function runVatChecks(db: Db, ledger: Ledger, period: Period, payable: { 
 
   const kas = ledger.balance(ACCOUNTS.kas);
   if (kas < 0) {
-    found.push({ key: 'kas-negatief', blocking: true, title: `De kas staat op ${formatEuro(kas)}`, detail: 'Er kan niet meer contant geld uitgegeven zijn dan er in kas was. Er ontbreekt waarschijnlijk een storting of een contante ontvangst.', count: 1, fingerprint: String(kas), screen: 'expert' });
+    found.push({ key: 'kas-negatief', blocking: true, title: `Je contante geld staat op ${formatEuro(kas)}`, detail: 'Je hebt meer contant uitgegeven dan er binnenkwam. Waarschijnlijk mist er contant ontvangen geld, of geld dat je van de bank opnam.', count: 1, fingerprint: String(kas), screen: 'aankopen' });
   }
 
   const vraag = ledger.balance(ACCOUNTS.vraagposten);
   if (vraag !== 0) {
-    found.push({ key: 'vraagposten', blocking: true, title: `${formatEuro(Math.abs(vraag))} staat nog bij "weet ik nog niet"`, detail: 'Zoek uit waar deze bedragen bij horen; ze kunnen btw bevatten.', count: 1, fingerprint: String(vraag), screen: 'expert' });
+    found.push({ key: 'vraagposten', blocking: true, title: `${formatEuro(Math.abs(vraag))} staat nog bij "weet ik nog niet"`, detail: 'Zoek uit waar deze betalingen bij horen: er kan btw in zitten die je terugkrijgt.', count: 1, fingerprint: String(vraag), screen: 'bank' });
   }
 
   if (payable.previous !== null && payable.previous !== 0) {

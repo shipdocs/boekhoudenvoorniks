@@ -160,7 +160,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
                   <td>{editable ? <MoneyInput value={l.unitPrice} onChange={(v) => setLine(i, { unitPrice: v })} /> : <Euro cents={l.unitPrice} />}</td>
                   <td>
                     <select value={l.vatCode} disabled={!editable || settings.kor} onChange={(e) => setLine(i, { vatCode: e.target.value as SalesVatCode })}>
-                      {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
+                      {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
                     </select>
                   </td>
                   <td className="num"><Euro cents={lineTotal} /></td>

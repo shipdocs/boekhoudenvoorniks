@@ -28,7 +28,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     id: 'fiscaal',
     version: 1,
     title: 'Auto en startjaar',
-    whatsNew: 'Nieuw: de app regelt nu afschrijving, investeringsaftrek en je kilometers. Daarvoor hebben we twee antwoorden nodig.',
+    whatsNew: 'Nieuw: de app houdt nu je investeringen (bus, machines) en je kilometers bij. Daarvoor hebben we twee antwoorden nodig.',
     satisfied: (s) => s.carUse !== 'onbekend' && s.startYear !== null,
   },
   {
