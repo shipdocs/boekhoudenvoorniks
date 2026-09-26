@@ -2,6 +2,8 @@
 
 ## Nog niet uitgebracht
 
+## 0.3.3 — bonnetjes per mail, eigen categorieën en btw-details
+
 - **Waar komt dit bedrag vandaan?** Bij Belasting klik je op Omzet, ontvangen btw of terug te krijgen btw
   (of op 🔍 details bij een vak van de aangifte) en je ziet welke boekingen erin zitten: datum, klant of
   leverancier, en of het uit een factuur, een bankbetaling, een bonnetje of een handmatige boeking komt. Met
