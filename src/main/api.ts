@@ -191,7 +191,7 @@ export function createApi(s: Services, host: HostContext) {
           'vat-due': ['belasting', r.periodKey],
           'bank-stale': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
-          'recurring-invoice': ['aankopen', undefined],
+          'recurring-invoice': ['bewijs', r.bankTransactionId],
           'recurring-missing-payment': ['bank', undefined],
           'vat-suppletie': ['belasting', undefined],
         };
@@ -317,6 +317,7 @@ export function createApi(s: Services, host: HostContext) {
     },
     documents: {
       add: (name: string, data: Uint8Array) => s.intake.add(name, data),
+      addEvidence: (name: string, data: Uint8Array, bankTransactionId: number) => s.intake.addEvidence(name, data, bankTransactionId),
       list: (status?: 'nieuw' | 'controle' | 'verwerkt' | 'genegeerd') => s.intake.list(status),
       get: (id: number) => s.intake.get(id),
       confirm: (id: number, c: Confirmation) => s.intake.confirm(id, c),

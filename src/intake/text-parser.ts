@@ -43,12 +43,17 @@ export function toLines(items: TextItem[]): Line[] {
   });
 }
 
-/** Bedragen op een artikelregel: géén spatie als duizendtalscheiding ("TS55 649,00" is 649,00). */
-const ITEM_AMOUNT_RE = /(?<![\d.,])(-?\d{1,3}(?:\.\d{3})+,\d{2}|-?\d+[.,]\d{2})(?!\d)/g;
+/**
+ * Bedragen op een artikelregel. Een spatie als duizendtalscheiding ("1 234,56") alleen als het getal
+ * los staat: in "TS55 649,00" hoort 55 bij de artikelcode, dus is het bedrag 649,00.
+ */
+const ITEM_AMOUNT_RE = /(?<![\w.,])(-?\d{1,3}(?: \d{3})+,\d{2})(?!\d)|(?<![\d.,])(-?\d{1,3}(?:\.\d{3})+,\d{2}|-?\d+[.,]\d{2})(?!\d)/g;
+/** Kortingsregel op een bon: hoort bij het artikel erboven, is zelf geen artikel. */
+const DISCOUNT_RE = /\b(korting|discount|actiekorting|voordeel)\b/i;
 function itemAmounts(text: string): Cents[] {
   return [...text.matchAll(ITEM_AMOUNT_RE)].map((m) => {
     try {
-      return parseEuro(m[1]!);
+      return parseEuro((m[1] ?? m[2])!);
     } catch {
       return NaN;
     }
@@ -192,6 +197,15 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     const a = itemAmounts(line.text);
     if (a.length === 0 || a.length > 3) continue;
     const amount = a[a.length - 1]!;
+    if (DISCOUNT_RE.test(line.text)) {
+      // korting verlaagt het artikel erboven; zonder artikel erboven: negeren (dan klopt de som niet en splitsen we niet)
+      const prev = itemLines[itemLines.length - 1];
+      if (prev) {
+        prev.value.amount -= Math.abs(amount);
+        prev.value.unitPrice = null;
+      }
+      continue;
+    }
     let quantity: number | null = null;
     let unitPrice: Cents | null = null;
     const qx = /(\d+(?:[.,]\d+)?)\s*(?:x|×|st\.?|stuks?)\s*(?:à\s*)?(?:€\s*)?(\d+[.,]\d{2})?/i.exec(line.text);

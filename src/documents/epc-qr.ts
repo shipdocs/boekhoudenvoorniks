@@ -1,5 +1,5 @@
 import QRCode from 'qrcode';
-import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
+import { isValidCreditorReference, isValidIban, normalizeIban, ValidationError } from '../shared/validation';
 import type { PurchaseService } from './purchases';
 import type { Cents } from '../shared/money';
 
@@ -15,7 +15,7 @@ export interface EpcInput {
   iban: string;
   bic?: string | null;
   amount: Cents;
-  /** gestructureerde betalingskenmerk (max 35), óf */
+  /** gestructureerd kenmerk: alleen een ISO 11649 creditor reference (RF…); iets anders gaat als omschrijving mee. Óf */
   reference?: string | null;
   /** vrije omschrijving, bv. het factuurnummer (max 140) */
   text?: string | null;
@@ -30,10 +30,14 @@ export function buildEpcPayload(input: EpcInput): string {
   if (!name) throw new ValidationError('De naam van de ontvanger ontbreekt');
   const bic = (input.bic ?? '').replace(/\s/g, '').toUpperCase();
   if (bic && !/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/.test(bic)) throw new ValidationError(`Ongeldige BIC: ${input.bic}`);
-  const reference = (input.reference ?? '').trim();
-  const text = (input.text ?? '').trim().slice(0, 140);
-  if (reference && text) throw new ValidationError('Gebruik óf een betalingskenmerk óf een omschrijving');
-  if (reference.length > 35) throw new ValidationError('Het betalingskenmerk is te lang (maximaal 35 tekens)');
+  const rawReference = (input.reference ?? '').trim();
+  let text = (input.text ?? '').trim().slice(0, 140);
+  if (rawReference && text) throw new ValidationError('Gebruik óf een betalingskenmerk óf een omschrijving');
+  // Het gestructureerde veld mag volgens EPC069-12 alleen een ISO 11649-referentie bevatten; een
+  // ander kenmerk (bv. een Nederlands betalingskenmerk) gaat daarom als omschrijving mee.
+  let reference = '';
+  if (rawReference && isValidCreditorReference(rawReference)) reference = rawReference.replace(/\s+/g, '').toUpperCase();
+  else if (rawReference) text = rawReference.slice(0, 140);
   const euros = `EUR${Math.floor(input.amount / 100)}.${String(input.amount % 100).padStart(2, '0')}`;
   const lines = ['BCD', '002', '1', 'SCT', bic, name, iban, euros, '', reference, text];
   // lege regels aan het eind mogen weg

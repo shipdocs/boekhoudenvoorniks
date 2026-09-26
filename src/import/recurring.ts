@@ -35,6 +35,8 @@ export interface SeriesState extends RecurringSeries {
   nextExpected: IsoDate | null;
   /** verwachte afschrijvingen die (na de coulance) niet gebeurd zijn */
   missed: IsoDate[];
+  /** verwachte afschrijvingen tussen twee betalingen in die ontbreken (laatste 12 maanden) */
+  gaps: IsoDate[];
   /** per maand omgerekend */
   monthly: Cents;
   /** prijsverschil t.o.v. ongeveer een jaar eerder, in procenten (afgerond), of null */
@@ -163,11 +165,23 @@ export class RecurringService {
         missed.push(due);
       }
     }
+    // gaten tussen twee betalingen: een maand overgeslagen (of een afschrijving die we niet zien)
+    const gaps: IsoDate[] = [];
+    const since = addMonths(asOf, -12);
+    for (let i = 1; i < payments.length; i++) {
+      const prev = payments[i - 1]!.transaction_date;
+      const next = payments[i]!.transaction_date;
+      for (let k = 1; k <= 24; k++) {
+        const due = addMonths(prev, step * k);
+        if (addDays(due, GRACE_DAYS[s.interval]) >= next) break;
+        if (due >= since) gaps.push(due);
+      }
+    }
     let priceChangePct: number | null = null;
     const latest = payments[payments.length - 1];
     const yearAgo = latest ? [...payments].reverse().find((p) => diffDays(p.transaction_date, latest.transaction_date) >= 330) : undefined;
     if (latest && yearAgo && yearAgo.amount !== 0) priceChangePct = Math.round(((latest.amount - yearAgo.amount) / yearAgo.amount) * 100);
-    return { ...s, payments, lastSeen, nextExpected, missed, monthly: Math.round(s.amount / step), priceChangePct };
+    return { ...s, payments, lastSeen, nextExpected, missed, gaps, monthly: Math.round(s.amount / step), priceChangePct };
   }
 
   /** Betalingen van een actieve reeks die een factuur verwachten maar er (na de coulance) nog geen hebben. */

@@ -24,7 +24,8 @@ export function classifyLine(item: LineItem, basis: 'incl' | 'excl', vatRate = 2
     if (!re.test(item.description)) continue;
     if (cat === 'gereedschap') {
       const each = item.unitPrice ?? (item.quantity && item.quantity > 0 ? Math.round(item.amount / item.quantity) : item.amount);
-      const excl = basis === 'incl' ? Math.round((each * 100) / (100 + vatRate)) : each;
+      const rate = item.vatRate ?? vatRate;
+      const excl = basis === 'incl' ? Math.round((each * 100) / (100 + rate)) : each;
       if (excl >= INVESTMENT_THRESHOLD) return 'investering';
     }
     return cat;
@@ -47,6 +48,8 @@ export interface SplitPart {
   /** bedrag inclusief btw */
   gross: Cents;
   items: string[];
+  /** btw-tarief van deze regels (als het document dat per regel vermeldt) */
+  vatRate?: number;
 }
 
 /**
@@ -57,16 +60,19 @@ export function suggestSplit(doc: DocumentResult): SplitPart[] | null {
   const lines = doc.lines ?? [];
   if (!doc.linesBasis || lines.length < 2 || !doc.total) return null;
   const rate = doc.vat.value.length === 1 ? doc.vat.value[0]!.rate : 21;
-  const parts = new Map<LineCategory, SplitPart>();
+  // per soort én per btw-tarief: elk deel wordt met zijn eigen tarief geboekt
+  const parts = new Map<string, SplitPart>();
   for (const l of lines) {
     const cat = classifyLine(l.value, doc.linesBasis, rate);
-    const gross = doc.linesBasis === 'incl' ? l.value.amount : Math.round((l.value.amount * (100 + (l.value.vatRate ?? rate))) / 100);
-    const p = parts.get(cat) ?? { categoryKey: cat, gross: 0, items: [] };
+    const lineRate = l.value.vatRate ?? undefined;
+    const gross = doc.linesBasis === 'incl' ? l.value.amount : Math.round((l.value.amount * (100 + (lineRate ?? rate))) / 100);
+    const key = `${cat}|${lineRate ?? ''}`;
+    const p = parts.get(key) ?? { categoryKey: cat, gross: 0, items: [], ...(lineRate !== undefined ? { vatRate: lineRate } : {}) };
     p.gross += gross;
     p.items.push(l.value.description);
-    parts.set(cat, p);
+    parts.set(key, p);
   }
-  if (parts.size < 2) return null;
+  if (new Set([...parts.values()].map((p) => p.categoryKey)).size < 2) return null;
   const list = [...parts.values()].sort((a, b) => b.gross - a.gross);
   // afronding bij excl.-regels: het verschil gaat naar het grootste deel, zodat de som = totaal
   const diff = doc.total.value - list.reduce((s, p) => s + p.gross, 0);
