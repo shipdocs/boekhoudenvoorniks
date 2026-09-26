@@ -231,7 +231,10 @@ function IncomeTaxCard() {
           <table>
             <tbody>
               <tr><td>Winst (heel jaar, geschat)</td><td className="num">{euro(b.profit)}</td></tr>
+              {b.bijtellingen > 0 && <tr><td>+ Bijtellingen (representatie, verkoop bedrijfsmiddel)</td><td className="num">{euro(b.bijtellingen)}</td></tr>}
+              {b.kia > 0 && <tr><td>− Investeringsaftrek (KIA)</td><td className="num">{euro(b.kia)}</td></tr>}
               <tr><td>− Zelfstandigenaftrek</td><td className="num">{euro(b.zelfstandigenaftrek)}</td></tr>
+              {b.startersaftrek > 0 && <tr><td>− Startersaftrek</td><td className="num">{euro(b.startersaftrek)}</td></tr>}
               <tr><td>− MKB-winstvrijstelling</td><td className="num">{euro(b.mkbWinstvrijstelling)}</td></tr>
               <tr><td>= Belastbaar inkomen</td><td className="num">{euro(b.taxableIncome)}</td></tr>
               <tr><td>Belasting box 1</td><td className="num">{euro(b.box1)}</td></tr>
@@ -244,6 +247,9 @@ function IncomeTaxCard() {
           <p className="muted">Niet meegenomen: {e.notIncluded.join('; ')}.</p>
         </div>
       )}
+      <div className="row" style={{ marginTop: 10 }}>
+        <Button small kind="primary" onClick={() => go({ screen: 'aangifte' })}>Aftrekposten, bedrijfsmiddelen en kilometers</Button>
+      </div>
       <p className="muted small" style={{ marginTop: 10 }}>
         <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Urencriterium aanpassen of de schatting uitzetten</span>
       </p>

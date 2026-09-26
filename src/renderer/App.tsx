@@ -12,6 +12,7 @@ import { DocumentReview } from './screens/DocumentReview';
 import { Customers, CustomerDetail } from './screens/Customers';
 import { Bank, CategorizeTransaction } from './screens/Bank';
 import { Tax } from './screens/Tax';
+import { TaxYear } from './screens/TaxYear';
 import { Overview } from './screens/Overview';
 import { SettingsScreen } from './screens/Settings';
 import { TemplateEditor } from './screens/TemplateEditor';
@@ -28,7 +29,7 @@ const NAV: { screen: Screen; label: string; icon: string; also?: Screen[] }[] = 
   { screen: 'aankopen', label: 'Aankopen & bonnetjes', icon: '🧾', also: ['document'] },
   { screen: 'klanten', label: 'Klanten', icon: '👤', also: ['klant'] },
   { screen: 'bank', label: 'Bank', icon: '🏦', also: ['categorie'] },
-  { screen: 'belasting', label: 'Belasting', icon: '📮' },
+  { screen: 'belasting', label: 'Belasting', icon: '📮', also: ['aangifte'] },
   { screen: 'overzicht', label: 'Hoe gaat het?', icon: '📈' },
 ];
 
@@ -106,6 +107,7 @@ export function App() {
       case 'klant': return <CustomerDetail id={route.id as number | undefined} key={String(route.id ?? 'new')} />;
       case 'bank': return <Bank focus={route.id as number | undefined} />;
       case 'belasting': return <Tax periodKey={route.id as string | undefined} key={String(route.id ?? '')} />;
+      case 'aangifte': return <TaxYear />;
       case 'overzicht': return <Overview />;
       case 'instellingen': return <SettingsScreen />;
       case 'opmaak': return <TemplateEditor />;

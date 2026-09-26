@@ -233,6 +233,12 @@ async function backgroundTasks(): Promise<void> {
     console.error('Back-up mislukt', e);
   }
   try {
+    // afschrijving van afgesloten jaren (na de jaarwisseling)
+    services.assets.bookDue();
+  } catch (e) {
+    console.error('Afschrijving boeken mislukt', e);
+  }
+  try {
     const r = services.inbox.autoProcess();
     if (r.matched + r.booked > 0) emit('auto-processed', r);
   } catch (e) {

@@ -3,6 +3,9 @@ import { Ledger } from './core-ledger/ledger';
 import { EventService } from './core-ledger/events';
 import { RecurringService } from './import/recurring';
 import { IncomeTaxService } from './tax/income-tax';
+import { AssetService } from './tax/assets';
+import { HoursService, MileageService } from './tax/mileage';
+import { TaxOverviewService } from './tax/overview';
 import { SearchService } from './search/search';
 import { SettingsService } from './settings/settings';
 import { RelationsService } from './relations/relations';
@@ -63,10 +66,14 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const exports = new AccountantExport(db, ledger);
   const memory = new SupplierMemory(db);
   const classifier = new Classifier(memory, deps.llm ?? null);
-  const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation);
+  const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);
-  const incomeTax = new IncomeTaxService(db, settings);
+  const assets = new AssetService(db, ledger);
+  const mileage = new MileageService(db, ledger);
+  const hours = new HoursService(db);
+  const taxOverview = new TaxOverviewService(db, settings, assets, mileage, hours);
+  const incomeTax = new IncomeTaxService(db, settings, { assets, overview: taxOverview });
   const jobs = new JobService(db, quotes, invoices, relations);
   const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases, recurring);
   const checklist = new ChecklistService(db, settings);
@@ -75,7 +82,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   templates.seedDefaults();
   bank.ensureDefaultAccount();
 
-  return { db, ledger, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist };
+  return { db, ledger, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;

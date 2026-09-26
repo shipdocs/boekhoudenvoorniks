@@ -624,4 +624,57 @@ export const migrations: string[] = [
   ALTER TABLE documents ADD COLUMN gps_lat REAL;
   ALTER TABLE documents ADD COLUMN gps_lon REAL;
   `,
+  /* 11: belastingvoordelen: bedrijfsmiddelen, afschrijving, kilometers, uren */ `
+  -- Bedrijfsmiddelen: afgeleid uit de journaalregels op een activarekening (elke manier van boeken).
+  CREATE TABLE assets (
+    id INTEGER PRIMARY KEY,
+    journal_line_id INTEGER NOT NULL UNIQUE REFERENCES journal_lines(id),
+    account_rgs TEXT NOT NULL,
+    name TEXT NOT NULL,
+    acquired_on TEXT NOT NULL,
+    cost INTEGER NOT NULL,
+    residual INTEGER NOT NULL DEFAULT 0,
+    lifetime_months INTEGER NOT NULL DEFAULT 60,
+    -- 1 = telt niet mee voor de investeringsaftrek (bv. personenauto)
+    kia_excluded INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'actief' CHECK (status IN ('actief','verkocht','vervallen')),
+    disposed_on TEXT,
+    proceeds INTEGER,
+    disposal_entry_id INTEGER REFERENCES journal_entries(id),
+    -- afschrijving tot en met dit jaar is buiten de app gedaan (bestaande administratie); null = alles in de app
+    booked_elsewhere_until INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Bestaande administratie: jaren vóór deze update boekt de app niet vanzelf (misschien al aangegeven,
+  -- of door de boekhouder buiten de app afgeschreven). Nieuwe administraties: geen beperking.
+  INSERT INTO settings (key, value) SELECT 'counter:depreciation-since', strftime('%Y', 'now') WHERE EXISTS (SELECT 1 FROM journal_entries);
+  -- Geboekte afschrijving per bedrijfsmiddel per jaar (één post per jaar, of tot de verkoopdatum).
+  CREATE TABLE asset_depreciation (
+    asset_id INTEGER NOT NULL REFERENCES assets(id),
+    year INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
+    journal_entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+    PRIMARY KEY (asset_id, year)
+  );
+  -- Zakelijke kilometers met de privéauto: € per km als kosten, tegen privé gestort.
+  CREATE TABLE trips (
+    id INTEGER PRIMARY KEY,
+    trip_date TEXT NOT NULL,
+    km REAL NOT NULL CHECK (km > 0),
+    description TEXT NOT NULL,
+    job_id INTEGER REFERENCES jobs(id),
+    rate INTEGER NOT NULL,
+    journal_entry_id INTEGER REFERENCES journal_entries(id),
+    deleted INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Uren voor het urencriterium die niet op een werkbon staan (administratie, offertes, reizen …).
+  CREATE TABLE time_entries (
+    id INTEGER PRIMARY KEY,
+    entry_date TEXT NOT NULL,
+    hours REAL NOT NULL CHECK (hours > 0),
+    description TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];

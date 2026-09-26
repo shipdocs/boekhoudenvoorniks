@@ -32,6 +32,9 @@ export function Onboarding() {
   const [kor, setKor] = useState(settings.kor);
   const [vatPeriod, setVatPeriod] = useState(settings.vatPeriod);
   const [autopilot, setAutopilot] = useState(settings.autopilot);
+  const [carUse, setCarUse] = useState(settings.carUse);
+  const [startYear, setStartYear] = useState(settings.startYear ? String(settings.startYear) : '');
+  const [startersUsed, setStartersUsed] = useState(settings.startersaftrekUsed.count);
   const [lastNumber, setLastNumber] = useState('');
   const [terms, setTerms] = useState(settings.termsAcceptedVersion === TERMS_VERSION);
   const year = new Date().getFullYear();
@@ -50,6 +53,7 @@ export function Onboarding() {
       if (shows('btw')) Object.assign(patch, { kor, vatPeriod, defaultVatCode: kor ? 'vrijgesteld' : 'hoog' });
       if (shows('bedrijf')) patch.smtp = { ...settings.smtp, fromName: company.name, fromEmail: settings.smtp.fromEmail || company.email };
       if (shows('nummering')) patch.termsAcceptedVersion = TERMS_VERSION;
+      if (shows('fiscaal')) Object.assign(patch, { carUse, startYear: Number(startYear) || null, startersaftrekUsed: { count: startersUsed, asOfYear: year } });
       await api.settings.update(patch);
       if (shows('bank')) {
         const accounts = await api.bank.accounts();
@@ -220,6 +224,39 @@ export function Onboarding() {
             📥 Sleep je bankafschrift hierheen of klik om te kiezen
           </DropZone>
           {footer(!company.iban || isValidIban(company.iban))}
+        </>
+      )}
+
+      {step.id === 'fiscaal' && (
+        <>
+          <h1>Auto en startjaar</h1>
+          <p className="sub">Hiermee rekenen we je aftrekposten uit: kilometers, afschrijving en de startersaftrek.</p>
+          <h2>Waarmee rijd je zakelijk?</h2>
+          <div className="choice">
+            {([
+              ['prive', 'Met mijn privéauto', 'Je krijgt € 0,25 per zakelijke kilometer. Tanken en parkeren tellen dan als privé.'],
+              ['zakelijk', 'Met een bus of auto van de zaak', 'Tanken, onderhoud en verzekering zijn kosten; de bus zelf schrijf je af.'],
+              ['geen', 'Ik rijd niet zakelijk', ''],
+            ] as const).map(([key, label, hint]) => (
+              <button key={key} className={carUse === key ? 'selected' : ''} onClick={() => setCarUse(key)}>
+                {label}
+                {hint && <div className="hint">{hint}</div>}
+              </button>
+            ))}
+          </div>
+          <div className="grid cols-2" style={{ marginTop: 18 }}>
+            <Field label="In welk jaar ben je gestart?">
+              <input value={startYear} onChange={(e) => setStartYear(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder={String(year)} inputMode="numeric" />
+            </Field>
+            {Number(startYear) > 0 && year - Number(startYear) < 5 && (
+              <Field label="Startersaftrek al eerder gebruikt?" hint="vóór dit jaar; weet je het niet, kies 0">
+                <select value={startersUsed} onChange={(e) => setStartersUsed(Number(e.target.value))}>
+                  {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}×</option>)}
+                </select>
+              </Field>
+            )}
+          </div>
+          {footer(carUse !== 'onbekend' && Number(startYear) > 1900 && Number(startYear) <= year)}
         </>
       )}
 

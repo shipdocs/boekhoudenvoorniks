@@ -3,6 +3,19 @@
 ## Nog niet uitgebracht
 
 ### Nieuw
+- **Aftrekposten** (Belasting → Aftrekposten, bedrijfsmiddelen en kilometers):
+  - **Bedrijfsmiddelen en afschrijving**: aankopen vanaf € 450 worden bedrijfsmiddelen. De app schrijft ze
+    lineair af (minstens 5 jaar) en boekt de afschrijving na afloop van het jaar. Verkopen verwerkt de app met
+    de boekwaarde.
+  - **Kleinschaligheidsinvesteringsaftrek (KIA)** en de desinvesteringsbijtelling (tabellen 2025 en 2026).
+  - **Privéauto**: € 0,25 per zakelijke km (2025: € 0,23). Tanken en parkeren worden dan als privé
+    voorgesteld en nooit automatisch als kosten geboekt.
+  - **Etentjes, borrels & relatiegeschenken**: nieuwe categorie. De app telt 20% bij (of de drempel, als die lager is).
+  - **Startersaftrek** en een **urenteller** voor het urencriterium (werkbonnen + losse uren).
+  - **Voor je aangifte**: jaaroverzicht met per regel het bedrag, de uitleg en waar het in de aangifte hoort.
+    Plus een signaal voor mogelijke EIA/MIA/Vamil, met de RVO-termijn.
+  - De schatting van de inkomstenbelasting rekent dit allemaal mee.
+  - Bestaande gebruikers krijgen één nieuwe onboardingstap: *Auto en startjaar*.
 - **Demo**: bij de eerste start (of via Instellingen → Back-up, demo & updates) de app bekijken met een
   voorbeeldbedrijf: klanten, offertes, facturen (betaald, open, vervallen), een klus, bonnetjes en een
   bankafschrift. In de demo gaat er geen e-mail naar buiten; een balk bovenaan toont dat je in de demo zit.
