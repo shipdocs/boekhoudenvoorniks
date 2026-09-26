@@ -2,12 +2,17 @@
 
 ## Nog niet uitgebracht
 
+## 0.3.0 — aftrekposten, demo en gewone taal
+
 ### Duidelijker
 - **Alle teksten in gewone taal nagelopen** (meldingen, knoppen, foutmeldingen, taken op Vandaag). Vaktaal
   is vervangen of in één regel uitgelegd. Wat echt voor de boekhouder is, staat bij *Notities voor je
   boekhouder* in het jaaroverzicht en gaat mee met "Kopieer voor je boekhouder".
 - Interne boekhoudfouten verschijnen niet meer als vaktaal, maar als een gewone melding.
 - Overal "btw" (zoals de Belastingdienst het schrijft).
+- Btw-overzicht: "Min: btw die je terugkrijgt" staat nu als positief bedrag; verlegde btw noemt ook buitenlandse leveranciers.
+- Zoeken of filteren zonder resultaat toont "Geen facturen gevonden" in plaats van "Nog geen facturen".
+- E-mail: bij SSL/TLS springt de poort mee naar 465 (STARTTLS: 587); "Verbinding testen" meldt als server of afzender ontbreekt.
 
 ### Nieuw
 - **Aftrekposten** (Belasting → Aftrekposten, bedrijfsmiddelen en kilometers):

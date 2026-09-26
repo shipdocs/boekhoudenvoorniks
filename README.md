@@ -87,7 +87,7 @@ Download de installer van de [laatste release](https://github.com/shipdocs/grati
 Op **Windows** kan SmartScreen melden dat "Windows uw pc heeft beveiligd". Dat komt doordat de installer (nog) niet met een betaald certificaat ondertekend is. Download de installer alleen van de [GitHub-release](https://github.com/shipdocs/gratis-boekhouden/releases) en controleer eventueel het controlegetal:
 
 ```powershell
-Get-FileHash '.\Gratis Boekhouden Setup 0.2.0.exe' -Algorithm SHA256   # vergelijk met SHA256SUMS-Windows.txt
+Get-FileHash '.\Gratis Boekhouden Setup 0.3.0.exe' -Algorithm SHA256   # vergelijk met SHA256SUMS-Windows.txt
 ```
 
 Klopt het, klik dan op **Meer informatie → Toch uitvoeren**. Op Linux: `sha256sum -c SHA256SUMS-Linux.txt --ignore-missing`.
@@ -101,7 +101,7 @@ GitHub-release. De versie komt uit `package.json`. De geïnstalleerde app werkt 
 ## Status en open punten
 
 De fases MVP, V2 en V3 uit het technisch plan zijn gebouwd en uitgebracht als v0.1.0. De slimme
-automatisering volgde in v0.2.0 (zie [CHANGELOG.md](CHANGELOG.md)). Openstaand werk staat als issue in
+automatisering volgde in v0.2.0, aftrekposten, de demo en teksten in gewone taal in v0.3.0 (zie [CHANGELOG.md](CHANGELOG.md)). Openstaand werk staat als issue in
 GitHub, per milestone en met prioriteit.
 
 Het rekeningschema gebruikt de officiële RGS-referentiecodes (taxonomie-release 20251210, `src/core-ledger/rgs-codes.json`).
