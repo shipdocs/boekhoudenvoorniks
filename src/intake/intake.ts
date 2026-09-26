@@ -6,7 +6,7 @@ import type { RelationsService } from '../relations/relations';
 import type { BankService, BankTransaction } from '../import/bank';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { EXPENSE_CATEGORIES, PRIVATE_CAR_CATEGORIES } from '../shared/categories';
-import { PURCHASE_VAT_RATES, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
+import { PURCHASE_VAT_RATES, isPurchaseVatCode, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
 import { diffDays, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { countDecision, logAutomation } from '../inbox/automation-log';
@@ -407,7 +407,7 @@ export class IntakeService {
     if (!Number.isSafeInteger(c.total) || c.total === 0) throw new ValidationError('Vul het totaalbedrag in');
     const category = EXPENSE_CATEGORIES.find((x) => x.key === c.categoryKey);
     if (!category) throw new ValidationError('Kies waar de aankoop voor was');
-    if (!(c.vatCode in PURCHASE_VAT_RATES)) throw new ValidationError('Kies of er btw op de bon stond');
+    if (!isPurchaseVatCode(c.vatCode)) throw new ValidationError('Kies of er btw op de bon stond');
 
     tx(this.db, () => {
       if (opts.learn !== false) this.memory.learn(c.supplier, { categoryKey: c.categoryKey, vatCode: c.vatCode, business: c.business });

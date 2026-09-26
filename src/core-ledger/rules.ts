@@ -45,7 +45,7 @@ export function expenseLines(lines: PurchaseLineInput[], counterAccount: string,
   let netTotal = 0;
   for (const l of lines) {
     assertCents(l.netAmount, 'bedrag');
-    if (!(l.vatCode in PURCHASE_VAT_RATES)) throw new ValidationError('Kies een btw-tarief');
+    if (!isPurchaseVatCode(l.vatCode)) throw new ValidationError('Kies een btw-tarief');
     const vat = purchaseVat(l);
     netTotal += l.netAmount;
     out.push(signedLine(l.account, l.netAmount, { relationId, vatCode: l.vatCode, description: l.description ?? null }));

@@ -45,11 +45,12 @@ export const PURCHASE_VAT_RATES: Record<PurchaseVatCode, VatRateInfo> = {
 };
 
 export function isSalesVatCode(code: string): code is SalesVatCode {
-  return code in SALES_VAT_RATES;
+  // hasOwn: 'toString' e.d. van het prototype tellen niet als btw-code
+  return typeof code === 'string' && Object.hasOwn(SALES_VAT_RATES, code);
 }
 
 export function isPurchaseVatCode(code: string): code is PurchaseVatCode {
-  return code in PURCHASE_VAT_RATES;
+  return typeof code === 'string' && Object.hasOwn(PURCHASE_VAT_RATES, code);
 }
 
 /** EU-lidstaten (landcode zoals in adressen en IBAN; Griekenland = GR, in btw-nummers EL). */
