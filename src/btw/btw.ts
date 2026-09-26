@@ -34,7 +34,10 @@ export interface VatReport {
   /** Voor de gebruiker: de vier getallen die ertoe doen */
   summary: {
     omzet: Cents;
+    /** btw over je eigen omzet (1a/1b) */
     btwOverOmzet: Cents;
+    /** verlegde btw op inkoop (2a/4a/4b): aangegeven én als voorbelasting afgetrokken */
+    btwVerlegd: Cents;
     voorbelasting: Cents;
     teBetalen: Cents;
     teBetalenEuro: number;
@@ -268,7 +271,8 @@ export class VatService {
       rubrieken: [r1a, r1b, r1e, r2a, r3a, r3b, r4a, r4b, r5a, r5b, r5c, r5g],
       summary: {
         omzet: omzetHoog + omzetLaag + omzetNul + omzetVrijgesteld + omzetExport + omzetIcp,
-        btwOverOmzet: btw5a,
+        btwOverOmzet: btwHoog + btwLaag,
+        btwVerlegd: btwVerlegd + btwBuitenEu + btwEu,
         voorbelasting,
         teBetalen: btw5a - voorbelasting,
         teBetalenEuro: saldoEuro,
@@ -416,7 +420,7 @@ export class VatService {
              balance = excluded.balance, details = excluded.details, status = 'ingediend', submitted_at = excluded.submitted_at,
              journal_entry_id = excluded.journal_entry_id`,
         )
-        .run(period.key, period.start, period.end, report.summary.btwOverOmzet, report.summary.voorbelasting, report.summary.teBetalen, JSON.stringify(report.rubrieken), entryId);
+        .run(period.key, period.start, period.end, report.summary.btwOverOmzet + report.summary.btwVerlegd, report.summary.voorbelasting, report.summary.teBetalen, JSON.stringify(report.rubrieken), entryId);
       return this.calculate(periodKey);
     });
   }

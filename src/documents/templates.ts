@@ -215,7 +215,7 @@ export function renderDocumentHtml(doc: RenderableDocument, customer: Renderable
       quantity: formatQuantity(l.quantity),
       unit: l.unit ?? '',
       unitPrice: formatEuro(l.unit_price),
-      vatLabel: l.vat_code === 'verlegd' || l.vat_code === 'icp' ? 'verlegd' : l.vat_code === 'export' ? '0%' : l.vat_code === 'vrijgesteld' ? '—' : `${l.vat_percentage}%`,
+      vatLabel: l.vat_code === 'verlegd' ? 'verlegd' : l.vat_code === 'icp' ? '0% ICP' : l.vat_code === 'export' ? '0% uitvoer' : l.vat_code === 'vrijgesteld' ? '—' : `${l.vat_percentage}%`,
       net: formatEuro(lineNet({ quantity: l.quantity, unitPrice: l.unit_price })),
     })),
     totals: {

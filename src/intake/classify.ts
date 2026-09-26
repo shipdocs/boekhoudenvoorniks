@@ -27,20 +27,28 @@ export interface LlmClassifier {
 }
 
 const EU_VAT_PREFIXES = new Set(['AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES', 'FI', 'FR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK', 'XI']);
+/** EU-landen in een IBAN (Griekenland = GR). */
+const EU_IBAN_PREFIXES = new Set([...EU_VAT_PREFIXES].filter((c) => c !== 'EL' && c !== 'XI').concat('GR'));
 
 /**
  * Verlegde btw: waar zit de leverancier? Afgeleid uit het btw-nummer (landcode). NL of onbekend = 2a;
  * een ander EU-land = 4b; een btw-nummer van buiten de EU (bv. GB, CHE, NO) = 4a (#16).
  */
-export function reverseChargeOrigin(supplierVatNumber: string | null): 'verlegd' | 'eu' | 'buiten-eu' {
+export function reverseChargeOrigin(supplierVatNumber: string | null, supplierIban: string | null = null): 'verlegd' | 'eu' | 'buiten-eu' {
   const prefix = supplierVatNumber?.replace(/[\s.-]/g, '').toUpperCase().match(/^([A-Z]{2,3})/)?.[1];
-  if (!prefix || prefix === 'NL') return 'verlegd';
+  if (!prefix) {
+    // geen btw-nummer gevonden: dan het land van het rekeningnummer als aanwijzing
+    const iban = supplierIban?.replace(/\s/g, '').toUpperCase().slice(0, 2);
+    if (!iban || iban === 'NL') return 'verlegd';
+    return EU_IBAN_PREFIXES.has(iban) ? 'eu' : 'buiten-eu';
+  }
+  if (prefix === 'NL') return 'verlegd';
   if (EU_VAT_PREFIXES.has(prefix.slice(0, 2))) return 'eu';
   return 'buiten-eu';
 }
 
 export function vatFromDocument(doc: DocumentResult): Classification['vatCode'] | null {
-  if (doc.reverseCharge) return reverseChargeOrigin(doc.supplierVatNumber?.value ?? null);
+  if (doc.reverseCharge) return reverseChargeOrigin(doc.supplierVatNumber?.value ?? null, doc.supplierIban?.value ?? null);
   const rates = doc.vat.value.filter((v) => v.amount !== 0).map((v) => v.rate);
   if (rates.length === 0) return doc.vat.value.length > 0 ? 'nul' : null;
   if (rates.every((r) => r === 21)) return 'hoog';
@@ -83,7 +91,7 @@ export class Classifier {
         reasons.push('artikel lijkt gereedschap');
       }
       reasons.push(`${known.name} is een bekende leverancier`);
-      return { categoryKey: category, vatCode: docVat ?? known.vatCode, business: true, confidence: 0.75, source: 'regel', reasons, automatic: false };
+      return { categoryKey: category, vatCode: docVat === 'verlegd' && known.vatCode === 'eu' ? 'eu' : docVat ?? known.vatCode, business: true, confidence: 0.75, source: 'regel', reasons, automatic: false };
     }
 
     if (doc.lineDescriptions.some((l) => TOOL_KEYWORDS.test(l))) {

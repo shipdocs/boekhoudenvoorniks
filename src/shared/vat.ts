@@ -50,6 +50,15 @@ export function isPurchaseVatCode(code: string): code is PurchaseVatCode {
   return code in PURCHASE_VAT_RATES;
 }
 
+/** EU-lidstaten (landcode zoals in adressen en IBAN; Griekenland = GR, in btw-nummers EL). */
+export const EU_COUNTRIES = new Set(['AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK']);
+
+/** Genormaliseerde landcode (2 letters, hoofdletters) of null als het geen geldige code is. */
+export function countryCode(input: string | null | undefined): string | null {
+  const c = (input ?? '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(c) ? (c === 'EL' ? 'GR' : c) : null;
+}
+
 /** Verlegde inkoop: je betaalt de leverancier alleen netto en rekent de btw zelf af. */
 export function isReverseCharge(code: string): code is 'verlegd' | 'eu' | 'buiten-eu' {
   return code === 'verlegd' || code === 'eu' || code === 'buiten-eu';
