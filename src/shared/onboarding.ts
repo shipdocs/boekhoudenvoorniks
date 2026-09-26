@@ -20,7 +20,7 @@ export interface OnboardingStep {
 
 export const ONBOARDING_STEPS: OnboardingStep[] = [
   { id: 'welkom', version: 1, title: 'Welkom', satisfied: (s) => !!s.profile.trade },
-  { id: 'alleen', version: 1, title: 'Werk je alleen?', satisfied: () => true },
+  { id: 'alleen', version: 1, title: 'Werk je alleen?' },
   { id: 'bedrijf', version: 1, title: 'Je bedrijf', satisfied: (s) => !!(s.company.name && s.company.address && s.company.city) },
   { id: 'btw', version: 1, title: 'BTW', satisfied: (s) => s.kor || !!s.company.vatNumber },
   { id: 'bank', version: 1, title: 'Bank', satisfied: (s) => !!s.company.iban },
@@ -30,7 +30,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     title: 'Hoeveel mag de app zelf doen?',
     whatsNew: 'Nieuw: je kiest nu zelf hoeveel de app automatisch mag verwerken.',
   },
-  { id: 'nummering', version: 1, title: 'Factuurnummers en afspraken', satisfied: () => true },
+  { id: 'nummering', version: 1, title: 'Factuurnummers en afspraken' },
 ];
 
 /**

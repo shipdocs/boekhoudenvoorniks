@@ -55,6 +55,15 @@ describe('onboarding die zichzelf bijwerkt', () => {
     // en wordt dan meteen als gezien vastgelegd
     expect(markSeen(filled, [], steps)).toEqual({ bedrijf: 2, nieuw: 1 });
   });
+
+  it('elke bestaande stap komt terug als zijn versie omhooggaat en de gegevens niet vanzelf kloppen', () => {
+    const legacy = { ...base, onboardingDone: true, onboardingSteps: {} };
+    for (const step of ONBOARDING_STEPS) {
+      const bumped = ONBOARDING_STEPS.map((st) => (st.id === step.id ? { ...st, version: st.version + 1 } : st));
+      const seen = markSeen(legacy, ONBOARDING_STEPS.map((st) => st.id));
+      expect(pendingSteps({ ...legacy, onboardingSteps: seen }, bumped).map((st) => st.id)).toEqual([step.id]);
+    }
+  });
 });
 
 describe('aan de slag-lijstje', () => {
