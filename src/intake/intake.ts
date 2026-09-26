@@ -228,7 +228,7 @@ export class IntakeService {
         business: classification.business,
         paidWith: bankMatch ? 'bank' : 'later',
       }, { learn: false });
-      const explanation = explain(signals, decisions);
+      const explanation = { ...explain(signals, decisions), refs: bankMatch ? { bankTransactionId: bankMatch.id } : undefined };
       logAutomation(this.db, {
         kind: 'document-auto',
         ref_id: id,

@@ -459,6 +459,11 @@ export class InboxService {
           const paidBy = this.db.prepare('SELECT id FROM bank_transactions WHERE matched_purchase_invoice_id = ?').all(doc.purchase_invoice_id) as { id: number }[];
           for (const b of paidBy) this.bank.unmatch(b.id, date);
           this.purchases.cancel(doc.purchase_invoice_id, date);
+        } else {
+          // privé: geen inkoop, wel mogelijk een privé-opname op de bank
+          const txId = entry.details?.refs?.bankTransactionId;
+          if (txId && this.bank.get(txId).status === 'gematcht') this.bank.unmatch(txId, date);
+          this.db.prepare(`UPDATE documents SET status = 'controle' WHERE id = ?`).run(doc.id);
         }
         if (doc.result?.supplier) this.memory.markCorrected(doc.result.supplier.value);
         for (const d of entry.details?.decisions ?? []) countDecision(this.db, d.kind, 'corrected');

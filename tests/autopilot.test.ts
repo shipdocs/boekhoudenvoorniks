@@ -94,6 +94,27 @@ describe('"Waarom?" en autopilot (#28, #29)', () => {
     expect(s.ledger.checkIntegrity().balanced).toBe(true);
   });
 
+  it('Klopt niet op een automatisch privé-bonnetje: privé-opname terug en document weer ter controle', async () => {
+    const { state, provider } = varOcr();
+    const { s } = setup({ ocr: provider });
+    for (const day of [1, 8, 15]) {
+      state.lines = bon(day);
+      const d = await s.intake.add(`p${day}.jpg`, new Uint8Array([day]), '2026-09-25');
+      s.intake.confirm(d.id, { supplier: 'Bouwmaat', date: `2026-09-${String(day).padStart(2, '0')}`, total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: false, paidWith: 'prive' });
+    }
+    s.memory.setAutomatic(s.memory.get('Bouwmaat')!.supplier_key, true);
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-22', amount: -12100, description: 'Pin', counterName: 'BOUWMAAT UTRECHT' }] });
+    state.lines = bon(22);
+    const d = await s.intake.add('prive.jpg', new Uint8Array([22]), '2026-09-25');
+    expect(d.status).toBe('genegeerd'); // privé: niet in de boekhouding
+    expect(s.ledger.balance(ACCOUNTS.priveOpnamen)).toBe(12100);
+    const entry = s.inbox.home('2026-09-25').automated.find((e) => e.kind === 'document-auto')!;
+    s.inbox.correctAutomation(entry.id, '2026-09-25');
+    expect(s.intake.get(d.id).status).toBe('controle');
+    expect(s.ledger.balance(ACCOUNTS.priveOpnamen)).toBe(0);
+    expect(s.bank.list({ status: 'nieuw' })).toHaveLength(1);
+  });
+
   it('uitleg-sjabloon noemt alleen meegegeven signalen', () => {
     const e = explain([{ type: 'leveranciersregel', label: 'je dit 5× zo koos', value: 0.97 }, { type: 'extractie', label: 'tekst herkend', value: 0.9 }]);
     expect(e.sentence).toBe('Omdat je dit 5× zo koos.');
@@ -197,6 +218,19 @@ describe('controles vóór de btw-aangifte (#20)', () => {
     expect(checks.map((c) => c.key)).toEqual(['groot-verschil']);
     expect(checks[0]!.blocking).toBe(false);
     expect(s.vat.markSubmitted(Q3).status).toBe('ingediend');
+  });
+
+  it('een mogelijk dubbel document uit een andere periode blokkeert deze aangifte niet', async () => {
+    const { state, provider } = varOcr();
+    const { s } = setup({ ocr: provider });
+    state.lines = bon(10).map((l) => l.replace('-09-', '-06-'));
+    const a = await s.intake.add('a.jpg', new Uint8Array([1]), '2026-09-25');
+    s.intake.confirm(a.id, { supplier: 'Bouwmaat', date: '2026-06-10', total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    state.lines = bon(11).map((l) => l.replace('-09-', '-06-'));
+    const b = await s.intake.add('b.jpg', new Uint8Array([2]), '2026-09-25');
+    expect(b.issues.some((i) => i.field === 'duplicate')).toBe(true);
+    expect(s.vat.checks('2026-Q2').some((c) => c.key === 'dubbel')).toBe(true);
+    expect(s.vat.checks(Q3).some((c) => c.key === 'dubbel')).toBe(false);
   });
 
   it('een schone administratie heeft geen controles', () => {

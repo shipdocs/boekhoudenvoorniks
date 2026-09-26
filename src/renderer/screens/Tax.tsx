@@ -13,7 +13,9 @@ export function Tax({ periodKey }: { periodKey?: string }) {
   const [key, setKey] = useState<string | undefined>(periodKey);
   const selected = key ?? current.data?.key;
   const report = useLoad(async () => (selected ? api.vat.calculate(selected) : null), [selected]);
-  const checks = useLoad(async () => (selected ? api.vat.checks(selected) : []), [selected]);
+  // controles horen bij één periode; tijdens het laden na een wissel nooit die van de vorige tonen
+  const checksLoad = useLoad(async () => ({ key: selected, list: selected ? await api.vat.checks(selected) : [] }), [selected]);
+  const checks = { data: checksLoad.data && checksLoad.data.key === selected ? checksLoad.data.list : undefined, reload: checksLoad.reload };
   const [details, setDetails] = useState(false);
 
   if (settings.kor) {
@@ -106,7 +108,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                       </div>
                       {!c.skipped && (
                         <span className="row">
-                          <Button small onClick={() => go({ screen: c.screen as never })}>Oplossen</Button>
+                          <Button small onClick={() => (c.screen === 'belasting' ? setDetails(true) : go({ screen: c.screen as never }))}>{c.screen === 'belasting' ? 'Bekijk berekening' : 'Oplossen'}</Button>
                           <Button small kind="ghost" disabled={busy} onClick={async () => {
                             const reason = c.blocking ? prompt('Waarom sla je dit over? (bv. "bon kwijt, bedrag klopt wel")') : '';
                             if (reason === null) return;
@@ -142,7 +144,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
               <div className="row" style={{ marginTop: 16 }}>
                 <Button kind="primary" onClick={() => void run(() => api.app.openExternal(meta.vatPortalUrl))}>Open Mijn Belastingdienst Zakelijk</Button>
                 {r.status !== 'ingediend' ? (
-                  <Button disabled={busy || (checks.data ?? []).some((c) => c.blocking && !c.skipped)} title={(checks.data ?? []).some((c) => c.blocking && !c.skipped) ? 'Los eerst de controles hierboven op, of sla ze bewust over' : undefined} onClick={async () => {
+                  <Button disabled={busy || !checks.data || checks.data.some((c) => c.blocking && !c.skipped)} title={(checks.data ?? []).some((c) => c.blocking && !c.skipped) ? 'Los eerst de controles hierboven op, of sla ze bewust over' : undefined} onClick={async () => {
                     if (!confirm(`Heb je de aangifte voor ${r.period.label} verstuurd? Wat je daarna nog in deze periode boekt, telt mee in je volgende aangifte.`)) return;
                     await run(() => api.vat.markSubmitted(r.period.key), 'Aangifte vastgelegd ✓');
                     await report.reload();

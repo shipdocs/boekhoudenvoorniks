@@ -12,6 +12,8 @@ export interface Explanation {
   expert: string;
   signals: Signal[];
   decisions?: Pick<Decision, 'kind' | 'label' | 'value' | 'confidence' | 'threshold' | 'ok'>[];
+  /** wat er geraakt is, om "Klopt niet" precies terug te kunnen draaien */
+  refs?: { bankTransactionId?: number };
 }
 
 function joinNl(parts: string[]): string {

@@ -7,7 +7,7 @@ import { formatDateNl } from '../../shared/dates';
 import { CategoryPicker } from './Bank';
 
 export function Home() {
-  const { go, settings, refreshBadge } = useApp();
+  const { go, settings, refreshBadge, toast } = useApp();
   const { data, error, reload } = useLoad(() => api.home.get());
   const { run, busy } = useAction();
   const [picking, setPicking] = useState<Task | null>(null);
@@ -27,13 +27,19 @@ export function Home() {
 
   /** "Alle 5 bevestigen": de hoofdknop voor elke taak in dezelfde groep (#20, #29) */
   const actGroup = async (group: Task[]) => {
+    // Taken die toch een scherm nodig hebben (bv. een bonnetje met ontbrekende gegevens) blijven staan.
+    const needsLook: Task[] = [];
     for (const t of group) {
       const primary = t.actions.find((a) => a.primary);
       if (!primary) continue;
-      await run(() => api.home.act(t, primary.id));
+      const r = await run(() => api.home.act(t, primary.id));
+      if (r && r.navigate) needsLook.push(t);
     }
     await reload();
     refreshBadge();
+    if (needsLook.length > 0) {
+      toast(`${needsLook.length} ${needsLook.length === 1 ? 'kon' : 'konden'} niet in één keer; bekijk ${needsLook.length === 1 ? 'die' : 'ze'} apart.`);
+    }
   };
 
   if (!data) return <div className="page"><ErrorBox error={error} /></div>;

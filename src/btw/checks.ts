@@ -68,7 +68,9 @@ export function runVatChecks(db: Db, ledger: Ledger, period: Period, payable: { 
     });
   }
 
-  const dupDocs = db.prepare(`SELECT id FROM documents WHERE status = 'controle' AND issues LIKE '%"field":"duplicate"%'`).all() as { id: number }[];
+  const dupDocs = db
+    .prepare(`SELECT id FROM documents WHERE status = 'controle' AND issues LIKE '%"field":"duplicate"%' AND json_extract(result, '$.invoiceDate.value') BETWEEN ? AND ?`)
+    .all(start, end) as { id: number }[];
   const dupPurchases = db
     .prepare(
       `SELECT a.id AS a, b.id AS b FROM purchase_invoices a JOIN purchase_invoices b
