@@ -88,3 +88,48 @@ describe('factuurregels (#23)', () => {
     expect(out.structured?.lines?.[0]!.value).toEqual({ description: 'Knauf Goldband', quantity: 4, unitPrice: 1295, amount: 5180, vatRate: 21 });
   });
 });
+
+describe('review-bevindingen #42', () => {
+  it('spatie als duizendtalscheiding alleen bij een los getal; artikelcode blijft buiten het bedrag', () => {
+    const doc = parseDocumentText(items(['BOUWMAAT', 'Datum: 12-09-2026', 'Steigerhuur week 1 234,56', 'Festool zaagmachine TS55 649,00', 'Totaal 1 883,56']), 'ocr:test');
+    expect(doc.lines!.map((l) => l.value.amount)).toEqual([123456, 64900]);
+  });
+
+  it('een kortingsregel verlaagt het artikel erboven en is zelf geen artikel', () => {
+    const doc = parseDocumentText(items(['PRAXIS', 'Datum: 14-09-2026', 'Muurverf wit 10L 49,95', 'Korting -10,00', 'Chips paprika 1,89', 'Totaal 41,84']), 'ocr:test');
+    expect(doc.lines!.map((l) => [l.value.description, l.value.amount])).toEqual([['Muurverf wit 10L', 3995], ['Chips paprika', 189]]);
+    expect(doc.linesBasis).toBe('incl');
+  });
+
+  it('UBL: prijs per BaseQuantity wordt omgerekend naar per stuk', () => {
+    const xml = `<?xml version="1.0"?><Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+<cbc:ID>F1</cbc:ID><cbc:IssueDate>2026-09-01</cbc:IssueDate>
+<cac:AccountingSupplierParty><cac:Party><cac:PartyName><cbc:Name>Wasco</cbc:Name></cac:PartyName></cac:Party></cac:AccountingSupplierParty>
+<cac:LegalMonetaryTotal><cbc:TaxExclusiveAmount currencyID="EUR">50.00</cbc:TaxExclusiveAmount><cbc:PayableAmount currencyID="EUR">60.50</cbc:PayableAmount></cac:LegalMonetaryTotal>
+<cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:InvoicedQuantity unitCode="H87">200</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">50.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Schroeven</cbc:Name></cac:Item><cac:Price><cbc:PriceAmount currencyID="EUR">25.00</cbc:PriceAmount><cbc:BaseQuantity unitCode="H87">100</cbc:BaseQuantity></cac:Price></cac:InvoiceLine>
+</Invoice>`;
+    expect(parseUbl(xml).lines![0]!.value).toMatchObject({ quantity: 200, unitPrice: 25, amount: 5000 });
+  });
+
+  it('delen met een eigen btw-tarief worden met dat tarief geboekt; investeringsgrens met het regeltarief', async () => {
+    const f = (description: string, amount: number, vatRate: number) => ({ value: { description, quantity: null, unitPrice: null, amount, vatRate }, confidence: 1, source: 'ubl' as const });
+    const doc = { ...parseDocumentText(items(['X', 'Totaal 30,00']), 'ocr:test'), linesBasis: 'excl' as const, total: { value: 2300, confidence: 1, source: 'ubl' as const }, lines: [f('Gipsplaat', 1000, 21), f('Werkbroek', 1000, 9)] };
+    const parts = suggestSplit(doc as never)!;
+    expect(parts.map((p) => [p.categoryKey, p.vatRate])).toEqual(expect.arrayContaining([['materiaal', 21], ['werkkleding', 9]]));
+    // € 500 incl. 9% = € 458,72 excl.: boven de grens; met 21% zou het € 413,22 zijn (eronder)
+    expect(classifyLine({ description: 'Boormachine', quantity: 1, unitPrice: null, amount: 50000, vatRate: 9 }, 'incl')).toBe('investering');
+    expect(classifyLine({ description: 'Boormachine', quantity: 1, unitPrice: null, amount: 50000, vatRate: null }, 'incl')).toBe('gereedschap');
+
+    const ocr: OcrProvider = { id: 'test', label: 'Test', available: async () => true, recognize: async () => ({ items: items(BONNEN.praxis) }) };
+    const { s } = setup({ ocr });
+    const d = await s.intake.add('praxis.jpg', new Uint8Array([1]), '2026-09-25');
+    s.intake.confirm(d.id, { supplier: 'Praxis', date: '2026-09-14', total: 6483, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas', splits: [
+      { categoryKey: 'materiaal', gross: 4995, vatRate: 21 },
+      { categoryKey: 'gereedschap', gross: 1299, vatRate: 9 },
+      { categoryKey: 'prive', gross: 189 },
+    ] });
+    expect(s.ledger.balance('WBedAlkGer')).toBe(1192); // 12,99 / 1,09
+    expect(s.ledger.balance(ACCOUNTS.btwVoorbelasting)).toBe(867 + 107);
+    expect(s.ledger.checkIntegrity().balanced).toBe(true);
+  });
+});
