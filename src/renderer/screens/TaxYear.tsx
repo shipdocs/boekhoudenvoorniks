@@ -260,7 +260,7 @@ function Trips({ year }: { year: number }) {
                 <td>{t.description}</td>
                 <td className="num">{t.km.toLocaleString('nl-NL')}</td>
                 <td className="num"><Euro cents={t.amount} /></td>
-                <td><Button small kind="ghost" onClick={async () => { if (await run(() => api.mileage.remove(t.id)) !== undefined) await list.reload(); }}>Weghalen</Button></td>
+                <td><Button small kind="ghost" onClick={async () => { if (await run(async () => { await api.mileage.remove(t.id); return true; })) await list.reload(); }}>Weghalen</Button></td>
               </tr>
             ))}
             <tr><td /><td><strong>Totaal {year}</strong></td><td className="num"><strong>{Math.round(total.km * 10) / 10}</strong></td><td className="num"><strong><Euro cents={total.amount} /></strong></td><td /></tr>
@@ -319,7 +319,7 @@ function Hours({ year }: { year: number }) {
                 <td><DateNl date={h.entry_date} /></td>
                 <td>{h.description}</td>
                 <td className="num">{h.hours.toLocaleString('nl-NL')} uur</td>
-                <td><Button small kind="ghost" onClick={async () => { if (await run(() => api.hours.remove(h.id)) !== undefined) await reload(); }}>Weghalen</Button></td>
+                <td><Button small kind="ghost" onClick={async () => { if (await run(async () => { await api.hours.remove(h.id); return true; })) await reload(); }}>Weghalen</Button></td>
               </tr>
             ))}
           </tbody>
