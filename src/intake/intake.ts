@@ -378,6 +378,7 @@ export class IntakeService {
         attachmentPath: doc.file_path,
         jobId: c.jobId ?? null,
         documentId: id,
+        payeeIban: doc.result?.supplierIban?.value ?? null,
         lines,
       });
       if (bankTx && c.paidWith === 'bank') this.bank.matchPurchase(bankTx.id, purchase.id);

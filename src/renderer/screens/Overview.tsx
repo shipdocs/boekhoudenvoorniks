@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { ErrorBox, Euro, useLoad } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, useAction, useLoad } from '../ui';
 import { formatEuro } from '../../shared/money';
 
 /** Eén serie (omzet per maand): staafdiagram in één kleur, tooltip per staaf, tabelweergave als alternatief. */
@@ -83,6 +83,36 @@ export function Overview() {
           </tbody>
         </table>
       )}
+      <FixedCosts />
+    </div>
+  );
+}
+
+/** Vaste lasten per maand (#30), met prijsverschil t.o.v. vorig jaar. */
+function FixedCosts() {
+  const { run } = useAction();
+  const list = useLoad(() => api.recurring.list());
+  const items = list.data ?? [];
+  if (items.length === 0) return null;
+  const total = items.reduce((s, x) => s + x.monthly, 0);
+  return (
+    <div className="card" style={{ marginTop: 18 }}>
+      <h2 style={{ marginTop: 0 }}>Vaste lasten: <Euro cents={total} /> per maand</h2>
+      <table className="list small">
+        <thead><tr><th>Wat</th><th>Hoe vaak</th><th className="num">Bedrag</th><th className="num">Per maand</th><th>Laatst</th><th /></tr></thead>
+        <tbody>
+          {items.map((x) => (
+            <tr key={x.id}>
+              <td>{x.counter_name}{x.priceChangePct !== null && Math.abs(x.priceChangePct) >= 5 && <span className={`pill ${x.priceChangePct > 0 ? 'warn' : ''}`}>{x.priceChangePct > 0 ? `${x.priceChangePct}% duurder` : `${-x.priceChangePct}% goedkoper`} dan vorig jaar</span>}</td>
+              <td>per {x.interval}</td>
+              <td className="num"><Euro cents={x.amount} /></td>
+              <td className="num"><Euro cents={x.monthly} /></td>
+              <td>{x.lastSeen ? <DateNl date={x.lastSeen} /> : '—'}</td>
+              <td><Button small kind="ghost" onClick={async () => { if (confirm(`${x.counter_name} is gestopt?`)) { await run(() => api.recurring.stop(x.id)); await list.reload(); } }}>Gestopt</Button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

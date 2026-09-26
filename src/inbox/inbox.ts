@@ -10,7 +10,8 @@ import type { JobService } from '../jobs/jobs';
 import type { IntakeService } from '../intake/intake';
 import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
 import type { PurchaseService } from '../documents/purchases';
-import { ValidationError } from '../shared/validation';
+import type { RecurringService } from '../import/recurring';
+import { normalizeIban, ValidationError } from '../shared/validation';
 import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
 import { EXPENSE_CATEGORIES } from '../shared/categories';
@@ -19,6 +20,8 @@ import { addDays, diffDays, formatDateNl, periodFor, today, vatDeadline, type Is
 
 /** Na zoveel dagen zonder nieuwe bankgegevens vragen we om een afschrift in te lezen. */
 export const BANK_STALE_DAYS = 14;
+/** Zoveel dagen vóór de vervaldatum herinneren we aan het betalen van een rekening. */
+export const PAY_REMINDER_DAYS = 3;
 import { formatEuro, type Cents } from '../shared/money';
 import { automationForMonth, countDecision, getAutomation, logAutomation, markCorrected, recentAutomation, type AutomationEntry } from './automation-log';
 import { explain } from '../automation/explain';
@@ -39,7 +42,13 @@ export type TaskKind =
   | 'bank-stale'
   | 'vat-suppletie'
   | 'supplier-auto'
-  | 'vat-check';
+  | 'vat-check'
+  | 'purchase-due'
+  | 'bank-pot'
+  | 'recurring-confirm'
+  | 'recurring-missing-payment'
+  | 'recurring-stopped'
+  | 'recurring-invoice';
 
 export interface TaskAction {
   id: string;
@@ -62,13 +71,23 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
+  ref: { seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
 }
 
 export interface HomeData {
   asOf: IsoDate;
   greeting: string;
-  money: { bank: Cents; toReceive: Cents; toPay: Cents; vatReserve: Cents };
+  money: {
+    bank: Cents;
+    toReceive: Cents;
+    toPay: Cents;
+    /** te reserveren btw: lopende periode(s) + aangegeven maar nog niet betaald */
+    vatReserve: Cents;
+    /** belastingpotje (#33): wat er al opzij staat, en wat er nog bij moet (null = geen potje) */
+    vatPot: { account: string; setAside: Cents; stillToReserve: Cents } | null;
+    /** banksaldo − te reserveren btw − openstaande rekeningen */
+    freeToSpend: Cents;
+  };
   /** t/m welke datum de bankgegevens bijgewerkt zijn (laatste transactiedatum over alle rekeningen) */
   bankUpdatedTo: IsoDate | null;
   vat: { periodLabel: string; deadline: IsoDate; deadlineLabel: string; estimate: Cents };
@@ -107,13 +126,26 @@ export class InboxService {
     private readonly memory: SupplierMemory,
     private readonly vat: VatService,
     private readonly purchases: PurchaseService,
+    private readonly recurring: RecurringService,
   ) {}
+
+  /** Een taak bewust overslaan; komt niet terug zolang de sleutel gelijk blijft. */
+  skipTask(key: string, reason = ''): void {
+    this.db
+      .prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', ?) ON CONFLICT(task_key) DO UPDATE SET reason = excluded.reason`)
+      .run(key, reason);
+  }
+
+  private isSkipped(key: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM task_skips WHERE task_key = ? AND fingerprint = 'x'`).get(key);
+  }
 
   /**
    * Verwerkt wat zeker is: betalingen die bij een factuur horen, en betalingen aan leveranciers
    * die de gebruiker al vaak genoeg heeft bevestigd. Deterministisch, geen AI.
    */
   autoProcess(asOf: IsoDate = today()): { matched: number; booked: number } {
+    this.recurring.detect(); // vaste lasten herkennen (alleen voorstellen, niets boeken)
     const level = this.settings.get().autopilot;
     if (level === 'voorzichtig') return { matched: 0, booked: 0 }; // alles blijft geel: de gebruiker bevestigt
     const auto = this.matching.autoMatch(asOf, level);
@@ -242,6 +274,21 @@ export class InboxService {
         });
         continue;
       }
+      const potAccount = s.vatPotAccountId ? this.bank.listAccounts().find((a) => a.id === s.vatPotAccountId) : undefined;
+      if (potAccount && potAccount.id !== t.bank_account_id && potAccount.iban && t.counter_iban && normalizeIban(t.counter_iban) === normalizeIban(potAccount.iban)) {
+        tasks.push({
+          key: `bank-${t.id}`,
+          kind: 'bank-pot',
+          icon: '🐷',
+          title: `${formatEuro(Math.abs(t.amount))} ${t.amount < 0 ? 'naar' : 'uit'} je belastingpotje`,
+          question: t.amount < 0 ? 'Opzijgezet voor de btw. Dit telt niet als kosten.' : 'Terug van je belastingpotje (bv. om de btw te betalen).',
+          amount: t.amount,
+          actions: [{ id: 'klopt', label: 'Klopt', primary: true }],
+          group: { key: 'bank-pot', label: 'Alle overboekingen met je potje' },
+          ref: { bankTransactionId: t.id, bankAccountId: potAccount.id },
+        });
+        continue;
+      }
       const sug = this.suggestionFor(t);
       if (sug?.confident && sug.business) {
         const label = EXPENSE_CATEGORIES.find((c) => c.key === sug.categoryKey)?.label.toLowerCase() ?? sug.categoryKey;
@@ -342,6 +389,84 @@ export class InboxService {
         amount: q.total,
         actions: [{ id: 'akkoord', label: 'Ja, akkoord', primary: true }, { id: 'afgewezen', label: 'Nee' }],
         ref: { quoteId: q.id },
+      });
+    }
+
+    // Vaste lasten (#30)
+    for (const series of this.recurring.list()) {
+      const label = `${formatEuro(series.amount)} per ${series.interval}`;
+      if (series.status === 'voorgesteld') {
+        tasks.push({
+          key: `recurring-${series.id}`,
+          kind: 'recurring-confirm',
+          icon: '🔁',
+          title: `${series.counter_name} lijkt een vaste last`,
+          question: `Ongeveer ${label}. Als vaste last houden we bij of de factuur en de afschrijving op tijd komen.`,
+          actions: [{ id: 'ja', label: 'Ja, vaste last', primary: true }, { id: 'nee', label: 'Nee' }],
+          priority: 3,
+          ref: { seriesId: series.id },
+        });
+        continue;
+      }
+      if (series.status !== 'actief') continue;
+      const st = this.recurring.state(series, asOf);
+      if (st.missed.length >= 2) {
+        const key = `recurring-stopped-${series.id}-${st.missed.length}`;
+        if (!this.isSkipped(key)) {
+          tasks.push({
+            key,
+            kind: 'recurring-stopped',
+            icon: '🔁',
+            title: `Is ${series.counter_name} gestopt?`,
+            question: `De laatste ${st.missed.length} verwachte afschrijvingen (${label}) zijn niet gebeurd.`,
+            actions: [{ id: 'ja', label: 'Ja, gestopt', primary: true }, { id: 'nee', label: 'Nee, loopt nog' }],
+            ref: { seriesId: series.id },
+          });
+        }
+      } else if (st.missed.length === 1) {
+        const key = `recurring-pay-${series.id}-${st.missed[0]}`;
+        if (!this.isSkipped(key)) {
+          tasks.push({
+            key,
+            kind: 'recurring-missing-payment',
+            icon: '🔁',
+            title: `Afschrijving ${series.counter_name} niet gezien`,
+            question: `Rond ${formatDateNl(st.missed[0]!)} verwachtten we ongeveer ${formatEuro(series.amount)}. Is je bankafschrift bijgewerkt?`,
+            actions: [{ id: 'ok', label: 'Klopt, niets aan de hand', primary: true }, { id: 'open', label: 'Bank bekijken' }],
+            priority: 3,
+            ref: { seriesId: series.id },
+          });
+        }
+      }
+      for (const t of this.recurring.missingInvoices(series, asOf)) {
+        const key = `recurring-invoice-${t.id}`;
+        if (this.isSkipped(key)) continue;
+        tasks.push({
+          key,
+          kind: 'recurring-invoice',
+          icon: '🧾',
+          title: `Factuur ${series.counter_name} ontbreekt`,
+          question: `Er is ${formatEuro(-t.amount)} afgeschreven op ${formatDateNl(t.transaction_date)}, maar we missen de factuur.`,
+          amount: t.amount,
+          actions: [{ id: 'open', label: 'Factuur toevoegen', primary: true }, { id: 'geen', label: 'Geen factuur nodig' }],
+          group: { key: `recurring-invoice-${series.id}`, label: `Facturen ${series.counter_name}` },
+          ref: { seriesId: series.id, bankTransactionId: t.id },
+        });
+      }
+    }
+
+    // Rekeningen die binnenkort betaald moeten worden (#25)
+    for (const p of this.purchases.listOpen().filter((x) => x.due_date && x.due_date <= addDays(asOf, PAY_REMINDER_DAYS) && x.open_amount > 0)) {
+      tasks.push({
+        key: `pay-${p.id}`,
+        kind: 'purchase-due',
+        icon: '💸',
+        title: `${p.relation_name ?? p.description}: ${formatEuro(p.open_amount)} betalen`,
+        question: p.due_date! < asOf ? `Dit had uiterlijk ${formatDateNl(p.due_date!)} betaald moeten zijn.` : `Betaal vóór ${formatDateNl(p.due_date!)}.`,
+        amount: -p.open_amount,
+        actions: [{ id: 'open', label: `Betaal ${formatEuro(p.open_amount)}`, primary: true }],
+        priority: p.due_date! < asOf ? 1 : 2,
+        ref: { purchaseId: p.id },
       });
     }
 
@@ -481,7 +606,10 @@ export class InboxService {
     const toReceive = this.invoices.listOpen(asOf).reduce((sum, i) => sum + Math.max(0, i.open_amount), 0);
     const toPay = (this.db.prepare(`SELECT COALESCE(SUM(total - amount_paid), 0) AS s FROM purchase_invoices WHERE status = 'open'`).get() as { s: number }).s;
     // Alles wat op BTW-rekeningen staat (lopend kwartaal + nog niet betaalde aangiftes)
-    const vatReserve = -this.ledger.balances().filter((b) => b.category === 'btw').reduce((sum, b) => sum + b.balance, 0);
+    const vatReserve = Math.max(0, -this.ledger.balances().filter((b) => b.category === 'btw').reduce((sum, b) => sum + b.balance, 0));
+    const pot = s.vatPotAccountId ? bankAccounts.find((a) => a.id === s.vatPotAccountId) ?? null : null;
+    const setAside = pot ? this.ledger.balance(pot.rgs_code) : 0;
+    const vatPot = pot ? { account: pot.name, setAside, stillToReserve: Math.max(0, vatReserve - setAside) } : null;
     const current = this.vat.currentPeriod(asOf);
     const deadline = vatDeadline(current.end, s.vatPeriod);
     const kinds = new Set(tasks.map((t) => t.kind));
@@ -497,7 +625,7 @@ export class InboxService {
     return {
       asOf,
       greeting: greeting(),
-      money: { bank: ledgerBank + pending, toReceive, toPay, vatReserve: Math.max(0, vatReserve) },
+      money: { bank: ledgerBank + pending, toReceive, toPay, vatReserve, vatPot, freeToSpend: ledgerBank + pending - vatReserve - toPay },
       bankUpdatedTo,
       vat: { periodLabel: current.label, deadline, deadlineLabel: formatDateNl(deadline), estimate: this.vat.calculate(current.key).summary.teBetalen },
       tasks,

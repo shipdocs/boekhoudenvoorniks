@@ -60,6 +60,8 @@ export interface AppSettings {
   /** Dagen na vervaldatum waarop herinneringen gestuurd worden, bv. [7, 21]. */
   reminderDays: number[];
   advancedMode: boolean;
+  /** Bankrekening (bank_accounts.id) die dient als belastingpotje (#33), of null. */
+  vatPotAccountId: number | null;
   /** Hoe automatisch: voorzichtig (niets zelf), normaal, maximaal (iets lagere drempels). */
   autopilot: 'voorzichtig' | 'normaal' | 'maximaal';
   onboardingDone: boolean;
@@ -102,6 +104,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reminderDays: [7, 21],
   advancedMode: false,
   autopilot: 'normaal',
+  vatPotAccountId: null,
   onboardingDone: false,
   termsAcceptedVersion: '',
   invoiceEmailSubject: 'Factuur {nummer} van {bedrijf}',

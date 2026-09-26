@@ -68,8 +68,18 @@ export function Home() {
         <div className="card clickable" onClick={() => go({ screen: 'belasting' })}>
           <div className="value">± <Euro cents={data.money.vatReserve} /></div>
           <div className="label">apart houden voor BTW</div>
+          {data.money.vatPot && (
+            <div className="small" style={{ marginTop: 6 }}>
+              🐷 <Euro cents={data.money.vatPot.setAside} /> in {data.money.vatPot.account}
+              {data.money.vatPot.stillToReserve > 0 ? <> · nog <strong><Euro cents={data.money.vatPot.stillToReserve} /></strong> opzijzetten</> : ' · genoeg opzij ✓'}
+            </div>
+          )}
         </div>
       </div>
+
+      <p className="muted small" style={{ marginTop: -6 }}>
+        Vrij te besteden: <strong><Euro cents={data.money.freeToSpend} /></strong> <span title="banksaldo min de btw die je nog moet betalen en je openstaande rekeningen">(banksaldo min btw en openstaande rekeningen)</span>
+      </p>
 
       <h2>Wat wil je doen?</h2>
       <div className="actions4">

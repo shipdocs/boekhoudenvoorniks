@@ -102,3 +102,13 @@ export function vatDeadline(periodEnd: IsoDate, type: 'maand' | 'kwartaal' | 'ja
   if (type === 'jaar') return `${Number(periodEnd.slice(0, 4)) + 1}-03-31`;
   return periodFor(addDays(periodEnd, 1), 'maand').end;
 }
+
+/** Zelfde dag n maanden later; valt die dag niet in de maand, dan de laatste dag van die maand. */
+export function addMonths(date: IsoDate, months: number): IsoDate {
+  const [y, m, d] = date.split('-').map(Number) as [number, number, number];
+  const total = y * 12 + (m - 1) + months;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  const last = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+}

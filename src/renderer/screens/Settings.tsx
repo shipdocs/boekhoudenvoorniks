@@ -23,6 +23,7 @@ export function SettingsScreen() {
   const { run, busy } = useAction();
   const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'bedrijf');
   const [draft, setDraft] = useState<Settings>(settings);
+  const bankAccounts = useLoad(() => api.bank.accounts());
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
   const set = (patch: Partial<AppSettings>) => setDraft({ ...draft, ...patch });
   const save = async () => {
@@ -98,6 +99,12 @@ export function SettingsScreen() {
               <Field label="Aangifte doen per">
                 <select value={draft.vatPeriod} onChange={(e) => set({ vatPeriod: e.target.value as AppSettings['vatPeriod'] })}>
                   <option value="kwartaal">Kwartaal</option><option value="maand">Maand</option><option value="jaar">Jaar</option>
+                </select>
+              </Field>
+              <Field label="Belastingpotje" hint="een (spaar)rekening waar je de btw opzij zet">
+                <select value={draft.vatPotAccountId ?? ''} onChange={(e) => set({ vatPotAccountId: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">Geen potje</option>
+                  {(bankAccounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.iban ? ` (${a.iban})` : ''}</option>)}
                 </select>
               </Field>
               <Field label="Standaard BTW op nieuwe regels">

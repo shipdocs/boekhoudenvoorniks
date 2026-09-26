@@ -485,4 +485,23 @@ export const migrations: string[] = [
   WHEN OLD.event_id IS NOT NULL AND (NEW.event_id IS NOT OLD.event_id OR NEW.rules_version IS NOT OLD.rules_version)
   BEGIN SELECT RAISE(ABORT, 'De herkomst van een journaalpost ligt vast'); END;
   `,
+  /* 8: terugkerende kosten, betalen met QR, belastingpotje */ `
+  -- Het IBAN waar deze inkoop naartoe betaald moet worden (van het document); voor de fraudecontrole
+  ALTER TABLE purchase_invoices ADD COLUMN payee_iban TEXT;
+  -- Vaste lasten en abonnementen (#30). counter_key: IBAN of genormaliseerde naam.
+  CREATE TABLE recurring_series (
+    id INTEGER PRIMARY KEY,
+    counter_key TEXT NOT NULL UNIQUE,
+    counter_name TEXT NOT NULL,
+    interval TEXT NOT NULL CHECK (interval IN ('maand','kwartaal','jaar')),
+    amount INTEGER NOT NULL,
+    amount_min INTEGER NOT NULL,
+    amount_max INTEGER NOT NULL,
+    category_key TEXT,
+    vat_code TEXT,
+    expects_invoice INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'voorgesteld' CHECK (status IN ('voorgesteld','actief','afgewezen','gestopt')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];
