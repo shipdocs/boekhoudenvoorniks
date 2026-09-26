@@ -9,6 +9,7 @@ import { AccountantNotice } from './TaxYear';
 const RUBRIEK_UITLEG: Record<string, string> = {
   '1a': 'je omzet met 21% btw',
   '1b': 'je omzet met 9% btw',
+  '1d': 'btw over privégebruik van je auto van de zaak',
   '1e': 'omzet met 0% of btw verlegd',
   '2a': 'btw die een onderaannemer naar jou verlegde',
   '3a': 'verkoop aan klanten buiten de EU',
@@ -83,6 +84,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
               <tbody>
                 <tr><td>Omzet</td><td><Euro cents={r.summary.omzet} /></td></tr>
                 <tr><td>Btw die je hebt ontvangen</td><td><Euro cents={r.summary.btwOverOmzet} /></td></tr>
+                {r.summary.btwPrive !== 0 && <tr><td>Btw over privégebruik van je auto</td><td><Euro cents={r.summary.btwPrive} /></td></tr>}
                 {r.summary.btwVerlegd !== 0 && <tr><td>Btw die naar jou is verlegd (door een onderaannemer of een buitenlandse leverancier; je betaalt hem en krijgt hem tegelijk terug: kost je niets)</td><td><Euro cents={r.summary.btwVerlegd} /></td></tr>}
                 <tr><td>Min: btw die je terugkrijgt (aankopen)</td><td><Euro cents={r.summary.voorbelasting} /></td></tr>
                 <tr className="total"><td>{r.summary.teBetalen >= 0 ? 'Te betalen' : 'Je krijgt terug'}</td><td><Euro cents={Math.abs(r.summary.teBetalen)} /></td></tr>
@@ -126,7 +128,15 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                       </div>
                       {!c.skipped && (
                         <span className="row">
-                          <Button small onClick={() => (c.screen === 'belasting' ? setDetails(true) : go({ screen: c.screen as never }))}>{c.screen === 'belasting' ? 'Bekijk berekening' : 'Oplossen'}</Button>
+                          {c.action ? (
+                            <Button small kind="primary" disabled={busy} onClick={async () => {
+                              if ((await run(async () => { await api.vat.bookCarPrivateUse(r.period.key); return true; }, 'Opgenomen in deze aangifte (vak 1d)')) !== undefined) {
+                                await Promise.all([checks.reload(), report.reload()]);
+                              }
+                            }}>{c.action.label}</Button>
+                          ) : (
+                            <Button small onClick={() => (c.screen === 'belasting' ? setDetails(true) : go({ screen: c.screen as never, extra: c.screen === 'instellingen' ? { tab: 'btw' } : undefined }))}>{c.screen === 'belasting' ? 'Bekijk berekening' : 'Oplossen'}</Button>
+                          )}
                           <Button small kind="ghost" disabled={busy} onClick={async () => {
                             const reason = c.blocking ? prompt('Waarom sla je dit over? (bv. "bon kwijt, bedrag klopt wel")') : '';
                             if (reason === null) return;
