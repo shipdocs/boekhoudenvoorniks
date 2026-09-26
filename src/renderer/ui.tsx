@@ -227,7 +227,7 @@ export const STATUS_LABEL: Record<string, [string, string]> = {
   gefactureerd: ['Gefactureerd', 'good'],
   gepland: ['Gepland', ''],
   bezig: ['Bezig', 'info'],
-  klaar: ['Klaar', 'warn'],
+  klaar: ['Klaar, nog factureren', 'warn'],
   geannuleerd: ['Geannuleerd', ''],
   nieuw: ['Nog verwerken', 'warn'],
   gematcht: ['Verwerkt', 'good'],

@@ -102,7 +102,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
       <div className="row between">
         <div>
           <h1>
-            {isInvoice ? (invoice?.totals.total ?? 0) < 0 ? 'Creditfactuur' : 'Factuur' : 'Offerte'} {d && 'number' in d && d.number ? d.number : id ? '(concept)' : ''}
+            {isInvoice ? (invoice?.totals.total ?? 0) < 0 ? 'Creditfactuur (draait een factuur terug)' : 'Factuur' : 'Offerte'} {d && 'number' in d && d.number ? d.number : id ? '(concept)' : ''}
           </h1>
           <p className="sub">
             {invoice && <StatusPill status={invoice.display_status} />} {quote && <StatusPill status={quote.status} />}{' '}
@@ -146,7 +146,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         <h2>Wat heb je gedaan?</h2>
         <table className="lines-table" style={{ width: '100%' }}>
           <thead>
-            <tr className="small muted"><td>Omschrijving</td><td style={{ width: 80 }}>Aantal</td><td style={{ width: 80 }}>Eenheid</td><td style={{ width: 120 }}>Prijs</td><td style={{ width: 150 }}>BTW</td><td style={{ width: 110 }} className="num">Totaal</td><td style={{ width: 36 }} /></tr>
+            <tr className="small muted"><td>Omschrijving</td><td style={{ width: 80 }}>Aantal</td><td style={{ width: 80 }}>Eenheid</td><td style={{ width: 120 }}>Prijs</td><td style={{ width: 150 }}>Btw</td><td style={{ width: 110 }} className="num">Totaal</td><td style={{ width: 36 }} /></tr>
           </thead>
           <tbody>
             {lines.map((l, i) => {
@@ -181,14 +181,14 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           </div>
         )}
         {lines.some((l) => l.vatCode === 'laag') && trade?.items.find((i) => i.note) && <p className="small muted">ℹ️ {trade.items.find((i) => i.note)!.note}</p>}
-        {lines.some((l) => l.vatCode === 'verlegd' || l.vatCode === 'icp') && <p className="small muted">ℹ️ Bij BTW verlegd moet het btw-nummer van je klant bekend zijn.</p>}
-        {lines.some((l) => l.vatCode === 'icp' || l.vatCode === 'export') && <p className="small muted">⚠️ Buitenland (0%) is nog niet door een fiscalist gecontroleerd. Verkoop je aan particulieren in de EU, dan geldt vaak de OSS-regeling; die zit niet in de app.</p>}
+        {lines.some((l) => l.vatCode === 'verlegd' || l.vatCode === 'icp') && <p className="small muted">ℹ️ Btw verlegd gebruik je als onderaannemer voor een andere aannemer: jij rekent geen btw, je klant regelt die. Het btw-nummer van je klant moet bekend zijn.</p>}
+        {lines.some((l) => l.vatCode === 'icp' || l.vatCode === 'export') && <p className="small muted">⚠️ Buitenland (0%) is nog niet door een belastingexpert nagekeken: laat je boekhouder meekijken. Verkoop je aan particulieren in het buitenland? Dat kan de app nog niet.</p>}
 
         <div className="row end" style={{ marginTop: 16 }}>
           <table className="sumtable">
             <tbody>
-              <tr><td>Subtotaal</td><td><Euro cents={totals.subtotal} /></td></tr>
-              {totals.groups.filter((g) => g.percentage > 0).map((g) => <tr key={g.vatCode}><td>BTW {g.percentage}%</td><td><Euro cents={g.vat} /></td></tr>)}
+              <tr><td>Totaal zonder btw</td><td><Euro cents={totals.subtotal} /></td></tr>
+              {totals.groups.filter((g) => g.percentage > 0).map((g) => <tr key={g.vatCode}><td>Btw {g.percentage}%</td><td><Euro cents={g.vat} /></td></tr>)}
               <tr className="total"><td>Totaal</td><td><Euro cents={totals.total} /></td></tr>
             </tbody>
           </table>
@@ -204,19 +204,19 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         {editable && <Button kind={id ? undefined : 'primary'} disabled={busy} onClick={() => void save()}>Opslaan</Button>}
         <Button disabled={busy} onClick={() => void showPreview()}>Voorbeeld</Button>
         {id && <Button disabled={busy} onClick={() => void run(() => (isInvoice ? api.invoices.savePdf(id) : api.quotes.savePdf(id)), 'PDF opgeslagen')}>PDF opslaan</Button>}
-        {id && isInvoice && invoice && invoice.status !== 'concept' && <Button disabled={busy} title="E-factuur (UBL) die boekhoudprogramma's zonder overtypen inlezen" onClick={() => void run(() => api.invoices.saveUbl(id), 'E-factuur opgeslagen')}>E-factuur (XML)</Button>}
+        {id && isInvoice && invoice && invoice.status !== 'concept' && <Button disabled={busy} title="Een bestand dat boekhoudprogramma's zonder overtypen inlezen" onClick={() => void run(() => api.invoices.saveUbl(id), 'E-factuur opgeslagen')}>E-factuur (XML)</Button>}
         <span className="grow" />
         {isInvoice && invoice?.status === 'concept' && (
           <>
-            <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Concept verwijderen?') && (await run(() => api.invoices.deleteDraft(invoice.id), 'Verwijderd')) !== undefined) go({ screen: 'werk' }); }}>Verwijderen</Button>
+            <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Deze factuur (nog niet verstuurd) verwijderen?') && (await run(async () => { await api.invoices.deleteDraft(invoice.id); return true; }, 'Verwijderd'))) go({ screen: 'werk' }); }}>Verwijderen</Button>
             <Button disabled={busy} onClick={async () => { if (confirm('Definitief maken zonder te mailen? Je kunt de factuur daarna niet meer wijzigen.')) { await run(() => api.invoices.finalize(invoice.id), 'Factuur is definitief'); await doc.reload(); } }}>Definitief maken</Button>
             <Button kind="primary" disabled={busy} onClick={async () => { const docId = await save(); if (docId) setSending(true); }}>Versturen</Button>
           </>
         )}
         {isInvoice && invoice && invoice.status !== 'concept' && (
           <>
-            {!invoice.credit_of_invoice_id && invoice.total! > 0 && <Button disabled={busy} onClick={async () => { const c = await run(() => api.invoices.creditNote(invoice.id)); if (c) go({ screen: 'factuur', id: c.id }); }}>Crediteren</Button>}
-            {invoice.status === 'verzonden' && invoice.open_amount > 0 && Math.abs(invoice.open_amount) <= 500 && invoice.amount_paid > 0 && <Button disabled={busy} onClick={async () => { await run(() => api.invoices.writeOff(invoice.id), 'Restbedrag afgeboekt'); await doc.reload(); }}>Restje afboeken</Button>}
+            {!invoice.credit_of_invoice_id && invoice.total! > 0 && <Button disabled={busy} onClick={async () => { const c = await run(() => api.invoices.creditNote(invoice.id)); if (c) go({ screen: 'factuur', id: c.id }); }}>Factuur terugdraaien (creditfactuur)</Button>}
+            {invoice.status === 'verzonden' && invoice.open_amount > 0 && Math.abs(invoice.open_amount) <= 500 && invoice.amount_paid > 0 && <Button disabled={busy} onClick={async () => { await run(() => api.invoices.writeOff(invoice.id), 'Klein verschil laten vallen ✓'); await doc.reload(); }}>Klein verschil laten vallen</Button>}
             {invoice.display_status === 'vervallen' && <Button disabled={busy} onClick={async () => { await run(() => api.invoices.sendReminder(invoice.id), 'Herinnering verstuurd'); await doc.reload(); }}>Herinnering sturen</Button>}
             {invoice.status === 'verzonden' && <Button disabled={busy} onClick={() => setPayment(true)}>Betaling ontvangen</Button>}
             <Button kind="primary" disabled={busy} onClick={() => setSending(true)}>{invoice.sent_at ? 'Opnieuw versturen' : 'Versturen'}</Button>
@@ -224,7 +224,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         )}
         {quote && (
           <>
-            {quote.status !== 'gefactureerd' && <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Offerte verwijderen?') && (await run(() => api.quotes.delete(quote.id), 'Verwijderd')) !== undefined) go({ screen: 'werk', extra: { tab: 'offertes' } }); }}>Verwijderen</Button>}
+            {quote.status !== 'gefactureerd' && <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Offerte verwijderen?') && (await run(async () => { await api.quotes.delete(quote.id); return true; }, 'Verwijderd'))) go({ screen: 'werk', extra: { tab: 'offertes' } }); }}>Verwijderen</Button>}
             {['concept', 'verzonden'].includes(quote.status) && <Button disabled={busy} onClick={async () => { await run(() => api.quotes.setStatus(quote.id, 'afgewezen')); await doc.reload(); }}>Afgewezen</Button>}
             {['concept', 'verzonden'].includes(quote.status) && <Button disabled={busy} onClick={async () => { const j = await run(() => api.jobs.acceptQuote(quote.id), 'Klant is akkoord — er staat een klus klaar'); if (j) go({ screen: 'klus', id: j.id }); }}>Klant is akkoord</Button>}
             {quote.status === 'geaccepteerd' && <Button disabled={busy} onClick={async () => { const inv = await run(() => api.quotes.convertToInvoice(quote.id)); if (inv) go({ screen: 'factuur', id: inv.id }); }}>Omzetten naar factuur</Button>}

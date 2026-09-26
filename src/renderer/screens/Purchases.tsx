@@ -63,10 +63,10 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
 
       <h2>Aankopen</h2>
       {(purchases.data ?? []).length === 0 ? (
-        <Empty icon="🧾" title="Nog geen aankopen">Bonnetjes die je hier toevoegt worden automatisch verwerkt, inclusief BTW die je terugkrijgt.</Empty>
+        <Empty icon="🧾" title="Nog geen aankopen">Bonnetjes die je hier toevoegt worden automatisch verwerkt, inclusief btw die je terugkrijgt.</Empty>
       ) : (
         <table className="list">
-          <thead><tr><th>Datum</th><th>Waar</th><th>Wat</th><th>Status</th><th className="num">BTW terug</th><th className="num">Bedrag</th><th /></tr></thead>
+          <thead><tr><th>Datum</th><th>Waar</th><th>Wat</th><th>Status</th><th className="num">Btw terug</th><th className="num">Bedrag</th><th /></tr></thead>
           <tbody>
             {purchases.data!.map((p) => (
               <tr key={p.id} className={p.attachment_path ? 'clickable' : ''} onClick={() => p.attachment_path && void run(() => api.app.openAttachment(p.attachment_path!))}>
@@ -139,7 +139,7 @@ function PayModal({ id, onClose }: { id: number; onClose: () => void }) {
   );
 }
 
-/** "Bonnetje zonder foto": in mensentaal, BTW wordt automatisch berekend. */
+/** "Bonnetje zonder foto": in mensentaal, btw wordt automatisch berekend. */
 function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const { meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
@@ -158,10 +158,10 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
           <Field label="Waar gekocht?"><input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="bv. Gamma" autoFocus /></Field>
           <Field label="Wanneer?"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         </div>
-        <Field label="Bedrag op de bon" hint="inclusief BTW"><MoneyInput value={amount} onChange={setAmount} /></Field>
+        <Field label="Bedrag op de bon" hint="inclusief btw"><MoneyInput value={amount} onChange={setAmount} /></Field>
         <CategoryChoice value={category} onChange={(c) => { setCategory(c); setVat(meta.expenseCategories.find((x) => x.key === c)?.defaultVat ?? 'hoog'); }} />
         <InvestmentHint categoryKey={category} gross={amount} vatCode={vat} onUse={() => setCategory('investering')} />
-        <Field label="Stond er BTW op de bon?">
+        <Field label="Stond er btw op de bon?">
           <select value={vat} onChange={(e) => setVat(e.target.value as PurchaseVatCode)}>
             {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
           </select>

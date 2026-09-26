@@ -48,7 +48,7 @@ export function Work() {
         <>
           <ErrorBox error={invoices.error} />
           {invList.length === 0 ? (
-            <Empty icon="💰" title="Nog geen facturen">Maak je eerste factuur of zet een geaccepteerde offerte om.</Empty>
+            <Empty icon="💰" title="Nog geen facturen">Maak je eerste factuur, of maak er een van een offerte waar de klant ja op zei.</Empty>
           ) : (
             <table className="list">
               <thead><tr><th>Nummer</th><th>Klant</th><th>Datum</th><th>Status</th><th className="num">Bedrag</th><th className="num">Nog open</th></tr></thead>

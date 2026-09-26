@@ -208,7 +208,7 @@ export function CategoryPicker({ initial, onPick, incoming, amount }: { initial?
         </div>
       </Field>
       {!incoming && <InvestmentHint categoryKey={cat} gross={amount} vatCode={vat} onUse={() => { setCat('investering'); setVat('hoog'); }} />}
-      <Field label="Stond er BTW op?">
+      <Field label="Stond er btw op?">
         <select value={vat} onChange={(e) => setVat(e.target.value as PurchaseVatCode)}>
           {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
         </select>

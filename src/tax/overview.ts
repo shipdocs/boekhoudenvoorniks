@@ -62,7 +62,7 @@ export interface TaxYearOverview {
 }
 
 export const OVERVIEW_DISCLAIMER =
-  'Dit overzicht is een hulpmiddel om je aangifte voor te bereiden, geen advies. Laat het altijd controleren door een boekhouder of accountant voordat je iets indient: de regels veranderen, de software kan fouten maken en de app kent je hele situatie niet. Jij blijft verantwoordelijk voor je aangifte.';
+  'Dit overzicht helpt je je aangifte voor te bereiden; het is geen advies. Jij blijft verantwoordelijk voor je aangifte.';
 
 /**
  * Wat er in de aangifte inkomstenbelasting bij de winst komt, bovenop de boekhouding: de KIA,

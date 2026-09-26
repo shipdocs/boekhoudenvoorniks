@@ -85,7 +85,7 @@ export function CustomerDetail({ id }: { id?: number }) {
           <summary className="muted">Zakelijke klant (btw-nummer, KvK, contactpersoon)</summary>
           <div className="grid cols-2" style={{ marginTop: 10 }}>
             <Field label="Contactpersoon"><input value={r.contact_name ?? ''} onChange={(e) => set({ contact_name: e.target.value })} /></Field>
-            <Field label="Btw-nummer" hint="nodig bij BTW verlegd"><input value={r.vat_number ?? ''} onChange={(e) => set({ vat_number: e.target.value })} /></Field>
+            <Field label="Btw-nummer" hint="nodig als je btw verlegt (klant is een bedrijf dat de btw zelf regelt)"><input value={r.vat_number ?? ''} onChange={(e) => set({ vat_number: e.target.value })} /></Field>
             <Field label="KvK-nummer"><input value={r.kvk_number ?? ''} onChange={(e) => set({ kvk_number: e.target.value })} /></Field>
             <Field label="IBAN"><input value={r.iban ?? ''} onChange={(e) => set({ iban: e.target.value })} /></Field>
             <Field label="Eigen betaaltermijn (dagen)"><input className="num" value={r.payment_term_days ?? ''} onChange={(e) => set({ payment_term_days: e.target.value ? Number(e.target.value) : null })} /></Field>
@@ -94,7 +94,7 @@ export function CustomerDetail({ id }: { id?: number }) {
         <Field label="Notities"><textarea value={r.notes ?? ''} onChange={(e) => set({ notes: e.target.value })} /></Field>
       </div>
       <div className="row" style={{ marginTop: 14 }}>
-        {id && <Button kind="danger" onClick={async () => { if (confirm('Klant archiveren?')) { await run(() => api.relations.archive(id)); go({ screen: 'klanten' }); } }}>Archiveren</Button>}
+        {id && <Button kind="danger" onClick={async () => { if (confirm('Klant verbergen? Facturen en offertes blijven bewaard.')) { await run(() => api.relations.archive(id)); go({ screen: 'klanten' }); } }}>Verbergen</Button>}
         <span className="grow" />
         {id && <Button onClick={() => go({ screen: 'offerte' })}>Offerte maken</Button>}
         <Button kind="primary" disabled={busy || !r.name} onClick={async () => {

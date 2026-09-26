@@ -10,11 +10,11 @@ import { TermsBlock } from './Terms';
 const AUTOPILOT: [AppSettings['autopilot'], string, string][] = [
   ['voorzichtig', 'Voorzichtig', 'Ik bevestig alles zelf. De app doet voorstellen, maar boekt niets zonder mij.'],
   ['normaal', 'Normaal (aangeraden)', 'Wat zeker is (een betaling met je factuurnummer erin) gaat vanzelf. De rest vraagt de app.'],
-  ['maximaal', 'Maximaal', 'Iets lagere drempels. Alles wat automatisch ging, zie je terug met een knop "Klopt niet".'],
+  ['maximaal', 'Maximaal', 'De app doet ook dingen zelf als hij bijna zeker is. Alles wat hij zelf deed, zie je terug met een knop "Klopt niet".'],
 ];
 
 /**
- * Onboarding zonder boekhoudtermen: wat voor werk, alleen of niet, bedrijf, BTW, bank, eerste factuur.
+ * Onboarding zonder boekhoudtermen: wat voor werk, alleen of niet, bedrijf, btw, bank, eerste factuur.
  * Alleen gegevens die echt nodig zijn (wettelijke factuureisen).
  *
  * De stappen komen uit shared/onboarding.ts. Een nieuwe gebruiker krijgt ze allemaal; wie de app al
@@ -177,21 +177,21 @@ export function Onboarding() {
 
       {step.id === 'btw' && (
         <>
-          <h1>Reken je BTW?</h1>
+          <h1>Reken je btw?</h1>
           <p className="sub">De meeste vakmensen wel. Twijfel je? Kijk op je brief van de Belastingdienst.</p>
           <div className="choice">
             <button className={!kor ? 'selected' : ''} onClick={() => setKor(false)}>
-              Ja, ik reken BTW
-              <div className="hint">Je doet elk kwartaal BTW-aangifte. Wij rekenen het voor je uit.</div>
+              Ja, ik reken btw
+              <div className="hint">Je doet btw-aangifte (meestal per kwartaal). Wij rekenen het voor je uit.</div>
             </button>
             <button className={kor ? 'selected' : ''} onClick={() => setKor(true)}>
-              Nee, ik gebruik de kleineondernemersregeling (KOR)
-              <div className="hint">Je rekent geen BTW en doet geen aangifte.</div>
+              Nee, ik gebruik de kleineondernemersregeling (KOR): ik heb me aangemeld omdat ik minder dan € 20.000 omzet heb
+              <div className="hint">Je rekent geen btw en doet geen aangifte.</div>
             </button>
           </div>
           {!kor && (
             <div className="grid cols-2" style={{ marginTop: 18 }}>
-              <Field label="Btw-identificatienummer" hint="NL…B01">
+              <Field label="Btw-identificatienummer" hint="staat op je brief van de Belastingdienst: begint met NL, eindigt op B01 of B02">
                 <input value={company.vatNumber} onChange={(e) => setCompany({ ...company, vatNumber: e.target.value })} placeholder="NL123456789B01" />
               </Field>
               <Field label="Hoe vaak doe je aangifte?">
@@ -215,8 +215,8 @@ export function Onboarding() {
             <input value={company.iban} onChange={(e) => setCompany({ ...company, iban: e.target.value })} placeholder="NL00 BANK 0123 4567 89" />
           </Field>
           {company.iban && !isValidIban(company.iban) && <p className="small" style={{ color: 'var(--bad)' }}>Dit rekeningnummer klopt niet.</p>}
-          <h2>Bank koppelen</h2>
-          <p className="muted small">Download een afschrift bij je bank (CSV, MT940 of CAMT.053) en sleep het hierheen. Een directe koppeling met je bank komt later.</p>
+          <h2>Bankafschrift inlezen (mag ook later)</h2>
+          <p className="muted small">Download een afschrift in je internetbankieren (bij "downloaden" of "exporteren"; kies CSV, MT940 of CAMT) en sleep het hierheen. Automatisch ophalen bij je bank komt later.</p>
           <DropZone
             accept=".csv,.txt,.sta,.940,.xml"
             onFile={async (file) => {
@@ -234,12 +234,12 @@ export function Onboarding() {
       {step.id === 'fiscaal' && (
         <>
           <h1>Auto en startjaar</h1>
-          <p className="sub">Hiermee rekenen we je aftrekposten uit: kilometers, afschrijving en de startersaftrek.</p>
+          <p className="sub">Hiermee rekenen we je aftrek uit: kilometers, investeringen en de aftrek voor starters.</p>
           <h2>Waarmee rijd je zakelijk?</h2>
           <div className="choice">
             {([
-              ['prive', 'Met mijn privéauto', 'Je krijgt € 0,25 per zakelijke kilometer. Tanken en parkeren tellen dan als privé.'],
-              ['zakelijk', 'Met een bus of auto van de zaak', 'Tanken, onderhoud en verzekering zijn kosten; de bus zelf schrijf je af.'],
+              ['prive', 'Met mijn privéauto', 'Je mag € 0,25 per zakelijke kilometer aftrekken. Tanken en parkeren tellen dan als privé.'],
+              ['zakelijk', 'Met een bus of auto van de zaak', 'Tanken, onderhoud en verzekering zijn kosten. De bus zelf telt de app verdeeld over een paar jaar als kosten.'],
               ['geen', 'Ik rijd niet zakelijk', ''],
             ] as const).map(([key, label, hint]) => (
               <button key={key} className={carUse === key ? 'selected' : ''} onClick={() => setCarUse(key)}>
@@ -253,7 +253,7 @@ export function Onboarding() {
               <input value={startYear} onChange={(e) => setStartYear(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder={String(year)} inputMode="numeric" />
             </Field>
             {Number(startYear) > 0 && year - Number(startYear) < 5 && (
-              <Field label="Startersaftrek al eerder gebruikt?" hint="vóór dit jaar; weet je het niet, kies 0">
+              <Field label="Hoe vaak kreeg je al startersaftrek (extra aftrek voor nieuwe ondernemers)?" hint="vóór dit jaar; weet je het niet, kies 0">
                 <select value={startersUsed} onChange={(e) => setStartersUsed(Number(e.target.value))}>
                   {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}×</option>)}
                 </select>
@@ -274,7 +274,7 @@ export function Onboarding() {
               <button key={pct} className={phonePct === pct ? 'selected' : ''} onClick={() => setPhonePct(pct as number)}>{label}</button>
             ))}
           </div>
-          <p className="small muted">Een redelijke schatting mag. Let op: een privé internetabonnement is alleen aftrekbaar voor zover je er extra kosten voor je bedrijf door hebt (bijvoorbeeld een sneller abonnement).</p>
+          <p className="small muted">Een redelijke schatting mag. Internet thuis telt alleen mee als je er voor je bedrijf extra voor betaalt (bv. een sneller abonnement).</p>
           <h2>Heb je een werkplek thuis?</h2>
           <div className="choice">
             {([
@@ -289,7 +289,7 @@ export function Onboarding() {
             ))}
           </div>
           {!profile.worksAlone && (
-            <Field label="Werkt je partner onbetaald mee? Hoeveel uur per jaar?" hint="vanaf 525 uur: meewerkaftrek">
+            <Field label="Werkt je partner onbetaald mee? Hoeveel uur per jaar?" hint="vanaf 525 uur krijg je extra aftrek (meewerkaftrek)">
               <input value={partnerHours} onChange={(e) => setPartnerHours(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="0" inputMode="numeric" />
             </Field>
           )}

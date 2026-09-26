@@ -11,7 +11,7 @@ const TABS: [Tab, string][] = [
   ['bedrijf', 'Je bedrijf'],
   ['facturen', 'Facturen & offertes'],
   ['email', 'E-mail'],
-  ['btw', 'BTW'],
+  ['btw', 'Btw'],
   ['koppelingen', 'Koppelingen'],
   ['ai', 'Automatisch & herkenning'],
   ['backup', 'Back-up, demo & updates'],
@@ -73,11 +73,11 @@ export function SettingsScreen() {
 
       {tab === 'facturen' && section(
         <>
-          <label className="row"><input type="checkbox" checked={draft.sendUbl} onChange={(e) => set({ sendUbl: e.target.checked })} /> Stuur ook een e-factuur (UBL) mee, zodat de klant de factuur zonder overtypen kan inlezen</label>
+          <label className="row"><input type="checkbox" checked={draft.sendUbl} onChange={(e) => set({ sendUbl: e.target.checked })} /> Stuur ook een e-factuur mee: een bestand dat het boekhoudprogramma van je klant zelf kan inlezen (zonder overtypen)</label>
           <div className="grid cols-3">
             <Field label="Betaaltermijn (dagen)"><input className="num" type="number" value={draft.paymentTermDays} onChange={(e) => set({ paymentTermDays: Number(e.target.value) })} /></Field>
             <Field label="Offerte geldig (dagen)"><input className="num" type="number" value={draft.quoteValidityDays} onChange={(e) => set({ quoteValidityDays: Number(e.target.value) })} /></Field>
-            <Field label="Factuurnummer" hint="{JJJJ} jaar, {NNNN} volgnummer"><input value={draft.invoiceNumberFormat} onChange={(e) => set({ invoiceNumberFormat: e.target.value })} /></Field>
+            <Field label="Factuurnummer" hint="bv. {JJJJ}-{NNNN} wordt 2026-0001"><input value={draft.invoiceNumberFormat} onChange={(e) => set({ invoiceNumberFormat: e.target.value })} /></Field>
           </div>
           <Field label="Onderwerp factuur-mail"><input value={draft.invoiceEmailSubject} onChange={(e) => set({ invoiceEmailSubject: e.target.value })} /></Field>
           <Field label="Tekst factuur-mail" hint="{klant} {nummer} {bedrag} {vervaldatum} {iban} {bedrijf}"><textarea rows={6} value={draft.invoiceEmailBody} onChange={(e) => set({ invoiceEmailBody: e.target.value })} /></Field>
@@ -109,9 +109,9 @@ export function SettingsScreen() {
                   {(bankAccounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.iban ? ` (${a.iban})` : ''}</option>)}
                 </select>
               </Field>
-              <Field label="Standaard BTW op nieuwe regels">
+              <Field label="Standaard btw op nieuwe regels">
                 <select value={draft.defaultVatCode} onChange={(e) => set({ defaultVatCode: e.target.value as AppSettings['defaultVatCode'] })}>
-                  <option value="hoog">21%</option><option value="laag">9%</option><option value="nul">0%</option><option value="verlegd">Verlegd</option>
+                  <option value="hoog">21%</option><option value="laag">9%</option><option value="nul">0%</option><option value="verlegd">Btw verlegd (klant regelt de btw)</option>
                 </select>
               </Field>
             </div>
@@ -129,8 +129,8 @@ export function SettingsScreen() {
               <option value="geen">Ik rijd niet zakelijk</option>
             </select>
           </Field>
-          {draft.carUse === 'prive' && <p className="small muted">Tanken en parkeren tellen dan als privé; je zakelijke kilometers vul je in bij Belasting → Aftrekposten → Kilometers.</p>}
-          {draft.carUse === 'zakelijk' && <p className="small muted">Rijd je ook privé in een auto van de zaak (meer dan 500 km per jaar)? Dan geldt een bijtelling; die rekent de app niet uit. Vraag je boekhouder.</p>}
+          {draft.carUse === 'prive' && <p className="small muted">Tanken en parkeren tellen dan als privé; je zakelijke kilometers vul je in bij Belasting → Aftrek → Kilometers.</p>}
+          {draft.carUse === 'zakelijk' && <p className="small muted">Rijd je ook privé in een auto van de zaak (meer dan 500 km per jaar)? Dan betaal je daar belasting over (bijtelling). Dat rekent de app niet uit: vraag je boekhouder.</p>}
           <div className="grid cols-2">
             <Field label="In welk jaar ben je gestart?" hint="voor de startersaftrek">
               <input value={draft.startYear ?? ''} onChange={(e) => set({ startYear: e.target.value ? Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || null : null })} placeholder="bv. 2024" inputMode="numeric" />
@@ -157,7 +157,7 @@ export function SettingsScreen() {
               </select>
             </Field>
           </div>
-          <Field label="Uren dat je partner onbetaald meewerkt, per jaar" hint="vanaf 525 uur: meewerkaftrek">
+          <Field label="Uren dat je partner onbetaald meewerkt, per jaar" hint="vanaf 525 uur krijg je extra aftrek (meewerkaftrek)">
             <input value={draft.partnerHours || ''} onChange={(e) => set({ partnerHours: Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || 0 })} placeholder="0" inputMode="numeric" />
           </Field>
           <p className="muted small">Altijd een schatting: de app kent alleen de winst uit je bedrijf, niet je partner, hypotheek of ander inkomen.</p>
@@ -169,7 +169,7 @@ export function SettingsScreen() {
         <>
           <Field label="Hoe automatisch?" hint="wat de app zelf mag afhandelen">
             <div className="chips">
-              {([['voorzichtig', 'Voorzichtig: ik bevestig alles zelf'], ['normaal', 'Normaal'], ['maximaal', 'Maximaal: iets lagere drempels']] as const).map(([k, l]) => (
+              {([['voorzichtig', 'Voorzichtig: ik bevestig alles zelf'], ['normaal', 'Normaal'], ['maximaal', 'Maximaal: de app doet meer zelf']] as const).map(([k, l]) => (
                 <button key={k} className={draft.autopilot === k ? 'selected' : ''} onClick={() => set({ autopilot: k })}>{l}</button>
               ))}
             </div>
@@ -181,8 +181,9 @@ export function SettingsScreen() {
           <p className="small muted">Ook op "maximaal" gaat alleen automatisch wat zeker genoeg is, en een leverancier pas nadat jij daar ja op zei. Alles wat automatisch ging zie je terug op Vandaag, met de reden en een knop "Klopt niet".</p>
           <p className="muted">Alles draait op je eigen computer; documenten gaan nergens naartoe. Zonder slimme herkenning werken e-facturen en PDF's met tekst gewoon; alleen foto's van bonnetjes vul je dan zelf in.</p>
           <LocalOcr engine={draft.ocr.engine} />
+          {settings.advancedMode && (
           <details style={{ marginTop: 12 }}>
-            <summary className="small">Eigen OCR-dienst of lokale AI (geavanceerd)</summary>
+            <summary className="small">Voor technische gebruikers: eigen herkenningsdienst of lokale AI</summary>
           <div className="grid cols-2">
             <Field label="Lokale tekstherkenning (OCR)" hint="adres van de OCR-dienst op deze computer"><input value={draft.ocr.url} onChange={(e) => set({ ocr: { ...draft.ocr, url: e.target.value } })} placeholder="http://127.0.0.1:8765" /></Field>
             <Field label="OCR-model"><select value={draft.ocr.engine} onChange={(e) => set({ ocr: { ...draft.ocr, engine: e.target.value } })}><option value="ingebouwd">Ingebouwd (GLM-OCR)</option><option value="glm-ocr">GLM-OCR</option><option value="paddleocr-vl">PaddleOCR-VL</option><option value="grm-ocr">GRM-OCR</option><option value="anders">Anders</option></select></Field>
@@ -191,6 +192,7 @@ export function SettingsScreen() {
           </div>
           <p className="small muted">De AI doet alleen voorstellen ("dit lijkt gereedschap"). De boeking zelf wordt altijd door vaste regels gemaakt.</p>
           </details>
+          )}
         </>,
       )}
       {tab === 'backup' && (
@@ -202,7 +204,7 @@ export function SettingsScreen() {
       {tab === 'over' && <About />}
       {tab === 'geavanceerd' && section(
         <>
-          <label className="row"><input type="checkbox" checked={draft.advancedMode} onChange={(e) => set({ advancedMode: e.target.checked })} /> Toon de boekhouding (grootboek, journaal, balans, exports)</label>
+          <label className="row"><input type="checkbox" checked={draft.advancedMode} onChange={(e) => set({ advancedMode: e.target.checked })} /> Toon de boekhouding voor je boekhouder (grootboek, balans en exports)</label>
           <p className="small muted">Handig voor je boekhouder. Voor dagelijks gebruik heb je dit niet nodig.</p>
         </>,
       )}
@@ -218,15 +220,15 @@ function EmailSettings({ draft, set, section }: { draft: Settings; set: (p: Part
     <>
       {section(
         <>
-          <p className="muted small">Facturen worden verstuurd via je eigen e-mailadres (SMTP). Je vindt deze gegevens bij je e-mailprovider.</p>
+          <p className="muted small">Facturen worden verstuurd via je eigen e-mailadres. De gegevens (server en poort) vind je bij je e-mailprovider: zoek op "SMTP-instellingen".</p>
           <div className="grid cols-3">
             <Field label="Server"><input value={draft.smtp.host} onChange={(e) => set({ smtp: { ...draft.smtp, host: e.target.value } })} placeholder="smtp.jouwprovider.nl" /></Field>
             <Field label="Poort"><input className="num" type="number" value={draft.smtp.port} onChange={(e) => set({ smtp: { ...draft.smtp, port: Number(e.target.value) } })} /></Field>
-            <Field label="Beveiliging"><select value={draft.smtp.secure ? 'ssl' : 'starttls'} onChange={(e) => set({ smtp: { ...draft.smtp, secure: e.target.value === 'ssl' } })}><option value="starttls">STARTTLS (587)</option><option value="ssl">SSL/TLS (465)</option></select></Field>
+            <Field label="Beveiliging" hint="neem over wat je provider zegt; meestal 587"><select value={draft.smtp.secure ? 'ssl' : 'starttls'} onChange={(e) => set({ smtp: { ...draft.smtp, secure: e.target.value === 'ssl' } })}><option value="starttls">STARTTLS (587)</option><option value="ssl">SSL/TLS (465)</option></select></Field>
             <Field label="Gebruikersnaam"><input value={draft.smtp.user} onChange={(e) => set({ smtp: { ...draft.smtp, user: e.target.value } })} /></Field>
             <Field label="Afzendernaam"><input value={draft.smtp.fromName} onChange={(e) => set({ smtp: { ...draft.smtp, fromName: e.target.value } })} /></Field>
             <Field label="Afzenderadres"><input value={draft.smtp.fromEmail} onChange={(e) => set({ smtp: { ...draft.smtp, fromEmail: e.target.value } })} /></Field>
-            <Field label="Kopie (BCC) naar" hint="optioneel"><input value={draft.smtp.bcc} onChange={(e) => set({ smtp: { ...draft.smtp, bcc: e.target.value } })} /></Field>
+            <Field label="Stuur mij een stille kopie op" hint="optioneel, e-mailadres"><input value={draft.smtp.bcc} onChange={(e) => set({ smtp: { ...draft.smtp, bcc: e.target.value } })} /></Field>
           </div>
         </>,
       )}

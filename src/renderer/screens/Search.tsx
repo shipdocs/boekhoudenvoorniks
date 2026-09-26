@@ -3,7 +3,7 @@ import { api } from '../api';
 import { Euro, DateNl, useApp } from '../ui';
 import type { SearchGroup } from '../../search/search';
 
-const KIND_LABEL: Record<string, string> = { document: '📷 Document', factuur: '💰 Factuur', offerte: '📄 Offerte', relatie: '👤 Relatie', bank: '🏦 Betaling', klus: '🔨 Klus', inkoop: '🧾 Aankoop', boeking: '📚 Boeking' };
+const KIND_LABEL: Record<string, string> = { document: '📷 Document', factuur: '💰 Factuur', offerte: '📄 Offerte', relatie: '👤 Klant/leverancier', bank: '🏦 Betaling', klus: '🔨 Klus', inkoop: '🧾 Aankoop', boeking: '📚 Boeking' };
 
 /** Snippet met [[treffer]] → gemarkeerde tekst, zonder HTML te injecteren. */
 function Snippet({ text }: { text: string }) {

@@ -53,7 +53,7 @@ export function EarningsPerJob({ relationId }: { relationId?: number } = {}) {
     <>
       <h2>{relationId ? 'Klussen voor deze klant' : 'Wat verdien ik per klus?'}</h2>
       <table className="list">
-        <thead><tr><th>Klus</th>{!relationId && <th>Klant</th>}<th className="num">Gefactureerd</th><th className="num">Kosten</th><th className="num">Verdiend</th><th className="num">Marge</th></tr></thead>
+        <thead><tr><th>Klus</th>{!relationId && <th>Klant</th>}<th className="num">Gefactureerd</th><th className="num">Kosten</th><th className="num">Verdiend</th><th className="num">% verdiend</th></tr></thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.jobId} className="clickable" onClick={() => go({ screen: 'klus', id: r.jobId })}>
@@ -218,7 +218,7 @@ function WorkOrder({ jobId, items, onChanged, readOnly = false }: { jobId: numbe
         <input className="num" style={{ width: 70 }} value={qty} onChange={(e) => setQty(e.target.value)} aria-label="Aantal" />
         <select value={unit} onChange={(e) => setUnit(e.target.value)} aria-label="Eenheid"><option>uur</option><option>m²</option><option>m</option><option>stuk</option></select>
         <div style={{ width: 120 }}><MoneyInput value={price} onChange={setPrice} /></div>
-        <select value={vat} onChange={(e) => setVat(e.target.value as 'hoog' | 'laag')} aria-label="BTW"><option value="hoog">21%</option><option value="laag">9%</option></select>
+        <select value={vat} onChange={(e) => setVat(e.target.value as 'hoog' | 'laag')} aria-label="Btw"><option value="hoog">21%</option><option value="laag">9%</option></select>
         <Button disabled={busy || !desc.trim() || price === null || price < 0} onClick={async () => {
           const r = await run(() => api.jobs.addWorkItem(jobId, { date: new Date().toISOString().slice(0, 10), description: desc, quantity: Number(qty.replace(',', '.')), unit, unitPrice: price!, vatCode: vat }));
           if (r) { setDesc(''); setPrice(null); onChanged(); }

@@ -59,8 +59,8 @@ export function TaxYear() {
   const [year, setYear] = useState(new Date().getFullYear());
   return (
     <div className="page">
-      <h1>Aangifte &amp; aftrekposten</h1>
-      <p className="sub">Wat je bij je aangifte inkomstenbelasting nodig hebt, en welke aftrek je krijgt.</p>
+      <h1>Aftrek &amp; investeringen</h1>
+      <p className="sub">Welke aftrek je krijgt, en wat je boekhouder nodig heeft voor je aangifte inkomstenbelasting.</p>
       {settings.taxCheckAcknowledgedYear !== new Date().getFullYear() ? (
         <AccountantGate onAccepted={() => void reloadSettings()} />
       ) : (
@@ -68,7 +68,7 @@ export function TaxYear() {
       <AccountantNotice compact />
       <div className="row between" style={{ marginBottom: 16 }}>
         <div className="chips">
-          {([['overzicht', 'Voor je aangifte'], ['bedrijfsmiddelen', 'Bedrijfsmiddelen'], ['kilometers', 'Kilometers'], ['uren', 'Uren']] as const).map(([k, l]) => (
+          {([['overzicht', 'Voor je aangifte'], ['bedrijfsmiddelen', 'Investeringen'], ['kilometers', 'Kilometers'], ['uren', 'Uren']] as const).map(([k, l]) => (
             <button key={k} className={tab === k ? 'selected' : ''} onClick={() => setTab(k)}>{l}</button>
           ))}
         </div>
@@ -85,7 +85,7 @@ export function TaxYear() {
       </>
       )}
       <p className="muted small" style={{ marginTop: 18 }}>
-        <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Auto, startjaar en urencriterium instellen</span>
+        <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Auto, startjaar en je uren (norm: 1.225 per jaar) instellen</span>
       </p>
     </div>
   );
@@ -202,23 +202,23 @@ function Assets() {
   const bookDue = async () => {
     const r = await run(() => api.assets.bookDue());
     if (r) {
-      toast(r.years.length ? `Afschrijving geboekt over ${r.years.join(', ')}` : 'Alles is al geboekt');
+      toast(r.years.length ? `Kosten van je investeringen bijgewerkt voor ${r.years.join(', ')}` : 'Alles is al bijgewerkt');
       await list.reload();
     }
   };
   return (
     <>
       <p className="muted">
-        Alles vanaf € 450 (excl. btw) per stuk dat je jaren gebruikt, zoals een bus, steigers of een machine. De kosten verdeel je over de jaren (afschrijven, minstens 5 jaar).
-        Na afloop van een jaar boekt de app de afschrijving zelf. Koop je via "Aankoop" iets als <em>groot gereedschap / machine</em>, dan komt het hier vanzelf bij.
+        Alles vanaf € 450 (zonder btw) dat je jaren gebruikt, zoals een bus, steigers, een machine of laptop. De kosten tellen verdeeld over minstens 5 jaar (dat heet afschrijven).
+        Dat doet de app elk jaar zelf. Kies je bij een aankoop "Investering (vanaf € 450, gaat jaren mee)", dan komt het hier vanzelf bij.
       </p>
       <KiaProgress assets={list.data} />
       {list.data.length === 0 ? (
-        <Empty icon="🧰" title="Nog geen bedrijfsmiddelen">Kies bij een aankoop de categorie "Groot gereedschap / machine".</Empty>
+        <Empty icon="🧰" title="Nog geen investeringen">Kies bij een aankoop "Investering (vanaf € 450, gaat jaren mee)".</Empty>
       ) : (
         <table className="list">
           <thead>
-            <tr><th>Wat</th><th>Gekocht</th><th className="num">Aanschaf</th><th className="num">Per jaar</th><th className="num">Boekwaarde</th><th /></tr>
+            <tr><th>Wat</th><th>Gekocht</th><th className="num">Kostte</th><th className="num">Kosten per jaar</th><th className="num" title="wat je betaalde, min wat al als kosten is geteld">Waarde nu</th><th /></tr>
           </thead>
           <tbody>
             {list.data.map((a) => (
@@ -229,12 +229,12 @@ function Assets() {
                   {a.kia_excluded ? <div className="small muted">telt niet mee voor de investeringsaftrek</div> : null}
                   {a.booked_elsewhere_until !== null && (
                     <div className="small muted">
-                      Afschrijving t/m {a.booked_elsewhere_until} gaat ervan uit dat die buiten de app is gedaan (bv. door je boekhouder).{' '}
-                      <span className="clickable" onClick={async () => { if (await run(() => api.assets.update(a.id, { bookInApp: true }), 'De app boekt ook de eerdere jaren') !== undefined) await list.reload(); }}>Toch in de app boeken</span>
+                      De jaren tot en met {a.booked_elsewhere_until} heeft je boekhouder al gedaan (niet in de app).{' '}
+                      <span className="clickable" onClick={async () => { if (await run(() => api.assets.update(a.id, { bookInApp: true }), 'De app houdt ook de eerdere jaren bij') !== undefined) await list.reload(); }}>Toch in de app bijhouden</span>
                     </div>
                   )}
                   {a.belowThreshold && <div className="small muted">onder € 450: had ook direct als kosten gekund</div>}
-                  {a.energyHint && <div className="small" style={{ color: 'var(--warn)' }}>Misschien EIA/MIA: meld bij RVO vóór <DateNl date={a.energyHint.deadline} /></div>}
+                  {a.energyHint && <div className="small" style={{ color: 'var(--warn)' }}>Misschien extra aftrek voor zuinige of milieuvriendelijke apparaten. Vraag je boekhouder vóór <DateNl date={a.energyHint.deadline} /></div>}
                 </td>
                 <td><DateNl date={a.acquired_on} /></td>
                 <td className="num"><Euro cents={a.cost} /></td>
@@ -254,7 +254,7 @@ function Assets() {
         </table>
       )}
       <div className="row" style={{ marginTop: 12 }}>
-        <Button small disabled={busy} onClick={() => void bookDue()}>Afschrijving van vorige jaren boeken</Button>
+        <Button small disabled={busy} onClick={() => void bookDue()}>Kosten van vorige jaren bijwerken</Button>
       </div>
       {editing && <EditAsset asset={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); void list.reload(); }} />}
       {selling && <SellAsset asset={selling} onClose={() => setSelling(null)} onSaved={() => { setSelling(null); void list.reload(); }} />}
@@ -273,8 +273,8 @@ function KiaProgress({ assets }: { assets: AssetItem[] }) {
     <div className="card small" style={{ marginBottom: 12 }}>
       <strong>Investeringen {year}: <Euro cents={total} /></strong>
       {kia > 0
-        ? <> · investeringsaftrek (KIA) ± € {kia.toLocaleString('nl-NL')}</>
-        : <> · de investeringsaftrek (KIA) geldt vanaf € {rules.kia.min.toLocaleString('nl-NL')} per jaar; alles wat je dit jaar nog investeert telt mee.</>}
+        ? <> · extra aftrek (KIA) ± € {kia.toLocaleString('nl-NL')}</>
+        : <> · extra aftrek (KIA) krijg je vanaf € {rules.kia.min.toLocaleString('nl-NL')} per jaar; wat je dit jaar nog koopt, telt mee.</>}
     </div>
   );
 }
@@ -290,15 +290,15 @@ function EditAsset({ asset, onClose, onSaved }: { asset: AssetItem; onClose: () 
     if (r) onSaved();
   };
   return (
-    <Modal title="Bedrijfsmiddel aanpassen" onClose={onClose}>
+    <Modal title="Investering aanpassen" onClose={onClose}>
       <div className="grid">
         <Field label="Naam"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <div className="grid cols-2">
           <Field label="Hoeveel jaar gebruik je het?" hint="minstens 5"><input value={years} onChange={(e) => setYears(e.target.value)} inputMode="decimal" /></Field>
-          <Field label="Wat is het daarna nog waard?" hint="restwaarde, vaak € 0"><MoneyInput value={residual} onChange={setResidual} /></Field>
+          <Field label="Wat is het daarna nog waard?" hint="meestal € 0"><MoneyInput value={residual} onChange={setResidual} /></Field>
         </div>
-        <label className="row small"><input type="checkbox" checked={car} onChange={(e) => setCar(e.target.checked)} /> Dit is een personenauto (telt niet mee voor de investeringsaftrek)</label>
-        <p className="small muted">Afschrijving die al geboekt is, blijft staan; de wijziging geldt voor de rest van de looptijd.</p>
+        <label className="row small"><input type="checkbox" checked={car} onChange={(e) => setCar(e.target.checked)} /> Dit is een personenauto (daarvoor krijg je geen extra aftrek)</label>
+        <p className="small muted">Wat al als kosten is geteld, blijft staan. De wijziging geldt voor de jaren die nog komen.</p>
       </div>
       <div className="row end" style={{ marginTop: 14 }}>
         <Button onClick={onClose}>Annuleren</Button>
@@ -324,8 +324,8 @@ function SellAsset({ asset, onClose, onSaved }: { asset: AssetItem; onClose: () 
           <Field label="Verkoopprijs excl. btw" hint="0 als je het weggooit"><MoneyInput value={price} onChange={setPrice} /></Field>
         </div>
         <p className="small muted">
-          De app boekt de afschrijving tot de verkoop en haalt de boekwaarde van de balans. Heb je het verkocht? Maak dan ook een gewone factuur voor de koper (met btw): die zorgt voor de opbrengst.
-          Verkoop je binnen 5 jaar na aankoop, dan kan een deel van de investeringsaftrek terug; dat staat dan bij "Voor je aangifte".
+          De app telt de kosten tot de verkoopdatum en haalt het uit je lijst. Heb je het verkocht? Maak dan ook een gewone factuur voor de koper (met btw): die zorgt voor de opbrengst.
+          Verkoop je het binnen 5 jaar na aankoop? Dan moet je misschien een deel van de extra aftrek terugbetalen. De app rekent dat uit en zet het in de notities voor je boekhouder.
         </p>
       </div>
       <div className="row end" style={{ marginTop: 14 }}>

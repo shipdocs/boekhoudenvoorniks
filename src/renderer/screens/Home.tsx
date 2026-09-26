@@ -101,7 +101,7 @@ export function Home() {
         </div>
         <div className="card clickable" onClick={() => go({ screen: 'belasting' })}>
           <div className="value">± <Euro cents={data.money.vatReserve} /></div>
-          <div className="label">apart houden voor BTW</div>
+          <div className="label">apart houden voor btw</div>
           {data.money.vatPot && (
             <div className="small" style={{ marginTop: 6 }}>
               🐷 <Euro cents={data.money.vatPot.setAside} /> in {data.money.vatPot.account}

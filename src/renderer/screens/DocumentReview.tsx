@@ -189,7 +189,7 @@ export function DocumentReview({ id }: { id: number }) {
                 <Field label="Winkel / leverancier"><input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} /></Field>
                 <Field label="Datum"><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
               </div>
-              <Field label="Totaal (incl. BTW)"><MoneyInput value={form.total} onChange={(v) => setForm({ ...form, total: v })} /></Field>
+              <Field label="Totaal (incl. btw)"><MoneyInput value={form.total} onChange={(v) => setForm({ ...form, total: v })} /></Field>
               <Field label="Was dit zakelijk?">
                 <div className="chips">
                   <button className={form.business ? 'selected' : ''} onClick={() => setForm({ ...form, business: true })}>Zakelijk</button>
@@ -200,7 +200,7 @@ export function DocumentReview({ id }: { id: number }) {
                 <>
                   <CategoryChoice value={form.categoryKey} onChange={(c) => setForm({ ...form, categoryKey: c })} />
                   {!form.splits && <InvestmentHint categoryKey={form.categoryKey} gross={form.total} vatCode={form.vatCode} onUse={() => setForm({ ...form, categoryKey: 'investering' })} />}
-                  <Field label="BTW op de bon">
+                  <Field label="Btw op de bon">
                     <select value={form.vatCode} onChange={(e) => setForm({ ...form, vatCode: e.target.value as PurchaseVatCode })}>
                       {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
                     </select>
