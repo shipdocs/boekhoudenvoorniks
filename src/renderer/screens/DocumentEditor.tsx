@@ -133,7 +133,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
             <input type="date" value={date} disabled={!editable} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <Field label={isInvoice ? 'Betalen vóór' : 'Geldig tot'} hint={`standaard ${isInvoice ? settings.paymentTermDays : settings.quoteValidityDays} dagen`}>
-            <input type="date" value={secondDate || addDays(date, isInvoice ? settings.paymentTermDays : settings.quoteValidityDays)} disabled={!editable} onChange={(e) => setSecondDate(e.target.value)} />
+            <input type="date" value={secondDate || (date ? addDays(date, isInvoice ? settings.paymentTermDays : settings.quoteValidityDays) : '')} disabled={!editable} onChange={(e) => setSecondDate(e.target.value)} />
           </Field>
         </div>
         {editable && !settings.kor && (() => {
@@ -157,6 +157,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         </div>
 
         <h2>{isInvoice ? 'Wat heb je gedaan?' : 'Wat ga je doen?'}</h2>
+        <div className="lines-scroll">
         <table className="lines-table" style={{ width: '100%' }}>
           <thead>
             <tr className="small muted"><td>Omschrijving</td><td style={{ width: 80 }}>Aantal</td><td style={{ width: 80 }}>Eenheid</td><td style={{ width: 120 }}>Prijs</td><td style={{ width: 190 }}>Btw</td><td style={{ width: 110 }} className="num">Totaal</td><td style={{ width: 36 }} /></tr>
@@ -183,6 +184,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
             })}
           </tbody>
         </table>
+        </div>
         {editable && (
           <div className="row" style={{ marginTop: 8 }}>
             <Button small onClick={() => setLines((ls) => [...ls, { description: '', quantity: '1', unit: '', unitPrice: null, vatCode: defaultVat }])}>+ Regel</Button>

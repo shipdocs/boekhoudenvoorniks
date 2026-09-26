@@ -163,7 +163,9 @@ table.list tr.clickable:hover td { background: var(--surface-2); }
 .fieldcheck .ok { color: var(--good); font-weight: 700; }
 .fieldcheck .warn { color: var(--warn); font-weight: 700; }
 /* vaste kolombreedtes: een lang btw-label mag de omschrijving niet wegdrukken */
-.lines-table { table-layout: fixed; }
+.lines-table { table-layout: fixed; min-width: 860px; }
+/* in een smal venster schuift de regeltabel opzij in plaats van de omschrijving samen te knijpen */
+.lines-scroll { overflow-x: auto; }
 .lines-table input, .lines-table select { width: 100%; min-width: 0; }
 .lines-table td { padding: 4px 4px; }
 .muted { color: var(--muted); }
