@@ -20,7 +20,8 @@
     "dist": "npm run build && electron-builder --linux --win",
     "dist:linux": "npm run build && electron-builder --linux",
     "dist:win": "npm run build && electron-builder --win",
-    "benchmark:ocr": "npm run build:main && node dist/main/tools/ocr-benchmark.js"
+    "benchmark:ocr": "npm run build:main && node dist/main/tools/ocr-benchmark.js",
+    "benchmark:maak": "npm run build:main && electron dist/main/tools/render-benchmark.js"
   },
   "build": {
     "appId": "app.shipdocs.gratisboekhouden",

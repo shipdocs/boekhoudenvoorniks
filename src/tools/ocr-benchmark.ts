@@ -5,6 +5,11 @@
  *   npm run build:main
  *   node dist/main/tools/ocr-benchmark.js <map-met-documenten> [ocr-url] [engine-naam]
  *
+ * Engine "llamacpp:glm-ocr" praat met een llama-server (de ingebouwde herkenning), bv.
+ *   llama-server -hf ggml-org/GLM-OCR-GGUF:Q8_0 --port 8080
+ *   node dist/main/tools/ocr-benchmark.js ./benchmark http://127.0.0.1:8080 llamacpp:glm-ocr
+ * Een synthetische set maak je met render-benchmark.ts (zie docs/ocr-benchmark.md).
+ *
  * De map bevat per document een bestand (jpg/png/pdf/xml) en een gelijknamig .json met de juiste waarden:
  *   { "supplier": "Bouwmaat", "date": "2026-09-23", "total": 121.00, "vat": [{ "rate": 21, "amount": 21.00 }] }
  *
@@ -16,14 +21,10 @@ import Database from 'better-sqlite3';
 import { migrate } from '../db/database';
 import { createServices, MemorySecretStore } from '../services';
 import { HttpOcrProvider } from '../intake/ocr';
-import { supplierKey } from '../intake/supplier-memory';
+import { LlamaCppOcrProvider } from '../intake/ocr-llamacpp';
+import { scoreDocument } from './benchmark-score';
+import type { Truth } from './synthetic-receipts';
 
-interface Truth {
-  supplier?: string;
-  date?: string;
-  total?: number;
-  vat?: { rate: number; amount: number }[];
-}
 
 async function main() {
   const [dir, ocrUrl, engine = 'ocr'] = process.argv.slice(2);
@@ -39,7 +40,8 @@ async function main() {
     secrets: new MemorySecretStore(),
     fetch: (url, init) => fetch(url, init),
     storeFile: async (name) => name,
-    ocr: ocrUrl ? new HttpOcrProvider(engine, ocrUrl, (url, init) => fetch(url, init)) : null,
+    // engine "llamacpp:<naam>" = een llama-server (zoals de ingebouwde herkenning), anders de sidecar-API
+    ocr: !ocrUrl ? null : engine.startsWith('llamacpp') ? new LlamaCppOcrProvider(engine, ocrUrl, (url, init) => fetch(url, init)) : new HttpOcrProvider(engine, ocrUrl, (url, init) => fetch(url, init)),
   });
   const files = readdirSync(dir).filter((f) => ['.jpg', '.jpeg', '.png', '.webp', '.pdf', '.xml'].includes(extname(f).toLowerCase()));
   const score: Record<'supplier' | 'date' | 'total' | 'vat', [number, number]> = { supplier: [0, 0], date: [0, 0], total: [0, 0], vat: [0, 0] };
@@ -48,7 +50,7 @@ async function main() {
   for (const f of files) {
     const truthPath = join(dir, basename(f, extname(f)) + '.json');
     if (!existsSync(truthPath)) continue;
-    const truth = JSON.parse(readFileSync(truthPath, 'utf8')) as Truth;
+    const truth = JSON.parse(readFileSync(truthPath, 'utf8')) as Partial<Truth>;
     const started = Date.now();
     let res;
     try {
@@ -59,19 +61,10 @@ async function main() {
     }
     totalMs += Date.now() - started;
     const r = res.result;
-    const diffs: string[] = [];
-    const check = (field: keyof typeof score, ok: boolean, got: unknown, want: unknown) => {
-      score[field][1]++;
-      if (ok) score[field][0]++;
-      else diffs.push(`${field}: kreeg ${JSON.stringify(got)}, verwacht ${JSON.stringify(want)}`);
-    };
-    if (truth.supplier) check('supplier', !!r.supplier && supplierKey(r.supplier.value).split(' ')[0] === supplierKey(truth.supplier).split(' ')[0], r.supplier?.value, truth.supplier);
-    if (truth.date) check('date', r.invoiceDate?.value === truth.date, r.invoiceDate?.value, truth.date);
-    if (truth.total !== undefined) check('total', r.total?.value === Math.round(truth.total * 100), r.total?.value, Math.round(truth.total * 100));
-    if (truth.vat) {
-      const want = truth.vat.map((v) => `${v.rate}:${Math.round(v.amount * 100)}`).sort().join(',');
-      const got = r.vat.value.map((v) => `${v.rate}:${v.amount}`).sort().join(',');
-      check('vat', want === got, got, want);
+    const { fields, diffs } = scoreDocument(r, truth);
+    for (const [k, ok] of Object.entries(fields) as [keyof typeof score, boolean][]) {
+      score[k][1]++;
+      if (ok) score[k][0]++;
     }
     rows.push(`${f} [${res.source}]: ${diffs.length ? diffs.join('; ') : 'OK'}`);
   }

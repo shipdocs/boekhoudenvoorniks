@@ -19,7 +19,7 @@ eigen computer, zonder account, cloud of abonnement.
 | **Vandaag** | Hoeveel geld heb ik, hoeveel is vrij te besteden, hoeveel krijg ik nog, hoeveel moet ik apart houden voor BTW (met een optioneel belastingpotje), en *moet ik iets doen?* De administratie werkt als een inbox die leeg kan ("Je bent bij ✓"). |
 | **Werk & facturen** | Offertes → klant akkoord → klus → *werk klaar* → factuur in één klik. PDF + e-factuur (UBL, Peppol BIS 3.0) per e-mail (eigen SMTP). Doorlopende nummering, creditfacturen, betaalstatus, automatische herinneringen. Per klus een dossier: resultaat (omzet − materiaal − uitbesteed werk), werkbon die de factuur vult, en de vraag "Was dit voor de klus bij …?" bij een bon. Optioneel (standaard uit, alleen lokaal): de locatie van de bonfoto koppelt aan de klus. |
 | **Opmaak** | Logo, kleuren, lettertype en vaste tekstblokken met live voorbeeld; eigen HTML-template in expertmodus. |
-| **Aankopen & bonnetjes** | Betalen met een betaal-QR (EPC) voor je bank-app, met een waarschuwing als het rekeningnummer anders is dan vorige keer. Foto, PDF of e-factuur (UBL) erin. Eerst UBL, dan de PDF-tekstlaag, dan lokale OCR. Daarna validatie, classificatie, een confidence-inschatting en de koppeling met de bank. Regels op de bon worden herkend; een gemengde bon (materiaal + werkbroek + iets privé) wordt op verzoek per soort geboekt. |
+| **Aankopen & bonnetjes** | Betalen met een betaal-QR (EPC) voor je bank-app, met een waarschuwing als het rekeningnummer anders is dan vorige keer. Foto, PDF of e-factuur (UBL) erin. Eerst UBL, dan de PDF-tekstlaag, dan lokale OCR (GLM-OCR, download bij eerste gebruik). Daarna validatie, classificatie, een confidence-inschatting en de koppeling met de bank. Regels op de bon worden herkend; een gemengde bon (materiaal + werkbroek + iets privé) wordt op verzoek per soort geboekt. |
 | **Bank** | CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos + zelf kolommen aanwijzen), MT940 en CAMT.053. Automatische koppeling aan facturen en bonnetjes; de app leert per leverancier. Vaste lasten en abonnementen worden herkend (ontbrekende factuur of afschrijving wordt gemeld). |
 | **Belasting** | BTW per kwartaal in mensentaal ("Te betalen € 3.365, uiterlijk 31 oktober"). Daaronder de officiële rubrieken (1a/1b/1e/2a/5a/5b/5g) om over te nemen in Mijn Belastingdienst Zakelijk. Vóór de aangifte controleert de app wat de aangifte fout kan maken (onverwerkte bank, uitgaven zonder bewijs, dubbele aankopen, verlegd zonder btw-nummer, negatieve kas, vraagposten). Periode-afsluiting, CSV-export en een XBRL-voorbereiding. Buitenland: verkoop aan EU-bedrijven (3b, met ICP-overzicht), uitvoer (3a) en verlegde btw op diensten uit/buiten de EU (4a/4b, bv. Stripe, Google, Meta), met een duidelijke disclaimer; OSS zit er niet in. Een schatting van de inkomstenbelasting (zelfstandigenaftrek, mkb-winstvrijstelling, geversioneerde tarieven), altijd als schatting gemarkeerd en uit te zetten. |
 | **Zoeken** | Ctrl+K: één zoekveld over klanten, facturen, bonnen, bank en klussen, met bedragen (`>400`) en periodes (`2026-09`). Garantie per aankoop ("nog 14 maanden garantie"). |
@@ -42,6 +42,7 @@ src/
   core-ledger/   dubbele boekhouding: journaalposten, saldi, RGS-rekeningschema, gebeurtenissen + boekingsregels   ← het risicovolle deel, eigen tests
   documents/     offertes, facturen, inkoop, templates, PDF/e-mail, herinneringen
   import/        CSV/MT940/CAMT.053 → genormaliseerde transacties, matching-engine
+  ocr-runtime/   ingebouwde OCR: download (sha256, hervatten), llama-server starten/stoppen
   intake/        documentinbox: UBL, PDF-tekst, OCR-interface, validatie, classificatie, confidence, leveranciersgeheugen
   btw/           BTW-berekening uit journal_lines → rubrieken, periode-afsluiting, XBRL (voorbereiding)
   jobs/          klussen (offerte → klus → factuur)
@@ -74,8 +75,10 @@ npm run dist:win    # Windows-installer (NSIS)
 `better-sqlite3` is een native module. `npm test` bouwt hem voor Node en `npm run dev`/`npm start` voor
 Electron (`electron-builder install-app-deps`).
 
-Lokale OCR en AI zijn optioneel; zie [`docs/ocr-sidecar.md`](docs/ocr-sidecar.md). De benchmark draai je met
-`npm run benchmark:ocr -- <map> <ocr-url> <engine>`.
+Tekstherkenning voor foto's is optioneel. De ingebouwde herkenning (GLM-OCR via llama.cpp, lokaal, CPU)
+installeer je bij eerste gebruik in de instellingen; zie [`docs/lokale-ocr.md`](docs/lokale-ocr.md).
+Een eigen OCR-dienst kan ook, zie [`docs/ocr-sidecar.md`](docs/ocr-sidecar.md). De benchmark met een
+synthetische set staat in [`docs/ocr-benchmark.md`](docs/ocr-benchmark.md).
 
 ## Installeren
 

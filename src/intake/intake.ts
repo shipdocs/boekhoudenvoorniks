@@ -162,7 +162,13 @@ export class IntakeService {
         issues: [{ field: 'document', severity: 'fout', message: 'Tekstherkenning (OCR) is nog niet ingesteld. Vul de gegevens zelf in.' }],
       };
     }
-    const out = await this.ocr.recognize({ data, mimeType: mime, filename });
+    let out;
+    try {
+      out = await this.ocr.recognize({ data, mimeType: mime, filename });
+    } catch (e) {
+      // herkenning mislukt: document blijft bewaard, de gebruiker vult zelf in
+      return { result: emptyResult(), source: 'geen', issues: [{ field: 'document', severity: 'fout', message: (e as Error).message || 'Tekstherkenning mislukt. Vul de gegevens zelf in.' }] };
+    }
     const result = { ...parseDocumentText(out.items, `ocr:${this.ocr.id}`), ...(out.structured ?? {}) } as DocumentResult;
     if (out.structured?.lines) result.linesBasis = computeLinesBasis(result);
     result.pageSizes = out.pageSizes;

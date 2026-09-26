@@ -162,24 +162,36 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
   const vatLines: VatLine[] = [];
   let vatConf = 0;
   let vatLine: Line | null = null;
+  const VAT_WORD = /btw|vat|b\.t\.w|omzetbelasting/i;
+  const candidates: { line: Line; vat: VatLine; word: boolean }[] = [];
   for (const line of lines) {
     const m = /(\d{1,2})(?:[.,]0+)?\s*%/.exec(line.text);
-    if (!m || !/btw|vat|b\.t\.w|omzetbelasting|%/i.test(line.text)) continue;
+    if (!m) continue;
     const rate = Number(m[1]);
     if (![0, 9, 21, 6, 19].includes(rate)) continue;
     const a = amounts(line.text.replace(m[0], ' '));
     if (a.length === 0) continue;
+    const word = VAT_WORD.test(line.text);
     if (a.length >= 2) {
       const [x, y] = [a[a.length - 2]!, a[a.length - 1]!];
       // grondslag en btw: bij tarieven ≤ 21% is de grondslag altijd het grootste bedrag
       const base = Math.abs(x) >= Math.abs(y) ? x : y;
       const amount = base === x ? y : x;
-      vatLines.push({ rate, base, amount });
+      // zonder het woord "btw" moet het bedrag passen bij de grondslag (excl. of incl.), anders is het bv. een
+      // artikelregel met een kolom "21%". Mét "btw" houden we de regel, zodat de validatie een leesfout vangt.
+      const fits = Math.abs(amount - Math.round((base * rate) / 100)) <= 2 || Math.abs(amount - Math.round((base * rate) / (100 + rate))) <= 2;
+      if (!fits && !word) continue;
+      candidates.push({ line, vat: { rate, base, amount }, word });
     } else {
-      vatLines.push({ rate, base: null, amount: a[0]! });
+      candidates.push({ line, vat: { rate, base: null, amount: a[0]! }, word });
     }
-    vatConf = /btw|vat|omzetbelasting/i.test(line.text) ? 0.85 : 0.7;
-    vatLine ??= line;
+  }
+  // staan er regels met "btw" in, dan alleen die: losse "21%" is dan een kolom in de artikeltabel
+  const chosen = candidates.some((c) => c.word) ? candidates.filter((c) => c.word) : candidates;
+  for (const c of chosen) {
+    vatLines.push(c.vat);
+    vatConf = c.word ? 0.85 : 0.7;
+    vatLine ??= c.line;
   }
   const reverseCharge = /btw\s*verlegd|verlegd|reverse\s*charge|vat\s*reverse/i.test(rawText);
 
