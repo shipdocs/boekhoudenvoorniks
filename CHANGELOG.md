@@ -2,6 +2,8 @@
 
 ## Nog niet uitgebracht
 
+## 0.3.2 — buitenlandse klanten en te veel betaald
+
 - **Land bij een klant**: het klantformulier (ook "Nieuwe klant" vanuit een factuur) heeft nu een landkeuze,
   met het btw-nummer erbij voor een buitenlandse klant. Voorheen kon je het land niet invullen, waardoor
   "Bedrijf in een ander EU-land (0%)" en "Klant buiten de EU (0%)" niet te gebruiken waren.
