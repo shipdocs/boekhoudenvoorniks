@@ -13,6 +13,7 @@ import { backupTo, dailyBackup, restoreFrom } from './backup';
 import { decryptBackup, encryptBackup, isEncryptedBackup } from './encrypted-backup';
 import { tmpdir } from 'node:os';
 import { HttpOcrProvider } from '../intake/ocr';
+import { LocalOcrRuntime } from '../ocr-runtime/runtime';
 import { OllamaClassifier } from '../intake/llm-ollama';
 import type { FetchLike } from '../integrations/types';
 
@@ -24,6 +25,7 @@ let db: Db;
 let services: Services;
 let api: Api;
 let secrets: SafeStorageSecretStore;
+let localOcr: LocalOcrRuntime;
 
 function dataDir(): string {
   const dir = process.env.GRATIS_BOEKHOUDEN_DATA ?? app.getPath('userData');
@@ -59,7 +61,13 @@ const localFetch: FetchLike = (url, init) => fetch(url, init);
 function configureLocalAi(): void {
   const { ocr } = services.settings.get();
   try {
-    services.intake.setOcrProvider(ocr.url ? new HttpOcrProvider(ocr.engine || 'ocr', ocr.url, localFetch) : null);
+    if (ocr.engine === 'ingebouwd') {
+      // ingebouwde herkenning (#9): alleen als die gedownload is; de server start pas bij de eerste bon
+      services.intake.setOcrProvider(localOcr.isInstalled() ? localOcr.provider(localFetch) : null);
+    } else {
+      localOcr.stop();
+      services.intake.setOcrProvider(ocr.url ? new HttpOcrProvider(ocr.engine || 'ocr', ocr.url, localFetch) : null);
+    }
   } catch (e) {
     console.error('OCR-instelling ongeldig', e);
     services.intake.setOcrProvider(null);
@@ -81,6 +89,9 @@ function initServices(): void {
     secrets,
     fetch: localFetch,
     storeFile: storeAttachment,
+  });
+  localOcr = new LocalOcrRuntime(join(dataDir(), 'ocr'), {
+    fetch: (url, init) => fetch(url, init) as never,
   });
   configureLocalAi();
   api = createApi(services, {
@@ -177,6 +188,14 @@ function initServices(): void {
       return true;
     },
     appVersion: () => app.getVersion(),
+    localOcr: {
+      status: () => localOcr.status(),
+      install: () => {
+        const st = localOcr.startInstall();
+        return st;
+      },
+      uninstall: () => localOcr.uninstall(),
+    },
     async checkForUpdates() {
       if (!app.isPackaged) return 'Updates zijn alleen beschikbaar in de geïnstalleerde versie';
       const r = await autoUpdater.checkForUpdates();
@@ -329,6 +348,7 @@ if (!gotLock) {
   });
 
   app.on('will-quit', () => {
+    localOcr?.stop();
     try {
       db?.close();
     } catch {

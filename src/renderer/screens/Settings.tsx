@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { Button, DateNl, ErrorBox, Field, useAction, useApp, useLoad, type Settings } from '../ui';
 import type { AppSettings } from '../../settings/settings';
@@ -139,14 +139,18 @@ export function SettingsScreen() {
             <span>Gebruik de locatie van foto's om bonnen aan klussen te koppelen<br /><span className="small muted">Standaard uit. De plek uit de foto (als je telefoon die opslaat) blijft alleen op deze computer en wordt vergeleken met waar je eerder voor de klus fotografeerde.</span></span>
           </label>
           <p className="small muted">Ook op "maximaal" gaat alleen automatisch wat zeker genoeg is, en een leverancier pas nadat jij daar ja op zei. Alles wat automatisch ging zie je terug op Vandaag, met de reden en een knop "Klopt niet".</p>
-          <p className="muted">Alles draait op je eigen computer; documenten gaan nergens naartoe. Zonder deze instellingen werken e-facturen en PDF's met tekst gewoon; alleen foto's van bonnetjes vul je dan zelf in.</p>
+          <p className="muted">Alles draait op je eigen computer; documenten gaan nergens naartoe. Zonder slimme herkenning werken e-facturen en PDF's met tekst gewoon; alleen foto's van bonnetjes vul je dan zelf in.</p>
+          <LocalOcr engine={draft.ocr.engine} />
+          <details style={{ marginTop: 12 }}>
+            <summary className="small">Eigen OCR-dienst of lokale AI (geavanceerd)</summary>
           <div className="grid cols-2">
             <Field label="Lokale tekstherkenning (OCR)" hint="adres van de OCR-dienst op deze computer"><input value={draft.ocr.url} onChange={(e) => set({ ocr: { ...draft.ocr, url: e.target.value } })} placeholder="http://127.0.0.1:8765" /></Field>
-            <Field label="OCR-model"><select value={draft.ocr.engine} onChange={(e) => set({ ocr: { ...draft.ocr, engine: e.target.value } })}><option value="glm-ocr">GLM-OCR</option><option value="paddleocr-vl">PaddleOCR-VL</option><option value="grm-ocr">GRM-OCR</option><option value="anders">Anders</option></select></Field>
+            <Field label="OCR-model"><select value={draft.ocr.engine} onChange={(e) => set({ ocr: { ...draft.ocr, engine: e.target.value } })}><option value="ingebouwd">Ingebouwd (GLM-OCR)</option><option value="glm-ocr">GLM-OCR</option><option value="paddleocr-vl">PaddleOCR-VL</option><option value="grm-ocr">GRM-OCR</option><option value="anders">Anders</option></select></Field>
             <Field label="Lokale AI voor herkennen van aankopen" hint="Ollama-adres, optioneel"><input value={draft.ocr.llmUrl} onChange={(e) => set({ ocr: { ...draft.ocr, llmUrl: e.target.value } })} placeholder="http://127.0.0.1:11434" /></Field>
             <Field label="AI-model"><input value={draft.ocr.llmModel} onChange={(e) => set({ ocr: { ...draft.ocr, llmModel: e.target.value } })} placeholder="bv. qwen2.5:3b" /></Field>
           </div>
           <p className="small muted">De AI doet alleen voorstellen ("dit lijkt gereedschap"). De boeking zelf wordt altijd door vaste regels gemaakt.</p>
+          </details>
         </>,
       )}
       {tab === 'backup' && <BackupSettings />}
@@ -258,6 +262,85 @@ function BackupSettings() {
         <span className="muted">Versie {version.data}</span>
         <Button disabled={busy} onClick={async () => { const r = await run(() => api.app.checkForUpdates()); if (r) alert(r); }}>Zoek naar updates</Button>
       </div>
+    </div>
+  );
+}
+
+/** Ingebouwde tekstherkenning (#9): één klik om te downloaden, daarna alles lokaal. */
+function LocalOcr({ engine }: { engine: string }) {
+  const { run, busy } = useAction();
+  const { reloadSettings, toast } = useApp();
+  const info = useLoad(() => api.localOcr.info());
+  const status = useLoad(() => api.localOcr.status());
+  const st = status.data;
+  const downloading = st?.state === 'downloaden';
+  // tijdens het downloaden de voortgang volgen; klaar = direct in gebruik nemen
+  useEffect(() => {
+    if (!downloading) return;
+    // één ronde tegelijk: een trage status-aanroep mag niet overlappen met de volgende
+    let busyTick = false;
+    let finished = false;
+    const t = setInterval(async () => {
+      if (busyTick || finished) return;
+      busyTick = true;
+      try {
+        const next = await api.localOcr.status();
+        if (next.state === 'geinstalleerd') {
+          finished = true;
+          await api.localOcr.use();
+          await reloadSettings();
+          toast('Slimme herkenning is klaar ✓');
+        }
+        await status.reload();
+      } finally {
+        busyTick = false;
+      }
+    }, 1000);
+    return () => {
+      finished = true;
+      clearInterval(t);
+    };
+  }, [downloading]);
+  if (!st || !info.data) return null;
+  const mb = (n: number) => `${Math.round(n / 1_000_000).toLocaleString('nl-NL')} MB`;
+  const installed = st.state === 'geinstalleerd' || st.state === 'actief' || st.state === 'starten';
+  return (
+    <div className="card" style={{ marginTop: 10 }}>
+      <h3 style={{ marginTop: 0 }}>Slimme herkenning van bonnetjes</h3>
+      {!installed && !downloading && (
+        <>
+          <p className="small">Lees foto's van bonnen automatisch uit. Eenmalig downloaden (± {mb(info.data.downloadSize)}); daarna werkt het zonder internet en blijven je documenten op deze computer.</p>
+          <p className="small muted">{info.data.requirements}</p>
+          {st.state === 'fout' && <div className="notice warn small">{st.error}</div>}
+          <Button kind="primary" disabled={busy} onClick={async () => { await run(() => api.localOcr.install()); await status.reload(); }}>
+            {st.state === 'fout' ? 'Opnieuw proberen' : 'Slimme herkenning installeren'}
+          </Button>
+        </>
+      )}
+      {downloading && (
+        <>
+          <p className="small">Bezig met downloaden{st.progress?.file ? ` (${st.progress.file})` : ''}… Je kunt gewoon doorwerken.</p>
+          <progress max={st.progress?.total || 1} value={st.progress?.done ?? 0} style={{ width: '100%' }} />
+          <p className="small muted">{st.progress ? `${mb(st.progress.done)} van ${mb(st.progress.total)}` : ''}</p>
+        </>
+      )}
+      {installed && (
+        <>
+          <p className="small">✓ Geïnstalleerd ({info.data.model}{st.llamaVersion ? `, runtime ${st.llamaVersion}` : ''}). {engine === 'ingebouwd' ? 'In gebruik voor foto\'s van bonnen.' : 'Niet in gebruik: je gebruikt een eigen OCR-dienst.'}</p>
+          <div className="row">
+            {engine !== 'ingebouwd' && <Button small onClick={async () => { await run(() => api.localOcr.use()); await reloadSettings(); }}>Gebruiken</Button>}
+            <Button small disabled={busy} onClick={async () => {
+              if (!confirm('Slimme herkenning verwijderen? Foto\'s van bonnen vul je daarna weer zelf in.')) return;
+              await run(() => api.localOcr.uninstall(), 'Verwijderd');
+              await reloadSettings();
+              await status.reload();
+            }}>Verwijderen</Button>
+          </div>
+        </>
+      )}
+      <p className="small muted" style={{ marginTop: 8 }}>
+        Model: {info.data.model} ({info.data.modelLicense}-licentie) · Runtime: {info.data.runtime} ({info.data.runtimeLicense}-licentie). Beide mogen vrij gebruikt en verspreid worden.
+      </p>
     </div>
   );
 }

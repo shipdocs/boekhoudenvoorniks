@@ -1,6 +1,13 @@
 # Lokale OCR-sidecar (contract)
 
-De app bevat zelf geen OCR-model. Tekstherkenning voor foto's en scans komt van een **lokale
+De app bevat zelf geen OCR-model in de installer. Er zijn twee manieren:
+
+1. **Ingebouwd (aanbevolen voor gebruikers):** *Instellingen → Slimme herkenning → Slimme herkenning
+   installeren*. De app downloadt eenmalig GLM-OCR (± 1,4 GB) en llama.cpp en draait die daarna
+   zelf, lokaal, op de CPU. Zie [lokale-ocr.md](lokale-ocr.md).
+2. **Eigen OCR-dienst (dit contract):** voor ontwikkelaars en andere engines.
+
+Bij optie 2 komt de tekstherkenning voor foto's en scans van een **lokale
 OCR-dienst** die op dezelfde computer draait (alleen `localhost` is toegestaan; documenten
 verlaten de computer niet). Welke engine erachter zit (GLM-OCR, PaddleOCR-VL, GRM-OCR, …) maakt
 voor de app niet uit: alle engines leveren hetzelfde formaat, dat de app normaliseert naar één
@@ -58,9 +65,4 @@ dit?*) gebeuren daarna, de boeking altijd met vaste regels in code.
 
 ## Benchmark
 
-```bash
-npm run build:main
-node dist/main/tools/ocr-benchmark.js ./benchmark-documenten http://127.0.0.1:8765 glm-ocr
-```
-
-Zie de uitleg bovenin `src/tools/ocr-benchmark.ts` voor het formaat van de juiste waarden (`.json` per document).
+Zie [ocr-benchmark.md](ocr-benchmark.md).

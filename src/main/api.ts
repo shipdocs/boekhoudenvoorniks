@@ -1,3 +1,5 @@
+import type { RuntimeStatus } from '../ocr-runtime/runtime';
+import { DOWNLOAD_SIZE, GLM_OCR, LLAMA_CPP, REQUIREMENTS } from '../ocr-runtime/manifest';
 import type { Services } from '../services';
 import type { AppSettings } from '../settings/settings';
 import type { RelationInput } from '../relations/relations';
@@ -33,6 +35,7 @@ import { today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
+
 export interface HostContext {
   saveFile(defaultName: string, content: Buffer | string, filters: { name: string; extensions: string[] }[]): Promise<string | null>;
   storeAttachment(name: string, data: Uint8Array): Promise<string>;
@@ -48,6 +51,12 @@ export interface HostContext {
   exportEncrypted(password: string): Promise<string | null>;
   appVersion(): string;
   checkForUpdates(): Promise<string>;
+  /** ingebouwde tekstherkenning (#9): downloaden bij eerste gebruik */
+  localOcr: {
+    status(): RuntimeStatus;
+    install(): RuntimeStatus;
+    uninstall(): Promise<RuntimeStatus>;
+  };
 }
 
 /**
@@ -425,6 +434,22 @@ export function createApi(s: Services, host: HostContext) {
     },
     incomeTax: {
       estimate: () => s.incomeTax.estimate(),
+    },
+    localOcr: {
+      status: () => host.localOcr.status(),
+      info: () => ({ model: GLM_OCR.label, modelLicense: GLM_OCR.license, modelLicenseUrl: GLM_OCR.licenseUrl, runtime: LLAMA_CPP.label, runtimeLicense: LLAMA_CPP.license, runtimeLicenseUrl: LLAMA_CPP.licenseUrl, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS }),
+      install: () => host.localOcr.install(),
+      uninstall: async () => {
+        const st = await host.localOcr.uninstall();
+        if (s.settings.get().ocr.engine === 'ingebouwd') s.settings.update({ ocr: { ...s.settings.get().ocr, engine: 'glm-ocr' } });
+        host.reconfigureLocalAi();
+        return st;
+      },
+      use: () => {
+        s.settings.update({ ocr: { ...s.settings.get().ocr, engine: 'ingebouwd', url: '' } });
+        host.reconfigureLocalAi();
+        return s.settings.get();
+      },
     },
     vat: {
       current: () => s.vat.currentPeriod(),
