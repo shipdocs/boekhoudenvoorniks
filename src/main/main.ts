@@ -260,6 +260,11 @@ function createWindow(): void {
     mainWindow.webContents.once('did-finish-load', async () => {
       try {
         const ok = await mainWindow!.webContents.executeJavaScript('window.bridge.call("app.version", [])');
+        // Het scherm moet echt iets tonen: een fout bij het laden van de renderer geeft een leeg venster.
+        const rendered = await mainWindow!.webContents.executeJavaScript(
+          `new Promise((resolve) => { const t0 = Date.now(); const tick = () => { const n = document.getElementById('root')?.childElementCount ?? 0; if (n > 0) resolve(true); else if (Date.now() - t0 > 15000) resolve(false); else setTimeout(tick, 100); }; tick(); })`,
+        );
+        if (!rendered) throw new Error('het venster bleef leeg (renderer niet gestart)');
         console.log(`SMOKE OK ${ok}`);
         app.exit(0);
       } catch (e) {
