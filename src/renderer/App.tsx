@@ -7,6 +7,7 @@ import { Work } from './screens/Work';
 import { DocumentEditor } from './screens/DocumentEditor';
 import { Jobs, JobDetail } from './screens/Jobs';
 import { Purchases } from './screens/Purchases';
+import { SearchOverlay } from './screens/Search';
 import { DocumentReview } from './screens/DocumentReview';
 import { Customers, CustomerDetail } from './screens/Customers';
 import { Bank, CategorizeTransaction } from './screens/Bank';
@@ -31,6 +32,18 @@ const NAV: { screen: Screen; label: string; icon: string; also?: Screen[] }[] = 
 
 export function App() {
   const [history, setHistory] = useState<Route[]>([{ screen: 'home' }]);
+  const [searching, setSearching] = useState(false);
+  // Ctrl+K / Cmd+K opent de zoekbalk (#26)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearching(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [toasts, setToasts] = useState<{ id: number; message: string; kind: 'info' | 'error' }[]>([]);
   const [meta, setMeta] = useState<Meta>();
   const [settings, setSettings] = useState<Settings>();
@@ -105,6 +118,7 @@ export function App() {
         {route.screen !== 'welkom' && (
           <nav className="nav" aria-label="Hoofdmenu">
             <div className="brand">Gratis Boekhouden</div>
+            <button className="search-btn" onClick={() => setSearching(true)} title="Zoeken (Ctrl+K)"><span>🔍</span>Zoeken<kbd>Ctrl K</kbd></button>
             {NAV.map((n) => (
               <button key={n.screen} className={isActive(n) ? 'active' : ''} onClick={() => go({ screen: n.screen })}>
                 <span>{n.icon}</span>
@@ -130,6 +144,7 @@ export function App() {
           {screen}
         </main>
       </div>
+      {searching && <SearchOverlay onClose={() => setSearching(false)} />}
       {settings.onboardingDone && settings.termsAcceptedVersion !== TERMS_VERSION && route.screen !== 'welkom' && <TermsGate onAccepted={() => void reloadSettings()} />}
       <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => (

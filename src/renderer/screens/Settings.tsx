@@ -128,6 +128,10 @@ export function SettingsScreen() {
               ))}
             </div>
           </Field>
+          <label className="row" style={{ alignItems: 'flex-start' }}>
+            <input type="checkbox" checked={draft.jobLocation} onChange={(e) => set({ jobLocation: e.target.checked })} />
+            <span>Gebruik de locatie van foto's om bonnen aan klussen te koppelen<br /><span className="small muted">Standaard uit. De plek uit de foto (als je telefoon die opslaat) blijft alleen op deze computer en wordt vergeleken met waar je eerder voor de klus fotografeerde.</span></span>
+          </label>
           <p className="small muted">Ook op "maximaal" gaat alleen automatisch wat zeker genoeg is, en een leverancier pas nadat jij daar ja op zei. Alles wat automatisch ging zie je terug op Vandaag, met de reden en een knop "Klopt niet".</p>
           <p className="muted">Alles draait op je eigen computer; documenten gaan nergens naartoe. Zonder deze instellingen werken e-facturen en PDF's met tekst gewoon; alleen foto's van bonnetjes vul je dan zelf in.</p>
           <div className="grid cols-2">

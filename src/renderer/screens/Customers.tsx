@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, Empty, ErrorBox, Field, Modal, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, StatusPill, useAction, useApp, useLoad } from '../ui';
+import { EarningsPerJob } from './Jobs';
 import type { Relation, RelationInput } from '../../relations/relations';
 
 export function Customers() {
@@ -102,6 +103,28 @@ export function CustomerDetail({ id }: { id?: number }) {
           else if (saved) { setForm(null); await existing.reload(); }
         }}>Opslaan</Button>
       </div>
+      {id && (
+        <div className="dossier" style={{ marginTop: 24 }}>
+          <EarningsPerJob relationId={id} />
+          {(invoices.data ?? []).length > 0 && (
+            <>
+              <h2>Facturen</h2>
+              <table className="list">
+                <tbody>
+                  {invoices.data!.map((i) => (
+                    <tr key={i.id} className="clickable" onClick={() => go({ screen: 'factuur', id: i.id })}>
+                      <td>{i.number ?? 'concept'}</td>
+                      <td><DateNl date={i.invoice_date} /></td>
+                      <td><StatusPill status={i.display_status} /></td>
+                      <td className="num"><Euro cents={i.total} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

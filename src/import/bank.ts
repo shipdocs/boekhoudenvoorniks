@@ -67,6 +67,8 @@ export interface BookToAccountInput {
   vatCode?: string;
   description?: string;
   relationId?: number | null;
+  /** klus waar deze uitgave bij hoort (#32) */
+  jobId?: number | null;
 }
 
 export { splitGross } from '../core-ledger/rules';
@@ -306,7 +308,7 @@ export class BankService {
       description,
     };
     return tx(this.db, () => {
-      const { entryId } = this.events.record({ type: 'bank-categorie', payload }, [{ kind: 'bank', refId: txId }]);
+      const { entryId } = this.events.record({ type: 'bank-categorie', payload }, [{ kind: 'bank', refId: txId }], { jobId: input.jobId ?? null });
       this.db.prepare(`UPDATE bank_transactions SET status = 'gematcht', matched_journal_entry_id = ? WHERE id = ?`).run(entryId, txId);
       return entryId;
     });

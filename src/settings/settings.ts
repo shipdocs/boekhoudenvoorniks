@@ -60,6 +60,8 @@ export interface AppSettings {
   /** Dagen na vervaldatum waarop herinneringen gestuurd worden, bv. [7, 21]. */
   reminderDays: number[];
   advancedMode: boolean;
+  /** Locatie van foto's gebruiken om bonnen aan klussen te koppelen (#32). Standaard uit; alleen lokaal. */
+  jobLocation: boolean;
   /** E-factuur (UBL) als bijlage meesturen met elke factuur (#24). */
   sendUbl: boolean;
   /** Bankrekening (bank_accounts.id) die dient als belastingpotje (#33), of null. */
@@ -108,6 +110,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autopilot: 'normaal',
   vatPotAccountId: null,
   sendUbl: true,
+  jobLocation: false,
   onboardingDone: false,
   termsAcceptedVersion: '',
   invoiceEmailSubject: 'Factuur {nummer} van {bedrijf}',

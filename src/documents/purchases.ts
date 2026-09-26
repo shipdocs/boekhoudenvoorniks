@@ -46,6 +46,8 @@ export interface PurchaseInvoice {
   job_id: number | null;
   document_id: number | null;
   payee_iban: string | null;
+  /** garantietermijn in maanden (gereedschap, machines) */
+  warranty_months: number | null;
   open_amount: Cents;
 }
 
@@ -79,6 +81,7 @@ export class PurchaseService {
           payload: { purchaseId: id, date: input.invoiceDate, description: input.description.trim(), relationId: input.relationId ?? null, supplierReference: input.supplierReference ?? null, lines: input.lines },
         },
         evidence,
+        { jobId: input.jobId ?? null },
       );
       const insertLine = this.db.prepare('INSERT INTO purchase_invoice_lines (purchase_invoice_id, account_id, description, net_amount, vat_code, vat_amount) VALUES (?, ?, ?, ?, ?, ?)');
       for (const l of input.lines) insertLine.run(id, this.ledger.getAccount(l.account).id, l.description ?? null, l.netAmount, l.vatCode, purchaseVat(l));

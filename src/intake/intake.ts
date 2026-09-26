@@ -14,6 +14,7 @@ import { allCertain, type AutopilotLevel, type Decision } from '../automation/de
 import { explain } from '../automation/explain';
 import { documentDecisions } from './decisions';
 import { computeLinesBasis, splitQuestion, suggestSplit } from './line-items';
+import { readJpegGps } from './exif';
 import { ValidationError } from '../shared/validation';
 import { isUbl, parseUbl, findEmbeddedUbl } from './ubl';
 import { extractPdf } from './pdf-text';
@@ -134,6 +135,7 @@ export class IntakeService {
     private readonly storeFile: (name: string, data: Uint8Array) => Promise<string>,
     private ocr: OcrProvider | null = null,
     private readonly autopilot: () => AutopilotLevel = () => 'normaal',
+    private readonly locationEnabled: () => boolean = () => false,
   ) {}
 
   setOcrProvider(provider: OcrProvider | null): void {
@@ -183,6 +185,11 @@ export class IntakeService {
     const id = Number(
       this.db.prepare('INSERT INTO documents (file_path, original_name, mime_type, sha256, extraction_source, result) VALUES (?, ?, ?, ?, ?, ?)').run(path, filename, mime, sha, source, JSON.stringify(result)).lastInsertRowid,
     );
+    // Locatie alleen na expliciete toestemming (#32), en alleen in de lokale database
+    if (this.locationEnabled() && mime === 'image/jpeg') {
+      const gps = readJpegGps(data);
+      if (gps) this.db.prepare('UPDATE documents SET gps_lat = ?, gps_lon = ? WHERE id = ?').run(gps.lat, gps.lon, id);
+    }
     await this.evaluate(id, extractionIssues, asOf);
     return this.get(id);
   }
@@ -424,6 +431,10 @@ export class IntakeService {
         this.purchases.registerPayment(purchase.id, { amount: purchase.total, date: c.date, moneyAccount: c.paidWith === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen });
       }
       this.db.prepare(`UPDATE documents SET status = 'verwerkt', purchase_invoice_id = ? WHERE id = ?`).run(purchase.id, id);
+      if (c.jobId) {
+        // eerste foto met locatie bij een klus zonder locatie wordt de kluslocatie (alleen als opt-in de locatie heeft opgeslagen)
+        this.db.prepare('UPDATE jobs SET lat = (SELECT gps_lat FROM documents WHERE id = ?), lon = (SELECT gps_lon FROM documents WHERE id = ?) WHERE id = ? AND lat IS NULL AND (SELECT gps_lat FROM documents WHERE id = ?) IS NOT NULL').run(id, id, c.jobId, id);
+      }
     });
     return this.get(id);
   }
