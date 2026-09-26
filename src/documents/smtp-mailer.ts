@@ -26,6 +26,7 @@ export function createSmtpMailer(smtp: SmtpSettings, password: string | null): M
 }
 
 export async function verifySmtp(smtp: SmtpSettings, password: string | null): Promise<void> {
+  if (!smtp.host || !smtp.fromEmail) throw new Error('Vul eerst de mailserver en je e-mailadres in.');
   const transport = nodemailer.createTransport({
     host: smtp.host,
     port: smtp.port,

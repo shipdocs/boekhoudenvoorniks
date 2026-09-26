@@ -228,6 +228,14 @@ describe('jaaroverzicht en schatting', () => {
     expect(est.breakdown.startersaftrek).toBeGreaterThan(0);
   });
 
+  it('boven de KIA-grens: geen extra aftrek en dat staat er ook', () => {
+    const { s } = setup();
+    buy(s, '2026-02-10', 484000_00, 'Graafmachine');
+    const kia = s.taxOverview.year(2026, '2026-06-30').items.find((i) => i.key === 'kia');
+    expect(Math.abs(kia?.amount ?? 1)).toBe(0);
+    expect(kia?.explain).toMatch(/geen extra aftrek meer/);
+  });
+
   it('signaal voor energie-investeringen met de RVO-termijn', () => {
     const { s } = setup();
     buy(s, '2026-05-01', 12100_00, 'Zonnepanelen werkplaats');

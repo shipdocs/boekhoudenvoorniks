@@ -274,7 +274,9 @@ function KiaProgress({ assets }: { assets: AssetItem[] }) {
       <strong>Investeringen {year}: <Euro cents={total} /></strong>
       {kia > 0
         ? <> · extra aftrek (KIA) ± € {kia.toLocaleString('nl-NL')}</>
-        : <> · extra aftrek (KIA) krijg je vanaf € {rules.kia.min.toLocaleString('nl-NL')} per jaar; wat je dit jaar nog koopt, telt mee.</>}
+        : total / 100 > rules.kia.phaseOutUpTo
+          ? <> · boven € {rules.kia.phaseOutUpTo.toLocaleString('nl-NL')} per jaar is er geen extra aftrek (KIA) meer.</>
+          : <> · extra aftrek (KIA) krijg je vanaf € {rules.kia.min.toLocaleString('nl-NL')} per jaar; wat je dit jaar nog koopt, telt mee.</>}
     </div>
   );
 }

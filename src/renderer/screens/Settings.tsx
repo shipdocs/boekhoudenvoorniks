@@ -224,7 +224,12 @@ function EmailSettings({ draft, set, section }: { draft: Settings; set: (p: Part
           <div className="grid cols-3">
             <Field label="Server"><input value={draft.smtp.host} onChange={(e) => set({ smtp: { ...draft.smtp, host: e.target.value } })} placeholder="smtp.jouwprovider.nl" /></Field>
             <Field label="Poort"><input className="num" type="number" value={draft.smtp.port} onChange={(e) => set({ smtp: { ...draft.smtp, port: Number(e.target.value) } })} /></Field>
-            <Field label="Beveiliging" hint="neem over wat je provider zegt; meestal 587"><select value={draft.smtp.secure ? 'ssl' : 'starttls'} onChange={(e) => set({ smtp: { ...draft.smtp, secure: e.target.value === 'ssl' } })}><option value="starttls">STARTTLS (587)</option><option value="ssl">SSL/TLS (465)</option></select></Field>
+            <Field label="Beveiliging" hint="neem over wat je provider zegt; meestal 587"><select value={draft.smtp.secure ? 'ssl' : 'starttls'} onChange={(e) => {
+              const secure = e.target.value === 'ssl';
+              // standaardpoort meeschuiven, maar een zelf ingevulde poort laten staan
+              const port = draft.smtp.port === (secure ? 587 : 465) ? (secure ? 465 : 587) : draft.smtp.port;
+              set({ smtp: { ...draft.smtp, secure, port } });
+            }}><option value="starttls">STARTTLS (587)</option><option value="ssl">SSL/TLS (465)</option></select></Field>
             <Field label="Gebruikersnaam"><input value={draft.smtp.user} onChange={(e) => set({ smtp: { ...draft.smtp, user: e.target.value } })} /></Field>
             <Field label="Afzendernaam"><input value={draft.smtp.fromName} onChange={(e) => set({ smtp: { ...draft.smtp, fromName: e.target.value } })} /></Field>
             <Field label="Afzenderadres"><input value={draft.smtp.fromEmail} onChange={(e) => set({ smtp: { ...draft.smtp, fromEmail: e.target.value } })} /></Field>
