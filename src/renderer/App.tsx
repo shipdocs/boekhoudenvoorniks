@@ -83,7 +83,7 @@ export function App() {
       case 'offerte': return <DocumentEditor kind="offerte" id={route.id as number | undefined} key={`o${route.id ?? 'new'}`} />;
       case 'klussen': return <Jobs />;
       case 'klus': return <JobDetail id={route.id as number} key={String(route.id)} />;
-      case 'aankopen': return <Purchases />;
+      case 'aankopen': return <Purchases pay={route.id as number | undefined} key={`p${route.id ?? ''}`} />;
       case 'document': return <DocumentReview id={route.id as number} key={String(route.id)} />;
       case 'categorie': return <CategorizeTransaction id={route.id as number} key={String(route.id)} />;
       case 'klanten': return <Customers />;

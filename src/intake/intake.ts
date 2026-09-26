@@ -177,6 +177,31 @@ export class IntakeService {
     return this.get(id);
   }
 
+  /**
+   * Een factuur als bewijsstuk bij een al bestaande afschrijving (vaste lasten, #25): niet opnieuw
+   * boeken, alleen bewaren en koppelen. Een document dat al als aankoop verwerkt is, blijft zoals het is.
+   */
+  async addEvidence(filename: string, data: Uint8Array, bankTransactionId: number): Promise<IntakeDocument> {
+    const tx = this.db.prepare('SELECT id FROM bank_transactions WHERE id = ?').get(bankTransactionId);
+    if (!tx) throw new ValidationError('Deze afschrijving bestaat niet (meer)');
+    const classification = JSON.stringify({ categoryKey: 'overig', vatCode: 'hoog', business: true, confidence: 1, source: 'geheugen', reasons: [`bewijsstuk bij banktransactie #${bankTransactionId}`], automatic: true });
+    const sha = createHash('sha256').update(data).digest('hex');
+    const existing = this.db.prepare('SELECT id, status FROM documents WHERE sha256 = ?').get(sha) as { id: number; status: string } | undefined;
+    if (existing) {
+      if (existing.status !== 'verwerkt') this.db.prepare(`UPDATE documents SET status = 'verwerkt', confidence = 'HIGH', issues = '[]', classification = ? WHERE id = ?`).run(classification, existing.id);
+      return this.get(existing.id);
+    }
+    const mime = mimeFor(filename);
+    const path = await this.storeFile(filename, data);
+    const { result, source } = await this.extract(filename, data);
+    const id = Number(
+      this.db
+        .prepare(`INSERT INTO documents (file_path, original_name, mime_type, sha256, extraction_source, result, status, confidence, issues, classification) VALUES (?, ?, ?, ?, ?, ?, 'verwerkt', 'HIGH', '[]', ?)`)
+        .run(path, filename, mime, sha, source, JSON.stringify(result), classification).lastInsertRowid,
+    );
+    return this.get(id);
+  }
+
   /** CLASSIFICATIE + VALIDATIE + CONFIDENCE, en bij HIGH direct verwerken. */
   async evaluate(id: number, extraIssues: Issue[] = [], asOf: IsoDate = today()): Promise<IntakeDocument> {
     const doc = this.get(id);
@@ -378,6 +403,7 @@ export class IntakeService {
         attachmentPath: doc.file_path,
         jobId: c.jobId ?? null,
         documentId: id,
+        payeeIban: doc.result?.supplierIban?.value ?? null,
         lines,
       });
       if (bankTx && c.paidWith === 'bank') this.bank.matchPurchase(bankTx.id, purchase.id);

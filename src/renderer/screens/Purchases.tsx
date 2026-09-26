@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, DropZone, Empty, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useLoad } from '../ui';
 import { today } from '../../shared/dates';
 import type { PurchaseVatCode } from '../../shared/vat';
 
-export function Purchases() {
+export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const { go, toast } = useApp();
   const { run } = useAction();
   const docs = useLoad(() => api.documents.list('controle'));
   const purchases = useLoad(() => api.purchases.list());
   const [manual, setManual] = useState(false);
+  const [pay, setPay] = useState<number | null>(payInitial ?? null);
   const [uploading, setUploading] = useState(0);
 
   const upload = async (file: File) => {
@@ -64,7 +65,7 @@ export function Purchases() {
         <Empty icon="🧾" title="Nog geen aankopen">Bonnetjes die je hier toevoegt worden automatisch verwerkt, inclusief BTW die je terugkrijgt.</Empty>
       ) : (
         <table className="list">
-          <thead><tr><th>Datum</th><th>Waar</th><th>Wat</th><th>Status</th><th className="num">BTW terug</th><th className="num">Bedrag</th></tr></thead>
+          <thead><tr><th>Datum</th><th>Waar</th><th>Wat</th><th>Status</th><th className="num">BTW terug</th><th className="num">Bedrag</th><th /></tr></thead>
           <tbody>
             {purchases.data!.map((p) => (
               <tr key={p.id} className={p.attachment_path ? 'clickable' : ''} onClick={() => p.attachment_path && void run(() => api.app.openAttachment(p.attachment_path!))}>
@@ -74,13 +75,51 @@ export function Purchases() {
                 <td><StatusPill status={p.status} /></td>
                 <td className="num"><Euro cents={p.vat_total} /></td>
                 <td className="num"><Euro cents={p.total} /></td>
+                <td onClick={(e) => e.stopPropagation()}>{p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
       {manual && <ManualExpense onClose={() => setManual(false)} onDone={async () => { setManual(false); await purchases.reload(); }} />}
+      {pay !== null && <PayModal id={pay} onClose={() => setPay(null)} />}
     </div>
+  );
+}
+
+/** Betalen met de bank-app: scan de QR-code (#25). Bij een nieuw IBAN eerst een waarschuwing. */
+function PayModal({ id, onClose }: { id: number; onClose: () => void }) {
+  const [confirmNew, setConfirmNew] = useState(false);
+  const qr = useLoad(() => api.purchases.paymentQr(id, confirmNew), [id, confirmNew]);
+  const q = qr.data;
+  return (
+    <Modal title="Rekening betalen" onClose={onClose}>
+      <ErrorBox error={qr.error} />
+      {q && (
+        <div className="grid">
+          <p>
+            <strong><Euro cents={q.amount} /></strong> aan <strong>{q.name}</strong>
+            {q.dueDate && <> · vóór <DateNl date={q.dueDate} /></>}
+            <br /><span className="small muted">{q.iban}</span>
+          </p>
+          {q.needsConfirm ? (
+            <>
+              <div className="notice warn">{q.warning}</div>
+              <div className="row">
+                <Button kind="primary" onClick={() => setConfirmNew(true)}>Ik heb het gecontroleerd, toon de QR-code</Button>
+                <Button onClick={onClose}>Nu niet</Button>
+              </div>
+            </>
+          ) : (
+            <>
+              {q.warning && <div className="notice small">{q.warning}</div>}
+              <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(q.svg)}`} alt="Betaal-QR-code" width={240} height={240} style={{ justifySelf: 'center', background: '#fff', borderRadius: 8 }} />
+              <p className="small muted">Scan met je bank-app (“betalen met QR”). Zodra de betaling op je bankafschrift staat, zetten we de rekening op betaald.</p>
+            </>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }
 

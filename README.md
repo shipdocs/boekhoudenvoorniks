@@ -16,11 +16,11 @@ eigen computer, zonder account, cloud of abonnement.
 
 | | |
 |---|---|
-| **Vandaag** | Hoeveel geld heb ik, hoeveel krijg ik nog, hoeveel moet ik apart houden voor BTW, en *moet ik iets doen?* De administratie werkt als een inbox die leeg kan ("Je bent bij ✓"). |
+| **Vandaag** | Hoeveel geld heb ik, hoeveel is vrij te besteden, hoeveel krijg ik nog, hoeveel moet ik apart houden voor BTW (met een optioneel belastingpotje), en *moet ik iets doen?* De administratie werkt als een inbox die leeg kan ("Je bent bij ✓"). |
 | **Werk & facturen** | Offertes → klant akkoord → klus → *werk klaar* → factuur in één klik. PDF + e-mail (eigen SMTP). Doorlopende nummering, creditfacturen, betaalstatus, automatische herinneringen. |
 | **Opmaak** | Logo, kleuren, lettertype en vaste tekstblokken met live voorbeeld; eigen HTML-template in expertmodus. |
-| **Aankopen & bonnetjes** | Foto, PDF of e-factuur (UBL) erin. Eerst UBL, dan de PDF-tekstlaag, dan lokale OCR. Daarna validatie, classificatie, een confidence-inschatting en de koppeling met de bank. |
-| **Bank** | CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos + zelf kolommen aanwijzen), MT940 en CAMT.053. Automatische koppeling aan facturen en bonnetjes; de app leert per leverancier. |
+| **Aankopen & bonnetjes** | Betalen met een betaal-QR (EPC) voor je bank-app, met een waarschuwing als het rekeningnummer anders is dan vorige keer. Foto, PDF of e-factuur (UBL) erin. Eerst UBL, dan de PDF-tekstlaag, dan lokale OCR. Daarna validatie, classificatie, een confidence-inschatting en de koppeling met de bank. |
+| **Bank** | CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos + zelf kolommen aanwijzen), MT940 en CAMT.053. Automatische koppeling aan facturen en bonnetjes; de app leert per leverancier. Vaste lasten en abonnementen worden herkend (ontbrekende factuur of afschrijving wordt gemeld). |
 | **Belasting** | BTW per kwartaal in mensentaal ("Te betalen € 3.365, uiterlijk 31 oktober"). Daaronder de officiële rubrieken (1a/1b/1e/2a/5a/5b/5g) om over te nemen in Mijn Belastingdienst Zakelijk. Vóór de aangifte controleert de app wat de aangifte fout kan maken (onverwerkte bank, uitgaven zonder bewijs, dubbele aankopen, verlegd zonder btw-nummer, negatieve kas, vraagposten). Periode-afsluiting, CSV-export en een XBRL-voorbereiding. |
 | **Koppelingen** | WooCommerce, Shopify (orders → facturen), Mollie, Stripe (uitbetalingen + kosten). |
 | **Voor de boekhouder** | Grootboek (RGS), journaal, W&V, balans, correctieboekingen, auditfile (XAF 3.2), CSV-exports en de regels die per leverancier geleerd zijn. |

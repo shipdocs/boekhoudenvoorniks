@@ -16,6 +16,7 @@ import type { ParseResult } from '../import/types';
 import { buildVatXbrl } from '../btw/xbrl';
 import { PORTAL_URL, SUPPLETIE_URL } from '../btw/btw';
 import { decisionStats } from '../inbox/automation-log';
+import { purchasePaymentQr } from '../documents/epc-qr';
 import { supplierKey } from '../intake/supplier-memory';
 import { tx } from '../db/database';
 import type { ExpenseInput, CashSaleInput } from '../quick/quick';
@@ -135,6 +136,24 @@ export function createApi(s: Services, host: HostContext) {
       case 'supplier-auto:nee':
         s.memory.setAutomatic(r.supplierKey!, false);
         return;
+      case 'bank-pot:klopt':
+        s.bank.bookToAccount(r.bankTransactionId!, { account: s.bank.getAccount(r.bankAccountId!).rgs_code, description: 'Belastingpotje' });
+        return;
+      case 'recurring-confirm:ja':
+        s.recurring.confirm(r.seriesId!);
+        s.inbox.autoProcess();
+        return;
+      case 'recurring-confirm:nee':
+        s.recurring.setStatus(r.seriesId!, 'afgewezen');
+        return;
+      case 'recurring-stopped:ja':
+        s.recurring.setStatus(r.seriesId!, 'gestopt');
+        return;
+      case 'recurring-stopped:nee':
+      case 'recurring-missing-payment:ok':
+      case 'recurring-invoice:geen':
+        s.inbox.skipTask(task.key, actionId);
+        return;
       case 'vat-check:overslaan':
         s.vat.skipCheck(r.periodKey!, r.checkKey!, 'overgeslagen vanuit Vandaag');
         return;
@@ -160,6 +179,9 @@ export function createApi(s: Services, host: HostContext) {
           'invoice-concept': ['factuur', r.invoiceId],
           'vat-due': ['belasting', r.periodKey],
           'bank-stale': ['bank', undefined],
+          'purchase-due': ['aankopen', r.purchaseId],
+          'recurring-invoice': ['bewijs', r.bankTransactionId],
+          'recurring-missing-payment': ['bank', undefined],
           'vat-suppletie': ['belasting', undefined],
         };
         const target = screens[task.kind];
@@ -268,6 +290,7 @@ export function createApi(s: Services, host: HostContext) {
     },
     documents: {
       add: (name: string, data: Uint8Array) => s.intake.add(name, data),
+      addEvidence: (name: string, data: Uint8Array, bankTransactionId: number) => s.intake.addEvidence(name, data, bankTransactionId),
       list: (status?: 'nieuw' | 'controle' | 'verwerkt' | 'genegeerd') => s.intake.list(status),
       get: (id: number) => s.intake.get(id),
       confirm: (id: number, c: Confirmation) => s.intake.confirm(id, c),
@@ -287,6 +310,11 @@ export function createApi(s: Services, host: HostContext) {
       create: (input: PurchaseInvoiceInput) => s.purchases.create(input),
       recordExpense: (input: ExpenseInput) => s.quick.recordExpense(input),
       attach: (name: string, data: Uint8Array) => host.storeAttachment(name, data),
+      /**
+       * Betaal-QR (EPC) voor een open inkoop (#25). Ander IBAN dan eerder bij deze leverancier:
+       * eerst een waarschuwing, pas na bevestiging de QR.
+       */
+      paymentQr: (id: number, confirmNewIban = false) => purchasePaymentQr(s.purchases, id, confirmNewIban),
     },
     quick: {
       cashSale: (input: CashSaleInput) => s.quick.recordCashSale(input),
@@ -380,6 +408,12 @@ export function createApi(s: Services, host: HostContext) {
       markSuppletieSubmitted: (periodKey: string) => s.vat.markSuppletieSubmitted(periodKey),
       exportCsv: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.csv`, s.vat.exportCsv(periodKey), [{ name: 'CSV', extensions: ['csv'] }]),
       exportXbrl: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.xbrl`, buildVatXbrl(s.vat.calculate(periodKey), s.settings.get().company), [{ name: 'XBRL', extensions: ['xbrl', 'xml'] }]),
+    },
+    recurring: {
+      /** Vaste lasten met hun stand (laatst gezien, volgende, per maand, prijsverschil) */
+      list: () => s.recurring.list().filter((x) => x.status === 'actief').map((x) => s.recurring.state(x)),
+      stop: (id: number) => s.recurring.setStatus(id, 'gestopt'),
+      setExpectsInvoice: (id: number, expects: boolean) => s.recurring.setExpectsInvoice(id, expects),
     },
     dashboard: {
       get: () => s.dashboard.get(),

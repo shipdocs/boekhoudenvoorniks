@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, Modal, useAction, useApp, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, Modal, readAsBytes, useAction, useApp, useLoad } from '../ui';
 import type { Task } from '../../inbox/inbox';
 import type { AutomationEntry } from '../../inbox/automation-log';
 import { formatDateNl } from '../../shared/dates';
@@ -14,11 +14,28 @@ export function Home() {
   const [showAll, setShowAll] = useState(false);
   const [why, setWhy] = useState<string | null>(null);
   const [monthOpen, setMonthOpen] = useState(false);
+  // factuur bij een bestaande afschrijving (vaste lasten): bestand kiezen en direct koppelen
+  const evidenceInput = useRef<HTMLInputElement>(null);
+  const evidenceFor = useRef<number | null>(null);
+  const addEvidence = async (file: File) => {
+    const txId = evidenceFor.current;
+    if (txId === null) return;
+    const bytes = await readAsBytes(file);
+    const r = await run(() => api.documents.addEvidence(file.name, bytes, txId), 'Factuur gekoppeld ✓');
+    if (r) {
+      await reload();
+      refreshBadge();
+    }
+  };
 
   const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string }) => {
     const r = await run(() => api.home.act(task, actionId, payload));
     if (r && r.navigate) {
       if (r.navigate.screen === 'categorie') return setPicking(task);
+      if (r.navigate.screen === 'bewijs') {
+        evidenceFor.current = r.navigate.id as number;
+        return evidenceInput.current?.click();
+      }
       return go({ screen: r.navigate.screen as never, id: r.navigate.id });
     }
     await reload();
@@ -51,6 +68,11 @@ export function Home() {
 
   return (
     <div className="page">
+      <input ref={evidenceInput} type="file" accept=".pdf,.xml,.jpg,.jpeg,.png,.webp,.heic" hidden onChange={(e) => {
+        const f = e.target.files?.[0];
+        e.target.value = '';
+        if (f) void addEvidence(f);
+      }} />
       <h1>
         {data.greeting}
         {name ? ` ${name}` : ''} 👋
@@ -68,8 +90,18 @@ export function Home() {
         <div className="card clickable" onClick={() => go({ screen: 'belasting' })}>
           <div className="value">± <Euro cents={data.money.vatReserve} /></div>
           <div className="label">apart houden voor BTW</div>
+          {data.money.vatPot && (
+            <div className="small" style={{ marginTop: 6 }}>
+              🐷 <Euro cents={data.money.vatPot.setAside} /> in {data.money.vatPot.account}
+              {data.money.vatPot.stillToReserve > 0 ? <> · nog <strong><Euro cents={data.money.vatPot.stillToReserve} /></strong> opzijzetten</> : ' · genoeg opzij ✓'}
+            </div>
+          )}
         </div>
       </div>
+
+      <p className="muted small" style={{ marginTop: -6 }}>
+        Vrij te besteden: <strong><Euro cents={data.money.freeToSpend} /></strong> <span title="banksaldo min de btw die je nog moet betalen en je openstaande rekeningen">(banksaldo min btw en openstaande rekeningen)</span>
+      </p>
 
       <h2>Wat wil je doen?</h2>
       <div className="actions4">

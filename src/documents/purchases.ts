@@ -5,7 +5,7 @@ import { ACCOUNTS } from '../core-ledger/accounts';
 import { PURCHASE_VAT_RATES, type PurchaseVatCode } from '../shared/vat';
 import { assertIsoDate, type IsoDate } from '../shared/dates';
 import { assertCents, roundHalfAwayFromZero, type Cents } from '../shared/money';
-import { ValidationError } from '../shared/validation';
+import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
 
 export type { PurchaseLineInput } from '../core-ledger/rules';
 export { expenseLines, purchaseVat } from '../core-ledger/rules';
@@ -24,6 +24,8 @@ export interface PurchaseInvoiceInput {
   documentId?: number | null;
   externalSource?: string | null;
   externalId?: string | null;
+  /** IBAN van de leverancier zoals op het document, voor betalen met QR en de fraudecontrole */
+  payeeIban?: string | null;
 }
 
 export interface PurchaseInvoice {
@@ -43,6 +45,7 @@ export interface PurchaseInvoice {
   attachment_path: string | null;
   job_id: number | null;
   document_id: number | null;
+  payee_iban: string | null;
   open_amount: Cents;
 }
 
@@ -63,10 +66,10 @@ export class PurchaseService {
       const vatPaid = booking.payable - booking.net;
       const result = this.db
         .prepare(
-          `INSERT INTO purchase_invoices (relation_id, supplier_reference, invoice_date, due_date, description, subtotal, vat_total, total, attachment_path, job_id, document_id, external_source, external_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO purchase_invoices (relation_id, supplier_reference, invoice_date, due_date, description, subtotal, vat_total, total, attachment_path, job_id, document_id, external_source, external_id, payee_iban)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(input.relationId ?? null, input.supplierReference ?? null, input.invoiceDate, input.dueDate ?? null, input.description.trim(), booking.net, vatPaid, booking.payable, input.attachmentPath ?? null, input.jobId ?? null, input.documentId ?? null, input.externalSource ?? null, input.externalId ?? null);
+        .run(input.relationId ?? null, input.supplierReference ?? null, input.invoiceDate, input.dueDate ?? null, input.description.trim(), booking.net, vatPaid, booking.payable, input.attachmentPath ?? null, input.jobId ?? null, input.documentId ?? null, input.externalSource ?? null, input.externalId ?? null, input.payeeIban ? normalizeIban(input.payeeIban) : null);
       const id = Number(result.lastInsertRowid);
       const evidence: Evidence[] = [{ kind: 'inkoop', refId: id }];
       if (input.documentId) evidence.push({ kind: 'document', refId: input.documentId });
@@ -154,6 +157,30 @@ export class PurchaseService {
       this.db.prepare(`UPDATE documents SET purchase_invoice_id = NULL, status = 'controle' WHERE purchase_invoice_id = ?`).run(id);
       this.db.prepare('DELETE FROM purchase_invoices WHERE id = ?').run(id);
     });
+  }
+
+  /**
+   * Betaalgegevens met fraudecontrole (#25): wijkt het IBAN af van wat we eerder van deze
+   * leverancier kenden, dan eerst een waarschuwing en pas na bevestiging een betaal-QR.
+   */
+  paymentInfo(id: number): { purchase: PurchaseInvoice; iban: string | null; name: string; knownIbans: string[]; ibanChanged: boolean; ibanValid: boolean } {
+    const p = this.get(id);
+    const relation = p.relation_id
+      ? (this.db.prepare('SELECT name, iban FROM relations WHERE id = ?').get(p.relation_id) as { name: string; iban: string | null } | undefined)
+      : undefined;
+    const earlier = p.relation_id
+      ? (this.db.prepare('SELECT DISTINCT payee_iban FROM purchase_invoices WHERE relation_id = ? AND id < ? AND payee_iban IS NOT NULL').all(p.relation_id, id) as { payee_iban: string }[]).map((r) => r.payee_iban)
+      : [];
+    const known = [...new Set([...(relation?.iban ? [normalizeIban(relation.iban)] : []), ...earlier])];
+    const iban = p.payee_iban ?? known[0] ?? null;
+    return {
+      purchase: p,
+      iban,
+      name: relation?.name ?? p.relation_name ?? p.description,
+      knownIbans: known,
+      ibanChanged: !!iban && known.length > 0 && !known.includes(iban),
+      ibanValid: !!iban && isValidIban(iban),
+    };
   }
 
   get(id: number): PurchaseInvoice {
