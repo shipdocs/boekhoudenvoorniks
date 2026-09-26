@@ -10,6 +10,7 @@ export function readJpegGps(data: Uint8Array): { lat: number; lon: number } | nu
     if (b[off] !== 0xff) return null;
     const marker = b[off + 1]!;
     const size = b.readUInt16BE(off + 2);
+    if (size < 2) return null; // ongeldig segment: niet eindeloos blijven lezen
     if (marker === 0xe1 && b.toString('latin1', off + 4, off + 10) === 'Exif\0\0') return parseTiff(b.subarray(off + 10, off + 2 + size));
     if (marker === 0xda) return null; // begin van de beelddata: geen EXIF
     off += 2 + size;
@@ -51,7 +52,7 @@ function parseTiff(t: Buffer): { lat: number; lon: number } | null {
   };
   const lat = dms(2);
   const lon = dms(4);
-  if (lat === null || lon === null) return null;
+  if (lat === null || lon === null || !Number.isFinite(lat) || !Number.isFinite(lon) || lat > 90 || lon > 180) return null;
   return { lat: ref(1) === 'S' ? -lat : lat, lon: ref(3) === 'W' ? -lon : lon };
 }
 

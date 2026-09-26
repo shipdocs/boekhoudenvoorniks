@@ -109,7 +109,7 @@ export function Home() {
           <>
             {' · '}
             <span className="clickable" title={ib.data.disclaimer} onClick={() => go({ screen: 'belasting' })}>
-              inkomstenbelasting tot nu ± <Euro cents={ib.data.reserveToDate} /> <em>(schatting)</em>, daarna vrij ± <Euro cents={data.money.freeToSpend - ib.data.reserveToDate} />
+              inkomstenbelasting tot nu ± <Euro cents={ib.data.reserveToDate} /> <em>(schatting)</em>, daarna vrij ± <Euro cents={Math.max(0, data.money.freeToSpend - ib.data.reserveToDate)} />
             </span>
           </>
         )}

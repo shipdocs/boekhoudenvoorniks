@@ -96,7 +96,7 @@ function NewJob({ onClose, onCreated }: { onClose: () => void; onCreated: (id: n
 }
 
 export function JobDetail({ id }: { id: number }) {
-  const { go } = useApp();
+  const { go, settings } = useApp();
   const { run, busy } = useAction();
   const job = useLoad(() => api.jobs.get(id), [id]);
   const work = useLoad(() => api.jobs.workItems(id), [id]);
@@ -131,10 +131,9 @@ export function JobDetail({ id }: { id: number }) {
           <h3>Het werk is klaar 🎉</h3>
           <p className="muted">{openWork.length ? 'De factuur wordt opgebouwd uit de werkbon. Je kunt hem nog aanpassen voor je hem verstuurt.' : j.quote_id ? 'De factuur wordt opgebouwd uit de offerte. Je kunt hem nog aanpassen voor je hem verstuurt.' : 'We maken een factuur voor deze klant.'}</p>
           <Button kind="primary" disabled={busy} onClick={async () => {
-            if (j.quote_id || openWork.length) {
-              const inv = await run(() => api.jobs.makeInvoice(id));
-              if (inv) go({ screen: 'factuur', id: inv.id });
-            } else go({ screen: 'factuur' });
+            // zonder offerte of werkbon: een concept met de klus als regel, zodat de factuur wél aan de klus hangt
+            const inv = await run(() => (j.quote_id || openWork.length ? api.jobs.makeInvoice(id) : api.jobs.makeInvoice(id, [{ description: j.title, quantity: 1, unitPrice: 0, vatCode: settings.defaultVatCode }])));
+            if (inv) go({ screen: 'factuur', id: inv.id });
           }}>Factuur maken</Button>
         </div>
       )}
@@ -144,7 +143,7 @@ export function JobDetail({ id }: { id: number }) {
         <JobResultCard id={id} />
       </div>
 
-      <WorkOrder jobId={id} items={work.data ?? []} onChanged={() => void work.reload()} />
+      <WorkOrder jobId={id} items={work.data ?? []} onChanged={() => void work.reload()} readOnly={j.status === 'gefactureerd' || j.status === 'geannuleerd'} />
 
       {j.invoices.length > 0 && (
         <>
@@ -188,7 +187,7 @@ export function JobResultCard({ id }: { id: number }) {
 }
 
 /** Werkbon: uren en materiaal op de klus, die straks de factuurregels worden. */
-function WorkOrder({ jobId, items, onChanged }: { jobId: number; items: WorkItem[]; onChanged: () => void }) {
+function WorkOrder({ jobId, items, onChanged, readOnly = false }: { jobId: number; items: WorkItem[]; onChanged: () => void; readOnly?: boolean }) {
   const { run, busy } = useAction();
   const [desc, setDesc] = useState('');
   const [qty, setQty] = useState('1');
@@ -208,23 +207,23 @@ function WorkOrder({ jobId, items, onChanged }: { jobId: number; items: WorkItem
                 <td>{w.description}</td>
                 <td className="num">{w.quantity} {w.unit ?? ''}</td>
                 <td className="num"><Euro cents={Math.round(w.quantity * w.unit_price)} /></td>
-                <td>{w.invoice_id ? <span className="pill">gefactureerd</span> : <Button small kind="ghost" onClick={async () => { await run(() => api.jobs.removeWorkItem(w.id)); onChanged(); }}>✕</Button>}</td>
+                <td>{w.invoice_id ? <span className="pill">gefactureerd</span> : readOnly ? null : <Button small kind="ghost" onClick={async () => { await run(() => api.jobs.removeWorkItem(w.id)); onChanged(); }}>✕</Button>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <div className="row" style={{ flexWrap: 'wrap', marginTop: 8 }}>
+      {!readOnly && <div className="row" style={{ flexWrap: 'wrap', marginTop: 8 }}>
         <input placeholder="Wat? (bv. stucwerk plafond)" value={desc} onChange={(e) => setDesc(e.target.value)} style={{ flex: 2, minWidth: 180 }} />
         <input className="num" style={{ width: 70 }} value={qty} onChange={(e) => setQty(e.target.value)} aria-label="Aantal" />
         <select value={unit} onChange={(e) => setUnit(e.target.value)} aria-label="Eenheid"><option>uur</option><option>m²</option><option>m</option><option>stuk</option></select>
         <div style={{ width: 120 }}><MoneyInput value={price} onChange={setPrice} /></div>
         <select value={vat} onChange={(e) => setVat(e.target.value as 'hoog' | 'laag')} aria-label="BTW"><option value="hoog">21%</option><option value="laag">9%</option></select>
-        <Button disabled={busy || !desc.trim() || price === null} onClick={async () => {
+        <Button disabled={busy || !desc.trim() || price === null || price < 0} onClick={async () => {
           const r = await run(() => api.jobs.addWorkItem(jobId, { date: new Date().toISOString().slice(0, 10), description: desc, quantity: Number(qty.replace(',', '.')), unit, unitPrice: price!, vatCode: vat }));
           if (r) { setDesc(''); setPrice(null); onChanged(); }
         }}>Toevoegen</Button>
-      </div>
+      </div>}
     </div>
   );
 }

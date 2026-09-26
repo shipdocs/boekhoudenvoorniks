@@ -88,6 +88,29 @@ describe('Buitenland (#16)', () => {
   });
 });
 
+describe('review-bevindingen #45', () => {
+  it('verlegd zonder btw-nummer: land van het IBAN als aanwijzing', () => {
+    expect(reverseChargeOrigin(null, 'IE29 AIBK 9311 5212 3456 78')).toBe('eu');
+    expect(reverseChargeOrigin(null, 'GB33BUKB20201555555555')).toBe('buiten-eu');
+    expect(reverseChargeOrigin(null, 'NL91ABNA0417164300')).toBe('verlegd');
+  });
+
+  it('uitvoer alleen naar buiten de EU, ICP alleen met een geldig EU-land', () => {
+    const { s, klant } = setup();
+    const nl = s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-07-10', lines: [{ description: 'x', quantity: 1, unitPrice: 10000, vatCode: 'export' }] });
+    expect(() => s.invoices.finalize(nl.id)).toThrow(/buiten de EU/);
+    const leeg = s.relations.create({ name: 'Zonder land', address: 'Straat 1', postcode: '1000', city: 'X', country: ' ', vat_number: 'DE123456789' });
+    const d = s.invoices.createDraft({ relationId: leeg.id, invoiceDate: '2026-07-10', lines: [{ description: 'x', quantity: 1, unitPrice: 10000, vatCode: 'icp' }] });
+    expect(() => s.invoices.finalize(d.id)).toThrow(/ander EU-land/);
+  });
+
+  it('verlegde inkoop telt niet als "btw die je hebt ontvangen"', () => {
+    const { s } = setup();
+    s.quick.recordExpense({ date: '2026-07-01', supplierName: 'Meta', description: 'Advertenties', categoryKey: 'reclame', grossAmount: 10000, vatCode: 'eu', paidWith: 'bank' });
+    expect(s.vat.calculate('2026-Q3').summary).toMatchObject({ btwOverOmzet: 0, btwVerlegd: 2100, voorbelasting: 2100, teBetalen: 0 });
+  });
+});
+
 describe('Schatting inkomstenbelasting (#33 fase 2)', () => {
   it('rekent met zelfstandigenaftrek, mkb-winstvrijstelling, kortingen en Zvw', () => {
     const { rules } = rulesFor(2026);

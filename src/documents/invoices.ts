@@ -2,7 +2,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS, SALES_ACCOUNTS } from '../core-ledger/accounts';
-import { needsCustomerVatNumber } from '../shared/vat';
+import { EU_COUNTRIES, countryCode, needsCustomerVatNumber } from '../shared/vat';
 import type { SettingsService } from '../settings/settings';
 import type { RelationsService, Relation } from '../relations/relations';
 import type { TemplateService } from './templates';
@@ -160,7 +160,15 @@ export class InvoiceService {
     if (inv.status !== 'concept') throw new ValidationError('Definitieve facturen kunnen niet verwijderd worden (bewaarplicht). Maak een creditfactuur.');
     tx(this.db, () => {
       this.db.prepare('UPDATE quotes SET status = ? WHERE id = ? AND status = ?').run('geaccepteerd', inv.quote_id, 'gefactureerd');
+      // werkbonregels komen weer vrij, en de klus is weer "klaar" als er geen andere factuur meer is (#32)
+      const jobId = (this.db.prepare('SELECT job_id FROM invoices WHERE id = ?').get(id) as { job_id: number | null } | undefined)?.job_id ?? null;
+      this.db.prepare('UPDATE job_work_items SET invoice_id = NULL WHERE invoice_id = ?').run(id);
       this.db.prepare('DELETE FROM invoices WHERE id = ?').run(id);
+      if (jobId) {
+        this.db
+          .prepare(`UPDATE jobs SET status = 'klaar' WHERE id = ? AND status = 'gefactureerd' AND NOT EXISTS (SELECT 1 FROM invoices WHERE job_id = ?)`)
+          .run(jobId, jobId);
+      }
     });
   }
 
@@ -213,8 +221,12 @@ export class InvoiceService {
     if (inv.lines.some((l) => needsCustomerVatNumber(l.vat_code)) && !relation.vat_number) {
       throw new ValidationError(`Bij verlegde BTW moet het btw-nummer van ${relation.name} op de factuur staan`);
     }
-    if (inv.lines.some((l) => l.vat_code === 'icp') && (relation.country || 'NL').toUpperCase() === 'NL') {
-      throw new ValidationError(`${relation.name} zit in Nederland. "Bedrijf in de EU (0%)" is alleen voor klanten in een ander EU-land; vul het land in bij de klant`);
+    const country = countryCode(relation.country);
+    if (inv.lines.some((l) => l.vat_code === 'icp') && (!country || country === 'NL' || !EU_COUNTRIES.has(country))) {
+      throw new ValidationError(`"Bedrijf in de EU (0%)" is alleen voor klanten in een ander EU-land. Vul bij ${relation.name} het land in (bv. DE of BE)`);
+    }
+    if (inv.lines.some((l) => l.vat_code === 'export') && (!country || EU_COUNTRIES.has(country))) {
+      throw new ValidationError(`"Uitvoer buiten de EU (0%)" is alleen voor klanten buiten de EU. Vul bij ${relation.name} het land in (bv. CH of US)`);
     }
     if (kor && inv.lines.some((l) => l.vat_percentage > 0)) {
       throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): factuurregels mogen geen BTW bevatten');
