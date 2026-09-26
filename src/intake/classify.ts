@@ -1,4 +1,5 @@
 import { EXPENSE_CATEGORIES } from '../shared/categories';
+import type { PurchaseVatCode } from '../shared/vat';
 import type { DocumentResult } from './types';
 import { KNOWN_SUPPLIERS, TOOL_KEYWORDS } from './suppliers';
 import type { SupplierMemory } from './supplier-memory';
@@ -9,7 +10,7 @@ import type { SupplierMemory } from './supplier-memory';
  */
 export interface Classification {
   categoryKey: string;
-  vatCode: 'hoog' | 'laag' | 'nul' | 'verlegd' | 'geen';
+  vatCode: PurchaseVatCode;
   business: boolean;
   /** 0..1 */
   confidence: number;
@@ -25,8 +26,21 @@ export interface LlmClassifier {
   classify(input: { supplier: string | null; lines: string[]; categories: { key: string; label: string; hint: string }[] }): Promise<{ categoryKey: string; confidence: number; explanation: string } | null>;
 }
 
+const EU_VAT_PREFIXES = new Set(['AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES', 'FI', 'FR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK', 'XI']);
+
+/**
+ * Verlegde btw: waar zit de leverancier? Afgeleid uit het btw-nummer (landcode). NL of onbekend = 2a;
+ * een ander EU-land = 4b; een btw-nummer van buiten de EU (bv. GB, CHE, NO) = 4a (#16).
+ */
+export function reverseChargeOrigin(supplierVatNumber: string | null): 'verlegd' | 'eu' | 'buiten-eu' {
+  const prefix = supplierVatNumber?.replace(/[\s.-]/g, '').toUpperCase().match(/^([A-Z]{2,3})/)?.[1];
+  if (!prefix || prefix === 'NL') return 'verlegd';
+  if (EU_VAT_PREFIXES.has(prefix.slice(0, 2))) return 'eu';
+  return 'buiten-eu';
+}
+
 export function vatFromDocument(doc: DocumentResult): Classification['vatCode'] | null {
-  if (doc.reverseCharge) return 'verlegd';
+  if (doc.reverseCharge) return reverseChargeOrigin(doc.supplierVatNumber?.value ?? null);
   const rates = doc.vat.value.filter((v) => v.amount !== 0).map((v) => v.rate);
   if (rates.length === 0) return doc.vat.value.length > 0 ? 'nul' : null;
   if (rates.every((r) => r === 21)) return 'hoog';

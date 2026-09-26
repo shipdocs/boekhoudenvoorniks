@@ -78,6 +78,8 @@ export const DEFAULT_HTML_TEMPLATE = `<!doctype html>
   </table>
 
   {{#doc.verlegd}}<div class="notice">BTW verlegd{{#customer.vat_number}} — btw-nummer afnemer: {{customer.vat_number}}{{/customer.vat_number}}</div>{{/doc.verlegd}}
+  {{#doc.icp}}<div class="notice">{{doc.icpText}}{{#customer.vat_number}} — btw-nummer afnemer: {{customer.vat_number}}{{/customer.vat_number}}</div>{{/doc.icp}}
+  {{#doc.export}}<div class="notice">Uitvoer buiten de EU, 0% btw</div>{{/doc.export}}
   {{#doc.kor}}<div class="notice">Vrijgesteld van BTW op grond van de kleineondernemersregeling.</div>{{/doc.kor}}
   {{#doc.isInvoice}}{{^doc.isCredit}}<div class="notice">Gelieve {{totals.total}} vóór {{doc.dueDate}} over te maken op {{company.iban}} t.n.v. {{company.name}} o.v.v. {{doc.number}}.</div>{{/doc.isCredit}}{{/doc.isInvoice}}
 

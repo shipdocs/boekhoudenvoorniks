@@ -422,6 +422,9 @@ export function createApi(s: Services, host: HostContext) {
       unmatch: (txId: number) => s.bank.unmatch(txId),
       autoMatch: () => s.matching.autoMatch(undefined, s.settings.get().autopilot),
     },
+    incomeTax: {
+      estimate: () => s.incomeTax.estimate(),
+    },
     vat: {
       current: () => s.vat.currentPeriod(),
       calculate: (periodKey: string) => s.vat.calculate(periodKey),
@@ -433,6 +436,8 @@ export function createApi(s: Services, host: HostContext) {
       skipCheck: (periodKey: string, checkKey: string, reason?: string) => s.vat.skipCheck(periodKey, checkKey, reason),
       markSuppletieSubmitted: (periodKey: string) => s.vat.markSuppletieSubmitted(periodKey),
       exportCsv: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.csv`, s.vat.exportCsv(periodKey), [{ name: 'CSV', extensions: ['csv'] }]),
+      icp: (periodKey: string) => s.vat.icp(periodKey),
+      exportIcpCsv: (periodKey: string) => host.saveFile(`icp-opgaaf-${periodKey}.csv`, s.vat.icpCsv(periodKey), [{ name: 'CSV', extensions: ['csv'] }]),
       exportXbrl: (periodKey: string) => host.saveFile(`btw-aangifte-${periodKey}.xbrl`, buildVatXbrl(s.vat.calculate(periodKey), s.settings.get().company), [{ name: 'XBRL', extensions: ['xbrl', 'xml'] }]),
     },
     search: {

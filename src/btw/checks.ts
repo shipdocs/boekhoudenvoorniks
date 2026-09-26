@@ -97,7 +97,7 @@ export function runVatChecks(db: Db, ledger: Ledger, period: Period, payable: { 
     .prepare(
       `SELECT DISTINCT i.id, i.number FROM invoices i JOIN relations r ON r.id = i.relation_id
        WHERE i.status <> 'concept' AND i.invoice_date BETWEEN ? AND ? AND TRIM(COALESCE(r.vat_number, '')) = ''
-         AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.vat_code = 'verlegd')`,
+         AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.vat_code IN ('verlegd', 'icp'))`,
     )
     .all(start, end) as { id: number; number: string | null }[];
   if (reverseNoVat.length > 0) {

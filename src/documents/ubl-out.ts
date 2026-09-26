@@ -34,6 +34,8 @@ export function unitCode(unit: string | null | undefined): string {
 /** EN 16931 btw-categorie + reden voor vrijstelling/verlegging. */
 export function taxCategory(vatCode: string, percentage: number): { id: string; percent: number; reason?: string; reasonCode?: string } {
   if (vatCode === 'verlegd') return { id: 'AE', percent: 0, reason: 'Btw verlegd', reasonCode: 'VATEX-EU-AE' };
+  if (vatCode === 'icp') return { id: 'K', percent: 0, reason: 'Intracommunautaire levering', reasonCode: 'VATEX-EU-IC' };
+  if (vatCode === 'export') return { id: 'G', percent: 0, reason: 'Uitvoer buiten de EU', reasonCode: 'VATEX-EU-G' };
   if (vatCode === 'vrijgesteld') return { id: 'E', percent: 0, reason: 'Vrijgesteld van btw (KOR)' };
   if (percentage === 0) return { id: 'Z', percent: 0 };
   return { id: 'S', percent: percentage };
@@ -84,6 +86,10 @@ export function checkBisRules(inv: Invoice, seller: Party, buyer: Party, iban: s
     if (!seller.vat_number?.trim()) errors.push('Bij btw verlegd moet je eigen btw-nummer op de factuur (BR-AE-02).');
     if (!buyer.vat_number?.trim()) errors.push('Bij btw verlegd moet het btw-nummer van de klant op de factuur (BR-AE-02).');
   }
+  if (categories.includes('K')) {
+    if (!seller.vat_number?.trim()) errors.push('Bij een levering aan een EU-bedrijf moet je eigen btw-nummer op de factuur (BR-IC-02).');
+    if (!buyer.vat_number?.trim()) errors.push('Bij een levering aan een EU-bedrijf moet het btw-nummer van de klant op de factuur (BR-IC-02).');
+  }
   if (!iban.trim()) errors.push('Vul je IBAN in, zodat de klant weet waarheen te betalen.');
   const lineSum = inv.lines.reduce((s, l) => s + lineNet({ quantity: l.quantity, unitPrice: l.unit_price }), 0);
   if (lineSum !== inv.totals.subtotal) errors.push('Som van de regels wijkt af van het subtotaal (BR-CO-10).');
@@ -129,6 +135,7 @@ ${inv.notes ? `<cbc:Note>${esc(inv.notes.slice(0, 1000))}</cbc:Note>` : ''}
 <cbc:BuyerReference>${esc(inv.reference || inv.number!)}</cbc:BuyerReference>
 ${party('AccountingSupplierParty', seller)}
 ${party('AccountingCustomerParty', buyer)}
+${t.groups.some((g) => g.vatCode === 'icp') ? `<cac:Delivery><cbc:ActualDeliveryDate>${inv.invoice_date}</cbc:ActualDeliveryDate><cac:DeliveryLocation><cac:Address><cac:Country><cbc:IdentificationCode>${esc((buyer.country || 'NL').toUpperCase())}</cbc:IdentificationCode></cac:Country></cac:Address></cac:DeliveryLocation></cac:Delivery>` : ''}
 <cac:PaymentMeans><cbc:PaymentMeansCode>58</cbc:PaymentMeansCode><cbc:PaymentID>${esc(inv.number!)}</cbc:PaymentID><cac:PayeeFinancialAccount><cbc:ID>${esc(company.iban.replace(/\s/g, '').toUpperCase())}</cbc:ID><cbc:Name>${esc(company.name)}</cbc:Name></cac:PayeeFinancialAccount></cac:PaymentMeans>
 ${credit ? '' : `<cac:PaymentTerms><cbc:Note>Te betalen vóór ${inv.due_date}</cbc:Note></cac:PaymentTerms>`}
 <cac:TaxTotal><cbc:TaxAmount currencyID="EUR">${amt(sign * t.vatTotal)}</cbc:TaxAmount>

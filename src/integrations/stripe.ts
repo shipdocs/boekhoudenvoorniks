@@ -39,7 +39,7 @@ export async function fetchStripePayouts(fetchImpl: FetchLike, cfg: { apiKey: st
       gross += t.amount;
       fees += t.fee;
     }
-    // Stripe (Ierland) rekent geen Nederlandse BTW; verlegging (rubriek 4b) valt buiten deze MVP — zie issue.
+    // Stripe (Ierland) rekent zakelijke klanten geen btw: verlegd uit de EU, rubriek 4b (#16)
     out.push({
       externalId: p.id,
       date: new Date(p.arrival_date * 1000).toISOString().slice(0, 10),
@@ -47,6 +47,7 @@ export async function fetchStripePayouts(fetchImpl: FetchLike, cfg: { apiKey: st
       gross: gross || p.amount,
       feesNet: fees,
       feesVat: 0,
+      feesReverseCharge: 'eu',
       currency: p.currency.toUpperCase(),
       reference: p.statement_descriptor ?? p.id,
     });

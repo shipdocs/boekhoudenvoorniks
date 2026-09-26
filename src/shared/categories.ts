@@ -1,3 +1,5 @@
+import type { PurchaseVatCode } from './vat';
+
 /**
  * Gebruikersvriendelijke categorieën ("Wat heb je gekocht?") → grootboekrekening + standaard BTW.
  * De gebruiker ziet nooit rekeningnummers; de boekhouder ziet keurige RGS-rekeningen.
@@ -7,7 +9,7 @@ export interface ExpenseCategory {
   label: string;
   hint: string;
   account: string;
-  defaultVat: 'hoog' | 'laag' | 'nul' | 'verlegd' | 'geen';
+  defaultVat: PurchaseVatCode;
 }
 
 export const EXPENSE_CATEGORIES: ExpenseCategory[] = [

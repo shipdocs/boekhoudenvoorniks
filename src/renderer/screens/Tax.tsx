@@ -133,7 +133,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
               <p className="muted small">Neem deze bedragen over in Mijn Belastingdienst Zakelijk. Klik op een bedrag om het te kopiëren. Bedragen zijn in hele euro's, afgerond in jouw voordeel.</p>
               <div className="notice small">{VAT_DISCLAIMER}</div>
               <div className="rubriek small muted"><span>Vak</span><span /><span className="num">Omzet</span><span className="num">Omzetbelasting</span></div>
-              {r.rubrieken.filter((x) => x.code !== '5c').map((x) => (
+              {r.rubrieken.filter((x) => x.code !== '5c' && !(/^[34]/.test(x.code) && !x.omzet && !x.btw)).map((x) => (
                 <div key={x.code} className="rubriek">
                   <strong>{x.code}</strong>
                   <span>{x.label}</span>
@@ -165,8 +165,86 @@ export function Tax({ periodKey }: { periodKey?: string }) {
               </div>
             </div>
           )}
+          <IcpCard periodKey={r.period.key} />
         </>
       )}
+      <IncomeTaxCard />
+    </div>
+  );
+}
+
+/** Opgaaf intracommunautaire prestaties (#16): alleen zichtbaar als er in deze periode aan EU-bedrijven verkocht is. */
+function IcpCard({ periodKey }: { periodKey: string }) {
+  const { run } = useAction();
+  const icp = useLoad(() => api.vat.icp(periodKey), [periodKey]);
+  if (!icp.data || icp.data.lines.length === 0) return null;
+  return (
+    <div className="card" style={{ marginTop: 14 }}>
+      <h2 style={{ marginTop: 0 }}>Opgaaf ICP {icp.data.period.label}</h2>
+      <p className="muted small">Verkopen aan bedrijven in andere EU-landen (rubriek 3b). Geef deze per klant op in Mijn Belastingdienst Zakelijk (opgaaf intracommunautaire prestaties) en kies daar per regel goederen of diensten.</p>
+      <table>
+        <thead><tr><th>Land</th><th>Btw-nummer</th><th>Klant</th><th className="num">Bedrag</th></tr></thead>
+        <tbody>
+          {icp.data.lines.map((l) => (
+            <tr key={`${l.relationId}`}>
+              <td>{l.country}</td>
+              <td>{l.vatNumber || '—'}{l.problems.length > 0 && <div className="small" style={{ color: 'var(--danger, #b42318)' }}>⚠️ {l.problems.join(', ')}</div>}</td>
+              <td>{l.name}</td>
+              <td className="num">€ {l.amountEuro.toLocaleString('nl-NL')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="notice small" style={{ marginTop: 10 }}>{BUITENLAND_TEXT}</div>
+      <div className="row" style={{ marginTop: 10 }}>
+        <Button small onClick={() => void run(() => api.vat.exportIcpCsv(periodKey), 'Opgeslagen')}>ICP-overzicht (CSV)</Button>
+      </div>
+    </div>
+  );
+}
+
+const BUITENLAND_TEXT = 'Nog niet door een fiscalist gecontroleerd. Controleer de bedragen en btw-nummers (bv. via VIES) voordat je de opgaaf doet.';
+
+/** Schatting inkomstenbelasting (#33 fase 2). Altijd als schatting gemarkeerd; uit te zetten in Instellingen. */
+function IncomeTaxCard() {
+  const { go } = useApp();
+  const est = useLoad(() => api.incomeTax.estimate());
+  const [open, setOpen] = useState(false);
+  const e = est.data;
+  if (!e) return null;
+  const b = e.breakdown;
+  const euro = (n: number) => `€ ${n.toLocaleString('nl-NL')}`;
+  return (
+    <div className="card" style={{ marginTop: 14 }}>
+      <h2 style={{ marginTop: 0 }}>Inkomstenbelasting {e.year} <span className="muted small">(schatting)</span></h2>
+      <div className="notice warn small">{e.disclaimer}</div>
+      <p>
+        Winst tot nu: <strong><Euro cents={e.profitToDate} /></strong>. Doorgetrokken naar het hele jaar: <Euro cents={e.profitYear} />.<br />
+        Geschatte inkomstenbelasting + Zvw-bijdrage over {e.year}: <strong>± <Euro cents={e.taxYear} /></strong>.<br />
+        Zet daarvan nu ongeveer <strong>± <Euro cents={e.reserveToDate} /></strong> opzij (naar rato van het jaar tot nu).
+      </p>
+      <Button small onClick={() => setOpen((o) => !o)}>{open ? 'Verberg berekening' : 'Hoe is dit berekend?'}</Button>
+      {open && (
+        <div className="small" style={{ marginTop: 10 }}>
+          <table>
+            <tbody>
+              <tr><td>Winst (heel jaar, geschat)</td><td className="num">{euro(b.profit)}</td></tr>
+              <tr><td>− Zelfstandigenaftrek</td><td className="num">{euro(b.zelfstandigenaftrek)}</td></tr>
+              <tr><td>− MKB-winstvrijstelling</td><td className="num">{euro(b.mkbWinstvrijstelling)}</td></tr>
+              <tr><td>= Belastbaar inkomen</td><td className="num">{euro(b.taxableIncome)}</td></tr>
+              <tr><td>Belasting box 1</td><td className="num">{euro(b.box1)}</td></tr>
+              <tr><td>− Heffingskortingen (algemeen + arbeid)</td><td className="num">{euro(b.heffingskortingen)}</td></tr>
+              <tr><td>+ Bijdrage Zvw</td><td className="num">{euro(b.zvw)}</td></tr>
+              <tr><td><strong>Totaal</strong></td><td className="num"><strong>{euro(b.total)}</strong></td></tr>
+            </tbody>
+          </table>
+          <p className="muted">Tarieven van {e.rulesYear}{e.rulesYear !== e.year ? ` (voor ${e.year} nog niet bekend in de app)` : ''}{e.rulesChecked ? '' : '; deze tabel is nog niet door een fiscalist gecontroleerd'}.</p>
+          <p className="muted">Niet meegenomen: {e.notIncluded.join('; ')}.</p>
+        </div>
+      )}
+      <p className="muted small" style={{ marginTop: 10 }}>
+        <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Urencriterium aanpassen of de schatting uitzetten</span>
+      </p>
     </div>
   );
 }

@@ -35,6 +35,8 @@ export const ACCOUNTS = {
   btwAfdragenHoog: 'BSchBepBtwAfdHoo',
   btwAfdragenLaag: 'BSchBepBtwAfdLaa',
   btwAfdragenVerlegd: 'BSchBepBtwAfdVer',
+  btwAfdragenEu: 'BSchBepBtwAfdEu',
+  btwAfdragenBuitenEu: 'BSchBepBtwAfdBui',
   btwVoorbelasting: 'BSchBepBtwVoo',
   btwAfrekening: 'BSchBepBtwAfr',
   omzetHoog: 'WOmzNopOlh',
@@ -42,6 +44,8 @@ export const ACCOUNTS = {
   omzetNul: 'WOmzNopOln',
   omzetVerlegd: 'WOmzNopOlv',
   omzetVrijgesteld: 'WOmzNopOvr',
+  omzetIcp: 'WOmzNopOic',
+  omzetExport: 'WOmzNopOex',
   inkoopMaterialen: 'WKprInkMat',
   bankkosten: 'WFbeBan',
   betalingsverschillen: 'WBedAlkBev',
@@ -70,6 +74,8 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '1710', rgs: ACCOUNTS.btwAfdragenHoog, ref: 'BSchBepBtwOla', name: 'Af te dragen BTW hoog', category: 'btw', vatCode: 'hoog', system: true },
   { code: '1720', rgs: ACCOUNTS.btwAfdragenLaag, ref: 'BSchBepBtwOlt', name: 'Af te dragen BTW laag', category: 'btw', vatCode: 'laag', system: true },
   { code: '1730', rgs: ACCOUNTS.btwAfdragenVerlegd, ref: 'BSchBepBtwOlw', name: 'Af te dragen BTW verlegd (inkoop)', category: 'btw', vatCode: 'verlegd', system: true },
+  { code: '1735', rgs: ACCOUNTS.btwAfdragenEu, ref: 'BSchBepBtwOlu', name: 'Af te dragen BTW verlegd uit de EU (4b)', category: 'btw', vatCode: 'eu', system: true },
+  { code: '1736', rgs: ACCOUNTS.btwAfdragenBuitenEu, ref: 'BSchBepBtwOlb', name: 'Af te dragen BTW verlegd van buiten de EU (4a)', category: 'btw', vatCode: 'buiten-eu', system: true },
   { code: '1740', rgs: ACCOUNTS.btwVoorbelasting, ref: 'BSchBepBtwVoo', name: 'Voorbelasting', category: 'btw', vatCode: 'voorbelasting', system: true },
   { code: '1750', rgs: ACCOUNTS.btwAfrekening, ref: 'BSchBepBtwAfo', name: 'Af te dragen omzetbelasting (aangifte)', category: 'btw', system: true },
 
@@ -79,6 +85,8 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '8020', rgs: ACCOUNTS.omzetNul, ref: 'WOmzNodOdg', name: 'Omzet 0%', category: 'omzet', vatCode: 'nul', system: true },
   { code: '8030', rgs: ACCOUNTS.omzetVerlegd, ref: 'WOmzNodOdg', name: 'Omzet BTW verlegd', category: 'omzet', vatCode: 'verlegd', system: true },
   { code: '8040', rgs: ACCOUNTS.omzetVrijgesteld, ref: 'WOmzNodNod', name: 'Omzet vrijgesteld / KOR', category: 'omzet', vatCode: 'vrijgesteld', system: true },
+  { code: '8050', rgs: ACCOUNTS.omzetIcp, ref: 'WOmzNodOdi', name: 'Omzet EU-bedrijven (ICP, 3b)', category: 'omzet', vatCode: 'icp', system: true },
+  { code: '8060', rgs: ACCOUNTS.omzetExport, ref: 'WOmzNodOdb', name: 'Omzet uitvoer buiten de EU (3a)', category: 'omzet', vatCode: 'export', system: true },
 
   // Kosten
   { code: '7000', rgs: ACCOUNTS.inkoopMaterialen, ref: 'WKprInpInp', name: 'Inkoop materialen', category: 'kosten', system: true },
@@ -106,4 +114,13 @@ export const SALES_ACCOUNTS: Record<string, { revenue: string; vat?: string }> =
   nul: { revenue: ACCOUNTS.omzetNul },
   verlegd: { revenue: ACCOUNTS.omzetVerlegd },
   vrijgesteld: { revenue: ACCOUNTS.omzetVrijgesteld },
+  icp: { revenue: ACCOUNTS.omzetIcp },
+  export: { revenue: ACCOUNTS.omzetExport },
+};
+
+/** Op welke rekening de verlegde btw (af te dragen) komt, per inkoop-btw-code. */
+export const REVERSE_CHARGE_ACCOUNTS: Record<'verlegd' | 'eu' | 'buiten-eu', string> = {
+  verlegd: ACCOUNTS.btwAfdragenVerlegd,
+  eu: ACCOUNTS.btwAfdragenEu,
+  'buiten-eu': ACCOUNTS.btwAfdragenBuitenEu,
 };

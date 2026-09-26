@@ -1,6 +1,6 @@
-import { ACCOUNTS, SALES_ACCOUNTS } from './accounts';
+import { ACCOUNTS, REVERSE_CHARGE_ACCOUNTS, SALES_ACCOUNTS } from './accounts';
 import { signedLine, type EntrySource, type PostLine } from './ledger';
-import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isSalesVatCode, type PurchaseVatCode } from '../shared/vat';
+import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isReverseCharge, isSalesVatCode, type PurchaseVatCode } from '../shared/vat';
 import { assertCents, roundHalfAwayFromZero, type Cents } from '../shared/money';
 import type { IsoDate } from '../shared/dates';
 import { ValidationError } from '../shared/validation';
@@ -34,7 +34,7 @@ export function purchaseVat(line: PurchaseLineInput): Cents {
  * Journaalregels voor kosten met BTW. Wordt ook gebruikt voor het direct boeken van
  * banktransacties op een kostenrekening.
  *   - hoog/laag: kosten (netto) + voorbelasting aan crediteur/bank (bruto)
- *   - verlegd:   kosten (netto) + voorbelasting aan af te dragen btw verlegd; crediteur/bank alleen netto
+ *   - verlegd/eu/buiten-eu: kosten (netto) + voorbelasting aan af te dragen btw verlegd; crediteur/bank alleen netto
  *   - nul/geen:  alleen kosten
  * Retourneert de regels en het bedrag dat daadwerkelijk betaald wordt.
  */
@@ -52,11 +52,11 @@ export function expenseLines(lines: PurchaseLineInput[], counterAccount: string,
     if (vat !== 0) {
       out.push(signedLine(ACCOUNTS.btwVoorbelasting, vat, { relationId, vatCode: l.vatCode }));
       vatTotal += vat;
-      if (l.vatCode === 'verlegd') {
-        out.push(signedLine(ACCOUNTS.btwAfdragenVerlegd, -vat, { relationId, vatCode: 'verlegd' }));
+      if (isReverseCharge(l.vatCode)) {
+        out.push(signedLine(REVERSE_CHARGE_ACCOUNTS[l.vatCode], -vat, { relationId, vatCode: l.vatCode }));
       }
     }
-    payable += l.netAmount + (l.vatCode === 'verlegd' ? 0 : vat);
+    payable += l.netAmount + (isReverseCharge(l.vatCode) ? 0 : vat);
   }
   out.push(signedLine(counterAccount, -payable, { relationId, description: description ?? null }));
   return { lines: out.filter((l): l is PostLine => l !== null), payable, vat: vatTotal, net: netTotal };
@@ -146,7 +146,7 @@ export function bankCategoryLines(p: BankCategoriePayload): PostLine[] {
     const rate = PURCHASE_VAT_RATES[vatCode];
     // een negatieve transactie is een uitgave; een positieve op een kostenrekening is een terugbetaling
     const gross = -p.amount;
-    const { net, vat } = splitGross(gross, rate.percentage, vatCode === 'verlegd');
+    const { net, vat } = splitGross(gross, rate.percentage, isReverseCharge(vatCode));
     return expenseLines([{ account: p.account, netAmount: net, vatCode, vatAmount: vat, description: p.description }], p.bankAccount, p.relationId, p.description).lines;
   }
   if (p.accountCategory === 'omzet') {

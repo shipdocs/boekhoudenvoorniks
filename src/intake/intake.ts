@@ -6,7 +6,7 @@ import type { RelationsService } from '../relations/relations';
 import type { BankService, BankTransaction } from '../import/bank';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { EXPENSE_CATEGORIES } from '../shared/categories';
-import { PURCHASE_VAT_RATES, type PurchaseVatCode } from '../shared/vat';
+import { PURCHASE_VAT_RATES, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
 import { diffDays, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { countDecision, logAutomation } from '../inbox/automation-log';
@@ -417,7 +417,7 @@ export class IntakeService {
         if (sp.categoryKey === 'prive') return { account: ACCOUNTS.priveOpnamen, netAmount: sp.gross, vatCode: 'geen' as const, description: 'Privé-deel van de bon' };
         const cat = EXPENSE_CATEGORIES.find((x) => x.key === sp.categoryKey);
         if (!cat) throw new ValidationError(`Onbekende categorie ${sp.categoryKey}`);
-        const { net, vat } = splitGross(sp.gross, rate, c.vatCode === 'verlegd');
+        const { net, vat } = splitGross(sp.gross, rate, isReverseCharge(c.vatCode));
         return { account: cat.account, netAmount: net, vatCode: c.vatCode, vatAmount: vat, description: cat.label };
       });
     }
@@ -433,10 +433,10 @@ export class IntakeService {
       }));
     }
     const rate = PURCHASE_VAT_RATES[c.vatCode].percentage;
-    const { net, vat: vatAmount } = splitGross(c.total, rate, c.vatCode === 'verlegd');
+    const { net, vat: vatAmount } = splitGross(c.total, rate, isReverseCharge(c.vatCode));
     // Gebruik het BTW-bedrag van het document als dat binnen 2 cent klopt (bonnen ronden soms per regel af)
     const docVat = vat.length === 1 ? vat[0]!.amount : null;
-    const useDoc = docVat !== null && c.vatCode !== 'verlegd' && Math.abs(docVat - vatAmount) <= 2;
+    const useDoc = docVat !== null && !isReverseCharge(c.vatCode) && Math.abs(docVat - vatAmount) <= 2;
     return [{ account, netAmount: useDoc ? c.total - docVat! : net, vatCode: c.vatCode, vatAmount: useDoc ? docVat! : vatAmount }];
   }
 

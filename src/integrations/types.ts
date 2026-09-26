@@ -53,6 +53,8 @@ export interface ExternalPayout {
   feesNet: Cents;
   /** BTW op transactiekosten (0 bij buitenlandse provider) */
   feesVat: Cents;
+  /** 'eu': de provider zit in een ander EU-land en rekent geen btw; de btw is naar jou verlegd (4b, #16) */
+  feesReverseCharge?: 'eu';
   currency: string;
   reference: string;
 }

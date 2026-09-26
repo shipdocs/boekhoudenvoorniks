@@ -181,7 +181,8 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           </div>
         )}
         {lines.some((l) => l.vatCode === 'laag') && trade?.items.find((i) => i.note) && <p className="small muted">ℹ️ {trade.items.find((i) => i.note)!.note}</p>}
-        {lines.some((l) => l.vatCode === 'verlegd') && <p className="small muted">ℹ️ Bij BTW verlegd moet het btw-nummer van je klant bekend zijn.</p>}
+        {lines.some((l) => l.vatCode === 'verlegd' || l.vatCode === 'icp') && <p className="small muted">ℹ️ Bij BTW verlegd moet het btw-nummer van je klant bekend zijn.</p>}
+        {lines.some((l) => l.vatCode === 'icp' || l.vatCode === 'export') && <p className="small muted">⚠️ Buitenland (0%) is nog niet door een fiscalist gecontroleerd. Verkoop je aan particulieren in de EU, dan geldt vaak de OSS-regeling; die zit niet in de app.</p>}
 
         <div className="row end" style={{ marginTop: 16 }}>
           <table className="sumtable">

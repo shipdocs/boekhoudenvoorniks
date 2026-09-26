@@ -7,7 +7,7 @@ export interface KnownSupplier {
   name: string;
   pattern: RegExp;
   category: string;
-  vatCode: 'hoog' | 'laag' | 'nul' | 'geen';
+  vatCode: 'hoog' | 'laag' | 'nul' | 'geen' | 'eu';
 }
 
 export const KNOWN_SUPPLIERS: KnownSupplier[] = [
@@ -40,6 +40,10 @@ export const KNOWN_SUPPLIERS: KnownSupplier[] = [
   { name: 'Bol.com', pattern: /\bbol\.com\b/i, category: 'kantoor', vatCode: 'hoog' },
   { name: 'Microsoft', pattern: /\bmicrosoft\b/i, category: 'software', vatCode: 'hoog' },
   { name: 'Google', pattern: /\bgoogle\b/i, category: 'software', vatCode: 'hoog' },
+  // Ierse vestigingen factureren zakelijke klanten met btw-nummer zonder btw: verlegd uit de EU (4b, #16)
+  { name: 'Meta', pattern: /\bmeta\s+platforms\b|\bfacebook\b/i, category: 'reclame', vatCode: 'eu' },
+  { name: 'Stripe', pattern: /\bstripe\b/i, category: 'bank', vatCode: 'eu' },
+  { name: 'LinkedIn', pattern: /\blinkedin\b/i, category: 'reclame', vatCode: 'eu' },
 ];
 
 /** Artikelomschrijvingen die op gereedschap wijzen (binnen een bouwmarktbon). */

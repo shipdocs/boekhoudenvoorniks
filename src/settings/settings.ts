@@ -66,6 +66,10 @@ export interface AppSettings {
   sendUbl: boolean;
   /** Bankrekening (bank_accounts.id) die dient als belastingpotje (#33), of null. */
   vatPotAccountId: number | null;
+  /** Schatting inkomstenbelasting tonen (#33); altijd als schatting gemarkeerd. */
+  incomeTaxEstimate: boolean;
+  /** Voldoe ik aan het urencriterium (1.225 uur)? Bepaalt of de zelfstandigenaftrek meetelt in de schatting. */
+  urencriterium: boolean;
   /** Hoe automatisch: voorzichtig (niets zelf), normaal, maximaal (iets lagere drempels). */
   autopilot: 'voorzichtig' | 'normaal' | 'maximaal';
   onboardingDone: boolean;
@@ -109,6 +113,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   advancedMode: false,
   autopilot: 'normaal',
   vatPotAccountId: null,
+  incomeTaxEstimate: true,
+  urencriterium: true,
   sendUbl: true,
   jobLocation: false,
   onboardingDone: false,
