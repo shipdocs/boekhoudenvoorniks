@@ -39,11 +39,13 @@ export function parseUbl(xml: string): DocumentResult {
   const items = rawLines.map((l) => {
     const qtyRaw = t(l.InvoicedQuantity ?? l.CreditedQuantity);
     const price = t(l.Price?.PriceAmount);
+    // de prijs kan voor meerdere stuks gelden (BaseQuantity, bv. per 100): omrekenen naar per stuk
+    const baseQty = Number(t(l.Price?.BaseQuantity) || 1) || 1;
     const rate = t(l.Item?.ClassifiedTaxCategory?.Percent);
     return f({
       description: t(l.Item?.Name) || t(l.Item?.Description) || 'Regel',
       quantity: qtyRaw ? sign * Number(qtyRaw) : null,
-      unitPrice: price ? parseEuro(price) : null,
+      unitPrice: price ? Math.round(parseEuro(price) / baseQty) : null,
       amount: sign * parseEuro(t(l.LineExtensionAmount) || '0'),
       vatRate: rate !== '' ? Number(rate) : null,
     });

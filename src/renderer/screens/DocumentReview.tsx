@@ -61,7 +61,7 @@ export function DocumentReview({ id }: { id: number }) {
   const doc = useLoad(() => api.documents.get(id), [id]);
   const jobs = useLoad(() => api.jobs.list({ active: true }));
   const [active, setActive] = useState<string | null>(null);
-  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number }[] | null } | null>(null);
+  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
 
   const d = doc.data;
   useEffect(() => {
@@ -142,12 +142,12 @@ export function DocumentReview({ id }: { id: number }) {
             </div>
           )}
           {d.status === 'controle' && d.issues.filter((i) => i.field === 'lines').map((i) => {
-            const parts = i.suggestion as { categoryKey: string; gross: number; items: string[] }[];
+            const parts = i.suggestion as { categoryKey: string; gross: number; items: string[]; vatRate?: number }[];
             return (
               <div key="split" className="notice">
                 {i.message}
                 <div className="row" style={{ marginTop: 8 }}>
-                  <Button small kind={form.splits ? 'primary' : undefined} onClick={() => setForm({ ...form, splits: form.splits ? null : parts.map((p) => ({ categoryKey: p.categoryKey, gross: p.gross })) })}>
+                  <Button small kind={form.splits ? 'primary' : undefined} onClick={() => setForm({ ...form, splits: form.splits ? null : parts.map((p) => ({ categoryKey: p.categoryKey, gross: p.gross, vatRate: p.vatRate })) })}>
                     {form.splits ? '✓ Wordt apart geboekt' : 'Ja, apart boeken'}
                   </Button>
                 </div>
