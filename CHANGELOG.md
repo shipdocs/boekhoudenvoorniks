@@ -2,6 +2,8 @@
 
 ## Nog niet uitgebracht
 
+## 0.3.1 — extra bankrekeningen en controles
+
 - **Btw over privégebruik van een auto van de zaak** (vak 1d). Bij Instellingen → Btw vul je in of je er
   ook privé mee rijdt, de cataloguswaarde en sinds wanneer je de auto gebruikt. In de laatste aangifte van
   het jaar staat dan een controle met het bedrag (2,7% van de cataloguswaarde, vanaf het 5e jaar 1,5%, in het
