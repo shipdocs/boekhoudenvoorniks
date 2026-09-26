@@ -15,6 +15,18 @@ export function isValidIban(input: string): boolean {
   return remainder === 1;
 }
 
+/** ISO 11649 creditor reference ("RF18 5390 0754 7034"): RF + 2 controlecijfers + max 21 tekens, mod 97. */
+export function isValidCreditorReference(input: string): boolean {
+  const ref = input.replace(/\s+/g, '').toUpperCase();
+  if (!/^RF\d{2}[A-Z0-9]{1,21}$/.test(ref)) return false;
+  let remainder = 0;
+  for (const ch of ref.slice(4) + ref.slice(0, 4)) {
+    const value = /[A-Z]/.test(ch) ? String(ch.charCodeAt(0) - 55) : ch;
+    for (const digit of value) remainder = (remainder * 10 + Number(digit)) % 97;
+  }
+  return remainder === 1;
+}
+
 export function formatIban(input: string): string {
   return normalizeIban(input).replace(/(.{4})/g, '$1 ').trim();
 }
