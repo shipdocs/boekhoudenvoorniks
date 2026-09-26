@@ -28,7 +28,7 @@ jobs:
       - name: Bestandsnamen in de controlegetallen gelijk aan GitHub
         run: |
           mkdir sums && cd sums
-          gh release download "$TAG" --pattern 'SHA256SUMS-*' || exit 0
+          gh release download "$TAG" --pattern 'SHA256SUMS-*'
           for f in SHA256SUMS-*; do
             while read -r hash name; do
               name="${name#\*}"
