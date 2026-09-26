@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, type Db } from '../db/database';
+import { LedgerError } from '../core-ledger/ledger';
 import { createServices, type Services } from '../services';
 import { createSmtpMailer, verifySmtp } from '../documents/smtp-mailer';
 import { createApi, type Api } from './api';
@@ -222,7 +223,16 @@ function registerIpc(): void {
     const group = Object.prototype.hasOwnProperty.call(api, ns) ? (api as unknown as Record<string, Record<string, unknown>>)[ns] : undefined;
     const handler = group && Object.prototype.hasOwnProperty.call(group, fn) ? group[fn] : undefined;
     if (typeof handler !== 'function') throw new Error(`Onbekende functie: ${method}`);
-    return await (handler as (...a: unknown[]) => unknown)(...args);
+    try {
+      return await (handler as (...a: unknown[]) => unknown)(...args);
+    } catch (e) {
+      // interne boekhoudfouten (journaal, grootboek, gebeurtenissen) zijn vaktaal: niet zo aan de gebruiker tonen
+      if (e instanceof LedgerError || /journaalpost|grootboekrekening|tegenboeking|debet|gebeurtenis/i.test(String((e as Error)?.message))) {
+        console.error(`Fout in ${method}`, e);
+        throw new Error('Er ging iets mis bij het verwerken. Probeer het opnieuw. Blijft het misgaan? Vraag je boekhouder of meld het, dan kijken we mee.');
+      }
+      throw e;
+    }
   });
 }
 

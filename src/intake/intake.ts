@@ -143,7 +143,7 @@ export class IntakeService {
     const mime = mimeFor(filename);
     if (mime === 'application/xml') {
       const xml = Buffer.from(data).toString('utf8');
-      if (!isUbl(xml)) throw new ValidationError('Dit XML-bestand is geen UBL e-factuur');
+      if (!isUbl(xml)) throw new ValidationError('Dit bestand is geen e-factuur. Gebruik de PDF of een foto.');
       return { result: parseUbl(xml), source: 'ubl', issues: [] };
     }
     if (mime === 'application/pdf') {
@@ -202,7 +202,7 @@ export class IntakeService {
    */
   async addEvidence(filename: string, data: Uint8Array, bankTransactionId: number): Promise<IntakeDocument> {
     const tx = this.db.prepare('SELECT id FROM bank_transactions WHERE id = ?').get(bankTransactionId);
-    if (!tx) throw new ValidationError('Deze afschrijving bestaat niet (meer)');
+    if (!tx) throw new ValidationError('Deze betaling bestaat niet (meer)');
     const classification = JSON.stringify({ categoryKey: 'overig', vatCode: 'hoog', business: true, confidence: 1, source: 'geheugen', reasons: [`bewijsstuk bij banktransactie #${bankTransactionId}`], automatic: true });
     const sha = createHash('sha256').update(data).digest('hex');
     const existing = this.db.prepare('SELECT id, status FROM documents WHERE sha256 = ?').get(sha) as { id: number; status: string } | undefined;
@@ -342,7 +342,7 @@ export class IntakeService {
   markDuplicate(id: number, match: Pick<DuplicateMatch, 'documentId' | 'purchaseId'>): IntakeDocument {
     tx(this.db, () => {
       const doc = this.get(id);
-      if (doc.status === 'verwerkt') throw new ValidationError('Dit document is al verwerkt');
+      if (doc.status === 'verwerkt') throw new ValidationError('Dit bonnetje is al verwerkt');
       const original = match.documentId ? this.get(match.documentId) : null;
       const purchaseId = match.purchaseId ?? original?.purchase_invoice_id ?? null;
       if (purchaseId) {
@@ -402,12 +402,12 @@ export class IntakeService {
    */
   confirm(id: number, c: Confirmation, opts: { learn?: boolean } = {}): IntakeDocument {
     const doc = this.get(id);
-    if (doc.status === 'verwerkt') throw new ValidationError('Dit document is al verwerkt');
+    if (doc.status === 'verwerkt') throw new ValidationError('Dit bonnetje is al verwerkt');
     if (!c.supplier?.trim()) throw new ValidationError('Vul de winkel of leverancier in');
     if (!Number.isSafeInteger(c.total) || c.total === 0) throw new ValidationError('Vul het totaalbedrag in');
     const category = EXPENSE_CATEGORIES.find((x) => x.key === c.categoryKey);
     if (!category) throw new ValidationError('Kies waar de aankoop voor was');
-    if (!(c.vatCode in PURCHASE_VAT_RATES)) throw new ValidationError('Onbekende BTW-keuze');
+    if (!(c.vatCode in PURCHASE_VAT_RATES)) throw new ValidationError('Kies of er btw op de bon stond');
 
     tx(this.db, () => {
       if (opts.learn !== false) this.memory.learn(c.supplier, { categoryKey: c.categoryKey, vatCode: c.vatCode, business: c.business });
@@ -456,7 +456,7 @@ export class IntakeService {
         const rate = PURCHASE_VAT_RATES[vatCode].percentage;
         if (sp.categoryKey === 'prive') return { account: ACCOUNTS.priveOpnamen, netAmount: sp.gross, vatCode: 'geen' as const, description: 'Privé-deel van de bon' };
         const cat = EXPENSE_CATEGORIES.find((x) => x.key === sp.categoryKey);
-        if (!cat) throw new ValidationError(`Onbekende categorie ${sp.categoryKey}`);
+        if (!cat) throw new ValidationError('Kies bij elk deel waar het voor was');
         const { net, vat } = splitGross(sp.gross, rate, isReverseCharge(vatCode));
         return { account: cat.account, netAmount: net, vatCode, vatAmount: vat, description: cat.label };
       });
@@ -486,7 +486,7 @@ export class IntakeService {
 
   get(id: number): IntakeDocument {
     const row = this.db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as Row | undefined;
-    if (!row) throw new ValidationError(`Document ${id} bestaat niet`);
+    if (!row) throw new ValidationError('Dit bonnetje bestaat niet (meer)');
     const result = row.result ? (JSON.parse(row.result) as DocumentResult) : null;
     return {
       ...row,

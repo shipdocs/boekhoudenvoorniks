@@ -47,7 +47,7 @@ export class RelationsService {
 
   get(id: number): Relation {
     const r = this.db.prepare('SELECT * FROM relations WHERE id = ?').get(id) as Relation | undefined;
-    if (!r) throw new ValidationError(`Relatie ${id} bestaat niet`);
+    if (!r) throw new ValidationError('Deze klant of leverancier bestaat niet (meer)');
     return r;
   }
 
@@ -91,15 +91,15 @@ export class RelationsService {
     if (!name) throw new ValidationError('Naam is verplicht');
     const t = (v: unknown) => (typeof v === 'string' ? v.trim() || null : v ?? null);
     const email = t(input.email) as string | null;
-    if (email && !isValidEmail(email)) throw new ValidationError(`Ongeldig e-mailadres: ${email}`);
+    if (email && !isValidEmail(email)) throw new ValidationError(`Dit e-mailadres klopt niet: ${email}`);
     const iban = input.iban ? normalizeIban(input.iban) : null;
-    if (iban && !isValidIban(iban)) throw new ValidationError(`Ongeldig IBAN: ${input.iban}`);
+    if (iban && !isValidIban(iban)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${input.iban}`);
     const vat = input.vat_number ? input.vat_number.replace(/[\s.]/g, '').toUpperCase() : null;
-    if (vat && !isValidVatNumber(vat)) throw new ValidationError(`Ongeldig btw-nummer: ${input.vat_number}`);
+    if (vat && !isValidVatNumber(vat)) throw new ValidationError(`Dit btw-nummer klopt niet: ${input.vat_number}`);
     const kvk = input.kvk_number ? input.kvk_number.replace(/\s/g, '') : null;
-    if (kvk && !isValidKvk(kvk)) throw new ValidationError(`Ongeldig KvK-nummer (8 cijfers): ${input.kvk_number}`);
+    if (kvk && !isValidKvk(kvk)) throw new ValidationError(`Dit KvK-nummer klopt niet (het heeft 8 cijfers): ${input.kvk_number}`);
     const type = input.type ?? 'klant';
-    if (!['klant', 'leverancier', 'beide'].includes(type)) throw new ValidationError(`Ongeldig relatietype: ${type}`);
+    if (!['klant', 'leverancier', 'beide'].includes(type)) throw new ValidationError('Kies klant, leverancier of allebei');
     const term = input.payment_term_days;
     if (term != null && (!Number.isInteger(term) || term < 0 || term > 365)) throw new ValidationError('Betaaltermijn moet tussen 0 en 365 dagen liggen');
     return {

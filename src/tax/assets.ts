@@ -148,7 +148,7 @@ export class AssetService {
 
   private row(id: number): AssetRow {
     const a = this.db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as AssetRow | undefined;
-    if (!a) throw new ValidationError('Dit bedrijfsmiddel bestaat niet');
+    if (!a) throw new ValidationError('Deze investering bestaat niet (meer)');
     return a;
   }
 
@@ -178,16 +178,16 @@ export class AssetService {
   /** Naam, levensduur, restwaarde of "telt niet mee voor de KIA" aanpassen. Afschrijving die al geboekt is, blijft staan. */
   update(id: number, patch: { name?: string; lifetimeMonths?: number; residual?: Cents; kiaExcluded?: boolean; bookInApp?: boolean }): Asset {
     const a = this.row(id);
-    if (a.status !== 'actief') throw new ValidationError('Alleen een bedrijfsmiddel in gebruik kun je aanpassen');
+    if (a.status !== 'actief') throw new ValidationError('Alleen een investering die je nog gebruikt, kun je aanpassen');
     if (patch.lifetimeMonths !== undefined) {
       if (!Number.isInteger(patch.lifetimeMonths) || patch.lifetimeMonths < MIN_LIFETIME_MONTHS || patch.lifetimeMonths > 600) {
-        throw new ValidationError('Levensduur: minstens 5 jaar (fiscaal maximaal 20% afschrijving per jaar), hooguit 50 jaar');
+        throw new ValidationError('Vul tussen 5 en 50 jaar in (korter dan 5 jaar mag niet voor de belasting)');
       }
     }
     if (patch.residual !== undefined && (!Number.isSafeInteger(patch.residual) || patch.residual < 0 || patch.residual >= a.cost)) {
-      throw new ValidationError('De restwaarde moet lager zijn dan de aanschafprijs');
+      throw new ValidationError('Wat het daarna nog waard is, moet lager zijn dan wat je ervoor betaalde');
     }
-    if (patch.name !== undefined && !patch.name.trim()) throw new ValidationError('Geef het bedrijfsmiddel een naam');
+    if (patch.name !== undefined && !patch.name.trim()) throw new ValidationError('Geef de investering een naam');
     this.db
       .prepare('UPDATE assets SET name = COALESCE(?, name), lifetime_months = COALESCE(?, lifetime_months), residual = COALESCE(?, residual), kia_excluded = COALESCE(?, kia_excluded) WHERE id = ?')
       .run(patch.name?.trim() ?? null, patch.lifetimeMonths ?? null, patch.residual ?? null, patch.kiaExcluded === undefined ? null : patch.kiaExcluded ? 1 : 0, id);
@@ -205,7 +205,7 @@ export class AssetService {
 
   /** Afschrijving van een afgesloten jaar boeken (idempotent: een jaar dat al geboekt is, wordt overgeslagen). */
   bookYear(year: number, asOf: IsoDate = today()): { entryId: number | null; amount: Cents } {
-    if (year >= Number(asOf.slice(0, 4))) throw new ValidationError(`${year} is nog niet voorbij; afschrijving boek je na afloop van het jaar`);
+    if (year >= Number(asOf.slice(0, 4))) throw new ValidationError(`${year} is nog niet voorbij. De kosten voor dit jaar telt de app als het jaar voorbij is`);
     return tx(this.db, () => {
       const candidates = (this.db.prepare(`SELECT * FROM assets WHERE status = 'actief' AND acquired_on <= ?`).all(`${year}-12-31`) as AssetRow[]).filter(
         (a) => !this.db.prepare('SELECT 1 FROM asset_depreciation WHERE asset_id = ? AND year = ?').get(a.id, year),
@@ -256,7 +256,7 @@ export class AssetService {
    */
   dispose(id: number, date: IsoDate, proceeds: Cents): Asset {
     const a = this.row(id);
-    if (a.status !== 'actief') throw new ValidationError('Dit bedrijfsmiddel is al verkocht of vervallen');
+    if (a.status !== 'actief') throw new ValidationError('Deze investering is al verkocht of weggedaan');
     if (date < a.acquired_on) throw new ValidationError('De verkoopdatum ligt vóór de aankoop');
     if (!Number.isSafeInteger(proceeds) || proceeds < 0) throw new ValidationError('Vul de verkoopprijs in (0 als je het wegdoet)');
     const year = Number(date.slice(0, 4));

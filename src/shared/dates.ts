@@ -10,7 +10,7 @@ export function isIsoDate(value: string): value is IsoDate {
 }
 
 export function assertIsoDate(value: string, label = 'datum'): asserts value is IsoDate {
-  if (!isIsoDate(value)) throw new Error(`${label} moet een geldige datum (JJJJ-MM-DD) zijn, kreeg: ${value}`);
+  if (!isIsoDate(value)) throw new Error(`Vul een geldige ${label} in`);
 }
 
 export function today(): IsoDate {
@@ -89,7 +89,7 @@ export function periodFromKey(key: string): Period {
   if (m) return periodFor(`${m[1]}-${m[2]}-01`, 'maand');
   m = /^(\d{4})$/.exec(key);
   if (m) return periodFor(`${m[1]}-01-01`, 'jaar');
-  throw new Error(`Onbekende periode: ${key}`);
+  throw new Error('Deze periode kent de app niet');
 }
 
 export function formatDateNl(date: IsoDate): string {

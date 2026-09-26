@@ -6,7 +6,7 @@ export type Cents = number;
 
 export function assertCents(value: number, label = 'bedrag'): asserts value is Cents {
   if (!Number.isSafeInteger(value)) {
-    throw new Error(`${label} moet een geheel aantal centen zijn, kreeg: ${value}`);
+    throw new Error(`Dit bedrag klopt niet (${label})`);
   }
 }
 
@@ -20,11 +20,11 @@ export function roundHalfAwayFromZero(value: number): number {
 /** Converteert een euro-bedrag (number of string, NL of EN notatie) naar centen. */
 export function parseEuro(input: string | number): Cents {
   if (typeof input === 'number') {
-    if (!Number.isFinite(input)) throw new Error(`Ongeldig bedrag: ${input}`);
+    if (!Number.isFinite(input)) throw new Error(`Dit bedrag klopt niet: ${input}`);
     return roundHalfAwayFromZero(input * 100);
   }
   let s = input.trim().replace(/[€\s]/g, '').replace(/^EUR/i, '');
-  if (s === '') throw new Error('Leeg bedrag');
+  if (s === '') throw new Error('Vul een bedrag in');
   let negative = false;
   if (s.startsWith('(') && s.endsWith(')')) {
     negative = true;
@@ -54,7 +54,7 @@ export function parseEuro(input: string | number): Cents {
     const dotCount = s.split('.').length - 1;
     if (dotCount > 1) s = s.replace(/\./g, '');
   }
-  if (!/^\d+(\.\d+)?$/.test(s)) throw new Error(`Ongeldig bedrag: ${input}`);
+  if (!/^\d+(\.\d+)?$/.test(s)) throw new Error(`Dit bedrag klopt niet: ${input}`);
   const [whole, frac = ''] = s.split('.');
   const cents = Number(whole) * 100 + Number((frac + '00').slice(0, 2)) + (Number(frac[2] ?? '0') >= 5 ? 1 : 0);
   return negative ? -cents : cents;

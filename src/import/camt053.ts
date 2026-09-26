@@ -26,7 +26,7 @@ function text(v: unknown): string {
 export function parseCamt053(xml: string): ParseResult {
   const doc = parser.parse(xml) as X;
   const root = doc.Document?.BkToCstmrStmt;
-  if (!root) throw new Error('Geen geldig CAMT.053-bestand (BkToCstmrStmt ontbreekt)');
+  if (!root) throw new Error('Dit bankbestand kunnen we niet lezen. Download het afschrift opnieuw bij je bank.');
   const transactions: NormalizedTransaction[] = [];
   const warnings: string[] = [];
   for (const stmt of (root.Stmt ?? []) as X[]) {

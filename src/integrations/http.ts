@@ -4,7 +4,9 @@ export async function getJson<T>(fetchImpl: FetchLike, url: string, headers: Rec
   const res = await fetchImpl(url, { method: 'GET', headers: { Accept: 'application/json', ...headers } });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status} bij ${new URL(url).host}: ${body.slice(0, 200)}`);
+    throw new Error(res.status === 401 || res.status === 403
+      ? `Koppeling met ${new URL(url).host} mislukt: controleer de sleutel of het wachtwoord (fout ${res.status})`
+      : `Koppeling met ${new URL(url).host} mislukt (fout ${res.status}): ${body.slice(0, 200)}`);
   }
   return (await res.json()) as T;
 }

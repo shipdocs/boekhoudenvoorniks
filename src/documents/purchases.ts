@@ -98,9 +98,9 @@ export class PurchaseService {
     if (lines.length === 0) throw new ValidationError('Voeg minimaal één regel toe');
     return tx(this.db, () => {
       const p = this.get(id);
-      if (!p.journal_entry_id) throw new ValidationError('Deze inkoop heeft geen boeking');
+      if (!p.journal_entry_id) throw new ValidationError('Deze aankoop kan niet aangepast worden');
       const event = this.events.forEntry(p.journal_entry_id);
-      if (!event || event.type !== 'inkoop') throw new ValidationError('Deze inkoop is van vóór het gebeurtenissenmodel en kan zo niet aangepast worden');
+      if (!event || event.type !== 'inkoop') throw new ValidationError('Deze aankoop is met een oudere versie van de app verwerkt en kan zo niet aangepast worden. Vraag je boekhouder.');
       const booking = expenseLines(lines, ACCOUNTS.crediteuren, p.relation_id, p.supplier_reference ?? undefined);
       if (p.amount_paid !== 0 && booking.payable !== p.total) throw new ValidationError('Het te betalen bedrag verandert; maak eerst de betaling ongedaan');
       const old = event.payload as InkoopPayload;
@@ -155,7 +155,7 @@ export class PurchaseService {
   cancel(id: number, date: IsoDate): void {
     tx(this.db, () => {
       const p = this.get(id);
-      if (p.amount_paid !== 0) throw new ValidationError('Maak eerst de betaling van deze inkoop ongedaan');
+      if (p.amount_paid !== 0) throw new ValidationError('Maak eerst de betaling van deze aankoop ongedaan');
       if (p.journal_entry_id) this.ledger.reverse(p.journal_entry_id, date, `Teruggedraaid: ${p.description}`);
       this.db.prepare(`UPDATE documents SET purchase_invoice_id = NULL, status = 'controle' WHERE purchase_invoice_id = ?`).run(id);
       this.db.prepare('DELETE FROM purchase_invoices WHERE id = ?').run(id);
@@ -190,7 +190,7 @@ export class PurchaseService {
     const row = this.db
       .prepare('SELECT p.*, r.name AS relation_name FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id WHERE p.id = ?')
       .get(id) as Omit<PurchaseInvoice, 'open_amount'> | undefined;
-    if (!row) throw new ValidationError(`Inkoopfactuur ${id} bestaat niet`);
+    if (!row) throw new ValidationError('Deze aankoop bestaat niet (meer)');
     return { ...row, open_amount: row.total - row.amount_paid };
   }
 

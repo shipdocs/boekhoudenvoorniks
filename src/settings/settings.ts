@@ -211,7 +211,7 @@ export class SettingsService {
   }
 
   setCounter(name: string, value: number): void {
-    if (!Number.isInteger(value) || value < 0) throw new Error('Teller moet een positief geheel getal zijn');
+    if (!Number.isInteger(value) || value < 0) throw new Error('Vul je laatste factuurnummer in als getal');
     this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(`counter:${name}`, JSON.stringify(value));
   }
 }

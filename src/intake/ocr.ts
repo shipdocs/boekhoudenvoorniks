@@ -36,7 +36,7 @@ export class HttpOcrProvider implements OcrProvider {
     label?: string,
   ) {
     const u = new URL(baseUrl);
-    if (!['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) throw new Error('OCR-sidecar moet lokaal draaien (localhost)');
+    if (!['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) throw new Error('Slimme herkenning moet op deze computer draaien (localhost)');
     this.label = label ?? `Lokale OCR (${id})`;
   }
 
@@ -55,7 +55,7 @@ export class HttpOcrProvider implements OcrProvider {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mime_type: input.mimeType, filename: input.filename, data_base64: Buffer.from(input.data).toString('base64') }),
     });
-    if (!res.ok) throw new Error(`OCR mislukt (HTTP ${res.status})`);
+    if (!res.ok) throw new Error(`Slimme herkenning werkt nu niet (fout ${res.status}). Vul de gegevens zelf in.`);
     const body = (await res.json()) as {
       pages?: { width: number; height: number }[];
       lines?: { text: string; page?: number; bbox?: [number, number, number, number]; confidence?: number }[];

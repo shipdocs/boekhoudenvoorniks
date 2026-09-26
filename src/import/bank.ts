@@ -101,7 +101,7 @@ export class BankService {
 
   addAccount(name: string, iban: string): BankAccount {
     const clean = normalizeIban(iban);
-    if (!isValidIban(clean)) throw new ValidationError(`Ongeldig IBAN: ${iban}`);
+    if (!isValidIban(clean)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${iban}`);
     return tx(this.db, () => {
       const n = this.listAccounts().length;
       // tweede en volgende rekeningen krijgen een eigen grootboekrekening
@@ -116,14 +116,14 @@ export class BankService {
 
   updateAccount(id: number, patch: { name?: string; iban?: string | null }): void {
     const iban = patch.iban ? normalizeIban(patch.iban) : patch.iban;
-    if (iban && !isValidIban(iban)) throw new ValidationError(`Ongeldig IBAN: ${patch.iban}`);
+    if (iban && !isValidIban(iban)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${patch.iban}`);
     const current = this.getAccount(id);
     this.db.prepare('UPDATE bank_accounts SET name = ?, iban = ? WHERE id = ?').run(patch.name ?? current.name, iban === undefined ? current.iban : iban, id);
   }
 
   getAccount(id: number): BankAccount {
     const a = this.listAccounts().find((x) => x.id === id);
-    if (!a) throw new ValidationError(`Bankrekening ${id} bestaat niet`);
+    if (!a) throw new ValidationError('Deze bankrekening bestaat niet (meer)');
     return a;
   }
 
@@ -247,12 +247,12 @@ export class BankService {
 
   get(id: number): BankTransaction {
     const t = this.db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(id) as BankTransaction | undefined;
-    if (!t) throw new ValidationError(`Banktransactie ${id} bestaat niet`);
+    if (!t) throw new ValidationError('Deze betaling bestaat niet (meer)');
     return t;
   }
 
   private assertOpen(t: BankTransaction): void {
-    if (t.status === 'gematcht') throw new ValidationError('Deze transactie is al verwerkt');
+    if (t.status === 'gematcht') throw new ValidationError('Deze betaling is al verwerkt');
   }
 
   // ---------- verwerken ----------
@@ -321,10 +321,10 @@ export class BankService {
   reclassify(txId: number, change: { account: string; vatCode?: string; description?: string }, reason = 'andere categorie'): number {
     const t = this.get(txId);
     if (t.status !== 'gematcht' || !t.matched_journal_entry_id || t.matched_invoice_id || t.matched_purchase_invoice_id) {
-      throw new ValidationError('Alleen een betaling die direct op een categorie is geboekt kan zo aangepast worden');
+      throw new ValidationError('Alleen een betaling waar je zelf een soort kosten bij koos, kun je zo aanpassen');
     }
     const event = this.events.forEntry(t.matched_journal_entry_id);
-    if (!event || event.type !== 'bank-categorie') throw new ValidationError('Deze boeking is van vóór het gebeurtenissenmodel; maak de verwerking ongedaan en boek opnieuw');
+    if (!event || event.type !== 'bank-categorie') throw new ValidationError('Deze betaling is met een oudere versie van de app verwerkt. Maak de verwerking ongedaan en doe het opnieuw.');
     const target = this.ledger.getAccount(change.account);
     const old = event.payload as BankCategoriePayload;
     const payload: BankCategoriePayload = {

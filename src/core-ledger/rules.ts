@@ -45,7 +45,7 @@ export function expenseLines(lines: PurchaseLineInput[], counterAccount: string,
   let netTotal = 0;
   for (const l of lines) {
     assertCents(l.netAmount, 'bedrag');
-    if (!(l.vatCode in PURCHASE_VAT_RATES)) throw new ValidationError(`Onbekende BTW-code ${l.vatCode}`);
+    if (!(l.vatCode in PURCHASE_VAT_RATES)) throw new ValidationError('Kies een btw-tarief');
     const vat = purchaseVat(l);
     netTotal += l.netAmount;
     out.push(signedLine(l.account, l.netAmount, { relationId, vatCode: l.vatCode, description: l.description ?? null }));
@@ -142,7 +142,7 @@ export function compile(event: DomainEvent): CompiledEntry {
 export function bankCategoryLines(p: BankCategoriePayload): PostLine[] {
   const vatCode = p.vatCode;
   if (p.accountCategory === 'kosten' || (p.accountCategory === 'activa' && p.amount < 0)) {
-    if (!isPurchaseVatCode(vatCode)) throw new ValidationError(`Ongeldige BTW-keuze voor kosten: ${vatCode}`);
+    if (!isPurchaseVatCode(vatCode)) throw new ValidationError('Kies een ander btw-tarief');
     const rate = PURCHASE_VAT_RATES[vatCode];
     // een negatieve transactie is een uitgave; een positieve op een kostenrekening is een terugbetaling
     const gross = -p.amount;
@@ -150,7 +150,7 @@ export function bankCategoryLines(p: BankCategoriePayload): PostLine[] {
     return expenseLines([{ account: p.account, netAmount: net, vatCode, vatAmount: vat, description: p.description }], p.bankAccount, p.relationId, p.description).lines;
   }
   if (p.accountCategory === 'omzet') {
-    if (!isSalesVatCode(vatCode)) throw new ValidationError(`Ongeldige BTW-keuze voor omzet: ${vatCode}`);
+    if (!isSalesVatCode(vatCode)) throw new ValidationError('Kies een ander btw-tarief');
     const { net, vat } = splitGross(p.amount, SALES_VAT_RATES[vatCode].percentage);
     const vatAccount = SALES_ACCOUNTS[vatCode]?.vat;
     return [
