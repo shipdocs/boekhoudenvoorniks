@@ -115,7 +115,7 @@ describe('BTW-aangifte', () => {
     s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-07-10', lines: [{ description: 'x', quantity: 2, unitPrice: 50000, vatCode: 'hoog' }] }).id);
     s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-07-20', amount: -5000, description: 'iets' }] });
     const r = s.vat.calculate('2026-Q3');
-    expect(r.warnings.join(' ')).toMatch(/1 banktransacties/);
+    expect(s.vat.checks('2026-Q3').find((c) => c.key === 'bank-open')).toMatchObject({ count: 1, blocking: true });
     expect(s.vat.exportCsv('2026-Q3')).toContain('1a;');
     const xbrl = buildVatXbrl(r, s.settings.get().company);
     expect(xbrl).toContain('<bd-i:TurnoverSuppliesServicesGeneralTariff contextRef="Msg" unitRef="EUR" decimals="INF">1000</bd-i:TurnoverSuppliesServicesGeneralTariff>');

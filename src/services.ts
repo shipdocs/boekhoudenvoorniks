@@ -52,9 +52,9 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const exports = new AccountantExport(db, ledger);
   const memory = new SupplierMemory(db);
   const classifier = new Classifier(memory, deps.llm ?? null);
-  const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, deps.storeFile, deps.ocr ?? null);
+  const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot);
   const jobs = new JobService(db, quotes, invoices, relations);
-  const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat);
+  const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases);
 
   ledger.seedDefaultAccounts();
   templates.seedDefaults();

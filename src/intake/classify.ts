@@ -25,7 +25,7 @@ export interface LlmClassifier {
   classify(input: { supplier: string | null; lines: string[]; categories: { key: string; label: string; hint: string }[] }): Promise<{ categoryKey: string; confidence: number; explanation: string } | null>;
 }
 
-function vatFromDocument(doc: DocumentResult): Classification['vatCode'] | null {
+export function vatFromDocument(doc: DocumentResult): Classification['vatCode'] | null {
   if (doc.reverseCharge) return 'verlegd';
   const rates = doc.vat.value.filter((v) => v.amount !== 0).map((v) => v.rate);
   if (rates.length === 0) return doc.vat.value.length > 0 ? 'nul' : null;

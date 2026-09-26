@@ -4,6 +4,7 @@ import type { PurchaseService, PurchaseInvoice } from '../documents/purchases';
 import type { RelationsService } from '../relations/relations';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { today, type IsoDate } from '../shared/dates';
+import { THRESHOLDS, thresholdFor, type AutopilotLevel } from '../automation/decisions';
 
 export type Suggestion =
   | { kind: 'factuur'; invoiceId: number; label: string; score: number; reasons: string[] }
@@ -12,6 +13,18 @@ export type Suggestion =
 
 /** Score vanaf waar automatisch gekoppeld wordt (bedrag + factuurnummer, of bedrag + IBAN). */
 export const AUTO_MATCH_THRESHOLD = 100;
+/** Een tweede kandidaat binnen deze marge = twijfel: dan beslist de gebruiker. */
+export const DOUBT_MARGIN = 30;
+
+/**
+ * Score → zekerheid 0..1 (#21). Gekalibreerd zodat de oude drempel (100) precies op de
+ * standaarddrempel voor bankkoppelingen (0,9) valt. Twijfel halveert de zekerheid.
+ */
+export function matchConfidence(best: number, second?: number): { confidence: number; doubt: boolean } {
+  const doubt = second !== undefined && second >= best - DOUBT_MARGIN;
+  const base = Math.min(1, Math.max(0, (best / AUTO_MATCH_THRESHOLD) * THRESHOLDS.bankkoppeling));
+  return { confidence: doubt ? base / 2 : base, doubt };
+}
 
 function compact(s: string | null | undefined): string {
   return (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -92,17 +105,19 @@ export class MatchingEngine {
   }
 
   /** Koppelt nieuwe transacties automatisch als er één duidelijke kandidaat is. */
-  autoMatch(asOf: IsoDate = today()): { matched: number; details: { txId: number; label: string; reasons: string[] }[] } {
-    const details: { txId: number; label: string; reasons: string[] }[] = [];
+  autoMatch(asOf: IsoDate = today(), level: AutopilotLevel = 'normaal'): { matched: number; details: { txId: number; label: string; reasons: string[]; confidence: number }[] } {
+    const details: { txId: number; label: string; reasons: string[]; confidence: number }[] = [];
+    const threshold = thresholdFor('bankkoppeling', level);
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 }).reverse()) {
       const suggestions = this.suggest(t, this.invoices.listOpen(asOf), this.purchases.listOpen()).filter((s) => s.kind !== 'rekening');
       const [best, second] = suggestions;
-      if (!best || best.score < AUTO_MATCH_THRESHOLD) continue;
-      if (second && second.score >= best.score - 30) continue; // twijfel → gebruiker beslist
+      if (!best) continue;
+      const { confidence } = matchConfidence(best.score, second?.score);
+      if (confidence < threshold) continue; // te weinig zeker of twijfel → gebruiker beslist
       try {
         if (best.kind === 'factuur') this.bank.matchInvoice(t.id, best.invoiceId);
         else if (best.kind === 'inkoop') this.bank.matchPurchase(t.id, best.purchaseId);
-        details.push({ txId: t.id, label: best.label, reasons: best.reasons });
+        details.push({ txId: t.id, label: best.label, reasons: best.reasons, confidence });
       } catch {
         // bv. periode afgesloten — laat staan voor handmatige verwerking
       }

@@ -4,7 +4,8 @@ import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import type { SettingsService } from '../settings/settings';
 import { centsToDecimalString, formatEuro, type Cents } from '../shared/money';
-import { periodFor, periodFromKey, today, type IsoDate, type Period } from '../shared/dates';
+import { addDays, periodFor, periodFromKey, today, type IsoDate, type Period } from '../shared/dates';
+import { runVatChecks, skipKey, type VatCheck } from './checks';
 import { ValidationError } from '../shared/validation';
 
 /**
@@ -208,10 +209,7 @@ export class VatService {
     const r5g: Rubriek = { code: '5g', label: 'Totaal te betalen / terug te vragen', omzet: null, btw: btw5a - voorbelasting, omzetEuro: null, btwEuro: saldoEuro };
 
     const warnings: string[] = [];
-    const unprocessed = (this.db
-      .prepare(`SELECT COUNT(*) AS n FROM bank_transactions WHERE status = 'nieuw' AND transaction_date BETWEEN ? AND ?`)
-      .get(period.start, period.end) as { n: number }).n;
-    if (unprocessed > 0) warnings.push(`Er zijn nog ${unprocessed} banktransacties in deze periode niet verwerkt. Verwerk ze eerst, anders mis je mogelijk voorbelasting.`);
+    // onverwerkte banktransacties e.d.: zie checks() (#20)
     const drafts = (this.db.prepare(`SELECT COUNT(*) AS n FROM invoices WHERE status = 'concept' AND invoice_date BETWEEN ? AND ?`).get(period.start, period.end) as { n: number }).n;
     if (drafts > 0) warnings.push(`Er staan nog ${drafts} conceptfacturen in deze periode. Die tellen pas mee als ze definitief zijn.`);
     if (this.settings.get().kor) warnings.push('Je gebruikt de kleineondernemersregeling (KOR): je hoeft in principe geen BTW-aangifte te doen.');
@@ -266,6 +264,29 @@ export class VatService {
     });
   }
 
+  /** Controles vóór de aangifte (#20). */
+  checks(periodKey: string): VatCheck[] {
+    const period = periodFromKey(periodKey);
+    const current = this.calculate(periodKey).summary.teBetalen;
+    const prevPeriod = periodFor(addDays(period.start, -1), this.settings.get().vatPeriod);
+    const prev = this.calculate(prevPeriod.key);
+    const hadActivity = prev.summary.omzet !== 0 || prev.summary.voorbelasting !== 0;
+    return runVatChecks(this.db, this.ledger, period, { current, previous: hadActivity ? prev.summary.teBetalen : null });
+  }
+
+  /** Bewust overslaan; komt terug als de situatie verandert (andere fingerprint). */
+  skipCheck(periodKey: string, checkKey: string, reason = ''): VatCheck[] {
+    const check = this.checks(periodKey).find((c) => c.key === checkKey);
+    if (!check) throw new ValidationError('Deze controle is al opgelost');
+    this.db
+      .prepare(
+        `INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, ?, ?)
+         ON CONFLICT(task_key) DO UPDATE SET fingerprint = excluded.fingerprint, reason = excluded.reason, created_at = datetime('now')`,
+      )
+      .run(skipKey(periodKey, checkKey), check.fingerprint, reason.trim());
+    return this.checks(periodKey);
+  }
+
   /**
    * Markeert de aangifte als ingediend: boekt de BTW-rekeningen over naar
    * "af te dragen omzetbelasting" en sluit de periode af voor nieuwe boekingen.
@@ -275,6 +296,10 @@ export class VatService {
     return tx(this.db, () => {
       const report = this.calculate(periodKey);
       if (report.status === 'ingediend') throw new ValidationError(`${report.period.label} is al ingediend`);
+      const open = this.checks(periodKey).filter((c) => c.blocking && !c.skipped);
+      if (open.length > 0) {
+        throw new ValidationError(`Los eerst op of sla bewust over: ${open.map((c) => c.title.toLowerCase()).join('; ')}`);
+      }
       const { period } = report;
       const lines: (PostLine | null)[] = [];
       const hoog = report.rubrieken.find((r) => r.code === '1a')!.btw ?? 0;

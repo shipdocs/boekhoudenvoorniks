@@ -51,10 +51,21 @@ export class SupplierMemory {
   }
 
   /** Leveranciers waarvoor we kunnen voorstellen om ze voortaan automatisch te verwerken. */
-  pendingApprovals(): SupplierRule[] {
+  pendingApprovals(minConfirmations = ASK_AUTO_AFTER_CONFIRMATIONS): SupplierRule[] {
     return this.db
       .prepare('SELECT * FROM supplier_rules WHERE auto_approved = 0 AND corrections = 0 AND confirmations >= ? ORDER BY display_name')
-      .all(ASK_AUTO_AFTER_CONFIRMATIONS) as SupplierRule[];
+      .all(minConfirmations) as SupplierRule[];
+  }
+
+  /** "Klopt niet" op een automatische verwerking: opnieuw leren en weer vragen. */
+  markCorrected(name: string): void {
+    const key = supplierKey(name);
+    this.db
+      .prepare(
+        `UPDATE supplier_rules SET corrections = corrections + 1, confirmations = 0,
+           auto_approved = CASE WHEN auto_approved = -1 THEN -1 ELSE 0 END, updated_at = datetime('now') WHERE supplier_key = ?`,
+      )
+      .run(key);
   }
 
   /** De keuze van de gebruiker: true = voortaan automatisch, false = blijf het vragen. */

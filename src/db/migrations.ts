@@ -409,4 +409,27 @@ export const migrations: string[] = [
     submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  /* 6: autopilot, beslissingen en uitleg, controles vóór de btw-aangifte */ `
+  -- actor: wie deed het (systeem/gebruiker); status: auto, done_by_user of klopt_niet;
+  -- details: gestructureerde signalen en beslissingen (JSON) achter de uitleg in 'reason'
+  ALTER TABLE automation_log ADD COLUMN actor TEXT NOT NULL DEFAULT 'systeem';
+  ALTER TABLE automation_log ADD COLUMN status TEXT NOT NULL DEFAULT 'auto';
+  ALTER TABLE automation_log ADD COLUMN details TEXT;
+  ALTER TABLE automation_log ADD COLUMN corrected_at TEXT;
+  -- beslissingen per veld en per keuze bij een document (#21)
+  ALTER TABLE documents ADD COLUMN decisions TEXT;
+  -- bewust overgeslagen taken; komen terug als de situatie (fingerprint) verandert
+  CREATE TABLE task_skips (
+    task_key TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- hoe vaak de gebruiker een automatische beslissing corrigeert, per soort
+  CREATE TABLE decision_stats (
+    kind TEXT PRIMARY KEY,
+    automatic INTEGER NOT NULL DEFAULT 0,
+    corrected INTEGER NOT NULL DEFAULT 0
+  );
+  `,
 ];

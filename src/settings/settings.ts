@@ -60,6 +60,8 @@ export interface AppSettings {
   /** Dagen na vervaldatum waarop herinneringen gestuurd worden, bv. [7, 21]. */
   reminderDays: number[];
   advancedMode: boolean;
+  /** Hoe automatisch: voorzichtig (niets zelf), normaal, maximaal (iets lagere drempels). */
+  autopilot: 'voorzichtig' | 'normaal' | 'maximaal';
   onboardingDone: boolean;
   /** versie van de voorwaarden waarmee akkoord is gegeven (leeg = nog niet) */
   termsAcceptedVersion: string;
@@ -99,6 +101,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   remindersEnabled: false,
   reminderDays: [7, 21],
   advancedMode: false,
+  autopilot: 'normaal',
   onboardingDone: false,
   termsAcceptedVersion: '',
   invoiceEmailSubject: 'Factuur {nummer} van {bedrijf}',

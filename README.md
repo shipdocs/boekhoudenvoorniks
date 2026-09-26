@@ -21,14 +21,14 @@ eigen computer, zonder account, cloud of abonnement.
 | **Opmaak** | Logo, kleuren, lettertype en vaste tekstblokken met live voorbeeld; eigen HTML-template in expertmodus. |
 | **Aankopen & bonnetjes** | Foto, PDF of e-factuur (UBL) erin. Eerst UBL, dan de PDF-tekstlaag, dan lokale OCR. Daarna validatie, classificatie, een confidence-inschatting en de koppeling met de bank. |
 | **Bank** | CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos + zelf kolommen aanwijzen), MT940 en CAMT.053. Automatische koppeling aan facturen en bonnetjes; de app leert per leverancier. |
-| **Belasting** | BTW per kwartaal in mensentaal ("Te betalen € 3.365, uiterlijk 31 oktober"). Daaronder de officiële rubrieken (1a/1b/1e/2a/5a/5b/5g) om over te nemen in Mijn Belastingdienst Zakelijk. Periode-afsluiting, CSV-export en een XBRL-voorbereiding. |
+| **Belasting** | BTW per kwartaal in mensentaal ("Te betalen € 3.365, uiterlijk 31 oktober"). Daaronder de officiële rubrieken (1a/1b/1e/2a/5a/5b/5g) om over te nemen in Mijn Belastingdienst Zakelijk. Vóór de aangifte controleert de app wat de aangifte fout kan maken (onverwerkte bank, uitgaven zonder bewijs, dubbele aankopen, verlegd zonder btw-nummer, negatieve kas, vraagposten). Periode-afsluiting, CSV-export en een XBRL-voorbereiding. |
 | **Koppelingen** | WooCommerce, Shopify (orders → facturen), Mollie, Stripe (uitbetalingen + kosten). |
 | **Voor de boekhouder** | Grootboek (RGS), journaal, W&V, balans, correctieboekingen, auditfile (XAF 3.2), CSV-exports en de regels die per leverancier geleerd zijn. |
 
 ## Ontwerpregels
 
 1. **Wat is er gebeurd?** in plaats van *wat wilt u boeken?* Boekhoudtermen staan alleen in de expertmodus.
-2. **De software doet het werk en vraagt alleen om uitzonderingen** (HIGH → automatisch, MEDIUM → één vraag, LOW → controle). Een leverancier wordt pas automatisch verwerkt als jij daar ja op zegt, en alles wat de app zelf deed staat onder "Automatisch gedaan".
+2. **De software doet het werk en vraagt alleen om uitzonderingen** (HIGH → automatisch, MEDIUM → één vraag, LOW → controle). Een leverancier wordt pas automatisch verwerkt als jij daar ja op zegt, en alles wat de app zelf deed staat onder "Automatisch gedaan". Zekerheid wordt per veld en per beslissing bepaald; automatisch alleen als álles boven de drempel zit. Instelbaar: voorzichtig / normaal / maximaal. Elke automatische verwerking heeft een "Waarom?" (vaste sjablonen, geen AI) en een knop "Klopt niet" die het terugdraait.
 3. **AI verzint nooit de boekhouding.** Extractie (*wat staat er?*), classificatie (*wat is dit?*) en boeking (*hoe boeken we dit?*) zijn strikt gescheiden. Een lokale LLM mag alleen een categorie voorstellen; boekingen worden altijd met vaste, testbare regels in code gemaakt.
 4. **Journaalposten zijn onveranderlijk** (afgedwongen met database-triggers); corrigeren gaat via een tegenboeking. Elke post is in balans. Een ingediende BTW-periode verandert nooit: wat later nog in die periode geboekt wordt, telt mee in de volgende aangifte (boven € 1.000 btw: een suppletie).
 5. **Bedragen in centen** (integers), BTW-percentage per regel, BTW per tarief berekend over de som van de regels.

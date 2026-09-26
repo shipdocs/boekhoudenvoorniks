@@ -56,7 +56,7 @@ function DocumentView({ id, mime, highlight, pageSize }: { id: number; mime: str
 }
 
 export function DocumentReview({ id }: { id: number }) {
-  const { go, meta } = useApp();
+  const { go, meta, settings } = useApp();
   const { run, busy } = useAction();
   const doc = useLoad(() => api.documents.get(id), [id]);
   const jobs = useLoad(() => api.jobs.list({ active: true }));
@@ -109,11 +109,14 @@ export function DocumentReview({ id }: { id: number }) {
           <div className="card" style={{ padding: 8 }}>
             {fields.map((f) => {
               const issue = issueFor(f.key);
+              const decision = d.decisions?.find((x) => x.field === f.key);
+              const doubt = d.status === 'controle' && decision && !decision.ok;
               return (
-                <div key={f.key} className={`fieldcheck ${active === f.key ? 'active' : ''}`} onClick={() => setActive(f.key)} title={f.field ? `bron: ${f.field.source}, zekerheid ${Math.round(f.field.confidence * 100)}%` : 'niet gevonden'}>
+                <div key={f.key} className={`fieldcheck ${active === f.key ? 'active' : ''} ${doubt ? 'doubt' : ''}`} onClick={() => setActive(f.key)} title={f.field ? `bron: ${f.field.source}, zekerheid ${Math.round(f.field.confidence * 100)}%` : 'niet gevonden'}>
                   <span className="muted small" style={{ width: 130 }}>{f.label}</span>
                   <span className="grow">{f.show}</span>
-                  {issue ? <span className="warn" title={issue.message}>!</span> : f.field ? <span className="ok">✓</span> : <span className="muted">—</span>}
+                  {settings.advancedMode && decision && <span className="small muted mono">{Math.round(decision.confidence * 100)}%</span>}
+                  {issue || doubt ? <span className="warn" title={issue?.message ?? 'Hier twijfelen we over'}>?</span> : f.field ? <span className="ok">✓</span> : <span className="muted">—</span>}
                 </div>
               );
             })}
@@ -132,6 +135,11 @@ export function DocumentReview({ id }: { id: number }) {
               )}
             </div>
           ))}
+          {d.status === 'controle' && (d.decisions ?? []).some((x) => !x.field && !x.ok) && (
+            <div className="notice small">
+              Hier twijfelen we nog over: {(d.decisions ?? []).filter((x) => !x.field && !x.ok).map((x) => `${x.label.toLowerCase()} (${x.value})`).join(', ')}. Kies hieronder wat klopt.
+            </div>
+          )}
           {d.bank_match && <div className="notice good">✓ Betaling gevonden op de bank: {formatDateNl(d.bank_match.transaction_date)} · <Euro cents={d.bank_match.amount} /></div>}
           {d.classification && <p className="small muted">{d.classification.reasons.join(' · ')}</p>}
 

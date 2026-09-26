@@ -12,7 +12,7 @@ const TABS: [Tab, string][] = [
   ['email', 'E-mail'],
   ['btw', 'BTW'],
   ['koppelingen', 'Koppelingen'],
-  ['ai', 'Slimme herkenning'],
+  ['ai', 'Automatisch & herkenning'],
   ['backup', 'Back-up & updates'],
   ['geavanceerd', 'Voor de boekhouder'],
   ['over', 'Over'],
@@ -113,6 +113,14 @@ export function SettingsScreen() {
       {tab === 'koppelingen' && <Integrations />}
       {tab === 'ai' && section(
         <>
+          <Field label="Hoe automatisch?" hint="wat de app zelf mag afhandelen">
+            <div className="chips">
+              {([['voorzichtig', 'Voorzichtig: ik bevestig alles zelf'], ['normaal', 'Normaal'], ['maximaal', 'Maximaal: iets lagere drempels']] as const).map(([k, l]) => (
+                <button key={k} className={draft.autopilot === k ? 'selected' : ''} onClick={() => set({ autopilot: k })}>{l}</button>
+              ))}
+            </div>
+          </Field>
+          <p className="small muted">Ook op "maximaal" gaat alleen automatisch wat zeker genoeg is, en een leverancier pas nadat jij daar ja op zei. Alles wat automatisch ging zie je terug op Vandaag, met de reden en een knop "Klopt niet".</p>
           <p className="muted">Alles draait op je eigen computer; documenten gaan nergens naartoe. Zonder deze instellingen werken e-facturen en PDF's met tekst gewoon; alleen foto's van bonnetjes vul je dan zelf in.</p>
           <div className="grid cols-2">
             <Field label="Lokale tekstherkenning (OCR)" hint="adres van de OCR-dienst op deze computer"><input value={draft.ocr.url} onChange={(e) => set({ ocr: { ...draft.ocr, url: e.target.value } })} placeholder="http://127.0.0.1:8765" /></Field>
