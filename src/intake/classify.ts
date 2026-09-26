@@ -1,7 +1,8 @@
 import { EXPENSE_CATEGORIES } from '../shared/categories';
 import type { PurchaseVatCode } from '../shared/vat';
 import type { DocumentResult } from './types';
-import { KNOWN_SUPPLIERS, TOOL_KEYWORDS } from './suppliers';
+import { DEVICE_KEYWORDS, KNOWN_SUPPLIERS, TOOL_KEYWORDS } from './suppliers';
+import { INVESTMENT_THRESHOLD, netAmount } from '../shared/investment';
 import type { SupplierMemory } from './supplier-memory';
 
 /**
@@ -59,6 +60,12 @@ export function vatFromDocument(doc: DocumentResult): Classification['vatCode'] 
 export class Classifier {
   constructor(private readonly memory: SupplierMemory, private llm: LlmClassifier | null = null) {}
 
+  /** Totaal excl. btw: het subtotaal van de bon, of teruggerekend uit het totaal. De grens van € 450 is excl. btw. */
+  private netTotal(doc: DocumentResult, docVat: Classification['vatCode'] | null): number {
+    if (doc.subtotal?.value) return doc.subtotal.value;
+    return netAmount(doc.total?.value ?? 0, docVat ?? 'hoog');
+  }
+
   setLlm(llm: LlmClassifier | null): void {
     this.llm = llm;
   }
@@ -86,16 +93,20 @@ export class Classifier {
     if (known) {
       let category = known.category;
       if (category === 'materiaal' && doc.lineDescriptions.some((l) => TOOL_KEYWORDS.test(l)) && !doc.lineDescriptions.every((l) => !TOOL_KEYWORDS.test(l))) {
-        const toolTotal = doc.total?.value ?? 0;
-        category = toolTotal >= 45000 ? 'investering' : 'gereedschap';
+        category = this.netTotal(doc, docVat) >= INVESTMENT_THRESHOLD ? 'investering' : 'gereedschap';
         reasons.push('artikel lijkt gereedschap');
       }
       reasons.push(`${known.name} is een bekende leverancier`);
       return { categoryKey: category, vatCode: docVat === 'verlegd' && known.vatCode === 'eu' ? 'eu' : docVat ?? known.vatCode, business: true, confidence: 0.75, source: 'regel', reasons, automatic: false };
     }
 
+    if (doc.lineDescriptions.some((l) => DEVICE_KEYWORDS.test(l))) {
+      const invest = this.netTotal(doc, docVat) >= INVESTMENT_THRESHOLD;
+      return { categoryKey: invest ? 'investering' : 'kantoor', vatCode: docVat ?? 'hoog', business: true, confidence: 0.6, source: 'regel', reasons: [invest ? 'apparaat van € 450 of meer (excl. btw): gaat jaren mee' : 'apparaat'], automatic: false };
+    }
+
     if (doc.lineDescriptions.some((l) => TOOL_KEYWORDS.test(l))) {
-      return { categoryKey: (doc.total?.value ?? 0) >= 45000 ? 'investering' : 'gereedschap', vatCode: docVat ?? 'hoog', business: true, confidence: 0.6, source: 'regel', reasons: ['artikel lijkt gereedschap'], automatic: false };
+      return { categoryKey: this.netTotal(doc, docVat) >= INVESTMENT_THRESHOLD ? 'investering' : 'gereedschap', vatCode: docVat ?? 'hoog', business: true, confidence: 0.6, source: 'regel', reasons: ['artikel lijkt gereedschap'], automatic: false };
     }
 
     if (this.llm) {

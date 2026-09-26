@@ -123,9 +123,14 @@ export class Ledger {
        VALUES (@rgs, @ref, @code, @name, @category, @vatCode, @system)`,
     );
     const fillRef = this.db.prepare('UPDATE chart_of_accounts SET rgs_ref = ? WHERE rgs_code = ? AND rgs_ref IS NULL');
+    const exists = this.db.prepare('SELECT 1 FROM chart_of_accounts WHERE rgs_code = ?');
+    const codeTaken = this.db.prepare('SELECT 1 FROM chart_of_accounts WHERE code = ?');
     tx(this.db, () => {
       for (const a of DEFAULT_ACCOUNTS) {
-        insert.run({ rgs: a.rgs, ref: a.ref, code: a.code, name: a.name, category: a.category, vatCode: a.vatCode ?? null, system: a.system ? 1 : 0 });
+        // een nieuwe standaardrekening in een bestaande administratie: bij een bezet nummer het eerstvolgende vrije
+        let code = a.code;
+        if (!exists.get(a.rgs)) while (codeTaken.get(code)) code = String(Number(code) + 1).padStart(a.code.length, '0');
+        insert.run({ rgs: a.rgs, ref: a.ref, code, name: a.name, category: a.category, vatCode: a.vatCode ?? null, system: a.system ? 1 : 0 });
         fillRef.run(a.ref, a.rgs);
       }
     });

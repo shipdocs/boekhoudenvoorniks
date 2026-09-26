@@ -188,6 +188,12 @@ export function createApi(s: Services, host: HostContext) {
       case 'vat-suppletie:gedaan':
         s.vat.markSuppletieSubmitted(r.periodKey!);
         return;
+      case 'investment-check:ja':
+        s.investments.convert({ lineId: r.lineId!, purchaseId: r.purchaseId ?? null, bankTransactionId: r.bankTransactionId ?? null });
+        return;
+      case 'investment-check:nee':
+        s.inbox.skipTask(task.key, 'gewone kosten');
+        return;
       case 'quote-expired:afgewezen':
         s.quotes.setStatus(r.quoteId!, 'afgewezen');
         return;
@@ -450,6 +456,25 @@ export function createApi(s: Services, host: HostContext) {
     },
     incomeTax: {
       estimate: () => s.incomeTax.estimate(),
+      /** "Voor je aangifte": KIA, bijtellingen, ondernemersaftrek, uren en kilometers van een jaar */
+      overview: (year: number) => s.taxOverview.year(year),
+    },
+    assets: {
+      list: () => s.assets.list(),
+      update: (id: number, patch: { name?: string; lifetimeMonths?: number; residual?: Cents; kiaExcluded?: boolean; bookInApp?: boolean }) => s.assets.update(id, patch),
+      dispose: (id: number, date: IsoDate, proceeds: Cents) => s.assets.dispose(id, date, proceeds),
+      bookDue: () => s.assets.bookDue(),
+    },
+    mileage: {
+      list: (year: number) => s.mileage.list(year),
+      add: (input: { date: IsoDate; km: number; description: string; jobId?: number | null }) => s.mileage.add(input),
+      remove: (id: number) => s.mileage.remove(id),
+    },
+    hours: {
+      list: (year: number) => s.hours.list(year),
+      totals: (year: number) => s.hours.totals(year),
+      add: (input: { date: IsoDate; hours: number; description: string }) => s.hours.add(input),
+      remove: (id: number) => s.hours.remove(id),
     },
     localOcr: {
       status: () => host.localOcr.status(),

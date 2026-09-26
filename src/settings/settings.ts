@@ -70,6 +70,26 @@ export interface AppSettings {
   incomeTaxEstimate: boolean;
   /** Voldoe ik aan het urencriterium (1.225 uur)? Bepaalt of de zelfstandigenaftrek meetelt in de schatting. */
   urencriterium: boolean;
+  /**
+   * Waarmee rijd je zakelijk? 'prive' = privéauto: tanken en parkeren tellen als privé, zakelijke
+   * kilometers geven € per km aftrek. 'zakelijk' = bus/auto van de zaak (kosten aftrekbaar).
+   */
+  carUse: 'onbekend' | 'prive' | 'zakelijk' | 'geen';
+  /** jaar waarin je onderneming begon (voor de startersaftrek), of null */
+  startYear: number | null;
+  /** hoe vaak je de startersaftrek al gebruikte vóór `asOfYear` (zo opgegeven door de gebruiker) */
+  startersaftrekUsed: { count: number; asOfYear: number };
+  /**
+   * Zakelijk deel van telefoon & internet in procenten (null = nog niet opgegeven, dan 100%).
+   * Het privédeel telt bij de winst en de btw daarover mag je niet aftrekken.
+   */
+  phoneInternetBusinessPct: number | null;
+  /** Werkplek thuis: 'geen', een plek in huis ('thuis'), of een zelfstandige werkruimte (eigen ingang en sanitair). */
+  homeWorkspace: 'geen' | 'thuis' | 'zelfstandig' | null;
+  /** Uren die je partner onbetaald meewerkt in het bedrijf (meewerkaftrek), per jaar. */
+  partnerHours: number;
+  /** jaar waarin de gebruiker bevestigde dat de IB-berekeningen door een boekhouder gecontroleerd moeten worden */
+  taxCheckAcknowledgedYear: number;
   /** Hoe automatisch: voorzichtig (niets zelf), normaal, maximaal (iets lagere drempels). */
   autopilot: 'voorzichtig' | 'normaal' | 'maximaal';
   onboardingDone: boolean;
@@ -118,6 +138,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reminderDays: [7, 21],
   advancedMode: false,
   autopilot: 'normaal',
+  carUse: 'onbekend',
+  phoneInternetBusinessPct: null,
+  homeWorkspace: null,
+  partnerHours: 0,
+  taxCheckAcknowledgedYear: 0,
+  startYear: null,
+  startersaftrekUsed: { count: 0, asOfYear: 0 },
   vatPotAccountId: null,
   incomeTaxEstimate: true,
   urencriterium: true,

@@ -7,7 +7,7 @@ import { api } from './api';
 
 export type Screen =
   | 'home' | 'welkom' | 'werk' | 'factuur' | 'offerte' | 'klussen' | 'klus' | 'aankopen' | 'document' | 'categorie'
-  | 'klanten' | 'klant' | 'bank' | 'belasting' | 'overzicht' | 'instellingen' | 'opmaak' | 'expert';
+  | 'klanten' | 'klant' | 'bank' | 'belasting' | 'aangifte' | 'overzicht' | 'instellingen' | 'opmaak' | 'expert';
 
 export interface Route {
   screen: Screen;
@@ -24,6 +24,17 @@ interface AppCtx {
   settings: Settings;
   reloadSettings(): Promise<void>;
   refreshBadge(): void;
+  /** Na het opslaan van een investering: uitleg wat de app nu doet en wat jij nog moet doen. */
+  showInvestmentSaved(info: InvestmentSavedInfo): void;
+}
+
+export interface InvestmentSavedInfo {
+  /** bedrag excl. btw */
+  net: number;
+  /** btw die je terugkrijgt (0 als onbekend of niet van toepassing) */
+  vat: number;
+  /** is de bon/factuur al in de app bewaard? */
+  hasAttachment?: boolean;
 }
 
 export type Meta = Awaited<ReturnType<typeof api.app.meta>>;

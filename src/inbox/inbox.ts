@@ -14,7 +14,7 @@ import type { RecurringService } from '../import/recurring';
 import { normalizeIban, ValidationError } from '../shared/validation';
 import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
-import { EXPENSE_CATEGORIES } from '../shared/categories';
+import { EXPENSE_CATEGORIES, PRIVATE_CAR_CATEGORIES } from '../shared/categories';
 import { KNOWN_SUPPLIERS } from '../intake/suppliers';
 import { addDays, diffDays, formatDateNl, periodFor, today, vatDeadline, type IsoDate } from '../shared/dates';
 
@@ -25,6 +25,8 @@ export const PAY_REMINDER_DAYS = 3;
 import { formatEuro, type Cents } from '../shared/money';
 import { automationForMonth, countDecision, getAutomation, logAutomation, markCorrected, recentAutomation, type AutomationEntry } from './automation-log';
 import { explain } from '../automation/explain';
+import type { InvestmentCheck } from '../tax/investment-check';
+
 
 export type TaskKind =
   | 'setup'
@@ -49,7 +51,8 @@ export type TaskKind =
   | 'recurring-confirm'
   | 'recurring-missing-payment'
   | 'recurring-stopped'
-  | 'recurring-invoice';
+  | 'recurring-invoice'
+  | 'investment-check';
 
 export interface TaskAction {
   id: string;
@@ -72,7 +75,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
+  ref: { lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
 }
 
 export interface HomeData {
@@ -128,6 +131,7 @@ export class InboxService {
     private readonly vat: VatService,
     private readonly purchases: PurchaseService,
     private readonly recurring: RecurringService,
+    private readonly investments?: InvestmentCheck,
   ) {}
 
   /** Een taak bewust overslaan; komt niet terug zolang de sleutel gelijk blijft. */
@@ -161,6 +165,8 @@ export class InboxService {
       if (t.amount >= 0 || !t.counter_name) continue;
       const rule = this.memory.get(t.counter_name);
       if (!this.memory.isAutomatic(rule)) continue;
+      // privéauto: tanken en parkeren nooit automatisch als zakelijke kosten
+      if (rule!.business && this.fuelIsPrivate(rule!.category_key)) continue;
       // Staat er een open bonnetje/inkoopfactuur met dit bedrag? Dan niet als losse kosten boeken.
       const openPurchase = this.db.prepare(`SELECT 1 FROM purchase_invoices WHERE status = 'open' AND total - amount_paid = ?`).get(-t.amount);
       if (openPurchase) continue;
@@ -209,7 +215,20 @@ export class InboxService {
     this.bookCategory(t, category, vatCode, answer.business, true);
   }
 
+  /** Met een privéauto zijn autokosten (tanken, parkeren, onderhoud) privé: je krijgt een bedrag per zakelijke km. */
+  private fuelIsPrivate(categoryKey: string): boolean {
+    return PRIVATE_CAR_CATEGORIES.includes(categoryKey) && this.settings.get().carUse === 'prive';
+  }
+
   private suggestionFor(t: BankTransaction): { categoryKey: string; vatCode: string; business: boolean; confident: boolean; why: string } | null {
+    const sug = this.rawSuggestionFor(t);
+    if (sug && sug.business && this.fuelIsPrivate(sug.categoryKey)) {
+      return { ...sug, business: false, confident: false, why: 'Je rijdt met een privéauto: tanken, parkeren en onderhoud zijn dan privé. Zakelijke kilometers vul je in bij Belasting → Kilometers.' };
+    }
+    return sug;
+  }
+
+  private rawSuggestionFor(t: BankTransaction): { categoryKey: string; vatCode: string; business: boolean; confident: boolean; why: string } | null {
     const rule = t.counter_name ? this.memory.get(t.counter_name) : null;
     if (rule) {
       const label = EXPENSE_CATEGORIES.find((c) => c.key === rule.category_key)?.label.toLowerCase() ?? rule.category_key;
@@ -313,9 +332,12 @@ export class InboxService {
           kind: 'bank-business',
           icon: '🧾',
           title: `${who} ${formatEuro(-t.amount)}`,
-          question: guess ? `Was dit zakelijk (${guess}) of privé?` : 'Was dit zakelijk of privé?',
+          question: sug && !sug.business && this.fuelIsPrivate(sug.categoryKey) ? 'Autokosten van je privéauto tellen als privé; je zakelijke kilometers vul je apart in.' : guess ? `Was dit zakelijk (${guess}) of privé?` : 'Was dit zakelijk of privé?',
           amount: t.amount,
-          actions: [{ id: 'zakelijk', label: 'Zakelijk', primary: true }, { id: 'prive', label: 'Privé' }],
+          actions: sug && !sug.business && this.fuelIsPrivate(sug.categoryKey)
+            ? [{ id: 'prive', label: 'Privé', primary: true }, { id: 'zakelijk', label: 'Toch zakelijk' }]
+            : [{ id: 'zakelijk', label: 'Zakelijk', primary: true }, { id: 'prive', label: 'Privé' }],
+          why: sug && !sug.business && this.fuelIsPrivate(sug.categoryKey) ? sug.why : undefined,
           ref: { bankTransactionId: t.id, categoryKey: sug?.categoryKey, vatCode: sug?.vatCode },
         });
       }
@@ -573,6 +595,24 @@ export class InboxService {
         question: `Je hebt dit ${rule.confirmations}× zo gekozen. Voortaan automatisch verwerken? Je ziet het terug onder "Automatisch gedaan" en kunt het altijd terugdraaien.`,
         actions: [{ id: 'ja', label: 'Ja, voortaan automatisch', primary: true }, { id: 'nee', label: 'Nee, blijf het vragen' }],
         ref: { supplierKey: rule.supplier_key },
+      });
+    }
+
+    // vangnet: € 450+ als gewone kosten geboekt in een categorie waar dat vaak een investering is
+    for (const c of this.investments?.candidates(asOf) ?? []) {
+      const key = `investment-${c.lineId}`;
+      if (this.isSkipped(key)) continue;
+      tasks.push({
+        key,
+        kind: 'investment-check',
+        icon: '🧰',
+        title: `Was dit een investering? ${formatEuro(c.amount)} — ${c.description}`,
+        question: 'Gaat dit langer dan een jaar mee (machine, laptop, telefoon, steiger)? Kies "Ja": de btw blijft gewoon terugkomen, de kosten verdeelt de app over 5 jaar en het telt mee voor de investeringsaftrek (KIA). Verder hoef je niets te doen.',
+        amount: -c.amount,
+        actions: [{ id: 'ja', label: 'Ja, investering', primary: true }, { id: 'nee', label: 'Nee, gewone kosten' }],
+        why: 'Vanaf € 450 excl. btw per stuk is iets dat jaren meegaat een bedrijfsmiddel: je trekt het niet in één keer af, maar verdeelt het over de jaren. Daarnaast krijg je mogelijk 28% investeringsaftrek.',
+        priority: 3,
+        ref: { lineId: c.lineId, purchaseId: c.purchaseId ?? undefined, bankTransactionId: c.bankTransactionId ?? undefined },
       });
     }
 

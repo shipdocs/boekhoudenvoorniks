@@ -97,7 +97,11 @@ onderneming.
 - fiscaal partner, hypotheek en andere aftrekposten;
 - ander inkomen en box 2/3;
 - voorlopige aanslagen;
-- startersaftrek, FOR, KIA en nog niet geboekte afschrijvingen.
+- willekeurige afschrijving en EIA/MIA/Vamil.
+
+Sinds de aftrekposten (hoofdstuk 3) rekent de schatting wél met: de verwachte afschrijving van het
+hele jaar, de KIA over wat al gekocht is, de bijtelling voor representatie (doorgetrokken naar het
+jaar), de desinvesteringsbijtelling en de startersaftrek.
 
 **Vragen**
 11. Is deze methode verantwoord als "grove reservering"? Moet de schatting eerder aan de veilige kant (hoger) uitvallen?
@@ -136,7 +140,98 @@ Graag per waarde controleren tegen de publicaties van de Belastingdienst.
 
 ---
 
-## 3. Hoe terugkoppelen
+## 3. Aftrekposten en bedrijfsmiddelen
+
+Code: `src/tax/assets.ts`, `src/tax/mileage.ts`, `src/tax/overview.ts`; bedragen per jaar in
+`src/tax/income-tax.ts`. In de app: Belasting → *Aftrekposten, bedrijfsmiddelen en kilometers*.
+
+### 3.1 Bedrijfsmiddelen en afschrijving
+
+- Alles wat op *Inventaris en gereedschap* of *Vervoermiddelen* wordt geboekt (debet), wordt een
+  bedrijfsmiddel. De app stelt zo'n boeking voor bij aankopen vanaf € 450 excl. btw per stuk (categorie
+  "Groot gereedschap / machine").
+- Lineair, per maand, vanaf de maand van aanschaf. Standaard 5 jaar en restwaarde € 0; de gebruiker kan
+  dat aanpassen, maar niet korter dan 5 jaar (max. 20% per jaar).
+- Na afloop van een jaar boekt de app de afschrijving automatisch op 31 december:
+  *Afschrijving inventaris* (WAfsAmvBei) aan *Cumulatieve afschrijving inventaris* (BMvaBeiCae). Voor
+  vervoermiddelen WAfsAmvTev / BMvaTevCae.
+- Verkoop of buiten gebruik: eerst de afschrijving tot en met de maand vóór de verkoop. Daarna gaat de
+  boekwaarde naar *Boekresultaat* (WAfsRvmBei). De opbrengst komt binnen via een gewone verkoopfactuur (met btw)
+  en staat dus op omzet.
+- Wordt de aankoop later teruggedraaid (andere categorie), dan vervalt het bedrijfsmiddel en wordt de
+  geboekte afschrijving teruggenomen.
+
+**Vragen**
+17. Is afschrijven per maand vanaf de aanschafmaand, met standaard 5 jaar en restwaarde 0, een verantwoorde standaard?
+18. Is de verkoopopbrengst op omzet (via de factuur) en de boekwaarde op boekresultaat acceptabel, of moet de opbrengst ook op boekresultaat?
+
+### 3.2 Investeringsaftrek (KIA) en desinvesteringsbijtelling
+
+| | 2025 | 2026 |
+|---|---|---|
+| Geen aftrek tot en met | € 2.900 | € 2.900 |
+| 28% tot en met | € 70.602 | € 71.683 |
+| Vast bedrag tot en met | € 130.744: € 19.769 | € 132.746: € 20.072 |
+| Afbouw 7,56% tot en met | € 392.230 | € 398.236 |
+
+- Alleen bedrijfsmiddelen vanaf € 450 per stuk tellen mee. De gebruiker kan een bedrijfsmiddel uitsluiten,
+  bijvoorbeeld een personenauto.
+- Desinvesteringsbijtelling: verkoop binnen 5 jaar na het begin van het investeringsjaar, alleen als de
+  verkopen in dat jaar samen boven € 2.500 komen. Bijtelling = het effectieve KIA-percentage van het
+  investeringsjaar × de verkoopprijs, en nooit meer dan dat percentage × de aanschafprijs.
+
+**Vragen**
+19. Kloppen de tabellen?
+20. Klopt de berekening van de desinvesteringsbijtelling met het effectieve percentage van het investeringsjaar?
+
+### 3.3 Privéauto, representatie, startersaftrek en uren
+
+- **Privéauto** (instelling): € 0,23 (2025) of € 0,25 (2026) per zakelijke km. Per rit wordt
+  *Kilometervergoeding* (WBedAutKil) geboekt aan *Privé-stortingen*. Tanken en parkeren worden dan
+  als privé voorgesteld en nooit automatisch als zakelijke kosten geboekt. Staat er toch brandstof op de
+  kosten, dan waarschuwt het jaaroverzicht. Een auto van de zaak met bijtelling rekent de app niet uit.
+- **Representatie**: nieuwe categorie *Etentjes, borrels & relatiegeschenken* (WBedVkkRep, standaard
+  zonder btw-aftrek). Bijtelling = min(20% van het totaal, drempel € 5.600 (2025) / € 5.700 (2026)).
+- **Startersaftrek** € 2.123: als het startjaar minder dan 5 jaar geleden is, en de aftrek minder dan 3 keer
+  is gebruikt. De app neemt aan dat de gebruiker hem sinds het opgeven elk jaar gebruikt. Niet meer
+  vanaf 2028.
+- **Urencriterium**: uren op werkbonnen (eenheid "uur") plus losse uren. Dit is alleen een teller: de
+  gebruiker zet het vinkje "urencriterium" zelf.
+- **EIA/MIA/Vamil**: alleen een signaal bij bedrijfsmiddelen waarvan de naam lijkt op iets van de
+  Energie- of Milieulijst, met de meldtermijn van 3 maanden (gerekend vanaf de aankoopdatum).
+
+- **Investering of kosten**: bij € 450 of meer excl. btw in de categorieën gereedschap, kantoor, telefoon,
+  auto of overig vraagt de app al bij de invoer: "Gaat dit langer dan een jaar mee?". Op Vandaag staat daarna
+  nog een vangnet: "Was dit een investering?". Bij "ja" wordt de kostenregel omgeboekt naar Inventaris. De
+  bonherkenning gebruikt nu het bedrag excl. btw (subtotaal, of het totaal teruggerekend).
+- **Telefoon & internet**: de gebruiker geeft een zakelijk percentage op. Het privédeel van de kosten
+  (WBedKanTel) telt bij de winst. De btw daarover (± 21% van het privédeel van de kosten tegen 21%) wordt als
+  correctie genoemd voor de laatste btw-aangifte van het jaar (minder voorbelasting, 5b). Die boekt de
+  app nog niet automatisch.
+- **Werkplek thuis**: alleen uitleg. Een niet-zelfstandige werkruimte is niet aftrekbaar (inrichting wel).
+  Een zelfstandige werkruimte kan aftrekbaar zijn (inkomenseis 70%/30%); de app rekent dat niet uit.
+- **Meewerkaftrek**: vanaf 525 uur 1,25%, vanaf 875 uur 2%, vanaf 1.225 uur 3%, vanaf 1.750 uur 4% van de
+  winst. Alleen met urencriterium, en de app gaat ervan uit dat de partner minder dan € 5.000 krijgt.
+- **AOV, lijfrente en pensioen**: altijd de uitleg dat dit geen bedrijfskosten zijn, maar wel aftrekbaar in
+  de aangifte. De categorie *Verzekeringen* noemt de AOV niet langer.
+- **Latere jaren**: 2027 rekent met zelfstandigenaftrek € 900 en startersaftrek € 10; vanaf 2028 geen
+  startersaftrek. De overige bedragen zijn die van 2026, en dat staat erbij.
+- **Controle door een deskundige**: bij elke IB-berekening staat de melding dat een boekhouder of
+  accountant de aangifte moet controleren. Eén keer per jaar moet de gebruiker dat bevestigen voordat het
+  overzicht opent. Er is een knop om het overzicht als tekst naar de boekhouder te sturen.
+
+**Vragen**
+21. Is "tanken met een privéauto = privé" juist? De btw-aftrek op brandstof naar rato van zakelijk gebruik laten we nu liggen.
+22. Is 80% of de drempel voor representatie correct toegepast voor IB-ondernemers?
+23. Mag de aanname "elk jaar gebruikt" bij de startersaftrek, of moet de gebruiker per jaar aangeven of hij hem gebruikt?
+24. Is het privédeel van telefoon & internet als bijtelling, met een btw-correctie aan het eind van het jaar, een goede werkwijze? Of moet het per boeking worden gesplitst?
+25. Kloppen de percentages van de meewerkaftrek voor 2025 en 2026?
+26. Zijn de categorieën voor de investeringsvraag (gereedschap, kantoor, telefoon, auto, overig) goed gekozen?
+
+---
+
+## 4. Hoe terugkoppelen
 
 Het liefst per vraagnummer in issue #44 op GitHub, of per e-mail. Wijzigingen verwerk ik in de code en
-de tests (`tests/btw.test.ts`, `tests/buitenland.test.ts`), zodat ze niet ongemerkt terugkomen.
+de tests (`tests/btw.test.ts`, `tests/buitenland.test.ts`, `tests/belastingvoordelen.test.ts`), zodat ze
+niet ongemerkt terugkomen.

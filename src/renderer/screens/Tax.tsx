@@ -3,6 +3,7 @@ import { api } from '../api';
 import { Button, ErrorBox, Euro, useAction, useApp, useLoad } from '../ui';
 import { formatDateNl, vatDeadline } from '../../shared/dates';
 import { VAT_DISCLAIMER } from '../../shared/legal';
+import { AccountantNotice } from './TaxYear';
 
 export function Tax({ periodKey }: { periodKey?: string }) {
   const { settings, meta, toast, go } = useApp();
@@ -219,11 +220,12 @@ function IncomeTaxCard() {
   return (
     <div className="card" style={{ marginTop: 14 }}>
       <h2 style={{ marginTop: 0 }}>Inkomstenbelasting {e.year} <span className="muted small">(schatting)</span></h2>
-      <div className="notice warn small">{e.disclaimer}</div>
+      <AccountantNotice compact />
       <p>
         Winst tot nu: <strong><Euro cents={e.profitToDate} /></strong>. Doorgetrokken naar het hele jaar: <Euro cents={e.profitYear} />.<br />
         Geschatte inkomstenbelasting + Zvw-bijdrage over {e.year}: <strong>± <Euro cents={e.taxYear} /></strong>.<br />
-        Zet daarvan nu ongeveer <strong>± <Euro cents={e.reserveToDate} /></strong> opzij (naar rato van het jaar tot nu).
+        Zet daarvan nu ongeveer <strong>± <Euro cents={e.reserveToDate} /></strong> opzij (naar rato van het jaar tot nu).<br />
+        <span className="small muted">Vuistregel: zet elke maand 30 à 40% van je winst apart voor inkomstenbelasting en Zvw. Door de lagere zelfstandigenaftrek eerder aan de bovenkant.</span>
       </p>
       <Button small onClick={() => setOpen((o) => !o)}>{open ? 'Verberg berekening' : 'Hoe is dit berekend?'}</Button>
       {open && (
@@ -231,7 +233,10 @@ function IncomeTaxCard() {
           <table>
             <tbody>
               <tr><td>Winst (heel jaar, geschat)</td><td className="num">{euro(b.profit)}</td></tr>
+              {b.bijtellingen > 0 && <tr><td>+ Bijtellingen (representatie, verkoop bedrijfsmiddel)</td><td className="num">{euro(b.bijtellingen)}</td></tr>}
+              {b.kia > 0 && <tr><td>− Investeringsaftrek (KIA)</td><td className="num">{euro(b.kia)}</td></tr>}
               <tr><td>− Zelfstandigenaftrek</td><td className="num">{euro(b.zelfstandigenaftrek)}</td></tr>
+              {b.startersaftrek > 0 && <tr><td>− Startersaftrek</td><td className="num">{euro(b.startersaftrek)}</td></tr>}
               <tr><td>− MKB-winstvrijstelling</td><td className="num">{euro(b.mkbWinstvrijstelling)}</td></tr>
               <tr><td>= Belastbaar inkomen</td><td className="num">{euro(b.taxableIncome)}</td></tr>
               <tr><td>Belasting box 1</td><td className="num">{euro(b.box1)}</td></tr>
@@ -244,6 +249,9 @@ function IncomeTaxCard() {
           <p className="muted">Niet meegenomen: {e.notIncluded.join('; ')}.</p>
         </div>
       )}
+      <div className="row" style={{ marginTop: 10 }}>
+        <Button small kind="primary" onClick={() => go({ screen: 'aangifte' })}>Aftrekposten, bedrijfsmiddelen en kilometers</Button>
+      </div>
       <p className="muted small" style={{ marginTop: 10 }}>
         <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Urencriterium aanpassen of de schatting uitzetten</span>
       </p>

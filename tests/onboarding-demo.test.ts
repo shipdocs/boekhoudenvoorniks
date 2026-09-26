@@ -37,9 +37,9 @@ describe('onboarding die zichzelf bijwerkt', () => {
 
   it('bestaande gebruiker van vóór de versies ziet alleen wat nieuw is', () => {
     const legacy = { ...base, onboardingDone: true, onboardingSteps: {} };
-    expect(pendingSteps(legacy).map((s) => s.id)).toEqual(['automatisch']);
+    expect(pendingSteps(legacy).map((s) => s.id)).toEqual(['fiscaal', 'thuis', 'automatisch']);
     expect(hasOnboardingUpdate(legacy)).toBe(true);
-    const after = { ...legacy, onboardingSteps: markSeen(legacy, ['automatisch']) };
+    const after = { ...legacy, onboardingSteps: markSeen(legacy, ['fiscaal', 'thuis', 'automatisch']) };
     expect(pendingSteps(after)).toEqual([]);
   });
 

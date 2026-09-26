@@ -25,6 +25,20 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   { id: 'btw', version: 1, title: 'BTW', satisfied: (s) => s.kor || !!s.company.vatNumber },
   { id: 'bank', version: 1, title: 'Bank', satisfied: (s) => !!s.company.iban },
   {
+    id: 'fiscaal',
+    version: 1,
+    title: 'Auto en startjaar',
+    whatsNew: 'Nieuw: de app regelt nu afschrijving, investeringsaftrek en je kilometers. Daarvoor hebben we twee antwoorden nodig.',
+    satisfied: (s) => s.carUse !== 'onbekend' && s.startYear !== null,
+  },
+  {
+    id: 'thuis',
+    version: 1,
+    title: 'Telefoon, internet en werkplek',
+    whatsNew: 'Nieuw: gebruik je telefoon en internet ook privé, of werk je thuis? Dan rekent de app het zakelijke deel goed uit.',
+    satisfied: (s) => s.phoneInternetBusinessPct !== null && s.homeWorkspace !== null,
+  },
+  {
     id: 'automatisch',
     version: 1,
     title: 'Hoeveel mag de app zelf doen?',

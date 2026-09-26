@@ -43,6 +43,11 @@ function fillDemo(s: Services, asOf: IsoDate): void {
       bic: 'ABNANL2A',
     },
     profile: { trade: 'stukadoor', worksAlone: true, hasBusinessAccount: true, firstName: 'Sam' },
+    carUse: 'zakelijk',
+    phoneInternetBusinessPct: 75,
+    homeWorkspace: 'thuis',
+    startYear: Number(asOf.slice(0, 4)) - 1,
+    startersaftrekUsed: { count: 1, asOfYear: Number(asOf.slice(0, 4)) },
     smtp: { host: '', port: 587, secure: false, user: '', fromName: DEMO_COMPANY, fromEmail: 'demo@example.nl', bcc: '' },
   });
   s.settings.update({ onboardingSteps: markSeen(settings, ONBOARDING_STEPS.map((st) => st.id)) });
@@ -88,6 +93,10 @@ function fillDemo(s: Services, asOf: IsoDate): void {
   // bonnetjes: twee via de bank (worden gekoppeld), één contant
   s.quick.recordExpense({ date: d(50), supplierName: 'Gamma Utrecht', description: 'Stucloper, gips en hoekprofielen', categoryKey: 'materiaal', grossAmount: 186_34, vatCode: 'hoog', paidWith: 'bank', jobId: null });
   s.quick.recordExpense({ date: d(20), supplierName: 'Shell Utrecht', description: 'Tanken bus', categoryKey: 'brandstof', grossAmount: 78_50, vatCode: 'hoog', paidWith: 'bank' });
+  // bedrijfsmiddel (afschrijving + investeringsaftrek), een zakelijke lunch en uren buiten de werkbon
+  s.quick.recordExpense({ date: d(80), supplierName: 'Bouwmaat', description: 'Steigerset en rolsteiger', categoryKey: 'investering', grossAmount: 4235_00, vatCode: 'hoog', paidWith: 'prive' });
+  s.quick.recordExpense({ date: d(15), supplierName: 'Café De Hoek', description: 'Lunch met aannemer De Vries', categoryKey: 'representatie', grossAmount: 64_50, vatCode: 'geen', paidWith: 'kas' });
+  s.hours.add({ date: d(7), hours: 6, description: 'Offertes en administratie' });
   s.quick.recordExpense({ date: d(30), supplierName: 'Werkkleding Direct', description: 'Werkbroek en schoenen', categoryKey: 'werkkleding', grossAmount: 124_95, vatCode: 'hoog', paidWith: 'kas' });
 
   const t = (days: number, amount: number, counterName: string, description: string, counterIban: string | null = null): NormalizedTransaction => ({

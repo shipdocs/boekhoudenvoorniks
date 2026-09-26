@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useLoad, type InvestmentSavedInfo } from '../ui';
 import { today } from '../../shared/dates';
 import type { PurchaseVatCode } from '../../shared/vat';
+import { mightBeInvestment, netAmount } from '../../shared/investment';
 
 export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const { go, toast } = useApp();
@@ -140,7 +141,7 @@ function PayModal({ id, onClose }: { id: number; onClose: () => void }) {
 
 /** "Bonnetje zonder foto": in mensentaal, BTW wordt automatisch berekend. */
 function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const { meta } = useApp();
+  const { meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
   const jobs = useLoad(() => api.jobs.list({ active: true }));
   const [supplier, setSupplier] = useState('');
@@ -159,6 +160,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
         </div>
         <Field label="Bedrag op de bon" hint="inclusief BTW"><MoneyInput value={amount} onChange={setAmount} /></Field>
         <CategoryChoice value={category} onChange={(c) => { setCategory(c); setVat(meta.expenseCategories.find((x) => x.key === c)?.defaultVat ?? 'hoog'); }} />
+        <InvestmentHint categoryKey={category} gross={amount} vatCode={vat} onUse={() => setCategory('investering')} />
         <Field label="Stond er BTW op de bon?">
           <select value={vat} onChange={(e) => setVat(e.target.value as PurchaseVatCode)}>
             {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
@@ -183,8 +185,11 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
         <Button kind="primary" disabled={busy || !amount} onClick={async () => {
-          const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, paidWith, jobId }), 'Aankoop verwerkt ✓');
-          if (r) onDone();
+          const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, paidWith, jobId }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
+          if (r) {
+            onDone();
+            if (category === 'investering') showInvestmentSaved(investmentInfo(amount!, vat));
+          }
         }}>Opslaan</Button>
       </div>
     </Modal>
@@ -203,6 +208,70 @@ export function CategoryChoice({ value, onChange }: { value: string; onChange: (
       </div>
     </Field>
   );
+}
+
+const eur = (cents: number) => `€ ${(cents / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * "Gaat dit langer dan een jaar mee?" — bij € 450+ excl. btw in een categorie waar dat vaak een
+ * investering is. Legt in gewone taal uit wat er gebeurt als je ja zegt, en dat je verder niets hoeft
+ * te doen. De gebruiker beslist; "Nee" verbergt de vraag (de app vraagt het later nog eens op Vandaag).
+ */
+export function InvestmentHint({ categoryKey, gross, vatCode, onUse }: { categoryKey: string; gross: number | null | undefined; vatCode: string; onUse: () => void }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed || !mightBeInvestment(categoryKey, gross, vatCode)) return null;
+  const net = netAmount(gross!, vatCode);
+  const vat = gross! - net;
+  return (
+    <div className="notice" role="note">
+      <strong>{eur(net)} excl. btw — gaat dit langer dan een jaar mee?</strong>
+      <div className="small" style={{ marginTop: 4 }}>
+        Denk aan een machine, laptop, telefoon of steiger. Dan is het voor de belasting een <em>investering</em> (bedrijfsmiddel). Kies je daarvoor, dan:
+      </div>
+      <ul className="small" style={{ margin: '6px 0', paddingLeft: 18 }}>
+        {vat > 0 && <li><strong>btw:</strong> die {eur(vat)} krijg je gewoon in één keer terug bij je volgende btw-aangifte. Daar verandert niets aan.</li>}
+        <li><strong>kosten:</strong> je trekt het niet in één keer af, maar verdeeld over 5 jaar (± {eur(Math.round(net / 5))} per jaar). Dat boekt de app elk jaar vanzelf.</li>
+        <li><strong>extra aftrek:</strong> het telt mee voor de investeringsaftrek (KIA). Investeer je dit jaar in totaal meer dan € 2.900, dan mag je 28% extra aftrekken.</li>
+      </ul>
+      <div className="small">Jij hoeft daarvoor niets extra te doen. Twijfel je? Kies dan "Nee": de app vraagt het later nog één keer op Vandaag.</div>
+      <div className="row" style={{ marginTop: 8 }}>
+        <Button small kind="primary" onClick={onUse}>Ja, het is een investering</Button>
+        <Button small onClick={() => setDismissed(true)}>Nee, gewone kosten</Button>
+      </div>
+    </div>
+  );
+}
+
+/** Na het opslaan: wat de app nu voor je doet, en wat jij (nog) moet doen. */
+export function InvestmentSaved({ info, onClose }: { info: InvestmentSavedInfo; onClose: () => void }) {
+  const { go } = useApp();
+  return (
+    <Modal title="Toegevoegd aan je bedrijfsmiddelen ✓" onClose={onClose}>
+      <h3 style={{ marginTop: 0 }}>Dit doet de app voor je</h3>
+      <ul style={{ marginTop: 0, paddingLeft: 18 }}>
+        {info.vat > 0 && <li>De btw ({eur(info.vat)}) krijg je terug bij je volgende btw-aangifte; die staat daar al in.</li>}
+        <li>Elk jaar boekt de app ± {eur(Math.round(info.net / 5))} afschrijving, 5 jaar lang. Dat verlaagt je winst, en dus je inkomstenbelasting.</li>
+        <li>Het telt mee voor de investeringsaftrek (KIA). Dat zie je terug bij Belasting → Aftrekposten → Voor je aangifte.</li>
+      </ul>
+      <h3>Wat jij moet doen</h3>
+      <ul style={{ marginTop: 0, paddingLeft: 18 }}>
+        <li>{info.hasAttachment ? 'Niets voor de bon: die is al in de app bewaard.' : 'Bewaar de bon of factuur. Dat moet 7 jaar; voeg hem het liefst toe in de app.'}</li>
+        <li>Verkoop je het, of gooi je het weg? Zet dat dan bij Bedrijfsmiddelen ("Verkocht…"). De app rekent de rest uit.</li>
+        <li>Laat bij je aangifte je boekhouder of accountant meekijken, zoals altijd.</li>
+      </ul>
+      <p className="small muted">Toch geen investering? Pas de categorie aan bij de aankoop; de app draait de boeking dan netjes terug.</p>
+      <div className="row end">
+        <Button onClick={() => { onClose(); go({ screen: 'aangifte', extra: { tab: 'bedrijfsmiddelen' } }); }}>Bekijk bedrijfsmiddelen</Button>
+        <Button kind="primary" onClick={onClose}>Oké</Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Info voor de bevestiging uit een bedrag zoals op de bon. */
+export function investmentInfo(gross: number, vatCode: string, hasAttachment = false): InvestmentSavedInfo {
+  const net = netAmount(gross, vatCode);
+  return { net, vat: ['hoog', 'laag'].includes(vatCode) ? gross - net : 0, hasAttachment };
 }
 
 /** "nog 14 maanden garantie" / "garantie verlopen". */

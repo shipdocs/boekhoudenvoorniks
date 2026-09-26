@@ -51,6 +51,15 @@ export const ACCOUNTS = {
   betalingsverschillen: 'WBedAlkBev',
   vraagposten: 'BSchOvsVrp',
   uitbesteedWerk: 'WKprKuwKuw',
+  inventaris: 'BMvaBedIna',
+  vervoermiddelen: 'BMvaTraVrt',
+  cumAfschrijvingInventaris: 'BMvaBedCae',
+  cumAfschrijvingVervoer: 'BMvaTraCae',
+  afschrijvingInventaris: 'WAfsAmvBei',
+  afschrijvingVervoer: 'WAfsAmvTev',
+  boekresultaat: 'WAfsRvmBei',
+  kilometervergoeding: 'WBedAutKil',
+  representatie: 'WBedVkkRep',
 } as const;
 
 export const DEFAULT_ACCOUNTS: AccountSeed[] = [
@@ -61,7 +70,9 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '1195', rgs: ACCOUNTS.tussenrekeningPsp, ref: 'BVorTusTonTcv', name: 'Tussenrekening betaalprovider', category: 'activa', system: true },
   { code: '1300', rgs: ACCOUNTS.debiteuren, ref: 'BVorDebHad', name: 'Debiteuren', category: 'activa', system: true },
   { code: '0200', rgs: 'BMvaTraVrt', ref: 'BMvaTevVvp', name: 'Vervoermiddelen', category: 'activa' },
+  { code: '0210', rgs: 'BMvaTraCae', ref: 'BMvaTevCae', name: 'Afschrijving vervoermiddelen (cumulatief)', category: 'activa', system: true },
   { code: '0300', rgs: 'BMvaBedIna', ref: 'BMvaBeiVvp', name: 'Inventaris en gereedschap', category: 'activa' },
+  { code: '0310', rgs: 'BMvaBedCae', ref: 'BMvaBeiCae', name: 'Afschrijving inventaris en gereedschap (cumulatief)', category: 'activa', system: true },
 
   // Passiva
   { code: '0500', rgs: ACCOUNTS.eigenVermogen, ref: 'BEivKapOnd', name: 'Eigen vermogen', category: 'passiva', system: true },
@@ -104,6 +115,11 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '4430', rgs: 'WBedAlkWkl', ref: 'WBedOvpWkv', name: 'Werkkleding', category: 'kosten' },
   { code: '4490', rgs: 'WBedAlkOvr', ref: 'WBedAlkOal', name: 'Overige algemene kosten', category: 'kosten' },
   { code: '4495', rgs: ACCOUNTS.betalingsverschillen, ref: 'WBedAdlBet', name: 'Betalingsverschillen', category: 'kosten', system: true },
+  { code: '4120', rgs: ACCOUNTS.kilometervergoeding, ref: 'WBedAutKil', name: 'Kilometervergoeding privéauto', category: 'kosten', system: true },
+  { code: '4320', rgs: ACCOUNTS.representatie, ref: 'WBedVkkRep', name: 'Representatie, etentjes en relatiegeschenken', category: 'kosten' },
+  { code: '4600', rgs: ACCOUNTS.afschrijvingInventaris, ref: 'WAfsAmvBei', name: 'Afschrijving inventaris en gereedschap', category: 'kosten', system: true },
+  { code: '4610', rgs: ACCOUNTS.afschrijvingVervoer, ref: 'WAfsAmvTev', name: 'Afschrijving vervoermiddelen', category: 'kosten', system: true },
+  { code: '4620', rgs: ACCOUNTS.boekresultaat, ref: 'WAfsRvmBei', name: 'Boekresultaat verkochte bedrijfsmiddelen', category: 'kosten', system: true },
   { code: '4500', rgs: ACCOUNTS.bankkosten, ref: 'WBedAdlBan', name: 'Bankkosten', category: 'kosten', system: true },
 ];
 

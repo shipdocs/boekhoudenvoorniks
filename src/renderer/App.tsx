@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
-import { Ctx, type Meta, type Route, type Settings, type Screen } from './ui';
+import { Ctx, type InvestmentSavedInfo, type Meta, type Route, type Settings, type Screen } from './ui';
 import { Home } from './screens/Home';
 import { Onboarding } from './screens/Onboarding';
 import { Work } from './screens/Work';
@@ -12,6 +12,8 @@ import { DocumentReview } from './screens/DocumentReview';
 import { Customers, CustomerDetail } from './screens/Customers';
 import { Bank, CategorizeTransaction } from './screens/Bank';
 import { Tax } from './screens/Tax';
+import { TaxYear } from './screens/TaxYear';
+import { InvestmentSaved } from './screens/Purchases';
 import { Overview } from './screens/Overview';
 import { SettingsScreen } from './screens/Settings';
 import { TemplateEditor } from './screens/TemplateEditor';
@@ -28,7 +30,7 @@ const NAV: { screen: Screen; label: string; icon: string; also?: Screen[] }[] = 
   { screen: 'aankopen', label: 'Aankopen & bonnetjes', icon: '🧾', also: ['document'] },
   { screen: 'klanten', label: 'Klanten', icon: '👤', also: ['klant'] },
   { screen: 'bank', label: 'Bank', icon: '🏦', also: ['categorie'] },
-  { screen: 'belasting', label: 'Belasting', icon: '📮' },
+  { screen: 'belasting', label: 'Belasting', icon: '📮', also: ['aangifte'] },
   { screen: 'overzicht', label: 'Hoe gaat het?', icon: '📈' },
 ];
 
@@ -50,6 +52,7 @@ export function App() {
   const [meta, setMeta] = useState<Meta>();
   const [settings, setSettings] = useState<Settings>();
   const [badge, setBadge] = useState(0);
+  const [investmentSaved, setInvestmentSaved] = useState<InvestmentSavedInfo | null>(null);
   const route = history[history.length - 1]!;
 
   const toast = useCallback((message: string, kind: 'info' | 'error' = 'info') => {
@@ -88,7 +91,7 @@ export function App() {
 
   const go = (r: Route) => setHistory((h) => (r.screen === 'home' ? [r] : [...h.slice(-20), r]));
   const back = () => setHistory((h) => (h.length > 1 ? h.slice(0, -1) : h));
-  const ctx = { route, go, back, toast, meta, settings, reloadSettings, refreshBadge };
+  const ctx = { route, go, back, toast, meta, settings, reloadSettings, refreshBadge, showInvestmentSaved: setInvestmentSaved };
 
   const screen = (() => {
     switch (route.screen) {
@@ -106,6 +109,7 @@ export function App() {
       case 'klant': return <CustomerDetail id={route.id as number | undefined} key={String(route.id ?? 'new')} />;
       case 'bank': return <Bank focus={route.id as number | undefined} />;
       case 'belasting': return <Tax periodKey={route.id as string | undefined} key={String(route.id ?? '')} />;
+      case 'aangifte': return <TaxYear />;
       case 'overzicht': return <Overview />;
       case 'instellingen': return <SettingsScreen />;
       case 'opmaak': return <TemplateEditor />;
@@ -149,6 +153,7 @@ export function App() {
         </main>
       </div>
       {searching && <SearchOverlay onClose={() => setSearching(false)} />}
+      {investmentSaved && <InvestmentSaved info={investmentSaved} onClose={() => setInvestmentSaved(null)} />}
       {settings.onboardingDone && settings.termsAcceptedVersion !== TERMS_VERSION && route.screen !== 'welkom' && <TermsGate onAccepted={() => void reloadSettings()} />}
       <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => (

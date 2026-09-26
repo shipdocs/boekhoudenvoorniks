@@ -46,5 +46,8 @@ export const KNOWN_SUPPLIERS: KnownSupplier[] = [
   { name: 'LinkedIn', pattern: /\blinkedin\b/i, category: 'reclame', vatCode: 'eu' },
 ];
 
+/** Apparaten die (vanaf € 450 excl. btw) meestal een investering zijn; daaronder kantoorkosten. */
+export const DEVICE_KEYWORDS = /\b(laptop|notebook|macbook|imac|computer|desktop|monitor|beeldscherm|printer|iphone|smartphone|telefoon|galaxy|tablet|ipad|aanhanger|aanhangwagen)\b/i;
+
 /** Artikelomschrijvingen die op gereedschap wijzen (binnen een bouwmarktbon). */
 export const TOOL_KEYWORDS = /\b(makita|dewalt|bosch\s*(professional|blauw)?|metabo|hilti|festool|milwaukee|ryobi|boor(machine)?|schroefmachine|zaag|slijper|accu|ladder|steiger|spaan|troffel|kwast|roller|mixer|garde)\b/i;

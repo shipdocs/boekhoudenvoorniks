@@ -5,7 +5,7 @@ import type { PurchaseService, PurchaseLineInput } from '../documents/purchases'
 import type { RelationsService } from '../relations/relations';
 import type { BankService, BankTransaction } from '../import/bank';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import { EXPENSE_CATEGORIES } from '../shared/categories';
+import { EXPENSE_CATEGORIES, PRIVATE_CAR_CATEGORIES } from '../shared/categories';
 import { PURCHASE_VAT_RATES, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
 import { diffDays, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
@@ -131,6 +131,7 @@ export class IntakeService {
     private ocr: OcrProvider | null = null,
     private readonly autopilot: () => AutopilotLevel = () => 'normaal',
     private readonly locationEnabled: () => boolean = () => false,
+    private readonly carUse: () => string = () => 'onbekend',
   ) {}
 
   setOcrProvider(provider: OcrProvider | null): void {
@@ -246,7 +247,11 @@ export class IntakeService {
         .run('[]', JSON.stringify({ categoryKey: 'overig', vatCode: 'hoog', business: true, confidence: 1, source: 'geheugen', reasons: [`bewijsstuk bij banktransactie #${alreadyBooked.id}`], automatic: true }), id);
       return this.get(id);
     }
-    const classification = await this.classifier.classify(result);
+    let classification = await this.classifier.classify(result);
+    if (PRIVATE_CAR_CATEGORIES.includes(classification.categoryKey) && classification.business && this.carUse() === 'prive') {
+      // privéauto: bon van tanken/parkeren is privé (aftrek via de kilometers)
+      classification = { ...classification, business: false, automatic: false, reasons: [...classification.reasons, 'privéauto: tanken, parkeren en onderhoud zijn privé; zakelijke km vul je apart in'] };
+    }
     const issues = [...extraIssues, ...validateDocument(result, asOf)];
     if (duplicate) {
       issues.push({ field: 'duplicate', severity: 'fout', message: `Lijkt op ${duplicate.label}. Is dit dezelfde aankoop?`, suggestion: duplicate });

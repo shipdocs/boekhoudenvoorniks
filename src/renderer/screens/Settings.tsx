@@ -121,6 +121,45 @@ export function SettingsScreen() {
           {draft.incomeTaxEstimate && (
             <label className="row"><input type="checkbox" checked={draft.urencriterium} onChange={(e) => set({ urencriterium: e.target.checked })} /> Ik werk minstens 1.225 uur per jaar in mijn bedrijf (urencriterium, voor de zelfstandigenaftrek)</label>
           )}
+          <Field label="Waarmee rijd je zakelijk?">
+            <select value={draft.carUse} onChange={(e) => set({ carUse: e.target.value as AppSettings['carUse'] })}>
+              <option value="onbekend">Nog niet opgegeven</option>
+              <option value="prive">Mijn privéauto (aftrek per kilometer)</option>
+              <option value="zakelijk">Een bus of auto van de zaak</option>
+              <option value="geen">Ik rijd niet zakelijk</option>
+            </select>
+          </Field>
+          {draft.carUse === 'prive' && <p className="small muted">Tanken en parkeren tellen dan als privé; je zakelijke kilometers vul je in bij Belasting → Aftrekposten → Kilometers.</p>}
+          {draft.carUse === 'zakelijk' && <p className="small muted">Rijd je ook privé in een auto van de zaak (meer dan 500 km per jaar)? Dan geldt een bijtelling; die rekent de app niet uit. Vraag je boekhouder.</p>}
+          <div className="grid cols-2">
+            <Field label="In welk jaar ben je gestart?" hint="voor de startersaftrek">
+              <input value={draft.startYear ?? ''} onChange={(e) => set({ startYear: e.target.value ? Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || null : null })} placeholder="bv. 2024" inputMode="numeric" />
+            </Field>
+            {draft.startYear && new Date().getFullYear() - draft.startYear < 5 && (
+              <Field label="Hoe vaak heb je de startersaftrek al gebruikt?" hint="vóór dit jaar">
+                <select value={draft.startersaftrekUsed.count} onChange={(e) => set({ startersaftrekUsed: { count: Number(e.target.value), asOfYear: new Date().getFullYear() } })}>
+                  {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}×</option>)}
+                </select>
+              </Field>
+            )}
+          </div>
+          <div className="grid cols-2">
+            <Field label="Zakelijk deel telefoon & internet" hint="het privédeel telt niet als kosten">
+              <select value={draft.phoneInternetBusinessPct ?? 100} onChange={(e) => set({ phoneInternetBusinessPct: Number(e.target.value) })}>
+                {[100, 90, 75, 50, 25, 0].map((p) => <option key={p} value={p}>{p}%</option>)}
+              </select>
+            </Field>
+            <Field label="Werkplek thuis">
+              <select value={draft.homeWorkspace ?? 'geen'} onChange={(e) => set({ homeWorkspace: e.target.value as AppSettings['homeWorkspace'] })}>
+                <option value="geen">Geen</option>
+                <option value="thuis">Een plek in huis</option>
+                <option value="zelfstandig">Eigen ingang en sanitair</option>
+              </select>
+            </Field>
+          </div>
+          <Field label="Uren dat je partner onbetaald meewerkt, per jaar" hint="vanaf 525 uur: meewerkaftrek">
+            <input value={draft.partnerHours || ''} onChange={(e) => set({ partnerHours: Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || 0 })} placeholder="0" inputMode="numeric" />
+          </Field>
           <p className="muted small">Altijd een schatting: de app kent alleen de winst uit je bedrijf, niet je partner, hypotheek of ander inkomen.</p>
         </>,
       )}
