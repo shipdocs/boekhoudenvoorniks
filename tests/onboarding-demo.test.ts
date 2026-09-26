@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -97,6 +97,20 @@ describe('demo', () => {
     expect(hasRealData(s.db)).toBe(false);
   });
 
+  it('gaat er iets mis, dan blijft de administratie leeg', () => {
+    const s = emptyServices();
+    const original = s.inbox.autoProcess.bind(s.inbox);
+    s.inbox.autoProcess = () => {
+      throw new Error('stuk');
+    };
+    expect(() => seedDemo(s, '2026-09-26')).toThrow('stuk');
+    expect(s.settings.get().demoMode).toBe(false);
+    expect(s.relations.list()).toEqual([]);
+    s.inbox.autoProcess = original;
+    seedDemo(s, '2026-09-26');
+    expect(s.settings.get().demoMode).toBe(true);
+  });
+
   it('weigert een administratie met gegevens', () => {
     const { s } = setup();
     expect(() => seedDemo(s)).toThrow(/lege administratie/);
@@ -138,5 +152,32 @@ describe('wissen', () => {
     seedDemo(s, '2026-09-26');
     expect(await wipeDatabase(s.db, file, join(dir, 'backups'))).toBeNull();
     expect(existsSync(join(dir, 'backups'))).toBe(false);
+  });
+
+  it('bijlagen: weg bij de demo, bewaard bij echte gegevens (de kopie verwijst ernaar)', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'gb-wis-'));
+    const file = join(dir, 'boekhouding.sqlite');
+    const bijlagen = join(dir, 'bijlagen');
+    mkdirSync(bijlagen);
+    const bon = (name: string) => {
+      const p = join(bijlagen, name);
+      writeFileSync(p, 'x');
+      return p;
+    };
+
+    const demo = emptyServices(openDatabase(file));
+    seedDemo(demo, '2026-09-26');
+    const demoBon = bon('demo.pdf');
+    demo.purchases.create({ invoiceDate: '2026-09-20', description: 'bon', attachmentPath: demoBon, lines: [{ account: 'WBedAlkOvr', netAmount: 1000, vatCode: 'geen', vatAmount: 0 }] });
+    const los = bon('los.pdf');
+    await wipeDatabase(demo.db, file, join(dir, 'backups'), bijlagen);
+    expect(existsSync(demoBon)).toBe(false);
+    expect(existsSync(los)).toBe(true);
+
+    const real = emptyServices(openDatabase(file));
+    const echteBon = bon('echt.pdf');
+    real.purchases.create({ invoiceDate: '2026-09-20', description: 'bon', attachmentPath: echteBon, lines: [{ account: 'WBedAlkOvr', netAmount: 1000, vatCode: 'geen', vatAmount: 0 }] });
+    expect(await wipeDatabase(real.db, file, join(dir, 'backups'), bijlagen)).toBeTruthy();
+    expect(existsSync(echteBon)).toBe(true);
   });
 });

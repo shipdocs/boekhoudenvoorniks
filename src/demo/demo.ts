@@ -1,4 +1,5 @@
 import type { Services } from '../services';
+import { tx } from '../db/database';
 import { addDays, today, type IsoDate } from '../shared/dates';
 import type { NormalizedTransaction } from '../import/types';
 import { ONBOARDING_STEPS, markSeen } from '../shared/onboarding';
@@ -12,8 +13,13 @@ export const DEMO_COMPANY = 'Demo Stukadoorsbedrijf';
  *
  * Alleen voor een lege database: `demoMode` zorgt dat er niets naar buiten gaat (geen e-mail) en dat
  * de app een balk "Je bekijkt de demo" toont met een knop om schoon te beginnen.
+ * Alles in één transactie: gaat er iets mis, dan blijft de administratie leeg (en kan het opnieuw).
  */
 export function seedDemo(s: Services, asOf: IsoDate = today()): void {
+  tx(s.db, () => fillDemo(s, asOf));
+}
+
+function fillDemo(s: Services, asOf: IsoDate): void {
   const d = (days: number) => addDays(asOf, -days);
   const hasData = s.db.prepare('SELECT (SELECT COUNT(*) FROM invoices) + (SELECT COUNT(*) FROM bank_transactions) + (SELECT COUNT(*) FROM relations) AS n').get() as { n: number };
   if (hasData.n > 0) throw new Error('De demo kan alleen in een lege administratie');

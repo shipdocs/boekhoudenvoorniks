@@ -191,7 +191,7 @@ function initServices(): void {
     },
     async resetData(withDemo) {
       localOcr.stop();
-      const backup = await wipeDatabase(db, dbPath(), join(dataDir(), 'backups'));
+      const backup = await wipeDatabase(db, dbPath(), join(dataDir(), 'backups'), join(dataDir(), 'bijlagen'));
       // nieuwe, lege database met verse services; de IPC-handler gebruikt daarna vanzelf de nieuwe api
       initServices();
       if (withDemo) seedDemo(services);
