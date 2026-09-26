@@ -87,7 +87,7 @@ Download de installer van de [laatste release](https://github.com/shipdocs/grati
 Op **Windows** kan SmartScreen melden dat "Windows uw pc heeft beveiligd". Dat komt doordat de installer (nog) niet met een betaald certificaat ondertekend is. Download de installer alleen van de [GitHub-release](https://github.com/shipdocs/gratis-boekhouden/releases) en controleer eventueel het controlegetal:
 
 ```powershell
-Get-FileHash '.\Gratis Boekhouden Setup 0.3.0.exe' -Algorithm SHA256   # vergelijk met SHA256SUMS-Windows.txt
+Get-FileHash '.\Gratis-Boekhouden-Setup-0.3.0.exe' -Algorithm SHA256   # vergelijk met SHA256SUMS-Windows.txt
 ```
 
 Klopt het, klik dan op **Meer informatie → Toch uitvoeren**. Op Linux: `sha256sum -c SHA256SUMS-Linux.txt --ignore-missing`.
@@ -96,7 +96,7 @@ Klopt het, klik dan op **Meer informatie → Toch uitvoeren**. Op Linux: `sha256
 
 Een tag `v*`, of het handmatig starten van de workflow *Release* op main (Actions → Release → Run
 workflow), bouwt via GitHub Actions de installers voor Linux en Windows en publiceert ze als
-GitHub-release. De versie komt uit `package.json`. De geïnstalleerde app werkt zichzelf bij via `electron-updater`.
+GitHub-release. De versie komt uit `package.json`; de tekst bij de release komt uit het CHANGELOG-deel van die versie. De geïnstalleerde app werkt zichzelf bij via `electron-updater`.
 
 ## Status en open punten
 

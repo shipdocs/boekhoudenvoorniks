@@ -1,0 +1,43 @@
+name: Releasetekst
+
+# Zet de tekst uit CHANGELOG.md bij een bestaande GitHub-release (de Release-workflow doet dit zelf
+# voor nieuwe releases) en zet de bestandsnamen in de controlegetallen gelijk aan de namen op GitHub.
+# Handmatig starten op main met de tag, bv. v0.3.0.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag van de release, bv. v0.3.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Releasetekst uit CHANGELOG
+        run: |
+          scripts/release-notes.sh "${TAG#v}" > notes.md
+          gh release edit "$TAG" --notes-file notes.md
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Bestandsnamen in de controlegetallen gelijk aan GitHub
+        run: |
+          mkdir sums && cd sums
+          gh release download "$TAG" --pattern 'SHA256SUMS-*' || exit 0
+          for f in SHA256SUMS-*; do
+            while read -r hash name; do
+              name="${name#\*}"
+              echo "$hash  ${name// /-}"
+            done < "$f" > "$f.new"
+            mv "$f.new" "$f"
+            cat "$f"
+            gh release upload "$TAG" "$f" --clobber
+          done
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

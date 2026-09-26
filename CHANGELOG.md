@@ -2,6 +2,9 @@
 
 ## Nog niet uitgebracht
 
+- Releases krijgen de tekst uit deze CHANGELOG. De controlegetallen (`SHA256SUMS-*.txt`) gebruiken de
+  bestandsnamen zoals ze op GitHub staan, zodat `sha256sum -c` de AppImage ook echt controleert.
+
 ## 0.3.0 — aftrekposten, demo en gewone taal
 
 ### Duidelijker

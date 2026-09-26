@@ -80,8 +80,22 @@ jobs:
           shopt -s nullglob
           cd release
           files=(*.AppImage *.deb *.exe)
-          sha256sum "${files[@]}" > "SHA256SUMS-${{ runner.os }}.txt"
+          # GitHub zet spaties in bestandsnamen om naar '-'; gebruik de naam zoals hij te downloaden is,
+          # anders vindt `sha256sum -c` het bestand niet
+          : > "SHA256SUMS-${{ runner.os }}.txt"
+          for f in "${files[@]}"; do
+            echo "$(sha256sum "$f" | cut -d' ' -f1)  ${f// /-}" >> "SHA256SUMS-${{ runner.os }}.txt"
+          done
           cat "SHA256SUMS-${{ runner.os }}.txt"
           gh release upload "$RELEASE_TAG" "SHA256SUMS-${{ runner.os }}.txt" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Releasetekst uit CHANGELOG
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          scripts/release-notes.sh "${RELEASE_TAG#v}" > notes.md
+          gh release edit "$RELEASE_TAG" --notes-file notes.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
