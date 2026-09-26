@@ -32,6 +32,16 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
   { key: 'overig', label: 'Overige kosten', hint: '', account: 'WBedAlkOvr', defaultVat: 'hoog' },
 ];
 
+/** Opzoeken van categorieën: de vaste lijst plus eigen en aangepaste (zie settings/categories.ts). */
+export interface CategoryLookup {
+  /** zichtbare categorieën, om uit te kiezen */
+  list(): ExpenseCategory[];
+  /** ook verborgen categorieën, zodat eerder geleerde leveranciers blijven werken */
+  find(key: string): ExpenseCategory | undefined;
+  /** naam in kleine letters, of de key als de categorie niet bestaat */
+  label(key: string): string;
+}
+
 /** Voor banktransacties zonder factuur: bestemmingen die geen kosten zijn. */
 /** Met een privéauto niet aftrekbaar (zit in het bedrag per km): tanken, parkeren, onderhoud, verzekering. */
 export const PRIVATE_CAR_CATEGORIES = ['brandstof', 'auto'];

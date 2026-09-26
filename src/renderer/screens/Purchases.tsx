@@ -4,6 +4,7 @@ import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInp
 import { today } from '../../shared/dates';
 import type { PurchaseVatCode } from '../../shared/vat';
 import { mightBeInvestment, netAmount } from '../../shared/investment';
+import { CategoryChips } from './Categories';
 
 export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const { go, toast } = useApp();
@@ -198,14 +199,9 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
 
 /** "Waar was deze aankoop voor?" — categorieën in mensentaal. */
 export function CategoryChoice({ value, onChange }: { value: string; onChange: (key: string) => void }) {
-  const { meta } = useApp();
   return (
     <Field label="Waar was deze aankoop voor?">
-      <div className="chips">
-        {meta.expenseCategories.map((c) => (
-          <button key={c.key} className={value === c.key ? 'selected' : ''} title={c.hint} onClick={() => onChange(c.key)}>{c.label}</button>
-        ))}
-      </div>
+      <CategoryChips value={value} onChange={(key) => onChange(key)} />
     </Field>
   );
 }

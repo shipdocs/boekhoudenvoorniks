@@ -14,7 +14,7 @@ import type { RecurringService } from '../import/recurring';
 import { normalizeIban, ValidationError } from '../shared/validation';
 import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
-import { EXPENSE_CATEGORIES, PRIVATE_CAR_CATEGORIES } from '../shared/categories';
+import { PRIVATE_CAR_CATEGORIES, type CategoryLookup } from '../shared/categories';
 import { KNOWN_SUPPLIERS } from '../intake/suppliers';
 import { addDays, diffDays, formatDateNl, periodFor, today, vatDeadline, type IsoDate } from '../shared/dates';
 
@@ -134,6 +134,7 @@ export class InboxService {
     private readonly vat: VatService,
     private readonly purchases: PurchaseService,
     private readonly recurring: RecurringService,
+    private readonly categories: CategoryLookup,
     private readonly investments?: InvestmentCheck,
   ) {}
 
@@ -178,7 +179,7 @@ export class InboxService {
         // boeken en vastleggen in één transactie: nooit een automatische boeking zonder logregel
         tx(this.db, () => {
           this.bookCategory(t, rule!.category_key, rule!.vat_code, Boolean(rule!.business), false);
-          const label = rule!.business ? EXPENSE_CATEGORIES.find((c) => c.key === rule!.category_key)?.label.toLowerCase() ?? rule!.category_key : 'privé';
+          const label = rule!.business ? this.categories.label(rule!.category_key) : 'privé';
           const explanation = explain([
             { type: 'leveranciersregel', label: `je ${rule!.confirmations}× ${rule!.display_name} als ${label} hebt bevestigd en hebt gezegd dat dit voortaan automatisch mag`, value: 0.97 },
           ]);
@@ -235,7 +236,7 @@ export class InboxService {
     if (!business) {
       this.bank.bookToAccount(t.id, { account: t.amount < 0 ? ACCOUNTS.priveOpnamen : ACCOUNTS.priveStortingen, description: `Privé: ${name}` });
     } else {
-      const category = EXPENSE_CATEGORIES.find((c) => c.key === categoryKey);
+      const category = this.categories.find(categoryKey);
       if (!category) throw new Error(`Onbekende categorie ${categoryKey}`);
       this.bank.bookToAccount(t.id, { account: category.account, vatCode, description: `${category.label} — ${name}` });
     }
@@ -246,7 +247,7 @@ export class InboxService {
   answerBank(bankTransactionId: number, answer: { business: boolean; categoryKey?: string; vatCode?: string }): void {
     const t = this.bank.get(bankTransactionId);
     const category = answer.categoryKey ?? 'overig';
-    const vatCode = answer.vatCode ?? EXPENSE_CATEGORIES.find((c) => c.key === category)?.defaultVat ?? 'hoog';
+    const vatCode = answer.vatCode ?? this.categories.find(category)?.defaultVat ?? 'hoog';
     this.bookCategory(t, category, vatCode, answer.business, true);
   }
 
@@ -266,7 +267,7 @@ export class InboxService {
   private rawSuggestionFor(t: BankTransaction): { categoryKey: string; vatCode: string; business: boolean; confident: boolean; why: string } | null {
     const rule = t.counter_name ? this.memory.get(t.counter_name) : null;
     if (rule) {
-      const label = EXPENSE_CATEGORIES.find((c) => c.key === rule.category_key)?.label.toLowerCase() ?? rule.category_key;
+      const label = this.categories.label(rule.category_key);
       return { categoryKey: rule.category_key, vatCode: rule.vat_code, business: Boolean(rule.business), confident: rule.confirmations >= 1, why: `Omdat je ${rule.display_name} eerder ${rule.confirmations}× als ${label} hebt bevestigd.` };
     }
     const known = KNOWN_SUPPLIERS.find((k) => k.pattern.test(`${t.counter_name ?? ''} ${t.description}`));
@@ -397,7 +398,7 @@ export class InboxService {
       }
       const sug = this.suggestionFor(t);
       if (sug?.confident && sug.business) {
-        const label = EXPENSE_CATEGORIES.find((c) => c.key === sug.categoryKey)?.label.toLowerCase() ?? sug.categoryKey;
+        const label = this.categories.label(sug.categoryKey);
         tasks.push({
           key: `bank-${t.id}`,
           kind: 'bank-category',
@@ -411,7 +412,7 @@ export class InboxService {
           ref: { bankTransactionId: t.id, categoryKey: sug.categoryKey, vatCode: sug.vatCode },
         });
       } else {
-        const guess = sug ? EXPENSE_CATEGORIES.find((c) => c.key === sug.categoryKey)?.label.toLowerCase() : null;
+        const guess = sug ? this.categories.label(sug.categoryKey) : null;
         tasks.push({
           key: `bank-${t.id}`,
           kind: 'bank-business',
@@ -452,7 +453,7 @@ export class InboxService {
         kind: 'document-review',
         icon: '📷',
         title: `${name}${d.result?.total ? ' ' + formatEuro(d.result.total.value) : ''}`,
-        question: bad ? bad.message : d.classification ? `We denken: ${EXPENSE_CATEGORIES.find((c) => c.key === d.classification!.categoryKey)?.label.toLowerCase()}. Alles klopt?` : 'Even controleren?',
+        question: bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}. Alles klopt?` : 'Even controleren?',
         amount: d.result?.total?.value,
         actions: bad?.field === 'duplicate'
           ? [{ id: 'dubbel', label: 'Ja, zelfde', primary: true }, { id: 'open', label: 'Nee, bekijken' }]
@@ -687,7 +688,7 @@ export class InboxService {
     }
     const askAfter = s.autopilot === 'voorzichtig' ? Number.POSITIVE_INFINITY : s.autopilot === 'maximaal' ? 2 : ASK_AUTO_AFTER_CONFIRMATIONS;
     for (const rule of Number.isFinite(askAfter) ? this.memory.pendingApprovals(askAfter) : []) {
-      const label = rule.business ? EXPENSE_CATEGORIES.find((c) => c.key === rule.category_key)?.label.toLowerCase() ?? rule.category_key : 'privé';
+      const label = rule.business ? this.categories.label(rule.category_key) : 'privé';
       tasks.push({
         key: `supplier-auto-${rule.supplier_key}`,
         kind: 'supplier-auto',

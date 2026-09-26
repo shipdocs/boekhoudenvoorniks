@@ -23,7 +23,7 @@ import { supplierKey } from '../intake/supplier-memory';
 import { tx } from '../db/database';
 import { hasRealData } from './reset';
 import type { ExpenseInput, CashSaleInput } from '../quick/quick';
-import { EXPENSE_CATEGORIES, OTHER_DESTINATIONS } from '../shared/categories';
+import { OTHER_DESTINATIONS } from '../shared/categories';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES } from '../shared/vat';
 import { ACCOUNTS, type AccountCategory } from '../core-ledger/accounts';
 import { TRADES } from '../shared/trades';
@@ -251,7 +251,7 @@ export function createApi(s: Services, host: HostContext) {
       /** Alles wissen en schoon beginnen (de onboarding start opnieuw). */
       clearData: () => host.resetData(false),
       meta: () => ({
-        expenseCategories: EXPENSE_CATEGORIES,
+        expenseCategories: s.categories.list(),
         otherDestinations: OTHER_DESTINATIONS,
         salesVat: Object.values(SALES_VAT_RATES),
         purchaseVat: Object.values(PURCHASE_VAT_RATES),
@@ -276,6 +276,14 @@ export function createApi(s: Services, host: HostContext) {
       testSmtp: (smtp?: AppSettings['smtp'], password?: string) => host.testSmtp(smtp, password),
       counters: (year: number) => ({ factuur: s.settings.peekCounter(`factuur:${year}`), offerte: s.settings.peekCounter(`offerte:${year}`) }),
       setInvoiceCounter: (year: number, value: number) => s.settings.setCounter(`factuur:${year}`, value),
+    },
+    /** Kostencategorieën: eigen toevoegen, aanpassen, verbergen (nooit verwijderen). */
+    categories: {
+      all: () => ({ categories: s.categories.all(), groups: s.categories.groups() }),
+      add: (input: { label: string; hint?: string; groupKey: string; defaultVat?: string }) => s.categories.add(input),
+      update: (key: string, input: { label?: string; hint?: string; defaultVat?: string; groupKey?: string }) => s.categories.update(key, input),
+      setHidden: (key: string, hidden: boolean) => s.categories.setHidden(key, hidden),
+      reset: (key: string) => s.categories.reset(key),
     },
     relations: {
       list: (filter?: { type?: 'klant' | 'leverancier'; search?: string }) => s.relations.list(filter),
@@ -457,7 +465,7 @@ export function createApi(s: Services, host: HostContext) {
       ignore: (txId: number) => s.bank.ignore(txId),
       /** Andere categorie voor een al geboekte betaling: tegenboeking + nieuwe boeking (#19), en leren. */
       reclassify: (txId: number, categoryKey: string, vatCode: string) => {
-        const category = EXPENSE_CATEGORIES.find((c) => c.key === categoryKey);
+        const category = s.categories.find(categoryKey);
         if (!category) throw new Error('Onbekende categorie');
         // boeken en leren in één transactie: nooit een gewijzigde boeking met een mislukte leerstap
         return tx(s.db, () => {

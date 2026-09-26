@@ -1,5 +1,4 @@
 import { decide, type AutopilotLevel, type Decision, type Signal } from '../automation/decisions';
-import { EXPENSE_CATEGORIES } from '../shared/categories';
 import { formatEuro } from '../shared/money';
 import type { BankTransaction } from '../import/bank';
 import type { Classification } from './classify';
@@ -20,9 +19,11 @@ export function documentDecisions(input: {
   bankMatch: BankTransaction | null;
   rule: SupplierRule | null;
   level: AutopilotLevel;
+  /** naam van de categorie in kleine letters */
+  categoryLabel: string;
 }): { decisions: Decision[]; signals: Signal[] } {
   const { doc, issues, classification: c, bankMatch, rule, level } = input;
-  const category = EXPENSE_CATEGORIES.find((x) => x.key === c.categoryKey)?.label.toLowerCase() ?? c.categoryKey;
+  const category = input.categoryLabel;
   const docVat = vatFromDocument(doc);
 
   const signals: Signal[] = [];

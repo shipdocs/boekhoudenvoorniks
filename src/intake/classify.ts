@@ -1,4 +1,4 @@
-import { EXPENSE_CATEGORIES } from '../shared/categories';
+import type { CategoryLookup } from '../shared/categories';
 import type { PurchaseVatCode } from '../shared/vat';
 import type { DocumentResult } from './types';
 import { DEVICE_KEYWORDS, KNOWN_SUPPLIERS, TOOL_KEYWORDS } from './suppliers';
@@ -58,7 +58,7 @@ export function vatFromDocument(doc: DocumentResult): Classification['vatCode'] 
 }
 
 export class Classifier {
-  constructor(private readonly memory: SupplierMemory, private llm: LlmClassifier | null = null) {}
+  constructor(private readonly memory: SupplierMemory, private readonly categories: CategoryLookup, private llm: LlmClassifier | null = null) {}
 
   /** Totaal excl. btw: het subtotaal van de bon, of teruggerekend uit het totaal. De grens van € 450 is excl. btw. */
   private netTotal(doc: DocumentResult, docVat: Classification['vatCode'] | null): number {
@@ -111,8 +111,8 @@ export class Classifier {
 
     if (this.llm) {
       try {
-        const r = await this.llm.classify({ supplier, lines: doc.lineDescriptions, categories: EXPENSE_CATEGORIES.map(({ key, label, hint }) => ({ key, label, hint })) });
-        if (r && EXPENSE_CATEGORIES.some((c) => c.key === r.categoryKey)) {
+        const r = await this.llm.classify({ supplier, lines: doc.lineDescriptions, categories: this.categories.list().map(({ key, label, hint }) => ({ key, label, hint })) });
+        if (r && this.categories.list().some((c) => c.key === r.categoryKey)) {
           // LLM-zekerheid wordt bewust afgetopt: nooit automatisch boeken op alleen een LLM-voorstel
           return { categoryKey: r.categoryKey, vatCode: docVat ?? 'hoog', business: true, confidence: Math.min(0.7, r.confidence), source: 'llm', reasons: [`voorstel van de slimme herkenning: ${r.explanation}`], automatic: false };
         }

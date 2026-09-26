@@ -104,6 +104,7 @@ input.num { text-align: right; font-variant-numeric: tabular-nums; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chips button { border: 1px solid var(--border); background: var(--surface); padding: 8px 14px; border-radius: 99px; cursor: pointer; }
 .chips button.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
+.chips button.ghost { border-style: dashed; color: var(--text-2); background: transparent; }
 
 table.list { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
 table.list th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
@@ -162,7 +163,11 @@ table.list tr.clickable:hover td { background: var(--surface-2); }
 .fieldcheck:hover, .fieldcheck.active { background: var(--primary-soft); }
 .fieldcheck .ok { color: var(--good); font-weight: 700; }
 .fieldcheck .warn { color: var(--warn); font-weight: 700; }
-.lines-table input { width: 100%; }
+/* vaste kolombreedtes: een lang btw-label mag de omschrijving niet wegdrukken */
+.lines-table { table-layout: fixed; min-width: 860px; }
+/* in een smal venster schuift de regeltabel opzij in plaats van de omschrijving samen te knijpen */
+.lines-scroll { overflow-x: auto; }
+.lines-table input, .lines-table select { width: 100%; min-width: 0; }
 .lines-table td { padding: 4px 4px; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }

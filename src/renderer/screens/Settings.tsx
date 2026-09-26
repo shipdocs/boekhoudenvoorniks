@@ -3,15 +3,17 @@ import { api } from '../api';
 import { Button, DateNl, ErrorBox, Field, MoneyInput, useAction, useApp, useLoad, type Settings } from '../ui';
 import type { AppSettings } from '../../settings/settings';
 import { ResetCard } from './Reset';
+import { CategoriesDialog } from './Categories';
 import { LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 
-type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'koppelingen' | 'ai' | 'backup' | 'geavanceerd' | 'over';
+type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'ai' | 'backup' | 'geavanceerd' | 'over';
 
 const TABS: [Tab, string][] = [
   ['bedrijf', 'Je bedrijf'],
   ['facturen', 'Facturen & offertes'],
   ['email', 'E-mail'],
   ['btw', 'Btw'],
+  ['categorieen', 'Categorieën'],
   ['koppelingen', 'Koppelingen'],
   ['ai', 'Automatisch & herkenning'],
   ['backup', 'Back-up, demo & updates'],
@@ -91,6 +93,8 @@ export function SettingsScreen() {
       )}
 
       {tab === 'email' && <EmailSettings draft={draft} set={set} section={section} />}
+
+      {tab === 'categorieen' && <CategoriesCard />}
 
       {tab === 'btw' && section(
         <>
@@ -457,6 +461,22 @@ function About() {
         <a href="#" onClick={open(SOURCE_URL)}>Broncode</a> · <a href="#" onClick={open(TERMS_URL)}>Gebruiksvoorwaarden</a> · <a href="#" onClick={open(PRIVACY_URL)}>Privacyverklaring</a>
       </p>
       <p className="small muted">De software wordt geleverd zonder garantie. Jij blijft verantwoordelijk voor je administratie en aangiften.</p>
+    </div>
+  );
+}
+
+/** Instellingen → Categorieën: dezelfde lijst als achter "Aanpassen" bij het boeken. */
+function CategoriesCard() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="card grid">
+      <p>
+        Bij een betaling of bon kies je waar het voor was, bijvoorbeeld Materiaal of Telefoon &amp; internet. Mist er iets, of heet het bij jou anders?
+        Voeg een eigen categorie toe of pas de naam, uitleg en btw aan. Categorieën die je niet gebruikt kun je verbergen.
+      </p>
+      <p className="small muted">Veilig: er wordt nooit iets verwijderd en eerdere boekingen veranderen niet mee.</p>
+      <div className="row end"><Button kind="primary" onClick={() => setOpen(true)}>Categorieën bekijken en aanpassen</Button></div>
+      {open && <CategoriesDialog onClose={() => setOpen(false)} />}
     </div>
   );
 }
