@@ -36,6 +36,11 @@ test('rondgang door alle schermen van de demo: geen crash, geen foutmelding', as
   await nav(page, 'Werk & facturen');
   await page.locator('.chips button', { hasText: 'Offertes' }).click();
   await noErrorBox(page, 'offertes');
+  await page.locator('table.list tbody tr').first().click();
+  await expect(page.getByRole('heading', { name: /Offerte/ })).toBeVisible();
+  await noErrorBox(page, 'offerte');
+  await a11y(page, testInfo, 'offerte', found);
+  await nav(page, 'Werk & facturen');
   await page.locator('.chips button', { hasText: 'Facturen' }).click();
   await page.locator('table.list tbody tr').first().click();
   await expect(page.getByRole('heading', { name: /Factuur/ })).toBeVisible();

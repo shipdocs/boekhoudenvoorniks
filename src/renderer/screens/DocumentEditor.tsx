@@ -279,8 +279,9 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           <iframe className="preview-frame" sandbox="" srcDoc={preview} title="Voorbeeld" />
         </Modal>
       )}
-      {/* pas openen als het document geladen is: anders blijft "Naar" leeg (het adres van de klant komt uit het document) */}
-      {sending && id && d && (
+      {/* pas openen als het document geladen is: anders blijft "Naar" leeg (het adres van de klant komt uit het document);
+          lukt laden niet, dan toch openen (adres zelf invullen) */}
+      {sending && id && (d || doc.error) && (
         <SendDialog
           kind={kind}
           id={id}
