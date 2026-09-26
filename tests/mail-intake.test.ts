@@ -133,14 +133,29 @@ describe('inkomende post', () => {
     expect(await s.mail.poll(box)).toMatchObject({ documents: 0, other: 1 });
   });
 
-  it('een bericht dat niet te lezen is, houdt de rest niet tegen; een ontbrekende map wordt gemeld', async () => {
+  it('even niet te lezen: de volgende keer opnieuw; blijft het mislukken, dan na 3 keer overslaan', async () => {
     const { s, box } = withMail();
     s.settings.update({ mailIn: { ...s.settings.get().mailIn, extraFolders: ['Bestaat niet'] } });
     box.add('INBOX', { uid: 1, attachments: [att('a.jpg', jpg(1))] });
     box.add('INBOX', { uid: 2, attachments: [att('b.jpg', jpg(2))] });
     const orig = box.fetch.bind(box);
+    let broken = true;
+    box.fetch = async (uid) => { if (uid === 1 && broken) throw new Error('verbinding weg'); return orig(uid); };
+    expect(await s.mail.poll(box)).toMatchObject({ documents: 0, errors: 1, missingFolders: ['Bestaat niet'] });
+    // verbinding weer goed: bericht 1 komt alsnog binnen
+    broken = false;
+    expect(await s.mail.poll(box)).toMatchObject({ documents: 2, errors: 0 });
+  });
+
+  it('een bericht dat nooit te lezen is, houdt de rest niet voor altijd tegen', async () => {
+    const { s, box } = withMail();
+    box.add('INBOX', { uid: 1, attachments: [att('a.jpg', jpg(1))] });
+    box.add('INBOX', { uid: 2, attachments: [att('b.jpg', jpg(2))] });
+    const orig = box.fetch.bind(box);
     box.fetch = async (uid) => { if (uid === 1) throw new Error('kapot'); return orig(uid); };
-    const r = await s.mail.poll(box);
-    expect(r).toMatchObject({ documents: 1, errors: 1, missingFolders: ['Bestaat niet'] });
+    expect((await s.mail.poll(box)).documents).toBe(0);
+    expect((await s.mail.poll(box)).documents).toBe(0);
+    expect(await s.mail.poll(box)).toMatchObject({ documents: 1, errors: 1 });
+    expect(s.mail.summary().counts.fout).toBe(1);
   });
 });

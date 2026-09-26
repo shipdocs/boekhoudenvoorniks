@@ -77,6 +77,8 @@ export const MAIL_LIMITS = {
   maxAttachmentsPerMail: 10,
   /** zoveel berichten per keer ophalen; de rest volgt de volgende keer */
   maxMessagesPerPoll: 200,
+  /** zo vaak opnieuw proberen als een bericht niet te lezen is; daarna overslaan (als "fout") */
+  maxAttempts: 3,
 };
 
 const EMAIL = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;
@@ -203,6 +205,24 @@ export class MailIntakeService {
           .run(folder, box.uidValidity, uid);
       setLast(afterUid);
 
+      /**
+       * Mislukt: niet meteen opgeven (vaak is de verbinding even weg). De map stopt hier en de
+       * volgende keer proberen we dit bericht opnieuw; pas na een paar keer slaan we het over.
+       */
+      const failed = (uid: number, m: MailMessage | null, key: string, note: string): 'opnieuw' | 'overgeslagen' => {
+        const row = this.db.prepare('SELECT failed_uid, failed_count FROM mail_folders WHERE folder = ?').get(folder) as { failed_uid: number | null; failed_count: number };
+        const count = row.failed_uid === uid ? row.failed_count + 1 : 1;
+        result.errors++;
+        if (count < MAIL_LIMITS.maxAttempts) {
+          this.db.prepare('UPDATE mail_folders SET failed_uid = ?, failed_count = ? WHERE folder = ?').run(uid, count, folder);
+          return 'opnieuw';
+        }
+        if (!this.seen(key)) this.record(key, folder, uid, m, 'fout', { note });
+        this.db.prepare('UPDATE mail_folders SET failed_uid = NULL, failed_count = 0 WHERE folder = ?').run(folder);
+        setLast(uid);
+        return 'overgeslagen';
+      };
+
       for (const uid of await source.list(afterUid, since)) {
         if (budget-- <= 0) break;
         let m: MailMessage | null = null;
@@ -213,9 +233,7 @@ export class MailIntakeService {
         }
         const key = m?.messageId ? `id:${m.messageId}` : `uid:${folder}:${box.uidValidity}:${uid}`;
         if (!m) {
-          if (!this.seen(key)) this.record(key, folder, uid, null, 'fout', { note: 'Kon dit bericht niet lezen' });
-          result.errors++;
-          setLast(uid);
+          if (failed(uid, null, key, 'Kon dit bericht niet lezen') === 'opnieuw') break;
           continue;
         }
         if (this.seen(key)) {
@@ -260,8 +278,9 @@ export class MailIntakeService {
             }
           }
         } catch (e) {
-          this.record(key, folder, uid, m, 'fout', { note: (e as Error).message.slice(0, 300) });
-          result.errors++;
+          // bijlagen die al binnen waren, worden bij een nieuwe poging herkend (zelfde bestand)
+          if (failed(uid, m, key, (e as Error).message.slice(0, 300)) === 'opnieuw') break;
+          continue;
         }
         setLast(uid);
       }

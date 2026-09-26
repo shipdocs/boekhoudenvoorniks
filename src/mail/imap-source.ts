@@ -15,7 +15,8 @@ export function friendlyImapError(e: unknown): Error {
   return new Error(`Mail ophalen lukt niet: ${msg}`);
 }
 
-function isoDate(d: Date | undefined): string {
+function isoDate(value: Date | string | undefined): string {
+  const d = value === undefined ? undefined : new Date(value);
   return (d && !Number.isNaN(d.getTime()) ? d : new Date()).toISOString().slice(0, 10);
 }
 
@@ -68,10 +69,24 @@ export class ImapSource implements MailSource {
   }
 
   async fetch(uid: number): Promise<MailMessage | null> {
-    const msg = await this.client.fetchOne(String(uid), { uid: true, size: true, source: true }, { uid: true });
+    // eerst alleen de grootte: heel grote mail (bv. video's) lezen we niet helemaal in
+    const head = await this.client.fetchOne(String(uid), { uid: true, size: true, envelope: true }, { uid: true });
+    if (!head) return null;
+    if ((head.size ?? 0) > MAIL_LIMITS.maxAttachmentBytes * MAIL_LIMITS.maxAttachmentsPerMail) {
+      const from = head.envelope?.from?.[0];
+      return {
+        uid,
+        messageId: head.envelope?.messageId ?? null,
+        fromAddress: from?.address ?? '',
+        fromName: from?.name ?? '',
+        subject: head.envelope?.subject ?? '',
+        date: isoDate(head.envelope?.date),
+        text: '',
+        attachments: [],
+      };
+    }
+    const msg = await this.client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
     if (!msg || !msg.source) return null;
-    // heel grote mail (bv. video's): alleen de kop lezen, bijlagen overslaan
-    const tooBig = (msg.size ?? msg.source.length) > MAIL_LIMITS.maxAttachmentBytes * MAIL_LIMITS.maxAttachmentsPerMail;
     const parsed = await simpleParser(msg.source, { skipHtmlToText: false, skipTextToHtml: true, skipImageLinks: true });
     const from = parsed.from?.value[0];
     return {
@@ -82,14 +97,12 @@ export class ImapSource implements MailSource {
       subject: parsed.subject ?? '',
       date: isoDate(parsed.date),
       text: (parsed.text ?? '').slice(0, 20_000),
-      attachments: tooBig
-        ? []
-        : parsed.attachments.map((a) => ({
-            filename: a.filename ?? '',
-            contentType: a.contentType ?? '',
-            content: new Uint8Array(a.content),
-            inline: a.contentDisposition === 'inline' || Boolean(a.related),
-          })),
+      attachments: parsed.attachments.map((a) => ({
+        filename: a.filename ?? '',
+        contentType: a.contentType ?? '',
+        content: new Uint8Array(a.content),
+        inline: a.contentDisposition === 'inline' || Boolean(a.related),
+      })),
     };
   }
 

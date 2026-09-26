@@ -700,7 +700,10 @@ export const migrations: string[] = [
     folder TEXT PRIMARY KEY,
     uid_validity TEXT NOT NULL,
     last_uid INTEGER NOT NULL DEFAULT 0,
-    checked_at TEXT
+    checked_at TEXT,
+    -- een bericht dat niet te lezen was: later opnieuw proberen, na 3 keer overslaan
+    failed_uid INTEGER,
+    failed_count INTEGER NOT NULL DEFAULT 0
   );
   -- Elk bericht dat de app gezien heeft, ook als het gelezen, gearchiveerd of verplaatst is.
   CREATE TABLE mail_messages (
