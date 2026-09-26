@@ -226,8 +226,24 @@ export class InboxService {
       tasks.push({ key: 'setup', kind: 'setup', icon: '👋', title: 'Maak je bedrijf compleet', question: 'We hebben nog een paar gegevens nodig voor je facturen.', actions: [{ id: 'open', label: 'Afronden', primary: true }], ref: {} });
     }
 
+    const potAccount = s.vatPotAccountId ? this.bank.listAccounts().find((a) => a.id === s.vatPotAccountId) : undefined;
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
       const who = t.counter_name || t.description.slice(0, 40) || 'Onbekend';
+      // overboeking van/naar het belastingpotje eerst: een opname uit het potje is geen omzet
+      if (potAccount && potAccount.id !== t.bank_account_id && potAccount.iban && t.counter_iban && normalizeIban(t.counter_iban) === normalizeIban(potAccount.iban)) {
+        tasks.push({
+          key: `bank-${t.id}`,
+          kind: 'bank-pot',
+          icon: '🐷',
+          title: `${formatEuro(Math.abs(t.amount))} ${t.amount < 0 ? 'naar' : 'uit'} je belastingpotje`,
+          question: t.amount < 0 ? 'Opzijgezet voor de btw. Dit telt niet als kosten.' : 'Terug van je belastingpotje (bv. om de btw te betalen).',
+          amount: t.amount,
+          actions: [{ id: 'klopt', label: 'Klopt', primary: true }],
+          group: { key: 'bank-pot', label: 'Alle overboekingen met je potje' },
+          ref: { bankTransactionId: t.id, bankAccountId: potAccount.id },
+        });
+        continue;
+      }
       const suggestions = this.matching.suggest(t);
       const inv = suggestions.find((x) => x.kind === 'factuur');
       const pur = suggestions.find((x) => x.kind === 'inkoop');
@@ -271,21 +287,6 @@ export class InboxService {
           amount: t.amount,
           actions: [{ id: 'open', label: 'Uitzoeken', primary: true }],
           ref: { bankTransactionId: t.id },
-        });
-        continue;
-      }
-      const potAccount = s.vatPotAccountId ? this.bank.listAccounts().find((a) => a.id === s.vatPotAccountId) : undefined;
-      if (potAccount && potAccount.id !== t.bank_account_id && potAccount.iban && t.counter_iban && normalizeIban(t.counter_iban) === normalizeIban(potAccount.iban)) {
-        tasks.push({
-          key: `bank-${t.id}`,
-          kind: 'bank-pot',
-          icon: '🐷',
-          title: `${formatEuro(Math.abs(t.amount))} ${t.amount < 0 ? 'naar' : 'uit'} je belastingpotje`,
-          question: t.amount < 0 ? 'Opzijgezet voor de btw. Dit telt niet als kosten.' : 'Terug van je belastingpotje (bv. om de btw te betalen).',
-          amount: t.amount,
-          actions: [{ id: 'klopt', label: 'Klopt', primary: true }],
-          group: { key: 'bank-pot', label: 'Alle overboekingen met je potje' },
-          ref: { bankTransactionId: t.id, bankAccountId: potAccount.id },
         });
         continue;
       }
@@ -423,15 +424,17 @@ export class InboxService {
             ref: { seriesId: series.id },
           });
         }
-      } else if (st.missed.length === 1) {
-        const key = `recurring-pay-${series.id}-${st.missed[0]}`;
-        if (!this.isSkipped(key)) {
+      } else {
+        // één gemiste aan het eind, of een gat tussen twee betalingen in
+        for (const due of [...st.gaps, ...st.missed]) {
+          const key = `recurring-pay-${series.id}-${due}`;
+          if (this.isSkipped(key)) continue;
           tasks.push({
             key,
             kind: 'recurring-missing-payment',
             icon: '🔁',
             title: `Afschrijving ${series.counter_name} niet gezien`,
-            question: `Rond ${formatDateNl(st.missed[0]!)} verwachtten we ongeveer ${formatEuro(series.amount)}. Is je bankafschrift bijgewerkt?`,
+            question: `Rond ${formatDateNl(due)} verwachtten we ongeveer ${formatEuro(series.amount)}. Is je bankafschrift bijgewerkt?`,
             actions: [{ id: 'ok', label: 'Klopt, niets aan de hand', primary: true }, { id: 'open', label: 'Bank bekijken' }],
             priority: 3,
             ref: { seriesId: series.id },

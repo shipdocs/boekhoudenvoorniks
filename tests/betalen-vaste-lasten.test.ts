@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import QRCode from 'qrcode';
 import jsQR from 'jsqr';
 import { setup } from './helpers';
+import { makePdf } from './pdf';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { buildEpcPayload, parseEpcPayload, purchasePaymentQr, EPC_MAX_AMOUNT } from '../src/documents/epc-qr';
 import { detectRun } from '../src/import/recurring';
+import { addMonths } from '../src/shared/dates';
 
 /** Rendert de QR-matrix naar pixels en leest hem terug met een onafhankelijke decoder. */
 function decodeQr(payload: string): string | null {
@@ -158,5 +160,70 @@ describe('belastingpotje (#33)', () => {
     const profitAfter = s.ledger.balances().filter((b) => b.category === 'omzet' || b.category === 'kosten').reduce((x, b) => x + b.balance, 0);
     expect(profitAfter).toBe(profitBefore);
     expect(s.inbox.home('2026-09-21').money.vatPot).toMatchObject({ setAside: 50000 });
+  });
+});
+
+describe('review-bevindingen #40', () => {
+  it('alleen een ISO 11649-referentie in het gestructureerde veld; een ander kenmerk gaat als omschrijving mee', () => {
+    const base = { name: 'Bouwmaat', iban: 'NL91ABNA0417164300', amount: 1000 };
+    expect(buildEpcPayload({ ...base, reference: 'RF18 5390 0754 7034' }).split('\n')[9]).toBe('RF18539007547034');
+    const nl = buildEpcPayload({ ...base, reference: '1234 5678 9012 3456' }).split('\n');
+    expect(nl[9]).toBe('');
+    expect(nl[10]).toBe('1234 5678 9012 3456');
+    expect(buildEpcPayload({ ...base, reference: 'RF19 5390 0754 7034' }).split('\n')[10]).toBe('RF19 5390 0754 7034'); // controlegetal fout
+  });
+
+  it('addMonths geeft altijd een geldige ISO-datum', () => {
+    expect(addMonths('0001-01-15', -1)).toBe('0000-12-15');
+    expect(addMonths('2024-01-31', 1)).toBe('2024-02-29');
+    expect(addMonths('2100-01-31', 1)).toBe('2100-02-28');
+  });
+
+  it('een overgeslagen afschrijving tussen twee betalingen wordt gemeld', () => {
+    const { s } = setup();
+    s.settings.update({ onboardingDone: true });
+    const kpn = (d: string) => s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: d, amount: -6100, description: 'Abonnement', counterName: 'KPN BV', counterIban: 'NL44RABO0123456789' }] });
+    for (const d of ['2026-03-03', '2026-04-03', '2026-05-04']) kpn(d);
+    s.inbox.autoProcess('2026-05-06');
+    const ask = s.inbox.tasks('2026-05-06').find((t) => t.kind === 'recurring-confirm')!;
+    s.recurring.confirm(ask.ref.seriesId!);
+    // juni ontbreekt, juli en augustus weer wel
+    for (const d of ['2026-07-03', '2026-08-03']) kpn(d);
+    const st = s.recurring.state(s.recurring.get(ask.ref.seriesId!), '2026-08-05');
+    expect(st.missed).toEqual([]);
+    expect(st.gaps).toEqual(['2026-06-04']);
+    const t = s.inbox.tasks('2026-08-05').filter((x) => x.kind === 'recurring-missing-payment');
+    expect(t.map((x) => x.key)).toEqual([`recurring-pay-${ask.ref.seriesId}-2026-06-04`]);
+  });
+
+  it('geld terug uit het belastingpotje is geen omzet', () => {
+    const { s } = setup();
+    s.settings.update({ onboardingDone: true });
+    const main = s.bank.ensureDefaultAccount('NL91ABNA0417164300');
+    const pot = s.bank.addAccount('Btw-spaarrekening', 'NL44RABO0123456789');
+    s.settings.update({ vatPotAccountId: pot.id });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-10-20', amount: 300000, description: 'Van spaarrekening', counterIban: 'NL44RABO0123456789', counterName: 'Piet' }] }, { bankAccountId: main.id });
+    const tasks = s.inbox.tasks('2026-10-21');
+    expect(tasks.find((t) => t.kind === 'bank-pot')?.title).toMatch(/uit je belastingpotje/);
+    expect(tasks.find((t) => t.kind === 'bank-income')).toBeUndefined();
+  });
+
+  it('een ontbrekende factuur kan direct aan de afschrijving gekoppeld worden', async () => {
+    const { s } = setup();
+    s.settings.update({ onboardingDone: true });
+    for (const d of ['2026-06-03', '2026-07-03', '2026-08-03']) {
+      s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: d, amount: -6100, description: 'Abonnement', counterName: 'KPN BV', counterIban: 'NL44RABO0123456789' }] });
+    }
+    s.inbox.autoProcess('2026-08-05');
+    const ask = s.inbox.tasks('2026-08-05').find((t) => t.kind === 'recurring-confirm')!;
+    s.recurring.confirm(ask.ref.seriesId!);
+    for (const t of s.bank.list({ status: 'nieuw' })) s.bank.bookToAccount(t.id, { account: 'WBedKanTel', vatCode: 'hoog' });
+    const before = s.inbox.tasks('2026-08-12').filter((t) => t.kind === 'recurring-invoice');
+    expect(before.length).toBeGreaterThan(0);
+    const txId = before[0]!.ref.bankTransactionId!;
+    const doc = await s.intake.addEvidence('kpn-juni.pdf', makePdf(['KPN B.V.', 'Factuur 2026-06', 'Totaal 61,00']), txId);
+    expect(doc.status).toBe('verwerkt');
+    expect(s.inbox.tasks('2026-08-12').filter((t) => t.kind === 'recurring-invoice').map((t) => t.ref.bankTransactionId)).not.toContain(txId);
+    expect(s.purchases.list()).toHaveLength(0); // niet dubbel geboekt
   });
 });
