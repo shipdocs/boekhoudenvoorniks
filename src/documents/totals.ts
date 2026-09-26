@@ -1,5 +1,5 @@
 import { roundHalfAwayFromZero, type Cents } from '../shared/money';
-import { SALES_VAT_RATES, type SalesVatCode } from '../shared/vat';
+import { SALES_VAT_RATES, isSalesVatCode, type SalesVatCode } from '../shared/vat';
 
 export interface LineInput {
   description: string;
@@ -61,6 +61,6 @@ export function validateLines(lines: LineInput[]): void {
     if (!l.description?.trim()) throw new Error(`Regel ${i + 1}: omschrijving ontbreekt`);
     if (!Number.isFinite(l.quantity) || l.quantity === 0) throw new Error(`Regel ${i + 1}: aantal is ongeldig`);
     if (!Number.isSafeInteger(l.unitPrice)) throw new Error(`Regel ${i + 1}: prijs is ongeldig`);
-    if (!(l.vatCode in SALES_VAT_RATES)) throw new Error(`Regel ${i + 1}: onbekende BTW-code ${l.vatCode}`);
+    if (!isSalesVatCode(l.vatCode)) throw new Error(`Regel ${i + 1}: kies een btw-tarief`);
   }
 }

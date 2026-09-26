@@ -5,6 +5,21 @@ import { formatDateNl, vatDeadline } from '../../shared/dates';
 import { VAT_DISCLAIMER } from '../../shared/legal';
 import { AccountantNotice } from './TaxYear';
 
+/** Eén regel uitleg per vak van de btw-aangifte (de officiële naam staat ervoor). */
+const RUBRIEK_UITLEG: Record<string, string> = {
+  '1a': 'je omzet met 21% btw',
+  '1b': 'je omzet met 9% btw',
+  '1e': 'omzet met 0% of btw verlegd',
+  '2a': 'btw die een onderaannemer naar jou verlegde',
+  '3a': 'verkoop aan klanten buiten de EU',
+  '3b': 'verkoop aan bedrijven in andere EU-landen',
+  '4a': 'aankopen van buiten de EU zonder btw',
+  '4b': 'aankopen uit andere EU-landen zonder btw (bv. Google, Meta)',
+  '5a': 'alle btw die je moet betalen',
+  '5b': 'btw die je terugkrijgt over je aankopen',
+  '5g': 'wat je betaalt of terugkrijgt',
+};
+
 export function Tax({ periodKey }: { periodKey?: string }) {
   const { settings, meta, toast, go } = useApp();
   const { run, busy } = useAction();
@@ -24,9 +39,9 @@ export function Tax({ periodKey }: { periodKey?: string }) {
       <div className="page-narrow">
         <h1>Belasting</h1>
         <div className="card">
-          <h3>Je gebruikt de kleineondernemersregeling (KOR)</h3>
-          <p className="muted">Je rekent geen BTW en hoeft geen BTW-aangifte te doen. Houd je omzet in de gaten: boven € 20.000 per jaar vervalt de KOR.</p>
-          <Button onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>BTW-instellingen</Button>
+          <h3>Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw omdat je weinig omzet hebt</h3>
+          <p className="muted">Je rekent geen btw en hoeft geen btw-aangifte te doen. Houd je omzet in de gaten: boven € 20.000 per jaar vervalt de KOR.</p>
+          <Button onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Btw-instellingen</Button>
         </div>
         <IncomeTaxCard />
       </div>
@@ -44,7 +59,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
   return (
     <div className="page">
       <h1>Belasting</h1>
-      <p className="sub">Wij rekenen je BTW uit. Jij hoeft alleen de bedragen over te nemen.</p>
+      <p className="sub">Wij rekenen je btw uit. Jij hoeft alleen de bedragen over te nemen.</p>
 
       <div className="row" style={{ marginBottom: 16 }}>
         <select value={year} onChange={(e) => { setYear(Number(e.target.value)); setKey(undefined); }} aria-label="Jaar">
@@ -63,16 +78,16 @@ export function Tax({ periodKey }: { periodKey?: string }) {
       {r && (
         <>
           <div className="card">
-            <h2 style={{ marginTop: 0 }}>BTW {r.period.label}</h2>
+            <h2 style={{ marginTop: 0 }}>Btw {r.period.label}</h2>
             <table className="sumtable">
               <tbody>
                 <tr><td>Omzet</td><td><Euro cents={r.summary.omzet} /></td></tr>
-                <tr><td>BTW die je hebt ontvangen</td><td><Euro cents={r.summary.btwOverOmzet} /></td></tr>
-                {r.summary.btwVerlegd !== 0 && <tr><td>Verlegde btw op inkoop (aangeven én aftrekken)</td><td><Euro cents={r.summary.btwVerlegd} /></td></tr>}
-                <tr><td>BTW die je terugkrijgt (aankopen)</td><td><Euro cents={-r.summary.voorbelasting} /></td></tr>
+                <tr><td>Btw die je hebt ontvangen</td><td><Euro cents={r.summary.btwOverOmzet} /></td></tr>
+                {r.summary.btwVerlegd !== 0 && <tr><td>Btw die naar jou is verlegd (door een onderaannemer of een buitenlandse leverancier; je betaalt hem en krijgt hem tegelijk terug: kost je niets)</td><td><Euro cents={r.summary.btwVerlegd} /></td></tr>}
+                <tr><td>Min: btw die je terugkrijgt (aankopen)</td><td><Euro cents={r.summary.voorbelasting} /></td></tr>
                 <tr className="total"><td>{r.summary.teBetalen >= 0 ? 'Te betalen' : 'Je krijgt terug'}</td><td><Euro cents={Math.abs(r.summary.teBetalen)} /></td></tr>
                 {r.corrections.filter((c) => !c.suppletie).map((c) => (
-                  <tr key={c.periodKey} className="muted small"><td>Waarvan correctie op {c.label}</td><td><Euro cents={c.btw} /></td></tr>
+                  <tr key={c.periodKey} className="muted small"><td>Waarvan verbetering van {c.label}</td><td><Euro cents={c.btw} /></td></tr>
                 ))}
               </tbody>
             </table>
@@ -81,14 +96,14 @@ export function Tax({ periodKey }: { periodKey?: string }) {
             )}
             {r.corrections.filter((c) => c.suppletie).map((c) => (
               <div key={c.periodKey} className="notice warn">
-                <strong>Suppletie nodig voor {c.label}:</strong> er is achteraf <Euro cents={Math.abs(c.btw)} /> btw {c.btw >= 0 ? 'bijgekomen' : 'afgegaan'}. Dat is meer dan € 1.000, dus dat verbeter je apart in Mijn Belastingdienst Zakelijk. Het zit niet in de bedragen hierboven.
+                <strong>Oude aangifte verbeteren ({c.label}):</strong> er is achteraf <Euro cents={Math.abs(c.btw)} /> btw {c.btw >= 0 ? 'bijgekomen' : 'afgegaan'}. Dat is meer dan € 1.000, dus dat verbeter je apart in Mijn Belastingdienst Zakelijk (dat heet een "suppletie"). Het zit niet in de bedragen hierboven.
                 <div className="row" style={{ marginTop: 8 }}>
-                  <Button small onClick={() => void run(() => api.app.openExternal(meta.vatSuppletieUrl))}>Hoe werkt een suppletie?</Button>
+                  <Button small onClick={() => void run(() => api.app.openExternal(meta.vatSuppletieUrl))}>Hoe verbeter ik een aangifte?</Button>
                   <Button small disabled={busy} onClick={async () => {
-                    if (!confirm(`Heb je de suppletie voor ${c.label} verstuurd?`)) return;
-                    await run(() => api.vat.markSuppletieSubmitted(c.periodKey), 'Suppletie vastgelegd ✓');
+                    if (!confirm(`Heb je de verbetering voor ${c.label} verstuurd?`)) return;
+                    await run(() => api.vat.markSuppletieSubmitted(c.periodKey), 'Verbetering vastgelegd ✓');
                     await report.reload();
-                  }}>Suppletie is gedaan</Button>
+                  }}>Verbetering is verstuurd</Button>
                 </div>
               </div>
             ))}
@@ -97,7 +112,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
             ) : (
               deadline && r.summary.teBetalen > 0 && <p style={{ marginTop: 14 }}>Zorg dat uiterlijk <strong>{formatDateNl(deadline)}</strong> ongeveer <strong><Euro cents={r.summary.teBetalen} /></strong> beschikbaar is.</p>
             )}
-            {r.warnings.filter((w) => !/suppletie-aangifte/.test(w)).map((w) => <div key={w} className="notice warn">{w}</div>)}
+            {r.warnings.filter((w) => !/suppletie/.test(w)).map((w) => <div key={w} className="notice warn">{w}</div>)}
             {r.status !== 'ingediend' && (checks.data ?? []).length > 0 && (
               <div style={{ marginTop: 14 }}>
                 <strong>Even controleren vóór je aangifte doet</strong>
@@ -132,14 +147,14 @@ export function Tax({ periodKey }: { periodKey?: string }) {
 
           {details && (
             <div className="card" style={{ marginTop: 14 }}>
-              <h2 style={{ marginTop: 0 }}>BTW-aangifte {r.period.label}</h2>
+              <h2 style={{ marginTop: 0 }}>Btw-aangifte {r.period.label}</h2>
               <p className="muted small">Neem deze bedragen over in Mijn Belastingdienst Zakelijk. Klik op een bedrag om het te kopiëren. Bedragen zijn in hele euro's, afgerond in jouw voordeel.</p>
               <div className="notice small">{VAT_DISCLAIMER}</div>
-              <div className="rubriek small muted"><span>Vak</span><span /><span className="num">Omzet</span><span className="num">Omzetbelasting</span></div>
+              <div className="rubriek small muted"><span>Vak</span><span /><span className="num">Omzet</span><span className="num">Btw</span></div>
               {r.rubrieken.filter((x) => x.code !== '5c' && !(/^[34]/.test(x.code) && !x.omzet && !x.btw)).map((x) => (
                 <div key={x.code} className="rubriek">
                   <strong>{x.code}</strong>
-                  <span>{x.label}</span>
+                  <span>{x.label}{RUBRIEK_UITLEG[x.code] && <span className="small muted"> · {RUBRIEK_UITLEG[x.code]}</span>}</span>
                   <span className="num">{x.omzetEuro !== null && <span className="copy" onClick={() => copy(x.omzetEuro)}>€ {x.omzetEuro.toLocaleString('nl-NL')}</span>}</span>
                   <span className="num">{x.btwEuro !== null && <span className="copy" onClick={() => copy(x.btwEuro)}>€ {x.btwEuro.toLocaleString('nl-NL')}</span>}</span>
                 </div>
@@ -183,8 +198,8 @@ function IcpCard({ periodKey }: { periodKey: string }) {
   if (!icp.data || icp.data.lines.length === 0) return null;
   return (
     <div className="card" style={{ marginTop: 14 }}>
-      <h2 style={{ marginTop: 0 }}>Opgaaf ICP {icp.data.period.label}</h2>
-      <p className="muted small">Verkopen aan bedrijven in andere EU-landen (rubriek 3b). Geef deze per klant op in Mijn Belastingdienst Zakelijk (opgaaf intracommunautaire prestaties) en kies daar per regel goederen of diensten.</p>
+      <h2 style={{ marginTop: 0 }}>Verkopen aan EU-bedrijven {icp.data.period.label} (ICP-opgaaf)</h2>
+      <p className="muted small">Deze verkopen geef je apart op in Mijn Belastingdienst Zakelijk, per klant. Kies daar per regel "goederen" of "diensten".</p>
       <table>
         <thead><tr><th>Land</th><th>Btw-nummer</th><th>Klant</th><th className="num">Bedrag</th></tr></thead>
         <tbody>
@@ -206,7 +221,7 @@ function IcpCard({ periodKey }: { periodKey: string }) {
   );
 }
 
-const BUITENLAND_TEXT = 'Nog niet door een fiscalist gecontroleerd. Controleer de bedragen en btw-nummers (bv. via VIES) voordat je de opgaaf doet.';
+const BUITENLAND_TEXT = 'Nog niet door een belastingexpert nagekeken. Controleer de btw-nummers op de EU-site "VIES" voordat je de opgaaf doet, of laat je boekhouder meekijken.';
 
 /** Schatting inkomstenbelasting (#33 fase 2). Altijd als schatting gemarkeerd; uit te zetten in Instellingen. */
 function IncomeTaxCard() {
@@ -223,9 +238,9 @@ function IncomeTaxCard() {
       <AccountantNotice compact />
       <p>
         Winst tot nu: <strong><Euro cents={e.profitToDate} /></strong>. Doorgetrokken naar het hele jaar: <Euro cents={e.profitYear} />.<br />
-        Geschatte inkomstenbelasting + Zvw-bijdrage over {e.year}: <strong>± <Euro cents={e.taxYear} /></strong>.<br />
-        Zet daarvan nu ongeveer <strong>± <Euro cents={e.reserveToDate} /></strong> opzij (naar rato van het jaar tot nu).<br />
-        <span className="small muted">Vuistregel: zet elke maand 30 à 40% van je winst apart voor inkomstenbelasting en Zvw. Door de lagere zelfstandigenaftrek eerder aan de bovenkant.</span>
+        Geschatte inkomstenbelasting + zorgpremie (Zvw) over {e.year}: <strong>± <Euro cents={e.taxYear} /></strong>.<br />
+        Zet daarvan nu ongeveer <strong>± <Euro cents={e.reserveToDate} /></strong> opzij (voor het deel van het jaar dat al voorbij is).<br />
+        <span className="small muted">Vuistregel: zet elke maand 30 à 40% van je winst apart voor inkomstenbelasting en Zvw. Kies liever 40%: de aftrek voor zzp'ers wordt elk jaar kleiner.</span>
       </p>
       <Button small onClick={() => setOpen((o) => !o)}>{open ? 'Verberg berekening' : 'Hoe is dit berekend?'}</Button>
       {open && (
@@ -233,27 +248,27 @@ function IncomeTaxCard() {
           <table>
             <tbody>
               <tr><td>Winst (heel jaar, geschat)</td><td className="num">{euro(b.profit)}</td></tr>
-              {b.bijtellingen > 0 && <tr><td>+ Bijtellingen (representatie, verkoop bedrijfsmiddel)</td><td className="num">{euro(b.bijtellingen)}</td></tr>}
-              {b.kia > 0 && <tr><td>− Investeringsaftrek (KIA)</td><td className="num">{euro(b.kia)}</td></tr>}
-              <tr><td>− Zelfstandigenaftrek</td><td className="num">{euro(b.zelfstandigenaftrek)}</td></tr>
-              {b.startersaftrek > 0 && <tr><td>− Startersaftrek</td><td className="num">{euro(b.startersaftrek)}</td></tr>}
-              <tr><td>− MKB-winstvrijstelling</td><td className="num">{euro(b.mkbWinstvrijstelling)}</td></tr>
-              <tr><td>= Belastbaar inkomen</td><td className="num">{euro(b.taxableIncome)}</td></tr>
-              <tr><td>Belasting box 1</td><td className="num">{euro(b.box1)}</td></tr>
-              <tr><td>− Heffingskortingen (algemeen + arbeid)</td><td className="num">{euro(b.heffingskortingen)}</td></tr>
-              <tr><td>+ Bijdrage Zvw</td><td className="num">{euro(b.zvw)}</td></tr>
+              {b.bijtellingen > 0 && <tr><td>+ Niet (helemaal) aftrekbaar (etentjes, privédeel telefoon, verkochte investering)</td><td className="num">{euro(b.bijtellingen)}</td></tr>}
+              {b.kia > 0 && <tr><td>− Extra aftrek voor investeringen (KIA)</td><td className="num">{euro(b.kia)}</td></tr>}
+              <tr><td>− Aftrek voor zelfstandigen</td><td className="num">{euro(b.zelfstandigenaftrek)}</td></tr>
+              {b.startersaftrek > 0 && <tr><td>− Extra aftrek voor starters</td><td className="num">{euro(b.startersaftrek)}</td></tr>}
+              <tr><td>− Korting voor kleine bedrijven <span className="muted">(vast deel van je winst is onbelast)</span></td><td className="num">{euro(b.mkbWinstvrijstelling)}</td></tr>
+              <tr><td>= Hierover betaal je belasting</td><td className="num">{euro(b.taxableIncome)}</td></tr>
+              <tr><td>Inkomstenbelasting</td><td className="num">{euro(b.box1)}</td></tr>
+              <tr><td>− Kortingen die iedereen krijgt (heffingskortingen)</td><td className="num">{euro(b.heffingskortingen)}</td></tr>
+              <tr><td>+ Zorgpremie (Zvw)</td><td className="num">{euro(b.zvw)}</td></tr>
               <tr><td><strong>Totaal</strong></td><td className="num"><strong>{euro(b.total)}</strong></td></tr>
             </tbody>
           </table>
-          <p className="muted">Tarieven van {e.rulesYear}{e.rulesYear !== e.year ? ` (voor ${e.year} nog niet bekend in de app)` : ''}{e.rulesChecked ? '' : '; deze tabel is nog niet door een fiscalist gecontroleerd'}.</p>
+          <p className="muted">Tarieven van {e.rulesYear}{e.rulesYear !== e.year ? ` (voor ${e.year} nog niet bekend in de app)` : ''}{e.rulesChecked ? '' : '; deze bedragen zijn nog niet door een belastingexpert nagekeken'}.</p>
           <p className="muted">Niet meegenomen: {e.notIncluded.join('; ')}.</p>
         </div>
       )}
       <div className="row" style={{ marginTop: 10 }}>
-        <Button small kind="primary" onClick={() => go({ screen: 'aangifte' })}>Aftrekposten, bedrijfsmiddelen en kilometers</Button>
+        <Button small kind="primary" onClick={() => go({ screen: 'aangifte' })}>Aftrek, investeringen en kilometers</Button>
       </div>
       <p className="muted small" style={{ marginTop: 10 }}>
-        <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Urencriterium aanpassen of de schatting uitzetten</span>
+        <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Werk je 1.225 uur per jaar aan je bedrijf? Aanpassen, of de schatting uitzetten</span>
       </p>
     </div>
   );

@@ -79,7 +79,7 @@ export function App() {
     })();
     refreshBadge();
     return window.bridge.onEvent((event, payload) => {
-      if (event === 'reminders') toast(`${(payload as { sent: number }).sent} betalingsherinnering(en) verstuurd`);
+      if (event === 'reminders') toast(`${(payload as { sent: number }).sent} ${(payload as { sent: number }).sent === 1 ? 'herinnering' : 'herinneringen'} om te betalen verstuurd`);
       if (event === 'auto-processed') refreshBadge();
       if (event === 'reminders-failed') toast('Een of meer herinneringen konden niet verstuurd worden', 'error');
     });

@@ -101,7 +101,7 @@ export function Home() {
         </div>
         <div className="card clickable" onClick={() => go({ screen: 'belasting' })}>
           <div className="value">± <Euro cents={data.money.vatReserve} /></div>
-          <div className="label">apart houden voor BTW</div>
+          <div className="label">apart houden voor btw</div>
           {data.money.vatPot && (
             <div className="small" style={{ marginTop: 6 }}>
               🐷 <Euro cents={data.money.vatPot.setAside} /> in {data.money.vatPot.account}
@@ -112,12 +112,12 @@ export function Home() {
       </div>
 
       <p className="muted small" style={{ marginTop: -6 }}>
-        Vrij te besteden: <strong><Euro cents={data.money.freeToSpend} /></strong> <span title="banksaldo min de btw die je nog moet betalen en je openstaande rekeningen">(banksaldo min btw en openstaande rekeningen)</span>
+        Vrij te besteden: <strong><Euro cents={data.money.freeToSpend} /></strong> <span>(wat op de bank staat, min btw en rekeningen die je nog moet betalen)</span>
         {ib.data && ib.data.reserveToDate > 0 && (
           <>
             {' · '}
             <span className="clickable" title={ib.data.disclaimer} onClick={() => go({ screen: 'belasting' })}>
-              inkomstenbelasting tot nu ± <Euro cents={ib.data.reserveToDate} /> <em>(schatting, laten controleren door je boekhouder)</em>, daarna vrij ± <Euro cents={Math.max(0, data.money.freeToSpend - ib.data.reserveToDate)} />
+              zet ook ± <Euro cents={ib.data.reserveToDate} /> apart voor inkomstenbelasting <em>(schatting)</em>
             </span>
           </>
         )}
@@ -133,7 +133,7 @@ export function Home() {
         <button className="btn big" onClick={() => go({ screen: 'belasting' })}><span className="emoji">📮</span>Belasting</button>
       </div>
 
-      <h2>{data.upToDate ? 'Je bent bij' : data.tasks.length === 1 ? 'Nog 1 ding en je bent klaar' : `Nog ${data.tasks.length} dingen en je bent klaar`}</h2>
+      <h2>{data.upToDate ? 'Je bent helemaal bij ✓' : data.tasks.length === 1 ? 'Nog 1 ding en je bent klaar' : `Nog ${data.tasks.length} dingen en je bent klaar`}</h2>
       {data.upToDate ? (
         <div className="card done-box">
           <div className="check">✓</div>
@@ -194,7 +194,7 @@ export function Home() {
           <span>🟡 {data.monthCounts.byUser} door jou gecontroleerd</span>
           <span>🔴 {data.monthCounts.attention} {data.monthCounts.attention === 1 ? 'heeft' : 'hebben'} nog aandacht</span>
         </div>
-        {data.monthCounts.automatic > 0 && <Button small kind="ghost" onClick={() => setMonthOpen(true)}>Bekijk wat automatisch ging</Button>}
+        {data.monthCounts.automatic > 0 && <Button small kind="ghost" onClick={() => setMonthOpen(true)}>Wat de app deze maand zelf deed</Button>}
       </div>
 
       {data.automated.length > 0 && (
@@ -208,7 +208,7 @@ export function Home() {
 
       {data.vat.estimate !== 0 && (
         <p className="muted small" style={{ marginTop: 18 }}>
-          BTW {data.vat.periodLabel} tot nu toe: <Euro cents={data.vat.estimate} /> — aangeven vóór {data.vat.deadlineLabel}.
+          Btw {data.vat.periodLabel} tot nu toe: <Euro cents={data.vat.estimate} />. Aangifte doen vóór {data.vat.deadlineLabel}.
         </p>
       )}
 
@@ -257,7 +257,7 @@ function AutomationList({ items, expert, onChanged }: { items: AutomationEntry[]
               <button className="linklike" onClick={() => setOpen(open === a.id ? null : a.id)}>Waarom?</button>
               {a.status === 'auto' && (
                 <Button small kind="ghost" disabled={busy} onClick={async () => {
-                  if (!confirm('Terugdraaien? Het komt dan weer als vraag bij "Nog te doen", en de app vraagt het voortaan weer.')) return;
+                  if (!confirm('Terugdraaien? Dan vraagt de app het je weer op Vandaag, en voortaan ook.')) return;
                   await run(() => api.home.correct(a.id), 'Teruggedraaid');
                   await onChanged();
                 }}>Klopt niet</Button>
@@ -280,7 +280,7 @@ function MonthModal({ expert, onClose, onChanged }: { expert: boolean; onClose: 
   const month = useLoad(() => api.home.month());
   const m = month.data;
   return (
-    <Modal title="Wat ging er automatisch deze maand" onClose={onClose}>
+    <Modal title="Wat de app deze maand zelf deed" onClose={onClose}>
       <ErrorBox error={month.error} />
       {m && (
         <>

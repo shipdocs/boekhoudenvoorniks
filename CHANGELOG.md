@@ -2,6 +2,13 @@
 
 ## Nog niet uitgebracht
 
+### Duidelijker
+- **Alle teksten in gewone taal nagelopen** (meldingen, knoppen, foutmeldingen, taken op Vandaag). Vaktaal
+  is vervangen of in één regel uitgelegd. Wat echt voor de boekhouder is, staat bij *Notities voor je
+  boekhouder* in het jaaroverzicht en gaat mee met "Kopieer voor je boekhouder".
+- Interne boekhoudfouten verschijnen niet meer als vaktaal, maar als een gewone melding.
+- Overal "btw" (zoals de Belastingdienst het schrijft).
+
 ### Nieuw
 - **Aftrekposten** (Belasting → Aftrekposten, bedrijfsmiddelen en kilometers):
   - **Bedrijfsmiddelen en afschrijving**: aankopen vanaf € 450 worden bedrijfsmiddelen. De app schrijft ze

@@ -93,7 +93,7 @@ const safeLabel = (key: string) => {
 
 /** #16: buitenland is gebouwd zonder fiscale review; altijd tonen als deze rubrieken gevuld zijn. */
 export const BUITENLAND_DISCLAIMER =
-  'Let op: de rubrieken voor het buitenland (3a, 3b, 4a, 4b) zijn nog niet door een fiscalist gecontroleerd. Controleer ze voordat je de aangifte doet. Verkoop je aan particulieren in andere EU-landen (webshop), dan geldt vaak de OSS-regeling; die zit niet in deze app.';
+  'Let op: verkoop en inkoop in het buitenland zijn in de app nog niet door een belastingexpert nagekeken. Laat die bedragen controleren voordat je de aangifte doet. Verkoop je via een webshop aan particulieren in andere EU-landen? Dat kan de app nog niet: vraag je boekhouder.';
 
 export const PORTAL_URL = 'https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-aangifte-doen';
 
@@ -169,7 +169,7 @@ export class VatService {
     return tx(this.db, () => {
       const c = this.corrections().find((x) => x.periodKey === correctionPeriodKey);
       if (!c) throw new ValidationError(`Er staan geen correcties open voor ${safeLabel(correctionPeriodKey)}`);
-      if (!c.suppletie) throw new ValidationError(`De correctie op ${c.label} is € 1.000 of minder en gaat mee in de gewone aangifte, niet via een suppletie`);
+      if (!c.suppletie) throw new ValidationError(`Het verschil over ${c.label} is € 1.000 of minder. Dat gaat vanzelf mee in je volgende aangifte`);
       const rows = this.db
         .prepare(
           `SELECT a.rgs_code, SUM(l.credit) - SUM(l.debit) AS net
@@ -249,20 +249,18 @@ export class VatService {
     const warnings: string[] = [];
     // onverwerkte banktransacties e.d.: zie checks() (#20)
     const drafts = (this.db.prepare(`SELECT COUNT(*) AS n FROM invoices WHERE status = 'concept' AND invoice_date BETWEEN ? AND ?`).get(period.start, period.end) as { n: number }).n;
-    if (drafts > 0) warnings.push(`Er staan nog ${drafts} conceptfacturen in deze periode. Die tellen pas mee als ze definitief zijn.`);
-    if (this.settings.get().kor) warnings.push('Je gebruikt de kleineondernemersregeling (KOR): je hoeft in principe geen BTW-aangifte te doen.');
-    if (omzetVrijgesteld !== 0 && !this.settings.get().kor) warnings.push('Er is omzet geboekt als vrijgesteld/KOR terwijl KOR niet aan staat. Controleer dit.');
+    if (drafts > 0) warnings.push(`${drafts} ${drafts === 1 ? 'factuur is' : 'facturen zijn'} in deze periode nog niet verstuurd. Die tellen pas mee als je ze verstuurt of definitief maakt.`);
+    if (this.settings.get().kor) warnings.push('Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw en hoeft in principe geen btw-aangifte te doen.');
+    if (omzetVrijgesteld !== 0 && !this.settings.get().kor) warnings.push('Er staan factuurregels zonder btw ("Vrijgesteld / KOR"), maar je gebruikt de KOR niet. Kijk die facturen na.');
     for (const c of corrections) {
       if (c.suppletie) {
-        warnings.push(`Er is ${formatEuro(Math.abs(c.btw))} btw gecorrigeerd over ${c.label}. Dat is meer dan € 1.000, dus dat gaat via een suppletie-aangifte. Het zit niet in de bedragen hieronder.`);
+        warnings.push(`Er is ${formatEuro(Math.abs(c.btw))} btw gecorrigeerd over ${c.label}. Dat is meer dan € 1.000: dat verbeter je apart in Mijn Belastingdienst Zakelijk (een "suppletie"). Het zit niet in de bedragen hieronder.`);
       }
     }
     if (omzetExport !== 0 || omzetIcp !== 0 || btwBuitenEu !== 0 || btwEu !== 0) {
       warnings.push(BUITENLAND_DISCLAIMER);
     }
-    if (omzetIcp !== 0) warnings.push('Je hebt aan bedrijven in andere EU-landen verkocht (3b). Doe daarnaast de opgaaf intracommunautaire prestaties (ICP); het overzicht staat hieronder.');
-    const rounding = btwHoog - (r1a.btwEuro ?? 0) * 100;
-    if (Math.abs(rounding) > 100) warnings.push('Controleer de afronding van rubriek 1a.');
+    if (omzetIcp !== 0) warnings.push('Je verkocht aan bedrijven in andere EU-landen. Dat geef je ook apart op (de "ICP-opgaaf"); het overzicht staat hieronder.');
 
     const stored = this.db.prepare('SELECT status, submitted_at FROM vat_periods WHERE period_key = ?').get(period.key) as { status: 'concept' | 'ingediend'; submitted_at: string | null } | undefined;
     return {
@@ -319,7 +317,7 @@ export class VatService {
       const problems: string[] = [];
       if (!vatNumber) problems.push('btw-nummer ontbreekt');
       else if (!/^[A-Z]{2}[0-9A-Z]{2,13}$/.test(vatNumber)) problems.push('btw-nummer lijkt niet geldig');
-      else if (vatNumber.startsWith('NL')) problems.push('Nederlands btw-nummer: dit is geen ICP');
+      else if (vatNumber.startsWith('NL')) problems.push('Dit is een Nederlands btw-nummer: kies bij deze factuur gewoon 21% of 9%');
       return {
         relationId: r.relation_id,
         name: r.name ?? 'Onbekende klant',

@@ -18,6 +18,8 @@ export interface VatRateInfo {
   code: VatCode;
   label: string;
   percentage: number;
+  /** keuze in gewone taal in de app (het `label` komt op de factuur) */
+  pickLabel?: string;
   /** Rubriek op de BTW-aangifte waar de omzet (en evt. btw) in valt. */
   rubriek: string;
 }
@@ -26,28 +28,29 @@ export const SALES_VAT_RATES: Record<SalesVatCode, VatRateInfo> = {
   hoog: { code: 'hoog', label: '21% (hoog)', percentage: 21, rubriek: '1a' },
   laag: { code: 'laag', label: '9% (laag)', percentage: 9, rubriek: '1b' },
   nul: { code: 'nul', label: '0%', percentage: 0, rubriek: '1e' },
-  verlegd: { code: 'verlegd', label: 'BTW verlegd', percentage: 0, rubriek: '1e' },
-  vrijgesteld: { code: 'vrijgesteld', label: 'Vrijgesteld / KOR', percentage: 0, rubriek: '-' },
-  icp: { code: 'icp', label: 'Bedrijf in de EU (0%, ICP)', percentage: 0, rubriek: '3b' },
-  export: { code: 'export', label: 'Uitvoer buiten de EU (0%)', percentage: 0, rubriek: '3a' },
+  verlegd: { code: 'verlegd', label: 'BTW verlegd', pickLabel: 'Btw verlegd (je werkt als onderaannemer; je klant regelt de btw)', percentage: 0, rubriek: '1e' },
+  vrijgesteld: { code: 'vrijgesteld', label: 'Vrijgesteld / KOR', pickLabel: 'Geen btw (vrijgesteld of KOR)', percentage: 0, rubriek: '-' },
+  icp: { code: 'icp', label: 'Bedrijf in de EU (0%, ICP)', pickLabel: 'Bedrijf in een ander EU-land (0%)', percentage: 0, rubriek: '3b' },
+  export: { code: 'export', label: 'Uitvoer buiten de EU (0%)', pickLabel: 'Klant buiten de EU (0%)', percentage: 0, rubriek: '3a' },
 };
 
 export const PURCHASE_VAT_RATES: Record<PurchaseVatCode, VatRateInfo> = {
   hoog: { code: 'hoog', label: '21% (hoog)', percentage: 21, rubriek: '5b' },
   laag: { code: 'laag', label: '9% (laag)', percentage: 9, rubriek: '5b' },
   nul: { code: 'nul', label: '0%', percentage: 0, rubriek: '-' },
-  verlegd: { code: 'verlegd', label: 'BTW verlegd naar mij', percentage: 21, rubriek: '2a' },
-  eu: { code: 'eu', label: 'Verlegd, leverancier in de EU', percentage: 21, rubriek: '4b' },
-  'buiten-eu': { code: 'buiten-eu', label: 'Verlegd, leverancier buiten de EU', percentage: 21, rubriek: '4a' },
-  geen: { code: 'geen', label: 'Geen BTW', percentage: 0, rubriek: '-' },
+  verlegd: { code: 'verlegd', label: 'Btw verlegd naar mij (onderaannemer, geen btw op de factuur)', percentage: 21, rubriek: '2a' },
+  eu: { code: 'eu', label: 'Buitenlandse leverancier in de EU, geen btw op de factuur (bv. Google, Meta)', percentage: 21, rubriek: '4b' },
+  'buiten-eu': { code: 'buiten-eu', label: 'Leverancier buiten de EU, geen btw op de factuur', percentage: 21, rubriek: '4a' },
+  geen: { code: 'geen', label: 'Geen btw', percentage: 0, rubriek: '-' },
 };
 
 export function isSalesVatCode(code: string): code is SalesVatCode {
-  return code in SALES_VAT_RATES;
+  // hasOwn: 'toString' e.d. van het prototype tellen niet als btw-code
+  return typeof code === 'string' && Object.hasOwn(SALES_VAT_RATES, code);
 }
 
 export function isPurchaseVatCode(code: string): code is PurchaseVatCode {
-  return code in PURCHASE_VAT_RATES;
+  return typeof code === 'string' && Object.hasOwn(PURCHASE_VAT_RATES, code);
 }
 
 /** EU-lidstaten (landcode zoals in adressen en IBAN; Griekenland = GR, in btw-nummers EL). */

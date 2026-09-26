@@ -178,7 +178,7 @@ describe('ingebouwde tekstherkenning: gebruiken (#9)', () => {
     const r = await s.intake.extract('bon.heic', new Uint8Array([1]));
     expect(r.source).toBe('geen');
     expect(r.issues[0]!.message).toMatch(/jpg of png/);
-    expect(() => new LlamaCppOcrProvider('x', 'http://example.com', fetch as never)).toThrow(/lokaal/);
+    expect(() => new LlamaCppOcrProvider('x', 'http://example.com', fetch as never)).toThrow(/deze computer/);
   });
 
   it('markdown en HTML van het model worden gewone regels', () => {

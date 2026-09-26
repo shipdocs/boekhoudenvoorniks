@@ -52,7 +52,7 @@ export class LlamaCppOcrProvider implements OcrProvider {
     label?: string,
   ) {
     const u = new URL(baseUrl);
-    if (!['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) throw new Error('OCR moet lokaal draaien (localhost)');
+    if (!['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) throw new Error('Slimme herkenning moet op deze computer draaien (localhost)');
     this.label = label ?? `Ingebouwde herkenning (${id})`;
   }
 
@@ -94,7 +94,7 @@ export class LlamaCppOcrProvider implements OcrProvider {
         stream: false,
       }),
     });
-    if (!res.ok) throw new Error(`Tekstherkenning mislukt (HTTP ${res.status})`);
+    if (!res.ok) throw new Error(`Slimme herkenning werkt nu niet (fout ${res.status}). Vul de gegevens zelf in.`);
     const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
     const content = body.choices?.[0]?.message?.content ?? '';
     return { items: textToItems(content) };

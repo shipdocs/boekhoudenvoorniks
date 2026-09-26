@@ -76,13 +76,13 @@ export class TemplateService {
 
   get(id: number): DocumentTemplate {
     const row = this.db.prepare('SELECT * FROM templates WHERE id = ?').get(id) as Row | undefined;
-    if (!row) throw new Error(`Template ${id} bestaat niet`);
+    if (!row) throw new Error('Deze opmaak bestaat niet (meer)');
     return parse(row);
   }
 
   getDefault(type: TemplateType): DocumentTemplate {
     const row = this.db.prepare('SELECT * FROM templates WHERE type = ? ORDER BY is_default DESC, id LIMIT 1').get(type) as Row | undefined;
-    if (!row) throw new Error(`Geen template voor ${type}`);
+    if (!row) throw new Error(`Er is nog geen opmaak voor ${type}`);
     return parse(row);
   }
 
@@ -116,9 +116,9 @@ export class TemplateService {
 
   delete(id: number): void {
     const t = this.get(id);
-    if (t.is_default) throw new Error('Het standaardtemplate kan niet verwijderd worden');
+    if (t.is_default) throw new Error('De standaardopmaak kun je niet verwijderen');
     const used = this.db.prepare('SELECT (SELECT COUNT(*) FROM invoices WHERE template_id = ?) + (SELECT COUNT(*) FROM quotes WHERE template_id = ?) AS n').get(id, id) as { n: number };
-    if (used.n > 0) throw new Error('Template is in gebruik door documenten en kan niet verwijderd worden');
+    if (used.n > 0) throw new Error('Deze opmaak wordt gebruikt door facturen of offertes en kan niet weg');
     this.db.prepare('DELETE FROM templates WHERE id = ?').run(id);
   }
 

@@ -49,3 +49,14 @@ describe('money', () => {
     expect(addDays('2026-12-25', 14)).toBe('2027-01-08');
   });
 });
+
+describe('btw-codes', () => {
+  it('namen van het prototype (toString) zijn geen btw-code', async () => {
+    const { isSalesVatCode, isPurchaseVatCode } = await import('../src/shared/vat');
+    const { validateLines } = await import('../src/documents/totals');
+    expect(isSalesVatCode('toString')).toBe(false);
+    expect(isPurchaseVatCode('constructor')).toBe(false);
+    expect(isSalesVatCode('hoog')).toBe(true);
+    expect(() => validateLines([{ description: 'x', quantity: 1, unitPrice: 100, vatCode: 'toString' as never }])).toThrow(/btw-tarief/);
+  });
+});

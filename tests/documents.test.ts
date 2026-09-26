@@ -47,8 +47,8 @@ describe('facturen', () => {
     expect(s.ledger.balance(ACCOUNTS.debiteuren)).toBe(121000);
     expect(s.ledger.balance(ACCOUNTS.omzetHoog)).toBe(-100000);
     expect(s.ledger.balance(ACCOUNTS.btwAfdragenHoog)).toBe(-21000);
-    expect(() => s.invoices.updateDraft(inv.id, { notes: 'x' })).toThrow(/concepten/);
-    expect(() => s.invoices.deleteDraft(inv.id)).toThrow(/bewaarplicht/);
+    expect(() => s.invoices.updateDraft(inv.id, { notes: 'x' })).toThrow(/niet meer aanpassen/);
+    expect(() => s.invoices.deleteDraft(inv.id)).toThrow(/7 jaar bewaren/);
   });
 
   it('nummering is doorlopend zonder gaten, ook als concepten verwijderd worden', () => {

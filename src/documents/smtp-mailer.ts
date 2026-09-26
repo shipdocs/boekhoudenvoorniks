@@ -3,7 +3,7 @@ import type { SmtpSettings } from '../settings/settings';
 import type { Mailer, MailMessage } from './sending';
 
 export function createSmtpMailer(smtp: SmtpSettings, password: string | null): Mailer {
-  if (!smtp.host || !smtp.fromEmail) throw new Error('Stel eerst de e-mailinstellingen (SMTP) in bij Instellingen');
+  if (!smtp.host || !smtp.fromEmail) throw new Error('Stel eerst je e-mail in bij Instellingen → E-mail');
   const transport = nodemailer.createTransport({
     host: smtp.host,
     port: smtp.port,
@@ -26,6 +26,7 @@ export function createSmtpMailer(smtp: SmtpSettings, password: string | null): M
 }
 
 export async function verifySmtp(smtp: SmtpSettings, password: string | null): Promise<void> {
+  if (!smtp.host || !smtp.fromEmail) throw new Error('Vul eerst de mailserver en je e-mailadres in.');
   const transport = nodemailer.createTransport({
     host: smtp.host,
     port: smtp.port,

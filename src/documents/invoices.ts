@@ -129,7 +129,7 @@ export class InvoiceService {
 
   updateDraft(id: number, input: Partial<InvoiceDraftInput>): Invoice {
     const inv = this.row(id);
-    if (inv.status !== 'concept') throw new ValidationError('Alleen concepten kunnen bewerkt worden. Maak een creditfactuur om een definitieve factuur te corrigeren.');
+    if (inv.status !== 'concept') throw new ValidationError('Een verstuurde factuur kun je niet meer aanpassen. Draai hem terug met "Factuur terugdraaien" en maak een nieuwe.');
     const relationId = input.relationId ?? inv.relation_id;
     this.relations.get(relationId);
     const date = input.invoiceDate ?? inv.invoice_date;
@@ -157,7 +157,7 @@ export class InvoiceService {
 
   deleteDraft(id: number): void {
     const inv = this.row(id);
-    if (inv.status !== 'concept') throw new ValidationError('Definitieve facturen kunnen niet verwijderd worden (bewaarplicht). Maak een creditfactuur.');
+    if (inv.status !== 'concept') throw new ValidationError('Een verstuurde factuur moet je 7 jaar bewaren en kun je niet verwijderen. Draai hem terug met "Factuur terugdraaien".');
     tx(this.db, () => {
       this.db.prepare('UPDATE quotes SET status = ? WHERE id = ? AND status = ?').run('geaccepteerd', inv.quote_id, 'gefactureerd');
       // werkbonregels komen weer vrij, en de klus is weer "klaar" als er geen andere factuur meer is (#32)
@@ -188,7 +188,7 @@ export class InvoiceService {
       const seq = this.settings.nextCounter(key);
       const number = formatDocumentNumber(s.invoiceNumberFormat, inv.invoice_date, seq);
       if (this.db.prepare('SELECT 1 FROM invoices WHERE number = ?').get(number)) {
-        throw new ValidationError(`Factuurnummer ${number} bestaat al; pas de nummerinstellingen aan`);
+        throw new ValidationError(`Factuurnummer ${number} bestaat al. Pas je factuurnummer aan bij Instellingen → Facturen & offertes`);
       }
       const totals = inv.totals;
       const entryId = this.ledger.post({
@@ -219,7 +219,7 @@ export class InvoiceService {
     if (missing.length) throw new ValidationError(`Vul eerst je bedrijfsgegevens aan bij Instellingen: ${missing.join(', ')}`);
     if (!relation.address || !relation.city) throw new ValidationError(`Adres van ${relation.name} ontbreekt (verplicht op een factuur)`);
     if (inv.lines.some((l) => needsCustomerVatNumber(l.vat_code)) && !relation.vat_number) {
-      throw new ValidationError(`Bij verlegde BTW moet het btw-nummer van ${relation.name} op de factuur staan`);
+      throw new ValidationError(`Bij btw verlegd moet het btw-nummer van ${relation.name} op de factuur staan. Vul het in bij de klant.`);
     }
     const country = countryCode(relation.country);
     if (inv.lines.some((l) => l.vat_code === 'icp') && (!country || country === 'NL' || !EU_COUNTRIES.has(country))) {
@@ -229,7 +229,7 @@ export class InvoiceService {
       throw new ValidationError(`"Uitvoer buiten de EU (0%)" is alleen voor klanten buiten de EU. Vul bij ${relation.name} het land in (bv. CH of US)`);
     }
     if (kor && inv.lines.some((l) => l.vat_percentage > 0)) {
-      throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): factuurregels mogen geen BTW bevatten');
+      throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw. Kies bij elke regel "Geen btw".');
     }
   }
 
@@ -237,10 +237,10 @@ export class InvoiceService {
     const lines: (PostLine | null)[] = [signedLine(ACCOUNTS.debiteuren, totals.total, { relationId, description: number })];
     for (const g of totals.groups) {
       const accounts = SALES_ACCOUNTS[g.vatCode];
-      if (!accounts) throw new Error(`Geen omzetrekening voor BTW-code ${g.vatCode}`);
+      if (!accounts) throw new ValidationError('Er ging iets mis met de btw-keuze op deze factuur. Kies het btw-tarief opnieuw.');
       lines.push(signedLine(accounts.revenue, -g.net, { relationId, vatCode: g.vatCode }));
       if (g.vat !== 0) {
-        if (!accounts.vat) throw new Error(`Geen BTW-rekening voor BTW-code ${g.vatCode}`);
+        if (!accounts.vat) throw new ValidationError('Er ging iets mis met de btw-keuze op deze factuur. Kies het btw-tarief opnieuw.');
         lines.push(signedLine(accounts.vat, -g.vat, { relationId, vatCode: g.vatCode }));
       }
     }
@@ -311,9 +311,9 @@ export class InvoiceService {
   writeOffRemainder(id: number, date: IsoDate = today()): Invoice {
     return tx(this.db, () => {
       const inv = this.get(id);
-      if (inv.status !== 'verzonden') throw new ValidationError('Alleen openstaande facturen kunnen afgeboekt worden');
+      if (inv.status !== 'verzonden') throw new ValidationError('Alleen bij een factuur die nog open staat kun je een klein verschil laten vallen');
       const open = inv.open_amount;
-      if (Math.abs(open) > 500) throw new ValidationError('Afboeken kan alleen voor verschillen tot € 5,00');
+      if (Math.abs(open) > 500) throw new ValidationError('Laten vallen kan alleen bij een verschil tot € 5');
       this.ledger.post({
         date,
         description: `Betalingsverschil factuur ${inv.number}`,
@@ -330,9 +330,9 @@ export class InvoiceService {
   createCreditNote(id: number): Invoice {
     const inv = this.get(id);
     if (inv.status === 'concept') throw new ValidationError('Een concept kun je gewoon aanpassen of verwijderen');
-    if (inv.credit_of_invoice_id) throw new ValidationError('Een creditfactuur kan niet gecrediteerd worden');
+    if (inv.credit_of_invoice_id) throw new ValidationError('Deze factuur is zelf al een terugdraai-factuur');
     const existing = this.db.prepare('SELECT id FROM invoices WHERE credit_of_invoice_id = ?').get(id) as { id: number } | undefined;
-    if (existing) throw new ValidationError('Er bestaat al een creditfactuur voor deze factuur');
+    if (existing) throw new ValidationError('Deze factuur is al teruggedraaid');
     const draft = this.createDraft({
       relationId: inv.relation_id,
       reference: `Creditering van factuur ${inv.number}`,
@@ -353,7 +353,7 @@ export class InvoiceService {
 
   private row(id: number): InvoiceRow {
     const row = this.db.prepare('SELECT * FROM invoices WHERE id = ?').get(id) as InvoiceRow | undefined;
-    if (!row) throw new ValidationError(`Factuur ${id} bestaat niet`);
+    if (!row) throw new ValidationError('Deze factuur bestaat niet (meer)');
     return row;
   }
 

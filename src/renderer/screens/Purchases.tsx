@@ -63,10 +63,10 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
 
       <h2>Aankopen</h2>
       {(purchases.data ?? []).length === 0 ? (
-        <Empty icon="🧾" title="Nog geen aankopen">Bonnetjes die je hier toevoegt worden automatisch verwerkt, inclusief BTW die je terugkrijgt.</Empty>
+        <Empty icon="🧾" title="Nog geen aankopen">Bonnetjes die je hier toevoegt worden automatisch verwerkt, inclusief btw die je terugkrijgt.</Empty>
       ) : (
         <table className="list">
-          <thead><tr><th>Datum</th><th>Waar</th><th>Wat</th><th>Status</th><th className="num">BTW terug</th><th className="num">Bedrag</th><th /></tr></thead>
+          <thead><tr><th>Datum</th><th>Waar</th><th>Wat</th><th>Status</th><th className="num">Btw terug</th><th className="num">Bedrag</th><th /></tr></thead>
           <tbody>
             {purchases.data!.map((p) => (
               <tr key={p.id} className={p.attachment_path ? 'clickable' : ''} onClick={() => p.attachment_path && void run(() => api.app.openAttachment(p.attachment_path!))}>
@@ -89,7 +89,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                       if (months !== null && !Number.isFinite(months)) return toast('Vul een aantal maanden in, bv. 24', 'error');
                       await run(() => api.search.setWarranty(p.id, months));
                       await purchases.reload();
-                    }}>🛡️</Button>
+                    }}>🛡️ Garantie</Button>
                   </span>
                 </td>
               </tr>
@@ -139,7 +139,7 @@ function PayModal({ id, onClose }: { id: number; onClose: () => void }) {
   );
 }
 
-/** "Bonnetje zonder foto": in mensentaal, BTW wordt automatisch berekend. */
+/** "Bonnetje zonder foto": in mensentaal, btw wordt automatisch berekend. */
 function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const { meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
@@ -158,10 +158,10 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
           <Field label="Waar gekocht?"><input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="bv. Gamma" autoFocus /></Field>
           <Field label="Wanneer?"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         </div>
-        <Field label="Bedrag op de bon" hint="inclusief BTW"><MoneyInput value={amount} onChange={setAmount} /></Field>
+        <Field label="Bedrag op de bon" hint="inclusief btw"><MoneyInput value={amount} onChange={setAmount} /></Field>
         <CategoryChoice value={category} onChange={(c) => { setCategory(c); setVat(meta.expenseCategories.find((x) => x.key === c)?.defaultVat ?? 'hoog'); }} />
         <InvestmentHint categoryKey={category} gross={amount} vatCode={vat} onUse={() => setCategory('investering')} />
-        <Field label="Stond er BTW op de bon?">
+        <Field label="Stond er btw op de bon?">
           <select value={vat} onChange={(e) => setVat(e.target.value as PurchaseVatCode)}>
             {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
           </select>
@@ -226,7 +226,7 @@ export function InvestmentHint({ categoryKey, gross, vatCode, onUse }: { categor
     <div className="notice" role="note">
       <strong>{eur(net)} excl. btw — gaat dit langer dan een jaar mee?</strong>
       <div className="small" style={{ marginTop: 4 }}>
-        Denk aan een machine, laptop, telefoon of steiger. Dan is het voor de belasting een <em>investering</em> (bedrijfsmiddel). Kies je daarvoor, dan:
+        Denk aan een machine, laptop, telefoon of steiger. Dan is het een <em>investering</em>: iets dat je jaren gebruikt. Kies je daarvoor, dan:
       </div>
       <ul className="small" style={{ margin: '6px 0', paddingLeft: 18 }}>
         {vat > 0 && <li><strong>btw:</strong> die {eur(vat)} krijg je gewoon in één keer terug bij je volgende btw-aangifte. Daar verandert niets aan.</li>}
@@ -246,22 +246,22 @@ export function InvestmentHint({ categoryKey, gross, vatCode, onUse }: { categor
 export function InvestmentSaved({ info, onClose }: { info: InvestmentSavedInfo; onClose: () => void }) {
   const { go } = useApp();
   return (
-    <Modal title="Toegevoegd aan je bedrijfsmiddelen ✓" onClose={onClose}>
+    <Modal title="Opgeslagen als investering ✓" onClose={onClose}>
       <h3 style={{ marginTop: 0 }}>Dit doet de app voor je</h3>
       <ul style={{ marginTop: 0, paddingLeft: 18 }}>
         {info.vat > 0 && <li>De btw ({eur(info.vat)}) krijg je terug bij je volgende btw-aangifte; die staat daar al in.</li>}
-        <li>Elk jaar boekt de app ± {eur(Math.round(info.net / 5))} afschrijving, 5 jaar lang. Dat verlaagt je winst, en dus je inkomstenbelasting.</li>
-        <li>Het telt mee voor de investeringsaftrek (KIA). Dat zie je terug bij Belasting → Aftrekposten → Voor je aangifte.</li>
+        <li>Elk jaar telt de app ± {eur(Math.round(info.net / 5))} als kosten, 5 jaar lang (dat heet afschrijven). Dat verlaagt je winst, en dus je inkomstenbelasting.</li>
+        <li>Het telt mee voor de investeringsaftrek (KIA). Dat zie je terug bij Belasting → Aftrek → Voor je aangifte.</li>
       </ul>
       <h3>Wat jij moet doen</h3>
       <ul style={{ marginTop: 0, paddingLeft: 18 }}>
         <li>{info.hasAttachment ? 'Niets voor de bon: die is al in de app bewaard.' : 'Bewaar de bon of factuur. Dat moet 7 jaar; voeg hem het liefst toe in de app.'}</li>
-        <li>Verkoop je het, of gooi je het weg? Zet dat dan bij Bedrijfsmiddelen ("Verkocht…"). De app rekent de rest uit.</li>
+        <li>Verkoop je het, of gooi je het weg? Zet dat dan bij Belasting → Aftrek → Investeringen (knop "Verkocht…"). De app rekent de rest uit.</li>
         <li>Laat bij je aangifte je boekhouder of accountant meekijken, zoals altijd.</li>
       </ul>
-      <p className="small muted">Toch geen investering? Pas de categorie aan bij de aankoop; de app draait de boeking dan netjes terug.</p>
+      <p className="small muted">Toch geen investering? Kies bij de aankoop een andere soort kosten; de app past het dan vanzelf aan.</p>
       <div className="row end">
-        <Button onClick={() => { onClose(); go({ screen: 'aangifte', extra: { tab: 'bedrijfsmiddelen' } }); }}>Bekijk bedrijfsmiddelen</Button>
+        <Button onClick={() => { onClose(); go({ screen: 'aangifte', extra: { tab: 'bedrijfsmiddelen' } }); }}>Bekijk je investeringen</Button>
         <Button kind="primary" onClick={onClose}>Oké</Button>
       </div>
     </Modal>

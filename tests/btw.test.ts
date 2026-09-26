@@ -79,7 +79,7 @@ describe('BTW-aangifte', () => {
     expect(q4.corrections).toMatchObject([{ periodKey: '2026-Q3', btw: 2100, suppletie: false }]);
     expect(q4.warnings.join(' ')).not.toMatch(/suppletie/);
     // kleine correctie gaat mee in de gewone aangifte, niet via een suppletie
-    expect(() => s.vat.markSuppletieSubmitted('2026-Q3')).toThrow(/gewone aangifte/);
+    expect(() => s.vat.markSuppletieSubmitted('2026-Q3')).toThrow(/volgende aangifte/);
     // de btw-toewijzing ligt vast
     expect(() => s.db.prepare(`UPDATE journal_entries SET vat_date = '2026-07-01' WHERE vat_correction_of IS NOT NULL`).run()).toThrow(/ligt vast/);
     // terugdraaien van de late boeking heft de correctie op

@@ -48,7 +48,11 @@ export function Work() {
         <>
           <ErrorBox error={invoices.error} />
           {invList.length === 0 ? (
-            <Empty icon="💰" title="Nog geen facturen">Maak je eerste factuur of zet een geaccepteerde offerte om.</Empty>
+            search || filter ? (
+              <Empty icon="🔍" title="Geen facturen gevonden">Er zijn geen facturen die passen bij je zoekopdracht of filter.</Empty>
+            ) : (
+              <Empty icon="💰" title="Nog geen facturen">Maak je eerste factuur, of maak er een van een offerte waar de klant ja op zei.</Empty>
+            )
           ) : (
             <table className="list">
               <thead><tr><th>Nummer</th><th>Klant</th><th>Datum</th><th>Status</th><th className="num">Bedrag</th><th className="num">Nog open</th></tr></thead>
@@ -71,7 +75,11 @@ export function Work() {
         <>
           <ErrorBox error={quotes.error} />
           {(quotes.data ?? []).length === 0 ? (
-            <Empty icon="📄" title="Nog geen offertes">Een offerte wordt na akkoord een klus, en daarna met één klik een factuur.</Empty>
+            search ? (
+              <Empty icon="🔍" title="Geen offertes gevonden">Er zijn geen offertes die passen bij je zoekopdracht.</Empty>
+            ) : (
+              <Empty icon="📄" title="Nog geen offertes">Een offerte wordt na akkoord een klus, en daarna met één klik een factuur.</Empty>
+            )
           ) : (
             <table className="list">
               <thead><tr><th>Nummer</th><th>Klant</th><th>Datum</th><th>Geldig tot</th><th>Status</th><th className="num">Bedrag</th></tr></thead>

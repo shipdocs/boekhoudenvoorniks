@@ -50,7 +50,7 @@ describe('inbox: "Ben ik bij?"', () => {
     expect(st!.lastImport).toMatchObject({ filename: 'sept.sta', from: '2026-08-31', to: '2026-09-10', transactions: 2, imported: 1, duplicates: 1 });
     expect(s.inbox.tasks('2026-09-20').some((t) => t.kind === 'bank-stale')).toBe(false);
     const stale = s.inbox.tasks('2026-09-25').find((t) => t.kind === 'bank-stale')!;
-    expect(stale.title).toContain('t/m 10 september 2026');
+    expect(stale.title).toContain('tot 10 september 2026');
     expect(s.inbox.home('2026-09-25').bankUpdatedTo).toBe('2026-09-10');
   });
 
@@ -112,7 +112,7 @@ describe('inbox: "Ben ik bij?"', () => {
     s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-08-01', lines: [{ description: 'x', quantity: 1, unitPrice: 100000, vatCode: 'hoog' }] }).id);
     s.invoices.registerPayment(s.invoices.list()[0]!.id, { amount: 121000, date: '2026-08-05' });
     const t = s.inbox.tasks('2026-10-02').find((x) => x.kind === 'vat-due')!;
-    expect(t.title).toBe('BTW 3e kwartaal 2026 aangeven');
+    expect(t.title).toBe('Btw-aangifte 3e kwartaal 2026 doen');
     expect(t.question).toContain('31 oktober 2026');
     expect(s.inbox.home('2026-10-02').money.vatReserve).toBe(21000);
     s.vat.markSubmitted('2026-Q3');

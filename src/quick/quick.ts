@@ -8,7 +8,7 @@ import type { InvoiceService, Invoice } from '../documents/invoices';
 import type { RelationsService } from '../relations/relations';
 import { splitGross } from '../import/bank';
 import { EXPENSE_CATEGORIES } from '../shared/categories';
-import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isReverseCharge, type PurchaseVatCode, type SalesVatCode } from '../shared/vat';
+import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isReverseCharge, type PurchaseVatCode, type SalesVatCode } from '../shared/vat';
 import { assertIsoDate, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
@@ -54,8 +54,8 @@ export class QuickActions {
   recordExpense(input: ExpenseInput): PurchaseInvoice {
     assertIsoDate(input.date);
     const category = EXPENSE_CATEGORIES.find((c) => c.key === input.categoryKey);
-    if (!category) throw new ValidationError(`Onbekende categorie: ${input.categoryKey}`);
-    if (!(input.vatCode in PURCHASE_VAT_RATES)) throw new ValidationError(`Onbekende BTW-keuze: ${input.vatCode}`);
+    if (!category) throw new ValidationError('Kies waar de aankoop voor was');
+    if (!isPurchaseVatCode(input.vatCode)) throw new ValidationError('Kies of er btw op de bon stond');
     if (!Number.isSafeInteger(input.grossAmount) || input.grossAmount === 0) throw new ValidationError('Vul een bedrag in');
     const { net, vat } = splitGross(input.grossAmount, PURCHASE_VAT_RATES[input.vatCode].percentage, isReverseCharge(input.vatCode));
     return tx(this.db, () => {
@@ -89,7 +89,7 @@ export class QuickActions {
   recordCashSale(input: CashSaleInput): number {
     assertIsoDate(input.date);
     const rate = SALES_VAT_RATES[input.vatCode];
-    if (!rate) throw new ValidationError(`Onbekende BTW-code ${input.vatCode}`);
+    if (!rate) throw new ValidationError('Kies een btw-tarief');
     const { net, vat } = splitGross(input.grossAmount, rate.percentage);
     const accounts = SALES_ACCOUNTS[input.vatCode]!;
     const lines = [

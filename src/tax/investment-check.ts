@@ -60,10 +60,10 @@ export class InvestmentCheck {
              FROM purchase_invoice_lines pl JOIN chart_of_accounts a ON a.id = pl.account_id WHERE pl.purchase_invoice_id = ? ORDER BY pl.id`,
           )
           .all(c.purchaseId) as (PurchaseLineInput & { account: string })[];
-        if (!line || lines.length === 0) throw new ValidationError('Deze aankoop kan niet omgezet worden');
+        if (!line || lines.length === 0) throw new ValidationError('Deze aankoop kan niet automatisch worden omgezet. Pas de soort kosten aan bij de aankoop en kies "Investering".');
         // de grootste regel op die kostenrekening wordt de investering
         const target = lines.filter((l) => l.account === line.rgs_code).sort((a, b) => b.netAmount - a.netAmount)[0];
-        if (!target) throw new ValidationError('Deze aankoop kan niet omgezet worden');
+        if (!target) throw new ValidationError('Deze aankoop kan niet automatisch worden omgezet. Pas de soort kosten aan bij de aankoop en kies "Investering".');
         this.purchases.reclassify(
           c.purchaseId,
           lines.map((l) => (l === target ? { ...l, account: ACCOUNTS.inventaris } : l)),
@@ -72,7 +72,7 @@ export class InvestmentCheck {
       } else if (c.bankTransactionId) {
         this.bank.reclassify(c.bankTransactionId, { account: ACCOUNTS.inventaris }, 'investering (bedrijfsmiddel)');
       } else {
-        throw new ValidationError('Deze aankoop kan niet omgezet worden');
+        throw new ValidationError('Deze aankoop kan niet automatisch worden omgezet. Pas de soort kosten aan bij de aankoop en kies "Investering".');
       }
     });
   }

@@ -226,11 +226,9 @@ export const INCOME_TAX_DISCLAIMER =
   'Dit is een schatting, geen aanslag en geen advies. De app kent alleen de winst uit je onderneming en rekent met standaardaftrekposten; je werkelijke inkomstenbelasting kan flink anders zijn. Laat je aangifte altijd controleren door een boekhouder of accountant.';
 
 export const NOT_INCLUDED = [
-  'fiscaal partner, hypotheekrente en andere aftrekposten',
-  'ander inkomen (loon, uitkering) en box 2/3',
-  'voorlopige aanslagen die je al betaalt',
-  'willekeurige afschrijving, energie- en milieu-investeringsaftrek (EIA/MIA/Vamil)',
-  'precieze heffingskortingen (die hangen af van je hele inkomen)',
+  'je partner, hypotheek en ander inkomen (loon, uitkering, spaargeld)',
+  'belasting die je al vooruit betaalt (voorlopige aanslag)',
+  'sommige bijzondere aftrekposten: je boekhouder weet welke'
 ];
 
 /** Winst (omzet − kosten) volgens het grootboek tussen twee datums, in centen. */

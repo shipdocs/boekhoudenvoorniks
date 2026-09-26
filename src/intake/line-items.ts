@@ -84,5 +84,5 @@ export function suggestSplit(doc: DocumentResult): SplitPart[] | null {
 export function splitQuestion(parts: SplitPart[]): string {
   const [main, ...rest] = parts;
   const label = (k: string) => (k === 'prive' ? 'privé' : EXPENSE_CATEGORIES.find((c) => c.key === k)?.label.toLowerCase() ?? k);
-  return `Deze bon bevat ook ${rest.map((p) => `${p.items.slice(0, 2).join(', ')} (${formatEuro(p.gross)}, ${label(p.categoryKey)})`).join(' en ')}. Apart boeken? De rest (${formatEuro(main!.gross)}) is ${label(main!.categoryKey)}.`;
+  return `Op deze bon staat ook: ${rest.map((p) => `${p.items.slice(0, 2).join(', ')} (${formatEuro(p.gross)}, ${label(p.categoryKey)})`).join(' en ')}. Apart verwerken? De rest (${formatEuro(main!.gross)}) is ${label(main!.categoryKey)}.`;
 }

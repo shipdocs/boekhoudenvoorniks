@@ -31,7 +31,7 @@ export class ChecklistService {
       { key: 'klant', label: 'Eerste klant toevoegen', hint: '', done: !!has(`SELECT 1 FROM relations WHERE type IN ('klant','beide') AND archived = 0`).x, screen: 'klant' },
       { key: 'factuur', label: 'Eerste factuur maken', hint: '', done: !!has('SELECT 1 FROM invoices WHERE number IS NOT NULL').x, screen: 'factuur' },
       { key: 'bank', label: 'Bankafschrift inlezen', hint: 'dan zien we wie er betaald heeft', done: !!has('SELECT 1 FROM bank_transactions').x, screen: 'bank' },
-      { key: 'bon', label: 'Eerste bonnetje of inkoopfactuur toevoegen', hint: '', done: !!(has('SELECT 1 FROM purchase_invoices').x || has('SELECT 1 FROM documents').x), screen: 'aankopen' },
+      { key: 'bon', label: 'Eerste bonnetje of factuur van een leverancier toevoegen', hint: '', done: !!(has('SELECT 1 FROM purchase_invoices').x || has('SELECT 1 FROM documents').x), screen: 'aankopen' },
       { key: 'email', label: 'E-mail instellen', hint: 'om facturen direct vanuit de app te versturen', done: !!(s.smtp.host && s.smtp.fromEmail), screen: 'instellingen' },
     ];
   }

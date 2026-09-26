@@ -66,7 +66,7 @@ export function TemplateEditor() {
             </Field>
             <div className="grid cols-2">
               <Field label="Hoofdkleur"><input type="color" value={t.colors.primary} onChange={(e) => set({ colors: { ...t.colors, primary: e.target.value } })} /></Field>
-              <Field label="Achtergrond accenten"><input type="color" value={t.colors.accentBg} onChange={(e) => set({ colors: { ...t.colors, accentBg: e.target.value } })} /></Field>
+              <Field label="Kleur van vlakken"><input type="color" value={t.colors.accentBg} onChange={(e) => set({ colors: { ...t.colors, accentBg: e.target.value } })} /></Field>
               <Field label="Tekstkleur"><input type="color" value={t.colors.text} onChange={(e) => set({ colors: { ...t.colors, text: e.target.value } })} /></Field>
               <Field label="Lettertype">
                 <select value={t.font} onChange={(e) => set({ font: e.target.value })}>
@@ -94,7 +94,7 @@ export function TemplateEditor() {
             )}
           </div>
           <div className="row">
-            {!t.is_default && <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Template verwijderen?')) { await run(() => api.templates.delete(t.id)); setSelectedId(null); await list.reload(); } }}>Verwijderen</Button>}
+            {!t.is_default && <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Deze opmaak verwijderen?')) { await run(() => api.templates.delete(t.id)); setSelectedId(null); await list.reload(); } }}>Verwijderen</Button>}
             {!t.is_default && <Button disabled={busy} onClick={async () => { await run(() => api.templates.setDefault(t.id), 'Standaard ingesteld'); await list.reload(); }}>Als standaard gebruiken</Button>}
             <span className="grow" />
             <Button kind="primary" disabled={busy} onClick={async () => { await run(() => api.templates.update(t.id, t), 'Opmaak opgeslagen'); await list.reload(); }}>Opslaan</Button>

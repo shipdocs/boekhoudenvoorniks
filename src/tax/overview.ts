@@ -62,7 +62,7 @@ export interface TaxYearOverview {
 }
 
 export const OVERVIEW_DISCLAIMER =
-  'Dit overzicht is een hulpmiddel om je aangifte voor te bereiden, geen advies. Laat het altijd controleren door een boekhouder of accountant voordat je iets indient: de regels veranderen, de software kan fouten maken en de app kent je hele situatie niet. Jij blijft verantwoordelijk voor je aangifte.';
+  'Dit overzicht helpt je je aangifte voor te bereiden; het is geen advies. Jij blijft verantwoordelijk voor je aangifte.';
 
 /**
  * Wat er in de aangifte inkomstenbelasting bij de winst komt, bovenop de boekhouding: de KIA,
@@ -211,7 +211,9 @@ export class TaxOverviewService {
         explain:
           adj.kia > 0
             ? `Je kocht dit jaar voor ${eur(adj.investments)} aan dingen die jaren meegaan (vanaf € 450 per stuk). Daarvoor krijg je extra aftrek.`
-            : `Je kocht dit jaar voor ${eur(adj.investments)} aan dingen die jaren meegaan. Extra aftrek krijg je pas vanaf € ${rules.kia.min.toLocaleString('nl-NL')} per jaar${running ? '; wat je later dit jaar nog koopt, telt mee' : ''}.`,
+            : adj.investments / 100 > rules.kia.phaseOutUpTo
+              ? `Je kocht dit jaar voor ${eur(adj.investments)} aan dingen die jaren meegaan. Boven € ${rules.kia.phaseOutUpTo.toLocaleString('nl-NL')} per jaar is er geen extra aftrek meer.`
+              : `Je kocht dit jaar voor ${eur(adj.investments)} aan dingen die jaren meegaan. Extra aftrek krijg je pas vanaf € ${rules.kia.min.toLocaleString('nl-NL')} per jaar${running ? '; wat je later dit jaar nog koopt, telt mee' : ''}.`,
         note: `Kleinschaligheidsinvesteringsaftrek (KIA) over ${eur(adj.investments)} investeringen. Aangifte: winst uit onderneming → investeringsaftrek.`,
         status: adj.kia > 0 ? 'ok' : 'info',
       });

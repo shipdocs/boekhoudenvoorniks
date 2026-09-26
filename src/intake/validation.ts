@@ -21,19 +21,19 @@ export function validateDocument(doc: DocumentResult, asOf: string = today()): I
     if (age > 400) issues.push({ field: 'invoiceDate', severity: 'waarschuwing', message: 'Dit document is ouder dan een jaar.' });
   }
   if (!doc.supplier) issues.push({ field: 'supplier', severity: 'waarschuwing', message: 'We weten niet van welke winkel of leverancier dit is.' });
-  if (doc.currency.value !== 'EUR') issues.push({ field: 'currency', severity: 'fout', message: `Valuta ${doc.currency.value} wordt niet ondersteund.` });
+  if (doc.currency.value !== 'EUR') issues.push({ field: 'currency', severity: 'fout', message: `Deze bon is niet in euro's (${doc.currency.value}). Dat kan de app nog niet: vraag je boekhouder.` });
 
   for (const [i, v] of doc.vat.value.entries()) {
     if (v.base !== null && v.rate > 0) {
       const expected = Math.round((v.base * v.rate) / 100);
       if (Math.abs(expected - v.amount) > 2) {
-        issues.push({ field: `vat.${i}`, severity: 'fout', message: `${v.rate}% van ${(v.base / 100).toFixed(2)} is ${(expected / 100).toFixed(2)}, niet ${(v.amount / 100).toFixed(2)}.`, suggestion: expected });
+        issues.push({ field: `vat.${i}`, severity: 'fout', message: `De btw klopt niet: ${v.rate}% van € ${(v.base / 100).toFixed(2).replace('.', ',')} is € ${(expected / 100).toFixed(2).replace('.', ',')}, niet € ${(v.amount / 100).toFixed(2).replace('.', ',')}.`, suggestion: expected });
       }
     }
   }
   if (total !== undefined && subtotal != null && doc.vat.value.length > 0 && !doc.reverseCharge) {
     if (Math.abs(subtotal + vatSum - total) > 2) {
-      issues.push({ field: 'total', severity: 'fout', message: 'Netto + BTW komt niet uit op het totaal.', suggestion: subtotal + vatSum });
+      issues.push({ field: 'total', severity: 'fout', message: 'Bedrag zonder btw + btw is niet gelijk aan het totaal.', suggestion: subtotal + vatSum });
     }
   }
   if (total !== undefined && doc.vat.value.length === 1 && doc.vat.value[0]!.base === null && !doc.reverseCharge) {
