@@ -5,7 +5,8 @@ import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS, SALES_ACCOUNTS } from '../core-ledger/accounts';
 import type { InvoiceService } from '../documents/invoices';
 import type { PurchaseService } from '../documents/purchases';
-import { expenseLines } from '../documents/purchases';
+import { type BankCategoriePayload } from '../core-ledger/rules';
+import type { EventService } from '../core-ledger/events';
 import type { RelationsService } from '../relations/relations';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isSalesVatCode } from '../shared/vat';
 import { roundHalfAwayFromZero, type Cents } from '../shared/money';
@@ -68,16 +69,7 @@ export interface BookToAccountInput {
   relationId?: number | null;
 }
 
-/**
- * Splitst een bruto bedrag (incl. BTW) in netto + BTW.
- * Bij verlegde btw is het betaalde bedrag al netto; de BTW wordt dan berekend over het netto bedrag.
- */
-export function splitGross(gross: Cents, percentage: number, verlegd = false): { net: Cents; vat: Cents } {
-  if (verlegd) return { net: gross, vat: roundHalfAwayFromZero((gross * percentage) / 100) };
-  if (percentage === 0) return { net: gross, vat: 0 };
-  const net = roundHalfAwayFromZero((gross * 100) / (100 + percentage));
-  return { net, vat: gross - net };
-}
+export { splitGross } from '../core-ledger/rules';
 
 export class BankService {
   constructor(
@@ -86,6 +78,7 @@ export class BankService {
     private readonly invoices: InvoiceService,
     private readonly purchases: PurchaseService,
     private readonly relations: RelationsService,
+    private readonly events: EventService,
   ) {}
 
   // ---------- bankrekeningen ----------
@@ -300,33 +293,48 @@ export class BankService {
     const target = this.ledger.getAccount(input.account);
     const description = input.description?.trim() || t.description || t.counter_name || 'Banktransactie';
     const relationId = input.relationId ?? (t.counter_iban ? this.relations.findByIban(t.counter_iban)?.id ?? null : null);
-    let lines: PostLine[];
     const vatCode = input.vatCode ?? 'geen';
-
-    if (target.category === 'kosten' || (target.category === 'activa' && t.amount < 0)) {
-      if (!isPurchaseVatCode(vatCode)) throw new ValidationError(`Ongeldige BTW-keuze voor kosten: ${vatCode}`);
-      const rate = PURCHASE_VAT_RATES[vatCode];
-      // een negatieve transactie is een uitgave; een positieve op een kostenrekening is een terugbetaling
-      const gross = -t.amount;
-      const { net, vat } = splitGross(gross, rate.percentage, vatCode === 'verlegd');
-      lines = expenseLines([{ account: target.rgs_code, netAmount: net, vatCode, vatAmount: vat, description }], bank.rgs_code, relationId, description).lines;
-    } else if (target.category === 'omzet') {
-      if (!isSalesVatCode(vatCode)) throw new ValidationError(`Ongeldige BTW-keuze voor omzet: ${vatCode}`);
-      const { net, vat } = splitGross(t.amount, SALES_VAT_RATES[vatCode].percentage);
-      const vatAccount = SALES_ACCOUNTS[vatCode]?.vat;
-      lines = [
-        signedLine(bank.rgs_code, t.amount),
-        signedLine(target.rgs_code, -net, { relationId, vatCode }),
-        vat !== 0 && vatAccount ? signedLine(vatAccount, -vat, { relationId, vatCode }) : null,
-      ].filter((l): l is PostLine => l !== null);
-    } else {
-      // privé, btw-afdracht, kruisposten, leningen: geen BTW
-      lines = [signedLine(bank.rgs_code, t.amount)!, signedLine(target.rgs_code, -t.amount, { relationId, description })!];
-    }
-
+    const payload: BankCategoriePayload = {
+      bankTransactionId: txId,
+      date: t.transaction_date,
+      amount: t.amount,
+      bankAccount: bank.rgs_code,
+      account: target.rgs_code,
+      accountCategory: target.category,
+      vatCode,
+      relationId,
+      description,
+    };
     return tx(this.db, () => {
-      const entryId = this.ledger.post({ date: t.transaction_date, description, source: 'bank', sourceRef: `bank:${txId}`, lines });
+      const { entryId } = this.events.record({ type: 'bank-categorie', payload }, [{ kind: 'bank', refId: txId }]);
       this.db.prepare(`UPDATE bank_transactions SET status = 'gematcht', matched_journal_entry_id = ? WHERE id = ?`).run(entryId, txId);
+      return entryId;
+    });
+  }
+
+  /**
+   * Andere categorie of btw-keuze voor een al geboekte transactie (#19): de gebeurtenis wordt
+   * vervangen, de oude post krijgt een tegenboeking en de nieuwe wordt opnieuw gecompileerd.
+   */
+  reclassify(txId: number, change: { account: string; vatCode?: string; description?: string }, reason = 'andere categorie'): number {
+    const t = this.get(txId);
+    if (t.status !== 'gematcht' || !t.matched_journal_entry_id || t.matched_invoice_id || t.matched_purchase_invoice_id) {
+      throw new ValidationError('Alleen een betaling die direct op een categorie is geboekt kan zo aangepast worden');
+    }
+    const event = this.events.forEntry(t.matched_journal_entry_id);
+    if (!event || event.type !== 'bank-categorie') throw new ValidationError('Deze boeking is van vóór het gebeurtenissenmodel; maak de verwerking ongedaan en boek opnieuw');
+    const target = this.ledger.getAccount(change.account);
+    const old = event.payload as BankCategoriePayload;
+    const payload: BankCategoriePayload = {
+      ...old,
+      account: target.rgs_code,
+      accountCategory: target.category,
+      vatCode: change.vatCode ?? old.vatCode,
+      description: change.description?.trim() || old.description,
+    };
+    return tx(this.db, () => {
+      const { entryId } = this.events.replace(event.id, { type: 'bank-categorie', payload }, reason);
+      this.db.prepare('UPDATE bank_transactions SET matched_journal_entry_id = ? WHERE id = ?').run(entryId, txId);
       return entryId;
     });
   }

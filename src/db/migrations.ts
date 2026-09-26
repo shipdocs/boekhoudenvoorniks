@@ -432,4 +432,57 @@ export const migrations: string[] = [
     corrected INTEGER NOT NULL DEFAULT 0
   );
   `,
+  /* 7: gebeurtenissen als bron van waarheid (#19) */ `
+  -- Wat er gebeurd is, met herkomst. De boekhouding wordt er deterministisch uit gegenereerd
+  -- (src/core-ledger/rules.ts). Een correctie maakt een nieuwe gebeurtenis die de oude vervangt.
+  CREATE TABLE events (
+    id INTEGER PRIMARY KEY,
+    type TEXT NOT NULL,
+    event_date TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'actief' CHECK (status IN ('actief','vervangen')),
+    rules_version TEXT NOT NULL,
+    supersedes_event_id INTEGER REFERENCES events(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE event_evidence (
+    id INTEGER PRIMARY KEY,
+    event_id INTEGER NOT NULL REFERENCES events(id),
+    kind TEXT NOT NULL,
+    ref_id INTEGER,
+    note TEXT,
+    confidence REAL
+  );
+  CREATE INDEX idx_event_evidence_event ON event_evidence(event_id);
+  ALTER TABLE journal_entries ADD COLUMN event_id INTEGER REFERENCES events(id);
+  ALTER TABLE journal_entries ADD COLUMN rules_version TEXT;
+
+  -- Backfill: elke bestaande post wordt een gebeurtenis "boeking" met precies zijn eigen regels,
+  -- zodat saldi niet veranderen. Tegenboekingen horen bij de gebeurtenis van het origineel.
+  INSERT INTO events (id, type, event_date, payload, rules_version, created_at)
+  SELECT e.id, 'boeking', e.entry_date,
+         json_object('date', e.entry_date, 'description', e.description, 'source', e.source, 'sourceRef', e.source_ref,
+           'lines', (SELECT json_group_array(json_object('account', a.rgs_code, 'debit', l.debit, 'credit', l.credit,
+                       'relationId', l.relation_id, 'vatCode', l.vat_code, 'description', l.description))
+                     FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = e.id)),
+         'backfill', e.created_at
+  FROM journal_entries e WHERE e.reverses_entry_id IS NULL;
+  UPDATE journal_entries SET event_id = id, rules_version = 'backfill' WHERE reverses_entry_id IS NULL;
+  UPDATE journal_entries SET event_id = (SELECT o.event_id FROM journal_entries o WHERE o.id = journal_entries.reverses_entry_id), rules_version = 'backfill'
+   WHERE reverses_entry_id IS NOT NULL;
+  INSERT INTO event_evidence (event_id, kind, ref_id, note)
+  SELECT id, kind, CASE WHEN kind = 'bron' THEN NULL ELSE CAST(rest AS INTEGER) END, ref
+  FROM (
+    SELECT id, json_extract(payload, '$.sourceRef') AS ref,
+           substr(json_extract(payload, '$.sourceRef'), instr(json_extract(payload, '$.sourceRef'), ':') + 1) AS rest,
+           CASE substr(json_extract(payload, '$.sourceRef'), 1, instr(json_extract(payload, '$.sourceRef'), ':') - 1)
+             WHEN 'invoice' THEN 'factuur' WHEN 'purchase' THEN 'inkoop' WHEN 'bank' THEN 'bank' ELSE 'bron' END AS kind
+    FROM events WHERE json_extract(payload, '$.sourceRef') IS NOT NULL
+  );
+
+  -- De herkomst van een post ligt vast zodra hij gezet is.
+  CREATE TRIGGER journal_entries_event_no_update BEFORE UPDATE ON journal_entries
+  WHEN OLD.event_id IS NOT NULL AND (NEW.event_id IS NOT OLD.event_id OR NEW.rules_version IS NOT OLD.rules_version)
+  BEGIN SELECT RAISE(ABORT, 'De herkomst van een journaalpost ligt vast'); END;
+  `,
 ];
