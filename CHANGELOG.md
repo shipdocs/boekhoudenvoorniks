@@ -2,6 +2,40 @@
 
 ## Nog niet uitgebracht
 
+## 0.4.0 — overstappen met een lopende administratie
+
+- **Overstap-hulp** (#82, #83, #84): had je al een administratie, in een ander programma, in Excel of bij je
+  boekhouder? Bij het begin vraagt de app "Heb je al een administratie?". Kies dan een instapdatum: 1 januari is
+  aangeraden, maar elke datum kan, en de app zegt erbij wat dat betekent. Daarna vraagt de overstap-hulp in gewone
+  taal, hoofdstuk voor hoofdstuk, wat er toen al was:
+  - **wat je nodig hebt**: een lijstje om klaar te leggen (ook af te drukken);
+  - **bankrekeningen**: het saldo aan het begin (uit het eindsaldo van je CAMT/MT940-afschrift berekend), je
+    afschriften vanaf de instapdatum, en betalingen van vóór die datum met één klik overslaan;
+  - **klanten die nog moesten betalen** en **rekeningen die jij nog moest betalen**: komt het geld later binnen,
+    dan koppelt de app de betaling aan de oude factuur. Omzet en btw tellen niet nog eens;
+  - **bus, auto en gereedschap**: verder afschrijven vanaf de waarde op 1 januari. Weet je die niet, dan rekent de
+    app hem uit;
+  - **btw** van de vorige aangifte die nog open stond, en bij instappen midden in een btw-periode het stuk van die
+    periode, zodat de aangifte straks klopt;
+  - **omzet en kosten tot nu toe** bij instappen midden in het jaar;
+  - **leningen, borg en andere schulden**;
+  - **je startpositie**: wat er van jou in de zaak zit (eigen vermogen), met controles: sluit het banksaldo aan,
+    ontbreken er afschriften, klopt het met de balans van je boekhouder.
+  Stoppen mag: alles is meteen bewaard, en "Je vorige administratie overzetten" staat op Vandaag tot het klaar is.
+- **Uit je vorige programma inlezen**: sleep een bestand erop en de app vult de startbalans in. Jij kijkt het na
+  en vinkt aan wat klopt:
+  - een **auditfile** (XAF) uit bv. SnelStart, e-Boekhouden, Moneybird, Exact of Jortt: saldi, openstaande facturen
+    per klant en leverancier, bus en gereedschap, btw, omzet en kosten tot de instapdatum, klanten en leveranciers;
+  - een **kolommenbalans** als Excel (bv. uit DigiBoox) of een **saldibalans** (Excel of CSV);
+  - een **lijst met openstaande facturen** (Excel of CSV): losse facturen in plaats van één totaal, zodat betalingen
+    vanzelf koppelen. De app controleert of het totaal aansluit op je startbalans.
+  De app herkent zelf wat voor bestand het is en welke kolom wat is. Lukt dat niet, dan stelt hij hooguit drie korte
+  vragen en onthoudt hij het antwoord. Er is een voorbeeldbestand om in te vullen. Openstaande facturen kun je ook
+  als **e-factuur** (UBL) erop slepen. Betalingen kort na de overstap die bij een oude factuur of de vorige
+  btw-aangifte lijken te horen, stelt de app voor.
+- Bedragen uit de overstap mogen voorlopig zijn (bv. als de jaarrekening nog niet klaar is). Aanpassen kan later
+  altijd. Laat je startbalans nakijken door je boekhouder.
+
 - **Bonnen in dollars die er al in stonden** (#74): oudere versies lazen "$ 90,00" als € 90,00. De app vindt die
   bonnen nu en rekent ze om:
   - een bon die je nog moet controleren wordt vanzelf opnieuw beoordeeld (er was nog niets geboekt);
@@ -15,6 +49,9 @@
 - **Niet meer dubbel**: een nieuwe bon in dollars bij een betaling die je al als kosten boekte, wordt het bewijsstuk
   in plaats van een tweede aankoop; en dezelfde bon nog eens toevoegen wordt herkend, ook als die eerder als euro's
   geboekt is.
+- **Bon als PDF van meerdere pagina's** (#80): bij het nakijken zie je nu alle pagina's onder elkaar.
+- **Doorgestuurde mail als bon** (#79): de tekst van de oorspronkelijke mail komt mee, ook uit een doorgestuurde
+  .eml, en je eigen tekst erboven overstemt die niet meer.
 
 ## 0.3.9 — aankopen in vreemde valuta (dollars, ponden, …)
 
