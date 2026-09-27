@@ -197,9 +197,10 @@ jaar), de desinvesteringsbijtelling en de startersaftrek.
 14. Moet de startersaftrek als optie erbij?
 
 **Bevinding code-audit**
-- **Tariefsaanpassing: FOUT.** Bij inkomen in de hoogste schijf levert de zelfstandigenaftrek en de
-  mkb-winstvrijstelling maximaal 37,48% (2025) / 37,56% (2026) voordeel op. `estimateIncomeTax()`
-  trekt ze volledig af tegen 49,50%. Daardoor valt de reservering bij hoge winst te laag uit
+- **Tariefsaanpassing: FOUT.** Bij inkomen in de hoogste schijf levert de ondernemersaftrek
+  (zelfstandigen-, starters- en meewerkaftrek) en de mkb-winstvrijstelling maximaal 37,48% (2025) /
+  37,56% (2026) voordeel op (art. 2.10a Wet IB 2001). `estimateIncomeTax()` trekt ze volledig af
+  tegen 49,50%. Daardoor valt de reservering bij hoge winst te laag uit
   (bij € 150.000 winst in 2026 grofweg € 2.400).
 - **Startersaftrek en lage winst: FOUT.** De code kapt de zelfstandigenaftrek af op de winst en de
   startersaftrek op wat daarna overblijft. Volgens de Belastingdienst geldt die beperking niet als er
@@ -215,7 +216,7 @@ jaar), de desinvesteringsbijtelling en de startersaftrek.
   berekening juist is (vraag 29).
 
 **Nieuwe vragen**
-28. Klopt het dat voor een reserveringsschatting de tariefsaanpassing op zelfstandigenaftrek en
+28. Klopt het dat voor een reserveringsschatting de tariefsaanpassing op de ondernemersaftrek en de
     mkb-winstvrijstelling moet worden toegepast (voordeel maximaal tegen het tarief van schijf 2)?
 29. Klopt het dat bij recht op startersaftrek de zelfstandigenaftrek niet tot de winst wordt beperkt,
     en dat het niet-gerealiseerde deel in latere jaren verrekend kan worden? Moet de app dat
