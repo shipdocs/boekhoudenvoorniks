@@ -1,4 +1,5 @@
 import { test, expect, onboard, nav } from './fixtures';
+import { OTHER_PACKAGE } from '../tests/fixtures/xaf-ander-pakket';
 
 test('overstapper: onboarding, beginsaldo, openstaande factuur en startpositie', async ({ page, problems }) => {
   await onboard(page, { overstap: true });
@@ -6,6 +7,7 @@ test('overstapper: onboarding, beginsaldo, openstaande factuur en startpositie',
   await expect(page.getByText(`1 januari ${year}`).first()).toBeVisible();
   await expect(page.getByText(/Bankafschriften vanaf 1 januari/)).toBeVisible();
 
+  await page.getByRole('button', { name: /Verder: uit je vorige programma/ }).click();
   await page.getByRole('button', { name: /Verder: bankrekeningen/ }).click();
   await page.getByRole('textbox', { name: /Beginsaldo/ }).fill('1500,00');
   await page.getByRole('button', { name: 'Opslaan', exact: true }).first().click();
@@ -27,5 +29,25 @@ test('overstapper: onboarding, beginsaldo, openstaande factuur en startpositie',
   // de openstaande factuur staat ook gewoon bij Werk & facturen
   await nav(page, 'Werk & facturen');
   await expect(page.getByText(`${year - 1}-0099`).first()).toBeVisible();
+  expect(problems.apiErrors).toEqual([]);
+});
+
+test('overstapper: auditfile (XAF) uit het vorige programma inlezen', async ({ page, problems }) => {
+  const year = new Date().getFullYear();
+  test.skip(year !== 2026, 'de voorbeeld-auditfile is van 2026');
+  await onboard(page, { overstap: true });
+  await page.getByRole('button', { name: /Verder: uit je vorige programma/ }).click();
+  await page.locator('main input[type=file]').first().setInputFiles({ name: 'export.xaf', mimeType: 'application/xml', buffer: Buffer.from(OTHER_PACKAGE) });
+  await expect(page.getByRole('heading', { name: 'Wat de app overneemt' })).toBeVisible();
+  await expect(page.getByText('Factuur 2025-050 Bakker Bouw')).toBeVisible();
+  // niet herkend staat standaard uit
+  await expect(page.getByRole('checkbox', { name: /Diversen/ })).not.toBeChecked();
+  await page.getByRole('button', { name: 'Overnemen' }).click();
+  await expect(page.getByText(/onderdelen overgenomen uit een auditfile/)).toBeVisible();
+
+  await page.locator('.chips button', { hasText: 'Je startpositie' }).click();
+  await expect(page.locator('.card', { hasText: 'Wat er van jou in de zaak zit' }).getByText(/12\.910,00/)).toBeVisible();
+  // Diversen niet overgenomen: het verschil met de vorige administratie wordt gemeld
+  await expect(page.getByText(/Verschil met je vorige administratie: .*100,00/)).toBeVisible();
   expect(problems.apiErrors).toEqual([]);
 });

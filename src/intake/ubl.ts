@@ -81,3 +81,26 @@ export function findEmbeddedUbl(attachments: { filename: string; content: Uint8A
   }
   return null;
 }
+
+/**
+ * Eigen verkoopfactuur als UBL (bv. uit een vorig programma, bij overstappen): klant, nummer, datums
+ * en het te betalen bedrag. Een creditnota geeft een negatief bedrag.
+ */
+export function parseUblSalesInvoice(xml: string): { number: string; customer: string; invoiceDate: string; dueDate: string | null; amount: number } {
+  if (!isUbl(xml)) throw new Error('Dit is geen UBL-factuur (e-factuur)');
+  const doc = parser.parse(xml) as X;
+  const inv: X | undefined = doc.Invoice ?? doc.CreditNote;
+  if (!inv) throw new Error('Geen UBL Invoice of CreditNote');
+  const party = inv.AccountingCustomerParty?.Party ?? {};
+  const customer = t(party.PartyLegalEntity?.RegistrationName) || t(party.PartyName?.Name);
+  const totals = inv.LegalMonetaryTotal ?? {};
+  const amount = parseEuro(t(totals.PayableAmount) || t(totals.TaxInclusiveAmount) || '0');
+  const due = t(inv.DueDate) || t((inv.PaymentMeans ?? [])[0]?.PaymentDueDate) || t(inv.PaymentTerms?.PaymentDueDate);
+  return {
+    number: t(inv.ID),
+    customer,
+    invoiceDate: t(inv.IssueDate).slice(0, 10),
+    dueDate: due ? due.slice(0, 10) : null,
+    amount: doc.CreditNote ? -Math.abs(amount) : amount,
+  };
+}
