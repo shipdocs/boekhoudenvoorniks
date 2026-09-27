@@ -54,6 +54,8 @@ export interface PurchaseInvoice {
   currency: string | null;
   foreign_total: Cents | null;
   fx_rate: number | null;
+  /** 1 = uit de vorige administratie (overstap): alleen het openstaande bedrag */
+  is_opening: number;
   open_amount: Cents;
 }
 
@@ -104,6 +106,7 @@ export class PurchaseService {
     if (lines.length === 0) throw new ValidationError('Voeg minimaal één regel toe');
     return tx(this.db, () => {
       const p = this.get(id);
+      if (p.is_opening) throw new ValidationError('Deze rekening komt uit je vorige administratie. Pas hem aan in de overstap-hulp');
       if (!p.journal_entry_id) throw new ValidationError('Deze aankoop kan niet aangepast worden');
       const event = this.events.forEntry(p.journal_entry_id);
       if (!event || event.type !== 'inkoop') throw new ValidationError('Deze aankoop is met een oudere versie van de app verwerkt en kan zo niet aangepast worden. Vraag je boekhouder.');

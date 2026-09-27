@@ -18,6 +18,7 @@ import { Overview } from './screens/Overview';
 import { SettingsScreen } from './screens/Settings';
 import { TemplateEditor } from './screens/TemplateEditor';
 import { Expert } from './screens/Expert';
+import { Switchover } from './screens/Switchover';
 import { TermsGate } from './screens/Terms';
 import { TERMS_VERSION } from '../shared/legal';
 import { hasOnboardingUpdate } from '../shared/onboarding';
@@ -116,6 +117,7 @@ export function App() {
       case 'instellingen': return <SettingsScreen />;
       case 'opmaak': return <TemplateEditor />;
       case 'expert': return <Expert />;
+      case 'overstap': return <Switchover />;
     }
   })();
 

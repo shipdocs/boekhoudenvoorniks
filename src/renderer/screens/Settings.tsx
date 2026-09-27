@@ -79,6 +79,11 @@ export function SettingsScreen() {
             <Field label="IBAN"><input value={draft.company.iban} onChange={(e) => set({ company: { ...draft.company, iban: e.target.value } })} /></Field>
             <Field label="BIC" hint="optioneel"><input value={draft.company.bic} onChange={(e) => set({ company: { ...draft.company, bic: e.target.value } })} /></Field>
           </div>
+          <div className="card flat" style={{ marginTop: 14 }}>
+            <strong>Had je al een administratie?</strong>
+            <p className="small muted" style={{ margin: '4px 0 10px' }}>Bijvoorbeeld in een ander programma, in Excel of bij je boekhouder. De overstap-hulp zet je saldo, openstaande facturen en wat je al had erin.</p>
+            <Button small onClick={() => go({ screen: 'overstap' })}>{settings.switchover.mode === 'overstapper' ? 'Naar de overstap-hulp' : 'Overstap-hulp openen'}</Button>
+          </div>
         </>,
       )}
 

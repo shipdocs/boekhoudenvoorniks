@@ -65,6 +65,10 @@ export const ACCOUNTS = {
   boekresultaat: 'WAfsRvmBei',
   kilometervergoeding: 'WBedAutKil',
   representatie: 'WBedVkkRep',
+  /** beginbalans: lening (bv. voor de bus), borg of voorschot, en andere schulden */
+  leningen: 'BLasLen',
+  overigeVorderingen: 'BVorOvr',
+  overigeSchulden: 'BSchOvr',
 } as const;
 
 export const DEFAULT_ACCOUNTS: AccountSeed[] = [
@@ -78,11 +82,14 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '0210', rgs: 'BMvaTraCae', ref: 'BMvaTevCae', name: 'Afschrijving vervoermiddelen (cumulatief)', category: 'activa', system: true },
   { code: '0300', rgs: 'BMvaBedIna', ref: 'BMvaBeiVvp', name: 'Inventaris en gereedschap', category: 'activa' },
   { code: '0310', rgs: 'BMvaBedCae', ref: 'BMvaBeiCae', name: 'Afschrijving inventaris en gereedschap (cumulatief)', category: 'activa', system: true },
+  { code: '1590', rgs: ACCOUNTS.overigeVorderingen, ref: 'BVorOvrOvk', name: 'Overige vorderingen (borg, voorschot)', category: 'activa', system: true },
 
   // Passiva
   { code: '0500', rgs: ACCOUNTS.eigenVermogen, ref: 'BEivKapOnd', name: 'Eigen vermogen', category: 'passiva', system: true },
   { code: '0510', rgs: ACCOUNTS.priveOpnamen, ref: 'BEivKapProOvp', name: 'Privé-opnamen', category: 'passiva', system: true },
   { code: '0520', rgs: ACCOUNTS.priveStortingen, ref: 'BEivKapPrsOps', name: 'Privé-stortingen', category: 'passiva', system: true },
+  { code: '0700', rgs: ACCOUNTS.leningen, ref: 'BLasSakLvl', name: 'Leningen', category: 'passiva', system: true },
+  { code: '1680', rgs: ACCOUNTS.overigeSchulden, ref: 'BSchOvsOvs', name: 'Overige schulden', category: 'passiva', system: true },
   { code: '1600', rgs: ACCOUNTS.crediteuren, ref: 'BSchCreHac', name: 'Crediteuren', category: 'passiva', system: true },
   { code: '1690', rgs: ACCOUNTS.vraagposten, ref: 'BSchTusTovTvp', name: 'Vraagposten (nog uitzoeken)', category: 'passiva', system: true },
 

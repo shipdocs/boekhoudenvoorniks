@@ -1,6 +1,6 @@
 import { read } from 'mt940-js';
 import { normalizeIban } from '../shared/validation';
-import type { NormalizedTransaction, ParseResult } from './types';
+import type { NormalizedTransaction, ParseResult, StatementBalance } from './types';
 
 /**
  * MT940 via de open-source library mt940-js. Nederlandse banken zetten tegenrekening,
@@ -46,8 +46,15 @@ export function parseField86(raw: string): { counterIban: string | null; counter
 export async function parseMt940(data: Buffer | ArrayBuffer): Promise<ParseResult> {
   const statements = await read(data instanceof ArrayBuffer ? data : Buffer.from(data));
   const transactions: NormalizedTransaction[] = [];
+  const balances: StatementBalance[] = [];
   for (const st of statements) {
     const ownIban = st.accountId ? normalizeIban(st.accountId.split(/\s/)[0] ?? '') : null;
+    // :62F: eindsaldo, het saldo aan het eind van die dag
+    const close = st.closingBalance;
+    if (close?.date && Number.isFinite(close.value)) {
+      const cents = Math.round(Math.abs(close.value) * 100);
+      balances.push({ ownIban: ownIban && /^[A-Z]{2}\d{2}/.test(ownIban) ? ownIban : null, date: toIso(close.date), amount: close.isCredit ? cents : -cents });
+    }
     for (const t of st.transactions) {
       const info = parseField86(t.description ?? '');
       const cents = Math.round(t.amount * 100);
@@ -63,7 +70,7 @@ export async function parseMt940(data: Buffer | ArrayBuffer): Promise<ParseResul
       });
     }
   }
-  return { source: 'mt940', transactions, warnings: [] };
+  return { source: 'mt940', transactions, warnings: [], balances };
 }
 
 function toIso(date: string): string {

@@ -32,6 +32,7 @@ import type { Confirmation } from '../intake/intake';
 import type { JobStatus } from '../jobs/jobs';
 import type { LineInput } from '../documents/totals';
 import type { Task } from '../inbox/inbox';
+import type { OpeningInput } from '../onboarding/switchover';
 import type { EntrySource } from '../core-ledger/ledger';
 import { today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
@@ -570,6 +571,22 @@ export function createApi(s: Services, host: HostContext) {
       },
       unmatch: (txId: number) => s.bank.unmatch(txId),
       autoMatch: () => s.matching.autoMatch(undefined, s.settings.get().autopilot),
+    },
+    /** Overstappen met een lopende administratie: instapdatum, startbalans en controles. */
+    switchover: {
+      state: () => s.switchover.state(),
+      setMode: (mode: 'nieuw' | 'overstapper', date?: IsoDate | null) => s.switchover.setMode(mode, date ?? null),
+      save: (input: OpeningInput, id?: number) => (s.switchover.save(input, id), s.switchover.state()),
+      remove: (id: number) => (s.switchover.remove(id), s.switchover.state()),
+      setBankOpening: (bankAccountId: number, amount: Cents) => s.switchover.setBankOpening(bankAccountId, amount),
+      setBankCheck: (bankAccountId: number, date: IsoDate, amount: Cents) => s.switchover.setBankCheck(bankAccountId, date, amount),
+      ignoreBeforeDate: () => (s.switchover.ignoreBeforeDate(), s.switchover.state()),
+      suggestions: () => s.switchover.suggestions(),
+      acceptSuggestion: (txId: number, overrides?: { relationName?: string; number?: string; invoiceDate?: IsoDate }) => (s.switchover.acceptSuggestion(txId, overrides), s.switchover.state()),
+      dismissSuggestion: (txId: number) => (s.switchover.dismissSuggestion(txId), s.switchover.state()),
+      setAccountantEquity: (amount: Cents | null) => s.switchover.setAccountantEquity(amount),
+      confirm: (opts?: { provisional?: boolean }) => s.switchover.confirm(opts),
+      reopen: () => s.switchover.reopen(),
     },
     incomeTax: {
       estimate: () => s.incomeTax.estimate(),

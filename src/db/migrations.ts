@@ -750,4 +750,34 @@ export const migrations: string[] = [
   ALTER TABLE purchase_invoices ADD COLUMN foreign_total INTEGER;
   ALTER TABLE purchase_invoices ADD COLUMN fx_rate REAL;
   `,
+  /* 17: overstappen met een lopende administratie */ `
+  -- Wat er al was op de instapdatum (de startbalans): openstaande facturen van klanten, rekeningen die
+  -- nog betaald moesten worden, bus en gereedschap, btw, leningen, en bij instappen midden in het jaar
+  -- de omzet en kosten tot dan. Elke regel heeft een eigen beginbalansboeking tegen eigen vermogen.
+  CREATE TABLE opening_items (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('klant','leverancier','bezit','btw','lening','vordering','schuld','resultaat','btw-periode')),
+    description TEXT NOT NULL,
+    -- positief = iets van jou of wat je nog krijgt; negatief = wat je nog moet betalen (bij resultaat: de winst)
+    amount INTEGER NOT NULL,
+    data TEXT NOT NULL DEFAULT '{}',
+    journal_entry_id INTEGER REFERENCES journal_entries(id),
+    invoice_id INTEGER REFERENCES invoices(id),
+    purchase_invoice_id INTEGER REFERENCES purchase_invoices(id),
+    asset_id INTEGER REFERENCES assets(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Een factuur of rekening uit de vorige administratie: telt niet als omzet of kosten in deze app
+  ALTER TABLE invoices ADD COLUMN is_opening INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE purchase_invoices ADD COLUMN is_opening INTEGER NOT NULL DEFAULT 0;
+  -- Bus of gereedschap dat er al was: afschrijven vanaf de boekwaarde, geen investeringsaftrek
+  ALTER TABLE assets ADD COLUMN is_opening INTEGER NOT NULL DEFAULT 0;
+  -- Eindsaldo volgens het afschrift (CAMT/MT940): om te controleren of er afschriften ontbreken
+  ALTER TABLE import_batch_accounts ADD COLUMN closing_balance INTEGER;
+  ALTER TABLE import_batch_accounts ADD COLUMN closing_date TEXT;
+  -- Bestaande administraties zijn al ingericht: de vraag "overstappen?" niet alsnog stellen
+  INSERT OR IGNORE INTO settings (key, value)
+    SELECT 'switchover', '{"mode":"nieuw","date":null,"status":"klaar","provisional":false,"filedElsewhere":[],"dismissed":[],"bankConfirmed":[],"bankChecks":{},"accountantEquity":null}'
+    WHERE EXISTS (SELECT 1 FROM journal_entries);
+  `,
 ];

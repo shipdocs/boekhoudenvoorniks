@@ -15,7 +15,7 @@ describe('migraties', () => {
         (1, '2026-03-02', 100, 'csv', 7, 'a'), (1, '2026-03-28', 200, 'csv', 7, 'b');`);
     migrate(db);
     expect(db.prepare('SELECT * FROM import_batch_accounts').all()).toEqual([
-      { batch_id: 7, bank_account_id: 1, period_from: '2026-03-02', period_to: '2026-03-28', transactions: 2, imported: 2, duplicates: 0 },
+      { batch_id: 7, bank_account_id: 1, period_from: '2026-03-02', period_to: '2026-03-28', transactions: 2, imported: 2, duplicates: 0, closing_balance: null, closing_date: null },
     ]);
     expect(db.pragma('user_version', { simple: true })).toBe(migrations.length);
   });

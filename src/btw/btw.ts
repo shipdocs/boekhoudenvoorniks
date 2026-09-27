@@ -147,7 +147,7 @@ export class VatService {
          FROM journal_lines l
          JOIN journal_entries e ON e.id = l.journal_entry_id
          JOIN chart_of_accounts a ON a.id = l.account_id
-         WHERE COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source <> 'btw'
+         WHERE COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')
            AND NOT ${VatService.SETTLED} ${excl}
          GROUP BY a.rgs_code, a.category, l.vat_code`,
       )
@@ -168,7 +168,7 @@ export class VatService {
          FROM journal_lines l
          JOIN journal_entries e ON e.id = l.journal_entry_id
          JOIN chart_of_accounts a ON a.id = l.account_id
-         WHERE e.vat_correction_of IS NOT NULL AND e.source <> 'btw' AND NOT ${VatService.SETTLED} ${range}
+         WHERE e.vat_correction_of IS NOT NULL AND e.source NOT IN ('btw', 'opening') AND NOT ${VatService.SETTLED} ${range}
          GROUP BY e.vat_correction_of, a.rgs_code`,
       )
       .all(...(start && end ? [start, end] : [])) as { period_key: string; rgs_code: string; net: number; max_id: number; entries: number }[];
@@ -201,7 +201,7 @@ export class VatService {
            FROM journal_lines l
            JOIN journal_entries e ON e.id = l.journal_entry_id
            JOIN chart_of_accounts a ON a.id = l.account_id
-           WHERE e.vat_correction_of = ? AND e.id <= ? AND e.source <> 'btw' AND NOT ${VatService.SETTLED}
+           WHERE e.vat_correction_of = ? AND e.id <= ? AND e.source NOT IN ('btw', 'opening') AND NOT ${VatService.SETTLED}
            GROUP BY a.rgs_code`,
         )
         .all(correctionPeriodKey, c.maxEntryId) as { rgs_code: string; net: number }[];
@@ -260,7 +260,7 @@ export class VatService {
          FROM journal_lines l
          JOIN journal_entries e ON e.id = l.journal_entry_id
          JOIN chart_of_accounts a ON a.id = l.account_id
-         WHERE COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source <> 'btw'
+         WHERE COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')
            AND NOT ${VatService.SETTLED} ${excl}
          ORDER BY COALESCE(e.vat_date, e.entry_date), e.id`,
       )
@@ -452,7 +452,7 @@ export class VatService {
          JOIN journal_entries e ON e.id = l.journal_entry_id
          JOIN chart_of_accounts a ON a.id = l.account_id
          LEFT JOIN relations r ON r.id = l.relation_id
-         WHERE a.rgs_code = ? AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source <> 'btw'
+         WHERE a.rgs_code = ? AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')
          GROUP BY l.relation_id
          HAVING net <> 0
          ORDER BY r.name`,

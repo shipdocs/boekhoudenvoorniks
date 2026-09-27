@@ -6,6 +6,8 @@ import { TERMS_VERSION } from '../../shared/legal';
 import { markSeen, pendingSteps } from '../../shared/onboarding';
 import type { AppSettings } from '../../settings/settings';
 import { TermsBlock } from './Terms';
+import { startDateConsequences, startDateOptions } from '../../shared/switchover';
+import { isIsoDate, today } from '../../shared/dates';
 
 const AUTOPILOT: [AppSettings['autopilot'], string, string][] = [
   ['voorzichtig', 'Voorzichtig', 'Ik bevestig alles zelf. De app doet voorstellen, maar boekt niets zonder mij.'],
@@ -40,6 +42,9 @@ export function Onboarding() {
   const [partnerHours, setPartnerHours] = useState(settings.partnerHours ? String(settings.partnerHours) : '');
   const [lastNumber, setLastNumber] = useState('');
   const [terms, setTerms] = useState(settings.termsAcceptedVersion === TERMS_VERSION);
+  const [switchMode, setSwitchMode] = useState(settings.switchover.mode);
+  const [switchDate, setSwitchDate] = useState(settings.switchover.date ?? `${new Date().getFullYear()}-01-01`);
+  const [otherDate, setOtherDate] = useState(false);
   const year = new Date().getFullYear();
   const ids = steps.map((s) => s.id);
   const shows = (id: string) => ids.includes(id);
@@ -49,7 +54,8 @@ export function Onboarding() {
   const next = () => setIndex((i) => Math.min(steps.length - 1, i + 1));
   const prev = () => setIndex((i) => Math.max(0, i - 1));
 
-  const finish = async (then: 'factuur' | 'home') => {
+  const overstap = shows('start') && switchMode === 'overstapper';
+  const finish = async (then: 'factuur' | 'home' | 'overstap') => {
     const ok = await run(async () => {
       // alleen opslaan wat in de getoonde stappen stond: een update mag eerdere keuzes niet overschrijven
       const patch: Partial<AppSettings> = { profile, company, autopilot, onboardingDone: true, onboardingSteps: markSeen({ ...settings, company, kor }, ids) };
@@ -65,11 +71,13 @@ export function Onboarding() {
       }
       const n = Number(lastNumber.replace(/\D/g, '').slice(-4));
       if (lastNumber && Number.isInteger(n) && n > 0) await api.settings.setInvoiceCounter(year, n);
+      // na de btw-keuze: de instapdatum markeert eerdere btw-periodes als al aangegeven
+      if (shows('start') && switchMode) await api.switchover.setMode(switchMode, switchMode === 'overstapper' ? switchDate : null);
       return true;
     });
     if (!ok) return;
     await reloadSettings();
-    go(then === 'factuur' ? { screen: 'factuur' } : { screen: 'home' });
+    go(then === 'factuur' ? { screen: 'factuur' } : then === 'overstap' ? { screen: 'overstap' } : { screen: 'home' });
   };
 
   const startDemo = async () => {
@@ -99,10 +107,14 @@ export function Onboarding() {
     <div className="row between" style={{ marginTop: 28 }}>
       {back}
       {isLast ? (
-        <div className="row">
-          <Button kind={update ? 'primary' : undefined} disabled={busy || !canContinue || (needsTerms && !terms)} onClick={() => void finish('home')}>Klaar</Button>
-          {!update && <Button kind="primary" disabled={busy || !canContinue || (needsTerms && !terms)} onClick={() => void finish('factuur')}>Maak mijn eerste factuur</Button>}
-        </div>
+        overstap ? (
+          <Button kind="primary" disabled={busy || !canContinue || (needsTerms && !terms)} onClick={() => void finish('overstap')}>Klaar, verder met overstappen</Button>
+        ) : (
+          <div className="row">
+            <Button kind={update ? 'primary' : undefined} disabled={busy || !canContinue || (needsTerms && !terms)} onClick={() => void finish('home')}>Klaar</Button>
+            {!update && <Button kind="primary" disabled={busy || !canContinue || (needsTerms && !terms)} onClick={() => void finish('factuur')}>Maak mijn eerste factuur</Button>}
+          </div>
+        )
       ) : (
         <Button kind="primary" disabled={!canContinue} onClick={next}>Verder</Button>
       )}
@@ -228,6 +240,54 @@ export function Onboarding() {
             📥 Sleep je bankafschrift hierheen of klik om te kiezen
           </DropZone>
           {footer(!company.iban || isValidIban(company.iban))}
+        </>
+      )}
+
+      {step.id === 'start' && (
+        <>
+          <h1>Heb je al een administratie?</h1>
+          <p className="sub">Bijvoorbeeld in een ander programma, in Excel of bij je boekhouder. Dan zetten we die erin, zodat alles doorloopt.</p>
+          <div className="choice">
+            <button className={switchMode === 'nieuw' ? 'selected' : ''} onClick={() => setSwitchMode('nieuw')}>
+              Nee, ik begin net
+              <div className="hint">Je begint met een schone lei.</div>
+            </button>
+            <button className={switchMode === 'overstapper' ? 'selected' : ''} onClick={() => setSwitchMode('overstapper')}>
+              Ja, ik stap over
+              <div className="hint">De app helpt je daarna stap voor stap: welke papieren je nodig hebt en wat je waar invult.</div>
+            </button>
+          </div>
+          {switchMode === 'overstapper' && (
+            <>
+              <h2>Vanaf wanneer houdt de app je administratie bij?</h2>
+              <div className="choice">
+                {startDateOptions(today(), vatPeriod, kor).map((o) => (
+                  <button key={o.key} className={!otherDate && switchDate === o.date ? 'selected' : ''} onClick={() => { setOtherDate(false); setSwitchDate(o.date); }}>
+                    {o.label}{o.recommended ? ' (aangeraden)' : ''}
+                    <div className="hint">{o.hint}</div>
+                  </button>
+                ))}
+                <button className={otherDate ? 'selected' : ''} onClick={() => setOtherDate(true)}>
+                  Een andere datum
+                  <div className="hint">Bijvoorbeeld de dag dat je bij je vorige programma stopte.</div>
+                </button>
+              </div>
+              {otherDate && (
+                <Field label="Instapdatum">
+                  <input type="date" value={switchDate} max={today()} onChange={(e) => setSwitchDate(e.target.value)} />
+                </Field>
+              )}
+              {isIsoDate(switchDate) && switchDate <= today() && (
+                <div className="notice">
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {startDateConsequences(switchDate, vatPeriod, kor).map((c) => <li key={c}>{c}</li>)}
+                  </ul>
+                  <div className="small muted" style={{ marginTop: 6 }}>Je hoeft nu nog niets op te zoeken.</div>
+                </div>
+              )}
+            </>
+          )}
+          {footer(switchMode === 'nieuw' || (switchMode === 'overstapper' && isIsoDate(switchDate) && switchDate <= today()))}
         </>
       )}
 
