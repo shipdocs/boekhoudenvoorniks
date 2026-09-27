@@ -302,12 +302,13 @@ function SaleWithoutInvoice({ txId, amount, description, busy, onBook }: { txId:
           {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
         </select>
       </Field>
+      {hint.error && !picked && <p className="small">Er is geen voorstel. Kies zelf de btw die op de factuur staat.</p>}
       {hint.data?.reason && !picked && <p className="small muted">Voorstel omdat {hint.data.reason}. Stond er op de factuur toch btw? Kies dan dat tarief.</p>}
       <p className="small">Omzet <Euro cents={net} />{amount - net !== 0 && <> + btw <Euro cents={amount - net} /></>}</p>
       {vat !== 'hoog' && vat !== 'laag' && (
         <p className="small muted">Geen Nederlandse btw? Laat je boekhouder even meekijken of dat klopt voor wat je levert.</p>
       )}
-      <div className="row end"><Button kind="primary" disabled={busy || hint.loading} onClick={() => onBook(vat, hint.data?.relationId ?? null, number.trim() ? `Factuur ${number.trim()}${description.includes(number.trim()) ? '' : ` · ${description}`}` : description)}>Verwerk als omzet</Button></div>
+      <div className="row end"><Button kind="primary" disabled={busy || hint.loading || (Boolean(hint.error) && !picked)} onClick={() => onBook(vat, hint.data?.relationId ?? null, number.trim() ? `Factuur ${number.trim()}${description.includes(number.trim()) ? '' : ` · ${description}`}` : description)}>Verwerk als omzet</Button></div>
     </div>
   );
 }

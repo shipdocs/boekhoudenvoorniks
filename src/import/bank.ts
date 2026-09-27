@@ -8,7 +8,7 @@ import type { PurchaseService } from '../documents/purchases';
 import { type BankCategoriePayload } from '../core-ledger/rules';
 import type { EventService } from '../core-ledger/events';
 import type { RelationsService } from '../relations/relations';
-import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, customerVatSituation, isPurchaseVatCode, isSalesVatCode, suggestedSalesVat, type SalesVatCode } from '../shared/vat';
+import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, customerVatSituation, isPurchaseVatCode, isSalesVatCode, suggestedSalesVat, vatNumberMatchesCountry, type SalesVatCode } from '../shared/vat';
 import { roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { today, type IsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
@@ -368,13 +368,20 @@ export class BankService {
    */
   salesVatSuggestion(txId: number): { vatCode: SalesVatCode; relationId: number | null; reason: string } {
     const t = this.get(txId);
-    const byIban = t.counter_iban ? this.relations.findByIban(t.counter_iban) : undefined;
-    const name = (t.counter_name ?? '').trim().toLowerCase();
-    const byName = byIban ?? (name.length >= 4
-      ? this.relations.list({ type: 'klant' }).find((r) => r.name.trim().length >= 4 && name.includes(r.name.trim().toLowerCase()))
-      : undefined);
+    const iban = t.counter_iban ? this.relations.findByIban(t.counter_iban) : undefined;
+    const byIban = iban && iban.type !== 'leverancier' ? iban : undefined;
+    // op naam: de klantnaam als hele woorden in de naam van de betaler; de langste wint, bij gelijkspel geen voorstel
+    const name = ` ${(t.counter_name ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
+    const words = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    const hits = byIban ? [] : this.relations
+      .list({ type: 'klant' })
+      .filter((r) => words(r.name).length >= 4 && name.includes(` ${words(r.name)} `))
+      .sort((a, b) => words(b.name).length - words(a.name).length);
+    const byName = byIban ?? (hits.length > 0 && (hits.length === 1 || words(hits[0]!.name).length > words(hits[1]!.name).length) ? hits[0] : undefined);
     if (byName) {
-      const code = suggestedSalesVat(customerVatSituation(byName.country, byName.vat_number));
+      // een btw-nummer dat niet bij het land past, telt niet als bedrijf in de EU
+      const vatNumber = vatNumberMatchesCountry(byName.vat_number, byName.country) ? byName.vat_number : null;
+      const code = suggestedSalesVat(customerVatSituation(byName.country, vatNumber));
       if (code) return { vatCode: code, relationId: byName.id, reason: `${byName.name} zit in het buitenland (${byName.country})` };
       return { vatCode: 'hoog', relationId: byName.id, reason: `${byName.name} is een klant in Nederland` };
     }

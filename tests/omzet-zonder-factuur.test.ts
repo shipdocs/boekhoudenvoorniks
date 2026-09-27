@@ -38,3 +38,35 @@ describe('omzet zonder factuur in de app (Mollie, webshop, contant)', () => {
     expect(r1a).toMatchObject({ omzet: 10000, btw: 2100 });
   });
 });
+
+describe('voorstel: welke klant hoort bij de betaler', () => {
+  function tx(s: ReturnType<typeof setup>['s'], counterName: string, counterIban?: string) {
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-08-12', amount: 50000, description: `betaling ${counterName}`, counterIban, counterName }] });
+    return s.bank.list({ status: 'nieuw' }).find((t) => t.counter_name === counterName)!;
+  }
+
+  it('een leverancier met dit IBAN telt niet als klant', () => {
+    const { s } = setup();
+    s.relations.create({ name: 'Zwitserse Leverancier', type: 'leverancier', country: 'CH', iban: 'CH9300762011623852957' });
+    expect(s.bank.salesVatSuggestion(tx(s, 'Iemand', 'NL91ABNA0417164300').id).relationId).toBeNull();
+    expect(s.bank.salesVatSuggestion(tx(s, 'Iemand anders', 'CH9300762011623852957').id)).toMatchObject({ relationId: null, vatCode: 'export' });
+  });
+
+  it('naam: alleen hele woorden, de langste naam wint', () => {
+    const { s } = setup();
+    s.relations.create({ name: 'Shipping', country: 'NL' });
+    const burando = s.relations.create({ name: 'Burando Shipping', country: 'CH' });
+    s.relations.create({ name: 'Ando', country: 'US' });
+    expect(s.bank.salesVatSuggestion(tx(s, 'BURANDO SHIPPING AG').id).relationId).toBe(burando.id);
+    // "Ando" zit wel in "Burando", maar niet als woord
+    expect(s.bank.salesVatSuggestion(tx(s, 'Burandos BV').id).relationId).toBeNull();
+  });
+
+  it('EU-klant met een btw-nummer van een ander land: gewoon 21%, geen ICP', () => {
+    const { s } = setup();
+    s.relations.create({ name: 'Müller Handel', country: 'DE', vat_number: 'FR12345678901' });
+    expect(s.bank.salesVatSuggestion(tx(s, 'Müller Handel GmbH').id).vatCode).toBe('hoog');
+    s.relations.create({ name: 'Schmidt Handel', country: 'DE', vat_number: 'DE123456789' });
+    expect(s.bank.salesVatSuggestion(tx(s, 'Schmidt Handel GmbH').id).vatCode).toBe('icp');
+  });
+});
