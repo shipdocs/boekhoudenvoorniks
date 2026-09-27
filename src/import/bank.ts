@@ -13,6 +13,7 @@ import { roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { today, type IsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
 import type { NormalizedTransaction, ParseResult } from './types';
+import { referenceIn } from '../shared/references';
 
 export interface BankAccount {
   id: number;
@@ -69,6 +70,25 @@ export interface BookToAccountInput {
   relationId?: number | null;
   /** klus waar deze uitgave bij hoort (#32) */
   jobId?: number | null;
+  /** verkoop via een ander systeem (Mollie, webshop, kassa) */
+  channel?: string | null;
+}
+
+export interface SaleInput {
+  vatCode: SalesVatCode;
+  relationId?: number | null;
+  /** bv. "Mollie", "webshop"; mag leeg */
+  channel?: string | null;
+  /** nummer van de factuur of bon; mag leeg */
+  reference?: string | null;
+}
+
+/** Een eerdere verkoop via een ander systeem van dezelfde betaler: om met één klik te herhalen. */
+export interface PreviousSale {
+  vatCode: SalesVatCode;
+  channel: string | null;
+  relationId: number | null;
+  date: IsoDate;
 }
 
 export { splitGross } from '../core-ledger/rules';
@@ -391,6 +411,64 @@ export class BankService {
   }
 
   /**
+   * "Verkoop via een ander systeem": geld van een klant zonder factuur uit deze app (Mollie,
+   * webshop, kassa, pin, contant). De omschrijving noemt het systeem en het nummer, zodat de
+   * boekhouder de factuur of bon daar terugvindt.
+   */
+  bookSale(txId: number, input: SaleInput): number {
+    const t = this.get(txId);
+    if (t.amount <= 0) throw new ValidationError('Een verkoop is geld dat binnenkomt');
+    if (!isSalesVatCode(input.vatCode)) throw new ValidationError('Kies een btw-tarief');
+    const channel = input.channel?.trim() || null;
+    const reference = input.reference?.trim() || null;
+    const who = t.counter_name?.trim() || null;
+    const description = [`Verkoop${channel ? ` via ${channel}` : ''}`, reference && `factuur/bon ${reference}`, who].filter(Boolean).join(' · ').slice(0, 200);
+    return this.bookToAccount(txId, { account: ACCOUNTS.omzetHoog, vatCode: input.vatCode, relationId: input.relationId ?? null, description, channel });
+  }
+
+  /**
+   * De laatste keer dat geld van deze betaler (zelfde IBAN, of zonder IBAN dezelfde naam) als
+   * verkoop is verwerkt. Alleen boekingen die nog gelden (niet teruggedraaid).
+   */
+  previousSale(txId: number): PreviousSale | null {
+    const t = this.get(txId);
+    if (t.amount <= 0 || (!t.counter_iban && !t.counter_name)) return null;
+    const rows = this.db
+      .prepare(
+        `SELECT b.matched_journal_entry_id AS entry, b.transaction_date AS date FROM bank_transactions b
+         WHERE b.status = 'gematcht' AND b.id <> ? AND b.amount > 0 AND b.matched_invoice_id IS NULL AND b.matched_journal_entry_id IS NOT NULL
+           AND (CASE WHEN ? IS NOT NULL THEN b.counter_iban = ? ELSE b.counter_iban IS NULL AND b.counter_name = ? END)
+         ORDER BY b.transaction_date DESC, b.id DESC LIMIT 20`,
+      )
+      .all(t.id, t.counter_iban, t.counter_iban, t.counter_name) as { entry: number; date: IsoDate }[];
+    for (const r of rows) {
+      const e = this.events.forEntry(r.entry);
+      if (!e || e.type !== 'bank-categorie' || e.status !== 'actief') continue;
+      const p = e.payload as BankCategoriePayload;
+      // de laatste keer was geen verkoop (bv. privé gestort): dan geen voorstel
+      if (p.accountCategory !== 'omzet' || !isSalesVatCode(p.vatCode)) return null;
+      return { vatCode: p.vatCode, channel: p.channel ?? null, relationId: p.relationId, date: r.date };
+    }
+    return null;
+  }
+
+  /** Net als vorige keer: zelfde btw, systeem en klant; het nummer uit de omschrijving van de bank. */
+  repeatSale(txId: number): number {
+    const prev = this.previousSale(txId);
+    if (!prev) throw new ValidationError('Er is geen eerdere verkoop van deze betaler om te herhalen');
+    const t = this.get(txId);
+    return this.bookSale(txId, { vatCode: prev.vatCode, channel: prev.channel, relationId: prev.relationId, reference: referenceIn(t.description) });
+  }
+
+  /** Namen van systemen die de gebruiker eerder gaf (Mollie, webshop, …), voor de keuzelijst. */
+  saleChannels(): string[] {
+    const rows = this.db
+      .prepare(`SELECT DISTINCT json_extract(payload, '$.channel') AS c FROM events WHERE type = 'bank-categorie' AND status = 'actief' AND json_extract(payload, '$.channel') IS NOT NULL ORDER BY id DESC LIMIT 20`)
+      .all() as { c: string }[];
+    return rows.map((r) => r.c);
+  }
+
+  /**
    * Boekt een transactie direct op een grootboekrekening ("kantoorkosten", "privé", …),
    * inclusief BTW-splitsing. De gebruiker ziet alleen een categorie en een BTW-keuze.
    */
@@ -414,6 +492,7 @@ export class BankService {
       vatCode,
       relationId,
       description,
+      ...(input.channel?.trim() ? { channel: input.channel.trim().slice(0, 60) } : {}),
     };
     return tx(this.db, () => {
       const { entryId } = this.events.record({ type: 'bank-categorie', payload }, [{ kind: 'bank', refId: txId }], { jobId: input.jobId ?? null });

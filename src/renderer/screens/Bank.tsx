@@ -2,7 +2,8 @@ import { Fragment, useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
 import type { CsvMapping } from '../../import/csv';
-import type { PurchaseVatCode } from '../../shared/vat';
+import { saleVatText, type PurchaseVatCode, type SalesVatCode } from '../../shared/vat';
+import { referenceIn } from '../../shared/references';
 import { InvestmentHint, investmentInfo } from './Purchases';
 import { CategoryChips } from './Categories';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
@@ -279,26 +280,33 @@ export function CategoryPicker({ initial, onPick, incoming, amount }: { initial?
 }
 
 /**
- * "Ik heb iets verkocht" zonder factuur uit deze app (Mollie, webshop, pin, contant): kies de btw. De app stelt een
- * tarief voor op basis van de klant of het land van de rekening; bij een klant buiten Nederland is
- * dat vaak 0%.
+ * "Verkoop via een ander systeem": geld van een klant zonder factuur uit deze app (Mollie, webshop,
+ * kassa, pin, contant). Kies de btw; de app stelt een tarief voor op basis van de klant of het land
+ * van de rekening. Het systeem en het nummer komen in de omschrijving, en de app onthoudt de keuze
+ * voor de volgende betaling van deze betaler.
  */
-function SaleWithoutInvoice({ txId, amount, description, busy, onBook }: { txId: number; amount: number; description: string; busy: boolean; onBook: (vatCode: string, relationId: number | null, description: string) => void }) {
+function SaleForm({ txId, amount, description, busy, onBook }: { txId: number; amount: number; description: string; busy: boolean; onBook: (input: { vatCode: SalesVatCode; relationId: number | null; channel: string; reference: string }) => void }) {
   const { meta } = useApp();
   const hint = useLoad(() => api.bank.salesVatSuggestion(txId), [txId]);
-  const [picked, setPicked] = useState<string | null>(null);
-  // een factuurnummer uit de omschrijving van de bank, bv. I-MOL-2026-00344
-  const [number, setNumber] = useState(() => description.match(/\b[A-Z][A-Z0-9]*(?:[-/][A-Z0-9]+)*\d{3,}\b/)?.[0] ?? '');
+  const channels = useLoad(() => api.bank.saleChannels());
+  const [picked, setPicked] = useState<SalesVatCode | null>(null);
+  const [channel, setChannel] = useState('');
+  // een nummer uit de omschrijving van de bank, bv. I-MOL-2026-00344
+  const [reference, setReference] = useState(() => referenceIn(description) ?? '');
   const vat = picked ?? hint.data?.vatCode ?? 'hoog';
   const rate = meta.salesVat.find((v) => v.code === vat);
   const net = Math.round((amount * 100) / (100 + (rate?.percentage ?? 0)));
   return (
     <div className="card grid" style={{ gridTemplateColumns: 'minmax(0, 1fr)', margin: 0 }}>
+      <Field label="Via welk systeem? (mag leeg)" hint="bv. Mollie, je webshop of je kassa; de app onthoudt het voor de volgende keer">
+        <input value={channel} maxLength={60} list="verkoop-systemen" placeholder="bv. Mollie" onChange={(e) => setChannel(e.target.value)} />
+        <datalist id="verkoop-systemen">{(channels.data ?? []).map((c) => <option key={c} value={c} />)}</datalist>
+      </Field>
       <Field label="Nummer van de factuur of bon, als je die hebt" hint="staat vaak al in de omschrijving van de bank; zo vindt je boekhouder hem terug">
-        <input value={number} maxLength={60} onChange={(e) => setNumber(e.target.value)} />
+        <input value={reference} maxLength={60} onChange={(e) => setReference(e.target.value)} />
       </Field>
       <Field label="Hoeveel btw rekende je?" hint="kijk op de factuur of bon die je klant kreeg">
-        <select value={vat} onChange={(e) => setPicked(e.target.value)}>
+        <select value={vat} onChange={(e) => setPicked(e.target.value as SalesVatCode)}>
           {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
         </select>
       </Field>
@@ -308,7 +316,9 @@ function SaleWithoutInvoice({ txId, amount, description, busy, onBook }: { txId:
       {vat !== 'hoog' && vat !== 'laag' && (
         <p className="small muted" style={{ margin: 0 }}>Geen Nederlandse btw? Laat je boekhouder even meekijken of dat klopt voor wat je levert.</p>
       )}
-      <div className="row end"><Button kind="primary" disabled={busy || hint.loading || (Boolean(hint.error) && !picked)} onClick={() => onBook(vat, hint.data?.relationId ?? null, number.trim() ? `Factuur ${number.trim()}${description.includes(number.trim()) ? '' : ` · ${description}`}` : description)}>Verwerk als verkoop</Button></div>
+      <div className="row end">
+        <Button kind="primary" disabled={busy || hint.loading || (Boolean(hint.error) && !picked)} onClick={() => onBook({ vatCode: vat, relationId: hint.data?.relationId ?? null, channel, reference })}>Verwerk als verkoop</Button>
+      </div>
     </div>
   );
 }
@@ -323,6 +333,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const [recat, setRecat] = useState(false);
   const [sale, setSale] = useState(false);
   const own = useLoad(() => api.bank.ownTransfer(id), [id]);
+  const previousSale = useLoad(() => api.bank.previousSale(id), [id]);
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
   const done = async (p: Promise<unknown>, investment?: string) => {
@@ -390,7 +401,14 @@ export function CategorizeTransaction({ id }: { id: number }) {
 
           {t.amount > 0 ? (
             <>
-              <h2>Waar is dit geld voor?</h2>
+              {previousSale.data && (
+                <div className="card">
+                  <strong>Weer een verkoop{previousSale.data.channel ? ` via ${previousSale.data.channel}` : ''}?</strong>
+                  <p className="small muted">Net als vorige keer ({formatDateNl(previousSale.data.date)}): {saleVatText(previousSale.data.vatCode)}.</p>
+                  <Button kind="primary" disabled={busy} onClick={() => void done(api.bank.repeatSale(t.id))}>Klopt, verwerk als verkoop</Button>
+                </div>
+              )}
+              <h2>{previousSale.data ? 'Of was het iets anders?' : 'Waar is dit geld voor?'}</h2>
               {invoices.length > 0 && (
                 <Field label="Betaling van een factuur">
                   <select defaultValue="" onChange={(e) => e.target.value && void done(api.bank.matchInvoice(t.id, Number(e.target.value)))}>
@@ -408,13 +426,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
                     </button>
                     {/* direct onder de knop, niet onderaan na alle andere keuzes */}
                     {d.key === 'omzet' && sale && (
-                      <SaleWithoutInvoice
-                        txId={t.id}
-                        amount={t.amount}
-                        description={t.description ?? ''}
-                        busy={busy}
-                        onBook={(vatCode, relationId, description) => void done(api.bank.book(t.id, { account: d.account, vatCode, relationId, description }))}
-                      />
+                      <SaleForm txId={t.id} amount={t.amount} description={t.description ?? ''} busy={busy} onBook={(input) => void done(api.bank.bookSale(t.id, input))} />
                     )}
                   </Fragment>
                 ))}

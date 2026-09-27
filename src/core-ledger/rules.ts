@@ -97,6 +97,8 @@ export interface BankCategoriePayload {
   vatCode: string;
   relationId: number | null;
   description: string;
+  /** verkoop via een ander systeem: de naam die de gebruiker gaf, bv. "Mollie" of "webshop" */
+  channel?: string | null;
 }
 
 /** Een inkoopfactuur of bonnetje. */
