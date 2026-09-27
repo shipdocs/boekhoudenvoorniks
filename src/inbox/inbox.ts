@@ -28,6 +28,7 @@ import { automationForMonth, countDecision, getAutomation, logAutomation, markCo
 import { explain } from '../automation/explain';
 import type { InvestmentCheck } from '../tax/investment-check';
 import type { MailIntakeService } from '../mail/mail-intake';
+import type { FxRepair } from '../fx/repair';
 
 
 export type TaskKind =
@@ -59,6 +60,7 @@ export type TaskKind =
   | 'recurring-stopped'
   | 'recurring-invoice'
   | 'investment-check'
+  | 'fx-repair'
   | 'mail-online'
   | 'mail-customer';
 
@@ -143,6 +145,11 @@ export class InboxService {
     private readonly investments?: InvestmentCheck,
     private readonly mail?: MailIntakeService,
   ) {}
+
+  private fxRepair: FxRepair | null = null;
+  setFxRepair(repair: FxRepair): void {
+    this.fxRepair = repair;
+  }
 
   /** Een taak bewust overslaan; komt niet terug zolang de sleutel gelijk blijft. */
   skipTask(key: string, reason = ''): void {
@@ -775,6 +782,23 @@ export class InboxService {
         why: 'Kost iets € 450 of meer (zonder btw) en gebruik je het jaren? Dan telt de app de kosten verdeeld over 5 jaar. De btw krijg je gewoon meteen terug, en je krijgt misschien 28% extra aftrek.',
         priority: 3,
         ref: { lineId: c.lineId, purchaseId: c.purchaseId ?? undefined, bankTransactionId: c.bankTransactionId ?? undefined },
+      });
+    }
+
+    // vangnet (#74): met een oudere versie als euro's geboekt, maar de bon is in bv. dollars
+    const foreign = (this.fxRepair?.candidates().length ?? 0) + (this.fxRepair?.pendingDocuments().length ?? 0);
+    if (foreign > 0) {
+      tasks.push({
+        key: 'fx-repair',
+        kind: 'fx-repair',
+        icon: '💱',
+        title: foreign === 1 ? 'Een bon in dollars (of een andere munt) staat als euro\'s in je boekhouding' : `${foreign} bonnen in dollars (of een andere munt) staan als euro's in je boekhouding`,
+        question: 'De app rekent ze om naar wat er echt van je rekening is afgeschreven. Je ziet eerst wat er verandert.',
+        actions: [{ id: 'open', label: 'Nakijken', primary: true }],
+        why: 'Oudere versies van de app lazen "$ 90,00" als € 90,00. Daardoor klopt het bedrag niet en koppelt de betaling op de bank niet.',
+        // eerst: anders boek je de afschrijving misschien los als kosten, naast de aankoop (dubbel)
+        priority: 1,
+        ref: {},
       });
     }
 
