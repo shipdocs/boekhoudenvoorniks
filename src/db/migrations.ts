@@ -780,4 +780,17 @@ export const migrations: string[] = [
     SELECT 'switchover', '{"mode":"nieuw","date":null,"status":"klaar","provisional":false,"filedElsewhere":[],"dismissed":[],"bankConfirmed":[],"bankChecks":{},"accountantEquity":null}'
     WHERE EXISTS (SELECT 1 FROM journal_entries);
   `,
+  /* 18: fiscale review — ingebruikname, overbrengen naar privé, vastgelegde KIA per jaar */ `
+  -- afschrijving begint bij ingebruikname (NULL = de aankoopdatum)
+  ALTER TABLE assets ADD COLUMN in_use_on TEXT;
+  -- 'verkocht' of 'prive' (overgebracht naar privévermogen: telt als vervreemding)
+  ALTER TABLE assets ADD COLUMN disposal_kind TEXT;
+  -- de KIA zoals die voor een afgesloten jaar is toegepast; basis voor de desinvesteringsbijtelling
+  CREATE TABLE kia_applied (
+    year INTEGER PRIMARY KEY,
+    investments INTEGER NOT NULL,
+    kia INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];
