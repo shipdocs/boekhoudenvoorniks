@@ -33,6 +33,7 @@ import type { JobStatus } from '../jobs/jobs';
 import type { LineInput } from '../documents/totals';
 import type { Task } from '../inbox/inbox';
 import type { OpeningInput } from '../onboarding/switchover';
+import type { XafApplyChoices } from '../onboarding/xaf-import';
 import type { EntrySource } from '../core-ledger/ledger';
 import { today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
@@ -596,6 +597,11 @@ export function createApi(s: Services, host: HostContext) {
       setAccountantEquity: (amount: Cents | null) => s.switchover.setAccountantEquity(amount),
       confirm: (opts?: { provisional?: boolean }) => s.switchover.confirm(opts),
       reopen: () => s.switchover.reopen(),
+      /** auditfile (XAF) uit het vorige programma: eerst bekijken, dan overnemen wat aangevinkt is */
+      analyzeXaf: (file: string | Uint8Array, date?: IsoDate) => s.xafImport.analyze(file, date),
+      applyXaf: (file: string | Uint8Array, choices: XafApplyChoices) => s.xafImport.apply(file, choices),
+      /** openstaande verkoopfacturen als UBL (e-factuur) */
+      addUblInvoices: (files: { name: string; xml: string }[]) => ({ ...s.switchover.saveFromUbl(files), state: s.switchover.state() }),
     },
     incomeTax: {
       estimate: () => s.incomeTax.estimate(),
