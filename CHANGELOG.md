@@ -2,6 +2,18 @@
 
 ## Nog niet uitgebracht
 
+- **Btw-aangifte na de uiterste datum**: Vandaag bleef om de aangifte van een vorig kwartaal vragen, ook als je
+  die al buiten de app deed. Nu vraagt de app na de uiterste datum eerst "Al gedaan, bv. via Mijn
+  Belastingdienst of je boekhouder?" met de knop **Al ingediend** (die kan ook bij openstaande controles). Ook
+  vóór de uiterste datum staat *Al ingediend* erbij. Op het Belasting-scherm zie je bij een lopend kwartaal
+  wanneer je de aangifte doet.
+- **Potje zonder eigen rekeningnummer** (bv. een Knab-potje voor de btw): een rekening toevoegen kan nu ook
+  zonder IBAN. Bij een betaling kies je dan "Naar potje …" of "Uit potje …": geen kosten, niets "onderweg".
+- **Bon controleren**: het formulier past weer binnen de kaart; het factuur- of bonnummer en het btw-bedrag kun
+  je nu zelf aanpassen. Engelse facturen: datums als "May 6, 2026" worden herkend en een kopje als "Date of
+  issue" wordt niet meer als leverancier gezien. Anthropic is een bekende leverancier (software, btw verlegd
+  van buiten de EU). Datumvelden staan in het Nederlands (dd-mm-jjjj), ook op een Engelstalige computer.
+
 ## 0.3.7 — verkoop via een ander systeem (Mollie, webshop, kassa)
 
 - **"Verkoop via een ander systeem"** (bij geld dat binnenkomt; heette "Omzet zonder factuur (contant/pin)"):

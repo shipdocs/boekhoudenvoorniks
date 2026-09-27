@@ -9,7 +9,7 @@ import { KNOWN_SUPPLIERS } from './suppliers';
  * Dit is EXTRACTIE: wat staat er? Er worden hier geen fiscale beslissingen genomen.
  */
 const AMOUNT_RE = /(?:€\s*)?(-?\d{1,3}(?:[.\s]\d{3})*[,.]\d{2}|-?\d+[,.]\d{2})(?!\d)/g;
-const MONTHS: Record<string, number> = { jan: 1, feb: 2, mrt: 3, maa: 3, apr: 4, mei: 5, jun: 6, jul: 7, aug: 8, sep: 9, okt: 10, oct: 10, nov: 11, dec: 12 };
+const MONTHS: Record<string, number> = { jan: 1, feb: 2, mrt: 3, maa: 3, mar: 3, apr: 4, mei: 5, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, okt: 10, oct: 10, nov: 11, dec: 12 };
 
 interface Line {
   text: string;
@@ -84,6 +84,12 @@ function parseDateText(text: string): string | null {
     const iso = `${m[3]}-${String(MONTHS[m[2]!.toLowerCase()]).padStart(2, '0')}-${m[1]!.padStart(2, '0')}`;
     return isIsoDate(iso) ? iso : null;
   }
+  // Engels: "May 6, 2026" of "September 12 2026"
+  m = /\b([a-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})\b/i.exec(text);
+  if (m && MONTHS[m[1]!.toLowerCase()]) {
+    const iso = `${m[3]}-${String(MONTHS[m[1]!.toLowerCase()]).padStart(2, '0')}-${m[2]!.padStart(2, '0')}`;
+    return isIsoDate(iso) ? iso : null;
+  }
   return null;
 }
 
@@ -102,7 +108,8 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     }
   }
   if (!supplier) {
-    const first = lines.find((l) => /[a-z]{3,}/i.test(l.text) && !/factuur|bon|kassabon|invoice|datum/i.test(l.text));
+    // de eerste regel met letters, maar geen kopje als "Factuur", "Date of issue" of "Invoice number"
+    const first = lines.find((l) => /[a-z]{3,}/i.test(l.text) && !/factuur|bon|kassabon|invoice|receipt|datum|\bdate\b|nummer|number|\bdue\b|pagina|page|bill to|ship to/i.test(l.text));
     if (first) supplier = field(first.text.slice(0, 80), first, 0.5);
   }
 

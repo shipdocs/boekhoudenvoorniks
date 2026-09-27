@@ -713,19 +713,26 @@ export class InboxService {
       const hasActivity = report.summary.omzet !== 0 || report.summary.voorbelasting !== 0;
       if (report.status !== 'ingediend' && hasActivity) {
         const deadline = vatDeadline(previous.end, s.vatPeriod);
+        const late = deadline < asOf;
+        const amount = `${report.summary.teBetalen >= 0 ? 'betalen' : 'terugkrijgen'} ongeveer ${formatEuro(Math.abs(report.summary.teBetalen))}`;
         tasks.push({
           key: `vat-${previous.key}`,
           kind: 'vat-due',
           icon: '📮',
-          title: `Btw-aangifte ${previous.label} doen`,
-          question: `Uiterlijk ${formatDateNl(deadline)}: ${report.summary.teBetalen >= 0 ? 'betalen' : 'terugkrijgen'} ongeveer ${formatEuro(Math.abs(report.summary.teBetalen))}.`,
+          title: late ? `Btw-aangifte ${previous.label}: had uiterlijk ${formatDateNl(deadline)} binnen moeten zijn` : `Btw-aangifte ${previous.label} doen`,
+          question: late
+            ? `Al gedaan, bijvoorbeeld via Mijn Belastingdienst of je boekhouder? Vink hem dan af. Nog niet? Doe hem zo snel mogelijk (${amount}).`
+            : `Uiterlijk ${formatDateNl(deadline)}: ${amount}. Al gedaan buiten de app? Vink hem dan af.`,
           amount: report.summary.teBetalen,
-          actions: [{ id: 'open', label: 'Aangifte bekijken', primary: true }],
+          actions: late
+            ? [{ id: 'ingediend', label: 'Al ingediend', primary: true }, { id: 'open', label: 'Aangifte bekijken' }]
+            : [{ id: 'open', label: 'Aangifte bekijken', primary: true }, { id: 'ingediend', label: 'Al ingediend' }],
           priority: 1,
           ref: { periodKey: previous.key },
         });
-        // Controles vóór de aangifte (#20): in dezelfde lijst, blokkerend tot opgelost of bewust overgeslagen
-        for (const c of this.vat.checks(previous.key).filter((x) => !x.skipped)) {
+        // Controles vóór de aangifte (#20): in dezelfde lijst, blokkerend tot opgelost of bewust overgeslagen.
+        // Na de uiterste datum niet meer los: dan is de vraag eerst of de aangifte al gedaan is.
+        for (const c of late ? [] : this.vat.checks(previous.key).filter((x) => !x.skipped)) {
           tasks.push({
             key: `vat-check-${previous.key}-${c.key}`,
             kind: 'vat-check',

@@ -63,7 +63,7 @@ export function DocumentReview({ id }: { id: number }) {
   const jobSuggestion = useLoad(() => api.jobs.suggestForDocument(id), [id]);
   const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
-  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
+  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
 
   const d = doc.data;
   useEffect(() => {
@@ -74,6 +74,7 @@ export function DocumentReview({ id }: { id: number }) {
       date: r?.invoiceDate?.value ?? '',
       total: r?.total?.value ?? null,
       invoiceNumber: r?.invoiceNumber?.value ?? '',
+      vatAmount: null,
       categoryKey: d.classification?.categoryKey ?? 'materiaal',
       vatCode: (d.classification?.vatCode ?? 'hoog') as PurchaseVatCode,
       business: d.classification?.business ?? true,
@@ -102,6 +103,10 @@ export function DocumentReview({ id }: { id: number }) {
     { key: 'vat', label: 'Btw', field: r?.vat, show: r?.vat.value.map((v) => `${v.rate}%: ${(v.amount / 100).toFixed(2).replace('.', ',')}`).join(' · ') || '—' },
     { key: 'total', label: 'Totaal', field: r?.total, show: form.total !== null ? new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(form.total / 100) : '?' },
   ];
+  // btw-bedrag zoals gelezen (één tarief), anders uitgerekend uit het totaal
+  const rate = form.vatCode === 'hoog' ? 21 : form.vatCode === 'laag' ? 9 : 0;
+  const docVat = r?.vat.value.length === 1 && r.vat.value[0]!.rate === rate ? r.vat.value[0]!.amount : null;
+  const defaultVat = form.total === null ? null : docVat ?? Math.round((form.total * rate) / (100 + rate));
   const activeField = fields.find((f) => f.key === active)?.field ?? (active?.startsWith('line-') ? r?.lines?.[Number(active.slice(5))] ?? null : null);
   const pageSize = r?.pageSizes?.[(activeField?.page ?? 1) - 1];
 
@@ -184,12 +189,16 @@ export function DocumentReview({ id }: { id: number }) {
           {d.classification && <p className="small muted">{d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(' · ')}</p>}
 
           {d.status !== 'verwerkt' && (
-            <div className="card grid" style={{ marginTop: 12 }}>
+            // minmax: het formulier blijft binnen de kaart, hoe breed de keuzeknoppen of het datumveld ook zijn
+            <div className="card grid" style={{ marginTop: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
               <div className="grid cols-2">
                 <Field label="Winkel / leverancier"><input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} /></Field>
                 <Field label="Datum"><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
               </div>
-              <Field label="Totaal (incl. btw)"><MoneyInput value={form.total} onChange={(v) => setForm({ ...form, total: v })} /></Field>
+              <div className="grid cols-2">
+                <Field label="Totaal (incl. btw)"><MoneyInput value={form.total} onChange={(v) => setForm({ ...form, total: v })} /></Field>
+                <Field label="Factuur- of bonnummer" hint="mag leeg"><input value={form.invoiceNumber} maxLength={60} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} /></Field>
+              </div>
               <Field label="Was dit zakelijk?">
                 <div className="chips">
                   <button className={form.business ? 'selected' : ''} onClick={() => setForm({ ...form, business: true })}>Zakelijk</button>
@@ -200,11 +209,18 @@ export function DocumentReview({ id }: { id: number }) {
                 <>
                   <CategoryChoice value={form.categoryKey} onChange={(c) => setForm({ ...form, categoryKey: c })} />
                   {!form.splits && <InvestmentHint categoryKey={form.categoryKey} gross={form.total} vatCode={form.vatCode} onUse={() => setForm({ ...form, categoryKey: 'investering' })} />}
-                  <Field label="Btw op de bon">
-                    <select value={form.vatCode} onChange={(e) => setForm({ ...form, vatCode: e.target.value as PurchaseVatCode })}>
-                      {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
-                    </select>
-                  </Field>
+                  <div className="grid cols-2">
+                    <Field label="Btw op de bon">
+                      <select value={form.vatCode} onChange={(e) => setForm({ ...form, vatCode: e.target.value as PurchaseVatCode, vatAmount: null })}>
+                        {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
+                      </select>
+                    </Field>
+                    {!form.splits && (form.vatCode === 'hoog' || form.vatCode === 'laag') && (
+                      <Field label="Btw-bedrag" hint="zoals op de bon; pas aan als het anders is">
+                        <MoneyInput value={form.vatAmount ?? defaultVat} onChange={(v) => setForm({ ...form, vatAmount: v })} />
+                      </Field>
+                    )}
+                  </div>
                   <Field label="Hoe betaald?">
                     <div className="chips">
                       <button className={form.paidWith === 'bank' || form.paidWith === 'later' ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: d.bank_match ? 'bank' : 'later' })}>Zakelijke rekening</button>
@@ -226,7 +242,7 @@ export function DocumentReview({ id }: { id: number }) {
                 <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
                 <Button kind="primary" disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
                   const isInvestment = form.business && !form.splits && form.categoryKey === 'investering';
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits }), isInvestment ? undefined : 'Verwerkt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount, categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits }), isInvestment ? undefined : 'Verwerkt ✓');
                   if (res) {
                     go({ screen: 'aankopen' });
                     if (isInvestment) showInvestmentSaved(investmentInfo(form.total!, form.vatCode, true));
