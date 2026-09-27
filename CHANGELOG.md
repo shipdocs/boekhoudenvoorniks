@@ -2,6 +2,8 @@
 
 ## Nog niet uitgebracht
 
+## 0.3.7 — verkoop via een ander systeem (Mollie, webshop, kassa)
+
 - **"Verkoop via een ander systeem"** (bij geld dat binnenkomt; heette "Omzet zonder factuur (contant/pin)"):
   voor een klant die je betaalde via bv. Mollie, je webshop, kassa, pin of contant, of voor een factuur die je
   ergens anders maakte. Zonder koppeling:
