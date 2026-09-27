@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { estimateIncomeTax, representatieBijtelling, rulesFor, tariefsaanpassingFor } from '../src/tax/income-tax';
 import { isStarter } from '../src/tax/overview';
+import { setup } from './helpers';
+
+type S = ReturnType<typeof setup>['s'];
+/** Investering via een bon: bruto incl. 21% btw. */
+const buy = (s: S, date: string, gross: number, name = 'Steigermateriaal') =>
+  s.quick.recordExpense({ date, supplierName: 'Bouwmaat', description: name, categoryKey: 'investering', grossAmount: gross, vatCode: 'hoog', paidWith: 'kas' });
+const balance = (s: S, rgs: string) =>
+  (s.db.prepare(`SELECT COALESCE(SUM(l.debit - l.credit), 0) AS b FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE a.rgs_code = ?`).get(rgs) as { b: number }).b;
 
 /**
  * Regressietests uit de fiscale review (docs/fiscale-review.md, hoofdstuk 4). Elke test noemt het
@@ -91,5 +99,53 @@ describe('drempels uit de jaartabel (vragen 22 en 31)', () => {
       expect(r.desinvesteringDrempel).toBe(2900);
       expect(r.kia.min - 1).toBe(r.desinvesteringDrempel);
     }
+  });
+});
+
+describe('bedrijfsmiddelen (vragen 17, 20 en 31)', () => {
+  it('17: afschrijving begint bij ingebruikname, niet bij aankoop', () => {
+    const { s } = setup();
+    buy(s, '2025-03-01', 3630_00); // 3.000 excl. btw, 60 maanden → 50 per maand
+    const [a] = s.assets.list({}, '2025-03-02');
+    s.assets.update(a!.id, { inUseOn: '2025-11-15' });
+    // 2025: alleen november en december
+    expect(s.assets.bookYear(2025, '2026-01-05').amount).toBe(100_00);
+    expect(() => s.assets.update(a!.id, { inUseOn: '2025-12-01' })).toThrow(/al afschrijving/);
+    expect(() => s.assets.update(a!.id, { inUseOn: '2025-01-01' })).toThrow();
+  });
+
+  it('31: naar privé telt als vervreemding: waarde als privé-opname, desinvesteringsbijtelling', () => {
+    const { s } = setup();
+    buy(s, '2025-07-10', 3630_00);
+    const [a] = s.assets.list({}, '2026-01-10');
+    s.assets.dispose(a!.id, '2026-04-15', 3000_00, 'prive');
+    expect(balance(s, 'BEivPriPrv')).toBe(3000_00);
+    // boekresultaat: boekwaarde 2.550 eraf, waarde 3.000 erbij
+    expect(balance(s, 'WAfsRvmBei')).toBe(3000_00 - 450_00 - 3000_00);
+    expect(s.ledger.checkIntegrity().balanced).toBe(true);
+    expect(s.taxOverview.adjustments(2026, '2026-05-01').desinvesteringsbijtelling).toBe(840_00);
+  });
+
+  it('31: geen bijtelling tot en met de drempel van € 2.900', () => {
+    const { s } = setup();
+    buy(s, '2025-07-10', 3630_00);
+    const [a] = s.assets.list({}, '2026-01-10');
+    s.assets.dispose(a!.id, '2026-04-15', 2900_00);
+    expect(s.taxOverview.adjustments(2026, '2026-05-01').desinvesteringsbijtelling).toBe(0);
+  });
+
+  it('20: KIA van een afgesloten jaar wordt vastgelegd en verandert niet meer door het register', () => {
+    const { s } = setup();
+    buy(s, '2025-02-01', 3630_00, 'Steiger');
+    buy(s, '2025-03-01', 12100_00, 'Aanhanger');
+    // 2025 afgesloten: 13.000 × 28%
+    expect(s.taxOverview.adjustments(2025, '2026-02-01').kia).toBe(3640_00);
+    // later wordt de aanhanger uitgesloten; de toegepaste KIA van 2025 blijft
+    const aanhanger = s.assets.list({}, '2026-02-01').find((x) => x.name.includes('Aanhanger'))!;
+    s.assets.update(aanhanger.id, { kiaExcluded: true });
+    expect(s.taxOverview.adjustments(2025, '2026-03-01').kia).toBe(3640_00);
+    const steiger = s.assets.list({}, '2026-03-01').find((x) => x.name.includes('Steiger'))!;
+    s.assets.dispose(steiger.id, '2026-04-01', 3000_00);
+    expect(s.taxOverview.adjustments(2026, '2026-05-01').desinvesteringsbijtelling).toBe(840_00);
   });
 });

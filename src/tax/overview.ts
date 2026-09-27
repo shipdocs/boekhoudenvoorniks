@@ -99,11 +99,23 @@ export class TaxOverviewService {
     return r.s;
   }
 
-  /** Effectief KIA-percentage van een jaar (voor de desinvesteringsbijtelling). */
-  private kiaRate(year: number): number {
-    const inv = this.investmentsIn(year);
-    if (inv <= 0) return 0;
-    return kiaFor(inv / 100, rulesFor(year).rules.kia) / (inv / 100);
+  /**
+   * De KIA van een jaar. Voor een afgesloten jaar wordt die de eerste keer vastgelegd, zodat latere
+   * wijzigingen in het register (verkopen, uitsluiten) het toegepaste percentage niet meer veranderen.
+   */
+  private kiaOf(year: number, asOf: IsoDate): { investments: Cents; kia: Cents } {
+    const stored = this.db.prepare('SELECT investments, kia FROM kia_applied WHERE year = ?').get(year) as { investments: Cents; kia: Cents } | undefined;
+    if (stored) return stored;
+    const investments = this.investmentsIn(year);
+    const kia = Math.round(kiaFor(investments / 100, rulesFor(year).rules.kia) * 100);
+    if (year < Number(asOf.slice(0, 4))) this.db.prepare('INSERT OR IGNORE INTO kia_applied (year, investments, kia) VALUES (?, ?, ?)').run(year, investments, kia);
+    return { investments, kia };
+  }
+
+  /** KIA-percentage zoals toegepast in het investeringsjaar (voor de desinvesteringsbijtelling). */
+  private kiaRate(year: number, asOf: IsoDate): number {
+    const { investments, kia } = this.kiaOf(year, asOf);
+    return investments > 0 ? kia / investments : 0;
   }
 
   adjustments(year: number, asOf: IsoDate = today()): FiscalAdjustments {
@@ -111,8 +123,7 @@ export class TaxOverviewService {
     const { rules } = rulesFor(year);
     // afgesloten jaren zijn dan geboekt; wat overblijft is alleen het lopende jaar
     this.assets.bookDue(asOf);
-    const investments = this.investmentsIn(year);
-    const kia = Math.round(kiaFor(investments / 100, rules.kia) * 100);
+    const { investments, kia } = this.kiaOf(year, asOf);
 
     // verkocht binnen 5 jaar na het begin van het investeringsjaar: (een deel van) de KIA terug
     const sold = this.db
@@ -123,7 +134,7 @@ export class TaxOverviewService {
     const desinvesteringsbijtelling =
       soldTotal > rules.desinvesteringDrempel * 100
         ? within.reduce((t, a) => {
-            const rate = this.kiaRate(Number(a.acquired_on.slice(0, 4)));
+            const rate = this.kiaRate(Number(a.acquired_on.slice(0, 4)), asOf);
             return t + Math.round(rate * Math.min(a.proceeds ?? 0, a.cost));
           }, 0)
         : 0;

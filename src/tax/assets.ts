@@ -12,7 +12,7 @@ import { ValidationError } from '../shared/validation';
  * dus het maakt niet uit hoe de aankoop geboekt is (bon, inkoopfactuur, bank). De gebruiker kan per
  * bedrijfsmiddel de naam, levensduur en restwaarde aanpassen.
  *
- * Afschrijving is lineair per maand, vanaf de maand van aanschaf, en wordt per afgesloten jaar als één
+ * Afschrijving is lineair per maand, vanaf de maand van ingebruikname (standaard de aankoopdatum), en wordt per afgesloten jaar als één
  * journaalpost op 31 december geboekt (bij verkoop tot de verkoopdatum). Fiscaal mag maximaal 20% per
  * jaar: de levensduur is daarom minstens 60 maanden. Voor het lopende jaar rekent de app een verwachting
  * (voor de schatting van de inkomstenbelasting), zonder te boeken.
@@ -48,6 +48,10 @@ export interface AssetRow {
   booked_elsewhere_until: number | null;
   /** 1 = er was al vóór de instapdatum (overstap): afschrijven vanaf de boekwaarde, geen investeringsaftrek */
   is_opening: number;
+  /** datum van ingebruikname als die later is dan de aankoop (fiscaal begint de afschrijving dan); null = aankoopdatum */
+  in_use_on: IsoDate | null;
+  /** hoe het bedrijfsmiddel de onderneming verliet: verkocht, of overgebracht naar privé */
+  disposal_kind: 'verkocht' | 'prive' | null;
 }
 
 export interface Asset extends AssetRow {
@@ -65,13 +69,16 @@ export interface Asset extends AssetRow {
 
 const monthIndex = (d: IsoDate) => Number(d.slice(0, 4)) * 12 + Number(d.slice(5, 7)) - 1;
 
+/** Vanaf wanneer afgeschreven wordt: de ingebruikname, of anders de aankoopdatum. */
+export const depreciationStart = (a: Pick<AssetRow, 'acquired_on'> & { in_use_on?: IsoDate | null }): IsoDate => a.in_use_on ?? a.acquired_on;
+
 /**
  * Afschrijving tot en met het einde van een maand, cumulatief en afgerond (zo lopen de jaarbedragen
  * altijd precies op tot aanschaf min restwaarde). `until` = laatste maand die meetelt.
  */
-export function cumulativeDepreciation(a: Pick<AssetRow, 'acquired_on' | 'cost' | 'residual' | 'lifetime_months'>, untilYear: number, untilMonth: number): Cents {
+export function cumulativeDepreciation(a: Pick<AssetRow, 'acquired_on' | 'cost' | 'residual' | 'lifetime_months'> & { in_use_on?: IsoDate | null }, untilYear: number, untilMonth: number): Cents {
   const base = Math.max(0, a.cost - a.residual);
-  const months = untilYear * 12 + untilMonth - 1 - monthIndex(a.acquired_on) + 1;
+  const months = untilYear * 12 + untilMonth - 1 - monthIndex(depreciationStart(a)) + 1;
   if (months <= 0) return 0;
   return Math.min(base, Math.round((base * months) / a.lifetime_months));
 }
@@ -178,9 +185,14 @@ export class AssetService {
   }
 
   /** Naam, levensduur, restwaarde of "telt niet mee voor de KIA" aanpassen. Afschrijving die al geboekt is, blijft staan. */
-  update(id: number, patch: { name?: string; lifetimeMonths?: number; residual?: Cents; kiaExcluded?: boolean; bookInApp?: boolean }): Asset {
+  update(id: number, patch: { name?: string; lifetimeMonths?: number; residual?: Cents; kiaExcluded?: boolean; bookInApp?: boolean; inUseOn?: IsoDate | null }): Asset {
     const a = this.row(id);
     if (a.status !== 'actief') throw new ValidationError('Alleen een investering die je nog gebruikt, kun je aanpassen');
+    if (patch.inUseOn !== undefined) {
+      if (patch.inUseOn !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(patch.inUseOn) || patch.inUseOn < a.acquired_on)) throw new ValidationError('De datum van ingebruikname ligt niet vóór de aankoop');
+      if (this.booked(a.id) > 0) throw new ValidationError('Er is al afschrijving voor geboekt; vraag je boekhouder om dit te corrigeren');
+      this.db.prepare('UPDATE assets SET in_use_on = ? WHERE id = ?').run(patch.inUseOn && patch.inUseOn !== a.acquired_on ? patch.inUseOn : null, id);
+    }
     if (patch.lifetimeMonths !== undefined) {
       // al in gebruik vóór de overstap: de levensduur is wat er nog over is, dat mag korter dan 5 jaar
       const min = a.is_opening ? 12 : MIN_LIFETIME_MONTHS;
@@ -202,7 +214,7 @@ export class AssetService {
 
   /** Nog te boeken afschrijving van één bedrijfsmiddel over een jaar (tot en met `untilMonth`). */
   private dueFor(a: AssetRow, year: number, untilMonth = 12): Cents {
-    if (Number(a.acquired_on.slice(0, 4)) > year) return 0;
+    if (Number(depreciationStart(a).slice(0, 4)) > year) return 0;
     if (a.booked_elsewhere_until !== null && year <= a.booked_elsewhere_until) return 0;
     return Math.max(0, cumulativeDepreciation(a, year, untilMonth) - this.booked(a.id, year - 1) - this.elsewhere(a, year - 1));
   }
@@ -257,12 +269,17 @@ export class AssetService {
    * Verkocht of weggedaan. Eerst de afschrijving tot de verkoopmaand, dan gaat de boekwaarde naar
    * "boekresultaat". De opbrengst zelf komt binnen via een gewone factuur (met btw); `proceeds`
    * (excl. btw) is alleen voor de desinvesteringsbijtelling.
+   *
+   * `kind = 'prive'`: overgebracht naar privévermogen (fiscaal ook een vervreemding). `proceeds` is
+   * dan de waarde in het economisch verkeer; die wordt als privé-opname geboekt tegen boekresultaat.
+   * Btw over de onttrekking (als er btw is afgetrokken) boekt de app niet: dat gaat via de boekhouder.
    */
-  dispose(id: number, date: IsoDate, proceeds: Cents): Asset {
+  dispose(id: number, date: IsoDate, proceeds: Cents, kind: 'verkocht' | 'prive' = 'verkocht'): Asset {
     const a = this.row(id);
     if (a.status !== 'actief') throw new ValidationError('Deze investering is al verkocht of weggedaan');
     if (date < a.acquired_on) throw new ValidationError('De verkoopdatum ligt vóór de aankoop');
-    if (!Number.isSafeInteger(proceeds) || proceeds < 0) throw new ValidationError('Vul de verkoopprijs in (0 als je het wegdoet)');
+    if (!Number.isSafeInteger(proceeds) || proceeds < 0) throw new ValidationError(kind === 'prive' ? 'Vul in wat het nu waard is' : 'Vul de verkoopprijs in (0 als je het wegdoet)');
+    if (kind !== 'verkocht' && kind !== 'prive') throw new ValidationError('Kies verkocht of naar privé');
     const year = Number(date.slice(0, 4));
     const acc = DEPRECIATION_ACCOUNTS[a.account_rgs]!;
     return tx(this.db, () => {
@@ -306,8 +323,11 @@ export class AssetService {
       const lines: PostLine[] = [{ account: a.account_rgs, credit: a.cost, description: a.name }];
       if (booked > 0) lines.push({ account: acc.cumulative, debit: booked, description: a.name });
       if (a.cost - booked > 0) lines.push({ account: ACCOUNTS.boekresultaat, debit: a.cost - booked, description: `Boekwaarde ${a.name}` });
-      const entryId = this.ledger.post({ date, description: `Verkocht / buiten gebruik: ${a.name}`, source: 'handmatig', sourceRef: `desinvestering:${a.id}`, lines });
-      this.db.prepare(`UPDATE assets SET status = 'verkocht', disposed_on = ?, proceeds = ?, disposal_entry_id = ? WHERE id = ?`).run(date, proceeds, entryId, a.id);
+      if (kind === 'prive' && proceeds > 0) {
+        lines.push({ account: ACCOUNTS.priveOpnamen, debit: proceeds, description: `Naar privé: ${a.name}` }, { account: ACCOUNTS.boekresultaat, credit: proceeds, description: `Waarde naar privé: ${a.name}` });
+      }
+      const entryId = this.ledger.post({ date, description: `${kind === 'prive' ? 'Naar privé' : 'Verkocht / buiten gebruik'}: ${a.name}`, source: 'handmatig', sourceRef: `desinvestering:${a.id}`, lines });
+      this.db.prepare(`UPDATE assets SET status = 'verkocht', disposed_on = ?, proceeds = ?, disposal_entry_id = ?, disposal_kind = ? WHERE id = ?`).run(date, proceeds, entryId, kind, a.id);
       return this.get(a.id, date);
     });
   }

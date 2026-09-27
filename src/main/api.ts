@@ -614,8 +614,8 @@ export function createApi(s: Services, host: HostContext) {
     },
     assets: {
       list: () => s.assets.list(),
-      update: (id: number, patch: { name?: string; lifetimeMonths?: number; residual?: Cents; kiaExcluded?: boolean; bookInApp?: boolean }) => s.assets.update(id, patch),
-      dispose: (id: number, date: IsoDate, proceeds: Cents) => s.assets.dispose(id, date, proceeds),
+      update: (id: number, patch: { name?: string; lifetimeMonths?: number; residual?: Cents; kiaExcluded?: boolean; bookInApp?: boolean; inUseOn?: IsoDate | null }) => s.assets.update(id, patch),
+      dispose: (id: number, date: IsoDate, proceeds: Cents, kind?: 'verkocht' | 'prive') => s.assets.dispose(id, date, proceeds, kind),
       bookDue: () => s.assets.bookDue(),
     },
     mileage: {
