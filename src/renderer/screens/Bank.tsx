@@ -310,9 +310,14 @@ export function CategorizeTransaction({ id }: { id: number }) {
       {t.status !== 'nieuw' ? (
         <div className="card">
           <StatusPill status={t.status} />
-          <p className="muted small">Verkeerd verwerkt? Maak het ongedaan; de app draait het netjes terug.</p>
+          <p className="muted small">Verkeerd verwerkt, of stond het bij "weet ik nog niet"? Maak het ongedaan; de app draait het netjes terug en je kiest hieronder meteen wat het wel was.</p>
           <div className="row">
-            <Button onClick={() => void done(api.bank.unmatch(t.id))}>Ongedaan maken</Button>
+            <Button disabled={busy} onClick={async () => {
+              // op deze pagina blijven: daarna meteen opnieuw indelen
+              if ((await run(async () => { await api.bank.unmatch(t.id); return true; }, 'Teruggedraaid. Kies nu wat het wel was.')) !== undefined) {
+                await Promise.all([txs.reload(), suggestions.reload(), own.reload()]);
+              }
+            }}>Ongedaan maken</Button>
             {t.status === 'gematcht' && !t.matched_invoice_id && !t.matched_purchase_invoice_id && t.amount < 0 && (
               <Button onClick={() => setRecat(!recat)}>Andere categorie</Button>
             )}

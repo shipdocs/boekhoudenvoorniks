@@ -4,6 +4,7 @@ import { Button, DateNl, ErrorBox, Euro, Modal, useAction, useApp, useLoad } fro
 import { formatDateNl, vatDeadline } from '../../shared/dates';
 import { VAT_DISCLAIMER } from '../../shared/legal';
 import { AccountantNotice } from './TaxYear';
+import { CheckLines } from './CheckLines';
 
 /** Eén regel uitleg per vak van de btw-aangifte (de officiële naam staat ervoor). */
 const RUBRIEK_UITLEG: Record<string, string> = {
@@ -35,6 +36,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
   const checks = { data: checksLoad.data && checksLoad.data.key === selected ? checksLoad.data.list : undefined, reload: checksLoad.reload };
   const [details, setDetails] = useState(false);
   const [detail, setDetail] = useState<{ code: string; title: string } | null>(null);
+  const [checkLines, setCheckLines] = useState<{ account: string; upTo?: string; title: string; hint: string } | null>(null);
 
   if (settings.kor) {
     return (
@@ -136,7 +138,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                               }
                             }}>{c.action.label}</Button>
                           ) : (
-                            <Button small onClick={() => (c.screen === 'belasting' ? setDetails(true) : go({ screen: c.screen as never, extra: c.screen === 'instellingen' ? { tab: 'btw' } : undefined }))}>{c.screen === 'belasting' ? 'Bekijk berekening' : 'Oplossen'}</Button>
+                            <Button small onClick={() => (c.account ? setCheckLines({ account: c.account.rgs, upTo: c.account.upTo, title: c.title, hint: c.detail }) : c.screen === 'belasting' ? setDetails(true) : go({ screen: c.screen as never, extra: c.screen === 'instellingen' ? { tab: 'btw' } : undefined }))}>{c.screen === 'belasting' ? 'Bekijk berekening' : 'Oplossen'}</Button>
                           )}
                           <Button small kind="ghost" disabled={busy} onClick={async () => {
                             const reason = c.blocking ? prompt('Waarom sla je dit over? (bv. "bon kwijt, bedrag klopt wel")') : '';
@@ -198,6 +200,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
             </div>
           )}
           <IcpCard periodKey={r.period.key} />
+          {checkLines && <CheckLines {...checkLines} onClose={() => { setCheckLines(null); void checks.reload(); void report.reload(); }} />}
           {detail && <VatDetails periodKey={r.period.key} code={detail.code} title={detail.title} onClose={() => setDetail(null)} />}
         </>
       )}

@@ -2,6 +2,13 @@
 
 ## Nog niet uitgebracht
 
+- **"Oplossen" laat nu zien welke betalingen het zijn**: bij "… staat nog bij *weet ik nog niet*", geld
+  "onderweg", geld bij je betaalprovider, contant geld onder nul of een spaarrekening onder nul opent een
+  lijst met de boekingen die samen dat bedrag vormen. Met *Opnieuw indelen* ga je naar die betaling. Voorheen
+  kwam je alleen op het bankscherm en moest je zelf zoeken.
+- **Ongedaan maken bij een betaling**: je blijft op dezelfde pagina en kiest meteen wat het wel was, in plaats
+  van terug naar de lijst te gaan.
+
 ## 0.3.4 — getest in de browser: kleine verbeteringen
 
 - **Factuur of offerte meteen versturen**: bij een nieuwe factuur of offerte staat *Versturen* er nu meteen

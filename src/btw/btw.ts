@@ -115,6 +115,8 @@ export interface VatDetailLine {
   reversal: boolean;
   omzet: Cents;
   btw: Cents;
+  /** bij accountLines: bedrag op die rekening (debet − credit) */
+  amount?: Cents;
   invoiceId: number | null;
   purchaseId: number | null;
   bankTransactionId: number | null;
@@ -286,6 +288,41 @@ export class VatService {
     }
     const lines = [...byEntry.values()].filter((l) => l.omzet !== 0 || l.btw !== 0);
     return { code, lines, omzet: lines.reduce((x, l) => x + l.omzet, 0), btw: lines.reduce((x, l) => x + l.btw, 0) };
+  }
+
+  /**
+   * "Wat staat hier?": de boekingen die samen het saldo van één rekening vormen (bv. "weet ik nog
+   * niet", geld onderweg, contant geld), zodat je ze één voor één kunt uitzoeken. Een boeking die
+   * is teruggedraaid telt niet mee, samen met zijn tegenboeking. Bedrag: debet − credit, net als het saldo.
+   */
+  accountLines(rgs: string, upTo?: IsoDate): { account: string; name: string; lines: VatDetailLine[]; total: Cents } {
+    const account = this.ledger.getAccount(rgs);
+    const to = upTo ?? '9999-12-31';
+    const rows = this.db
+      .prepare(
+        `SELECT e.id, e.entry_date, e.description, e.source, e.source_ref, SUM(l.debit) - SUM(l.credit) AS net
+         FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
+         WHERE l.account_id = ? AND e.entry_date <= ?
+           AND NOT (e.status = 'teruggedraaid' AND EXISTS (SELECT 1 FROM journal_entries r WHERE r.reverses_entry_id = e.id AND r.entry_date <= ?))
+           AND NOT (e.reverses_entry_id IS NOT NULL AND EXISTS (SELECT 1 FROM journal_entries o WHERE o.id = e.reverses_entry_id AND o.entry_date <= ?))
+         GROUP BY e.id
+         HAVING net <> 0
+         ORDER BY e.entry_date, e.id`,
+      )
+      .all(account.id, to, to, to) as { id: number; entry_date: string; description: string; source: string; source_ref: string | null; net: number }[];
+    const lines: VatDetailLine[] = rows.map((r) => ({
+      entryId: r.id,
+      date: r.entry_date,
+      description: r.description,
+      source: r.source,
+      reversed: false,
+      reversal: false,
+      omzet: 0,
+      btw: 0,
+      amount: r.net,
+      ...this.origin(r.id, r.source_ref),
+    }));
+    return { account: rgs, name: account.name, lines, total: lines.reduce((s, l) => s + (l.amount ?? 0), 0) };
   }
 
   /** Waar komt een boeking vandaan? Voor de knop "Bekijken" in de details. */
