@@ -1,7 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { roundHalfAwayFromZero, type Cents } from '../shared/money';
-import { normalizeIban } from '../shared/validation';
-import type { IsoDate } from '../shared/dates';
+import { isValidIban, normalizeIban } from '../shared/validation';
+import { isIsoDate, type IsoDate } from '../shared/dates';
 
 /**
  * XML Auditfile Financieel (XAF 3.0, 3.1 en 3.2): het standaard exportformaat van vrijwel elk
@@ -113,7 +113,8 @@ const list = (v: unknown): X[] => (Array.isArray(v) ? (v as X[]) : v ? [v as X] 
 
 function date(v: unknown): IsoDate | null {
   const s = text(v).slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  // echte kalenderdatums: 31 februari zou later stilletjes 3 maart worden
+  return isIsoDate(s) ? s : null;
 }
 
 /** "1234.50" → 123450. XAF gebruikt altijd een punt als decimaalteken. */
@@ -147,7 +148,7 @@ function rgsOf(a: X): string | null {
 
 function iban(v: unknown): string | null {
   const s = text(v).replace(/\s/g, '').toUpperCase();
-  return /^[A-Z]{2}\d{2}[A-Z0-9]{8,30}$/.test(s) ? normalizeIban(s) : null;
+  return isValidIban(s) ? normalizeIban(s) : null;
 }
 
 export function parseXaf(xml: string): XafFile {

@@ -91,6 +91,9 @@ export function parseUblSalesInvoice(xml: string): { number: string; customer: s
   const doc = parser.parse(xml) as X;
   const inv: X | undefined = doc.Invoice ?? doc.CreditNote;
   if (!inv) throw new Error('Geen UBL Invoice of CreditNote');
+  // de boekhouding is in euro's: een factuur in een andere munt niet stilletjes als euro's overnemen
+  const currency = (t(inv.DocumentCurrencyCode) || String(inv.LegalMonetaryTotal?.PayableAmount?.['@currencyID'] ?? 'EUR')).toUpperCase();
+  if (currency !== 'EUR') throw new Error(`deze factuur is in ${currency}; vul hem met het bedrag in euro's zelf in`);
   const party = inv.AccountingCustomerParty?.Party ?? {};
   const customer = t(party.PartyLegalEntity?.RegistrationName) || t(party.PartyName?.Name);
   const totals = inv.LegalMonetaryTotal ?? {};
