@@ -156,6 +156,23 @@ export function looksLikeReceipt(m: Pick<MailMessage, 'subject' | 'text'>): bool
   return amount.test(text);
 }
 
+/**
+ * Mailtekst opschonen. Nieuwsbrieven en bonnen (Google, Apple, webshops) zetten vaak een verborgen
+ * "preheader" vol onzichtbare tekens (&zwnj;, &#847;, &nbsp;) boven de mail; in de platte tekst worden
+ * dat bladzijden met lege regels, zodat de bon zelf pas op pagina 2 of later staat.
+ */
+export function cleanMailText(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u00ad\u034f\u180e\u200b-\u200f\u2028\u2029\u2060-\u2064\ufeff]/g, '')
+    .replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000\t]/g, ' ')
+    .split('\n')
+    .map((line) => line.replace(/ {2,}/g, ' ').trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /**
@@ -164,7 +181,7 @@ const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
  */
 export function receiptHtml(m: Pick<MailMessage, 'fromName' | 'fromAddress' | 'subject' | 'date' | 'text'>): string {
   const from = m.fromName ? `${m.fromName} <${m.fromAddress}>` : m.fromAddress;
-  const body = m.text.replace(/\n{3,}/g, '\n\n').slice(0, 20_000);
+  const body = cleanMailText(m.text).slice(0, 20_000);
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>${escapeHtml(m.subject)}</title>
 <style>body{font:11pt/1.45 Helvetica,Arial,sans-serif;margin:32px;color:#111}h1{font-size:14pt;margin:0 0 6px}.meta{color:#555;font-size:9.5pt;margin-bottom:16px;border-bottom:1px solid #ccc;padding-bottom:8px}pre{white-space:pre-wrap;font:inherit;margin:0}</style>
 </head><body><h1>${escapeHtml(m.subject || 'Bon uit e-mail')}</h1>
