@@ -7,6 +7,7 @@ import { formatDateNl } from '../../shared/dates';
 import { CategoryPicker } from './Bank';
 import { investmentInfo } from './Purchases';
 import { hasOnboardingUpdate } from '../../shared/onboarding';
+import { CheckLines } from './CheckLines';
 
 export function Home() {
   const { go, settings, refreshBadge, toast, showInvestmentSaved } = useApp();
@@ -15,6 +16,8 @@ export function Home() {
   const { run, busy } = useAction();
   const [picking, setPicking] = useState<Task | null>(null);
   const [pickingJob, setPickingJob] = useState<Task | null>(null);
+  // controle over een saldo: eerst de boekingen laten zien die het bedrag vormen
+  const [checkLines, setCheckLines] = useState<Task | null>(null);
   const activeJobs = useLoad(async () => (pickingJob ? api.jobs.list({ active: true }) : []), [pickingJob]);
   const [showAll, setShowAll] = useState(false);
   const [why, setWhy] = useState<string | null>(null);
@@ -34,6 +37,7 @@ export function Home() {
   };
 
   const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number }) => {
+    if (task.kind === 'vat-check' && actionId === 'open' && task.ref.account) return setCheckLines(task);
     // `?? {}`: ook een actie zonder antwoord telt als gelukt (undefined = fout)
     const r = await run(async () => (await api.home.act(task, actionId, payload)) ?? {});
     if (r && !('navigate' in r && r.navigate)) {
@@ -225,6 +229,9 @@ export function Home() {
         </Modal>
       )}
 
+      {checkLines && (
+        <CheckLines account={checkLines.ref.account!} upTo={checkLines.ref.upTo} title={checkLines.title} hint={checkLines.question} onClose={() => { setCheckLines(null); void reload(); refreshBadge(); }} />
+      )}
       {picking && (
         <Modal title="Waar was deze betaling voor?" onClose={() => setPicking(null)}>
           <p className="muted">{picking.title}</p>

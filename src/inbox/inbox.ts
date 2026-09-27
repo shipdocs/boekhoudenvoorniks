@@ -81,7 +81,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; mailId?: number; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
+  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
 }
 
 export interface HomeData {
@@ -716,7 +716,7 @@ export class InboxService {
             question: `${c.detail}${c.blocking ? ` Nodig voor de btw-aangifte ${previous.label}.` : ''}`,
             actions: [{ id: 'open', label: 'Oplossen', primary: true }, { id: 'overslaan', label: c.blocking ? 'Bewust overslaan' : 'Klopt' }],
             priority: 1,
-            ref: { periodKey: previous.key, checkKey: c.key },
+            ref: { periodKey: previous.key, checkKey: c.key, account: c.account?.rgs, upTo: c.account?.upTo },
           });
         }
       }

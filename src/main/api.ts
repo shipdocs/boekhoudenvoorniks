@@ -553,6 +553,8 @@ export function createApi(s: Services, host: HostContext) {
       calculate: (periodKey: string) => s.vat.calculate(periodKey),
       /** de boekingen achter één vak of regel van de berekening */
       details: (periodKey: string, code: string) => s.vat.rubriekDetails(periodKey, code),
+      /** de boekingen die samen het saldo van een rekening vormen (bij een controle: "wat staat hier?") */
+      accountLines: (rgs: string, upTo?: string) => s.vat.accountLines(rgs, upTo),
       periods: (year: number) => s.vat.listPeriods(year),
       markSubmitted: (periodKey: string) => s.vat.markSubmitted(periodKey),
       reopen: (periodKey: string) => s.vat.reopen(periodKey),
