@@ -17,8 +17,11 @@ test('eerste foto van een bon: kiezen hoe de app bonnen leest, met uitleg', asyn
 
   await page.getByRole('button', { name: /Nee, ik vul bonnen zelf in/ }).click();
   await expect(page.getByRole('heading', { name: 'Zal de app je bonnen voortaan zelf lezen?' })).toBeHidden();
-  const settings = await call<{ ocr: { askedReader: boolean } }>(page, 'settings.get');
+  const settings = await call<{ ocr: { askedReader: boolean; engine: string; url: string } }>(page, 'settings.get');
   expect(settings.ocr.askedReader).toBe(true);
+  // zelf invullen = elke manier van lezen uit
+  expect(settings.ocr.engine).toBe('uit');
+  expect(settings.ocr.url).toBe('');
 
   // in Instellingen staat de keuze, en is hij te wijzigen
   await nav(page, 'Instellingen');

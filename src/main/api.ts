@@ -603,7 +603,8 @@ export function createApi(s: Services, host: HostContext) {
           const st = host.localOcr.status();
           if (st.state === 'niet-geinstalleerd' || st.state === 'fout') host.localOcr.install();
         } else {
-          s.settings.update({ ocr: { ...ocr, askedReader: true } });
+          // zelf invullen: elke manier van lezen uit, ook een eerder gekozen assistent of eigen dienst
+          s.settings.update({ ocr: { ...ocr, engine: 'uit', url: '', askedReader: true } });
         }
         host.reconfigureLocalAi();
         return s.settings.get();
@@ -613,8 +614,13 @@ export function createApi(s: Services, host: HostContext) {
         let read = 0;
         const docs = s.intake.unread();
         for (const d of docs) {
-          const after = await s.intake.reread(d.id, host.readAttachment(d.file_path));
-          if (after.extraction_source !== 'geen') read++;
+          // één bon die niet lukt (bv. bestand weg) houdt de rest niet tegen
+          try {
+            const after = await s.intake.reread(d.id, host.readAttachment(d.file_path));
+            if (after.extraction_source !== 'geen') read++;
+          } catch {
+            /* telt als niet gelezen; de bon blijft staan om zelf in te vullen */
+          }
         }
         return { read, total: docs.length };
       },
