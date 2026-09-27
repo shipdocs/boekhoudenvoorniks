@@ -30,6 +30,7 @@ import type { OcrProvider } from './intake/ocr';
 import { JobService } from './jobs/jobs';
 import { InboxService } from './inbox/inbox';
 import { ChecklistService } from './onboarding/checklist';
+import { SwitchoverService } from './onboarding/switchover';
 import { CategoryService } from './settings/categories';
 import { MailIntakeService } from './mail/mail-intake';
 import { FxService } from './fx/fx';
@@ -90,6 +91,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const fxRepair = new FxRepair(db, fx, intake, purchases, bank);
   inbox.setFxRepair(fxRepair);
   const checklist = new ChecklistService(db, settings);
+  const switchover = new SwitchoverService(db, ledger, settings, relations, bank, vat);
 
   // alleen-lezen (koppeling voor Claude Code/Codex): niets aanvullen, de app deed dat al bij het openen
   if (!db.readonly) {
@@ -98,7 +100,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, fx, fxRepair, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, investments, assets, mileage, hours, taxOverview };
+  return { db, fx, fxRepair, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, switchover, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;

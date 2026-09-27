@@ -300,10 +300,22 @@ export class BankService {
         if (r.changes > 0) (imported++, stat.imported++);
         else (duplicates++, stat.duplicates++);
       }
+      // eindsaldo volgens het afschrift (het laatste per rekening), om later te controleren of er iets ontbreekt
+      const closing = new Map<number, { date: IsoDate; amount: Cents }>();
+      for (const b of result.balances ?? []) {
+        const account = opts.bankAccountId ? this.getAccount(opts.bankAccountId) : this.accountForIban(b.ownIban);
+        const known = closing.get(account.id);
+        if (!known || b.date >= known.date) closing.set(account.id, { date: b.date, amount: b.amount });
+        // een afschrift zonder betalingen (alleen een saldo) telt ook: dat saldo is juist nuttig
+        if (!perAccount.has(account.id)) perAccount.set(account.id, { from: b.date, to: b.date, transactions: 0, imported: 0, duplicates: 0 });
+      }
       const insertStat = this.db.prepare(
-        'INSERT INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates, closing_balance, closing_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       );
-      for (const [accountId, s] of perAccount) insertStat.run(batchId, accountId, s.from, s.to, s.transactions, s.imported, s.duplicates);
+      for (const [accountId, s] of perAccount) {
+        const c = closing.get(accountId);
+        insertStat.run(batchId, accountId, s.from, s.to, s.transactions, s.imported, s.duplicates, c?.amount ?? null, c?.date ?? null);
+      }
       this.db.prepare('UPDATE import_batches SET imported_count = ?, duplicate_count = ? WHERE id = ?').run(imported, duplicates, batchId);
       const periods = [...perAccount].map(([bankAccountId, s]) => ({ bankAccountId, from: s.from, to: s.to }));
       return { batchId, periods, imported, duplicates, warnings: result.warnings };

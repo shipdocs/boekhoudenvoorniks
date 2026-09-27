@@ -24,6 +24,7 @@ eigen computer, zonder account, cloud of abonnement.
 | **Belasting** | BTW per kwartaal in mensentaal ("Te betalen € 3.365, uiterlijk 31 oktober"). Daaronder de officiële rubrieken (1a/1b/1e/2a/5a/5b/5g) om over te nemen in Mijn Belastingdienst Zakelijk. Vóór de aangifte controleert de app wat de aangifte fout kan maken (onverwerkte bank, uitgaven zonder bewijs, dubbele aankopen, verlegd zonder btw-nummer, negatieve kas, vraagposten). Periode-afsluiting, CSV-export en een XBRL-voorbereiding. Buitenland: verkoop aan EU-bedrijven (3b, met ICP-overzicht), uitvoer (3a) en verlegde btw op diensten uit/buiten de EU (4a/4b, bv. Stripe, Google, Meta), met een duidelijke disclaimer; OSS zit er niet in. Een schatting van de inkomstenbelasting (zelfstandigenaftrek, mkb-winstvrijstelling, geversioneerde tarieven), altijd als schatting gemarkeerd en uit te zetten. |
 | **Zoeken** | Ctrl+K: één zoekveld over klanten, facturen, bonnen, bank en klussen, met bedragen (`>400`) en periodes (`2026-09`). Garantie per aankoop ("nog 14 maanden garantie"). |
 | **Koppelingen** | WooCommerce, Shopify (orders → facturen), Mollie, Stripe (uitbetalingen + kosten). |
+| **Overstappen** | Had je al een administratie (ander programma, Excel, boekhouder)? Kies een instapdatum (1 januari aangeraden, vrij te kiezen) en de overstap-hulp vraagt in gewone taal wat er toen al was: saldo per rekening (uit het eindsaldo van je CAMT/MT940-afschrift berekend), facturen die klanten nog moesten betalen, rekeningen die jij nog moest betalen, bus en gereedschap (verder afschrijven vanaf de boekwaarde), btw, leningen, en bij instappen midden in het jaar de omzet en kosten tot dan (en midden in een btw-periode het stuk van die periode). Alles wordt een startbalans tegen eigen vermogen, dat de app zelf uitrekent. Betalingen kort na de overstap die bij een oude factuur of de vorige btw-aangifte lijken te horen, stelt de app voor. Controles: sluit het saldo van de bank aan, ontbreken er afschriften, klopt het eigen vermogen met de balans van je boekhouder. In de auditfile staat de startbalans als `openingBalance`. |
 | **Voor de boekhouder** | Grootboek (RGS), journaal, W&V, balans, correctieboekingen, auditfile (XAF 3.2), CSV-exports en de regels die per leverancier geleerd zijn. |
 
 ## Ontwerpregels
@@ -47,6 +48,7 @@ src/
   btw/           BTW-berekening uit journal_lines → rubrieken, periode-afsluiting, XBRL (voorbereiding)
   jobs/          klussen (offerte → klus → factuur)
   inbox/         "Ben ik bij?": taken, automatisch verwerken, geld-overzicht
+  onboarding/    "Aan de slag"-lijstje en de overstap-hulp (instapdatum, startbalans, controles)
   dashboard/     read-only overzichten
   integrations/  WooCommerce, Shopify, Mollie, Stripe, open-banking-interface (los; zonder configuratie inactief)
   export/        auditfile (XAF), journaal/saldibalans CSV

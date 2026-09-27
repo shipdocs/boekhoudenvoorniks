@@ -113,6 +113,12 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         <Button kind="ghost" onClick={() => go({ screen: 'werk', extra: { tab: isInvoice ? 'facturen' : 'offertes' } })}>← Terug</Button>
       </div>
       <ErrorBox error={doc.error} />
+      {invoice?.is_opening ? (
+        <div className="notice row between">
+          <span>Deze factuur komt uit je vorige administratie: hier staat alleen wat er nog open staat. Omzet en btw zaten al in je vorige boekhouding.</span>
+          <Button small onClick={() => go({ screen: 'overstap', extra: { section: 'klanten' } })}>Aanpassen in de overstap-hulp</Button>
+        </div>
+      ) : null}
       {id && <CustomerMailNotice relationId={relationId} />}
       {!isInvoice && editable && (
         <p className="notice small">
@@ -229,9 +235,9 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
 
       <div className="row" style={{ marginTop: 16 }}>
         {editable && <Button disabled={busy} onClick={() => void save()}>Opslaan</Button>}
-        <Button disabled={busy} onClick={() => void showPreview()}>Voorbeeld</Button>
-        {id && <Button disabled={busy} onClick={() => void run(() => (isInvoice ? api.invoices.savePdf(id) : api.quotes.savePdf(id)), 'PDF opgeslagen')}>PDF opslaan</Button>}
-        {id && isInvoice && invoice && invoice.status !== 'concept' && <Button disabled={busy} title="Een bestand dat boekhoudprogramma's zonder overtypen inlezen" onClick={() => void run(() => api.invoices.saveUbl(id), 'E-factuur opgeslagen')}>E-factuur (XML)</Button>}
+        {!invoice?.is_opening && <Button disabled={busy} onClick={() => void showPreview()}>Voorbeeld</Button>}
+        {id && !invoice?.is_opening && <Button disabled={busy} onClick={() => void run(() => (isInvoice ? api.invoices.savePdf(id) : api.quotes.savePdf(id)), 'PDF opgeslagen')}>PDF opslaan</Button>}
+        {id && isInvoice && invoice && invoice.status !== 'concept' && !invoice.is_opening && <Button disabled={busy} title="Een bestand dat boekhoudprogramma's zonder overtypen inlezen" onClick={() => void run(() => api.invoices.saveUbl(id), 'E-factuur opgeslagen')}>E-factuur (XML)</Button>}
         <span className="grow" />
         {!id && <Button kind="primary" disabled={busy} title="Slaat op en opent het verstuurvenster" onClick={() => void save('send')}>Versturen</Button>}
         {isInvoice && invoice?.status === 'concept' && (
@@ -243,11 +249,11 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         )}
         {isInvoice && invoice && invoice.status !== 'concept' && (
           <>
-            {!invoice.credit_of_invoice_id && invoice.total! > 0 && <Button disabled={busy} onClick={async () => { const c = await run(() => api.invoices.creditNote(invoice.id)); if (c) go({ screen: 'factuur', id: c.id }); }}>Factuur terugdraaien (creditfactuur)</Button>}
+            {!invoice.credit_of_invoice_id && !invoice.is_opening && invoice.total! > 0 && <Button disabled={busy} onClick={async () => { const c = await run(() => api.invoices.creditNote(invoice.id)); if (c) go({ screen: 'factuur', id: c.id }); }}>Factuur terugdraaien (creditfactuur)</Button>}
             {invoice.status === 'verzonden' && invoice.open_amount > 0 && Math.abs(invoice.open_amount) <= 500 && invoice.amount_paid > 0 && <Button disabled={busy} onClick={async () => { await run(() => api.invoices.writeOff(invoice.id), 'Klein verschil laten vallen ✓'); await doc.reload(); }}>Klein verschil laten vallen</Button>}
             {invoice.display_status === 'vervallen' && <Button disabled={busy} onClick={async () => { await run(() => api.invoices.sendReminder(invoice.id), 'Herinnering verstuurd'); await doc.reload(); }}>Herinnering sturen</Button>}
             {invoice.status === 'verzonden' && <Button disabled={busy} onClick={() => setPayment(true)}>Betaling ontvangen</Button>}
-            <Button kind="primary" disabled={busy} onClick={() => setSending(true)}>{invoice.sent_at ? 'Opnieuw versturen' : 'Versturen'}</Button>
+            {!invoice.is_opening && <Button kind="primary" disabled={busy} onClick={() => setSending(true)}>{invoice.sent_at ? 'Opnieuw versturen' : 'Versturen'}</Button>}
           </>
         )}
         {quote && (
