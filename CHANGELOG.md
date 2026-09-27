@@ -2,6 +2,8 @@
 
 ## Nog niet uitgebracht
 
+## 0.3.4 — getest in de browser: kleine verbeteringen
+
 - **Factuur of offerte meteen versturen**: bij een nieuwe factuur of offerte staat *Versturen* er nu meteen
   (de app slaat eerst op). Voorheen moest je eerst op *Opslaan* klikken voordat die knop verscheen.
 - **Versturen: het e-mailadres van de klant staat er weer in**, ook als je direct na het opslaan verstuurt.
