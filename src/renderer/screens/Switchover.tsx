@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { Button, DateNl, DropZone, Euro, Field, Modal, MoneyInput, readAsText, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, DropZone, Euro, Field, Modal, MoneyInput, readAsBytes, readAsText, useAction, useApp, useLoad } from '../ui';
 import { addDays, isIsoDate, today } from '../../shared/dates';
 import { defaultBookValue, startDateConsequences, startDateOptions } from '../../shared/switchover';
 import type { OpeningInput, OpeningItem, OpeningKind, OpeningSuggestion, SectionKey, SwitchoverState } from '../../onboarding/switchover';
+import type { XafPlan } from '../../onboarding/xaf-import';
 
 /**
  * Overstap-hulp: een lopende administratie overzetten. Hoofdstukken in gewone taal; de app boekt
@@ -56,6 +57,7 @@ export function Switchover() {
         ))}
       </div>
       {section === 'papieren' && <Papers {...props} />}
+      {section === 'import' && <XafImport {...props} />}
       {section === 'bank' && <Banks {...props} />}
       {section === 'klanten' && <OpenItems kind="klant" {...props} />}
       {section === 'leveranciers' && <OpenItems kind="leverancier" {...props} />}
@@ -150,7 +152,139 @@ function Papers({ state, refresh, nextButton }: SectionProps) {
   );
 }
 
-// ---------- 2. bank ----------
+// ---------- 2. auditfile uit het vorige programma ----------
+
+const EXPORT_HOWTO: [string, string][] = [
+  ['SnelStart', 'menu Administratie → Auditfile exporteren (vanaf versie 12)'],
+  ['e-Boekhouden.nl', 'menu Rapporten → Auditfile (XAF)'],
+  ['Jortt', 'Boekhoudbot → "Maak voor mij een auditfile"'],
+  ['DigiBoox', 'de auditfile vraag je aan bij hun support. Direct kan: de kolommenbalans als Excel (.xlsx) exporteren en die hier neerzetten'],
+  ['Moneybird, Exact, Twinfield, Yuki, AFAS, …', 'zoek in de help van je programma op "auditfile" of "XAF"'],
+];
+
+function XafImport({ state, refresh, nextButton }: SectionProps) {
+  const { run, busy } = useAction();
+  const { toast } = useApp();
+  const [file, setFile] = useState<{ name: string; data: string | Uint8Array } | null>(null);
+  const [plan, setPlan] = useState<XafPlan | null>(null);
+  const [include, setInclude] = useState<Set<string>>(new Set());
+  const [banks, setBanks] = useState<Record<string, number | 'nieuw' | null>>({});
+  const [relations, setRelations] = useState(true);
+  const accounts = useLoad(() => api.bank.accounts());
+  const date = state.settings.date!;
+  const imported = state.items.filter((i) => i.data.bron === 'xaf').length;
+
+  const load = async (f: File) => {
+    // auditfile is tekst (XML); een kolommenbalans uit Excel gaat als bytes
+    const data = /\.xlsx$/i.test(f.name) ? await readAsBytes(f) : await readAsText(f);
+    const p = await run(() => api.switchover.analyzeXaf(data));
+    if (!p) return;
+    setFile({ name: f.name, data });
+    setPlan(p);
+    setInclude(new Set(p.proposals.filter((x) => x.include).map((x) => x.key)));
+    setBanks(Object.fromEntries(p.banks.map((b) => [b.accountId, b.bankAccountId ?? 'nieuw'])));
+    setRelations(true);
+  };
+  const toggle = (key: string) => setInclude((cur) => {
+    const next = new Set(cur);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  });
+
+  return (
+    <>
+      <h2>Uit je vorige programma</h2>
+      <p className="muted">
+        Gebruikte je een boekhoudprogramma? Exporteer daar een <strong>auditfile</strong> (een .xaf-bestand) tot en met <DateNl date={addDays(date, -1)} />.
+        De app rekent dan zelf uit wat er op je rekeningen stond, welke facturen nog open stonden en wat je bus nog waard is. Jij kijkt het na en vinkt aan wat klopt.
+      </p>
+      <details className="small" style={{ marginBottom: 12 }}>
+        <summary>Waar vind ik de auditfile?</summary>
+        <ul>{EXPORT_HOWTO.map(([pkg, how]) => <li key={pkg}><strong>{pkg}</strong>: {how}</li>)}</ul>
+        <p className="muted">
+          Geen auditfile? Een <strong>kolommenbalans</strong> (proef- en saldibalans) als Excel werkt ook: daar staan de saldi per rekening in, maar geen losse facturen.
+          Daarmee stap je in op 1 januari (met de beginbalans) of na de dag van de export. Heb je geen van beide, sla dit dan over en vul de hoofdstukken hierna zelf in.
+        </p>
+      </details>
+      {imported > 0 && !plan && <div className="notice good">✓ {imported} onderdelen overgenomen uit een auditfile. Opnieuw inlezen vervangt ze.</div>}
+      <DropZone accept=".xaf,.xml,.xlsx" onFile={(f) => void load(f)}>
+        <div style={{ fontSize: 26 }}>📂</div>
+        <strong>Sleep je auditfile (.xaf) hierheen</strong>
+        <div className="small">of een kolommenbalans als Excel-bestand (.xlsx)</div>
+      </DropZone>
+
+      {plan && file && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="small muted">
+            {file.name} · {plan.meta.software || 'onbekend programma'} · <DateNl date={plan.meta.startDate} /> t/m <DateNl date={plan.meta.endDate} /> · {plan.meta.accounts} rekeningen{plan.meta.version === 'kolommenbalans' ? ' (alleen saldi)' : `, ${plan.meta.lines} boekingsregels`}
+          </div>
+          {plan.warnings.map((w) => <div key={w} className="notice warn small">{w}</div>)}
+
+          {plan.banks.length > 0 && (
+            <>
+              <h3>Bankrekeningen</h3>
+              <table className="list"><tbody>
+                {plan.banks.map((b) => (
+                  <tr key={b.accountId}>
+                    <td>{b.name}<div className="small muted">{b.iban ?? `rekening ${b.accountId}`}</div></td>
+                    <td style={{ textAlign: 'right' }}><Euro cents={b.amount} /></td>
+                    <td>
+                      <select aria-label={`Rekening in de app voor ${b.name}`} value={String(banks[b.accountId] ?? '')} onChange={(e) => setBanks({ ...banks, [b.accountId]: e.target.value === '' ? null : e.target.value === 'nieuw' ? 'nieuw' : Number(e.target.value) })}>
+                        {(accounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.iban ? ` (${a.iban})` : ''}</option>)}
+                        <option value="nieuw">Nieuwe rekening in de app</option>
+                        <option value="">Niet overnemen</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody></table>
+            </>
+          )}
+
+          <h3>Wat de app overneemt</h3>
+          <table className="list"><tbody>
+            {plan.proposals.map((p) => (
+              <tr key={p.key}>
+                <td style={{ width: 28 }}><input type="checkbox" aria-label={p.label} checked={include.has(p.key)} onChange={() => toggle(p.key)} /></td>
+                <td>{p.label}{p.note && <div className="small muted">{p.note}</div>}</td>
+                <td style={{ textAlign: 'right' }}><Euro cents={p.amount} /></td>
+              </tr>
+            ))}
+          </tbody></table>
+          {plan.relations.total > 0 && (
+            <label className="row" style={{ marginTop: 10 }}>
+              <input type="checkbox" checked={relations} onChange={(e) => setRelations(e.target.checked)} />
+              <span>{plan.relations.total} klanten en leveranciers overnemen ({plan.relations.fresh} nieuw)</span>
+            </label>
+          )}
+          <p style={{ marginTop: 12 }}>Volgens je vorige administratie zat er <strong><Euro cents={plan.equity} /></strong> van jou in de zaak. De app vergelijkt dat straks met je startpositie.</p>
+          <div className="row end">
+            <Button onClick={() => { setPlan(null); setFile(null); }}>Annuleren</Button>
+            <Button
+              kind="primary"
+              disabled={busy}
+              onClick={async () => {
+                const r = await run(() => api.switchover.applyXaf(file.data, { include: [...include], banks, relations }));
+                if (!r) return;
+                toast('Overgenomen uit je auditfile');
+                setPlan(null);
+                setFile(null);
+                await refresh(r);
+                await accounts.reload();
+              }}
+            >
+              Overnemen
+            </Button>
+          </div>
+        </div>
+      )}
+      {nextButton}
+    </>
+  );
+}
+
+// ---------- 3. bank ----------
 
 function Banks({ state, refresh, nextButton }: SectionProps) {
   const { run, busy } = useAction();
@@ -353,12 +487,31 @@ function OpenItems({ kind, state, suggestions, refresh, nextButton }: SectionPro
           : <>Rekeningen van leveranciers of onderaannemers die op <DateNl date={addDays(date, -1)} /> nog open stonden. De kosten en btw stonden al in je vorige administratie.</>}
       </p>
       <Suggestions list={suggestions.filter((s) => s.kind === kind)} refresh={refresh} />
+      {kind === 'klant' && <UblDrop refresh={refresh} />}
       <ItemList items={items} onEdit={setEditing} refresh={refresh} empty={kind === 'klant' ? 'Nog geen openstaande facturen. Had je er geen? Dan is dit klaar.' : 'Nog geen openstaande rekeningen. Had je er geen? Dan is dit klaar.'} />
       {items.length > 0 && <p className="small">Samen: <strong><Euro cents={total} /></strong></p>}
       <Button onClick={() => setEditing('nieuw')}>+ {kind === 'klant' ? 'Openstaande factuur' : 'Openstaande rekening'} toevoegen</Button>
       {editing && <InvoiceForm kind={kind} date={date} item={editing === 'nieuw' ? null : editing} onClose={() => setEditing(null)} refresh={refresh} />}
       {nextButton}
     </>
+  );
+}
+
+/** Openstaande facturen als e-factuur (UBL) uit het vorige programma erop slepen. */
+function UblDrop({ refresh }: { refresh: SectionProps['refresh'] }) {
+  const { run } = useAction();
+  const { toast } = useApp();
+  return (
+    <DropZone accept=".xml" multiple onFile={async (f) => {
+      const xml = await readAsText(f);
+      const r = await run(() => api.switchover.addUblInvoices([{ name: f.name, xml }]));
+      if (!r) return;
+      if (r.added) toast(`Factuur uit ${f.name} toegevoegd. Al deels betaald? Pas dan het bedrag aan.`);
+      for (const msg of r.skipped) toast(msg, 'error');
+      await refresh(r.state);
+    }}>
+      <div className="small"><strong>Heb je de facturen als e-factuur (UBL, .xml)?</strong> Sleep ze hierheen, dan vult de app ze in.</div>
+    </DropZone>
   );
 }
 

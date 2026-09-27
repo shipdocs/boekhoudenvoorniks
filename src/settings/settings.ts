@@ -96,6 +96,8 @@ export interface SwitchoverSettings {
   bankConfirmed: number[];
   /** per bankrekening: een saldo dat de gebruiker opgaf om te controleren (voor CSV zonder saldo) */
   bankChecks: Record<string, { date: string; amount: number }>;
+  /** bankrekeningen waarvan het beginsaldo uit een auditfile/kolommenbalans kwam (opnieuw inlezen zet ze eerst terug) */
+  xafBanks?: number[];
   /** eigen vermogen volgens de balans van de boekhouder (centen), om te vergelijken */
   accountantEquity: number | null;
 }
