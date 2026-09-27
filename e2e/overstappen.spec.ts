@@ -44,7 +44,7 @@ test('overstapper: auditfile (XAF) uit het vorige programma inlezen', async ({ p
   // niet herkend staat standaard uit
   await expect(page.getByRole('checkbox', { name: /Diversen/ })).not.toBeChecked();
   await page.getByRole('button', { name: 'Overnemen' }).click();
-  await expect(page.getByText(/onderdelen overgenomen uit een auditfile/)).toBeVisible();
+  await expect(page.getByText(/onderdelen overgenomen uit je vorige programma/)).toBeVisible();
 
   await page.locator('.chips button', { hasText: 'Je startpositie' }).click();
   await expect(page.locator('.card', { hasText: 'Wat er van jou in de zaak zit' }).getByText(/12\.910,00/)).toBeVisible();
@@ -64,5 +64,20 @@ test('overstapper: kolommenbalans (Excel) uit DigiBoox inlezen', async ({ page, 
   await page.getByRole('button', { name: 'Overnemen' }).click();
   await page.locator('.chips button', { hasText: 'Je startpositie' }).click();
   await expect(page.locator('.card', { hasText: 'Wat er van jou in de zaak zit' }).getByText(/2\.500,00/)).toBeVisible();
+  expect(problems.apiErrors).toEqual([]);
+});
+
+test('overstapper: lijst met openstaande facturen (CSV) inlezen', async ({ page, problems }) => {
+  await onboard(page, { overstap: true });
+  const year = new Date().getFullYear() - 1;
+  await page.getByRole('button', { name: /Verder: uit je vorige programma/ }).click();
+  const csv = `Naam;Soort;Factuurnummer;Datum;Bedrag\r\nBakker Bouw;klant;${year}-042;15-12-${year};1210,00\r\nGamma;leverancier;F-7781;20-12-${year};363,00\r\n`;
+  await page.locator('main input[type=file]').first().setInputFiles({ name: 'openstaand.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await expect(page.getByRole('checkbox', { name: `Factuur ${year}-042 Bakker Bouw` })).toBeChecked();
+  await expect(page.getByText(/Samen .*1\.210,00 wat klanten nog moesten betalen/)).toBeVisible();
+  await page.getByRole('button', { name: 'Overnemen' }).click();
+  await expect(page.getByText(/onderdelen overgenomen uit je vorige programma/)).toBeVisible();
+  await nav(page, 'Werk & facturen');
+  await expect(page.getByText(`${year}-042`).first()).toBeVisible();
   expect(problems.apiErrors).toEqual([]);
 });

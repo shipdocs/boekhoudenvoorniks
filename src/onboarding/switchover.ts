@@ -57,8 +57,8 @@ export type OpeningInput = (
   | { kind: 'resultaat'; omzet: Cents; materiaal: Cents; auto: Cents; overig: Cents }
   | { kind: 'btw-periode'; omzetHoog: Cents; btwHoog: Cents; omzetLaag: Cents; btwLaag: Cents; omzetNul: Cents; voorbelasting: Cents }
 ) & {
-  /** 'xaf': overgenomen uit een auditfile (opnieuw inlezen vervangt het) */
-  bron?: 'xaf';
+  /** 'xaf': uit een auditfile, kolommen- of saldibalans; 'lijst': uit een lijst met openstaande posten (opnieuw inlezen vervangt het) */
+  bron?: 'xaf' | 'lijst';
 };
 
 export interface OpeningItem {
@@ -1010,7 +1010,7 @@ export class SwitchoverService {
     const startOfYear = !!date?.endsWith('-01-01');
     const sections: SwitchoverState['sections'] = [
       { key: 'papieren', title: 'Wat heb je nodig?', done: !!date, needed: true },
-      { key: 'import', title: 'Uit je vorige programma', done: items.some((i) => i.data.bron === 'xaf'), needed: true },
+      { key: 'import', title: 'Uit je vorige programma', done: items.some((i) => !!i.data.bron), needed: true },
       { key: 'bank', title: 'Bankrekeningen', done: !!date && banks.length > 0 && !bad('bank'), needed: true },
       { key: 'klanten', title: 'Klanten die nog moeten betalen', done: kinds.has('klant') || cfg.status === 'klaar', needed: true },
       { key: 'leveranciers', title: 'Rekeningen die jij nog moet betalen', done: kinds.has('leverancier') || cfg.status === 'klaar', needed: true },
