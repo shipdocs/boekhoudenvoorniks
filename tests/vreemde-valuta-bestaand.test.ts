@@ -86,6 +86,16 @@ describe('vreemde valuta in bestaande gegevens (#74)', () => {
     expect(s.intake.get(s.purchases.get(pid).document_id!).result?.foreign).toMatchObject({ currency: 'USD', total: 9000, source: 'bank' });
   });
 
+  it('afschrijving intussen anders verwerkt: niets omgerekend, opnieuw nakijken', async () => {
+    const { s } = setup({ fetch: ecb });
+    const pid = await oldPurchase(s);
+    debit(s, 8312);
+    const pr = await s.fxRepair.preview(pid);
+    s.bank.ignore(pr.bankTransactionId!);
+    expect(() => s.fxRepair.apply(pid, { currency: 'USD', foreignTotal: 9000, euroTotal: 8312, bankTransactionId: pr.bankTransactionId })).toThrow(/intussen anders verwerkt/);
+    expect(s.purchases.get(pid)).toMatchObject({ total: 9000, currency: null });
+  });
+
   it('geboekte aankoop die al deels betaald staat (bank € 83,12 op € 90,00): wordt helemaal betaald', async () => {
     const { s } = setup({ fetch: ecb });
     const pid = await oldPurchase(s);

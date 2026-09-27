@@ -237,13 +237,12 @@ export class FxRepair {
         }
         return { kind: 'dubbel' as const };
       }
+      // de afschrijving uit het voorstel kan intussen anders verwerkt of genegeerd zijn: dan niet dat bedrag gebruiken
+      const t = input.bankTransactionId ? this.bank.get(input.bankTransactionId) : null;
+      if (t && t.status !== 'nieuw') throw new ValidationError('Deze betaling is intussen anders verwerkt. Kijk het opnieuw na.');
       this.purchases.revalue(purchaseId, input.euroTotal, { currency, total: input.foreignTotal });
-      let source: 'bank' | 'ecb' = 'ecb';
-      if (input.bankTransactionId) {
-        const t = this.bank.get(input.bankTransactionId);
-        if (t.status === 'nieuw') this.bank.matchPurchase(t.id, purchaseId);
-        source = 'bank';
-      } else if (p.amount_paid > 0) source = 'bank';
+      if (t) this.bank.matchPurchase(t.id, purchaseId);
+      const source: 'bank' | 'ecb' = t || p.amount_paid > 0 ? 'bank' : 'ecb';
       if (p.document_id) this.markForeign(p.document_id, currency, input.foreignTotal, input.euroTotal, source, p.invoice_date);
       return { kind: 'omgerekend' as const };
     });
