@@ -28,12 +28,14 @@ export function SettingsScreen() {
   const { run, busy } = useAction();
   const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'bedrijf');
   const [draft, setDraft] = useState<Settings>(settings);
+  // na zoeken naar Claude Code/Codex: het kaartje voor vragen stellen opnieuw laden
+  const [aiVersion, setAiVersion] = useState(0);
   const bankAccounts = useLoad(() => api.bank.accounts());
   // de keuze voor het lezen van bonnen wordt direct opgeslagen: in het concept meenemen, anders zet
   // "Opslaan" van iets anders hem terug
   useEffect(() => {
-    setDraft((d) => ({ ...d, ocr: { ...d.ocr, engine: settings.ocr.engine, url: settings.ocr.url, askedReader: settings.ocr.askedReader } }));
-  }, [settings.ocr.engine, settings.ocr.url, settings.ocr.askedReader]);
+    setDraft((d) => ({ ...d, ocr: { ...d.ocr, engine: settings.ocr.engine, url: settings.ocr.url, askedReader: settings.ocr.askedReader, claudeCodePath: settings.ocr.claudeCodePath, codexPath: settings.ocr.codexPath, assistantsSearched: settings.ocr.assistantsSearched } }));
+  }, [settings.ocr.engine, settings.ocr.url, settings.ocr.askedReader, settings.ocr.claudeCodePath, settings.ocr.codexPath, settings.ocr.assistantsSearched]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
   const set = (patch: Partial<AppSettings>) => setDraft({ ...draft, ...patch });
   const save = async () => {
@@ -229,9 +231,9 @@ export function SettingsScreen() {
               : 'Alles draait op je eigen computer; documenten gaan nergens naartoe.'}{' '}
             E-facturen en PDF's met tekst leest de app altijd zelf.
           </p>
-          <ReaderChoice context="instellingen" />
+          <ReaderChoice context="instellingen" onToolsChanged={() => setAiVersion((v) => v + 1)} />
           {settings.ocr.engine === 'ingebouwd' && <LocalOcr engine={draft.ocr.engine} />}
-          <AssistantCard />
+          <AssistantCard key={aiVersion} />
           {settings.advancedMode && (
           <details style={{ marginTop: 12 }}>
             <summary className="small">Voor technische gebruikers: eigen herkenningsdienst of lokale AI</summary>

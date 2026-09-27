@@ -73,8 +73,12 @@ function init(fresh) {
       install: () => { updateInstalled = true; },
       reconfigure: () => { updateStatus = { ...updateStatus, state: updateStatus.state === 'klaar' ? 'klaar' : services.settings.get().autoUpdate ? 'wacht' : 'uit' }; },
     },
-    // geen Claude Code of Codex in de test: de keuze staat dan uit met uitleg
-    findCli: () => null,
+    // in de test "staat" alleen Claude Code op de computer (nep); gezocht wordt pas na de knop
+    findCli: (kind) => (kind === 'claude-code' ? '/opt/claude/bin/claude' : null),
+    programExists: (p) => p === '/opt/claude/bin/claude',
+    pickProgram: async () => null,
+    checkCli: async () => 'Claude Code werkt ✓',
+    openLoginTerminal: async () => 'Claude Code is geopend in een terminal.',
     mcpCommand: () => ({ command: '/opt/Gratis Boekhouden/gratis-boekhouden', args: ['--mcp'] }),
     localOcr: { status: () => ({ state: 'niet-geinstalleerd' }), install: () => ({ state: 'niet-geinstalleerd' }), uninstall: async () => ({ state: 'niet-geinstalleerd' }) },
     async resetData(withDemo) {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { CliAiProvider, extractJson, findCli, toOcrOutput, type CliRunner, type Workspace } from '../src/intake/ocr-cli';
 import { setup } from './helpers';
 
@@ -102,5 +104,25 @@ describe('bonnen lezen met Claude Code of Codex', () => {
     expect(after.result?.supplier?.value).toBe('Gamma');
     expect(after.status).not.toBe('verwerkt');
     expect(s.intake.unread()).toEqual([]);
+  });
+});
+
+describe('Controleer: een klein proefverzoek aan het echte programma', () => {
+  const script = (body: string) => {
+    const dir = mkdtempSync(join(tmpdir(), 'gb-cli-'));
+    const file = join(dir, 'claude');
+    writeFileSync(file, `#!/bin/sh\ncat >/dev/null\n${body}\n`);
+    chmodSync(file, 0o755);
+    return file;
+  };
+
+  it.skipIf(process.platform === 'win32')('ingelogd: werkt; niet ingelogd: uitleg hoe', async () => {
+    const { checkCli, programExists } = await import('../src/main/assistant-tools');
+    const ok = script(`echo '{"type":"result","is_error":false,"result":"ok"}'`);
+    expect(programExists(ok)).toBe(true);
+    expect(programExists(join(tmpdir(), 'bestaat-niet'))).toBe(false);
+    await expect(checkCli('claude-code', ok)).resolves.toMatch(/werkt/);
+    const out = script(`echo 'Invalid API key · Please run /login' >&2; exit 1`);
+    await expect(checkCli('claude-code', out)).rejects.toThrow(/niet ingelogd/);
   });
 });

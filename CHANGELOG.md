@@ -13,6 +13,9 @@
     gaat naar Anthropic of OpenAI. De assistent krijgt alleen die ene foto (in een lege map), mag verder niets
     (alleen lezen, geen andere hulpmiddelen) en heeft een tijdslimiet;
   - **zelf invullen**.
+  De app installeert Claude Code of Codex niet en zoekt er pas naar als jij op **Zoek op deze computer** klikt
+  (of het programma zelf aanwijst met **Kies zelf…**); wat gevonden is wordt onthouden. **Inloggen** opent een
+  terminal met het programma erin; **Controleer** stuurt een heel klein proefbericht om te zien of het werkt.
   Bonnen die nog klaarlagen worden na het kiezen vanzelf gelezen. Wat de app leest is een voorstel: jij klikt
   op "Klopt", er wordt niets geboekt zonder dat je het ziet.
 - **Vragen stellen over je boekhouding met Claude Code of Codex**: in Instellingen → Automatisch & herkenning

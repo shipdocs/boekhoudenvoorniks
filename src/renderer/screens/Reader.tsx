@@ -12,7 +12,7 @@ const mb = (n: number) => (n >= 1_000_000_000 ? `${(n / 1_000_000_000).toLocaleS
  * met je eigen Claude Code of Codex (geen download, maar de foto gaat naar Anthropic/OpenAI), of zelf
  * invullen.
  */
-export function ReaderChoice({ context, onDone }: { context: 'bon' | 'instellingen'; onDone?: () => void | Promise<void> }) {
+export function ReaderChoice({ context, onDone, onToolsChanged }: { context: 'bon' | 'instellingen'; onDone?: () => void | Promise<void>; onToolsChanged?: () => void }) {
   const { reloadSettings, toast } = useApp();
   const { run, busy } = useAction();
   const opts = useLoad(() => api.reader.options());
@@ -72,6 +72,7 @@ export function ReaderChoice({ context, onDone }: { context: 'bon' | 'instelling
   };
 
   const current = o.current;
+  const notFound = o.searched ? 'Niet gevonden op deze computer. Staat het ergens anders? Kies het hieronder zelf.' : 'Nog niet gezocht: klik hieronder op "Zoek op deze computer".';
   const localBusy = downloading || o.local.state === 'starten';
   const options: { key: Choice; title: string; text: string; note?: string; disabled?: string | null }[] = [
     {
@@ -84,13 +85,13 @@ export function ReaderChoice({ context, onDone }: { context: 'bon' | 'instelling
       key: 'claude-code',
       title: 'Met je eigen Claude Code (Anthropic)',
       text: 'Geen download: Claude Code op je computer leest de bon, met je eigen abonnement. Let op: de foto gaat daarvoor naar Anthropic. Claude krijgt alleen die ene foto en mag verder niets op je computer.',
-      disabled: o.claudeCode ? null : 'Niet gevonden op deze computer. Net geïnstalleerd? Start de app dan opnieuw.',
+      disabled: o.claudeCode ? null : notFound,
     },
     {
       key: 'codex',
       title: 'Met je eigen Codex (OpenAI)',
       text: 'Geen download: Codex op je computer leest de bon, met je eigen abonnement. Let op: de foto gaat daarvoor naar OpenAI. Codex krijgt alleen die ene foto en mag verder niets op je computer. Leest alleen foto\'s, geen gescande PDF\'s.',
-      disabled: o.codex ? null : 'Niet gevonden op deze computer. Net geïnstalleerd? Start de app dan opnieuw.',
+      disabled: o.codex ? null : notFound,
     },
     {
       key: 'zelf',
@@ -127,6 +128,7 @@ export function ReaderChoice({ context, onDone }: { context: 'bon' | 'instelling
           </button>
         ))}
       </div>
+      <AssistantFinder onChange={async () => { await opts.reload(); onToolsChanged?.(); }} />
       {downloading && (
         <div style={{ marginTop: 10 }}>
           <p className="small">Bezig met downloaden… Je kunt gewoon doorwerken; bonnen die klaarliggen worden daarna vanzelf gelezen.</p>
@@ -154,5 +156,76 @@ function LocalProgress() {
       <progress max={p?.total || 1} value={p?.done ?? 0} style={{ width: '100%' }} />
       {p && <p className="small muted">{mb(p.done)} van {mb(p.total)}</p>}
     </>
+  );
+}
+
+/**
+ * Claude Code of Codex zoeken, zelf aanwijzen, inloggen en controleren. De app installeert niets en
+ * zoekt pas als de gebruiker op de knop drukt; wat gevonden is wordt onthouden.
+ */
+export function AssistantFinder({ onChange }: { onChange?: () => void | Promise<void> }) {
+  const { toast, reloadSettings } = useApp();
+  const { run, busy } = useAction();
+  const opts = useLoad(() => api.reader.options());
+  const [checking, setChecking] = useState<string | null>(null);
+  const o = opts.data;
+  if (!o) return null;
+  const done = async () => {
+    // opgeslagen paden ook in de instellingen van het scherm, anders zet "Opslaan" ze terug
+    await reloadSettings();
+    await opts.reload();
+    await onChange?.();
+  };
+  const search = async () => {
+    const r = await run(() => api.assistantTools.search());
+    if (!r) return;
+    toast(r.claudeCode || r.codex ? `Gevonden: ${[r.claudeCode && 'Claude Code', r.codex && 'Codex'].filter(Boolean).join(' en ')}` : 'Geen Claude Code of Codex gevonden');
+    await done();
+  };
+  const tools = [
+    { kind: 'claude-code' as const, name: 'Claude Code', path: o.claudeCode },
+    { kind: 'codex' as const, name: 'Codex', path: o.codex },
+  ];
+  return (
+    <div className="notice small" style={{ marginTop: 10 }}>
+      {!o.searched ? (
+        <>
+          <strong>Heb je Claude Code of Codex?</strong> De app zoekt pas als jij daarom vraagt, en installeert zelf niets.
+          <div className="row" style={{ marginTop: 8, gap: 8 }}>
+            <Button small disabled={busy} onClick={() => void search()}>Zoek op deze computer</Button>
+          </div>
+        </>
+      ) : (
+        <>
+          {tools.map((t) => (
+            <div key={t.kind} className="row" style={{ gap: 8, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ minWidth: 200 }}>
+                <strong>{t.name}</strong>: {t.path ? <>gevonden <span className="muted mono" style={{ wordBreak: 'break-all' }}>{t.path}</span></> : 'niet gevonden'}
+              </span>
+              {t.path ? (
+                <>
+                  <Button small disabled={busy} title="Opent een terminal; log daar één keer in met je eigen account" onClick={async () => { const m = await run(() => api.assistantTools.openLogin(t.kind)); if (m) toast(m); }}>Inloggen</Button>
+                  <Button small disabled={busy || checking !== null} onClick={async () => {
+                    setChecking(t.kind);
+                    try {
+                      const m = await run(() => api.assistantTools.check(t.kind));
+                      if (m) toast(m);
+                    } finally {
+                      setChecking(null);
+                    }
+                  }}>{checking === t.kind ? 'Bezig…' : 'Controleer'}</Button>
+                </>
+              ) : (
+                <Button small kind="ghost" disabled={busy} onClick={async () => { if (await run(() => api.assistantTools.pick(t.kind))) await done(); }}>Kies zelf…</Button>
+              )}
+            </div>
+          ))}
+          <div className="row" style={{ marginTop: 8, gap: 8 }}>
+            <Button small kind="ghost" disabled={busy} onClick={() => void search()}>Opnieuw zoeken</Button>
+          </div>
+          <p className="muted" style={{ margin: '6px 0 0' }}>"Controleer" stuurt een heel klein proefbericht om te zien of je bent ingelogd.</p>
+        </>
+      )}
+    </div>
   );
 }

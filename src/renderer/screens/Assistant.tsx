@@ -48,13 +48,13 @@ export function AssistantCard() {
         moment dat jij iets vraagt. Wat de assistent zegt over btw of belasting is uitleg, geen advies: laat het controleren door je boekhouder.
       </p>
       {found ? (
-        <div className="row" style={{ gap: 8 }}>
+        <div className="row" style={{ gap: 8, marginTop: 10 }}>
           {i.claudeCode && <Button disabled={busy} onClick={() => void connect('claude-code')}>Toevoegen aan Claude Code</Button>}
           {i.codex && <Button disabled={busy} onClick={() => void connect('codex')}>Toevoegen aan Codex</Button>}
           <Button kind="ghost" small onClick={() => setManual(!manual)}>{manual ? 'Verberg' : 'Zelf instellen'}</Button>
         </div>
       ) : (
-        <p className="small">Geen Claude Code of Codex gevonden op deze computer. Heb je het wel? Stel het dan zelf in:</p>
+        <p className="small" style={{ marginTop: 10 }}>Nog niet gevonden: gebruik hierboven "Zoek op deze computer", of stel het zelf in met een opdracht in de terminal:</p>
       )}
       {found && <p className="small muted">Daarna: open een nieuwe terminal, start <code>claude</code> of <code>codex</code> en stel je vraag.</p>}
       {(manual || !found) && (

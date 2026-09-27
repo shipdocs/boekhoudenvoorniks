@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { HttpOcrProvider } from '../intake/ocr';
 import { CliAiProvider, findCli } from '../intake/ocr-cli';
 import { nodeCliRunner, tempWorkspace } from './cli-runner';
+import { checkCli, openLoginTerminal, programExists } from './assistant-tools';
 import { LocalOcrRuntime } from '../ocr-runtime/runtime';
 import { OllamaClassifier } from '../intake/llm-ollama';
 import type { FetchLike } from '../integrations/types';
@@ -113,8 +114,9 @@ function configureLocalAi(): void {
     if (ocr.engine === 'claude-code' || ocr.engine === 'codex') {
       // bonnen lezen met de eigen Claude Code of Codex van de gebruiker (foto gaat naar Anthropic/OpenAI)
       localOcr.stop();
-      const cmd = findCli(ocr.engine);
-      services.intake.setOcrProvider(cmd ? new CliAiProvider(ocr.engine, cmd, nodeCliRunner, tempWorkspace) : null);
+      // alleen het programma dat de gebruiker liet zoeken of zelf koos
+      const cmd = ocr.engine === 'codex' ? ocr.codexPath : ocr.claudeCodePath;
+      services.intake.setOcrProvider(programExists(cmd) ? new CliAiProvider(ocr.engine, cmd, nodeCliRunner, tempWorkspace) : null);
     } else if (ocr.engine === 'ingebouwd') {
       // ingebouwde herkenning (#9): alleen als die gedownload is; de server start pas bij de eerste bon
       services.intake.setOcrProvider(localOcr.isInstalled() ? localOcr.provider(localFetch) : null);
@@ -183,10 +185,15 @@ function initServices(): void {
     storeAttachment,
     reconfigureLocalAi: configureLocalAi,
     findCli: (kind) => findCli(kind),
+    programExists,
+    pickProgram: async (title) => {
+      const r = await dialog.showOpenDialog(mainWindow!, { title, properties: ['openFile'] });
+      return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+    },
+    checkCli,
+    openLoginTerminal: (kind, path) => openLoginTerminal(kind, path),
     mcpCommand,
-    connectMcp: async (kind) => {
-      const cli = findCli(kind);
-      if (!cli) throw new Error(`${kind === 'codex' ? 'Codex' : 'Claude Code'} is niet gevonden op deze computer.`);
+    connectMcp: async (kind, cli) => {
       const { command, args } = mcpCommand();
       const add = kind === 'codex' ? ['mcp', 'add', 'gratis-boekhouden', '--', command, ...args] : ['mcp', 'add', '--scope', 'user', 'gratis-boekhouden', '--', command, ...args];
       const env = { ...process.env, PATH: [dirname(cli), process.env.PATH ?? ''].join(delimiter) };
