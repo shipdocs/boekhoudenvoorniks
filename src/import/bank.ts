@@ -306,6 +306,8 @@ export class BankService {
         const account = opts.bankAccountId ? this.getAccount(opts.bankAccountId) : this.accountForIban(b.ownIban);
         const known = closing.get(account.id);
         if (!known || b.date >= known.date) closing.set(account.id, { date: b.date, amount: b.amount });
+        // een afschrift zonder betalingen (alleen een saldo) telt ook: dat saldo is juist nuttig
+        if (!perAccount.has(account.id)) perAccount.set(account.id, { from: b.date, to: b.date, transactions: 0, imported: 0, duplicates: 0 });
       }
       const insertStat = this.db.prepare(
         'INSERT INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates, closing_balance, closing_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',

@@ -45,6 +45,8 @@ export function Onboarding() {
   const [switchMode, setSwitchMode] = useState(settings.switchover.mode);
   const [switchDate, setSwitchDate] = useState(settings.switchover.date ?? `${new Date().getFullYear()}-01-01`);
   const [otherDate, setOtherDate] = useState(false);
+  // zelfde grenzen als de service: anders is de onboarding al opgeslagen als de overstap mislukt
+  const validSwitchDate = isIsoDate(switchDate) && switchDate >= '2000-01-01' && switchDate <= today();
   const year = new Date().getFullYear();
   const ids = steps.map((s) => s.id);
   const shows = (id: string) => ids.includes(id);
@@ -274,10 +276,10 @@ export function Onboarding() {
               </div>
               {otherDate && (
                 <Field label="Instapdatum">
-                  <input type="date" value={switchDate} max={today()} onChange={(e) => setSwitchDate(e.target.value)} />
+                  <input type="date" value={switchDate} min="2000-01-01" max={today()} onChange={(e) => setSwitchDate(e.target.value)} />
                 </Field>
               )}
-              {isIsoDate(switchDate) && switchDate <= today() && (
+              {validSwitchDate && (
                 <div className="notice">
                   <ul style={{ margin: 0, paddingLeft: 18 }}>
                     {startDateConsequences(switchDate, vatPeriod, kor).map((c) => <li key={c}>{c}</li>)}
@@ -287,7 +289,7 @@ export function Onboarding() {
               )}
             </>
           )}
-          {footer(switchMode === 'nieuw' || (switchMode === 'overstapper' && isIsoDate(switchDate) && switchDate <= today()))}
+          {footer(switchMode === 'nieuw' || (switchMode === 'overstapper' && validSwitchDate))}
         </>
       )}
 

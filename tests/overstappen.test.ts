@@ -226,6 +226,14 @@ describe('overstappen met een lopende administratie', () => {
     expect(s.switchover.checks().some((c) => c.key === `bank-voor-${bank.id}`)).toBe(false);
   });
 
+  it('afschrift met alleen een saldo (geen betalingen) wordt toch bewaard; controle-datum binnen de grenzen', () => {
+    const { s, bank } = overstapper('2026-09-01');
+    s.bank.import({ source: 'camt', warnings: [], transactions: [], balances: [{ ownIban: MAIN, date: '2026-09-10', amount: 50_000 }] });
+    expect(s.switchover.state().banks.find((b) => b.bankAccountId === bank.id)?.suggestedOpening?.amount).toBe(50_000);
+    expect(() => s.switchover.setBankCheck(bank.id, '2026-08-01', 1)).toThrow(/Kies een datum/);
+    expect(() => s.switchover.save({ kind: 'klant', relationName: 'X', number: '1', invoiceDate: '2026-08-01', amount: -100 })).toThrow(/bedrag/);
+  });
+
   it('camt: eindsaldo wordt gelezen', () => {
     const xml = `<?xml version="1.0"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02"><BkToCstmrStmt><Stmt>
       <Acct><Id><IBAN>${MAIN}</IBAN></Id></Acct>

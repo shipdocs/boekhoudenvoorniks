@@ -336,6 +336,8 @@ export class SwitchoverService {
   /** Het saldo volgens de bank op een datum, om te controleren of alle afschriften erin zitten. */
   setBankCheck(bankAccountId: number, date: IsoDate, amount: Cents): SwitchoverState {
     assertIsoDate(date);
+    const start = this.date();
+    if (date < start || date > today()) throw new ValidationError(`Kies een datum tussen ${formatDateNl(start)} en vandaag`);
     if (!Number.isSafeInteger(amount)) throw new ValidationError('Vul het saldo in');
     this.bank.getAccount(bankAccountId);
     this.update({ bankChecks: { ...this.cfg().bankChecks, [String(bankAccountId)]: { date, amount } } });
@@ -430,7 +432,7 @@ export class SwitchoverService {
         assertIsoDate(input.invoiceDate, 'factuurdatum');
         if (input.invoiceDate >= date) throw new ValidationError(`De factuur moet van vóór ${formatDateNl(date)} zijn. Een latere factuur voer je gewoon in de app in`);
         if (input.dueDate) assertIsoDate(input.dueDate, 'vervaldatum');
-        if (!Number.isSafeInteger(input.amount) || input.amount === 0) throw new ValidationError('Vul het bedrag in dat nog open staat (inclusief btw)');
+        if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new ValidationError('Vul het bedrag in dat nog open staat (inclusief btw)');
         if (input.kind === 'klant' && !input.number?.trim()) throw new ValidationError('Vul het factuurnummer in; dan herkent de app de betaling');
         return;
       case 'bezit': {

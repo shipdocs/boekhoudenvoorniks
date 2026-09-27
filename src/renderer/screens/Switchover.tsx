@@ -248,9 +248,9 @@ function BankCard({ bank, date, checks, refresh }: { bank: SwitchoverState['bank
         <details style={{ marginTop: 8 }}>
           <summary className="small">Saldo volgens je bank invullen om te controleren</summary>
           <div className="row" style={{ marginTop: 8 }}>
-            <input type="date" value={checkDate} onChange={(e) => setCheckDate(e.target.value)} aria-label="Datum saldo" />
+            <input type="date" value={checkDate} min={date} max={today()} onChange={(e) => setCheckDate(e.target.value)} aria-label="Datum saldo" />
             <MoneyInput value={checkAmount} onChange={setCheckAmount} ariaLabel={`Saldo volgens de bank ${bank.name}`} placeholder="saldo aan het eind van die dag" />
-            <Button small disabled={busy || checkAmount === null || !isIsoDate(checkDate)} onClick={async () => { const r = await run(() => api.switchover.setBankCheck(bank.bankAccountId, checkDate, checkAmount!)); if (r) await refresh(r); }}>Controleren</Button>
+            <Button small disabled={busy || checkAmount === null || !isIsoDate(checkDate) || checkDate < date || checkDate > today()} onClick={async () => { const r = await run(() => api.switchover.setBankCheck(bank.bankAccountId, checkDate, checkAmount!)); if (r) await refresh(r); }}>Controleren</Button>
           </div>
         </details>
       )}
