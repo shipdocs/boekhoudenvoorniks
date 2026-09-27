@@ -2,6 +2,8 @@
 
 ## Nog niet uitgebracht
 
+## 0.3.9 — aankopen in vreemde valuta (dollars, ponden, …)
+
 - **Aankopen in dollars (en andere munten)** (#74): de app herkent een bon of factuur in een andere munt ($, USD,
   £, CHF, …) en boekt hem in euro's, zonder extra velden:
   - staat de betaling al op de bank, dan telt **het bedrag dat de bank afschreef** (de echte koers). Bank en bon
