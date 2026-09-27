@@ -7,7 +7,13 @@ import { normalizeVatNumber } from './validation';
  * LET OP: deze tabel is onderdeel van de BTW-rekenlogica en moet vóór livegang gereviewd worden
  * door een boekhouder/fiscalist (zie GitHub-issue "BTW-logica laten reviewen").
  */
-export type SalesVatCode = 'hoog' | 'laag' | 'nul' | 'verlegd' | 'vrijgesteld' | 'icp' | 'export';
+/**
+ * Buitenland (fiscale review): 'icp' = levering van goederen aan een bedrijf in een ander EU-land
+ * (art. 138), 'icp-dienst' = dienst aan een bedrijf in een ander EU-land (art. 44/196, verlegd); beide
+ * 3b, maar apart in de ICP-opgaaf. 'export' = uitvoer van goederen buiten de EU (3a).
+ * 'dienst-buiten-eu' = dienst aan een bedrijf buiten de EU: niet in Nederland belast en niet in de aangifte.
+ */
+export type SalesVatCode = 'hoog' | 'laag' | 'nul' | 'verlegd' | 'vrijgesteld' | 'icp' | 'icp-dienst' | 'export' | 'dienst-buiten-eu';
 /**
  * Inkoop. Verlegd = de btw wordt naar jou verlegd: je rekent zelf 21% uit, geeft die aan en trekt
  * hem tegelijk weer af (#16). 'verlegd' = Nederlandse leverancier (2a), 'eu' = leverancier in een
@@ -32,8 +38,10 @@ export const SALES_VAT_RATES: Record<SalesVatCode, VatRateInfo> = {
   nul: { code: 'nul', label: '0%', percentage: 0, rubriek: '1e' },
   verlegd: { code: 'verlegd', label: 'BTW verlegd', pickLabel: 'Btw verlegd (je werkt als onderaannemer; je klant regelt de btw)', percentage: 0, rubriek: '1e' },
   vrijgesteld: { code: 'vrijgesteld', label: 'Vrijgesteld / KOR', pickLabel: 'Geen btw (vrijgesteld of KOR)', percentage: 0, rubriek: '-' },
-  icp: { code: 'icp', label: 'Bedrijf in de EU (0%, ICP)', pickLabel: 'Bedrijf in een ander EU-land (0%)', percentage: 0, rubriek: '3b' },
-  export: { code: 'export', label: 'Uitvoer buiten de EU (0%)', pickLabel: 'Klant buiten de EU (0%)', percentage: 0, rubriek: '3a' },
+  icp: { code: 'icp', label: 'Intracommunautaire levering (0%)', pickLabel: 'Goederen naar een bedrijf in een ander EU-land (0%)', percentage: 0, rubriek: '3b' },
+  'icp-dienst': { code: 'icp-dienst', label: 'Btw verlegd (dienst EU)', pickLabel: 'Dienst aan een bedrijf in een ander EU-land (btw verlegd)', percentage: 0, rubriek: '3b' },
+  export: { code: 'export', label: 'Uitvoer goederen buiten de EU (0%)', pickLabel: 'Goederen naar een klant buiten de EU (0%)', percentage: 0, rubriek: '3a' },
+  'dienst-buiten-eu': { code: 'dienst-buiten-eu', label: 'Niet belast in Nederland', pickLabel: 'Dienst aan een bedrijf buiten de EU (niet in de aangifte)', percentage: 0, rubriek: '-' },
 };
 
 export const PURCHASE_VAT_RATES: Record<PurchaseVatCode, VatRateInfo> = {
@@ -71,7 +79,17 @@ export function isReverseCharge(code: string): code is 'verlegd' | 'eu' | 'buite
 
 /** Verkoop waarbij het btw-nummer van de klant op de factuur moet staan. */
 export function needsCustomerVatNumber(code: string): boolean {
-  return code === 'verlegd' || code === 'icp';
+  return code === 'verlegd' || isIcp(code);
+}
+
+/** Intracommunautaire prestatie (goederen of dienst): rubriek 3b en de ICP-opgaaf. */
+export function isIcp(code: string): code is 'icp' | 'icp-dienst' {
+  return code === 'icp' || code === 'icp-dienst';
+}
+
+/** Klant buiten de EU (goederen of dienst). */
+export function isOutsideEu(code: string): code is 'export' | 'dienst-buiten-eu' {
+  return code === 'export' || code === 'dienst-buiten-eu';
 }
 
 /** Drempel voor verkoop aan particulieren in andere EU-landen; daarboven btw van het land van de klant (OSS). */
@@ -94,13 +112,20 @@ export function vatNumberMatchesCountry(vatNumber: string | null | undefined, co
   return !!prefix && countryCode(prefix) === countryCode(country ?? 'NL');
 }
 
-/** Welke btw-keuze meestal hoort bij deze klant (null = gewoon Nederlandse btw). */
+/**
+ * Welke btw-keuze meestal hoort bij deze klant (null = gewoon Nederlandse btw). De doelgroep levert
+ * vooral diensten; verkoop je goederen, dan kies je zelf de goederenvariant.
+ */
 export function suggestedSalesVat(situation: CustomerVatSituation): SalesVatCode | null {
-  return situation === 'eu-bedrijf' ? 'icp' : situation === 'buiten-eu' ? 'export' : null;
+  return situation === 'eu-bedrijf' ? 'icp-dienst' : situation === 'buiten-eu' ? 'dienst-buiten-eu' : null;
 }
 
-/** Wettelijke vermelding op de factuur bij een intracommunautaire levering/dienst. */
-export const ICP_TEXT = 'Intracommunautaire levering/dienst, btw verlegd (art. 138 / art. 196 Btw-richtlijn)';
+/** Wettelijke vermelding op de factuur bij een intracommunautaire levering van goederen. */
+export const ICP_TEXT = 'Intracommunautaire levering, vrijgesteld van btw (art. 138 Btw-richtlijn)';
+/** Wettelijke vermelding op de factuur bij een dienst aan een bedrijf in een ander EU-land. */
+export const ICP_SERVICE_TEXT = 'Btw verlegd (reverse charge, art. 196 Btw-richtlijn)';
+/** Vermelding bij een dienst aan een bedrijf buiten de EU. */
+export const OUTSIDE_EU_SERVICE_TEXT = 'Dienst niet belast in Nederland (plaats van dienst buiten de EU)';
 
 /** Wettelijke vermelding op de factuur bij verlegde btw. */
 export const VERLEGD_TEXT = 'BTW verlegd';
@@ -113,7 +138,9 @@ export function saleVatText(code: SalesVatCode): string {
     nul: '0% btw',
     verlegd: 'btw verlegd',
     vrijgesteld: 'geen btw',
-    icp: 'bedrijf in de EU, 0% btw',
-    export: 'klant buiten de EU, 0% btw',
+    icp: 'goederen naar een bedrijf in de EU, 0% btw',
+    'icp-dienst': 'dienst aan een bedrijf in de EU, btw verlegd',
+    export: 'goederen naar buiten de EU, 0% btw',
+    'dienst-buiten-eu': 'dienst aan een bedrijf buiten de EU, geen Nederlandse btw',
   } as Record<SalesVatCode, string>)[code];
 }

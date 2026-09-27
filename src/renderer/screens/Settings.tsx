@@ -113,6 +113,13 @@ export function SettingsScreen() {
       {tab === 'btw' && section(
         <>
           <label className="row"><input type="checkbox" checked={draft.kor} onChange={(e) => set({ kor: e.target.checked, defaultVatCode: e.target.checked ? 'vrijgesteld' : 'hoog' })} /> Ik gebruik de kleineondernemersregeling (KOR)</label>
+          {draft.kor !== settings.kor && (
+            <p className="small muted">
+              {draft.kor
+                ? 'Met de KOR krijg je geen btw meer terug op je aankopen; de app telt die btw vanaf nu bij je kosten. Heb je de afgelopen jaren btw teruggekregen op een investering (zoals een bus of machine)? Dan moet je misschien een deel terugbetalen (herziening). Vraag je boekhouder.'
+                : 'Stop je met de KOR, dan reken je weer btw en krijg je btw op aankopen weer terug. Voor investeringen van de afgelopen jaren kun je misschien alsnog een deel terugkrijgen (herziening). Vraag je boekhouder.'}
+            </p>
+          )}
           {!draft.kor && (
             <div className="grid cols-2">
               <Field label="Btw-identificatienummer"><input value={draft.company.vatNumber} onChange={(e) => set({ company: { ...draft.company, vatNumber: e.target.value } })} /></Field>
@@ -173,8 +180,30 @@ export function SettingsScreen() {
                       </div>
                     </Field>
                   </div>
+                  <div className="grid cols-2">
+                    <Field label="Kreeg je btw terug op de auto of de kosten?" hint="bij aankoop, of op brandstof en onderhoud">
+                      <select value={draft.carVatDeducted === null ? '' : draft.carVatDeducted ? 'ja' : 'nee'} onChange={(e) => set({ carVatDeducted: e.target.value === '' ? null : e.target.value === 'ja' })}>
+                        <option value="">Nog niet opgegeven</option>
+                        <option value="ja">Ja</option>
+                        <option value="nee">Nee (bijvoorbeeld een occasion zonder btw, en geen btw op de kosten)</option>
+                      </select>
+                    </Field>
+                    {draft.carVatDeducted && (
+                      <Field label="Hoe reken je het privégebruik?" hint="vraag je boekhouder als je twijfelt">
+                        <select value={draft.carVatMethod ?? ''} onChange={(e) => set({ carVatMethod: (e.target.value || null) as AppSettings['carVatMethod'] })}>
+                          <option value="">Nog niet opgegeven</option>
+                          <option value="forfait">Vast percentage van de cataloguswaarde (forfait)</option>
+                          <option value="werkelijk">Mijn echte privékilometers (rittenadministratie)</option>
+                        </select>
+                      </Field>
+                    )}
+                  </div>
                   <p className="small muted">
-                    Over privégebruik betaal je één keer per jaar btw, in je laatste aangifte van het jaar: 2,7% van de cataloguswaarde (vanaf het 5e jaar na ingebruikname 1,5%; in het eerste jaar naar rato). De app zet dat voor je klaar.
+                    {draft.carVatDeducted === false
+                      ? 'Heb je geen btw teruggekregen op de auto en de kosten? Dan betaal je ook geen btw over het privégebruik.'
+                      : draft.carVatMethod === 'werkelijk'
+                        ? 'Met je echte privékilometers rekent je boekhouder de btw uit; die komt in je laatste aangifte van het jaar.'
+                        : 'Met het forfait betaal je één keer per jaar btw, in je laatste aangifte van het jaar: 2,7% van de cataloguswaarde (vanaf het 5e jaar na ingebruikname 1,5%; in het eerste jaar naar rato). De app zet dat voor je klaar. Betaal je een eigen bijdrage, of is de auto bijzonder (bijvoorbeeld zonder btw gekocht)? Vraag je boekhouder of het forfait klopt.'}{' '}
                     Daarnaast telt privégebruik mee voor de inkomstenbelasting (bijtelling). Dat rekent de app niet uit: vraag je boekhouder.
                   </p>
                 </>
@@ -187,13 +216,26 @@ export function SettingsScreen() {
               <input value={draft.startYear ?? ''} onChange={(e) => set({ startYear: e.target.value ? Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || null : null })} placeholder="bv. 2024" inputMode="numeric" />
             </Field>
             {draft.startYear && new Date().getFullYear() - draft.startYear < 5 && (
-              <Field label="Hoe vaak heb je de startersaftrek al gebruikt?" hint="vóór dit jaar">
-                <select value={draft.startersaftrekUsed.count} onChange={(e) => set({ startersaftrekUsed: { count: Number(e.target.value), asOfYear: new Date().getFullYear() } })}>
-                  {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}×</option>)}
-                </select>
+              <Field label="In welke jaren gebruikte je de startersaftrek?" hint="zoals in je aangiftes; vraag je boekhouder als je het niet weet">
+                <div className="row" style={{ flexWrap: 'wrap' }}>
+                  {Array.from({ length: new Date().getFullYear() - draft.startYear }, (_, i) => draft.startYear! + i).map((y) => {
+                    const years = draft.startersaftrekYears ?? [];
+                    return (
+                      <label key={y} className="row">
+                        <input type="checkbox" checked={years.includes(y)} onChange={(e) => set({ startersaftrekYears: e.target.checked ? [...years, y].sort() : years.filter((x) => x !== y) })} /> {y}
+                      </label>
+                    );
+                  })}
+                  {new Date().getFullYear() === draft.startYear && <span className="small muted">Je bent dit jaar gestart.</span>}
+                </div>
               </Field>
             )}
           </div>
+          {draft.urencriterium && (
+            <Field label="Aftrek voor zelfstandigen uit eerdere jaren die nog openstaat" hint="niet-gerealiseerde zelfstandigenaftrek; staat op je aanslag. Meestal € 0">
+              <input value={draft.nietGerealiseerdeZelfstandigenaftrek || ''} onChange={(e) => set({ nietGerealiseerdeZelfstandigenaftrek: Number(e.target.value.replace(/\D/g, '').slice(0, 7)) || 0 })} placeholder="0" inputMode="numeric" />
+            </Field>
+          )}
           <div className="grid cols-2">
             <Field label="Zakelijk deel telefoon & internet" hint="het privédeel telt niet als kosten">
               <select value={draft.phoneInternetBusinessPct ?? 100} onChange={(e) => set({ phoneInternetBusinessPct: Number(e.target.value) })}>
@@ -211,6 +253,7 @@ export function SettingsScreen() {
           <Field label="Uren dat je partner onbetaald meewerkt, per jaar" hint="vanaf 525 uur krijg je extra aftrek (meewerkaftrek)">
             <input value={draft.partnerHours || ''} onChange={(e) => set({ partnerHours: Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || 0 })} placeholder="0" inputMode="numeric" />
           </Field>
+          {draft.partnerHours >= 525 && <p className="small muted">Meewerkaftrek krijg je alleen als je partner geen of een lage vergoeding krijgt (minder dan € 5.000 per jaar) en jullie niet samen de onderneming hebben. Klopt dat niet? Vraag je boekhouder.</p>}
           <p className="muted small">Altijd een schatting: de app kent alleen de winst uit je bedrijf, niet je partner, hypotheek of ander inkomen.</p>
         </>,
       )}

@@ -6,6 +6,7 @@ import { PURCHASE_VAT_RATES, isReverseCharge, type PurchaseVatCode } from '../sh
 import { assertIsoDate, type IsoDate } from '../shared/dates';
 import { assertCents, roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
+import { korActive } from '../settings/settings';
 
 export type { PurchaseLineInput } from '../core-ledger/rules';
 export { expenseLines, purchaseVat } from '../core-ledger/rules';
@@ -72,7 +73,9 @@ export class PurchaseService {
     if (!input.description?.trim()) throw new ValidationError('Omschrijving is verplicht');
     if (input.lines.length === 0) throw new ValidationError('Voeg minimaal één regel toe');
     return tx(this.db, () => {
-      const booking = expenseLines(input.lines, ACCOUNTS.crediteuren, input.relationId ?? null, input.supplierReference ?? undefined);
+      // KOR: geen aftrek van voorbelasting; vastgelegd in de gebeurtenis, zodat hercompileren hetzelfde blijft
+      const noVatDeduction = korActive(this.db);
+      const booking = expenseLines(input.lines, ACCOUNTS.crediteuren, input.relationId ?? null, input.supplierReference ?? undefined, { noVatDeduction });
       const vatPaid = booking.payable - booking.net;
       const result = this.db
         .prepare(
@@ -86,7 +89,7 @@ export class PurchaseService {
       const { entryId } = this.events.record(
         {
           type: 'inkoop',
-          payload: { purchaseId: id, date: input.invoiceDate, description: input.description.trim(), relationId: input.relationId ?? null, supplierReference: input.supplierReference ?? null, lines: input.lines },
+          payload: { purchaseId: id, date: input.invoiceDate, description: input.description.trim(), relationId: input.relationId ?? null, supplierReference: input.supplierReference ?? null, lines: input.lines, ...(noVatDeduction ? { noVatDeduction } : {}) },
         },
         evidence,
         { jobId: input.jobId ?? null },
@@ -138,7 +141,7 @@ export class PurchaseService {
       const old = event.payload as InkoopPayload;
       const lines = next(old.lines);
       if (lines.length === 0) throw new ValidationError('Voeg minimaal één regel toe');
-      const booking = expenseLines(lines, ACCOUNTS.crediteuren, p.relation_id, p.supplier_reference ?? undefined);
+      const booking = expenseLines(lines, ACCOUNTS.crediteuren, p.relation_id, p.supplier_reference ?? undefined, { noVatDeduction: old.noVatDeduction });
       if (opts.samePayable && p.amount_paid !== 0 && booking.payable !== p.total) throw new ValidationError('Het te betalen bedrag verandert; maak eerst de betaling ongedaan');
       const { entryId } = this.events.replace(event.id, { type: 'inkoop', payload: { ...old, lines } }, reason);
       this.db

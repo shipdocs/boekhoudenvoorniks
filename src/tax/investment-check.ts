@@ -2,7 +2,7 @@ import { tx, type Db } from '../db/database';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import type { PurchaseService } from '../documents/purchases';
 import type { BankService } from '../import/bank';
-import type { PurchaseLineInput } from '../core-ledger/rules';
+import { NON_DEDUCTIBLE_VAT, type PurchaseLineInput } from '../core-ledger/rules';
 import { addDays, today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 import { INVESTMENT_CANDIDATE_ACCOUNTS, INVESTMENT_THRESHOLD } from '../shared/investment';
@@ -34,19 +34,22 @@ export class InvestmentCheck {
     const accounts = INVESTMENT_CANDIDATE_ACCOUNTS;
     const rows = this.db
       .prepare(
-        `SELECT l.id AS lineId, e.entry_date AS date, l.debit AS amount, COALESCE(NULLIF(l.description, ''), e.description) AS description,
+        `SELECT l.id AS lineId, e.entry_date AS date,
+                -- KOR: de niet-aftrekbare btw op de regel erna hoort bij de kostprijs
+                l.debit + COALESCE((SELECT n.debit FROM journal_lines n WHERE n.id = l.id + 1 AND n.journal_entry_id = l.journal_entry_id AND n.account_id = l.account_id AND n.vat_code = '${NON_DEDUCTIBLE_VAT}'), 0) AS amount,
+                COALESCE(NULLIF(l.description, ''), e.description) AS description,
                 (SELECT p.id FROM purchase_invoices p WHERE p.journal_entry_id = e.id) AS purchaseId,
                 (SELECT t.id FROM bank_transactions t WHERE t.matched_journal_entry_id = e.id AND t.matched_invoice_id IS NULL AND t.matched_purchase_invoice_id IS NULL) AS bankTransactionId
          FROM journal_lines l
          JOIN journal_entries e ON e.id = l.journal_entry_id
          JOIN chart_of_accounts a ON a.id = l.account_id
-         WHERE a.rgs_code IN (${accounts.map(() => '?').join(',')}) AND l.debit >= ?
+         WHERE a.rgs_code IN (${accounts.map(() => '?').join(',')}) AND COALESCE(l.vat_code, '') != '${NON_DEDUCTIBLE_VAT}'
            AND e.status = 'definitief' AND e.reverses_entry_id IS NULL AND e.entry_date BETWEEN ? AND ?
          ORDER BY e.entry_date DESC`,
       )
-      .all(...accounts, INVESTMENT_THRESHOLD, addDays(asOf, -365), asOf) as InvestmentCandidate[];
+      .all(...accounts, addDays(asOf, -365), asOf) as InvestmentCandidate[];
     // alleen wat we ook echt kunnen omzetten
-    return rows.filter((r) => r.purchaseId !== null || r.bankTransactionId !== null);
+    return rows.filter((r) => r.amount >= INVESTMENT_THRESHOLD && (r.purchaseId !== null || r.bankTransactionId !== null));
   }
 
   /** De kostenregel omzetten naar Inventaris; het bedrijfsmiddel verschijnt dan vanzelf in het register. */

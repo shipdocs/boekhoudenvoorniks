@@ -2,7 +2,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS, SALES_ACCOUNTS } from '../core-ledger/accounts';
-import { EU_COUNTRIES, countryCode, needsCustomerVatNumber } from '../shared/vat';
+import { EU_COUNTRIES, countryCode, isIcp, isOutsideEu, needsCustomerVatNumber } from '../shared/vat';
 import type { SettingsService } from '../settings/settings';
 import type { RelationsService, Relation } from '../relations/relations';
 import type { TemplateService } from './templates';
@@ -224,11 +224,11 @@ export class InvoiceService {
       throw new ValidationError(`Bij btw verlegd moet het btw-nummer van ${relation.name} op de factuur staan. Vul het in bij de klant.`);
     }
     const country = countryCode(relation.country);
-    if (inv.lines.some((l) => l.vat_code === 'icp') && (!country || country === 'NL' || !EU_COUNTRIES.has(country))) {
-      throw new ValidationError(`"Bedrijf in een ander EU-land (0%)" is alleen voor klanten in een ander EU-land. Vul bij ${relation.name} het land in (bv. DE of BE)`);
+    if (inv.lines.some((l) => isIcp(l.vat_code)) && (!country || country === 'NL' || !EU_COUNTRIES.has(country))) {
+      throw new ValidationError(`"Bedrijf in een ander EU-land" is alleen voor klanten in een ander EU-land. Vul bij ${relation.name} het land in (bv. DE of BE)`);
     }
-    if (inv.lines.some((l) => l.vat_code === 'export') && (!country || EU_COUNTRIES.has(country))) {
-      throw new ValidationError(`"Klant buiten de EU (0%)" is alleen voor klanten buiten de EU. Vul bij ${relation.name} het land in (bv. CH of US)`);
+    if (inv.lines.some((l) => isOutsideEu(l.vat_code)) && (!country || EU_COUNTRIES.has(country))) {
+      throw new ValidationError(`"Klant buiten de EU" is alleen voor klanten buiten de EU. Vul bij ${relation.name} het land in (bv. CH of US)`);
     }
     if (kor && inv.lines.some((l) => l.vat_percentage > 0)) {
       throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw. Kies bij elke regel "Geen btw".');

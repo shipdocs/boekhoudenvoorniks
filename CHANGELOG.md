@@ -2,6 +2,16 @@
 
 ## Nog niet uitgebracht
 
+### Fiscale review verwerkt
+- **KOR**: btw op inkopen en investeringen wordt niet meer als voorbelasting geboekt maar bij de kosten of de prijs van de investering. Verlegde btw (bijvoorbeeld van Google of een onderaannemer) moet je met de KOR wél betalen; het btw-scherm toont die per kwartaal.
+- **Buitenland**: nieuwe keuzes *Dienst aan een bedrijf buiten de EU* (niet in de aangifte) en *Dienst aan een bedrijf in een ander EU-land* naast de goederenvarianten. De ICP-opgaaf splitst goederen en diensten, en correcties op een eerdere opgaaf staan apart, los van een btw-suppletie.
+- **OSS**: de waarschuwing bij verkopen aan particulieren in andere EU-landen noemt de € 10.000 alleen nog voor spullen en digitale diensten.
+- **Inkomstenbelasting**: tariefsaanpassing bij een hoog inkomen, startersaftrek zonder beperking tot de winst, fiscaal verlies, en niet-gerealiseerde zelfstandigenaftrek uit eerdere jaren.
+- **Drempels**: representatie € 5.700 (2025 en 2026), desinvesteringsbijtelling pas boven € 2.900.
+- **Investeringen**: afschrijven vanaf ingebruikname, meenemen naar privé telt als verkoop, en de KIA van een afgesloten jaar wordt vastgelegd.
+- **Auto van de zaak**: de btw over privégebruik (forfait) pas na bevestiging dat er btw is afgetrokken; ook werkelijk privégebruik kan.
+- Teksten over werkruimte thuis, AOV en meewerkaftrek zijn minder stellig.
+
 ### Hersteld
 - Btw-rubrieken 5a, 5b, 5c en 5g sluiten na afronding altijd op elkaar aan; het ICP-overzicht gebruikt bij correcties en suppleties voortaan dezelfde boekingen als rubriek 3b.
 - Auditfiles volgen nu de XAF 3.2-volgorde en taxonomiestructuur en zijn tegen het XAF-schema gevalideerd.
