@@ -69,6 +69,9 @@ describe('vreemde valuta (#74)', () => {
     expect(doc.result?.foreign).toMatchObject({ currency: 'USD', total: 9000, source: 'ecb', rate: 1.08, rateDate: '2026-05-05' });
     expect(doc.result?.total?.value).toBe(8333); // 90 / 1,08
     expect(doc.status).toBe('controle'); // geschat: niet vanzelf verwerken
+    // omgerekend: geen foutmelding "niet in euro's", alleen de uitleg over de schatting
+    expect(doc.issues.some((i) => i.field === 'currency')).toBe(false);
+    expect(doc.issues.some((i) => i.severity === 'fout')).toBe(false);
     s.intake.confirm(doc.id, { supplier: 'Anthropic', date: '2026-05-06', total: 8333, categoryKey: 'software', vatCode: 'buiten-eu', business: true, paidWith: 'later' });
     const p = s.purchases.list()[0]!;
     s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-05-09', amount: -8400, description: 'ANTHROPIC USD 90,00', counterName: 'ANTHROPIC' }] });

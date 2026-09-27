@@ -21,7 +21,8 @@ export function validateDocument(doc: DocumentResult, asOf: string = today()): I
     if (age > 400) issues.push({ field: 'invoiceDate', severity: 'waarschuwing', message: 'Dit document is ouder dan een jaar.' });
   }
   if (!doc.supplier) issues.push({ field: 'supplier', severity: 'waarschuwing', message: 'We weten niet van welke winkel of leverancier dit is.' });
-  if (doc.currency.value !== 'EUR') issues.push({ field: 'currency', severity: 'fout', message: `Deze bon is niet in euro's (${doc.currency.value}). Dat kan de app nog niet: vraag je boekhouder.` });
+  // andere munt (#74): omgerekend (doc.foreign) is in orde; alleen zonder omrekening (geen totaal gevonden) een vraag
+  if (doc.currency.value !== 'EUR' && !doc.foreign) issues.push({ field: 'currency', severity: 'waarschuwing', message: `Deze bon is niet in euro's (${doc.currency.value}). Vul het bedrag in euro's in, zoals het van je rekening is afgeschreven.` });
 
   for (const [i, v] of doc.vat.value.entries()) {
     if (v.base !== null && v.rate > 0) {
