@@ -7,10 +7,13 @@ export class SafeStorageSecretStore implements SecretStore {
   constructor(private readonly db: Db) {}
 
   get available(): boolean {
-    return safeStorage.isEncryptionAvailable();
+    if (!safeStorage.isEncryptionAvailable()) return false;
+    // Electron gebruikt zonder Linux-keyring de backend "basic_text" met een vaste sleutel.
+    return process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text';
   }
 
   get(key: string): string | null {
+    if (!this.available) return null;
     const row = this.db.prepare('SELECT value FROM secrets WHERE key = ?').get(key) as { value: Buffer } | undefined;
     if (!row) return null;
     try {

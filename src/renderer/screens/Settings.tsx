@@ -91,8 +91,8 @@ export function SettingsScreen() {
         <>
           <label className="row"><input type="checkbox" checked={draft.sendUbl} onChange={(e) => set({ sendUbl: e.target.checked })} /> Stuur ook een e-factuur mee: een bestand dat het boekhoudprogramma van je klant zelf kan inlezen (zonder overtypen)</label>
           <div className="grid cols-3">
-            <Field label="Betaaltermijn (dagen)"><input className="num" type="number" value={draft.paymentTermDays} onChange={(e) => set({ paymentTermDays: Number(e.target.value) })} /></Field>
-            <Field label="Offerte geldig (dagen)"><input className="num" type="number" value={draft.quoteValidityDays} onChange={(e) => set({ quoteValidityDays: Number(e.target.value) })} /></Field>
+            <Field label="Betaaltermijn (dagen)"><input className="num" type="number" min={0} max={365} value={draft.paymentTermDays} onChange={(e) => set({ paymentTermDays: Number(e.target.value) })} /></Field>
+            <Field label="Offerte geldig (dagen)"><input className="num" type="number" min={1} max={3650} value={draft.quoteValidityDays} onChange={(e) => set({ quoteValidityDays: Number(e.target.value) })} /></Field>
             <Field label="Factuurnummer" hint="bv. {JJJJ}-{NNNN} wordt 2026-0001"><input value={draft.invoiceNumberFormat} onChange={(e) => set({ invoiceNumberFormat: e.target.value })} /></Field>
           </div>
           <Field label="Onderwerp factuur-mail"><input value={draft.invoiceEmailSubject} onChange={(e) => set({ invoiceEmailSubject: e.target.value })} /></Field>
@@ -281,7 +281,7 @@ function EmailSettings({ draft, set, section }: { draft: Settings; set: (p: Part
           <p className="muted small">Facturen worden verstuurd via je eigen e-mailadres. De gegevens (server en poort) vind je bij je e-mailprovider: zoek op "SMTP-instellingen".</p>
           <div className="grid cols-3">
             <Field label="Server"><input value={draft.smtp.host} onChange={(e) => set({ smtp: { ...draft.smtp, host: e.target.value } })} placeholder="smtp.jouwprovider.nl" /></Field>
-            <Field label="Poort"><input className="num" type="number" value={draft.smtp.port} onChange={(e) => set({ smtp: { ...draft.smtp, port: Number(e.target.value) } })} /></Field>
+            <Field label="Poort"><input className="num" type="number" min={1} max={65535} value={draft.smtp.port} onChange={(e) => set({ smtp: { ...draft.smtp, port: Number(e.target.value) } })} /></Field>
             <Field label="Beveiliging" hint="neem over wat je provider zegt; meestal 587"><select value={draft.smtp.secure ? 'ssl' : 'starttls'} onChange={(e) => {
               const secure = e.target.value === 'ssl';
               // standaardpoort meeschuiven, maar een zelf ingevulde poort laten staan
@@ -504,7 +504,7 @@ function BackupSettings() {
   const [restorePw, setRestorePw] = useState('');
   return (
     <div className="card grid">
-      <p>Je administratie staat op deze computer. Er wordt elke dag automatisch een back-up gemaakt (de laatste 14 dagen). Maak af en toe ook een kopie op een USB-stick of in je eigen cloudmap.</p>
+      <p>Je administratie staat op deze computer. Er wordt elke dag automatisch een complete back-up gemaakt met je boekhouding, facturen en bonnen (de laatste 14 dagen). Maak af en toe ook een kopie op een USB-stick of in je eigen cloudmap.</p>
       <div className="row">
         <Button kind="primary" disabled={busy} onClick={() => void run(() => api.app.backup(), 'Back-up opgeslagen')}>Back-up maken</Button>
         <Button disabled={busy} onClick={() => void run(() => api.app.restore(restorePw || undefined))}>Back-up terugzetten…</Button>

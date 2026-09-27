@@ -1,5 +1,6 @@
 import type { Db } from '../db/database';
 import type { PeriodType } from '../shared/dates';
+import { ValidationError, isValidEmail } from '../shared/validation';
 
 export interface CompanySettings {
   name: string;
@@ -244,6 +245,29 @@ export const DEFAULT_SETTINGS: AppSettings = {
     'Beste {klant},\n\nVolgens onze administratie staat factuur {nummer} van {bedrag} nog open; de vervaldatum was {vervaldatum}.\nWilt u het openstaande bedrag van {openstaand} zo snel mogelijk overmaken op {iban} o.v.v. het factuurnummer? Heeft u al betaald, dan kunt u deze herinnering als niet verzonden beschouwen.\n\nMet vriendelijke groet,\n{bedrijf}',
 };
 
+function integerInRange(value: number, min: number, max: number, label: string): void {
+  if (!Number.isInteger(value) || value < min || value > max) throw new ValidationError(`${label} moet een heel getal tussen ${min} en ${max} zijn`);
+}
+
+function validateSettings(settings: AppSettings): void {
+  integerInRange(settings.paymentTermDays, 0, 365, 'Betaaltermijn');
+  integerInRange(settings.quoteValidityDays, 1, 3650, 'Geldigheid offerte');
+  integerInRange(settings.smtp.port, 1, 65535, 'SMTP-poort');
+  integerInRange(settings.partnerHours, 0, 8784, 'Partneruren');
+  if (settings.startYear !== null) integerInRange(settings.startYear, 1800, new Date().getFullYear() + 1, 'Startjaar');
+  if (settings.phoneInternetBusinessPct !== null) integerInRange(settings.phoneInternetBusinessPct, 0, 100, 'Zakelijk percentage telefoon en internet');
+  if (!['maand', 'kwartaal', 'jaar'].includes(settings.vatPeriod)) throw new ValidationError('Ongeldige btw-periode');
+  if (!['hoog', 'laag', 'nul', 'verlegd', 'vrijgesteld'].includes(settings.defaultVatCode)) throw new ValidationError('Ongeldige standaard-btw');
+  if (!['voorzichtig', 'normaal', 'maximaal'].includes(settings.autopilot)) throw new ValidationError('Ongeldige automatische stand');
+  if (!['onbekend', 'prive', 'zakelijk', 'geen'].includes(settings.carUse)) throw new ValidationError('Ongeldige keuze voor zakelijk vervoer');
+  if (settings.reminderDays.length > 12 || settings.reminderDays.some((day) => !Number.isInteger(day) || day < 0 || day > 365)) throw new ValidationError('Herinneringsdagen moeten hele getallen tussen 0 en 365 zijn');
+  if (settings.smtp.fromEmail && !isValidEmail(settings.smtp.fromEmail)) throw new ValidationError('Het afzenderadres is geen geldig e-mailadres');
+  if (settings.smtp.bcc && !isValidEmail(settings.smtp.bcc)) throw new ValidationError('Het BCC-adres is geen geldig e-mailadres');
+  for (const [label, value] of [['Bedrijfsnaam', settings.company.name], ['SMTP-server', settings.smtp.host], ['E-mailtekst', settings.invoiceEmailBody]] as const) {
+    if (value.length > 20_000) throw new ValidationError(`${label} is te lang`);
+  }
+}
+
 export class SettingsService {
   constructor(private readonly db: Db) {}
 
@@ -266,6 +290,9 @@ export class SettingsService {
   update(patch: Partial<AppSettings>): AppSettings {
     const upsert = this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
     const current = this.get();
+    const candidate = { ...current, ...patch } as AppSettings;
+    for (const key of ['company', 'smtp', 'profile', 'ocr'] as const) candidate[key] = { ...current[key], ...((patch[key] as object | undefined) ?? {}) } as never;
+    validateSettings(candidate);
     this.db.transaction(() => {
       for (const [key, value] of Object.entries(patch)) {
         if (!(key in DEFAULT_SETTINGS) || value === undefined) continue;

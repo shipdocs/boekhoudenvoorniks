@@ -124,6 +124,21 @@ describe('bankimport en matching', () => {
     expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
   });
 
+  it('koppelt een uitgaande terugbetaling aan een open creditfactuur', () => {
+    const { s, klant } = setup();
+    const original = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-01', lines: [{ description: 'x', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
+    s.invoices.registerPayment(original.id, { amount: original.total!, date: '2026-09-03' });
+    const credit = s.invoices.finalize(s.invoices.createCreditNote(original.id).id);
+    expect(credit.open_amount).toBe(-12100);
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-10', amount: -12100, description: `Terugbetaling ${credit.number}`, counterName: klant.name, counterIban: klant.iban }] });
+    const transaction = s.bank.list({ status: 'nieuw' })[0]!;
+    expect(s.matching.suggest(transaction)[0]).toMatchObject({ kind: 'factuur', invoiceId: credit.id });
+    s.bank.matchInvoice(transaction.id, credit.id);
+    expect(s.invoices.get(credit.id).status).toBe('betaald');
+    expect(s.bank.get(transaction.id).matched_invoice_id).toBe(credit.id);
+    expect(s.ledger.balance(ACCOUNTS.debiteuren)).toBe(0);
+  });
+
   it('privé betaald en beginsaldo', () => {
     const { s } = setup();
     s.quick.recordExpense({ date: '2026-09-02', description: 'Telefoon', categoryKey: 'telefoon', grossAmount: 2420, vatCode: 'hoog', paidWith: 'prive' });

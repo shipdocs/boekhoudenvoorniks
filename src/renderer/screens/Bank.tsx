@@ -446,6 +446,14 @@ export function CategorizeTransaction({ id }: { id: number }) {
           ) : (
             <>
               <h2>Was dit zakelijk?</h2>
+              {invoices.filter((i) => i.open_amount < 0).length > 0 && (
+                <Field label="Terugbetaling van een creditfactuur">
+                  <select defaultValue="" onChange={(e) => e.target.value && void done(api.bank.matchInvoice(t.id, Number(e.target.value)))}>
+                    <option value="">Kies de creditfactuur…</option>
+                    {invoices.filter((i) => i.open_amount < 0).map((i) => <option key={i.id} value={i.id}>{i.number} — {i.relation_name} — {(-i.open_amount / 100).toFixed(2).replace('.', ',')}</option>)}
+                  </select>
+                </Field>
+              )}
               <div className="card">
                 <CategoryPicker
                   amount={Math.abs(t.amount)}

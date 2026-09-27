@@ -71,7 +71,9 @@ test('rondgang door alle schermen van de demo: geen crash, geen foutmelding', as
 
   // Instellingen: elk tabblad
   await nav(page, 'Instellingen');
-  const tabs = await page.locator('main .chips').first().locator('button').allTextContents();
+  const tabButtons = page.locator('main .chips').first().locator('button');
+  await expect.poll(() => tabButtons.count()).toBeGreaterThan(5);
+  const tabs = await tabButtons.allTextContents();
   expect(tabs.length).toBeGreaterThan(5);
   for (const t of tabs) {
     await page.locator('main .chips').first().locator('button', { hasText: t }).click();
