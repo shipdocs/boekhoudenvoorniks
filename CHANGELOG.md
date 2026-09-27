@@ -2,6 +2,17 @@
 
 ## Nog niet uitgebracht
 
+- **"Verkoop via een ander systeem"** (bij geld dat binnenkomt; heette "Omzet zonder factuur (contant/pin)"):
+  voor een klant die je betaalde via bv. Mollie, je webshop, kassa, pin of contant, of voor een factuur die je
+  ergens anders maakte. Zonder koppeling:
+  - Je kiest nu zelf de btw; voorheen was dit altijd 21%, ook bij een klant in het buitenland. De app doet een
+    voorstel op basis van de klant (herkend op IBAN of naam) of het land van de rekening; bij een klant buiten
+    de EU is dat 0%. Het bedrag komt dan in de juiste rubriek van de aangifte.
+  - Je kunt de naam van het systeem (bv. "Mollie") en het nummer van de factuur of bon erbij zetten; het
+    nummer haalt de app zo mogelijk al uit de omschrijving van de bank. Je boekhouder vindt de factuur zo terug.
+  - **De app onthoudt het**: bij de volgende betaling van dezelfde betaler vraagt Vandaag "Weer een verkoop via
+    Mollie, net als vorige keer (klant buiten de EU, 0% btw)?" en is één klik op *Klopt* genoeg.
+
 ## 0.3.6 — automatisch bijwerken, zichtbaar en uit te zetten
 
 - **Automatisch bijwerken, maar zichtbaar**: staat standaard aan. De app kijkt nu elke 4 uur (niet alleen bij

@@ -245,7 +245,7 @@ function VatDetails({ periodKey, code, title, onClose }: { periodKey: string; co
       {d.data && lines.length === 0 && <p className="muted">Er zitten geen boekingen in.</p>}
       {fromBankAsIncome && (
         <div className="notice small">
-          Een deel komt van <strong>geld dat binnenkwam op de bank</strong> en als "omzet zonder factuur" is geboekt. Was dat geen omzet (bijvoorbeeld geld van
+          Een deel komt van <strong>geld dat binnenkwam op de bank</strong> en als "Verkoop via een ander systeem" is geboekt. Was dat geen omzet (bijvoorbeeld geld van
           jezelf, een terugbetaling of een lening)? Klik op <strong>Bekijken</strong> en kies daar wat het wel was.
         </div>
       )}

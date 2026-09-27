@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
 import type { CsvMapping } from '../../import/csv';
-import type { PurchaseVatCode } from '../../shared/vat';
+import { saleVatText, type PurchaseVatCode, type SalesVatCode } from '../../shared/vat';
+import { referenceIn } from '../../shared/references';
 import { InvestmentHint, investmentInfo } from './Purchases';
 import { CategoryChips } from './Categories';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
@@ -278,6 +279,50 @@ export function CategoryPicker({ initial, onPick, incoming, amount }: { initial?
   );
 }
 
+/**
+ * "Verkoop via een ander systeem": geld van een klant zonder factuur uit deze app (Mollie, webshop,
+ * kassa, pin, contant). Kies de btw; de app stelt een tarief voor op basis van de klant of het land
+ * van de rekening. Het systeem en het nummer komen in de omschrijving, en de app onthoudt de keuze
+ * voor de volgende betaling van deze betaler.
+ */
+function SaleForm({ txId, amount, description, busy, onBook }: { txId: number; amount: number; description: string; busy: boolean; onBook: (input: { vatCode: SalesVatCode; relationId: number | null; channel: string; reference: string }) => void }) {
+  const { meta } = useApp();
+  const hint = useLoad(() => api.bank.salesVatSuggestion(txId), [txId]);
+  const channels = useLoad(() => api.bank.saleChannels());
+  const [picked, setPicked] = useState<SalesVatCode | null>(null);
+  const [channel, setChannel] = useState('');
+  // een nummer uit de omschrijving van de bank, bv. I-MOL-2026-00344
+  const [reference, setReference] = useState(() => referenceIn(description) ?? '');
+  const vat = picked ?? hint.data?.vatCode ?? 'hoog';
+  const rate = meta.salesVat.find((v) => v.code === vat);
+  const net = Math.round((amount * 100) / (100 + (rate?.percentage ?? 0)));
+  return (
+    <div className="card grid" style={{ gridTemplateColumns: 'minmax(0, 1fr)', margin: 0 }}>
+      <Field label="Via welk systeem? (mag leeg)" hint="bv. Mollie, je webshop of je kassa; de app onthoudt het voor de volgende keer">
+        <input value={channel} maxLength={60} list="verkoop-systemen" placeholder="bv. Mollie" onChange={(e) => setChannel(e.target.value)} />
+        <datalist id="verkoop-systemen">{(channels.data ?? []).map((c) => <option key={c} value={c} />)}</datalist>
+      </Field>
+      <Field label="Nummer van de factuur of bon, als je die hebt" hint="staat vaak al in de omschrijving van de bank; zo vindt je boekhouder hem terug">
+        <input value={reference} maxLength={60} onChange={(e) => setReference(e.target.value)} />
+      </Field>
+      <Field label="Hoeveel btw rekende je?" hint="kijk op de factuur of bon die je klant kreeg">
+        <select value={vat} onChange={(e) => setPicked(e.target.value as SalesVatCode)}>
+          {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
+        </select>
+      </Field>
+      {hint.error && !picked && <p className="small" style={{ margin: 0 }}>Er is geen voorstel. Kies zelf de btw die op de factuur staat.</p>}
+      {hint.data?.reason && !picked && <p className="small muted" style={{ margin: 0 }}>Voorstel omdat {hint.data.reason}. Stond er op de factuur toch btw? Kies dan dat tarief.</p>}
+      <p className="small" style={{ margin: 0 }}>Omzet <Euro cents={net} />{amount - net !== 0 && <> + btw <Euro cents={amount - net} /></>}</p>
+      {vat !== 'hoog' && vat !== 'laag' && (
+        <p className="small muted" style={{ margin: 0 }}>Geen Nederlandse btw? Laat je boekhouder even meekijken of dat klopt voor wat je levert.</p>
+      )}
+      <div className="row end">
+        <Button kind="primary" disabled={busy || hint.loading || (Boolean(hint.error) && !picked)} onClick={() => onBook({ vatCode: vat, relationId: hint.data?.relationId ?? null, channel, reference })}>Verwerk als verkoop</Button>
+      </div>
+    </div>
+  );
+}
+
 export function CategorizeTransaction({ id }: { id: number }) {
   const { go, meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
@@ -286,7 +331,9 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const openInvoices = useLoad(() => api.invoices.list({ status: 'openstaand' }));
   const overdue = useLoad(() => api.invoices.list({ status: 'vervallen' }));
   const [recat, setRecat] = useState(false);
+  const [sale, setSale] = useState(false);
   const own = useLoad(() => api.bank.ownTransfer(id), [id]);
+  const previousSale = useLoad(() => api.bank.previousSale(id), [id]);
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
   const done = async (p: Promise<unknown>, investment?: string) => {
@@ -354,7 +401,14 @@ export function CategorizeTransaction({ id }: { id: number }) {
 
           {t.amount > 0 ? (
             <>
-              <h2>Waar is dit geld voor?</h2>
+              {previousSale.data && (
+                <div className="card">
+                  <strong>Weer een verkoop{previousSale.data.channel ? ` via ${previousSale.data.channel}` : ''}?</strong>
+                  <p className="small muted">Net als vorige keer ({formatDateNl(previousSale.data.date)}): {saleVatText(previousSale.data.vatCode)}.</p>
+                  <Button kind="primary" disabled={busy} onClick={() => void done(api.bank.repeatSale(t.id))}>Klopt, verwerk als verkoop</Button>
+                </div>
+              )}
+              <h2>{previousSale.data ? 'Of was het iets anders?' : 'Waar is dit geld voor?'}</h2>
               {invoices.length > 0 && (
                 <Field label="Betaling van een factuur">
                   <select defaultValue="" onChange={(e) => e.target.value && void done(api.bank.matchInvoice(t.id, Number(e.target.value)))}>
@@ -364,8 +418,17 @@ export function CategorizeTransaction({ id }: { id: number }) {
                 </Field>
               )}
               <div className="choice" style={{ marginTop: 12 }}>
-                {meta.otherDestinations.filter((d) => ['prive-storting', 'omzet', 'btw', 'overboeking', 'onbekend'].includes(d.key)).map((d) => (
-                  <button key={d.key} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: d.account, vatCode: d.key === 'omzet' ? 'hoog' : undefined }))}>{d.label}</button>
+                {['omzet', 'prive-storting', 'btw', 'overboeking', 'onbekend'].map((key) => meta.otherDestinations.find((d) => d.key === key)!).map((d) => (
+                  <Fragment key={d.key}>
+                    <button disabled={busy} className={d.key === 'omzet' && sale ? 'selected' : ''} aria-expanded={d.key === 'omzet' ? sale : undefined} onClick={() => (d.key === 'omzet' ? setSale(!sale) : void done(api.bank.book(t.id, { account: d.account })))}>
+                      {d.label}
+                      {'hint' in d && d.hint && <div className="hint">{d.hint}</div>}
+                    </button>
+                    {/* direct onder de knop, niet onderaan na alle andere keuzes */}
+                    {d.key === 'omzet' && sale && (
+                      <SaleForm txId={t.id} amount={t.amount} description={t.description ?? ''} busy={busy} onBook={(input) => void done(api.bank.bookSale(t.id, input))} />
+                    )}
+                  </Fragment>
                 ))}
               </div>
             </>

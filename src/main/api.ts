@@ -9,7 +9,7 @@ import type { DocumentTemplate, TemplateType } from '../documents/templates';
 import { renderDocumentHtml, FONTS } from '../documents/templates';
 import type { SendOptions } from '../documents/sending';
 import type { PurchaseInvoiceInput } from '../documents/purchases';
-import type { BookToAccountInput } from '../import/bank';
+import type { BookToAccountInput, SaleInput } from '../import/bank';
 import { parseCsv, previewCsv, headerSignature, type CsvMapping } from '../import/csv';
 import { parseMt940 } from '../import/mt940';
 import { parseCamt053 } from '../import/camt053';
@@ -108,6 +108,11 @@ export function createApi(s: Services, host: HostContext) {
       case 'bank-purchase:klopt':
         s.bank.matchPurchase(r.bankTransactionId!, r.purchaseId!);
         return;
+      case 'bank-sale:klopt':
+        s.bank.repeatSale(r.bankTransactionId!);
+        return;
+      case 'bank-sale:anders':
+        return { navigate: { screen: 'categorie', id: r.bankTransactionId } };
       case 'bank-category:klopt':
         s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: r.categoryKey, vatCode: r.vatCode });
         return;
@@ -516,6 +521,12 @@ export function createApi(s: Services, host: HostContext) {
       matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(txId, invoiceId),
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(txId, purchaseId),
       book: (txId: number, input: BookToAccountInput) => s.bank.bookToAccount(txId, input),
+      salesVatSuggestion: (txId: number) => s.bank.salesVatSuggestion(txId),
+      /** verkoop via een ander systeem (Mollie, webshop, kassa, pin, contant) */
+      bookSale: (txId: number, input: SaleInput) => s.bank.bookSale(txId, input),
+      previousSale: (txId: number) => s.bank.previousSale(txId),
+      repeatSale: (txId: number) => s.bank.repeatSale(txId),
+      saleChannels: () => s.bank.saleChannels(),
       ignore: (txId: number) => s.bank.ignore(txId),
       /** Andere categorie voor een al geboekte betaling: tegenboeking + nieuwe boeking (#19), en leren. */
       reclassify: (txId: number, categoryKey: string, vatCode: string) => {

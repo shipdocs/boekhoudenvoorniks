@@ -104,3 +104,16 @@ export const ICP_TEXT = 'Intracommunautaire levering/dienst, btw verlegd (art. 1
 
 /** Wettelijke vermelding op de factuur bij verlegde btw. */
 export const VERLEGD_TEXT = 'BTW verlegd';
+
+/** Kort in gewone taal, voor een vraag als "net als vorige keer (…)?" */
+export function saleVatText(code: SalesVatCode): string {
+  return ({
+    hoog: '21% btw',
+    laag: '9% btw',
+    nul: '0% btw',
+    verlegd: 'btw verlegd',
+    vrijgesteld: 'geen btw',
+    icp: 'bedrijf in de EU, 0% btw',
+    export: 'klant buiten de EU, 0% btw',
+  } as Record<SalesVatCode, string>)[code];
+}
