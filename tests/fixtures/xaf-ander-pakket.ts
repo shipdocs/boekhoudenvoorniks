@@ -65,3 +65,8 @@ export const OTHER_PACKAGE = `<?xml version="1.0" encoding="UTF-8"?>
     </transactions>
   </company>
 </auditfile>`;
+
+/** Dezelfde auditfile voor een ander jaar (voor de e2e-tests, die met het huidige jaar werken). */
+export function otherPackage(year: number): string {
+  return OTHER_PACKAGE.replace(/2026/g, String(year)).replace(/2025/g, String(year - 1));
+}
