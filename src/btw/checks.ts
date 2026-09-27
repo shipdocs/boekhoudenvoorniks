@@ -2,7 +2,7 @@ import type { Db } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { formatEuro, type Cents } from '../shared/money';
-import type { Period } from '../shared/dates';
+import type { IsoDate, Period } from '../shared/dates';
 import type { CarPrivateUse } from './car';
 import { EU_B2C_THRESHOLD, EU_COUNTRIES, countryCode } from '../shared/vat';
 
@@ -24,6 +24,8 @@ export interface VatCheck {
   skipReason: string | null;
   /** scherm om het op te lossen */
   screen: 'bank' | 'aankopen' | 'werk' | 'expert' | 'belasting' | 'instellingen';
+  /** het gaat om het saldo van deze rekening: "Oplossen" toont de boekingen die erop staan */
+  account?: { rgs: string; upTo?: IsoDate };
   /** oplossen met één knop in plaats van naar een scherm te gaan */
   action?: { id: 'auto-prive'; label: string };
 }
@@ -125,12 +127,12 @@ export function runVatChecks(
 
   const kas = ledger.balance(ACCOUNTS.kas);
   if (kas < 0) {
-    found.push({ key: 'kas-negatief', blocking: true, title: `Je contante geld staat op ${formatEuro(kas)}`, detail: 'Je hebt meer contant uitgegeven dan er binnenkwam. Waarschijnlijk mist er contant ontvangen geld, of geld dat je van de bank opnam.', count: 1, fingerprint: String(kas), screen: 'aankopen' });
+    found.push({ key: 'kas-negatief', blocking: true, title: `Je contante geld staat op ${formatEuro(kas)}`, detail: 'Je hebt meer contant uitgegeven dan er binnenkwam. Waarschijnlijk mist er contant ontvangen geld, of geld dat je van de bank opnam.', count: 1, fingerprint: String(kas), screen: 'aankopen', account: { rgs: ACCOUNTS.kas } });
   }
 
   const vraag = ledger.balance(ACCOUNTS.vraagposten);
   if (vraag !== 0) {
-    found.push({ key: 'vraagposten', blocking: true, title: `${formatEuro(Math.abs(vraag))} staat nog bij "weet ik nog niet"`, detail: 'Zoek uit waar deze betalingen bij horen: er kan btw in zitten die je terugkrijgt.', count: 1, fingerprint: String(vraag), screen: 'bank' });
+    found.push({ key: 'vraagposten', blocking: true, title: `${formatEuro(Math.abs(vraag))} staat nog bij "weet ik nog niet"`, detail: 'Zoek uit waar deze betalingen bij horen: er kan btw in zitten die je terugkrijgt.', count: 1, fingerprint: String(vraag), screen: 'bank', account: { rgs: ACCOUNTS.vraagposten } });
   }
 
   // Geld "onderweg" tussen eigen rekeningen of van een betaalprovider: dan mist er meestal een afschrift
@@ -144,6 +146,7 @@ export function runVatChecks(
       count: 1,
       fingerprint: String(onderweg),
       screen: 'bank',
+      account: { rgs: ACCOUNTS.kruisposten, upTo: end },
     });
   }
   const psp = ledger.balance(ACCOUNTS.tussenrekeningPsp, { to: end });
@@ -156,6 +159,7 @@ export function runVatChecks(
       count: 1,
       fingerprint: String(psp),
       screen: 'bank',
+      account: { rgs: ACCOUNTS.tussenrekeningPsp, upTo: end },
     });
   }
   // Een spaarrekening of potje kan niet negatief staan (de eerste, gewone rekening mag wel rood staan)
@@ -171,6 +175,7 @@ export function runVatChecks(
         count: 1,
         fingerprint: String(saldo),
         screen: 'bank',
+        account: { rgs: acc.rgs_code, upTo: end },
       });
     }
   }

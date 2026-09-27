@@ -170,5 +170,40 @@ describe('btw-berekening: waar komt een bedrag vandaan?', () => {
     const v = s.vat.rubriekDetails('2026-Q2', '5b');
     expect(v.btw).toBe(s.vat.calculate('2026-Q2').summary.voorbelasting);
     expect(v.lines[0]!.purchaseId).not.toBeNull();
+    // zonder foto of PDF: geen bon om te openen (dan gaat "Bekijken" naar de aankopen)
+    expect(v.lines[0]!.attachmentPath).toBeNull();
+    s.db.prepare('UPDATE purchase_invoices SET attachment_path = ? WHERE id = ?').run('/tmp/bon.pdf', v.lines[0]!.purchaseId);
+    expect(s.vat.rubriekDetails('2026-Q2', '5b').lines[0]!.attachmentPath).toBe('/tmp/bon.pdf');
+  });
+});
+
+describe('controle "weet ik nog niet": welke betalingen zijn het?', () => {
+  it('de boekingen op de rekening tellen op tot het bedrag; opnieuw indelen haalt ze weg', () => {
+    const { s, main, tx } = withAccounts();
+    const a = tx(main.id, '2026-05-02', -12100, 'NL02ABNA0123456789');
+    const b = tx(main.id, '2026-05-03', -5000, 'NL02ABNA0123456789');
+    s.bank.bookToAccount(a.id, { account: ACCOUNTS.vraagposten });
+    s.bank.bookToAccount(b.id, { account: ACCOUNTS.vraagposten });
+    const check = s.vat.checks('2026-Q2').find((c) => c.key === 'vraagposten')!;
+    expect(check.account).toEqual({ rgs: ACCOUNTS.vraagposten });
+    const r = s.vat.accountLines(ACCOUNTS.vraagposten);
+    expect(r.total).toBe(s.ledger.balance(ACCOUNTS.vraagposten));
+    expect(r.lines.map((l) => l.bankTransactionId)).toEqual([a.id, b.id]);
+    // de eerste terugdraaien en goed indelen: verdwijnt uit de lijst (boeking + tegenboeking tellen niet)
+    s.bank.unmatch(a.id, '2026-05-10');
+    s.inbox.answerBank(a.id, { business: true, categoryKey: 'materiaal' });
+    const after = s.vat.accountLines(ACCOUNTS.vraagposten);
+    expect(after.lines.map((l) => l.bankTransactionId)).toEqual([b.id]);
+    expect(after.total).toBe(s.ledger.balance(ACCOUNTS.vraagposten));
+  });
+
+  it('geld onderweg: alleen tot het einde van de periode', () => {
+    const { s, main, tx } = withAccounts();
+    s.bank.bookToAccount(tx(main.id, '2026-06-30', -40000, SPAAR).id, { account: ACCOUNTS.kruisposten });
+    s.bank.bookToAccount(tx(main.id, '2026-07-02', -1000, SPAAR).id, { account: ACCOUNTS.kruisposten });
+    const check = s.vat.checks('2026-Q2').find((c) => c.key === 'onderweg')!;
+    const r = s.vat.accountLines(check.account!.rgs, check.account!.upTo);
+    expect(r.lines).toHaveLength(1);
+    expect(r.total).toBe(40000);
   });
 });

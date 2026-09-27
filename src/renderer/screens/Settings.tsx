@@ -306,7 +306,7 @@ const OUTCOME_LABEL: Record<string, string> = {
   bijlage: 'bonnetje/factuur opgehaald',
   'online-factuur': 'factuur staat online',
   klant: 'van een klant (niet aangeraakt)',
-  eigen: 'van jezelf',
+  eigen: 'kopie van je eigen factuur of offerte',
   overig: 'niets mee gedaan',
   fout: 'kon niet gelezen worden',
 };
@@ -393,7 +393,7 @@ function IncomingMail() {
         <Button disabled={busy || dirty || !settings.mailIn.enabled} title={dirty ? 'Eerst opslaan' : undefined} onClick={async () => {
           const r = await run(() => api.mail.fetchNow());
           if (r) {
-            const parts = [`${r.documents} ${r.documents === 1 ? 'bonnetje' : 'bonnetjes'}`, r.onlineInvoices && `${r.onlineInvoices} online`, r.fromCustomers && `${r.fromCustomers} van klanten`, r.errors && `${r.errors} niet te lezen`].filter(Boolean);
+            const parts = [`${r.documents} ${r.documents === 1 ? 'bonnetje' : 'bonnetjes'}`, r.onlineInvoices && `${r.onlineInvoices} online`, r.fromCustomers && `${r.fromCustomers} van klanten`, r.other && `${r.other} zonder factuur of bon (blijft staan)`, r.errors && `${r.errors} niet te lezen`].filter(Boolean);
             toast(`Mail opgehaald: ${parts.join(', ')}${r.missingFolders.length ? `. Map niet gevonden: ${r.missingFolders.join(', ')}` : ''}`);
             await status.reload();
           }
@@ -410,7 +410,17 @@ function IncomingMail() {
           <table className="list small">
             <tbody>
               {status.data.recent.map((m) => (
-                <tr key={m.id}><td><DateNl date={m.received_on} /></td><td>{m.from_name || m.from_address}</td><td>{m.subject}</td><td className="muted">{OUTCOME_LABEL[m.outcome]}{m.note ? `: ${m.note}` : ''}</td></tr>
+                <tr key={m.id}>
+                  <td><DateNl date={m.received_on} /></td><td>{m.from_name || m.from_address}</td><td>{m.subject}</td>
+                  <td className="muted">{m.note ?? OUTCOME_LABEL[m.outcome]}</td>
+                  <td>
+                    {(m.outcome === 'overig' || m.outcome === 'online-factuur') && (
+                      <Button small disabled={busy} title="De tekst van de mail als bon bewaren (de app haalt hem nog één keer op)" onClick={async () => {
+                        if ((await run(() => api.mail.saveAsReceipt(m.id), 'Bewaard als bon. Je vindt hem bij Aankopen & bonnetjes.')) !== undefined) await status.reload();
+                      }}>Als bon bewaren</Button>
+                    )}
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
