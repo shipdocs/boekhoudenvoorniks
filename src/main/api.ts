@@ -598,8 +598,8 @@ export function createApi(s: Services, host: HostContext) {
       confirm: (opts?: { provisional?: boolean }) => s.switchover.confirm(opts),
       reopen: () => s.switchover.reopen(),
       /** auditfile (XAF) uit het vorige programma: eerst bekijken, dan overnemen wat aangevinkt is */
-      analyzeXaf: (xml: string, date?: IsoDate) => s.xafImport.analyze(xml, date),
-      applyXaf: (xml: string, choices: XafApplyChoices) => s.xafImport.apply(xml, choices),
+      analyzeXaf: (file: string | Uint8Array, date?: IsoDate) => s.xafImport.analyze(file, date),
+      applyXaf: (file: string | Uint8Array, choices: XafApplyChoices) => s.xafImport.apply(file, choices),
       /** openstaande verkoopfacturen als UBL (e-factuur) */
       addUblInvoices: (files: { name: string; xml: string }[]) => ({ ...s.switchover.saveFromUbl(files), state: s.switchover.state() }),
     },

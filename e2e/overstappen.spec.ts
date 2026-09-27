@@ -1,5 +1,6 @@
 import { test, expect, onboard, nav } from './fixtures';
 import { OTHER_PACKAGE } from '../tests/fixtures/xaf-ander-pakket';
+import { kolommenbalans } from '../tests/fixtures/xlsx';
 
 test('overstapper: onboarding, beginsaldo, openstaande factuur en startpositie', async ({ page, problems }) => {
   await onboard(page, { overstap: true });
@@ -49,5 +50,19 @@ test('overstapper: auditfile (XAF) uit het vorige programma inlezen', async ({ p
   await expect(page.locator('.card', { hasText: 'Wat er van jou in de zaak zit' }).getByText(/12\.910,00/)).toBeVisible();
   // Diversen niet overgenomen: het verschil met de vorige administratie wordt gemeld
   await expect(page.getByText(/Verschil met je vorige administratie: .*100,00/)).toBeVisible();
+  expect(problems.apiErrors).toEqual([]);
+});
+
+test('overstapper: kolommenbalans (Excel) uit DigiBoox inlezen', async ({ page, problems }) => {
+  test.skip(new Date().getFullYear() !== 2026, 'de voorbeeld-kolommenbalans is van 2026');
+  await onboard(page, { overstap: true });
+  await page.getByRole('button', { name: /Verder: uit je vorige programma/ }).click();
+  await page.locator('main input[type=file]').first().setInputFiles({ name: 'kolommenbalans.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(kolommenbalans()) });
+  await expect(page.getByText(/alleen saldi/)).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Bestelbus' })).toBeChecked();
+  await page.getByRole('checkbox', { name: /Kruisposten/ }).check();
+  await page.getByRole('button', { name: 'Overnemen' }).click();
+  await page.locator('.chips button', { hasText: 'Je startpositie' }).click();
+  await expect(page.locator('.card', { hasText: 'Wat er van jou in de zaak zit' }).getByText(/2\.500,00/)).toBeVisible();
   expect(problems.apiErrors).toEqual([]);
 });
