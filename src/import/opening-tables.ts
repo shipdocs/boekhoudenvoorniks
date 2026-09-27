@@ -56,18 +56,24 @@ const FIELDS: Record<TableKind, { field: string; question: string; required: boo
 
 const cell = (v: unknown) => String(v ?? '').trim();
 
-/** De kopregel: de eerste rij met minstens twee tekstcellen (titels erboven worden overgeslagen). */
+/**
+ * De kopregel: de eerste rij met kolomnamen die de app herkent; anders de eerste rij met minstens
+ * twee tekstcellen. Titelregels erboven (bedrijfsnaam, periode) worden overgeslagen.
+ */
 function toTable(sheet: string, raw: string[][]): Table | null {
+  const candidates: number[] = [];
   for (let r = 0; r < Math.min(raw.length, 25); r++) {
-    const row = (raw[r] ?? []).map(cell);
-    const texts = row.filter((c) => c && !/^-?[\d.,]+$/.test(c));
-    if (texts.length >= 2) {
-      const width = row.length;
-      const rows = raw.slice(r + 1).map((x) => Array.from({ length: width }, (_, i) => cell(x?.[i]))).filter((x) => x.some(Boolean));
-      return { sheet, title: raw.slice(0, r).flat().map(cell).filter(Boolean), headers: row, rows };
-    }
+    const texts = (raw[r] ?? []).map(cell).filter((c) => c && !/^-?[\d.,]+$/.test(c));
+    if (texts.length >= 2) candidates.push(r);
   }
-  return null;
+  const make = (r: number): Table => {
+    const row = (raw[r] ?? []).map(cell);
+    const width = row.length;
+    const rows = raw.slice(r + 1).map((x) => Array.from({ length: width }, (_, i) => cell(x?.[i]))).filter((x) => x.some(Boolean));
+    return { sheet, title: raw.slice(0, r).flat().map(cell).filter(Boolean), headers: row, rows };
+  };
+  const tables = candidates.map(make);
+  return tables.find((t) => detectKind(t) !== null) ?? tables[0] ?? null;
 }
 
 export function tablesFromCsv(text: string): Table[] {
@@ -85,7 +91,10 @@ export function tablesFromWorkbook(wb: Workbook): Table[] {
 
 export function detectKind(t: Table): TableKind | null {
   const h = t.headers.join(' | ');
-  if (/factuur|invoice|faktuur/i.test(h) && /openstaand|open|saldo|bedrag|totaal|amount|te ontvangen|te betalen|restant/i.test(h)) return 'openstaande-posten';
+  const openAmount = /openstaand|open|saldo|bedrag|totaal|amount|te ontvangen|te betalen|restant/i;
+  if (/factuur|invoice|faktuur/i.test(h) && openAmount.test(h)) return 'openstaande-posten';
+  // zonder het woord "factuur": een relatie, een kenmerk en een openstaand bedrag
+  if (/klant|debiteur|leverancier|crediteur|relatie|customer|supplier/i.test(h) && /referentie|kenmerk|boekstuk|^nummer$|^nr\.?$/im.test(t.headers.join('\n')) && openAmount.test(h)) return 'openstaande-posten';
   if (/saldo|debet|debit|credit|balans/i.test(h) && /rekening|grootboek|nr|nummer|code|account/i.test(h)) return 'saldibalans';
   return null;
 }
@@ -117,12 +126,13 @@ export function suggestColumns(kind: TableKind, t: Table): { mapping: ColumnMapp
 
 // ---------- waarden ----------
 
-function amount(v: string): Cents {
-  if (!v) return 0;
+/** Bedrag uit een cel; leeg is 0, onleesbaar is null. */
+function amount(v: string): Cents | null {
+  if (!v.trim()) return 0;
   try {
     return parseEuro(v);
   } catch {
-    return 0;
+    return null;
   }
 }
 
@@ -163,7 +173,12 @@ export function saldibalansToXaf(t: Table, m: ColumnMapping, asOf: IsoDate): Xaf
     const both = /^(\d{3,8})\s+(.+)$/.exec(id);
     if (both) [id, name] = [both[1]!, name || both[2]!];
     if (!/^\d{2,8}$/.test(id)) continue; // kopjes en totalen
-    const value = m.balance !== undefined ? amount(row[m.balance] ?? '') : amount(row[m.debit!] ?? '') - Math.abs(amount(row[m.credit!] ?? ''));
+    const read = (col: number) => {
+      const v = amount(row[col] ?? '');
+      if (v === null) throw new XafError(`Het saldo van rekening ${id} ("${row[col]}") kan de app niet lezen`);
+      return v;
+    };
+    const value = m.balance !== undefined ? read(m.balance) : read(m.debit!) - Math.abs(read(m.credit!));
     const typeCell = m.type !== undefined ? (row[m.type] ?? '').toLowerCase() : '';
     const pl = typeCell ? /^(p|w|wv|w&v|winst|resultaat|verlies)/.test(typeCell) : /^[478]\d{2,}/.test(id) || (/^9\d{2,}/.test(id) && !/balans/i.test(name));
     accounts.push({ id, name: name.trim() || `Rekening ${id}`, type: pl ? 'P' : 'B', rgs: null });
@@ -201,17 +216,25 @@ export interface OpenItemRow {
   amount: Cents;
 }
 
-/** Klant of leverancier: uit een kolom "soort", de kolomnaam of de titel/het tabblad. */
-export function openItemRows(t: Table, m: ColumnMapping): OpenItemRow[] {
+/**
+ * Regels van de lijst. Klant of leverancier: uit een kolom "soort", de kolomnaam of de titel/het
+ * tabblad. Regels met een bedrag dat de app niet kan lezen, staan apart (om te melden).
+ */
+export function openItemRows(t: Table, m: ColumnMapping): { rows: OpenItemRow[]; unreadable: string[] } {
   const context = `${t.sheet} ${t.title.join(' ')} ${m.relation !== undefined ? t.headers[m.relation] : ''}`.toLowerCase();
   const defaultKind = /leverancier|crediteur|supplier|inkoop|te betalen/.test(context) ? 'leverancier' : 'klant';
   const out: OpenItemRow[] = [];
+  const unreadable: string[] = [];
   for (const row of t.rows) {
     const name = (row[m.relation!] ?? '').trim();
     const number = (row[m.number!] ?? '').trim();
     const value = amount(row[m.amount!] ?? '');
     if (!name && !number) continue;
     if (/^(totaal|total|subtotaal)/i.test(name) || /^(totaal|total)/i.test(number)) continue;
+    if (value === null) {
+      unreadable.push(`${[name, number].filter(Boolean).join(' ')}: "${row[m.amount!]}"`);
+      continue;
+    }
     if (value === 0) continue;
     const typeCell = m.type !== undefined ? (row[m.type] ?? '').toLowerCase() : '';
     const kind = typeCell ? (/lev|cred|inkoop|^c$|^s$|supplier/.test(typeCell) ? 'leverancier' : 'klant') : defaultKind;
@@ -224,7 +247,7 @@ export function openItemRows(t: Table, m: ColumnMapping): OpenItemRow[] {
       amount: value,
     });
   }
-  return out;
+  return { rows: out, unreadable };
 }
 
 /** Voorbeeldbestand om in te vullen (Excel opent CSV met puntkomma's goed). */

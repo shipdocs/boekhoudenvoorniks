@@ -232,6 +232,8 @@ function XafImport({ state, refresh, nextButton }: SectionProps) {
       </p>
       {ask && file && (
         <ColumnQuestions
+          // een nieuw bestand: nieuwe vragen, niet de keuzes van het vorige
+          key={`${file.name}:${ask.headers.join('|')}`}
           ask={ask}
           onCancel={() => { setAsk(null); setFile(null); }}
           onDone={async (answers) => {

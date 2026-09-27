@@ -342,6 +342,13 @@ test('overstapper: onbekende kolommen, één vraag en de keuze wordt onthouden',
   await expect(ask).toBeVisible();
   await expect(ask.getByRole('button', { name: 'Verder' })).toBeDisabled();
   await ask.locator('select').first().selectOption({ label: 'Wie (bv. Bakker Bouw)' });
+  await expect(ask.getByRole('button', { name: 'Verder' })).toBeEnabled();
+  // toch een ander bestand: de keuze van het vorige bestand geldt daar niet
+  await drop(page, 'ander.csv', `Persoon;Factuur;Openstaand\r\nGamma;F-1;10,00\r\n`, 'text/csv');
+  await expect(ask.locator('select').first().locator('option', { hasText: 'Persoon' })).toHaveCount(1);
+  await expect(ask.getByRole('button', { name: 'Verder' })).toBeDisabled();
+  await drop(page, 'export.csv', csv, 'text/csv');
+  await ask.locator('select').first().selectOption({ label: 'Wie (bv. Bakker Bouw)' });
   await ask.getByRole('button', { name: 'Verder' }).click();
   await expect(page.getByRole('checkbox', { name: `Factuur ${prev}-042 Bakker Bouw` })).toBeChecked();
   await page.getByRole('button', { name: 'Overnemen' }).click();

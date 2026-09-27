@@ -251,7 +251,8 @@ export class XafImportService {
     if (s.mode !== 'overstapper' || !s.date) throw new ValidationError('Kies eerst een instapdatum');
     const date = s.date;
     const until = addDays(date, -1);
-    const rows = openItemRows(table, mapping);
+    const { rows, unreadable } = openItemRows(table, mapping);
+    if (rows.length === 0 && unreadable.length > 0) throw new ValidationError(`De bedragen in deze lijst kan de app niet lezen, bv. ${unreadable[0]}`);
     if (rows.length === 0) throw new ValidationError('In deze lijst staan geen openstaande bedragen');
     const proposals: XafProposal[] = [];
     rows.forEach((r, i) => {
@@ -300,7 +301,7 @@ export class XafImportService {
       equity: null,
       check: parts.join(' '),
       accounts: [],
-      warnings: [],
+      warnings: unreadable.length ? [`${unreadable.length} ${unreadable.length === 1 ? 'regel heeft een bedrag' : 'regels hebben een bedrag'} dat de app niet kan lezen; die staan hieronder niet: ${unreadable.slice(0, 3).join(', ')}${unreadable.length > 3 ? ', …' : ''}`] : [],
     };
   }
 
@@ -590,8 +591,16 @@ export class XafImportService {
     if (src.type === 'table' && src.kind === 'openstaande-posten') return this.applyOpenItems(this.planOpenItems(src.table, src.mapping), choices);
     const xaf = src.type === 'xaf' ? src.xaf : this.saldibalans(src.table, src.mapping);
     const plan = this.plan(xaf, s.switchover.date);
-    // staat er al een lijst met losse facturen, dan gaat die voor het totaal uit dit overzicht
-    const listed = new Set(this.switchover.list().filter((i) => i.data.bron === 'lijst').map((i) => i.kind));
+    const same = (a: OpeningInput, b: OpeningInput) =>
+      a.kind === b.kind &&
+      ((a.kind === 'klant' && b.kind === 'klant' && a.number === b.number) ||
+        (a.kind === 'leverancier' && b.kind === 'leverancier' && a.relationName === b.relationName && (a.reference ?? null) === (b.reference ?? null)) ||
+        (a.kind === 'bezit' && b.kind === 'bezit' && a.name === b.name));
+    // staat er al een lijst met losse facturen, dan gaat die voor: geen totaal voor die soort erbij, en
+    // geen factuur die al op de lijst staat. Andere losse facturen uit de auditfile komen er gewoon bij.
+    const listed = this.switchover.list().filter((i) => i.data.bron === 'lijst').map((i) => i.data);
+    const isTotal = (p: OpeningInput) => (p.kind === 'klant' && p.number.startsWith('SALDO-')) || (p.kind === 'leverancier' && !p.reference);
+    const covered = (p: OpeningInput) => listed.some((l) => same(l, p)) || (isTotal(p) && listed.some((l) => l.kind === p.kind));
     const include = new Set(choices.include);
     tx(this.db, () => {
       if (choices.relations) this.importRelations(xaf);
@@ -602,11 +611,6 @@ export class XafImportService {
         if (item.locked) kept.push(item.data);
         else this.switchover.remove(item.id);
       }
-      const same = (a: OpeningInput, b: OpeningInput) =>
-        a.kind === b.kind &&
-        ((a.kind === 'klant' && b.kind === 'klant' && a.number === b.number) ||
-          (a.kind === 'leverancier' && b.kind === 'leverancier' && a.relationName === b.relationName && (a.reference ?? null) === (b.reference ?? null)) ||
-          (a.kind === 'bezit' && b.kind === 'bezit' && a.name === b.name));
       // beginsaldi van een vorige keer inlezen eerst terug op nul (misschien koppel je nu aan een andere rekening)
       for (const id of s.switchover.xafBanks ?? []) {
         if (this.bank.listAccounts().some((b) => b.id === id)) this.bank.setOpeningBalance(id, 0, plan.date);
@@ -623,7 +627,7 @@ export class XafImportService {
       // eerst de btw-periode: de omzet tot nu toe rekent daarmee
       const ordered = [...plan.proposals.filter((p) => p.input.kind === 'btw-periode'), ...plan.proposals.filter((p) => p.input.kind !== 'btw-periode')];
       for (const p of ordered) {
-        if (!include.has(p.key) || kept.some((k) => same(k, p.input)) || listed.has(p.input.kind)) continue;
+        if (!include.has(p.key) || kept.some((k) => same(k, p.input)) || covered(p.input)) continue;
         const existing = p.input.kind === 'btw' ? this.switchover.list().find((i) => i.kind === 'btw') : undefined;
         this.switchover.save(p.input, existing?.id);
       }
