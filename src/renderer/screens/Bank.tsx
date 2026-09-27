@@ -147,7 +147,7 @@ function AccountDialog({ account, onClose, onSaved }: { account: { id: number; n
   const [date, setDate] = useState(`${new Date().getFullYear()}-01-01`);
   const save = async () => {
     const ok = await run(async () => {
-      const id = account ? (await api.bank.updateAccount(account.id, { name, iban: iban.trim() || null }), account.id) : (await api.bank.addAccount(name, iban)).id;
+      const id = account ? (await api.bank.updateAccount(account.id, { name, iban: iban.trim() || null }), account.id) : (await api.bank.addAccount(name, iban.trim() || null)).id;
       if (!account && amount) await api.bank.openingBalance(id, amount, date);
       const potId = pot ? id : settings.vatPotAccountId === id ? null : settings.vatPotAccountId;
       if (potId !== settings.vatPotAccountId) {
@@ -164,6 +164,9 @@ function AccountDialog({ account, onClose, onSaved }: { account: { id: number; n
         <Field label="Naam" hint="zoals jij hem noemt"><input value={name} placeholder="bv. Spaarrekening" onChange={(e) => setName(e.target.value)} autoFocus /></Field>
         <Field label="Rekeningnummer (IBAN)" hint="zo herkent de app betalingen van en naar deze rekening"><input value={iban} placeholder="NL00 BANK 0123 4567 89" onChange={(e) => setIban(e.target.value)} /></Field>
       </div>
+      {!iban.trim() && (
+        <p className="small muted">Geen rekeningnummer? Dan is het een potje binnen je bank, zoals een Knab-potje. Daar lees je geen afschrift van in: bij een betaling naar of uit het potje kies je dan zelf "Naar potje" of "Uit potje".</p>
+      )}
       {!settings.kor && (
         <label className="row" style={{ marginTop: 10 }}>
           <input type="checkbox" checked={pot} onChange={(e) => setPot(e.target.checked)} /> Hier zet ik geld opzij voor de btw (btw-potje)
@@ -182,7 +185,7 @@ function AccountDialog({ account, onClose, onSaved }: { account: { id: number; n
       )}
       <div className="row end" style={{ marginTop: 14 }}>
         <Button onClick={onClose}>Annuleren</Button>
-        <Button kind="primary" disabled={busy || !name.trim() || (!account && !iban.trim())} onClick={() => void save()}>Opslaan</Button>
+        <Button kind="primary" disabled={busy || !name.trim()} onClick={() => void save()}>Opslaan</Button>
       </div>
     </Modal>
   );
@@ -333,6 +336,8 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const [recat, setRecat] = useState(false);
   const [sale, setSale] = useState(false);
   const own = useLoad(() => api.bank.ownTransfer(id), [id]);
+  // potjes zonder eigen rekeningnummer (bv. Knab): daar komt geen afschrift van, dus hier kiezen
+  const pots = useLoad(() => api.bank.accounts().then((list) => list.filter((a) => !a.iban)));
   const previousSale = useLoad(() => api.bank.previousSale(id), [id]);
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
@@ -418,6 +423,12 @@ export function CategorizeTransaction({ id }: { id: number }) {
                 </Field>
               )}
               <div className="choice" style={{ marginTop: 12 }}>
+                {(pots.data ?? []).filter((p) => p.id !== t.bank_account_id).map((p) => (
+                  <button key={`pot-${p.id}`} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: p.rgs_code, description: `Uit potje ${p.name}` }))}>
+                    Uit potje {p.name}
+                    <div className="hint">Geld terug van een potje binnen je eigen bank: geen omzet</div>
+                  </button>
+                ))}
                 {['omzet', 'prive-storting', 'btw', 'overboeking', 'onbekend'].map((key) => meta.otherDestinations.find((d) => d.key === key)!).map((d) => (
                   <Fragment key={d.key}>
                     <button disabled={busy} className={d.key === 'omzet' && sale ? 'selected' : ''} aria-expanded={d.key === 'omzet' ? sale : undefined} onClick={() => (d.key === 'omzet' ? setSale(!sale) : void done(api.bank.book(t.id, { account: d.account })))}>
@@ -448,6 +459,12 @@ export function CategorizeTransaction({ id }: { id: number }) {
               </div>
               <div className="choice" style={{ marginTop: 12 }}>
                 <button disabled={busy} onClick={() => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'prive'))}>Nee, dit was privé</button>
+                {(pots.data ?? []).filter((p) => p.id !== t.bank_account_id).map((p) => (
+                  <button key={`pot-${p.id}`} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: p.rgs_code, description: `Naar potje ${p.name}` }))}>
+                    Naar potje {p.name}
+                    <div className="hint">Geld opzij gezet binnen je eigen bank: geen kosten</div>
+                  </button>
+                ))}
                 {meta.otherDestinations.filter((d) => ['btw', 'overboeking', 'onbekend'].includes(d.key)).map((d) => (
                   <button key={d.key} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: d.account }))}>{d.label}</button>
                 ))}

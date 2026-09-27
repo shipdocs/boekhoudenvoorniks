@@ -566,11 +566,15 @@ export class VatService {
    * "af te dragen omzetbelasting" en sluit de periode af voor nieuwe boekingen.
    * Correcties daarna vallen automatisch in de volgende open periode.
    */
-  markSubmitted(periodKey: string): VatReport {
+  /**
+   * alreadyFiled: de gebruiker deed deze aangifte al buiten de app (Mijn Belastingdienst, boekhouder);
+   * dan houden de controles het afvinken niet tegen: de aangifte is immers al verstuurd.
+   */
+  markSubmitted(periodKey: string, opts: { alreadyFiled?: boolean } = {}): VatReport {
     return tx(this.db, () => {
       const report = this.calculate(periodKey);
       if (report.status === 'ingediend') throw new ValidationError(`${report.period.label} is al ingediend`);
-      const open = this.checks(periodKey).filter((c) => c.blocking && !c.skipped);
+      const open = opts.alreadyFiled ? [] : this.checks(periodKey).filter((c) => c.blocking && !c.skipped);
       if (open.length > 0) {
         throw new ValidationError(`Los eerst op of sla bewust over: ${open.map((c) => c.title.toLowerCase()).join('; ')}`);
       }

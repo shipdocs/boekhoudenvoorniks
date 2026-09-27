@@ -425,6 +425,9 @@ if (SMOKE_TEST) {
   }, 60_000).unref();
 }
 
+// Nederlandse datumvelden (dd-mm-jjjj) en teksten van Chromium, ook op een Engelstalige computer
+app.commandLine.appendSwitch('lang', 'nl');
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   // In rooktestmodus is een tweede instantie een fout, geen stille succesvolle exit.

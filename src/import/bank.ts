@@ -119,11 +119,16 @@ export class BankService {
     return this.listAccounts()[0]!;
   }
 
-  addAccount(name: string, iban: string): BankAccount {
-    const clean = normalizeIban(iban);
-    if (!isValidIban(clean)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${iban}`);
+  /**
+   * Zonder IBAN: een potje binnen je bank zonder eigen rekeningnummer (bv. een Knab-potje voor de
+   * btw). Daar komen geen afschriften van; geld erheen of eruit kies je bij de betaling zelf.
+   */
+  addAccount(name: string, iban: string | null): BankAccount {
+    const clean = iban?.trim() ? normalizeIban(iban) : null;
+    if (clean && !isValidIban(clean)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${iban}`);
     if (!name.trim()) throw new ValidationError('Geef de rekening een naam, bijvoorbeeld "Spaarrekening"');
-    if (this.listAccounts().some((a) => a.iban === clean)) throw new ValidationError('Deze rekening staat er al in');
+    if (clean && this.listAccounts().some((a) => a.iban === clean)) throw new ValidationError('Deze rekening staat er al in');
+    if (!clean && this.listAccounts().some((a) => a.name.toLowerCase() === name.trim().toLowerCase())) throw new ValidationError('Er is al een rekening met deze naam');
     name = name.trim();
     return tx(this.db, () => {
       const n = this.listAccounts().length;
@@ -132,8 +137,8 @@ export class BankService {
       // RGS: 'Rekening-courant bank - Naam A..E' (BLimBanRbb..f) voor extra rekeningen
       const rgsRef = n >= 1 && n <= 5 ? `BLimBanRb${String.fromCharCode(97 + n)}` : null;
       const ledgerAccount = n === 0 ? this.ledger.getAccount(ACCOUNTS.bank) : this.ledger.createAccount({ code: String(1100 + n), rgs, rgsRef, name: `Bank ${name}`, category: 'activa' });
-      this.db.prepare('INSERT INTO bank_accounts (name, iban, account_id) VALUES (?, ?, ?)').run(name, clean, ledgerAccount.id);
-      return this.listAccounts().find((a) => a.iban === clean)!;
+      const id = Number(this.db.prepare('INSERT INTO bank_accounts (name, iban, account_id) VALUES (?, ?, ?)').run(name, clean, ledgerAccount.id).lastInsertRowid);
+      return this.getAccount(id);
     });
   }
 
