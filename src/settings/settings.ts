@@ -76,6 +76,30 @@ export interface OcrSettings {
   llmModel: string;
 }
 
+/**
+ * Overstappen met een lopende administratie. Vanaf `date` (de instapdatum) boekt de app alles zelf;
+ * wat er daarvóór was, staat als startbalans in de app (zie onboarding/switchover.ts).
+ */
+export interface SwitchoverSettings {
+  /** null = nog niet gevraagd; 'nieuw' = net begonnen (of al ingericht); 'overstapper' = had al een administratie */
+  mode: 'nieuw' | 'overstapper' | null;
+  date: string | null;
+  /** 'klaar' als de gebruiker de startpositie heeft bevestigd */
+  status: 'concept' | 'klaar';
+  /** bedragen zijn nog voorlopig (bv. de jaarrekening van vorig jaar is nog niet klaar) */
+  provisional: boolean;
+  /** btw-periodes vóór de instapdatum die de app als "al aangegeven" heeft gemarkeerd */
+  filedElsewhere: string[];
+  /** banktransacties waarvan de gebruiker zei: geen betaling voor iets van vóór de instapdatum */
+  dismissed: number[];
+  /** bankrekeningen waarvan de gebruiker het beginsaldo op de instapdatum bevestigde (ook als dat € 0 is) */
+  bankConfirmed: number[];
+  /** per bankrekening: een saldo dat de gebruiker opgaf om te controleren (voor CSV zonder saldo) */
+  bankChecks: Record<string, { date: string; amount: number }>;
+  /** eigen vermogen volgens de balans van de boekhouder (centen), om te vergelijken */
+  accountantEquity: number | null;
+}
+
 export interface AppSettings {
   company: CompanySettings;
   profile: BusinessProfile;
@@ -136,6 +160,7 @@ export interface AppSettings {
   taxCheckAcknowledgedYear: number;
   /** Hoe automatisch: voorzichtig (niets zelf), normaal, maximaal (iets lagere drempels). */
   autopilot: 'voorzichtig' | 'normaal' | 'maximaal';
+  switchover: SwitchoverSettings;
   onboardingDone: boolean;
   /** Per onboardingstap de versie die de gebruiker gezien heeft (zie shared/onboarding.ts). */
   onboardingSteps: Record<string, number>;
@@ -200,6 +225,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   urencriterium: true,
   sendUbl: true,
   jobLocation: false,
+  switchover: { mode: null, date: null, status: 'concept', provisional: false, filedElsewhere: [], dismissed: [], bankConfirmed: [], bankChecks: {}, accountantEquity: null },
   onboardingDone: false,
   onboardingSteps: {},
   checklistHidden: false,
@@ -231,6 +257,7 @@ export class SettingsService {
       mailIn: { ...DEFAULT_SETTINGS.mailIn, ...((stored.mailIn as object) ?? {}) },
       profile: { ...DEFAULT_SETTINGS.profile, ...((stored.profile as object) ?? {}) },
       ocr: { ...DEFAULT_SETTINGS.ocr, ...((stored.ocr as object) ?? {}) },
+      switchover: { ...DEFAULT_SETTINGS.switchover, ...((stored.switchover as object) ?? {}) },
     } as AppSettings;
   }
 
@@ -240,7 +267,7 @@ export class SettingsService {
     this.db.transaction(() => {
       for (const [key, value] of Object.entries(patch)) {
         if (!(key in DEFAULT_SETTINGS) || value === undefined) continue;
-        const merged = ['company', 'smtp', 'mailIn', 'profile', 'ocr'].includes(key) ? { ...(current[key as keyof AppSettings] as object), ...(value as object) } : value;
+        const merged = ['company', 'smtp', 'mailIn', 'profile', 'ocr', 'switchover'].includes(key) ? { ...(current[key as keyof AppSettings] as object), ...(value as object) } : value;
         upsert.run(key, JSON.stringify(merged));
       }
     })();

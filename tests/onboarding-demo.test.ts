@@ -37,9 +37,10 @@ describe('onboarding die zichzelf bijwerkt', () => {
 
   it('bestaande gebruiker van vóór de versies ziet alleen wat nieuw is', () => {
     const legacy = { ...base, onboardingDone: true, onboardingSteps: {} };
-    expect(pendingSteps(legacy).map((s) => s.id)).toEqual(['fiscaal', 'thuis', 'automatisch']);
+    // 'start' alleen zonder boekingen: een administratie met boekingen krijgt bij de migratie mode 'nieuw'
+    expect(pendingSteps(legacy).map((s) => s.id)).toEqual(['start', 'fiscaal', 'thuis', 'automatisch']);
     expect(hasOnboardingUpdate(legacy)).toBe(true);
-    const after = { ...legacy, onboardingSteps: markSeen(legacy, ['fiscaal', 'thuis', 'automatisch']) };
+    const after = { ...legacy, onboardingSteps: markSeen(legacy, ['start', 'fiscaal', 'thuis', 'automatisch']) };
     expect(pendingSteps(after)).toEqual([]);
   });
 

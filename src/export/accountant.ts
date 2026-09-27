@@ -4,6 +4,7 @@ import type { CompanySettings } from '../settings/settings';
 import { centsToDecimalString } from '../shared/money';
 import { escapeHtml } from '../documents/render';
 import type { IsoDate } from '../shared/dates';
+import { ACCOUNTS } from '../core-ledger/accounts';
 
 function csvCell(v: unknown): string {
   const s = String(v ?? '');
@@ -40,6 +41,28 @@ export class AccountantExport {
   }
 
   /**
+   * Beginbalans op `from`: de balansrekeningen uit alles vóór die dag plus een beginbalansboeking op die
+   * dag zelf (overstap). Het resultaat van eerdere jaren telt bij het eigen vermogen. Debet positief.
+   */
+  openingBalance(from: IsoDate): { code: string; amount: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT a.code, a.rgs_code, a.category, SUM(l.debit - l.credit) AS amount
+         FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+         WHERE e.entry_date < ? OR (e.source = 'opening' AND e.entry_date = ?)
+         GROUP BY a.id ORDER BY a.code`,
+      )
+      .all(from, from) as { code: string; rgs_code: string; category: string; amount: number }[];
+    const equity = this.ledger.getAccount(ACCOUNTS.eigenVermogen).code;
+    const result = rows.filter((r) => r.category === 'omzet' || r.category === 'kosten').reduce((s, r) => s + r.amount, 0);
+    const balance = rows.filter((r) => r.category !== 'omzet' && r.category !== 'kosten').map((r) => ({ code: r.code, amount: r.amount }));
+    const ev = balance.find((b) => b.code === equity);
+    if (ev) ev.amount += result;
+    else if (result !== 0) balance.push({ code: equity, amount: result });
+    return balance.filter((b) => b.amount !== 0);
+  }
+
+  /**
    * XML Auditfile Financieel (XAF 3.2) — het standaard uitwisselformaat voor accountants
    * en de Belastingdienst. Bevat grootboek, relaties en alle journaalposten.
    */
@@ -48,15 +71,20 @@ export class AccountantExport {
     const amount = (c: number) => centsToDecimalString(c);
     const accounts = this.ledger.listAccounts(true);
     const relations = this.db.prepare('SELECT * FROM relations ORDER BY id').all() as { id: number; name: string; type: string; address: string | null; postcode: string | null; city: string | null; country: string; vat_number: string | null; kvk_number: string | null; iban: string | null }[];
+    // een beginbalans op de eerste dag (overstap) hoort in <openingBalance>, niet bij de mutaties
+    const isOpening = `(e.source = 'opening' AND e.entry_date = ?)`;
     const entries = this.db
-      .prepare(`SELECT * FROM journal_entries WHERE entry_date BETWEEN ? AND ? ORDER BY entry_date, id`)
-      .all(from, to) as { id: number; entry_date: string; description: string; source: string }[];
+      .prepare(`SELECT * FROM journal_entries e WHERE entry_date BETWEEN ? AND ? AND NOT ${isOpening} ORDER BY entry_date, id`)
+      .all(from, to, from) as { id: number; entry_date: string; description: string; source: string }[];
     const lines = this.db
       .prepare(
         `SELECT l.*, a.code FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
-         JOIN journal_entries e ON e.id = l.journal_entry_id WHERE e.entry_date BETWEEN ? AND ? ORDER BY l.id`,
+         JOIN journal_entries e ON e.id = l.journal_entry_id WHERE e.entry_date BETWEEN ? AND ? AND NOT ${isOpening} ORDER BY l.id`,
       )
-      .all(from, to) as { id: number; journal_entry_id: number; code: string; debit: number; credit: number; relation_id: number | null; vat_code: string | null; description: string | null }[];
+      .all(from, to, from) as { id: number; journal_entry_id: number; code: string; debit: number; credit: number; relation_id: number | null; vat_code: string | null; description: string | null }[];
+    const opening = this.openingBalance(from);
+    const obDebit = opening.filter((o) => o.amount > 0).reduce((s, o) => s + o.amount, 0);
+    const obCredit = opening.filter((o) => o.amount < 0).reduce((s, o) => s - o.amount, 0);
     const byEntry = new Map<number, typeof lines>();
     for (const l of lines) byEntry.set(l.journal_entry_id, [...(byEntry.get(l.journal_entry_id) ?? []), l]);
     const journals = [...new Set(entries.map((e) => e.source))];
@@ -96,7 +124,19 @@ ${r.iban ? `        <bankAccount><bankAccNr>${x(r.iban)}</bankAccNr></bankAccoun
     <generalLedger>
 ${accounts.map((a) => `      <ledgerAccount><accID>${x(a.code)}</accID><accDesc>${x(a.name)}</accDesc><accTp>${accTp(a.category)}</accTp>${a.rgs_ref ? `<taxonomies><taxonomy><txAcctMap><txLink>${x(a.rgs_ref)}</txLink></txAcctMap></taxonomy></taxonomies>` : ''}</ledgerAccount>`).join('\n')}
     </generalLedger>
-    <transactions>
+${
+  opening.length > 0
+    ? `    <openingBalance>
+      <opBalDate>${from}</opBalDate>
+      <opBalDesc>Beginbalans</opBalDesc>
+      <linesCount>${opening.length}</linesCount>
+      <totalDebit>${amount(obDebit)}</totalDebit>
+      <totalCredit>${amount(obCredit)}</totalCredit>
+${opening.map((o, i) => `      <obLine><nr>${i + 1}</nr><accID>${x(o.code)}</accID><amnt>${amount(Math.abs(o.amount))}</amnt><amntTp>${o.amount > 0 ? 'D' : 'C'}</amntTp></obLine>`).join('\n')}
+    </openingBalance>
+`
+    : ''
+}    <transactions>
       <linesCount>${lines.length}</linesCount>
       <totalDebit>${amount(totalDebit)}</totalDebit>
       <totalCredit>${amount(totalCredit)}</totalCredit>

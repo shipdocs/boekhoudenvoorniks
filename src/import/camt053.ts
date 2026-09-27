@@ -1,7 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { parseEuro } from '../shared/money';
 import { normalizeIban } from '../shared/validation';
-import type { NormalizedTransaction, ParseResult } from './types';
+import type { NormalizedTransaction, ParseResult, StatementBalance } from './types';
 
 /**
  * CAMT.053 (ISO 20022 bank-to-customer statement), XML geparsed met fast-xml-parser.
@@ -29,8 +29,17 @@ export function parseCamt053(xml: string): ParseResult {
   if (!root) throw new Error('Dit bankbestand kunnen we niet lezen. Download het afschrift opnieuw bij je bank.');
   const transactions: NormalizedTransaction[] = [];
   const warnings: string[] = [];
+  const balances: StatementBalance[] = [];
   for (const stmt of (root.Stmt ?? []) as X[]) {
     const ownIban = text(stmt.Acct?.Id?.IBAN) || null;
+    // eindsaldo (CLBD): het saldo aan het eind van die dag
+    for (const bal of (stmt.Bal ?? []) as X[]) {
+      if (text(bal.Tp?.CdOrPrtry?.Cd) !== 'CLBD') continue;
+      const date = text(bal.Dt?.Dt ?? bal.Dt?.DtTm).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const amount = Math.abs(parseEuro(text(bal.Amt)));
+      balances.push({ ownIban: ownIban ? normalizeIban(ownIban) : null, date, amount: text(bal.CdtDbtInd) === 'DBIT' ? -amount : amount });
+    }
     for (const entry of (stmt.Ntry ?? []) as X[]) {
       const status = text(entry.Sts?.Cd ?? entry.Sts);
       if (status && status !== 'BOOK') continue; // alleen geboekte posten
@@ -65,5 +74,5 @@ export function parseCamt053(xml: string): ParseResult {
       }
     }
   }
-  return { source: 'camt', transactions, warnings };
+  return { source: 'camt', transactions, warnings, balances };
 }

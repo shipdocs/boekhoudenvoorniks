@@ -46,6 +46,8 @@ export interface AssetRow {
   proceeds: Cents | null;
   disposal_entry_id: number | null;
   booked_elsewhere_until: number | null;
+  /** 1 = er was al vóór de instapdatum (overstap): afschrijven vanaf de boekwaarde, geen investeringsaftrek */
+  is_opening: number;
 }
 
 export interface Asset extends AssetRow {
@@ -165,7 +167,7 @@ export class AssetService {
       bookValue: a.status === 'actief' ? a.cost - booked : 0,
       perYear: Math.round(((a.cost - a.residual) * 12) / a.lifetime_months),
       belowThreshold: a.cost < ASSET_THRESHOLD,
-      energyHint: a.status === 'actief' && ENERGY_HINT.test(a.name) && deadline >= asOf ? { deadline } : null,
+      energyHint: a.status === 'actief' && !a.is_opening && ENERGY_HINT.test(a.name) && deadline >= asOf ? { deadline } : null,
     };
   }
 
@@ -180,8 +182,10 @@ export class AssetService {
     const a = this.row(id);
     if (a.status !== 'actief') throw new ValidationError('Alleen een investering die je nog gebruikt, kun je aanpassen');
     if (patch.lifetimeMonths !== undefined) {
-      if (!Number.isInteger(patch.lifetimeMonths) || patch.lifetimeMonths < MIN_LIFETIME_MONTHS || patch.lifetimeMonths > 600) {
-        throw new ValidationError('Vul tussen 5 en 50 jaar in (korter dan 5 jaar mag niet voor de belasting)');
+      // al in gebruik vóór de overstap: de levensduur is wat er nog over is, dat mag korter dan 5 jaar
+      const min = a.is_opening ? 12 : MIN_LIFETIME_MONTHS;
+      if (!Number.isInteger(patch.lifetimeMonths) || patch.lifetimeMonths < min || patch.lifetimeMonths > 600) {
+        throw new ValidationError(a.is_opening ? 'Vul tussen 1 en 50 jaar in' : 'Vul tussen 5 en 50 jaar in (korter dan 5 jaar mag niet voor de belasting)');
       }
     }
     if (patch.residual !== undefined && (!Number.isSafeInteger(patch.residual) || patch.residual < 0 || patch.residual >= a.cost)) {

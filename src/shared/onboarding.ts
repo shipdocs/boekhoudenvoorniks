@@ -25,6 +25,13 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   { id: 'btw', version: 1, title: 'BTW', satisfied: (s) => s.kor || !!s.company.vatNumber },
   { id: 'bank', version: 1, title: 'Bank', satisfied: (s) => !!s.company.iban },
   {
+    id: 'start',
+    version: 1,
+    title: 'Al een administratie?',
+    whatsNew: 'Nieuw: stap je over van een ander programma, Excel of je boekhouder? De app helpt je nu je lopende administratie over te zetten.',
+    satisfied: (s) => s.switchover.mode !== null,
+  },
+  {
     id: 'fiscaal',
     version: 1,
     title: 'Auto en startjaar',

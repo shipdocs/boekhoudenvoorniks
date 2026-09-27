@@ -82,6 +82,8 @@ export class DocumentSender {
   /** Maakt de factuur zo nodig definitief, genereert de PDF en mailt hem naar de klant. */
   async sendInvoice(id: number, opts: SendOptions = {}): Promise<Invoice> {
     let inv = this.invoices.get(id);
+    // de echte factuur staat in je vorige programma; hier alleen het openstaande bedrag
+    if (inv.is_opening) throw new ValidationError('Deze factuur komt uit je vorige administratie. Stuur hem vanuit je vorige programma; een herinnering kan wel vanuit hier.');
     const to = (opts.to ?? inv.relation_email ?? '').trim();
     if (!isValidEmail(to)) throw new ValidationError(`Geen geldig e-mailadres voor ${inv.relation_name}`);
     const mailer = await this.mailerFactory(); // faalt vroeg als SMTP niet is ingesteld
@@ -137,13 +139,14 @@ export class DocumentSender {
     const mailer = await this.mailerFactory();
     const s = this.settings.get();
     const values = this.invoiceValues(inv, s);
-    const attachment = await this.invoicePdf(invoiceId);
+    // factuur uit de vorige administratie: geen PDF uit deze app meesturen (die zou er anders uitzien dan het origineel)
+    const attachments: MailMessage['attachments'] = inv.is_opening ? [] : [{ ...(await this.invoicePdf(invoiceId)), contentType: 'application/pdf' }];
     await this.deliver(mailer, 'herinnering', invoiceId, {
       to,
       bcc: s.smtp.bcc || undefined,
       subject: fillPlaceholders(opts.subject ?? s.reminderEmailSubject, values),
       text: fillPlaceholders(opts.body ?? s.reminderEmailBody, values),
-      attachments: [{ ...attachment, contentType: 'application/pdf' }],
+      attachments,
     });
     this.invoices.recordReminder(invoiceId);
     return this.invoices.get(invoiceId);
@@ -157,7 +160,8 @@ export class DocumentSender {
       .listOpen(asOf)
       .map((summary) => this.invoices.get(summary.id, asOf))
       .filter((inv) => {
-        if (inv.open_amount <= 0 || inv.credit_of_invoice_id) return false;
+        // uit de vorige administratie: daar liep het herinneren al; niet vanzelf vanuit hier
+        if (inv.open_amount <= 0 || inv.credit_of_invoice_id || inv.is_opening) return false;
         const nextDays = schedule[inv.reminder_count];
         if (nextDays === undefined) return false;
         if (addDays(inv.due_date, nextDays) > asOf) return false;

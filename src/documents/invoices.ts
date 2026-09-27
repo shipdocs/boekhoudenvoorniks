@@ -45,6 +45,8 @@ export interface InvoiceRow {
   last_reminder_at: string | null;
   external_source: string | null;
   external_id: string | null;
+  /** 1 = uit de vorige administratie (overstap): alleen het openstaande bedrag, geen eigen factuur-PDF */
+  is_opening: number;
   created_at: string;
 }
 

@@ -19,8 +19,17 @@ export interface NormalizedTransaction {
 
 export type BankSource = 'csv' | 'mt940' | 'camt' | 'openbanking' | 'handmatig';
 
+/** Eindsaldo van een afschrift: het saldo aan het eind van `date`. */
+export interface StatementBalance {
+  ownIban: string | null;
+  date: IsoDate;
+  amount: Cents;
+}
+
 export interface ParseResult {
   source: BankSource;
   transactions: NormalizedTransaction[];
   warnings: string[];
+  /** eindsaldi uit het bestand (CAMT/MT940); CSV heeft ze meestal niet */
+  balances?: StatementBalance[];
 }
