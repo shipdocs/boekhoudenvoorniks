@@ -282,6 +282,12 @@ function validateSettings(settings: AppSettings): void {
   }
 }
 
+/** Staat de kleineondernemersregeling aan? (dan geen recht op aftrek van voorbelasting) */
+export function korActive(db: Db): boolean {
+  const row = db.prepare(`SELECT value FROM settings WHERE key = 'kor'`).get() as { value: string } | undefined;
+  return row ? JSON.parse(row.value) === true : DEFAULT_SETTINGS.kor;
+}
+
 export class SettingsService {
   constructor(private readonly db: Db) {}
 

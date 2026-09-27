@@ -347,13 +347,15 @@ const eur = (cents: number) => `€ ${(cents / 100).toLocaleString('nl-NL', { mi
  * te doen. De gebruiker beslist; "Nee" verbergt de vraag (de app vraagt het later nog eens op Vandaag).
  */
 export function InvestmentHint({ categoryKey, gross, vatCode, onUse }: { categoryKey: string; gross: number | null | undefined; vatCode: string; onUse: () => void }) {
+  const { settings } = useApp();
   const [dismissed, setDismissed] = useState(false);
-  if (dismissed || !mightBeInvestment(categoryKey, gross, vatCode)) return null;
-  const net = netAmount(gross!, vatCode);
-  const vat = gross! - net;
+  if (dismissed || !mightBeInvestment(categoryKey, gross, vatCode, settings.kor)) return null;
+  // KOR: btw niet aftrekbaar, dus onderdeel van de kostprijs
+  const net = settings.kor ? gross! : netAmount(gross!, vatCode);
+  const vat = settings.kor ? 0 : gross! - net;
   return (
     <div className="notice" role="note">
-      <strong>{eur(net)} excl. btw — gaat dit langer dan een jaar mee?</strong>
+      <strong>{eur(net)}{settings.kor ? '' : ' excl. btw'} — gaat dit langer dan een jaar mee?</strong>
       <div className="small" style={{ marginTop: 4 }}>
         Denk aan een machine, laptop, telefoon of steiger. Dan is het een <em>investering</em>: iets dat je jaren gebruikt. Kies je daarvoor, dan:
       </div>

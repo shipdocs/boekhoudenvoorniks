@@ -113,6 +113,13 @@ export function SettingsScreen() {
       {tab === 'btw' && section(
         <>
           <label className="row"><input type="checkbox" checked={draft.kor} onChange={(e) => set({ kor: e.target.checked, defaultVatCode: e.target.checked ? 'vrijgesteld' : 'hoog' })} /> Ik gebruik de kleineondernemersregeling (KOR)</label>
+          {draft.kor !== settings.kor && (
+            <p className="small muted">
+              {draft.kor
+                ? 'Met de KOR krijg je geen btw meer terug op je aankopen; de app telt die btw vanaf nu bij je kosten. Heb je de afgelopen jaren btw teruggekregen op een investering (zoals een bus of machine)? Dan moet je misschien een deel terugbetalen (herziening). Vraag je boekhouder.'
+                : 'Stop je met de KOR, dan reken je weer btw en krijg je btw op aankopen weer terug. Voor investeringen van de afgelopen jaren kun je misschien alsnog een deel terugkrijgen (herziening). Vraag je boekhouder.'}
+            </p>
+          )}
           {!draft.kor && (
             <div className="grid cols-2">
               <Field label="Btw-identificatienummer"><input value={draft.company.vatNumber} onChange={(e) => set({ company: { ...draft.company, vatNumber: e.target.value } })} /></Field>

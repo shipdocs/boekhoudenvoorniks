@@ -160,7 +160,8 @@ export class TaxOverviewService {
         costs: phoneCosts,
         pct: privatePct,
         bijtelling: Math.round((phoneCosts * privatePct) / 100),
-        vat: Math.round((phoneVatBase * 0.21 * privatePct) / 100),
+        // KOR: er is geen btw afgetrokken, dus ook niets te corrigeren
+        vat: s.kor ? 0 : Math.round((phoneVatBase * 0.21 * privatePct) / 100),
       },
       unbookedDepreciation,
       starter: isStarter(s, year),

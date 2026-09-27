@@ -13,6 +13,12 @@ import type { AccountCategory } from './accounts';
  * worden (tegenboeking van de oude post + nieuwe post).
  */
 
+/**
+ * Btw-code op de kostenregel met niet-aftrekbare btw (KOR). Staat direct na de regel waar hij bij
+ * hoort; telt niet mee in de grondslag van een rubriek, wel in de kostprijs van een bedrijfsmiddel.
+ */
+export const NON_DEDUCTIBLE_VAT = 'niet-aftrekbaar';
+
 export interface PurchaseLineInput {
   /** RGS-code van de kostenrekening (of activa bij investering) */
   account: string;
@@ -36,9 +42,13 @@ export function purchaseVat(line: PurchaseLineInput): Cents {
  *   - hoog/laag: kosten (netto) + voorbelasting aan crediteur/bank (bruto)
  *   - verlegd/eu/buiten-eu: kosten (netto) + voorbelasting aan af te dragen btw verlegd; crediteur/bank alleen netto
  *   - nul/geen:  alleen kosten
+ *
+ * `noVatDeduction` (KOR): geen recht op aftrek. De btw komt dan niet op voorbelasting maar bij de
+ * kosten of de kostprijs van het bedrijfsmiddel (aparte regel zonder btw-code, zodat de grondslag
+ * van 2a/4a/4b netto blijft). Verlegde btw blijft verschuldigd.
  * Retourneert de regels en het bedrag dat daadwerkelijk betaald wordt.
  */
-export function expenseLines(lines: PurchaseLineInput[], counterAccount: string, relationId: number | null, description?: string): { lines: PostLine[]; payable: Cents; vat: Cents; net: Cents } {
+export function expenseLines(lines: PurchaseLineInput[], counterAccount: string, relationId: number | null, description?: string, opts: { noVatDeduction?: boolean } = {}): { lines: PostLine[]; payable: Cents; vat: Cents; net: Cents } {
   const out: (PostLine | null)[] = [];
   let payable = 0;
   let vatTotal = 0;
@@ -50,7 +60,11 @@ export function expenseLines(lines: PurchaseLineInput[], counterAccount: string,
     netTotal += l.netAmount;
     out.push(signedLine(l.account, l.netAmount, { relationId, vatCode: l.vatCode, description: l.description ?? null }));
     if (vat !== 0) {
-      out.push(signedLine(ACCOUNTS.btwVoorbelasting, vat, { relationId, vatCode: l.vatCode }));
+      out.push(
+        opts.noVatDeduction
+          ? signedLine(l.account, vat, { relationId, vatCode: NON_DEDUCTIBLE_VAT, description: `Niet-aftrekbare btw${l.description ? `: ${l.description}` : ''}` })
+          : signedLine(ACCOUNTS.btwVoorbelasting, vat, { relationId, vatCode: l.vatCode }),
+      );
       vatTotal += vat;
       if (isReverseCharge(l.vatCode)) {
         out.push(signedLine(REVERSE_CHARGE_ACCOUNTS[l.vatCode], -vat, { relationId, vatCode: l.vatCode }));
@@ -99,6 +113,8 @@ export interface BankCategoriePayload {
   description: string;
   /** verkoop via een ander systeem: de naam die de gebruiker gaf, bv. "Mollie" of "webshop" */
   channel?: string | null;
+  /** geen recht op aftrek van voorbelasting (KOR) op het moment van boeken */
+  noVatDeduction?: boolean;
 }
 
 /** Een inkoopfactuur of bonnetje. */
@@ -109,6 +125,8 @@ export interface InkoopPayload {
   relationId: number | null;
   supplierReference: string | null;
   lines: PurchaseLineInput[];
+  /** geen recht op aftrek van voorbelasting (KOR) op het moment van boeken */
+  noVatDeduction?: boolean;
 }
 
 export type DomainEvent =
@@ -132,7 +150,7 @@ export function compile(event: DomainEvent): CompiledEntry {
     }
     case 'inkoop': {
       const p = event.payload;
-      const booking = expenseLines(p.lines, ACCOUNTS.crediteuren, p.relationId, p.supplierReference ?? undefined);
+      const booking = expenseLines(p.lines, ACCOUNTS.crediteuren, p.relationId, p.supplierReference ?? undefined, { noVatDeduction: p.noVatDeduction });
       return { date: p.date, description: `Inkoop: ${p.description.trim()}`, source: 'inkoop', sourceRef: `purchase:${p.purchaseId}`, lines: booking.lines };
     }
     case 'bank-categorie':
@@ -149,7 +167,7 @@ export function bankCategoryLines(p: BankCategoriePayload): PostLine[] {
     // een negatieve transactie is een uitgave; een positieve op een kostenrekening is een terugbetaling
     const gross = -p.amount;
     const { net, vat } = splitGross(gross, rate.percentage, isReverseCharge(vatCode));
-    return expenseLines([{ account: p.account, netAmount: net, vatCode, vatAmount: vat, description: p.description }], p.bankAccount, p.relationId, p.description).lines;
+    return expenseLines([{ account: p.account, netAmount: net, vatCode, vatAmount: vat, description: p.description }], p.bankAccount, p.relationId, p.description, { noVatDeduction: p.noVatDeduction }).lines;
   }
   if (p.accountCategory === 'omzet') {
     if (!isSalesVatCode(vatCode)) throw new ValidationError('Kies een ander btw-tarief');

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { estimateIncomeTax, representatieBijtelling, rulesFor, tariefsaanpassingFor } from '../src/tax/income-tax';
 import { isStarter } from '../src/tax/overview';
 import { setup } from './helpers';
@@ -147,5 +148,61 @@ describe('bedrijfsmiddelen (vragen 17, 20 en 31)', () => {
     const steiger = s.assets.list({}, '2026-03-01').find((x) => x.name.includes('Steiger'))!;
     s.assets.dispose(steiger.id, '2026-04-01', 3000_00);
     expect(s.taxOverview.adjustments(2026, '2026-05-01').desinvesteringsbijtelling).toBe(840_00);
+  });
+});
+
+describe('KOR: geen aftrek van voorbelasting (vraag 27)', () => {
+  const rubrieken = (s: S, key: string) => Object.fromEntries(s.vat.calculate(key).rubrieken.map((x) => [x.code, x]));
+
+  it('27: inkoop met 21% onder de KOR: geen voorbelasting, btw bij de kosten', () => {
+    const { s } = setup();
+    s.settings.update({ kor: true });
+    s.quick.recordExpense({ date: '2026-07-01', supplierName: 'Bouwmaat', description: 'Schuurpapier', categoryKey: 'materiaal', grossAmount: 121_00, vatCode: 'hoog', paidWith: 'kas' });
+    expect(s.ledger.balance(ACCOUNTS.btwVoorbelasting)).toBe(0);
+    expect(rubrieken(s, '2026-Q3')['5b']!.btw || 0).toBe(0);
+    // winst: de volle 121 als kosten
+    expect(s.taxOverview.year(2026, '2026-07-31').profitBooked).toBe(-121_00);
+    expect(s.ledger.checkIntegrity().balanced).toBe(true);
+  });
+
+  it('27: verlegde buitenlandse dienst onder de KOR: 4b verschuldigd, geen aftrek in 5b', () => {
+    const { s } = setup();
+    s.settings.update({ kor: true });
+    s.quick.recordExpense({ date: '2026-07-01', supplierName: 'Meta Platforms Ireland', description: 'Advertenties', categoryKey: 'reclame', grossAmount: 100_00, vatCode: 'eu', paidWith: 'bank' });
+    const rub = rubrieken(s, '2026-Q3');
+    expect(rub['4b']).toMatchObject({ omzet: 100_00, btw: 21_00 });
+    expect(rub['5b']!.btw || 0).toBe(0);
+    expect(s.vat.calculate('2026-Q3').summary.teBetalen).toBe(21_00);
+    expect(s.vat.calculate('2026-Q3').warnings.join(' ')).toMatch(/verlegd.*aangeven en betalen/);
+    expect(s.vat.korReverseCharge(2026)).toEqual([{ period: expect.objectContaining({ key: '2026-Q3' }), btw: 21_00 }]);
+    // betaald: alleen netto; kosten: netto + niet-aftrekbare btw
+    expect(s.purchases.list()[0]!.total).toBe(100_00);
+    expect(s.taxOverview.year(2026, '2026-07-31').profitBooked).toBe(-121_00);
+  });
+
+  it('13: investering onder de KOR: kostprijs inclusief niet-aftrekbare btw, één bedrijfsmiddel', () => {
+    const { s } = setup();
+    s.settings.update({ kor: true });
+    buy(s, '2026-03-01', 1210_00, 'Laptop');
+    const assets = s.assets.list({}, '2026-03-02');
+    expect(assets).toHaveLength(1);
+    expect(assets[0]!.cost).toBe(1210_00);
+    expect(s.ledger.balance(ACCOUNTS.btwVoorbelasting)).toBe(0);
+  });
+
+  it('27: bankbetaling op een kostenrekening onder de KOR', () => {
+    const { s } = setup();
+    s.settings.update({ kor: true });
+    s.quick.recordExpense({ date: '2026-07-01', supplierName: 'KPN', description: 'Telefoon', categoryKey: 'telefoon', grossAmount: 60_50, vatCode: 'hoog', paidWith: 'bank' });
+    expect(s.ledger.balance(ACCOUNTS.btwVoorbelasting)).toBe(0);
+    // geen btw-correctie privégebruik telefoon: er is niets afgetrokken
+    s.settings.update({ phoneInternetBusinessPct: 50 });
+    expect(s.taxOverview.adjustments(2026, '2026-07-31').phonePrivate.vat).toBe(0);
+  });
+
+  it('27: zonder KOR verandert er niets', () => {
+    const { s } = setup();
+    s.quick.recordExpense({ date: '2026-07-01', supplierName: 'Bouwmaat', description: 'Schuurpapier', categoryKey: 'materiaal', grossAmount: 121_00, vatCode: 'hoog', paidWith: 'kas' });
+    expect(rubrieken(s, '2026-Q3')['5b']!.btw).toBe(21_00);
   });
 });
