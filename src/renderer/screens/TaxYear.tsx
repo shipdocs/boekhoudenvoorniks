@@ -102,7 +102,7 @@ async function copyForAccountant(d: OverviewData): Promise<void> {
     '',
     'Bedragen:',
     ...d.items.filter((i) => i.amount !== null).map(item),
-    `Belastbare winst uit onderneming (geschat): € ${d.breakdown.taxableIncome.toLocaleString('nl-NL')}`,
+    `Belastbare winst uit onderneming (geschat): € ${d.breakdown.taxableProfit.toLocaleString('nl-NL')}${d.breakdown.taxableProfit < 0 ? ' (verlies)' : ''}`,
     '',
     'Aandachtspunten:',
     ...d.items.filter((i) => i.amount === null).map(item),
@@ -154,7 +154,7 @@ function Overview({ year }: { year: number }) {
                 <td className="num">{hiddenTotal > 0 ? '+ ' : ''}{euro(hiddenTotal)}</td>
               </tr>
             )}
-            <tr className="total"><td>Winst waarover je belasting betaalt (schatting)</td><td className="num">€ {b.taxableIncome.toLocaleString('nl-NL')}</td></tr>
+            <tr className="total"><td>{b.taxableProfit < 0 ? 'Verlies (schatting)' : 'Winst waarover je belasting betaalt (schatting)'}</td><td className="num">{b.taxableProfit < 0 ? '− ' : ''}€ {Math.abs(b.taxableProfit).toLocaleString('nl-NL')}</td></tr>
           </tbody>
         </table>
       </div>

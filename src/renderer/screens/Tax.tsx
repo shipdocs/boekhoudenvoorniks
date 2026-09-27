@@ -359,9 +359,12 @@ function IncomeTaxCard() {
               {b.kia > 0 && <tr><td>− Extra aftrek voor investeringen (KIA)</td><td className="num">{euro(b.kia)}</td></tr>}
               <tr><td>− Aftrek voor zelfstandigen</td><td className="num">{euro(b.zelfstandigenaftrek)}</td></tr>
               {b.startersaftrek > 0 && <tr><td>− Extra aftrek voor starters</td><td className="num">{euro(b.startersaftrek)}</td></tr>}
+              {b.zelfstandigenaftrekVerrekend > 0 && <tr><td>− Aftrek voor zelfstandigen uit eerdere jaren</td><td className="num">{euro(b.zelfstandigenaftrekVerrekend)}</td></tr>}
+              {b.meewerkaftrek > 0 && <tr><td>− Aftrek omdat je partner meewerkt</td><td className="num">{euro(b.meewerkaftrek)}</td></tr>}
               <tr><td>− Korting voor kleine bedrijven <span className="muted">(vast deel van je winst is onbelast)</span></td><td className="num">{euro(b.mkbWinstvrijstelling)}</td></tr>
-              <tr><td>= Hierover betaal je belasting</td><td className="num">{euro(b.taxableIncome)}</td></tr>
+              <tr><td>= {b.taxableProfit < 0 ? 'Verlies (daarover betaal je niets)' : 'Hierover betaal je belasting'}</td><td className="num">{euro(b.taxableProfit)}</td></tr>
               <tr><td>Inkomstenbelasting</td><td className="num">{euro(b.box1)}</td></tr>
+              {b.tariefsaanpassing > 0 && <tr><td>+ Minder voordeel van je aftrek bij een hoog inkomen (tariefsaanpassing)</td><td className="num">{euro(b.tariefsaanpassing)}</td></tr>}
               <tr><td>− Kortingen die iedereen krijgt (heffingskortingen)</td><td className="num">{euro(b.heffingskortingen)}</td></tr>
               <tr><td>+ Zorgpremie (Zvw)</td><td className="num">{euro(b.zvw)}</td></tr>
               <tr><td><strong>Totaal</strong></td><td className="num"><strong>{euro(b.total)}</strong></td></tr>
