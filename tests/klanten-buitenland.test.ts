@@ -13,8 +13,8 @@ describe('land van de klant en btw', () => {
     expect(customerVatSituation('BE', '')).toBe('eu-particulier');
     expect(customerVatSituation('US', null)).toBe('buiten-eu');
     expect(customerVatSituation('XYZ', null)).toBe('onbekend');
-    expect(suggestedSalesVat('eu-bedrijf')).toBe('icp');
-    expect(suggestedSalesVat('buiten-eu')).toBe('export');
+    expect(suggestedSalesVat('eu-bedrijf')).toBe('icp-dienst');
+    expect(suggestedSalesVat('buiten-eu')).toBe('dienst-buiten-eu');
     expect(suggestedSalesVat('eu-particulier')).toBeNull();
     // bij een ander land hoort het oude btw-nummer niet meer
     expect(vatNumberMatchesCountry('DE 123456789', 'DE')).toBe(true);

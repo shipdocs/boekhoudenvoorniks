@@ -110,7 +110,7 @@ export function runVatChecks(
     .prepare(
       `SELECT DISTINCT i.id, i.number FROM invoices i JOIN relations r ON r.id = i.relation_id
        WHERE i.status <> 'concept' AND i.invoice_date BETWEEN ? AND ? AND TRIM(COALESCE(r.vat_number, '')) = ''
-         AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.vat_code IN ('verlegd', 'icp'))`,
+         AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.vat_code IN ('verlegd', 'icp', 'icp-dienst'))`,
     )
     .all(start, end) as { id: number; number: string | null }[];
   if (reverseNoVat.length > 0) {
@@ -199,13 +199,16 @@ export function runVatChecks(
       key: 'eu-bedrijf-met-btw',
       blocking: false,
       title: `${euBusinessWithVat.length === 1 ? `Factuur ${first.number}` : `${euBusinessWithVat.length} facturen`} aan een bedrijf in een ander EU-land met Nederlandse btw`,
-      detail: `Bij een bedrijf in een ander EU-land (zoals ${first.name}) verleg je de btw meestal: "Bedrijf in een ander EU-land (0%)". Alleen bij werk aan een gebouw of grond in Nederland reken je Nederlandse btw. Klopt het niet? Maak een creditfactuur en een nieuwe factuur. Twijfel je? Vraag je boekhouder.`,
+      detail: `Bij een bedrijf in een ander EU-land (zoals ${first.name}) verleg je de btw meestal: kies "Dienst aan een bedrijf in een ander EU-land" (of "Goederen …" als je spullen levert). Alleen bij werk aan een gebouw of grond in Nederland reken je Nederlandse btw. Klopt het niet? Maak een creditfactuur en een nieuwe factuur. Twijfel je? Vraag je boekhouder.`,
       count: euBusinessWithVat.length,
       fingerprint: euBusinessWithVat.map((i) => i.id).join(','),
       screen: 'werk',
     });
   }
-  // Particulieren in andere EU-landen: boven € 10.000 per jaar geldt de btw van het land van de klant (OSS)
+  // Particulieren in andere EU-landen. De drempel van € 10.000 geldt alleen voor afstandsverkopen van
+  // goederen en voor digitale diensten (telecom, omroep, elektronisch). Voor andere diensten hangt de
+  // plaats van heffing af van het soort dienst (bv. werk aan een gebouw: altijd in dat land). De app
+  // kent het soort prestatie niet, dus: waarschuwen dat het gecontroleerd moet worden.
   const year = end.slice(0, 4);
   const euConsumers = (
     db
@@ -220,14 +223,19 @@ export function runVatChecks(
       )
       .get(ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, `${year}-01-01`, end, ...[...EU_COUNTRIES].filter((c) => c !== 'NL')) as { s: number }
   ).s;
-  if (euConsumers > EU_B2C_THRESHOLD) {
+  if (euConsumers > 0) {
+    const above = euConsumers > EU_B2C_THRESHOLD;
     found.push({
-      key: 'oss-drempel',
+      key: above ? 'oss-drempel' : 'eu-particulier',
       blocking: false,
-      title: `Meer dan ${formatEuro(EU_B2C_THRESHOLD)} verkocht aan particulieren in andere EU-landen`,
-      detail: `Dit jaar al ${formatEuro(euConsumers)}. Boven ${formatEuro(EU_B2C_THRESHOLD)} per jaar reken je de btw van het land van de klant en geef je die aan via de "OSS-regeling" (éénloketsysteem). Dat regelt de app niet: vraag je boekhouder.`,
+      title: above ? `Meer dan ${formatEuro(EU_B2C_THRESHOLD)} verkocht aan particulieren in andere EU-landen` : 'Verkocht aan particulieren in andere EU-landen: controleer de btw',
+      detail: `Dit jaar ${formatEuro(euConsumers)} met Nederlandse btw. ${
+        above
+          ? `Stuur je spullen op of lever je digitale diensten, dan reken je boven ${formatEuro(EU_B2C_THRESHOLD)} per jaar de btw van het land van de klant (via de "OSS-regeling").`
+          : `Voor spullen die je opstuurt en digitale diensten mag dat tot ${formatEuro(EU_B2C_THRESHOLD)} per jaar.`
+      } Voor andere diensten hangt het af van wat je doet: werk aan een huis of gebouw in dat land is bijvoorbeeld altijd belast in dat land. Dat regelt de app niet: laat je boekhouder controleren welke btw geldt.`,
       count: 1,
-      fingerprint: `${year}`,
+      fingerprint: `${year}:${above ? 'boven' : 'onder'}`,
       screen: 'belasting',
     });
   }
@@ -237,10 +245,20 @@ export function runVatChecks(
       key: 'auto-prive',
       blocking: true,
       title: 'Rijd je ook privé in je auto van de zaak?',
-      detail: 'Dan betaal je in deze laatste aangifte van het jaar btw over dat privégebruik. Vul bij Instellingen → Btw en belasting in of je privé rijdt, wat de cataloguswaarde van je auto is en sinds wanneer je hem gebruikt; dan rekent de app het uit.',
+      detail: 'Dan betaal je misschien in deze laatste aangifte van het jaar btw over dat privégebruik. Vul bij Instellingen → Btw en belasting in of je privé rijdt, of je btw hebt teruggekregen op de auto of de kosten, hoe je het privégebruik berekent, wat de cataloguswaarde is en sinds wanneer je hem gebruikt.',
       count: 1,
       fingerprint: `onbekend:${car.year}`,
       screen: 'instellingen',
+    });
+  } else if (car && car.due.state === 'werkelijk') {
+    found.push({
+      key: 'auto-prive',
+      blocking: false,
+      title: 'Btw over privégebruik van je auto: laat je boekhouder het bedrag uitrekenen',
+      detail: 'Je rekent met je werkelijke privégebruik (rittenadministratie). Dat bedrag rekent de app niet uit: laat je boekhouder het berekenen en boek het in vak 1d van deze aangifte.',
+      count: 1,
+      fingerprint: `werkelijk:${car.year}`,
+      screen: 'belasting',
     });
   } else if (car && car.due.state === 'bekend' && car.due.amount !== car.booked) {
     const { amount, pct, catalogValue, months } = car.due;

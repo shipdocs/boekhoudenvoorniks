@@ -12,9 +12,11 @@ import { estimateIncomeTax, kiaFor, profitBetween, representatieBijtelling, rule
 /** De startersaftrek is in 2027 nog € 10 en vervalt per 2028 (wetswijziging); tot die tijd max 3× in de eerste 5 jaar. */
 const STARTERSAFTREK_ENDS = 2028;
 
-export function isStarter(s: Pick<AppSettings, 'startYear' | 'startersaftrekUsed'>, year: number): boolean {
+export function isStarter(s: Pick<AppSettings, 'startYear' | 'startersaftrekUsed'> & Partial<Pick<AppSettings, 'startersaftrekYears'>>, year: number): boolean {
   if (!s.startYear || year < s.startYear || year - s.startYear >= 5 || year >= STARTERSAFTREK_ENDS) return false;
-  // aanname: sinds het moment van opgeven elk jaar gebruikt
+  // opgegeven per jaar (zoals in de aangiftes): dat telt
+  if (s.startersaftrekYears) return s.startersaftrekYears.filter((y) => y < year).length < 3;
+  // anders de aanname: sinds het moment van opgeven elk jaar gebruikt
   const since = Math.max(s.startersaftrekUsed.asOfYear || s.startYear, s.startYear);
   const usedBefore = s.startersaftrekUsed.count + Math.max(0, year - since);
   return usedBefore < 3;
@@ -97,11 +99,23 @@ export class TaxOverviewService {
     return r.s;
   }
 
-  /** Effectief KIA-percentage van een jaar (voor de desinvesteringsbijtelling). */
-  private kiaRate(year: number): number {
-    const inv = this.investmentsIn(year);
-    if (inv <= 0) return 0;
-    return kiaFor(inv / 100, rulesFor(year).rules.kia) / (inv / 100);
+  /**
+   * De KIA van een jaar. Voor een afgesloten jaar wordt die de eerste keer vastgelegd, zodat latere
+   * wijzigingen in het register (verkopen, uitsluiten) het toegepaste percentage niet meer veranderen.
+   */
+  private kiaOf(year: number, asOf: IsoDate): { investments: Cents; kia: Cents } {
+    const stored = this.db.prepare('SELECT investments, kia FROM kia_applied WHERE year = ?').get(year) as { investments: Cents; kia: Cents } | undefined;
+    if (stored) return stored;
+    const investments = this.investmentsIn(year);
+    const kia = Math.round(kiaFor(investments / 100, rulesFor(year).rules.kia) * 100);
+    if (year < Number(asOf.slice(0, 4))) this.db.prepare('INSERT OR IGNORE INTO kia_applied (year, investments, kia) VALUES (?, ?, ?)').run(year, investments, kia);
+    return { investments, kia };
+  }
+
+  /** KIA-percentage zoals toegepast in het investeringsjaar (voor de desinvesteringsbijtelling). */
+  private kiaRate(year: number, asOf: IsoDate): number {
+    const { investments, kia } = this.kiaOf(year, asOf);
+    return investments > 0 ? kia / investments : 0;
   }
 
   adjustments(year: number, asOf: IsoDate = today()): FiscalAdjustments {
@@ -109,8 +123,7 @@ export class TaxOverviewService {
     const { rules } = rulesFor(year);
     // afgesloten jaren zijn dan geboekt; wat overblijft is alleen het lopende jaar
     this.assets.bookDue(asOf);
-    const investments = this.investmentsIn(year);
-    const kia = Math.round(kiaFor(investments / 100, rules.kia) * 100);
+    const { investments, kia } = this.kiaOf(year, asOf);
 
     // verkocht binnen 5 jaar na het begin van het investeringsjaar: (een deel van) de KIA terug
     const sold = this.db
@@ -121,7 +134,7 @@ export class TaxOverviewService {
     const desinvesteringsbijtelling =
       soldTotal > rules.desinvesteringDrempel * 100
         ? within.reduce((t, a) => {
-            const rate = this.kiaRate(Number(a.acquired_on.slice(0, 4)));
+            const rate = this.kiaRate(Number(a.acquired_on.slice(0, 4)), asOf);
             return t + Math.round(rate * Math.min(a.proceeds ?? 0, a.cost));
           }, 0)
         : 0;
@@ -147,7 +160,8 @@ export class TaxOverviewService {
         costs: phoneCosts,
         pct: privatePct,
         bijtelling: Math.round((phoneCosts * privatePct) / 100),
-        vat: Math.round((phoneVatBase * 0.21 * privatePct) / 100),
+        // KOR: er is geen btw afgetrokken, dus ook niets te corrigeren
+        vat: s.kor ? 0 : Math.round((phoneVatBase * 0.21 * privatePct) / 100),
       },
       unbookedDepreciation,
       starter: isStarter(s, year),
@@ -175,6 +189,7 @@ export class TaxOverviewService {
       kia: adj.kia / 100,
       bijtellingen: (adj.representatie.bijtelling + adj.desinvesteringsbijtelling + adj.phonePrivate.bijtelling) / 100,
       partnerHours: s.partnerHours,
+      nietGerealiseerd: s.nietGerealiseerdeZelfstandigenaftrek,
     });
     const fuel = this.costsOn('WBedAutBra', `${year}-01-01`, to) + this.costsOn('WBedAutOnd', `${year}-01-01`, to);
     const eur = (c: number) => `€ ${(c / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -225,7 +240,7 @@ export class TaxOverviewService {
         label: 'Verkocht binnen 5 jaar: deel van de extra aftrek terug',
         amount: adj.desinvesteringsbijtelling,
         explain: 'Je verkocht iets dat je minder dan 5 jaar geleden kocht. Een deel van de extra aftrek van toen moet je terugbetalen.',
-        note: 'Desinvesteringsbijtelling: effectief KIA-percentage van het investeringsjaar × verkoopprijs (max. over aanschafprijs).',
+        note: `Desinvesteringsbijtelling (drempel € ${rules.desinvesteringDrempel.toLocaleString('nl-NL')} per jaar): KIA-percentage van het investeringsjaar × verkoopprijs, nooit meer dan de eerder gekregen KIA. Ook naar privé overgebracht telt als verkoop (tegen de waarde in het economisch verkeer).`,
         forAccountant: true,
       });
     }
@@ -247,8 +262,28 @@ export class TaxOverviewService {
         explain: adj.starter
           ? 'Omdat je bedrijf nog geen 5 jaar bestaat. Je krijgt deze aftrek hooguit 3 keer, en na 2027 bestaat hij niet meer.'
           : 'Deze aftrek heb je al 3 keer gehad, of hij bestaat niet meer (na 2027 afgeschaft).',
-        note: 'Startersaftrek (ondernemersaftrek); aanname: sinds opgave elk jaar gebruikt. 2027: € 10, vanaf 2028 vervallen.',
+        note: `Startersaftrek (ondernemersaftrek); ${s.startersaftrekYears ? `eerder gebruikt in: ${s.startersaftrekYears.join(', ') || 'geen jaren'}` : 'aanname: sinds opgave elk jaar gebruikt (per jaar opgeven bij Instellingen)'}. Bij recht op startersaftrek geldt de beperking van de zelfstandigenaftrek tot de winst niet. 2027: € 10, vanaf 2028 vervallen.`,
         status: adj.starter ? 'ok' : 'info',
+      });
+    }
+    if (breakdown.zelfstandigenaftrekVerrekend > 0) {
+      items.push({
+        key: 'za-verrekend',
+        label: 'Aftrek voor zelfstandigen uit eerdere jaren',
+        amount: -Math.round(breakdown.zelfstandigenaftrekVerrekend * 100),
+        explain: 'In eerdere jaren was je winst te laag voor de hele aftrek. Een deel daarvan mag je nu alsnog aftrekken.',
+        note: `Verrekening niet-gerealiseerde zelfstandigenaftrek (opgegeven openstaand: € ${s.nietGerealiseerdeZelfstandigenaftrek.toLocaleString('nl-NL')}). Zelf bijhouden wat verrekend is.`,
+        status: 'ok',
+      });
+    }
+    if (breakdown.zelfstandigenaftrekNietGerealiseerd > 0) {
+      items.push({
+        key: 'za-niet-gerealiseerd',
+        label: 'Aftrek voor zelfstandigen: past niet helemaal',
+        amount: null,
+        explain: `Je winst is te laag voor de hele aftrek. De rest (€ ${breakdown.zelfstandigenaftrekNietGerealiseerd.toLocaleString('nl-NL')}) mag je de komende 9 jaar alsnog aftrekken. Dat bedrag staat later op je aanslag.`,
+        note: `Niet-gerealiseerde zelfstandigenaftrek € ${breakdown.zelfstandigenaftrekNietGerealiseerd.toLocaleString('nl-NL')}; 9 jaar verrekenbaar voor zover de winst hoger is dan de zelfstandigenaftrek van dat jaar.`,
+        status: 'info',
       });
     }
     if (breakdown.meewerkaftrek > 0) {
@@ -257,7 +292,7 @@ export class TaxOverviewService {
         label: 'Aftrek omdat je partner meewerkt',
         amount: -Math.round(breakdown.meewerkaftrek * 100),
         explain: `Je partner helpt ${s.partnerHours.toLocaleString('nl-NL')} uur per jaar mee zonder (veel) loon.`,
-        note: 'Meewerkaftrek naar uren partner; aanname: vergoeding partner < € 5.000.',
+        note: 'Meewerkaftrek naar uren partner. Voorwaarden controleren: partner krijgt geen of een lage vergoeding (< € 5.000) en er is geen samenwerkingsverband.',
         status: 'ok',
       });
     }
@@ -266,14 +301,35 @@ export class TaxOverviewService {
       label: 'Korting voor kleine bedrijven',
       amount: -Math.round(breakdown.mkbWinstvrijstelling * 100),
       explain: `Over je winst hoef je ${(rules.mkbWinstvrijstelling * 100).toLocaleString('nl-NL')}% geen belasting te betalen. Dat gaat vanzelf.`,
-      note: 'Mkb-winstvrijstelling over de winst na ondernemersaftrek.',
+      note: 'Mkb-winstvrijstelling over de winst na ondernemersaftrek (bij verlies: verkleint het verlies).',
     });
+    if (breakdown.taxableProfit < 0) {
+      items.push({
+        key: 'verlies',
+        label: 'Verlies',
+        amount: null,
+        explain: `Je maakt fiscaal verlies (€ ${(-breakdown.taxableProfit).toLocaleString('nl-NL')}). Dan betaal je over je bedrijf geen belasting, en dat verlies mag je verrekenen met ander inkomen of met andere jaren. Je boekhouder regelt dat.`,
+        note: `Fiscaal verlies uit onderneming € ${(-breakdown.taxableProfit).toLocaleString('nl-NL')} (na ondernemersaftrek en mkb-winstvrijstelling). Verliesverrekening niet in de schatting.`,
+        status: 'info',
+      });
+    }
+    if (breakdown.tariefsaanpassing > 0) {
+      items.push({
+        key: 'tariefsaanpassing',
+        label: 'Minder voordeel van je aftrek bij een hoog inkomen',
+        amount: null,
+        explain: `Omdat je winst in het hoogste tarief valt, leveren je aftrekposten minder op. Daardoor betaal je ongeveer € ${breakdown.tariefsaanpassing.toLocaleString('nl-NL')} meer. Dat zit al in de schatting.`,
+        note: `Tariefsaanpassing ondernemersaftrek en mkb-winstvrijstelling (art. 2.10a Wet IB 2001): € ${breakdown.tariefsaanpassing.toLocaleString('nl-NL')}.`,
+        status: 'info',
+      });
+    }
     if (s.carUse === 'prive' && fuel > 0) {
       items.push({
         key: 'brandstof',
         label: 'Controleer je autokosten',
         amount: null,
         explain: `Je rijdt met je eigen auto, maar er staat ${eur(fuel)} aan tanken, parkeren of onderhoud bij je zakelijke kosten. Dat mag niet: je krijgt al € ${(rules.kmRate / 100).toFixed(2).replace('.', ',')} per zakelijke kilometer. Zet die betalingen op "privé" en vul je kilometers in.`,
+        note: 'Privéauto: kosten niet aftrekbaar voor de IB naast de kilometervergoeding. Btw op brandstof/onderhoud kan wel naar rato van zakelijk gebruik aftrekbaar zijn (app laat dit liggen).',
         status: 'warn',
       });
     }
@@ -289,11 +345,19 @@ export class TaxOverviewService {
         explain:
           car.state === 'bekend'
             ? `Over privégebruik betaal je btw: ${eur(car.amount)} dit jaar. De app zet dat klaar in je laatste btw-aangifte van het jaar${booked ? ' (al gedaan)' : ''}. Privégebruik telt ook mee voor de inkomstenbelasting (bijtelling); dat rekent je boekhouder uit.`
-            : 'Rijd je ook privé in je auto van de zaak? Vul dat in bij Instellingen → Btw. Dan betaal je btw over het privégebruik en telt het mee voor de inkomstenbelasting (bijtelling).',
+            : car.state === 'werkelijk'
+              ? 'Je rekent de btw over privégebruik met je werkelijke privékilometers. Dat bedrag rekent je boekhouder uit. Privégebruik telt ook mee voor de inkomstenbelasting (bijtelling).'
+              : car.state === 'n.v.t.'
+                ? 'Je hebt geen btw teruggekregen op de auto of de kosten, dus je betaalt geen btw over het privégebruik. Privégebruik telt wel mee voor de inkomstenbelasting (bijtelling); dat rekent je boekhouder uit.'
+                : 'Rijd je ook privé in je auto van de zaak? Vul dat in bij Instellingen → Btw. Dan betaal je misschien btw over het privégebruik en telt het mee voor de inkomstenbelasting (bijtelling).',
         note:
           car.state === 'bekend'
-            ? `Auto van de zaak met privégebruik. Btw-correctie ${(car.pct * 100).toLocaleString('nl-NL')}% van cataloguswaarde ${eur(car.catalogValue)} = ${eur(car.amount)}${booked ? ', geboekt in vak 1d' : ', nog niet geboekt'}${car.months < 12 ? `; naar rato over ${car.months} maanden (auto dit jaar in gebruik genomen)` : ''}. IB-bijtelling niet berekend; controleren of er een rittenregistratie is.`
-            : 'Auto van de zaak: privégebruik niet opgegeven. Btw-correctie (1d) en IB-bijtelling controleren.',
+            ? `Auto van de zaak met privégebruik; btw afgetrokken, forfait gekozen. Btw-correctie ${(car.pct * 100).toLocaleString('nl-NL')}% van cataloguswaarde ${eur(car.catalogValue)} = ${eur(car.amount)}${booked ? ', geboekt in vak 1d' : ', nog niet geboekt'}${car.months < 12 ? `; naar rato over ${car.months} maanden (auto dit jaar in gebruik genomen)` : ''}. Controleren: eigen bijdrage, historie van de auto (bijv. marge-auto, aftrek alleen op kosten). IB-bijtelling niet berekend.`
+            : car.state === 'werkelijk'
+              ? 'Auto van de zaak: btw-correctie privégebruik op basis van werkelijk gebruik (rittenadministratie); bedrag niet door de app berekend of geboekt (1d).'
+              : car.state === 'n.v.t.'
+                ? 'Auto van de zaak: volgens de gebruiker geen btw afgetrokken op aanschaf of kosten, dus geen btw-correctie privégebruik. Controleren; IB-bijtelling niet berekend.'
+                : 'Auto van de zaak: privégebruik, btw-aftrek of methode niet opgegeven. Btw-correctie (1d) en IB-bijtelling controleren.',
         forAccountant: true,
         status: car.state === 'bekend' && booked ? 'ok' : 'warn',
       });
@@ -325,9 +389,12 @@ export class TaxOverviewService {
         amount: null,
         explain:
           s.homeWorkspace === 'zelfstandig'
-            ? 'Een aparte werkruimte met eigen ingang kan aftrekbaar zijn. Dat hangt af van hoeveel je daar verdient. Je boekhouder rekent dat uit. Je bureau, stoel en kast mag je altijd aftrekken.'
-            : 'Je kamer of werkhoek thuis zelf mag je niet aftrekken, ook de energie of huur niet. Je bureau, stoel, kast en apparaten wel.',
-        note: s.homeWorkspace === 'zelfstandig' ? 'Zelfstandige werkruimte opgegeven: toets inkomenseis (70%/30%) en bereken aftrek (niet door de app gedaan).' : undefined,
+            ? 'Een aparte werkruimte met eigen ingang kan aftrekbaar zijn. Dat hangt af van hoeveel je daar verdient. Je boekhouder rekent dat uit.'
+            : 'Je kamer of werkhoek thuis zelf mag je niet aftrekken, ook de energie of huur niet. Spullen die je vooral voor je werk gebruikt, zoals een laptop of printer, kunnen wel zakelijk zijn. Twijfel je over de inrichting (bureau, stoel, kast)? Vraag het je boekhouder.',
+        note:
+          s.homeWorkspace === 'zelfstandig'
+            ? 'Zelfstandige werkruimte opgegeven: toets inkomenseis (70%/30%) en bereken aftrek (niet door de app gedaan). Inrichting volgt die toets.'
+            : 'Niet-zelfstandige werkruimte: kosten werkruimte niet aftrekbaar. Losse bedrijfsmiddelen en inrichting apart beoordelen op zakelijk gebruik.',
         status: 'info',
       });
     }
@@ -335,7 +402,7 @@ export class TaxOverviewService {
       key: 'aov',
       label: 'Arbeidsongeschiktheidsverzekering (AOV) en pensioen',
       amount: null,
-      explain: 'Dit zijn geen bedrijfskosten: zet ze op "privé". Je mag ze wel aftrekken in je aangifte. Geef je boekhouder door hoeveel je betaalde.',
+      explain: 'Dit zijn geen bedrijfskosten: zet ze op "privé". Ze kunnen wel aftrekbaar zijn in je aangifte, als aan de voorwaarden is voldaan. Geef je boekhouder door hoeveel je betaalde.',
       note: 'AOV: uitgaven voor inkomensvoorzieningen. Lijfrente/pensioen: binnen jaarruimte/reserveringsruimte.',
       status: 'info',
     });

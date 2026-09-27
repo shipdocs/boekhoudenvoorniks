@@ -142,6 +142,13 @@ export interface AppSettings {
   carPrivateUse: boolean | null;
   /** cataloguswaarde van de auto van de zaak, incl. btw en bpm (centen) */
   carCatalogValue: number | null;
+  /**
+   * Trok je btw af op de aanschaf of de kosten van de auto? (null = nog niet gevraagd) Zonder aftrek
+   * (bijvoorbeeld een marge-auto en geen aftrek op de kosten) is er geen btw-correctie.
+   */
+  carVatDeducted: boolean | null;
+  /** Btw-correctie privégebruik: forfait (2,7%/1,5%) of werkelijk privégebruik uit een rittenadministratie. */
+  carVatMethod: 'forfait' | 'werkelijk' | null;
   /** jaar waarin de auto in gebruik is genomen voor je bedrijf */
   carInUseSince: number | null;
   /** maand (1–12) van ingebruikname; alleen nodig voor het eerste jaar (naar rato) */
@@ -150,6 +157,16 @@ export interface AppSettings {
   startYear: number | null;
   /** hoe vaak je de startersaftrek al gebruikte vóór `asOfYear` (zo opgegeven door de gebruiker) */
   startersaftrekUsed: { count: number; asOfYear: number };
+  /**
+   * Jaren waarin je de startersaftrek echt gebruikte (zoals in je aangiftes), of null als dat nog
+   * niet is opgegeven. Gaat boven de aanname "sinds opgeven elk jaar gebruikt".
+   */
+  startersaftrekYears: number[] | null;
+  /**
+   * Niet-gerealiseerde zelfstandigenaftrek uit eerdere jaren die je nog mag verrekenen, in hele euro's
+   * (staat op je aanslag; zelf bijhouden wat al verrekend is).
+   */
+  nietGerealiseerdeZelfstandigenaftrek: number;
   /**
    * Zakelijk deel van telefoon & internet in procenten (null = nog niet opgegeven, dan 100%).
    * Het privédeel telt bij de winst en de btw daarover mag je niet aftrekken.
@@ -215,6 +232,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   carUse: 'onbekend',
   carPrivateUse: null,
   carCatalogValue: null,
+  carVatDeducted: null,
+  carVatMethod: null,
   carInUseSince: null,
   carInUseMonth: null,
   phoneInternetBusinessPct: null,
@@ -223,6 +242,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   taxCheckAcknowledgedYear: 0,
   startYear: null,
   startersaftrekUsed: { count: 0, asOfYear: 0 },
+  startersaftrekYears: null,
+  nietGerealiseerdeZelfstandigenaftrek: 0,
   vatPotAccountId: null,
   incomeTaxEstimate: true,
   urencriterium: true,
@@ -255,6 +276,8 @@ function validateSettings(settings: AppSettings): void {
   integerInRange(settings.smtp.port, 1, 65535, 'SMTP-poort');
   integerInRange(settings.partnerHours, 0, 8784, 'Partneruren');
   if (settings.startYear !== null) integerInRange(settings.startYear, 1800, new Date().getFullYear() + 1, 'Startjaar');
+  integerInRange(settings.nietGerealiseerdeZelfstandigenaftrek, 0, 1_000_000, 'Niet-gerealiseerde zelfstandigenaftrek');
+  if (settings.startersaftrekYears !== null && (!Array.isArray(settings.startersaftrekYears) || settings.startersaftrekYears.length > 10 || settings.startersaftrekYears.some((y) => !Number.isInteger(y) || y < 1800 || y > 9999))) throw new ValidationError('Ongeldige jaren voor de startersaftrek');
   if (settings.phoneInternetBusinessPct !== null) integerInRange(settings.phoneInternetBusinessPct, 0, 100, 'Zakelijk percentage telefoon en internet');
   if (!['maand', 'kwartaal', 'jaar'].includes(settings.vatPeriod)) throw new ValidationError('Ongeldige btw-periode');
   if (!['hoog', 'laag', 'nul', 'verlegd', 'vrijgesteld'].includes(settings.defaultVatCode)) throw new ValidationError('Ongeldige standaard-btw');
@@ -266,6 +289,12 @@ function validateSettings(settings: AppSettings): void {
   for (const [label, value] of [['Bedrijfsnaam', settings.company.name], ['SMTP-server', settings.smtp.host], ['E-mailtekst', settings.invoiceEmailBody]] as const) {
     if (value.length > 20_000) throw new ValidationError(`${label} is te lang`);
   }
+}
+
+/** Staat de kleineondernemersregeling aan? (dan geen recht op aftrek van voorbelasting) */
+export function korActive(db: Db): boolean {
+  const row = db.prepare(`SELECT value FROM settings WHERE key = 'kor'`).get() as { value: string } | undefined;
+  return row ? JSON.parse(row.value) === true : DEFAULT_SETTINGS.kor;
 }
 
 export class SettingsService {

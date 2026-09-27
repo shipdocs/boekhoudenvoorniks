@@ -204,8 +204,9 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           </div>
         )}
         {lines.some((l) => l.vatCode === 'laag') && trade?.items.find((i) => i.note) && <p className="small muted">ℹ️ {trade.items.find((i) => i.note)!.note}</p>}
-        {lines.some((l) => l.vatCode === 'verlegd' || l.vatCode === 'icp') && <p className="small muted">ℹ️ Btw verlegd gebruik je als onderaannemer voor een andere aannemer: jij rekent geen btw, je klant regelt die. Het btw-nummer van je klant moet bekend zijn.</p>}
-        {lines.some((l) => l.vatCode === 'icp' || l.vatCode === 'export') && <p className="small muted">⚠️ Buitenland (0%) is nog niet door een belastingexpert nagekeken: laat je boekhouder meekijken. Verkoop je aan particulieren in het buitenland? Dat kan de app nog niet.</p>}
+        {lines.some((l) => l.vatCode === 'verlegd') && <p className="small muted">ℹ️ Btw verlegd gebruik je alleen als de wet dat voorschrijft, bijvoorbeeld als onderaannemer in de bouw: jij rekent geen btw, je klant regelt die. Alleen een btw-nummer van je klant is niet genoeg. Het btw-nummer van je klant moet wel op de factuur.</p>}
+        {lines.some((l) => l.vatCode === 'icp' || l.vatCode === 'icp-dienst') && <p className="small muted">ℹ️ Bedrijf in een ander EU-land: kies "goederen" als je spullen levert die naar dat land gaan, en "dienst" voor werk of advies. Dat moet kloppen voor de opgave aan de Belastingdienst. Werk je aan een gebouw of grond? Dan gelden andere regels: vraag je boekhouder.</p>}
+        {lines.some((l) => l.vatCode === 'export' || l.vatCode === 'dienst-buiten-eu') && <p className="small muted">ℹ️ Klant buiten de EU: spullen die de EU uitgaan zijn "goederen" (0%, in je aangifte). Een dienst aan een bedrijf buiten de EU komt niet in je Nederlandse aangifte. Is de klant een particulier, of werk je aan een gebouw in Nederland? Vraag je boekhouder welke btw geldt.</p>}
 
         <div className="row end" style={{ marginTop: 16 }}>
           <table className="sumtable">

@@ -102,7 +102,7 @@ async function copyForAccountant(d: OverviewData): Promise<void> {
     '',
     'Bedragen:',
     ...d.items.filter((i) => i.amount !== null).map(item),
-    `Belastbare winst uit onderneming (geschat): € ${d.breakdown.taxableIncome.toLocaleString('nl-NL')}`,
+    `Belastbare winst uit onderneming (geschat): € ${d.breakdown.taxableProfit.toLocaleString('nl-NL')}${d.breakdown.taxableProfit < 0 ? ' (verlies)' : ''}`,
     '',
     'Aandachtspunten:',
     ...d.items.filter((i) => i.amount === null).map(item),
@@ -154,7 +154,7 @@ function Overview({ year }: { year: number }) {
                 <td className="num">{hiddenTotal > 0 ? '+ ' : ''}{euro(hiddenTotal)}</td>
               </tr>
             )}
-            <tr className="total"><td>Winst waarover je belasting betaalt (schatting)</td><td className="num">€ {b.taxableIncome.toLocaleString('nl-NL')}</td></tr>
+            <tr className="total"><td>{b.taxableProfit < 0 ? 'Verlies (schatting)' : 'Winst waarover je belasting betaalt (schatting)'}</td><td className="num">{b.taxableProfit < 0 ? '− ' : ''}€ {Math.abs(b.taxableProfit).toLocaleString('nl-NL')}</td></tr>
           </tbody>
         </table>
       </div>
@@ -287,8 +287,13 @@ function EditAsset({ asset, onClose, onSaved }: { asset: AssetItem; onClose: () 
   const [years, setYears] = useState(String(asset.lifetime_months / 12));
   const [residual, setResidual] = useState<number | null>(asset.residual);
   const [car, setCar] = useState(!!asset.kia_excluded);
+  const [inUseOn, setInUseOn] = useState(asset.in_use_on ?? asset.acquired_on);
+  const canMoveStart = asset.booked === 0;
   const save = async () => {
-    const r = await run(() => api.assets.update(asset.id, { name, lifetimeMonths: Math.round(Number(years.replace(',', '.')) * 12), residual: residual ?? 0, kiaExcluded: car }), 'Opgeslagen');
+    const r = await run(
+      () => api.assets.update(asset.id, { name, lifetimeMonths: Math.round(Number(years.replace(',', '.')) * 12), residual: residual ?? 0, kiaExcluded: car, ...(canMoveStart && inUseOn !== (asset.in_use_on ?? asset.acquired_on) ? { inUseOn } : {}) }),
+      'Opgeslagen',
+    );
     if (r) onSaved();
   };
   return (
@@ -299,6 +304,11 @@ function EditAsset({ asset, onClose, onSaved }: { asset: AssetItem; onClose: () 
           <Field label="Hoeveel jaar gebruik je het?" hint="minstens 5"><input value={years} onChange={(e) => setYears(e.target.value)} inputMode="decimal" /></Field>
           <Field label="Wat is het daarna nog waard?" hint="meestal € 0"><MoneyInput value={residual} onChange={setResidual} /></Field>
         </div>
+        {canMoveStart && (
+          <Field label="Sinds wanneer gebruik je het?" hint="later dan de aankoop? Dan beginnen de kosten per jaar pas vanaf die datum">
+            <input type="date" value={inUseOn} min={asset.acquired_on} onChange={(e) => setInUseOn(e.target.value)} />
+          </Field>
+        )}
         <label className="row small"><input type="checkbox" checked={car} onChange={(e) => setCar(e.target.checked)} /> Dit is een personenauto (daarvoor krijg je geen extra aftrek)</label>
         <p className="small muted">Wat al als kosten is geteld, blijft staan. De wijziging geldt voor de jaren die nog komen.</p>
       </div>
@@ -314,20 +324,29 @@ function SellAsset({ asset, onClose, onSaved }: { asset: AssetItem; onClose: () 
   const { run, busy } = useAction();
   const [date, setDate] = useState(today());
   const [price, setPrice] = useState<number | null>(0);
+  const [kind, setKind] = useState<'verkocht' | 'prive'>('verkocht');
   const save = async () => {
-    const r = await run(() => api.assets.dispose(asset.id, date, price ?? 0), 'Verwerkt');
+    const r = await run(() => api.assets.dispose(asset.id, date, price ?? 0, kind), 'Verwerkt');
     if (r) onSaved();
   };
   return (
     <Modal title={`${asset.name} verkocht of weggedaan`} onClose={onClose}>
       <div className="grid">
+        <div className="chips">
+          <button className={kind === 'verkocht' ? 'selected' : ''} onClick={() => setKind('verkocht')}>Verkocht of weggegooid</button>
+          <button className={kind === 'prive' ? 'selected' : ''} onClick={() => setKind('prive')}>Ik gebruik het voortaan privé</button>
+        </div>
         <div className="grid cols-2">
           <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-          <Field label="Verkoopprijs excl. btw" hint="0 als je het weggooit"><MoneyInput value={price} onChange={setPrice} /></Field>
+          {kind === 'verkocht'
+            ? <Field label="Verkoopprijs excl. btw" hint="0 als je het weggooit"><MoneyInput value={price} onChange={setPrice} /></Field>
+            : <Field label="Wat is het nu waard?" hint="wat je er bij verkoop voor zou krijgen"><MoneyInput value={price} onChange={setPrice} /></Field>}
         </div>
         <p className="small muted">
-          De app telt de kosten tot de verkoopdatum en haalt het uit je lijst. Heb je het verkocht? Maak dan ook een gewone factuur voor de koper (met btw): die zorgt voor de opbrengst.
-          Verkoop je het binnen 5 jaar na aankoop? Dan moet je misschien een deel van de extra aftrek terugbetalen. De app rekent dat uit en zet het in de notities voor je boekhouder.
+          {kind === 'verkocht'
+            ? 'De app telt de kosten tot de verkoopdatum en haalt het uit je lijst. Heb je het verkocht? Maak dan ook een gewone factuur voor de koper (met btw): die zorgt voor de opbrengst.'
+            : 'Neem je het mee naar privé, dan telt dat voor de belasting als verkoop tegen wat het nu waard is. Heb je bij aankoop btw teruggekregen? Dan moet je over de waarde misschien btw betalen: vraag je boekhouder.'}{' '}
+          Binnen 5 jaar na aankoop moet je misschien een deel van de extra aftrek terugbetalen. De app rekent dat uit en zet het in de notities voor je boekhouder.
         </p>
       </div>
       <div className="row end" style={{ marginTop: 14 }}>

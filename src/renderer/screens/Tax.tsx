@@ -45,8 +45,10 @@ export function Tax({ periodKey }: { periodKey?: string }) {
         <div className="card">
           <h3>Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw omdat je weinig omzet hebt</h3>
           <p className="muted">Je rekent geen btw en hoeft geen btw-aangifte te doen. Houd je omzet in de gaten: boven € 20.000 per jaar vervalt de KOR.</p>
+          <p className="muted">Btw die je betaalt op je aankopen krijg je met de KOR niet terug. De app telt die btw daarom bij je kosten (of bij de prijs van je investering).</p>
           <Button onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Btw-instellingen</Button>
         </div>
+        <KorReverseCharge year={year} />
         <IncomeTaxCard />
       </div>
     );
@@ -302,28 +304,56 @@ function VatDetails({ periodKey, code, title, onClose }: { periodKey: string; co
 function IcpCard({ periodKey }: { periodKey: string }) {
   const { run } = useAction();
   const icp = useLoad(() => api.vat.icp(periodKey), [periodKey]);
-  if (!icp.data || icp.data.lines.length === 0) return null;
+  if (!icp.data || (icp.data.lines.length === 0 && icp.data.corrections.length === 0)) return null;
   return (
     <div className="card" style={{ marginTop: 14 }}>
       <h2 style={{ marginTop: 0 }}>Verkopen aan EU-bedrijven {icp.data.period.label} (ICP-opgaaf)</h2>
-      <p className="muted small">Deze verkopen geef je apart op in Mijn Belastingdienst Zakelijk, per klant. Kies daar per regel "goederen" of "diensten".</p>
+      <p className="muted small">Deze verkopen geef je apart op in Mijn Belastingdienst Zakelijk, per klant. Goederen en diensten geef je apart op; de soort staat erbij (volgt uit de btw-keuze op de factuur).</p>
       <table>
-        <thead><tr><th>Land</th><th>Btw-nummer</th><th>Klant</th><th className="num">Bedrag</th></tr></thead>
+        <thead><tr><th>Land</th><th>Btw-nummer</th><th>Klant</th><th>Soort</th><th className="num">Bedrag</th></tr></thead>
         <tbody>
           {icp.data.lines.map((l) => (
-            <tr key={`${l.relationId}`}>
+            <tr key={`${l.relationId}-${l.kind}`}>
               <td>{l.country}</td>
               <td>{l.vatNumber || '—'}{l.problems.length > 0 && <div className="small" style={{ color: 'var(--danger, #b42318)' }}>⚠️ {l.problems.join(', ')}</div>}</td>
               <td>{l.name}</td>
+              <td>{l.kind}</td>
               <td className="num">€ {l.amountEuro.toLocaleString('nl-NL')}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {icp.data.corrections.length > 0 && (
+        <div className="notice warn small" style={{ marginTop: 10 }}>
+          <strong>Correcties op een eerdere opgaaf</strong>
+          <div>Deze bedragen horen bij een eerdere periode. Verbeter daarvoor de ICP-opgaaf van die periode in Mijn Belastingdienst Zakelijk. Dat staat los van je btw-aangifte en een eventuele suppletie.</div>
+          <ul>
+            {icp.data.corrections.map((l) => <li key={`${l.periodKey}-${l.relationId}-${l.kind}`}>{l.periodLabel}: {l.name} ({l.vatNumber || 'geen btw-nummer'}, {l.kind}) € {l.amountEuro.toLocaleString('nl-NL')}</li>)}
+          </ul>
+        </div>
+      )}
       <div className="notice small" style={{ marginTop: 10 }}>{BUITENLAND_TEXT}</div>
       <div className="row" style={{ marginTop: 10 }}>
         <Button small onClick={() => void run(() => api.vat.exportIcpCsv(periodKey), 'Opgeslagen')}>ICP-overzicht (CSV)</Button>
       </div>
+    </div>
+  );
+}
+
+/** KOR: verlegde btw blijft verschuldigd. */
+function KorReverseCharge({ year }: { year: number }) {
+  const list = useLoad(() => api.vat.korReverseCharge(year), [year]);
+  if (!list.data || list.data.length === 0) return null;
+  return (
+    <div className="notice warn" style={{ marginTop: 14 }}>
+      <strong>Btw die naar jou verlegd is: die moet je wel betalen</strong>
+      <div className="small">
+        Je kocht iets zonder btw op de factuur (btw verlegd, bijvoorbeeld van een onderaannemer of een buitenlands bedrijf als Google of Meta).
+        Ook met de KOR moet je die btw aangeven en betalen, en je mag hem niet aftrekken. Vraag je boekhouder hoe je die aangifte doet.
+      </div>
+      <ul className="small">
+        {list.data.map((p) => <li key={p.period.key}>{p.period.label}: <Euro cents={p.btw} /></li>)}
+      </ul>
     </div>
   );
 }
@@ -359,9 +389,12 @@ function IncomeTaxCard() {
               {b.kia > 0 && <tr><td>− Extra aftrek voor investeringen (KIA)</td><td className="num">{euro(b.kia)}</td></tr>}
               <tr><td>− Aftrek voor zelfstandigen</td><td className="num">{euro(b.zelfstandigenaftrek)}</td></tr>
               {b.startersaftrek > 0 && <tr><td>− Extra aftrek voor starters</td><td className="num">{euro(b.startersaftrek)}</td></tr>}
+              {b.zelfstandigenaftrekVerrekend > 0 && <tr><td>− Aftrek voor zelfstandigen uit eerdere jaren</td><td className="num">{euro(b.zelfstandigenaftrekVerrekend)}</td></tr>}
+              {b.meewerkaftrek > 0 && <tr><td>− Aftrek omdat je partner meewerkt</td><td className="num">{euro(b.meewerkaftrek)}</td></tr>}
               <tr><td>− Korting voor kleine bedrijven <span className="muted">(vast deel van je winst is onbelast)</span></td><td className="num">{euro(b.mkbWinstvrijstelling)}</td></tr>
-              <tr><td>= Hierover betaal je belasting</td><td className="num">{euro(b.taxableIncome)}</td></tr>
+              <tr><td>= {b.taxableProfit < 0 ? 'Verlies (daarover betaal je niets)' : 'Hierover betaal je belasting'}</td><td className="num">{euro(b.taxableProfit)}</td></tr>
               <tr><td>Inkomstenbelasting</td><td className="num">{euro(b.box1)}</td></tr>
+              {b.tariefsaanpassing > 0 && <tr><td>+ Minder voordeel van je aftrek bij een hoog inkomen (tariefsaanpassing)</td><td className="num">{euro(b.tariefsaanpassing)}</td></tr>}
               <tr><td>− Kortingen die iedereen krijgt (heffingskortingen)</td><td className="num">{euro(b.heffingskortingen)}</td></tr>
               <tr><td>+ Zorgpremie (Zvw)</td><td className="num">{euro(b.zvw)}</td></tr>
               <tr><td><strong>Totaal</strong></td><td className="num"><strong>{euro(b.total)}</strong></td></tr>

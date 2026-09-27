@@ -28,11 +28,11 @@ export function CustomerVatHint({ country, vatNumber }: { country: string | null
   const land = countryName(country);
   switch (customerVatSituation(country, vatNumber)) {
     case 'eu-bedrijf':
-      return <div className="notice small">Bedrijf in {land}: meestal verleg je de btw naar de klant. Op de factuur kies je dan <strong>Bedrijf in een ander EU-land (0%)</strong>. Uitzondering: werk aan een gebouw of grond in Nederland, dan gewoon Nederlandse btw. Twijfel je? Vraag je boekhouder.</div>;
+      return <div className="notice small">Bedrijf in {land}: meestal verleg je de btw naar de klant. Op de factuur kies je dan <strong>Dienst aan een bedrijf in een ander EU-land</strong>, of bij spullen <strong>Goederen naar een bedrijf in een ander EU-land</strong>. Uitzondering: werk aan een gebouw of grond in Nederland, dan gewoon Nederlandse btw. Twijfel je? Vraag je boekhouder.</div>;
     case 'eu-particulier':
       return <div className="notice small">Particulier in {land}: je rekent gewoon Nederlandse btw, zolang je in totaal minder dan {formatEuro(EU_B2C_THRESHOLD)} per jaar aan particulieren in andere EU-landen verkoopt. Is dit een bedrijf? Vul dan het btw-nummer in.</div>;
     case 'buiten-eu':
-      return <div className="notice small">Klant buiten de EU ({land}): voor spullen die de EU uitgaan en voor de meeste diensten aan bedrijven reken je 0%. Op de factuur kies je dan <strong>Klant buiten de EU (0%)</strong>. Werk je in Nederland voor deze klant, of is het een particulier? Vraag je boekhouder welke btw geldt.</div>;
+      return <div className="notice small">Klant buiten de EU ({land}): spullen die de EU uitgaan zijn <strong>goederen buiten de EU (0%)</strong>. Een dienst aan een bedrijf buiten de EU is meestal niet in Nederland belast: kies dan <strong>Dienst aan een bedrijf buiten de EU</strong>; die komt niet in je aangifte. Werk je in Nederland voor deze klant, of is het een particulier? Vraag je boekhouder welke btw geldt.</div>;
     case 'onbekend':
       return <div className="notice warn small">Deze landcode kennen we niet. Gebruik twee letters, bijvoorbeeld DE of US.</div>;
     default:

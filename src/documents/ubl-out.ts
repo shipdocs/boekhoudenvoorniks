@@ -35,7 +35,10 @@ export function unitCode(unit: string | null | undefined): string {
 export function taxCategory(vatCode: string, percentage: number): { id: string; percent: number; reason?: string; reasonCode?: string } {
   if (vatCode === 'verlegd') return { id: 'AE', percent: 0, reason: 'Btw verlegd', reasonCode: 'VATEX-EU-AE' };
   if (vatCode === 'icp') return { id: 'K', percent: 0, reason: 'Intracommunautaire levering', reasonCode: 'VATEX-EU-IC' };
+  if (vatCode === 'icp-dienst') return { id: 'AE', percent: 0, reason: 'Btw verlegd', reasonCode: 'VATEX-EU-AE' };
   if (vatCode === 'export') return { id: 'G', percent: 0, reason: 'Uitvoer buiten de EU', reasonCode: 'VATEX-EU-G' };
+  // geen 'O' (niet belast): EN 16931 verbiedt dan het btw-nummer van de verkoper op de factuur
+  if (vatCode === 'dienst-buiten-eu') return { id: 'G', percent: 0, reason: 'Dienst buiten de EU, niet belast in Nederland', reasonCode: 'VATEX-EU-G' };
   if (vatCode === 'vrijgesteld') return { id: 'E', percent: 0, reason: 'Vrijgesteld van btw (KOR)' };
   if (percentage === 0) return { id: 'Z', percent: 0 };
   return { id: 'S', percent: percentage };

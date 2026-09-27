@@ -9,6 +9,10 @@ import type { AppSettings } from '../settings/settings';
  * Forfait van de Belastingdienst: 2,7% van de cataloguswaarde (incl. btw en bpm); vanaf het 5e jaar
  * na het jaar van ingebruikname 1,5%. Alleen als je btw op de auto of de autokosten aftrok.
  * Alternatief: het werkelijke privégebruik uit een kilometeradministratie; dat laat de app aan de boekhouder.
+ *
+ * Niet automatisch: de gebruiker bevestigt eerst dat er btw is afgetrokken op de auto of de kosten, en
+ * kiest de methode. Een eigen bijdrage of een bijzondere historie (bijv. marge-auto) kan het bedrag
+ * veranderen; dat staat in de notitie voor de boekhouder.
  */
 export const CAR_PRIVATE_PCT = 0.027;
 export const CAR_PRIVATE_PCT_OLD = 0.015;
@@ -19,6 +23,8 @@ export type CarPrivateUse =
   | { state: 'n.v.t.' }
   /** privégebruik of cataloguswaarde nog niet ingevuld */
   | { state: 'onbekend' }
+  /** werkelijk privégebruik: het bedrag rekent de boekhouder uit (de app boekt niets) */
+  | { state: 'werkelijk' }
   /** `months`: over hoeveel maanden (12, of minder in het jaar van ingebruikname) */
   | { state: 'bekend'; amount: Cents; pct: number; catalogValue: Cents; months: number };
 
@@ -36,9 +42,14 @@ export function carPrivateUseEntries(db: Db, year: number): { id: number; entry_
     .all(`auto-prive:${year}`, ACCOUNTS.btwPriveGebruik) as { id: number; entry_date: IsoDate; amount: Cents }[];
 }
 
-export function carPrivateUse(s: Pick<AppSettings, 'carUse' | 'carPrivateUse' | 'carCatalogValue' | 'carInUseSince' | 'carInUseMonth' | 'kor'>, year: number): CarPrivateUse {
-  if (s.kor || s.carUse !== 'zakelijk' || s.carPrivateUse === false) return { state: 'n.v.t.' };
+export function carPrivateUse(
+  s: Pick<AppSettings, 'carUse' | 'carPrivateUse' | 'carCatalogValue' | 'carInUseSince' | 'carInUseMonth' | 'kor'> & Partial<Pick<AppSettings, 'carVatDeducted' | 'carVatMethod'>>,
+  year: number,
+): CarPrivateUse {
+  if (s.kor || s.carUse !== 'zakelijk' || s.carPrivateUse === false || s.carVatDeducted === false) return { state: 'n.v.t.' };
   if (s.carInUseSince !== null && s.carInUseSince > year) return { state: 'n.v.t.' };
+  if (s.carPrivateUse === true && s.carVatDeducted === true && s.carVatMethod === 'werkelijk') return { state: 'werkelijk' };
+  if (s.carVatDeducted !== true || s.carVatMethod !== 'forfait') return { state: 'onbekend' };
   if (s.carPrivateUse !== true || !s.carCatalogValue || s.carCatalogValue <= 0) return { state: 'onbekend' };
   // in het jaar van ingebruikname naar rato: vanaf de maand van ingebruikname
   const firstYear = s.carInUseSince === year;
