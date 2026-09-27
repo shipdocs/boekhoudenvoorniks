@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Notification, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, delimiter, dirname, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -9,7 +9,7 @@ import { createSmtpMailer, verifySmtp } from '../documents/smtp-mailer';
 import { createApi, type Api } from './api';
 import { renderPdf } from './pdf';
 import { SafeStorageSecretStore } from './secrets';
-import { backupTo, dailyBackup, restoreFrom } from './backup';
+import { createBackupBundle, dailyBackup, isBackupBundle, restoreCompleteBackup, restoreLegacyDatabase, validateBackup, validateCompleteBackup, writeCompleteBackup } from './backup';
 import { wipeDatabase } from './reset';
 import { seedDemo } from '../demo/demo';
 import { decryptBackup, encryptBackup, isEncryptedBackup } from './encrypted-backup';
@@ -25,6 +25,7 @@ import { ImapSource } from '../mail/imap-source';
 import { Updates } from './updates';
 import { startMcp } from '../mcp/start';
 import type { PollResult } from '../mail/mail-intake';
+import { isPathInside } from './path-security';
 
 const SMTP_SECRET = 'smtp:password';
 const IMAP_SECRET = 'imap:password';
@@ -204,11 +205,11 @@ function initServices(): void {
       throw new Error(`Toevoegen lukte niet. Gebruik de opdracht hieronder in een terminal.${out.trim() ? ` (${out.trim().slice(0, 200)})` : ''}`);
     },
     readAttachment(path) {
-      if (!path.startsWith(join(dataDir(), 'bijlagen'))) throw new Error('Alleen bijlagen van de administratie');
+      if (!isPathInside(join(dataDir(), 'bijlagen'), path)) throw new Error('Alleen bijlagen van de administratie');
       return readFileSync(path);
     },
     async openPath(path) {
-      if (!path.startsWith(join(dataDir(), 'bijlagen'))) throw new Error('Alleen bijlagen van de administratie kunnen geopend worden');
+      if (!isPathInside(join(dataDir(), 'bijlagen'), path)) throw new Error('Alleen bijlagen van de administratie kunnen geopend worden');
       const err = await shell.openPath(path);
       if (err) throw new Error(err);
     },
@@ -245,11 +246,11 @@ function initServices(): void {
     },
     async backupNow() {
       const result = await dialog.showSaveDialog(mainWindow!, {
-        defaultPath: join(app.getPath('documents'), `boekhouding-backup-${new Date().toISOString().slice(0, 10)}.sqlite`),
-        filters: [{ name: 'Back-up', extensions: ['sqlite'] }],
+        defaultPath: join(app.getPath('documents'), `boekhouding-backup-${new Date().toISOString().slice(0, 10)}.gbbackup`),
+        filters: [{ name: 'Complete back-up', extensions: ['gbbackup'] }],
       });
       if (result.canceled || !result.filePath) return null;
-      await backupTo(db, result.filePath);
+      await writeCompleteBackup(db, dataDir(), result.filePath);
       return result.filePath;
     },
     async exportEncrypted(password) {
@@ -258,24 +259,14 @@ function initServices(): void {
         filters: [{ name: 'Versleutelde back-up', extensions: ['gbbackup'] }],
       });
       if (result.canceled || !result.filePath) return null;
-      const tmp = join(tmpdir(), `gb-export-${randomUUID()}.sqlite`);
-      try {
-        await backupTo(db, tmp);
-        writeFileSync(result.filePath, encryptBackup(readFileSync(tmp), password));
-      } finally {
-        try {
-          unlinkSync(tmp);
-        } catch {
-          /* al weg */
-        }
-      }
+      writeFileSync(result.filePath, encryptBackup(await createBackupBundle(db, dataDir()), password), { mode: 0o600 });
       return result.filePath;
     },
     async restoreBackup(password) {
       const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile'], filters: [{ name: 'Back-up', extensions: ['sqlite', 'gbbackup'] }] });
       if (result.canceled || !result.filePaths[0]) return false;
-      let source = result.filePaths[0];
-      const raw = readFileSync(source);
+      const selected = result.filePaths[0];
+      const raw = readFileSync(selected);
       // ontsleutelde kopie: altijd opruimen, ook bij annuleren of een fout
       let decrypted: string | null = null;
       const cleanup = () => {
@@ -288,22 +279,32 @@ function initServices(): void {
         decrypted = null;
       };
       try {
+        let backupData: Buffer = Buffer.from(raw);
         if (isEncryptedBackup(raw)) {
           if (!password) throw new Error('Dit is een versleutelde back-up: vul eerst het wachtwoord in');
-          decrypted = source = join(tmpdir(), `gb-restore-${randomUUID()}.sqlite`);
-          writeFileSync(source, decryptBackup(raw, password), { mode: 0o600 });
+          backupData = decryptBackup(raw, password);
+        }
+        const complete = isBackupBundle(backupData);
+        if (complete) validateCompleteBackup(backupData);
+        else {
+          decrypted = join(tmpdir(), `gb-restore-${randomUUID()}.sqlite`);
+          writeFileSync(decrypted, backupData, { mode: 0o600 });
+          validateBackup(decrypted);
         }
         const confirm = await dialog.showMessageBox(mainWindow!, {
           type: 'warning',
           buttons: ['Annuleren', 'Terugzetten'],
           defaultId: 0,
           message: 'Weet je zeker dat je deze back-up wilt terugzetten?',
-          detail: 'De huidige administratie wordt vervangen (er wordt eerst een kopie van gemaakt). De app start daarna opnieuw.',
+          detail: complete
+            ? 'De huidige administratie en bijlagen worden vervangen (er wordt eerst een kopie van gemaakt). De app start daarna opnieuw.'
+            : 'Dit is een oude databaseback-up zonder bijlagen. Alleen de boekhouding wordt vervangen; ontbrekende bonnen of facturen kunnen hiermee niet worden hersteld.',
         });
         if (confirm.response !== 1) return false;
-        await dailyBackup(db, join(dataDir(), 'backups'));
+        await dailyBackup(db, join(dataDir(), 'backups'), dataDir());
         db.close();
-        restoreFrom(source, dbPath());
+        if (complete) restoreCompleteBackup(backupData, dbPath(), dataDir());
+        else restoreLegacyDatabase(decrypted!, dbPath());
       } finally {
         cleanup();
       }
@@ -362,7 +363,7 @@ function registerIpc(): void {
 
 async function backgroundTasks(): Promise<void> {
   try {
-    await dailyBackup(db, join(dataDir(), 'backups'));
+    await dailyBackup(db, join(dataDir(), 'backups'), dataDir());
   } catch (e) {
     console.error('Back-up mislukt', e);
   }
@@ -501,6 +502,10 @@ if (MCP_MODE) {
 
   app.whenReady().then(() => {
     if (!SMOKE_TEST) backupBeforeUpgrade();
+    // De renderer gebruikt geen browserrechten; wijs onverwachte camera-, locatie- en
+    // notificatieverzoeken daarom standaard af.
+    session.defaultSession.setPermissionCheckHandler(() => false);
+    session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
     initServices();
     registerIpc();
     createWindow();

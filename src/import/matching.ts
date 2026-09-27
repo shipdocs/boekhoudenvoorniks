@@ -81,6 +81,17 @@ export class MatchingEngine {
         if (score >= 40) out.push({ kind: 'factuur', invoiceId: inv.id, label: `Factuur ${inv.number} — ${inv.relation_name}`, score, reasons });
       }
     } else {
+      for (const inv of openInvoices ?? this.invoices.listOpen()) {
+        if (inv.open_amount >= 0 || !inv.credit_of_invoice_id) continue;
+        const reasons: string[] = [];
+        let score = 0;
+        if (inv.open_amount === t.amount) (score += 50, reasons.push('terugbetaald bedrag klopt'));
+        if (mentions(text, inv.number)) (score += 60, reasons.push(`creditnummer ${inv.number} staat in de omschrijving`));
+        const rel = this.relations.get(inv.relation_id);
+        if (t.counter_iban && rel.iban && t.counter_iban === rel.iban) (score += 50, reasons.push('rekeningnummer van de klant'));
+        else if (nameSimilar(t.counter_name, inv.relation_name)) (score += 15, reasons.push('naam lijkt op klant'));
+        if (score >= 40) out.push({ kind: 'factuur', invoiceId: inv.id, label: `Terugbetaling credit ${inv.number} — ${inv.relation_name}`, score, reasons });
+      }
       for (const p of openPurchases ?? this.purchases.listOpen()) {
         const reasons: string[] = [];
         let score = 0;

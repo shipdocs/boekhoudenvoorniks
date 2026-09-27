@@ -2,6 +2,18 @@
 
 ## Nog niet uitgebracht
 
+### Hersteld
+- Auditfiles volgen nu de XAF 3.2-volgorde en taxonomiestructuur en zijn tegen het XAF-schema gevalideerd.
+- Handmatige, dagelijkse en versleutelde back-ups bevatten voortaan ook alle bijlagen, met controlesommen en padherstel bij terugzetten op een andere computer. Oude `.sqlite`-back-ups blijven leesbaar met een waarschuwing dat ze geen bijlagen bevatten.
+- Een terugbetaling aan een klant kan vanuit een negatieve bankmutatie aan de open creditfactuur worden gekoppeld.
+- Na een mislukte eerste factuurmail wordt niet meer automatisch een betalingsherinnering verstuurd.
+- Op Linux worden SMTP- en API-geheimen niet opgeslagen wanneer Electron alleen de onveilige `basic_text`-opslag kan aanbieden.
+- Bijlagepaden, instellingen, browserrechten en het verpakte Electron-programma zijn verder afgeschermd.
+
+### Techniek
+- PDF.js wordt alleen geladen wanneer een PDF wordt bekeken; de renderer is daardoor opgesplitst in kleinere bundles.
+- De Vite- en Vitest-configuratie gebruikt expliciete ESM-bestanden en geeft geen toekomstige config-loaderwaarschuwing meer.
+
 ## 0.4.0 — overstappen met een lopende administratie
 
 - **Overstap-hulp** (#82, #83, #84): had je al een administratie, in een ander programma, in Excel of bij je
@@ -238,7 +250,6 @@
   het als vraag op Vandaag, anders gebeurt het vanzelf.
 - Releases krijgen de tekst uit deze CHANGELOG. De controlegetallen (`SHA256SUMS-*.txt`) gebruiken de
   bestandsnamen zoals ze op GitHub staan, zodat `sha256sum -c` de AppImage ook echt controleert.
-
 ## 0.3.0 — aftrekposten, demo en gewone taal
 
 ### Duidelijker

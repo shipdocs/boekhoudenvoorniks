@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useLoad } from '../ui';
 import { CategoryChoice, InvestmentHint, investmentInfo } from './Purchases';
@@ -10,8 +10,6 @@ import { ReaderChoice } from './Reader';
 import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
 import type { DocumentResult } from '../../intake/types';
 import { formatDateNl } from '../../shared/dates';
-
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 // pdf.js gebruikt Map.getOrInsertComputed, dat oudere Chromium-versies (bv. die van de e2e-tests) nog niet kennen
 for (const proto of [Map.prototype, WeakMap.prototype] as unknown as Record<string, unknown>[]) {
@@ -26,18 +24,17 @@ for (const proto of [Map.prototype, WeakMap.prototype] as unknown as Record<stri
     });
   }
 }
-
 type Box = [number, number, number, number];
 
 /** Zoveel PDF-pagina's laten we hooguit zien (een bon of factuur is zelden langer). */
 const MAX_PAGES = 20;
 
 /** Eén PDF-pagina op een canvas. */
-function PdfPage({ doc, number, onSize }: { doc: pdfjs.PDFDocumentProxy; number: number; onSize: (size: { width: number; height: number }) => void }) {
+function PdfPage({ doc, number, onSize }: { doc: PDFDocumentProxy; number: number; onSize: (size: { width: number; height: number }) => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     let cancelled = false;
-    let render: pdfjs.RenderTask | null = null;
+    let render: RenderTask | null = null;
     void (async () => {
       const page = await doc.getPage(number);
       const viewport = page.getViewport({ scale: 2 });
@@ -62,7 +59,7 @@ function PdfPage({ doc, number, onSize }: { doc: pdfjs.PDFDocumentProxy; number:
 /** Toont het document (alle pagina's onder elkaar); tekent een markering rond het geselecteerde veld (bbox). */
 function DocumentView({ id, mime, highlight, pageSizes }: { id: number; mime: string; highlight: { bbox?: Box; page?: number } | null; pageSizes?: { width: number; height: number }[] }) {
   const file = useLoad(() => api.documents.file(id), [id]);
-  const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null);
+  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [natural, setNatural] = useState<Record<number, { width: number; height: number }>>({});
   const [broken, setBroken] = useState(false);
   const pages = useRef<Record<number, HTMLDivElement | null>>({});
@@ -70,21 +67,22 @@ function DocumentView({ id, mime, highlight, pageSizes }: { id: number; mime: st
   useEffect(() => {
     if (!file.data || mime !== 'application/pdf') return;
     let cancelled = false;
-    const task = pdfjs.getDocument({ data: Uint8Array.from(atob(file.data.base64), (c) => c.charCodeAt(0)) });
-    task.promise.then(
-      (doc) => {
-        if (!cancelled) setPdf(doc);
-      },
-      () => {
-        if (!cancelled) setBroken(true);
-      },
-    );
+    let task: PDFDocumentLoadingTask | null = null;
+    void (async () => {
+      const pdfjs = await import('pdfjs-dist');
+      pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+      task = pdfjs.getDocument({ data: Uint8Array.from(atob(file.data!.base64), (c) => c.charCodeAt(0)) });
+      const doc = await task.promise;
+      if (!cancelled) setPdf(doc);
+    })().catch(() => {
+      if (!cancelled) setBroken(true);
+    });
     return () => {
       cancelled = true;
       setPdf(null);
       setNatural({});
       setBroken(false);
-      void task.destroy();
+      void task?.destroy();
     };
   }, [file.data, mime]);
 

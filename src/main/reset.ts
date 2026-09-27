@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, unlinkSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import type { Db } from '../db/database';
-import { backupTo } from './backup';
+import { writeCompleteBackup } from './backup';
 
 /**
  * Staat er iets in deze administratie dat de moeite van bewaren waard is? Een demo niet;
@@ -24,17 +24,16 @@ export function hasRealData(db: Db): boolean {
  * sluiten en de bestanden verwijderen. Het journaal is onveranderlijk (triggers), dus leegmaken
  * met DELETE kan niet — een nieuwe, lege database wel. De aanroeper opent daarna een nieuwe.
  *
- * Bijlagen: bij echte gegevens blijven ze staan, want de veiligheidskopie verwijst ernaar (absolute
- * paden) en moet na terugzetten compleet zijn. Bij een demo of lege administratie is er geen kopie;
- * dan gaan de bijlagen van deze administratie (bv. bonnetjes die je in de demo toevoegde) mee weg.
+ * Bij echte gegevens bevat de veiligheidskopie ook alle bijlagen. Daarna wordt de administratie,
+ * inclusief de lokale bijlagenmap, gewist.
  * Geeft het pad van de veiligheidskopie terug, of null als die niet nodig was.
  */
 export async function wipeDatabase(db: Db, file: string, backupDir: string, attachmentsDir?: string): Promise<string | null> {
   let backup: string | null = null;
   if (hasRealData(db)) {
     mkdirSync(backupDir, { recursive: true });
-    backup = join(backupDir, `voor-wissen-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
-    await backupTo(db, backup);
+    backup = join(backupDir, `voor-wissen-${new Date().toISOString().replace(/[:.]/g, '-')}.gbbackup`);
+    await writeCompleteBackup(db, resolve(attachmentsDir ? join(attachmentsDir, '..') : join(file, '..')), backup);
   } else if (attachmentsDir) {
     const root = resolve(attachmentsDir) + sep;
     const rows = db.prepare('SELECT file_path AS p FROM documents UNION SELECT attachment_path FROM purchase_invoices WHERE attachment_path IS NOT NULL').all() as { p: string }[];
@@ -42,5 +41,6 @@ export async function wipeDatabase(db: Db, file: string, backupDir: string, atta
   }
   db.close();
   for (const suffix of ['', '-wal', '-shm']) if (existsSync(file + suffix)) unlinkSync(file + suffix);
+  if (attachmentsDir && existsSync(attachmentsDir)) rmSync(attachmentsDir, { recursive: true, force: true });
   return backup;
 }

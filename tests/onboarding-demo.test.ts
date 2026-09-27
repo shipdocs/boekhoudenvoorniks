@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -7,6 +7,7 @@ import { migrate, openDatabase } from '../src/db/database';
 import { createServices, MemorySecretStore } from '../src/services';
 import { seedDemo } from '../src/demo/demo';
 import { hasRealData, wipeDatabase } from '../src/main/reset';
+import { readBackupBundle } from '../src/main/backup';
 import { DEFAULT_SETTINGS } from '../src/settings/settings';
 import { ONBOARDING_STEPS, hasOnboardingUpdate, markSeen, pendingSteps, type OnboardingStep } from '../src/shared/onboarding';
 import { isValidIban } from '../src/shared/validation';
@@ -155,12 +156,13 @@ describe('wissen', () => {
     expect(existsSync(join(dir, 'backups'))).toBe(false);
   });
 
-  it('bijlagen: weg bij de demo, bewaard bij echte gegevens (de kopie verwijst ernaar)', async () => {
+  it('bijlagen: worden gewist en bij echte gegevens eerst in de complete back-up gezet', async () => {
     dir = mkdtempSync(join(tmpdir(), 'gb-wis-'));
     const file = join(dir, 'boekhouding.sqlite');
     const bijlagen = join(dir, 'bijlagen');
     mkdirSync(bijlagen);
     const bon = (name: string) => {
+      mkdirSync(bijlagen, { recursive: true });
       const p = join(bijlagen, name);
       writeFileSync(p, 'x');
       return p;
@@ -173,12 +175,14 @@ describe('wissen', () => {
     const los = bon('los.pdf');
     await wipeDatabase(demo.db, file, join(dir, 'backups'), bijlagen);
     expect(existsSync(demoBon)).toBe(false);
-    expect(existsSync(los)).toBe(true);
+    expect(existsSync(los)).toBe(false);
 
     const real = emptyServices(openDatabase(file));
     const echteBon = bon('echt.pdf');
     real.purchases.create({ invoiceDate: '2026-09-20', description: 'bon', attachmentPath: echteBon, lines: [{ account: 'WBedAlkOvr', netAmount: 1000, vatCode: 'geen', vatAmount: 0 }] });
-    expect(await wipeDatabase(real.db, file, join(dir, 'backups'), bijlagen)).toBeTruthy();
-    expect(existsSync(echteBon)).toBe(true);
+    const backup = await wipeDatabase(real.db, file, join(dir, 'backups'), bijlagen);
+    expect(backup).toBeTruthy();
+    expect(existsSync(echteBon)).toBe(false);
+    expect(readBackupBundle(readFileSync(backup!)).get('bijlagen/echt.pdf')?.toString()).toBe('x');
   });
 });

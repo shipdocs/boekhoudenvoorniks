@@ -116,6 +116,18 @@ describe('exports & dashboard', () => {
     expect(s.exports.journalCsv('2026-01-01', '2026-12-31')).toContain('WOmzNodOdh');
   });
 
+  it('volgt de XAF 3.2-volgorde voor relaties en gebruikt taxonomy zonder wrapper', () => {
+    const { s, klant } = setup();
+    s.relations.update(klant.id, { kvk_number: '12345678', vat_number: 'NL123456789B01' });
+    const xml = s.exports.auditfile('2026-01-01', '2026-12-31', s.settings.get().company, '0.3.0');
+    const relation = xml.slice(xml.indexOf('<customerSupplier>'), xml.indexOf('</customerSupplier>'));
+    expect(relation.indexOf('<commerceNr>')).toBeLessThan(relation.indexOf('<custSupTp>'));
+    expect(relation.indexOf('<taxRegIdent>')).toBeLessThan(relation.indexOf('<custSupTp>'));
+    expect(xml).toContain('<taxonomy><taxoRef>');
+    expect(xml).toContain('<conceptRef>');
+    expect(xml).not.toContain('<taxonomies>');
+  });
+
   it('dashboard: omzet, openstaand, BTW-schuld', () => {
     const { s, klant } = setup();
     s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-01', lines: [{ description: 'x', quantity: 1, unitPrice: 100000, vatCode: 'hoog' }] }).id);
