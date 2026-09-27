@@ -13,47 +13,119 @@ import { formatDateNl } from '../../shared/dates';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
+// pdf.js gebruikt Map.getOrInsertComputed, dat oudere Chromium-versies (bv. die van de e2e-tests) nog niet kennen
+for (const proto of [Map.prototype, WeakMap.prototype] as unknown as Record<string, unknown>[]) {
+  if (!proto.getOrInsertComputed) {
+    Object.defineProperty(proto, 'getOrInsertComputed', {
+      configurable: true,
+      writable: true,
+      value(this: Map<unknown, unknown>, key: unknown, make: (key: unknown) => unknown) {
+        if (!this.has(key)) this.set(key, make(key));
+        return this.get(key);
+      },
+    });
+  }
+}
+
 type Box = [number, number, number, number];
 
-/** Toont het document; tekent een markering rond het geselecteerde veld (bbox). */
-function DocumentView({ id, mime, highlight, pageSize }: { id: number; mime: string; highlight: { bbox?: Box; page?: number } | null; pageSize?: { width: number; height: number } }) {
-  const file = useLoad(() => api.documents.file(id), [id]);
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+/** Zoveel PDF-pagina's laten we hooguit zien (een bon of factuur is zelden langer). */
+const MAX_PAGES = 20;
 
+/** Eén PDF-pagina op een canvas. */
+function PdfPage({ doc, number, onSize }: { doc: pdfjs.PDFDocumentProxy; number: number; onSize: (size: { width: number; height: number }) => void }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    if (!file.data || mime !== 'application/pdf' || !canvas.current) return;
     let cancelled = false;
+    let render: pdfjs.RenderTask | null = null;
     void (async () => {
-      const bytes = Uint8Array.from(atob(file.data!.base64), (c) => c.charCodeAt(0));
-      const doc = await pdfjs.getDocument({ data: bytes }).promise;
-      const page = await doc.getPage(highlight?.page ?? 1);
+      const page = await doc.getPage(number);
       const viewport = page.getViewport({ scale: 2 });
       if (cancelled || !canvas.current) return;
       canvas.current.width = viewport.width;
       canvas.current.height = viewport.height;
-      await page.render({ canvas: canvas.current, canvasContext: canvas.current.getContext('2d')!, viewport }).promise;
-      setNatural({ width: viewport.width / 2, height: viewport.height / 2 });
-    })();
+      render = page.render({ canvas: canvas.current, canvasContext: canvas.current.getContext('2d')!, viewport });
+      await render.promise;
+      if (!cancelled) onSize({ width: viewport.width / 2, height: viewport.height / 2 });
+    })().catch(() => {
+      // afgebroken (ander document) of een kapotte pagina: die blijft leeg, de rest werkt
+    });
     return () => {
       cancelled = true;
+      render?.cancel();
     };
-  }, [file.data, mime, highlight?.page]);
+    // alleen opnieuw tekenen bij een ander document of een andere pagina (onSize is elke render nieuw)
+  }, [doc, number]);
+  return <canvas ref={canvas} aria-label={`Pagina ${number}`} />;
+}
+
+/** Toont het document (alle pagina's onder elkaar); tekent een markering rond het geselecteerde veld (bbox). */
+function DocumentView({ id, mime, highlight, pageSizes }: { id: number; mime: string; highlight: { bbox?: Box; page?: number } | null; pageSizes?: { width: number; height: number }[] }) {
+  const file = useLoad(() => api.documents.file(id), [id]);
+  const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null);
+  const [natural, setNatural] = useState<Record<number, { width: number; height: number }>>({});
+  const [broken, setBroken] = useState(false);
+  const pages = useRef<Record<number, HTMLDivElement | null>>({});
+
+  useEffect(() => {
+    if (!file.data || mime !== 'application/pdf') return;
+    let cancelled = false;
+    const task = pdfjs.getDocument({ data: Uint8Array.from(atob(file.data.base64), (c) => c.charCodeAt(0)) });
+    task.promise.then(
+      (doc) => {
+        if (!cancelled) setPdf(doc);
+      },
+      () => {
+        if (!cancelled) setBroken(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+      setPdf(null);
+      setNatural({});
+      setBroken(false);
+      void task.destroy();
+    };
+  }, [file.data, mime]);
+
+  // markering op een andere pagina: daarheen scrollen
+  const highlightPage = highlight?.bbox ? highlight.page ?? 1 : null;
+  useEffect(() => {
+    if (highlightPage && highlightPage > 1) pages.current[highlightPage]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [highlightPage, pdf]);
 
   if (!file.data) return <div className="doc-view" style={{ minHeight: 300 }}><ErrorBox error={file.error} /></div>;
   if (mime === 'application/xml') return <div className="card flat">📄 E-factuur (XML) — alle gegevens komen rechtstreeks uit het bestand.</div>;
-  const size = pageSize ?? natural;
-  const box = highlight?.bbox && size ? highlight.bbox : null;
+
+  const marker = (page: number) => {
+    const size = pageSizes?.[page - 1] ?? natural[page];
+    const box = highlight?.bbox && (highlight.page ?? 1) === page && size ? highlight.bbox : null;
+    if (!box || !size) return null;
+    return <div className="bbox" style={{ left: `${(box[0] / size.width) * 100}%`, top: `${(box[1] / size.height) * 100}%`, width: `${((box[2] - box[0]) / size.width) * 100}%`, height: `${((box[3] - box[1]) / size.height) * 100}%` }} />;
+  };
+
+  if (mime !== 'application/pdf') {
+    return (
+      <div className="doc-view">
+        <div className="doc-page">
+          <img src={`data:${mime};base64,${file.data.base64}`} alt="Document" onLoad={(e) => setNatural({ 1: { width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight } })} />
+          {marker(1)}
+        </div>
+      </div>
+    );
+  }
+  if (broken) return <div className="card flat">Dit PDF-bestand kunnen we hier niet laten zien. Het staat wel bewaard; je kunt de gegevens gewoon zelf invullen.</div>;
+  const count = pdf ? Math.min(pdf.numPages, MAX_PAGES) : 0;
   return (
-    <div className="doc-view">
-      {mime === 'application/pdf' ? (
-        <canvas ref={canvas} />
-      ) : (
-        <img src={`data:${mime};base64,${file.data.base64}`} alt="Document" onLoad={(e) => setNatural({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })} />
-      )}
-      {box && size && (
-        <div className="bbox" style={{ left: `${(box[0] / size.width) * 100}%`, top: `${(box[1] / size.height) * 100}%`, width: `${((box[2] - box[0]) / size.width) * 100}%`, height: `${((box[3] - box[1]) / size.height) * 100}%` }} />
-      )}
+    <div className="doc-view" style={pdf ? undefined : { minHeight: 300 }}>
+      {pdf &&
+        Array.from({ length: count }, (_, i) => i + 1).map((n) => (
+          <div className="doc-page" key={n} ref={(el) => void (pages.current[n] = el)}>
+            <PdfPage doc={pdf} number={n} onSize={(size) => setNatural((prev) => (prev[n]?.width === size.width && prev[n]?.height === size.height ? prev : { ...prev, [n]: size }))} />
+            {marker(n)}
+          </div>
+        ))}
+      {pdf && pdf.numPages > MAX_PAGES && <p className="sub" style={{ padding: 12, margin: 0 }}>Nog {pdf.numPages - MAX_PAGES} pagina's die we hier niet laten zien.</p>}
     </div>
   );
 }
@@ -114,7 +186,6 @@ export function DocumentReview({ id }: { id: number }) {
   // wat je in het veld ziet, is wat er geboekt wordt
   const showVat = form.business && !form.splits && (form.vatCode === 'hoog' || form.vatCode === 'laag');
   const activeField = fields.find((f) => f.key === active)?.field ?? (active?.startsWith('line-') ? r?.lines?.[Number(active.slice(5))] ?? null : null);
-  const pageSize = r?.pageSizes?.[(activeField?.page ?? 1) - 1];
 
   return (
     <div className="page">
@@ -126,7 +197,7 @@ export function DocumentReview({ id }: { id: number }) {
         <Button kind="ghost" onClick={() => go({ screen: 'aankopen' })}>← Aankopen</Button>
       </div>
       <div className="split">
-        <DocumentView id={d.id} mime={d.mime_type} highlight={activeField} pageSize={pageSize} />
+        <DocumentView id={d.id} mime={d.mime_type} highlight={activeField} pageSizes={r?.pageSizes} />
         <div>
           <div className="card" style={{ padding: 8 }}>
             {fields.map((f) => {
