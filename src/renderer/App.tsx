@@ -22,6 +22,7 @@ import { TermsGate } from './screens/Terms';
 import { TERMS_VERSION } from '../shared/legal';
 import { hasOnboardingUpdate } from '../shared/onboarding';
 import { DemoBanner } from './screens/Reset';
+import { UpdateBanner } from './screens/UpdateBanner';
 
 const NAV: { screen: Screen; label: string; icon: string; also?: Screen[] }[] = [
   { screen: 'home', label: 'Vandaag', icon: '🏠' },
@@ -150,6 +151,7 @@ export function App() {
         )}
         <main className="main" style={route.screen === 'welkom' ? { gridColumn: '1 / -1' } : undefined}>
           {settings.demoMode && route.screen !== 'welkom' && <DemoBanner />}
+          {route.screen !== 'welkom' && <UpdateBanner />}
           {screen}
         </main>
       </div>
