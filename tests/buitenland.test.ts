@@ -23,7 +23,7 @@ describe('Buitenland (#16)', () => {
 
     const icp = s.vat.icp('2026-Q3');
     expect(icp.lines).toEqual([expect.objectContaining({ name: 'Bau GmbH', country: 'DE', vatNumber: 'DE123456789', amount: 250000, amountEuro: 2500, problems: [] })]);
-    expect(s.vat.icpCsv('2026-Q3')).toContain('DE;DE123456789;"Bau GmbH";2500.00;2500');
+    expect(s.vat.icpCsv('2026-Q3')).toContain('DE;DE123456789;"Bau GmbH";goederen;2500.00;2500');
 
     // e-factuur: categorie K met leveringsland
     const xml = s.invoices.ublXml(inv.id);
@@ -32,27 +32,31 @@ describe('Buitenland (#16)', () => {
     expect(xml).toMatch(/<cac:Delivery>.*<cbc:IdentificationCode>DE<\/cbc:IdentificationCode>/);
   });
 
-  it('houdt ICP en rubriek 3b gelijk bij gewone correcties en suppleties', () => {
+  it('ICP-correcties staan los van de btw-suppletie (fiscale review, vraag 10a)', () => {
     const { s, klant } = setup();
     const de = s.relations.create({ name: 'Bau GmbH', address: 'Hauptstraße 1', postcode: '47533', city: 'Kleve', country: 'DE', vat_number: 'DE123456789' });
     s.vat.markSubmitted('2026-Q3');
 
-    // Een kleine correctie gaat mee in Q4, zowel in 3b als in ICP.
+    // Een kleine correctie gaat in de btw-aangifte mee in Q4 (3b). Voor de ICP-opgaaf is het
+    // een correctie op Q3: die staat apart, niet in het Q4-totaal.
     s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-08-01', lines: [{ description: 'klein', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
     s.invoices.finalize(s.invoices.createDraft({ relationId: de.id, invoiceDate: '2026-08-02', lines: [{ description: 'EU klein', quantity: 1, unitPrice: 25000, vatCode: 'icp' }] }).id);
     expect(rubrieken(s, '2026-Q4')['3b']!.omzet).toBe(25000);
-    expect(s.vat.icp('2026-Q4').total).toBe(25000);
+    expect(s.vat.icp('2026-Q4').total).toBe(0);
+    expect(s.vat.icp('2026-Q4').corrections).toEqual([expect.objectContaining({ periodKey: '2026-Q3', name: 'Bau GmbH', kind: 'goederen', amount: 25000 })]);
+    expect(s.vat.calculate('2026-Q4').warnings.join(' ')).toMatch(/ICP-opgaaf van die periode/);
 
-    // Door de grote binnenlandse correctie moet de hele correctie op Q3 via een
-    // suppletie. De bijbehorende EU-regel hoort dan niet meer in Q4/ICP.
+    // Door de grote binnenlandse correctie gaat de btw-correctie op Q3 via een suppletie (3b in Q4
+    // wordt 0), maar de ICP-correctie blijft gewoon zichtbaar.
     s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-08-03', lines: [{ description: 'groot', quantity: 1, unitPrice: 1000000, vatCode: 'hoog' }] }).id);
     expect(s.vat.calculate('2026-Q4').corrections).toMatchObject([{ periodKey: '2026-Q3', suppletie: true }]);
     expect(rubrieken(s, '2026-Q4')['3b']!.omzet).toBe(0);
-    expect(s.vat.icp('2026-Q4').total).toBe(0);
+    expect(s.vat.icp('2026-Q4').corrections).toHaveLength(1);
 
     s.vat.markSuppletieSubmitted('2026-Q3');
     expect(rubrieken(s, '2026-Q4')['3b']!.omzet).toBe(0);
-    expect(s.vat.icp('2026-Q4').total).toBe(0);
+    expect(s.vat.icp('2026-Q4').corrections).toHaveLength(1);
+    expect(s.vat.icpCsv('2026-Q4')).toContain('2026-Q3;DE;DE123456789;"Bau GmbH";goederen;250.00;250');
   });
 
   it('ICP naar een Nederlandse klant of zonder btw-nummer wordt geweigerd', () => {
