@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setup } from './helpers';
-import { onlineInvoiceDomain, usableAttachments, type MailAttachment, type MailMessage, type MailSource } from '../src/mail/mail-intake';
+import { looksLikeReceipt, onlineInvoiceDomain, receiptHtml, usableAttachments, type MailAttachment, type MailMessage, type MailSource } from '../src/mail/mail-intake';
+import { makePdf } from './pdf';
 
 const UBL = new Uint8Array(readFileSync(join(__dirname, 'fixtures/ubl-invoice.xml')));
 const pdf = (text = 'factuur') => new TextEncoder().encode(`%PDF-1.4\n${text}\n%%EOF`);
@@ -166,5 +167,61 @@ describe('inkomende post', () => {
     expect((await s.mail.poll(box)).documents).toBe(0);
     expect(await s.mail.poll(box)).toMatchObject({ documents: 1, errors: 1 });
     expect(s.mail.summary().counts.fout).toBe(1);
+  });
+});
+
+describe('bon in de mailtekst (geen bijlage)', () => {
+  // HTML → een echte (minimale) PDF met de tekstregels, zoals de app dat in Electron doet
+  const toPdf = async (html: string) => makePdf(html.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').split('\n').map((l) => l.trim()).filter(Boolean));
+  const bonText = 'Bedankt voor je bestelling bij Bol\n1x Kitpistool € 12,99\n1x Afplaktape € 4,99\nTotaal € 17,98\nBetaald met iDEAL op 20-09-2026';
+
+  it('herkennen: een woord als bestelling/factuur én een bedrag', () => {
+    expect(looksLikeReceipt({ subject: 'Je bestelling 1234', text: bonText })).toBe(true);
+    expect(looksLikeReceipt({ subject: 'Nieuwsbrief', text: 'Nu 20% korting op alles! Kijk snel op de site voor de aanbiedingen van deze week.' })).toBe(false);
+    expect(looksLikeReceipt({ subject: 'Uw factuur staat klaar', text: 'Bekijk hem op https://mijn.kpn.com/facturen – inloggen met je account.' })).toBe(false);
+    expect(looksLikeReceipt({ subject: 'Receipt', text: 'Thanks for your order with Uber\nTotal: 23.40\nPaid with Visa ending 1234' })).toBe(true);
+  });
+
+  it('alleen de platte tekst: geen plaatjes, links of scripts uit de mail', () => {
+    const html = receiptHtml({ fromName: 'Shop', fromAddress: 'noreply@shop.example', subject: '<script>x</script>Bestelling', date: '2026-09-20', text: 'Totaal € 5,00 <img src="https://track.example/p.gif">' });
+    expect(html).not.toMatch(/<script>|<img/);
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).toContain('&lt;img');
+  });
+
+  it('bij het ophalen: de mail wordt een PDF-bon die op controle wacht, en gaat naar Verwerkt', async () => {
+    const { s, box } = withMail();
+    s.mail.setPdfRenderer(toPdf);
+    box.add('INBOX', { uid: 5, fromAddress: 'noreply@bol.example', fromName: 'Bol', subject: 'Je bestelling 1234', text: bonText });
+    expect(await s.mail.poll(box, '2026-09-21')).toMatchObject({ documents: 1, other: 0 });
+    const doc = s.intake.list()[0]!;
+    expect(doc.status).toBe('controle');
+    expect(doc.original_name).toMatch(/^mail 2026-09-01 Je bestelling 1234\.pdf$/);
+    expect(doc.result?.total?.value).toBe(1798);
+    expect(box.moved).toEqual([{ uid: 5, from: 'INBOX', to: 'Verwerkt' }]);
+    expect(s.mail.summary().recent[0]!.note).toBe('mailtekst als bon bewaard');
+  });
+
+  it('"Toch als bon bewaren" voor een mail die bleef liggen', async () => {
+    const { s, box } = withMail();
+    s.mail.setPdfRenderer(toPdf);
+    box.add('INBOX', { uid: 7, fromAddress: 'info@parkeren.example', subject: 'Parkeersessie', text: 'Je parkeersessie in Utrecht is beëindigd. Kosten 6,40 euro, afgeschreven van je creditcard.' });
+    expect(await s.mail.poll(box)).toMatchObject({ other: 1, documents: 0 });
+    const rec = s.mail.summary().recent[0]!;
+    expect(rec.outcome).toBe('overig');
+    const after = await s.mail.saveAsReceipt(box, rec.id);
+    expect(after).toMatchObject({ outcome: 'bijlage', note: 'mailtekst als bon bewaard', moved_to: 'Verwerkt' });
+    expect(s.intake.list()).toHaveLength(1);
+    await expect(s.mail.saveAsReceipt(box, rec.id)).rejects.toThrow(/al verwerkt/);
+  });
+
+  it('staat de mail niet meer op dezelfde plek, dan een duidelijke melding', async () => {
+    const { s, box } = withMail();
+    s.mail.setPdfRenderer(toPdf);
+    box.add('INBOX', { uid: 8, messageId: '<a@x>', subject: 'Hallo', text: 'Gewoon een bericht zonder bedrag erin, niets bijzonders hier.' });
+    await s.mail.poll(box);
+    const rec = s.mail.summary().recent[0]!;
+    box.folders.get('INBOX')!.messages[0]!.messageId = '<ander@x>';
+    await expect(s.mail.saveAsReceipt(box, rec.id)).rejects.toThrow(/niet meer op dezelfde plek/);
   });
 });
