@@ -8,6 +8,7 @@ import type { VatService } from '../btw/btw';
 import { addDays, assertIsoDate, diffDays, formatDateNl, periodFor, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
+import { parseUblSalesInvoice } from '../intake/ubl';
 
 /**
  * Overstappen met een lopende administratie.
@@ -35,7 +36,7 @@ import { ValidationError } from '../shared/validation';
 
 export type OpeningKind = 'klant' | 'leverancier' | 'bezit' | 'btw' | 'lening' | 'vordering' | 'schuld' | 'resultaat' | 'btw-periode';
 
-export type OpeningInput =
+export type OpeningInput = (
   | { kind: 'klant'; relationName: string; number: string; invoiceDate: IsoDate; dueDate?: IsoDate | null; amount: Cents }
   | { kind: 'leverancier'; relationName: string; reference?: string | null; invoiceDate: IsoDate; dueDate?: IsoDate | null; amount: Cents }
   | {
@@ -51,9 +52,14 @@ export type OpeningInput =
       remainingYears: number;
     }
   | { kind: 'btw'; direction: 'betalen' | 'terug'; amount: Cents; description?: string }
-  | { kind: 'lening' | 'vordering' | 'schuld'; description: string; amount: Cents }
+  /** account 'kas': contant geld in de kas in plaats van een overige vordering */
+  | { kind: 'lening' | 'vordering' | 'schuld'; description: string; amount: Cents; account?: 'kas' }
   | { kind: 'resultaat'; omzet: Cents; materiaal: Cents; auto: Cents; overig: Cents }
-  | { kind: 'btw-periode'; omzetHoog: Cents; btwHoog: Cents; omzetLaag: Cents; btwLaag: Cents; omzetNul: Cents; voorbelasting: Cents };
+  | { kind: 'btw-periode'; omzetHoog: Cents; btwHoog: Cents; omzetLaag: Cents; btwLaag: Cents; omzetNul: Cents; voorbelasting: Cents }
+) & {
+  /** 'xaf': overgenomen uit een auditfile (opnieuw inlezen vervangt het) */
+  bron?: 'xaf';
+};
 
 export interface OpeningItem {
   id: number;
@@ -116,7 +122,7 @@ export interface SwitchoverCheck {
   section: SectionKey;
 }
 
-export type SectionKey = 'papieren' | 'bank' | 'klanten' | 'leveranciers' | 'bezit' | 'btw' | 'resultaat' | 'overig' | 'klaar';
+export type SectionKey = 'papieren' | 'import' | 'bank' | 'klanten' | 'leveranciers' | 'bezit' | 'btw' | 'resultaat' | 'overig' | 'klaar';
 
 export interface Requirement {
   key: string;
@@ -506,6 +512,30 @@ export class SwitchoverService {
     });
   }
 
+  /**
+   * Openstaande facturen als UBL (e-factuur) uit het vorige programma: elk bestand wordt een factuur
+   * die nog open staat. Al (deels) betaald? Dan past de gebruiker het bedrag daarna aan.
+   */
+  saveFromUbl(files: { name: string; xml: string }[]): { added: number; skipped: string[] } {
+    const skipped: string[] = [];
+    let added = 0;
+    // elk bestand apart (save heeft een eigen transactie): één fout bestand houdt de rest niet tegen
+    {
+      for (const f of files) {
+        try {
+          const u = parseUblSalesInvoice(f.xml);
+          if (u.amount <= 0) throw new ValidationError('creditnota of factuur zonder bedrag');
+          if (this.db.prepare('SELECT 1 FROM invoices WHERE number = ?').get(u.number)) throw new ValidationError(`factuur ${u.number} staat er al in`);
+          this.save({ kind: 'klant', relationName: u.customer || 'Onbekende klant', number: u.number, invoiceDate: u.invoiceDate, dueDate: u.dueDate, amount: u.amount });
+          added++;
+        } catch (e) {
+          skipped.push(`${f.name}: ${(e as Error).message}`);
+        }
+      }
+    }
+    return { added, skipped };
+  }
+
   remove(id: number): void {
     tx(this.db, () => {
       const item = this.hydrate(this.row(id));
@@ -670,7 +700,8 @@ export class SwitchoverService {
       case 'schuld': {
         const amount = input.kind === 'vordering' ? input.amount : -input.amount;
         const description = input.description.trim();
-        const entryId = this.post(`Startbalans: ${description}`, date, [signedLine(OTHER_ACCOUNT[input.kind], amount, { description })]);
+        const account = input.kind === 'vordering' && input.account === 'kas' ? ACCOUNTS.kas : OTHER_ACCOUNT[input.kind];
+        const entryId = this.post(`Startbalans: ${description}`, date, [signedLine(account, amount, { description })]);
         set(description, amount, entryId);
         return;
       }
@@ -788,6 +819,7 @@ export class SwitchoverService {
     const startOfYear = date.endsWith('-01-01');
     const split = this.splitPeriod(date);
     const list: Requirement[] = [
+      { key: 'auditfile', label: `Een auditfile (.xaf) uit je vorige boekhoudprogramma, tot en met ${before}`, hint: 'Heb je een programma gebruikt (Exact, e-Boekhouden, Moneybird, SnelStart, Jortt, …)? Exporteer daar een "auditfile". Dan vult de app bijna alles hieronder zelf in.', optional: true },
       { key: 'bank', label: `Bankafschriften vanaf ${day}`, hint: 'Van al je zakelijke rekeningen, ook je spaarrekening en creditcard. Download ze bij je bank als CAMT.053 (XML) of MT940: daar staat ook het saldo in. CSV kan ook.', optional: false },
       { key: 'saldo', label: `Het saldo van elke rekening op ${before}`, hint: 'Staat op je afschrift of in je internetbankieren. Uit een CAMT- of MT940-bestand rekent de app het zelf uit.', optional: false },
       { key: 'klanten', label: `Facturen die klanten op ${before} nog niet hadden betaald`, hint: 'Nummer, klant, datum en bedrag (inclusief btw). Uit je vorige programma of je eigen lijstje.', optional: false },
@@ -857,12 +889,12 @@ export class SwitchoverService {
     }
     const position = this.position();
     const equity = s.switchover.accountantEquity;
-    if (position && equity !== null && date.endsWith('-01-01') && position.eigenVermogen !== equity) {
+    if (position && equity !== null && position.eigenVermogen !== equity) {
       out.push({
         key: 'eigen-vermogen',
         level: 'let-op',
-        title: `Verschil met de balans van je boekhouder: ${formatEuro(Math.abs(position.eigenVermogen - equity))}`,
-        detail: `Volgens de app zit er ${formatEuro(position.eigenVermogen)} van jou in de zaak, volgens je boekhouder ${formatEuro(equity)}. Kijk of er een rekening, factuur of bezitting ontbreekt of dubbel staat.`,
+        title: `Verschil met je vorige administratie: ${formatEuro(Math.abs(position.eigenVermogen - equity))}`,
+        detail: `Volgens de app zit er ${formatEuro(position.eigenVermogen)} van jou in de zaak, volgens je vorige administratie ${formatEuro(equity)}. Kijk of er een rekening, factuur of bezitting ontbreekt of dubbel staat.`,
         section: 'klaar',
       });
     }
@@ -978,6 +1010,7 @@ export class SwitchoverService {
     const startOfYear = !!date?.endsWith('-01-01');
     const sections: SwitchoverState['sections'] = [
       { key: 'papieren', title: 'Wat heb je nodig?', done: !!date, needed: true },
+      { key: 'import', title: 'Uit je vorige programma', done: items.some((i) => i.data.bron === 'xaf'), needed: true },
       { key: 'bank', title: 'Bankrekeningen', done: !!date && banks.length > 0 && !bad('bank'), needed: true },
       { key: 'klanten', title: 'Klanten die nog moeten betalen', done: kinds.has('klant') || cfg.status === 'klaar', needed: true },
       { key: 'leveranciers', title: 'Rekeningen die jij nog moet betalen', done: kinds.has('leverancier') || cfg.status === 'klaar', needed: true },
