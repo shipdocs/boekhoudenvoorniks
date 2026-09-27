@@ -2,6 +2,8 @@
 
 ## Nog niet uitgebracht
 
+## 0.3.6 — automatisch bijwerken, zichtbaar en uit te zetten
+
 - **Automatisch bijwerken, maar zichtbaar**: staat standaard aan. De app kijkt nu elke 4 uur (niet alleen bij
   het opstarten), downloadt op de achtergrond en installeert als je de app sluit. Bovenaan verschijnt
   "Versie … staat klaar" met *Wat is er nieuw?* en *Nu herstarten*; de app herstart nooit vanzelf midden in je
