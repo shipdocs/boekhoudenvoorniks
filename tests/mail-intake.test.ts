@@ -127,10 +127,19 @@ describe('inkomende post', () => {
   });
 
   it('kopie van je eigen factuur (bcc) wordt geen inkoop', async () => {
-    const { s, box } = withMail();
+    const { s, box, klant } = withMail();
     s.settings.update({ smtp: { ...s.settings.get().smtp, fromEmail: 'piet@example.nl' } });
-    box.add('INBOX', { uid: 1, fromAddress: 'piet@example.nl', attachments: [att('2026-0001.pdf', pdf())] });
+    const inv = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-01', lines: [{ description: 'Werk', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
+    box.add('INBOX', { uid: 1, fromAddress: 'piet@example.nl', subject: `Factuur ${inv.number} van Stukadoorsbedrijf Piet`, attachments: [att('bon.jpg', jpg(1))] });
     expect(await s.mail.poll(box)).toMatchObject({ documents: 0, other: 1 });
+  });
+
+  it('een factuur die je zelf doorstuurt vanaf je eigen adres wordt wel verwerkt', async () => {
+    const { s, box } = withMail();
+    s.settings.update({ company: { ...s.settings.get().company, email: 'info@piet.nl' } });
+    box.add('INBOX', { uid: 1, fromAddress: 'Info@Piet.nl', subject: 'Fwd: Knab Boekhoudpakket factuur 202609-018752', attachments: [att('factuur.jpg', jpg(3))] });
+    expect(await s.mail.poll(box)).toMatchObject({ documents: 1, other: 0 });
+    expect(s.intake.list()[0]!.status).toBe('controle');
   });
 
   it('even niet te lezen: de volgende keer opnieuw; blijft het mislukken, dan na 3 keer overslaan', async () => {

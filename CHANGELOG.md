@@ -2,6 +2,13 @@
 
 ## Nog niet uitgebracht
 
+- **Facturen doorsturen naar je administratie-mailbox werkt nu**: mail vanaf je eigen adres werd overgeslagen
+  (bedoeld voor kopieën van je eigen facturen), dus ook een factuur die je zelf doorstuurde. Nu wordt alleen
+  een kopie van je eigen factuur of offerte overgeslagen (herkend aan je factuur- of offertenummer). Ook een
+  mail die je "als bijlage" doorstuurt, wordt uitgepakt. Mail die eerder zo is overgeslagen, wordt na de
+  update nog één keer bekeken.
+- **"Nu ophalen"** zegt nu ook hoeveel mail er zonder factuur of bon was.
+
 - **"Oplossen" laat nu zien welke betalingen het zijn**: bij "… staat nog bij *weet ik nog niet*", geld
   "onderweg", geld bij je betaalprovider, contant geld onder nul of een spaarrekening onder nul opent een
   lijst met de boekingen die samen dat bedrag vormen. Met *Opnieuw indelen* ga je naar die betaling. Voorheen

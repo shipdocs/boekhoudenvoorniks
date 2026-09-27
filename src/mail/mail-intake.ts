@@ -180,6 +180,18 @@ export class MailIntakeService {
     return new Set([s.smtp.fromEmail, s.smtp.replyTo, s.smtp.user, s.mailIn.user, s.company.email].filter((a) => a && EMAIL.test(a)).map(normalizeAddress));
   }
 
+  /**
+   * Een kopie van je eigen factuur of offerte (bv. een stille kopie aan jezelf)? Herkend aan een van
+   * je eigen factuur- of offertenummers in het onderwerp of de bestandsnaam. Een factuur die je zelf
+   * doorstuurt (bv. "Fwd: factuur van Knab") is géén eigen factuur en wordt gewoon verwerkt.
+   */
+  private isOwnDocument(m: MailMessage): boolean {
+    const numbers = (this.db.prepare(`SELECT number FROM invoices WHERE number IS NOT NULL UNION SELECT number FROM quotes WHERE number IS NOT NULL`).all() as { number: string }[]).map((r) => r.number);
+    if (numbers.length === 0) return false;
+    const haystack = [m.subject, ...m.attachments.map((a) => a.filename)].join(' ');
+    return numbers.some((n) => new RegExp(`(^|[^\\w-])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\w-]|$)`).test(haystack));
+  }
+
   async poll(source: MailSource, asOf: IsoDate = today()): Promise<PollResult> {
     const cfg = this.settings.get().mailIn;
     const result: PollResult = { documents: 0, onlineInvoices: 0, fromCustomers: 0, other: 0, errors: 0, missingFolders: [] };
@@ -242,8 +254,8 @@ export class MailIntakeService {
         }
         const from = normalizeAddress(m.fromAddress);
         try {
-          if (own.has(from)) {
-            // bv. een kopie (bcc) van je eigen factuur: geen inkoop
+          if (own.has(from) && this.isOwnDocument(m)) {
+            // een kopie (bcc) van je eigen factuur of offerte: geen inkoop
             this.record(key, folder, uid, m, 'eigen');
             result.other++;
           } else if (customers.has(from)) {
