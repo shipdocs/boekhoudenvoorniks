@@ -35,6 +35,44 @@ describe('BTW-aangifte', () => {
     expect(rub['5g']!.btwEuro).toBe(208);
   });
 
+  it('houdt 5a, 5b, 5c, 5g en de samenvatting gelijk bij afronding per rubriek', () => {
+    const { s, klant } = setup();
+    // 21% van € 2,86 en 9% van € 6,67 zijn beide € 0,60 btw. Per rubriek naar
+    // beneden is dat € 0 + € 0; het onbewerkte totaal van € 1,20 mag 5a niet
+    // alsnog op € 1 zetten.
+    s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-01-10', lines: [
+      { description: 'hoog', quantity: 1, unitPrice: 286, vatCode: 'hoog' },
+      { description: 'laag', quantity: 1, unitPrice: 667, vatCode: 'laag' },
+    ] }).id);
+    // Voorbelasting van € 0,60 wordt in het voordeel van de ondernemer € 1.
+    s.quick.recordExpense({ date: '2026-01-12', description: 'Inkoop', categoryKey: 'materiaal', grossAmount: 346, vatCode: 'hoog', paidWith: 'kas' });
+
+    const report = s.vat.calculate('2026-Q1');
+    const rub = Object.fromEntries(report.rubrieken.map((x) => [x.code, x]));
+    expect(rub['1a']!.btw).toBe(60);
+    expect(rub['1b']!.btw).toBe(60);
+    expect(rub['5a']!.btwEuro).toBe(0);
+    expect(rub['5b']!.btwEuro).toBe(1);
+    expect(rub['5c']!.btwEuro).toBe(-1);
+    expect(rub['5g']!.btwEuro).toBe(-1);
+    expect(report.summary.teBetalenEuro).toBe(-1);
+    expect(rub['5c']!.btwEuro).toBe(rub['5a']!.btwEuro! - rub['5b']!.btwEuro!);
+
+    // Een creditcorrectie blijft met dezelfde methode eveneens rekenkundig sluitend.
+    const credit = s.invoices.createCreditNote(s.invoices.list()[0]!.id);
+    s.invoices.updateDraft(credit.id, { invoiceDate: '2026-01-20' });
+    s.invoices.finalize(credit.id);
+    const corrected = s.vat.calculate('2026-Q1');
+    const correctedRub = Object.fromEntries(corrected.rubrieken.map((x) => [x.code, x]));
+    expect(correctedRub['1a']!.btw).toBe(0);
+    expect(correctedRub['1b']!.btw).toBe(0);
+    expect(correctedRub['5a']!.btwEuro).toBe(0);
+    expect(correctedRub['5b']!.btwEuro).toBe(1);
+    expect(correctedRub['5c']!.btwEuro).toBe(correctedRub['5a']!.btwEuro! - correctedRub['5b']!.btwEuro!);
+    expect(correctedRub['5g']!.btwEuro).toBe(correctedRub['5c']!.btwEuro);
+    expect(corrected.summary.teBetalenEuro).toBe(correctedRub['5g']!.btwEuro);
+  });
+
   it('verlegde btw: verkoop in 1e, inkoop in 2a en 5b', () => {
     const { s, aannemer } = setup();
     s.invoices.finalize(s.invoices.createDraft({ relationId: aannemer.id, invoiceDate: '2026-04-10', lines: [{ description: 'Stucwerk nieuwbouw', quantity: 1, unitPrice: 500000, vatCode: 'verlegd' }] }).id);
