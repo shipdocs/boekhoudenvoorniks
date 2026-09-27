@@ -59,6 +59,12 @@ describe('doorgestuurde mail', () => {
     expect(text).toContain('Bijgaand de factuur.');
   });
 
+  it('een lange eigen tekst knipt de doorgestuurde mail niet weg', () => {
+    const text = mailText('handtekening '.repeat(3000), 'Totaal € 12,50', 20_000);
+    expect(text.length).toBeLessThanOrEqual(20_000);
+    expect(text).toContain('Totaal € 12,50');
+  });
+
   it('verborgen preheader vol onzichtbare tekens (Google, Apple) duwt de bon niet naar een volgende pagina', async () => {
     const pad = '&#847;&zwnj;&nbsp;'.repeat(400);
     const html = `<div style="display:none">Your receipt ${pad}</div><table><tr><td>Google Play</td></tr><tr><td>Total: € 1,99</td></tr></table>`;

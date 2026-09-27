@@ -52,9 +52,17 @@ export async function unpack(list: ParsedAttachment[], depth = 0): Promise<{ att
   return { attachments, forwardedText: texts.join('\n\n') };
 }
 
-/** De leesbare tekst van een mail: opgeschoond, met de tekst van een "als bijlage" doorgestuurde mail erachter. */
-export function mailText(text: string | undefined, forwardedText: string): string {
-  return cleanMailText([text ?? '', forwardedText].filter((t) => t.trim()).join('\n\n')).slice(0, 20_000);
+/**
+ * De leesbare tekst van een mail: opgeschoond, met de tekst van een "als bijlage" doorgestuurde mail
+ * erachter. Is er zo'n doorgestuurde mail, dan krijgt de eigen tekst (meestal "zie bijlage" plus een
+ * handtekening) hooguit een kwart van de ruimte, zodat de bon in de binnenste mail niet wegvalt.
+ */
+export function mailText(text: string | undefined, forwardedText: string, max = 20_000): string {
+  const own = cleanMailText(text ?? '');
+  const fwd = cleanMailText(forwardedText);
+  if (!fwd) return own.slice(0, max);
+  const ownPart = own.slice(0, Math.max(max / 4, max - fwd.length - 2));
+  return (ownPart ? `${ownPart}\n\n${fwd}` : fwd).slice(0, max);
 }
 
 /**
