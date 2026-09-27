@@ -6,6 +6,7 @@ import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useLoad }
 import { CategoryChoice, InvestmentHint, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
 import type { PurchaseVatCode } from '../../shared/vat';
+import { ReaderChoice } from './Reader';
 import { formatDateNl } from '../../shared/dates';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -94,6 +95,7 @@ export function DocumentReview({ id }: { id: number }) {
 
   if (!d || !form) return <div className="page"><ErrorBox error={doc.error} /></div>;
   const r = d.result;
+  const unread = d.extraction_source === 'geen' && (d.status === 'nieuw' || d.status === 'controle');
   const issueFor = (field: string) => d.issues.find((i) => i.field === field || i.field.startsWith(`${field}.`));
   const fields: { key: string; label: string; field: DocField<unknown> | null | undefined; show: string }[] = [
     { key: 'supplier', label: 'Winkel / leverancier', field: r?.supplier, show: form.supplier || '?' },
@@ -107,6 +109,8 @@ export function DocumentReview({ id }: { id: number }) {
   const rate = form.vatCode === 'hoog' ? 21 : form.vatCode === 'laag' ? 9 : 0;
   const docVat = r?.vat.value.length === 1 && r.vat.value[0]!.rate === rate ? r.vat.value[0]!.amount : null;
   const defaultVat = form.total === null ? null : docVat ?? Math.round((form.total * rate) / (100 + rate));
+  // wat je in het veld ziet, is wat er geboekt wordt
+  const showVat = form.business && !form.splits && (form.vatCode === 'hoog' || form.vatCode === 'laag');
   const activeField = fields.find((f) => f.key === active)?.field ?? (active?.startsWith('line-') ? r?.lines?.[Number(active.slice(5))] ?? null : null);
   const pageSize = r?.pageSizes?.[(activeField?.page ?? 1) - 1];
 
@@ -137,7 +141,9 @@ export function DocumentReview({ id }: { id: number }) {
               );
             })}
           </div>
-          {d.issues.filter((i) => i.severity === 'fout' || i.field === 'duplicate').map((i) => (
+          {/* nog niet uitgelezen (geen herkenning): hier kiezen hoe de app bonnen mag lezen */}
+          {unread && <ReaderChoice context="bon" onDone={async () => { setForm(null); await doc.reload(); }} />}
+          {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document')).map((i) => (
             <div key={i.field + i.message} className="notice warn">
               {i.message}
               {i.field === 'duplicate' && d.status === 'controle' && (
@@ -215,7 +221,7 @@ export function DocumentReview({ id }: { id: number }) {
                         {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
                       </select>
                     </Field>
-                    {!form.splits && (form.vatCode === 'hoog' || form.vatCode === 'laag') && (
+                    {showVat && (
                       <Field label="Btw-bedrag" hint="zoals op de bon; pas aan als het anders is">
                         <MoneyInput value={form.vatAmount ?? defaultVat} onChange={(v) => setForm({ ...form, vatAmount: v })} />
                       </Field>
@@ -242,7 +248,7 @@ export function DocumentReview({ id }: { id: number }) {
                 <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
                 <Button kind="primary" disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
                   const isInvestment = form.business && !form.splits && form.categoryKey === 'investering';
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount, categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits }), isInvestment ? undefined : 'Verwerkt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits }), isInvestment ? undefined : 'Verwerkt ✓');
                   if (res) {
                     go({ screen: 'aankopen' });
                     if (isInvestment) showInvestmentSaved(investmentInfo(form.total!, form.vatCode, true));

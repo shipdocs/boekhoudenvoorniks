@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { basename, delimiter, dirname, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
@@ -15,11 +15,14 @@ import { seedDemo } from '../demo/demo';
 import { decryptBackup, encryptBackup, isEncryptedBackup } from './encrypted-backup';
 import { tmpdir } from 'node:os';
 import { HttpOcrProvider } from '../intake/ocr';
+import { CliAiProvider, findCli } from '../intake/ocr-cli';
+import { nodeCliRunner, tempWorkspace } from './cli-runner';
 import { LocalOcrRuntime } from '../ocr-runtime/runtime';
 import { OllamaClassifier } from '../intake/llm-ollama';
 import type { FetchLike } from '../integrations/types';
 import { ImapSource } from '../mail/imap-source';
 import { Updates } from './updates';
+import { startMcp } from '../mcp/start';
 import type { PollResult } from '../mail/mail-intake';
 
 const SMTP_SECRET = 'smtp:password';
@@ -42,6 +45,16 @@ function dataDir(): string {
 
 function dbPath(): string {
   return join(dataDir(), 'boekhouding.sqlite');
+}
+
+/**
+ * Hoe Claude Code/Codex de koppeling start. Een AppImage draait steeds vanaf een andere tijdelijke
+ * plek; dan het AppImage-bestand zelf. Tijdens ontwikkelen: electron met de app-map.
+ */
+function mcpCommand(): { command: string; args: string[] } {
+  if (process.env.APPIMAGE) return { command: process.env.APPIMAGE, args: ['--mcp'] };
+  if (!app.isPackaged) return { command: process.execPath, args: [app.getAppPath(), '--mcp'] };
+  return { command: process.execPath, args: ['--mcp'] };
 }
 
 function emit(event: string, payload: unknown): void {
@@ -97,7 +110,12 @@ const localFetch: FetchLike = (url, init) => fetch(url, init);
 function configureLocalAi(): void {
   const { ocr } = services.settings.get();
   try {
-    if (ocr.engine === 'ingebouwd') {
+    if (ocr.engine === 'claude-code' || ocr.engine === 'codex') {
+      // bonnen lezen met de eigen Claude Code of Codex van de gebruiker (foto gaat naar Anthropic/OpenAI)
+      localOcr.stop();
+      const cmd = findCli(ocr.engine);
+      services.intake.setOcrProvider(cmd ? new CliAiProvider(ocr.engine, cmd, nodeCliRunner, tempWorkspace) : null);
+    } else if (ocr.engine === 'ingebouwd') {
       // ingebouwde herkenning (#9): alleen als die gedownload is; de server start pas bij de eerste bon
       services.intake.setOcrProvider(localOcr.isInstalled() ? localOcr.provider(localFetch) : null);
     } else {
@@ -164,6 +182,20 @@ function initServices(): void {
     },
     storeAttachment,
     reconfigureLocalAi: configureLocalAi,
+    findCli: (kind) => findCli(kind),
+    mcpCommand,
+    connectMcp: async (kind) => {
+      const cli = findCli(kind);
+      if (!cli) throw new Error(`${kind === 'codex' ? 'Codex' : 'Claude Code'} is niet gevonden op deze computer.`);
+      const { command, args } = mcpCommand();
+      const add = kind === 'codex' ? ['mcp', 'add', 'gratis-boekhouden', '--', command, ...args] : ['mcp', 'add', '--scope', 'user', 'gratis-boekhouden', '--', command, ...args];
+      const env = { ...process.env, PATH: [dirname(cli), process.env.PATH ?? ''].join(delimiter) };
+      const r = await nodeCliRunner(cli, add, { cwd: app.getPath('home'), input: '', timeoutMs: 30_000, env });
+      const out = `${r.stdout}\n${r.stderr}`;
+      if (r.code === 0) return 'Toegevoegd ✓';
+      if (/already exists|bestaat al/i.test(out)) return 'Stond er al in ✓';
+      throw new Error(`Toevoegen lukte niet. Gebruik de opdracht hieronder in een terminal.${out.trim() ? ` (${out.trim().slice(0, 200)})` : ''}`);
+    },
     readAttachment(path) {
       if (!path.startsWith(join(dataDir(), 'bijlagen'))) throw new Error('Alleen bijlagen van de administratie');
       return readFileSync(path);
@@ -428,8 +460,20 @@ if (SMOKE_TEST) {
 // Nederlandse datumvelden (dd-mm-jjjj) en teksten van Chromium, ook op een Engelstalige computer
 app.commandLine.appendSwitch('lang', 'nl');
 
-const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) {
+// "--mcp": de koppeling voor Claude Code/Codex (alleen lezen). Geen venster, geen enkele-instantie-slot:
+// de app zelf kan gewoon tegelijk open zijn.
+const MCP_MODE = process.argv.includes('--mcp');
+const gotLock = MCP_MODE ? false : app.requestSingleInstanceLock();
+if (MCP_MODE) {
+  app.dock?.hide();
+  startMcp(dbPath(), app.getVersion()).then(
+    () => app.exit(0),
+    (e) => {
+      process.stderr.write(`Gratis Boekhouden (koppeling): ${(e as Error).message}\n`);
+      app.exit(1);
+    },
+  );
+} else if (!gotLock) {
   // In rooktestmodus is een tweede instantie een fout, geen stille succesvolle exit.
   if (SMOKE_TEST) console.error('SMOKE FAIL: er draait al een instantie');
   app.exit(SMOKE_TEST ? 1 : 0);

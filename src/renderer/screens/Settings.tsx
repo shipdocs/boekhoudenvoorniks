@@ -4,6 +4,8 @@ import { Button, DateNl, ErrorBox, Field, MoneyInput, useAction, useApp, useLoad
 import type { AppSettings } from '../../settings/settings';
 import { ResetCard } from './Reset';
 import { CategoriesDialog } from './Categories';
+import { ReaderChoice } from './Reader';
+import { AssistantCard } from './Assistant';
 import { LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 
 type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'ai' | 'backup' | 'geavanceerd' | 'over';
@@ -27,6 +29,11 @@ export function SettingsScreen() {
   const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'bedrijf');
   const [draft, setDraft] = useState<Settings>(settings);
   const bankAccounts = useLoad(() => api.bank.accounts());
+  // de keuze voor het lezen van bonnen wordt direct opgeslagen: in het concept meenemen, anders zet
+  // "Opslaan" van iets anders hem terug
+  useEffect(() => {
+    setDraft((d) => ({ ...d, ocr: { ...d.ocr, engine: settings.ocr.engine, url: settings.ocr.url, askedReader: settings.ocr.askedReader } }));
+  }, [settings.ocr.engine, settings.ocr.url, settings.ocr.askedReader]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
   const set = (patch: Partial<AppSettings>) => setDraft({ ...draft, ...patch });
   const save = async () => {
@@ -216,8 +223,15 @@ export function SettingsScreen() {
             <span>Gebruik de locatie van foto's om bonnen aan klussen te koppelen<br /><span className="small muted">Standaard uit. De plek uit de foto (als je telefoon die opslaat) blijft alleen op deze computer en wordt vergeleken met waar je eerder voor de klus fotografeerde.</span></span>
           </label>
           <p className="small muted">Ook op "maximaal" gaat alleen automatisch wat zeker genoeg is, en een leverancier pas nadat jij daar ja op zei. Alles wat automatisch ging zie je terug op Vandaag, met de reden en een knop "Klopt niet".</p>
-          <p className="muted">Alles draait op je eigen computer; documenten gaan nergens naartoe. Zonder slimme herkenning werken e-facturen en PDF's met tekst gewoon; alleen foto's van bonnetjes vul je dan zelf in.</p>
-          <LocalOcr engine={draft.ocr.engine} />
+          <p className="muted">
+            {settings.ocr.engine === 'claude-code' || settings.ocr.engine === 'codex'
+              ? `Foto's van bonnen gaan naar ${settings.ocr.engine === 'codex' ? 'OpenAI (Codex)' : 'Anthropic (Claude Code)'} om gelezen te worden. Al het andere blijft op je eigen computer.`
+              : 'Alles draait op je eigen computer; documenten gaan nergens naartoe.'}{' '}
+            E-facturen en PDF's met tekst leest de app altijd zelf.
+          </p>
+          <ReaderChoice context="instellingen" />
+          {settings.ocr.engine === 'ingebouwd' && <LocalOcr engine={draft.ocr.engine} />}
+          <AssistantCard />
           {settings.advancedMode && (
           <details style={{ marginTop: 12 }}>
             <summary className="small">Voor technische gebruikers: eigen herkenningsdienst of lokale AI</summary>

@@ -118,6 +118,8 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
   for (const [preferred, conf] of [[true, 0.95], [false, 0.75]] as const) {
     for (const line of lines) {
       if (preferred && !/datum|date/i.test(line.text)) continue;
+      // "Payment date" of "Betaaldatum" is niet de factuurdatum
+      if (preferred && /payment|paid|betaal/i.test(line.text)) continue;
       if (/verval|due/i.test(line.text)) continue;
       const d = parseDateText(line.text);
       if (d) {

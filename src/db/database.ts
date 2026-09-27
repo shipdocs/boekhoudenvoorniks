@@ -11,6 +11,20 @@ export function openDatabase(filename: string): Db {
   return db;
 }
 
+/**
+ * Alleen lezen (voor de koppeling met Claude Code/Codex): nooit migreren of schrijven. Hoort de
+ * database bij een andere versie, dan eerst de app openen.
+ */
+export function openReadonly(filename: string): Db {
+  const db = new Database(filename, { readonly: true, fileMustExist: true });
+  const version = db.pragma('user_version', { simple: true }) as number;
+  if (version !== migrations.length) {
+    db.close();
+    throw new Error('De administratie hoort bij een andere versie van de app. Open Gratis Boekhouden eerst één keer, dan werkt deze koppeling weer.');
+  }
+  return db;
+}
+
 export function migrate(db: Db): void {
   const current = db.pragma('user_version', { simple: true }) as number;
   for (let i = current; i < migrations.length; i++) {

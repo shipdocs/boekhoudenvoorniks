@@ -73,6 +73,9 @@ function init(fresh) {
       install: () => { updateInstalled = true; },
       reconfigure: () => { updateStatus = { ...updateStatus, state: updateStatus.state === 'klaar' ? 'klaar' : services.settings.get().autoUpdate ? 'wacht' : 'uit' }; },
     },
+    // geen Claude Code of Codex in de test: de keuze staat dan uit met uitleg
+    findCli: () => null,
+    mcpCommand: () => ({ command: '/opt/Gratis Boekhouden/gratis-boekhouden', args: ['--mcp'] }),
     localOcr: { status: () => ({ state: 'niet-geinstalleerd' }), install: () => ({ state: 'niet-geinstalleerd' }), uninstall: async () => ({ state: 'niet-geinstalleerd' }) },
     async resetData(withDemo) {
       const backup = await wipeDatabase(db, file, path.join(dir, 'backups'));

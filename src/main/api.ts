@@ -1,4 +1,5 @@
 import type { RuntimeStatus } from '../ocr-runtime/runtime';
+import type { CliKind } from '../intake/ocr-cli';
 import { DOWNLOAD_SIZE, GLM_OCR, LLAMA_CPP, REQUIREMENTS } from '../ocr-runtime/manifest';
 import type { Services } from '../services';
 import type { AppSettings } from '../settings/settings';
@@ -73,6 +74,12 @@ export interface HostContext {
     /** "Toch als bon bewaren": de tekst van een mail die bleef liggen als PDF-bon */
     saveAsReceipt(id: number): Promise<unknown>;
   };
+  /** waar staat Claude Code of Codex op deze computer (null = niet gevonden); ontbreekt buiten Electron */
+  findCli?(kind: CliKind): string | null;
+  /** hoe Claude Code/Codex de koppeling (alleen lezen) start: dit programma met --mcp */
+  mcpCommand?(): { command: string; args: string[] };
+  /** de koppeling toevoegen aan Claude Code of Codex (voert "claude/codex mcp add" uit) */
+  connectMcp?(kind: CliKind): Promise<string>;
   /** ingebouwde tekstherkenning (#9): downloaden bij eerste gebruik */
   localOcr: {
     status(): RuntimeStatus;
@@ -567,6 +574,62 @@ export function createApi(s: Services, host: HostContext) {
       totals: (year: number) => s.hours.totals(year),
       add: (input: { date: IsoDate; hours: number; description: string }) => s.hours.add(input),
       remove: (id: number) => s.hours.remove(id),
+    },
+    /**
+     * Hoe mag de app bonnen lezen? Op deze computer (download), met de eigen Claude Code of Codex
+     * (foto gaat naar Anthropic/OpenAI), of niet (zelf invullen). Gevraagd bij de eerste foto.
+     */
+    reader: {
+      options: () => {
+        const { ocr } = s.settings.get();
+        const local = host.localOcr.status();
+        return {
+          current: ocr.engine === 'ingebouwd' || ocr.engine === 'claude-code' || ocr.engine === 'codex' ? ocr.engine : ocr.url ? 'eigen' : 'geen',
+          asked: ocr.askedReader,
+          local: { state: local.state, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS },
+          claudeCode: host.findCli?.('claude-code') ?? null,
+          codex: host.findCli?.('codex') ?? null,
+          unread: s.intake.unread().length,
+        };
+      },
+      choose: (choice: string) => {
+        if (!['lokaal', 'claude-code', 'codex', 'zelf'].includes(choice)) throw new Error('Onbekende keuze');
+        const ocr = s.settings.get().ocr;
+        if (choice === 'claude-code' || choice === 'codex') {
+          if (!host.findCli?.(choice)) throw new Error(`${choice === 'codex' ? 'Codex' : 'Claude Code'} is niet gevonden op deze computer.`);
+          s.settings.update({ ocr: { ...ocr, engine: choice, url: '', askedReader: true } });
+        } else if (choice === 'lokaal') {
+          s.settings.update({ ocr: { ...ocr, engine: 'ingebouwd', url: '', askedReader: true } });
+          const st = host.localOcr.status();
+          if (st.state === 'niet-geinstalleerd' || st.state === 'fout') host.localOcr.install();
+        } else {
+          s.settings.update({ ocr: { ...ocr, askedReader: true } });
+        }
+        host.reconfigureLocalAi();
+        return s.settings.get();
+      },
+      /** bonnen die nog niet uitgelezen zijn, nu (opnieuw) laten lezen */
+      rereadPending: async () => {
+        let read = 0;
+        const docs = s.intake.unread();
+        for (const d of docs) {
+          const after = await s.intake.reread(d.id, host.readAttachment(d.file_path));
+          if (after.extraction_source !== 'geen') read++;
+        }
+        return { read, total: docs.length };
+      },
+    },
+    /** vragen stellen over je boekhouding vanuit Claude Code of Codex (alleen lezen) */
+    assistant: {
+      info: () => {
+        const cmd = host.mcpCommand?.() ?? null;
+        return { command: cmd, claudeCode: host.findCli?.('claude-code') ?? null, codex: host.findCli?.('codex') ?? null };
+      },
+      connect: async (kind: string) => {
+        if (kind !== 'claude-code' && kind !== 'codex') throw new Error('Onbekend programma');
+        if (!host.connectMcp) throw new Error('Kan alleen in de app zelf');
+        return host.connectMcp(kind);
+      },
     },
     localOcr: {
       status: () => host.localOcr.status(),

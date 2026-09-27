@@ -163,7 +163,7 @@ export class IntakeService {
       return {
         result: emptyResult(),
         source: 'geen',
-        issues: [{ field: 'document', severity: 'fout', message: 'Slimme herkenning staat nog niet aan (Instellingen → Automatisch & herkenning). Vul de gegevens zelf in.' }],
+        issues: [{ field: 'document', severity: 'fout', message: 'Deze bon is nog niet uitgelezen. Kies hoe de app bonnen mag lezen, of vul de gegevens zelf in.' }],
       };
     }
     let out;
@@ -221,6 +221,31 @@ export class IntakeService {
         .prepare(`INSERT INTO documents (file_path, original_name, mime_type, sha256, extraction_source, result, status, confidence, issues, classification) VALUES (?, ?, ?, ?, ?, ?, 'verwerkt', 'HIGH', '[]', ?)`)
         .run(path, filename, mime, sha, source, JSON.stringify(result), classification).lastInsertRowid,
     );
+    return this.get(id);
+  }
+
+  /** Bonnen die nog niet uitgelezen konden worden (geen herkenning), nog niet verwerkt. */
+  unread(): { id: number; file_path: string; original_name: string }[] {
+    return this.db
+      .prepare(`SELECT id, file_path, original_name FROM documents WHERE extraction_source = 'geen' AND status IN ('nieuw','controle') AND purchase_invoice_id IS NULL ORDER BY id`)
+      .all() as { id: number; file_path: string; original_name: string }[];
+  }
+
+  /**
+   * Opnieuw lezen, bv. nadat de gebruiker een manier koos om bonnen te laten lezen. Alleen voor een
+   * bon die nog niet uitgelezen en niet verwerkt is; daarna altijd eerst controleren (nooit zelf boeken).
+   */
+  async reread(id: number, data: Uint8Array, asOf: IsoDate = today()): Promise<IntakeDocument> {
+    const doc = this.get(id);
+    if (doc.extraction_source !== 'geen' || doc.status === 'verwerkt' || doc.status === 'genegeerd') return doc;
+    const { result, source, issues } = await this.extract(doc.original_name, data);
+    if (source === 'geen') {
+      // lukte weer niet: alleen de melding bijwerken
+      this.db.prepare('UPDATE documents SET issues = ? WHERE id = ?').run(JSON.stringify(issues), id);
+      return this.get(id);
+    }
+    this.db.prepare('UPDATE documents SET extraction_source = ?, result = ? WHERE id = ?').run(source, JSON.stringify(result), id);
+    await this.evaluate(id, issues, asOf, { autoConfirm: false });
     return this.get(id);
   }
 
@@ -468,7 +493,11 @@ export class IntakeService {
     // zelf ingevuld btw-bedrag: gaat voor wat de app las of uitrekende (niet bij verlegde btw: die reken je zelf uit)
     if (c.vatAmount !== undefined && c.vatAmount !== null && !isReverseCharge(c.vatCode)) {
       if (!Number.isInteger(c.vatAmount) || c.vatAmount < 0 || c.vatAmount > c.total) throw new ValidationError('Het btw-bedrag kan niet meer zijn dan het totaal');
-      if (PURCHASE_VAT_RATES[c.vatCode].percentage === 0 && c.vatAmount !== 0) throw new ValidationError('Bij "geen btw" of 0% hoort geen btw-bedrag');
+      const pct = PURCHASE_VAT_RATES[c.vatCode].percentage;
+      if (pct === 0 && c.vatAmount !== 0) throw new ValidationError('Bij "geen btw" of 0% hoort geen btw-bedrag');
+      // nooit meer btw dan het tarief toelaat (een paar cent afronding per regel mag)
+      const max = Math.round((c.total * pct) / (100 + pct));
+      if (c.vatAmount > max + 2) throw new ValidationError(`Bij ${pct}% kan de btw hooguit ${(max / 100).toFixed(2).replace('.', ',')} zijn. Staat er meer op de bon? Dan klopt het tarief of het totaal niet.`);
       return [{ account, netAmount: c.total - c.vatAmount, vatCode: c.vatCode, vatAmount: c.vatAmount }];
     }
     const vat = result?.vat.value ?? [];
