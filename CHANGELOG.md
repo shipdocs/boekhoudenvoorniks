@@ -2,6 +2,29 @@
 
 ## Nog niet uitgebracht
 
+- **Verbeteringen na de review**: een potje zonder IBAN wordt nu apart bijgehouden, zodat een afschrift met een
+  nieuw rekeningnummer nooit op een potje terechtkomt en alleen echte potjes als "Naar potje" verschijnen;
+  twee rekeningen met dezelfde naam kan niet meer; het btw-bedrag dat je bij een bon ziet is wat er geboekt
+  wordt, en kan niet hoger zijn dan het tarief toelaat; "Payment date" wordt niet meer als factuurdatum gezien.
+- **Kiezen hoe de app bonnen leest**: bij de eerste foto van een bon (en in Instellingen → Automatisch &
+  herkenning) kies je, met uitleg:
+  - **op deze computer**: eenmalig ± 1,5 GB downloaden, daarna zonder internet; alles blijft op je computer;
+  - **met je eigen Claude Code** (Anthropic) of **Codex** (OpenAI), als je dat hebt: geen download, maar de foto
+    gaat naar Anthropic of OpenAI. De assistent krijgt alleen die ene foto (in een lege map), mag verder niets
+    (alleen lezen, geen andere hulpmiddelen) en heeft een tijdslimiet;
+  - **zelf invullen**.
+  De app installeert Claude Code of Codex niet en zoekt er pas naar als jij op **Zoek op deze computer** klikt
+  (of het programma zelf aanwijst met **Kies zelf…**); wat gevonden is wordt onthouden. **Inloggen** opent een
+  terminal met het programma erin; **Controleer** stuurt een heel klein proefbericht om te zien of het werkt.
+  Bonnen die nog klaarlagen worden na het kiezen vanzelf gelezen. Wat de app leest is een voorstel: jij klikt
+  op "Klopt", er wordt niets geboekt zonder dat je het ziet.
+- **Vragen stellen over je boekhouding met Claude Code of Codex**: in Instellingen → Automatisch & herkenning
+  voeg je met één klik (of een opdracht voor de terminal) een koppeling toe. Daarna vraag je bv. "Waarom is mijn
+  btw dit kwartaal zo hoog?". De koppeling kan **alleen lezen**: de administratie wordt alleen-lezen geopend en
+  er zijn alleen hulpmiddelen die iets opzoeken (overzicht, Vandaag, btw per periode en per vak, facturen,
+  aankopen, bank, klanten, zoeken, inkomstenbelasting). Je vraag en wat de assistent opzoekt gaan naar
+  Anthropic of OpenAI. Uitleg over btw of belasting is geen advies: laat het controleren door je boekhouder.
+
 - **Btw-aangifte na de uiterste datum**: Vandaag bleef om de aangifte van een vorig kwartaal vragen, ook als je
   die al buiten de app deed. Nu vraagt de app na de uiterste datum eerst "Al gedaan, bv. via Mijn
   Belastingdienst of je boekhouder?" met de knop **Al ingediend** (die kan ook bij openstaande controles). Ook

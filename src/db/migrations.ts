@@ -732,4 +732,9 @@ export const migrations: string[] = [
   DELETE FROM mail_messages WHERE outcome = 'eigen';
   UPDATE mail_folders SET last_uid = 0, failed_uid = NULL, failed_count = 0;
   `,
+  /* 15: potjes zonder eigen rekeningnummer */ `
+  -- Een potje binnen je bank (bv. Knab) heeft geen IBAN, net als een gewone rekening waarvan het nummer
+  -- nog niet bekend is. Dit veld houdt ze uit elkaar: een afschrift met een onbekend IBAN komt nooit op een potje.
+  ALTER TABLE bank_accounts ADD COLUMN is_pot INTEGER NOT NULL DEFAULT 0;
+  `,
 ];

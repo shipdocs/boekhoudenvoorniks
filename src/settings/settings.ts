@@ -59,7 +59,18 @@ export interface BusinessProfile {
 export interface OcrSettings {
   /** lokale OCR-sidecar, bv. http://127.0.0.1:8765 — leeg = uit */
   url: string;
+  /** 'ingebouwd' (lokaal), 'claude-code', 'codex', of een eigen dienst (glm-ocr, …) */
   engine: string;
+  /** de keuze "hoe wil je bonnen laten lezen?" is al gesteld (ook bij "zelf invullen") */
+  askedReader: boolean;
+  /**
+   * Waar Claude Code en Codex staan: alleen gezocht of gekozen als de gebruiker daarom vraagt
+   * ("Zoek op deze computer" of "Kies zelf"). Leeg = niet gevonden of nog niet gezocht.
+   */
+  claudeCodePath: string;
+  codexPath: string;
+  /** de gebruiker heeft (minstens één keer) laten zoeken */
+  assistantsSearched: boolean;
   /** optionele lokale LLM (Ollama-compatibel) voor classificatievoorstellen — leeg = uit */
   llmUrl: string;
   llmModel: string;
@@ -158,7 +169,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     bic: '',
   },
   profile: { trade: '', worksAlone: true, hasBusinessAccount: true, firstName: '' },
-  ocr: { url: '', engine: 'glm-ocr', llmUrl: '', llmModel: '' },
+  ocr: { url: '', engine: 'glm-ocr', askedReader: false, claudeCodePath: '', codexPath: '', assistantsSearched: false, llmUrl: '', llmModel: '' },
   smtp: { host: '', port: 587, secure: false, user: '', fromName: '', fromEmail: '', bcc: '', replyTo: '' },
   mailIn: { enabled: false, host: '', port: 993, secure: true, user: '', folder: 'INBOX', extraFolders: [], processedFolder: 'Verwerkt', since: '' },
   autoUpdate: true,

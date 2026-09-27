@@ -49,3 +49,16 @@ describe('potje zonder eigen rekeningnummer (bv. Knab)', () => {
     expect(s.vat.calculate('2026-Q3').summary.voorbelasting === 0).toBe(true);
   });
 });
+
+describe('potje en gewone rekening zonder IBAN uit elkaar houden', () => {
+  it('een afschrift met een onbekend IBAN komt nooit op een potje; hernoemen naar een bestaande naam kan niet', () => {
+    const { s } = setup();
+    const pot = s.bank.addAccount('Knab-potje', null);
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-01', amount: 100, description: 'x', counterName: 'y', ownIban: 'NL02ABNA0123456789' }] });
+    expect(s.bank.getAccount(pot.id).iban).toBeNull();
+    // de gewone rekening zonder nummer krijgt het nummer, niet het potje
+    expect(s.bank.listAccounts().find((a) => a.iban === 'NL02ABNA0123456789')?.is_pot).toBe(0);
+    const other = s.bank.addAccount('Spaarrekening', 'NL91ABNA0417164300');
+    expect(() => s.bank.updateAccount(other.id, { name: 'knab-potje' })).toThrow(/al een rekening met deze naam/);
+  });
+});
