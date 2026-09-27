@@ -1,6 +1,6 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.5.0 — fiscale review verwerkt en makkelijker overstappen
 
 ### Overstappen makkelijker
 - De overstap-hulp begint met één vraag: **hoe stap je over?** Met een boekhoudprogramma (auditfile), met een overzicht van je boekhouder, of zelf invullen. Het lijstje "wat heb je nodig" staat ingeklapt eronder.
