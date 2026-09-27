@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, ErrorBox, Euro, Modal, useAction, useApp, useLoad } from '../ui';
-import { formatDateNl, vatDeadline } from '../../shared/dates';
+import { formatDateNl, today, vatDeadline } from '../../shared/dates';
 import { VAT_DISCLAIMER } from '../../shared/legal';
 import { AccountantNotice } from './TaxYear';
 import { CheckLines } from './CheckLines';
@@ -59,6 +59,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
     toast(`${value} gekopieerd`);
   };
   const deadline = r ? vatDeadline(r.period.end, settings.vatPeriod) : null;
+  const todayIso = today();
 
   return (
     <div className="page">
@@ -112,6 +113,23 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                 </div>
               </div>
             ))}
+            {r.status !== 'ingediend' && r.period.end >= todayIso && (
+              <div className="notice">Deze periode loopt nog tot en met {formatDateNl(r.period.end)}. De aangifte doe je daarna, uiterlijk {deadline ? formatDateNl(deadline) : ''}. Tot die tijd kan het bedrag nog veranderen.</div>
+            )}
+            {r.status !== 'ingediend' && deadline && deadline < todayIso && (
+              <div className="notice warn">
+                Deze aangifte had uiterlijk <strong>{formatDateNl(deadline)}</strong> binnen moeten zijn. Al gedaan, bijvoorbeeld via Mijn Belastingdienst of je boekhouder? Vink hem dan hier af. Nog niet? Doe hem zo snel mogelijk.
+                <div className="row" style={{ marginTop: 8 }}>
+                  <Button small disabled={busy} onClick={async () => {
+                    if (!confirm(`Heb je de aangifte over ${r.period.label} al ingediend? De app legt de bedragen van hierboven vast. Diende je iets anders in, laat je boekhouder dan kijken of er een verbetering (suppletie) nodig is.`)) return;
+                    await run(() => api.vat.markSubmitted(r.period.key, true), 'Vastgelegd als ingediend ✓');
+                    await report.reload();
+                    await checks.reload();
+                    await periods.reload();
+                  }}>Ja, al ingediend</Button>
+                </div>
+              </div>
+            )}
             {r.status === 'ingediend' ? (
               <div className="notice good">✓ Je hebt deze aangifte gedaan{r.submittedAt ? ` (${formatDateNl(r.submittedAt.slice(0, 10))})` : ''}.</div>
             ) : (
