@@ -3,6 +3,7 @@
 ## Nog niet uitgebracht
 
 ### Hersteld
+- Btw-rubrieken 5a, 5b, 5c en 5g sluiten na afronding altijd op elkaar aan; het ICP-overzicht gebruikt bij correcties en suppleties voortaan dezelfde boekingen als rubriek 3b.
 - Auditfiles volgen nu de XAF 3.2-volgorde en taxonomiestructuur en zijn tegen het XAF-schema gevalideerd.
 - Handmatige, dagelijkse en versleutelde back-ups bevatten voortaan ook alle bijlagen, met controlesommen en padherstel bij terugzetten op een andere computer. Oude `.sqlite`-back-ups blijven leesbaar met een waarschuwing dat ze geen bijlagen bevatten.
 - Een terugbetaling aan een klant kan vanuit een negatieve bankmutatie aan de open creditfactuur worden gekoppeld.

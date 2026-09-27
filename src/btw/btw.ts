@@ -135,6 +135,11 @@ export class VatService {
   /** Posten die al met een suppletie-aangifte zijn afgehandeld. */
   private static readonly SETTLED = `EXISTS (SELECT 1 FROM vat_suppleties s WHERE s.correction_period_key = e.vat_correction_of AND e.id <= s.max_entry_id)`;
 
+  /** Correctieperiodes die in deze aangifte via een aparte suppletie lopen. */
+  private static excludedCorrectionPeriods(corrections: VatCorrection[]): string[] {
+    return corrections.filter((c) => c.suppletie).map((c) => c.periodKey);
+  }
+
   /**
    * Som van (credit − debet) per rekening/btw-code in een periode, exclusief afsluitboekingen,
    * correcties die via een suppletie lopen (of al gelopen hebben).
@@ -231,7 +236,7 @@ export class VatService {
    */
   rubriekDetails(periodKey: string, code: string): { code: string; lines: VatDetailLine[]; omzet: Cents; btw: Cents } {
     const period = periodFromKey(periodKey);
-    const corrections = this.corrections(period.start, period.end).filter((c) => c.suppletie).map((c) => c.periodKey);
+    const corrections = VatService.excludedCorrectionPeriods(this.corrections(period.start, period.end));
     const afdragen = [ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag, ACCOUNTS.btwPriveGebruik, ACCOUNTS.btwAfdragenVerlegd, ACCOUNTS.btwAfdragenEu, ACCOUNTS.btwAfdragenBuitenEu];
     // per vak: welke rekeningen tellen als omzet/grondslag en welke als btw; inkoop = kosten/activa met die btw-code
     const spec: Record<string, { omzet?: string[]; inkoop?: string; btw?: string[]; btwSign?: 1 | -1 }> = {
@@ -344,7 +349,7 @@ export class VatService {
   calculate(periodKey: string): VatReport {
     const period = periodFromKey(periodKey);
     const corrections = this.corrections(period.start, period.end);
-    const rows = this.sums(period.start, period.end, corrections.filter((c) => c.suppletie).map((c) => c.periodKey));
+    const rows = this.sums(period.start, period.end, VatService.excludedCorrectionPeriods(corrections));
     const byAccount = (rgs: string) => rows.filter((r) => r.rgs_code === rgs).reduce((s, r) => s + r.net, 0);
 
     const omzetHoog = byAccount(ACCOUNTS.omzetHoog);
@@ -385,9 +390,14 @@ export class VatService {
     const r3b = rub('3b', 'Leveringen naar of diensten in landen binnen de EU', omzetIcp, null);
     const r4a = rub('4a', 'Leveringen/diensten uit landen buiten de EU', inkoopBuitenEu, btwBuitenEu);
     const r4b = rub('4b', 'Leveringen/diensten uit landen binnen de EU', inkoopEu, btwEu);
-    const r5a = rub('5a', 'Verschuldigde omzetbelasting (rubrieken 1a t/m 4b)', null, btw5a);
     const r5b = rub('5b', 'Voorbelasting', null, voorbelasting, true);
-    const saldoEuro = (r1a.btwEuro ?? 0) + (r1b.btwEuro ?? 0) + (r1d.btwEuro ?? 0) + (r2a.btwEuro ?? 0) + (r4a.btwEuro ?? 0) + (r4b.btwEuro ?? 0) - (r5b.btwEuro ?? 0);
+    // De aangifte staat afronding per rubriek in het voordeel van de ondernemer toe. Houd
+    // die methode overal aan: 5a is de som van de afgeronde verschuldigde rubrieken en
+    // 5c/5g zijn vervolgens exact 5a min 5b. Zo kan het subtotaal nooit afwijken van de
+    // zichtbare invoervakken doordat het onbewerkte cententotaal opnieuw wordt afgerond.
+    const verschuldigdEuro = (r1a.btwEuro ?? 0) + (r1b.btwEuro ?? 0) + (r1d.btwEuro ?? 0) + (r2a.btwEuro ?? 0) + (r4a.btwEuro ?? 0) + (r4b.btwEuro ?? 0);
+    const r5a: Rubriek = { ...rub('5a', 'Verschuldigde omzetbelasting (rubrieken 1a t/m 4b)', null, btw5a), btwEuro: verschuldigdEuro };
+    const saldoEuro = verschuldigdEuro - (r5b.btwEuro ?? 0);
     const r5c: Rubriek = { code: '5c', label: 'Subtotaal (5a min 5b)', omzet: null, btw: btw5a - voorbelasting, omzetEuro: null, btwEuro: saldoEuro };
     const r5g: Rubriek = { code: '5g', label: 'Totaal te betalen / terug te vragen', omzet: null, btw: btw5a - voorbelasting, omzetEuro: null, btwEuro: saldoEuro };
 
@@ -445,6 +455,10 @@ export class VatService {
    */
   icp(periodKey: string): IcpReport {
     const period = periodFromKey(periodKey);
+    const excludedCorrections = VatService.excludedCorrectionPeriods(this.corrections(period.start, period.end));
+    const correctionFilter = excludedCorrections.length
+      ? `AND (e.vat_correction_of IS NULL OR e.vat_correction_of NOT IN (${excludedCorrections.map(() => '?').join(',')}))`
+      : '';
     const rows = this.db
       .prepare(
         `SELECT l.relation_id, r.name, r.country, r.vat_number, SUM(l.credit) - SUM(l.debit) AS net
@@ -453,11 +467,12 @@ export class VatService {
          JOIN chart_of_accounts a ON a.id = l.account_id
          LEFT JOIN relations r ON r.id = l.relation_id
          WHERE a.rgs_code = ? AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')
+           AND NOT ${VatService.SETTLED} ${correctionFilter}
          GROUP BY l.relation_id
          HAVING net <> 0
          ORDER BY r.name`,
       )
-      .all(ACCOUNTS.omzetIcp, period.start, period.end) as { relation_id: number | null; name: string | null; country: string | null; vat_number: string | null; net: number }[];
+      .all(ACCOUNTS.omzetIcp, period.start, period.end, ...excludedCorrections) as { relation_id: number | null; name: string | null; country: string | null; vat_number: string | null; net: number }[];
     const lines: IcpLine[] = rows.map((r) => {
       const vatNumber = normalizeVatNumber(r.vat_number ?? '');
       const problems: string[] = [];

@@ -72,9 +72,16 @@ kijkt de app naar het land van het IBAN. Bekende partijen zijn standaard 4b: Met
 
 ### 1.4 Afronding
 
-De aangifte wordt per rubriek in hele euro's ingevuld. Omzet en af te dragen btw worden naar beneden
-afgerond, voorbelasting naar boven (in het voordeel van de ondernemer). Rubriek 5g is de som van de
-afgeronde vakken. Vraag 10: klopt dit?
+De aangifte wordt per rubriek in hele euro's ingevuld. De app past consequent afronding per rubriek
+in het voordeel van de ondernemer toe: omzet en af te dragen btw naar beneden, voorbelasting naar
+boven. Rubriek 5a is de som van de afgeronde verschuldigde rubrieken; 5c en 5g zijn daarna exact
+5a min 5b. Dit voorkomt dat een tweede afronding van het cententotaal een ander subtotaal oplevert.
+Vraag 10: klopt deze vaste methode voor alle positieve bedragen, creditcorrecties en negatieve saldi?
+
+Het ICP-overzicht gebruikt voor correcties op eerdere periodes dezelfde selectie als rubriek 3b:
+kleine correcties staan in beide overzichten van de volgende aangifte; boekingen die via een aparte
+suppletie lopen of al met een suppletie zijn afgehandeld staan in geen van beide. Vraag 10a: klopt
+deze koppeling tussen de gewone btw-aangifte, suppletie en ICP-opgaaf?
 
 ---
 

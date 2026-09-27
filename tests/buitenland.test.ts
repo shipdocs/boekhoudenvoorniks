@@ -32,6 +32,29 @@ describe('Buitenland (#16)', () => {
     expect(xml).toMatch(/<cac:Delivery>.*<cbc:IdentificationCode>DE<\/cbc:IdentificationCode>/);
   });
 
+  it('houdt ICP en rubriek 3b gelijk bij gewone correcties en suppleties', () => {
+    const { s, klant } = setup();
+    const de = s.relations.create({ name: 'Bau GmbH', address: 'Hauptstraße 1', postcode: '47533', city: 'Kleve', country: 'DE', vat_number: 'DE123456789' });
+    s.vat.markSubmitted('2026-Q3');
+
+    // Een kleine correctie gaat mee in Q4, zowel in 3b als in ICP.
+    s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-08-01', lines: [{ description: 'klein', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
+    s.invoices.finalize(s.invoices.createDraft({ relationId: de.id, invoiceDate: '2026-08-02', lines: [{ description: 'EU klein', quantity: 1, unitPrice: 25000, vatCode: 'icp' }] }).id);
+    expect(rubrieken(s, '2026-Q4')['3b']!.omzet).toBe(25000);
+    expect(s.vat.icp('2026-Q4').total).toBe(25000);
+
+    // Door de grote binnenlandse correctie moet de hele correctie op Q3 via een
+    // suppletie. De bijbehorende EU-regel hoort dan niet meer in Q4/ICP.
+    s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-08-03', lines: [{ description: 'groot', quantity: 1, unitPrice: 1000000, vatCode: 'hoog' }] }).id);
+    expect(s.vat.calculate('2026-Q4').corrections).toMatchObject([{ periodKey: '2026-Q3', suppletie: true }]);
+    expect(rubrieken(s, '2026-Q4')['3b']!.omzet).toBe(0);
+    expect(s.vat.icp('2026-Q4').total).toBe(0);
+
+    s.vat.markSuppletieSubmitted('2026-Q3');
+    expect(rubrieken(s, '2026-Q4')['3b']!.omzet).toBe(0);
+    expect(s.vat.icp('2026-Q4').total).toBe(0);
+  });
+
   it('ICP naar een Nederlandse klant of zonder btw-nummer wordt geweigerd', () => {
     const { s, klant } = setup();
     const nl = s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-07-10', lines: [{ description: 'x', quantity: 1, unitPrice: 10000, vatCode: 'icp' }] });
