@@ -140,6 +140,20 @@ describe('Schatting inkomstenbelasting (#33 fase 2)', () => {
     expect(rulesFor(2031)).toMatchObject({ fallback: true, rules: { year: 2026 } });
   });
 
+  it('berekent arbeidskorting over winst vóór ondernemersaftrek en mkb-winstvrijstelling', () => {
+    const rules = rulesFor(2026).rules;
+    const metAftrek = estimateIncomeTax(50000, rules, { urencriterium: true });
+    const zonderAftrek = estimateIncomeTax(50000, rules, { urencriterium: false });
+
+    // De zelfstandigenaftrek verandert het arbeidsinkomen niet. Het verschil in de
+    // gecombineerde korting ontstaat hier dus alleen door de algemene heffingskorting.
+    const expectedAhkDifference = Math.round(
+      (zonderAftrek.taxableIncome - metAftrek.taxableIncome) * rules.algemeneHeffingskorting.phaseOutRate,
+    );
+    expect(metAftrek.heffingskortingen - zonderAftrek.heffingskortingen).toBeCloseTo(expectedAhkDifference, -1);
+    expect(metAftrek.heffingskortingen).toBe(7690);
+  });
+
   it('schat op basis van de winst tot nu, doorgetrokken naar het jaar; uit te zetten', () => {
     const { s, klant } = setup();
     s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-02-01', lines: [{ description: 'Werk', quantity: 1, unitPrice: 2500000, vatCode: 'hoog' }] }).id);
