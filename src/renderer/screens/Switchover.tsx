@@ -4,7 +4,7 @@ import { Button, DateNl, DropZone, Euro, Field, Modal, MoneyInput, readAsBytes, 
 import { addDays, isIsoDate, today } from '../../shared/dates';
 import { defaultBookValue, startDateConsequences, startDateOptions } from '../../shared/switchover';
 import type { OpeningInput, OpeningItem, OpeningKind, OpeningSuggestion, SectionKey, SwitchoverState } from '../../onboarding/switchover';
-import type { XafPlan } from '../../onboarding/xaf-import';
+import type { ImportAnalysis, XafPlan } from '../../onboarding/xaf-import';
 
 /**
  * Overstap-hulp: een lopende administratie overzetten. Hoofdstukken in gewone taal; de app boekt
@@ -59,8 +59,8 @@ export function Switchover() {
       {section === 'papieren' && <Papers {...props} />}
       {section === 'import' && <XafImport {...props} />}
       {section === 'bank' && <Banks {...props} />}
-      {section === 'klanten' && <OpenItems kind="klant" {...props} />}
-      {section === 'leveranciers' && <OpenItems kind="leverancier" {...props} />}
+      {section === 'klanten' && <OpenItems kind="klant" {...props} onSection={setSection} />}
+      {section === 'leveranciers' && <OpenItems kind="leverancier" {...props} onSection={setSection} />}
       {section === 'bezit' && <Assets {...props} />}
       {section === 'btw' && <Vat {...props} />}
       {section === 'resultaat' && <Result {...props} />}
@@ -79,7 +79,7 @@ interface SectionProps {
 
 /** Nog geen instapdatum (bv. via Instellingen hierheen): eerst die vraag. */
 function StartChoice({ state, onDone }: { state: SwitchoverState; onDone: () => Promise<void> }) {
-  const { settings } = useApp();
+  const { settings, reloadSettings } = useApp();
   const { run, busy } = useAction();
   const [date, setDate] = useState(`${new Date().getFullYear()}-01-01`);
   const valid = isIsoDate(date) && date <= today();
@@ -103,7 +103,7 @@ function StartChoice({ state, onDone }: { state: SwitchoverState; onDone: () => 
         </div>
       )}
       <div className="row end" style={{ marginTop: 20 }}>
-        <Button kind="primary" disabled={busy || !valid} onClick={async () => { if ((await run(() => api.switchover.setMode('overstapper', date))) !== undefined) await onDone(); }}>Beginnen</Button>
+        <Button kind="primary" disabled={busy || !valid} onClick={async () => { if ((await run(() => api.switchover.setMode('overstapper', date))) !== undefined) { await reloadSettings(); await onDone(); } }}>Beginnen</Button>
       </div>
     </div>
   );
@@ -170,20 +170,34 @@ function XafImport({ state, refresh, nextButton }: SectionProps) {
   const [include, setInclude] = useState<Set<string>>(new Set());
   const [banks, setBanks] = useState<Record<string, number | 'nieuw' | null>>({});
   const [relations, setRelations] = useState(true);
+  // alleen als de app een kolom echt niet vindt: een paar vragen
+  const [ask, setAsk] = useState<Extract<ImportAnalysis, { questions: unknown }> | null>(null);
+  const [mapping, setMapping] = useState<Record<string, number> | undefined>(undefined);
   const accounts = useLoad(() => api.bank.accounts());
   const date = state.settings.date!;
-  const imported = state.items.filter((i) => i.data.bron === 'xaf').length;
+  const imported = state.items.filter((i) => !!i.data.bron).length;
 
-  const load = async (f: File) => {
-    // auditfile is tekst (XML); een kolommenbalans uit Excel gaat als bytes
-    const data = /\.xlsx$/i.test(f.name) ? await readAsBytes(f) : await readAsText(f);
-    const p = await run(() => api.switchover.analyzeXaf(data));
-    if (!p) return;
-    setFile({ name: f.name, data });
+  const show = (r: ImportAnalysis, f: { name: string; data: string | Uint8Array }, m?: Record<string, number>) => {
+    setFile(f);
+    setMapping(m);
+    if ('questions' in r) {
+      setAsk(r);
+      setPlan(null);
+      return;
+    }
+    setAsk(null);
+    const p = r.plan;
     setPlan(p);
     setInclude(new Set(p.proposals.filter((x) => x.include).map((x) => x.key)));
     setBanks(Object.fromEntries(p.banks.map((b) => [b.accountId, b.bankAccountId ?? 'nieuw'])));
     setRelations(true);
+  };
+
+  const load = async (f: File) => {
+    // auditfile en CSV zijn tekst; Excel gaat als bytes
+    const data = /\.xlsx$/i.test(f.name) ? await readAsBytes(f) : await readAsText(f);
+    const r = await run(() => api.switchover.analyzeXaf(data));
+    if (r) show(r, { name: f.name, data });
   };
   const toggle = (key: string) => setInclude((cur) => {
     const next = new Set(cur);
@@ -203,16 +217,32 @@ function XafImport({ state, refresh, nextButton }: SectionProps) {
         <summary>Waar vind ik de auditfile?</summary>
         <ul>{EXPORT_HOWTO.map(([pkg, how]) => <li key={pkg}><strong>{pkg}</strong>: {how}</li>)}</ul>
         <p className="muted">
-          Geen auditfile? Een <strong>kolommenbalans</strong> (proef- en saldibalans) als Excel werkt ook: daar staan de saldi per rekening in, maar geen losse facturen.
-          Daarmee stap je in op 1 januari (met de beginbalans) of na de dag van de export. Heb je geen van beide, sla dit dan over en vul de hoofdstukken hierna zelf in.
+          Geen auditfile? Een saldibalans of kolommenbalans, of een lijst met openstaande facturen (Excel of CSV) werkt ook.
+          Heb je niets van dat alles, sla dit dan over en vul de hoofdstukken hierna zelf in.
         </p>
       </details>
-      {imported > 0 && !plan && <div className="notice good">✓ {imported} onderdelen overgenomen uit een auditfile. Opnieuw inlezen vervangt ze.</div>}
-      <DropZone accept=".xaf,.xml,.xlsx" onFile={(f) => void load(f)}>
+      {imported > 0 && !plan && <div className="notice good">✓ {imported} onderdelen overgenomen uit je vorige programma. Opnieuw inlezen vervangt ze.</div>}
+      <DropZone accept=".xaf,.xml,.xlsx,.csv" onFile={(f) => void load(f)}>
         <div style={{ fontSize: 26 }}>📂</div>
         <strong>Sleep je auditfile (.xaf) hierheen</strong>
-        <div className="small">of een kolommenbalans als Excel-bestand (.xlsx)</div>
+        <div className="small">of een overzicht uit je vorige programma of Excel (.xlsx, .csv)</div>
       </DropZone>
+      <p className="small muted" style={{ marginTop: 6 }}>
+        Lukt het niet? <a href="#" onClick={(e) => { e.preventDefault(); void run(() => api.switchover.saveTemplate()); }}>Download het voorbeeldbestand</a>, zet je openstaande facturen erin en sleep het hierheen.
+      </p>
+      {ask && file && (
+        <ColumnQuestions
+          // een nieuw bestand: nieuwe vragen, niet de keuzes van het vorige
+          key={`${file.name}:${ask.headers.join('|')}`}
+          ask={ask}
+          onCancel={() => { setAsk(null); setFile(null); }}
+          onDone={async (answers) => {
+            const m = { ...ask.mapping, ...answers };
+            const r = await run(() => api.switchover.analyzeXaf(file.data, m));
+            if (r) show(r, file, m);
+          }}
+        />
+      )}
 
       {plan && file && (
         <div className="card" style={{ marginTop: 16 }}>
@@ -258,14 +288,15 @@ function XafImport({ state, refresh, nextButton }: SectionProps) {
               <span>{plan.relations.total} klanten en leveranciers overnemen ({plan.relations.fresh} nieuw)</span>
             </label>
           )}
-          <p style={{ marginTop: 12 }}>Volgens je vorige administratie zat er <strong><Euro cents={plan.equity} /></strong> van jou in de zaak. De app vergelijkt dat straks met je startpositie.</p>
+          {plan.check && <p style={{ marginTop: 12 }}>{plan.check}</p>}
+          {plan.equity !== null && <p style={{ marginTop: 12 }}>Volgens je vorige administratie zat er <strong><Euro cents={plan.equity} /></strong> van jou in de zaak. De app vergelijkt dat straks met je startpositie.</p>}
           <div className="row end">
             <Button onClick={() => { setPlan(null); setFile(null); }}>Annuleren</Button>
             <Button
               kind="primary"
               disabled={busy}
               onClick={async () => {
-                const r = await run(() => api.switchover.applyXaf(file.data, { include: [...include], banks, relations }));
+                const r = await run(() => api.switchover.applyXaf(file.data, { include: [...include], banks, relations }, mapping));
                 if (!r) return;
                 toast('Overgenomen uit je auditfile');
                 setPlan(null);
@@ -281,6 +312,31 @@ function XafImport({ state, refresh, nextButton }: SectionProps) {
       )}
       {nextButton}
     </>
+  );
+}
+
+/** Maximaal drie vragen als de app een kolom niet vindt; de keuze wordt onthouden. */
+function ColumnQuestions({ ask, onCancel, onDone }: { ask: Extract<ImportAnalysis, { questions: unknown }>; onCancel: () => void; onDone: (answers: Record<string, number>) => void }) {
+  const [answers, setAnswers] = useState<Record<string, number>>(() => Object.fromEntries(ask.questions.filter((q) => q.suggested !== null).map((q) => [q.field, q.suggested!])));
+  const complete = ask.questions.every((q) => answers[q.field] !== undefined);
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3 style={{ marginTop: 0 }}>Nog even kiezen</h3>
+      <div className="grid">
+        {ask.questions.map((q) => (
+          <Field key={q.field} label={q.question}>
+            <select value={answers[q.field] ?? ''} onChange={(e) => setAnswers({ ...answers, [q.field]: Number(e.target.value) })}>
+              <option value="" disabled>Kies een kolom</option>
+              {ask.headers.map((h, i) => <option key={i} value={i}>{h || `kolom ${i + 1}`}{ask.sample[0]?.[i] ? ` (bv. ${ask.sample[0][i]})` : ''}</option>)}
+            </select>
+          </Field>
+        ))}
+      </div>
+      <div className="row end" style={{ marginTop: 12 }}>
+        <Button onClick={onCancel}>Annuleren</Button>
+        <Button kind="primary" disabled={!complete} onClick={() => onDone(answers)}>Verder</Button>
+      </div>
+    </div>
   );
 }
 
@@ -473,7 +529,7 @@ function SuggestionForm({ s, onClose, onSave }: { s: OpeningSuggestion; onClose:
 
 // ---------- 3/4. openstaande facturen en rekeningen ----------
 
-function OpenItems({ kind, state, suggestions, refresh, nextButton }: SectionProps & { kind: 'klant' | 'leverancier' }) {
+function OpenItems({ kind, state, suggestions, refresh, nextButton, onSection }: SectionProps & { kind: 'klant' | 'leverancier'; onSection: (s: SectionKey) => void }) {
   const [editing, setEditing] = useState<OpeningItem | 'nieuw' | null>(null);
   const items = state.items.filter((i) => i.kind === kind);
   const date = state.settings.date!;
@@ -487,6 +543,12 @@ function OpenItems({ kind, state, suggestions, refresh, nextButton }: SectionPro
           : <>Rekeningen van leveranciers of onderaannemers die op <DateNl date={addDays(date, -1)} /> nog open stonden. De kosten en btw stonden al in je vorige administratie.</>}
       </p>
       <Suggestions list={suggestions.filter((s) => s.kind === kind)} refresh={refresh} />
+      {items.some((i) => (i.data.kind === 'klant' && i.data.number.startsWith('SALDO-')) || (i.data.kind === 'leverancier' && !i.data.reference && i.data.bron === 'xaf')) && (
+        <div className="notice small row between">
+          <span>Hier staat nu één totaal. Heb je de lijst met losse facturen? Zet die erin, dan koppelt de app de betalingen eraan.</span>
+          <Button small onClick={() => onSection('import')}>Lijst inlezen</Button>
+        </div>
+      )}
       {kind === 'klant' && <UblDrop refresh={refresh} />}
       <ItemList items={items} onEdit={setEditing} refresh={refresh} empty={kind === 'klant' ? 'Nog geen openstaande facturen. Had je er geen? Dan is dit klaar.' : 'Nog geen openstaande rekeningen. Had je er geen? Dan is dit klaar.'} />
       {items.length > 0 && <p className="small">Samen: <strong><Euro cents={total} /></strong></p>}

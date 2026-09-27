@@ -4,9 +4,15 @@ import type { RelationsService } from '../relations/relations';
 import type { SettingsService } from '../settings/settings';
 import { parseXaf, XafError, type XafAccount, type XafFile, type XafLine } from '../import/xaf';
 import { readXlsx } from '../import/xlsx';
-import { parseTrialBalance } from '../import/trial-balance';
+import { isTrialBalance, parseTrialBalance } from '../import/trial-balance';
+import {
+  detectKind, openItemRows, saldibalansToXaf, suggestColumns, tablesFromCsv, tablesFromWorkbook, titleDate,
+  type ColumnMapping, type ColumnQuestion, type Table, type TableKind,
+} from '../import/opening-tables';
+import { headerSignature } from '../import/csv';
 import { addDays, formatDateNl, periodFor, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
+import { ACCOUNTS } from '../core-ledger/accounts';
 import { ValidationError } from '../shared/validation';
 import type { OpeningInput, SwitchoverService, SwitchoverState } from './switchover';
 
@@ -50,7 +56,16 @@ export interface XafBank {
   bankAccountId: number | null;
 }
 
+/** Wat voor bestand het was. */
+export type ImportKind = 'auditfile' | 'kolommenbalans' | TableKind;
+
+/** Het voorstel, of (alleen als de app een kolom echt niet vindt) een paar vragen. */
+export type ImportAnalysis =
+  | { kind: ImportKind; plan: XafPlan }
+  | { kind: TableKind; questions: ColumnQuestion[]; headers: string[]; sample: string[][]; mapping: ColumnMapping };
+
 export interface XafPlan {
+  kind: ImportKind;
   meta: { software: string; version: string; fiscalYear: string; startDate: IsoDate; endDate: IsoDate; company: string; accounts: number; lines: number };
   /** de instapdatum waarvoor gerekend is */
   date: IsoDate;
@@ -59,8 +74,10 @@ export interface XafPlan {
   banks: XafBank[];
   proposals: XafProposal[];
   relations: { total: number; fresh: number };
-  /** wat er van jou in de zaak zat volgens de auditfile (bezittingen min schulden) */
-  equity: Cents;
+  /** wat er van jou in de zaak zat volgens de auditfile (bezittingen min schulden); null bij een lijst met openstaande posten */
+  equity: Cents | null;
+  /** bij openstaande posten: sluit het totaal aan op de startbalans? */
+  check?: string | null;
   accounts: { id: string; name: string; rgs: string | null; class: XafClass; balance: Cents }[];
   warnings: string[];
 }
@@ -158,22 +175,136 @@ export class XafImportService {
     private readonly switchover: SwitchoverService,
   ) {}
 
-  /** Auditfile (tekst) of Excel-export (bytes, bv. een kolommenbalans uit DigiBoox). */
-  private load(file: string | Uint8Array): XafFile {
-    if (typeof file === 'string') return parseXaf(file);
-    let wb;
-    try {
-      wb = readXlsx(file);
-    } catch {
-      throw new XafError('Dit bestand kunnen we niet lezen. Gebruik een auditfile (.xaf) of de kolommenbalans als Excel-bestand (.xlsx).');
-    }
-    return parseTrialBalance(wb);
-  }
-
   /** Wat de auditfile of kolommenbalans betekent voor de startbalans op `date` (standaard: de gekozen instapdatum). */
   analyze(file: string | Uint8Array, date?: IsoDate): XafPlan {
-    return this.plan(this.load(file), date);
+    const r = this.analyzeFile(file, { date });
+    if (!('plan' in r)) throw new ValidationError(r.questions[0]?.question ?? 'Kies eerst welke kolom wat is');
+    return r.plan;
   }
+
+  /**
+   * Eén ingang voor alles wat de gebruiker erop sleept: auditfile, kolommenbalans, saldibalans of een
+   * lijst met openstaande posten (Excel of CSV). De app bepaalt zelf wat het is.
+   */
+  analyzeFile(file: string | Uint8Array, opts: { date?: IsoDate; mapping?: ColumnMapping } = {}): ImportAnalysis {
+    const src = this.source(file, opts.mapping);
+    if (src.type === 'xaf') return { kind: src.kind, plan: this.plan(src.xaf, opts.date) };
+    if (src.questions.length > 0) return { kind: src.kind, questions: src.questions, headers: src.table.headers, sample: src.table.rows.slice(0, 3), mapping: src.mapping };
+    if (src.kind === 'saldibalans') return { kind: src.kind, plan: this.plan(this.saldibalans(src.table, src.mapping), opts.date) };
+    return { kind: src.kind, plan: this.planOpenItems(src.table, src.mapping) };
+  }
+
+  private source(file: string | Uint8Array, given?: ColumnMapping):
+    | { type: 'xaf'; kind: ImportKind; xaf: XafFile }
+    | { type: 'table'; kind: TableKind; table: Table; mapping: ColumnMapping; questions: ColumnQuestion[] } {
+    let tables: Table[];
+    if (typeof file === 'string') {
+      if (/<([\w-]+:)?auditfile[\s>]/i.test(file.slice(0, 3000))) return { type: 'xaf', kind: 'auditfile', xaf: parseXaf(file) };
+      tables = tablesFromCsv(file);
+    } else {
+      let wb;
+      try {
+        wb = readXlsx(file);
+      } catch {
+        throw new XafError('Dit bestand kunnen we niet lezen. Gebruik een auditfile (.xaf), of een overzicht als Excel (.xlsx) of CSV.');
+      }
+      if (isTrialBalance(wb)) return { type: 'xaf', kind: 'kolommenbalans', xaf: parseTrialBalance(wb) };
+      tables = tablesFromWorkbook(wb);
+    }
+    const found = tables.map((t) => ({ t, kind: detectKind(t) })).find((x) => x.kind !== null);
+    if (!found) {
+      throw new XafError(
+        typeof file === 'string'
+          ? 'Dit bestand herkennen we niet. Een auditfile (.xaf), een saldibalans of een lijst met openstaande facturen werkt. Of download het voorbeeldbestand en zet je facturen daarin.'
+          : 'In dit Excel-bestand staat geen kolommenbalans, saldibalans of lijst met openstaande facturen. Of download het voorbeeldbestand en zet je facturen daarin.',
+      );
+    }
+    const kind = found.kind!;
+    const table = found.t;
+    const key = `overstap-${kind}-${headerSignature(table.headers)}`.slice(0, 200);
+    const guess = suggestColumns(kind, table);
+    let mapping = guess.mapping;
+    if (given) {
+      mapping = { ...mapping, ...given };
+      // onthouden: de volgende keer hetzelfde soort bestand zonder vragen
+      this.db
+        .prepare('INSERT INTO csv_mappings (name, header_signature, mapping) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET mapping = excluded.mapping')
+        .run(key, headerSignature(table.headers), JSON.stringify(mapping));
+    } else {
+      const saved = this.db.prepare('SELECT mapping FROM csv_mappings WHERE name = ?').get(key) as { mapping: string } | undefined;
+      if (saved) mapping = { ...mapping, ...(JSON.parse(saved.mapping) as ColumnMapping) };
+    }
+    const questions = guess.questions.filter((q) => mapping[q.field] === undefined && !(q.field === 'balance' && mapping.debit !== undefined && mapping.credit !== undefined));
+    return { type: 'table', kind, table, mapping, questions };
+  }
+
+  private saldibalans(table: Table, mapping: ColumnMapping): XafFile {
+    const s = this.settings.get().switchover;
+    // saldo per: de datum in de titel, anders de dag vóór de instapdatum
+    const asOf = titleDate(table) ?? (s.mode === 'overstapper' && s.date ? addDays(s.date, -1) : `${new Date().getFullYear() - 1}-12-31`);
+    return saldibalansToXaf(table, mapping, asOf);
+  }
+
+  /** Lijst met openstaande posten → losse facturen en rekeningen, met een controle op de startbalans. */
+  private planOpenItems(table: Table, mapping: ColumnMapping): XafPlan {
+    const s = this.settings.get().switchover;
+    if (s.mode !== 'overstapper' || !s.date) throw new ValidationError('Kies eerst een instapdatum');
+    const date = s.date;
+    const until = addDays(date, -1);
+    const { rows, unreadable } = openItemRows(table, mapping);
+    if (rows.length === 0 && unreadable.length > 0) throw new ValidationError(`De bedragen in deze lijst kan de app niet lezen, bv. ${unreadable[0]}`);
+    if (rows.length === 0) throw new ValidationError('In deze lijst staan geen openstaande bedragen');
+    const proposals: XafProposal[] = [];
+    rows.forEach((r, i) => {
+      const invoiceDate = r.invoiceDate && r.invoiceDate < date ? r.invoiceDate : until;
+      if (r.amount > 0) {
+        const input: OpeningInput =
+          r.kind === 'klant'
+            ? { kind: 'klant', relationName: r.relationName, number: r.number || `ZONDER-NR-${i + 1}`, invoiceDate, dueDate: r.dueDate, amount: r.amount, bron: 'lijst' }
+            : { kind: 'leverancier', relationName: r.relationName, reference: r.number || null, invoiceDate, dueDate: r.dueDate, amount: r.amount, bron: 'lijst' };
+        proposals.push({
+          key: `lijst:${r.kind}:${r.relationName}:${r.number}:${i}`,
+          label: `${r.kind === 'klant' ? 'Factuur' : 'Rekening'} ${r.number || '(zonder nummer)'} ${r.relationName}`,
+          input,
+          amount: r.kind === 'klant' ? r.amount : -r.amount,
+          include: true,
+          note: r.number ? null : 'geen factuurnummer: dan koppelt de app de betaling niet vanzelf',
+        });
+      } else {
+        // klant betaalde vooruit / je hebt tegoed bij een leverancier
+        const input: OpeningInput =
+          r.kind === 'klant' ? { kind: 'schuld', description: `Vooruit ontvangen van ${r.relationName}`, amount: -r.amount, bron: 'lijst' } : { kind: 'vordering', description: `Tegoed bij ${r.relationName}`, amount: -r.amount, bron: 'lijst' };
+        proposals.push({ key: `lijst-min:${r.kind}:${r.relationName}:${r.number}:${i}`, label: input.description, input, amount: r.kind === 'klant' ? r.amount : -r.amount, include: true, note: null });
+      }
+    });
+    // controle: sluit de lijst aan op wat de startbalans nu zegt?
+    const position = this.switchover.position();
+    const net = (key: string) => (position?.bezittingen.find((l) => l.key === key)?.amount ?? 0) - (position?.schulden.find((l) => l.key === key)?.amount ?? 0);
+    const parts: string[] = [];
+    for (const kind of ['klant', 'leverancier'] as const) {
+      if (!rows.some((r) => r.kind === kind)) continue;
+      const list = rows.filter((r) => r.kind === kind).reduce((t, r) => t + r.amount, 0);
+      const now = kind === 'klant' ? net(ACCOUNTS.debiteuren) : -net(ACCOUNTS.crediteuren);
+      const who = kind === 'klant' ? 'klanten nog moesten betalen' : 'jij nog moest betalen';
+      if (now === 0) parts.push(`Samen ${formatEuro(list)} wat ${who}.`);
+      else if (now === list) parts.push(`Samen ${formatEuro(list)}: gelijk aan wat ${who} volgens je startbalans ✓`);
+      else parts.push(`Samen ${formatEuro(list)} wat ${who}; volgens je startbalans ${formatEuro(now)} (${formatEuro(Math.abs(list - now))} verschil).`);
+    }
+    return {
+      kind: 'openstaande-posten',
+      meta: { software: `Openstaande posten (${table.sheet})`, version: 'openstaande-posten', fiscalYear: date.slice(0, 4), startDate: until, endDate: until, company: table.title[0] ?? '', accounts: 0, lines: rows.length },
+      date,
+      suggestedDate: date,
+      banks: [],
+      proposals,
+      relations: { total: 0, fresh: 0 },
+      equity: null,
+      check: parts.join(' '),
+      accounts: [],
+      warnings: unreadable.length ? [`${unreadable.length} ${unreadable.length === 1 ? 'regel heeft een bedrag' : 'regels hebben een bedrag'} dat de app niet kan lezen; die staan hieronder niet: ${unreadable.slice(0, 3).join(', ')}${unreadable.length > 3 ? ', …' : ''}`] : [],
+    };
+  }
+
 
   private plan(xaf: XafFile, requested?: IsoDate): XafPlan {
     const s = this.settings.get();
@@ -435,6 +566,7 @@ export class XafImportService {
     const equity = xaf.accounts.filter((a) => isBalance(cls.get(a.id)!) && cls.get(a.id) !== 'eigen-vermogen').reduce((t, a) => t + (balance.get(a.id) ?? 0), 0);
     const known = new Set(this.relations.list({ includeArchived: true }).map((r) => r.name.toLowerCase()));
     return {
+      kind: xaf.version === 'kolommenbalans' || xaf.version === 'saldibalans' ? xaf.version : 'auditfile',
       meta: { software: xaf.software, version: xaf.version, fiscalYear: xaf.fiscalYear, startDate: xaf.startDate, endDate: xaf.endDate, company: xaf.company.name, accounts: xaf.accounts.length, lines: xaf.lines.length },
       date,
       suggestedDate,
@@ -451,11 +583,24 @@ export class XafImportService {
    * Overnemen wat de gebruiker aanvinkte. Eerder uit een auditfile overgenomen onderdelen worden
    * eerst weggehaald (niet als ze al betaald of afgeschreven zijn), zodat opnieuw inlezen niets dubbelt.
    */
-  apply(file: string | Uint8Array, choices: XafApplyChoices): SwitchoverState {
+  apply(file: string | Uint8Array, choices: XafApplyChoices, mapping?: ColumnMapping): SwitchoverState {
     const s = this.settings.get();
     if (s.switchover.mode !== 'overstapper' || !s.switchover.date) throw new ValidationError('Kies eerst een instapdatum');
-    const xaf = this.load(file);
+    const src = this.source(file, mapping);
+    if (src.type === 'table' && src.questions.length > 0) throw new ValidationError(src.questions[0]!.question);
+    if (src.type === 'table' && src.kind === 'openstaande-posten') return this.applyOpenItems(this.planOpenItems(src.table, src.mapping), choices);
+    const xaf = src.type === 'xaf' ? src.xaf : this.saldibalans(src.table, src.mapping);
     const plan = this.plan(xaf, s.switchover.date);
+    const same = (a: OpeningInput, b: OpeningInput) =>
+      a.kind === b.kind &&
+      ((a.kind === 'klant' && b.kind === 'klant' && a.number === b.number) ||
+        (a.kind === 'leverancier' && b.kind === 'leverancier' && a.relationName === b.relationName && (a.reference ?? null) === (b.reference ?? null)) ||
+        (a.kind === 'bezit' && b.kind === 'bezit' && a.name === b.name));
+    // staat er al een lijst met losse facturen, dan gaat die voor: geen totaal voor die soort erbij, en
+    // geen factuur die al op de lijst staat. Andere losse facturen uit de auditfile komen er gewoon bij.
+    const listed = this.switchover.list().filter((i) => i.data.bron === 'lijst').map((i) => i.data);
+    const isTotal = (p: OpeningInput) => (p.kind === 'klant' && p.number.startsWith('SALDO-')) || (p.kind === 'leverancier' && !p.reference);
+    const covered = (p: OpeningInput) => listed.some((l) => same(l, p)) || (isTotal(p) && listed.some((l) => l.kind === p.kind));
     const include = new Set(choices.include);
     tx(this.db, () => {
       if (choices.relations) this.importRelations(xaf);
@@ -466,11 +611,6 @@ export class XafImportService {
         if (item.locked) kept.push(item.data);
         else this.switchover.remove(item.id);
       }
-      const same = (a: OpeningInput, b: OpeningInput) =>
-        a.kind === b.kind &&
-        ((a.kind === 'klant' && b.kind === 'klant' && a.number === b.number) ||
-          (a.kind === 'leverancier' && b.kind === 'leverancier' && a.relationName === b.relationName && (a.reference ?? null) === (b.reference ?? null)) ||
-          (a.kind === 'bezit' && b.kind === 'bezit' && a.name === b.name));
       // beginsaldi van een vorige keer inlezen eerst terug op nul (misschien koppel je nu aan een andere rekening)
       for (const id of s.switchover.xafBanks ?? []) {
         if (this.bank.listAccounts().some((b) => b.id === id)) this.bank.setOpeningBalance(id, 0, plan.date);
@@ -487,11 +627,37 @@ export class XafImportService {
       // eerst de btw-periode: de omzet tot nu toe rekent daarmee
       const ordered = [...plan.proposals.filter((p) => p.input.kind === 'btw-periode'), ...plan.proposals.filter((p) => p.input.kind !== 'btw-periode')];
       for (const p of ordered) {
-        if (!include.has(p.key) || kept.some((k) => same(k, p.input))) continue;
+        if (!include.has(p.key) || kept.some((k) => same(k, p.input)) || covered(p.input)) continue;
         const existing = p.input.kind === 'btw' ? this.switchover.list().find((i) => i.kind === 'btw') : undefined;
         this.switchover.save(p.input, existing?.id);
       }
       this.switchover.setAccountantEquity(plan.equity);
+    });
+    return this.switchover.state();
+  }
+
+  /**
+   * Lijst met openstaande posten overnemen. Wat er voor die soort (klanten of leveranciers) uit een
+   * overzicht of een vorige lijst stond, gaat eruit (behalve wat al betaald is); de lijst komt ervoor in de plaats.
+   */
+  private applyOpenItems(plan: XafPlan, choices: XafApplyChoices): SwitchoverState {
+    const include = new Set(choices.include);
+    const kinds = new Set(plan.proposals.map((p) => (p.key.split(':')[1] === 'leverancier' ? 'leverancier' : 'klant')));
+    tx(this.db, () => {
+      const kept: OpeningInput[] = [];
+      for (const item of this.switchover.list()) {
+        if (!item.data.bron || !(item.kind === 'klant' || item.kind === 'leverancier' || item.data.bron === 'lijst') || !kinds.has(item.kind === 'leverancier' ? 'leverancier' : 'klant')) continue;
+        if (item.locked) kept.push(item.data);
+        else this.switchover.remove(item.id);
+      }
+      for (const p of plan.proposals) {
+        if (!include.has(p.key)) continue;
+        const i = p.input;
+        // al betaald (blijft staan) of het nummer bestaat al in de app: niet nog een keer
+        if (kept.some((k) => k.kind === i.kind && ((k.kind === 'klant' && i.kind === 'klant' && k.number === i.number) || (k.kind === 'leverancier' && i.kind === 'leverancier' && k.relationName === i.relationName && k.reference === i.reference)))) continue;
+        if (i.kind === 'klant' && this.db.prepare('SELECT 1 FROM invoices WHERE number = ?').get(i.number)) continue;
+        this.switchover.save(i);
+      }
     });
     return this.switchover.state();
   }
