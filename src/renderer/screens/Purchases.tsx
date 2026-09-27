@@ -4,6 +4,7 @@ import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInp
 import { today } from '../../shared/dates';
 import type { PurchaseVatCode } from '../../shared/vat';
 import { mightBeInvestment, netAmount } from '../../shared/investment';
+import { formatForeign } from '../../shared/currency';
 import { CategoryChips } from './Categories';
 
 export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
@@ -79,7 +80,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                 </td>
                 <td><StatusPill status={p.status} /></td>
                 <td className="num"><Euro cents={p.vat_total} /></td>
-                <td className="num"><Euro cents={p.total} /></td>
+                <td className="num"><Euro cents={p.total} />{p.currency && p.foreign_total !== null && <div className="small muted">{formatForeign(p.foreign_total, p.currency)}</div>}</td>
                 <td onClick={(e) => e.stopPropagation()}>
                   <span className="row">
                     {p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}

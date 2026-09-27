@@ -2,6 +2,18 @@
 
 ## Nog niet uitgebracht
 
+- **Aankopen in dollars (en andere munten)** (#74): de app herkent een bon of factuur in een andere munt ($, USD,
+  £, CHF, …) en boekt hem in euro's, zonder extra velden:
+  - staat de betaling al op de bank, dan telt **het bedrag dat de bank afschreef** (de echte koers). Bank en bon
+    worden gekoppeld, ook al verschilt het bedrag door de koers van je bank;
+  - nog geen betaling: omgerekend met de **dagkoers van de Europese Centrale Bank** op de factuurdatum (alleen
+    de munt en de datum gaan naar de ECB; de koers wordt bewaard). Komt de betaling later, dan koppelt de app hem
+    en boekt het kleine verschil als **koersverschil**;
+  - geen internet: de app gokt niets en vraagt het bedrag in euro's zoals afgeschreven.
+  Bij de bon en in de lijst met aankopen staat het oorspronkelijke bedrag en de koers erbij. Btw van een
+  leverancier buiten de EU (verlegd, rubriek 4a) gaat over het bedrag in euro's. Laat de koers en de btw altijd
+  controleren door je boekhouder.
+
 ## 0.3.8 — bonnen lezen naar keuze, vragen stellen via Claude Code/Codex, btw-termijn en potjes
 
 - **Verbeteringen na de review**: een potje zonder IBAN wordt nu apart bijgehouden, zodat een afschrift met een

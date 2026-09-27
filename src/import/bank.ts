@@ -14,6 +14,7 @@ import { today, type IsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
 import type { NormalizedTransaction, ParseResult } from './types';
 import { referenceIn } from '../shared/references';
+import { withinFx } from '../shared/currency';
 
 export interface BankAccount {
   id: number;
@@ -390,7 +391,10 @@ export class BankService {
     const t = this.get(txId);
     this.assertOpen(t);
     const account = this.getAccount(t.bank_account_id);
-    this.purchases.registerPayment(purchaseId, { amount: -t.amount, date: t.transaction_date, moneyAccount: account.rgs_code, bankTransactionId: txId });
+    // andere munt (#74): de bank rekende een eigen koers; een klein verschil is een koersverschil
+    const p = this.purchases.get(purchaseId);
+    const settleFx = Boolean(p.currency && p.currency !== 'EUR' && -t.amount !== p.open_amount && withinFx(-t.amount, p.open_amount));
+    this.purchases.registerPayment(purchaseId, { amount: -t.amount, date: t.transaction_date, moneyAccount: account.rgs_code, bankTransactionId: txId, settleFx });
   }
 
   /**

@@ -4,6 +4,7 @@ import type { PurchaseService, PurchaseInvoice } from '../documents/purchases';
 import type { RelationsService } from '../relations/relations';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { today, type IsoDate } from '../shared/dates';
+import { withinFx } from '../shared/currency';
 import { THRESHOLDS, thresholdFor, type AutopilotLevel } from '../automation/decisions';
 
 export type Suggestion =
@@ -84,6 +85,8 @@ export class MatchingEngine {
         const reasons: string[] = [];
         let score = 0;
         if (p.open_amount === -t.amount) (score += 50, reasons.push('bedrag klopt'));
+        // andere munt (#74): de bank rekende een eigen koers, dus ongeveer hetzelfde bedrag
+        else if (p.currency && p.currency !== 'EUR' && withinFx(-t.amount, p.open_amount)) (score += 40, reasons.push(`bedrag klopt ongeveer (${p.currency}, andere koers)`));
         if (p.supplier_reference && mentions(text, p.supplier_reference)) (score += 60, reasons.push('factuurnummer staat in de omschrijving'));
         if (p.relation_name && nameSimilar(t.counter_name, p.relation_name)) (score += 20, reasons.push('naam van de leverancier'));
         if (score >= 50) out.push({ kind: 'inkoop', purchaseId: p.id, label: `Aankoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''}`, score, reasons });

@@ -62,6 +62,20 @@ export interface DocumentResult {
   reverseCharge: boolean;
   /** ruwe tekst voor debugging en classificatie */
   rawText: string;
+  /**
+   * Document in een andere munt (#74). De bedragen hierboven zijn dan in euro's: omgerekend met de
+   * ECB-koers van de factuurdatum, of (beter) het bedrag dat de bank echt afschreef.
+   */
+  foreign?: {
+    currency: string;
+    /** totaal in de vreemde munt, in centen */
+    total: Cents;
+    /** vreemde munt per 1 euro; null = nog geen koers (geen internet) */
+    rate: number | null;
+    rateDate: string | null;
+    /** 'ecb' = geschat met de dagkoers, 'bank' = wat er echt is afgeschreven */
+    source: 'ecb' | 'bank' | null;
+  };
   pageSizes?: { width: number; height: number }[];
 }
 
