@@ -1,6 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron';
-import { autoUpdater } from 'electron-updater';
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, type Db } from '../db/database';
@@ -20,6 +19,7 @@ import { LocalOcrRuntime } from '../ocr-runtime/runtime';
 import { OllamaClassifier } from '../intake/llm-ollama';
 import type { FetchLike } from '../integrations/types';
 import { ImapSource } from '../mail/imap-source';
+import { Updates } from './updates';
 import type { PollResult } from '../mail/mail-intake';
 
 const SMTP_SECRET = 'smtp:password';
@@ -115,6 +115,31 @@ function configureLocalAi(): void {
     services.classifier.setLlm(null);
   }
 }
+
+/**
+ * Eerste start van een nieuwe versie: eerst een kopie van de administratie, want een nieuwe versie
+ * kan de database aanpassen. De app is dan nog niet open, dus een bestandskopie is veilig.
+ */
+function backupBeforeUpgrade(): void {
+  const marker = join(dataDir(), 'versie.txt');
+  const current = app.getVersion();
+  const previous = existsSync(marker) ? readFileSync(marker, 'utf8').trim() : null;
+  if (previous === current) return;
+  try {
+    if (existsSync(dbPath())) {
+      const dir = join(dataDir(), 'backups');
+      mkdirSync(dir, { recursive: true });
+      const target = join(dir, `voor-versie-${current}-van-${previous ?? 'onbekend'}-${new Date().toISOString().slice(0, 10)}.sqlite`);
+      copyFileSync(dbPath(), target);
+      if (existsSync(`${dbPath()}-wal`)) copyFileSync(`${dbPath()}-wal`, `${target}-wal`);
+    }
+    writeFileSync(marker, current);
+  } catch (e) {
+    console.error('Kopie vóór de update mislukt', e);
+  }
+}
+
+let updates: Updates | null = null;
 
 function initServices(): void {
   db = openDatabase(dbPath());
@@ -265,9 +290,12 @@ function initServices(): void {
       uninstall: () => localOcr.uninstall(),
     },
     async checkForUpdates() {
-      if (!app.isPackaged) return 'Updates zijn alleen beschikbaar in de geïnstalleerde versie';
-      const r = await autoUpdater.checkForUpdates();
-      return r?.updateInfo.version && r.updateInfo.version !== app.getVersion() ? `Versie ${r.updateInfo.version} wordt gedownload` : 'Je hebt de nieuwste versie';
+      return updates ? updates.checkNow() : 'Updates zijn alleen beschikbaar in de geïnstalleerde versie';
+    },
+    updates: {
+      status: () => updates?.status ?? { state: 'uit', version: null, notes: null, percent: null, error: null },
+      install: () => updates?.install(),
+      reconfigure: () => updates?.configure(),
     },
   });
 }
@@ -411,6 +439,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    if (!SMOKE_TEST) backupBeforeUpgrade();
     initServices();
     registerIpc();
     createWindow();
@@ -420,10 +449,9 @@ if (!gotLock) {
     // inkomende post: kort na het opstarten en daarna elk kwartier
     setTimeout(() => void backgroundMail(), 30_000);
     setInterval(() => void backgroundMail(), FIFTEEN_MINUTES);
-    if (app.isPackaged) {
-      autoUpdater.autoDownload = true;
-      void autoUpdater.checkForUpdatesAndNotify().catch((e) => console.error('Update-controle mislukt', e));
-    }
+    // automatisch bijwerken (standaard aan; uit te zetten in Instellingen)
+    updates = new Updates((status) => emit('update', status), () => services.settings.get().autoUpdate);
+    updates.configure();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

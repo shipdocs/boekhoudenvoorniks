@@ -2,6 +2,12 @@
 
 ## Nog niet uitgebracht
 
+- **Automatisch bijwerken, maar zichtbaar**: staat standaard aan. De app kijkt nu elke 4 uur (niet alleen bij
+  het opstarten), downloadt op de achtergrond en installeert als je de app sluit. Bovenaan verschijnt
+  "Versie … staat klaar" met *Wat is er nieuw?* en *Nu herstarten*; de app herstart nooit vanzelf midden in je
+  werk. Bij de eerste start van een nieuwe versie maakt de app eerst een kopie van je administratie. Tevreden
+  met wat je hebt? Zet het uit bij Instellingen → Back-up, demo & updates; *Zoek naar updates* werkt dan nog wel.
+
 ## 0.3.5 — mail doorsturen, bonnen in de mail en controles oplossen
 
 - **Bon in de mail zelf** (geen bijlage), bijvoorbeeld van een webshop, Uber of een app: staat er een woord als

@@ -25,6 +25,9 @@ let dir, file, db, services, api;
 let inflight = 0;
 /** wat de app "verstuurde" (e-mail) en "opsloeg" (bestanden), voor controles in de tests */
 let sent = [];
+/** nagebootste update-status (POST /__update), en of "Nu herstarten" is aangeklikt */
+let updateStatus = { state: 'uit', version: null, notes: null, percent: null, error: null };
+let updateInstalled = false;
 
 async function storeFile(name, data) {
   const p = path.join(dir, 'bijlagen', `${Date.now()}-${name.replace(/[^\w.-]+/g, '_')}`);
@@ -65,6 +68,11 @@ function init(fresh) {
     async backupNow() { return path.join(dir, 'backup.sqlite'); },
     async restoreBackup() { return false; },
     async exportEncrypted() { return path.join(dir, 'export.gbbackup'); },
+    updates: {
+      status: () => updateStatus,
+      install: () => { updateInstalled = true; },
+      reconfigure: () => { updateStatus = { ...updateStatus, state: updateStatus.state === 'klaar' ? 'klaar' : services.settings.get().autoUpdate ? 'wacht' : 'uit' }; },
+    },
     localOcr: { status: () => ({ state: 'niet-geinstalleerd' }), install: () => ({ state: 'niet-geinstalleerd' }), uninstall: async () => ({ state: 'niet-geinstalleerd' }) },
     async resetData(withDemo) {
       const backup = await wipeDatabase(db, file, path.join(dir, 'backups'));
@@ -92,10 +100,16 @@ http
         // niet midden in een verzoek van de vorige test de database wisselen
         for (let i = 0; inflight > 0 && i < 100; i++) await new Promise((r) => setTimeout(r, 50));
         sent = [];
+        updateStatus = { state: 'uit', version: null, notes: null, percent: null, error: null };
+        updateInstalled = false;
         init(true);
         return res.end('{"ok":true}');
       }
       if (req.url === '/__sent') return res.end(JSON.stringify({ ok: sent }));
+      if (req.url === '/__update') {
+        if (body) updateStatus = { ...updateStatus, ...JSON.parse(body) };
+        return res.end(JSON.stringify({ ok: { status: updateStatus, installed: updateInstalled } }));
+      }
       const { method, args } = JSON.parse(body, revive);
       const [ns, fn] = String(method).split('.');
       const handler = Object.hasOwn(api, ns) && Object.hasOwn(api[ns], fn) ? api[ns][fn] : null;

@@ -71,6 +71,8 @@ export interface AppSettings {
   ocr: OcrSettings;
   smtp: SmtpSettings;
   mailIn: MailInSettings;
+  /** nieuwe versies automatisch downloaden en installeren bij afsluiten (standaard aan) */
+  autoUpdate: boolean;
   paymentTermDays: number;
   quoteValidityDays: number;
   invoiceNumberFormat: string;
@@ -159,6 +161,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ocr: { url: '', engine: 'glm-ocr', llmUrl: '', llmModel: '' },
   smtp: { host: '', port: 587, secure: false, user: '', fromName: '', fromEmail: '', bcc: '', replyTo: '' },
   mailIn: { enabled: false, host: '', port: 993, secure: true, user: '', folder: 'INBOX', extraFolders: [], processedFolder: 'Verwerkt', since: '' },
+  autoUpdate: true,
   paymentTermDays: 14,
   quoteValidityDays: 30,
   invoiceNumberFormat: '{JJJJ}-{NNNN}',
