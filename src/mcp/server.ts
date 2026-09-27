@@ -152,14 +152,19 @@ export function runStdio(input: Readable, output: Writable, tools: McpTool[], ve
   const rl = createInterface({ input, crlfDelay: Infinity });
   rl.on('line', (line) => {
     if (!line.trim()) return;
-    let msg: JsonRpc;
+    let msg: unknown;
     try {
-      msg = JSON.parse(line) as JsonRpc;
+      msg = JSON.parse(line);
     } catch {
       output.write(`${JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Ongeldige JSON' } })}\n`);
       return;
     }
-    const res = handleMessage(msg, tools, version);
+    // geldige JSON maar geen bericht (null, een getal, een lijst): netjes weigeren, nooit vastlopen
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
+      output.write(`${JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Ongeldig verzoek' } })}\n`);
+      return;
+    }
+    const res = handleMessage(msg as JsonRpc, tools, version);
     if (res) output.write(`${JSON.stringify(res)}\n`);
   });
   return new Promise((resolve) => rl.on('close', () => resolve()));

@@ -115,11 +115,13 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
 
   // Datum: bij voorkeur een regel met "datum"
   let invoiceDate: Field<string> | null = null;
-  for (const [preferred, conf] of [[true, 0.95], [false, 0.75]] as const) {
+  // 1. regel met "datum"/"date"; 2. elke andere regel behalve een betaaldatum; 3. desnoods de betaaldatum
+  // (een kassabon heeft de datum soms alleen bij "Betaald met pin")
+  const isPayment = (t: string) => /payment|paid|betaal/i.test(t);
+  for (const [pass, conf] of [['label', 0.95], ['geen-betaling', 0.75], ['alles', 0.6]] as const) {
     for (const line of lines) {
-      if (preferred && !/datum|date/i.test(line.text)) continue;
-      // "Payment date" of "Betaaldatum" is niet de factuurdatum
-      if (preferred && /payment|paid|betaal/i.test(line.text)) continue;
+      if (pass === 'label' && !/datum|date/i.test(line.text)) continue;
+      if (pass !== 'alles' && isPayment(line.text)) continue;
       if (/verval|due/i.test(line.text)) continue;
       const d = parseDateText(line.text);
       if (d) {

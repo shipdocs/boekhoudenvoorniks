@@ -60,5 +60,10 @@ describe('review-punten', () => {
   it('"Payment date" is niet de factuurdatum', () => {
     const r = parseDocumentText(['Invoice', 'Payment date May 20, 2026', 'Date of issue May 6, 2026', 'Total €90.00'].map((text) => ({ text, page: 1 })), 'pdf-text');
     expect(r.invoiceDate?.value).toBe('2026-05-06');
+    // zonder kopje: liever een andere datum dan de betaaldatum; alleen een betaaldatum dan toch die
+    const r2 = parseDocumentText(['Paid on 20-05-2026', 'Winkel', 'Bon 06-05-2026', 'Totaal 9,00'].map((text) => ({ text, page: 1 })), 'pdf-text');
+    expect(r2.invoiceDate?.value).toBe('2026-05-06');
+    const r3 = parseDocumentText(['Winkel', 'Betaald met pin 06-05-2026', 'Totaal 9,00'].map((text) => ({ text, page: 1 })), 'pdf-text');
+    expect(r3.invoiceDate?.value).toBe('2026-05-06');
   });
 });

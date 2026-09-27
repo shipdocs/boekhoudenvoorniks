@@ -64,10 +64,11 @@ describe('koppeling voor Claude Code/Codex (MCP, alleen lezen)', () => {
     const done = runStdio(input, output, tools, 'x');
     input.write('{"jsonrpc":"2.0","id":1,"method":"ping"}\n');
     input.write('kapot\n');
+    input.write('null\n');
     input.end('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
     await done;
     const lines = out.trim().split('\n').map((l) => JSON.parse(l));
-    expect(lines).toEqual([{ jsonrpc: '2.0', id: 1, result: {} }, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Ongeldige JSON' } }]);
+    expect(lines).toEqual([{ jsonrpc: '2.0', id: 1, result: {} }, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Ongeldige JSON' } }, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Ongeldig verzoek' } }]);
   });
 
   it('andere versie van de database: eerst de app openen', () => {
