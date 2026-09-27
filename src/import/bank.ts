@@ -8,7 +8,7 @@ import type { PurchaseService } from '../documents/purchases';
 import { type BankCategoriePayload } from '../core-ledger/rules';
 import type { EventService } from '../core-ledger/events';
 import type { RelationsService } from '../relations/relations';
-import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isSalesVatCode } from '../shared/vat';
+import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, customerVatSituation, isPurchaseVatCode, isSalesVatCode, suggestedSalesVat, type SalesVatCode } from '../shared/vat';
 import { roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { today, type IsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
@@ -363,6 +363,27 @@ export class BankService {
   }
 
   /**
+   * Welke btw meestal hoort bij geld dat binnenkomt zonder factuur in de app (bv. via Mollie of een
+   * webshop). Eerst de klant (op IBAN of naam), anders het land van de IBAN. Alleen een voorstel.
+   */
+  salesVatSuggestion(txId: number): { vatCode: SalesVatCode; relationId: number | null; reason: string } {
+    const t = this.get(txId);
+    const byIban = t.counter_iban ? this.relations.findByIban(t.counter_iban) : undefined;
+    const name = (t.counter_name ?? '').trim().toLowerCase();
+    const byName = byIban ?? (name.length >= 4
+      ? this.relations.list({ type: 'klant' }).find((r) => r.name.trim().length >= 4 && name.includes(r.name.trim().toLowerCase()))
+      : undefined);
+    if (byName) {
+      const code = suggestedSalesVat(customerVatSituation(byName.country, byName.vat_number));
+      if (code) return { vatCode: code, relationId: byName.id, reason: `${byName.name} zit in het buitenland (${byName.country})` };
+      return { vatCode: 'hoog', relationId: byName.id, reason: `${byName.name} is een klant in Nederland` };
+    }
+    const land = countryCode(t.counter_iban?.slice(0, 2));
+    if (land && land !== 'NL' && !EU_COUNTRIES.has(land)) return { vatCode: 'export', relationId: null, reason: `het geld komt van een rekening buiten de EU (${land})` };
+    return { vatCode: 'hoog', relationId: null, reason: '' };
+  }
+
+  /**
    * Boekt een transactie direct op een grootboekrekening ("kantoorkosten", "privé", …),
    * inclusief BTW-splitsing. De gebruiker ziet alleen een categorie en een BTW-keuze.
    */
@@ -374,12 +395,14 @@ export class BankService {
     const description = input.description?.trim() || t.description || t.counter_name || 'Banktransactie';
     const relationId = input.relationId ?? (t.counter_iban ? this.relations.findByIban(t.counter_iban)?.id ?? null : null);
     const vatCode = input.vatCode ?? 'geen';
+    // omzet komt op de omzetrekening die bij de btw hoort (21%, 0% buiten de EU, …): zo belandt het in de juiste rubriek
+    const account = target.category === 'omzet' && isSalesVatCode(vatCode) ? SALES_ACCOUNTS[vatCode]?.revenue ?? target.rgs_code : target.rgs_code;
     const payload: BankCategoriePayload = {
       bankTransactionId: txId,
       date: t.transaction_date,
       amount: t.amount,
       bankAccount: bank.rgs_code,
-      account: target.rgs_code,
+      account,
       accountCategory: target.category,
       vatCode,
       relationId,

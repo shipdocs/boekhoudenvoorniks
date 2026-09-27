@@ -278,6 +278,40 @@ export function CategoryPicker({ initial, onPick, incoming, amount }: { initial?
   );
 }
 
+/**
+ * Omzet zonder factuur in deze app (contant, pin, Mollie, webshop): kies de btw. De app stelt een
+ * tarief voor op basis van de klant of het land van de rekening; bij een klant buiten Nederland is
+ * dat vaak 0%.
+ */
+function SaleWithoutInvoice({ txId, amount, description, busy, onBook }: { txId: number; amount: number; description: string; busy: boolean; onBook: (vatCode: string, relationId: number | null, description: string) => void }) {
+  const { meta } = useApp();
+  const hint = useLoad(() => api.bank.salesVatSuggestion(txId), [txId]);
+  const [picked, setPicked] = useState<string | null>(null);
+  // een factuurnummer uit de omschrijving van de bank, bv. I-MOL-2026-00344
+  const [number, setNumber] = useState(() => description.match(/\b[A-Z][A-Z0-9]*(?:[-/][A-Z0-9]+)*\d{3,}\b/)?.[0] ?? '');
+  const vat = picked ?? hint.data?.vatCode ?? 'hoog';
+  const rate = meta.salesVat.find((v) => v.code === vat);
+  const net = Math.round((amount * 100) / (100 + (rate?.percentage ?? 0)));
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <Field label="Factuurnummer (mag leeg)" hint="van de factuur die je klant kreeg, bv. uit Mollie of je webshop; zo vindt je boekhouder hem terug">
+        <input value={number} maxLength={60} onChange={(e) => setNumber(e.target.value)} />
+      </Field>
+      <Field label="Welke btw hoort hierbij?" hint="kijk op de factuur of bon die je klant kreeg (bv. uit Mollie of je webshop)">
+        <select value={vat} onChange={(e) => setPicked(e.target.value)}>
+          {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
+        </select>
+      </Field>
+      {hint.data?.reason && !picked && <p className="small muted">Voorstel omdat {hint.data.reason}. Stond er op de factuur toch btw? Kies dan dat tarief.</p>}
+      <p className="small">Omzet <Euro cents={net} />{amount - net !== 0 && <> + btw <Euro cents={amount - net} /></>}</p>
+      {vat !== 'hoog' && vat !== 'laag' && (
+        <p className="small muted">Geen Nederlandse btw? Laat je boekhouder even meekijken of dat klopt voor wat je levert.</p>
+      )}
+      <div className="row end"><Button kind="primary" disabled={busy || hint.loading} onClick={() => onBook(vat, hint.data?.relationId ?? null, number.trim() ? `Factuur ${number.trim()}${description.includes(number.trim()) ? '' : ` · ${description}`}` : description)}>Verwerk als omzet</Button></div>
+    </div>
+  );
+}
+
 export function CategorizeTransaction({ id }: { id: number }) {
   const { go, meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
@@ -286,6 +320,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const openInvoices = useLoad(() => api.invoices.list({ status: 'openstaand' }));
   const overdue = useLoad(() => api.invoices.list({ status: 'vervallen' }));
   const [recat, setRecat] = useState(false);
+  const [sale, setSale] = useState(false);
   const own = useLoad(() => api.bank.ownTransfer(id), [id]);
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
@@ -365,9 +400,18 @@ export function CategorizeTransaction({ id }: { id: number }) {
               )}
               <div className="choice" style={{ marginTop: 12 }}>
                 {meta.otherDestinations.filter((d) => ['prive-storting', 'omzet', 'btw', 'overboeking', 'onbekend'].includes(d.key)).map((d) => (
-                  <button key={d.key} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: d.account, vatCode: d.key === 'omzet' ? 'hoog' : undefined }))}>{d.label}</button>
+                  <button key={d.key} disabled={busy} className={d.key === 'omzet' && sale ? 'selected' : ''} onClick={() => (d.key === 'omzet' ? setSale(!sale) : void done(api.bank.book(t.id, { account: d.account })))}>{d.label}</button>
                 ))}
               </div>
+              {sale && (
+                <SaleWithoutInvoice
+                  txId={t.id}
+                  amount={t.amount}
+                  description={t.description ?? ''}
+                  busy={busy}
+                  onBook={(vatCode, relationId, description) => void done(api.bank.book(t.id, { account: meta.otherDestinations.find((d) => d.key === 'omzet')!.account, vatCode, relationId, description }))}
+                />
+              )}
             </>
           ) : (
             <>

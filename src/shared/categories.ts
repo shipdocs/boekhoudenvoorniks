@@ -51,6 +51,6 @@ export const OTHER_DESTINATIONS = [
   { key: 'prive-storting', label: 'Privé gestort (van mezelf)', account: 'BEivPriStr' },
   { key: 'btw', label: 'Btw betaald aan / terug van de Belastingdienst', account: 'BSchBepBtwAfr' },
   { key: 'overboeking', label: 'Overboeking tussen eigen rekeningen', account: 'BLiqKru' },
-  { key: 'omzet', label: 'Omzet zonder factuur (contant/pin)', account: 'WOmzNopOlh' },
+  { key: 'omzet', label: 'Omzet zonder factuur in deze app (contant, pin, Mollie, webshop)', account: 'WOmzNopOlh' },
   { key: 'onbekend', label: 'Weet ik nog niet (later uitzoeken)', account: 'BSchOvsVrp' },
 ];

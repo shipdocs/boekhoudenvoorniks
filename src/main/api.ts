@@ -516,6 +516,7 @@ export function createApi(s: Services, host: HostContext) {
       matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(txId, invoiceId),
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(txId, purchaseId),
       book: (txId: number, input: BookToAccountInput) => s.bank.bookToAccount(txId, input),
+      salesVatSuggestion: (txId: number) => s.bank.salesVatSuggestion(txId),
       ignore: (txId: number) => s.bank.ignore(txId),
       /** Andere categorie voor een al geboekte betaling: tegenboeking + nieuwe boeking (#19), en leren. */
       reclassify: (txId: number, categoryKey: string, vatCode: string) => {
