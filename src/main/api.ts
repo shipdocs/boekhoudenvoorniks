@@ -34,6 +34,7 @@ import type { LineInput } from '../documents/totals';
 import type { Task } from '../inbox/inbox';
 import type { OpeningInput } from '../onboarding/switchover';
 import type { XafApplyChoices } from '../onboarding/xaf-import';
+import { OPEN_ITEMS_TEMPLATE, type ColumnMapping } from '../import/opening-tables';
 import type { EntrySource } from '../core-ledger/ledger';
 import { today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
@@ -598,8 +599,11 @@ export function createApi(s: Services, host: HostContext) {
       confirm: (opts?: { provisional?: boolean }) => s.switchover.confirm(opts),
       reopen: () => s.switchover.reopen(),
       /** auditfile (XAF) uit het vorige programma: eerst bekijken, dan overnemen wat aangevinkt is */
-      analyzeXaf: (file: string | Uint8Array, date?: IsoDate) => s.xafImport.analyze(file, date),
-      applyXaf: (file: string | Uint8Array, choices: XafApplyChoices) => s.xafImport.apply(file, choices),
+      /** alles wat de gebruiker erop sleept (auditfile, kolommen-/saldibalans, openstaande posten): voorstel of een paar vragen */
+      analyzeXaf: (file: string | Uint8Array, mapping?: ColumnMapping) => s.xafImport.analyzeFile(file, { mapping }),
+      applyXaf: (file: string | Uint8Array, choices: XafApplyChoices, mapping?: ColumnMapping) => s.xafImport.apply(file, choices, mapping),
+      /** voorbeeldbestand voor openstaande posten, om in te vullen */
+      saveTemplate: () => host.saveFile('openstaande-posten.csv', OPEN_ITEMS_TEMPLATE, [{ name: 'CSV', extensions: ['csv'] }]),
       /** openstaande verkoopfacturen als UBL (e-factuur) */
       addUblInvoices: (files: { name: string; xml: string }[]) => ({ ...s.switchover.saveFromUbl(files), state: s.switchover.state() }),
     },

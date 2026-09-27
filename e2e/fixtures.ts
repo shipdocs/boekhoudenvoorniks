@@ -80,7 +80,8 @@ export async function nav(page: Page, label: string | RegExp) {
 }
 
 /** De hele onboarding doorlopen zoals een nieuwe gebruiker. Eindigt op Vandaag. */
-export async function onboard(page: Page, opts: { kor?: boolean; overstap?: boolean } = {}) {
+export async function onboard(page: Page, opts: { kor?: boolean; overstap?: boolean; overstapDate?: string } = {}) {
+  const overstap = opts.overstap || !!opts.overstapDate;
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Welkom 👋' })).toBeVisible();
   await page.getByPlaceholder('Voornaam').fill('Piet');
@@ -106,9 +107,12 @@ export async function onboard(page: Page, opts: { kor?: boolean; overstap?: bool
       await page.getByPlaceholder('NL00 BANK 0123 4567 89').fill('NL91ABNA0417164300');
       await page.getByRole('button', { name: 'Verder' }).click();
     } else if (/Heb je al een administratie/.test(h1)) {
-      if (opts.overstap) {
+      if (overstap) {
         await page.getByRole('button', { name: /Ja, ik stap over/ }).click();
-        await page.getByRole('button', { name: /Vanaf 1 januari .*aangeraden/ }).click();
+        if (opts.overstapDate) {
+          await page.getByRole('button', { name: /Een andere datum/ }).click();
+          await field(page, 'Instapdatum').fill(opts.overstapDate);
+        } else await page.getByRole('button', { name: /Vanaf 1 januari .*aangeraden/ }).click();
       } else await page.getByRole('button', { name: /Nee, ik begin net/ }).click();
       await page.getByRole('button', { name: 'Verder' }).click();
     } else if (/Auto en startjaar/.test(h1)) {
@@ -124,7 +128,7 @@ export async function onboard(page: Page, opts: { kor?: boolean; overstap?: bool
     } else if (/eerder gefactureerd/.test(h1)) {
       const terms = page.locator('input[type=checkbox]');
       for (const cb of await terms.all()) await cb.check();
-      if (opts.overstap) {
+      if (overstap) {
         await page.getByRole('button', { name: 'Klaar, verder met overstappen' }).click();
         await expect(page.getByRole('heading', { name: 'Overstappen' })).toBeVisible();
         return;
