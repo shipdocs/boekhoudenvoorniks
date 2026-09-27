@@ -121,6 +121,8 @@ export interface VatDetailLine {
   purchaseId: number | null;
   bankTransactionId: number | null;
   counterparty: string | null;
+  /** bewijsstuk van de aankoop (foto/PDF), als dat er is */
+  attachmentPath: string | null;
 }
 
 export class VatService {
@@ -326,7 +328,7 @@ export class VatService {
   }
 
   /** Waar komt een boeking vandaan? Voor de knop "Bekijken" in de details. */
-  private origin(entryId: number, sourceRef: string | null): Pick<VatDetailLine, 'invoiceId' | 'purchaseId' | 'bankTransactionId' | 'counterparty'> {
+  private origin(entryId: number, sourceRef: string | null): Pick<VatDetailLine, 'invoiceId' | 'purchaseId' | 'bankTransactionId' | 'counterparty' | 'attachmentPath'> {
     const invoiceId = sourceRef?.startsWith('invoice:') ? Number(sourceRef.slice(8)) : null;
     const purchaseId = sourceRef?.startsWith('purchase:') ? Number(sourceRef.slice(9)) : null;
     const bank = this.db.prepare('SELECT id, counter_name FROM bank_transactions WHERE matched_journal_entry_id = ? LIMIT 1').get(entryId) as { id: number; counter_name: string | null } | undefined;
@@ -335,7 +337,8 @@ export class VatService {
         `SELECT r.name FROM journal_lines l JOIN relations r ON r.id = l.relation_id WHERE l.journal_entry_id = ? LIMIT 1`,
       )
       .get(entryId) as { name: string } | undefined;
-    return { invoiceId, purchaseId, bankTransactionId: bank?.id ?? null, counterparty: rel?.name ?? bank?.counter_name ?? null };
+    const attachment = purchaseId ? (this.db.prepare('SELECT attachment_path FROM purchase_invoices WHERE id = ?').get(purchaseId) as { attachment_path: string | null } | undefined) : undefined;
+    return { invoiceId, purchaseId, bankTransactionId: bank?.id ?? null, counterparty: rel?.name ?? bank?.counter_name ?? null, attachmentPath: attachment?.attachment_path ?? null };
   }
 
   calculate(periodKey: string): VatReport {
