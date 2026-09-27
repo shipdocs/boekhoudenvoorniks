@@ -1,247 +1,170 @@
-# Fiscale review: voor de boekhouder
+# Fiscale review en code-audit
 
-Dit document is bedoeld om voor te leggen aan een boekhouder of fiscalist (issue #44). Het beschrijft
-hoe Gratis Boekhouden boekt en rekent op de punten die nog niet gecontroleerd zijn. Per punt staat de
-vraag die we beantwoord willen hebben. Graag per vraag: **klopt** / **klopt niet, want …**.
+**Peildatum:** 27 september 2026  
+**Codebasis:** `main` @ `9970c629b96ae17a3f67d28d2ff4ae31d1a709ee`  
+**Scope:** Nederlandse zzp'ers en kleine IB-ondernemers.
 
-De app is voor zzp'ers en kleine bouwbedrijven (stukadoor, schilder, timmerman, loodgieter,
-elektricien). Alle bedragen in de voorbeelden zijn in euro's.
+Deze review beschrijft wat de code werkelijk doet en toetst dat aan actuele primaire bronnen. Geen ontbrekende feiten zijn als aanname ingevuld.
 
----
+Legenda: **✅ akkoord**, **⚠️ conditioneel**, **❌ correctie vereist**, **ℹ️ buiten scope**.
 
-## 1. Btw-codes en rubrieken
+## 1. Eindoordeel
 
-### 1.1 Verkoop
+De dubbele boekhouding, centenadministratie, onveranderlijke journaalregels, tegenboekingen en standaard-btw-rubrieken zijn degelijk. De app is nog niet fiscaal volledig correct.
 
-| Code in de app | Wat de gebruiker kiest | Tarief | Rubriek | Grootboek (RGS) |
-|---|---|---|---|---|
-| `hoog` | 21% | 21% | 1a | WOmzNodOdh |
-| `laag` | 9% | 9% | 1b | WOmzNodOdl |
-| `nul` | 0% | 0% | 1e | WOmzNodOdg |
-| `verlegd` | Btw verlegd (NL, bv. onderaanneming bouw) | 0% | 1e | WOmzNodOdg |
-| `vrijgesteld` | Vrijgesteld / KOR | – | geen | WOmzNodNod |
-| `icp` | Bedrijf in de EU (0%, ICP) | 0% | 3b + ICP-opgaaf | WOmzNodOdi |
-| `export` | Uitvoer buiten de EU (0%) | 0% | 3a | WOmzNodOdb |
+| Prio | Bevinding |
+|---|---|
+| P0 | **KOR:** inkopen kunnen 21%/9% als aftrekbare voorbelasting boeken. Onder KOR mag btw op kosten/investeringen niet worden afgetrokken. |
+| P0 | **Buiten-EU diensten:** `export` zet omzet generiek in 3a. Een B2B-dienst die buiten de EU belast is hoort doorgaans niet in de Nederlandse btw-aangifte. |
+| P0 | **IB tariefbeperking ontbreekt:** zelfstandigenaftrek en mkb-winstvrijstelling mogen bij hoog inkomen maximaal 37,48% (2025) / 37,56% (2026) voordeel geven. |
+| P1 | **Startersaftrek/lage winst:** de winstbeperking van zelfstandigenaftrek geldt niet bij recht op startersaftrek; code kapt wel af. Niet-gerealiseerde zelfstandigenaftrek (9 jaar) ontbreekt. |
+| P1 | **Desinvestering:** code €2.500; correct €2.800 (2025) en €2.900 (2026). |
+| P1 | **Representatie 2025:** code €5.600; correct €5.700. |
+| P1 | **Zvw 2025:** code max €75.860; actuele Belastingdiensttabel €75.864. |
+| P1 | **ICP:** goederen/diensten zijn één code; ICP-correctie wordt te sterk gekoppeld aan btw-suppletie. |
+| P1 | **Auto-btw:** 2,7%/1,5%-forfait wordt te automatisch toegepast. |
+| P1 | **OSS:** €10.000-waarschuwing is te breed zonder prestatietype. |
+| P1 | **Werkruimte thuis:** producttekst is te stellig over aftrek van inrichting. |
 
-**Controles die de app afdwingt**
-- Bij `verlegd` en `icp` moet het btw-nummer van de klant bekend zijn.
-- Bij `icp` moet de klant in een ander EU-land zitten. Bij `export` moet de klant buiten de EU zitten.
-- Op de factuur staat bij `icp`: *"Intracommunautaire levering/dienst, btw verlegd (art. 138 / art. 196 Btw-richtlijn)"* met het btw-nummer van de afnemer.
-- In de e-factuur (UBL, Peppol BIS 3.0) wordt `icp` categorie K (VATEX-EU-IC) en `export` categorie G (VATEX-EU-G).
+## 2. Boekhoudkundige kern — ✅
 
-**Vragen**
-1. Klopt de indeling van `verlegd` (NL) in rubriek 1e?
-2. Diensten aan een **bedrijf buiten de EU**: nu kan de gebruiker alleen `export` (3a) kiezen. Horen die diensten in 3a, in 1e, of niet in de aangifte?
-3. `icp` is één code voor zowel goederen als diensten. Voor de ICP-opgaaf moet de gebruiker dat per klant zelf aangeven. Is een aparte code nodig?
-4. Is de tekst op de factuur bij ICP juist en volledig?
+`src/core-ledger/ledger.ts`, `rules.ts`, `events.ts` en database-triggers vormen een echte dubbele boekhouding. Bedragen staan in centen, posten moeten in balans zijn en correcties lopen via tegenboekingen. Interne rekeningcodes en officiële RGS-referenties zijn gescheiden en getest.
 
-### 1.2 Inkoop
+## 3. Omzetbelasting
 
-| Code in de app | Wat de gebruiker kiest | Rubriek | Boeking |
-|---|---|---|---|
-| `hoog` / `laag` | 21% / 9% | 5b | kosten + voorbelasting |
-| `verlegd` | Btw verlegd naar mij (NL, bv. onderaannemer) | 2a + 5b | zie voorbeeld |
-| `eu` | Verlegd, leverancier in de EU | 4b + 5b | zie voorbeeld |
-| `buiten-eu` | Verlegd, leverancier buiten de EU | 4a + 5b | zie voorbeeld |
-| `nul` / `geen` | 0% / geen btw | – | alleen kosten |
+### Binnenland
 
-**Voorbeeld verlegde inkoop**: advertentiekosten bij Meta Platforms Ireland van € 100 (geen btw op de factuur).
+`hoog` → 21%/1a, `laag` → 9%/1b en `nul` → 0%/1e zijn technisch goed. `verlegd` → 1e is juist **mits** een wettelijke verleggingsgrond bestaat. Een btw-nummer alleen is niet voldoende.
 
-| Rekening | Debet | Credit |
-|---|---|---|
-| Reclamekosten | 100,00 | |
-| Voorbelasting | 21,00 | |
-| Af te dragen btw verlegd uit de EU (4b) | | 21,00 |
-| Bank | | 100,00 |
+### KOR — ❌
 
-De aangifte toont dan: 4b omzet 100 / btw 21 en 5b 21. Per saldo betaalt de ondernemer niets.
+De verkoopflow houdt rekening met `kor=true`, maar de aankoopmotor kan nog `hoog`/`laag` accepteren en via `expenseLines()` voorbelasting boeken.
 
-**Hoe de app 2a/4a/4b kiest**: op de factuur staat "btw verlegd" (of reverse charge). Het land komt
-uit het btw-nummer van de leverancier (IE, DE, … = 4b; GB, CHE, … = 4a; NL = 2a). Zonder btw-nummer
-kijkt de app naar het land van het IBAN. Bekende partijen zijn standaard 4b: Meta, Stripe en LinkedIn.
+Vereist:
+- onder KOR Nederlandse factuur-btw niet op `btwVoorbelasting`;
+- niet-aftrekbare btw in kosten/kostprijs;
+- verlegde/buitenlandse btw apart behandelen: incidentele aangifte kan nodig zijn;
+- echte vrijstelling en KOR semantisch scheiden;
+- overgang naar/uit KOR kan herziening van eerdere btw-aftrek veroorzaken.
 
-**Vragen**
-5. Klopt de boeking van 4a/4b hierboven, inclusief de volledige aftrek in 5b?
-6. **Stripe-transactiekosten** worden als 4b geboekt (21% verlegd). Of zijn ze vrijgesteld (financiële dienst), en horen ze dan niet in de aangifte?
-7. Google en Microsoft staan standaard op 21% (`hoog`), omdat ze zakelijke klanten zonder geregistreerd btw-nummer Nederlandse btw rekenen. Staat op de factuur "reverse charge", dan wordt het 4b. Is dat een verstandige standaard?
+### Verlegde inkoop 2a/4a/4b — ✅/⚠️
 
-### 1.3 Buiten scope (bewust)
+De boeking kosten/actief + voorbelasting tegenover verlegde btw + bank/crediteur is passend voor volledig aftrekgerechtigde ondernemers. 5b is alleen aftrekbaar voor zover recht op aftrek bestaat.
 
-- **OSS** (webshopverkopen aan EU-consumenten) zit niet in de app. De app waarschuwt daarvoor. Vraag 8: vindt u dat verantwoord voor deze doelgroep, of moet de app zulke verkopen blokkeren?
-- **Suppletie**: correcties boven € 1.000 btw gaan via een suppletie, correcties tot en met € 1.000 gaan mee in de volgende aangifte. Vraag 9: klopt deze grens?
+Leveranciersgeheugen (Stripe, Meta, Google enz.) mag alleen voorstellen. Factuur, contracterende entiteit, land en reverse-chargevermelding gaan voor.
 
-### 1.4 Afronding
+### ICP — ⚠️/❌
 
-De aangifte wordt per rubriek in hele euro's ingevuld. De app past consequent afronding per rubriek
-in het voordeel van de ondernemer toe: omzet en af te dragen btw naar beneden, voorbelasting naar
-boven. Rubriek 5a is de som van de afgeronde verschuldigde rubrieken; 5c en 5g zijn daarna exact
-5a min 5b. Dit voorkomt dat een tweede afronding van het cententotaal een ander subtotaal oplevert.
-Vraag 10: klopt deze vaste methode voor alle positieve bedragen, creditcorrecties en negatieve saldi?
+Rubriek 3b is op hoofdlijn goed. De app moet echter goederen en diensten onderscheiden. De huidige tekst “art. 138 / art. 196” is te generiek en de ICP-CSV bevat geen prestatietype.
 
-Het ICP-overzicht gebruikt voor correcties op eerdere periodes dezelfde selectie als rubriek 3b:
-kleine correcties staan in beide overzichten van de volgende aangifte; boekingen die via een aparte
-suppletie lopen of al met een suppletie zijn afgehandeld staan in geen van beide. Vraag 10a: klopt
-deze koppeling tussen de gewone btw-aangifte, suppletie en ICP-opgaaf?
+De recente code koppelt ICP-correcties bovendien aan de btw-suppletieroute. Dat zijn afzonderlijke processen. Bewaar aparte btw-correctiestatus en ICP-correctiestatus.
 
----
+### Buiten EU — ❌
 
-## 2. Schatting inkomstenbelasting
+`export`/3a is geschikt voor goederenuitvoer als aan de voorwaarden is voldaan. Een B2B-dienst die volgens de plaats-van-dienstregels buiten de EU belast is, hoeft volgens de Belastingdienst niet in de Nederlandse btw-aangifte.
 
-Dit is **altijd een schatting**, zo staat het ook in de app. De app kent alleen de winst uit de
-onderneming.
+Minimaal toevoegen: `buiten-eu-goederen` en `buiten-eu-dienst`.
 
-### 2.1 Methode
+### OSS — ❌ waarschuwing verfijnen
 
-1. Winst tot nu (omzet − kosten volgens de boekhouding), lineair doorgetrokken naar het hele jaar.
-2. − zelfstandigenaftrek, alleen als de gebruiker aangeeft aan het urencriterium te voldoen, en nooit meer dan de winst.
-3. − mkb-winstvrijstelling over (winst − zelfstandigenaftrek).
-4. = belastbaar inkomen. Daarover gaat box 1 (tarief onder de AOW-leeftijd).
-5. − algemene heffingskorting over het belastbaar inkomen; − arbeidskorting over de fiscale
-   winst vóór ondernemersaftrek en mkb-winstvrijstelling (het arbeidsinkomen).
-6. \+ inkomensafhankelijke bijdrage Zvw over het belastbaar inkomen (tot het maximum).
-7. "Nu opzij zetten" = de jaarschatting × het verstreken deel van het jaar.
+De €10.000-regel geldt niet generiek voor iedere B2C-dienst. Zonder prestatietype alleen waarschuwen dat plaats van heffing en OSS moeten worden gecontroleerd.
 
-**Niet meegenomen** (dit staat ook in de app):
-- fiscaal partner, hypotheek en andere aftrekposten;
-- ander inkomen en box 2/3;
-- voorlopige aanslagen;
-- willekeurige afschrijving en EIA/MIA/Vamil.
+### Suppletie en afronding — ✅/⚠️
 
-Sinds de aftrekposten (hoofdstuk 3) rekent de schatting wél met: de verwachte afschrijving van het
-hele jaar, de KIA over wat al gekocht is, de bijtelling voor representatie (doorgetrokken naar het
-jaar), de desinvesteringsbijtelling en de startersaftrek.
+De €1.000-hoofdregel is passend: tot en met €1.000 kan in de eerstvolgende aangifte, daarboven afzonderlijke suppletie. Houd ook rekening met tijdige correctie.
 
-**Vragen**
-11. Is deze methode verantwoord als "grove reservering"? Moet de schatting eerder aan de veilige kant (hoger) uitvallen?
-12. De algemene heffingskorting wordt over het belastbaar inkomen berekend. De arbeidskorting wordt
-    sinds de fiscale controle van september 2026 over het arbeidsinkomen berekend. Is deze afbakening
-    voor ondernemers met uitsluitend winst uit onderneming juist?
-13. Klopt de volgorde: eerst de zelfstandigenaftrek, dan de mkb-winstvrijstelling?
-14. Moet de startersaftrek als optie erbij?
+De recente afrondingsfix voor 5a/5b/5c/5g is rekenkundig goed.
 
-### 2.2 Tarieventabel (`src/tax/income-tax.ts`)
+## 4. Inkomstenbelasting
 
-Graag per waarde controleren tegen de publicaties van de Belastingdienst.
+De uitkomst moet een **reserveringsschatting** blijven. Partner, ander inkomen, eigen woning, box 2/3, persoonsgebonden aftrek, andere ondernemingen en voorlopige aanslagen ontbreken.
 
-| | 2025 | 2026 |
-|---|---|---|
-| Schijf 1 tot | € 38.441 à 35,82% | € 38.883 à 35,75% |
-| Schijf 2 tot | € 76.817 à 37,48% | € 78.426 à 37,56% |
-| Schijf 3 daarboven | 49,50% | 49,50% |
-| Zelfstandigenaftrek | € 2.470 | € 1.200 |
-| Mkb-winstvrijstelling | 12,70% | 12,70% |
-| Algemene heffingskorting max. | € 3.068, afbouw 6,337% vanaf € 28.406 | € 3.115, afbouw 6,398% vanaf € 29.736 |
-| Arbeidskorting opbouw | 8,053% tot € 12.169; 30,030% tot € 26.288; 2,258% tot € 43.071 | 8,324% tot € 11.965; 31,009% tot € 25.845; 1,950% tot € 45.592 |
-| Arbeidskorting max. / afbouw | € 5.599; 6,51% vanaf € 43.071 | € 5.685; 6,51% vanaf € 45.592 |
-| Zvw-bijdrage ondernemer | 5,26% tot € 75.860 | 4,85% tot € 79.409 |
+| Onderdeel | 2025 | 2026 | Audit |
+|---|---:|---:|---|
+| Box 1 schijf 1 | €38.441 / 35,82% | €38.883 / 35,75% | ✅ |
+| Box 1 schijf 2 | €76.817 / 37,48% | €78.426 / 37,56% | ✅ |
+| Schijf 3 | 49,50% | 49,50% | ✅ |
+| Zelfstandigenaftrek | €2.470 | €1.200 | ✅ |
+| Mkb-winstvrijstelling | 12,7% | 12,7% | ✅ |
+| Startersaftrek | €2.123 | €2.123 | ✅ |
+| Privévervoermiddel | €0,23/km | €0,25/km | ✅ |
+| Urencriterium | 1.225 | 1.225 | ✅ |
+| Representatiedrempel | **€5.700** | €5.700 | ❌ 2025 |
+| Desinvesteringsdrempel | **€2.800** | **€2.900** | ❌ |
+| Zvw max. inkomen | **€75.864** | €79.409 | ❌ 2025 |
 
-15. Kloppen deze waarden? Na akkoord zet ik per jaar `checked: true`. De app toont dan niet langer "nog niet gecontroleerd".
+De 2026 algemene heffingskorting en arbeidskorting in de code sluiten aan op de officiële tabellen. Zvw 2026 4,85% klopt.
 
-**Rekenvoorbeeld 2026**: winst € 50.000, urencriterium ja.
-- zelfstandigenaftrek € 1.200
-- mkb-winstvrijstelling 12,7% × € 48.800 = € 6.198
-- belastbaar € 42.602
-- box 1 ≈ € 15.298
-- heffingskortingen ≈ € 7.919
-- Zvw ≈ € 2.066
-- **schatting ≈ € 9.445**
+### Zelfstandigenaftrek/startersaftrek — ❌
 
-16. Komt dit ongeveer overeen met wat u voor zo'n ondernemer (zonder partner en zonder ander inkomen) zou verwachten?
+De code begrenst zelfstandigenaftrek op de winst en startersaftrek daarna op het restant. De Belastingdienst vermeldt dat deze winstbeperking niet geldt als recht bestaat op startersaftrek. Niet-gerealiseerde zelfstandigenaftrek kan 9 jaar worden verrekend.
 
----
+`isStarter()` leidt historisch gebruik deels af uit startjaar/teller. Laat historische toepassing per relevant jaar bevestigen/importeren.
 
-## 3. Aftrekposten en bedrijfsmiddelen
+### Tariefbeperking — ❌ P0
 
-Code: `src/tax/assets.ts`, `src/tax/mileage.ts`, `src/tax/overview.ts`; bedragen per jaar in
-`src/tax/income-tax.ts`. In de app: Belasting → *Aftrekposten, bedrijfsmiddelen en kilometers*.
+Bij inkomen in de hoogste schijf moet het voordeel van onder meer zelfstandigenaftrek en mkb-winstvrijstelling worden beperkt tot 37,48%/37,56%. De huidige formule doet dit niet en kan de reservering te laag maken.
 
-### 3.1 Bedrijfsmiddelen en afschrijving
+### Verlies — ❌
 
-- Alles wat op *Inventaris en gereedschap* of *Vervoermiddelen* wordt geboekt (debet), wordt een
-  bedrijfsmiddel. De app stelt zo'n boeking voor bij aankopen vanaf € 450 excl. btw per stuk (categorie
-  "Groot gereedschap / machine").
-- Lineair, per maand, vanaf de maand van aanschaf. Standaard 5 jaar en restwaarde € 0; de gebruiker kan
-  dat aanpassen, maar niet korter dan 5 jaar (max. 20% per jaar).
-- Na afloop van een jaar boekt de app de afschrijving automatisch op 31 december:
-  *Afschrijving inventaris* (WAfsAmvBei) aan *Cumulatieve afschrijving inventaris* (BMvaBeiCae). Voor
-  vervoermiddelen WAfsAmvTev / BMvaTevCae.
-- Verkoop of buiten gebruik: eerst de afschrijving tot en met de maand vóór de verkoop. Daarna gaat de
-  boekwaarde naar *Boekresultaat* (WAfsRvmBei). De opbrengst komt binnen via een gewone verkoopfactuur (met btw)
-  en staat dus op omzet.
-- Wordt de aankoop later teruggedraaid (andere categorie), dan vervalt het bedrijfsmiddel en wordt de
-  geboekte afschrijving teruggenomen.
+Mkb-winstvrijstelling verkleint ook een fiscaal verlies. `estimateIncomeTax()` retourneert bij `fiscal <= 0` direct nullen. Splits “belasting te reserveren” van “fiscale winst/verlies”.
 
-**Vragen**
-17. Is afschrijven per maand vanaf de aanschafmaand, met standaard 5 jaar en restwaarde 0, een verantwoorde standaard?
-18. Is de verkoopopbrengst op omzet (via de factuur) en de boekwaarde op boekresultaat acceptabel, of moet de opbrengst ook op boekresultaat?
+## 5. Bedrijfsmiddelen/KIA
 
-### 3.2 Investeringsaftrek (KIA) en desinvesteringsbijtelling
+De €450-KIA-grens en KIA-staffels 2025/2026 zijn correct. €450 excl. btw is alleen universeel bruikbaar als btw aftrekbaar is; onder KOR hoort niet-aftrekbare btw bij de kostprijs.
 
-| | 2025 | 2026 |
-|---|---|---|
-| Geen aftrek tot en met | € 2.900 | € 2.900 |
-| 28% tot en met | € 70.602 | € 71.683 |
-| Vast bedrag tot en met | € 130.744: € 19.769 | € 132.746: € 20.072 |
-| Afbouw 7,56% tot en met | € 392.230 | € 398.236 |
+Minimaal 60 maanden sluit aan bij maximaal 20% afschrijving per jaar voor gewone bedrijfsmiddelen. De code start echter op aankoopdatum; fiscaal is **ingebruikname** relevant. Voeg `in_use_on` toe.
 
-- Alleen bedrijfsmiddelen vanaf € 450 per stuk tellen mee. De gebruiker kan een bedrijfsmiddel uitsluiten,
-  bijvoorbeeld een personenauto.
-- Desinvesteringsbijtelling: verkoop binnen 5 jaar na het begin van het investeringsjaar, alleen als de
-  verkopen in dat jaar samen boven € 2.500 komen. Bijtelling = het effectieve KIA-percentage van het
-  investeringsjaar × de verkoopprijs, en nooit meer dan dat percentage × de aanschafprijs.
+Restwaarde €0 mag alleen een aanpasbare default zijn.
 
-**Vragen**
-19. Kloppen de tabellen?
-20. Klopt de berekening van de desinvesteringsbijtelling met het effectieve percentage van het investeringsjaar?
+Desinvestering: wijzig drempel naar €2.800 (2025) en €2.900 (2026). De berekening moet aansluiten op de investeringsaftrek die werkelijk eerder is toegepast, niet uitsluitend op een reconstructie uit het huidige assetregister.
 
-### 3.3 Privéauto, representatie, startersaftrek en uren
+## 6. Auto
 
-- **Privéauto** (instelling): € 0,23 (2025) of € 0,25 (2026) per zakelijke km. Per rit wordt
-  *Kilometervergoeding* (WBedAutKil) geboekt aan *Privé-stortingen*. Tanken en parkeren worden dan
-  als privé voorgesteld en nooit automatisch als zakelijke kosten geboekt. Staat er toch brandstof op de
-  kosten, dan waarschuwt het jaaroverzicht. Een auto van de zaak met bijtelling rekent de app niet uit.
-- **Representatie**: nieuwe categorie *Etentjes, borrels & relatiegeschenken* (WBedVkkRep, standaard
-  zonder btw-aftrek). Bijtelling = min(20% van het totaal, drempel € 5.600 (2025) / € 5.700 (2026)).
-- **Startersaftrek** € 2.123: als het startjaar minder dan 5 jaar geleden is, en de aftrek minder dan 3 keer
-  is gebruikt. De app neemt aan dat de gebruiker hem sinds het opgeven elk jaar gebruikt. Niet meer
-  vanaf 2028.
-- **Urencriterium**: uren op werkbonnen (eenheid "uur") plus losse uren. Dit is alleen een teller: de
-  gebruiker zet het vinkje "urencriterium" zelf.
-- **EIA/MIA/Vamil**: alleen een signaal bij bedrijfsmiddelen waarvan de naam lijkt op iets van de
-  Energie- of Milieulijst, met de meldtermijn van 3 maanden (gerekend vanaf de aankoopdatum).
+Privévervoermiddel voor IB: €0,23/km (2025), €0,25/km (2026) is correct. Brandstof, verzekering, tol en parkeren mogen dan voor IB niet daarnaast als autokosten worden afgetrokken.
 
-- **Investering of kosten**: bij € 450 of meer excl. btw in de categorieën gereedschap, kantoor, telefoon,
-  auto of overig vraagt de app al bij de invoer: "Gaat dit langer dan een jaar mee?". Op Vandaag staat daarna
-  nog een vangnet: "Was dit een investering?". Bij "ja" wordt de kostenregel omgeboekt naar Inventaris. De
-  bonherkenning gebruikt nu het bedrag excl. btw (subtotaal, of het totaal teruggerekend).
-- **Telefoon & internet**: de gebruiker geeft een zakelijk percentage op. Het privédeel van de kosten
-  (WBedKanTel) telt bij de winst. De btw daarover (± 21% van het privédeel van de kosten tegen 21%) wordt als
-  correctie genoemd voor de laatste btw-aangifte van het jaar (minder voorbelasting, 5b). Die boekt de
-  app nog niet automatisch.
-- **Werkplek thuis**: alleen uitleg. Een niet-zelfstandige werkruimte is niet aftrekbaar (inrichting wel).
-  Een zelfstandige werkruimte kan aftrekbaar zijn (inkomenseis 70%/30%); de app rekent dat niet uit.
-- **Meewerkaftrek**: vanaf 525 uur 1,25%, vanaf 875 uur 2%, vanaf 1.225 uur 3%, vanaf 1.750 uur 4% van de
-  winst. Alleen met urencriterium, en de app gaat ervan uit dat de partner minder dan € 5.000 krijgt.
-- **AOV, lijfrente en pensioen**: altijd de uitleg dat dit geen bedrijfskosten zijn, maar wel aftrekbaar in
-  de aangifte. De categorie *Verzekeringen* noemt de AOV niet langer.
-- **Latere jaren**: 2027 rekent met zelfstandigenaftrek € 900 en startersaftrek € 10; vanaf 2028 geen
-  startersaftrek. De overige bedragen zijn die van 2026, en dat staat erbij.
-- **Controle door een deskundige**: bij elke IB-berekening staat de melding dat een boekhouder of
-  accountant de aangifte moet controleren. Eén keer per jaar moet de gebruiker dat bevestigen voordat het
-  overzicht opent. Er is een knop om het overzicht als tekst naar de boekhouder te sturen.
+Voor btw kan bij een privéauto wel aftrek naar rato van zakelijk gebruik mogelijk zijn. De huidige conservatieve aanpak kan dus rechtmatige voorbelasting missen.
 
-**Vragen**
-21. Is "tanken met een privéauto = privé" juist? De btw-aftrek op brandstof naar rato van zakelijk gebruik laten we nu liggen.
-22. Is 80% of de drempel voor representatie correct toegepast voor IB-ondernemers?
-23. Mag de aanname "elk jaar gebruikt" bij de startersaftrek, of moet de gebruiker per jaar aangeven of hij hem gebruikt?
-24. Is het privédeel van telefoon & internet als bijtelling, met een btw-correctie aan het eind van het jaar, een goede werkwijze? Of moet het per boeking worden gesplitst?
-25. Kloppen de percentages van de meewerkaftrek voor 2025 en 2026?
-26. Zijn de categorieën voor de investeringsvraag (gereedschap, kantoor, telefoon, auto, overig) goed gekozen?
+Voor een auto van de zaak is 2,7%/1,5% geen universele automatische berekening. Werkelijk privégebruik, vrijgestelde omzet, eigen bijdrage en de periode sinds ingebruikname kunnen de uitkomst wijzigen. IB-bijtelling blijft terecht buiten scope.
 
----
+## 7. Overige posten
 
-## 4. Hoe terugkoppelen
+**Representatie:** de methode “80% aftrek of drempel, wat gunstiger is” is bruikbaar voor IB-ondernemers; zet 2025 op €5.700. Btw kent aparte regels.
 
-Het liefst per vraagnummer in issue #44 op GitHub, of per e-mail. Wijzigingen verwerk ik in de code en
-de tests (`tests/btw.test.ts`, `tests/buitenland.test.ts`, `tests/belastingvoordelen.test.ts`), zodat ze
-niet ongemerkt terugkomen.
+**Telefoon/internet:** een zakelijk percentage kan als gebruikersinschatting werken. Beter is privégebruik en werkelijk niet-aftrekbare btw bij de oorspronkelijke boeking te splitsen dan later circa 21% te reconstrueren.
+
+**Werkruimte thuis:** Belastingdienst: meestal 0% aftrek, met uitzonderingen. Vervang “bureau, stoel en kast mag je altijd aftrekken” door een feitelijke werkruimtetoets. Losse apparatuur kan afzonderlijk zakelijk worden beoordeeld.
+
+**Meewerkaftrek:** staffel 1,25% / 2% / 3% / 4% bij 525 / 875 / 1.225 / 1.750 uur is correct; overige voorwaarden en partnervergoeding moeten expliciet worden bevestigd.
+
+**AOV/lijfrente/pensioen:** gebruik “kan aftrekbaar zijn”, niet generiek “mag je aftrekken”.
+
+**EIA/MIA/Vamil:** alleen signaleren is juist; geen recht claimen zonder actuele RVO-lijst en voorwaarden.
+
+## 8. Regels toekomstige jaren
+
+`rulesFor()` mag een eerdere tabel alleen als expliciete prognose/fallback gebruiken. Zet een jaar pas `checked: true` wanneer alle bedragen én formules van dat jaar tegen actuele primaire bronnen zijn geverifieerd. Door bovenstaande P0/P1-punten mogen 2025/2026 nog niet als volledig gecontroleerd worden gemarkeerd.
+
+## 9. Vereiste regressietests
+
+1. KOR + 21%-inkoop: geen voorbelasting; btw in kosten/kostprijs.
+2. KOR + verlegde buitenlandse dienst: incidentele aangifte zonder automatische 5b-aftrek.
+3. Buiten-EU goederen versus B2B-dienst: alleen goederenroute naar 3a.
+4. IB boven hoogste schijf: tariefbeperking 37,48%/37,56%.
+5. Starter met lage winst: startersuitzondering en verlies correct.
+6. Niet-gerealiseerde zelfstandigenaftrek over jaren.
+7. Desinvestering rond €2.800/€2.900.
+8. Representatie 2025 rond €5.700.
+9. Zvw 2025 max €75.864.
+10. ICP goederen/diensten apart en correctie onafhankelijk van suppletie.
+11. Auto-btw: 2,7%, 1,5%, vrijgestelde omzet/eigen bijdrage.
+12. Afschrijving met latere ingebruiknamedatum.
+13. KOR-investering: kostprijs inclusief niet-aftrekbare btw.
+
+## 10. Primaire bronnen
+
+Voor deze audit zijn actuele pagina's van de **Belastingdienst** gebruikt over KOR, buitenlandse diensten, ICP, privégebruik auto, zelfstandigenaftrek, mkb-winstvrijstelling, tariefsaanpassing aftrekposten, heffingskortingen, Zvw, KIA/desinvesteringsbijtelling, beperkt aftrekbare kosten en werkruimte thuis. Voor EIA/MIA/Vamil moet steeds de actuele **RVO**-lijst worden gebruikt.
+
+## 11. Status
+
+De architectuur is geschikt om fiscale regels betrouwbaar uit te voeren. De resterende risico's zitten hoofdzakelijk in fiscale beslislogica, uitzonderingen en ontbrekende feiten. Los eerst de P0/P1-punten op en laat daarna de regressiesuite opnieuw draaien voordat `checked: true` of een claim “fiscaal correct” wordt gebruikt.
