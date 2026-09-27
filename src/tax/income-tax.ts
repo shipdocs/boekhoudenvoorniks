@@ -59,9 +59,9 @@ export const INCOME_TAX_RULES: IncomeTaxRules[] = [
     zvw: { rate: 0.0526, maxIncome: 75860 },
     startersaftrek: 2123,
     kia: { min: 2901, pct: 0.28, pctUpTo: 70602, fixed: 19769, fixedUpTo: 130744, phaseOutRate: 0.0756, phaseOutUpTo: 392230, minPerAsset: 450 },
-    desinvesteringDrempel: 2500,
+    desinvesteringDrempel: 2900,
     kmRate: 23,
-    representatie: { deductible: 0.8, drempel: 5600 },
+    representatie: { deductible: 0.8, drempel: 5700 },
     urencriterium: 1225,
     meewerkaftrek: [[525, 0.0125], [875, 0.02], [1225, 0.03], [1750, 0.04]],
   },
@@ -76,7 +76,7 @@ export const INCOME_TAX_RULES: IncomeTaxRules[] = [
     zvw: { rate: 0.0485, maxIncome: 79409 },
     startersaftrek: 2123,
     kia: { min: 2901, pct: 0.28, pctUpTo: 71683, fixed: 20072, fixedUpTo: 132746, phaseOutRate: 0.0756, phaseOutUpTo: 398236, minPerAsset: 450 },
-    desinvesteringDrempel: 2500,
+    desinvesteringDrempel: 2900,
     kmRate: 25,
     representatie: { deductible: 0.8, drempel: 5700 },
     urencriterium: 1225,
@@ -129,16 +129,28 @@ export function representatieBijtelling(total: number, r: IncomeTaxRules['repres
 export interface IncomeTaxBreakdown {
   /** winst over het hele jaar (in euro's) waarover gerekend is */
   profit: number;
+  /** fiscale winst vóór ondernemersaftrek: winst + bijtellingen − KIA */
+  fiscalProfit: number;
   /** + niet-aftrekbare kosten en desinvesteringsbijtelling */
   bijtellingen: number;
   /** − investeringsaftrek (KIA) */
   kia: number;
   zelfstandigenaftrek: number;
   startersaftrek: number;
+  /** niet-gerealiseerde zelfstandigenaftrek uit eerdere jaren die dit jaar verrekend wordt */
+  zelfstandigenaftrekVerrekend: number;
+  /** zelfstandigenaftrek die dit jaar niet past (winst te laag): 9 jaar te verrekenen */
+  zelfstandigenaftrekNietGerealiseerd: number;
   meewerkaftrek: number;
+  /** negatief bij verlies: de vrijstelling verkleint dan het verlies */
   mkbWinstvrijstelling: number;
+  /** belastbare winst uit onderneming; negatief = verlies (verrekenbaar, niet in deze schatting) */
+  taxableProfit: number;
+  /** belastbaar inkomen box 1 (nooit negatief) */
   taxableIncome: number;
   box1: number;
+  /** extra belasting doordat ondernemersaftrek en mkb-winstvrijstelling hooguit tegen het tarief van schijf 2 aftrekken */
+  tariefsaanpassing: number;
   heffingskortingen: number;
   zvw: number;
   total: number;
@@ -159,22 +171,38 @@ function arbeidskorting(income: number, r: IncomeTaxRules['arbeidskorting']): nu
   return Math.max(0, k);
 }
 
-/** Pure berekening over een jaarwinst in euro's. */
+/**
+ * Pure berekening over een jaarwinst in euro's.
+ *
+ * - Zelfstandigenaftrek: niet hoger dan de winst, behalve bij recht op startersaftrek; dan mogen
+ *   zelfstandigen- en startersaftrek samen een verlies geven. Wat niet past, is niet-gerealiseerde
+ *   zelfstandigenaftrek: de 9 jaar daarna te verrekenen voor zover de winst hoger is dan de
+ *   zelfstandigenaftrek van dat jaar (`nietGerealiseerd` = wat daarvan nog openstaat).
+ * - Mkb-winstvrijstelling over de winst na ondernemersaftrek; bij verlies verkleint ze het verlies.
+ * - Tariefsaanpassing (art. 2.10a Wet IB 2001): ondernemersaftrek en mkb-winstvrijstelling leveren
+ *   hooguit het tarief van de voorlaatste schijf op; voor het deel dat in de hoogste schijf valt,
+ *   komt het verschil erbij.
+ */
 export function estimateIncomeTax(
   profit: number,
   rules: IncomeTaxRules,
-  opts: { urencriterium: boolean; starter?: boolean; kia?: number; bijtellingen?: number; partnerHours?: number },
+  opts: { urencriterium: boolean; starter?: boolean; kia?: number; bijtellingen?: number; partnerHours?: number; nietGerealiseerd?: number },
 ): IncomeTaxBreakdown {
   const bij = opts.bijtellingen ?? 0;
   const kia = opts.kia ?? 0;
   const fiscal = profit + bij - kia;
-  if (fiscal <= 0) return { profit: round(profit), bijtellingen: round(bij), kia: round(kia), zelfstandigenaftrek: 0, startersaftrek: 0, meewerkaftrek: 0, mkbWinstvrijstelling: 0, taxableIncome: 0, box1: 0, heffingskortingen: 0, zvw: 0, total: 0 };
-  // ondernemersaftrek niet groter dan de winst (vereenvoudiging: geen verliesverrekening)
-  const za = opts.urencriterium ? Math.min(rules.zelfstandigenaftrek, fiscal) : 0;
-  const sa = opts.urencriterium && opts.starter ? Math.min(rules.startersaftrek, fiscal - za) : 0;
-  const mw = opts.urencriterium ? meewerkaftrekFor(fiscal, opts.partnerHours ?? 0, rules) : 0;
-  const mkb = (fiscal - za - sa - mw) * rules.mkbWinstvrijstelling;
-  const taxable = Math.max(0, fiscal - za - sa - mw - mkb);
+  const uren = opts.urencriterium;
+  const starter = uren && !!opts.starter;
+  // starter: geen beperking tot de winst; anders hooguit de (positieve) winst
+  const za = uren ? (starter ? rules.zelfstandigenaftrek : Math.min(rules.zelfstandigenaftrek, Math.max(0, fiscal))) : 0;
+  const sa = starter ? rules.startersaftrek : 0;
+  const nietGerealiseerdNieuw = uren ? rules.zelfstandigenaftrek - za : 0;
+  const verrekend = uren ? Math.min(Math.max(0, opts.nietGerealiseerd ?? 0), Math.max(0, fiscal - za - sa)) : 0;
+  const mw = uren ? meewerkaftrekFor(fiscal, opts.partnerHours ?? 0, rules) : 0;
+  const ondernemersaftrek = za + sa + verrekend + mw;
+  const mkb = (fiscal - ondernemersaftrek) * rules.mkbWinstvrijstelling;
+  const taxableProfit = fiscal - ondernemersaftrek - mkb;
+  const taxable = Math.max(0, taxableProfit);
   let box1 = 0;
   let prev = 0;
   for (const [upTo, rate] of rules.brackets) {
@@ -182,29 +210,49 @@ export function estimateIncomeTax(
     if (taxable > prev) box1 += (Math.min(taxable, top) - prev) * rate;
     prev = top;
   }
+  const tariefsaanpassing = tariefsaanpassingFor(taxable, ondernemersaftrek + mkb, rules);
   const ahk = rules.algemeneHeffingskorting;
   const algemeen = Math.max(0, ahk.max - Math.max(0, taxable - ahk.phaseOutFrom) * ahk.phaseOutRate);
   // De arbeidskorting rekent met het arbeidsinkomen. Voor een ondernemer is dat hier de
   // fiscale winst vóór ondernemersaftrek en mkb-winstvrijstelling, niet het belastbaar
   // inkomen dat na die aftrekposten overblijft. KIA en bijtellingen horen al bij de
   // winstbepaling en zitten daarom wel in `fiscal`.
-  const kortingen = Math.min(box1, algemeen + arbeidskorting(fiscal, rules.arbeidskorting));
+  const kortingen = Math.min(box1 + tariefsaanpassing, algemeen + arbeidskorting(Math.max(0, fiscal), rules.arbeidskorting));
   const zvw = Math.min(taxable, rules.zvw.maxIncome) * rules.zvw.rate;
-  const total = box1 - kortingen + zvw;
+  const total = box1 + tariefsaanpassing - kortingen + zvw;
   return {
     profit: round(profit),
+    fiscalProfit: round(fiscal),
     bijtellingen: round(bij),
     kia: round(kia),
     zelfstandigenaftrek: round(za),
     startersaftrek: round(sa),
+    zelfstandigenaftrekVerrekend: round(verrekend),
+    zelfstandigenaftrekNietGerealiseerd: round(nietGerealiseerdNieuw),
     meewerkaftrek: round(mw),
     mkbWinstvrijstelling: round(mkb),
+    taxableProfit: round(taxableProfit),
     taxableIncome: round(taxable),
     box1: round(box1),
+    tariefsaanpassing: round(tariefsaanpassing),
     heffingskortingen: round(kortingen),
     zvw: round(zvw),
     total: round(total),
   };
+}
+
+/**
+ * Tariefsaanpassing: aftrekposten `aftrek` leveren hooguit het tarief van de voorlaatste schijf op.
+ * Het deel van de aftrek dat (zonder die aftrek) in de hoogste schijf valt, wordt belast tegen het
+ * verschil tussen de hoogste en de voorlaatste schijf.
+ */
+export function tariefsaanpassingFor(taxable: number, aftrek: number, rules: IncomeTaxRules): number {
+  if (aftrek <= 0 || rules.brackets.length < 2) return 0;
+  const [topStart, prevRate] = rules.brackets[rules.brackets.length - 2]!;
+  const topRate = rules.brackets[rules.brackets.length - 1]![1];
+  if (topStart === null) return 0;
+  const inTop = Math.min(aftrek, Math.max(0, taxable + aftrek - topStart));
+  return inTop * (topRate - prevRate);
 }
 
 export interface IncomeTaxEstimate {
@@ -279,7 +327,7 @@ export class IncomeTaxService {
     const reprYear = adj ? Math.round((adj.representatie.total * daysInYear) / elapsed) : 0;
     const phoneYear = adj ? Math.round((adj.phonePrivate.bijtelling * daysInYear) / elapsed) : 0;
     const bijtellingen = adj ? representatieBijtelling(reprYear / 100, rules.representatie) + (adj.desinvesteringsbijtelling + phoneYear) / 100 : 0;
-    const breakdown = estimateIncomeTax(profitYear / 100, rules, { urencriterium: s.urencriterium, starter: adj?.starter, kia: adj ? adj.kia / 100 : 0, bijtellingen, partnerHours: s.partnerHours });
+    const breakdown = estimateIncomeTax(profitYear / 100, rules, { urencriterium: s.urencriterium, starter: adj?.starter, kia: adj ? adj.kia / 100 : 0, bijtellingen, partnerHours: s.partnerHours, nietGerealiseerd: s.nietGerealiseerdeZelfstandigenaftrek });
     const taxYear = breakdown.total * 100;
     return {
       year: y,

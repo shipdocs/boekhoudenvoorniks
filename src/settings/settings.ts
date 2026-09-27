@@ -151,6 +151,16 @@ export interface AppSettings {
   /** hoe vaak je de startersaftrek al gebruikte vóór `asOfYear` (zo opgegeven door de gebruiker) */
   startersaftrekUsed: { count: number; asOfYear: number };
   /**
+   * Jaren waarin je de startersaftrek echt gebruikte (zoals in je aangiftes), of null als dat nog
+   * niet is opgegeven. Gaat boven de aanname "sinds opgeven elk jaar gebruikt".
+   */
+  startersaftrekYears: number[] | null;
+  /**
+   * Niet-gerealiseerde zelfstandigenaftrek uit eerdere jaren die je nog mag verrekenen, in hele euro's
+   * (staat op je aanslag; zelf bijhouden wat al verrekend is).
+   */
+  nietGerealiseerdeZelfstandigenaftrek: number;
+  /**
    * Zakelijk deel van telefoon & internet in procenten (null = nog niet opgegeven, dan 100%).
    * Het privédeel telt bij de winst en de btw daarover mag je niet aftrekken.
    */
@@ -223,6 +233,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   taxCheckAcknowledgedYear: 0,
   startYear: null,
   startersaftrekUsed: { count: 0, asOfYear: 0 },
+  startersaftrekYears: null,
+  nietGerealiseerdeZelfstandigenaftrek: 0,
   vatPotAccountId: null,
   incomeTaxEstimate: true,
   urencriterium: true,
@@ -255,6 +267,8 @@ function validateSettings(settings: AppSettings): void {
   integerInRange(settings.smtp.port, 1, 65535, 'SMTP-poort');
   integerInRange(settings.partnerHours, 0, 8784, 'Partneruren');
   if (settings.startYear !== null) integerInRange(settings.startYear, 1800, new Date().getFullYear() + 1, 'Startjaar');
+  integerInRange(settings.nietGerealiseerdeZelfstandigenaftrek, 0, 1_000_000, 'Niet-gerealiseerde zelfstandigenaftrek');
+  if (settings.startersaftrekYears !== null && (!Array.isArray(settings.startersaftrekYears) || settings.startersaftrekYears.length > 10 || settings.startersaftrekYears.some((y) => !Number.isInteger(y) || y < 1800 || y > 9999))) throw new ValidationError('Ongeldige jaren voor de startersaftrek');
   if (settings.phoneInternetBusinessPct !== null) integerInRange(settings.phoneInternetBusinessPct, 0, 100, 'Zakelijk percentage telefoon en internet');
   if (!['maand', 'kwartaal', 'jaar'].includes(settings.vatPeriod)) throw new ValidationError('Ongeldige btw-periode');
   if (!['hoog', 'laag', 'nul', 'verlegd', 'vrijgesteld'].includes(settings.defaultVatCode)) throw new ValidationError('Ongeldige standaard-btw');

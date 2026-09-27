@@ -187,13 +187,26 @@ export function SettingsScreen() {
               <input value={draft.startYear ?? ''} onChange={(e) => set({ startYear: e.target.value ? Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || null : null })} placeholder="bv. 2024" inputMode="numeric" />
             </Field>
             {draft.startYear && new Date().getFullYear() - draft.startYear < 5 && (
-              <Field label="Hoe vaak heb je de startersaftrek al gebruikt?" hint="vóór dit jaar">
-                <select value={draft.startersaftrekUsed.count} onChange={(e) => set({ startersaftrekUsed: { count: Number(e.target.value), asOfYear: new Date().getFullYear() } })}>
-                  {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}×</option>)}
-                </select>
+              <Field label="In welke jaren gebruikte je de startersaftrek?" hint="zoals in je aangiftes; vraag je boekhouder als je het niet weet">
+                <div className="row" style={{ flexWrap: 'wrap' }}>
+                  {Array.from({ length: new Date().getFullYear() - draft.startYear }, (_, i) => draft.startYear! + i).map((y) => {
+                    const years = draft.startersaftrekYears ?? [];
+                    return (
+                      <label key={y} className="row">
+                        <input type="checkbox" checked={years.includes(y)} onChange={(e) => set({ startersaftrekYears: e.target.checked ? [...years, y].sort() : years.filter((x) => x !== y) })} /> {y}
+                      </label>
+                    );
+                  })}
+                  {new Date().getFullYear() === draft.startYear && <span className="small muted">Je bent dit jaar gestart.</span>}
+                </div>
               </Field>
             )}
           </div>
+          {draft.urencriterium && (
+            <Field label="Aftrek voor zelfstandigen uit eerdere jaren die nog openstaat" hint="niet-gerealiseerde zelfstandigenaftrek; staat op je aanslag. Meestal € 0">
+              <input value={draft.nietGerealiseerdeZelfstandigenaftrek || ''} onChange={(e) => set({ nietGerealiseerdeZelfstandigenaftrek: Number(e.target.value.replace(/\D/g, '').slice(0, 7)) || 0 })} placeholder="0" inputMode="numeric" />
+            </Field>
+          )}
           <div className="grid cols-2">
             <Field label="Zakelijk deel telefoon & internet" hint="het privédeel telt niet als kosten">
               <select value={draft.phoneInternetBusinessPct ?? 100} onChange={(e) => set({ phoneInternetBusinessPct: Number(e.target.value) })}>
@@ -211,6 +224,7 @@ export function SettingsScreen() {
           <Field label="Uren dat je partner onbetaald meewerkt, per jaar" hint="vanaf 525 uur krijg je extra aftrek (meewerkaftrek)">
             <input value={draft.partnerHours || ''} onChange={(e) => set({ partnerHours: Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || 0 })} placeholder="0" inputMode="numeric" />
           </Field>
+          {draft.partnerHours >= 525 && <p className="small muted">Meewerkaftrek krijg je alleen als je partner geen of een lage vergoeding krijgt (minder dan € 5.000 per jaar) en jullie niet samen de onderneming hebben. Klopt dat niet? Vraag je boekhouder.</p>}
           <p className="muted small">Altijd een schatting: de app kent alleen de winst uit je bedrijf, niet je partner, hypotheek of ander inkomen.</p>
         </>,
       )}
