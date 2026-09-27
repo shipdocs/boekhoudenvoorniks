@@ -29,7 +29,7 @@ is de app vermoedelijk nog niet fiscaal juist:
 | P0 | Geen tariefsaanpassing voor zelfstandigenaftrek en mkb-winstvrijstelling in de hoogste schijf | `src/tax/income-tax.ts` `estimateIncomeTax()` | 28 |
 | P1 | Zelfstandigenaftrek wordt ook bij recht op startersaftrek op de winst afgekapt; geen niet-gerealiseerde zelfstandigenaftrek | idem | 29 |
 | P1 | Bij verlies geeft de schatting overal nul (geen fiscaal verlies) | idem | 30 |
-| P1 | Desinvesteringsdrempel € 2.500 vast in de tabel; historisch KIA-percentage wordt uit het huidige register gereconstrueerd | `src/tax/income-tax.ts`, `src/tax/overview.ts` | 20, 31 |
+| P1 | Desinvesteringsdrempel staat op € 2.500, moet € 2.900 zijn; historisch KIA-percentage wordt uit het huidige register gereconstrueerd | `src/tax/income-tax.ts`, `src/tax/overview.ts` | 20, 31 |
 | P1 | Representatiedrempels 2025/2026 nog niet tegen de jaartabel vastgezet | `src/tax/income-tax.ts` | 22 |
 | P1 | ICP: één code voor goederen en diensten; ICP-correctie gekoppeld aan btw-suppletie | `src/shared/vat.ts`, `src/btw/btw.ts` | 3, 4, 10a |
 | P1 | Auto van de zaak: 2,7%/1,5%-forfait wordt te automatisch toegepast | `src/btw/car.ts` | 32 |
@@ -320,18 +320,26 @@ Code: `src/tax/assets.ts`, `src/tax/mileage.ts`, `src/tax/overview.ts`; bedragen
 **Bevinding code-audit**
 - De KIA-staffels 2025/2026 en de grens van € 450 per bedrijfsmiddel komen overeen met de officiële
   KIA-tabellen: **OK**.
-- Desinvesteringsdrempel: de code gebruikt voor beide jaren € 2.500 (`desinvesteringDrempel`). In een
-  eerdere versie van de audit stond dat dit voor 2026 € 2.900 zou zijn; daar hebben we geen bron voor
-  gevonden en het lijkt een verwarring met de KIA-ondergrens (€ 2.900/€ 2.901). Zie vraag 31.
+- **Desinvesteringsdrempel: FOUT.** De code gebruikt voor beide jaren € 2.500 (`desinvesteringDrempel`).
+  Volgens de Belastingdienst geldt de bijtelling alleen als de vervreemde bedrijfsmiddelen samen
+  meer waard zijn dan **€ 2.900** (in 2024 was dit € 2.800). De drempel loopt dus mee met de
+  ondergrens van de KIA, die in de code voor 2025 en 2026 ook op € 2.900 staat.
+  Bron: Belastingdienst, *Desinvesteringsbijtelling*, geraadpleegd 27-09-2026.
 - **LET OP:** het KIA-percentage van het investeringsjaar wordt achteraf gereconstrueerd uit het
   huidige register. Als er sindsdien bedrijfsmiddelen zijn toegevoegd, verwijderd of uitgesloten,
   klopt dat percentage niet meer. Voorstel: de werkelijk toegepaste KIA per investeringsjaar opslaan.
-- Fictieve vervreemdingen (overbrengen naar privé, bepaalde verhuur, niet tijdig in gebruik nemen)
-  herkent de app niet.
+- De berekening (hetzelfde percentage als bij de eerdere KIA, en nooit meer dan de eerder gekregen
+  aftrek; termijn 5 jaar vanaf het begin van het investeringsjaar) komt overeen met de Belastingdienst.
+- De app herkent geen fictieve vervreemdingen. Volgens de Belastingdienst tellen ook mee: overbrengen
+  naar privévermogen; bestemmen voor verhuur (alleen bij KIA); niet binnen 12 maanden na de
+  investering in gebruik nemen zonder dat 25% van de prijs is betaald; en niet in gebruik nemen binnen
+  3 jaar na het begin van het investeringsjaar. Bij staking geldt de bijtelling ook voor
+  bedrijfsmiddelen die binnen de termijn worden vervreemd of naar privé gaan.
 
 **Nieuwe vraag**
-31. Is de drempel van € 2.500 voor de desinvesteringsbijtelling in 2025 en 2026 juist? Welke
-    fictieve vervreemdingen zijn voor deze doelgroep relevant genoeg om in de app te signaleren?
+31. De drempel wordt € 2.900 voor 2025 en 2026. Klopt het dat die altijd gelijk is aan de
+    KIA-ondergrens van dat jaar? Welke fictieve vervreemdingen zijn voor deze doelgroep relevant genoeg
+    om in de app te signaleren (bijv. overbrengen naar privé en staking)?
 
 ### 3.3 Privéauto, representatie, startersaftrek en uren
 
