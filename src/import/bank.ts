@@ -441,7 +441,7 @@ export class BankService {
       return { vatCode: 'hoog', relationId: byName.id, reason: `${byName.name} is een klant in Nederland` };
     }
     const land = countryCode(t.counter_iban?.slice(0, 2));
-    if (land && land !== 'NL' && !EU_COUNTRIES.has(land)) return { vatCode: 'export', relationId: null, reason: `het geld komt van een rekening buiten de EU (${land})` };
+    if (land && land !== 'NL' && !EU_COUNTRIES.has(land)) return { vatCode: suggestedSalesVat('buiten-eu')!, relationId: null, reason: `het geld komt van een rekening buiten de EU (${land})` };
     return { vatCode: 'hoog', relationId: null, reason: '' };
   }
 

@@ -206,3 +206,46 @@ describe('KOR: geen aftrek van voorbelasting (vraag 27)', () => {
     expect(rubrieken(s, '2026-Q3')['5b']!.btw).toBe(21_00);
   });
 });
+
+describe('buitenland (vragen 2, 3, 4 en 8)', () => {
+  const rubrieken = (s: S, key: string) => Object.fromEntries(s.vat.calculate(key).rubrieken.map((x) => [x.code, x]));
+
+  it('2: goederen buiten de EU in 3a, een dienst aan een bedrijf buiten de EU niet in de aangifte', () => {
+    const { s } = setup();
+    const ch = s.relations.create({ name: 'Bau AG', address: 'Bahnhofstrasse 1', postcode: '8001', city: 'Zürich', country: 'CH', vat_number: 'CHE253742182', email: 'info@bau.example' });
+    s.invoices.finalize(s.invoices.createDraft({ relationId: ch.id, invoiceDate: '2026-02-10', lines: [{ description: 'Machine', quantity: 1, unitPrice: 80000, vatCode: 'export' }] }).id);
+    const dienst = s.invoices.finalize(s.invoices.createDraft({ relationId: ch.id, invoiceDate: '2026-02-11', lines: [{ description: 'Advies', quantity: 1, unitPrice: 50000, vatCode: 'dienst-buiten-eu' }] }).id);
+    const r = s.vat.calculate('2026-Q1');
+    expect(rubrieken(s, '2026-Q1')['3a']).toMatchObject({ omzet: 80000 });
+    expect(r.rubrieken.reduce((t, x) => t + (x.omzet ?? 0), 0)).toBe(80000);
+    expect(r.summary.omzet).toBe(130000);
+    expect(r.summary.teBetalen).toBe(0);
+    // op de factuur: niet belast in Nederland
+    const xml = s.invoices.ublXml(dienst.id);
+    expect(xml).toContain('Dienst buiten de EU');
+  });
+
+  it('3/4: ICP goederen en diensten apart, met de juiste factuurtekst', () => {
+    const { s } = setup();
+    const de = s.relations.create({ name: 'Bau GmbH', address: 'Hauptstraße 1', postcode: '47533', city: 'Kleve', country: 'DE', vat_number: 'DE123456789', email: 'info@bau.example' });
+    const goed = s.invoices.finalize(s.invoices.createDraft({ relationId: de.id, invoiceDate: '2026-07-10', lines: [{ description: 'Steigers', quantity: 1, unitPrice: 100000, vatCode: 'icp' }] }).id);
+    const dienst = s.invoices.finalize(s.invoices.createDraft({ relationId: de.id, invoiceDate: '2026-07-11', lines: [{ description: 'Ontwerp', quantity: 1, unitPrice: 40000, vatCode: 'icp-dienst' }] }).id);
+    expect(rubrieken(s, '2026-Q3')['3b']).toMatchObject({ omzet: 140000 });
+    const icp = s.vat.icp('2026-Q3');
+    expect(icp.lines.map((l) => [l.kind, l.amount])).toEqual([['goederen', 100000], ['diensten', 40000]]);
+    expect(s.vat.icpCsv('2026-Q3')).toContain(';diensten;400.00;400');
+    expect(s.invoices.ublXml(goed.id)).toContain('<cbc:ID>K</cbc:ID>');
+    const dienstXml = s.invoices.ublXml(dienst.id);
+    expect(dienstXml).toContain('<cbc:ID>AE</cbc:ID>');
+    expect(dienstXml).not.toContain('<cbc:ID>K</cbc:ID>');
+  });
+
+  it('8: particulieren in andere EU-landen: altijd een controle, de drempel alleen voor goederen en digitale diensten', () => {
+    const { s } = setup();
+    const fr = s.relations.create({ name: 'Mme Dupont', address: 'Rue 1', postcode: '75001', city: 'Paris', country: 'FR' });
+    s.invoices.finalize(s.invoices.createDraft({ relationId: fr.id, invoiceDate: '2026-03-10', lines: [{ description: 'Advies', quantity: 1, unitPrice: 60000, vatCode: 'hoog' }] }).id);
+    const c = s.vat.checks('2026-Q1').find((x) => x.key === 'eu-particulier');
+    expect(c?.detail).toMatch(/opstuurt en digitale diensten/);
+    expect(c?.detail).toMatch(/gebouw/);
+  });
+});

@@ -54,6 +54,8 @@ export interface VatReport {
 
 export interface IcpLine {
   relationId: number | null;
+  /** goederen (art. 138) of diensten: in de ICP-opgaaf apart op te geven */
+  kind: 'goederen' | 'diensten';
   name: string;
   /** landcode uit het btw-nummer (EL = Griekenland) */
   country: string;
@@ -66,7 +68,10 @@ export interface IcpLine {
 export interface IcpReport {
   period: Period;
   lines: IcpLine[];
+  /** totaal van deze periode (zonder correcties op eerdere periodes) */
   total: Cents;
+  /** correcties op de opgaaf ICP van een eerdere periode: daar verbeteren, los van een btw-suppletie */
+  corrections: (IcpLine & { periodKey: string; periodLabel: string })[];
 }
 
 export interface VatCorrection {
@@ -246,13 +251,13 @@ export class VatService {
       '1e': { omzet: [ACCOUNTS.omzetNul, ACCOUNTS.omzetVerlegd] },
       '2a': { inkoop: 'verlegd', btw: [ACCOUNTS.btwAfdragenVerlegd] },
       '3a': { omzet: [ACCOUNTS.omzetExport] },
-      '3b': { omzet: [ACCOUNTS.omzetIcp] },
+      '3b': { omzet: [ACCOUNTS.omzetIcp, ACCOUNTS.omzetIcpDienst] },
       '4a': { inkoop: 'buiten-eu', btw: [ACCOUNTS.btwAfdragenBuitenEu] },
       '4b': { inkoop: 'eu', btw: [ACCOUNTS.btwAfdragenEu] },
       '5a': { btw: afdragen },
       '5b': { btw: [ACCOUNTS.btwVoorbelasting], btwSign: -1 },
       // regels uit de samenvatting bovenaan
-      omzet: { omzet: [ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, ACCOUNTS.omzetNul, ACCOUNTS.omzetVerlegd, ACCOUNTS.omzetVrijgesteld, ACCOUNTS.omzetExport, ACCOUNTS.omzetIcp] },
+      omzet: { omzet: [ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, ACCOUNTS.omzetNul, ACCOUNTS.omzetVerlegd, ACCOUNTS.omzetVrijgesteld, ACCOUNTS.omzetExport, ACCOUNTS.omzetIcp, ACCOUNTS.omzetIcpDienst, ACCOUNTS.omzetDienstBuitenEu] },
       'btw-omzet': { btw: [ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag] },
     };
     const s = spec[code];
@@ -364,7 +369,9 @@ export class VatService {
     const btwVerlegd = byAccount(ACCOUNTS.btwAfdragenVerlegd);
     // buitenland (#16): 3a uitvoer, 3b EU-bedrijven (ICP), 4a/4b verlegde inkoop van buiten/binnen de EU
     const omzetExport = byAccount(ACCOUNTS.omzetExport);
-    const omzetIcp = byAccount(ACCOUNTS.omzetIcp);
+    const omzetIcp = byAccount(ACCOUNTS.omzetIcp) + byAccount(ACCOUNTS.omzetIcpDienst);
+    // diensten aan bedrijven buiten de EU: niet in Nederland belast, niet in de aangifte
+    const omzetDienstBuitenEu = byAccount(ACCOUNTS.omzetDienstBuitenEu);
     const inkoopBuitenEu = inkoopGrondslag('buiten-eu');
     const btwBuitenEu = byAccount(ACCOUNTS.btwAfdragenBuitenEu);
     const inkoopEu = inkoopGrondslag('eu');
@@ -415,10 +422,11 @@ export class VatService {
         warnings.push(`Er is ${formatEuro(Math.abs(c.btw))} btw gecorrigeerd over ${c.label}. Dat is meer dan € 1.000: dat verbeter je apart in Mijn Belastingdienst Zakelijk (een "suppletie"). Het zit niet in de bedragen hieronder.`);
       }
     }
-    if (omzetExport !== 0 || omzetIcp !== 0 || btwBuitenEu !== 0 || btwEu !== 0) {
+    if (omzetExport !== 0 || omzetIcp !== 0 || omzetDienstBuitenEu !== 0 || btwBuitenEu !== 0 || btwEu !== 0) {
       warnings.push(BUITENLAND_DISCLAIMER);
     }
     if (omzetIcp !== 0) warnings.push('Je verkocht aan bedrijven in andere EU-landen. Dat geef je ook apart op (de "ICP-opgaaf"); het overzicht staat hieronder.');
+    if (this.icp(periodKey).corrections.length > 0) warnings.push('Er zijn verkopen aan EU-bedrijven gecorrigeerd over een eerdere periode. Verbeter daarvoor de ICP-opgaaf van die periode; dat staat los van de btw-aangifte en een eventuele suppletie.');
 
     const stored = this.db.prepare('SELECT status, submitted_at FROM vat_periods WHERE period_key = ?').get(period.key) as { status: 'concept' | 'ingediend'; submitted_at: string | null } | undefined;
     return {
@@ -426,7 +434,7 @@ export class VatService {
       status: stored?.status ?? 'open',
       rubrieken: [r1a, r1b, ...(btwPrive !== 0 ? [r1d] : []), r1e, r2a, r3a, r3b, r4a, r4b, r5a, r5b, r5c, r5g],
       summary: {
-        omzet: omzetHoog + omzetLaag + omzetNul + omzetVrijgesteld + omzetExport + omzetIcp,
+        omzet: omzetHoog + omzetLaag + omzetNul + omzetVrijgesteld + omzetExport + omzetIcp + omzetDienstBuitenEu,
         btwOverOmzet: btwHoog + btwLaag,
         btwVerlegd: btwVerlegd + btwBuitenEu + btwEu,
         btwPrive,
@@ -440,8 +448,9 @@ export class VatService {
         { vatCode: 'nul', label: '0% / verlegd', omzet: omzetNul, btw: 0 },
         { vatCode: 'vrijgesteld', label: 'Vrijgesteld / KOR', omzet: omzetVrijgesteld, btw: 0 },
         { vatCode: 'verlegd-inkoop', label: 'Inkoop btw verlegd', omzet: verlegdInkoop, btw: btwVerlegd },
-        { vatCode: 'icp', label: 'Bedrijven in de EU (0%)', omzet: omzetIcp, btw: 0 },
-        { vatCode: 'export', label: 'Uitvoer buiten de EU (0%)', omzet: omzetExport, btw: 0 },
+        { vatCode: 'icp', label: 'Bedrijven in de EU (0% / verlegd)', omzet: omzetIcp, btw: 0 },
+        { vatCode: 'export', label: 'Uitvoer goederen buiten de EU (0%)', omzet: omzetExport, btw: 0 },
+        { vatCode: 'dienst-buiten-eu', label: 'Diensten buiten de EU (niet in de aangifte)', omzet: omzetDienstBuitenEu, btw: 0 },
         { vatCode: 'eu', label: 'Inkoop uit de EU, btw verlegd', omzet: inkoopEu, btw: btwEu },
         { vatCode: 'buiten-eu', label: 'Inkoop van buiten de EU, btw verlegd', omzet: inkoopBuitenEu, btw: btwBuitenEu },
       ],
@@ -453,30 +462,26 @@ export class VatService {
 
   /**
    * Overzicht voor de opgaaf intracommunautaire prestaties (ICP, #16): per afnemer in een ander
-   * EU-land het btw-nummer en het bedrag van rubriek 3b in deze periode. De opgaaf zelf doe je in
-   * Mijn Belastingdienst Zakelijk; daar geef je ook aan of het om goederen of diensten gaat.
+   * EU-land en per soort (goederen of diensten) het btw-nummer en het bedrag van rubriek 3b in deze
+   * periode. De opgaaf zelf doe je in Mijn Belastingdienst Zakelijk.
    */
   icp(periodKey: string): IcpReport {
     const period = periodFromKey(periodKey);
-    const excludedCorrections = VatService.excludedCorrectionPeriods(this.corrections(period.start, period.end));
-    const correctionFilter = excludedCorrections.length
-      ? `AND (e.vat_correction_of IS NULL OR e.vat_correction_of NOT IN (${excludedCorrections.map(() => '?').join(',')}))`
-      : '';
-    const rows = this.db
-      .prepare(
-        `SELECT l.relation_id, r.name, r.country, r.vat_number, SUM(l.credit) - SUM(l.debit) AS net
-         FROM journal_lines l
-         JOIN journal_entries e ON e.id = l.journal_entry_id
-         JOIN chart_of_accounts a ON a.id = l.account_id
-         LEFT JOIN relations r ON r.id = l.relation_id
-         WHERE a.rgs_code = ? AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')
-           AND NOT ${VatService.SETTLED} ${correctionFilter}
-         GROUP BY l.relation_id
-         HAVING net <> 0
-         ORDER BY r.name`,
-      )
-      .all(ACCOUNTS.omzetIcp, period.start, period.end, ...excludedCorrections) as { relation_id: number | null; name: string | null; country: string | null; vat_number: string | null; net: number }[];
-    const lines: IcpLine[] = rows.map((r) => {
+    const query = (where: string) =>
+      this.db
+        .prepare(
+          `SELECT l.relation_id, a.rgs_code, e.vat_correction_of AS correction_of, r.name, r.country, r.vat_number, SUM(l.credit) - SUM(l.debit) AS net
+           FROM journal_lines l
+           JOIN journal_entries e ON e.id = l.journal_entry_id
+           JOIN chart_of_accounts a ON a.id = l.account_id
+           LEFT JOIN relations r ON r.id = l.relation_id
+           WHERE a.rgs_code IN (?, ?) AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening') AND ${where}
+           GROUP BY e.vat_correction_of, l.relation_id, a.rgs_code
+           HAVING net <> 0
+           ORDER BY e.vat_correction_of, r.name, a.rgs_code`,
+        )
+        .all(ACCOUNTS.omzetIcp, ACCOUNTS.omzetIcpDienst, period.start, period.end) as { relation_id: number | null; rgs_code: string; correction_of: string | null; name: string | null; country: string | null; vat_number: string | null; net: number }[];
+    const toLine = (r: ReturnType<typeof query>[number]): IcpLine => {
       const vatNumber = normalizeVatNumber(r.vat_number ?? '');
       const problems: string[] = [];
       if (!vatNumber) problems.push('btw-nummer ontbreekt');
@@ -484,6 +489,7 @@ export class VatService {
       else if (vatNumber.startsWith('NL')) problems.push('Dit is een Nederlands btw-nummer: kies bij deze factuur gewoon 21% of 9%');
       return {
         relationId: r.relation_id,
+        kind: r.rgs_code === ACCOUNTS.omzetIcpDienst ? 'diensten' : 'goederen',
         name: r.name ?? 'Onbekende klant',
         country: (vatNumber.slice(0, 2) || r.country || '').toUpperCase(),
         vatNumber,
@@ -491,14 +497,22 @@ export class VatService {
         amountEuro: Math.round(r.net / 100),
         problems,
       };
-    });
-    return { period, lines, total: lines.reduce((s, l) => s + l.amount, 0) };
+    };
+    // Prestaties van deze periode. Correcties op een eerdere periode staan apart: die verbeter je in
+    // de opgaaf ICP van die periode, los van de vraag of de btw via een suppletie loopt.
+    const lines = query('e.vat_correction_of IS NULL').map(toLine);
+    const corrections = query('e.vat_correction_of IS NOT NULL').map((r) => ({ ...toLine(r), periodKey: r.correction_of!, periodLabel: safeLabel(r.correction_of!) }));
+    return { period, lines, total: lines.reduce((s, l) => s + l.amount, 0), corrections };
   }
 
   icpCsv(periodKey: string): string {
     const r = this.icp(periodKey);
-    const out = ['Land;Btw-nummer;Klant;Bedrag;Bedrag (hele euro)'];
-    for (const l of r.lines) out.push([l.country, l.vatNumber, `"${l.name.replace(/"/g, '""')}"`, centsToDecimalString(l.amount), l.amountEuro].join(';'));
+    const out = ['Land;Btw-nummer;Klant;Soort;Bedrag;Bedrag (hele euro)'];
+    for (const l of r.lines) out.push([l.country, l.vatNumber, `"${l.name.replace(/"/g, '""')}"`, l.kind, centsToDecimalString(l.amount), l.amountEuro].join(';'));
+    if (r.corrections.length) {
+      out.push('', 'Correcties op eerdere opgaven (verbeteren in de opgaaf van die periode)', 'Periode;Land;Btw-nummer;Klant;Soort;Bedrag;Bedrag (hele euro)');
+      for (const l of r.corrections) out.push([l.periodKey, l.country, l.vatNumber, `"${l.name.replace(/"/g, '""')}"`, l.kind, centsToDecimalString(l.amount), l.amountEuro].join(';'));
+    }
     return out.join('\r\n') + '\r\n';
   }
 

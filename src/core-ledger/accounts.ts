@@ -50,6 +50,8 @@ export const ACCOUNTS = {
   omzetVrijgesteld: 'WOmzNopOvr',
   omzetIcp: 'WOmzNopOic',
   omzetExport: 'WOmzNopOex',
+  omzetIcpDienst: 'WOmzNopOid',
+  omzetDienstBuitenEu: 'WOmzNopObd',
   inkoopMaterialen: 'WKprInkMat',
   bankkosten: 'WFbeBan',
   betalingsverschillen: 'WBedAlkBev',
@@ -111,6 +113,8 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '8040', rgs: ACCOUNTS.omzetVrijgesteld, ref: 'WOmzNodNod', name: 'Omzet vrijgesteld / KOR', category: 'omzet', vatCode: 'vrijgesteld', system: true },
   { code: '8050', rgs: ACCOUNTS.omzetIcp, ref: 'WOmzNodOdi', name: 'Omzet EU-bedrijven (ICP, 3b)', category: 'omzet', vatCode: 'icp', system: true },
   { code: '8060', rgs: ACCOUNTS.omzetExport, ref: 'WOmzNodOdb', name: 'Omzet uitvoer buiten de EU (3a)', category: 'omzet', vatCode: 'export', system: true },
+  { code: '8055', rgs: ACCOUNTS.omzetIcpDienst, ref: 'WOmzNodOdi', name: 'Omzet diensten EU-bedrijven (ICP, 3b)', category: 'omzet', vatCode: 'icp-dienst', system: true },
+  { code: '8070', rgs: ACCOUNTS.omzetDienstBuitenEu, ref: 'WOmzNodNod', name: 'Omzet diensten buiten de EU (niet in NL belast)', category: 'omzet', vatCode: 'dienst-buiten-eu', system: true },
 
   // Kosten
   { code: '7000', rgs: ACCOUNTS.inkoopMaterialen, ref: 'WKprInpInp', name: 'Inkoop materialen', category: 'kosten', system: true },
@@ -148,6 +152,8 @@ export const SALES_ACCOUNTS: Record<string, { revenue: string; vat?: string }> =
   vrijgesteld: { revenue: ACCOUNTS.omzetVrijgesteld },
   icp: { revenue: ACCOUNTS.omzetIcp },
   export: { revenue: ACCOUNTS.omzetExport },
+  'icp-dienst': { revenue: ACCOUNTS.omzetIcpDienst },
+  'dienst-buiten-eu': { revenue: ACCOUNTS.omzetDienstBuitenEu },
 };
 
 /** Op welke rekening de verlegde btw (af te dragen) komt, per inkoop-btw-code. */

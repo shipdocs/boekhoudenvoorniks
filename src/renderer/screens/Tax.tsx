@@ -304,24 +304,34 @@ function VatDetails({ periodKey, code, title, onClose }: { periodKey: string; co
 function IcpCard({ periodKey }: { periodKey: string }) {
   const { run } = useAction();
   const icp = useLoad(() => api.vat.icp(periodKey), [periodKey]);
-  if (!icp.data || icp.data.lines.length === 0) return null;
+  if (!icp.data || (icp.data.lines.length === 0 && icp.data.corrections.length === 0)) return null;
   return (
     <div className="card" style={{ marginTop: 14 }}>
       <h2 style={{ marginTop: 0 }}>Verkopen aan EU-bedrijven {icp.data.period.label} (ICP-opgaaf)</h2>
-      <p className="muted small">Deze verkopen geef je apart op in Mijn Belastingdienst Zakelijk, per klant. Kies daar per regel "goederen" of "diensten".</p>
+      <p className="muted small">Deze verkopen geef je apart op in Mijn Belastingdienst Zakelijk, per klant. Goederen en diensten geef je apart op; de soort staat erbij (volgt uit de btw-keuze op de factuur).</p>
       <table>
-        <thead><tr><th>Land</th><th>Btw-nummer</th><th>Klant</th><th className="num">Bedrag</th></tr></thead>
+        <thead><tr><th>Land</th><th>Btw-nummer</th><th>Klant</th><th>Soort</th><th className="num">Bedrag</th></tr></thead>
         <tbody>
           {icp.data.lines.map((l) => (
-            <tr key={`${l.relationId}`}>
+            <tr key={`${l.relationId}-${l.kind}`}>
               <td>{l.country}</td>
               <td>{l.vatNumber || '—'}{l.problems.length > 0 && <div className="small" style={{ color: 'var(--danger, #b42318)' }}>⚠️ {l.problems.join(', ')}</div>}</td>
               <td>{l.name}</td>
+              <td>{l.kind}</td>
               <td className="num">€ {l.amountEuro.toLocaleString('nl-NL')}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {icp.data.corrections.length > 0 && (
+        <div className="notice warn small" style={{ marginTop: 10 }}>
+          <strong>Correcties op een eerdere opgaaf</strong>
+          <div>Deze bedragen horen bij een eerdere periode. Verbeter daarvoor de ICP-opgaaf van die periode in Mijn Belastingdienst Zakelijk. Dat staat los van je btw-aangifte en een eventuele suppletie.</div>
+          <ul>
+            {icp.data.corrections.map((l) => <li key={`${l.periodKey}-${l.relationId}-${l.kind}`}>{l.periodLabel}: {l.name} ({l.vatNumber || 'geen btw-nummer'}, {l.kind}) € {l.amountEuro.toLocaleString('nl-NL')}</li>)}
+          </ul>
+        </div>
+      )}
       <div className="notice small" style={{ marginTop: 10 }}>{BUITENLAND_TEXT}</div>
       <div className="row" style={{ marginTop: 10 }}>
         <Button small onClick={() => void run(() => api.vat.exportIcpCsv(periodKey), 'Opgeslagen')}>ICP-overzicht (CSV)</Button>
