@@ -1,7 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import type { MailInSettings } from '../settings/settings';
-import { MAIL_LIMITS, type MailMessage, type MailSource } from './mail-intake';
+import { cleanMailText, MAIL_LIMITS, type MailMessage, type MailSource } from './mail-intake';
 
 /** Foutmeldingen van de mailserver in gewone taal. */
 export function friendlyImapError(e: unknown): Error {
@@ -27,20 +27,34 @@ type ParsedAttachment = { filename?: string; contentType?: string; content: Buff
  * (één niveau diep, zodat een mail in een mail in een mail niet eindeloos doorgaat).
  */
 export async function attachmentsOf(list: ParsedAttachment[], depth = 0): Promise<MailMessage['attachments']> {
-  const out: MailMessage['attachments'] = [];
+  return (await unpack(list, depth)).attachments;
+}
+
+/** Bijlagen én de tekst van mails die "als bijlage" zijn doorgestuurd (de bon staat dan in de binnenste mail). */
+export async function unpack(list: ParsedAttachment[], depth = 0): Promise<{ attachments: MailMessage['attachments']; forwardedText: string }> {
+  const attachments: MailMessage['attachments'] = [];
+  const texts: string[] = [];
   for (const a of list) {
     if (a.contentType === 'message/rfc822' && depth === 0) {
       try {
-        const inner = await simpleParser(a.content, { skipHtmlToText: true, skipTextToHtml: true, skipImageLinks: true });
-        out.push(...(await attachmentsOf(inner.attachments as ParsedAttachment[], depth + 1)));
+        const inner = await simpleParser(a.content, { skipHtmlToText: false, skipTextToHtml: true, skipImageLinks: true });
+        const from = inner.from?.text ?? '';
+        const head = [`---------- Doorgestuurd bericht ----------`, from && `Van: ${from}`, inner.date && `Datum: ${isoDate(inner.date)}`, inner.subject && `Onderwerp: ${inner.subject}`].filter(Boolean).join('\n');
+        if (inner.text?.trim()) texts.push(`${head}\n\n${inner.text}`);
+        attachments.push(...(await unpack(inner.attachments as ParsedAttachment[], depth + 1)).attachments);
       } catch {
         // onleesbare doorgestuurde mail: overslaan
       }
       continue;
     }
-    out.push({ filename: a.filename ?? '', contentType: a.contentType ?? '', content: new Uint8Array(a.content), inline: a.contentDisposition === 'inline' || Boolean(a.related) });
+    attachments.push({ filename: a.filename ?? '', contentType: a.contentType ?? '', content: new Uint8Array(a.content), inline: a.contentDisposition === 'inline' || Boolean(a.related) });
   }
-  return out;
+  return { attachments, forwardedText: texts.join('\n\n') };
+}
+
+/** De leesbare tekst van een mail: opgeschoond, met de tekst van een "als bijlage" doorgestuurde mail erachter. */
+export function mailText(text: string | undefined, forwardedText: string): string {
+  return cleanMailText([text ?? '', forwardedText].filter((t) => t.trim()).join('\n\n')).slice(0, 20_000);
 }
 
 /**
@@ -112,6 +126,7 @@ export class ImapSource implements MailSource {
     if (!msg || !msg.source) return null;
     const parsed = await simpleParser(msg.source, { skipHtmlToText: false, skipTextToHtml: true, skipImageLinks: true });
     const from = parsed.from?.value[0];
+    const { attachments, forwardedText } = await unpack(parsed.attachments as ParsedAttachment[]);
     return {
       uid,
       messageId: parsed.messageId ?? null,
@@ -119,8 +134,8 @@ export class ImapSource implements MailSource {
       fromName: from?.name ?? '',
       subject: parsed.subject ?? '',
       date: isoDate(parsed.date),
-      text: (parsed.text ?? '').slice(0, 20_000),
-      attachments: await attachmentsOf(parsed.attachments),
+      text: mailText(parsed.text, forwardedText),
+      attachments,
     };
   }
 
