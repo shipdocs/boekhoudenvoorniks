@@ -158,6 +158,8 @@ describe('verzenden', () => {
     const { s, klant, sent } = setup();
     s.settings.update({ remindersEnabled: true, reminderDays: [7, 21] });
     const inv = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-01-01', lines: [stucwerk] }).id);
+    expect(s.sender.dueReminders('2026-01-22')).toHaveLength(0);
+    s.invoices.markSent(inv.id);
     expect(s.sender.dueReminders('2026-01-20')).toHaveLength(0); // vervalt 15-01, +7 = 22-01
     expect(s.sender.dueReminders('2026-01-22').map((i) => i.id)).toEqual([inv.id]);
     const r = await s.sender.runAutomaticReminders('2026-01-22');
@@ -168,5 +170,15 @@ describe('verzenden', () => {
     expect(s.sender.dueReminders('2026-02-05')).toHaveLength(1);
     s.invoices.registerPayment(inv.id, { amount: inv.open_amount, date: '2026-02-01' });
     expect(s.sender.dueReminders('2026-02-05')).toHaveLength(0);
+  });
+
+  it('stuurt geen herinnering na een mislukte eerste verzending', async () => {
+    const { s, klant } = setup({ mailer: { send: async () => { throw new Error('SMTP niet bereikbaar'); } } });
+    s.settings.update({ remindersEnabled: true, reminderDays: [0] });
+    const draft = s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-01-01', dueDate: '2026-01-02', lines: [stucwerk] });
+    await expect(s.sender.sendInvoice(draft.id)).rejects.toThrow(/SMTP niet bereikbaar/);
+    const invoice = s.invoices.get(draft.id);
+    expect(invoice.sent_at).toBeNull();
+    expect(s.sender.dueReminders('2026-02-01')).toEqual([]);
   });
 });

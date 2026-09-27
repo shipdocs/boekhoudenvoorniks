@@ -160,8 +160,10 @@ export class DocumentSender {
       .listOpen(asOf)
       .map((summary) => this.invoices.get(summary.id, asOf))
       .filter((inv) => {
-        // uit de vorige administratie: daar liep het herinneren al; niet vanzelf vanuit hier
-        if (inv.open_amount <= 0 || inv.credit_of_invoice_id || inv.is_opening) return false;
+        // Een definitieve factuur is pas echt verzonden nadat de mailer succesvol terugkwam.
+        // Zonder deze controle kan een mislukte eerste verzending later als "herinnering" uitgaan.
+        // Facturen uit de vorige administratie worden evenmin automatisch herinnerd.
+        if (!inv.sent_at || inv.open_amount <= 0 || inv.credit_of_invoice_id || inv.is_opening) return false;
         const nextDays = schedule[inv.reminder_count];
         if (nextDays === undefined) return false;
         if (addDays(inv.due_date, nextDays) > asOf) return false;

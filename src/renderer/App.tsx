@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { Ctx, type InvestmentSavedInfo, type Meta, type Route, type Settings, type Screen } from './ui';
 import { Home } from './screens/Home';
@@ -8,22 +8,23 @@ import { DocumentEditor } from './screens/DocumentEditor';
 import { Jobs, JobDetail } from './screens/Jobs';
 import { Purchases } from './screens/Purchases';
 import { SearchOverlay } from './screens/Search';
-import { DocumentReview } from './screens/DocumentReview';
 import { Customers, CustomerDetail } from './screens/Customers';
 import { Bank, CategorizeTransaction } from './screens/Bank';
 import { Tax } from './screens/Tax';
 import { TaxYear } from './screens/TaxYear';
 import { InvestmentSaved } from './screens/Purchases';
 import { Overview } from './screens/Overview';
-import { SettingsScreen } from './screens/Settings';
 import { TemplateEditor } from './screens/TemplateEditor';
-import { Expert } from './screens/Expert';
-import { Switchover } from './screens/Switchover';
 import { TermsGate } from './screens/Terms';
 import { TERMS_VERSION } from '../shared/legal';
 import { hasOnboardingUpdate } from '../shared/onboarding';
 import { DemoBanner } from './screens/Reset';
 import { UpdateBanner } from './screens/UpdateBanner';
+
+const DocumentReview = lazy(() => import('./screens/DocumentReview').then((module) => ({ default: module.DocumentReview })));
+const SettingsScreen = lazy(() => import('./screens/Settings').then((module) => ({ default: module.SettingsScreen })));
+const Expert = lazy(() => import('./screens/Expert').then((module) => ({ default: module.Expert })));
+const Switchover = lazy(() => import('./screens/Switchover').then((module) => ({ default: module.Switchover })));
 
 const NAV: { screen: Screen; label: string; icon: string; also?: Screen[] }[] = [
   { screen: 'home', label: 'Vandaag', icon: '🏠' },
@@ -154,7 +155,7 @@ export function App() {
         <main className="main" style={route.screen === 'welkom' ? { gridColumn: '1 / -1' } : undefined}>
           {settings.demoMode && route.screen !== 'welkom' && <DemoBanner />}
           {route.screen !== 'welkom' && <UpdateBanner />}
-          {screen}
+          <Suspense fallback={<div className="card">Laden…</div>}>{screen}</Suspense>
         </main>
       </div>
       {searching && <SearchOverlay onClose={() => setSearching(false)} />}

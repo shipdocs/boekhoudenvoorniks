@@ -5,7 +5,7 @@ import type { Mailer, MailMessage } from '../src/documents/sending';
 import type { FetchLike } from '../src/integrations/types';
 import type { OcrProvider } from '../src/intake/ocr';
 
-export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider } = {}) {
+export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mailer } = {}) {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   migrate(db);
@@ -18,7 +18,7 @@ export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider } = {}) {
   };
   const s = createServices(db, {
     pdf: async (html) => Buffer.from(`PDF:${html.length}`),
-    mailerFactory: async () => mailer,
+    mailerFactory: async () => opts.mailer ?? mailer,
     secrets: new MemorySecretStore(),
     fetch: opts.fetch ?? (async () => { throw new Error('geen netwerk in tests'); }),
     storeFile: async (name) => `/tmp/test-bijlagen/${name}`,
