@@ -3,6 +3,7 @@ import { isIsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban } from '../shared/validation';
 import type { LineItem, DocumentResult, ExtractionSource, Field, TextItem, VatLine } from './types';
 import { KNOWN_SUPPLIERS } from './suppliers';
+import { detectCurrency } from '../shared/currency';
 
 /**
  * Haalt factuur-/bongegevens uit platte tekst met posities (PDF-tekstlaag of OCR-regels).
@@ -254,7 +255,8 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     invoiceNumber,
     invoiceDate,
     dueDate,
-    currency: { value: 'EUR', confidence: /€|eur/i.test(rawText) ? 0.95 : 0.6, source },
+    // munt van het document (#74): $ en USD worden dollars, anders euro
+    currency: (() => { const c = detectCurrency(rawText); return { value: c.code, confidence: c.confidence, source }; })(),
     subtotal,
     vat: vatLine ? field(vatLines, vatLine, vatConf) : { value: [], confidence: 0.3, source },
     total,

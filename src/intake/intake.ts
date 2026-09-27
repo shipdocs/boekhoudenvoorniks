@@ -27,6 +27,9 @@ import { supplierKey } from './supplier-memory';
 import type { OcrProvider } from './ocr';
 import type { ConfidenceLevel, DocumentResult, Issue } from './types';
 import { splitGross } from '../import/bank';
+import type { FxService } from '../fx/fx';
+import { toEuro } from '../fx/fx';
+import { CURRENCY_NAMES, formatForeign, withinFx } from '../shared/currency';
 
 
 export interface IntakeDocument {
@@ -141,6 +144,34 @@ export class IntakeService {
     this.ocr = provider;
   }
 
+  private fx: FxService | null = null;
+  setFx(fx: FxService | null): void {
+    this.fx = fx;
+  }
+
+  /**
+   * Vreemde munt (#74): alle bedragen naar euro's met de ECB-koers van de factuurdatum; het origineel
+   * blijft bewaard. Later, als de betaling op de bank staat, wordt het bedrag van de bank gebruikt.
+   * Geen koers (geen internet): dan geen bedrag in euro's gokken, maar de gebruiker laten invullen.
+   */
+  private async toEuros(result: DocumentResult): Promise<Issue[]> {
+    const cur = result.currency?.value;
+    if (!cur || cur === 'EUR' || !result.total || result.foreign) return [];
+    const foreignTotal = result.total.value;
+    const fx = this.fx ? await this.fx.rateFor(cur, result.invoiceDate?.value ?? today()) : null;
+    result.foreign = { currency: cur, total: foreignTotal, rate: fx?.rate ?? null, rateDate: fx?.date ?? null, source: fx ? 'ecb' : null };
+    const name = CURRENCY_NAMES[cur]?.name ?? cur;
+    if (!fx) {
+      result.total = null;
+      result.subtotal = null;
+      result.vat = { ...result.vat, value: [] };
+      result.lines = undefined;
+      return [{ field: 'total', severity: 'waarschuwing', message: `Deze bon is in ${name} (${formatForeign(foreignTotal, cur)}). De koers kon niet opgehaald worden (geen internet?). Vul het bedrag in euro's in, zoals het van je rekening is afgeschreven.` }];
+    }
+    scaleMoney(result, (c) => toEuro(c, fx.rate));
+    return [];
+  }
+
   /** EXTRACTIE: wat staat er op het document? */
   async extract(filename: string, data: Uint8Array): Promise<{ result: DocumentResult; source: string; issues: Issue[] }> {
     const mime = mimeFor(filename);
@@ -186,7 +217,8 @@ export class IntakeService {
     if (existing) return this.get(existing.id);
     const mime = mimeFor(filename);
     const path = await this.storeFile(filename, data);
-    const { result, source, issues: extractionIssues } = await this.extract(filename, data);
+    const { result, source, issues: extracted } = await this.extract(filename, data);
+    const extractionIssues = [...extracted, ...(await this.toEuros(result))];
     const id = Number(
       this.db.prepare('INSERT INTO documents (file_path, original_name, mime_type, sha256, extraction_source, result) VALUES (?, ?, ?, ?, ?, ?)').run(path, filename, mime, sha, source, JSON.stringify(result)).lastInsertRowid,
     );
@@ -238,7 +270,8 @@ export class IntakeService {
   async reread(id: number, data: Uint8Array, asOf: IsoDate = today()): Promise<IntakeDocument> {
     const doc = this.get(id);
     if (doc.extraction_source !== 'geen' || doc.status === 'verwerkt' || doc.status === 'genegeerd') return doc;
-    const { result, source, issues } = await this.extract(doc.original_name, data);
+    const { result, source, issues: extracted } = await this.extract(doc.original_name, data);
+    const issues = [...extracted, ...(await this.toEuros(result))];
     if (source === 'geen') {
       // lukte weer niet: alleen de melding bijwerken
       this.db.prepare('UPDATE documents SET issues = ? WHERE id = ?').run(JSON.stringify(issues), id);
@@ -286,6 +319,17 @@ export class IntakeService {
       issues.push({ field: 'duplicate', severity: 'fout', message: `Lijkt op ${duplicate.label}. Is dit dezelfde aankoop?`, suggestion: duplicate });
     }
     const bankMatch = this.findBankMatch(result);
+    // vreemde munt: wat de bank afschreef is het echte bedrag in euro's (en daarmee de echte koers)
+    if (bankMatch && result.foreign && result.total && -bankMatch.amount !== result.total.value) {
+      const eur = -bankMatch.amount;
+      const factor = eur / result.total.value;
+      scaleMoney(result, (c) => Math.round(c * factor));
+      result.total = { ...result.total!, value: eur, confidence: 0.99 };
+      result.foreign = { ...result.foreign, rate: result.foreign.total / eur, rateDate: bankMatch.transaction_date, source: 'bank' };
+      this.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(result), id);
+    }
+    // geschat met de dagkoers en nog geen betaling: niet vanzelf verwerken, eerst even laten kijken
+    if (result.foreign && !bankMatch) issues.push({ field: 'total', severity: 'waarschuwing', message: `Omgerekend met de koers van de ECB. Komt de betaling later op de bank, dan rekent de app het verschil vanzelf af.` });
     const assessed = assessConfidence({ document: result, issues, classification, bankMatch: !!bankMatch });
     const rule = this.memory.get(result.supplier?.value);
     const { decisions, signals } = documentDecisions({ doc: result, issues, classification, bankMatch, rule, level: this.autopilot(), categoryLabel: this.categories.label(classification.categoryKey) });
@@ -391,7 +435,9 @@ export class IntakeService {
   /** Zoekt een onverwerkte banktransactie met hetzelfde bedrag rond dezelfde datum. */
   findBankMatch(result: DocumentResult): BankTransaction | null {
     if (!result.total) return null;
-    const candidates = this.bank.list({ status: 'nieuw', limit: 2000 }).filter((t) => t.amount === -result.total!.value);
+    const foreign = Boolean(result.foreign);
+    // vreemde munt: de bank rekende een eigen koers, dus ongeveer hetzelfde bedrag
+    const candidates = this.bank.list({ status: 'nieuw', limit: 2000 }).filter((t) => (foreign ? t.amount < 0 && withinFx(-t.amount, result.total!.value) : t.amount === -result.total!.value));
     const date = result.invoiceDate?.value;
     const scored = candidates
       .map((t) => {
@@ -401,8 +447,11 @@ export class IntakeService {
           if (d > 10) return null;
           score += d <= 3 ? 2 : 1;
         }
-        if (result.supplier && t.counter_name && supplierKey(t.counter_name).split(' ')[0] === supplierKey(result.supplier.value).split(' ')[0]) score += 3;
+        const nameMatch = Boolean(result.supplier && t.counter_name && supplierKey(t.counter_name).split(' ')[0] === supplierKey(result.supplier.value).split(' ')[0]);
+        if (nameMatch) score += 3;
         if (result.supplierIban && t.counter_iban === result.supplierIban.value) score += 3;
+        // bij een omgerekend bedrag alleen met de naam van de winkel, of als het bedrag heel dicht bij ligt
+        if (foreign && !nameMatch && Math.abs(-t.amount - result.total!.value) > Math.round(result.total!.value * 0.02)) return null;
         return { t, score };
       })
       .filter((x): x is { t: BankTransaction; score: number } => x !== null)
@@ -440,7 +489,7 @@ export class IntakeService {
 
     tx(this.db, () => {
       if (opts.learn !== false) this.memory.learn(c.supplier, { categoryKey: c.categoryKey, vatCode: c.vatCode, business: c.business });
-      const bankTx = doc.bank_match && doc.bank_match.amount === -c.total ? doc.bank_match : null;
+      const bankTx = doc.bank_match && (doc.bank_match.amount === -c.total || (doc.result?.foreign && withinFx(-doc.bank_match.amount, c.total))) ? doc.bank_match : null;
       if (!c.business) {
         // privé: niet in de boekhouding; als het van de zakelijke rekening betaald is → privé-opname
         if (bankTx) this.bank.bookToAccount(bankTx.id, { account: ACCOUNTS.priveOpnamen, description: `Privé: ${c.supplier}` });
@@ -460,6 +509,7 @@ export class IntakeService {
         documentId: id,
         payeeIban: doc.result?.supplierIban?.value ?? null,
         lines,
+        foreign: doc.result?.foreign ? { currency: doc.result.foreign.currency, total: doc.result.foreign.total, rate: doc.result.foreign.total / c.total } : null,
       });
       if (bankTx && c.paidWith === 'bank') this.bank.matchPurchase(bankTx.id, purchase.id);
       else if (c.paidWith === 'kas' || c.paidWith === 'prive') {
@@ -541,4 +591,12 @@ export class IntakeService {
     const rows = this.db.prepare(`SELECT id FROM documents ${status ? 'WHERE status = ?' : ''} ORDER BY id DESC LIMIT 500`).all(...(status ? [status] : [])) as { id: number }[];
     return rows.map((r) => this.get(r.id));
   }
+}
+
+/** Alle geldbedragen van een document omrekenen (vreemde munt → euro's). */
+function scaleMoney(result: DocumentResult, f: (cents: number) => number): void {
+  if (result.total) result.total = { ...result.total, value: f(result.total.value) };
+  if (result.subtotal) result.subtotal = { ...result.subtotal, value: f(result.subtotal.value) };
+  result.vat = { ...result.vat, value: result.vat.value.map((v) => ({ ...v, base: v.base === null ? null : f(v.base), amount: f(v.amount) })) };
+  if (result.lines) result.lines = result.lines.map((l) => ({ ...l, value: { ...l.value, amount: f(l.value.amount), unitPrice: l.value.unitPrice === null ? null : f(l.value.unitPrice) } }));
 }
