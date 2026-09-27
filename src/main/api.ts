@@ -35,6 +35,7 @@ import type { EntrySource } from '../core-ledger/ledger';
 import { today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 import type { PollResult } from '../mail/mail-intake';
+import type { UpdateStatus } from './updates';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -56,6 +57,12 @@ export interface HostContext {
   checkForUpdates(): Promise<string>;
   /** Administratie wissen (met veiligheidskopie bij echte gegevens) en eventueel de demo erin zetten. */
   resetData(withDemo: boolean): Promise<{ backup: string | null }>;
+  /** automatisch bijwerken; ontbreekt buiten Electron */
+  updates?: {
+    status(): UpdateStatus;
+    install(): void;
+    reconfigure(): void;
+  };
   /** inkomende post (IMAP); ontbreekt buiten Electron */
   mail?: {
     setPassword(password: string): void;
@@ -273,6 +280,10 @@ export function createApi(s: Services, host: HostContext) {
       },
       /** Alles wissen en schoon beginnen (de onboarding start opnieuw). */
       clearData: () => host.resetData(false),
+      /** automatisch bijwerken: staat er een nieuwe versie klaar? */
+      updateStatus: (): UpdateStatus => host.updates?.status() ?? { state: 'uit', version: null, notes: null, percent: null, error: null },
+      /** "Nu herstarten": de klaarstaande update installeren */
+      installUpdate: () => host.updates?.install(),
       meta: () => ({
         expenseCategories: s.categories.list(),
         otherDestinations: OTHER_DESTINATIONS,
@@ -293,6 +304,7 @@ export function createApi(s: Services, host: HostContext) {
       update: (patch: Partial<AppSettings>) => {
         const r = s.settings.update(patch);
         if (patch.ocr) host.reconfigureLocalAi();
+        if (patch.autoUpdate !== undefined) host.updates?.reconfigure();
         return r;
       },
       setSmtpPassword: (pw: string) => host.setSmtpPassword(pw),

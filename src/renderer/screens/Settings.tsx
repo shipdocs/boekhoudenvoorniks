@@ -476,6 +476,7 @@ function Integrations() {
 
 function BackupSettings() {
   const { run, busy } = useAction();
+  const { settings, reloadSettings } = useApp();
   const version = useLoad(() => api.app.version());
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -496,6 +497,18 @@ function BackupSettings() {
         <Button disabled={busy || pw.length < 10 || pw !== pw2} onClick={async () => { const r = await run(() => api.app.exportEncrypted(pw), 'Versleutelde kopie opgeslagen'); if (r) { setPw(''); setPw2(''); } }}>Versleutelde kopie maken</Button>
       </div>
       <h3>Updates</h3>
+      <label className="row">
+        <input type="checkbox" checked={settings.autoUpdate} disabled={busy} onChange={async (e) => {
+          const autoUpdate = e.target.checked;
+          if ((await run(() => api.settings.update({ autoUpdate }), autoUpdate ? 'Automatisch bijwerken staat aan' : 'Automatisch bijwerken staat uit')) !== undefined) await reloadSettings();
+        }} />
+        Automatisch bijwerken (aanbevolen)
+      </label>
+      <p className="small muted">
+        {settings.autoUpdate
+          ? 'Nieuwe versies worden op de achtergrond gedownload en geïnstalleerd als je de app sluit. Vlak daarvoor maakt de app een kopie van je administratie. Je krijgt bovenaan een melding als er een klaarstaat.'
+          : 'De app zoekt niet zelf naar nieuwe versies en blijft zoals hij is. Wil je toch bijwerken, klik dan op "Zoek naar updates".'}
+      </p>
       <div className="row">
         <span className="muted">Versie {version.data}</span>
         <Button disabled={busy} onClick={async () => { const r = await run(() => api.app.checkForUpdates()); if (r) alert(r); }}>Zoek naar updates</Button>
