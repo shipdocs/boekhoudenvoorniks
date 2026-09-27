@@ -67,7 +67,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
         <Empty icon="🧾" title="Nog geen aankopen">Bonnetjes die je hier toevoegt worden automatisch verwerkt, inclusief btw die je terugkrijgt.</Empty>
       ) : (
         <table className="list">
-          <thead><tr><th>Datum</th><th>Waar</th><th>Wat</th><th>Status</th><th className="num">Btw terug</th><th className="num">Bedrag</th><th /></tr></thead>
+          <thead><tr><th>Datum</th><th>Waar</th><th>Wat</th><th>Status</th><th className="num">Btw terug</th><th className="num">Bedrag</th><th><span className="sr-only">Acties</span></th></tr></thead>
           <tbody>
             {purchases.data!.map((p) => (
               <tr key={p.id} className={p.attachment_path ? 'clickable' : ''} onClick={() => p.attachment_path && void run(() => api.app.openAttachment(p.attachment_path!))}>
@@ -83,14 +83,14 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                 <td onClick={(e) => e.stopPropagation()}>
                   <span className="row">
                     {p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}
-                    <Button small kind="ghost" title="Garantietermijn vastleggen" onClick={async () => {
+                    <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={async () => {
                       const v = prompt('Hoeveel maanden garantie? (leeg = geen)', p.warranty_months ? String(p.warranty_months) : '24');
                       if (v === null) return;
                       const months = v.trim() ? Number(v.trim().replace(',', '.')) : null;
                       if (months !== null && !Number.isFinite(months)) return toast('Vul een aantal maanden in, bv. 24', 'error');
                       await run(() => api.search.setWarranty(p.id, months));
                       await purchases.reload();
-                    }}>🛡️ Garantie</Button>
+                    }}>🛡️</Button>
                   </span>
                 </td>
               </tr>

@@ -110,7 +110,7 @@ export function Bank({ focus }: { focus?: number }) {
       <p className="small muted">Heb je een spaarrekening of een potje voor de btw? Voeg hem toe. Geld dat je tussen je eigen rekeningen verplaatst, telt dan niet als omzet of kosten.</p>
       <ErrorBox error={status.error} />
       <table className="list">
-        <thead><tr><th>Rekening</th><th>Laatst ingelezen</th><th>Dat afschrift bevatte</th><th>Bijgewerkt t/m</th><th /></tr></thead>
+        <thead><tr><th>Rekening</th><th>Laatst ingelezen</th><th>Dat afschrift bevatte</th><th>Bijgewerkt t/m</th><th><span className="sr-only">Acties</span></th></tr></thead>
         <tbody>
           {(status.data ?? []).map((st) => (
             <tr key={st.bankAccountId}>

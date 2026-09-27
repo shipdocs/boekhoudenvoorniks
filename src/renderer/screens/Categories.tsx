@@ -65,7 +65,7 @@ export function CategoriesDialog({ onClose }: { onClose: () => void }) {
       <ErrorBox error={data.error} />
       <table className="list">
         <thead>
-          <tr><th>Categorie</th><th>Btw meestal</th><th /></tr>
+          <tr><th>Categorie</th><th>Btw meestal</th><th><span className="sr-only">Acties</span></th></tr>
         </thead>
         <tbody>
           {list.map((c) => (

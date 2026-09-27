@@ -5,3 +5,5 @@ release/
 .DS_Store
 *.sqlite
 *.sqlite-journal
+e2e-results/
+e2e-report/

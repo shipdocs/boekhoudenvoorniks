@@ -245,7 +245,7 @@ function VatDetails({ periodKey, code, title, onClose }: { periodKey: string; co
       {lines.length > 0 && (
         <table className="list small">
           <thead>
-            <tr><th>Datum</th><th>Wat</th><th>Waar vandaan</th>{showOmzet && <th className="num">Omzet</th>}{showBtw && <th className="num">Btw</th>}<th /></tr>
+            <tr><th>Datum</th><th>Wat</th><th>Waar vandaan</th>{showOmzet && <th className="num">Omzet</th>}{showBtw && <th className="num">Btw</th>}<th><span className="sr-only">Acties</span></th></tr>
           </thead>
           <tbody>
             {lines.map((l) => (

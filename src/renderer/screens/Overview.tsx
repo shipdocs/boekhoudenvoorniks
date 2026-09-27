@@ -99,7 +99,7 @@ function FixedCosts() {
     <div className="card" style={{ marginTop: 18 }}>
       <h2 style={{ marginTop: 0 }}>Vaste lasten: <Euro cents={total} /> per maand</h2>
       <table className="list small">
-        <thead><tr><th>Wat</th><th>Hoe vaak</th><th className="num">Bedrag</th><th className="num">Per maand</th><th>Laatst</th><th /></tr></thead>
+        <thead><tr><th>Wat</th><th>Hoe vaak</th><th className="num">Bedrag</th><th className="num">Per maand</th><th>Laatst</th><th><span className="sr-only">Acties</span></th></tr></thead>
         <tbody>
           {items.map((x) => (
             <tr key={x.id}>

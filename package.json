@@ -21,7 +21,9 @@
     "dist:linux": "npm run build && electron-builder --linux",
     "dist:win": "npm run build && electron-builder --win",
     "benchmark:ocr": "npm run build:main && node dist/main/tools/ocr-benchmark.js",
-    "benchmark:maak": "npm run build:main && electron dist/main/tools/render-benchmark.js"
+    "benchmark:maak": "npm run build:main && electron dist/main/tools/render-benchmark.js",
+    "e2e": "npm run rebuild:node && npm run build && playwright test",
+    "e2e:only": "playwright test"
   },
   "build": {
     "appId": "app.shipdocs.gratisboekhouden",
@@ -80,6 +82,8 @@
     "tslib": "^2.8.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "1.56",
     "@types/better-sqlite3": "^9.6.0",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^22.20.4",
@@ -105,5 +109,8 @@
     "node": ">=22.12"
   },
   "homepage": "https://shipdocs.github.io/gratis-boekhouden/",
-  "desktopName": "gratis-boekhouden.desktop"
+  "desktopName": "gratis-boekhouden.desktop",
+  "overrides": {
+    "playwright-core": "1.56.1"
+  }
 }
