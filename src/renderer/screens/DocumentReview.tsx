@@ -143,7 +143,7 @@ export function DocumentReview({ id }: { id: number }) {
               );
             })}
           </div>
-          {r?.foreign && <ForeignNotice foreign={r.foreign} euro={r.total?.value ?? null} />}
+          {r?.foreign && <ForeignNotice foreign={r.foreign} euro={form.total ?? r.total?.value ?? null} />}
           {/* nog niet uitgelezen (geen herkenning): hier kiezen hoe de app bonnen mag lezen */}
           {unread && <ReaderChoice context="bon" onDone={async () => { setForm(null); await doc.reload(); }} />}
           {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document')).map((i) => (

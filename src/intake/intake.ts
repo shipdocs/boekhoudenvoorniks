@@ -596,7 +596,11 @@ export class IntakeService {
 /** Alle geldbedragen van een document omrekenen (vreemde munt → euro's). */
 function scaleMoney(result: DocumentResult, f: (cents: number) => number): void {
   if (result.total) result.total = { ...result.total, value: f(result.total.value) };
-  if (result.subtotal) result.subtotal = { ...result.subtotal, value: f(result.subtotal.value) };
   result.vat = { ...result.vat, value: result.vat.value.map((v) => ({ ...v, base: v.base === null ? null : f(v.base), amount: f(v.amount) })) };
+  // los afronden kan een cent schelen: het subtotaal is wat overblijft, zodat subtotaal + btw = totaal blijft
+  if (result.subtotal) {
+    const vat = result.vat.value.reduce((s, v) => s + v.amount, 0);
+    result.subtotal = { ...result.subtotal, value: result.total ? result.total.value - vat : f(result.subtotal.value) };
+  }
   if (result.lines) result.lines = result.lines.map((l) => ({ ...l, value: { ...l.value, amount: f(l.value.amount), unitPrice: l.value.unitPrice === null ? null : f(l.value.unitPrice) } }));
 }

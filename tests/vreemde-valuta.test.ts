@@ -88,6 +88,15 @@ describe('vreemde valuta (#74)', () => {
     expect(s.ledger.balance(ACCOUNTS.koersverschillen) === 0).toBe(true);
   });
 
+  it('omrekenen houdt subtotaal + btw = totaal (geen afrondingsverschil)', async () => {
+    const { s } = setup({ fetch: ecb() });
+    const doc = await s.intake.add('bon.pdf', makePdf(['Shop Inc', 'Date May 6, 2026', 'Subtotal $10.01', 'VAT 21% $2.10', 'Total $12.11']), '2026-05-08', { autoConfirm: false });
+    const r = doc.result!;
+    expect(r.foreign?.currency).toBe('USD');
+    const vat = r.vat.value.reduce((x, v) => x + v.amount, 0);
+    if (r.subtotal) expect(r.subtotal.value + vat).toBe(r.total!.value);
+  });
+
   it('geen internet: geen gok in euro\'s, de gebruiker vult het bedrag in', async () => {
     const { s } = setup();
     const doc = await s.intake.add('invoice.pdf', makePdf(INVOICE), '2026-05-08');
