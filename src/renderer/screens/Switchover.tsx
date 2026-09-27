@@ -79,7 +79,7 @@ interface SectionProps {
 
 /** Nog geen instapdatum (bv. via Instellingen hierheen): eerst die vraag. */
 function StartChoice({ state, onDone }: { state: SwitchoverState; onDone: () => Promise<void> }) {
-  const { settings } = useApp();
+  const { settings, reloadSettings } = useApp();
   const { run, busy } = useAction();
   const [date, setDate] = useState(`${new Date().getFullYear()}-01-01`);
   const valid = isIsoDate(date) && date <= today();
@@ -103,7 +103,7 @@ function StartChoice({ state, onDone }: { state: SwitchoverState; onDone: () => 
         </div>
       )}
       <div className="row end" style={{ marginTop: 20 }}>
-        <Button kind="primary" disabled={busy || !valid} onClick={async () => { if ((await run(() => api.switchover.setMode('overstapper', date))) !== undefined) await onDone(); }}>Beginnen</Button>
+        <Button kind="primary" disabled={busy || !valid} onClick={async () => { if ((await run(() => api.switchover.setMode('overstapper', date))) !== undefined) { await reloadSettings(); await onDone(); } }}>Beginnen</Button>
       </div>
     </div>
   );

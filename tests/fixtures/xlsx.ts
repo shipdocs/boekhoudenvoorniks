@@ -52,7 +52,7 @@ export function makeXlsx(sheets: { name: string; rows: (string | number | null)[
 }
 
 /** Kolommenbalans zoals DigiBoox hem als Excel geeft (verzonnen bedragen). */
-export function kolommenbalans(): Uint8Array {
+export function kolommenbalans(year = 2026): Uint8Array {
   const r = (name: string, ...n: number[]): (string | number | null)[] => [null, name, ...n];
   return makeXlsx(
     [
@@ -63,7 +63,7 @@ export function kolommenbalans(): Uint8Array {
           [],
           [null, 'Klusbedrijf Test'],
           [null, 'Kolommenbalans'],
-          [null, '01-01-2026 - 31-12-2026'],
+          [null, `01-01-${year} - 31-12-${year}`],
           [],
           [null, '', 'Beginbalans', '', 'Mutaties', '', '', '', '', 'Eindbalans', ''],
           [null, 'Categorie', 'Debet', 'Credit', 'Debet', 'Credit', 'Debet', 'Credit', 'Mutaties', 'Debet', 'Credit'],
@@ -87,6 +87,6 @@ export function kolommenbalans(): Uint8Array {
         ],
       },
     ],
-    '2026-09-27T17:01:39Z',
+    `${year}-09-27T17:01:39Z`,
   );
 }
