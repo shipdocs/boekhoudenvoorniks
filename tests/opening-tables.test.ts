@@ -140,6 +140,61 @@ describe('saldibalans en openstaande posten inlezen', () => {
     expect(() => s.xafImport.analyzeFile('a;b\r\n1;2\r\n')).toThrow(/voorbeeldbestand/);
   });
 
+  it('titelregels met twee tekstcellen boven de echte kolomnamen', () => {
+    const { s } = overstapper();
+    const xlsx = makeXlsx([
+      {
+        name: 'Blad1',
+        rows: [
+          ['Klusbedrijf Test', 'Utrecht'],
+          ['Saldibalans', 'per 31-12-2025'],
+          ['Rekening', 'Omschrijving', 'Saldo'],
+          ['1002', 'Bank Knab', 1500],
+          ['0500', 'Eigen vermogen', -1500],
+        ],
+      },
+    ]);
+    const p = plan(s.xafImport.analyzeFile(xlsx));
+    expect(p.kind).toBe('saldibalans');
+    expect(p.banks[0]!.amount).toBe(150_000);
+  });
+
+  it('lijst zonder het woord "factuur": relatie, kenmerk en openstaand bedrag', () => {
+    const { s } = overstapper();
+    const r = s.xafImport.analyzeFile('Debiteur;Kenmerk;Openstaand\r\nBakker Bouw;2025-042;1210,00\r\n');
+    expect(r.kind).toBe('openstaande-posten');
+    expect(plan(r).proposals[0]!.input).toMatchObject({ kind: 'klant', relationName: 'Bakker Bouw', number: '2025-042', amount: 121_000 });
+  });
+
+  it('een bedrag dat de app niet kan lezen, verdwijnt niet stilletjes', () => {
+    const { s } = overstapper();
+    const p = plan(s.xafImport.analyzeFile('Klant;Factuurnummer;Bedrag\r\nBakker Bouw;2025-042;1210,00\r\nDe Vries;2025-043;twaalf euro\r\n'));
+    expect(p.proposals).toHaveLength(1);
+    expect(p.warnings).toEqual([expect.stringMatching(/1 regel heeft een bedrag .*De Vries 2025-043: "twaalf euro"/)]);
+    expect(() => s.xafImport.analyzeFile('Klant;Factuurnummer;Bedrag\r\nDe Vries;2025-043;twaalf euro\r\n')).toThrow(/niet lezen/);
+    expect(() => s.xafImport.analyzeFile('Rekening;Omschrijving;Saldo\r\n1002;Bank;??\r\n')).toThrow(/rekening 1002 .*niet lezen/);
+  });
+
+  it('na een lijst: het totaal uit een overzicht niet, andere losse posten wel', () => {
+    const { s } = overstapper();
+    const lijst = 'Naam;Soort;Factuurnummer;Bedrag\r\nGamma;leverancier;F-7781;363,00\r\nDe Vries;klant;2025-043;-50,00\r\n';
+    s.xafImport.apply(lijst, all(plan(s.xafImport.analyzeFile(lijst))));
+    const sb = [
+      'Saldibalans per 31-12-2025',
+      'Rekening;Omschrijving;Saldo',
+      '1002;Bank Knab;1.500,00',
+      '1400;Crediteuren;-363,00',
+      '1300;Debiteuren;500,00',
+      '1900;Overige schulden;-200,00',
+    ].join('\r\n');
+    const state = s.xafImport.apply(sb, all(plan(s.xafImport.analyzeFile(sb))));
+    // leveranciers: de lijst gaat voor het totaal
+    expect(state.items.filter((i) => i.kind === 'leverancier').map((i) => i.description)).toEqual(['Rekening F-7781 Gamma']);
+    // klanten staan niet op de lijst: het totaal komt er wel in, en een overige schuld ook
+    expect(state.items.filter((i) => i.kind === 'klant')).toHaveLength(1);
+    expect(state.items.filter((i) => i.kind === 'schuld').map((i) => i.amount).sort()).toEqual([-20_000, -5_000]);
+  });
+
   it('datums uit een cel, ook als Excel-getal', () => {
     expect(cellDate('15-12-2025')).toBe('2025-12-15');
     expect(cellDate('2025-12-15')).toBe('2025-12-15');
