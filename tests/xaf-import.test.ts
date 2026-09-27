@@ -4,6 +4,8 @@ import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { parseXaf, XafError } from '../src/import/xaf';
 import { classify } from '../src/onboarding/xaf-import';
 import { OTHER_PACKAGE, IBAN } from './fixtures/xaf-ander-pakket';
+import { kolommenbalans, makeXlsx } from './fixtures/xlsx';
+import { readXlsx } from '../src/import/xlsx';
 
 /**
  * Overstappen met een auditfile: een eigen export (met RGS-codes) terug inlezen, en een auditfile
@@ -113,6 +115,48 @@ describe('auditfile (XAF) inlezen bij overstappen', () => {
     expect(item.data).toMatchObject({ kind: 'klant', number: fin.number, invoiceDate: '2025-12-10', dueDate: '2025-12-24', amount: 121_000, relationName: 'Familie Jansen' });
     // tweede keer: staat er al in
     expect(s.switchover.saveFromUbl([{ name: 'f.xml', xml }]).skipped[0]).toMatch(/staat er al in/);
+  });
+
+  it('kolommenbalans als Excel (DigiBoox): instappen op 1 januari met de beginbalans', () => {
+    const { s } = overstapper('2026-01-01');
+    const data = kolommenbalans();
+    expect(readXlsx(data).sheets.map((x) => x.name)).toEqual(['Winst- en verliesrekening', 'Kolommenbalans']);
+    const plan = s.xafImport.analyze(data);
+    expect(plan.meta).toMatchObject({ startDate: '2026-01-01', endDate: '2026-09-27', company: 'Klusbedrijf Test' });
+    expect(plan.banks.map((b) => [b.name, b.amount])).toEqual([['Bank Knab', 150_000]]);
+    // de ongebruikte standaardrekening in de app wordt voorgesteld
+    expect(plan.banks[0]!.bankAccountId).toBe(s.bank.ensureDefaultAccount().id);
+    const byKey = Object.fromEntries(plan.proposals.map((p) => [p.key, p]));
+    expect(byKey['bezit:bestelbus']!.input).toMatchObject({ cost: 500_000, bookValue: 300_000, type: 'vervoer' });
+    expect(byKey['leverancier::SALDO-onbekend']!.amount).toBe(-100_000);
+    expect(byKey['btw']!.input).toMatchObject({ direction: 'betalen', amount: 10_000 });
+    expect(byKey['vordering:2000']).toMatchObject({ include: false, amount: -90_000 });
+    expect(plan.proposals.some((p) => p.input.kind === 'resultaat')).toBe(false);
+    expect(plan.equity).toBe(250_000);
+    expect(plan.warnings.join(' ')).toMatch(/geen losse facturen/);
+
+    const state = s.xafImport.apply(data, { include: plan.proposals.map((p) => p.key), banks: { '1002': plan.banks[0]!.bankAccountId }, relations: false });
+    expect(state.position!.eigenVermogen).toBe(250_000);
+    expect(state.checks.find((c) => c.key === 'eigen-vermogen')).toBeUndefined();
+  });
+
+  it('kolommenbalans: na de exportdatum met de eindbalans en de omzet en kosten tot dan; ertussenin kan niet', () => {
+    const { s } = overstapper('2026-01-01');
+    const plan = s.xafImport.analyze(kolommenbalans(), '2026-09-28');
+    expect(plan.banks.map((b) => b.amount)).toEqual([120_000]);
+    const byKey = Object.fromEntries(plan.proposals.map((p) => [p.key, p]));
+    // afschrijving en de overboekingsrekening winst tellen niet mee
+    expect(byKey['resultaat']!.input).toMatchObject({ omzet: 150_000, materiaal: 25_000, auto: 0, overig: 45_000 });
+    expect(byKey['bezit:bestelbus']!.input).toMatchObject({ bookValue: 290_000 });
+    expect(byKey['vordering:2010']).toMatchObject({ include: false, amount: 25_000 });
+    expect(plan.equity).toBe(340_000);
+    expect(() => s.xafImport.analyze(kolommenbalans(), '2026-06-01')).toThrow(/alleen totalen/);
+  });
+
+  it('Excel zonder kolommenbalans: duidelijke melding', () => {
+    const { s } = overstapper('2026-01-01');
+    expect(() => s.xafImport.analyze(makeXlsx([{ name: 'Blad1', rows: [['a', 'b']] }]))).toThrow(/geen kolommenbalans/);
+    expect(() => s.xafImport.analyze(new Uint8Array([1, 2, 3]))).toThrow(/niet lezen/);
   });
 
   it('te vroeg of te laat: duidelijke meldingen', () => {

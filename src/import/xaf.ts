@@ -76,6 +76,8 @@ export interface XafFile {
   opening: { date: IsoDate | null; lines: { accountId: string; amount: Cents }[]; items: XafOpenItem[] };
   lines: XafLine[];
   warnings: string[];
+  /** alleen totalen per rekening (bv. een kolommenbalans): geen losse boekingen of facturen */
+  totalsOnly?: boolean;
 }
 
 export class XafError extends Error {

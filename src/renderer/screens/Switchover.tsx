@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { Button, DateNl, DropZone, Euro, Field, Modal, MoneyInput, readAsText, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, DropZone, Euro, Field, Modal, MoneyInput, readAsBytes, readAsText, useAction, useApp, useLoad } from '../ui';
 import { addDays, isIsoDate, today } from '../../shared/dates';
 import { defaultBookValue, startDateConsequences, startDateOptions } from '../../shared/switchover';
 import type { OpeningInput, OpeningItem, OpeningKind, OpeningSuggestion, SectionKey, SwitchoverState } from '../../onboarding/switchover';
@@ -158,14 +158,14 @@ const EXPORT_HOWTO: [string, string][] = [
   ['SnelStart', 'menu Administratie → Auditfile exporteren (vanaf versie 12)'],
   ['e-Boekhouden.nl', 'menu Rapporten → Auditfile (XAF)'],
   ['Jortt', 'Boekhoudbot → "Maak voor mij een auditfile"'],
-  ['DigiBoox', 'niet zelf te downloaden: vraag hem aan bij hun support'],
+  ['DigiBoox', 'de auditfile vraag je aan bij hun support. Direct kan: de kolommenbalans als Excel (.xlsx) exporteren en die hier neerzetten'],
   ['Moneybird, Exact, Twinfield, Yuki, AFAS, …', 'zoek in de help van je programma op "auditfile" of "XAF"'],
 ];
 
 function XafImport({ state, refresh, nextButton }: SectionProps) {
   const { run, busy } = useAction();
   const { toast } = useApp();
-  const [file, setFile] = useState<{ name: string; xml: string } | null>(null);
+  const [file, setFile] = useState<{ name: string; data: string | Uint8Array } | null>(null);
   const [plan, setPlan] = useState<XafPlan | null>(null);
   const [include, setInclude] = useState<Set<string>>(new Set());
   const [banks, setBanks] = useState<Record<string, number | 'nieuw' | null>>({});
@@ -175,10 +175,11 @@ function XafImport({ state, refresh, nextButton }: SectionProps) {
   const imported = state.items.filter((i) => i.data.bron === 'xaf').length;
 
   const load = async (f: File) => {
-    const xml = await readAsText(f);
-    const p = await run(() => api.switchover.analyzeXaf(xml));
+    // auditfile is tekst (XML); een kolommenbalans uit Excel gaat als bytes
+    const data = /\.xlsx$/i.test(f.name) ? await readAsBytes(f) : await readAsText(f);
+    const p = await run(() => api.switchover.analyzeXaf(data));
     if (!p) return;
-    setFile({ name: f.name, xml });
+    setFile({ name: f.name, data });
     setPlan(p);
     setInclude(new Set(p.proposals.filter((x) => x.include).map((x) => x.key)));
     setBanks(Object.fromEntries(p.banks.map((b) => [b.accountId, b.bankAccountId ?? 'nieuw'])));
@@ -200,18 +201,22 @@ function XafImport({ state, refresh, nextButton }: SectionProps) {
       <details className="small" style={{ marginBottom: 12 }}>
         <summary>Waar vind ik de auditfile?</summary>
         <ul>{EXPORT_HOWTO.map(([pkg, how]) => <li key={pkg}><strong>{pkg}</strong>: {how}</li>)}</ul>
-        <p className="muted">Geen auditfile? Sla dit over en vul de hoofdstukken hierna zelf in.</p>
+        <p className="muted">
+          Geen auditfile? Een <strong>kolommenbalans</strong> (proef- en saldibalans) als Excel werkt ook: daar staan de saldi per rekening in, maar geen losse facturen.
+          Daarmee stap je in op 1 januari (met de beginbalans) of na de dag van de export. Heb je geen van beide, sla dit dan over en vul de hoofdstukken hierna zelf in.
+        </p>
       </details>
       {imported > 0 && !plan && <div className="notice good">✓ {imported} onderdelen overgenomen uit een auditfile. Opnieuw inlezen vervangt ze.</div>}
-      <DropZone accept=".xaf,.xml" onFile={(f) => void load(f)}>
+      <DropZone accept=".xaf,.xml,.xlsx" onFile={(f) => void load(f)}>
         <div style={{ fontSize: 26 }}>📂</div>
         <strong>Sleep je auditfile (.xaf) hierheen</strong>
+        <div className="small">of een kolommenbalans als Excel-bestand (.xlsx)</div>
       </DropZone>
 
       {plan && file && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="small muted">
-            {file.name} · {plan.meta.software || 'onbekend programma'} · <DateNl date={plan.meta.startDate} /> t/m <DateNl date={plan.meta.endDate} /> · {plan.meta.accounts} rekeningen, {plan.meta.lines} boekingsregels
+            {file.name} · {plan.meta.software || 'onbekend programma'} · <DateNl date={plan.meta.startDate} /> t/m <DateNl date={plan.meta.endDate} /> · {plan.meta.accounts} rekeningen{plan.meta.version === 'kolommenbalans' ? ' (alleen saldi)' : `, ${plan.meta.lines} boekingsregels`}
           </div>
           {plan.warnings.map((w) => <div key={w} className="notice warn small">{w}</div>)}
 
@@ -259,7 +264,7 @@ function XafImport({ state, refresh, nextButton }: SectionProps) {
               kind="primary"
               disabled={busy}
               onClick={async () => {
-                const r = await run(() => api.switchover.applyXaf(file.xml, { include: [...include], banks, relations }));
+                const r = await run(() => api.switchover.applyXaf(file.data, { include: [...include], banks, relations }));
                 if (!r) return;
                 toast('Overgenomen uit je auditfile');
                 setPlan(null);

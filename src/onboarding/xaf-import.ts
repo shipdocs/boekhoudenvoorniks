@@ -2,7 +2,9 @@ import { tx, type Db } from '../db/database';
 import type { BankService } from '../import/bank';
 import type { RelationsService } from '../relations/relations';
 import type { SettingsService } from '../settings/settings';
-import { parseXaf, type XafAccount, type XafFile, type XafLine } from '../import/xaf';
+import { parseXaf, XafError, type XafAccount, type XafFile, type XafLine } from '../import/xaf';
+import { readXlsx } from '../import/xlsx';
+import { parseTrialBalance } from '../import/trial-balance';
 import { addDays, formatDateNl, periodFor, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
@@ -101,10 +103,15 @@ function classByName(a: XafAccount): XafClass {
   const n = a.name;
   const pl = a.type === 'P' || /^[48]\d{3}/.test(a.id) || /^7\d{3}/.test(a.id);
   if (pl) {
+    // technische rekening die de winst naar het eigen vermogen boekt (bv. "Overboekingsrekening winst")
+    if (has(n, /overboeking|winstreserve|resultaat(verdeling|bestemming)?$/)) return 'eigen-vermogen';
     if (has(n, /omzet|opbrengst|verkoop|verkopen|revenue|sales/)) return 'omzet';
     if (has(n, /afschrijving/)) return 'afschrijving';
     if (has(n, /inkoop|materiaal|kostprijs|uitbesteed|onderaanneming|grondstof/)) return 'materiaal';
     if (has(n, /auto|brandstof|benzine|diesel|vervoer|bus\b|lease|parkeer|kilometer/)) return 'auto';
+    // decimaal rekeningschema: 7xxx inkoop, 8xxx omzet
+    if (/^7\d{3}/.test(a.id)) return 'materiaal';
+    if (/^8\d{3}/.test(a.id)) return 'omzet';
     return 'kosten';
   }
   // eerst de specifieke soorten: "Lening Rabobank" is een lening, "Voorbelasting" geen bank
@@ -114,10 +121,14 @@ function classByName(a: XafAccount): XafClass {
   if (has(n, /crediteur/)) return 'crediteuren';
   if (has(n, /lening|hypothe|financiering|krediet/)) return 'lening';
   if (has(n, /eigen vermogen|kapitaal|priv[eé]|onttrekking|storting|resultaat|winst/)) return 'eigen-vermogen';
+  // tussenrekeningen vóór de bank: "Kruisposten / Spaartransactie" is geen spaarrekening
+  if (has(n, /kruispost|tussenrekening|vraagpost|spaartransactie/)) return 'vordering';
   if (has(n, /\bkas\b|kasgeld|contant/)) return 'kas';
-  if (has(n, /\bbank|rabo|\bing\b|abn|knab|bunq|triodos|\bsns\b|\basn\b|regiobank|spaar|betaalrekening/)) return 'bank';
+  // betaalprovider: geld dat nog uitbetaald wordt
+  if (has(n, /mollie|stripe|paypal|sumup|adyen|zettle|tikkie/)) return 'vordering';
+  if (has(n, /\bbank|rabo|\bing\b|abn|knab|bunq|triodos|\bsns\b|\basn\b|regiobank|spaar|betaalrekening|revolut|\bwise\b|\bn26\b|moneyou/)) return 'bank';
   if (has(n, /machine|inventaris|gereedschap|auto|bus\b|vervoer|computer|installatie|verbouwing|bedrijfsmiddel|materieel/)) return 'bezit';
-  if (has(n, /vooruitbetaald|borg|waarborg|te ontvangen|vordering|voorschot|kruispost|tussenrekening/)) return 'vordering';
+  if (has(n, /vooruitbetaald|borg|waarborg|te ontvangen|vordering|voorschot|kruispost|tussenrekening|vraagpost/)) return 'vordering';
   if (has(n, /te betalen|schuld|loonheffing|nog te/)) return 'schuld';
   return 'onbekend';
 }
@@ -147,17 +158,36 @@ export class XafImportService {
     private readonly switchover: SwitchoverService,
   ) {}
 
-  /** Wat de auditfile betekent voor de startbalans op `date` (standaard: de gekozen instapdatum). */
-  analyze(xml: string, date?: IsoDate): XafPlan {
-    return this.plan(parseXaf(xml), date);
+  /** Auditfile (tekst) of Excel-export (bytes, bv. een kolommenbalans uit DigiBoox). */
+  private load(file: string | Uint8Array): XafFile {
+    if (typeof file === 'string') return parseXaf(file);
+    let wb;
+    try {
+      wb = readXlsx(file);
+    } catch {
+      throw new XafError('Dit bestand kunnen we niet lezen. Gebruik een auditfile (.xaf) of de kolommenbalans als Excel-bestand (.xlsx).');
+    }
+    return parseTrialBalance(wb);
+  }
+
+  /** Wat de auditfile of kolommenbalans betekent voor de startbalans op `date` (standaard: de gekozen instapdatum). */
+  analyze(file: string | Uint8Array, date?: IsoDate): XafPlan {
+    return this.plan(this.load(file), date);
   }
 
   private plan(xaf: XafFile, requested?: IsoDate): XafPlan {
     const s = this.settings.get();
-    const suggestedDate = addDays(xaf.endDate, 1);
+    // alleen totalen (kolommenbalans): het liefst instappen op de begindatum, met de beginbalans
+    const suggestedDate = xaf.totalsOnly ? xaf.startDate : addDays(xaf.endDate, 1);
     const date = requested ?? (s.switchover.mode === 'overstapper' && s.switchover.date ? s.switchover.date : suggestedDate);
     const until = addDays(date, -1);
     const warnings = [...xaf.warnings];
+    if (xaf.totalsOnly && date > xaf.startDate && until < xaf.endDate) {
+      throw new ValidationError(
+        `In dit overzicht staan alleen totalen, geen losse boekingen. Daarmee kan de app instappen op ${formatDateNl(xaf.startDate)} (met de beginbalans) of na ${formatDateNl(xaf.endDate)} (met de eindbalans), niet op ${formatDateNl(date)}. Kies een van die datums als instapdatum, of vraag een auditfile (.xaf) aan.`,
+      );
+    }
+    if (xaf.totalsOnly) warnings.push('In dit overzicht staan geen losse facturen: wat klanten nog moesten betalen en wat jij nog moest betalen, komt als één totaal. Vervang dat bij "Klanten" en "Rekeningen" door de losse facturen, dan koppelt de app de betalingen eraan.');
     if (xaf.startDate > date) throw new ValidationError(`Deze auditfile begint op ${formatDateNl(xaf.startDate)}, na je instapdatum (${formatDateNl(date)}). Exporteer het jaar ervoor, of kies een latere instapdatum.`);
     if (xaf.endDate < until) {
       warnings.push(`De auditfile loopt tot ${formatDateNl(xaf.endDate)}. Boekingen van ${formatDateNl(addDays(xaf.endDate, 1))} tot ${formatDateNl(date)} ontbreken: exporteer tot en met ${formatDateNl(until)}, of kies ${formatDateNl(suggestedDate)} als instapdatum.`);
@@ -187,6 +217,8 @@ export class XafImportService {
 
     // --- bank
     const appBanks = this.bank.listAccounts();
+    // een rekening in de app zonder nummer en zonder afschriften of saldo is nog vrij (bv. de standaardrekening)
+    const free = appBanks.filter((b) => !b.iban && !b.is_pot && !this.db.prepare('SELECT 1 FROM bank_transactions WHERE bank_account_id = ?').get(b.id) && this.bank.openingBalance(b.id).amount === 0);
     const banks: XafBank[] = of('bank')
       .filter((a) => (balance.get(a.id) ?? 0) !== 0 || lines.some((l) => l.accountId === a.id))
       .map((a) => {
@@ -196,6 +228,11 @@ export class XafImportService {
         const match = appBanks.find((b) => (iban && b.iban === iban) || b.name.toLowerCase() === a.name.toLowerCase()) ?? only;
         return { accountId: a.id, name: a.name, iban, amount: balance.get(a.id) ?? 0, bankAccountId: match?.id ?? null };
       });
+    for (const b of banks) {
+      if (b.bankAccountId !== null) continue;
+      const spare = free.find((f) => !banks.some((x) => x.bankAccountId === f.id));
+      if (spare) b.bankAccountId = spare.id;
+    }
 
     // --- kas
     for (const a of of('kas')) {
@@ -240,7 +277,7 @@ export class XafImportService {
           perRel.set(k, r);
         }
         perInvoice = [...perRel.values()].filter((g) => g.amount !== 0);
-        if (groups.size > 0) warnings.push(`${kind === 'klant' ? 'Debiteuren' : 'Crediteuren'}: niet elke betaling had een factuurnummer; de app neemt per ${kind} het openstaande saldo over`);
+        if (groups.size > 0 && !xaf.totalsOnly) warnings.push(`${kind === 'klant' ? 'Debiteuren' : 'Crediteuren'}: niet elke betaling had een factuurnummer; de app neemt per ${kind} het openstaande saldo over`);
       }
       for (const g of perInvoice) {
         const name = (g.relationId && relName.get(g.relationId)) || (kind === 'klant' ? 'Onbekende klant' : 'Onbekende leverancier');
@@ -352,7 +389,18 @@ export class XafImportService {
         const amount = balance.get(a.id) ?? 0;
         if (amount === 0) continue;
         const kind = c === 'vordering' ? (amount > 0 ? 'vordering' : 'schuld') : amount < 0 ? c : 'vordering';
-        push({ key: `${c}:${a.id}`, label: a.name, input: { kind, description: a.name, amount: Math.abs(amount), bron: 'xaf' } }, amount);
+        // tussenrekeningen horen op nul te staan: niet zomaar overnemen
+        const suspense = has(a.name, /kruispost|tussenrekening|vraagpost|spaartransactie/);
+        push(
+          {
+            key: `${c}:${a.id}`,
+            label: a.name,
+            input: { kind, description: a.name, amount: Math.abs(amount), bron: 'xaf' },
+            include: !suspense,
+            note: suspense ? (has(a.name, /vraagpost/) ? 'nog uit te zoeken in je vorige administratie: neem alleen over als je weet wat het is' : 'hoort op nul te staan: ontbreekt er een (spaar)rekening, of een boeking in je vorige administratie?') : null,
+          },
+          amount,
+        );
       }
     }
 
@@ -400,10 +448,10 @@ export class XafImportService {
    * Overnemen wat de gebruiker aanvinkte. Eerder uit een auditfile overgenomen onderdelen worden
    * eerst weggehaald (niet als ze al betaald of afgeschreven zijn), zodat opnieuw inlezen niets dubbelt.
    */
-  apply(xml: string, choices: XafApplyChoices): SwitchoverState {
+  apply(file: string | Uint8Array, choices: XafApplyChoices): SwitchoverState {
     const s = this.settings.get();
     if (s.switchover.mode !== 'overstapper' || !s.switchover.date) throw new ValidationError('Kies eerst een instapdatum');
-    const xaf = parseXaf(xml);
+    const xaf = this.load(file);
     const plan = this.plan(xaf, s.switchover.date);
     const include = new Set(choices.include);
     tx(this.db, () => {
