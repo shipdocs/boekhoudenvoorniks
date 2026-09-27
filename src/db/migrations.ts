@@ -725,4 +725,11 @@ export const migrations: string[] = [
   );
   CREATE INDEX mail_messages_outcome ON mail_messages (outcome, created_at);
   `,
+  /* 14: mail van je eigen adres opnieuw bekijken */ `
+  -- Tot nu toe werd alle mail van je eigen adres overgeslagen, ook een factuur die je zelf doorstuurde.
+  -- Nu alleen nog een kopie van je eigen factuur/offerte. Wat eerder als "eigen" is overgeslagen, wordt
+  -- nog één keer bekeken (de rest is herkenbaar aan de Message-ID en komt niet dubbel).
+  DELETE FROM mail_messages WHERE outcome = 'eigen';
+  UPDATE mail_folders SET last_uid = 0, failed_uid = NULL, failed_count = 0;
+  `,
 ];

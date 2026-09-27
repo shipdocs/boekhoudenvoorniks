@@ -20,6 +20,29 @@ function isoDate(value: Date | string | undefined): string {
   return (d && !Number.isNaN(d.getTime()) ? d : new Date()).toISOString().slice(0, 10);
 }
 
+type ParsedAttachment = { filename?: string; contentType?: string; content: Buffer; contentDisposition?: string; related?: boolean };
+
+/**
+ * Bijlagen, ook uit een doorgestuurde mail "als bijlage" (.eml): daarvan nemen we de bijlagen mee
+ * (één niveau diep, zodat een mail in een mail in een mail niet eindeloos doorgaat).
+ */
+export async function attachmentsOf(list: ParsedAttachment[], depth = 0): Promise<MailMessage['attachments']> {
+  const out: MailMessage['attachments'] = [];
+  for (const a of list) {
+    if (a.contentType === 'message/rfc822' && depth === 0) {
+      try {
+        const inner = await simpleParser(a.content, { skipHtmlToText: true, skipTextToHtml: true, skipImageLinks: true });
+        out.push(...(await attachmentsOf(inner.attachments as ParsedAttachment[], depth + 1)));
+      } catch {
+        // onleesbare doorgestuurde mail: overslaan
+      }
+      continue;
+    }
+    out.push({ filename: a.filename ?? '', contentType: a.contentType ?? '', content: new Uint8Array(a.content), inline: a.contentDisposition === 'inline' || Boolean(a.related) });
+  }
+  return out;
+}
+
 /**
  * De echte mailbox via IMAP. Lezen gebeurt met BODY.PEEK (imapflow doet dat standaard), zodat
  * ongelezen mail ongelezen blijft. Er wordt nooit iets verwijderd.
@@ -97,12 +120,7 @@ export class ImapSource implements MailSource {
       subject: parsed.subject ?? '',
       date: isoDate(parsed.date),
       text: (parsed.text ?? '').slice(0, 20_000),
-      attachments: parsed.attachments.map((a) => ({
-        filename: a.filename ?? '',
-        contentType: a.contentType ?? '',
-        content: new Uint8Array(a.content),
-        inline: a.contentDisposition === 'inline' || Boolean(a.related),
-      })),
+      attachments: await attachmentsOf(parsed.attachments),
     };
   }
 

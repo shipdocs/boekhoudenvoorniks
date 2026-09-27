@@ -2,6 +2,26 @@
 
 ## Nog niet uitgebracht
 
+- **Bon in de mail zelf** (geen bijlage), bijvoorbeeld van een webshop, Uber of een app: staat er een woord als
+  factuur, bon of bestelling in én een bedrag, dan bewaart de app de mail als PDF-bon bij Aankopen & bonnetjes,
+  om te controleren. Alleen de tekst: plaatjes, links en scripts uit de mail komen er niet in. Mist de app er
+  een? Bij Instellingen → E-mail → Laatste berichten staat *Als bon bewaren*, en bij "factuur staat online" op
+  Vandaag *Mail als bon bewaren*.
+
+- **Facturen doorsturen naar je administratie-mailbox werkt nu**: mail vanaf je eigen adres werd overgeslagen
+  (bedoeld voor kopieën van je eigen facturen), dus ook een factuur die je zelf doorstuurde. Nu wordt alleen
+  een kopie van je eigen factuur of offerte overgeslagen (herkend aan je factuur- of offertenummer). Ook een
+  mail die je "als bijlage" doorstuurt, wordt uitgepakt. Mail die eerder zo is overgeslagen, wordt na de
+  update nog één keer bekeken.
+- **"Nu ophalen"** zegt nu ook hoeveel mail er zonder factuur of bon was.
+
+- **"Oplossen" laat nu zien welke betalingen het zijn**: bij "… staat nog bij *weet ik nog niet*", geld
+  "onderweg", geld bij je betaalprovider, contant geld onder nul of een spaarrekening onder nul opent een
+  lijst met de boekingen die samen dat bedrag vormen. Met *Opnieuw indelen* ga je naar die betaling. Voorheen
+  kwam je alleen op het bankscherm en moest je zelf zoeken.
+- **Ongedaan maken bij een betaling**: je blijft op dezelfde pagina en kiest meteen wat het wel was, in plaats
+  van terug naar de lijst te gaan.
+
 ## 0.3.4 — getest in de browser: kleine verbeteringen
 
 - **Factuur of offerte meteen versturen**: bij een nieuwe factuur of offerte staat *Versturen* er nu meteen

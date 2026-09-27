@@ -63,6 +63,8 @@ export interface HostContext {
     /** test met de ingevulde gegevens en het ingetypte wachtwoord; geeft de mappen terug */
     test(cfg?: AppSettings['mailIn'], password?: string): Promise<{ folders: string[] }>;
     fetchNow(): Promise<PollResult>;
+    /** "Toch als bon bewaren": de tekst van een mail die bleef liggen als PDF-bon */
+    saveAsReceipt(id: number): Promise<unknown>;
   };
   /** ingebouwde tekstherkenning (#9): downloaden bij eerste gebruik */
   localOcr: {
@@ -181,6 +183,10 @@ export function createApi(s: Services, host: HostContext) {
         return;
       case 'mail-online:open':
         return { navigate: { screen: 'aankopen' } };
+      case 'mail-online:bon':
+        if (!host.mail) throw new Error('Mail ophalen kan alleen in de app');
+        await host.mail.saveAsReceipt(r.mailId!);
+        return;
       case 'mail-customer:open':
         return { navigate: { screen: 'klant', id: r.relationId } };
       case 'customer-overpaid:open':
@@ -316,6 +322,10 @@ export function createApi(s: Services, host: HostContext) {
         return host.mail.fetchNow();
       },
       fromCustomer: (relationId: number) => s.mail.fromCustomer(relationId),
+      saveAsReceipt: (id: number) => {
+        if (!host.mail) throw new Error('Mail ophalen kan alleen in de app');
+        return host.mail.saveAsReceipt(id);
+      },
     },
     relations: {
       list: (filter?: { type?: 'klant' | 'leverancier'; search?: string }) => s.relations.list(filter),
@@ -553,6 +563,8 @@ export function createApi(s: Services, host: HostContext) {
       calculate: (periodKey: string) => s.vat.calculate(periodKey),
       /** de boekingen achter één vak of regel van de berekening */
       details: (periodKey: string, code: string) => s.vat.rubriekDetails(periodKey, code),
+      /** de boekingen die samen het saldo van een rekening vormen (bij een controle: "wat staat hier?") */
+      accountLines: (rgs: string, upTo?: string) => s.vat.accountLines(rgs, upTo),
       periods: (year: number) => s.vat.listPeriods(year),
       markSubmitted: (periodKey: string) => s.vat.markSubmitted(periodKey),
       reopen: (periodKey: string) => s.vat.reopen(periodKey),
