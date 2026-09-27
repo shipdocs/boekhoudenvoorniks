@@ -21,8 +21,11 @@ export function netAmount(gross: Cents, vatCode: string): Cents {
   return Math.round((gross * 100) / (100 + rate.percentage));
 }
 
-/** Zou deze aankoop een investering kunnen zijn? (voor de hint "gaat dit langer dan een jaar mee?") */
-export function mightBeInvestment(categoryKey: string, gross: Cents | null | undefined, vatCode: string): boolean {
+/**
+ * Zou deze aankoop een investering kunnen zijn? (voor de hint "gaat dit langer dan een jaar mee?")
+ * Met de KOR is de btw niet aftrekbaar en hoort die bij de kostprijs: dan telt het bedrag incl. btw.
+ */
+export function mightBeInvestment(categoryKey: string, gross: Cents | null | undefined, vatCode: string, kor = false): boolean {
   if (!gross || gross <= 0 || !INVESTMENT_CANDIDATES.includes(categoryKey)) return false;
-  return netAmount(gross, vatCode) >= INVESTMENT_THRESHOLD;
+  return (kor ? gross : netAmount(gross, vatCode)) >= INVESTMENT_THRESHOLD;
 }

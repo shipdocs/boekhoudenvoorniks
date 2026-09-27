@@ -12,6 +12,7 @@ import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, custome
 import { roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { today, type IsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
+import { korActive } from '../settings/settings';
 import type { NormalizedTransaction, ParseResult } from './types';
 import { referenceIn } from '../shared/references';
 import { withinFx } from '../shared/currency';
@@ -527,6 +528,8 @@ export class BankService {
       relationId,
       description,
       ...(input.channel?.trim() ? { channel: input.channel.trim().slice(0, 60) } : {}),
+      // KOR: geen aftrek van voorbelasting op kosten
+      ...(target.category !== 'omzet' && korActive(this.db) ? { noVatDeduction: true } : {}),
     };
     return tx(this.db, () => {
       const { entryId } = this.events.record({ type: 'bank-categorie', payload }, [{ kind: 'bank', refId: txId }], { jobId: input.jobId ?? null });

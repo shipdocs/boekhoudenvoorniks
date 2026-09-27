@@ -755,6 +755,7 @@ export function createApi(s: Services, host: HostContext) {
       /** de boekingen die samen het saldo van een rekening vormen (bij een controle: "wat staat hier?") */
       accountLines: (rgs: string, upTo?: string) => s.vat.accountLines(rgs, upTo),
       periods: (year: number) => s.vat.listPeriods(year),
+      korReverseCharge: (year: number) => s.vat.korReverseCharge(year),
       markSubmitted: (periodKey: string, alreadyFiled = false) => s.vat.markSubmitted(periodKey, { alreadyFiled: alreadyFiled === true }),
       reopen: (periodKey: string) => s.vat.reopen(periodKey),
       corrections: () => s.vat.corrections(),

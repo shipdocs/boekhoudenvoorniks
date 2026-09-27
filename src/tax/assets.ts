@@ -1,5 +1,6 @@
 import { tx, type Db } from '../db/database';
 import { ACCOUNTS } from '../core-ledger/accounts';
+import { NON_DEDUCTIBLE_VAT } from '../core-ledger/rules';
 import type { Ledger, PostLine } from '../core-ledger/ledger';
 import { addDays, today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
@@ -95,11 +96,14 @@ export class AssetService {
     tx(this.db, () => {
       const fresh = this.db
         .prepare(
-          `SELECT l.id, a.rgs_code, COALESCE(NULLIF(l.description, ''), e.description) AS name, e.entry_date, l.debit
+          `SELECT l.id, a.rgs_code, COALESCE(NULLIF(l.description, ''), e.description) AS name, e.entry_date,
+             -- niet-aftrekbare btw (KOR) staat op de regel direct erna en hoort bij de kostprijs
+             l.debit + COALESCE((SELECT n.debit FROM journal_lines n WHERE n.id = l.id + 1 AND n.journal_entry_id = l.journal_entry_id AND n.account_id = l.account_id AND n.vat_code = '${NON_DEDUCTIBLE_VAT}'), 0) AS debit
            FROM journal_lines l
            JOIN journal_entries e ON e.id = l.journal_entry_id
            JOIN chart_of_accounts a ON a.id = l.account_id
            WHERE a.rgs_code IN (${accounts.map(() => '?').join(',')}) AND l.debit > 0
+             AND COALESCE(l.vat_code, '') != '${NON_DEDUCTIBLE_VAT}'
              AND e.status = 'definitief' AND e.reverses_entry_id IS NULL
              -- een beginbalans is geen nieuwe investering (geen KIA, en de afschrijving liep al)
              AND e.source != 'opening'

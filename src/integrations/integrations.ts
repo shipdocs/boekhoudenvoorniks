@@ -5,6 +5,8 @@ import { signedLine } from '../core-ledger/ledger';
 import { ACCOUNTS, REVERSE_CHARGE_ACCOUNTS } from '../core-ledger/accounts';
 import { PURCHASE_VAT_RATES } from '../shared/vat';
 import { roundHalfAwayFromZero } from '../shared/money';
+import { NON_DEDUCTIBLE_VAT } from '../core-ledger/rules';
+import { korActive } from '../settings/settings';
 import type { InvoiceService } from '../documents/invoices';
 import type { RelationsService } from '../relations/relations';
 import type { SalesVatCode } from '../shared/vat';
@@ -16,10 +18,16 @@ import type { ExternalOrder, ExternalPayout, FetchLike, IntegrationDefinition, S
 
 export const INTEGRATIONS: IntegrationDefinition[] = [WOOCOMMERCE, SHOPIFY, MOLLIE, STRIPE];
 
-/** Verlegde btw over buitenlandse transactiekosten: aangeven en tegelijk aftrekken (per saldo nul). */
-function reverseChargeLines(net: number): (PostLine | null)[] {
+/**
+ * Verlegde btw over buitenlandse transactiekosten: aangeven en tegelijk aftrekken (per saldo nul).
+ * Onder de KOR geen aftrek: de btw komt dan bij de kosten.
+ */
+function reverseChargeLines(net: number, noVatDeduction = false): (PostLine | null)[] {
   const vat = roundHalfAwayFromZero((net * PURCHASE_VAT_RATES.eu.percentage) / 100);
-  return [signedLine(ACCOUNTS.btwVoorbelasting, vat, { vatCode: 'eu' }), signedLine(REVERSE_CHARGE_ACCOUNTS.eu, -vat, { vatCode: 'eu' })];
+  return [
+    noVatDeduction ? signedLine(ACCOUNTS.bankkosten, vat, { vatCode: NON_DEDUCTIBLE_VAT, description: 'Niet-aftrekbare btw' }) : signedLine(ACCOUNTS.btwVoorbelasting, vat, { vatCode: 'eu' }),
+    signedLine(REVERSE_CHARGE_ACCOUNTS.eu, -vat, { vatCode: 'eu' }),
+  ];
 }
 
 export interface IntegrationState {
@@ -216,11 +224,12 @@ export class IntegrationService {
         result.skipped++;
         continue;
       }
+      const kor = korActive(this.db);
       const lines = [
         signedLine(ACCOUNTS.kruisposten, p.amount),
         signedLine(ACCOUNTS.bankkosten, p.feesNet, { description: `${source} transactiekosten`, vatCode: p.feesReverseCharge ?? null }),
-        ...(p.feesReverseCharge ? reverseChargeLines(p.feesNet) : []),
-        signedLine(ACCOUNTS.btwVoorbelasting, p.feesVat, { vatCode: 'hoog' }),
+        ...(p.feesReverseCharge ? reverseChargeLines(p.feesNet, kor) : []),
+        kor ? signedLine(ACCOUNTS.bankkosten, p.feesVat, { vatCode: NON_DEDUCTIBLE_VAT, description: 'Niet-aftrekbare btw' }) : signedLine(ACCOUNTS.btwVoorbelasting, p.feesVat, { vatCode: 'hoog' }),
         signedLine(ACCOUNTS.tussenrekeningPsp, -(p.amount + p.feesNet + p.feesVat)),
       ].filter((l): l is PostLine => l !== null);
       try {

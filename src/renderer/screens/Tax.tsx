@@ -45,8 +45,10 @@ export function Tax({ periodKey }: { periodKey?: string }) {
         <div className="card">
           <h3>Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw omdat je weinig omzet hebt</h3>
           <p className="muted">Je rekent geen btw en hoeft geen btw-aangifte te doen. Houd je omzet in de gaten: boven € 20.000 per jaar vervalt de KOR.</p>
+          <p className="muted">Btw die je betaalt op je aankopen krijg je met de KOR niet terug. De app telt die btw daarom bij je kosten (of bij de prijs van je investering).</p>
           <Button onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Btw-instellingen</Button>
         </div>
+        <KorReverseCharge year={year} />
         <IncomeTaxCard />
       </div>
     );
@@ -324,6 +326,24 @@ function IcpCard({ periodKey }: { periodKey: string }) {
       <div className="row" style={{ marginTop: 10 }}>
         <Button small onClick={() => void run(() => api.vat.exportIcpCsv(periodKey), 'Opgeslagen')}>ICP-overzicht (CSV)</Button>
       </div>
+    </div>
+  );
+}
+
+/** KOR: verlegde btw blijft verschuldigd. */
+function KorReverseCharge({ year }: { year: number }) {
+  const list = useLoad(() => api.vat.korReverseCharge(year), [year]);
+  if (!list.data || list.data.length === 0) return null;
+  return (
+    <div className="notice warn" style={{ marginTop: 14 }}>
+      <strong>Btw die naar jou verlegd is: die moet je wel betalen</strong>
+      <div className="small">
+        Je kocht iets zonder btw op de factuur (btw verlegd, bijvoorbeeld van een onderaannemer of een buitenlands bedrijf als Google of Meta).
+        Ook met de KOR moet je die btw aangeven en betalen, en je mag hem niet aftrekken. Vraag je boekhouder hoe je die aangifte doet.
+      </div>
+      <ul className="small">
+        {list.data.map((p) => <li key={p.period.key}>{p.period.label}: <Euro cents={p.btw} /></li>)}
+      </ul>
     </div>
   );
 }

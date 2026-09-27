@@ -405,7 +405,10 @@ export class VatService {
     // onverwerkte banktransacties e.d.: zie checks() (#20)
     const drafts = (this.db.prepare(`SELECT COUNT(*) AS n FROM invoices WHERE status = 'concept' AND invoice_date BETWEEN ? AND ?`).get(period.start, period.end) as { n: number }).n;
     if (drafts > 0) warnings.push(`${drafts} ${drafts === 1 ? 'factuur is' : 'facturen zijn'} in deze periode nog niet verstuurd. Die tellen pas mee als je ze verstuurt of definitief maakt.`);
-    if (this.settings.get().kor) warnings.push('Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw en hoeft in principe geen btw-aangifte te doen.');
+    if (this.settings.get().kor) {
+      warnings.push('Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw en hoeft in principe geen btw-aangifte te doen.');
+      if ((r2a.btw ?? 0) + (r4a.btw ?? 0) + (r4b.btw ?? 0) !== 0) warnings.push('Er is btw naar jou verlegd (2a/4a/4b). Die moet je ook met de KOR aangeven en betalen, en je mag hem niet aftrekken. Vraag je boekhouder hoe je die aangifte doet.');
+    }
     if (omzetVrijgesteld !== 0 && !this.settings.get().kor) warnings.push('Er staan factuurregels zonder btw ("Vrijgesteld / KOR"), maar je gebruikt de KOR niet. Kijk die facturen na.');
     for (const c of corrections) {
       if (c.suppletie) {
@@ -514,6 +517,25 @@ export class VatService {
       const r = this.calculate(p.key);
       return { period: p, status: r.status, teBetalen: r.summary.teBetalen };
     });
+  }
+
+  /**
+   * KOR: verlegde btw (2a/4a/4b) blijft verschuldigd, zonder aftrek. Per kwartaal wat er aan
+   * verlegde btw geboekt is; daarvoor moet je (een aangifte aanvragen en) betalen.
+   */
+  korReverseCharge(year: number): { period: Period; btw: Cents }[] {
+    const out: { period: Period; btw: Cents }[] = [];
+    for (let q = 0; q < 4; q++) {
+      const p = periodFor(`${year}-${String(q * 3 + 1).padStart(2, '0')}-01`, 'kwartaal');
+      const r = this.db
+        .prepare(
+          `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS s FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
+           JOIN chart_of_accounts a ON a.id = l.account_id WHERE a.rgs_code IN (?, ?, ?) AND e.entry_date BETWEEN ? AND ? AND COALESCE(e.source, '') != 'btw'`,
+        )
+        .get(ACCOUNTS.btwAfdragenVerlegd, ACCOUNTS.btwAfdragenEu, ACCOUNTS.btwAfdragenBuitenEu, p.start, p.end) as { s: number };
+      if (r.s !== 0) out.push({ period: p, btw: r.s });
+    }
+    return out;
   }
 
   /** Controles vóór de aangifte (#20). */
