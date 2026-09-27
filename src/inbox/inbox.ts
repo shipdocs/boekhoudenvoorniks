@@ -480,8 +480,8 @@ export class InboxService {
           kind: 'mail-online',
           icon: '📧',
           title: `${who}: factuur staat online`,
-          question: `${subject}. Er zat geen bijlage bij. Log in op ${m.link_domain} (typ het adres zelf in; klik bij twijfel niet op de link in de mail), download de factuur en zet hem bij Aankopen & bonnetjes.`,
-          actions: [{ id: 'open', label: 'Bonnetje toevoegen', primary: true }, { id: 'klaar', label: 'Gedaan' }],
+          question: `${subject}. Er zat geen bijlage bij. Log in op ${m.link_domain} (typ het adres zelf in; klik bij twijfel niet op de link in de mail), download de factuur en zet hem bij Aankopen & bonnetjes. Staat de factuur in de mail zelf? Bewaar dan de mail als bon.`,
+          actions: [{ id: 'open', label: 'Bonnetje toevoegen', primary: true }, { id: 'bon', label: 'Mail als bon bewaren' }, { id: 'klaar', label: 'Gedaan' }],
           priority: 2,
           ref: { mailId: m.id },
         });

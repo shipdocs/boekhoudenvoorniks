@@ -170,6 +170,14 @@ function initServices(): void {
         }
       },
       fetchNow: () => fetchMail(),
+      async saveAsReceipt(id) {
+        const source = await ImapSource.connect(services.settings.get().mailIn, secrets.get(IMAP_SECRET));
+        try {
+          return await services.mail.saveAsReceipt(source, id);
+        } finally {
+          await source.close();
+        }
+      },
     },
     async backupNow() {
       const result = await dialog.showSaveDialog(mainWindow!, {

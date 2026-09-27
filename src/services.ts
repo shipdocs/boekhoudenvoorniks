@@ -80,7 +80,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const incomeTax = new IncomeTaxService(db, settings, { assets, overview: taxOverview });
   const jobs = new JobService(db, quotes, invoices, relations);
   const investments = new InvestmentCheck(db, purchases, bank);
-  const mail = new MailIntakeService(db, settings, intake);
+  const mail = new MailIntakeService(db, settings, intake, async (html) => new Uint8Array(await deps.pdf(html)));
   const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases, recurring, categories, investments, mail);
   const checklist = new ChecklistService(db, settings);
 

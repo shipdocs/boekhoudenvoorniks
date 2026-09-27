@@ -42,6 +42,7 @@ export type MailOutcome = 'bijlage' | 'online-factuur' | 'klant' | 'eigen' | 'ov
 
 export interface MailRecord {
   id: number;
+  message_key: string;
   folder: string;
   uid: number;
   from_address: string | null;
@@ -142,6 +143,40 @@ export function onlineInvoiceDomain(m: Pick<MailMessage, 'subject' | 'text'>): s
   }
 }
 
+/**
+ * Een bon of factuur in de tekst van de mail zelf (geen bijlage), bv. van een webshop of app:
+ * een woord als factuur/bon/bestelling én een bedrag in euro's.
+ */
+export function looksLikeReceipt(m: Pick<MailMessage, 'subject' | 'text'>): boolean {
+  const text = m.text.slice(0, 20_000);
+  if (text.trim().length < 40) return false;
+  const words = /\b(factuur|nota|bon|kassabon|bestelling|bestelbevestiging|orderbevestiging|aankoop|betaalbewijs|kwitantie|receipt|invoice|order|totaal|total)\b/i;
+  if (!words.test(m.subject) && !words.test(text)) return false;
+  const amount = /(€|eur)\s?-?\d{1,3}(?:[.\s]\d{3})*,\d{2}\b|\b\d{1,3}(?:\.\d{3})*,\d{2}\s?(€|eur)|\b(totaal|total|te betalen|bedrag)\b[^\n\d]{0,25}\d+[.,]\d{2}\b/i;
+  return amount.test(text);
+}
+
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/**
+ * De mail als eenvoudige pagina om als PDF te bewaren: alleen de platte tekst, dus geen plaatjes,
+ * geen links en geen scripts uit de mail (volgpixels en nep-links komen er niet in).
+ */
+export function receiptHtml(m: Pick<MailMessage, 'fromName' | 'fromAddress' | 'subject' | 'date' | 'text'>): string {
+  const from = m.fromName ? `${m.fromName} <${m.fromAddress}>` : m.fromAddress;
+  const body = m.text.replace(/\n{3,}/g, '\n\n').slice(0, 20_000);
+  return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>${escapeHtml(m.subject)}</title>
+<style>body{font:11pt/1.45 Helvetica,Arial,sans-serif;margin:32px;color:#111}h1{font-size:14pt;margin:0 0 6px}.meta{color:#555;font-size:9.5pt;margin-bottom:16px;border-bottom:1px solid #ccc;padding-bottom:8px}pre{white-space:pre-wrap;font:inherit;margin:0}</style>
+</head><body><h1>${escapeHtml(m.subject || 'Bon uit e-mail')}</h1>
+<div class="meta">Van: ${escapeHtml(from)}<br>Datum: ${escapeHtml(m.date)}<br>Bewaard uit e-mail door Gratis Boekhouden</div>
+<pre>${escapeHtml(body)}</pre></body></html>`;
+}
+
+function receiptFilename(m: Pick<MailMessage, 'subject' | 'date'>): string {
+  const base = m.subject.replace(/^(fwd?|fw|doorst|tr|wg):\s*/i, '').replace(/[^\p{L}\p{N} ._-]/gu, '').trim().slice(0, 60) || 'bon';
+  return `mail ${m.date} ${base}.pdf`;
+}
+
 function normalizeAddress(a: string): string {
   return a.trim().toLowerCase();
 }
@@ -161,7 +196,56 @@ export class MailIntakeService {
     private readonly db: Db,
     private readonly settings: SettingsService,
     private readonly intake: IntakeService,
+    /** HTML → PDF, om een bon in de mailtekst te bewaren; null = niet mogelijk */
+    private pdf: ((html: string) => Promise<Uint8Array>) | null = null,
   ) {}
+
+  setPdfRenderer(pdf: ((html: string) => Promise<Uint8Array>) | null): void {
+    this.pdf = pdf;
+  }
+
+  /** De mailtekst als PDF-bon toevoegen (wacht op controle, nooit vanzelf geboekt). */
+  private async addBodyAsReceipt(m: MailMessage, asOf: IsoDate): Promise<number> {
+    if (!this.pdf) throw new Error('Een mail als bon bewaren kan hier niet');
+    const data = await this.pdf(receiptHtml(m));
+    return (await this.intake.add(receiptFilename(m), data, asOf, { autoConfirm: false })).id;
+  }
+
+  /** Verwerkte mail naar de map "Verwerkt" (alleen uit de gewone map); lukt dat niet, dan blijft hij staan. */
+  private async moveProcessed(source: MailSource, uid: number, main: boolean): Promise<string | null> {
+    const target = this.settings.get().mailIn.processedFolder;
+    if (!main || !target) return null;
+    try {
+      await source.move(uid, target);
+      return target;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * "Toch als bon bewaren" voor een mail die bleef liggen: haalt hem opnieuw op (zelfde map, zelfde
+   * bericht, gecontroleerd op de Message-ID) en bewaart de tekst als bon.
+   */
+  async saveAsReceipt(source: MailSource, id: number, asOf: IsoDate = today()): Promise<MailRecord> {
+    const rec = this.get(id);
+    if (!['overig', 'online-factuur'].includes(rec.outcome)) throw new Error('Deze mail is al verwerkt, of komt van een klant');
+    const box = await source.open(rec.folder);
+    if (!box) throw new Error(`De map "${rec.folder}" bestaat niet meer`);
+    const m = await source.fetch(rec.uid);
+    const key = m?.messageId ? `id:${m.messageId}` : null;
+    // hetzelfde bericht? (bij een Message-ID moet die kloppen; de UID kan intussen van een ander bericht zijn)
+    if (!m || (rec.message_key.startsWith('id:') && key !== rec.message_key)) {
+      throw new Error('Deze mail staat niet meer op dezelfde plek (verplaatst of verwijderd). Sla hem zelf op als PDF en zet hem bij Aankopen.');
+    }
+    const docId = await this.addBodyAsReceipt(m, asOf);
+    const main = rec.folder === (this.settings.get().mailIn.folder || 'INBOX');
+    const movedTo = await this.moveProcessed(source, rec.uid, main);
+    this.db
+      .prepare(`UPDATE mail_messages SET outcome = 'bijlage', document_ids = ?, note = ?, moved_to = ? WHERE id = ?`)
+      .run(JSON.stringify([docId]), 'mailtekst als bon bewaard', movedTo, id);
+    return this.get(id);
+  }
 
   private seen(key: string): boolean {
     return Boolean(this.db.prepare('SELECT 1 FROM mail_messages WHERE message_key = ?').get(key));
@@ -267,17 +351,15 @@ export class MailIntakeService {
             if (files.length > 0) {
               const ids: number[] = [];
               for (const f of files) ids.push((await this.intake.add(f.name, f.data, asOf, { autoConfirm: false })).id);
-              let movedTo: string | null = null;
-              if (main && cfg.processedFolder) {
-                try {
-                  await source.move(uid, cfg.processedFolder);
-                  movedTo = cfg.processedFolder;
-                } catch {
-                  // verplaatsen lukt niet (bv. geen rechten): dan blijft hij staan; we herkennen hem toch
-                }
-              }
+              const movedTo = await this.moveProcessed(source, uid, main);
               this.record(key, folder, uid, m, 'bijlage', { documentIds: ids, movedTo });
               result.documents += ids.length;
+            } else if (this.pdf && looksLikeReceipt(m)) {
+              // de bon staat in de mail zelf (webshop, app): de tekst als PDF bewaren
+              const docId = await this.addBodyAsReceipt(m, asOf);
+              const movedTo = await this.moveProcessed(source, uid, main);
+              this.record(key, folder, uid, m, 'bijlage', { documentIds: [docId], movedTo, note: 'mailtekst als bon bewaard' });
+              result.documents++;
             } else {
               const domain = onlineInvoiceDomain(m);
               if (domain) {
