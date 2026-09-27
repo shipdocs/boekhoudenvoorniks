@@ -7,7 +7,7 @@ export interface KnownSupplier {
   name: string;
   pattern: RegExp;
   category: string;
-  vatCode: 'hoog' | 'laag' | 'nul' | 'geen' | 'eu';
+  vatCode: 'hoog' | 'laag' | 'nul' | 'geen' | 'eu' | 'buiten-eu';
 }
 
 export const KNOWN_SUPPLIERS: KnownSupplier[] = [
@@ -39,6 +39,8 @@ export const KNOWN_SUPPLIERS: KnownSupplier[] = [
   { name: 'Coolblue', pattern: /\bcoolblue\b/i, category: 'kantoor', vatCode: 'hoog' },
   { name: 'Bol.com', pattern: /\bbol\.com\b/i, category: 'kantoor', vatCode: 'hoog' },
   { name: 'Microsoft', pattern: /\bmicrosoft\b/i, category: 'software', vatCode: 'hoog' },
+  // Amerikaans bedrijf, factureert zonder btw met "reverse charge": jij rekent de btw zelf af (4a)
+  { name: 'Anthropic', pattern: /\banthropic\b/i, category: 'software', vatCode: 'buiten-eu' },
   { name: 'Google', pattern: /\bgoogle\b/i, category: 'software', vatCode: 'hoog' },
   // Ierse vestigingen factureren zakelijke klanten met btw-nummer zonder btw: verlegd uit de EU (4b, #16)
   { name: 'Meta', pattern: /\bmeta\s+platforms\b|\bfacebook\b/i, category: 'reclame', vatCode: 'eu' },

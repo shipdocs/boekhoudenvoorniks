@@ -108,6 +108,9 @@ export function createApi(s: Services, host: HostContext) {
       case 'bank-purchase:klopt':
         s.bank.matchPurchase(r.bankTransactionId!, r.purchaseId!);
         return;
+      case 'vat-due:ingediend':
+        s.vat.markSubmitted(r.periodKey!, { alreadyFiled: true });
+        return;
       case 'bank-sale:klopt':
         s.bank.repeatSale(r.bankTransactionId!);
         return;
@@ -491,7 +494,7 @@ export function createApi(s: Services, host: HostContext) {
     bank: {
       accounts: () => s.bank.listAccounts(),
       importStatus: () => s.bank.importStatus(),
-      addAccount: (name: string, iban: string) => s.bank.addAccount(name, iban),
+      addAccount: (name: string, iban: string | null) => s.bank.addAccount(name, iban),
       updateAccount: (id: number, patch: { name?: string; iban?: string | null }) => s.bank.updateAccount(id, patch),
       openingBalance: (bankAccountId: number, amount: Cents, date: IsoDate) => s.bank.setOpeningBalance(bankAccountId, amount, date),
       getOpeningBalance: (bankAccountId: number) => s.bank.openingBalance(bankAccountId),
@@ -589,7 +592,7 @@ export function createApi(s: Services, host: HostContext) {
       /** de boekingen die samen het saldo van een rekening vormen (bij een controle: "wat staat hier?") */
       accountLines: (rgs: string, upTo?: string) => s.vat.accountLines(rgs, upTo),
       periods: (year: number) => s.vat.listPeriods(year),
-      markSubmitted: (periodKey: string) => s.vat.markSubmitted(periodKey),
+      markSubmitted: (periodKey: string, alreadyFiled = false) => s.vat.markSubmitted(periodKey, { alreadyFiled: alreadyFiled === true }),
       reopen: (periodKey: string) => s.vat.reopen(periodKey),
       corrections: () => s.vat.corrections(),
       checks: (periodKey: string) => s.vat.checks(periodKey),

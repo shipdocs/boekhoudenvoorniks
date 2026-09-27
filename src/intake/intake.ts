@@ -62,6 +62,8 @@ export interface Confirmation {
   jobId?: number | null;
   /** bon splitsen over categorieën (#23); bedragen incl. btw, som = totaal. 'prive' = niet zakelijk. */
   splits?: { categoryKey: string; gross: Cents; vatRate?: number }[] | null;
+  /** het btw-bedrag zoals de gebruiker het invulde (staat op de bon); leeg = uitrekenen */
+  vatAmount?: Cents | null;
 }
 
 type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'decisions'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
@@ -462,6 +464,12 @@ export class IntakeService {
         const { net, vat } = splitGross(sp.gross, rate, isReverseCharge(vatCode));
         return { account: cat.account, netAmount: net, vatCode, vatAmount: vat, description: cat.label };
       });
+    }
+    // zelf ingevuld btw-bedrag: gaat voor wat de app las of uitrekende (niet bij verlegde btw: die reken je zelf uit)
+    if (c.vatAmount !== undefined && c.vatAmount !== null && !isReverseCharge(c.vatCode)) {
+      if (!Number.isInteger(c.vatAmount) || c.vatAmount < 0 || c.vatAmount > c.total) throw new ValidationError('Het btw-bedrag kan niet meer zijn dan het totaal');
+      if (PURCHASE_VAT_RATES[c.vatCode].percentage === 0 && c.vatAmount !== 0) throw new ValidationError('Bij "geen btw" of 0% hoort geen btw-bedrag');
+      return [{ account, netAmount: c.total - c.vatAmount, vatCode: c.vatCode, vatAmount: c.vatAmount }];
     }
     const vat = result?.vat.value ?? [];
     const complete = vat.length > 1 && vat.every((v) => v.base !== null) && vat.reduce((s, v) => s + (v.base ?? 0) + v.amount, 0) === c.total;

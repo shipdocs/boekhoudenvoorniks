@@ -142,7 +142,7 @@ export function runVatChecks(
       key: 'onderweg',
       blocking: false,
       title: `${formatEuro(Math.abs(onderweg))} staat nog "onderweg" tussen je eigen rekeningen`,
-      detail: 'Er is geld overgemaakt tussen je eigen rekeningen, maar de andere kant staat er nog niet in. Lees het afschrift van die andere rekening in. Kwam het pas na deze periode binnen? Dan klopt het.',
+      detail: 'Er is geld overgemaakt tussen je eigen rekeningen, maar de andere kant staat er nog niet in. Lees het afschrift van die andere rekening in. Kwam het pas na deze periode binnen? Dan klopt het. Ging het naar een potje zonder eigen rekeningnummer (zoals een Knab-potje)? Voeg het potje toe bij Bank → Rekening toevoegen (rekeningnummer leeg laten), maak de betaling ongedaan en kies "Naar potje".',
       count: 1,
       fingerprint: String(onderweg),
       screen: 'bank',
