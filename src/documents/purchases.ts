@@ -2,7 +2,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import { PURCHASE_VAT_RATES, type PurchaseVatCode } from '../shared/vat';
+import { PURCHASE_VAT_RATES, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
 import { assertIsoDate, type IsoDate } from '../shared/dates';
 import { assertCents, roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
@@ -101,15 +101,42 @@ export class PurchaseService {
    * (tegenboeking + nieuwe post). Het te betalen bedrag mag niet veranderen als er al betaald is.
    */
   reclassify(id: number, lines: PurchaseLineInput[], reason = 'andere categorie'): PurchaseInvoice {
-    if (lines.length === 0) throw new ValidationError('Voeg minimaal één regel toe');
+    return this.rewrite(id, () => lines, reason, { samePayable: true });
+  }
+
+  /**
+   * Een aankoop die in een andere munt was maar als euro's is geboekt (van vóór #74, of zonder bon
+   * ingevoerd): omrekenen naar het bedrag in euro's. Alle regels gaan naar verhouding mee (kosten en
+   * btw); het afrondingsverschil komt op de laatste regel, zodat het totaal precies klopt.
+   * Een betaling die er al bij hoort blijft staan; er mag alleen niet meer betaald zijn dan het nieuwe bedrag.
+   */
+  revalue(id: number, euroTotal: Cents, foreign: { currency: string; total: Cents }, reason = 'omgerekend naar euro\'s'): PurchaseInvoice {
+    assertCents(euroTotal);
+    assertCents(foreign.total);
+    if (euroTotal <= 0 || foreign.total <= 0) throw new ValidationError('Vul beide bedragen in');
+    if (!/^[A-Z]{3}$/.test(foreign.currency) || foreign.currency === 'EUR') throw new ValidationError('Kies de munt van de bon');
+    return tx(this.db, () => {
+      const before = this.get(id);
+      if (before.amount_paid > euroTotal) throw new ValidationError('Er is al meer betaald dan het bedrag in euro\'s. Maak eerst de betaling ongedaan.');
+      const p = before.total === euroTotal ? before : this.rewrite(id, (old) => scaleLines(old, before.total, euroTotal), reason, { samePayable: false });
+      if (p.total !== euroTotal) throw new Error(`Omrekenen klopt niet: ${p.total} ≠ ${euroTotal}`);
+      this.db.prepare('UPDATE purchase_invoices SET currency = ?, foreign_total = ?, fx_rate = ? WHERE id = ?').run(foreign.currency, foreign.total, foreign.total / euroTotal, id);
+      return this.get(id);
+    });
+  }
+
+  /** Vervangt de regels van een geboekte inkoop: tegenboeking + nieuwe post (#19). */
+  private rewrite(id: number, next: (old: PurchaseLineInput[]) => PurchaseLineInput[], reason: string, opts: { samePayable: boolean }): PurchaseInvoice {
     return tx(this.db, () => {
       const p = this.get(id);
       if (!p.journal_entry_id) throw new ValidationError('Deze aankoop kan niet aangepast worden');
       const event = this.events.forEntry(p.journal_entry_id);
       if (!event || event.type !== 'inkoop') throw new ValidationError('Deze aankoop is met een oudere versie van de app verwerkt en kan zo niet aangepast worden. Vraag je boekhouder.');
-      const booking = expenseLines(lines, ACCOUNTS.crediteuren, p.relation_id, p.supplier_reference ?? undefined);
-      if (p.amount_paid !== 0 && booking.payable !== p.total) throw new ValidationError('Het te betalen bedrag verandert; maak eerst de betaling ongedaan');
       const old = event.payload as InkoopPayload;
+      const lines = next(old.lines);
+      if (lines.length === 0) throw new ValidationError('Voeg minimaal één regel toe');
+      const booking = expenseLines(lines, ACCOUNTS.crediteuren, p.relation_id, p.supplier_reference ?? undefined);
+      if (opts.samePayable && p.amount_paid !== 0 && booking.payable !== p.total) throw new ValidationError('Het te betalen bedrag verandert; maak eerst de betaling ongedaan');
       const { entryId } = this.events.replace(event.id, { type: 'inkoop', payload: { ...old, lines } }, reason);
       this.db
         .prepare('UPDATE purchase_invoices SET journal_entry_id = ?, subtotal = ?, vat_total = ?, total = ?, status = ? WHERE id = ?')
@@ -226,3 +253,21 @@ export class PurchaseService {
   }
 }
 
+/**
+ * Regels naar verhouding naar een nieuw totaal (te betalen bedrag). Btw gaat mee; bij verlegde btw
+ * rekent de app die opnieuw uit over het nieuwe bedrag. Het restje van het afronden gaat op de
+ * laatste regel, zodat het totaal precies het nieuwe bedrag is.
+ */
+export function scaleLines(lines: PurchaseLineInput[], fromTotal: Cents, toTotal: Cents): PurchaseLineInput[] {
+  if (fromTotal <= 0) throw new ValidationError('Deze aankoop heeft geen bedrag om om te rekenen');
+  const f = toTotal / fromTotal;
+  const scaled = lines.map((l): PurchaseLineInput => {
+    const { vatAmount: _vat, ...rest } = l;
+    const netAmount = Math.round(l.netAmount * f);
+    return isReverseCharge(l.vatCode) ? { ...rest, netAmount } : { ...rest, netAmount, vatAmount: Math.round(purchaseVat(l) * f) };
+  });
+  const payable = expenseLines(scaled, ACCOUNTS.crediteuren, null).payable;
+  const last = scaled[scaled.length - 1]!;
+  scaled[scaled.length - 1] = { ...last, netAmount: last.netAmount + (toTotal - payable) };
+  return scaled;
+}

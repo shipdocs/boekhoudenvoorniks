@@ -37,6 +37,7 @@ import { today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 import type { PollResult } from '../mail/mail-intake';
 import type { UpdateStatus } from './updates';
+import type { FxApplyInput } from '../fx/repair';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -285,6 +286,7 @@ export function createApi(s: Services, host: HostContext) {
           'vat-due': ['belasting', r.periodKey],
           'bank-stale': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
+          'fx-repair': ['aankopen', undefined],
           'recurring-invoice': ['bewijs', r.bankTransactionId],
           'recurring-missing-payment': ['bank', undefined],
           'vat-suppletie': ['belasting', undefined],
@@ -481,6 +483,13 @@ export function createApi(s: Services, host: HostContext) {
        * eerst een waarschuwing, pas na bevestiging de QR.
        */
       paymentQr: (id: number, confirmNewIban = false) => purchasePaymentQr(s.purchases, id, confirmNewIban),
+    },
+    /** Vreemde valuta in wat er al stond (#74): nakijken en omrekenen. */
+    valuta: {
+      candidates: () => ({ purchases: s.fxRepair.candidates(), documents: s.fxRepair.pendingDocuments().length }),
+      preview: (purchaseId: number, input?: { currency: string; foreignTotal: Cents }) => s.fxRepair.preview(purchaseId, input),
+      apply: (purchaseId: number, input: FxApplyInput) => s.fxRepair.apply(purchaseId, input),
+      fixAll: () => s.fxRepair.fixAll(),
     },
     quick: {
       cashSale: (input: CashSaleInput) => s.quick.recordCashSale(input),
