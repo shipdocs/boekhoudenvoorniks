@@ -34,6 +34,7 @@ import { SwitchoverService } from './onboarding/switchover';
 import { CategoryService } from './settings/categories';
 import { MailIntakeService } from './mail/mail-intake';
 import { FxService } from './fx/fx';
+import { FxRepair } from './fx/repair';
 
 export interface ServiceDeps {
   pdf: PdfRenderer;
@@ -86,6 +87,9 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const investments = new InvestmentCheck(db, purchases, bank);
   const mail = new MailIntakeService(db, settings, intake, async (html) => new Uint8Array(await deps.pdf(html)));
   const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases, recurring, categories, investments, mail);
+  // vreemde valuta in wat er al stond (#74): bonnen en aankopen van vóór 0.3.9 omrekenen
+  const fxRepair = new FxRepair(db, fx, intake, purchases, bank);
+  inbox.setFxRepair(fxRepair);
   const checklist = new ChecklistService(db, settings);
   const switchover = new SwitchoverService(db, ledger, settings, relations, bank, vat);
 
@@ -96,7 +100,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, fx, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, switchover, investments, assets, mileage, hours, taxOverview };
+  return { db, fx, fxRepair, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, switchover, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;

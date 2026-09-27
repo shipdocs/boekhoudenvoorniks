@@ -2,6 +2,20 @@
 
 ## Nog niet uitgebracht
 
+- **Bonnen in dollars die er al in stonden** (#74): oudere versies lazen "$ 90,00" als € 90,00. De app vindt die
+  bonnen nu en rekent ze om:
+  - een bon die je nog moet controleren wordt vanzelf opnieuw beoordeeld (er was nog niets geboekt);
+  - een geboekte aankoop zie je op Vandaag en bij Aankopen ("staat als euro's in je boekhouding"). Bij **Nakijken**
+    zie je wat er verandert: het bedrag dat van je rekening is afgeschreven komt in de boekhouding en de betaling
+    wordt gekoppeld; zonder betaling de ECB-koers. **Alles omrekenen** doet ze in één keer. De oude boeking krijgt
+    een tegenboeking; is de btw-aangifte van dat kwartaal al gedaan, dan gaat het verschil mee in de volgende;
+  - staat de betaling al rechtstreeks als kosten geboekt, dan was de aankoop dubbel: die haalt de app weg en de
+    bon wordt het bewijsstuk bij die betaling;
+  - een aankoop zonder bon (of met een ander bedrag) reken je om met 💱 in de lijst met aankopen.
+- **Niet meer dubbel**: een nieuwe bon in dollars bij een betaling die je al als kosten boekte, wordt het bewijsstuk
+  in plaats van een tweede aankoop; en dezelfde bon nog eens toevoegen wordt herkend, ook als die eerder als euro's
+  geboekt is.
+
 ## 0.3.9 — aankopen in vreemde valuta (dollars, ponden, …)
 
 - **Aankopen in dollars (en andere munten)** (#74): de app herkent een bon of factuur in een andere munt ($, USD,

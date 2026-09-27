@@ -154,7 +154,7 @@ export class IntakeService {
    * blijft bewaard. Later, als de betaling op de bank staat, wordt het bedrag van de bank gebruikt.
    * Geen koers (geen internet): dan geen bedrag in euro's gokken, maar de gebruiker laten invullen.
    */
-  private async toEuros(result: DocumentResult): Promise<Issue[]> {
+  async toEuros(result: DocumentResult): Promise<Issue[]> {
     const cur = result.currency?.value;
     if (!cur || cur === 'EUR' || !result.total || result.foreign) return [];
     const foreignTotal = result.total.value;
@@ -376,13 +376,18 @@ export class IntakeService {
     const number = result.invoiceNumber?.value ? normalizeInvoiceNumber(result.invoiceNumber.value) : null;
     const date = result.invoiceDate?.value ?? null;
     const total = result.total.value;
+    // vreemde munt (#74): ook hetzelfde bedrag in die munt, en een oudere boeking waarin dat bedrag als euro's staat
+    const foreign = result.foreign ?? null;
 
     const purchases = this.db
       .prepare(
         `SELECT p.id, p.supplier_reference, p.invoice_date, p.document_id, r.name AS supplier
-         FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id WHERE p.total = ?`,
+         FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id
+         WHERE p.total = ? OR (? IS NOT NULL AND ((p.currency = ? AND p.foreign_total = ?) OR (p.currency IS NULL AND p.total = ?)))`,
       )
-      .all(total) as { id: number; supplier_reference: string | null; invoice_date: string; document_id: number | null; supplier: string | null }[];
+      .all(total, foreign?.currency ?? null, foreign?.currency ?? null, foreign?.total ?? null, foreign?.total ?? null) as { id: number; supplier_reference: string | null; invoice_date: string; document_id: number | null; supplier: string | null }[];
+    const sameAmount = (r: DocumentResult) =>
+      r.total!.value === total || (!!foreign && (r.foreign ? r.foreign.currency === foreign.currency && r.foreign.total === foreign.total : r.total!.value === foreign.total));
     const docs = this.db
       .prepare(`SELECT id, result, status, purchase_invoice_id FROM documents WHERE id < ? AND status IN ('nieuw','controle','verwerkt') AND result IS NOT NULL`)
       .all(id) as { id: number; result: string; status: string; purchase_invoice_id: number | null }[];
@@ -399,7 +404,7 @@ export class IntakeService {
     }
     for (const d of docs) {
       const r = JSON.parse(d.result) as DocumentResult;
-      if (!r.total || r.total.value !== total || !r.supplier || supplierKey(r.supplier.value) !== key) continue;
+      if (!r.total || !sameAmount(r) || !r.supplier || supplierKey(r.supplier.value) !== key) continue;
       const label = `het document van ${r.supplier.value}${r.invoiceDate ? ` van ${r.invoiceDate.value}` : ''}`;
       const otherNumber = r.invoiceNumber?.value ? normalizeInvoiceNumber(r.invoiceNumber.value) : null;
       if (number && otherNumber === number) return { strength: 'zeker', documentId: d.id, purchaseId: d.purchase_invoice_id, label };
@@ -461,9 +466,29 @@ export class IntakeService {
     return scored[0]!.t;
   }
 
-  /** Een al (zonder document) verwerkte banktransactie met exact dit bedrag en datum ±3 dagen. */
-  private findBookedBankTransaction(result: DocumentResult): BankTransaction | null {
+  /**
+   * Een al (zonder document) verwerkte banktransactie met exact dit bedrag en datum ±3 dagen.
+   * Vreemde munt (#74): de bank rekende een eigen koers, dus ongeveer dit bedrag, tot 7 dagen later
+   * en alleen met de naam van de leverancier. Is er rond die datum (10 dagen vóór tot 20 dagen na) nog
+   * een vergelijkbare afschrijving van die leverancier, dan is het te onzeker: dan niets aannemen.
+   */
+  findBookedBankTransaction(result: DocumentResult): BankTransaction | null {
     if (!result.total || !result.invoiceDate) return null;
+    if (result.foreign) {
+      const supplier = result.supplier ? supplierKey(result.supplier.value).split(' ')[0] : '';
+      if (!supplier) return null;
+      const rows = (
+        this.db
+          .prepare(
+            `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount < 0 AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
+               AND julianday(transaction_date) - julianday(?) BETWEEN -10 AND 20
+               AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || bank_transactions.id || '"%')`,
+          )
+          .all(result.invoiceDate.value) as BankTransaction[]
+      ).filter((t) => withinFx(-t.amount, result.total!.value) && !!t.counter_name && supplierKey(t.counter_name).split(' ')[0] === supplier);
+      const days = (t: BankTransaction) => diffDays(result.invoiceDate!.value, t.transaction_date);
+      return rows.length === 1 && days(rows[0]!) >= -3 && days(rows[0]!) <= 7 ? rows[0]! : null;
+    }
     const rows = this.db
       .prepare(
         `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount = ? AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
