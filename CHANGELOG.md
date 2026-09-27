@@ -2,6 +2,8 @@
 
 ## Nog niet uitgebracht
 
+## 0.3.5 — mail doorsturen, bonnen in de mail en controles oplossen
+
 - **Bon in de mail zelf** (geen bijlage), bijvoorbeeld van een webshop, Uber of een app: staat er een woord als
   factuur, bon of bestelling in én een bedrag, dan bewaart de app de mail als PDF-bon bij Aankopen & bonnetjes,
   om te controleren. Alleen de tekst: plaatjes, links en scripts uit de mail komen er niet in. Mist de app er
