@@ -164,6 +164,8 @@ table.list tr.clickable:hover td { background: var(--surface-2); }
 @media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
 .doc-view { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .doc-view img, .doc-view canvas { display: block; width: 100%; height: auto; }
+.doc-page { position: relative; }
+.doc-page + .doc-page { border-top: 1px solid var(--border); }
 .doc-view .bbox { position: absolute; border: 2px solid #e8a100; background: rgba(255, 196, 0, .25); border-radius: 3px; pointer-events: none; }
 .fieldcheck { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: 8px; cursor: pointer; gap: 10px; }
 .fieldcheck:hover, .fieldcheck.active { background: var(--primary-soft); }
