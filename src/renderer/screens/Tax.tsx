@@ -224,15 +224,19 @@ const SOURCE_LABEL: Record<string, string> = {
  */
 function VatDetails({ periodKey, code, title, onClose }: { periodKey: string; code: string; title: string; onClose: () => void }) {
   const { go } = useApp();
+  const { run } = useAction();
   const d = useLoad(() => api.vat.details(periodKey, code), [periodKey, code]);
   const lines = d.data?.lines ?? [];
   const showOmzet = lines.some((l) => l.omzet !== 0);
   const showBtw = lines.some((l) => l.btw !== 0);
   const fromBankAsIncome = lines.some((l) => l.source === 'bank' && l.omzet > 0 && !l.invoiceId);
   const open = (l: (typeof lines)[number]) => {
-    onClose();
+    // een bon openen kan met dit venster nog open; naar een ander scherm gaan sluit het
+    if (!(l.purchaseId && l.attachmentPath && !l.bankTransactionId && !l.invoiceId)) onClose();
     if (l.invoiceId) go({ screen: 'factuur', id: l.invoiceId });
     else if (l.bankTransactionId) go({ screen: 'categorie', id: l.bankTransactionId });
+    // aankoop: de bon zelf openen als die er is; anders de lijst met aankopen
+    else if (l.purchaseId && l.attachmentPath) void run(() => api.app.openAttachment(l.attachmentPath!));
     else if (l.purchaseId) go({ screen: 'aankopen' });
   };
   return (

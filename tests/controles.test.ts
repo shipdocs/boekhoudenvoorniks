@@ -170,6 +170,10 @@ describe('btw-berekening: waar komt een bedrag vandaan?', () => {
     const v = s.vat.rubriekDetails('2026-Q2', '5b');
     expect(v.btw).toBe(s.vat.calculate('2026-Q2').summary.voorbelasting);
     expect(v.lines[0]!.purchaseId).not.toBeNull();
+    // zonder foto of PDF: geen bon om te openen (dan gaat "Bekijken" naar de aankopen)
+    expect(v.lines[0]!.attachmentPath).toBeNull();
+    s.db.prepare('UPDATE purchase_invoices SET attachment_path = ? WHERE id = ?').run('/tmp/bon.pdf', v.lines[0]!.purchaseId);
+    expect(s.vat.rubriekDetails('2026-Q2', '5b').lines[0]!.attachmentPath).toBe('/tmp/bon.pdf');
   });
 });
 

@@ -1,5 +1,5 @@
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, Modal, useApp, useLoad } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, Modal, useAction, useApp, useLoad } from '../ui';
 
 const SOURCE: Record<string, string> = {
   factuur: 'factuur',
@@ -16,12 +16,16 @@ const SOURCE: Record<string, string> = {
  */
 export function CheckLines({ account, upTo, title, hint, onClose }: { account: string; upTo?: string; title: string; hint?: string; onClose: () => void }) {
   const { go } = useApp();
+  const { run } = useAction();
   const d = useLoad(() => api.vat.accountLines(account, upTo), [account, upTo]);
   const lines = d.data?.lines ?? [];
   const open = (l: (typeof lines)[number]) => {
-    onClose();
+    // een bon openen kan met dit venster nog open; naar een ander scherm gaan sluit het
+    if (!(l.purchaseId && l.attachmentPath && !l.bankTransactionId && !l.invoiceId)) onClose();
     if (l.bankTransactionId) go({ screen: 'categorie', id: l.bankTransactionId });
     else if (l.invoiceId) go({ screen: 'factuur', id: l.invoiceId });
+    // aankoop: de bon zelf openen als die er is; anders de lijst met aankopen
+    else if (l.purchaseId && l.attachmentPath) void run(() => api.app.openAttachment(l.attachmentPath!));
     else if (l.purchaseId) go({ screen: 'aankopen' });
   };
   return (
