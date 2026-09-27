@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { Button, DateNl, DropZone, Euro, Field, Modal, MoneyInput, readAsBytes, readAsText, useAction, useApp, useLoad } from '../ui';
 import { addDays, isIsoDate, today } from '../../shared/dates';
-import { defaultBookValue, startDateConsequences, startDateOptions } from '../../shared/switchover';
+import { SKIPPABLE_SECTIONS, defaultBookValue, startDateConsequences, startDateOptions } from '../../shared/switchover';
 import type { OpeningInput, OpeningItem, OpeningKind, OpeningSuggestion, SectionKey, SwitchoverState } from '../../onboarding/switchover';
 import type { ImportAnalysis, XafPlan } from '../../onboarding/xaf-import';
 
@@ -13,6 +13,7 @@ import type { ImportAnalysis, XafPlan } from '../../onboarding/xaf-import';
  */
 export function Switchover() {
   const { route, go } = useApp();
+  const { run, busy } = useAction();
   const { data: state, reload, error } = useLoad(() => api.switchover.state());
   const suggestions = useLoad(() => api.switchover.suggestions());
   const [section, setSection] = useState<SectionKey>((route.extra?.section as SectionKey) ?? 'papieren');
@@ -28,27 +29,41 @@ export function Switchover() {
 
   const sections = state.sections.filter((s) => s.needed);
   const index = sections.findIndex((s) => s.key === section);
-  const next = sections[index + 1];
-  const nextButton = next && (
+  const current = sections[index];
+  // verder naar het eerstvolgende hoofdstuk dat nog niet klaar is (anders gewoon het volgende)
+  const next = sections.slice(index + 1).find((s) => !s.done) ?? sections[index + 1];
+  const open = (key: SectionKey) => { setSection(key); window.scrollTo(0, 0); };
+  const done = sections.filter((s) => s.done).length;
+  // "had ik niet": hoofdstuk afvinken zonder iets in te vullen
+  const skippable = current && (SKIPPABLE_SECTIONS as readonly string[]).includes(current.key) && !current.done && !state.items.some((i) => SECTION_KINDS[current.key]?.includes(i.kind));
+  const nextButton = (next || skippable) && (
     <div className="row end" style={{ marginTop: 24 }}>
-      <Button kind="primary" onClick={() => { setSection(next.key); window.scrollTo(0, 0); }}>Verder: {next.title.toLowerCase()}</Button>
+      {skippable && (
+        <Button onClick={async () => { const r = await run(() => api.switchover.skipSection(current.key)); if (r) { await refresh(); if (next) open(next.key); } }} disabled={busy}>
+          {SKIP_LABEL[current.key]}
+        </Button>
+      )}
+      {next && <Button kind="primary" onClick={() => open(next.key)}>Verder: {next.title.toLowerCase()}</Button>}
     </div>
   );
-  const props = { state, suggestions: suggestions.data ?? [], refresh, nextButton };
+  const props = { state, suggestions: suggestions.data ?? [], refresh, nextButton, onSection: open };
 
   return (
     <div className="page">
-      <div className="row between">
-        <div>
+      <div className="row between" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+        <div style={{ flex: 1 }}>
           <h1>Overstappen</h1>
           <p className="sub">
             De app houdt je administratie bij vanaf <strong><DateNl date={state.settings.date} /></strong>. Hier zet je erin wat er toen al was.
             Stoppen mag: alles wat je invult, is meteen bewaard.
           </p>
         </div>
-        <Button small onClick={() => go({ screen: 'home' })}>Later verder</Button>
+        <span style={{ flexShrink: 0 }}><Button small onClick={() => go({ screen: 'home' })}>Later verder</Button></span>
       </div>
-      <div className="steps">{sections.map((s, i) => <span key={s.key} className={i <= index ? 'on' : ''} />)}</div>
+      <div className="row between small muted" style={{ marginBottom: 4 }}>
+        <span>{done === sections.length ? 'Alles klaar ✓' : `${done} van ${sections.length} klaar`}</span>
+      </div>
+      <div className="steps" aria-label={`${done} van ${sections.length} onderdelen klaar`}>{sections.map((s) => <span key={s.key} className={s.done ? 'on' : ''} style={s.key === section ? { outline: '2px solid var(--accent, #1f5f99)', outlineOffset: 1 } : undefined} />)}</div>
       <div className="chips" style={{ marginBottom: 22 }}>
         {sections.map((s) => (
           <button key={s.key} className={s.key === section ? 'selected' : ''} onClick={() => setSection(s.key)}>
@@ -59,22 +74,40 @@ export function Switchover() {
       {section === 'papieren' && <Papers {...props} />}
       {section === 'import' && <XafImport {...props} />}
       {section === 'bank' && <Banks {...props} />}
-      {section === 'klanten' && <OpenItems kind="klant" {...props} onSection={setSection} />}
-      {section === 'leveranciers' && <OpenItems kind="leverancier" {...props} onSection={setSection} />}
+      {section === 'klanten' && <OpenItems kind="klant" {...props} />}
+      {section === 'leveranciers' && <OpenItems kind="leverancier" {...props} />}
       {section === 'bezit' && <Assets {...props} />}
       {section === 'btw' && <Vat {...props} />}
       {section === 'resultaat' && <Result {...props} />}
       {section === 'overig' && <Other {...props} />}
-      {section === 'klaar' && <Position {...props} onSection={setSection} />}
+      {section === 'klaar' && <Position {...props} />}
     </div>
   );
 }
+
+/** Welke soorten startbalans bij een hoofdstuk horen (is er al iets ingevuld?). */
+const SECTION_KINDS: Partial<Record<SectionKey, OpeningKind[]>> = {
+  klanten: ['klant'],
+  leveranciers: ['leverancier'],
+  bezit: ['bezit'],
+  overig: ['lening', 'vordering', 'schuld'],
+  import: [],
+};
+
+const SKIP_LABEL: Partial<Record<SectionKey, string>> = {
+  import: 'Ik had geen boekhoudprogramma',
+  klanten: 'Er stond niets open',
+  leveranciers: 'Er stond niets open',
+  bezit: 'Heb ik niet',
+  overig: 'Heb ik niet',
+};
 
 interface SectionProps {
   state: SwitchoverState;
   suggestions: OpeningSuggestion[];
   refresh: (next?: unknown) => Promise<void>;
   nextButton: ReactNode;
+  onSection: (s: SectionKey) => void;
 }
 
 /** Nog geen instapdatum (bv. via Instellingen hierheen): eerst die vraag. */
@@ -109,18 +142,38 @@ function StartChoice({ state, onDone }: { state: SwitchoverState; onDone: () => 
   );
 }
 
-// ---------- 1. papieren en instapdatum ----------
+// ---------- 1. hoe stap je over, papieren en instapdatum ----------
 
-function Papers({ state, refresh, nextButton }: SectionProps) {
+function Papers({ state, refresh, nextButton, onSection }: SectionProps) {
   const { settings } = useApp();
   const { run, busy } = useAction();
   const [changing, setChanging] = useState(false);
   const [date, setDate] = useState(state.settings.date!);
+  const manual = async () => {
+    const r = await run(() => api.switchover.skipSection('import'));
+    if (r) { await refresh(r); onSection('bank'); }
+  };
   return (
     <>
-      <h2>Wat heb je nodig?</h2>
-      <p className="muted">Leg dit klaar. Heb je iets (nog) niet? Ga gewoon verder en vul het later aan.</p>
-      <div className="card flat">
+      <h2>Hoe stap je over?</h2>
+      <p className="muted">Kies wat je hebt. Wat de app niet uit een bestand haalt, vraagt hij daarna stap voor stap. Aanvullen kan altijd later.</p>
+      <div className="choice">
+        <button onClick={() => onSection('import')}>
+          📂 Ik had een boekhoudprogramma
+          <div className="hint">Het snelst. Exporteer een auditfile (.xaf) uit bijvoorbeeld e-Boekhouden, Moneybird, SnelStart of Exact. Dan vult de app saldi, openstaande facturen en je bus zelf in.</div>
+        </button>
+        <button onClick={() => onSection('import')}>
+          📊 Mijn boekhouder heeft een overzicht
+          <div className="hint">Een balans of kolommenbalans (Excel of CSV), of een lijst met openstaande facturen. Die kun je ook inlezen.</div>
+        </button>
+        <button disabled={busy} onClick={() => void manual()}>
+          ✍️ Ik vul het zelf in
+          <div className="hint">Geen programma of overzicht? De app vraagt het in een paar korte stappen: bank, openstaande facturen, bus en gereedschap, btw.</div>
+        </button>
+      </div>
+      <details className="card flat" style={{ marginTop: 18 }}>
+        <summary><strong>Wat heb je nodig?</strong> <span className="small muted">({state.requirements.length} dingen om klaar te leggen)</span></summary>
+        <p className="small muted">Heb je iets (nog) niet? Ga gewoon verder en vul het later aan.</p>
         <ul className="checklist" style={{ display: 'block' }}>
           {state.requirements.map((r) => (
             <li key={r.key} className="no" style={{ marginBottom: 10 }}>
@@ -130,7 +183,7 @@ function Papers({ state, refresh, nextButton }: SectionProps) {
           ))}
         </ul>
         <div className="row end"><Button small onClick={() => window.print()}>🖨️ Lijstje afdrukken</Button></div>
-      </div>
+      </details>
       <h3 style={{ marginTop: 24 }}>Instapdatum: <DateNl date={state.settings.date} /></h3>
       {!changing ? (
         <Button small onClick={() => setChanging(true)}>Andere datum kiezen</Button>
@@ -162,7 +215,7 @@ const EXPORT_HOWTO: [string, string][] = [
   ['Moneybird, Exact, Twinfield, Yuki, AFAS, …', 'zoek in de help van je programma op "auditfile" of "XAF"'],
 ];
 
-function XafImport({ state, refresh, nextButton }: SectionProps) {
+function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
   const { run, busy } = useAction();
   const { toast } = useApp();
   const [file, setFile] = useState<{ name: string; data: string | Uint8Array } | null>(null);
@@ -221,7 +274,22 @@ function XafImport({ state, refresh, nextButton }: SectionProps) {
           Heb je niets van dat alles, sla dit dan over en vul de hoofdstukken hierna zelf in.
         </p>
       </details>
-      {imported > 0 && !plan && <div className="notice good">✓ {imported} onderdelen overgenomen uit je vorige programma. Opnieuw inlezen vervangt ze.</div>}
+      {imported > 0 && !plan && (
+        <div className="notice good">
+          ✓ {imported} onderdelen overgenomen uit je vorige programma. Opnieuw inlezen vervangt ze.
+          {(() => {
+            const todo = state.sections.filter((s) => s.needed && !s.done && s.key !== 'import' && s.key !== 'klaar');
+            return todo.length > 0 ? (
+              <div style={{ marginTop: 8 }}>
+                <div className="small">Nog even nalopen:</div>
+                <div className="chips" style={{ marginTop: 4 }}>{todo.map((s) => <button key={s.key} onClick={() => onSection(s.key)}>{s.title}</button>)}</div>
+              </div>
+            ) : (
+              <div className="row" style={{ marginTop: 8 }}><Button small kind="primary" onClick={() => onSection('klaar')}>Bekijk je startpositie</Button></div>
+            );
+          })()}
+        </div>
+      )}
       <DropZone accept=".xaf,.xml,.xlsx,.csv" onFile={(f) => void load(f)}>
         <div style={{ fontSize: 26 }}>📂</div>
         <strong>Sleep je auditfile (.xaf) hierheen</strong>
@@ -381,13 +449,26 @@ function Banks({ state, refresh, nextButton }: SectionProps) {
           <Button small kind="primary" disabled={busy} onClick={async () => { await run(() => api.switchover.ignoreBeforeDate(), 'Overgeslagen'); await refresh(); }}>Overslaan</Button>
         </div>
       )}
-      {state.banks.map((b) => <BankCard key={b.bankAccountId} bank={b} date={date} checks={state.checks.filter((c) => c.key.endsWith(`-${b.bankAccountId}`))} refresh={refresh} />)}
+      {state.banks.map((b) => (b.unused
+        ? <UnusedBank key={b.bankAccountId} bank={b} refresh={refresh} />
+        : <BankCard key={b.bankAccountId} bank={b} date={date} checks={state.checks.filter((c) => c.key.endsWith(`-${b.bankAccountId}`))} refresh={refresh} />))}
       <div style={{ marginTop: 14 }}>
         <Button small onClick={() => setAdding(true)}>+ Nog een rekening (spaarrekening, creditcard)</Button>
       </div>
       {adding && <AddAccount onClose={async () => { setAdding(false); await refresh(); }} />}
       {nextButton}
     </>
+  );
+}
+
+/** Een rekening die je vanaf de instapdatum niet gebruikt: ingeklapt, met een weg terug. */
+function UnusedBank({ bank, refresh }: { bank: SwitchoverState['banks'][number]; refresh: SectionProps['refresh'] }) {
+  const { run, busy } = useAction();
+  return (
+    <div className="card flat row between" style={{ marginTop: 14 }}>
+      <span><strong>{bank.name}</strong> <span className="small muted">{bank.iban ?? ''} · gebruik je niet (beginsaldo € 0)</span></span>
+      <Button small kind="ghost" disabled={busy} onClick={async () => { const r = await run(() => api.switchover.setBankUnused(bank.bankAccountId, false)); if (r) await refresh(r); }}>Toch gebruiken</Button>
+    </div>
   );
 }
 
@@ -424,9 +505,12 @@ function BankCard({ bank, date, checks, refresh }: { bank: SwitchoverState['bank
         </div>
       </div>
       {!bank.isPot && (
-        <p className="small muted" style={{ margin: '10px 0 0' }}>
-          {bank.coverageFrom ? <>Ingelezen: <DateNl date={bank.coverageFrom} /> t/m <DateNl date={bank.coverageTo} /></> : 'Nog geen afschriften ingelezen.'}
-        </p>
+        <div className="row between" style={{ margin: '10px 0 0' }}>
+          <span className="small muted">{bank.coverageFrom ? <>Ingelezen: <DateNl date={bank.coverageFrom} /> t/m <DateNl date={bank.coverageTo} /></> : 'Nog geen afschriften ingelezen.'}</span>
+          {(!bank.coverageTo || bank.coverageTo < date) && (
+            <Button small kind="ghost" disabled={busy} onClick={async () => { const r = await run(() => api.switchover.setBankUnused(bank.bankAccountId), 'Rekening op € 0 gezet'); if (r) await refresh(r); }}>Deze rekening gebruik ik niet</Button>
+          )}
+        </div>
       )}
       {bank.balanceCheck && bank.balanceCheck.bank === bank.balanceCheck.computed && (
         <div className="notice good small">✓ Klopt: op <DateNl date={bank.balanceCheck.date} /> <Euro cents={bank.balanceCheck.bank} />, precies wat de ingelezen afschriften zeggen.</div>

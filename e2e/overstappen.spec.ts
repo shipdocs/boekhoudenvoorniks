@@ -43,7 +43,7 @@ test('nieuwe gebruiker: overstap-hulp later openen via Instellingen', async ({ p
   await expect(page.getByRole('heading', { name: 'Overstappen met een lopende administratie' })).toBeVisible();
   await page.getByRole('button', { name: 'Beginnen' }).click();
   await expect(page.getByRole('heading', { name: 'Overstappen', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Wat heb je nodig?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Hoe stap je over?' })).toBeVisible();
 
   // nu staat hij wel op Vandaag, en brengt je terug
   await nav(page, 'Vandaag');
@@ -58,6 +58,8 @@ test('nieuwe gebruiker: overstap-hulp later openen via Instellingen', async ({ p
 test('overstapper op 1 januari: alle hoofdstukken met de hand, controles en klaarzetten', async ({ page, problems }) => {
   await onboard(page, { overstap: true });
   await expect(page.getByText(`1 januari ${year}`).first()).toBeVisible();
+  // het lijstje "wat heb je nodig" staat ingeklapt onder de keuze hoe je overstapt
+  await page.getByText('Wat heb je nodig?').click();
   await expect(page.getByText(/Bankafschriften vanaf 1 januari/)).toBeVisible();
   // op 1 januari is er geen hoofdstuk "omzet en kosten tot nu toe"
   await expect(page.locator('.chips button', { hasText: 'Omzet en kosten tot nu toe' })).toHaveCount(0);
@@ -202,7 +204,7 @@ test('overstapper midden in het jaar: omzet tot nu toe, gesplitste btw-periode e
   await expect(equity(page).getByText(/Waarvan winst van 1 januari tot .*4\.000,00/)).toBeVisible();
 
   // instapdatum verzetten naar het begin van het kwartaal: geen gesplitste periode meer
-  await chapter(page, 'Wat heb je nodig?');
+  await chapter(page, 'Hoe stap je over?');
   await page.getByRole('button', { name: 'Andere datum kiezen' }).click();
   await field(page, 'Nieuwe instapdatum').fill(`${prev}-07-01`);
   await page.getByRole('button', { name: 'Opslaan', exact: true }).click();
@@ -365,4 +367,42 @@ test('overstapper: onbekende kolommen, één vraag en de keuze wordt onthouden',
   // (het woord "voorbeeldbestand" staat al in de downloadlink: wacht op de melding zelf)
   await expect(page.getByText(/Dit bestand herkennen we niet/)).toBeVisible();
   await expect.poll(() => problems.apiErrors.map((e) => e.error)).toEqual([expect.stringMatching(/voorbeeldbestand/)]);
+});
+
+test('overstapper zonder programma: zelf invullen, "had ik niet" en een rekening die je niet gebruikt', async ({ page, problems }) => {
+  await onboard(page, { overstap: true });
+  await expect(page.getByText(/0 van \d+ klaar/)).toBeVisible();
+  // route kiezen: zelf invullen slaat het inlezen over en gaat naar de bank
+  await page.getByRole('button', { name: /Ik vul het zelf in/ }).click();
+  await expect(page.getByRole('heading', { name: 'Bankrekeningen' })).toBeVisible();
+  await expect(page.locator('.chips button', { hasText: 'Uit je vorige programma' })).toHaveText(/^✓ /);
+  await expect(page.locator('.chips button', { hasText: 'Hoe stap je over?' })).toHaveText(/^✓ /);
+
+  // de rekening van het instellen gebruik je niet meer: beginsaldo 0, geen afschriften nodig
+  await page.getByRole('button', { name: 'Deze rekening gebruik ik niet' }).click();
+  await expect(page.getByText(/gebruik je niet \(beginsaldo € 0\)/)).toBeVisible();
+  await expect(page.locator('.chips button', { hasText: 'Bankrekeningen' })).toHaveText(/^✓ /);
+  await page.getByRole('button', { name: 'Toch gebruiken' }).click();
+  await expect(page.getByRole('button', { name: 'Deze rekening gebruik ik niet' })).toBeVisible();
+  await page.getByRole('button', { name: 'Deze rekening gebruik ik niet' }).click();
+
+  // lege hoofdstukken afvinken; "verder" springt naar wat nog open staat
+  await chapter(page, 'Klanten die nog moeten betalen');
+  await page.getByRole('button', { name: 'Er stond niets open' }).click();
+  await expect(page.getByRole('heading', { name: 'Rekeningen die jij nog moest betalen' })).toBeVisible();
+  await expect(page.locator('.chips button', { hasText: 'Klanten die nog moeten betalen' })).toHaveText(/^✓ /);
+  await page.getByRole('button', { name: 'Er stond niets open' }).click();
+  await expect(page.getByRole('heading', { name: 'Bus, auto en gereedschap' })).toBeVisible();
+  await page.getByRole('button', { name: 'Heb ik niet' }).click();
+  await expect(page.getByRole('heading', { name: 'Btw', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Alles was al betaald' }).click();
+  await page.getByRole('button', { name: 'Opslaan', exact: true }).click();
+  await chapter(page, 'Leningen en overig');
+  await page.getByRole('button', { name: 'Heb ik niet' }).click();
+  await expect(page.getByRole('heading', { name: /Je startpositie/ })).toBeVisible();
+  await expect(page.getByText(/\d+ van \d+ klaar/)).toBeVisible();
+  await expect(page.getByText('✓ Alles klopt.')).toBeVisible();
+  await page.getByRole('button', { name: 'Klopt, zet klaar' }).click();
+  await expect(page.getByText('Alles klaar ✓')).toBeVisible();
+  noApiErrors(problems);
 });

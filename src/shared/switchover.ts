@@ -5,6 +5,9 @@ import type { Cents } from './money';
  * Hulpjes voor de overstap-wizard die zowel het scherm als de service gebruikt (geen database).
  */
 
+/** Hoofdstukken van de overstap-hulp die je kunt afvinken met "had ik niet". */
+export const SKIPPABLE_SECTIONS = ['import', 'klanten', 'leveranciers', 'bezit', 'overig'] as const;
+
 export interface StartDateOption {
   key: 'jaar' | 'periode';
   date: IsoDate;

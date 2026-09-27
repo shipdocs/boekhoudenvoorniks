@@ -2,6 +2,13 @@
 
 ## Nog niet uitgebracht
 
+### Overstappen makkelijker
+- De overstap-hulp begint met één vraag: **hoe stap je over?** Met een boekhoudprogramma (auditfile), met een overzicht van je boekhouder, of zelf invullen. Het lijstje "wat heb je nodig" staat ingeklapt eronder.
+- Lege hoofdstukken vink je af met één knop ("Er stond niets open", "Heb ik niet"), en **Verder** springt naar het eerstvolgende hoofdstuk dat nog open staat.
+- Na het inlezen van een auditfile zie je meteen wat je nog moet nalopen.
+- Een bankrekening die je niet meer gebruikt (bijvoorbeeld de rekening van het instellen, terwijl je vorige programma een andere had) zet je met "Deze rekening gebruik ik niet" op € 0, zonder dat de app om afschriften blijft vragen.
+- De voortgang telt wat echt klaar is ("4 van 9 klaar") in plaats van waar je bent.
+
 ### Fiscale review verwerkt
 - **KOR**: btw op inkopen en investeringen wordt niet meer als voorbelasting geboekt maar bij de kosten of de prijs van de investering. Verlegde btw (bijvoorbeeld van Google of een onderaannemer) moet je met de KOR wél betalen; het btw-scherm toont die per kwartaal.
 - **Buitenland**: nieuwe keuzes *Dienst aan een bedrijf buiten de EU* (niet in de aangifte) en *Dienst aan een bedrijf in een ander EU-land* naast de goederenvarianten. De ICP-opgaaf splitst goederen en diensten, en correcties op een eerdere opgaaf staan apart, los van een btw-suppletie.

@@ -101,6 +101,10 @@ export interface SwitchoverSettings {
   xafBanks?: number[];
   /** eigen vermogen volgens de balans van de boekhouder (centen), om te vergelijken */
   accountantEquity: number | null;
+  /** hoofdstukken waarvan de gebruiker zei: had ik niet (geen openstaande facturen, geen bus, …) */
+  skipped?: string[];
+  /** bankrekeningen die de gebruiker vanaf de instapdatum niet meer gebruikt (beginsaldo € 0, geen afschriften nodig) */
+  unusedBanks?: number[];
 }
 
 export interface AppSettings {
