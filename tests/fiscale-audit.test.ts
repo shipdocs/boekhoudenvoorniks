@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { estimateIncomeTax, representatieBijtelling, rulesFor, tariefsaanpassingFor } from '../src/tax/income-tax';
 import { isStarter } from '../src/tax/overview';
+import { carPrivateUse } from '../src/btw/car';
 import { setup } from './helpers';
 
 type S = ReturnType<typeof setup>['s'];
@@ -247,5 +248,25 @@ describe('buitenland (vragen 2, 3, 4 en 8)', () => {
     const c = s.vat.checks('2026-Q1').find((x) => x.key === 'eu-particulier');
     expect(c?.detail).toMatch(/opstuurt en digitale diensten/);
     expect(c?.detail).toMatch(/gebouw/);
+  });
+});
+
+describe('auto van de zaak: btw privégebruik (vraag 32)', () => {
+  const base = { kor: false, carUse: 'zakelijk' as const, carPrivateUse: true, carCatalogValue: 40000_00, carInUseSince: 2024, carInUseMonth: 1 };
+
+  it('32: forfait alleen na bevestiging van btw-aftrek en de keuze voor het forfait', () => {
+    expect(carPrivateUse(base, 2026).state).toBe('onbekend');
+    expect(carPrivateUse({ ...base, carVatDeducted: true }, 2026).state).toBe('onbekend');
+    expect(carPrivateUse({ ...base, carVatDeducted: true, carVatMethod: 'forfait' }, 2026)).toMatchObject({ state: 'bekend', amount: 1080_00 });
+  });
+
+  it('32: geen btw afgetrokken: geen correctie; werkelijk gebruik: de app boekt niets', () => {
+    expect(carPrivateUse({ ...base, carVatDeducted: false }, 2026).state).toBe('n.v.t.');
+    expect(carPrivateUse({ ...base, carVatDeducted: true, carVatMethod: 'werkelijk' }, 2026).state).toBe('werkelijk');
+    const { s } = setup();
+    s.settings.update({ ...base, carVatDeducted: true, carVatMethod: 'werkelijk' });
+    const c = s.vat.checks('2026-Q4').find((x) => x.key === 'auto-prive');
+    expect(c).toMatchObject({ blocking: false });
+    expect(() => s.vat.bookCarPrivateUse('2026-Q4')).toThrow();
   });
 });

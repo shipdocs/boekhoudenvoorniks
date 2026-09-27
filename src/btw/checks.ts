@@ -245,10 +245,20 @@ export function runVatChecks(
       key: 'auto-prive',
       blocking: true,
       title: 'Rijd je ook privé in je auto van de zaak?',
-      detail: 'Dan betaal je in deze laatste aangifte van het jaar btw over dat privégebruik. Vul bij Instellingen → Btw en belasting in of je privé rijdt, wat de cataloguswaarde van je auto is en sinds wanneer je hem gebruikt; dan rekent de app het uit.',
+      detail: 'Dan betaal je misschien in deze laatste aangifte van het jaar btw over dat privégebruik. Vul bij Instellingen → Btw en belasting in of je privé rijdt, of je btw hebt teruggekregen op de auto of de kosten, hoe je het privégebruik berekent, wat de cataloguswaarde is en sinds wanneer je hem gebruikt.',
       count: 1,
       fingerprint: `onbekend:${car.year}`,
       screen: 'instellingen',
+    });
+  } else if (car && car.due.state === 'werkelijk') {
+    found.push({
+      key: 'auto-prive',
+      blocking: false,
+      title: 'Btw over privégebruik van je auto: laat je boekhouder het bedrag uitrekenen',
+      detail: 'Je rekent met je werkelijke privégebruik (rittenadministratie). Dat bedrag rekent de app niet uit: laat je boekhouder het berekenen en boek het in vak 1d van deze aangifte.',
+      count: 1,
+      fingerprint: `werkelijk:${car.year}`,
+      screen: 'belasting',
     });
   } else if (car && car.due.state === 'bekend' && car.due.amount !== car.booked) {
     const { amount, pct, catalogValue, months } = car.due;
