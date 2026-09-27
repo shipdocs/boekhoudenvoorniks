@@ -468,8 +468,9 @@ export class IntakeService {
 
   /**
    * Een al (zonder document) verwerkte banktransactie met exact dit bedrag en datum ±3 dagen.
-   * Vreemde munt (#74): de bank rekende een eigen koers, dus ongeveer dit bedrag, tot 10 dagen later
-   * en alleen met de naam van de leverancier (anders is het te onzeker).
+   * Vreemde munt (#74): de bank rekende een eigen koers, dus ongeveer dit bedrag, tot 7 dagen later
+   * en alleen met de naam van de leverancier. Is er rond die datum (10 dagen vóór tot 20 dagen na) nog
+   * een vergelijkbare afschrijving van die leverancier, dan is het te onzeker: dan niets aannemen.
    */
   findBookedBankTransaction(result: DocumentResult): BankTransaction | null {
     if (!result.total || !result.invoiceDate) return null;
@@ -480,12 +481,13 @@ export class IntakeService {
         this.db
           .prepare(
             `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount < 0 AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
-               AND julianday(transaction_date) - julianday(?) BETWEEN -3 AND 10
+               AND julianday(transaction_date) - julianday(?) BETWEEN -10 AND 20
                AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || bank_transactions.id || '"%')`,
           )
           .all(result.invoiceDate.value) as BankTransaction[]
       ).filter((t) => withinFx(-t.amount, result.total!.value) && !!t.counter_name && supplierKey(t.counter_name).split(' ')[0] === supplier);
-      return rows.length === 1 ? rows[0]! : null;
+      const days = (t: BankTransaction) => diffDays(result.invoiceDate!.value, t.transaction_date);
+      return rows.length === 1 && days(rows[0]!) >= -3 && days(rows[0]!) <= 7 ? rows[0]! : null;
     }
     const rows = this.db
       .prepare(
