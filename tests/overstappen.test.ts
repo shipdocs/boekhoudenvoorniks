@@ -317,6 +317,38 @@ describe('overstappen met een lopende administratie', () => {
     expect(doc.auditfile.company.transactions.linesCount).toBe(0);
   });
 
+  it('"had ik niet": een leeg hoofdstuk afvinken, en weer openzetten', () => {
+    const { s } = overstapper();
+    const done = (key: string) => s.switchover.state().sections.find((x) => x.key === key)?.done;
+    expect(done('papieren')).toBe(false);
+    expect(done('leveranciers')).toBe(false);
+    s.switchover.skipSection('leveranciers');
+    expect(done('leveranciers')).toBe(true);
+    s.switchover.skipSection('leveranciers', false);
+    expect(done('leveranciers')).toBe(false);
+    // "ik vul het zelf in": geen programma, en daarmee is ook de route gekozen
+    s.switchover.skipSection('import');
+    expect(done('import')).toBe(true);
+    expect(done('papieren')).toBe(true);
+    // bank en btw laten zich niet overslaan
+    expect(() => s.switchover.skipSection('bank')).toThrow(/niet overslaan/);
+  });
+
+  it('een rekening die je niet meer gebruikt: beginsaldo 0 en geen afschriften nodig', () => {
+    const { s, bank, tx } = overstapper('2026-01-01');
+    expect(s.switchover.checks().map((c) => c.key)).toEqual(expect.arrayContaining([`bank-saldo-${bank.id}`]));
+    const st = s.switchover.setBankUnused(bank.id);
+    const b = st.banks.find((x) => x.bankAccountId === bank.id)!;
+    expect(b).toMatchObject({ unused: true, opening: 0 });
+    expect(st.checks.filter((c) => c.key.endsWith(`-${bank.id}`))).toEqual([]);
+    // weer in gebruik: dan wil de app weer afschriften zien
+    s.switchover.setBankUnused(bank.id, false);
+    expect(s.switchover.checks().some((c) => c.key === `bank-afschrift-${bank.id}`)).toBe(true);
+    // met betalingen vanaf de instapdatum kan het niet
+    tx('2026-02-01', -1000, 'Shell');
+    expect(() => s.switchover.setBankUnused(bank.id)).toThrow(/gebruik je dus nog/);
+  });
+
   it('KOR: geen btw-vragen', () => {
     const { s } = overstapper('2026-08-15', { kor: true });
     const st = s.switchover.state();

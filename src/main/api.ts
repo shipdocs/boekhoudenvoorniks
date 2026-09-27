@@ -32,7 +32,7 @@ import type { Confirmation } from '../intake/intake';
 import type { JobStatus } from '../jobs/jobs';
 import type { LineInput } from '../documents/totals';
 import type { Task } from '../inbox/inbox';
-import type { OpeningInput } from '../onboarding/switchover';
+import type { OpeningInput, SectionKey } from '../onboarding/switchover';
 import type { XafApplyChoices } from '../onboarding/xaf-import';
 import { OPEN_ITEMS_TEMPLATE, type ColumnMapping } from '../import/opening-tables';
 import type { EntrySource } from '../core-ledger/ledger';
@@ -598,6 +598,8 @@ export function createApi(s: Services, host: HostContext) {
       setAccountantEquity: (amount: Cents | null) => s.switchover.setAccountantEquity(amount),
       confirm: (opts?: { provisional?: boolean }) => s.switchover.confirm(opts),
       reopen: () => s.switchover.reopen(),
+      skipSection: (key: SectionKey, skip?: boolean) => s.switchover.skipSection(key, skip),
+      setBankUnused: (bankAccountId: number, unused?: boolean) => s.switchover.setBankUnused(bankAccountId, unused),
       /** auditfile (XAF) uit het vorige programma: eerst bekijken, dan overnemen wat aangevinkt is */
       /** alles wat de gebruiker erop sleept (auditfile, kolommen-/saldibalans, openstaande posten): voorstel of een paar vragen */
       analyzeXaf: (file: string | Uint8Array, mapping?: ColumnMapping) => s.xafImport.analyzeFile(file, { mapping }),

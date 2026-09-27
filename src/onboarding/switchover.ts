@@ -9,6 +9,7 @@ import { addDays, assertIsoDate, diffDays, formatDateNl, periodFor, today, type 
 import { formatEuro, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
 import { parseUblSalesInvoice } from '../intake/ubl';
+import { SKIPPABLE_SECTIONS } from '../shared/switchover';
 
 /**
  * Overstappen met een lopende administratie.
@@ -111,6 +112,8 @@ export interface BankStatus {
   beforeDate: number;
   /** controle: saldo volgens de bank tegen saldo volgens de ingelezen afschriften */
   balanceCheck: { date: IsoDate; bank: Cents; computed: Cents; source: 'afschrift' | 'opgegeven' } | null;
+  /** de gebruiker zei: deze rekening gebruik ik niet (meer) */
+  unused: boolean;
 }
 
 export interface SwitchoverCheck {
@@ -123,6 +126,7 @@ export interface SwitchoverCheck {
 }
 
 export type SectionKey = 'papieren' | 'import' | 'bank' | 'klanten' | 'leveranciers' | 'bezit' | 'btw' | 'resultaat' | 'overig' | 'klaar';
+
 
 export interface Requirement {
   key: string;
@@ -318,6 +322,42 @@ export class SwitchoverService {
     return this.state();
   }
 
+  /**
+   * "Had ik niet": een hoofdstuk zonder iets in te vullen afvinken (geen boekhoudprogramma, geen
+   * openstaande facturen, geen bus). Met `skip = false` weer openzetten.
+   */
+  skipSection(key: SectionKey, skip = true): SwitchoverState {
+    if (!(SKIPPABLE_SECTIONS as readonly string[]).includes(key)) throw new ValidationError('Dit onderdeel kun je niet overslaan');
+    const skipped = new Set(this.cfg().skipped ?? []);
+    if (skip) skipped.add(key);
+    else skipped.delete(key);
+    this.update({ skipped: [...skipped] });
+    return this.state();
+  }
+
+  /**
+   * Een rekening die je vanaf de instapdatum niet meer gebruikt (bv. de rekening die je bij het
+   * instellen opgaf, terwijl je vorige programma een andere had): beginsaldo € 0, geen afschriften nodig.
+   */
+  setBankUnused(bankAccountId: number, unused = true): SwitchoverState {
+    const date = this.date();
+    const b = this.bankStatus(date).find((x) => x.bankAccountId === bankAccountId);
+    if (!b) throw new ValidationError('Deze rekening bestaat niet (meer)');
+    if (unused && b.coverageTo && b.coverageTo >= date) throw new ValidationError(`Er staan al betalingen van ${b.name} vanaf de instapdatum in. Die rekening gebruik je dus nog.`);
+    tx(this.db, () => {
+      const set = new Set(this.cfg().unusedBanks ?? []);
+      if (unused) {
+        set.add(bankAccountId);
+        this.update({ unusedBanks: [...set] });
+        this.setBankOpening(bankAccountId, 0);
+      } else {
+        set.delete(bankAccountId);
+        this.update({ unusedBanks: [...set] });
+      }
+    });
+    return this.state();
+  }
+
   setAccountantEquity(amount: Cents | null): SwitchoverState {
     if (amount !== null && !Number.isSafeInteger(amount)) throw new ValidationError('Vul het eigen vermogen in als bedrag');
     this.update({ accountantEquity: amount });
@@ -366,6 +406,7 @@ export class SwitchoverService {
   private bankStatus(date: IsoDate): BankStatus[] {
     const status = new Map(this.bank.importStatus().map((s) => [s.bankAccountId, s]));
     const confirmed = new Set(this.cfg().bankConfirmed);
+    const unused = new Set(this.cfg().unusedBanks ?? []);
     return this.bank.listAccounts().map((a) => {
       const o = this.bank.openingBalance(a.id);
       const opening = o.date === date ? o.amount : o.date === null && confirmed.has(a.id) ? 0 : null;
@@ -393,6 +434,7 @@ export class SwitchoverService {
         coverageTo: st?.coverageTo ?? null,
         beforeDate: (this.db.prepare(`SELECT COUNT(*) AS n FROM bank_transactions WHERE bank_account_id = ? AND status <> 'genegeerd' AND transaction_date < ?`).get(a.id, date) as { n: number }).n,
         balanceCheck: reference && opening !== null ? { date: reference.date, bank: reference.amount, computed: opening + sumSince(reference.date), source: reference.source } : null,
+        unused: unused.has(a.id),
       };
     });
   }
@@ -844,10 +886,10 @@ export class SwitchoverService {
       if (b.opening === null) {
         out.push({ key: `bank-saldo-${b.bankAccountId}`, level: 'probleem', title: `Beginsaldo van ${name} ontbreekt`, detail: `Vul in wat er aan het begin van ${formatDateNl(date)} op de rekening stond (ook als dat € 0 is).`, section: 'bank' });
       }
-      if (b.isPot) continue;
+      if (b.isPot || (b.unused && (!b.coverageTo || b.coverageTo < date) && b.beforeDate === 0)) continue;
       if (!b.coverageTo || b.coverageTo < date) {
         // net overgestapt: dan zijn er nog geen afschriften, dat is geen fout
-        out.push({ key: `bank-afschrift-${b.bankAccountId}`, level: diffDays(date, now) > 14 ? 'probleem' : 'let-op', title: `Nog geen afschriften van ${name} vanaf ${formatDateNl(date)}`, detail: 'Lees de afschriften vanaf de instapdatum in. Gebruik je deze rekening niet meer, dan kun je hem bij Bank verwijderen of op € 0 zetten.', section: 'bank' });
+        out.push({ key: `bank-afschrift-${b.bankAccountId}`, level: diffDays(date, now) > 14 ? 'probleem' : 'let-op', title: `Nog geen afschriften van ${name} vanaf ${formatDateNl(date)}`, detail: 'Lees de afschriften vanaf de instapdatum in. Gebruik je deze rekening niet meer? Kies dan bij Bankrekeningen "Deze rekening gebruik ik niet".', section: 'bank' });
       } else {
         const firstAfter = (this.db.prepare('SELECT MIN(transaction_date) AS d FROM bank_transactions WHERE bank_account_id = ? AND transaction_date >= ?').get(b.bankAccountId, date) as { d: IsoDate | null }).d;
         if (firstAfter && diffDays(date, firstAfter) > 31) {
@@ -1008,16 +1050,18 @@ export class SwitchoverService {
     const bad = (section: SectionKey) => checks.some((c) => c.section === section && c.level === 'probleem');
     const split = date ? this.splitPeriod(date) : null;
     const startOfYear = !!date?.endsWith('-01-01');
+    const skipped = new Set(cfg.skipped ?? []);
     const sections: SwitchoverState['sections'] = [
-      { key: 'papieren', title: 'Wat heb je nodig?', done: !!date, needed: true },
-      { key: 'import', title: 'Uit je vorige programma', done: items.some((i) => !!i.data.bron), needed: true },
+      // klaar zodra er een route gekozen is: iets ingelezen of ingevuld, of "ik vul het zelf in"
+      { key: 'papieren', title: 'Hoe stap je over?', done: !!date && (items.length > 0 || skipped.has('import')), needed: true },
+      { key: 'import', title: 'Uit je vorige programma', done: items.some((i) => !!i.data.bron) || skipped.has('import'), needed: true },
       { key: 'bank', title: 'Bankrekeningen', done: !!date && banks.length > 0 && !bad('bank'), needed: true },
-      { key: 'klanten', title: 'Klanten die nog moeten betalen', done: kinds.has('klant') || cfg.status === 'klaar', needed: true },
-      { key: 'leveranciers', title: 'Rekeningen die jij nog moet betalen', done: kinds.has('leverancier') || cfg.status === 'klaar', needed: true },
-      { key: 'bezit', title: 'Bus, auto en gereedschap', done: kinds.has('bezit') || cfg.status === 'klaar', needed: true },
+      { key: 'klanten', title: 'Klanten die nog moeten betalen', done: kinds.has('klant') || skipped.has('klanten') || cfg.status === 'klaar', needed: true },
+      { key: 'leveranciers', title: 'Rekeningen die jij nog moet betalen', done: kinds.has('leverancier') || skipped.has('leveranciers') || cfg.status === 'klaar', needed: true },
+      { key: 'bezit', title: 'Bus, auto en gereedschap', done: kinds.has('bezit') || skipped.has('bezit') || cfg.status === 'klaar', needed: true },
       { key: 'btw', title: 'Btw', done: s.kor || ((kinds.has('btw') || cfg.status === 'klaar') && !bad('btw')), needed: !s.kor },
       { key: 'resultaat', title: 'Omzet en kosten tot nu toe', done: kinds.has('resultaat'), needed: !!date && !startOfYear },
-      { key: 'overig', title: 'Leningen en overig', done: kinds.has('lening') || kinds.has('vordering') || kinds.has('schuld') || cfg.status === 'klaar', needed: true },
+      { key: 'overig', title: 'Leningen en overig', done: kinds.has('lening') || kinds.has('vordering') || kinds.has('schuld') || skipped.has('overig') || cfg.status === 'klaar', needed: true },
       { key: 'klaar', title: 'Je startpositie', done: cfg.status === 'klaar', needed: true },
     ];
     return {
