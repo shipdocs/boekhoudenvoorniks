@@ -362,6 +362,7 @@ test('overstapper: onbekende kolommen, één vraag en de keuze wordt onthouden',
 
   // iets wat de app niet kan lezen: een duidelijke melding
   await drop(page, 'raar.csv', 'a;b\r\n1;2\r\n', 'text/csv');
-  await expect(page.getByText(/voorbeeldbestand/).first()).toBeVisible();
-  expect(problems.apiErrors.map((e) => e.error)).toEqual([expect.stringMatching(/voorbeeldbestand/)]);
+  // (het woord "voorbeeldbestand" staat al in de downloadlink: wacht op de melding zelf)
+  await expect(page.getByText(/Dit bestand herkennen we niet/)).toBeVisible();
+  await expect.poll(() => problems.apiErrors.map((e) => e.error)).toEqual([expect.stringMatching(/voorbeeldbestand/)]);
 });
