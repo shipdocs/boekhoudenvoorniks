@@ -37,17 +37,22 @@ function PdfPage({ doc, number, onSize }: { doc: pdfjs.PDFDocumentProxy; number:
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     let cancelled = false;
+    let render: pdfjs.RenderTask | null = null;
     void (async () => {
       const page = await doc.getPage(number);
       const viewport = page.getViewport({ scale: 2 });
       if (cancelled || !canvas.current) return;
       canvas.current.width = viewport.width;
       canvas.current.height = viewport.height;
-      await page.render({ canvas: canvas.current, canvasContext: canvas.current.getContext('2d')!, viewport }).promise;
+      render = page.render({ canvas: canvas.current, canvasContext: canvas.current.getContext('2d')!, viewport });
+      await render.promise;
       if (!cancelled) onSize({ width: viewport.width / 2, height: viewport.height / 2 });
-    })();
+    })().catch(() => {
+      // afgebroken (ander document) of een kapotte pagina: die blijft leeg, de rest werkt
+    });
     return () => {
       cancelled = true;
+      render?.cancel();
     };
     // alleen opnieuw tekenen bij een ander document of een andere pagina (onSize is elke render nieuw)
   }, [doc, number]);
@@ -59,19 +64,26 @@ function DocumentView({ id, mime, highlight, pageSizes }: { id: number; mime: st
   const file = useLoad(() => api.documents.file(id), [id]);
   const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [natural, setNatural] = useState<Record<number, { width: number; height: number }>>({});
+  const [broken, setBroken] = useState(false);
   const pages = useRef<Record<number, HTMLDivElement | null>>({});
 
   useEffect(() => {
     if (!file.data || mime !== 'application/pdf') return;
     let cancelled = false;
     const task = pdfjs.getDocument({ data: Uint8Array.from(atob(file.data.base64), (c) => c.charCodeAt(0)) });
-    void task.promise.then((doc) => {
-      if (!cancelled) setPdf(doc);
-    });
+    task.promise.then(
+      (doc) => {
+        if (!cancelled) setPdf(doc);
+      },
+      () => {
+        if (!cancelled) setBroken(true);
+      },
+    );
     return () => {
       cancelled = true;
       setPdf(null);
       setNatural({});
+      setBroken(false);
       void task.destroy();
     };
   }, [file.data, mime]);
@@ -102,6 +114,7 @@ function DocumentView({ id, mime, highlight, pageSizes }: { id: number; mime: st
       </div>
     );
   }
+  if (broken) return <div className="card flat">Dit PDF-bestand kunnen we hier niet laten zien. Het staat wel bewaard; je kunt de gegevens gewoon zelf invullen.</div>;
   const count = pdf ? Math.min(pdf.numPages, MAX_PAGES) : 0;
   return (
     <div className="doc-view" style={pdf ? undefined : { minHeight: 300 }}>
