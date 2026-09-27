@@ -191,6 +191,16 @@ describe('vreemde valuta in bestaande gegevens (#74)', () => {
     expect(s.ledger.balance('WBedKanSof')).toBe(8312);
   });
 
+  it('twee vergelijkbare afschrijvingen al als kosten geboekt: te onzeker, niets vanzelf als bewijsstuk', async () => {
+    const { s } = setup({ fetch: ecb });
+    debit(s, 8312);
+    debit(s, 8350, '2026-05-18');
+    for (const t of s.bank.list({ status: 'nieuw' })) s.bank.bookToAccount(t.id, { account: 'WBedKanSof', vatCode: 'buiten-eu' });
+    const doc = await s.intake.add('invoice.pdf', makePdf(INVOICE), '2026-05-20');
+    expect(doc.status).toBe('controle'); // de gebruiker kijkt zelf
+    expect(s.purchases.list()).toHaveLength(0);
+  });
+
   it('dezelfde bon opnieuw toevoegen na een oude boeking als euro\'s: herkend als dubbel', async () => {
     const { s } = setup({ fetch: ecb });
     await oldPurchase(s);
