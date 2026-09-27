@@ -332,6 +332,9 @@ describe('overstappen met een lopende administratie', () => {
     expect(done('papieren')).toBe(true);
     // bank en btw laten zich niet overslaan
     expect(() => s.switchover.skipSection('bank')).toThrow(/niet overslaan/);
+    // een hoofdstuk waar al iets in staat, kun je niet als "had ik niet" afvinken
+    s.switchover.save({ kind: 'bezit', name: 'Bus', type: 'vervoer', acquiredOn: '2023-03-10', cost: 3_000_000, bookValue: 1_700_000, remainingYears: 3 });
+    expect(() => s.switchover.skipSection('bezit')).toThrow(/al iets in/);
   });
 
   it('een rekening die je niet meer gebruikt: beginsaldo 0 en geen afschriften nodig', () => {
@@ -341,8 +344,9 @@ describe('overstappen met een lopende administratie', () => {
     const b = st.banks.find((x) => x.bankAccountId === bank.id)!;
     expect(b).toMatchObject({ unused: true, opening: 0 });
     expect(st.checks.filter((c) => c.key.endsWith(`-${bank.id}`))).toEqual([]);
-    // weer in gebruik: dan wil de app weer afschriften zien
+    // weer in gebruik: dan wil de app weer een beginsaldo en afschriften zien
     s.switchover.setBankUnused(bank.id, false);
+    expect(s.switchover.state().banks.find((x) => x.bankAccountId === bank.id)?.opening).toBeNull();
     expect(s.switchover.checks().some((c) => c.key === `bank-afschrift-${bank.id}`)).toBe(true);
     // met betalingen vanaf de instapdatum kan het niet
     tx('2026-02-01', -1000, 'Shell');
