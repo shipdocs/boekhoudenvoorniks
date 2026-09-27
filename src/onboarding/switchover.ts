@@ -328,6 +328,13 @@ export class SwitchoverService {
    */
   skipSection(key: SectionKey, skip = true): SwitchoverState {
     if (!(SKIPPABLE_SECTIONS as readonly string[]).includes(key)) throw new ValidationError('Dit onderdeel kun je niet overslaan');
+    if (skip) {
+      // alleen een leeg hoofdstuk: wat al is ingevuld of ingelezen, telt gewoon
+      const rows = this.rows();
+      const kinds: Record<string, string[]> = { klanten: ['klant'], leveranciers: ['leverancier'], bezit: ['bezit'], overig: ['lening', 'vordering', 'schuld'] };
+      const filled = key === 'import' ? rows.some((r) => !!this.hydrate(r).data.bron) : rows.some((r) => kinds[key]!.includes(r.kind));
+      if (filled) throw new ValidationError('Hier staat al iets in. Haal dat eerst weg als je het toch niet had');
+    }
     const skipped = new Set(this.cfg().skipped ?? []);
     if (skip) skipped.add(key);
     else skipped.delete(key);
@@ -351,8 +358,11 @@ export class SwitchoverService {
         this.update({ unusedBanks: [...set] });
         this.setBankOpening(bankAccountId, 0);
       } else {
+        // weer in gebruik: het beginsaldo van € 0 was een aanname, dus opnieuw laten invullen
         set.delete(bankAccountId);
-        this.update({ unusedBanks: [...set] });
+        const confirmed = new Set(this.cfg().bankConfirmed);
+        confirmed.delete(bankAccountId);
+        this.update({ unusedBanks: [...set], bankConfirmed: [...confirmed] });
       }
     });
     return this.state();
