@@ -23,6 +23,7 @@ export const BANK_STALE_DAYS = 14;
 /** Zoveel dagen vóór de vervaldatum herinneren we aan het betalen van een rekening. */
 export const PAY_REMINDER_DAYS = 3;
 import { formatEuro, type Cents } from '../shared/money';
+import { saleVatText } from '../shared/vat';
 import { automationForMonth, countDecision, getAutomation, logAutomation, markCorrected, recentAutomation, type AutomationEntry } from './automation-log';
 import { explain } from '../automation/explain';
 import type { InvestmentCheck } from '../tax/investment-check';
@@ -36,6 +37,7 @@ export type TaskKind =
   | 'bank-category'
   | 'bank-business'
   | 'bank-income'
+  | 'bank-sale'
   | 'document-review'
   | 'invoice-overdue'
   | 'invoice-concept'
@@ -384,6 +386,22 @@ export class InboxService {
           group: { key: 'bank-purchase', label: 'Alle betalingen koppelen' },
           why: `Omdat ${pur.reasons.join(', ')}.`,
           ref: { bankTransactionId: t.id, purchaseId: pur.purchaseId },
+        });
+        continue;
+      }
+      const sale = t.amount > 0 ? this.bank.previousSale(t.id) : null;
+      if (sale) {
+        tasks.push({
+          key: `bank-${t.id}`,
+          kind: 'bank-sale',
+          icon: '💶',
+          title: `${formatEuro(t.amount)} ontvangen van ${who}`,
+          question: `Weer een verkoop${sale.channel ? ` via ${sale.channel}` : ''}, net als vorige keer (${saleVatText(sale.vatCode)})?`,
+          amount: t.amount,
+          actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'anders', label: 'Iets anders' }],
+          group: { key: `bank-sale:${t.counter_iban ?? supplierKey(who)}`, label: `Alle van ${who}: verkoop` },
+          why: `Omdat je geld van ${who} op ${formatDateNl(sale.date)} ook als verkoop verwerkte.`,
+          ref: { bankTransactionId: t.id },
         });
         continue;
       }
