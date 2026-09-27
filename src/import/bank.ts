@@ -382,6 +382,13 @@ export class BankService {
   matchInvoice(txId: number, invoiceId: number): void {
     const t = this.get(txId);
     this.assertOpen(t);
+    const invoice = this.invoices.get(invoiceId);
+    if (t.amount < 0 && (!invoice.credit_of_invoice_id || invoice.open_amount >= 0)) {
+      throw new ValidationError('Deze betaling kan alleen aan een open creditfactuur worden gekoppeld');
+    }
+    // Een positieve tweede betaling op een gewone factuur is toegestaan: v0.4 signaleert die
+    // bewust als te veel betaald en begeleidt daarna de terugbetaling aan de klant.
+    if (t.amount > 0 && invoice.credit_of_invoice_id) throw new ValidationError('Deze ontvangst kan niet aan een creditfactuur worden gekoppeld');
     const account = this.getAccount(t.bank_account_id);
     tx(this.db, () => {
       const inv = this.invoices.registerPayment(invoiceId, {

@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:
 
 /**
  * Versleutelde kopie van de administratie (bijvoorbeeld om aan je boekhouder te geven).
- * Formaat: MAGIC(8) | versie(1) | salt(16) | iv(12) | tag(16) | versleutelde SQLite-database
+ * Formaat: MAGIC(8) | versie(1) | salt(16) | iv(12) | tag(16) | versleuteld compleet back-uppakket
  * Sleutel: scrypt(wachtwoord, salt), AES-256-GCM. Zonder het wachtwoord is de inhoud onleesbaar.
  */
 const MAGIC = Buffer.from('GBBACKUP');

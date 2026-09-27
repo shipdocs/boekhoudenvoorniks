@@ -5,6 +5,7 @@ import { centsToDecimalString } from '../shared/money';
 import { escapeHtml } from '../documents/render';
 import type { IsoDate } from '../shared/dates';
 import { ACCOUNTS } from '../core-ledger/accounts';
+import { RGS_VERSION } from '../core-ledger/ledger';
 
 function csvCell(v: unknown): string {
   const s = String(v ?? '');
@@ -91,6 +92,7 @@ export class AccountantExport {
     const totalDebit = lines.reduce((s, l) => s + l.debit, 0);
     const totalCredit = lines.reduce((s, l) => s + l.credit, 0);
     const accTp = (cat: string) => (cat === 'omzet' || cat === 'kosten' ? 'P' : 'B');
+    const rgsTaxonomy = `http://www.nltaxonomie.nl/rgs/nt20/rgs/${RGS_VERSION}/dictionary/`;
 
     return `<?xml version="1.0" encoding="UTF-8"?>
 <auditfile xmlns="http://www.auditfiles.nl/XAF/3.2">
@@ -115,14 +117,14 @@ ${relations
     (r) => `      <customerSupplier>
         <custSupID>${r.id}</custSupID>
         <custSupName>${x(r.name)}</custSupName>
-        <custSupTp>${r.type === 'leverancier' ? 'S' : r.type === 'beide' ? 'B' : 'C'}</custSupTp>
-${r.kvk_number ? `        <commerceNr>${x(r.kvk_number)}</commerceNr>\n` : ''}${r.vat_number ? `        <taxRegIdent>${x(r.vat_number)}</taxRegIdent>\n` : ''}        <streetAddress><streetname>${x(r.address ?? '')}</streetname><city>${x(r.city ?? '')}</city><postalCode>${x(r.postcode ?? '')}</postalCode><country>${x(r.country)}</country></streetAddress>
+${r.kvk_number ? `        <commerceNr>${x(r.kvk_number)}</commerceNr>\n` : ''}${r.vat_number ? `        <taxRegIdent>${x(r.vat_number)}</taxRegIdent>\n` : ''}        <custSupTp>${r.type === 'leverancier' ? 'S' : r.type === 'beide' ? 'B' : 'C'}</custSupTp>
+        <streetAddress><streetname>${x(r.address ?? '')}</streetname><city>${x(r.city ?? '')}</city><postalCode>${x(r.postcode ?? '')}</postalCode><country>${x(r.country)}</country></streetAddress>
 ${r.iban ? `        <bankAccount><bankAccNr>${x(r.iban)}</bankAccNr></bankAccount>\n` : ''}      </customerSupplier>`,
   )
   .join('\n')}
     </customersSuppliers>
     <generalLedger>
-${accounts.map((a) => `      <ledgerAccount><accID>${x(a.code)}</accID><accDesc>${x(a.name)}</accDesc><accTp>${accTp(a.category)}</accTp>${a.rgs_ref ? `<taxonomies><taxonomy><txAcctMap><txLink>${x(a.rgs_ref)}</txLink></txAcctMap></taxonomy></taxonomies>` : ''}</ledgerAccount>`).join('\n')}
+${accounts.map((a) => `      <ledgerAccount><accID>${x(a.code)}</accID><accDesc>${x(a.name)}</accDesc><accTp>${accTp(a.category)}</accTp>${a.rgs_ref ? `<taxonomy><taxoRef>${rgsTaxonomy}</taxoRef><entryPoint><entryPointRef>${rgsTaxonomy}</entryPointRef><conceptRef>${x(a.rgs_ref)}</conceptRef></entryPoint></taxonomy>` : ''}</ledgerAccount>`).join('\n')}
     </generalLedger>
 ${
   opening.length > 0
