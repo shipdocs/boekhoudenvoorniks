@@ -306,7 +306,7 @@ const OUTCOME_LABEL: Record<string, string> = {
   bijlage: 'bonnetje/factuur opgehaald',
   'online-factuur': 'factuur staat online',
   klant: 'van een klant (niet aangeraakt)',
-  eigen: 'van jezelf',
+  eigen: 'kopie van je eigen factuur of offerte',
   overig: 'niets mee gedaan',
   fout: 'kon niet gelezen worden',
 };
@@ -393,7 +393,7 @@ function IncomingMail() {
         <Button disabled={busy || dirty || !settings.mailIn.enabled} title={dirty ? 'Eerst opslaan' : undefined} onClick={async () => {
           const r = await run(() => api.mail.fetchNow());
           if (r) {
-            const parts = [`${r.documents} ${r.documents === 1 ? 'bonnetje' : 'bonnetjes'}`, r.onlineInvoices && `${r.onlineInvoices} online`, r.fromCustomers && `${r.fromCustomers} van klanten`, r.errors && `${r.errors} niet te lezen`].filter(Boolean);
+            const parts = [`${r.documents} ${r.documents === 1 ? 'bonnetje' : 'bonnetjes'}`, r.onlineInvoices && `${r.onlineInvoices} online`, r.fromCustomers && `${r.fromCustomers} van klanten`, r.other && `${r.other} zonder factuur of bon (blijft staan)`, r.errors && `${r.errors} niet te lezen`].filter(Boolean);
             toast(`Mail opgehaald: ${parts.join(', ')}${r.missingFolders.length ? `. Map niet gevonden: ${r.missingFolders.join(', ')}` : ''}`);
             await status.reload();
           }

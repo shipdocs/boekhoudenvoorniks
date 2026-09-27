@@ -10,7 +10,7 @@ test('"weet ik nog niet" oplossen: de betalingen zien en opnieuw indelen', async
   await page.locator('main input[type=file]').first().setInputFiles({ name: 'afschrift.csv', mimeType: 'text/csv', buffer: CSV });
   await page.locator('table.list tbody tr', { hasText: /SHELL/i }).first().click();
   await page.getByRole('button', { name: 'Weet ik nog niet (later uitzoeken)' }).click();
-  await expect(page.getByText('Verwerkt ✓')).toBeVisible();
+  await expect(page.getByText('Verwerkt ✓').last()).toBeVisible();
 
   // Belasting: de controle, met "Oplossen" → welke betalingen
   await nav(page, 'Belasting');
@@ -27,7 +27,7 @@ test('"weet ik nog niet" oplossen: de betalingen zien en opnieuw indelen', async
   await expect(page.getByRole('heading', { name: 'Was dit zakelijk?' })).toBeVisible();
   await page.locator('.chips button', { hasText: 'Materiaal' }).first().click();
   await page.getByRole('button', { name: 'Opslaan', exact: true }).click();
-  await expect(page.getByText('Verwerkt ✓')).toBeVisible();
+  await expect(page.getByText('Verwerkt ✓').last()).toBeVisible();
 
   await nav(page, 'Belasting');
   await expect(page.locator('ul.checks li', { hasText: 'weet ik nog niet' })).toHaveCount(0);

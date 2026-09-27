@@ -22,7 +22,7 @@ test('bankafschrift inlezen en een betaling indelen met een eigen categorie', as
   await expect(dlg).toBeHidden();
   await expect(page.locator('.chips button.selected')).toHaveText('Tanken aggregaat');
   await page.getByRole('button', { name: 'Opslaan', exact: true }).click();
-  await expect(page.getByText('Verwerkt ✓')).toBeVisible();
+  await expect(page.getByText('Verwerkt ✓').last()).toBeVisible();
   // de categorie is er ook bij de bonnetjes
   const cats = await call<{ categories: { label: string }[] }>(page, 'categories.all');
   expect(cats.categories.map((c) => c.label)).toContain('Tanken aggregaat');
