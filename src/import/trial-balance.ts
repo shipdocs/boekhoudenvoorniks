@@ -1,5 +1,5 @@
 import { roundHalfAwayFromZero, type Cents } from '../shared/money';
-import { today, type IsoDate } from '../shared/dates';
+import { isIsoDate, today, type IsoDate } from '../shared/dates';
 import type { Workbook } from './xlsx';
 import { XafError, type XafFile } from './xaf';
 
@@ -21,7 +21,8 @@ const num = (s: string | undefined): Cents => {
 /** "01-01-2026" → "2026-01-01" */
 function nlDate(s: string): IsoDate | null {
   const m = /(\d{1,2})-(\d{1,2})-(\d{4})/.exec(s);
-  return m ? `${m[3]}-${m[2]!.padStart(2, '0')}-${m[1]!.padStart(2, '0')}` : null;
+  const d = m ? `${m[3]}-${m[2]!.padStart(2, '0')}-${m[1]!.padStart(2, '0')}` : null;
+  return d && isIsoDate(d) ? d : null;
 }
 
 interface Pair {

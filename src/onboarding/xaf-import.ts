@@ -338,9 +338,12 @@ export class XafImportService {
       const inWindow = (l: XafLine) => l.date >= split.start && l.date <= until;
       const win = lines.filter(inWindow);
       const withVat = win.filter((l) => l.vat && l.vat.amount !== 0);
+      const revenueLines = win.filter((l) => cls.get(l.accountId) === 'omzet');
+      // btw per regel alleen gebruiken als élke omzetregel die heeft; anders zou omzet zonder btw-gegevens als 0% tellen
+      const perLine = withVat.length > 0 && revenueLines.every((l) => l.vat !== null);
       let omzetHoog = 0, btwHoog = 0, omzetLaag = 0, btwLaag = 0, omzetNul = 0, voorbelasting = 0;
       const revenue = (l: XafLine) => cls.get(l.accountId) === 'omzet';
-      if (withVat.length > 0) {
+      if (perLine) {
         for (const l of win.filter(revenue)) {
           const pct = l.vat?.percentage ?? 0;
           if (pct >= 20) omzetHoog -= l.amount;
@@ -374,7 +377,7 @@ export class XafImportService {
       const clamp = (v: number) => Math.max(0, v);
       const input: OpeningInput = { kind: 'btw-periode', omzetHoog: clamp(omzetHoog), btwHoog: clamp(btwHoog), omzetLaag: clamp(omzetLaag), btwLaag: clamp(btwLaag), omzetNul: clamp(omzetNul), voorbelasting: clamp(voorbelasting), bron: 'xaf' };
       splitVat = input.voorbelasting - input.btwHoog - input.btwLaag;
-      push({ key: 'btw-periode', label: `Omzet en btw van ${formatDateNl(split.start)} tot ${formatDateNl(date)}`, input, note: withVat.length > 0 ? 'uit de btw op de boekingsregels: vergelijk met je btw-overzicht' : 'uit de btw-rekeningen berekend: vergelijk met je btw-overzicht' }, splitVat);
+      push({ key: 'btw-periode', label: `Omzet en btw van ${formatDateNl(split.start)} tot ${formatDateNl(date)}`, input, note: perLine ? 'uit de btw op de boekingsregels: vergelijk met je btw-overzicht' : 'uit de btw-rekeningen berekend: vergelijk met je btw-overzicht' }, splitVat);
     }
     if (!s.kor) {
       // wat er op de btw-rekeningen staat, min het stuk dat hierboven apart geboekt wordt
@@ -456,19 +459,35 @@ export class XafImportService {
     const include = new Set(choices.include);
     tx(this.db, () => {
       if (choices.relations) this.importRelations(xaf);
+      // wat al betaald of afgeschreven is, blijft staan; dezelfde post uit de nieuwe export slaan we dan over
+      const kept: OpeningInput[] = [];
       for (const item of this.switchover.list()) {
-        if ((item.data as { bron?: string }).bron === 'xaf' && !item.locked) this.switchover.remove(item.id);
+        if ((item.data as { bron?: string }).bron !== 'xaf') continue;
+        if (item.locked) kept.push(item.data);
+        else this.switchover.remove(item.id);
       }
+      const same = (a: OpeningInput, b: OpeningInput) =>
+        a.kind === b.kind &&
+        ((a.kind === 'klant' && b.kind === 'klant' && a.number === b.number) ||
+          (a.kind === 'leverancier' && b.kind === 'leverancier' && a.relationName === b.relationName && (a.reference ?? null) === (b.reference ?? null)) ||
+          (a.kind === 'bezit' && b.kind === 'bezit' && a.name === b.name));
+      // beginsaldi van een vorige keer inlezen eerst terug op nul (misschien koppel je nu aan een andere rekening)
+      for (const id of s.switchover.xafBanks ?? []) {
+        if (this.bank.listAccounts().some((b) => b.id === id)) this.bank.setOpeningBalance(id, 0, plan.date);
+      }
+      const used: number[] = [];
       for (const b of plan.banks) {
         const target = choices.banks[b.accountId];
         if (target === null || target === undefined) continue;
         const id = target === 'nieuw' ? this.bank.addAccount(b.name, b.iban && !this.bank.listAccounts().some((x) => x.iban === b.iban) ? b.iban : null).id : target;
         this.switchover.setBankOpening(id, b.amount);
+        used.push(id);
       }
+      this.settings.update({ switchover: { ...this.settings.get().switchover, xafBanks: used } });
       // eerst de btw-periode: de omzet tot nu toe rekent daarmee
       const ordered = [...plan.proposals.filter((p) => p.input.kind === 'btw-periode'), ...plan.proposals.filter((p) => p.input.kind !== 'btw-periode')];
       for (const p of ordered) {
-        if (!include.has(p.key)) continue;
+        if (!include.has(p.key) || kept.some((k) => same(k, p.input))) continue;
         const existing = p.input.kind === 'btw' ? this.switchover.list().find((i) => i.kind === 'btw') : undefined;
         this.switchover.save(p.input, existing?.id);
       }
@@ -479,7 +498,8 @@ export class XafImportService {
 
   /** Klanten en leveranciers overnemen die de app nog niet kent (op naam); lege velden aanvullen. */
   private importRelations(xaf: XafFile): void {
-    const existing = this.relations.list({ includeArchived: true });
+    // alleen actieve relaties: een gearchiveerde zou naast een nieuwe met dezelfde naam komen te staan
+    const existing = this.relations.list();
     for (const r of xaf.relations) {
       const type = r.type === 'S' ? 'leverancier' : r.type === 'B' ? 'beide' : 'klant';
       const match = existing.find((e) => e.name.toLowerCase() === r.name.toLowerCase() || (r.kvk && e.kvk_number === r.kvk) || (r.iban && e.iban === r.iban));

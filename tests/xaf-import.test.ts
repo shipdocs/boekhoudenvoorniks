@@ -113,6 +113,9 @@ describe('auditfile (XAF) inlezen bij overstappen', () => {
     expect(r.skipped).toEqual([expect.stringMatching(/^kapot\.xml: /)]);
     const item = s.switchover.list()[0]!;
     expect(item.data).toMatchObject({ kind: 'klant', number: fin.number, invoiceDate: '2025-12-10', dueDate: '2025-12-24', amount: 121_000, relationName: 'Familie Jansen' });
+    // een factuur in een andere munt niet als euro's overnemen
+    const usd = xml.replace(/<cbc:DocumentCurrencyCode>EUR</, '<cbc:DocumentCurrencyCode>USD<');
+    expect(s.switchover.saveFromUbl([{ name: 'usd.xml', xml: usd.replace(fin.number!, 'X-1') }]).skipped[0]).toMatch(/USD/);
     // tweede keer: staat er al in
     expect(s.switchover.saveFromUbl([{ name: 'f.xml', xml }]).skipped[0]).toMatch(/staat er al in/);
   });
@@ -159,6 +162,38 @@ describe('auditfile (XAF) inlezen bij overstappen', () => {
     expect(() => s.xafImport.analyze(new Uint8Array([1, 2, 3]))).toThrow(/niet lezen/);
   });
 
+  it('opnieuw inlezen: andere bankrekening kiezen zet de vorige terug; al betaalde factuur blijft en dubbelt niet', () => {
+    const { s, tx } = (() => {
+      const c = overstapper('2026-01-01');
+      const bank = c.s.bank.ensureDefaultAccount();
+      const tx = (d: string, amount: number, description: string) => c.s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: d, amount, description }] }, { bankAccountId: bank.id });
+      return { ...c, tx };
+    })();
+    const data = kolommenbalans();
+    const plan = s.xafImport.analyze(data);
+    const keys = plan.proposals.map((p) => p.key);
+    const first = s.bank.ensureDefaultAccount();
+    s.xafImport.apply(data, { include: keys, banks: { '1002': first.id }, relations: false });
+    expect(s.bank.openingBalance(first.id).amount).toBe(150_000);
+    // de rekening van de leverancier wordt betaald
+    tx('2026-01-10', -100_000, 'Betaling');
+    const purchase = s.purchases.list().find((p) => p.is_opening)!;
+    s.bank.matchPurchase(s.bank.list()[0]!.id, purchase.id);
+    // opnieuw, nu met een nieuwe rekening
+    const state = s.xafImport.apply(data, { include: keys, banks: { '1002': 'nieuw' }, relations: false });
+    expect(s.bank.openingBalance(first.id).amount).toBe(0);
+    expect(state.items.filter((i) => i.kind === 'leverancier')).toHaveLength(1);
+    expect(state.position!.eigenVermogen).toBe(250_000);
+  });
+
+  it('btw-periode: niet elke omzetregel heeft btw-gegevens → uit de btw-rekeningen', () => {
+    const { s } = overstapper('2026-08-15');
+    const partial = OTHER_PACKAGE.replace('<vat><vatID>1</vatID><vatPerc>21</vatPerc><vatAmnt>210.00</vatAmnt><vatAmntTp>C</vatAmntTp></vat>', '');
+    const p = s.xafImport.analyze(partial).proposals.find((x) => x.key === 'btw-periode')!;
+    expect(p.input).toMatchObject({ omzetHoog: 100_000, btwHoog: 21_000, voorbelasting: 6_300, omzetNul: 0 });
+    expect(p.note).toMatch(/btw-rekeningen/);
+  });
+
   it('te vroeg of te laat: duidelijke meldingen', () => {
     const { s } = overstapper('2025-06-01');
     expect(() => s.xafImport.analyze(OTHER_PACKAGE)).toThrow(/begint op 1 januari 2026, na je instapdatum/);
@@ -169,6 +204,10 @@ describe('auditfile (XAF) inlezen bij overstappen', () => {
   it('geen auditfile, of een te oude versie', () => {
     expect(() => parseXaf('<html></html>')).toThrow(XafError);
     expect(() => parseXaf('<auditfile xmlns="http://www.auditfiles.nl/XAF/2.0"><header/><company/></auditfile>')).toThrow(/versie 2.0/);
+    // onmogelijke datum en ongeldig IBAN worden niet overgenomen
+    const x = parseXaf(OTHER_PACKAGE.replace('<trDt>2026-01-20</trDt>', '<trDt>2026-02-31</trDt>').replace(IBAN, 'NL00RABO0123456789'));
+    expect(x.lines.some((l) => l.date === '2026-02-31')).toBe(false);
+    expect(x.lines.every((l) => l.journalIban === null)).toBe(true);
   });
 
   it('rekeningen herkennen op RGS-code of naam', () => {

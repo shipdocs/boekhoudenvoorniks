@@ -183,6 +183,7 @@ function XafImport({ state, refresh, nextButton }: SectionProps) {
     setPlan(p);
     setInclude(new Set(p.proposals.filter((x) => x.include).map((x) => x.key)));
     setBanks(Object.fromEntries(p.banks.map((b) => [b.accountId, b.bankAccountId ?? 'nieuw'])));
+    setRelations(true);
   };
   const toggle = (key: string) => setInclude((cur) => {
     const next = new Set(cur);
