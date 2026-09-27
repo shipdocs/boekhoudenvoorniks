@@ -218,7 +218,7 @@ function Assets() {
       ) : (
         <table className="list">
           <thead>
-            <tr><th>Wat</th><th>Gekocht</th><th className="num">Kostte</th><th className="num">Kosten per jaar</th><th className="num" title="wat je betaalde, min wat al als kosten is geteld">Waarde nu</th><th /></tr>
+            <tr><th>Wat</th><th>Gekocht</th><th className="num">Kostte</th><th className="num">Kosten per jaar</th><th className="num" title="wat je betaalde, min wat al als kosten is geteld">Waarde nu</th><th><span className="sr-only">Acties</span></th></tr>
           </thead>
           <tbody>
             {list.data.map((a) => (
@@ -369,7 +369,7 @@ function Trips({ year }: { year: number }) {
       </div>
       {(list.data ?? []).length > 0 && (
         <table className="list" style={{ marginTop: 12 }}>
-          <thead><tr><th>Datum</th><th>Rit</th><th className="num">Km</th><th className="num">Aftrek</th><th /></tr></thead>
+          <thead><tr><th>Datum</th><th>Rit</th><th className="num">Km</th><th className="num">Aftrek</th><th><span className="sr-only">Acties</span></th></tr></thead>
           <tbody>
             {list.data!.map((t) => (
               <tr key={t.id}>

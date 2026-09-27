@@ -21,6 +21,31 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # End-to-end: de echte schermen in Chromium, met de echte services (zie e2e/ en playwright.config.ts).
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - name: Rapport bewaren bij een fout
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-rapport
+          path: |
+            e2e-report/
+            e2e-results/
+          retention-days: 7
+
   # Verpakt de app en start hem echt: vangt ontbrekende runtime-afhankelijkheden in het installatiepakket.
   package-smoke:
     runs-on: ubuntu-latest

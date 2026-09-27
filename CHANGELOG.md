@@ -2,6 +2,16 @@
 
 ## Nog niet uitgebracht
 
+- **Factuur of offerte meteen versturen**: bij een nieuwe factuur of offerte staat *Versturen* er nu meteen
+  (de app slaat eerst op). Voorheen moest je eerst op *Opslaan* klikken voordat die knop verscheen.
+- **Versturen: het e-mailadres van de klant staat er weer in**, ook als je direct na het opslaan verstuurt.
+- **Esc in een venster binnen een venster** (bv. *+ Eigen categorie* bij een bonnetje) sluit nu alleen dat
+  venster. Voorheen ging het bonnetje-venster ook dicht en was je ingevulde gegevens kwijt.
+- **Kleiner laptopscherm**: de lijst met aankopen past weer zonder opzij te schuiven.
+- **Schermlezers**: de velden in de factuurregels en lege kolomkoppen hebben nu een naam.
+- **End-to-end tests** (Playwright): de belangrijkste dingen die je in de app doet, worden bij elke wijziging
+  automatisch in een echte browser doorlopen, met een controle op toegankelijkheid. Zie `e2e/README.md`.
+
 ## 0.3.3 — bonnetjes per mail, eigen categorieën en btw-details
 
 - **Waar komt dit bedrag vandaan?** Bij Belasting klik je op Omzet, ontvangen btw of terug te krijgen btw
