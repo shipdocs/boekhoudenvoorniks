@@ -7,8 +7,8 @@ import type { TaxOverviewService } from './overview';
 
 /**
  * Schatting inkomstenbelasting (#33 fase 2). ALTIJD een schatting: de app kent alleen de winst uit
- * de onderneming. Partner, hypotheek, andere inkomsten, box 3, voorlopige aanslagen, startersaftrek,
- * FOR/investeringsaftrek en de precieze heffingskortingen zitten er niet in.
+ * de onderneming. Partner, hypotheek, andere inkomsten, box 3, voorlopige aanslagen en sommige
+ * bijzondere aftrekposten zitten er niet in.
  *
  * De tarieven staan per jaar in een aparte, geversioneerde tabel. LET OP: deze tabel is nog niet door
  * een fiscalist gecontroleerd (zie het issue voor de fiscale review); `checked` staat daarom op false
@@ -184,7 +184,11 @@ export function estimateIncomeTax(
   }
   const ahk = rules.algemeneHeffingskorting;
   const algemeen = Math.max(0, ahk.max - Math.max(0, taxable - ahk.phaseOutFrom) * ahk.phaseOutRate);
-  const kortingen = Math.min(box1, algemeen + arbeidskorting(taxable, rules.arbeidskorting));
+  // De arbeidskorting rekent met het arbeidsinkomen. Voor een ondernemer is dat hier de
+  // fiscale winst vóór ondernemersaftrek en mkb-winstvrijstelling, niet het belastbaar
+  // inkomen dat na die aftrekposten overblijft. KIA en bijtellingen horen al bij de
+  // winstbepaling en zitten daarom wel in `fiscal`.
+  const kortingen = Math.min(box1, algemeen + arbeidskorting(fiscal, rules.arbeidskorting));
   const zvw = Math.min(taxable, rules.zvw.maxIncome) * rules.zvw.rate;
   const total = box1 - kortingen + zvw;
   return {
