@@ -89,7 +89,8 @@ onderneming.
 2. − zelfstandigenaftrek, alleen als de gebruiker aangeeft aan het urencriterium te voldoen, en nooit meer dan de winst.
 3. − mkb-winstvrijstelling over (winst − zelfstandigenaftrek).
 4. = belastbaar inkomen. Daarover gaat box 1 (tarief onder de AOW-leeftijd).
-5. − algemene heffingskorting − arbeidskorting, beide berekend over het belastbaar inkomen.
+5. − algemene heffingskorting over het belastbaar inkomen; − arbeidskorting over de fiscale
+   winst vóór ondernemersaftrek en mkb-winstvrijstelling (het arbeidsinkomen).
 6. \+ inkomensafhankelijke bijdrage Zvw over het belastbaar inkomen (tot het maximum).
 7. "Nu opzij zetten" = de jaarschatting × het verstreken deel van het jaar.
 
@@ -105,7 +106,9 @@ jaar), de desinvesteringsbijtelling en de startersaftrek.
 
 **Vragen**
 11. Is deze methode verantwoord als "grove reservering"? Moet de schatting eerder aan de veilige kant (hoger) uitvallen?
-12. Heffingskortingen worden over het belastbaar inkomen berekend, niet over het verzamelinkomen of arbeidsinkomen. Acceptabel voor een schatting?
+12. De algemene heffingskorting wordt over het belastbaar inkomen berekend. De arbeidskorting wordt
+    sinds de fiscale controle van september 2026 over het arbeidsinkomen berekend. Is deze afbakening
+    voor ondernemers met uitsluitend winst uit onderneming juist?
 13. Klopt de volgorde: eerst de zelfstandigenaftrek, dan de mkb-winstvrijstelling?
 14. Moet de startersaftrek als optie erbij?
 
