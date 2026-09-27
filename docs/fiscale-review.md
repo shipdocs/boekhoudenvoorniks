@@ -9,9 +9,11 @@ elektricien). Alle bedragen in de voorbeelden zijn in euro's.
 
 **Code-audit (peildatum 27 september 2026, `main` @ `9970c62`).** De vragenlijst is bijgewerkt met
 een audit van de code zelf. Per onderdeel staat onder **Bevinding code-audit** wat de code nu
-werkelijk doet en waar we denken dat het fout gaat. Die bevindingen zijn nog niet door een fiscalist
-bevestigd; ze staan er juist zodat u ze kunt toetsen. De vraagnummers 1–26 zijn ongewijzigd gebleven,
-nieuwe vragen beginnen bij 27.
+werkelijk deed en waar het fout ging. De audit is door een fiscalist gedaan; alle bevindingen hieronder
+zijn inmiddels in de code verwerkt (zie **Status** in de tabel en de regressietests in
+`tests/fiscale-audit.test.ts`). De beschrijving per onderdeel gaat over de code van vóór de correctie.
+De vraagnummers 1–26 zijn ongewijzigd gebleven, nieuwe vragen beginnen bij 27; ze blijven staan voor
+bevestiging van de gekozen uitwerking.
 
 Legenda: **OK** = lijkt juist binnen de scope, **LET OP** = alleen juist onder voorwaarden,
 **FOUT** = vermoedelijk correctie nodig in de code.
@@ -20,22 +22,27 @@ Legenda: **OK** = lijkt juist binnen de scope, **LET OP** = alleen juist onder v
 
 De dubbele boekhouding (centen, alleen gebalanceerde posten, onveranderlijke journaalregels,
 correcties via tegenboekingen) en de standaard-btw-rubrieken zijn degelijk. Op de volgende punten
-is de app vermoedelijk nog niet fiscaal juist:
+was de app niet fiscaal juist:
 
-| Prio | Onderwerp | Waar | Vraag |
-|---|---|---|---|
-| P0 | Onder de KOR kan een inkoop met 21%/9% toch voorbelasting boeken | `src/core-ledger/rules.ts` `expenseLines()` | 27 |
-| P0 | Diensten aan bedrijven buiten de EU komen altijd in 3a | `src/btw/btw.ts` (`export`) | 2 |
-| P0 | Geen tariefsaanpassing voor zelfstandigenaftrek en mkb-winstvrijstelling in de hoogste schijf | `src/tax/income-tax.ts` `estimateIncomeTax()` | 28 |
-| P1 | Zelfstandigenaftrek wordt ook bij recht op startersaftrek op de winst afgekapt; geen niet-gerealiseerde zelfstandigenaftrek | idem | 29 |
-| P1 | Bij verlies geeft de schatting overal nul (geen fiscaal verlies) | idem | 30 |
-| P1 | Desinvesteringsdrempel staat op € 2.500, moet € 2.900 zijn; historisch KIA-percentage wordt uit het huidige register gereconstrueerd | `src/tax/income-tax.ts`, `src/tax/overview.ts` | 20, 31 |
-| P1 | Representatiedrempels 2025/2026 nog niet tegen de jaartabel vastgezet | `src/tax/income-tax.ts` | 22 |
-| P1 | ICP: één code voor goederen en diensten; ICP-correctie gekoppeld aan btw-suppletie | `src/shared/vat.ts`, `src/btw/btw.ts` | 3, 4, 10a |
-| P1 | Auto van de zaak: 2,7%/1,5%-forfait wordt te automatisch toegepast | `src/btw/car.ts` | 32 |
-| P1 | OSS-waarschuwing van € 10.000 geldt niet voor elk soort B2C-prestatie | `src/btw/checks.ts` | 8 |
-| P1 | Tekst werkruimte thuis: "bureau, stoel en kast mag je altijd aftrekken" is te stellig | `src/tax/overview.ts` | 33 |
-| P2 | Afschrijving start op aankoopdatum in plaats van ingebruikname | `src/tax/assets.ts` | 17 |
+| Prio | Onderwerp | Waar | Vraag | Status |
+|---|---|---|---|---|
+| P0 | Onder de KOR kan een inkoop met 21%/9% toch voorbelasting boeken | `src/core-ledger/rules.ts` `expenseLines()` | 27 | Verwerkt: onder de KOR komt de btw bij de kosten/kostprijs; verlegde btw blijft verschuldigd zonder aftrek en wordt per kwartaal getoond |
+| P0 | Diensten aan bedrijven buiten de EU komen altijd in 3a | `src/btw/btw.ts` (`export`) | 2 | Verwerkt: nieuwe code `dienst-buiten-eu` (niet in de aangifte); `export` = goederen (3a) |
+| P0 | Geen tariefsaanpassing voor zelfstandigenaftrek en mkb-winstvrijstelling in de hoogste schijf | `src/tax/income-tax.ts` `estimateIncomeTax()` | 28 | Verwerkt (art. 2.10a Wet IB 2001) |
+| P1 | Zelfstandigenaftrek wordt ook bij recht op startersaftrek op de winst afgekapt; geen niet-gerealiseerde zelfstandigenaftrek | idem | 29 | Verwerkt; openstaande niet-gerealiseerde aftrek is een instelling, startersaftrek per jaar op te geven |
+| P1 | Bij verlies geeft de schatting overal nul (geen fiscaal verlies) | idem | 30 | Verwerkt: fiscaal verlies apart getoond |
+| P1 | Desinvesteringsdrempel staat op € 2.500, moet € 2.900 zijn; historisch KIA-percentage wordt uit het huidige register gereconstrueerd | `src/tax/income-tax.ts`, `src/tax/overview.ts` | 20, 31 | Verwerkt: € 2.900; KIA per afgesloten jaar vastgelegd; naar privé telt als vervreemding |
+| P1 | Representatiedrempels 2025/2026 nog niet tegen de jaartabel vastgezet | `src/tax/income-tax.ts` | 22 | Verwerkt: € 5.700 in 2025 en 2026 (was € 5.600 voor 2025) |
+| P1 | ICP: één code voor goederen en diensten; ICP-correctie gekoppeld aan btw-suppletie | `src/shared/vat.ts`, `src/btw/btw.ts` | 3, 4, 10a | Verwerkt: `icp` (goederen) en `icp-dienst`; ICP-correcties apart per oorspronkelijke periode |
+| P1 | Auto van de zaak: 2,7%/1,5%-forfait wordt te automatisch toegepast | `src/btw/car.ts` | 32 | Verwerkt: eerst btw-aftrek en methode (forfait of werkelijk) opgeven |
+| P1 | OSS-waarschuwing van € 10.000 geldt niet voor elk soort B2C-prestatie | `src/btw/checks.ts` | 8 | Verwerkt: drempel alleen voor goederen en digitale diensten, altijd een controle |
+| P1 | Tekst werkruimte thuis: "bureau, stoel en kast mag je altijd aftrekken" is te stellig | `src/tax/overview.ts` | 33 | Verwerkt (ook AOV en meewerkaftrek) |
+| P2 | Afschrijving start op aankoopdatum in plaats van ingebruikname | `src/tax/assets.ts` | 17 | Verwerkt: veld "sinds wanneer gebruik je het" |
+
+Nog niet verwerkt (bewust): het privédeel van telefoon en internet wordt nog achteraf gecorrigeerd in
+plaats van per boeking gesplitst (vraag 24), en btw-aftrek naar rato bij een privéauto blijft liggen
+(vraag 21; wel als notitie voor de boekhouder). De jaartabellen staan nog op `checked: false` tot alle
+waarden (ook heffingskortingen en Zvw) tegen de officiële tabel zijn afgevinkt.
 
 ---
 

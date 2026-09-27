@@ -142,6 +142,13 @@ export interface AppSettings {
   carPrivateUse: boolean | null;
   /** cataloguswaarde van de auto van de zaak, incl. btw en bpm (centen) */
   carCatalogValue: number | null;
+  /**
+   * Trok je btw af op de aanschaf of de kosten van de auto? (null = nog niet gevraagd) Zonder aftrek
+   * (bijvoorbeeld een marge-auto en geen aftrek op de kosten) is er geen btw-correctie.
+   */
+  carVatDeducted: boolean | null;
+  /** Btw-correctie privégebruik: forfait (2,7%/1,5%) of werkelijk privégebruik uit een rittenadministratie. */
+  carVatMethod: 'forfait' | 'werkelijk' | null;
   /** jaar waarin de auto in gebruik is genomen voor je bedrijf */
   carInUseSince: number | null;
   /** maand (1–12) van ingebruikname; alleen nodig voor het eerste jaar (naar rato) */
@@ -225,6 +232,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   carUse: 'onbekend',
   carPrivateUse: null,
   carCatalogValue: null,
+  carVatDeducted: null,
+  carVatMethod: null,
   carInUseSince: null,
   carInUseMonth: null,
   phoneInternetBusinessPct: null,

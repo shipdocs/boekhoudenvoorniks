@@ -180,8 +180,30 @@ export function SettingsScreen() {
                       </div>
                     </Field>
                   </div>
+                  <div className="grid cols-2">
+                    <Field label="Kreeg je btw terug op de auto of de kosten?" hint="bij aankoop, of op brandstof en onderhoud">
+                      <select value={draft.carVatDeducted === null ? '' : draft.carVatDeducted ? 'ja' : 'nee'} onChange={(e) => set({ carVatDeducted: e.target.value === '' ? null : e.target.value === 'ja' })}>
+                        <option value="">Nog niet opgegeven</option>
+                        <option value="ja">Ja</option>
+                        <option value="nee">Nee (bijvoorbeeld een occasion zonder btw, en geen btw op de kosten)</option>
+                      </select>
+                    </Field>
+                    {draft.carVatDeducted && (
+                      <Field label="Hoe reken je het privégebruik?" hint="vraag je boekhouder als je twijfelt">
+                        <select value={draft.carVatMethod ?? ''} onChange={(e) => set({ carVatMethod: (e.target.value || null) as AppSettings['carVatMethod'] })}>
+                          <option value="">Nog niet opgegeven</option>
+                          <option value="forfait">Vast percentage van de cataloguswaarde (forfait)</option>
+                          <option value="werkelijk">Mijn echte privékilometers (rittenadministratie)</option>
+                        </select>
+                      </Field>
+                    )}
+                  </div>
                   <p className="small muted">
-                    Over privégebruik betaal je één keer per jaar btw, in je laatste aangifte van het jaar: 2,7% van de cataloguswaarde (vanaf het 5e jaar na ingebruikname 1,5%; in het eerste jaar naar rato). De app zet dat voor je klaar.
+                    {draft.carVatDeducted === false
+                      ? 'Heb je geen btw teruggekregen op de auto en de kosten? Dan betaal je ook geen btw over het privégebruik.'
+                      : draft.carVatMethod === 'werkelijk'
+                        ? 'Met je echte privékilometers rekent je boekhouder de btw uit; die komt in je laatste aangifte van het jaar.'
+                        : 'Met het forfait betaal je één keer per jaar btw, in je laatste aangifte van het jaar: 2,7% van de cataloguswaarde (vanaf het 5e jaar na ingebruikname 1,5%; in het eerste jaar naar rato). De app zet dat voor je klaar. Betaal je een eigen bijdrage, of is de auto bijzonder (bijvoorbeeld zonder btw gekocht)? Vraag je boekhouder of het forfait klopt.'}{' '}
                     Daarnaast telt privégebruik mee voor de inkomstenbelasting (bijtelling). Dat rekent de app niet uit: vraag je boekhouder.
                   </p>
                 </>

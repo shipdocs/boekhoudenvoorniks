@@ -329,6 +329,7 @@ export class TaxOverviewService {
         label: 'Controleer je autokosten',
         amount: null,
         explain: `Je rijdt met je eigen auto, maar er staat ${eur(fuel)} aan tanken, parkeren of onderhoud bij je zakelijke kosten. Dat mag niet: je krijgt al € ${(rules.kmRate / 100).toFixed(2).replace('.', ',')} per zakelijke kilometer. Zet die betalingen op "privé" en vul je kilometers in.`,
+        note: 'Privéauto: kosten niet aftrekbaar voor de IB naast de kilometervergoeding. Btw op brandstof/onderhoud kan wel naar rato van zakelijk gebruik aftrekbaar zijn (app laat dit liggen).',
         status: 'warn',
       });
     }
@@ -344,11 +345,19 @@ export class TaxOverviewService {
         explain:
           car.state === 'bekend'
             ? `Over privégebruik betaal je btw: ${eur(car.amount)} dit jaar. De app zet dat klaar in je laatste btw-aangifte van het jaar${booked ? ' (al gedaan)' : ''}. Privégebruik telt ook mee voor de inkomstenbelasting (bijtelling); dat rekent je boekhouder uit.`
-            : 'Rijd je ook privé in je auto van de zaak? Vul dat in bij Instellingen → Btw. Dan betaal je btw over het privégebruik en telt het mee voor de inkomstenbelasting (bijtelling).',
+            : car.state === 'werkelijk'
+              ? 'Je rekent de btw over privégebruik met je werkelijke privékilometers. Dat bedrag rekent je boekhouder uit. Privégebruik telt ook mee voor de inkomstenbelasting (bijtelling).'
+              : car.state === 'n.v.t.'
+                ? 'Je hebt geen btw teruggekregen op de auto of de kosten, dus je betaalt geen btw over het privégebruik. Privégebruik telt wel mee voor de inkomstenbelasting (bijtelling); dat rekent je boekhouder uit.'
+                : 'Rijd je ook privé in je auto van de zaak? Vul dat in bij Instellingen → Btw. Dan betaal je misschien btw over het privégebruik en telt het mee voor de inkomstenbelasting (bijtelling).',
         note:
           car.state === 'bekend'
-            ? `Auto van de zaak met privégebruik. Btw-correctie ${(car.pct * 100).toLocaleString('nl-NL')}% van cataloguswaarde ${eur(car.catalogValue)} = ${eur(car.amount)}${booked ? ', geboekt in vak 1d' : ', nog niet geboekt'}${car.months < 12 ? `; naar rato over ${car.months} maanden (auto dit jaar in gebruik genomen)` : ''}. IB-bijtelling niet berekend; controleren of er een rittenregistratie is.`
-            : 'Auto van de zaak: privégebruik niet opgegeven. Btw-correctie (1d) en IB-bijtelling controleren.',
+            ? `Auto van de zaak met privégebruik; btw afgetrokken, forfait gekozen. Btw-correctie ${(car.pct * 100).toLocaleString('nl-NL')}% van cataloguswaarde ${eur(car.catalogValue)} = ${eur(car.amount)}${booked ? ', geboekt in vak 1d' : ', nog niet geboekt'}${car.months < 12 ? `; naar rato over ${car.months} maanden (auto dit jaar in gebruik genomen)` : ''}. Controleren: eigen bijdrage, historie van de auto (bijv. marge-auto, aftrek alleen op kosten). IB-bijtelling niet berekend.`
+            : car.state === 'werkelijk'
+              ? 'Auto van de zaak: btw-correctie privégebruik op basis van werkelijk gebruik (rittenadministratie); bedrag niet door de app berekend of geboekt (1d).'
+              : car.state === 'n.v.t.'
+                ? 'Auto van de zaak: volgens de gebruiker geen btw afgetrokken op aanschaf of kosten, dus geen btw-correctie privégebruik. Controleren; IB-bijtelling niet berekend.'
+                : 'Auto van de zaak: privégebruik, btw-aftrek of methode niet opgegeven. Btw-correctie (1d) en IB-bijtelling controleren.',
         forAccountant: true,
         status: car.state === 'bekend' && booked ? 'ok' : 'warn',
       });
