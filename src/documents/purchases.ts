@@ -26,6 +26,8 @@ export interface PurchaseInvoiceInput {
   externalId?: string | null;
   /** IBAN van de leverancier zoals op het document, voor betalen met QR en de fraudecontrole */
   payeeIban?: string | null;
+  /** aankoop in een andere munt (#74): het origineel en de koers, als uitleg bij de boeking in euro's */
+  foreign?: { currency: string; total: Cents; rate: number } | null;
 }
 
 export interface PurchaseInvoice {
@@ -48,6 +50,10 @@ export interface PurchaseInvoice {
   payee_iban: string | null;
   /** garantietermijn in maanden (gereedschap, machines) */
   warranty_months: number | null;
+  /** andere munt (#74): bv. 'USD', het bedrag in die munt en de koers (vreemde munt per euro) */
+  currency: string | null;
+  foreign_total: Cents | null;
+  fx_rate: number | null;
   open_amount: Cents;
 }
 
@@ -68,10 +74,10 @@ export class PurchaseService {
       const vatPaid = booking.payable - booking.net;
       const result = this.db
         .prepare(
-          `INSERT INTO purchase_invoices (relation_id, supplier_reference, invoice_date, due_date, description, subtotal, vat_total, total, attachment_path, job_id, document_id, external_source, external_id, payee_iban)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO purchase_invoices (relation_id, supplier_reference, invoice_date, due_date, description, subtotal, vat_total, total, attachment_path, job_id, document_id, external_source, external_id, payee_iban, currency, foreign_total, fx_rate)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(input.relationId ?? null, input.supplierReference ?? null, input.invoiceDate, input.dueDate ?? null, input.description.trim(), booking.net, vatPaid, booking.payable, input.attachmentPath ?? null, input.jobId ?? null, input.documentId ?? null, input.externalSource ?? null, input.externalId ?? null, input.payeeIban ? normalizeIban(input.payeeIban) : null);
+        .run(input.relationId ?? null, input.supplierReference ?? null, input.invoiceDate, input.dueDate ?? null, input.description.trim(), booking.net, vatPaid, booking.payable, input.attachmentPath ?? null, input.jobId ?? null, input.documentId ?? null, input.externalSource ?? null, input.externalId ?? null, input.payeeIban ? normalizeIban(input.payeeIban) : null, input.foreign?.currency ?? null, input.foreign?.total ?? null, input.foreign?.rate ?? null);
       const id = Number(result.lastInsertRowid);
       const evidence: Evidence[] = [{ kind: 'inkoop', refId: id }];
       if (input.documentId) evidence.push({ kind: 'document', refId: input.documentId });
@@ -115,19 +121,29 @@ export class PurchaseService {
     });
   }
 
-  registerPayment(id: number, payment: { amount: Cents; date: IsoDate; moneyAccount?: string; bankTransactionId?: number | null }): PurchaseInvoice {
+  /**
+   * settleFx: aankoop in een andere munt (#74) waarvan de bank een iets ander bedrag afschreef dan
+   * geschat. Dan is de aankoop helemaal betaald en gaat het verschil naar "Koersverschillen".
+   */
+  registerPayment(id: number, payment: { amount: Cents; date: IsoDate; moneyAccount?: string; bankTransactionId?: number | null; settleFx?: boolean }): PurchaseInvoice {
     assertCents(payment.amount);
     assertIsoDate(payment.date);
     return tx(this.db, () => {
       const p = this.get(id);
+      const settled = payment.settleFx && p.currency ? p.open_amount : payment.amount;
+      const diff = settled - payment.amount; // positief: minder betaald dan geschat (winst), negatief: meer (verlies)
       const entryId = this.ledger.post({
         date: payment.date,
         description: `Betaling inkoop: ${p.description}`,
         source: 'bank',
         sourceRef: `purchase:${id}`,
-        lines: [signedLine(ACCOUNTS.crediteuren, payment.amount, { relationId: p.relation_id })!, signedLine(payment.moneyAccount ?? ACCOUNTS.bank, -payment.amount)!],
+        lines: [
+          signedLine(ACCOUNTS.crediteuren, settled, { relationId: p.relation_id })!,
+          signedLine(payment.moneyAccount ?? ACCOUNTS.bank, -payment.amount)!,
+          diff !== 0 ? signedLine(ACCOUNTS.koersverschillen, -diff, { description: `Koersverschil ${p.currency}` })! : null,
+        ].filter((l): l is NonNullable<typeof l> => l !== null),
       });
-      const paid = p.amount_paid + payment.amount;
+      const paid = p.amount_paid + settled;
       this.db.prepare('UPDATE purchase_invoices SET amount_paid = ?, status = ? WHERE id = ?').run(paid, paid >= p.total ? 'betaald' : 'open', id);
       if (payment.bankTransactionId) {
         this.db
@@ -140,9 +156,13 @@ export class PurchaseService {
 
   undoPayment(id: number, amount: Cents, journalEntryId: number, date: IsoDate): PurchaseInvoice {
     return tx(this.db, () => {
+      // wat deze betaling op de leverancier afboekte (bij een koersverschil meer dan het bankbedrag)
+      const booked = this.db
+        .prepare(`SELECT COALESCE(SUM(l.debit - l.credit), 0) AS s FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = ? AND a.rgs_code = ?`)
+        .get(journalEntryId, ACCOUNTS.crediteuren) as { s: number };
       this.ledger.reverse(journalEntryId, date);
       const p = this.get(id);
-      const paid = p.amount_paid - amount;
+      const paid = p.amount_paid - (booked.s > 0 ? booked.s : amount);
       this.db.prepare('UPDATE purchase_invoices SET amount_paid = ?, status = ? WHERE id = ?').run(paid, paid >= p.total ? 'betaald' : 'open', id);
       return this.get(id);
     });

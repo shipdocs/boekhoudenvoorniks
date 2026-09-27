@@ -737,4 +737,17 @@ export const migrations: string[] = [
   -- nog niet bekend is. Dit veld houdt ze uit elkaar: een afschrift met een onbekend IBAN komt nooit op een potje.
   ALTER TABLE bank_accounts ADD COLUMN is_pot INTEGER NOT NULL DEFAULT 0;
   `,
+  /* 16: vreemde valuta (#74) */ `
+  -- ECB-koersen die de app ophaalde (alleen als er een bon in een andere munt was)
+  CREATE TABLE fx_rates (
+    currency TEXT NOT NULL,
+    rate_date TEXT NOT NULL,
+    rate REAL NOT NULL,
+    PRIMARY KEY (currency, rate_date)
+  );
+  -- Een aankoop in bv. dollars: in de boekhouding in euro's, het oorspronkelijke bedrag en de koers als uitleg
+  ALTER TABLE purchase_invoices ADD COLUMN currency TEXT;
+  ALTER TABLE purchase_invoices ADD COLUMN foreign_total INTEGER;
+  ALTER TABLE purchase_invoices ADD COLUMN fx_rate REAL;
+  `,
 ];

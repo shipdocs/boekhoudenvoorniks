@@ -32,6 +32,7 @@ import { InboxService } from './inbox/inbox';
 import { ChecklistService } from './onboarding/checklist';
 import { CategoryService } from './settings/categories';
 import { MailIntakeService } from './mail/mail-intake';
+import { FxService } from './fx/fx';
 
 export interface ServiceDeps {
   pdf: PdfRenderer;
@@ -70,7 +71,9 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const exports = new AccountantExport(db, ledger);
   const memory = new SupplierMemory(db);
   const classifier = new Classifier(memory, categories, deps.llm ?? null);
+  const fx = new FxService(db, deps.fetch);
   const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, categories, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse);
+  intake.setFx(fx);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);
   const assets = new AssetService(db, ledger);
@@ -91,7 +94,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, investments, assets, mileage, hours, taxOverview };
+  return { db, fx, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;

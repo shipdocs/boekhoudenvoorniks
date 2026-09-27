@@ -7,6 +7,8 @@ import { CategoryChoice, InvestmentHint, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
 import type { PurchaseVatCode } from '../../shared/vat';
 import { ReaderChoice } from './Reader';
+import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
+import type { DocumentResult } from '../../intake/types';
 import { formatDateNl } from '../../shared/dates';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -141,6 +143,7 @@ export function DocumentReview({ id }: { id: number }) {
               );
             })}
           </div>
+          {r?.foreign && <ForeignNotice foreign={r.foreign} euro={form.total ?? r.total?.value ?? null} />}
           {/* nog niet uitgelezen (geen herkenning): hier kiezen hoe de app bonnen mag lezen */}
           {unread && <ReaderChoice context="bon" onDone={async () => { setForm(null); await doc.reload(); }} />}
           {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document')).map((i) => (
@@ -202,7 +205,7 @@ export function DocumentReview({ id }: { id: number }) {
                 <Field label="Datum"><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
               </div>
               <div className="grid cols-2">
-                <Field label="Totaal (incl. btw)"><MoneyInput value={form.total} onChange={(v) => setForm({ ...form, total: v })} /></Field>
+                <Field label={r?.foreign ? "Totaal in euro's (incl. btw)" : 'Totaal (incl. btw)'}><MoneyInput value={form.total} onChange={(v) => setForm({ ...form, total: v })} /></Field>
                 <Field label="Factuur- of bonnummer" hint="mag leeg"><input value={form.invoiceNumber} maxLength={60} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} /></Field>
               </div>
               <Field label="Was dit zakelijk?">
@@ -259,6 +262,23 @@ export function DocumentReview({ id }: { id: number }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Bon in een andere munt (#74): wat er stond, welk bedrag in euro's telt en waarom. */
+function ForeignNotice({ foreign, euro }: { foreign: NonNullable<DocumentResult['foreign']>; euro: number | null }) {
+  const name = CURRENCY_NAMES[foreign.currency]?.name ?? foreign.currency;
+  const eur = euro === null ? null : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(euro / 100);
+  const rate = foreign.rate ? `1 euro = ${foreign.rate.toLocaleString('nl-NL', { maximumFractionDigits: 4 })} ${name}` : null;
+  return (
+    <div className="notice small">
+      Deze bon is in <strong>{name}</strong>: {formatForeign(foreign.total, foreign.currency)}.{' '}
+      {foreign.source === 'bank' && eur && <>Van je rekening is <strong>{eur}</strong> afgeschreven ({rate}). Dat bedrag komt in de boekhouding.</>}
+      {foreign.source === 'ecb' && eur && (
+        <>Omgerekend met de koers van de Europese Centrale Bank{foreign.rateDate ? ` van ${formatDateNl(foreign.rateDate)}` : ''}: <strong>{eur}</strong> ({rate}). Komt de betaling later op de bank, dan koppelt de app hem en boekt hij een klein verschil als koersverschil.</>
+      )}
+      {!foreign.source && <>De koers kon niet opgehaald worden. Vul hieronder het bedrag in euro's in, zoals het van je rekening is afgeschreven.</>}
     </div>
   );
 }

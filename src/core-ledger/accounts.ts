@@ -53,6 +53,7 @@ export const ACCOUNTS = {
   inkoopMaterialen: 'WKprInkMat',
   bankkosten: 'WFbeBan',
   betalingsverschillen: 'WBedAlkBev',
+  koersverschillen: 'WFbeWisWis',
   vraagposten: 'BSchOvsVrp',
   uitbesteedWerk: 'WKprKuwKuw',
   inventaris: 'BMvaBedIna',
@@ -127,6 +128,8 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '4610', rgs: ACCOUNTS.afschrijvingVervoer, ref: 'WAfsAmvTev', name: 'Afschrijving vervoermiddelen', category: 'kosten', system: true },
   { code: '4620', rgs: ACCOUNTS.boekresultaat, ref: 'WAfsRvmBei', name: 'Boekresultaat verkochte bedrijfsmiddelen', category: 'kosten', system: true },
   { code: '4500', rgs: ACCOUNTS.bankkosten, ref: 'WBedAdlBan', name: 'Bankkosten', category: 'kosten', system: true },
+  // verschil tussen de koers op de factuur en wat de bank echt afschreef (#74)
+  { code: '4510', rgs: ACCOUNTS.koersverschillen, ref: 'WFbeWisWis', name: 'Koersverschillen', category: 'kosten', system: true },
 ];
 
 /** Welke omzet- en BTW-rekening hoort bij een verkoop-BTW-code. */
