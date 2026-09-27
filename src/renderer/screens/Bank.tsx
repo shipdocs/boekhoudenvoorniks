@@ -337,7 +337,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const [sale, setSale] = useState(false);
   const own = useLoad(() => api.bank.ownTransfer(id), [id]);
   // potjes zonder eigen rekeningnummer (bv. Knab): daar komt geen afschrift van, dus hier kiezen
-  const pots = useLoad(() => api.bank.accounts().then((list) => list.filter((a) => !a.iban)));
+  const pots = useLoad(() => api.bank.accounts().then((list) => list.filter((a) => a.is_pot)));
   const previousSale = useLoad(() => api.bank.previousSale(id), [id]);
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;

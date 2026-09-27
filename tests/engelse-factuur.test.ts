@@ -48,3 +48,22 @@ describe('bon controleren: alles is aan te passen', () => {
     expect(() => s.intake.confirm(other.id, { supplier: 'Winkel', date: '2026-09-13', total: 1000, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'later', vatAmount: 5000 })).toThrow(/niet meer zijn dan het totaal/);
   });
 });
+
+describe('review-punten', () => {
+  it('btw-bedrag hooguit wat het tarief toelaat', async () => {
+    const { s } = setup();
+    const doc = await s.intake.add('bon3.pdf', makePdf(['Bouwmarkt Kees', 'Datum 12-09-2026', 'Totaal 121,00']), '2026-09-20', { autoConfirm: false });
+    expect(() => s.intake.confirm(doc.id, { supplier: 'Bouwmarkt Kees', date: '2026-09-12', total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'later', vatAmount: 10000 })).toThrow(/hooguit 21,00/);
+    s.intake.confirm(doc.id, { supplier: 'Bouwmarkt Kees', date: '2026-09-12', total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'later', vatAmount: 2102 });
+  });
+
+  it('"Payment date" is niet de factuurdatum', () => {
+    const r = parseDocumentText(['Invoice', 'Payment date May 20, 2026', 'Date of issue May 6, 2026', 'Total €90.00'].map((text) => ({ text, page: 1 })), 'pdf-text');
+    expect(r.invoiceDate?.value).toBe('2026-05-06');
+    // zonder kopje: liever een andere datum dan de betaaldatum; alleen een betaaldatum dan toch die
+    const r2 = parseDocumentText(['Paid on 20-05-2026', 'Winkel', 'Bon 06-05-2026', 'Totaal 9,00'].map((text) => ({ text, page: 1 })), 'pdf-text');
+    expect(r2.invoiceDate?.value).toBe('2026-05-06');
+    const r3 = parseDocumentText(['Winkel', 'Betaald met pin 06-05-2026', 'Totaal 9,00'].map((text) => ({ text, page: 1 })), 'pdf-text');
+    expect(r3.invoiceDate?.value).toBe('2026-05-06');
+  });
+});

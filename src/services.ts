@@ -84,9 +84,12 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases, recurring, categories, investments, mail);
   const checklist = new ChecklistService(db, settings);
 
-  ledger.seedDefaultAccounts();
-  templates.seedDefaults();
-  bank.ensureDefaultAccount();
+  // alleen-lezen (koppeling voor Claude Code/Codex): niets aanvullen, de app deed dat al bij het openen
+  if (!db.readonly) {
+    ledger.seedDefaultAccounts();
+    templates.seedDefaults();
+    bank.ensureDefaultAccount();
+  }
 
   return { db, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, investments, assets, mileage, hours, taxOverview };
 }

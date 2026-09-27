@@ -1,4 +1,5 @@
 import type { RuntimeStatus } from '../ocr-runtime/runtime';
+import type { CliKind } from '../intake/ocr-cli';
 import { DOWNLOAD_SIZE, GLM_OCR, LLAMA_CPP, REQUIREMENTS } from '../ocr-runtime/manifest';
 import type { Services } from '../services';
 import type { AppSettings } from '../settings/settings';
@@ -73,6 +74,20 @@ export interface HostContext {
     /** "Toch als bon bewaren": de tekst van een mail die bleef liggen als PDF-bon */
     saveAsReceipt(id: number): Promise<unknown>;
   };
+  /** zoeken waar Claude Code of Codex staat (alleen als de gebruiker daarom vraagt); null = niet gevonden */
+  findCli?(kind: CliKind): string | null;
+  /** bestaat dit programma (nog)? */
+  programExists?(path: string): boolean;
+  /** de gebruiker wijst het programma zelf aan */
+  pickProgram?(title: string): Promise<string | null>;
+  /** klein proefverzoek: start het, is de gebruiker ingelogd? */
+  checkCli?(kind: CliKind, path: string): Promise<string>;
+  /** terminal openen met het programma erin, om in te loggen */
+  openLoginTerminal?(kind: CliKind, path: string): Promise<string>;
+  /** hoe Claude Code/Codex de koppeling (alleen lezen) start: dit programma met --mcp */
+  mcpCommand?(): { command: string; args: string[] };
+  /** de koppeling toevoegen aan Claude Code of Codex (voert "claude/codex mcp add" uit) */
+  connectMcp?(kind: CliKind, path: string): Promise<string>;
   /** ingebouwde tekstherkenning (#9): downloaden bij eerste gebruik */
   localOcr: {
     status(): RuntimeStatus;
@@ -86,6 +101,16 @@ export interface HostContext {
  * Alle argumenten komen uit de renderer en worden door de services zelf gevalideerd.
  */
 export function createApi(s: Services, host: HostContext) {
+  const cliKind = (kind: string): CliKind => {
+    if (kind !== 'claude-code' && kind !== 'codex') throw new Error('Onbekend programma');
+    return kind;
+  };
+  /** het onthouden pad van Claude Code of Codex, als het programma er nog is */
+  const storedCli = (kind: CliKind): string | null => {
+    const ocr = s.settings.get().ocr;
+    const path = kind === 'codex' ? ocr.codexPath : ocr.claudeCodePath;
+    return path && (host.programExists?.(path) ?? true) ? path : null;
+  };
   const parseBankFile = async (filename: string, content: string, mapping?: CsvMapping): Promise<ParseResult> => {
     const format = detectFormat(filename, content);
     if (format === 'camt') return parseCamt053(content);
@@ -567,6 +592,108 @@ export function createApi(s: Services, host: HostContext) {
       totals: (year: number) => s.hours.totals(year),
       add: (input: { date: IsoDate; hours: number; description: string }) => s.hours.add(input),
       remove: (id: number) => s.hours.remove(id),
+    },
+    /**
+     * Claude Code en Codex: de app installeert niets en zoekt pas als de gebruiker daarom vraagt.
+     * Wat gevonden of gekozen is, wordt onthouden.
+     */
+    assistantTools: {
+      search: () => {
+        const ocr = s.settings.get().ocr;
+        const claude = host.findCli?.('claude-code') ?? null;
+        const codex = host.findCli?.('codex') ?? null;
+        s.settings.update({ ocr: { ...ocr, claudeCodePath: claude ?? '', codexPath: codex ?? '', assistantsSearched: true } });
+        host.reconfigureLocalAi();
+        return { claudeCode: claude, codex };
+      },
+      pick: async (kind: string) => {
+        const k = cliKind(kind);
+        if (!host.pickProgram) throw new Error('Kan alleen in de app zelf');
+        const path = await host.pickProgram(`Waar staat ${k === 'codex' ? 'Codex' : 'Claude Code'}?`);
+        if (!path) return null;
+        if (host.programExists && !host.programExists(path)) throw new Error('Dit is geen programma dat de app kan starten.');
+        const ocr = s.settings.get().ocr;
+        s.settings.update({ ocr: { ...ocr, [k === 'codex' ? 'codexPath' : 'claudeCodePath']: path, assistantsSearched: true } });
+        host.reconfigureLocalAi();
+        return path;
+      },
+      check: async (kind: string) => {
+        const k = cliKind(kind);
+        const cli = storedCli(k);
+        if (!cli || !host.checkCli) throw new Error('Zoek eerst Claude Code of Codex op deze computer.');
+        return host.checkCli(k, cli);
+      },
+      openLogin: async (kind: string) => {
+        const k = cliKind(kind);
+        const cli = storedCli(k);
+        if (!cli || !host.openLoginTerminal) throw new Error('Zoek eerst Claude Code of Codex op deze computer.');
+        return host.openLoginTerminal(k, cli);
+      },
+    },
+    /**
+     * Hoe mag de app bonnen lezen? Op deze computer (download), met de eigen Claude Code of Codex
+     * (foto gaat naar Anthropic/OpenAI), of niet (zelf invullen). Gevraagd bij de eerste foto.
+     */
+    reader: {
+      options: () => {
+        const { ocr } = s.settings.get();
+        const local = host.localOcr.status();
+        return {
+          current: ocr.engine === 'ingebouwd' || ocr.engine === 'claude-code' || ocr.engine === 'codex' ? ocr.engine : ocr.url ? 'eigen' : 'geen',
+          asked: ocr.askedReader,
+          local: { state: local.state, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS },
+          claudeCode: storedCli('claude-code'),
+          codex: storedCli('codex'),
+          searched: ocr.assistantsSearched,
+          unread: s.intake.unread().length,
+        };
+      },
+      choose: (choice: string) => {
+        if (!['lokaal', 'claude-code', 'codex', 'zelf'].includes(choice)) throw new Error('Onbekende keuze');
+        const ocr = s.settings.get().ocr;
+        if (choice === 'claude-code' || choice === 'codex') {
+          if (!storedCli(choice)) throw new Error(`${choice === 'codex' ? 'Codex' : 'Claude Code'} is (nog) niet gevonden. Klik eerst op "Zoek op deze computer" of "Kies zelf".`);
+          s.settings.update({ ocr: { ...ocr, engine: choice, url: '', askedReader: true } });
+        } else if (choice === 'lokaal') {
+          s.settings.update({ ocr: { ...ocr, engine: 'ingebouwd', url: '', askedReader: true } });
+          const st = host.localOcr.status();
+          if (st.state === 'niet-geinstalleerd' || st.state === 'fout') host.localOcr.install();
+        } else {
+          // zelf invullen: elke manier van lezen uit, ook een eerder gekozen assistent of eigen dienst
+          s.settings.update({ ocr: { ...ocr, engine: 'uit', url: '', askedReader: true } });
+        }
+        host.reconfigureLocalAi();
+        return s.settings.get();
+      },
+      /** bonnen die nog niet uitgelezen zijn, nu (opnieuw) laten lezen */
+      rereadPending: async () => {
+        let read = 0;
+        const docs = s.intake.unread();
+        for (const d of docs) {
+          // één bon die niet lukt (bv. bestand weg) houdt de rest niet tegen
+          try {
+            const after = await s.intake.reread(d.id, host.readAttachment(d.file_path));
+            if (after.extraction_source !== 'geen') read++;
+          } catch {
+            /* telt als niet gelezen; de bon blijft staan om zelf in te vullen */
+          }
+        }
+        return { read, total: docs.length };
+      },
+    },
+    /** vragen stellen over je boekhouding vanuit Claude Code of Codex (alleen lezen) */
+    assistant: {
+      info: () => {
+        const cmd = host.mcpCommand?.() ?? null;
+        return { command: cmd, claudeCode: storedCli('claude-code'), codex: storedCli('codex'), searched: s.settings.get().ocr.assistantsSearched };
+      },
+      connect: async (kind: string) => {
+        if (kind !== 'claude-code' && kind !== 'codex') throw new Error('Onbekend programma');
+        if (!host.connectMcp) throw new Error('Kan alleen in de app zelf');
+        const cli = storedCli(kind);
+        if (!cli) throw new Error('Zoek eerst Claude Code of Codex op deze computer.');
+        return host.connectMcp(kind, cli);
+      },
     },
     localOcr: {
       status: () => host.localOcr.status(),

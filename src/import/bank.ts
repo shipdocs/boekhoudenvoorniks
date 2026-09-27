@@ -21,6 +21,8 @@ export interface BankAccount {
   iban: string | null;
   account_id: number;
   rgs_code: string;
+  /** 1 = potje binnen de bank zonder eigen rekeningnummer (bv. Knab); daar komen geen afschriften van */
+  is_pot: number;
 }
 
 export interface BankTransaction {
@@ -137,7 +139,7 @@ export class BankService {
       // RGS: 'Rekening-courant bank - Naam A..E' (BLimBanRbb..f) voor extra rekeningen
       const rgsRef = n >= 1 && n <= 5 ? `BLimBanRb${String.fromCharCode(97 + n)}` : null;
       const ledgerAccount = n === 0 ? this.ledger.getAccount(ACCOUNTS.bank) : this.ledger.createAccount({ code: String(1100 + n), rgs, rgsRef, name: `Bank ${name}`, category: 'activa' });
-      const id = Number(this.db.prepare('INSERT INTO bank_accounts (name, iban, account_id) VALUES (?, ?, ?)').run(name, clean, ledgerAccount.id).lastInsertRowid);
+      const id = Number(this.db.prepare('INSERT INTO bank_accounts (name, iban, account_id, is_pot) VALUES (?, ?, ?, ?)').run(name, clean, ledgerAccount.id, clean ? 0 : 1).lastInsertRowid);
       return this.getAccount(id);
     });
   }
@@ -149,7 +151,11 @@ export class BankService {
     if (patch.name !== undefined && !patch.name.trim()) throw new ValidationError('Geef de rekening een naam');
     if (iban && this.listAccounts().some((a) => a.id !== id && a.iban === iban)) throw new ValidationError('Deze rekening staat er al in');
     if (patch.name !== undefined) patch = { ...patch, name: patch.name.trim() };
-    this.db.prepare('UPDATE bank_accounts SET name = ?, iban = ? WHERE id = ?').run(patch.name ?? current.name, iban === undefined ? current.iban : iban, id);
+    const name = patch.name ?? current.name;
+    if (this.listAccounts().some((a) => a.id !== id && a.name.toLowerCase() === name.toLowerCase())) throw new ValidationError('Er is al een rekening met deze naam');
+    const nextIban = iban === undefined ? current.iban : iban;
+    // krijgt een potje toch een rekeningnummer, dan is het een gewone rekening
+    this.db.prepare('UPDATE bank_accounts SET name = ?, iban = ?, is_pot = ? WHERE id = ?').run(name, nextIban, nextIban ? 0 : current.is_pot, id);
   }
 
   getAccount(id: number): BankAccount {
@@ -163,7 +169,7 @@ export class BankService {
     if (iban) {
       const match = accounts.find((a) => a.iban === iban);
       if (match) return match;
-      const unassigned = accounts.find((a) => !a.iban);
+      const unassigned = accounts.find((a) => !a.iban && !a.is_pot);
       if (unassigned) {
         this.db.prepare('UPDATE bank_accounts SET iban = ? WHERE id = ?').run(iban, unassigned.id);
         return { ...unassigned, iban };
