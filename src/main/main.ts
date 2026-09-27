@@ -373,6 +373,13 @@ async function backgroundTasks(): Promise<void> {
     console.error('Afschrijving boeken mislukt', e);
   }
   try {
+    // bonnen van vóór 0.3.9 die nog gecontroleerd moeten worden en in bv. dollars zijn (#74): nog niets
+    // geboekt, dus gewoon opnieuw beoordelen; geboekte aankopen rekent de gebruiker zelf om
+    await services.fxRepair.fixDocuments(undefined, { needRate: true });
+  } catch (e) {
+    console.error('Bonnen in een andere munt omrekenen mislukt', e);
+  }
+  try {
     const r = services.inbox.autoProcess();
     if (r.matched + r.booked > 0) emit('auto-processed', r);
   } catch (e) {

@@ -4,7 +4,9 @@ import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInp
 import { today } from '../../shared/dates';
 import type { PurchaseVatCode } from '../../shared/vat';
 import { mightBeInvestment, netAmount } from '../../shared/investment';
-import { formatForeign } from '../../shared/currency';
+import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
+import { formatDateNl } from '../../shared/dates';
+import type { FxCandidate } from '../../fx/repair';
 import { CategoryChips } from './Categories';
 
 export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
@@ -15,6 +17,9 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const [manual, setManual] = useState(false);
   const [pay, setPay] = useState<number | null>(payInitial ?? null);
   const [uploading, setUploading] = useState(0);
+  // vreemde valuta (#74): een aankoop omrekenen (uit de lijst van de app, of met de hand)
+  const [fx, setFx] = useState<{ id: number; fromDocument: boolean } | null>(null);
+  const foreign = useLoad(() => api.valuta.candidates());
 
   const upload = async (file: File) => {
     setUploading((n) => n + 1);
@@ -63,6 +68,14 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
         </>
       )}
 
+      {foreign.data && (foreign.data.purchases.length > 0 || foreign.data.documents > 0) && (
+        <ForeignRepair
+          data={foreign.data}
+          onOpen={(id) => setFx({ id, fromDocument: true })}
+          onDone={async () => { await foreign.reload(); await docs.reload(); await purchases.reload(); }}
+        />
+      )}
+
       <h2>Aankopen</h2>
       {(purchases.data ?? []).length === 0 ? (
         <Empty icon="🧾" title="Nog geen aankopen">Bonnetjes die je hier toevoegt worden automatisch verwerkt, inclusief btw die je terugkrijgt.</Empty>
@@ -84,6 +97,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                 <td onClick={(e) => e.stopPropagation()}>
                   <span className="row">
                     {p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}
+                    {!p.currency && <Button small kind="ghost" title="Was deze bon in dollars of een andere munt? Dan reken je hem hier om naar euro's." ariaLabel="Omrekenen uit een andere munt" onClick={() => setFx({ id: p.id, fromDocument: false })}>💱</Button>}
                     <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={async () => {
                       const v = prompt('Hoeveel maanden garantie? (leeg = geen)', p.warranty_months ? String(p.warranty_months) : '24');
                       if (v === null) return;
@@ -101,7 +115,125 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
       )}
       {manual && <ManualExpense onClose={() => setManual(false)} onDone={async () => { setManual(false); await purchases.reload(); }} />}
       {pay !== null && <PayModal id={pay} onClose={() => setPay(null)} />}
+      {fx && <ForeignModal purchaseId={fx.id} fromDocument={fx.fromDocument} onClose={() => setFx(null)} onDone={async () => { setFx(null); await foreign.reload(); await purchases.reload(); }} />}
     </div>
+  );
+}
+
+/**
+ * Vreemde valuta in wat er al stond (#74): oudere versies lazen "$ 90,00" als € 90,00. Hier zie je
+ * welke aankopen dat zijn, en reken je ze om (één voor één, of alles in één keer).
+ */
+function ForeignRepair({ data, onOpen, onDone }: { data: { purchases: FxCandidate[]; documents: number }; onOpen: (id: number) => void; onDone: () => Promise<void> }) {
+  const { toast } = useApp();
+  const { run, busy } = useAction();
+  const n = data.purchases.length;
+  return (
+    <div className="notice warn" role="note" style={{ marginTop: 16 }}>
+      <strong>{n + data.documents === 1 ? 'Een bon in dollars (of een andere munt) staat als euro\'s in je boekhouding' : `${n + data.documents} bonnen in dollars (of een andere munt) staan als euro's in je boekhouding`}</strong>
+      <div className="small" style={{ marginTop: 4 }}>
+        Een oudere versie van de app las bv. "$ 90,00" als € 90,00. De app rekent ze om naar wat er echt van je rekening is afgeschreven, en koppelt de betaling. Staat de betaling al als kosten geboekt, dan was de aankoop dubbel: die haalt de app weg en de bon komt bij de betaling.
+      </div>
+      {n > 0 && (
+        <table className="list" style={{ marginTop: 8 }}>
+          <tbody>
+            {data.purchases.map((c) => (
+              <tr key={c.purchaseId}>
+                <td><DateNl date={c.date} /></td>
+                <td>{c.supplier ?? c.description}</td>
+                <td className="num">{formatForeign(c.foreignTotal, c.currency)} op de bon</td>
+                <td className="num">geboekt als <Euro cents={c.bookedTotal} /></td>
+                <td><Button small onClick={() => onOpen(c.purchaseId)}>Nakijken</Button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {data.documents > 0 && <div className="small" style={{ marginTop: 8 }}>{data.documents === 1 ? 'Eén bon die je nog moet controleren wordt' : `${data.documents} bonnen die je nog moet controleren worden`} ook omgerekend. Daarna controleer je ze zoals altijd.</div>}
+      <div className="row" style={{ marginTop: 8 }}>
+        <Button kind="primary" small disabled={busy} onClick={async () => {
+          const r = await run(() => api.valuta.fixAll());
+          if (!r) return;
+          const done = [r.purchases > 0 && `${r.purchases} omgerekend`, r.duplicates > 0 && `${r.duplicates} dubbele weggehaald`, r.documents > 0 && `${r.documents} ${r.documents === 1 ? 'bon' : 'bonnen'} opnieuw gelezen`].filter(Boolean).join(', ');
+          if (done) toast(`${done} ✓`);
+          if (r.open.length > 0) toast(`${r.open.length} ${r.open.length === 1 ? 'kon' : 'konden'} niet vanzelf: ${r.open[0]!.reason}`, 'error');
+          await onDone();
+        }}>Alles omrekenen</Button>
+      </div>
+    </div>
+  );
+}
+
+/** Eén aankoop omrekenen: wat er stond, wat het wordt en waarom; het bedrag in euro's kun je aanpassen. */
+function ForeignModal({ purchaseId, fromDocument, onClose, onDone }: { purchaseId: number; fromDocument: boolean; onClose: () => void; onDone: () => Promise<void> }) {
+  const { run, busy } = useAction();
+  const [currency, setCurrency] = useState('USD');
+  const [foreignTotal, setForeignTotal] = useState<number | null>(null);
+  const [asked, setAsked] = useState<{ currency: string; foreignTotal: number } | null>(null);
+  const [euro, setEuro] = useState<number | null>(null);
+  const preview = useLoad(async () => {
+    if (!fromDocument && !asked) return null;
+    const p = await api.valuta.preview(purchaseId, fromDocument ? undefined : asked!);
+    setEuro(p.euroTotal);
+    return p;
+  }, [purchaseId, asked]);
+  const p = preview.data;
+  const name = (c: string) => CURRENCY_NAMES[c]?.name ?? c;
+  return (
+    <Modal title="Omrekenen naar euro's" onClose={onClose}>
+      <div className="grid">
+        {!fromDocument && (
+          <>
+            <p className="small">Was deze aankoop in dollars of een andere munt? Vul in wat er op de bon staat; de app zoekt de betaling op je rekening.</p>
+            <div className="grid cols-2">
+              <Field label="Munt op de bon">
+                <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                  {Object.entries(CURRENCY_NAMES).filter(([c]) => c !== 'EUR').map(([c, v]) => <option key={c} value={c}>{v.symbol} — {v.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Bedrag op de bon"><MoneyInput value={foreignTotal} onChange={setForeignTotal} /></Field>
+            </div>
+            <div className="row"><Button disabled={!foreignTotal} onClick={() => setAsked({ currency, foreignTotal: foreignTotal! })}>Bereken</Button></div>
+          </>
+        )}
+        <ErrorBox error={preview.error} />
+        {p && (
+          <>
+            <p>
+              <strong>{p.supplier ?? p.description}</strong> · <DateNl date={p.date} /><br />
+              Op de bon: <strong>{formatForeign(p.foreignTotal, p.currency)}</strong> ({name(p.currency)}). Nu geboekt als <Euro cents={p.bookedTotal} />.
+            </p>
+            {p.alreadyBooked ? (
+              <div className="notice small">
+                De betaling van <strong><Euro cents={p.alreadyBooked.amount} /></strong> op {formatDateNl(p.alreadyBooked.date)} staat al als kosten in je boekhouding. Deze aankoop is dus dubbel: de app haalt hem weg en bewaart de bon als bewijsstuk bij die betaling.
+              </div>
+            ) : (
+              <>
+                {p.source && <div className="notice small">
+                  {p.source === 'bank' && p.linkedPayment && <>Van je rekening is <strong><Euro cents={p.euroTotal} /></strong> afgeschreven. Dat bedrag komt in de boekhouding, en de aankoop staat daarmee op betaald.</>}
+                  {p.source === 'bank' && !p.linkedPayment && <>Op je rekening staat een afschrijving van <strong><Euro cents={p.euroTotal} /></strong> die hierbij hoort. Dat bedrag komt in de boekhouding, en de app koppelt de betaling meteen.</>}
+                  {p.source === 'ecb' && <>Nog geen betaling gevonden. Omgerekend met de koers van de Europese Centrale Bank: <strong><Euro cents={p.euroTotal} /></strong>. Komt de betaling later op de bank, dan koppelt de app hem en boekt hij een klein verschil als koersverschil.</>}
+                  {p.rate && <> (1 euro = {p.rate.toLocaleString('nl-NL', { maximumFractionDigits: 4 })} {name(p.currency)})</>}
+                </div>}
+                <Field label="Bedrag in euro's" hint="zoals het van je rekening is afgeschreven"><MoneyInput value={euro} onChange={setEuro} /></Field>
+              </>
+            )}
+            {p.blocker && <div className="notice warn small">{p.blocker}</div>}
+            <p className="small muted">De oude boeking krijgt een tegenboeking en de nieuwe komt ervoor in de plaats. Is de btw-aangifte van dat kwartaal al gedaan? Dan gaat het verschil vanzelf mee in je volgende aangifte.</p>
+          </>
+        )}
+      </div>
+      <div className="row end" style={{ marginTop: 16 }}>
+        <Button onClick={onClose}>Annuleren</Button>
+        <Button kind="primary" disabled={busy || !p || (!p.alreadyBooked && !euro) || (!!p.blocker && !(p.euroTotal === null && euro))} onClick={async () => {
+          const r = await run(
+            () => api.valuta.apply(purchaseId, { currency: p!.currency, foreignTotal: p!.foreignTotal, euroTotal: p!.alreadyBooked ? p!.alreadyBooked.amount : euro!, bankTransactionId: p!.bankTransactionId, alreadyBookedBankTransactionId: p!.alreadyBooked?.bankTransactionId ?? null }),
+            p!.alreadyBooked ? 'Dubbele aankoop weggehaald ✓' : 'Omgerekend ✓',
+          );
+          if (r) await onDone();
+        }}>{p?.alreadyBooked ? 'Weghalen' : 'Omrekenen'}</Button>
+      </div>
+    </Modal>
   );
 }
 
