@@ -97,9 +97,9 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px sol
 textarea { min-height: 70px; resize: vertical; }
 input.num { text-align: right; font-variant-numeric: tabular-nums; }
 .choice { display: flex; flex-direction: column; gap: 8px; }
-.choice button { text-align: left; border: 1px solid var(--border); background: var(--surface); padding: 12px 14px; border-radius: 10px; cursor: pointer; }
-.choice button:hover { border-color: var(--primary); }
-.choice button.selected { border-color: var(--primary); background: var(--primary-soft); font-weight: 600; }
+.choice > button { text-align: left; border: 1px solid var(--border); background: var(--surface); padding: 12px 14px; border-radius: 10px; cursor: pointer; }
+.choice > button:hover { border-color: var(--primary); }
+.choice > button.selected { border-color: var(--primary); background: var(--primary-soft); font-weight: 600; }
 .choice .hint { color: var(--muted); font-size: 13px; font-weight: 400; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chips button { border: 1px solid var(--border); background: var(--surface); padding: 8px 14px; border-radius: 99px; cursor: pointer; }

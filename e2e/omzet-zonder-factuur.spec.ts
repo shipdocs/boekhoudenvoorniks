@@ -13,11 +13,11 @@ test('omzet via Mollie van een Zwitserse klant: 0% voorgesteld, factuurnummer be
   const row = page.locator('table.list tbody tr', { hasText: /BURANDO/ }).first();
   await expect(row).toBeVisible();
   await row.click();
-  await page.getByRole('button', { name: /Omzet zonder factuur in deze app/ }).click();
-  await expect(page.locator('label.field', { hasText: 'Welke btw' }).locator('select')).toHaveValue('export');
+  await page.getByRole('button', { name: /Ik heb iets verkocht/ }).click();
+  await expect(page.locator('label.field', { hasText: 'Hoeveel btw' }).locator('select')).toHaveValue('export');
   await expect(page.getByText(/Voorstel omdat Burando Shipping zit in het buitenland/)).toBeVisible();
-  await expect(page.locator('label.field', { hasText: 'Factuurnummer' }).locator('input')).toHaveValue('I-MOL-2026-00344');
-  await page.getByRole('button', { name: 'Verwerk als omzet' }).click();
+  await expect(page.locator('label.field', { hasText: 'Nummer van de factuur' }).locator('input')).toHaveValue('I-MOL-2026-00344');
+  await page.getByRole('button', { name: 'Verwerk als verkoop' }).click();
   await expect(page.getByText('Verwerkt ✓').last()).toBeVisible();
 
   const r = await call<{ rubrieken: { code: string; omzet: number | null; btw: number | null }[] }>(page, 'vat.calculate', '2026-Q3');

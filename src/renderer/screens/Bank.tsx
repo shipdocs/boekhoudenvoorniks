@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
 import type { CsvMapping } from '../../import/csv';
@@ -279,7 +279,7 @@ export function CategoryPicker({ initial, onPick, incoming, amount }: { initial?
 }
 
 /**
- * Omzet zonder factuur in deze app (contant, pin, Mollie, webshop): kies de btw. De app stelt een
+ * "Ik heb iets verkocht" zonder factuur uit deze app (Mollie, webshop, pin, contant): kies de btw. De app stelt een
  * tarief voor op basis van de klant of het land van de rekening; bij een klant buiten Nederland is
  * dat vaak 0%.
  */
@@ -293,22 +293,22 @@ function SaleWithoutInvoice({ txId, amount, description, busy, onBook }: { txId:
   const rate = meta.salesVat.find((v) => v.code === vat);
   const net = Math.round((amount * 100) / (100 + (rate?.percentage ?? 0)));
   return (
-    <div className="card" style={{ marginTop: 12 }}>
-      <Field label="Factuurnummer (mag leeg)" hint="van de factuur die je klant kreeg, bv. uit Mollie of je webshop; zo vindt je boekhouder hem terug">
+    <div className="card grid" style={{ gridTemplateColumns: 'minmax(0, 1fr)', margin: 0 }}>
+      <Field label="Nummer van de factuur of bon, als je die hebt" hint="staat vaak al in de omschrijving van de bank; zo vindt je boekhouder hem terug">
         <input value={number} maxLength={60} onChange={(e) => setNumber(e.target.value)} />
       </Field>
-      <Field label="Welke btw hoort hierbij?" hint="kijk op de factuur of bon die je klant kreeg (bv. uit Mollie of je webshop)">
+      <Field label="Hoeveel btw rekende je?" hint="kijk op de factuur of bon die je klant kreeg">
         <select value={vat} onChange={(e) => setPicked(e.target.value)}>
           {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
         </select>
       </Field>
-      {hint.error && !picked && <p className="small">Er is geen voorstel. Kies zelf de btw die op de factuur staat.</p>}
-      {hint.data?.reason && !picked && <p className="small muted">Voorstel omdat {hint.data.reason}. Stond er op de factuur toch btw? Kies dan dat tarief.</p>}
-      <p className="small">Omzet <Euro cents={net} />{amount - net !== 0 && <> + btw <Euro cents={amount - net} /></>}</p>
+      {hint.error && !picked && <p className="small" style={{ margin: 0 }}>Er is geen voorstel. Kies zelf de btw die op de factuur staat.</p>}
+      {hint.data?.reason && !picked && <p className="small muted" style={{ margin: 0 }}>Voorstel omdat {hint.data.reason}. Stond er op de factuur toch btw? Kies dan dat tarief.</p>}
+      <p className="small" style={{ margin: 0 }}>Omzet <Euro cents={net} />{amount - net !== 0 && <> + btw <Euro cents={amount - net} /></>}</p>
       {vat !== 'hoog' && vat !== 'laag' && (
-        <p className="small muted">Geen Nederlandse btw? Laat je boekhouder even meekijken of dat klopt voor wat je levert.</p>
+        <p className="small muted" style={{ margin: 0 }}>Geen Nederlandse btw? Laat je boekhouder even meekijken of dat klopt voor wat je levert.</p>
       )}
-      <div className="row end"><Button kind="primary" disabled={busy || hint.loading || (Boolean(hint.error) && !picked)} onClick={() => onBook(vat, hint.data?.relationId ?? null, number.trim() ? `Factuur ${number.trim()}${description.includes(number.trim()) ? '' : ` · ${description}`}` : description)}>Verwerk als omzet</Button></div>
+      <div className="row end"><Button kind="primary" disabled={busy || hint.loading || (Boolean(hint.error) && !picked)} onClick={() => onBook(vat, hint.data?.relationId ?? null, number.trim() ? `Factuur ${number.trim()}${description.includes(number.trim()) ? '' : ` · ${description}`}` : description)}>Verwerk als verkoop</Button></div>
     </div>
   );
 }
@@ -400,19 +400,25 @@ export function CategorizeTransaction({ id }: { id: number }) {
                 </Field>
               )}
               <div className="choice" style={{ marginTop: 12 }}>
-                {meta.otherDestinations.filter((d) => ['prive-storting', 'omzet', 'btw', 'overboeking', 'onbekend'].includes(d.key)).map((d) => (
-                  <button key={d.key} disabled={busy} className={d.key === 'omzet' && sale ? 'selected' : ''} onClick={() => (d.key === 'omzet' ? setSale(!sale) : void done(api.bank.book(t.id, { account: d.account })))}>{d.label}</button>
+                {['omzet', 'prive-storting', 'btw', 'overboeking', 'onbekend'].map((key) => meta.otherDestinations.find((d) => d.key === key)!).map((d) => (
+                  <Fragment key={d.key}>
+                    <button disabled={busy} className={d.key === 'omzet' && sale ? 'selected' : ''} aria-expanded={d.key === 'omzet' ? sale : undefined} onClick={() => (d.key === 'omzet' ? setSale(!sale) : void done(api.bank.book(t.id, { account: d.account })))}>
+                      {d.label}
+                      {'hint' in d && d.hint && <div className="hint">{d.hint}</div>}
+                    </button>
+                    {/* direct onder de knop, niet onderaan na alle andere keuzes */}
+                    {d.key === 'omzet' && sale && (
+                      <SaleWithoutInvoice
+                        txId={t.id}
+                        amount={t.amount}
+                        description={t.description ?? ''}
+                        busy={busy}
+                        onBook={(vatCode, relationId, description) => void done(api.bank.book(t.id, { account: d.account, vatCode, relationId, description }))}
+                      />
+                    )}
+                  </Fragment>
                 ))}
               </div>
-              {sale && (
-                <SaleWithoutInvoice
-                  txId={t.id}
-                  amount={t.amount}
-                  description={t.description ?? ''}
-                  busy={busy}
-                  onBook={(vatCode, relationId, description) => void done(api.bank.book(t.id, { account: meta.otherDestinations.find((d) => d.key === 'omzet')!.account, vatCode, relationId, description }))}
-                />
-              )}
             </>
           ) : (
             <>

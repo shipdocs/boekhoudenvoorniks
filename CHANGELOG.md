@@ -2,11 +2,12 @@
 
 ## Nog niet uitgebracht
 
-- **Omzet zonder factuur in deze app (contant, pin, Mollie, webshop)**: je kiest nu zelf de btw. Voorheen was
-  dit altijd 21%, ook bij een klant in het buitenland. De app doet een voorstel op basis van de klant (herkend
-  op IBAN of naam) of het land van de rekening; bij een klant buiten de EU is dat 0%. Het bedrag komt dan in
-  de juiste rubriek van de aangifte. Je kunt ook het factuurnummer invullen, bv. uit Mollie; de app haalt het
-  zo mogelijk al uit de omschrijving van de bank.
+- **"Ik heb iets verkocht"** (bij geld dat binnenkomt; heette "Omzet zonder factuur (contant/pin)"): voor een
+  klant die je betaalde via Mollie, je webshop, pin of contant, of voor een factuur die je ergens anders maakte.
+  Je kiest nu zelf de btw; voorheen was dit altijd 21%, ook bij een klant in het buitenland. De app doet een
+  voorstel op basis van de klant (herkend op IBAN of naam) of het land van de rekening; bij een klant buiten de
+  EU is dat 0%. Het bedrag komt dan in de juiste rubriek van de aangifte. Het nummer van de factuur of bon kun
+  je erbij zetten; de app haalt het zo mogelijk al uit de omschrijving van de bank.
 
 ## 0.3.6 — automatisch bijwerken, zichtbaar en uit te zetten
 
