@@ -1,5 +1,11 @@
 # Wijzigingen
 
+## 0.6.10 — voortgang bij updates, menubalk uit het zicht
+
+### Techniek
+- **Voortgangsbalk bij het downloaden van een update**: bovenin verschijnt een balk met het percentage zodra de app een nieuwe versie op de achtergrond binnenhaalt. Voorheen kwam er pas een melding zodra de update helemaal klaarstond, en was tussentijds niet te zien of er iets gebeurde.
+- **Menubalk van het venster** (Bestand/Bewerken/Beeld/Venster) staat voortaan standaard uit het zicht; op Windows en Linux verschijnt hij tijdelijk met de Alt-toets.
+
 ## 0.6.9 — Mollie Facturen inlezen
 
 ### Koppelingen
