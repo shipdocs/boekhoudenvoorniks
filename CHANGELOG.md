@@ -9,6 +9,10 @@
 - **Geld terug van een aankoop (refund)**: kies de categorie en btw van de oorspronkelijke aankoop; de app verlaagt je kosten en de btw die je terugkreeg. Was het een privé-aankoop, dan boekt de app het als privé.
 
 ### Vandaag
+- **Zien waar een vraag over gaat**: bij een bon op Vandaag klik je op de naam en zie je de bon zelf, en bij een mogelijk dubbele bon de andere ernaast. Bij een aankoop (investering, klus) zie je de aankoop met een knop om de bon te openen. Bij een betaling die aan een factuur of aankoop gekoppeld wordt, zie je die factuur met datum, bedrag, wat nog open staat en het verschil.
+- **Uitzoeken** bij geld dat binnenkwam opent meteen het scherm om de betaling in te delen, niet de hele banklijst.
+- Een verlopen offerte noemt nummer, datum, bedrag en geldigheid, met een knop **Bekijken**. Bij een vaste last zie je welke betalingen de app zag en wanneer de laatste was; bij "voortaan automatisch" de laatste betalingen.
+- Uitleg bij elke keuze bij de bank (btw, overboeking, privé, weet ik nog niet, negeren), bij de gekozen categorie en bij "Stond er btw op?". Bij het indelen van een betaling zie je alle gegevens van de bank en eerdere betalingen aan dezelfde partij.
 - **Betaling bekijken**: klik op de naam van een betaling in de lijst (bv. "PAYPAL EUROPE … € 13,11") en je ziet alles wat de bank erover gaf: datum, tegenpartij, rekeningnummer, de volledige omschrijving en het kenmerk. Eronder staan eerdere betalingen aan dezelfde partij en hoe je die verwerkte. Vanuit dat venster kies je meteen zakelijk of privé.
 
 ### Overstappen

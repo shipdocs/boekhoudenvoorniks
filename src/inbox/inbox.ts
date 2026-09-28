@@ -571,9 +571,9 @@ export class InboxService {
         kind: 'quote-expired',
         icon: '📄',
         title: `Offerte ${q.relation_name} is verlopen`,
-        question: 'Heeft de klant ja gezegd?',
+        question: `Offerte ${q.number} van ${formatDateNl(q.quote_date)}${q.total ? `, ${formatEuro(q.total)}` : ''}, was geldig tot ${formatDateNl(q.valid_until)}. Heeft de klant ja gezegd?`,
         amount: q.total,
-        actions: [{ id: 'akkoord', label: 'Ja, akkoord', primary: true }, { id: 'afgewezen', label: 'Nee' }],
+        actions: [{ id: 'akkoord', label: 'Ja, akkoord', primary: true }, { id: 'afgewezen', label: 'Nee' }, { id: 'open', label: 'Bekijken' }],
         ref: { quoteId: q.id },
       });
     }
@@ -624,6 +624,7 @@ export class InboxService {
     for (const series of this.recurring.list()) {
       const label = `${formatEuro(series.amount)} per ${series.interval}`;
       if (series.status === 'voorgesteld') {
+        const seen = this.recurring.state(series, asOf).payments.slice(-4).reverse();
         tasks.push({
           key: `recurring-${series.id}`,
           kind: 'recurring-confirm',
@@ -632,6 +633,7 @@ export class InboxService {
           question: `Ongeveer ${label}. Als vaste last letten we erop dat de factuur en de betaling elke keer binnenkomen.`,
           actions: [{ id: 'ja', label: 'Ja, vaste last', primary: true }, { id: 'nee', label: 'Nee' }],
           priority: 3,
+          why: seen.length ? `Omdat we deze betalingen zagen: ${seen.map((p) => `${formatDateNl(p.transaction_date)} ${formatEuro(Math.abs(p.amount))}`).join(', ')}.` : undefined,
           ref: { seriesId: series.id },
         });
         continue;
@@ -646,7 +648,7 @@ export class InboxService {
             kind: 'recurring-stopped',
             icon: '🔁',
             title: `Is ${series.counter_name} gestopt?`,
-            question: `De laatste ${st.missed.length} verwachte betalingen (${label}) zijn niet van je rekening gegaan.`,
+            question: `De laatste ${st.missed.length} verwachte betalingen (${label}) zijn niet van je rekening gegaan.${st.lastSeen ? ` De laatste betaling die we zagen was op ${formatDateNl(st.lastSeen)}.` : ''}`,
             actions: [{ id: 'ja', label: 'Ja, gestopt', primary: true }, { id: 'nee', label: 'Nee, loopt nog' }],
             ref: { seriesId: series.id },
           });
@@ -763,6 +765,10 @@ export class InboxService {
         title: `${rule.display_name} is bij jou altijd ${label}`,
         question: `Je koos dit al ${rule.confirmations} keer. Wil je dat de app dit voortaan zelf doet? Je ziet het terug op Vandaag en kunt het altijd terugdraaien.`,
         actions: [{ id: 'ja', label: 'Ja, voortaan automatisch', primary: true }, { id: 'nee', label: 'Nee, blijf het vragen' }],
+        why: (() => {
+          const recent = this.bank.list({ search: rule.display_name, limit: 5 }).filter((b) => b.status === 'gematcht');
+          return recent.length ? `De laatste betalingen: ${recent.map((b) => `${formatDateNl(b.transaction_date)} ${formatEuro(Math.abs(b.amount))}`).join(', ')}. Zat daar iets privé tussen, kies dan "Nee".` : undefined;
+        })(),
         ref: { supplierKey: rule.supplier_key },
       });
     }

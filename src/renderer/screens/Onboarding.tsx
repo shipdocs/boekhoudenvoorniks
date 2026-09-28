@@ -208,7 +208,7 @@ export function Onboarding() {
               <Field label="Btw-identificatienummer" hint="staat op je brief van de Belastingdienst: begint met NL, eindigt op B01 of B02">
                 <input value={company.vatNumber} onChange={(e) => setCompany({ ...company, vatNumber: e.target.value })} placeholder="NL123456789B01" />
               </Field>
-              <Field label="Hoe vaak doe je aangifte?">
+              <Field label="Hoe vaak doe je aangifte?" hint="staat op je brief van de Belastingdienst of in Mijn Belastingdienst Zakelijk; weet je het niet, dan is het bijna altijd per kwartaal">
                 <select value={vatPeriod} onChange={(e) => setVatPeriod(e.target.value as typeof vatPeriod)}>
                   <option value="kwartaal">Per kwartaal (meest gebruikelijk)</option>
                   <option value="maand">Per maand</option>

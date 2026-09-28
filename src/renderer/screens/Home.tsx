@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, Modal, readAsBytes, useAction, useApp, useLoad } from '../ui';
 import type { Task } from '../../inbox/inbox';
@@ -8,6 +8,10 @@ import { CategoryPicker } from './Bank';
 import { investmentInfo } from './Purchases';
 import { hasOnboardingUpdate } from '../../shared/onboarding';
 import { CheckLines } from './CheckLines';
+import { PaymentDetails } from './PaymentDetails';
+
+// bon bekijken: pas laden als je er een opent (PDF.js is groot)
+const DocumentPreview = lazy(() => import('./DocumentReview').then((m) => ({ default: m.DocumentPreview })));
 
 export function Home() {
   const { go, settings, refreshBadge, toast, showInvestmentSaved } = useApp();
@@ -50,6 +54,7 @@ export function Home() {
     if (r && 'navigate' in r && r.navigate) {
       if (r.navigate.screen === 'categorie') return setPicking(task);
       if (r.navigate.screen === 'klus-kiezen') return setPickingJob(task);
+      if (r.navigate.screen === 'betaling') return go({ screen: 'categorie', id: r.navigate.id });
       if (r.navigate.screen === 'bewijs') {
         evidenceFor.current = r.navigate.id as number;
         return evidenceInput.current?.click();
@@ -170,8 +175,8 @@ export function Home() {
               <div className="icon" aria-hidden>{t.icon}</div>
               <div className="grow">
                 <div className="title">
-                  {t.ref.bankTransactionId ? (
-                    <button className="linklike title-link" title="Bekijk alle gegevens van deze betaling" onClick={() => setViewing(t)}>{t.title}</button>
+                  {t.ref.bankTransactionId || t.ref.documentId || t.ref.purchaseId ? (
+                    <button className="linklike title-link" title={t.ref.documentId && !t.ref.bankTransactionId ? 'Bekijk de bon' : 'Bekijk alle gegevens van deze betaling'} onClick={() => setViewing(t)}>{t.title}</button>
                   ) : t.title}
                 </div>
                 <div className="q">
@@ -235,6 +240,32 @@ export function Home() {
         </Modal>
       )}
 
+      {viewing && !viewing.ref.bankTransactionId && viewing.ref.documentId && (
+        <Modal title="Bon bekijken" wide onClose={() => setViewing(null)}>
+          <Suspense fallback={<p className="muted">Laden…</p>}>
+            <DocumentPreview id={viewing.ref.documentId} />
+          </Suspense>
+          <div className="q" style={{ marginTop: 12 }}>{viewing.question}</div>
+          <div className="row end" style={{ marginTop: 8 }}>
+            <Button onClick={() => setViewing(null)}>Later</Button>
+            {viewing.actions.map((a) => (
+              <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={async () => { const t = viewing; setViewing(null); await act(t, a.id); }}>{a.label}</Button>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {viewing && !viewing.ref.bankTransactionId && !viewing.ref.documentId && viewing.ref.purchaseId && (
+        <Modal title="Aankoop bekijken" onClose={() => setViewing(null)}>
+          <PurchaseInfo purchaseId={viewing.ref.purchaseId} />
+          <div className="q" style={{ marginTop: 12 }}>{viewing.question}</div>
+          <div className="row end" style={{ marginTop: 8 }}>
+            <Button onClick={() => setViewing(null)}>Later</Button>
+            {viewing.actions.map((a) => (
+              <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={async () => { const t = viewing; setViewing(null); await act(t, a.id); }}>{a.label}</Button>
+            ))}
+          </div>
+        </Modal>
+      )}
       {viewing && viewing.ref.bankTransactionId && (
         <PaymentModal
           task={viewing}
@@ -251,6 +282,12 @@ export function Home() {
       {picking && (
         <Modal title="Waar was deze betaling voor?" onClose={() => setPicking(null)}>
           <p className="muted">{picking.title}</p>
+          {picking.ref.bankTransactionId && (
+            <details className="small" style={{ marginBottom: 10 }}>
+              <summary>Alle gegevens van deze betaling</summary>
+              <PaymentDetails txId={picking.ref.bankTransactionId} />
+            </details>
+          )}
           <CategoryPicker
             amount={picking.amount !== undefined ? Math.abs(picking.amount) : undefined}
             initial={picking.ref.categoryKey}
@@ -366,51 +403,37 @@ function GettingStarted() {
 
 /** Eén betaling met alles wat de bank erover gaf, zodat je kunt beoordelen wat het was. */
 function PaymentModal({ task, txId, busy, onClose, onAct }: { task: Task; txId: number; busy: boolean; onClose: () => void; onAct: (actionId: string) => Promise<void> }) {
-  const { data, error } = useLoad(() => api.bank.details(txId), [txId]);
-  const t = data?.transaction;
   return (
     <Modal title="Betaling bekijken" onClose={onClose}>
-      <ErrorBox error={error} />
-      {t && data && (
-        <>
-          <table className="list details"><tbody>
-            <tr><th>Datum</th><td>{formatDateNl(t.transaction_date)}</td></tr>
-            <tr><th>Bedrag</th><td><Euro cents={t.amount} /> {t.amount < 0 ? '(afgeschreven)' : '(bijgeschreven)'}</td></tr>
-            <tr><th>{t.amount < 0 ? 'Aan' : 'Van'}</th><td>{t.counter_name ?? <span className="muted">onbekend</span>}</td></tr>
-            <tr><th>Rekeningnummer</th><td>{t.counter_iban ?? <span className="muted">niet meegegeven door de bank</span>}</td></tr>
-            <tr><th>Omschrijving</th><td style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{t.description || <span className="muted">geen</span>}</td></tr>
-            {t.reference && <tr><th>Kenmerk</th><td>{t.reference}</td></tr>}
-            <tr><th>Rekening</th><td>{data.account.name}{data.account.iban ? ` · ${data.account.iban}` : ''}</td></tr>
-          </tbody></table>
-
-          <h3>Eerder {t.amount < 0 ? 'aan' : 'van'} {t.counter_name ?? 'deze partij'}</h3>
-          {data.history.length === 0 ? (
-            <p className="muted small">Geen eerdere betalingen gevonden.</p>
-          ) : (
-            <table className="list"><tbody>
-              {data.history.map((h) => (
-                <tr key={h.id}>
-                  <td>{formatDateNl(h.date)}</td>
-                  <td style={{ textAlign: 'right' }}><Euro cents={h.amount} /></td>
-                  <td>{h.how}<div className="small muted">{h.description.length > 90 ? `${h.description.slice(0, 90)}…` : h.description}</div></td>
-                </tr>
-              ))}
-            </tbody></table>
-          )}
-          <p className="small muted">
+      <PaymentDetails txId={txId} proposal={{ invoiceId: task.ref.invoiceId, purchaseId: task.ref.purchaseId }} />
+      <p className="small muted">
             Weet je het nog steeds niet? Zoek de factuur of het bonnetje op in je mail of bij de leverancier (bij PayPal: in je PayPal-overzicht op dezelfde datum en hetzelfde bedrag).
             Alle betalingen staan ook bij <strong>Bank</strong>.
-          </p>
-
-          <div className="q" style={{ marginTop: 12 }}>{task.question}</div>
-          <div className="row end" style={{ marginTop: 8 }}>
-            <Button onClick={onClose}>Later</Button>
-            {task.actions.map((a) => (
-              <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={() => void onAct(a.id)}>{a.label}</Button>
-            ))}
-          </div>
-        </>
-      )}
+      </p>
+      <div className="q" style={{ marginTop: 12 }}>{task.question}</div>
+      <div className="row end" style={{ marginTop: 8 }}>
+        <Button onClick={onClose}>Later</Button>
+        {task.actions.map((a) => (
+          <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={() => void onAct(a.id)}>{a.label}</Button>
+        ))}
+      </div>
     </Modal>
+  );
+}
+
+/** Een aankoop met de bon, om te beoordelen of het een investering is of bij een klus hoort. */
+function PurchaseInfo({ purchaseId }: { purchaseId: number }) {
+  const { data, error } = useLoad(() => api.bank.proposal({ purchaseId }), [purchaseId]);
+  if (!data) return <ErrorBox error={error} />;
+  return (
+    <>
+      <table className="list details"><tbody>
+        <tr><th>Leverancier</th><td>{data.relation ?? 'onbekend'}{data.number ? ` · ${data.number}` : ''}</td></tr>
+        <tr><th>Datum</th><td>{formatDateNl(data.date)}</td></tr>
+        <tr><th>Bedrag</th><td><Euro cents={data.total} /></td></tr>
+        {'description' in data && data.description && <tr><th>Omschrijving</th><td style={{ whiteSpace: 'pre-wrap' }}>{data.description}</td></tr>}
+      </tbody></table>
+      {data.attachmentPath ? <Button small onClick={() => void api.app.openAttachment(data.attachmentPath!)}>Bon of factuur openen</Button> : <p className="small muted">Er zit geen bon bij deze aankoop.</p>}
+    </>
   );
 }

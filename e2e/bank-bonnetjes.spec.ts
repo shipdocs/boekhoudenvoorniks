@@ -84,3 +84,22 @@ test('betaling op Vandaag aanklikken: alle gegevens van de bank om hem te beoord
   await expect(page.locator('.task .title-link', { hasText: title }).first()).toBeVisible();
   expect(problems.apiErrors).toEqual([]);
 });
+
+test('Uitzoeken bij geld dat binnenkwam: meteen het scherm om het in te delen, met rente en refund als keuze', async ({ page, problems }) => {
+  await onboard(page);
+  await nav(page, 'Bank');
+  await page.locator('main input[type=file]').first().setInputFiles({ name: 'afschrift.csv', mimeType: 'text/csv', buffer: CSV });
+  await expect(page.getByText(/betalingen ingelezen|ingelezen/).first()).toBeVisible();
+  await nav(page, 'Vandaag');
+  const show = page.getByRole('button', { name: /^Toon alle/ });
+  if (await show.isVisible()) await show.click();
+  const btn = page.getByRole('button', { name: 'Uitzoeken' }).first();
+  await expect(btn).toBeVisible();
+  await btn.click();
+  await expect(page.getByRole('heading', { name: 'Waar is dit geld voor?' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Rente ontvangen/ })).toBeVisible();
+  await page.getByRole('button', { name: /Geld terug van een aankoop/ }).click();
+  await expect(page.getByRole('button', { name: 'Het was een privé-aankoop' })).toBeVisible();
+  await expect(page.getByText(/Alle gegevens van deze betaling/)).toBeVisible();
+  expect(problems.apiErrors).toEqual([]);
+});

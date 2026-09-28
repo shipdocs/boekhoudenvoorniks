@@ -351,3 +351,61 @@ function ForeignNotice({ foreign, euro }: { foreign: NonNullable<DocumentResult[
     </div>
   );
 }
+
+/**
+ * Een bon of factuur bekijken vanaf Vandaag, voordat je "Ja, klopt" of "Ja, zelfde" kiest. Bij een
+ * mogelijk dubbel document staat het andere ernaast.
+ */
+export function DocumentPreview({ id }: { id: number }) {
+  const { meta } = useApp();
+  const doc = useLoad(() => api.documents.get(id), [id]);
+  const d = doc.data;
+  if (!d) return <ErrorBox error={doc.error} />;
+  const r = d.result;
+  const dup = d.issues.find((i) => i.field === 'duplicate')?.suggestion as { documentId: number | null; purchaseId: number | null } | undefined;
+  const category = d.classification ? meta.expenseCategories.find((c) => c.key === d.classification!.categoryKey)?.label : null;
+  return (
+    <div className="grid" style={{ gridTemplateColumns: dup?.documentId ? '1fr 1fr' : '1fr', gap: 12 }}>
+      <div>
+        {dup?.documentId && <h3 style={{ marginTop: 0 }}>Deze</h3>}
+        <table className="list details"><tbody>
+          <tr><th>Winkel / leverancier</th><td>{r?.supplier?.value ?? d.original_name}</td></tr>
+          <tr><th>Datum</th><td>{r?.invoiceDate?.value ? formatDateNl(r.invoiceDate.value) : '?'}</td></tr>
+          <tr><th>Bedrag</th><td>{r?.total ? <Euro cents={r.total.value} /> : '?'}</td></tr>
+          {r?.invoiceNumber?.value && <tr><th>Factuurnummer</th><td>{r.invoiceNumber.value}</td></tr>}
+          {category && <tr><th>Voorstel</th><td>{category}{d.classification?.business === false ? ' (privé)' : ''}</td></tr>}
+          <tr><th>Bestand</th><td>{d.original_name}</td></tr>
+        </tbody></table>
+        <div style={{ maxHeight: 420, overflow: 'auto', marginTop: 8 }}>
+          <DocumentView id={d.id} mime={d.mime_type} highlight={null} pageSizes={r?.pageSizes} />
+        </div>
+      </div>
+      {dup?.documentId && (
+        <div>
+          <h3 style={{ marginTop: 0 }}>Lijkt op</h3>
+          <OtherDocument id={dup.documentId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OtherDocument({ id }: { id: number }) {
+  const doc = useLoad(() => api.documents.get(id), [id]);
+  const d = doc.data;
+  if (!d) return <ErrorBox error={doc.error} />;
+  const r = d.result;
+  return (
+    <>
+      <table className="list details"><tbody>
+        <tr><th>Winkel / leverancier</th><td>{r?.supplier?.value ?? d.original_name}</td></tr>
+        <tr><th>Datum</th><td>{r?.invoiceDate?.value ? formatDateNl(r.invoiceDate.value) : '?'}</td></tr>
+        <tr><th>Bedrag</th><td>{r?.total ? <Euro cents={r.total.value} /> : '?'}</td></tr>
+        <tr><th>Bestand</th><td>{d.original_name}</td></tr>
+      </tbody></table>
+      <div style={{ maxHeight: 420, overflow: 'auto', marginTop: 8 }}>
+        <DocumentView id={d.id} mime={d.mime_type} highlight={null} pageSizes={r?.pageSizes} />
+      </div>
+    </>
+  );
+}

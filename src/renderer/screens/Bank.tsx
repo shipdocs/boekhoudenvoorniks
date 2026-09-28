@@ -6,6 +6,7 @@ import { saleVatText, type PurchaseVatCode, type SalesVatCode } from '../../shar
 import { referenceIn } from '../../shared/references';
 import { InvestmentHint, investmentInfo } from './Purchases';
 import { CategoryChips } from './Categories';
+import { PaymentDetails } from './PaymentDetails';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
 
 /** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
@@ -302,7 +303,7 @@ export function CategoryPicker({ initial, onPick, incoming, amount }: { initial?
         <CategoryChips value={cat} onChange={(key, defaultVat) => { setCat(key); setVat(defaultVat); }} />
       </Field>
       {!incoming && <InvestmentHint categoryKey={cat} gross={amount} vatCode={vat} onUse={() => { setCat('investering'); setVat('hoog'); }} />}
-      <Field label="Stond er btw op?">
+      <Field label="Stond er btw op?" hint="Kijk op de bon of factuur. Geen bon? Meestal 21%; verzekeringen, bankkosten en de overheid rekenen geen btw">
         <select value={vat} onChange={(e) => setVat(e.target.value as PurchaseVatCode)}>
           {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
         </select>
@@ -389,7 +390,11 @@ export function CategorizeTransaction({ id }: { id: number }) {
         <h1><Euro cents={t.amount} sign /> {t.amount > 0 ? 'ontvangen' : 'betaald'}</h1>
         <Button kind="ghost" onClick={() => go({ screen: 'bank' })}>← Bank</Button>
       </div>
-      <p className="sub">{t.counter_name ?? 'Onbekend'} · <DateNl date={t.transaction_date} /> · {t.description}</p>
+      <p className="sub">{t.counter_name ?? 'Onbekend'} · <DateNl date={t.transaction_date} /> · {t.description.length > 120 ? `${t.description.slice(0, 120)}…` : t.description}</p>
+      <details className="small" style={{ marginBottom: 12 }}>
+        <summary>Alle gegevens van deze betaling en eerdere betalingen {t.amount < 0 ? 'aan' : 'van'} {t.counter_name ?? 'deze partij'}</summary>
+        <PaymentDetails txId={t.id} />
+      </details>
 
       {t.status !== 'nieuw' ? (
         <div className="card">
@@ -523,7 +528,10 @@ export function CategorizeTransaction({ id }: { id: number }) {
                   </button>
                 ))}
                 {meta.otherDestinations.filter((d) => ['btw', 'overboeking', 'onbekend'].includes(d.key)).map((d) => (
-                  <button key={d.key} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: d.account }))}>{d.label}</button>
+                  <button key={d.key} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: d.account }))}>
+                    {d.label}
+                    {'hint' in d && d.hint && <div className="hint">{d.hint}</div>}
+                  </button>
                 ))}
               </div>
             </>
@@ -531,6 +539,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
           <div className="row end" style={{ marginTop: 16 }}>
             <Button kind="ghost" onClick={() => void done(api.bank.ignore(t.id))} title="Bijvoorbeeld een dubbele regel">Negeren (dubbel of niet belangrijk)</Button>
           </div>
+          <p className="small muted" style={{ textAlign: 'right', marginTop: 4 }}>Negeren telt niet mee in je boekhouding: alleen voor een dubbele regel. Twijfel je, kies dan "Weet ik nog niet".</p>
         </>
       )}
     </div>

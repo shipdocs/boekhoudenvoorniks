@@ -94,3 +94,14 @@ describe('bankrekeningen uit een auditfile', () => {
     expect(s.bank.removable(hoofd.id).ok).toBe(false);
   });
 });
+
+describe('vragen op Vandaag met genoeg informatie', () => {
+  it('verlopen offerte: nummer, datum, bedrag en een knop om hem te bekijken', () => {
+    const { s, klant } = setup();
+    const q = s.quotes.create({ relationId: klant.id, quoteDate: '2026-04-01', lines: [{ description: 'Stucwerk', quantity: 1, unitPrice: 100_000, vatCode: 'hoog' }] });
+    s.quotes.setStatus(q.id, 'verzonden');
+    const task = s.inbox.tasks('2026-09-25').find((t) => t.kind === 'quote-expired')!;
+    expect(task.question.replace(/\s/g, ' ')).toContain(`Offerte ${q.number} van 1 april 2026, € 1.210,00, was geldig tot`);
+    expect(task.actions.map((a) => a.id)).toContain('open');
+  });
+});
