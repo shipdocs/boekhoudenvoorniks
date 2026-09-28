@@ -280,12 +280,14 @@ export function createApi(s: Services, host: HostContext) {
       default: {
         const screens: Partial<Record<Task['kind'], [string, number | string | undefined]>> = {
           setup: ['welkom', undefined],
-          'bank-invoice': ['bank', r.bankTransactionId],
-          'bank-purchase': ['bank', r.bankTransactionId],
-          'bank-income': ['bank', r.bankTransactionId],
+          // rechtstreeks naar het scherm waar je de betaling indeelt (niet de banklijst)
+          'bank-invoice': ['betaling', r.bankTransactionId],
+          'bank-purchase': ['betaling', r.bankTransactionId],
+          'bank-income': ['betaling', r.bankTransactionId],
           'document-review': ['document', r.documentId],
           'invoice-overdue': ['factuur', r.invoiceId],
           'invoice-concept': ['factuur', r.invoiceId],
+          'quote-expired': ['offerte', r.quoteId],
           'vat-due': ['belasting', r.periodKey],
           'bank-stale': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
@@ -531,8 +533,17 @@ export function createApi(s: Services, host: HostContext) {
     bank: {
       accounts: () => s.bank.listAccounts(),
       importStatus: () => s.bank.importStatus(),
-      addAccount: (name: string, iban: string | null) => s.bank.addAccount(name, iban),
-      updateAccount: (id: number, patch: { name?: string; iban?: string | null }) => s.bank.updateAccount(id, patch),
+      addAccount: (name: string, iban: string | null, opts?: { pot?: boolean }) => s.bank.addAccount(name, iban, opts),
+      updateAccount: (id: number, patch: { name?: string; iban?: string | null; pot?: boolean }) => s.bank.updateAccount(id, patch),
+      removableAccount: (id: number) => s.bank.removable(id),
+      removeAccount: (id: number) => {
+        s.bank.removeAccount(id);
+        const st = s.settings.get();
+        const patch: Record<string, unknown> = {};
+        if (st.vatPotAccountId === id) patch.vatPotAccountId = null;
+        if (st.switchover.xafBanks?.includes(id)) patch.switchover = { ...st.switchover, xafBanks: st.switchover.xafBanks.filter((x) => x !== id) };
+        if (Object.keys(patch).length) s.settings.update(patch);
+      },
       openingBalance: (bankAccountId: number, amount: Cents, date: IsoDate) => s.bank.setOpeningBalance(bankAccountId, amount, date),
       getOpeningBalance: (bankAccountId: number) => s.bank.openingBalance(bankAccountId),
       ownTransfer: (txId: number) => s.bank.ownTransferTarget(s.bank.get(txId)),
@@ -558,6 +569,20 @@ export function createApi(s: Services, host: HostContext) {
       },
       transactions: (filter?: { status?: 'nieuw' | 'gematcht' | 'genegeerd'; search?: string }) => s.bank.list(filter),
       suggestions: (txId: number) => s.matching.suggest(s.bank.get(txId)),
+      /** alle gegevens van één betaling, met eerdere betalingen aan dezelfde partij */
+      details: (txId: number) => s.bank.details(txId),
+      /** de factuur of aankoop die de app bij een betaling voorstelt, om te vergelijken */
+      proposal: (ref: { invoiceId?: number; purchaseId?: number }) => {
+        if (ref.invoiceId) {
+          const i = s.invoices.get(ref.invoiceId);
+          return { kind: 'factuur' as const, number: i.number, relation: i.relation_name, date: i.invoice_date, dueDate: i.due_date, total: i.total ?? 0, open: i.open_amount, attachmentPath: null };
+        }
+        if (ref.purchaseId) {
+          const p = s.purchases.get(ref.purchaseId);
+          return { kind: 'aankoop' as const, number: p.supplier_reference, relation: p.relation_name, date: p.invoice_date, dueDate: null, total: p.total, open: p.open_amount, attachmentPath: p.attachment_path, description: p.description };
+        }
+        return null;
+      },
       matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(txId, invoiceId),
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(txId, purchaseId),
       book: (txId: number, input: BookToAccountInput) => s.bank.bookToAccount(txId, input),

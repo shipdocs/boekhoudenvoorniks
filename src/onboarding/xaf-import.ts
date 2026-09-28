@@ -10,7 +10,7 @@ import {
   type ColumnMapping, type ColumnQuestion, type Table, type TableKind,
 } from '../import/opening-tables';
 import { headerSignature } from '../import/csv';
-import { addDays, formatDateNl, periodFor, type IsoDate } from '../shared/dates';
+import { addDays, formatDateNl, periodFor, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { ValidationError } from '../shared/validation';
@@ -70,13 +70,33 @@ export interface ImportFileRole {
 }
 
 /** Meerdere bestanden: het voorstel voor het bestand dat bij de instapdatum hoort, plus wat er met de rest gebeurt. */
-export type MultiImportAnalysis = ImportAnalysis & {
-  files: ImportFileRole[];
-  /** index van het bestand waarmee de startstand is berekend */
-  chosen: number;
-  /** een latere instapdatum waarmee je het jongste bestand helemaal gebruikt (niets opnieuw inboeken), of null */
-  alternativeDate: IsoDate | null;
-};
+export type MultiImportAnalysis =
+  | (ImportAnalysis & {
+      files: ImportFileRole[];
+      /** index van het bestand waarmee de startstand is berekend */
+      chosen: number;
+      /** een latere instapdatum waarmee je het jongste bestand helemaal gebruikt (niets opnieuw inboeken), of null */
+      alternativeDate: IsoDate | null;
+    })
+  | DateAdvice;
+
+/**
+ * De auditfiles beginnen op of na de instapdatum: er is dan geen stand óp de instapdatum over te nemen.
+ * De app stelt een instapdatum voor waarmee alles tot en met de laatste boeking wordt overgenomen.
+ */
+export interface DateAdvice {
+  kind: 'instapdatum';
+  /** de huidige instapdatum */
+  date: IsoDate;
+  /** voorgestelde instapdatum: de dag na de laatste boeking (of na het laatste afgesloten jaar) */
+  suggestedDate: IsoDate;
+  /** false als de voorgestelde datum nog in de toekomst ligt (laatste boeking is van vandaag) */
+  ready: boolean;
+  firstDate: IsoDate;
+  lastBooking: IsoDate;
+  /** begint een bestand precies op de instapdatum zonder beginbalans: dan begon het bedrijf toen waarschijnlijk */
+  startedOnDate: boolean;
+}
 
 /** Het voorstel, of (alleen als de app een kolom echt niet vindt) een paar vragen. */
 export type ImportAnalysis =
@@ -170,6 +190,20 @@ function classByName(a: XafAccount): XafClass {
   return 'onbekend';
 }
 
+/**
+ * Dezelfde bank, ook als je vorige programma hem anders noemt: "Bank Knab" en "KNAB", "Rabo zakelijk" en
+ * "Rabobank zakelijk". Woorden als bank, rekening en zakelijk tellen niet mee.
+ */
+export function sameBankName(a: string, b: string): boolean {
+  const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w && !['bank', 'rekening', 'zakelijk', 'zakelijke', 'betaalrekening', 'nl', 'bv', 'b', 'v'].includes(w));
+  const x = words(a);
+  const y = words(b);
+  if (x.length === 0 || y.length === 0) return a.trim().toLowerCase() === b.trim().toLowerCase();
+  // elk woord van de kortste naam komt (als begin van een woord) in de andere voor: rabo ~ rabobank
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.every((w) => long.some((v) => v.startsWith(w) || w.startsWith(v)));
+}
+
 export function classify(a: XafAccount): XafClass {
   // een resultaatrekening (P) met een balanscode is tegenstrijdig, bv. DigiBoox' "Overboekingsrekening
   // winst" met BLimKru: dan telt het soort rekening, en herkent de app hem op de naam
@@ -248,6 +282,8 @@ export class XafImportService {
    * dat na de instapdatum begint, is voor de startstand niet nodig.
    */
   analyzeFiles(files: (string | Uint8Array)[], mapping?: ColumnMapping): MultiImportAnalysis {
+    const advice = this.dateAdvice(files);
+    if (advice) return advice;
     if (files.length === 1) {
       const r = this.analyzeFile(files[0]!, { mapping });
       const period = 'plan' in r ? { startDate: r.plan.meta.startDate, endDate: r.plan.meta.endDate } : { startDate: '', endDate: '' };
@@ -262,6 +298,33 @@ export class XafImportService {
     if (files.length === 1) return this.apply(files[0]!, choices, mapping);
     const pick = this.pickFile(files);
     return this.applyXaf(pick.xaf, choices, pick.history);
+  }
+
+  /** Alleen voor auditfiles: beginnen ze allemaal op of na de instapdatum, dan een betere instapdatum. */
+  private dateAdvice(files: (string | Uint8Array)[]): DateAdvice | null {
+    const s = this.settings.get();
+    if (s.switchover.mode !== 'overstapper' || !s.switchover.date) return null;
+    const date = s.switchover.date;
+    let xafs: XafFile[];
+    try {
+      const sources = files.map((f) => this.source(f));
+      if (sources.some((x) => x.type !== 'xaf')) return null;
+      xafs = sources.map((x) => (x as Extract<typeof x, { type: 'xaf' }>).xaf).filter((x) => !x.totalsOnly);
+    } catch {
+      // onleesbaar bestand: de gewone analyse geeft de juiste foutmelding
+      return null;
+    }
+    if (xafs.length === 0 || xafs.some((x) => x.startDate < date || (x.startDate === date && x.opening.lines.length > 0))) return null;
+    const lastBooking = xafs.flatMap((x) => x.lines.map((l) => l.date)).sort().at(-1);
+    if (!lastBooking) return null;
+    const now = today();
+    // een afgesloten jaar: de dag erna; anders de dag na de laatste boeking
+    const closed = xafs.map((x) => x.endDate).filter((e) => e < now).sort().at(-1);
+    const afterLast = addDays(lastBooking, 1);
+    const suggestedDate = closed && closed >= lastBooking ? addDays(closed, 1) : afterLast;
+    const firstDate = xafs.map((x) => x.startDate).sort()[0]!;
+    // een instapdatum in de toekomst kan niet: met een boeking van vandaag pas morgen
+    return { kind: 'instapdatum', date, suggestedDate, ready: suggestedDate <= now, firstDate, lastBooking, startedOnDate: firstDate === date };
   }
 
   private pickFile(files: (string | Uint8Array)[]) {
@@ -483,7 +546,7 @@ export class XafImportService {
         const iban = xaf.lines.find((l) => l.accountId === a.id && l.journalIban)?.journalIban ?? null;
         // één rekening aan beide kanten: dezelfde, tenzij de rekeningnummers verschillen
         const only = of('bank').length === 1 && appBanks.length === 1 && (!iban || !appBanks[0]!.iban) ? appBanks[0] : undefined;
-        const match = appBanks.find((b) => (iban && b.iban === iban) || b.name.toLowerCase() === a.name.toLowerCase()) ?? only;
+        const match = appBanks.find((b) => iban && b.iban === iban) ?? appBanks.find((b) => !b.is_pot && sameBankName(b.name, a.name)) ?? only;
         return { accountId: a.id, name: a.name, iban, amount: balance.get(a.id) ?? 0, bankAccountId: match?.id ?? null };
       });
     for (const b of banks) {
@@ -754,7 +817,8 @@ export class XafImportService {
       for (const b of plan.banks) {
         const target = choices.banks[b.accountId];
         if (target === null || target === undefined) continue;
-        const id = target === 'nieuw' ? this.bank.addAccount(b.name, b.iban && !this.bank.listAccounts().some((x) => x.iban === b.iban) ? b.iban : null).id : target;
+        // een rekening uit je vorige programma is een echte rekening, ook als het nummer er niet bij staat
+        const id = target === 'nieuw' ? this.bank.addAccount(b.name, b.iban && !this.bank.listAccounts().some((x) => x.iban === b.iban) ? b.iban : null, { pot: false }).id : target;
         this.switchover.setBankOpening(id, b.amount);
         used.push(id);
       }

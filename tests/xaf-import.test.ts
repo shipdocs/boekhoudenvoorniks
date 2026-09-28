@@ -15,6 +15,13 @@ import { readXlsx } from '../src/import/xlsx';
  */
 
 
+/** meerdere bestanden, waarbij de test een voorstel verwacht (geen advies over de instapdatum) */
+function analyzeFiles(s: ReturnType<typeof setup>['s'], files: string[]) {
+  const r = s.xafImport.analyzeFiles(files);
+  if (r.kind === 'instapdatum' || !('plan' in r)) throw new Error('geen voorstel');
+  return r;
+}
+
 function overstapper(date: string) {
   const ctx = setup();
   ctx.s.settings.update({ onboardingDone: true, vatPeriod: 'kwartaal' });
@@ -232,7 +239,7 @@ describe('meerdere auditfiles tegelijk (een per jaar)', () => {
   it('instap 1 januari 2026: de app kiest 2025, legt uit wat er met 2024 en 2026 gebeurt', () => {
     const { s } = overstapper('2026-01-01');
     // in willekeurige volgorde neergezet
-    const r = s.xafImport.analyzeFiles([XAF_2026, XAF_2024, XAF_2025]);
+    const r = analyzeFiles(s, [XAF_2026, XAF_2024, XAF_2025]);
     expect(r.chosen).toBe(2);
     expect(r.files.map((f) => f.role)).toEqual(['later', 'eerder', 'gebruikt']);
     expect(r.files[1]!.reason).toMatch(/aankoopdatums/);
@@ -254,7 +261,7 @@ describe('meerdere auditfiles tegelijk (een per jaar)', () => {
 
   it('instap na het laatste bestand: de app gebruikt 2026 en de oudere jaren alleen voor aankoopdatums', () => {
     const { s } = overstapper('2026-09-01');
-    const r = s.xafImport.analyzeFiles([XAF_2024, XAF_2025, XAF_2026]);
+    const r = analyzeFiles(s, [XAF_2024, XAF_2025, XAF_2026]);
     expect(r.chosen).toBe(2);
     expect(r.files.map((f) => f.role)).toEqual(['eerder', 'eerder', 'gebruikt']);
     expect(r.alternativeDate).toBeNull();
@@ -266,7 +273,7 @@ describe('meerdere auditfiles tegelijk (een per jaar)', () => {
     const zonder = (xml: string) => xml.replace(/<openingBalance>[\s\S]*?<\/openingBalance>/, '');
     const files = [zonder(XAF_2026), XAF_2024, zonder(XAF_2025)];
     const { s } = overstapper('2026-01-01');
-    const r = s.xafImport.analyzeFiles(files);
+    const r = analyzeFiles(s, files);
     expect(r.chosen).toBe(2);
     expect(r.files.map((f) => f.role)).toEqual(['later', 'gebruikt', 'gebruikt']);
     expect(r.files[1]!.reason).toMatch(/geen beginbalans.*2024 erbij op/);
@@ -295,9 +302,15 @@ describe('meerdere auditfiles tegelijk (een per jaar)', () => {
     expect(classify({ id: '2000', name: 'Kruisposten / Spaartransactie', type: 'B', rgs: 'BLimKru' })).toBe('vordering');
   });
 
-  it('alleen jaren na de instapdatum: duidelijke melding', () => {
+  it('alleen jaren op of na de instapdatum: de app stelt een instapdatum voor', () => {
     const { s } = overstapper('2023-07-01');
-    expect(() => s.xafImport.analyzeFiles([XAF_2025, XAF_2026])).toThrow(/beginnen na je instapdatum/);
+    expect(s.xafImport.analyzeFiles([XAF_2025, XAF_2026])).toMatchObject({ kind: 'instapdatum', firstDate: '2025-01-01', lastBooking: '2026-02-10', suggestedDate: '2026-09-01', ready: true, startedOnDate: false });
+    // instapdatum = begin van het eerste jaar zonder beginbalans (bedrijf begon toen), ook met één bestand
+    const b = overstapper('2024-01-01');
+    expect(b.s.xafImport.analyzeFiles([XAF_2024])).toMatchObject({ kind: 'instapdatum', startedOnDate: true, suggestedDate: '2025-01-01' });
+    // met die datum gaat het gewoon
+    b.s.switchover.setMode('overstapper', '2025-01-01');
+    expect(analyzeFiles(b.s, [XAF_2024]).plan.banks[0]!.amount).toBe(12_100_00);
   });
 
   it('aankoopdatum alleen als het oudste bestand de rekening nog leeg begon', () => {

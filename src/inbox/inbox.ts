@@ -68,6 +68,8 @@ export interface TaskAction {
   id: string;
   label: string;
   primary?: boolean;
+  /** wat deze keuze in je boekhouding doet, in gewone taal */
+  hint?: string;
 }
 
 /** Eén ding dat de aandacht van de gebruiker nodig heeft, in mensentaal. */
@@ -489,7 +491,7 @@ export class InboxService {
           : bad ? [{ id: 'open', label: 'Bekijken', primary: true }] : [{ id: 'klopt', label: 'Ja', primary: true }, { id: 'open', label: 'Aanpassen' }],
         group: bad ? undefined : { key: 'document-klopt', label: 'Alle bonnetjes bevestigen' },
         why: d.classification ? `Omdat ${d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(', ')}.` : undefined,
-        ref: { documentId: d.id },
+        ref: { documentId: d.id, categoryKey: d.classification?.business === false ? undefined : d.classification?.categoryKey },
       });
     }
 
@@ -499,13 +501,15 @@ export class InboxService {
       if (this.isSkipped(key)) continue;
       const who = m.relation_name ?? m.from_name ?? m.from_address ?? 'Iemand';
       const subject = m.subject ? `"${m.subject}"` : 'Een bericht zonder onderwerp';
+      // de inhoud van mail bewaart de app niet: afzender en datum, zodat je hem in je mailprogramma terugvindt
+      const from = [m.from_address ? `van ${m.from_name ? `${m.from_name} <${m.from_address}>` : m.from_address}` : null, m.received_on ? `op ${formatDateNl(m.received_on)}` : null].filter(Boolean).join(', ');
       if (m.outcome === 'online-factuur') {
         tasks.push({
           key,
           kind: 'mail-online',
           icon: '📧',
           title: `${who}: factuur staat online`,
-          question: `${subject}. Er zat geen bijlage bij. Log in op ${m.link_domain} (typ het adres zelf in; klik bij twijfel niet op de link in de mail), download de factuur en zet hem bij Aankopen & bonnetjes. Staat de factuur in de mail zelf? Bewaar dan de mail als bon.`,
+          question: `${subject}${from ? ` (${from})` : ''}. Er zat geen bijlage bij. Log in op ${m.link_domain} (typ het adres zelf in; klik bij twijfel niet op de link in de mail), download de factuur en zet hem bij Aankopen & bonnetjes. Staat de factuur in de mail zelf? Bewaar dan de mail als bon.`,
           actions: [{ id: 'open', label: 'Bonnetje toevoegen', primary: true }, { id: 'bon', label: 'Mail als bon bewaren' }, { id: 'klaar', label: 'Gedaan' }],
           priority: 2,
           ref: { mailId: m.id },
@@ -516,7 +520,7 @@ export class InboxService {
           kind: 'mail-customer',
           icon: '✉️',
           title: `Mail van ${who}`,
-          question: `${subject}${m.received_on ? ` (${formatDateNl(m.received_on)})` : ''}. Staat in je administratie-mailbox; de app heeft hem niet aangeraakt. Beantwoord hem in je mailprogramma.`,
+          question: `${subject}${from ? ` (${from})` : ''}. Staat in je administratie-mailbox; de app heeft hem niet aangeraakt. Beantwoord hem in je mailprogramma.`,
           actions: [{ id: 'klaar', label: 'Gezien', primary: true }, ...(m.relation_id ? [{ id: 'open', label: 'Bekijk klant' }] : [])],
           priority: 2,
           ref: { mailId: m.id, relationId: m.relation_id ?? undefined },
@@ -571,9 +575,9 @@ export class InboxService {
         kind: 'quote-expired',
         icon: '📄',
         title: `Offerte ${q.relation_name} is verlopen`,
-        question: 'Heeft de klant ja gezegd?',
+        question: `Offerte ${q.number} van ${formatDateNl(q.quote_date)}${q.total ? `, ${formatEuro(q.total)}` : ''}, was geldig tot ${formatDateNl(q.valid_until)}. Heeft de klant ja gezegd?`,
         amount: q.total,
-        actions: [{ id: 'akkoord', label: 'Ja, akkoord', primary: true }, { id: 'afgewezen', label: 'Nee' }],
+        actions: [{ id: 'akkoord', label: 'Ja, akkoord', primary: true }, { id: 'afgewezen', label: 'Nee' }, { id: 'open', label: 'Bekijken' }],
         ref: { quoteId: q.id },
       });
     }
@@ -624,6 +628,7 @@ export class InboxService {
     for (const series of this.recurring.list()) {
       const label = `${formatEuro(series.amount)} per ${series.interval}`;
       if (series.status === 'voorgesteld') {
+        const seen = this.recurring.state(series, asOf).payments.slice(-4).reverse();
         tasks.push({
           key: `recurring-${series.id}`,
           kind: 'recurring-confirm',
@@ -632,6 +637,7 @@ export class InboxService {
           question: `Ongeveer ${label}. Als vaste last letten we erop dat de factuur en de betaling elke keer binnenkomen.`,
           actions: [{ id: 'ja', label: 'Ja, vaste last', primary: true }, { id: 'nee', label: 'Nee' }],
           priority: 3,
+          why: seen.length ? `Omdat we deze betalingen zagen: ${seen.map((p) => `${formatDateNl(p.transaction_date)} ${formatEuro(Math.abs(p.amount))}`).join(', ')}.` : undefined,
           ref: { seriesId: series.id },
         });
         continue;
@@ -646,7 +652,7 @@ export class InboxService {
             kind: 'recurring-stopped',
             icon: '🔁',
             title: `Is ${series.counter_name} gestopt?`,
-            question: `De laatste ${st.missed.length} verwachte betalingen (${label}) zijn niet van je rekening gegaan.`,
+            question: `De laatste ${st.missed.length} verwachte betalingen (${label}) zijn niet van je rekening gegaan.${st.lastSeen ? ` De laatste betaling die we zagen was op ${formatDateNl(st.lastSeen)}.` : ''}`,
             actions: [{ id: 'ja', label: 'Ja, gestopt', primary: true }, { id: 'nee', label: 'Nee, loopt nog' }],
             ref: { seriesId: series.id },
           });
@@ -763,6 +769,10 @@ export class InboxService {
         title: `${rule.display_name} is bij jou altijd ${label}`,
         question: `Je koos dit al ${rule.confirmations} keer. Wil je dat de app dit voortaan zelf doet? Je ziet het terug op Vandaag en kunt het altijd terugdraaien.`,
         actions: [{ id: 'ja', label: 'Ja, voortaan automatisch', primary: true }, { id: 'nee', label: 'Nee, blijf het vragen' }],
+        why: (() => {
+          const recent = this.bank.list({ search: rule.display_name, limit: 5 }).filter((b) => b.status === 'gematcht');
+          return recent.length ? `De laatste betalingen: ${recent.map((b) => `${formatDateNl(b.transaction_date)} ${formatEuro(Math.abs(b.amount))}`).join(', ')}. Zat daar iets privé tussen, kies dan "Nee".` : undefined;
+        })(),
         ref: { supplierKey: rule.supplier_key },
       });
     }
@@ -816,7 +826,53 @@ export class InboxService {
       });
     }
     // stabiel sorteren op prioriteit; binnen een prioriteit blijft de volgorde gelijk
+    for (const t of tasks) this.explainActions(t);
     return tasks.map((t, i) => ({ t, i })).sort((a, b) => (a.t.priority ?? 2) - (b.t.priority ?? 2) || a.i - b.i).map((x) => x.t);
+  }
+
+  /** Bij elke knop: wat er in je boekhouding gebeurt als je hem kiest. */
+  private explainActions(t: Task): void {
+    const cat = t.ref.categoryKey ? this.categories.label(t.ref.categoryKey) : null;
+    const vatBack = t.ref.vatCode && !['geen', 'vrijgesteld'].includes(t.ref.vatCode) && !this.settings.get().kor ? ', de btw krijg je terug' : '';
+    const asCost = cat ? `Wordt geboekt als ${cat}: telt mee als kosten${vatBack}.` : 'Je kiest daarna wat voor kosten het waren en of er btw op stond.';
+    const hints: Record<string, string> = {
+      'bank-business:zakelijk': asCost,
+      'bank-business:prive': 'Geen kosten en geen btw: de betaling telt als privé.',
+      'bank-category:klopt': asCost,
+      'bank-category:anders': 'Je kiest zelf wat het wel was (andere kosten, privé, overboeking, …).',
+      'bank-invoice:klopt': 'De betaling wordt aan de factuur gekoppeld; die staat daarna als betaald. Geen nieuwe omzet: die telde al bij de factuur.',
+      'bank-invoice:nee': 'Je deelt de betaling zelf in.',
+      'bank-purchase:klopt': 'De betaling wordt aan de aankoop gekoppeld; die staat daarna als betaald. De kosten telden al bij de aankoop.',
+      'bank-purchase:nee': 'Je deelt de betaling zelf in.',
+      'bank-sale:klopt': 'Wordt geboekt als omzet, met dezelfde btw als de vorige keer.',
+      'bank-sale:anders': 'Je deelt de betaling zelf in.',
+      'bank-refund:klopt': 'Geen kosten: het geld ging terug naar je klant.',
+      'bank-refund:anders': 'Je deelt de betaling zelf in.',
+      'bank-pot:klopt': 'Geen omzet en geen kosten: geld verplaatst binnen je eigen bank.',
+      'bank-own:klopt': 'Geen omzet en geen kosten: geld verplaatst tussen je eigen rekeningen.',
+      'bank-income:open': 'Je kiest waar het geld voor was: een factuur, een verkoop, rente, een refund, privé, …',
+      'document-review:klopt': cat ? `De bon wordt geboekt als ${cat}.` : 'De bon wordt geboekt zoals voorgesteld.',
+      'document-review:dubbel': 'De bon wordt niet nog een keer geboekt.',
+      'document-review:open': 'Je ziet de bon en past aan wat niet klopt.',
+      'quote-expired:akkoord': 'Er komt een klus bij voor deze offerte; als het werk klaar is maak je de factuur.',
+      'quote-expired:afgewezen': 'De offerte gaat naar afgewezen. In je boekhouding verandert niets.',
+      'recurring-confirm:ja': 'De app let voortaan op of de factuur en de betaling elke keer binnenkomen. Er wordt niets extra geboekt.',
+      'recurring-confirm:nee': 'De app vraagt er niet meer naar.',
+      'recurring-stopped:ja': 'De app verwacht deze betaling niet meer.',
+      'recurring-stopped:nee': 'De app blijft de betaling verwachten.',
+      'supplier-auto:ja': 'Betalingen aan deze leverancier boekt de app voortaan zelf zo. Je ziet ze bij "Automatisch gedaan" en kunt ze altijd terugdraaien.',
+      'supplier-auto:nee': 'De app blijft het je elke keer vragen.',
+      'investment-check:ja': 'Wordt een bedrijfsmiddel: de kosten worden over minstens 5 jaar verdeeld, en je krijgt misschien extra aftrek (KIA).',
+      'investment-check:nee': 'Blijft gewone kosten in dit jaar.',
+      'vat-check:open': 'Je gaat naar de plek waar je het oplost.',
+      'vat-check:overslaan': 'De controle verdwijnt; de aangifte gaat door zoals het nu is.',
+      'customer-overpaid:klopt': 'Het te veel betaalde blijft als tegoed van de klant staan.',
+      'job-link:ja': 'De kosten tellen mee bij deze klus.',
+      'job-link:algemeen': 'Hoort niet bij een klus: gewone bedrijfskosten.',
+      'mail-online:bon': 'De mail wordt als bon bewaard; je controleert hem daarna.',
+      'recurring-invoice:geen': 'De app vraagt voor deze betaling niet meer om een factuur.',
+    };
+    for (const a of t.actions) a.hint ??= hints[`${t.kind}:${a.id}`];
   }
 
   /** Legt vast dat de gebruiker een taak heeft afgehandeld (voor "door jou gecontroleerd", #29). */

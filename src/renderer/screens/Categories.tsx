@@ -21,6 +21,11 @@ export function CategoryChips({ value, onChange }: { value: string; onChange: (k
         <button className="ghost" title="Een categorie die er nog niet bij staat" onClick={() => setDialog('nieuw')}>+ Eigen categorie</button>
         <button className="ghost" title="Namen, uitleg en btw aanpassen, of categorieën verbergen" onClick={() => setDialog('beheer')}>✎ Aanpassen</button>
       </div>
+      {/* de uitleg van de gekozen categorie, ook zonder muis (tooltip) te zien */}
+      {(() => {
+        const c = meta.expenseCategories.find((x) => x.key === value);
+        return c?.hint ? <div className="small muted" style={{ marginTop: 4 }}>{c.label}: {c.hint}</div> : null;
+      })()}
       {dialog === 'nieuw' && (
         <Modal title="Eigen categorie" onClose={() => setDialog(null)}>
           <CategoryForm category={null} onDone={(c) => { setDialog(null); if (c) onChange(c.key, c.defaultVat); }} />

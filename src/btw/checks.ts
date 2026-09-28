@@ -28,6 +28,16 @@ export interface VatCheck {
   account?: { rgs: string; upTo?: IsoDate };
   /** oplossen met één knop in plaats van naar een scherm te gaan */
   action?: { id: 'auto-prive'; label: string };
+  /** om welke betalingen, aankopen of facturen het gaat, zodat je ze kunt openen */
+  items?: CheckItem[];
+}
+
+export interface CheckItem {
+  kind: 'bank' | 'aankoop' | 'document' | 'factuur';
+  id: number;
+  date: IsoDate | null;
+  label: string;
+  amount: Cents | null;
 }
 
 /** Kosten vanaf dit bedrag (incl. btw) horen een bewijsstuk te hebben. */
@@ -52,22 +62,26 @@ export function runVatChecks(
 
   const bank = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE status = 'nieuw' AND transaction_date BETWEEN ? AND ?`).get(start, end) as { n: number; s: number };
   if (bank.n > 0) {
-    found.push({ key: 'bank-open', blocking: true, title: `${bank.n} betalingen moet je nog uitzoeken`, detail: 'Verwerk ze eerst, anders mis je mogelijk btw die je terug kunt krijgen.', count: bank.n, fingerprint: `${bank.n}:${bank.s}`, screen: 'bank' });
+    const items = (db.prepare(`SELECT id, transaction_date AS date, COALESCE(counter_name, description) AS label, amount FROM bank_transactions WHERE status = 'nieuw' AND transaction_date BETWEEN ? AND ? ORDER BY transaction_date LIMIT 50`).all(start, end) as Omit<CheckItem, 'kind'>[]).map((i) => ({ ...i, kind: 'bank' as const }));
+    found.push({ key: 'bank-open', blocking: true, title: `${bank.n} betalingen moet je nog uitzoeken`, detail: 'Verwerk ze eerst, anders mis je mogelijk btw die je terug kunt krijgen.', count: bank.n, fingerprint: `${bank.n}:${bank.s}`, screen: 'bank', items });
   }
 
   const noEvidencePurchases = db
-    .prepare(`SELECT id, total FROM purchase_invoices WHERE invoice_date BETWEEN ? AND ? AND total >= ? AND attachment_path IS NULL AND document_id IS NULL`)
-    .all(start, end, EVIDENCE_THRESHOLD) as { id: number; total: number }[];
+    .prepare(
+      `SELECT p.id, p.total, p.invoice_date AS date, COALESCE(r.name, p.description) AS label FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id
+       WHERE p.invoice_date BETWEEN ? AND ? AND p.total >= ? AND p.attachment_path IS NULL AND p.document_id IS NULL`,
+    )
+    .all(start, end, EVIDENCE_THRESHOLD) as { id: number; total: number; date: IsoDate; label: string }[];
   const noEvidenceBank = db
     .prepare(
-      `SELECT b.id, b.amount FROM bank_transactions b
+      `SELECT b.id, b.amount, b.transaction_date AS date, COALESCE(b.counter_name, b.description) AS label FROM bank_transactions b
        WHERE b.status = 'gematcht' AND b.matched_invoice_id IS NULL AND b.matched_purchase_invoice_id IS NULL
          AND b.amount <= ? AND b.transaction_date BETWEEN ? AND ?
          AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
                      WHERE l.journal_entry_id = b.matched_journal_entry_id AND a.category = 'kosten')
          AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || b.id || '"%')`,
     )
-    .all(-EVIDENCE_THRESHOLD, start, end) as { id: number; amount: number }[];
+    .all(-EVIDENCE_THRESHOLD, start, end) as { id: number; amount: number; date: IsoDate; label: string }[];
   const missing = noEvidencePurchases.length + noEvidenceBank.length;
   if (missing > 0) {
     found.push({
@@ -78,21 +92,28 @@ export function runVatChecks(
       count: missing,
       fingerprint: [...noEvidencePurchases.map((p) => `p${p.id}`), ...noEvidenceBank.map((b) => `b${b.id}`)].join(','),
       screen: 'aankopen',
+      items: [
+        ...noEvidencePurchases.map((p) => ({ kind: 'aankoop' as const, id: p.id, date: p.date, label: p.label, amount: -p.total })),
+        ...noEvidenceBank.map((b) => ({ kind: 'bank' as const, id: b.id, date: b.date, label: b.label, amount: b.amount })),
+      ],
     });
   }
 
   const dupDocs = db
-    .prepare(`SELECT id FROM documents WHERE status = 'controle' AND issues LIKE '%"field":"duplicate"%' AND json_extract(result, '$.invoiceDate.value') BETWEEN ? AND ?`)
-    .all(start, end) as { id: number }[];
+    .prepare(
+      `SELECT id, json_extract(result, '$.invoiceDate.value') AS date, COALESCE(json_extract(result, '$.supplier.value'), original_name) AS label, json_extract(result, '$.total.value') AS total
+       FROM documents WHERE status = 'controle' AND issues LIKE '%"field":"duplicate"%' AND json_extract(result, '$.invoiceDate.value') BETWEEN ? AND ?`,
+    )
+    .all(start, end) as { id: number; date: IsoDate; label: string; total: number | null }[];
   const dupPurchases = db
     .prepare(
-      `SELECT a.id AS a, b.id AS b FROM purchase_invoices a JOIN purchase_invoices b
+      `SELECT a.id AS a, b.id AS b, b.invoice_date AS date, b.total AS total, (SELECT name FROM relations WHERE id = b.relation_id) AS label FROM purchase_invoices a JOIN purchase_invoices b
          ON a.id < b.id AND a.relation_id = b.relation_id AND a.total = b.total
         AND ABS(julianday(a.invoice_date) - julianday(b.invoice_date)) <= 3
         AND (a.supplier_reference IS NULL OR b.supplier_reference IS NULL OR a.supplier_reference = b.supplier_reference)
        WHERE b.invoice_date BETWEEN ? AND ?`,
     )
-    .all(start, end) as { a: number; b: number }[];
+    .all(start, end) as { a: number; b: number; date: IsoDate; total: number; label: string | null }[];
   const dups = dupDocs.length + dupPurchases.length;
   if (dups > 0) {
     found.push({
@@ -103,16 +124,20 @@ export function runVatChecks(
       count: dups,
       fingerprint: [...dupDocs.map((d) => `d${d.id}`), ...dupPurchases.map((p) => `p${p.a}-${p.b}`)].join(','),
       screen: 'aankopen',
+      items: [
+        ...dupDocs.map((d) => ({ kind: 'document' as const, id: d.id, date: d.date, label: `Bon ${d.label}`, amount: d.total === null ? null : -d.total })),
+        ...dupPurchases.flatMap((p) => [p.a, p.b].map((id) => ({ kind: 'aankoop' as const, id, date: p.date, label: `${p.label ?? 'Aankoop'} (mogelijk dubbel)`, amount: -p.total }))),
+      ],
     });
   }
 
   const reverseNoVat = db
     .prepare(
-      `SELECT DISTINCT i.id, i.number FROM invoices i JOIN relations r ON r.id = i.relation_id
+      `SELECT DISTINCT i.id, i.number, i.invoice_date AS date, r.name AS relation FROM invoices i JOIN relations r ON r.id = i.relation_id
        WHERE i.status <> 'concept' AND i.invoice_date BETWEEN ? AND ? AND TRIM(COALESCE(r.vat_number, '')) = ''
          AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.vat_code IN ('verlegd', 'icp', 'icp-dienst'))`,
     )
-    .all(start, end) as { id: number; number: string | null }[];
+    .all(start, end) as { id: number; number: string | null; date: IsoDate; relation: string }[];
   if (reverseNoVat.length > 0) {
     found.push({
       key: 'verlegd-btwnummer',
@@ -122,6 +147,7 @@ export function runVatChecks(
       count: reverseNoVat.length,
       fingerprint: reverseNoVat.map((i) => i.id).join(','),
       screen: 'werk',
+      items: reverseNoVat.map((i) => ({ kind: 'factuur' as const, id: i.id, date: i.date, label: `Factuur ${i.number ?? '?'} · ${i.relation}`, amount: null })),
     });
   }
 
