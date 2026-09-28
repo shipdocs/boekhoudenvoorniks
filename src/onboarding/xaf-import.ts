@@ -90,6 +90,8 @@ export interface DateAdvice {
   date: IsoDate;
   /** voorgestelde instapdatum: de dag na de laatste boeking (of na het laatste afgesloten jaar) */
   suggestedDate: IsoDate;
+  /** false als de voorgestelde datum nog in de toekomst ligt (laatste boeking is van vandaag) */
+  ready: boolean;
   firstDate: IsoDate;
   lastBooking: IsoDate;
   /** begint een bestand precies op de instapdatum zonder beginbalans: dan begon het bedrijf toen waarschijnlijk */
@@ -302,12 +304,13 @@ export class XafImportService {
     const lastBooking = xafs.flatMap((x) => x.lines.map((l) => l.date)).sort().at(-1);
     if (!lastBooking) return null;
     const now = today();
-    // een afgesloten jaar: de dag erna; anders de dag na de laatste boeking (niet in de toekomst)
+    // een afgesloten jaar: de dag erna; anders de dag na de laatste boeking
     const closed = xafs.map((x) => x.endDate).filter((e) => e < now).sort().at(-1);
     const afterLast = addDays(lastBooking, 1);
-    const suggestedDate = [closed && closed >= lastBooking ? addDays(closed, 1) : afterLast, now].sort()[0]!;
+    const suggestedDate = closed && closed >= lastBooking ? addDays(closed, 1) : afterLast;
     const firstDate = xafs.map((x) => x.startDate).sort()[0]!;
-    return { kind: 'instapdatum', date, suggestedDate, firstDate, lastBooking, startedOnDate: firstDate === date };
+    // een instapdatum in de toekomst kan niet: met een boeking van vandaag pas morgen
+    return { kind: 'instapdatum', date, suggestedDate, ready: suggestedDate <= now, firstDate, lastBooking, startedOnDate: firstDate === date };
   }
 
   private pickFile(files: (string | Uint8Array)[]) {
