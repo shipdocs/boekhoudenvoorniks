@@ -47,11 +47,11 @@ export interface CategoryLookup {
 export const PRIVATE_CAR_CATEGORIES = ['brandstof', 'auto'];
 
 export const OTHER_DESTINATIONS = [
-  { key: 'prive-opname', label: 'Privé opgenomen (naar mezelf)', account: 'BEivPriPrv' },
-  { key: 'prive-storting', label: 'Privé gestort (van mezelf)', account: 'BEivPriStr' },
-  { key: 'btw', label: 'Btw betaald aan / terug van de Belastingdienst', account: 'BSchBepBtwAfr' },
-  { key: 'overboeking', label: 'Overboeking tussen eigen rekeningen', account: 'BLiqKru' },
+  { key: 'prive-opname', label: 'Privé opgenomen (naar mezelf)', hint: 'Geld van de zaak naar je eigen rekening of een privé-uitgave: geen kosten', account: 'BEivPriPrv' },
+  { key: 'prive-storting', label: 'Privé gestort (van mezelf)', hint: 'Eigen geld dat je in de zaak stopt: geen omzet', account: 'BEivPriStr' },
+  { key: 'btw', label: 'Btw betaald aan / terug van de Belastingdienst', hint: 'De betaling of teruggave van je btw-aangifte: geen kosten en geen omzet', account: 'BSchBepBtwAfr' },
+  { key: 'overboeking', label: 'Overboeking tussen eigen rekeningen', hint: 'Geld verplaatst naar of van je eigen spaar- of andere zakelijke rekening', account: 'BLiqKru' },
   { key: 'omzet', label: 'Verkoop via een ander systeem', hint: 'Een klant betaalde je via bv. Mollie, je webshop, kassa, pin of contant, of voor een factuur die je ergens anders maakte', account: 'WOmzNopOlh' },
   { key: 'rente', label: 'Rente ontvangen', hint: 'Rente van de bank op je zakelijke rekening. Geen omzet en geen btw, wel winst', account: 'WFbeRlmObr' },
-  { key: 'onbekend', label: 'Weet ik nog niet (later uitzoeken)', account: 'BSchOvsVrp' },
+  { key: 'onbekend', label: 'Weet ik nog niet (later uitzoeken)', hint: 'Staat apart en komt terug als controle vóór je btw-aangifte', account: 'BSchOvsVrp' },
 ];

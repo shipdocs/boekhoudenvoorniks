@@ -109,6 +109,7 @@ describe('vaste lasten (#30)', () => {
     expect(s.inbox.tasks('2026-09-12').find((t) => t.kind === 'recurring-missing-payment')).toBeDefined();
     expect(s.inbox.tasks('2026-09-12').find((t) => t.kind === 'recurring-stopped')).toBeUndefined();
     expect(s.inbox.tasks('2026-10-12').find((t) => t.kind === 'recurring-stopped')).toBeDefined();
+    expect(s.inbox.tasks('2026-10-12').find((t) => t.kind === 'recurring-stopped')!.question).toMatch(/De laatste betaling die we zagen was op \d+ \w+ 2026/);
     expect(s.inbox.tasks('2026-10-12').find((t) => t.kind === 'recurring-missing-payment')).toBeUndefined();
     const st = s.recurring.state(s.recurring.get(ask.ref.seriesId!), '2026-10-12');
     expect(st.monthly).toBe(6300);
