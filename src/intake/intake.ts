@@ -556,8 +556,10 @@ export class IntakeService {
         foreign: doc.result?.foreign ? { currency: doc.result.foreign.currency, total: doc.result.foreign.total, rate: doc.result.foreign.total / c.total } : null,
       });
       if (bankTx && c.paidWith === 'bank') this.bank.matchPurchase(bankTx.id, purchase.id);
-      else if (c.paidWith === 'kas' || c.paidWith === 'prive') {
-        this.purchases.registerPayment(purchase.id, { amount: purchase.total, date: c.date, moneyAccount: c.paidWith === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen });
+      else {
+        // niet op de zakelijke rekening gevonden: leverancier die je altijd privé/contant betaalt → meteen betaald
+        const paidWith = c.paidWith === 'later' ? relation.paid_with : c.paidWith === 'bank' ? null : c.paidWith;
+        if (paidWith) this.purchases.registerPayment(purchase.id, { amount: purchase.total, date: c.date, moneyAccount: paidWith === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen });
       }
       this.db.prepare(`UPDATE documents SET status = 'verwerkt', purchase_invoice_id = ? WHERE id = ?`).run(purchase.id, id);
       if (c.jobId) {

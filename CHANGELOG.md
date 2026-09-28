@@ -1,5 +1,13 @@
 # Wijzigingen
 
+## 0.6.4 — rekeningen die je privé betaalt
+
+### Aankopen
+- **Al betaald**: een open aankoop die niet van je zakelijke rekening betaald is, zet je met één klik op betaald.
+  - **Met privégeld**: van je privérekening, via je telefoonrekening (bv. Google) of met een privé-creditcard (bv. via Stripe of PayPal). De app boekt Crediteuren aan Privé-stortingen; de kosten en de btw die je terugkrijgt blijven staan.
+  - **Contant uit de zaak**: Crediteuren aan Kas.
+- **Voortaan altijd zo bij deze leverancier** (bv. een abonnement met incasso op je privérekening): de andere open rekeningen van die leverancier gaan in één keer op betaald, en nieuwe bonnen staan meteen op betaald als er geen betaling van je zakelijke rekening bij hoort.
+
 ## 0.6.3 — Revolut, facturen van Stripe, en Claude Code of Codex die gewoon werken
 
 ### Bonnen en facturen
