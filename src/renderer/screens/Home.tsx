@@ -294,7 +294,7 @@ export function Home() {
       {checkItems && (
         <Modal title={checkItems.task.title} onClose={() => setCheckItems(null)}>
           <p className="muted small">{checkItems.detail}</p>
-          <CheckItems items={checkItems.items} onOpen={() => setCheckItems(null)} />
+          <CheckItems items={checkItems.items} onOpen={() => setCheckItems(null)} onChanged={async () => { setCheckItems(null); await reload(); refreshBadge(); }} />
           <div className="row end" style={{ marginTop: 10 }}><Button onClick={() => setCheckItems(null)}>Sluiten</Button></div>
         </Modal>
       )}

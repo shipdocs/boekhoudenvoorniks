@@ -1,3 +1,4 @@
+import { ValidationError } from '../shared/validation';
 import type { RuntimeStatus } from '../ocr-runtime/runtime';
 import type { CliKind } from '../intake/ocr-cli';
 import { DOWNLOAD_SIZE, GLM_OCR, LLAMA_CPP, REQUIREMENTS } from '../ocr-runtime/manifest';
@@ -470,6 +471,8 @@ export function createApi(s: Services, host: HostContext) {
     documents: {
       add: (name: string, data: Uint8Array) => s.intake.add(name, data),
       addEvidence: (name: string, data: Uint8Array, bankTransactionId: number) => s.intake.addEvidence(name, data, bankTransactionId),
+      /** "Bon toevoegen" bij een aankoop zonder bon */
+      addPurchaseEvidence: (name: string, data: Uint8Array, purchaseId: number) => s.intake.addPurchaseEvidence(name, data, purchaseId),
       list: (status?: 'nieuw' | 'controle' | 'verwerkt' | 'genegeerd') => s.intake.list(status),
       get: (id: number) => s.intake.get(id),
       confirm: (id: number, c: Confirmation) => s.intake.confirm(id, c),
@@ -485,7 +488,8 @@ export function createApi(s: Services, host: HostContext) {
       setSupplierAutomatic: (key: string, automatic: boolean) => s.memory.setAutomatic(key, automatic),
     },
     purchases: {
-      list: (filter?: { status?: 'open' | 'betaald' }) => s.purchases.list(filter),
+      /** met hoe hij betaald is: de bankrekening, "privé betaald" of "contant" */
+      list: (filter?: { status?: 'open' | 'betaald' }) => s.purchases.list(filter).map((p) => ({ ...p, paid_via: p.amount_paid > 0 ? s.search.infoFor(`inkoop:${p.id}`)?.paidVia ?? null : null })),
       create: (input: PurchaseInvoiceInput) => s.purchases.create(input),
       recordExpense: (input: ExpenseInput) => s.quick.recordExpense(input),
       attach: (name: string, data: Uint8Array) => host.storeAttachment(name, data),
@@ -496,6 +500,13 @@ export function createApi(s: Services, host: HostContext) {
       paymentQr: (id: number, confirmNewIban = false) => purchasePaymentQr(s.purchases, id, confirmNewIban),
       /** Niet van de zakelijke rekening betaald maar privé of contant; `always`: voortaan bij deze leverancier. */
       paidWith: (id: number, via: 'prive' | 'kas', opts?: { always?: boolean }) => s.quick.payPurchaseWith(id, via, opts),
+      /** Een aankoop weghalen die er niet hoort (bv. per ongeluk toegevoegd); alleen zonder betaling. De bon blijft bewaard. */
+      remove: (id: number) => {
+        const p = s.purchases.get(id);
+        if (p.amount_paid !== 0) throw new ValidationError('Deze aankoop is (deels) betaald. Maak eerst de betaling ongedaan.');
+        s.purchases.cancel(id, p.invoice_date);
+        if (p.document_id) s.db.prepare(`UPDATE documents SET status = 'genegeerd' WHERE id = ?`).run(p.document_id);
+      },
       /** Staat de betaling van deze aankoop al als kosten op een van je rekeningen? (dan is hij dubbel) */
       bookedPayment: (id: number) => {
         const t = s.bookedPayments.find(s.purchases.get(id));
@@ -582,7 +593,14 @@ export function createApi(s: Services, host: HostContext) {
         const auto = s.inbox.autoProcess();
         return { ...summary, autoMatched: auto.matched + auto.booked };
       },
-      transactions: (filter?: { status?: 'nieuw' | 'gematcht' | 'genegeerd'; search?: string }) => s.bank.list(filter),
+      /** betalingen, met "waar staat dit op?" en de naam van de rekening */
+      transactions: (filter?: { status?: 'nieuw' | 'gematcht' | 'genegeerd'; search?: string }) => {
+        const accounts = new Map(s.bank.listAccounts().map((a) => [a.id, a.name]));
+        return s.bank.list(filter).map((t) => {
+          const booking = s.bookedInfo.entry(t.matched_journal_entry_id);
+          return { ...t, account_name: accounts.get(t.bank_account_id) ?? null, booked_as: booking?.summary || null, vat_period: booking?.vatPeriod ?? null };
+        });
+      },
       suggestions: (txId: number) => s.matching.suggest(s.bank.get(txId)),
       /** alle gegevens van één betaling, met eerdere betalingen aan dezelfde partij */
       details: (txId: number) => s.bank.details(txId),
@@ -815,7 +833,7 @@ export function createApi(s: Services, host: HostContext) {
     },
     search: {
       /** Zoeken over alles (#26); filters: periode, bedrag, klus. */
-      query: (q: string, filters?: { from?: IsoDate; to?: IsoDate; minAmount?: Cents; maxAmount?: Cents; jobId?: number }) => s.search.search(q, filters),
+      query: (q: string, filters?: { from?: IsoDate; to?: IsoDate; minAmount?: Cents; maxAmount?: Cents; jobId?: number }, limit?: number) => s.search.search(q, filters, Math.min(limit ?? 50, 500)),
       setWarranty: (purchaseId: number, months: number | null) => s.search.setWarranty(purchaseId, months),
       rebuild: () => s.search.rebuild(),
     },

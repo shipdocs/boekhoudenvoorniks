@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
 import type { CsvMapping } from '../../import/csv';
@@ -23,7 +23,14 @@ export function Bank({ focus }: { focus?: number }) {
   const { go, toast, settings } = useApp();
   const { run } = useAction();
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
-  const txs = useLoad(() => api.bank.transactions(view === 'hulp' ? { status: 'nieuw' } : {}), [view]);
+  // zoeken in naam, omschrijving en rekeningnummer; vertraagd zodat niet elke toets een zoekopdracht is
+  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(search.trim()), 200);
+    return () => clearTimeout(t);
+  }, [search]);
+  const txs = useLoad(() => api.bank.transactions({ ...(view === 'hulp' ? { status: 'nieuw' as const } : {}), ...(query ? { search: query } : {}) }), [view, query]);
   const accounts = useLoad(() => api.bank.accounts());
   const status = useLoad(() => api.bank.importStatus());
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
@@ -79,24 +86,42 @@ export function Bank({ focus }: { focus?: number }) {
         </div>
       )}
 
-      <div className="row" style={{ margin: '20px 0 12px' }}>
+      <div className="row" style={{ margin: '20px 0 12px', gap: 12 }}>
         <div className="chips">
           <button className={view === 'hulp' ? 'selected' : ''} onClick={() => setView('hulp')}>Hulp nodig</button>
           <button className={view === 'alles' ? 'selected' : ''} onClick={() => setView('alles')}>Alle betalingen</button>
         </div>
+        <input className="grow" type="search" aria-label="Zoek in betalingen" placeholder="Zoek op naam, omschrijving of rekeningnummer…" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
       <ErrorBox error={txs.error} />
+      {query && (txs.data ?? []).length > 0 && (
+        <p className="small muted">
+          {txs.data!.length === 1 ? '1 betaling' : `${txs.data!.length} betalingen`}{view === 'hulp' ? ' die nog verwerkt moeten worden' : ''}, samen <Euro cents={txs.data!.reduce((sum, t) => sum + t.amount, 0)} sign />
+          {view === 'hulp' && <> · <button className="linklike" onClick={() => setView('alles')}>zoek in alle betalingen</button></>}
+        </p>
+      )}
       {(txs.data ?? []).length === 0 ? (
-        <Empty icon="✓" title={view === 'hulp' ? 'Alle betalingen zijn verwerkt' : 'Nog geen betalingen ingelezen'} />
+        query ? (
+          <Empty icon="🔍" title={`Niets gevonden voor "${query}"`}>{view === 'hulp' ? <button className="linklike" onClick={() => setView('alles')}>Zoek in alle betalingen</button> : 'Probeer een ander woord.'}</Empty>
+        ) : (
+          <Empty icon="✓" title={view === 'hulp' ? 'Alle betalingen zijn verwerkt' : 'Nog geen betalingen ingelezen'} />
+        )
       ) : (
         <table className="list">
-          <thead><tr><th>Datum</th><th>Wie</th><th>Omschrijving</th><th>Status</th><th className="num">Bedrag</th></tr></thead>
+          <thead><tr><th>Datum</th><th>Wie en wat</th>{(accounts.data ?? []).length > 1 && <th>Rekening</th>}<th>Geboekt als</th><th>Status</th><th className="num">Bedrag</th></tr></thead>
           <tbody>
             {txs.data!.map((t) => (
               <tr key={t.id} className="clickable" style={t.id === focus ? { outline: '2px solid var(--primary)' } : undefined} onClick={() => go({ screen: 'categorie', id: t.id })}>
                 <td><DateNl date={t.transaction_date} /></td>
-                <td>{t.counter_name ?? '—'}</td>
-                <td className="small muted" style={{ maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description}</td>
+                <td>
+                  {t.counter_name ?? '—'}
+                  <div className="small muted" style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description}</div>
+                </td>
+                {(accounts.data ?? []).length > 1 && <td className="small">{t.account_name}</td>}
+                <td className="small">
+                  {t.booked_as ?? <span className="muted">—</span>}
+                  {t.vat_period && <div className="muted">btw {t.vat_period.label}{t.vat_period.filed ? ' · aangegeven' : ''}</div>}
+                </td>
                 <td><StatusPill status={t.status} /></td>
                 <td className="num" style={{ color: t.amount > 0 ? 'var(--good)' : undefined }}><Euro cents={t.amount} sign /></td>
               </tr>

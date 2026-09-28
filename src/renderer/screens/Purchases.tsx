@@ -15,6 +15,10 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const { run } = useAction();
   const docs = useLoad(() => api.documents.list('controle'));
   const purchases = useLoad(() => api.purchases.list());
+  // zoeken op leverancier, omschrijving of bedrag ("19,36")
+  const [search, setSearch] = useState('');
+  const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = (purchases.data ?? []).filter((p) => words.every((w) => [p.relation_name, p.description, p.paid_via, (p.total / 100).toFixed(2).replace('.', ',')].join(' ').toLowerCase().includes(w)));
   const [manual, setManual] = useState(false);
   const [pay, setPay] = useState<number | null>(payInitial ?? null);
   // niet van de zakelijke rekening betaald (privérekening, telefoonrekening, contant)
@@ -79,14 +83,19 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
         />
       )}
 
-      <h2>Aankopen</h2>
-      {(purchases.data ?? []).length === 0 ? (
+      <div className="row between" style={{ gap: 12 }}>
+        <h2>Aankopen</h2>
+        {(purchases.data ?? []).length > 0 && <input style={{ maxWidth: 360 }} className="grow" type="search" aria-label="Zoek in aankopen" placeholder="Zoek op leverancier, omschrijving of bedrag…" value={search} onChange={(e) => setSearch(e.target.value)} />}
+      </div>
+      {words.length > 0 && shown.length === 0 ? (
+        <Empty icon="🔍" title={`Geen aankopen gevonden voor "${search.trim()}"`}>Probeer een ander woord, of zoek overal met Ctrl+K.</Empty>
+      ) : (purchases.data ?? []).length === 0 ? (
         <Empty icon="🧾" title="Nog geen aankopen">Bonnetjes die je hier toevoegt worden automatisch verwerkt, inclusief btw die je terugkrijgt.</Empty>
       ) : (
         <table className="list">
           <thead><tr><th>Datum</th><th>Waar</th><th>Wat</th><th>Status</th><th className="num">Btw terug</th><th className="num">Bedrag</th><th><span className="sr-only">Acties</span></th></tr></thead>
           <tbody>
-            {purchases.data!.map((p) => (
+            {shown.map((p) => (
               <tr key={p.id} className={p.attachment_path ? 'clickable' : ''} onClick={() => p.attachment_path && void run(() => api.app.openAttachment(p.attachment_path!))}>
                 <td><DateNl date={p.invoice_date} /></td>
                 <td>{p.relation_name ?? '—'}</td>
@@ -94,13 +103,17 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                   {p.description} {p.attachment_path && <span title="Bewijsstuk aanwezig">📎</span>}
                   {p.warranty_months ? <div className="small muted">🛡️ {warrantyText(p.invoice_date, p.warranty_months)}</div> : null}
                 </td>
-                <td><StatusPill status={p.status} /></td>
+                <td><StatusPill status={p.status} />{p.paid_via && <div className="small muted">{p.paid_via}</div>}</td>
                 <td className="num"><Euro cents={p.vat_total} /></td>
                 <td className="num"><Euro cents={p.total} />{p.currency && p.foreign_total !== null && <div className="small muted">{formatForeign(p.foreign_total, p.currency)}</div>}</td>
                 <td onClick={(e) => e.stopPropagation()}>
                   <span className="row">
                     {p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}
                     {p.status === 'open' && p.open_amount > 0 && <Button small kind="ghost" title="Al betaald, maar niet van je zakelijke rekening (bv. privé of contant)" onClick={() => setPaidElsewhere(p)}>Al betaald</Button>}
+                    {p.status === 'open' && p.amount_paid === 0 && <Button small kind="ghost" title="Hoort deze aankoop hier niet (bv. per ongeluk toegevoegd, of van vóór je instapdatum)? Dan haal je hem weg; de bon blijft bewaard." ariaLabel="Aankoop weghalen" onClick={async () => {
+                      if (!confirm(`Aankoop ${p.relation_name ?? p.description} van ${formatDateNl(p.invoice_date)} weghalen? De kosten en de btw gaan eruit; de bon blijft bewaard.`)) return;
+                      if ((await run(async () => { await api.purchases.remove(p.id); return true; }, 'Aankoop weggehaald ✓')) !== undefined) await purchases.reload();
+                    }}>Weghalen</Button>}
                     {!p.currency && <Button small kind="ghost" title="Was deze bon in dollars of een andere munt? Dan reken je hem hier om naar euro's." ariaLabel="Omrekenen uit een andere munt" onClick={() => setFx({ id: p.id, fromDocument: false })}>💱</Button>}
                     <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={async () => {
                       const v = prompt('Hoeveel maanden garantie? (leeg = geen)', p.warranty_months ? String(p.warranty_months) : '24');
