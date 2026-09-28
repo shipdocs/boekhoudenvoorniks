@@ -147,3 +147,55 @@ describe('bankimport en matching', () => {
     expect(s.dashboard.get('2026-09-30').bank.ledgerBalance).toBe(250000);
   });
 });
+
+describe('Revolut', () => {
+  const text = () => fixture('revolut.csv').toString('utf8');
+
+  it('herkent de export: alleen voltooid, boekdatum, kosten apart, eindsaldo', () => {
+    const preview = previewCsv(text());
+    expect(preview.detectedBank).toBe('Revolut');
+    const r = parseCsv(text(), preview.suggestedMapping!);
+    expect(r.transactions.map((t) => [t.date, t.amount, t.description])).toEqual([
+      ['2026-01-02', 10000, 'Money added via IDEAL'],
+      ['2026-01-04', -2000, 'Vercel'],
+      ['2026-01-04', -35, 'Kosten: Vercel'],
+      ['2026-01-05', -2500, 'Supabase'],
+      ['2026-01-05', -2500, 'Supabase'],
+    ]);
+    expect(r.transactions[2]!.counterName).toBe('Revolut');
+    // teruggedraaid en in behandeling niet; eindsaldo = saldo na de laatste voltooide euro-regel
+    const sum = r.transactions.reduce((n, t) => n + t.amount, 0);
+    expect(r.balances).toEqual([{ ownIban: null, date: '2026-01-05', amount: 2965 }]);
+    expect(sum).toBe(2965);
+    expect(r.warnings).toEqual([
+      "1 regel in een andere valuta overgeslagen: de app boekt alleen euro's",
+      '1 betaling is nog in behandeling: die komen mee met een volgende export',
+    ]);
+    expect(r.bank).toBe('Revolut');
+  });
+
+  it('komt op de rekening Revolut, niet op de eerste rekening; opnieuw inlezen geeft geen dubbele', () => {
+    const { s } = setup();
+    const knab = s.bank.ensureDefaultAccount();
+    s.bank.updateAccount(knab.id, { name: 'Knab zakelijk', iban: 'NL52KNAB0775908274' });
+    const parsed = () => parseCsv(text(), previewCsv(text()).suggestedMapping!);
+    const first = s.bank.import(parsed());
+    const revolut = s.bank.listAccounts().find((a) => a.name === 'Revolut')!;
+    expect(revolut).toBeDefined();
+    expect(revolut.id).not.toBe(knab.id);
+    expect(revolut.is_pot).toBe(0);
+    expect(first.periods).toEqual([{ bankAccountId: revolut.id, from: '2026-01-02', to: '2026-01-05' }]);
+    expect(s.bank.list().filter((t) => t.bank_account_id === knab.id)).toHaveLength(0);
+    const again = s.bank.import(parsed());
+    expect(again.imported).toBe(0);
+    expect(again.duplicates).toBe(5);
+    expect(s.bank.listAccounts().filter((a) => a.name === 'Revolut')).toHaveLength(1);
+  });
+
+  it('nieuwe administratie: de lege standaardrekening wordt Revolut', () => {
+    const { s } = setup();
+    const def = s.bank.ensureDefaultAccount();
+    s.bank.import(parseCsv(text(), previewCsv(text()).suggestedMapping!));
+    expect(s.bank.listAccounts().map((a) => [a.id, a.name])).toEqual([[def.id, 'Revolut']]);
+  });
+});
