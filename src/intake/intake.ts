@@ -138,6 +138,8 @@ export class IntakeService {
     private readonly autopilot: () => AutopilotLevel = () => 'normaal',
     private readonly locationEnabled: () => boolean = () => false,
     private readonly carUse: () => string = () => 'onbekend',
+    /** je eigen btw-nummer: staat vaak bij "Bill to" op een buitenlandse factuur, maar is niet van de leverancier */
+    private readonly ownVatNumber: () => string = () => '',
   ) {}
 
   setOcrProvider(provider: OcrProvider | null): void {
@@ -173,7 +175,15 @@ export class IntakeService {
   }
 
   /** EXTRACTIE: wat staat er op het document? */
+  /** Uitlezen, zonder je eigen btw-nummer als dat van de leverancier. */
   async extract(filename: string, data: Uint8Array): Promise<{ result: DocumentResult; source: string; issues: Issue[] }> {
+    const out = await this.extractRaw(filename, data);
+    const own = this.ownVatNumber().replace(/[\s.]/g, '').toUpperCase();
+    if (own && out.result.supplierVatNumber?.value.replace(/[\s.]/g, '').toUpperCase() === own) out.result.supplierVatNumber = null;
+    return out;
+  }
+
+  async extractRaw(filename: string, data: Uint8Array): Promise<{ result: DocumentResult; source: string; issues: Issue[] }> {
     const mime = mimeFor(filename);
     if (mime === 'application/xml') {
       const xml = Buffer.from(data).toString('utf8');
@@ -475,8 +485,15 @@ export class IntakeService {
   findBookedBankTransaction(result: DocumentResult): BankTransaction | null {
     if (!result.total || !result.invoiceDate) return null;
     if (result.foreign) {
-      const supplier = result.supplier ? supplierKey(result.supplier.value).split(' ')[0] : '';
+      const supplier = result.supplier ? supplierKey(result.supplier.value) : '';
       if (!supplier) return null;
+      // "Eleven Labs Inc." op de factuur, "Elevenlabs" op de bank; "fireworks.ai" en "Fireworks AI"
+      const compact = (k: string) => k.replace(/\s+/g, '');
+      const same = (name: string) => {
+        const k = supplierKey(name);
+        const [a, b] = [compact(supplier), compact(k)];
+        return k.split(' ')[0] === supplier.split(' ')[0] || (Math.min(a.length, b.length) >= 4 && (a.startsWith(b) || b.startsWith(a)));
+      };
       const rows = (
         this.db
           .prepare(
@@ -485,9 +502,11 @@ export class IntakeService {
                AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || bank_transactions.id || '"%')`,
           )
           .all(result.invoiceDate.value) as BankTransaction[]
-      ).filter((t) => withinFx(-t.amount, result.total!.value) && !!t.counter_name && supplierKey(t.counter_name).split(' ')[0] === supplier);
+      ).filter((t) => withinFx(-t.amount, result.total!.value) && !!t.counter_name && same(t.counter_name));
+      // een factuur in dollars wordt vaak pas later met de kaart betaald (bv. 1 aug gefactureerd, 14 aug betaald);
+      // een abonnement komt maar eens per maand langs, dus binnen 20 dagen is het deze betaling
       const days = (t: BankTransaction) => diffDays(result.invoiceDate!.value, t.transaction_date);
-      return rows.length === 1 && days(rows[0]!) >= -3 && days(rows[0]!) <= 7 ? rows[0]! : null;
+      return rows.length === 1 && days(rows[0]!) >= -3 && days(rows[0]!) <= 20 ? rows[0]! : null;
     }
     const rows = this.db
       .prepare(
