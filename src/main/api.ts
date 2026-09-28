@@ -252,6 +252,10 @@ export function createApi(s: Services, host: HostContext) {
       case 'recurring-stopped:ja':
         s.recurring.setStatus(r.seriesId!, 'gestopt');
         return;
+      case 'purchase-double:ja':
+        s.bookedPayments.resolve(r.purchaseId!, r.bankTransactionId!, s.purchases.get(r.purchaseId!).invoice_date);
+        return;
+      case 'purchase-double:nee':
       case 'recurring-stopped:nee':
       case 'recurring-missing-payment:ok':
       case 'recurring-invoice:geen':
@@ -492,6 +496,13 @@ export function createApi(s: Services, host: HostContext) {
       paymentQr: (id: number, confirmNewIban = false) => purchasePaymentQr(s.purchases, id, confirmNewIban),
       /** Niet van de zakelijke rekening betaald maar privé of contant; `always`: voortaan bij deze leverancier. */
       paidWith: (id: number, via: 'prive' | 'kas', opts?: { always?: boolean }) => s.quick.payPurchaseWith(id, via, opts),
+      /** Staat de betaling van deze aankoop al als kosten op een van je rekeningen? (dan is hij dubbel) */
+      bookedPayment: (id: number) => {
+        const t = s.bookedPayments.find(s.purchases.get(id));
+        return t ? { bankTransactionId: t.id, date: t.transaction_date, amount: -t.amount, counterName: t.counter_name, account: s.bank.getAccount(t.bank_account_id).name } : null;
+      },
+      /** "Ja, dezelfde betaling": de aankoop vervalt, de bon wordt het bewijsstuk bij die betaling. */
+      mergeWithBooked: (id: number, bankTransactionId: number) => s.bookedPayments.resolve(id, bankTransactionId, s.purchases.get(id).invoice_date),
     },
     /** Vreemde valuta in wat er al stond (#74): nakijken en omrekenen. */
     valuta: {
