@@ -1,3 +1,4 @@
+import { sameBankName } from '../shared/bank-name';
 import { createHash } from 'node:crypto';
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
@@ -221,6 +222,29 @@ export class BankService {
   }
 
   /**
+   * Een bestand zonder eigen IBAN, maar wel van een bekende bank (bv. Revolut): de rekening met die
+   * naam, anders een nieuwe. Nooit zomaar de eerste rekening: dan komt Revolut op je Knab terecht.
+   * De lege standaardrekening van een nieuwe administratie wordt hergebruikt.
+   */
+  private accountForBank(bank: string): BankAccount {
+    const accounts = this.listAccounts();
+    const named = accounts.find((a) => !a.is_pot && sameBankName(a.name, bank));
+    if (named) return named;
+    const fresh = accounts.length === 1 && !accounts[0]!.iban && !accounts[0]!.is_pot && accounts[0]!.name === 'Zakelijke rekening'
+      && !this.db.prepare('SELECT 1 FROM bank_transactions WHERE bank_account_id = ? LIMIT 1').get(accounts[0]!.id);
+    if (fresh) {
+      this.db.prepare('UPDATE bank_accounts SET name = ? WHERE id = ?').run(bank, accounts[0]!.id);
+      return { ...accounts[0]!, name: bank };
+    }
+    if (accounts.length === 0) {
+      const created = this.ensureDefaultAccount();
+      this.db.prepare('UPDATE bank_accounts SET name = ? WHERE id = ?').run(bank, created.id);
+      return { ...created, name: bank };
+    }
+    return this.addAccount(bank, null, { pot: false });
+  }
+
+  /**
    * Beginsaldo van een bankrekening tegen eigen vermogen. Een eerder beginsaldo van dezelfde rekening
    * wordt eerst teruggedraaid, zodat opnieuw invoeren het saldo vervangt in plaats van optelt.
    */
@@ -323,9 +347,10 @@ export class BankService {
       const seen = new Map<string, number>();
       let imported = 0;
       let duplicates = 0;
+      let byBank: BankAccount | undefined;
       const perAccount = new Map<number, { from: string; to: string; transactions: number; imported: number; duplicates: number }>();
       for (const t of result.transactions) {
-        const account = opts.bankAccountId ? this.getAccount(opts.bankAccountId) : this.accountForIban(t.ownIban);
+        const account = opts.bankAccountId ? this.getAccount(opts.bankAccountId) : !t.ownIban && result.bank ? (byBank ??= this.accountForBank(result.bank)) : this.accountForIban(t.ownIban);
         const stat = perAccount.get(account.id) ?? { from: t.date, to: t.date, transactions: 0, imported: 0, duplicates: 0 };
         if (t.date < stat.from) stat.from = t.date;
         if (t.date > stat.to) stat.to = t.date;
@@ -342,7 +367,7 @@ export class BankService {
       // eindsaldo volgens het afschrift (het laatste per rekening), om later te controleren of er iets ontbreekt
       const closing = new Map<number, { date: IsoDate; amount: Cents }>();
       for (const b of result.balances ?? []) {
-        const account = opts.bankAccountId ? this.getAccount(opts.bankAccountId) : this.accountForIban(b.ownIban);
+        const account = opts.bankAccountId ? this.getAccount(opts.bankAccountId) : !b.ownIban && result.bank ? (byBank ??= this.accountForBank(result.bank)) : this.accountForIban(b.ownIban);
         const known = closing.get(account.id);
         if (!known || b.date >= known.date) closing.set(account.id, { date: b.date, amount: b.amount });
         // een afschrift zonder betalingen (alleen een saldo) telt ook: dat saldo is juist nuttig

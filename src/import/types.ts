@@ -32,4 +32,6 @@ export interface ParseResult {
   warnings: string[];
   /** eindsaldi uit het bestand (CAMT/MT940); CSV heeft ze meestal niet */
   balances?: StatementBalance[];
+  /** naam van de bank als het bestand geen eigen IBAN heeft (bv. Revolut): dan de rekening met die naam */
+  bank?: string;
 }

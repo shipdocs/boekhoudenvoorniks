@@ -24,6 +24,16 @@ export interface CsvMapping {
   ownIban?: string;
   /** datumformaat, bv. 'YYYYMMDD', 'DD-MM-YYYY', 'YYYY-MM-DD', 'DD/MM/YYYY' */
   dateFormat: string;
+  /** kosten in een eigen kolom (bv. Revolut): een aparte regel, zodat ze als bankkosten te boeken zijn */
+  fee?: string;
+  /** alleen regels met een van deze waarden (bv. Revolut: State = COMPLETED); de rest is niet (of nog niet) afgeschreven */
+  keep?: { column: string; values: string[] };
+  /** saldo na de regel: het laatste wordt het eindsaldo, om te controleren of er een afschrift ontbreekt */
+  balance?: string;
+  /** valuta per regel: alleen euro's */
+  currency?: string;
+  /** naam van de bank, voor een bestand zonder eigen IBAN: dan komt het op de rekening met die naam */
+  bank?: string;
 }
 
 export interface CsvPreview {
@@ -87,6 +97,23 @@ export const KNOWN_FORMATS: { bank: string; match: string[]; mapping: CsvMapping
       reference: 'Betalingskenmerk',
       description: ['Omschrijving'],
       dateFormat: 'DD-MM-YYYY',
+    },
+  },
+  {
+    // Revolut (privé-export): geen IBAN in het bestand, kosten apart, ook teruggedraaide betalingen
+    bank: 'Revolut',
+    match: ['Type', 'Product', 'Started Date', 'Completed Date', 'Description', 'Amount', 'Fee', 'Currency', 'State', 'Balance'],
+    mapping: {
+      date: 'Completed Date',
+      amount: 'Amount',
+      fee: 'Fee',
+      counterName: 'Description',
+      description: ['Description'],
+      keep: { column: 'State', values: ['COMPLETED'] },
+      balance: 'Balance',
+      currency: 'Currency',
+      bank: 'Revolut',
+      dateFormat: 'YYYY-MM-DD',
     },
   },
   {
@@ -187,9 +214,22 @@ export function parseCsv(text: string, mapping: CsvMapping): ParseResult {
   const parsed = Papa.parse<Record<string, string>>(stripBom(text), { header: true, skipEmptyLines: 'greedy', transformHeader: (h) => h.trim() });
   const transactions: NormalizedTransaction[] = [];
   const warnings: string[] = [];
+  const skipped = new Map<string, number>();
+  let otherCurrency = 0;
+  // het saldo na de laatste regel (op datum en tijd): het eindsaldo van het afschrift
+  let closing: { at: string; date: string; amount: number } | null = null;
   parsed.data.forEach((row, i) => {
     try {
       const get = (col?: string) => (col ? (row[col] ?? '').trim() : '');
+      if (mapping.keep && !mapping.keep.values.includes(get(mapping.keep.column))) {
+        const value = get(mapping.keep.column) || 'leeg';
+        skipped.set(value, (skipped.get(value) ?? 0) + 1);
+        return;
+      }
+      if (mapping.currency && get(mapping.currency) && get(mapping.currency).toUpperCase() !== 'EUR') {
+        otherCurrency++;
+        return;
+      }
       let amount: number;
       if (mapping.amountDebit || mapping.amountCredit) {
         const debit = get(mapping.amountDebit);
@@ -202,18 +242,39 @@ export function parseCsv(text: string, mapping: CsvMapping): ParseResult {
       }
       const description = (mapping.description ?? []).map(get).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
       const counterIban = get(mapping.counterIban);
+      const date = parseDate(get(mapping.date), mapping.dateFormat);
+      const ownIban = get(mapping.ownIban) ? normalizeIban(get(mapping.ownIban)) : null;
       transactions.push({
-        date: parseDate(get(mapping.date), mapping.dateFormat),
+        date,
         amount,
         counterName: get(mapping.counterName) || null,
         counterIban: counterIban ? normalizeIban(counterIban) : null,
         description: description || get(mapping.counterName),
         reference: get(mapping.reference) || null,
-        ownIban: get(mapping.ownIban) ? normalizeIban(get(mapping.ownIban)) : null,
+        ownIban,
       });
+      // kosten gaan van het saldo af (saldo = vorige + bedrag − kosten)
+      const fee = get(mapping.fee) ? parseEuro(get(mapping.fee)) : 0;
+      if (fee !== 0) {
+        transactions.push({ date, amount: -fee, counterName: mapping.bank ?? null, counterIban: null, description: `Kosten: ${description || get(mapping.counterName)}`, reference: null, ownIban });
+      }
+      if (mapping.balance && get(mapping.balance)) {
+        const at = get(mapping.date);
+        if (!closing || at >= closing.at) closing = { at, date, amount: parseEuro(get(mapping.balance)) };
+      }
     } catch (e) {
       warnings.push(`Regel ${i + 2}: ${(e as Error).message}`);
     }
   });
-  return { source: 'csv', transactions, warnings };
+  if (otherCurrency > 0) warnings.push(`${otherCurrency} ${otherCurrency === 1 ? 'regel' : 'regels'} in een andere valuta overgeslagen: de app boekt alleen euro's`);
+  const pending = [...skipped].filter(([v]) => /pending|behandeling/i.test(v)).reduce((n, [, c]) => n + c, 0);
+  if (pending > 0) warnings.push(`${pending} ${pending === 1 ? 'betaling is' : 'betalingen zijn'} nog in behandeling: die komen mee met een volgende export`);
+  const last = closing as { date: string; amount: number } | null;
+  return {
+    source: 'csv',
+    transactions,
+    warnings,
+    ...(last ? { balances: [{ ownIban: transactions[0]?.ownIban ?? null, date: last.date, amount: last.amount }] } : {}),
+    ...(mapping.bank ? { bank: mapping.bank } : {}),
+  };
 }
