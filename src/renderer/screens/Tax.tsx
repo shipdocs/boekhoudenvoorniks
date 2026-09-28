@@ -5,6 +5,7 @@ import { formatDateNl, today, vatDeadline } from '../../shared/dates';
 import { VAT_DISCLAIMER } from '../../shared/legal';
 import { AccountantNotice } from './TaxYear';
 import { CheckLines } from './CheckLines';
+import { CheckItems } from './CheckItems';
 
 /** Eén regel uitleg per vak van de btw-aangifte (de officiële naam staat ervoor). */
 const RUBRIEK_UITLEG: Record<string, string> = {
@@ -148,6 +149,12 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                       <div className="grow">
                         <div className={c.skipped ? 'muted' : ''}>{c.title}{c.skipped ? ' (bewust overgeslagen)' : ''}</div>
                         {!c.skipped && <div className="small muted">{c.detail}</div>}
+                        {!c.skipped && c.items && c.items.length > 0 && (
+                          <details className="small" style={{ marginTop: 4 }}>
+                            <summary>Welke {c.items.length === 1 ? 'is het' : `zijn het (${c.items.length})`}?</summary>
+                            <CheckItems items={c.items} />
+                          </details>
+                        )}
                       </div>
                       {!c.skipped && (
                         <span className="row">

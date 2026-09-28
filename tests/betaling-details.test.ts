@@ -105,3 +105,23 @@ describe('vragen op Vandaag met genoeg informatie', () => {
     expect(task.actions.map((a) => a.id)).toContain('open');
   });
 });
+
+describe('bij elke knop: wat er gebeurt', () => {
+  it('zakelijk of privé: welke kosten en of je de btw terugkrijgt', () => {
+    const { s } = setup();
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-10', amount: -1311, description: 'PayPal Hetzner', counterName: 'PAYPAL EUROPE' }] });
+    const t = s.inbox.tasks('2026-09-25').find((x) => x.kind === 'bank-business')!;
+    const hint = (id: string) => t.actions.find((a) => a.id === id)?.hint;
+    expect(hint('zakelijk')).toMatch(/kosten/);
+    expect(hint('prive')).toMatch(/Geen kosten en geen btw/);
+  });
+});
+
+describe('btw-controles: om welke posten het gaat', () => {
+  it('"betalingen uitzoeken" noemt de betalingen', () => {
+    const { s } = setup();
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-08-10', amount: -5000, description: 'iets', counterName: 'ONBEKEND BV' }] });
+    const check = s.vat.checks('2026-Q3').find((c) => c.key === 'bank-open')!;
+    expect(check.items).toEqual([expect.objectContaining({ kind: 'bank', date: '2026-08-10', label: 'ONBEKEND BV', amount: -5000 })]);
+  });
+});

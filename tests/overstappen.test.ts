@@ -256,6 +256,9 @@ describe('overstappen met een lopende administratie', () => {
       ['leverancier', '5531'],
       ['btw', null],
     ]);
+    // elk voorstel zegt waarom, en wat "Ja" doet
+    expect(sug[0]!.why).toMatch(/factuurnummer \(2025-0042\).*niet nog eens als omzet/);
+    expect(sug[2]!.why).toMatch(/Belastingdienst/);
     s.switchover.acceptSuggestion(sug[0]!.txId, { invoiceDate: '2025-12-10' });
     s.switchover.acceptSuggestion(sug[1]!.txId);
     s.switchover.acceptSuggestion(sug[2]!.txId);

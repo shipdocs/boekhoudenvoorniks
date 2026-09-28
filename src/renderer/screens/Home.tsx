@@ -9,6 +9,8 @@ import { investmentInfo } from './Purchases';
 import { hasOnboardingUpdate } from '../../shared/onboarding';
 import { CheckLines } from './CheckLines';
 import { PaymentDetails } from './PaymentDetails';
+import { CheckItems } from './CheckItems';
+import type { CheckItem } from '../../btw/checks';
 
 // bon bekijken: pas laden als je er een opent (PDF.js is groot)
 const DocumentPreview = lazy(() => import('./DocumentReview').then((m) => ({ default: m.DocumentPreview })));
@@ -27,6 +29,7 @@ export function Home() {
   const [why, setWhy] = useState<string | null>(null);
   // een betaling bekijken: alle gegevens van de bank en eerdere betalingen aan dezelfde partij
   const [viewing, setViewing] = useState<Task | null>(null);
+  const [checkItems, setCheckItems] = useState<{ task: Task; items: CheckItem[]; detail: string } | null>(null);
   const [monthOpen, setMonthOpen] = useState(false);
   // factuur bij een bestaande afschrijving (vaste lasten): bestand kiezen en direct koppelen
   const evidenceInput = useRef<HTMLInputElement>(null);
@@ -44,6 +47,11 @@ export function Home() {
 
   const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number }) => {
     if (task.kind === 'vat-check' && actionId === 'open' && task.ref.account) return setCheckLines(task);
+    // een controle over losse betalingen of aankopen: eerst laten zien welke het zijn
+    if (task.kind === 'vat-check' && actionId === 'open' && task.ref.periodKey) {
+      const check = (await api.vat.checks(task.ref.periodKey)).find((c) => c.key === task.ref.checkKey);
+      if (check?.items?.length) return setCheckItems({ task, items: check.items, detail: check.detail });
+    }
     // `?? {}`: ook een actie zonder antwoord telt als gelukt (undefined = fout)
     const r = await run(async () => (await api.home.act(task, actionId, payload)) ?? {});
     if (r && !('navigate' in r && r.navigate)) {
@@ -181,13 +189,18 @@ export function Home() {
                 </div>
                 <div className="q">
                   {t.question}
-                  {t.why && <> <button className="linklike small" onClick={() => setWhy(why === t.key ? null : t.key)}>Waarom?</button></>}
+                  {(t.why || t.actions.some((a) => a.hint)) && <> <button className="linklike small" aria-expanded={why === t.key} onClick={() => setWhy(why === t.key ? null : t.key)}>{t.why ? 'Waarom? Wat gebeurt er?' : 'Wat gebeurt er?'}</button></>}
                 </div>
-                {why === t.key && <div className="small muted">{t.why}</div>}
+                {why === t.key && (
+                  <div className="small muted">
+                    {t.why && <div>{t.why}</div>}
+                    <ActionHints task={t} />
+                  </div>
+                )}
               </div>
               <div className="row">
                 {t.actions.map((a) => (
-                  <Button key={a.id} kind={a.primary ? 'primary' : undefined} small disabled={busy} onClick={() => void act(t, a.id)}>
+                  <Button key={a.id} kind={a.primary ? 'primary' : undefined} small disabled={busy} title={a.hint} onClick={() => void act(t, a.id)}>
                     {a.label}
                   </Button>
                 ))}
@@ -246,6 +259,7 @@ export function Home() {
             <DocumentPreview id={viewing.ref.documentId} />
           </Suspense>
           <div className="q" style={{ marginTop: 12 }}>{viewing.question}</div>
+          <ActionHints task={viewing} />
           <div className="row end" style={{ marginTop: 8 }}>
             <Button onClick={() => setViewing(null)}>Later</Button>
             {viewing.actions.map((a) => (
@@ -258,6 +272,7 @@ export function Home() {
         <Modal title="Aankoop bekijken" onClose={() => setViewing(null)}>
           <PurchaseInfo purchaseId={viewing.ref.purchaseId} />
           <div className="q" style={{ marginTop: 12 }}>{viewing.question}</div>
+          <ActionHints task={viewing} />
           <div className="row end" style={{ marginTop: 8 }}>
             <Button onClick={() => setViewing(null)}>Later</Button>
             {viewing.actions.map((a) => (
@@ -276,6 +291,13 @@ export function Home() {
         />
       )}
 
+      {checkItems && (
+        <Modal title={checkItems.task.title} onClose={() => setCheckItems(null)}>
+          <p className="muted small">{checkItems.detail}</p>
+          <CheckItems items={checkItems.items} onOpen={() => setCheckItems(null)} />
+          <div className="row end" style={{ marginTop: 10 }}><Button onClick={() => setCheckItems(null)}>Sluiten</Button></div>
+        </Modal>
+      )}
       {checkLines && (
         <CheckLines account={checkLines.ref.account!} upTo={checkLines.ref.upTo} title={checkLines.title} hint={checkLines.question} onClose={() => { setCheckLines(null); void reload(); refreshBadge(); }} />
       )}
@@ -411,6 +433,7 @@ function PaymentModal({ task, txId, busy, onClose, onAct }: { task: Task; txId: 
             Alle betalingen staan ook bij <strong>Bank</strong>.
       </p>
       <div className="q" style={{ marginTop: 12 }}>{task.question}</div>
+      <ActionHints task={task} />
       <div className="row end" style={{ marginTop: 8 }}>
         <Button onClick={onClose}>Later</Button>
         {task.actions.map((a) => (
@@ -435,5 +458,16 @@ function PurchaseInfo({ purchaseId }: { purchaseId: number }) {
       </tbody></table>
       {data.attachmentPath ? <Button small onClick={() => void api.app.openAttachment(data.attachmentPath!)}>Bon of factuur openen</Button> : <p className="small muted">Er zit geen bon bij deze aankoop.</p>}
     </>
+  );
+}
+
+/** Per knop wat hij doet ("Zakelijk: wordt geboekt als …"), zodat je weet wat je kiest. */
+function ActionHints({ task }: { task: Task }) {
+  const hinted = task.actions.filter((a) => a.hint);
+  if (hinted.length === 0) return null;
+  return (
+    <ul className="small muted action-hints">
+      {hinted.map((a) => <li key={a.id}><strong>{a.label}:</strong> {a.hint}</li>)}
+    </ul>
   );
 }

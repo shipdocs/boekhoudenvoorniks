@@ -232,3 +232,7 @@ input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--primary)
   table.list th, table.list td { padding: 8px 6px; }
   table.list th { letter-spacing: .02em; }
 }
+.action-hints { margin: 6px 0 0; padding-left: 18px; }
+.action-hints li { margin-bottom: 2px; }
+.list.details th { text-align: left; width: 32%; font-weight: 600; vertical-align: top; }
+.payment-details h3 { margin-top: 16px; }

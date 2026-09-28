@@ -5,6 +5,7 @@ import { addDays, isIsoDate, today } from '../../shared/dates';
 import { SKIPPABLE_SECTIONS, defaultBookValue, startDateConsequences, startDateOptions } from '../../shared/switchover';
 import type { OpeningInput, OpeningItem, OpeningKind, OpeningSuggestion, SectionKey, SwitchoverState } from '../../onboarding/switchover';
 import type { DateAdvice, ImportAnalysis, ImportFileRole, XafPlan } from '../../onboarding/xaf-import';
+import { PaymentDetails } from './PaymentDetails';
 
 /**
  * Overstap-hulp: een lopende administratie overzetten. Hoofdstukken in gewone taal; de app boekt
@@ -516,9 +517,13 @@ function Banks({ state, refresh, nextButton }: SectionProps) {
         <div className="small">Meerdere bestanden of rekeningen? Sleep ze een voor een.</div>
       </DropZone>
       {beforeCount > 0 && (
-        <div className="notice warn row between" style={{ marginTop: 14 }}>
-          <span>{beforeCount} {beforeCount === 1 ? 'betaling is' : 'betalingen zijn'} van vóór <DateNl date={date} />. Die zitten al in je vorige administratie.</span>
-          <Button small kind="primary" disabled={busy} onClick={async () => { await run(() => api.switchover.ignoreBeforeDate(), 'Overgeslagen'); await refresh(); }}>Overslaan</Button>
+        <div className="notice warn" style={{ marginTop: 14 }}>
+          <div className="row between">
+            <span>{beforeCount} {beforeCount === 1 ? 'betaling is' : 'betalingen zijn'} van vóór <DateNl date={date} />. Die zitten al in je vorige administratie.</span>
+            <Button small kind="primary" disabled={busy} onClick={async () => { await run(() => api.switchover.ignoreBeforeDate(), 'Overgeslagen'); await refresh(); }}>Overslaan</Button>
+          </div>
+          <BeforeDateList date={date} />
+          <p className="small muted" style={{ marginBottom: 0 }}>Overslaan: ze tellen niet mee in deze administratie (niet als omzet, kosten of btw). Ze blijven zichtbaar bij Bank.</p>
         </div>
       )}
       {state.banks.map((b) => (b.unused
@@ -636,7 +641,12 @@ function Suggestions({ list, refresh }: { list: OpeningSuggestion[]; refresh: Se
         <div key={s.txId} className="row between" style={{ borderTop: '1px solid var(--border)', padding: '10px 0' }}>
           <div style={{ flex: 1, minWidth: 220 }}>
             <strong>{s.question}</strong>
-            <div className="small muted"><DateNl date={s.date} /> · <Euro cents={s.amount} /> · {s.name}{s.description ? ` · ${s.description}` : ''}</div>
+            <div className="small muted"><DateNl date={s.date} /> · <Euro cents={s.amount} /> · {s.name}{s.description ? ` · ${s.description.length > 120 ? `${s.description.slice(0, 120)}…` : s.description}` : ''}</div>
+            <div className="small muted">{s.why}</div>
+            <details className="small">
+              <summary>Alle gegevens van deze betaling</summary>
+              <PaymentDetails txId={s.txId} />
+            </details>
           </div>
           <div className="row">
             <Button small kind="primary" disabled={busy} onClick={() => (s.kind === 'btw' ? void run(async () => refresh(await api.switchover.acceptSuggestion(s.txId)), 'Toegevoegd') : setEdit(s))}>Ja</Button>
@@ -1128,5 +1138,27 @@ function Position({ state, refresh, onSection }: SectionProps & { onSection: (s:
       </div>
       {problems.length > 0 && <p className="small muted" style={{ textAlign: 'right' }}>Los eerst de rode punten op.</p>}
     </>
+  );
+}
+
+/** De betalingen van vóór de instapdatum, zodat je ziet wat je overslaat. */
+function BeforeDateList({ date }: { date: string }) {
+  const txs = useLoad(() => api.bank.transactions({ status: 'nieuw' }));
+  const list = (txs.data ?? []).filter((t) => t.transaction_date < date);
+  if (list.length === 0) return null;
+  return (
+    <details className="small" style={{ marginTop: 6 }}>
+      <summary>Welke betalingen zijn het?</summary>
+      <table className="list"><tbody>
+        {list.slice(0, 100).map((t) => (
+          <tr key={t.id}>
+            <td><DateNl date={t.transaction_date} /></td>
+            <td>{t.counter_name ?? t.description}</td>
+            <td style={{ textAlign: 'right' }}><Euro cents={t.amount} /></td>
+          </tr>
+        ))}
+      </tbody></table>
+      {list.length > 100 && <p className="muted">en nog {list.length - 100} andere</p>}
+    </details>
   );
 }
