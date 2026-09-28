@@ -37,8 +37,8 @@ export class Updates {
   }
 
   private set(patch: Partial<UpdateStatus>): void {
-    // een klaarstaande update blijft klaarstaan, ook als een latere controle niets nieuws vindt
-    if (this.status.state === 'klaar' && patch.state && patch.state !== 'klaar' && patch.state !== 'fout') return;
+    // een klaarstaande update blijft klaarstaan, ook als een latere controle niets nieuws vindt of mislukt
+    if (this.status.state === 'klaar' && patch.state && patch.state !== 'klaar') return;
     this.status = { ...this.status, ...patch };
     this.emit(this.status);
   }
