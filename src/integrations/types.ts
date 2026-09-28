@@ -23,7 +23,7 @@ export interface SyncResult {
 }
 
 export interface IntegrationDefinition {
-  id: 'woocommerce' | 'shopify' | 'mollie' | 'stripe';
+  id: 'woocommerce' | 'shopify' | 'mollie' | 'mollie-facturen' | 'stripe';
   label: string;
   kind: 'webshop' | 'betaalprovider';
   description: string;

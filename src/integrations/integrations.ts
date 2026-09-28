@@ -12,11 +12,11 @@ import type { RelationsService } from '../relations/relations';
 import type { SalesVatCode } from '../shared/vat';
 import { WOOCOMMERCE, fetchWooOrders } from './woocommerce';
 import { SHOPIFY, fetchShopifyOrders } from './shopify';
-import { MOLLIE, fetchMollieSettlements } from './mollie';
+import { MOLLIE, MOLLIE_FACTUREN, fetchMollieSettlements, fetchMollieSalesInvoices } from './mollie';
 import { STRIPE, fetchStripePayouts } from './stripe';
 import type { ExternalOrder, ExternalPayout, FetchLike, IntegrationDefinition, SecretStore, SyncResult } from './types';
 
-export const INTEGRATIONS: IntegrationDefinition[] = [WOOCOMMERCE, SHOPIFY, MOLLIE, STRIPE];
+export const INTEGRATIONS: IntegrationDefinition[] = [WOOCOMMERCE, SHOPIFY, MOLLIE_FACTUREN, MOLLIE, STRIPE];
 
 /**
  * Verlegde btw over buitenlandse transactiekosten: aangeven en tegelijk aftrekken (per saldo nul).
@@ -132,6 +132,8 @@ export class IntegrationService {
         result = this.importOrders(id, await fetchWooOrders(this.fetchImpl, { url: cfg.url!, consumerKey: cfg.consumerKey!, consumerSecret: cfg.consumerSecret! }, since));
       } else if (id === 'shopify') {
         result = this.importOrders(id, await fetchShopifyOrders(this.fetchImpl, { shop: cfg.shop!, accessToken: cfg.accessToken! }, since));
+      } else if (id === 'mollie-facturen') {
+        result = this.importOrders(id, await fetchMollieSalesInvoices(this.fetchImpl, { apiKey: cfg.apiKey! }, this.knownOrders(id)));
       } else if (id === 'mollie') {
         result = this.importPayouts(id, await fetchMollieSettlements(this.fetchImpl, { apiKey: cfg.apiKey! }, this.knownPayouts(id)));
       } else {
@@ -179,7 +181,7 @@ export class IntegrationService {
           const c = order.customer;
           const relation =
             (c.email ? this.relations.findByEmail(c.email) : undefined) ??
-            this.relations.create({ name: c.name, email: c.email, address: c.address, postcode: c.postcode, city: c.city, country: c.country ?? 'NL', type: 'klant' });
+            this.relations.create({ name: c.name, email: c.email, address: c.address, postcode: c.postcode, city: c.city, country: c.country ?? 'NL', vat_number: c.vatNumber ?? undefined, type: 'klant' });
           if (c.country && c.country !== 'NL' && order.lines.some((l) => l.vatPercentage === 0)) {
             result.messages.push(`Order ${order.number}: buitenlandse klant met 0% BTW — controleer of dit ICP (rubriek 3b) of OSS is.`);
           }
@@ -201,6 +203,11 @@ export class IntegrationService {
       }
     }
     return result;
+  }
+
+  private knownOrders(source: string): Set<string> {
+    const rows = this.db.prepare(`SELECT external_id FROM invoices WHERE external_source = ?`).all(source) as { external_id: string }[];
+    return new Set(rows.map((r) => r.external_id));
   }
 
   private knownPayouts(source: string): Set<string> {
