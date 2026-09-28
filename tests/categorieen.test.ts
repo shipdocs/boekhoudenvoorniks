@@ -99,6 +99,7 @@ describe('kostenposten per beroep (onboarding)', () => {
     const { s } = setup();
     expect(s.categories.applyTrade('stukadoor', { add: ['AI-tools'], hide: ['software', 'overig'] })).toEqual({ added: [], hidden: [] });
     expect(() => s.categories.applyTrade('bestaat-niet', { add: [], hide: [] })).toThrow(/beroep/);
+    expect(() => s.categories.applyTrade('webdev', { add: 'AI-tools' } as never)).toThrow(/Kies welke kosten/);
   });
 
   it('elk voorstel is een geldige eigen categorie', () => {

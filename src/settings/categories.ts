@@ -200,6 +200,8 @@ export class CategoryService implements CategoryLookup {
   applyTrade(tradeKey: string, choice: { add: string[]; hide: string[] }): { added: string[]; hidden: string[] } {
     const trade = TRADES.find((t) => t.key === tradeKey);
     if (!trade) throw new ValidationError('Onbekend beroep');
+    const isList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
+    if (!isList(choice?.add) || !isList(choice?.hide)) throw new ValidationError('Kies welke kosten je wilt toevoegen of verbergen');
     const added: string[] = [];
     const hidden: string[] = [];
     this.db.transaction(() => {
