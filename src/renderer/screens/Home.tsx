@@ -21,6 +21,8 @@ export function Home() {
   const activeJobs = useLoad(async () => (pickingJob ? api.jobs.list({ active: true }) : []), [pickingJob]);
   const [showAll, setShowAll] = useState(false);
   const [why, setWhy] = useState<string | null>(null);
+  // een betaling bekijken: alle gegevens van de bank en eerdere betalingen aan dezelfde partij
+  const [viewing, setViewing] = useState<Task | null>(null);
   const [monthOpen, setMonthOpen] = useState(false);
   // factuur bij een bestaande afschrijving (vaste lasten): bestand kiezen en direct koppelen
   const evidenceInput = useRef<HTMLInputElement>(null);
@@ -167,7 +169,11 @@ export function Home() {
             <div className="task">
               <div className="icon" aria-hidden>{t.icon}</div>
               <div className="grow">
-                <div className="title">{t.title}</div>
+                <div className="title">
+                  {t.ref.bankTransactionId ? (
+                    <button className="linklike title-link" title="Bekijk alle gegevens van deze betaling" onClick={() => setViewing(t)}>{t.title}</button>
+                  ) : t.title}
+                </div>
                 <div className="q">
                   {t.question}
                   {t.why && <> <button className="linklike small" onClick={() => setWhy(why === t.key ? null : t.key)}>Waarom?</button></>}
@@ -227,6 +233,16 @@ export function Home() {
             ))}
           </div>
         </Modal>
+      )}
+
+      {viewing && viewing.ref.bankTransactionId && (
+        <PaymentModal
+          task={viewing}
+          txId={viewing.ref.bankTransactionId}
+          busy={busy}
+          onClose={() => setViewing(null)}
+          onAct={async (actionId) => { const t = viewing; setViewing(null); await act(t, actionId); }}
+        />
       )}
 
       {checkLines && (
@@ -345,5 +361,56 @@ function GettingStarted() {
         </div>
       )}
     </>
+  );
+}
+
+/** Eén betaling met alles wat de bank erover gaf, zodat je kunt beoordelen wat het was. */
+function PaymentModal({ task, txId, busy, onClose, onAct }: { task: Task; txId: number; busy: boolean; onClose: () => void; onAct: (actionId: string) => Promise<void> }) {
+  const { data, error } = useLoad(() => api.bank.details(txId), [txId]);
+  const t = data?.transaction;
+  return (
+    <Modal title="Betaling bekijken" onClose={onClose}>
+      <ErrorBox error={error} />
+      {t && data && (
+        <>
+          <table className="list details"><tbody>
+            <tr><th>Datum</th><td>{formatDateNl(t.transaction_date)}</td></tr>
+            <tr><th>Bedrag</th><td><Euro cents={t.amount} /> {t.amount < 0 ? '(afgeschreven)' : '(bijgeschreven)'}</td></tr>
+            <tr><th>{t.amount < 0 ? 'Aan' : 'Van'}</th><td>{t.counter_name ?? <span className="muted">onbekend</span>}</td></tr>
+            <tr><th>Rekeningnummer</th><td>{t.counter_iban ?? <span className="muted">niet meegegeven door de bank</span>}</td></tr>
+            <tr><th>Omschrijving</th><td style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{t.description || <span className="muted">geen</span>}</td></tr>
+            {t.reference && <tr><th>Kenmerk</th><td>{t.reference}</td></tr>}
+            <tr><th>Rekening</th><td>{data.account.name}{data.account.iban ? ` · ${data.account.iban}` : ''}</td></tr>
+          </tbody></table>
+
+          <h3>Eerder {t.amount < 0 ? 'aan' : 'van'} {t.counter_name ?? 'deze partij'}</h3>
+          {data.history.length === 0 ? (
+            <p className="muted small">Geen eerdere betalingen gevonden.</p>
+          ) : (
+            <table className="list"><tbody>
+              {data.history.map((h) => (
+                <tr key={h.id}>
+                  <td>{formatDateNl(h.date)}</td>
+                  <td style={{ textAlign: 'right' }}><Euro cents={h.amount} /></td>
+                  <td>{h.how}<div className="small muted">{h.description.length > 90 ? `${h.description.slice(0, 90)}…` : h.description}</div></td>
+                </tr>
+              ))}
+            </tbody></table>
+          )}
+          <p className="small muted">
+            Weet je het nog steeds niet? Zoek de factuur of het bonnetje op in je mail of bij de leverancier (bij PayPal: in je PayPal-overzicht op dezelfde datum en hetzelfde bedrag).
+            Alle betalingen staan ook bij <strong>Bank</strong>.
+          </p>
+
+          <div className="q" style={{ marginTop: 12 }}>{task.question}</div>
+          <div className="row end" style={{ marginTop: 8 }}>
+            <Button onClick={onClose}>Later</Button>
+            {task.actions.map((a) => (
+              <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={() => void onAct(a.id)}>{a.label}</Button>
+            ))}
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }

@@ -374,6 +374,45 @@ export class BankService {
     return t;
   }
 
+  /**
+   * Alles wat je nodig hebt om een betaling te beoordelen: de regel zoals de bank hem gaf, en eerdere
+   * betalingen aan of van dezelfde partij met hoe die verwerkt zijn.
+   */
+  details(txId: number): {
+    transaction: BankTransaction;
+    account: { name: string; iban: string | null };
+    history: { id: number; date: IsoDate; amount: Cents; description: string; how: string }[];
+  } {
+    const t = this.get(txId);
+    const account = this.getAccount(t.bank_account_id);
+    const same = t.counter_iban
+      ? { sql: 'counter_iban = ?', value: t.counter_iban }
+      : t.counter_name
+        ? { sql: 'counter_iban IS NULL AND lower(counter_name) = lower(?)', value: t.counter_name }
+        : null;
+    const rows = same
+      ? (this.db.prepare(`SELECT * FROM bank_transactions WHERE ${same.sql} AND id <> ? ORDER BY transaction_date DESC, id DESC LIMIT 8`).all(same.value, t.id) as BankTransaction[])
+      : [];
+    const bookedTo = this.db.prepare(
+      `SELECT DISTINCT a.name FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+       WHERE l.journal_entry_id = ? AND l.account_id NOT IN (SELECT account_id FROM bank_accounts) AND a.category <> 'btw'`,
+    );
+    const how = (h: BankTransaction): string => {
+      if (h.status === 'nieuw') return 'nog niet verwerkt';
+      if (h.status === 'genegeerd') return 'overgeslagen';
+      if (h.matched_invoice_id) return 'betaling van een factuur';
+      if (h.matched_purchase_invoice_id) return 'betaling van een aankoop';
+      if (!h.matched_journal_entry_id) return 'verwerkt';
+      const names = (bookedTo.all(h.matched_journal_entry_id) as { name: string }[]).map((r) => r.name);
+      return names.length > 0 ? names.join(', ') : 'verwerkt';
+    };
+    return {
+      transaction: t,
+      account: { name: account.name, iban: account.iban },
+      history: rows.map((h) => ({ id: h.id, date: h.transaction_date, amount: h.amount, description: h.description, how: how(h) })),
+    };
+  }
+
   private assertOpen(t: BankTransaction): void {
     if (t.status === 'gematcht') throw new ValidationError('Deze betaling is al verwerkt');
   }

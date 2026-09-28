@@ -558,6 +558,8 @@ export function createApi(s: Services, host: HostContext) {
       },
       transactions: (filter?: { status?: 'nieuw' | 'gematcht' | 'genegeerd'; search?: string }) => s.bank.list(filter),
       suggestions: (txId: number) => s.matching.suggest(s.bank.get(txId)),
+      /** alle gegevens van één betaling, met eerdere betalingen aan dezelfde partij */
+      details: (txId: number) => s.bank.details(txId),
       matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(txId, invoiceId),
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(txId, purchaseId),
       book: (txId: number, input: BookToAccountInput) => s.bank.bookToAccount(txId, input),
