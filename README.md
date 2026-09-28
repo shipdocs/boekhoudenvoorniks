@@ -50,7 +50,7 @@ src/
   inbox/         "Ben ik bij?": taken, automatisch verwerken, geld-overzicht
   onboarding/    "Aan de slag"-lijstje en de overstap-hulp (instapdatum, startbalans, controles)
   dashboard/     read-only overzichten
-  integrations/  WooCommerce, Shopify, Mollie, Stripe, open-banking-interface (los; zonder configuratie inactief)
+  integrations/  WooCommerce, Shopify, Mollie Facturen, Mollie, Stripe, open-banking-interface (los; zonder configuratie inactief)
   export/        auditfile (XAF), journaal/saldibalans CSV
   main/          Electron-hoofdproces: IPC-whitelist, PDF (Chromium printToPDF), safeStorage, back-ups, updater
   renderer/      React-UI
