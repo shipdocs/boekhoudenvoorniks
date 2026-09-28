@@ -3,6 +3,7 @@ import { parseDocumentText, toLines } from '../src/intake/text-parser';
 import { vatFromDocument } from '../src/intake/classify';
 import { setup } from './helpers';
 import { makePdf } from './pdf';
+import type { FetchLike } from '../src/integrations/types';
 
 /**
  * Facturen en betaalbewijzen die Stripe maakt (Vercel, Render, Supabase, ...): de verkoper en de klant
@@ -107,5 +108,24 @@ describe('facturen van Stripe', () => {
     expect(doc.result?.supplierVatNumber ?? null).toBeNull();
     expect(doc.result?.supplier?.value).toBe('Wolkje');
     expect(doc.classification?.vatCode).toBe('buiten-eu');
+  });
+
+  it('betaling al rechtstreeks geboekt: de factuur wordt bewijsstuk, ook bij een andere schrijfwijze en 13 dagen later betaald', async () => {
+    const csv = ['KEY,FREQ,CURRENCY,CURRENCY_DENOM,EXR_TYPE,EXR_SUFFIX,TIME_PERIOD,OBS_VALUE', 'EXR.D.USD.EUR.SP00.A,D,USD,EUR,SP00,A,2026-07-31,1.1000'].join('\n');
+    const ecb: FetchLike = (async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => csv })) as FetchLike;
+    const { s } = setup({ fetch: ecb });
+    s.settings.update({ onboardingDone: true });
+    const card = s.bank.ensureDefaultAccount();
+    // $ 55,00 → ongeveer € 50,00; met de kaart betaald op 14 augustus, "Elevenlabs" op het afschrift
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-08-14', amount: -5040, description: 'Card Payment: Elevenlabs', counterName: 'Elevenlabs' }] }, { bankAccountId: card.id });
+    const tx = s.bank.list({ status: 'nieuw' })[0]!;
+    s.inbox.answerBank(tx.id, { business: true, categoryKey: 'software', vatCode: 'buiten-eu' });
+    const entries = s.db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get() as { n: number };
+    const lines = ['Invoice', 'Invoice number EL55AA01-0007', 'Date of issue August 1, 2026', 'Eleven Labs Inc. @elevenlabs Bill to', '169 Example Ave Shipdocs', 'United States Netherlands', 'Description Qty Unit price Amount', 'Creator 1 $55.00 $55.00', 'Total $55.00', 'Amount due $55.00 USD'];
+    const doc = await s.intake.add('Invoice-EL55AA01-0007.pdf', makePdf(lines), '2026-08-20', { autoConfirm: false });
+    expect(doc.status).toBe('verwerkt');
+    expect(doc.classification?.reasons.join(' ')).toMatch(new RegExp(`banktransactie #${tx.id}`));
+    expect(s.purchases.list()).toHaveLength(0);
+    expect((s.db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get() as { n: number }).n).toBe(entries.n);
   });
 });
