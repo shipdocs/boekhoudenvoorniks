@@ -152,7 +152,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                         {!c.skipped && c.items && c.items.length > 0 && (
                           <details className="small" style={{ marginTop: 4 }}>
                             <summary>Welke {c.items.length === 1 ? 'is het' : `zijn het (${c.items.length})`}?</summary>
-                            <CheckItems items={c.items} />
+                            <CheckItems items={c.items} onChanged={async () => { await Promise.all([checks.reload(), report.reload()]); }} />
                           </details>
                         )}
                       </div>

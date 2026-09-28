@@ -110,6 +110,10 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                   <span className="row">
                     {p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}
                     {p.status === 'open' && p.open_amount > 0 && <Button small kind="ghost" title="Al betaald, maar niet van je zakelijke rekening (bv. privé of contant)" onClick={() => setPaidElsewhere(p)}>Al betaald</Button>}
+                    {p.status === 'open' && p.amount_paid === 0 && <Button small kind="ghost" title="Hoort deze aankoop hier niet (bv. per ongeluk toegevoegd, of van vóór je instapdatum)? Dan haal je hem weg; de bon blijft bewaard." ariaLabel="Aankoop weghalen" onClick={async () => {
+                      if (!confirm(`Aankoop ${p.relation_name ?? p.description} van ${formatDateNl(p.invoice_date)} weghalen? De kosten en de btw gaan eruit; de bon blijft bewaard.`)) return;
+                      if ((await run(async () => { await api.purchases.remove(p.id); return true; }, 'Aankoop weggehaald ✓')) !== undefined) await purchases.reload();
+                    }}>Weghalen</Button>}
                     {!p.currency && <Button small kind="ghost" title="Was deze bon in dollars of een andere munt? Dan reken je hem hier om naar euro's." ariaLabel="Omrekenen uit een andere munt" onClick={() => setFx({ id: p.id, fromDocument: false })}>💱</Button>}
                     <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={async () => {
                       const v = prompt('Hoeveel maanden garantie? (leeg = geen)', p.warranty_months ? String(p.warranty_months) : '24');

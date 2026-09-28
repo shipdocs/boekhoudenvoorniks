@@ -1,5 +1,18 @@
 # Wijzigingen
 
+## 0.6.8 — zoeken, en zien waar alles geboekt staat
+
+### Zoeken
+- **Zoekscherm** (Zoeken in het menu): dezelfde zoekopdracht als Ctrl+K, maar per resultaat met van welke rekening, waar het geboekt staat (grootboekrekening en btw-vak, bv. "Software & abonnementen · btw verlegd, buiten EU (4a)"), in welke btw-aangifte (en of die al is gedaan), de status, of er een bon is, en of de app het automatisch verwerkte. Filter op soort en op "nog aandacht nodig"; het totaalbedrag staat erboven.
+- **Ctrl+K** blijft het snelle zoekvenster, nu met dezelfde korte info per resultaat en "Alle resultaten bekijken" (Shift+Enter).
+- **Zoeken in Bank, Aankopen en Klussen**. Bank toont per betaling ook de rekening en "Geboekt als"; Aankopen hoe hij betaald is (rekening, privé of contant).
+
+### Bonnen
+- **Bon toevoegen** bij "uitgaven zonder bonnetje of factuur" (Belasting en Vandaag): direct aan die betaling of aankoop. De omschrijving van de betaling staat erbij, bv. "FACTUUR F0000.2607.0000.1394", zodat je de goede factuur vindt.
+- Past de bon niet bij de betaling (andere maand of ander bedrag), dan zegt de app dat meteen.
+- Een factuur van vóór je instapdatum wordt geen nieuwe open aankoop meer, maar een vraag met uitleg.
+- **Weghalen**: een aankoop die er niet hoort en nog niet betaald is, haal je weg bij Aankopen. De bon blijft bewaard.
+
 ## 0.6.7 — zien waar verlegde btw vandaan komt
 
 ### Belasting
