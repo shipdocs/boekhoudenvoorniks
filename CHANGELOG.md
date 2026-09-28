@@ -3,6 +3,7 @@
 ## Nog niet uitgebracht
 
 ### Hersteld
+- **Auditfiles zonder beginbalans (bv. DigiBoox)**: de app telt de jaren nu bij elkaar op. Voorheen gebruikte hij alleen het jaar van de instapdatum, waardoor banksaldi, openstaande rekeningen en btw uit de jaren ervoor ontbraken. Bij één bestand zonder beginbalans waarschuwt de app dat eerdere jaren erbij horen. Btw-rekeningen met de code `BSchBtw` en de "Overboekingsrekening winst" worden goed herkend.
 - **Zoeken naar updates direct na een nieuwe release**: de release werd al openbaar terwijl de installers nog werden geüpload, waardoor de app kort een foutmelding gaf ("Cannot find latest-linux.yml"). Een release staat nu als concept klaar tot alle bestanden voor Linux en Windows er zijn. Lukt zoeken naar updates niet, dan zegt de app in gewone taal waarom.
 
 ### Website
