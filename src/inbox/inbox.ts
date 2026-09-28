@@ -62,6 +62,7 @@ export type TaskKind =
   | 'recurring-invoice'
   | 'investment-check'
   | 'fx-repair'
+  | 'purchase-double'
   | 'mail-online'
   | 'mail-customer';
 
@@ -815,6 +816,29 @@ export class InboxService {
       });
     }
 
+    // privé/contant betaald gezet, en een afschrijving met hetzelfde bedrag staat al als kosten op je rekening
+    for (const c of this.booked?.candidates().filter((x) => !x.certain) ?? []) {
+      const key = `dubbel-${c.purchase.id}-${c.bankTransaction.id}`;
+      if (this.isSkipped(key)) continue;
+      const name = c.purchase.relation_name ?? c.purchase.description;
+      const account = this.bank.getAccount(c.bankTransaction.bank_account_id).name;
+      tasks.push({
+        key,
+        kind: 'purchase-double',
+        icon: '👯',
+        title: `${name}: staat deze aankoop dubbel?`,
+        question: `De bon van ${formatDateNl(c.purchase.invoice_date)} (${formatEuro(c.purchase.total)}) staat op betaald met privégeld of contant. Op ${account} staat op ${formatDateNl(c.bankTransaction.transaction_date)} ook ${formatEuro(-c.bankTransaction.amount)} aan ${c.bankTransaction.counter_name ?? name}, al geboekt als kosten. Is dat dezelfde betaling?`,
+        amount: -c.purchase.total,
+        actions: [
+          { id: 'ja', label: 'Ja, dezelfde betaling', primary: true },
+          { id: 'nee', label: 'Nee, twee aankopen' },
+        ],
+        why: 'Anders tellen de kosten en de btw twee keer.',
+        priority: 1,
+        ref: { purchaseId: c.purchase.id, bankTransactionId: c.bankTransaction.id },
+      });
+    }
+
     // vangnet (#74): met een oudere versie als euro's geboekt, maar de bon is in bv. dollars
     const foreign = (this.fxRepair?.candidates().length ?? 0) + (this.fxRepair?.pendingDocuments().length ?? 0);
     if (foreign > 0) {
@@ -858,6 +882,8 @@ export class InboxService {
     const hints: Record<string, string> = {
       'bank-business:zakelijk': asCost,
       'bank-business:prive': 'Geen kosten en geen btw: de betaling telt als privé.',
+      'purchase-double:ja': 'De aankoop vervalt en de bon wordt het bewijsstuk bij de betaling op je rekening. De privé- of contante betaling wordt teruggedraaid.',
+      'purchase-double:nee': 'Er verandert niets: het zijn twee aankopen. De app vraagt het niet meer.',
       'bank-category:klopt': asCost,
       'bank-category:anders': 'Je kiest zelf wat het wel was (andere kosten, privé, overboeking, …).',
       'bank-invoice:klopt': 'De betaling wordt aan de factuur gekoppeld; die staat daarna als betaald. Geen nieuwe omzet: die telde al bij de factuur.',

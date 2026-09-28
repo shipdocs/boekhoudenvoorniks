@@ -12,7 +12,7 @@ import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isReverseCharge
 import { assertIsoDate, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
-import type { BookedPayments, BookedPaymentFix } from '../documents/booked-payment';
+import type { BookedPayments } from '../documents/booked-payment';
 
 export type PaidWith = 'bank' | 'kas' | 'prive';
 
@@ -91,29 +91,20 @@ export class QuickActions {
    * Een open rekening is niet van de zakelijke rekening betaald, maar privé (privérekening,
    * telefoonrekening) of contant. Privé: Crediteuren aan Privé-stortingen; de kosten en btw blijven staan.
    * Met `always`: ook de andere open rekeningen van deze leverancier, en nieuwe rekeningen voortaan meteen.
+   * Of de betaling al op een eigen rekening staat, vraagt het scherm eerst (`bookedPayment`); bij de
+   * andere open rekeningen laat de app zo'n rekening open (`skipped`) en gaat de leverancier niet op privé.
    */
-  payPurchaseWith(id: number, via: 'prive' | 'kas', opts: { always?: boolean } = {}): { paid: PurchaseInvoice[]; alreadyBooked: BookedPaymentFix[] } {
+  payPurchaseWith(id: number, via: 'prive' | 'kas', opts: { always?: boolean } = {}): { paid: PurchaseInvoice[]; skipped: PurchaseInvoice[] } {
     return tx(this.db, () => {
       const p = this.purchases.get(id);
       if (p.status !== 'open' || p.open_amount <= 0) throw new ValidationError('Deze rekening staat al op betaald');
       const all = opts.always && p.relation_id !== null;
-      const targets = all ? this.purchases.list({ status: 'open' }).filter((x) => x.relation_id === p.relation_id && x.open_amount > 0) : [p];
+      const others = all ? this.purchases.list({ status: 'open' }).filter((x) => x.id !== p.id && x.relation_id === p.relation_id && x.open_amount > 0) : [];
+      const skipped = others.filter((x) => !!this.booked?.find(x));
       const moneyAccount = via === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen;
-      const paid: PurchaseInvoice[] = [];
-      const alreadyBooked: BookedPaymentFix[] = [];
-      for (const t of targets) {
-        // staat de betaling al op een van je rekeningen (bv. Revolut) als kosten? Dan is de aankoop dubbel
-        const bankTx = this.booked?.find(t) ?? null;
-        if (bankTx) {
-          this.booked!.merge(t.id, bankTx.id, t.invoice_date);
-          alreadyBooked.push({ purchaseId: t.id, bankTransactionId: bankTx.id, supplier: t.relation_name ?? t.description, amount: -bankTx.amount, date: bankTx.transaction_date });
-        } else {
-          paid.push(this.purchases.registerPayment(t.id, { amount: t.open_amount, date: t.invoice_date, moneyAccount }));
-        }
-      }
-      // betaalt de zaak deze leverancier (ook) van een eigen rekening, dan niet voortaan privé
-      if (all) this.relations.setPaidWith(p.relation_id!, alreadyBooked.length ? null : via);
-      return { paid, alreadyBooked };
+      const paid = [p, ...others.filter((x) => !skipped.includes(x))].map((t) => this.purchases.registerPayment(t.id, { amount: t.open_amount, date: t.invoice_date, moneyAccount }));
+      if (all && skipped.length === 0) this.relations.setPaidWith(p.relation_id!, via);
+      return { paid, skipped };
     });
   }
 

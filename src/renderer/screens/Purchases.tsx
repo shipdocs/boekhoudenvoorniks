@@ -6,7 +6,6 @@ import type { PurchaseVatCode } from '../../shared/vat';
 import { mightBeInvestment, netAmount } from '../../shared/investment';
 import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
 import { formatDateNl } from '../../shared/dates';
-import { formatEuro } from '../../shared/money';
 import type { FxCandidate } from '../../fx/repair';
 import { CategoryChips } from './Categories';
 import type { PurchaseInvoice } from '../../documents/purchases';
@@ -252,7 +251,32 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
   const { run, busy } = useAction();
   const [via, setVia] = useState<'prive' | 'kas'>('prive');
   const [always, setAlways] = useState(false);
+  // staat dezelfde betaling al als kosten op een van je rekeningen? Dan eerst vragen (anders dubbel)
+  const booked = useLoad(() => api.purchases.bookedPayment(p.id), [p.id]);
+  const [separate, setSeparate] = useState(false);
   const name = p.relation_name ?? p.description;
+  const b = booked.data;
+  if (booked.loading) return <Modal title="Al betaald" onClose={onClose}><p className="small muted">Even kijken op je rekeningen…</p></Modal>;
+  if (b && !separate) {
+    return (
+      <Modal title="Al betaald" onClose={onClose}>
+        <div className="grid">
+          <p><strong>{name}</strong> · <Euro cents={p.open_amount} /> · <DateNl date={p.invoice_date} /></p>
+          <div className="notice warn">
+            Op <strong>{b.account}</strong> staat op {formatDateNl(b.date)} al <strong><Euro cents={b.amount} /></strong> aan {b.counterName ?? name}, geboekt als kosten. Is dat dezelfde betaling?
+          </div>
+          <p className="small muted">Ja: de aankoop vervalt en de bon wordt het bewijsstuk bij die betaling, zodat de kosten en de btw niet twee keer tellen.</p>
+        </div>
+        <div className="row end" style={{ marginTop: 16 }}>
+          <Button onClick={() => setSeparate(true)}>Nee, apart betaald</Button>
+          <Button kind="primary" disabled={busy} onClick={async () => {
+            const r = await run(() => api.purchases.mergeWithBooked(p.id, b.bankTransactionId), 'De bon hoort nu bij die betaling ✓');
+            if (r) await onDone();
+          }}>Ja, dezelfde betaling</Button>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal title="Al betaald" onClose={onClose}>
       <div className="grid">
@@ -276,14 +300,10 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
         <Button kind="primary" disabled={busy} onClick={async () => {
           const r = await run(() => api.purchases.paidWith(p.id, via, { always }));
           if (!r) return;
-          const n = r.alreadyBooked.length;
-          if (n > 0) {
-            const b = r.alreadyBooked[0]!;
-            toast(n === 1
-              ? `Deze betaling stond al op je rekening (${formatDateNl(b.date)}, ${formatEuro(b.amount)}). De aankoop is weggehaald; de bon is nu het bewijsstuk bij die betaling.`
-              : `${n} betalingen stonden al op je rekening. Die aankopen zijn weggehaald; de bonnen zijn nu het bewijsstuk.`);
+          toast(r.paid.length === 1 ? 'Op betaald gezet ✓' : `${r.paid.length} rekeningen op betaald gezet ✓`);
+          if (r.skipped.length > 0) {
+            toast(`${r.skipped.length === 1 ? 'Eén rekening bleef' : `${r.skipped.length} rekeningen bleven`} open: die betaling staat mogelijk al op je rekening. Daarom gaat ${name} ook niet op "voortaan privé". Kijk bij "Al betaald" op die rekening.`);
           }
-          if (r.paid.length > 0) toast(r.paid.length === 1 ? 'Op betaald gezet ✓' : `${r.paid.length} rekeningen op betaald gezet ✓`);
           await onDone();
         }}>Op betaald zetten</Button>
       </div>
