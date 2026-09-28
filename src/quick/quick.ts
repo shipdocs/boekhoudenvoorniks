@@ -81,6 +81,23 @@ export class QuickActions {
     });
   }
 
+  /**
+   * Een open rekening is niet van de zakelijke rekening betaald, maar privé (privérekening,
+   * telefoonrekening) of contant. Privé: Crediteuren aan Privé-stortingen; de kosten en btw blijven staan.
+   * Met `always`: ook de andere open rekeningen van deze leverancier, en nieuwe rekeningen voortaan meteen.
+   */
+  payPurchaseWith(id: number, via: 'prive' | 'kas', opts: { always?: boolean } = {}): PurchaseInvoice[] {
+    return tx(this.db, () => {
+      const p = this.purchases.get(id);
+      if (p.status !== 'open' || p.open_amount <= 0) throw new ValidationError('Deze rekening staat al op betaald');
+      const all = opts.always && p.relation_id !== null;
+      if (all) this.relations.setPaidWith(p.relation_id!, via);
+      const targets = all ? this.purchases.list({ status: 'open' }).filter((x) => x.relation_id === p.relation_id && x.open_amount > 0) : [p];
+      const moneyAccount = via === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen;
+      return targets.map((t) => this.purchases.registerPayment(t.id, { amount: t.open_amount, date: t.invoice_date, moneyAccount }));
+    });
+  }
+
   /** Klant heeft contant/pin betaald voor een bestaande factuur. */
   customerPaidCash(invoiceId: number, amount: Cents, date: IsoDate): Invoice {
     return this.invoices.registerPayment(invoiceId, { amount, date, moneyAccount: ACCOUNTS.kas, description: 'Contante betaling' });
