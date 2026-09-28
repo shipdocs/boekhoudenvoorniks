@@ -490,6 +490,8 @@ export function createApi(s: Services, host: HostContext) {
        * eerst een waarschuwing, pas na bevestiging de QR.
        */
       paymentQr: (id: number, confirmNewIban = false) => purchasePaymentQr(s.purchases, id, confirmNewIban),
+      /** Niet van de zakelijke rekening betaald maar privé of contant; `always`: voortaan bij deze leverancier. */
+      paidWith: (id: number, via: 'prive' | 'kas', opts?: { always?: boolean }) => s.quick.payPurchaseWith(id, via, opts),
     },
     /** Vreemde valuta in wat er al stond (#74): nakijken en omrekenen. */
     valuta: {

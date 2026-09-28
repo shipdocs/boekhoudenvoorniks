@@ -793,4 +793,9 @@ export const migrations: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  /* 19: leverancier die je altijd privé (of contant) betaalt */ `
+  -- bv. een abonnement dat van je privérekening of via je telefoonrekening gaat: nieuwe rekeningen
+  -- van deze leverancier staan meteen op betaald (Crediteuren aan Privé-stortingen of Kas)
+  ALTER TABLE relations ADD COLUMN paid_with TEXT CHECK (paid_with IN ('kas','prive'));
+  `,
 ];
