@@ -120,4 +120,60 @@ describe('eigen rekeningen', () => {
     expect(s.bank.list({ status: 'nieuw' })).toHaveLength(1);
     expect(s.inbox.tasks('2026-03-06').some((t) => t.kind === 'bank-own')).toBe(true);
   });
+
+  describe('spaarrekening zonder IBAN (Knab: het afschrift noemt alleen het korte nummer)', () => {
+    function knab() {
+      const { s } = setup();
+      s.settings.update({ onboardingDone: true });
+      s.bank.updateAccount(s.bank.ensureDefaultAccount().id, { iban: MAIN });
+      const main = s.bank.ensureDefaultAccount();
+      const spaar = s.bank.addAccount('Spaarrekening Belasting', null, { pot: true });
+      s.settings.update({ vatPotAccountId: spaar.id });
+      // `times`: zoveel keer dezelfde regel in één afschrift
+      const tx = (accountId: number, date: string, amount: number, counterIban: string | null, times = 1) =>
+        s.bank.import({ source: 'csv', warnings: [], transactions: Array.from({ length: times }, () => ({ date, amount, description: 'BTW SPAREN', counterIban, counterName: 'DRAMASOLVER' })) }, { bankAccountId: accountId });
+      const profit = () => s.ledger.balances().filter((b) => b.category === 'omzet' || b.category === 'kosten').reduce((x, b) => x + b.balance, 0);
+      const open = () => s.bank.list({ status: 'nieuw' });
+      return { s, main, spaar, tx, profit, open };
+    }
+
+    it('betaalrekening eerst ingelezen: de spaarkant boekt, de betaalkant wordt meteen gekoppeld', () => {
+      const { s, main, spaar, tx, profit, open } = knab();
+      tx(main.id, '2026-05-15', -8678, null);
+      s.inbox.autoProcess('2026-05-20');
+      expect(open()).toHaveLength(1); // nog niet te herkennen
+      tx(spaar.id, '2026-05-15', 8678, MAIN);
+      s.inbox.autoProcess('2026-05-20');
+      expect(open()).toEqual([]);
+      const [a, b] = [s.bank.list({ bankAccountId: main.id })[0]!, s.bank.list({ bankAccountId: spaar.id })[0]!];
+      expect(a.matched_journal_entry_id).toBe(b.matched_journal_entry_id);
+      expect(s.ledger.balance(spaar.rgs_code)).toBe(8678);
+      expect(s.ledger.balance(main.rgs_code)).toBe(-8678);
+      expect(profit()).toBe(0);
+    });
+
+    it('spaarrekening eerst: de betaalkant sluit later aan, ook drie keer hetzelfde bedrag op één dag', () => {
+      const { s, main, spaar, tx, profit, open } = knab();
+      tx(spaar.id, '2026-09-22', 8678, MAIN, 3);
+      s.inbox.autoProcess('2026-09-25');
+      tx(main.id, '2026-09-22', -8678, null, 3);
+      s.inbox.autoProcess('2026-09-25');
+      expect(open()).toEqual([]);
+      const entries = new Set(s.bank.list({ bankAccountId: main.id }).map((t) => t.matched_journal_entry_id));
+      expect(entries.size).toBe(3);
+      expect(s.ledger.balance(spaar.rgs_code)).toBe(3 * 8678);
+      expect(s.ledger.balance(main.rgs_code)).toBe(-3 * 8678);
+      expect(profit()).toBe(0);
+      expect(s.inbox.tasks('2026-09-25').filter((t) => t.kind.startsWith('bank-') && t.kind !== 'bank-stale')).toEqual([]);
+    });
+
+    it('een betaling met een ander bedrag of van iemand anders blijft een vraag', () => {
+      const { s, main, spaar, tx, open } = knab();
+      tx(spaar.id, '2026-05-15', 8678, MAIN);
+      tx(main.id, '2026-05-15', -8600, null);
+      tx(main.id, '2026-05-15', -8678, 'NL02ABNA0123456789');
+      s.inbox.autoProcess('2026-05-20');
+      expect(open().map((t) => t.amount).sort()).toEqual([-8678, -8600].sort());
+    });
+  });
 });

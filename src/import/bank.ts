@@ -324,7 +324,48 @@ export class BankService {
     }
     // de andere kant staat op "overboeking" (kruisposten): deze kant haalt het daar weer af
     const account = counterpart.some((c) => c.viaKruis) ? ACCOUNTS.kruisposten : other.rgs_code;
-    return this.bookToAccount(txId, { account, description: `${t.amount < 0 ? 'Naar' : 'Van'} ${other.name} (eigen rekening)` });
+    const entryId = this.bookToAccount(txId, { account, description: `${t.amount < 0 ? 'Naar' : 'Van'} ${other.name} (eigen rekening)` });
+    // de andere kant staat er al (nog open), maar zonder rekeningnummer (bv. Knab → spaarrekening:
+    // alleen het korte nummer) en kan zichzelf dus niet herkennen: meteen aan dezelfde boeking
+    // koppelen, anders blijft die als vraag staan en telt hij bij "zakelijk" dubbel
+    if (account === other.rgs_code) {
+      const open = this.db
+        .prepare(
+          `SELECT id FROM bank_transactions
+           WHERE bank_account_id = ? AND amount = ? AND status = 'nieuw' AND counter_iban IS NULL
+             AND ABS(julianday(transaction_date) - julianday(?)) <= 5
+           ORDER BY ABS(julianday(transaction_date) - julianday(?)), id LIMIT 1`,
+        )
+        .get(other.id, -t.amount, t.transaction_date, t.transaction_date) as { id: number } | undefined;
+      if (open) this.db.prepare(`UPDATE bank_transactions SET status = 'gematcht', matched_journal_entry_id = ? WHERE id = ?`).run(entryId, open.id);
+    }
+    return entryId;
+  }
+
+  /**
+   * Een open betaling zonder (herkenbaar) rekeningnummer, waarvan de andere kant al als eigen
+   * overboeking naar deze rekening geboekt is: aan die boeking koppelen. Bv. "BTW sparen" op Knab,
+   * terwijl de spaarrekening de overboeking van Knab al verwerkte. Geeft de boeking, of null.
+   */
+  linkBookedOwnTransfer(txId: number): number | null {
+    const t = this.get(txId);
+    if (t.status !== 'nieuw' || t.counter_iban) return null;
+    const own = this.getAccount(t.bank_account_id);
+    if (!own.iban) return null;
+    const c = this.db
+      .prepare(
+        `SELECT c.matched_journal_entry_id AS entryId FROM bank_transactions c
+         WHERE c.bank_account_id != ? AND c.amount = ? AND c.status = 'gematcht' AND c.matched_journal_entry_id IS NOT NULL
+           AND c.matched_invoice_id IS NULL AND c.matched_purchase_invoice_id IS NULL AND c.counter_iban = ?
+           AND ABS(julianday(c.transaction_date) - julianday(?)) <= 5
+           AND EXISTS (SELECT 1 FROM journal_lines l WHERE l.journal_entry_id = c.matched_journal_entry_id AND l.account_id = ?)
+           AND (SELECT COUNT(*) FROM bank_transactions x WHERE x.matched_journal_entry_id = c.matched_journal_entry_id) = 1
+         ORDER BY ABS(julianday(c.transaction_date) - julianday(?)), c.id LIMIT 1`,
+      )
+      .get(own.id, -t.amount, own.iban, t.transaction_date, own.account_id, t.transaction_date) as { entryId: number } | undefined;
+    if (!c) return null;
+    this.db.prepare(`UPDATE bank_transactions SET status = 'gematcht', matched_journal_entry_id = ? WHERE id = ?`).run(c.entryId, txId);
+    return c.entryId;
   }
 
   // ---------- import ----------

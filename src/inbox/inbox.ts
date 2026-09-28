@@ -224,8 +224,19 @@ export class InboxService {
     let n = 0;
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
       const other = this.bank.ownTransferTarget(t);
-      if (!other) continue;
       if (this.db.prepare(`SELECT 1 FROM automation_log WHERE kind = 'bank-own' AND ref_id = ? AND status = 'klopt_niet'`).get(t.id)) continue;
+      if (!other) {
+        // geen rekeningnummer, maar de andere kant boekte het al als overboeking naar deze rekening
+        const linked = tx(this.db, () => {
+          if (!this.bank.linkBookedOwnTransfer(t.id)) return false;
+          const own = this.bank.getAccount(t.bank_account_id);
+          const explanation = explain([{ type: 'bankbetaling', label: `dezelfde overboeking op je andere rekening al verwerkt is als geld ${t.amount < 0 ? 'van' : 'naar'} ${own.name}`, value: 0.97 }]);
+          logAutomation(this.db, { kind: 'bank-own', ref_id: t.id, summary: `${formatEuro(Math.abs(t.amount))} tussen je eigen rekeningen: geen omzet of kosten`, reason: explanation.sentence, details: explanation });
+          return true;
+        });
+        if (linked) n++;
+        continue;
+      }
       try {
         tx(this.db, () => {
           this.bank.bookOwnTransfer(t.id);
