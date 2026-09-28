@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wat is er nieuw | Gratis Boekhouden</title>
+  <meta name="description" content="Release notes van Gratis Boekhouden: nieuwe functies, verbeteringen, fiscale aanpassingen en opgeloste problemen per versie.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://shipdocs.github.io/gratis-boekhouden/wijzigingen.html">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="./">🧾 Gratis Boekhouden</a>
+      <nav>
+        <a href="./">Home</a>
+        <a href="./#overstappen">Overstappen</a>
+        <a href="wijzigingen.html" aria-current="page">Wat is er nieuw</a>
+        <a class="btn small" href="https://github.com/shipdocs/gratis-boekhouden/releases/latest">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap notes">
+    <h1>Wat is er nieuw</h1>
+    <p class="lead">Per versie wat er is toegevoegd, verbeterd en opgelost. De app werkt zichzelf bij; bij de eerste start van een nieuwe versie maakt hij eerst een kopie van je administratie.</p>
+
+    <nav class="toc" aria-label="Versies">
+      <a href="#v0.6.1">0.6.1</a><a href="#v0.6.0">0.6.0</a><a href="#v0.5.0">0.5.0</a><a href="#v0.4.0">0.4.0</a><a href="#v0.3">0.3.x</a><a href="#v0.2.0">0.2.0</a><a href="#v0.1.0">0.1.0</a>
+    </nav>
+
+    <article id="v0.6.1" class="release">
+      <header>
+        <h2>0.6.1 <span class="tag latest">Nieuwste versie</span></h2>
+        <p class="meta"><time datetime="2026-09-28">28 september 2026</time> · <a href="https://github.com/shipdocs/gratis-boekhouden/releases/tag/v0.6.1">Downloads en controlegetallen</a></p>
+        <p class="summary">Overstappen vanuit DigiBoox en betrouwbaardere updates.</p>
+      </header>
+      <h3><span class="tag fixed">Opgelost</span></h3>
+      <ul>
+        <li><strong>Auditfiles zonder beginbalans</strong>, zoals die van DigiBoox: de app telt de jaren nu bij elkaar op tot je instapdatum. Voorheen ontbraken de saldi uit eerdere jaren, zoals je banksaldo, openstaande rekeningen en btw.</li>
+        <li>Lees je één auditfile zonder beginbalans in, dan meldt de app dat de jaren ervoor erbij horen.</li>
+        <li>Btw-rekeningen en de rekening waarmee de winst naar het eigen vermogen gaat, worden in DigiBoox-bestanden goed herkend.</li>
+        <li>Zoeken naar updates direct na een nieuwe release gaf kort een foutmelding. Een release wordt nu pas gepubliceerd als alle bestanden er staan, en een melding staat in gewone taal.</li>
+        <li>Een gedownloade update blijft klaarstaan, ook als een latere controle op updates mislukt.</li>
+      </ul>
+    </article>
+
+    <article id="v0.6.0" class="release">
+      <header>
+        <h2>0.6.0</h2>
+        <p class="meta"><time datetime="2026-09-28">28 september 2026</time> · <a href="https://github.com/shipdocs/gratis-boekhouden/releases/tag/v0.6.0">Downloads en controlegetallen</a></p>
+        <p class="summary">Overstappen vanuit een administratie die al een paar jaar loopt, met een auditfile per boekjaar.</p>
+      </header>
+      <h3><span class="tag new">Nieuw</span> Meerdere auditfiles tegelijk</h3>
+      <ul>
+        <li>Sleep al je auditfiles (XAF) tegelijk in de overstap-hulp, bijvoorbeeld van 2024, 2025 en 2026. Veel boekhoudprogramma's maken er één per boekjaar.</li>
+        <li>De app kiest zelf het bestand dat bij je instapdatum hoort en laat per bestand zien wat ermee gebeurt: gebruikt voor je beginstand, alleen gebruikt als historie, of niet nodig.</li>
+        <li>Bedrijfsmiddelen krijgen hun echte aankoopdatum uit de oudere jaren, zodat afschrijving en investeringsaftrek kloppen. Voorheen werd 1 januari van het vorige jaar aangenomen.</li>
+        <li>Loopt een van de bestanden verder dan je instapdatum, dan stelt de app een latere instapdatum voor, zodat je die periode niet opnieuw hoeft in te boeken.</li>
+      </ul>
+    </article>
+
+    <article id="v0.5.0" class="release">
+      <header>
+        <h2>0.5.0</h2>
+        <p class="meta"><time datetime="2026-09-28">28 september 2026</time> · <a href="https://github.com/shipdocs/gratis-boekhouden/releases/tag/v0.5.0">Downloads en controlegetallen</a></p>
+        <p class="summary">De uitkomsten van een fiscale review verwerkt, en een eenvoudigere overstap-hulp.</p>
+      </header>
+      <h3><span class="tag tax">Fiscaal</span> Aanpassingen na de review</h3>
+      <ul>
+        <li><strong>KOR:</strong> btw op inkopen en investeringen wordt niet meer als voorbelasting geboekt, maar bij de kosten of de aanschafprijs geteld. Verlegde btw die je met de KOR wél moet betalen, staat per kwartaal op het btw-scherm.</li>
+        <li><strong>Buitenland:</strong> aparte keuzes voor diensten aan bedrijven binnen en buiten de EU. De ICP-opgaaf splitst goederen en diensten, en correcties op een eerdere opgaaf staan los van een btw-suppletie.</li>
+        <li><strong>OSS:</strong> de drempel van € 10.000 wordt alleen nog genoemd bij spullen en digitale diensten aan particulieren in andere EU-landen.</li>
+        <li><strong>Inkomstenbelasting:</strong> tariefsaanpassing bij hogere inkomens, startersaftrek zonder beperking tot de winst, fiscaal verlies en niet-benutte zelfstandigenaftrek uit eerdere jaren.</li>
+        <li><strong>Drempels:</strong> representatiekosten € 5.700 (2025 en 2026); desinvesteringsbijtelling pas boven € 2.900.</li>
+        <li><strong>Investeringen:</strong> afschrijven vanaf ingebruikname, meenemen naar privé telt als verkoop, en de KIA van een afgesloten jaar wordt vastgelegd.</li>
+        <li><strong>Auto van de zaak:</strong> btw over privégebruik (forfait) pas na bevestiging dat er btw is afgetrokken; afrekenen op werkelijk privégebruik kan ook.</li>
+      </ul>
+      <h3><span class="tag improved">Verbeterd</span> Overstap-hulp</h3>
+      <ul>
+        <li>Begint met één vraag: stap je over met een auditfile, met een overzicht van je boekhouder, of vul je het zelf in?</li>
+        <li>Lege onderdelen vink je met één knop af; <em>Verder</em> gaat naar het eerstvolgende onderdeel dat nog open staat.</li>
+        <li>Na het inlezen van een auditfile zie je meteen wat je nog moet nalopen.</li>
+        <li>Een bankrekening die je niet meer gebruikt, zet je op € 0 zonder dat de app om afschriften blijft vragen.</li>
+        <li>De voortgang telt wat echt klaar is (“4 van 9 klaar”).</li>
+      </ul>
+      <h3><span class="tag fixed">Opgelost</span></h3>
+      <ul>
+        <li>Btw-rubrieken 5a, 5b, 5c en 5g sluiten na afronding altijd op elkaar aan; het ICP-overzicht gebruikt dezelfde boekingen als rubriek 3b.</li>
+        <li>Geëxporteerde auditfiles volgen de XAF 3.2-structuur en zijn tegen het officiële schema gevalideerd.</li>
+        <li>Een terugbetaling aan een klant kan aan de openstaande creditfactuur worden gekoppeld.</li>
+        <li>Na een mislukte eerste factuurmail gaat er niet meer automatisch een betalingsherinnering uit.</li>
+      </ul>
+      <h3><span class="tag security">Beveiliging en back-ups</span></h3>
+      <ul>
+        <li>Back-ups (handmatig, dagelijks en versleuteld) bevatten nu ook alle bijlagen, met controlesommen. Terugzetten op een andere computer werkt. Oude back-ups blijven leesbaar.</li>
+        <li>Op Linux worden wachtwoorden en API-sleutels niet opgeslagen als het systeem geen veilige sleutelopslag heeft.</li>
+        <li>Bijlagen, instellingen en browserrechten zijn verder afgeschermd.</li>
+      </ul>
+    </article>
+
+    <article id="v0.4.0" class="release">
+      <header>
+        <h2>0.4.0</h2>
+        <p class="meta"><time datetime="2026-09-27">27 september 2026</time> · <a href="https://github.com/shipdocs/gratis-boekhouden/releases/tag/v0.4.0">Downloads en controlegetallen</a></p>
+        <p class="summary">Overstappen met een lopende administratie.</p>
+      </header>
+      <h3><span class="tag new">Nieuw</span> Overstap-hulp</h3>
+      <ul>
+        <li>Had je al een administratie, in een ander programma, in Excel of bij je boekhouder? Kies een instapdatum en de app vraagt in gewone taal wat er toen al was: banksaldi, openstaande facturen, bedrijfsmiddelen, btw, leningen en je eigen vermogen.</li>
+        <li>Inlezen uit je vorige programma: een auditfile (XAF) uit bijvoorbeeld SnelStart, e-Boekhouden, Moneybird, Exact of Jortt, een kolommen- of saldibalans (Excel/CSV) of een lijst met openstaande facturen.</li>
+        <li>Betalingen van oude facturen worden later automatisch gekoppeld, zonder dat omzet en btw dubbel tellen.</li>
+        <li>Controles: sluit het banksaldo aan, ontbreken er afschriften, klopt het met de balans van je boekhouder.</li>
+      </ul>
+      <h3><span class="tag fixed">Opgelost</span></h3>
+      <ul>
+        <li>Bonnen in dollars die oudere versies als euro's lazen, worden gevonden en met één klik omgerekend, met tegenboeking.</li>
+        <li>Een bon als PDF van meerdere pagina's toont alle pagina's; een doorgestuurde mail als bon neemt de oorspronkelijke tekst mee.</li>
+      </ul>
+    </article>
+
+    <article id="v0.3" class="release">
+      <header>
+        <h2>0.3.0 – 0.3.9</h2>
+        <p class="meta"><time datetime="2026-09-26">26</time>–<time datetime="2026-09-27">27 september 2026</time> · <a href="https://github.com/shipdocs/gratis-boekhouden/releases">Alle releases</a></p>
+        <p class="summary">Aftrekposten, bonnetjes per mail, buitenlandse klanten, vreemde valuta en automatisch bijwerken.</p>
+      </header>
+      <h3><span class="tag new">Nieuw</span></h3>
+      <ul>
+        <li><strong>0.3.9</strong> · Aankopen in vreemde valuta: omgerekend met het bedrag dat de bank afschreef, of met de ECB-dagkoers; koersverschillen worden geboekt.</li>
+        <li><strong>0.3.8</strong> · Kiezen hoe bonnen gelezen worden: lokaal op je computer, met je eigen Claude Code of Codex, of zelf invullen. Vragen stellen over je boekhouding via een koppeling die alleen kan lezen. Potjes zonder eigen rekeningnummer.</li>
+        <li><strong>0.3.7</strong> · Verkoop via een ander systeem (Mollie, webshop, kassa) met de juiste btw; de app onthoudt het per betaler.</li>
+        <li><strong>0.3.6</strong> · Automatisch bijwerken, zichtbaar en uit te zetten; nooit een herstart midden in je werk.</li>
+        <li><strong>0.3.3 – 0.3.5</strong> · Bonnetjes per mail naar een eigen administratie-adres, ook bonnen in de mailtekst zelf. Eigen categorieën. “Waar komt dit bedrag vandaan?” bij elke btw-rubriek.</li>
+        <li><strong>0.3.1 – 0.3.2</strong> · Extra bankrekeningen en potjes, overboekingen tussen eigen rekeningen, btw over privégebruik van een auto van de zaak, landkeuze en btw-advies bij buitenlandse klanten.</li>
+        <li><strong>0.3.0</strong> · Aftrekposten: bedrijfsmiddelen en afschrijving, KIA, kilometers, representatie, startersaftrek en urenteller, met een jaaroverzicht voor je aangifte. Demo met een voorbeeldbedrijf.</li>
+      </ul>
+      <h3><span class="tag improved">Verbeterd</span></h3>
+      <ul>
+        <li>Alle teksten in gewone taal nagelopen; wat voor de boekhouder is, staat apart in het jaaroverzicht.</li>
+        <li>Controles vóór de btw-aangifte en een btw-aangifte die je buiten de app deed, markeer je als ingediend.</li>
+        <li>De belangrijkste handelingen worden bij elke wijziging automatisch in een echte browser getest, met een toegankelijkheidscontrole.</li>
+      </ul>
+    </article>
+
+    <article id="v0.2.0" class="release">
+      <header>
+        <h2>0.2.0</h2>
+        <p class="meta"><time datetime="2026-09-26">26 september 2026</time> · <a href="https://github.com/shipdocs/gratis-boekhouden/releases/tag/v0.2.0">Downloads en controlegetallen</a></p>
+        <p class="summary">Slimme automatisering: niet invoeren, maar uitzonderingen afhandelen.</p>
+      </header>
+      <h3><span class="tag new">Nieuw</span></h3>
+      <ul>
+        <li>Elke boeking komt uit vaste, uitlegbare regels; herkenning en AI doen alleen voorstellen.</li>
+        <li>Autopilot met drie niveaus, met bij elke automatische boeking de reden en een knop “Klopt niet”.</li>
+        <li>Eén lijst “Nog te doen” met controles vóór de btw-aangifte, leveranciersregels die leren van je correcties, en herkenning van dubbele documenten.</li>
+        <li>Vaste lasten en abonnementen, betaal-QR, belastingpotje, e-factuur (UBL/Peppol) bij de factuurmail, zoeken met Ctrl+K en een klussendossier.</li>
+        <li>Buitenland (rubrieken 3a, 3b, 4a, 4b), schatting van de inkomstenbelasting en lokale tekstherkenning.</li>
+      </ul>
+    </article>
+
+    <article id="v0.1.0" class="release">
+      <header>
+        <h2>0.1.0</h2>
+        <p class="summary">Eerste versie: offertes en facturen, bonnetjes met herkenning, bankimport en koppelen, btw-aangifte, koppelingen met webshops en betaalproviders, en exports voor de boekhouder.</p>
+      </header>
+    </article>
+
+    <p class="fine">Gratis Boekhouden rekent en boekt volgens vaste regels, maar is geen fiscaal advies. Controleer je aangifte altijd zelf of laat een boekhouder meekijken; zie de <a href="voorwaarden.html">voorwaarden</a>. De volledige technische wijzigingslijst staat in <a href="https://github.com/shipdocs/gratis-boekhouden/blob/main/CHANGELOG.md">CHANGELOG.md</a>.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <span>Gratis Boekhouden, een project van <a href="https://github.com/shipdocs">Shipdocs</a> · open source onder AGPL-3.0-or-later</span>
+    <span><a href="voorwaarden.html">Voorwaarden</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/shipdocs/gratis-boekhouden/issues">Feedback & vragen</a></span>
+  </footer>
+</body>
+</html>

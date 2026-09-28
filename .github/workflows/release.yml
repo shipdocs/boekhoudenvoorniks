@@ -4,7 +4,9 @@ name: Release
 # electron-updater in de app haalt updates daar vandaan.
 # Vóór publicatie draait een rooktest op de verpakte app (start, database, venster, IPC).
 # Starten kan op twee manieren: een tag `v*` pushen, of handmatig (workflow_dispatch) op main.
-# Handmatig maakt electron-builder de release én de tag `v<versie uit package.json>` zelf aan.
+# electron-builder zet alles eerst in een concept-release; pas als Linux én Windows klaar zijn, maakt de
+# job `publish` hem openbaar (en daarmee bij handmatig starten ook de tag `v<versie uit package.json>`).
+# Zo ziet de updater in de app nooit een release waar latest.yml of latest-linux.yml nog ontbreekt.
 on:
   push:
     tags: ['v*']
@@ -12,6 +14,11 @@ on:
 
 permissions:
   contents: write
+
+# Nooit twee releases tegelijk: ze zouden bestanden in dezelfde concept-release zetten
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -97,5 +104,20 @@ jobs:
         run: |
           scripts/release-notes.sh "${RELEASE_TAG#v}" > notes.md
           gh release edit "$RELEASE_TAG" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Concept-release openbaar maken
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          for f in latest.yml latest-linux.yml SHA256SUMS-Windows.txt SHA256SUMS-Linux.txt; do
+            gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx "$f" || { echo "$f ontbreekt bij $tag" >&2; exit 1; }
+          done
+          gh release edit "$tag" --draft=false --latest --target "$GITHUB_SHA"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
