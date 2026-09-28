@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Overstappen
+- **Een auditfile per jaar?** Zet ze allemaal tegelijk neer (bijvoorbeeld 2024, 2025 en 2026). De app kiest het jaar dat bij je instapdatum hoort, legt uit wat hij met de andere doet, en haalt de echte aankoopdatums van je bus en gereedschap uit de oudere jaren. Heb je ook een bestand van na je instapdatum, dan noemt de app de instapdatum waarmee je die periode niet opnieuw hoeft in te boeken.
+
 ## 0.5.0 — fiscale review verwerkt en makkelijker overstappen
 
 ### Overstappen makkelijker

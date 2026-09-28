@@ -2,6 +2,7 @@ import { test, expect, onboard, nav, field, type Problems } from './fixtures';
 import type { Page } from '@playwright/test';
 import { otherPackage } from '../tests/fixtures/xaf-ander-pakket';
 import { kolommenbalans } from '../tests/fixtures/xlsx';
+import { xafJaren } from '../tests/fixtures/xaf-jaren';
 
 /**
  * De overstap-hulp van begin tot eind, zoals een vakman hem doorloopt: elk hoofdstuk, elk soort
@@ -404,5 +405,27 @@ test('overstapper zonder programma: zelf invullen, "had ik niet" en een rekening
   await expect(page.getByText('✓ Alles klopt.')).toBeVisible();
   await page.getByRole('button', { name: 'Klopt, zet klaar' }).click();
   await expect(page.getByText('Alles klaar ✓')).toBeVisible();
+  noApiErrors(problems);
+});
+
+test('overstapper met een auditfile per jaar: alle drie tegelijk neerzetten', async ({ page, problems }) => {
+  await onboard(page, { overstap: true });
+  await page.getByRole('button', { name: /Ik had een boekhoudprogramma/ }).click();
+  const [a, b, c] = xafJaren(year);
+  await page.locator('main input[type=file]').first().setInputFiles([
+    { name: `${year}.xaf`, mimeType: 'application/xml', buffer: Buffer.from(c) },
+    { name: `${year - 2}.xaf`, mimeType: 'application/xml', buffer: Buffer.from(a) },
+    { name: `${year - 1}.xaf`, mimeType: 'application/xml', buffer: Buffer.from(b) },
+  ]);
+  const info = page.locator('.notice', { hasText: '3 bestanden' });
+  await expect(info).toBeVisible();
+  await expect(info.locator('li', { hasText: `${year - 1}.xaf` })).toContainText('Hiermee rekent de app');
+  await expect(info.locator('li', { hasText: `${year - 2}.xaf` })).toContainText('aankoopdatums');
+  await expect(info.locator('li', { hasText: `${year}.xaf` })).toContainText('na je instapdatum');
+  await expect(info).toContainText(`1 september ${year}`);
+  await page.getByRole('button', { name: 'Overnemen' }).click();
+  await expect(page.getByText(/onderdelen overgenomen uit je vorige programma/)).toBeVisible();
+  await chapter(page, 'Je startpositie');
+  await expect(equity(page).getByText(/13\.700,00/)).toBeVisible();
   noApiErrors(problems);
 });

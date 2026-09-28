@@ -604,6 +604,9 @@ export function createApi(s: Services, host: HostContext) {
       /** alles wat de gebruiker erop sleept (auditfile, kolommen-/saldibalans, openstaande posten): voorstel of een paar vragen */
       analyzeXaf: (file: string | Uint8Array, mapping?: ColumnMapping) => s.xafImport.analyzeFile(file, { mapping }),
       applyXaf: (file: string | Uint8Array, choices: XafApplyChoices, mapping?: ColumnMapping) => s.xafImport.apply(file, choices, mapping),
+      /** meerdere bestanden tegelijk (bv. een auditfile per jaar): de app kiest het bestand bij de instapdatum */
+      analyzeXafFiles: (files: (string | Uint8Array)[], mapping?: ColumnMapping) => s.xafImport.analyzeFiles(files, mapping),
+      applyXafFiles: (files: (string | Uint8Array)[], choices: XafApplyChoices, mapping?: ColumnMapping) => s.xafImport.applyFiles(files, choices, mapping),
       /** voorbeeldbestand voor openstaande posten, om in te vullen */
       saveTemplate: () => host.saveFile('openstaande-posten.csv', OPEN_ITEMS_TEMPLATE, [{ name: 'CSV', extensions: ['csv'] }]),
       /** openstaande verkoopfacturen als UBL (e-factuur) */
