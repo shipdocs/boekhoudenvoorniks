@@ -92,7 +92,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                 <tr className="clickable" title="Klik om te zien waar dit bedrag vandaan komt" onClick={() => setDetail({ code: 'omzet', title: 'Omzet' })}><td>Omzet <span className="muted small">🔍</span></td><td><Euro cents={r.summary.omzet} /></td></tr>
                 <tr className="clickable" title="Klik om te zien waar dit bedrag vandaan komt" onClick={() => setDetail({ code: 'btw-omzet', title: 'Btw die je hebt ontvangen' })}><td>Btw die je hebt ontvangen <span className="muted small">🔍</span></td><td><Euro cents={r.summary.btwOverOmzet} /></td></tr>
                 {r.summary.btwPrive !== 0 && <tr><td>Btw over privégebruik van je auto</td><td><Euro cents={r.summary.btwPrive} /></td></tr>}
-                {r.summary.btwVerlegd !== 0 && <tr><td>Btw die naar jou is verlegd (door een onderaannemer of een buitenlandse leverancier; je betaalt hem en krijgt hem tegelijk terug: kost je niets)</td><td><Euro cents={r.summary.btwVerlegd} /></td></tr>}
+                {r.summary.btwVerlegd !== 0 && <tr className="clickable" title="Klik om te zien waar dit bedrag vandaan komt" onClick={() => setDetail({ code: 'verlegd', title: 'Btw die naar jou is verlegd' })}><td>Btw die naar jou is verlegd (door een onderaannemer of een buitenlandse leverancier; je betaalt hem en krijgt hem tegelijk terug: kost je niets) <span className="muted small">🔍</span></td><td><Euro cents={r.summary.btwVerlegd} /></td></tr>}
                 <tr className="clickable" title="Klik om te zien waar dit bedrag vandaan komt" onClick={() => setDetail({ code: '5b', title: 'Btw die je terugkrijgt (aankopen)' })}><td>Min: btw die je terugkrijgt (aankopen) <span className="muted small">🔍</span></td><td><Euro cents={r.summary.voorbelasting} /></td></tr>
                 <tr className="total"><td>{r.summary.teBetalen >= 0 ? 'Te betalen' : 'Je krijgt terug'}</td><td><Euro cents={Math.abs(r.summary.teBetalen)} /></td></tr>
                 {r.corrections.filter((c) => !c.suppletie).map((c) => (
@@ -249,6 +249,9 @@ const SOURCE_LABEL: Record<string, string> = {
  * "Waar komt dit bedrag vandaan?": de boekingen achter een regel van de btw-berekening, met een
  * knop naar de factuur, bon of betaling. Zo zie je meteen of er iets verkeerd geboekt is.
  */
+/** vakken waar de grondslag een aankoop is, geen omzet */
+const INKOOP_CODES = ['2a', '4a', '4b', 'verlegd'];
+
 function VatDetails({ periodKey, code, title, onClose }: { periodKey: string; code: string; title: string; onClose: () => void }) {
   const { go } = useApp();
   const { run } = useAction();
@@ -270,6 +273,13 @@ function VatDetails({ periodKey, code, title, onClose }: { periodKey: string; co
     <Modal title={title} onClose={onClose} wide>
       <ErrorBox error={d.error} />
       {d.data && lines.length === 0 && <p className="muted">Er zitten geen boekingen in.</p>}
+      {code === 'verlegd' && (
+        <div className="notice small">
+          Koop je als ondernemer een dienst bij een buitenlandse leverancier (bv. software of hosting uit de VS of Ierland) of werk van een onderaannemer met btw verlegd, dan
+          reken je die btw zelf uit: 21% over het bedrag. Dat staat hier, in vak 2a, 4a of 4b. Hetzelfde bedrag krijg je in vak 5b meteen terug, dus het kost je niets.
+          Was een van deze aankopen niet zakelijk, of stond er wél Nederlandse btw op de factuur? Klik op <strong>Bekijken</strong> en pas het daar aan.
+        </div>
+      )}
       {fromBankAsIncome && (
         <div className="notice small">
           Een deel komt van <strong>geld dat binnenkwam op de bank</strong> en als "Verkoop via een ander systeem" is geboekt. Was dat geen omzet (bijvoorbeeld geld van
@@ -279,7 +289,7 @@ function VatDetails({ periodKey, code, title, onClose }: { periodKey: string; co
       {lines.length > 0 && (
         <table className="list small">
           <thead>
-            <tr><th>Datum</th><th>Wat</th><th>Waar vandaan</th>{showOmzet && <th className="num">Omzet</th>}{showBtw && <th className="num">Btw</th>}<th><span className="sr-only">Acties</span></th></tr>
+            <tr><th>Datum</th><th>Wat</th><th>Waar vandaan</th>{showOmzet && <th className="num">{INKOOP_CODES.includes(code) ? 'Aankoop' : 'Omzet'}</th>}{showBtw && <th className="num">Btw</th>}<th><span className="sr-only">Acties</span></th></tr>
           </thead>
           <tbody>
             {lines.map((l) => (

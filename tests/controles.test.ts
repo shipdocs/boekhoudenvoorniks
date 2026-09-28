@@ -161,6 +161,20 @@ describe('btw-berekening: waar komt een bedrag vandaan?', () => {
     expect(() => s.vat.rubriekDetails('2026-Q2', 'x')).toThrow(/Onbekend vak/);
   });
 
+  it('btw die naar jou is verlegd (2a + 4a + 4b) telt op tot de regel bovenaan', () => {
+    const { s, main, tx } = withAccounts();
+    const us = tx(main.id, '2026-05-06', -2000, 'NL02ABNA0123456789');
+    s.bank.bookToAccount(us.id, { account: 'WBedKanSof', vatCode: 'buiten-eu' });
+    const ie = tx(main.id, '2026-05-07', -1000, 'NL44RABO0123456789');
+    s.bank.bookToAccount(ie.id, { account: 'WBedKanSof', vatCode: 'eu' });
+    const r = s.vat.calculate('2026-Q2');
+    const d = s.vat.rubriekDetails('2026-Q2', 'verlegd');
+    expect(d.btw).toBe(r.summary.btwVerlegd);
+    expect(d.btw).toBe(420 + 210);
+    expect(d.omzet).toBe(3000); // de aankopen
+    expect(d.lines.map((l) => l.bankTransactionId).sort()).toEqual([us.id, ie.id].sort());
+  });
+
   it('factuur en voorbelasting', () => {
     const { s } = withAccounts();
     const klant = s.relations.list()[0]!;
