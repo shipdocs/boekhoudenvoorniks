@@ -1,0 +1,65 @@
+{
+  "opening": {
+    "bank": 1000000,
+    "receivable": 121000,
+    "payable": 60500,
+    "vatPayable": 10500,
+    "equity": 1050000
+  },
+  "accounts": {
+    "BEivKap": -1050000,
+    "BEivPriStr": -12100,
+    "BLiqBanRba": 1156050,
+    "BSchBepBtwAfdHoo": -21000,
+    "BSchBepBtwAfdLaa": -4500,
+    "BSchBepBtwAfdVer": -8400,
+    "BSchBepBtwAfr": -10500,
+    "BSchBepBtwVoo": 21000,
+    "BSchCreHac": -76300,
+    "BVorDebHad": 54500,
+    "WBedAlkGer": 30000,
+    "WBedKanSof": 10000,
+    "WFbeBan": 1250,
+    "WKprInkMat": 20000,
+    "WKprKuwKuw": 40000,
+    "WOmzNopOlh": -100000,
+    "WOmzNopOll": -50000
+  },
+  "reports": {
+    "revenue": 150000,
+    "costs": 101250,
+    "profit": 48750
+  },
+  "vat": {
+    "summary": {
+      "omzet": 150000,
+      "btwOverOmzet": 25500,
+      "btwVerlegd": 8400,
+      "voorbelasting": 21000,
+      "teBetalen": 12900,
+      "teBetalenEuro": 129
+    },
+    "rubrieken": {
+      "1a": { "omzet": 100000, "btw": 21000 },
+      "1b": { "omzet": 50000, "btw": 4500 },
+      "2a": { "omzet": 40000, "btw": 8400 },
+      "5b": { "btw": 21000 },
+      "5g": { "btw": 12900, "btwEuro": 129 }
+    }
+  },
+  "openItems": {
+    "salesCount": 1,
+    "salesAmount": 54500,
+    "purchaseCount": 2,
+    "purchaseAmount": 76300
+  },
+  "bank": {
+    "closingBalance": 1156050,
+    "movementTotal": 156050,
+    "transactions": 5,
+    "unprocessed": 0
+  },
+  "documents": {
+    "processed": 4
+  }
+}

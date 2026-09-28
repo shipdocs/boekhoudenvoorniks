@@ -67,6 +67,7 @@ Vereist Node 22.12+.
 ```bash
 npm install
 npm test            # unit- en integratietests (vitest) op een in-memory database
+npm run test:proefadministratie # vaste XAF/UBL/CAMT-administratie met exact verwachte saldi
 npm run typecheck
 npm run dev         # Vite + Electron met hot reload
 npm start           # productiebuild lokaal starten
