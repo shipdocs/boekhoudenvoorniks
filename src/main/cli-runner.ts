@@ -1,16 +1,46 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { CliRunner, Workspace } from '../intake/ocr-cli';
+import { delimiter, join } from 'node:path';
+import { cliEnv, type CliRunner, type Workspace } from '../intake/ocr-cli';
+
+let shellPath: Promise<string> | null = null;
+
+/**
+ * Het PATH zoals de gebruiker het in een terminal heeft (uit .bashrc/.zshrc/.profile: nvm, Homebrew…).
+ * Een app die vanuit het menu start, krijgt dat niet mee. Eén keer gevraagd; lukt het niet, dan leeg.
+ */
+export function loginShellPath(): Promise<string> {
+  if (process.platform === 'win32') return Promise.resolve('');
+  shellPath ??= new Promise((resolve) => {
+    execFile(process.env.SHELL || '/bin/sh', ['-ilc', 'env'], { timeout: 5_000, maxBuffer: 1_000_000, env: process.env }, (_e, stdout) => {
+      // "env" werkt in elke shell (ook fish); een .bashrc die zelf iets print, staat er gewoon omheen
+      const lines = String(stdout ?? '').split('\n').filter((l) => l.startsWith('PATH='));
+      resolve(lines.pop()?.slice(5).trim() ?? '');
+    });
+  });
+  return shellPath;
+}
+
+/** Een omgeving voor dit programma: ook het PATH van de login-shell, zodat "node" te vinden is. */
+export async function cliEnvFor(cli: string): Promise<NodeJS.ProcessEnv> {
+  return cliEnv(cli, process.env, await loginShellPath());
+}
 
 /** Start Claude Code of Codex zonder venster; stopt het na de tijdslimiet. */
-export const nodeCliRunner: CliRunner = (cmd, args, { cwd, input, timeoutMs, env }) =>
+export const nodeCliRunner: CliRunner = async (cmd, args, opts) => {
+  // het PATH van de login-shell erachter: dan vindt "#!/usr/bin/env node" ook een Node uit nvm
+  const extra = await loginShellPath();
+  const env = extra ? { ...opts.env, PATH: [opts.env.PATH ?? '', extra].filter(Boolean).join(delimiter) } : opts.env;
+  return run(cmd, args, { ...opts, env });
+};
+
+const run: CliRunner = (cmd, args, { cwd, input, timeoutMs, env }) =>
   new Promise((resolve) => {
     // Windows: een .cmd (npm) kan alleen via de shell; de argumenten zijn eenvoudige woorden zonder spaties
     const viaShell = process.platform === 'win32' && /\.cmd$/i.test(cmd);
-    // via de shell: een argument met spaties (bv. het pad naar de app) tussen aanhalingstekens
-    const shellArgs = viaShell ? args.map((a) => (/[\s"&|<>^]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)) : args;
+    // via de shell: een leeg argument of een met spaties (bv. het pad naar de app) tussen aanhalingstekens
+    const shellArgs = viaShell ? args.map((a) => (a === '' || /[\s"&|<>^]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)) : args;
     const child = spawn(viaShell ? `"${cmd}"` : cmd, shellArgs, { cwd, env, shell: viaShell, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
