@@ -71,6 +71,51 @@ describe('integraties (fase 3)', () => {
     expect(s.invoices.list()[0]!.total).toBe(2420);
   });
 
+  it('Mollie Facturen: betaalde factuur wordt een gewone factuur op de tussenrekening, met de klant erbij', async () => {
+    const invoice = {
+      id: 'invoice_1',
+      status: 'paid',
+      invoiceNumber: 'I-0042',
+      currency: 'EUR',
+      recipient: { type: 'business', organizationName: 'Scheepvaartbedrijf De Vries', vatNumber: 'NL123456789B01', email: 'info@devries.nl', streetAndNumber: 'Kade 3', postalCode: '3000 AB', city: 'Rotterdam', country: 'NL' },
+      lines: [{ description: 'AIS-abonnement september', quantity: 1, vatRate: '21.00', unitPrice: { value: '100.00', currency: 'EUR' } }],
+      issuedAt: '2026-09-01T00:00:00Z',
+      paidAt: '2026-09-03T00:00:00Z',
+      createdAt: '2026-09-01T00:00:00Z',
+    };
+    const draft = { ...invoice, id: 'invoice_2', invoiceNumber: 'I-0043', status: 'draft', paidAt: null };
+    const settlement = {
+      id: 'stl_9',
+      reference: 'I-0042',
+      settledAt: '2026-09-05T00:00:00Z',
+      status: 'paidout',
+      amount: { value: '116.11', currency: 'EUR' },
+      periods: { '2026': { '09': { revenue: [{ amountGross: { value: '121.00', currency: 'EUR' } }], costs: [{ amountNet: { value: '4.04', currency: 'EUR' }, amountVat: { value: '0.85', currency: 'EUR' }, amountGross: { value: '4.89', currency: 'EUR' } }] } } },
+    };
+    const { s } = setup({
+      fetch: mockFetch({
+        'api.mollie.com/v2/sales-invoices': { _embedded: { invoices: [invoice, draft] }, _links: { next: null } },
+        'api.mollie.com/v2/settlements': { _embedded: { settlements: [settlement] }, _links: { next: null } },
+      }),
+    });
+    s.integrations.configure('mollie-facturen', { apiKey: 'access_x' }, true);
+    const r = await s.integrations.sync('mollie-facturen');
+    expect(r).toMatchObject({ created: 1, skipped: 0 });
+    const inv = s.invoices.list()[0]!;
+    expect(inv).toMatchObject({ total: 12100, status: 'betaald' });
+    expect(s.relations.list().find((x) => x.name === 'Scheepvaartbedrijf De Vries')).toMatchObject({ vat_number: 'NL123456789B01', email: 'info@devries.nl' });
+    expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(12100);
+    // een tweede sync maakt geen dubbele factuur
+    expect((await s.integrations.sync('mollie-facturen')).created).toBe(0);
+
+    // de uitbetaling (de andere Mollie-koppeling, voor settlements) trekt het weer van de tussenrekening af
+    s.integrations.configure('mollie', { apiKey: 'access_y' }, true);
+    await s.integrations.sync('mollie');
+    expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.kruisposten)).toBe(11611);
+    expect(s.ledger.balance(ACCOUNTS.bankkosten)).toBe(404);
+  });
+
   it('Mollie-uitbetaling boekt kosten en voorbelasting; bank sluit aan via kruisposten', async () => {
     const settlement = {
       id: 'stl_1',
