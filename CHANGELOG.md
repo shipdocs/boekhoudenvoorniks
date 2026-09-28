@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Volgende versie — nog niet uitgebracht
+
+### Techniek
+- **Vaste proefadministratie**: een samenhangende XAF-startpositie, UBL-inkopen, verkoopfacturen en een CAMT-bankafschrift worden periodiek door de echte boekingsservices verwerkt. De test vergelijkt daarna alle niet-nulle grootboeksaldi, bankaansluiting, btw-aangifte, winst, openstaande posten en ontdubbeling met een apart, handmatig doorgerekend verwacht resultaat.
+
 ## 0.6.10 — voortgang bij updates, menubalk uit het zicht
 
 ### Techniek

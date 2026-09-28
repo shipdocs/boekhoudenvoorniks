@@ -22,3 +22,8 @@ worden (auditfile, kolommenbalans, saldibalans, lijst met openstaande posten, on
 De datums zijn relatief aan het huidige jaar, zodat de tests niet verlopen.
 Bij een fout staan een schermafbeelding en een trace in `e2e-results/`
 (`npx playwright show-trace e2e-results/…/trace.zip`).
+
+De E2E-tests bewijzen de bediening in de echte schermen. De aparte
+[proefadministratie](../tests/proefadministratie/README.md) controleert aanvullend dat één vaste set
+XAF-, UBL- en CAMT-gegevens exact dezelfde grootboeksaldi, btw en openstaande posten blijft geven.
+Een overzicht van alle testlagen staat in [docs/testen.md](../docs/testen.md).
