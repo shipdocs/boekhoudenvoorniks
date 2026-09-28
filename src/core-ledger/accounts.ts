@@ -54,6 +54,7 @@ export const ACCOUNTS = {
   omzetDienstBuitenEu: 'WOmzNopObd',
   inkoopMaterialen: 'WKprInkMat',
   bankkosten: 'WFbeBan',
+  renteBaten: 'WFbeRlmObr',
   betalingsverschillen: 'WBedAlkBev',
   koersverschillen: 'WFbeWisWis',
   vraagposten: 'BSchOvsVrp',
@@ -141,6 +142,8 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '4500', rgs: ACCOUNTS.bankkosten, ref: 'WBedAdlBan', name: 'Bankkosten', category: 'kosten', system: true },
   // verschil tussen de koers op de factuur en wat de bank echt afschreef (#74)
   { code: '4510', rgs: ACCOUNTS.koersverschillen, ref: 'WFbeWisWis', name: 'Koersverschillen', category: 'kosten', system: true },
+  // rente van de bank: geen omzet en geen btw, wel winst (staat bij de financiële baten en lasten, net als bankkosten)
+  { code: '4520', rgs: ACCOUNTS.renteBaten, ref: 'WFbeRlmObr', name: 'Ontvangen rente', category: 'kosten', system: true },
 ];
 
 /** Welke omzet- en BTW-rekening hoort bij een verkoop-BTW-code. */

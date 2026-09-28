@@ -2,6 +2,10 @@
 
 ## Nog niet uitgebracht
 
+### Bank
+- **Rente ontvangen**: nieuwe keuze bij geld dat binnenkomt. Telt mee in je winst (bij de financiële baten en lasten), niet als omzet en zonder btw.
+- **Geld terug van een aankoop (refund)**: kies de categorie en btw van de oorspronkelijke aankoop; de app verlaagt je kosten en de btw die je terugkreeg. Was het een privé-aankoop, dan boekt de app het als privé.
+
 ### Vandaag
 - **Betaling bekijken**: klik op de naam van een betaling in de lijst (bv. "PAYPAL EUROPE … € 13,11") en je ziet alles wat de bank erover gaf: datum, tegenpartij, rekeningnummer, de volledige omschrijving en het kenmerk. Eronder staan eerdere betalingen aan dezelfde partij en hoe je die verwerkte. Vanuit dat venster kies je meteen zakelijk of privé.
 
