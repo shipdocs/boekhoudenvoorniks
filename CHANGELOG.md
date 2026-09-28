@@ -1,5 +1,13 @@
 # Wijzigingen
 
+## 0.6.5 — privé betaald, zonder dubbele kosten
+
+### Aankopen
+- **"Al betaald" kijkt eerst op je rekeningen**: staat dezelfde betaling al als kosten op een van je rekeningen (bv. een abonnement via Revolut, automatisch verwerkt)? Dan is de aankoop dubbel. De app haalt hem weg en de bon wordt het bewijsstuk bij die betaling. Bij "voortaan altijd" gaat die leverancier dan niet op privé.
+
+### Hersteld
+- **Dubbele kosten na "Al betaald" in 0.6.4**: een aankoop die privé betaald werd gezet terwijl de betaling al op een van je rekeningen als kosten stond, telde twee keer. De app herstelt dit vanzelf bij het opstarten en na het inlezen van de bank: de privé-betaling wordt teruggedraaid, de aankoop vervalt, de bon wordt het bewijsstuk, en "voortaan privé" gaat uit voor die leverancier. Is de btw-aangifte van die periode al gedaan, dan gaat het verschil mee in je volgende aangifte. Je ziet het terug in het overzicht van wat automatisch ging.
+
 ## 0.6.4 — rekeningen die je privé betaalt
 
 ### Aankopen

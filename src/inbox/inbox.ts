@@ -28,6 +28,7 @@ import { automationForMonth, countDecision, getAutomation, logAutomation, markCo
 import { explain } from '../automation/explain';
 import type { InvestmentCheck } from '../tax/investment-check';
 import type { MailIntakeService } from '../mail/mail-intake';
+import type { BookedPayments } from '../documents/booked-payment';
 import type { FxRepair } from '../fx/repair';
 
 
@@ -148,6 +149,11 @@ export class InboxService {
     private readonly mail?: MailIntakeService,
   ) {}
 
+  private booked: BookedPayments | null = null;
+  setBookedPayments(booked: BookedPayments): void {
+    this.booked = booked;
+  }
+
   private fxRepair: FxRepair | null = null;
   setFxRepair(repair: FxRepair): void {
     this.fxRepair = repair;
@@ -171,7 +177,8 @@ export class InboxService {
   autoProcess(asOf: IsoDate = today()): { matched: number; booked: number } {
     this.recurring.detect(); // vaste lasten herkennen (alleen voorstellen, niets boeken)
     const level = this.settings.get().autopilot;
-    if (level === 'voorzichtig') return { matched: 0, booked: 0 }; // alles blijft geel: de gebruiker bevestigt
+    // dubbel geboekte aankopen herstellen: geen nieuwe beslissing, dus ook bij "voorzichtig"
+    if (level === 'voorzichtig') return { matched: 0, booked: this.booked?.repair(asOf).length ?? 0 }; // alles blijft geel: de gebruiker bevestigt
     let booked = this.autoOwnTransfers();
     const auto = this.matching.autoMatch(asOf, level);
     const matched = auto.matched;
@@ -212,6 +219,8 @@ export class InboxService {
         // bv. afgesloten periode: laat staan
       }
     }
+    // aankopen die privé betaald staan, terwijl de betaling al op een eigen rekening geboekt is
+    booked += this.booked?.repair(asOf).length ?? 0;
     return { matched, booked };
   }
 
@@ -911,6 +920,7 @@ export class InboxService {
     const entry = getAutomation(this.db, logId);
     if (!entry || entry.actor !== 'systeem') throw new ValidationError('Onbekende automatische verwerking');
     if (entry.status === 'klopt_niet') throw new ValidationError('Dit is al teruggedraaid');
+    if (entry.kind === 'dubbel-weg') throw new ValidationError('Dit was een dubbele aankoop die de app heeft weggehaald. Klopt dat niet? Voeg de bon dan opnieuw toe.');
     tx(this.db, () => {
       if (entry.kind === 'bank-own') {
         const t = this.bank.get(entry.ref_id!);
