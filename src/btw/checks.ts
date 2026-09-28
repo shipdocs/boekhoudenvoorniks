@@ -38,6 +38,8 @@ export interface CheckItem {
   date: IsoDate | null;
   label: string;
   amount: Cents | null;
+  /** bv. de omschrijving van de betaling ("FACTUUR F0000.2607.0000.1394"): helpt de goede bon te vinden */
+  hint?: string | null;
 }
 
 /** Kosten vanaf dit bedrag (incl. btw) horen een bewijsstuk te hebben. */
@@ -74,14 +76,14 @@ export function runVatChecks(
     .all(start, end, EVIDENCE_THRESHOLD) as { id: number; total: number; date: IsoDate; label: string }[];
   const noEvidenceBank = db
     .prepare(
-      `SELECT b.id, b.amount, b.transaction_date AS date, COALESCE(b.counter_name, b.description) AS label FROM bank_transactions b
+      `SELECT b.id, b.amount, b.transaction_date AS date, COALESCE(b.counter_name, b.description) AS label, b.description AS hint FROM bank_transactions b
        WHERE b.status = 'gematcht' AND b.matched_invoice_id IS NULL AND b.matched_purchase_invoice_id IS NULL
          AND b.amount <= ? AND b.transaction_date BETWEEN ? AND ?
          AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
                      WHERE l.journal_entry_id = b.matched_journal_entry_id AND a.category = 'kosten')
          AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || b.id || '"%')`,
     )
-    .all(-EVIDENCE_THRESHOLD, start, end) as { id: number; amount: number; date: IsoDate; label: string }[];
+    .all(-EVIDENCE_THRESHOLD, start, end) as { id: number; amount: number; date: IsoDate; label: string; hint: string | null }[];
   const missing = noEvidencePurchases.length + noEvidenceBank.length;
   if (missing > 0) {
     found.push({
@@ -94,7 +96,7 @@ export function runVatChecks(
       screen: 'aankopen',
       items: [
         ...noEvidencePurchases.map((p) => ({ kind: 'aankoop' as const, id: p.id, date: p.date, label: p.label, amount: -p.total })),
-        ...noEvidenceBank.map((b) => ({ kind: 'bank' as const, id: b.id, date: b.date, label: b.label, amount: b.amount })),
+        ...noEvidenceBank.map((b) => ({ kind: 'bank' as const, id: b.id, date: b.date, label: b.label, amount: b.amount, hint: b.hint && b.hint !== b.label ? b.hint : null })),
       ],
     });
   }

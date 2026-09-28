@@ -2,6 +2,8 @@ import { ValidationError } from '../shared/validation';
 import type { Db } from '../db/database';
 import { parseEuro, type Cents } from '../shared/money';
 import { addMonths, diffDays, today, type IsoDate } from '../shared/dates';
+import type { BookedInfo, BookingInfo } from './booked-info';
+import { ACCOUNTS } from '../core-ledger/accounts';
 
 /**
  * Eén zoekbalk (#26) over documenten, factuur- en inkoopregels, relaties, betalingen, klussen en
@@ -29,6 +31,23 @@ export interface SearchGroup {
   links: { kind: SearchKind | 'boeking'; id: number; label: string }[];
   /** garantie bij gereedschap/investeringen, bv. "nog 14 maanden garantie" */
   warranty?: string | null;
+  /** hoe het ervoor staat en waar het geboekt is */
+  info?: GroupInfo | null;
+}
+
+export interface GroupInfo {
+  /** "Nog niet verwerkt", "Verwerkt", "Betaald", "Nog te betalen", … */
+  status: string | null;
+  /** hier moet de gebruiker nog iets mee */
+  attention: boolean;
+  /** de bankrekening, of "privé betaald" / "contant" */
+  paidVia: string | null;
+  counterparty: string | null;
+  booking: BookingInfo | null;
+  /** bon of factuur aanwezig; null = niet van toepassing */
+  evidence: boolean | null;
+  /** automatisch verwerkt door de app (niet door jou bevestigd) */
+  automatic: boolean;
 }
 
 export interface SearchFilters {
@@ -66,6 +85,11 @@ export function parseQuery(input: string): { match: string | null; filters: Sear
 export class SearchService {
   constructor(private readonly db: Db) {}
 
+  private booked: BookedInfo | null = null;
+  setBookedInfo(booked: BookedInfo): void {
+    this.booked = booked;
+  }
+
   /** Index opnieuw opbouwen (bv. na een herstel of voor bestaande administraties). */
   rebuild(): void {
     this.db.exec(`DELETE FROM search_index;`);
@@ -101,7 +125,7 @@ export class SearchService {
     for (const hit of rows) {
       const { key, links, jobId } = this.linksFor(hit);
       if (f.jobId && jobId !== f.jobId) continue;
-      const g = groups.get(key) ?? { key, title: hit.title, date: hit.date, amount: hit.amount, hits: [], links, warranty: this.warrantyFor(key) };
+      const g = groups.get(key) ?? { key, title: hit.title, date: hit.date, amount: hit.amount, hits: [], links, warranty: this.warrantyFor(key), info: this.infoFor(key) };
       g.hits.push(hit);
       for (const l of links) if (!g.links.some((x) => x.kind === l.kind && x.id === l.id)) g.links.push(l);
       groups.set(key, g);
@@ -163,6 +187,73 @@ export class SearchService {
       default:
         links.push({ kind: hit.kind, id: hit.id, label: hit.kind });
         return { key: `${hit.kind}:${hit.id}`, jobId: null, links };
+    }
+  }
+
+  /** Status, rekening, tegenpartij en boeking van een gebeurtenis (voor het zoekscherm). */
+  infoFor(key: string): GroupInfo | null {
+    const [kind, idText] = key.split(':');
+    const id = Number(idText);
+    const one = <T>(sql: string, ...p: unknown[]) => this.db.prepare(sql).get(...p) as T | undefined;
+    const bankName = (bankAccountId: number) => one<{ name: string }>('SELECT name FROM bank_accounts WHERE id = ?', bankAccountId)?.name ?? null;
+    const paidFromBank = (col: 'matched_purchase_invoice_id' | 'matched_invoice_id') =>
+      one<{ bank_account_id: number }>(`SELECT bank_account_id FROM bank_transactions WHERE ${col} = ? ORDER BY transaction_date DESC LIMIT 1`, id);
+    switch (kind) {
+      case 'bank': {
+        const t = one<{ status: string; bank_account_id: number; counter_name: string | null; matched_journal_entry_id: number | null; matched_purchase_invoice_id: number | null; matched_invoice_id: number | null }>('SELECT * FROM bank_transactions WHERE id = ?', id);
+        if (!t) return null;
+        const evidence = !!one(`SELECT 1 FROM documents WHERE classification LIKE ?`, `%banktransactie #${id}"%`);
+        const automatic = !!one(`SELECT 1 FROM automation_log WHERE ref_id = ? AND kind IN ('bank-auto', 'bank-match', 'bank-own') AND status = 'auto'`, id);
+        return {
+          status: t.status === 'nieuw' ? 'Nog niet verwerkt' : t.status === 'genegeerd' ? 'Genegeerd' : 'Verwerkt',
+          attention: t.status === 'nieuw',
+          paidVia: bankName(t.bank_account_id),
+          counterparty: t.counter_name,
+          booking: this.booked?.entry(t.matched_journal_entry_id) ?? null,
+          evidence: t.status === 'gematcht' && !t.matched_invoice_id ? evidence : null,
+          automatic,
+        };
+      }
+      case 'inkoop': {
+        const p = one<{ status: string; total: number; amount_paid: number; journal_entry_id: number | null; attachment_path: string | null; document_id: number | null; relation_id: number | null }>('SELECT * FROM purchase_invoices WHERE id = ?', id);
+        if (!p) return null;
+        const bank = paidFromBank('matched_purchase_invoice_id');
+        // niet via de bank betaald: privé of contant (de betaling staat tegen Privé-stortingen of Kas)
+        const elsewhere = bank ? null : one<{ rgs_code: string }>(
+          `SELECT a.rgs_code FROM journal_entries e JOIN journal_lines l ON l.journal_entry_id = e.id JOIN chart_of_accounts a ON a.id = l.account_id
+            WHERE e.source_ref = ? AND e.status <> 'teruggedraaid' AND e.reverses_entry_id IS NULL AND a.rgs_code IN (?, ?) LIMIT 1`, `purchase:${id}`, ACCOUNTS.priveStortingen, ACCOUNTS.kas);
+        return {
+          status: p.status === 'betaald' ? 'Betaald' : p.amount_paid > 0 ? 'Deels betaald' : 'Nog te betalen',
+          attention: p.status !== 'betaald',
+          paidVia: bank ? bankName(bank.bank_account_id) : elsewhere ? (elsewhere.rgs_code === ACCOUNTS.kas ? 'contant' : 'privé betaald') : null,
+          counterparty: p.relation_id ? one<{ name: string }>('SELECT name FROM relations WHERE id = ?', p.relation_id)?.name ?? null : null,
+          booking: this.booked?.entry(p.journal_entry_id) ?? null,
+          evidence: !!(p.attachment_path || p.document_id),
+          automatic: false,
+        };
+      }
+      case 'factuur': {
+        const i = one<{ status: string; journal_entry_id: number | null; relation_id: number }>('SELECT status, journal_entry_id, relation_id FROM invoices WHERE id = ?', id);
+        if (!i) return null;
+        const bank = paidFromBank('matched_invoice_id');
+        return {
+          status: i.status === 'concept' ? 'Concept' : i.status === 'betaald' ? 'Betaald' : 'Verstuurd, nog niet betaald',
+          attention: i.status !== 'betaald',
+          paidVia: bank ? bankName(bank.bank_account_id) : null,
+          counterparty: one<{ name: string }>('SELECT name FROM relations WHERE id = ?', i.relation_id)?.name ?? null,
+          booking: this.booked?.entry(i.journal_entry_id) ?? null,
+          evidence: null,
+          automatic: false,
+        };
+      }
+      case 'document': {
+        const d = one<{ status: string }>('SELECT status FROM documents WHERE id = ?', id);
+        if (!d) return null;
+        const status = d.status === 'controle' ? 'Nog controleren' : d.status === 'genegeerd' ? 'Privé of dubbel (niet geboekt)' : d.status === 'verwerkt' ? 'Bewijsstuk bij een betaling' : d.status;
+        return { status, attention: d.status === 'controle', paidVia: null, counterparty: null, booking: null, evidence: true, automatic: false };
+      }
+      default:
+        return null;
     }
   }
 

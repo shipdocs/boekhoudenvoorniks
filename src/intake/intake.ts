@@ -7,7 +7,7 @@ import type { BankService, BankTransaction } from '../import/bank';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { PRIVATE_CAR_CATEGORIES, type CategoryLookup } from '../shared/categories';
 import { PURCHASE_VAT_RATES, isPurchaseVatCode, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
-import { diffDays, today, type IsoDate } from '../shared/dates';
+import { diffDays, formatDateNl, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { countDecision, logAutomation } from '../inbox/automation-log';
 import { allCertain, type AutopilotLevel, type Decision } from '../automation/decisions';
@@ -266,6 +266,41 @@ export class IntakeService {
     return this.get(id);
   }
 
+  /** De instapdatum bij overstappen met een lopende administratie (daarvoor hoort alles bij de vorige). */
+  private startDate(): IsoDate | null {
+    const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'switchover'`).get() as { value: string } | undefined;
+    if (!row) return null;
+    try {
+      const s = JSON.parse(row.value) as { mode?: string; date?: string | null };
+      return s.mode === 'overstapper' && s.date ? s.date : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Een bon of factuur als bijlage bij een aankoop die er nog geen had ("Bon toevoegen"). */
+  async addPurchaseEvidence(filename: string, data: Uint8Array, purchaseId: number): Promise<IntakeDocument> {
+    const p = this.db.prepare('SELECT id, document_id FROM purchase_invoices WHERE id = ?').get(purchaseId) as { id: number; document_id: number | null } | undefined;
+    if (!p) throw new ValidationError('Deze aankoop bestaat niet (meer)');
+    const sha = createHash('sha256').update(data).digest('hex');
+    const existing = this.db.prepare('SELECT id FROM documents WHERE sha256 = ?').get(sha) as { id: number } | undefined;
+    const path = existing ? null : await this.storeFile(filename, data);
+    const { result, source } = existing ? { result: null, source: null } : await this.extract(filename, data);
+    return tx(this.db, () => {
+      const id = existing
+        ? existing.id
+        : Number(
+            this.db
+              .prepare(`INSERT INTO documents (file_path, original_name, mime_type, sha256, extraction_source, result, status, confidence, issues) VALUES (?, ?, ?, ?, ?, ?, 'verwerkt', 'HIGH', '[]')`)
+              .run(path, filename, mimeFor(filename), sha, source, JSON.stringify(result)).lastInsertRowid,
+          );
+      const doc = this.get(id);
+      this.db.prepare(`UPDATE documents SET status = 'verwerkt', purchase_invoice_id = ? WHERE id = ?`).run(purchaseId, id);
+      this.db.prepare('UPDATE purchase_invoices SET attachment_path = ?, document_id = ? WHERE id = ?').run(doc.file_path, id, purchaseId);
+      return this.get(id);
+    });
+  }
+
   /** Bonnen die nog niet uitgelezen konden worden (geen herkenning), nog niet verwerkt. */
   unread(): { id: number; file_path: string; original_name: string }[] {
     return this.db
@@ -327,6 +362,11 @@ export class IntakeService {
     const issues = [...extraIssues, ...validateDocument(result, asOf)];
     if (duplicate) {
       issues.push({ field: 'duplicate', severity: 'fout', message: `Lijkt op ${duplicate.label}. Is dit dezelfde aankoop?`, suggestion: duplicate });
+    }
+    // van vóór de instapdatum: hoort bij de vorige administratie, niet als nieuwe (open) aankoop
+    const start = this.startDate();
+    if (start && result.invoiceDate && result.invoiceDate.value < start) {
+      issues.push({ field: 'invoiceDate', severity: 'fout', message: `Deze factuur is van ${formatDateNl(result.invoiceDate.value)}, van vóór je instapdatum (${formatDateNl(start)}). Die hoort bij je vorige administratie. Zocht je de factuur bij een betaling van dit jaar? Kijk dan naar jaar en maand in het factuurnummer.` });
     }
     const bankMatch = this.findBankMatch(result);
     // vreemde munt: wat de bank afschreef is het echte bedrag in euro's (en daarmee de echte koers)

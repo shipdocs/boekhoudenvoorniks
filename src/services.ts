@@ -37,6 +37,7 @@ import { MailIntakeService } from './mail/mail-intake';
 import { FxService } from './fx/fx';
 import { FxRepair } from './fx/repair';
 import { BookedPayments } from './documents/booked-payment';
+import { BookedInfo } from './search/booked-info';
 
 export interface ServiceDeps {
   pdf: PdfRenderer;
@@ -80,6 +81,9 @@ export function createServices(db: Db, deps: ServiceDeps) {
   intake.setFx(fx);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);
+  // "waar staat dit op?" bij zoekresultaten en in de lijsten
+  const bookedInfo = new BookedInfo(db, () => settings.get().vatPeriod);
+  search.setBookedInfo(bookedInfo);
   const assets = new AssetService(db, ledger);
   const mileage = new MileageService(db, ledger);
   const hours = new HoursService(db);
@@ -107,7 +111,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, fx, fxRepair, bookedPayments, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
+  return { db, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;

@@ -7,6 +7,9 @@ export function Jobs() {
   const { go } = useApp();
   const [all, setAll] = useState(false);
   const jobs = useLoad(() => api.jobs.list(all ? {} : { active: true }), [all]);
+  const [search, setSearch] = useState('');
+  const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = (jobs.data ?? []).filter((j) => words.every((w) => [j.title, j.relation_name].join(' ').toLowerCase().includes(w)));
   const [creating, setCreating] = useState(false);
   return (
     <div className="page">
@@ -17,15 +20,19 @@ export function Jobs() {
         </div>
         <Button kind="primary" onClick={() => setCreating(true)}>+ Nieuwe klus</Button>
       </div>
-      <label className="row small muted" style={{ marginBottom: 12 }}>
-        <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Ook afgeronde klussen tonen
-      </label>
+      <div className="row" style={{ marginBottom: 12, gap: 12 }}>
+        <input className="grow" type="search" aria-label="Zoek in klussen" placeholder="Zoek op klus of klant…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <label className="row small muted">
+          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Ook afgeronde klussen tonen
+        </label>
+      </div>
       <ErrorBox error={jobs.error} />
-      {(jobs.data ?? []).length === 0 ? (
-        <Empty icon="🔨" title="Geen lopende klussen">Zodra een klant akkoord geeft op een offerte, verschijnt hier de klus.</Empty>
+      {shown.length === 0 ? (
+        words.length ? <Empty icon="🔍" title={`Geen klussen gevonden voor "${search.trim()}"`}>{all ? 'Probeer een ander woord.' : 'Zet "Ook afgeronde klussen tonen" aan om verder te zoeken.'}</Empty>
+          : <Empty icon="🔨" title="Geen lopende klussen">Zodra een klant akkoord geeft op een offerte, verschijnt hier de klus.</Empty>
       ) : (
         <div className="grid cols-2">
-          {jobs.data!.map((j) => (
+          {shown.map((j) => (
             <div key={j.id} className="card clickable" onClick={() => go({ screen: 'klus', id: j.id })}>
               <div className="row between"><strong>{j.title}</strong><StatusPill status={j.status} /></div>
               <div className="muted">{j.relation_name}{j.address ? ` · ${j.address}` : ''}</div>

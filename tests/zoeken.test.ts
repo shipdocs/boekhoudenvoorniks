@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { setup } from './helpers';
 import { parseQuery } from '../src/search/search';
+import { ACCOUNTS } from '../src/core-ledger/accounts';
 import type { OcrProvider } from '../src/intake/ocr';
 
 const items = (lines: string[]) => lines.map((text, i) => ({ text, page: 1, bbox: [10, 20 + i * 20, 300, 34 + i * 20] as [number, number, number, number], confidence: 0.97 }));
@@ -21,6 +22,36 @@ describe('zoeken (#26)', () => {
     // garantie
     s.search.setWarranty(Number(g!.key.split(':')[1]), 24);
     expect(s.search.search('festool')[0]!.warranty).toMatch(/nog \d+ maanden garantie/);
+  });
+
+  it('bij elk resultaat: status, rekening, waar het geboekt is en in welke btw-aangifte', () => {
+    const { s } = setup();
+    const revolut = s.bank.addAccount('Revolut', 'NL19REVO1775456722');
+    s.bank.import({ source: 'csv', warnings: [], transactions: [
+      { date: '2026-07-05', amount: -19401, description: 'Card Payment: Preply', counterName: 'Preply' },
+      { date: '2026-07-08', amount: -2131, description: 'Card Payment: Vercel', counterName: 'Vercel' },
+    ] }, { bankAccountId: revolut.id });
+    const [preply, vercel] = ['Preply', 'Vercel'].map((n) => s.bank.list({ search: n })[0]!);
+    s.bank.bookToAccount(preply!.id, { account: ACCOUNTS.priveOpnamen });
+    s.bank.bookToAccount(vercel!.id, { account: 'WBedKanSof', vatCode: 'buiten-eu' });
+
+    const p = s.search.search('preply')[0]!;
+    expect(p.info).toMatchObject({ status: 'Verwerkt', attention: false, paidVia: 'Revolut', counterparty: 'Preply', evidence: false });
+    expect(p.info!.booking).toMatchObject({ summary: 'Privé-opnamen', vatPeriod: null });
+
+    const v = s.search.search('vercel')[0]!;
+    expect(v.info!.booking).toMatchObject({ summary: 'Software & abonnementen · btw verlegd, buiten EU (4a)', vatPeriod: { key: '2026-Q3', filed: false } });
+    expect(v.info!.booking!.lines).toEqual([{ account: 'Software & abonnementen', amount: 2131, vat: 'btw verlegd, buiten EU (4a)' }]);
+
+    // nog niet verwerkt: aandacht nodig, nog nergens geboekt
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-01', amount: -500, description: 'Parkeren', counterName: 'Q-Park' }] }, { bankAccountId: revolut.id });
+    expect(s.search.search('q-park')[0]!.info).toMatchObject({ status: 'Nog niet verwerkt', attention: true, booking: null });
+
+    // aankoop privé betaald
+    const lev = s.relations.findOrCreateSupplier('DigiBoox');
+    const inkoop = s.purchases.create({ relationId: lev.id, invoiceDate: '2026-09-19', description: 'Overige kosten — DigiBoox', lines: [{ account: ACCOUNTS.inkoopMaterialen, netAmount: 1600, vatCode: 'hoog' }] });
+    s.quick.payPurchaseWith(inkoop.id, 'prive');
+    expect(s.search.search('digiboox').find((g) => g.key.startsWith('inkoop:'))!.info).toMatchObject({ status: 'Betaald', paidVia: 'privé betaald', counterparty: 'DigiBoox', evidence: false });
   });
 
   it('factuurregels en klanten zijn doorzoekbaar, met bedrag- en periodefilters', () => {
