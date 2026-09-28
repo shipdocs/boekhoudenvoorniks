@@ -1,6 +1,33 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.6.3 — Revolut, facturen van Stripe, en Claude Code of Codex die gewoon werken
+
+### Bonnen en facturen
+- **Facturen van Stripe goed gelezen** (de meeste software-abonnementen: Vercel, Render, Supabase, Moonshot, ElevenLabs, Cloudflare, ...):
+  - De leverancier is de verkoper naast "Bill to" (met de handelsnaam), niet een adres of een kopje als "Account ID".
+  - "Paid via Stripe" maakt Stripe niet meer de leverancier.
+  - Het factuurnummer is compleet ("P6ARUBNL-0001", niet meer "P6ARUBNL").
+  - "Amount paid" op een betaalbewijs is het totaal.
+- **Btw bij buitenlandse leveranciers**:
+  - De app leest het land uit het adres. Een Amerikaanse leverancier zonder btw op de factuur is verlegd (4a) en niet meer 21%.
+  - Bij "reverse charge" telt je eigen btw-nummer onder "Bill to" niet meer als dat van de leverancier.
+  - "21% on $5.00" en "(Includes VAT of € 1,73)" worden goed gelezen.
+- **Factuur bij een betaling die al geboekt is**: de factuur wordt het bewijsstuk, ook als de naam anders gespeld is ("Eleven Labs Inc." en "Elevenlabs") en als je hem tot 20 dagen later met de kaart betaalde.
+
+### Bank
+- **Revolut-export inlezen**:
+  - Alleen voltooide betalingen, op de boekdatum. Teruggedraaide betalingen komen er niet in.
+  - Kosten staan als aparte regel "Kosten: …", zodat je ze als bankkosten kunt boeken.
+  - Het eindsaldo uit het bestand, voor de saldocontrole en het beginsaldo.
+  - Het bestand komt op je rekening "Revolut", niet meer op je eerste rekening.
+- **Overboeking naar je spaarrekening zonder IBAN** (Knab noemt alleen het korte nummer): beide kanten horen nu bij één boeking. Eerst bleef de kant van je betaalrekening als vraag staan, en met "Zakelijk" werd hij dubbel geboekt. Wat al zo in je administratie stond, herstelt de app vanzelf.
+
+### Claude Code en Codex
+- **Werken ook als je de app vanuit het menu start**: de app vindt Node.js nu ook als dat via nvm, fnm, volta, asdf of mise is geïnstalleerd, en "Zoek op deze computer" vindt claude/codex daar ook.
+- **Duidelijke meldingen**: Node.js niet gevonden, programma weg, of een verouderde versie (met de opdracht om bij te werken).
+- **Afgeschermd en zuiniger**:
+  - Voor een bon gebruikt de app geen MCP-servers, instellingen of hooks van jezelf. Claude Code krijgt alleen het hulpmiddel Read.
+  - Bonnen lezen gaat met Sonnet: ongeveer een derde van het verbruik van Opus.
 
 ### Onboarding
 - **Nieuw beroep: Webdeveloper / ICT**, met factuurregels voor ontwikkeling, hosting en onderhoud, en licenties.
