@@ -58,7 +58,7 @@
         "provider": "github",
         "owner": "shipdocs",
         "repo": "gratis-boekhouden",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ],
     "electronFuses": {

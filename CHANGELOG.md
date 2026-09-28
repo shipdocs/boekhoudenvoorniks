@@ -1,5 +1,13 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Hersteld
+- **Zoeken naar updates direct na een nieuwe release**: de release werd al openbaar terwijl de installers nog werden geüpload, waardoor de app kort een foutmelding gaf ("Cannot find latest-linux.yml"). Een release staat nu als concept klaar tot alle bestanden voor Linux en Windows er zijn. Lukt zoeken naar updates niet, dan zegt de app in gewone taal waarom.
+
+### Website
+- Nieuwe pagina *Wat is er nieuw* met de release notes per versie, een sectie over overstappen, en de fiscale verbeteringen uit 0.5.0 bij de functies.
+
 ## 0.6.0 — overstappen met een auditfile per jaar
 
 ### Overstappen

@@ -59,8 +59,14 @@
           "Betalingsherinneringen",
           "Auditfile (XAF) en RGS-grootboek voor de boekhouder",
           "Koppelingen met WooCommerce, Shopify, Mollie en Stripe",
+          "Overstappen met auditfiles (XAF, ook één per jaar), kolommenbalans of saldibalans",
+          "Aftrekposten: afschrijving, KIA, kilometers, representatie en jaaroverzicht voor de aangifte",
+          "ICP-opgaaf met goederen en diensten apart",
+          "Dagelijkse back-up inclusief bijlagen",
           "Lokale opslag, werkt offline"
         ],
+        "softwareVersion": "0.6.0",
+        "releaseNotes": "https://shipdocs.github.io/gratis-boekhouden/wijzigingen.html",
         "screenshot": ["https://shipdocs.github.io/gratis-boekhouden/img/vandaag.png", "https://shipdocs.github.io/gratis-boekhouden/img/belasting.png", "https://shipdocs.github.io/gratis-boekhouden/img/werk.png", "https://shipdocs.github.io/gratis-boekhouden/img/overzicht.png"],
         "downloadUrl": "https://github.com/shipdocs/gratis-boekhouden/releases/latest",
         "publisher": { "@id": "https://shipdocs.github.io/gratis-boekhouden/#org" }
@@ -106,7 +112,15 @@
             "name": "Werkt het met btw verlegd en de kleineondernemersregeling (KOR)?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij btw verlegd controleert het programma of het btw-nummer van je klant op de factuur staat."
+              "text": "Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij btw verlegd controleert het programma of het btw-nummer van je klant op de factuur staat. Met de KOR telt de btw op je inkopen bij de kosten, en verlegde btw die je toch moet betalen staat per kwartaal op het btw-scherm."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Kan ik overstappen vanuit een ander boekhoudprogramma?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja. Kies een instapdatum en lees een auditfile (XAF) uit je vorige programma in, of het overzicht van je boekhouder (kolommen- of saldibalans en openstaande facturen). Heb je een auditfile per jaar, dan zet je ze allemaal tegelijk neer. De app vult je startbalans in; jij kijkt het na."
             }
           },
           {
@@ -186,8 +200,9 @@
       <nav>
         <a href="#hoe">Hoe het werkt</a>
         <a href="#functies">Functies</a>
-        <a href="#beroepen">Voor jouw vak</a>
+        <a href="#overstappen">Overstappen</a>
         <a href="#vragen">Vragen</a>
+        <a href="wijzigingen.html">Wat is er nieuw</a>
         <a class="btn small" href="https://github.com/shipdocs/gratis-boekhouden/releases/latest">Downloaden</a>
       </nav>
     </div>
@@ -196,6 +211,7 @@
   <main>
     <section class="hero wrap">
       <div>
+        <a class="announce" href="wijzigingen.html#v0.6.0"><span>Nieuw in 0.6.0</span> Overstappen met een auditfile per jaar →</a>
         <p class="eyebrow">Voor stukadoors, schilders, timmerlieden, loodgieters, elektriciens en andere vakmensen</p>
         <h1>Jij beheert je bedrijf.<br>Wij maken de boekhouding.</h1>
         <p class="sr-intro">Gratis boekhoudprogramma voor zzp'ers en vakmensen in Nederland.</p>
@@ -269,6 +285,35 @@
         <div><h3>Alle Nederlandse banken</h3><p>CSV van ING, Rabobank, ABN AMRO, bunq, Knab en Triodos, plus MT940 en CAMT.053.</p></div>
         <div><h3>Webshop & betalingen</h3><p>WooCommerce en Shopify worden facturen; Mollie- en Stripe-uitbetalingen kloppen vanzelf met je bank.</p></div>
         <div><h3>Voor je boekhouder</h3><p>Grootboek (RGS), journaal, balans, W&V, correctieboekingen en de XAF-auditfile, achter een aparte expertmodus.</p></div>
+        <div><h3>KOR en buitenland</h3><p>Met de KOR gaat btw op inkopen naar de kosten, verlegde btw blijft zichtbaar. Goederen en diensten aan EU-bedrijven apart in de ICP-opgaaf.</p></div>
+        <div><h3>Aftrekposten</h3><p>Bedrijfsmiddelen en afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek, met een jaaroverzicht voor je aangifte.</p></div>
+        <div><h3>Back-ups met bijlagen</h3><p>Elke dag een back-up, ook versleuteld, inclusief alle bonnen en facturen. Terugzetten op een nieuwe computer werkt gewoon.</p></div>
+      </div>
+      <p class="fine">De fiscale regels zijn in versie 0.5.0 aangescherpt na een review van de btw- en inkomstenbelastingberekeningen. Zie <a href="wijzigingen.html#v0.5.0">wat er veranderde</a>.</p>
+    </section>
+
+    <section id="overstappen" class="band">
+      <div class="wrap split">
+        <div>
+          <h2>Overstappen zonder opnieuw te beginnen</h2>
+          <p>Kom je van een ander programma, van Excel of van je boekhouder? Kies een instapdatum en de overstap-hulp zet je lopende administratie over, onderdeel voor onderdeel.</p>
+          <ul class="checks">
+            <li><strong>Auditfiles inlezen</strong><br><span class="muted">XAF uit bijvoorbeeld SnelStart, e-Boekhouden, Moneybird, Exact of Jortt. Heb je er één per jaar? Zet ze allemaal tegelijk neer.</span></li>
+            <li><strong>Of het overzicht van je boekhouder</strong><br><span class="muted">Kolommen- of saldibalans en een lijst met openstaande facturen, als Excel of CSV.</span></li>
+            <li><strong>Alles loopt door</strong><br><span class="muted">Banksaldi, openstaande facturen, bus en gereedschap met hun echte aankoopdatum, btw en leningen.</span></li>
+          </ul>
+          <p class="muted">Controles laten zien of je banksaldo aansluit en of het klopt met de balans van je boekhouder. Stoppen mag: alles wordt meteen bewaard.</p>
+        </div>
+        <div class="card">
+          <h3>Zo werkt het</h3>
+          <ol class="steps">
+            <li>Kies je instapdatum, bijvoorbeeld 1 januari of de dag na de laatste boeking in je oude programma.</li>
+            <li>Sleep je auditfiles of het overzicht van je boekhouder erin.</li>
+            <li>Kijk na wat de app heeft ingevuld en vink af wat klopt.</li>
+            <li>Lees je bankafschriften in vanaf de instapdatum. Betalingen van oude facturen worden vanzelf gekoppeld.</li>
+          </ol>
+          <p class="fine">Laat je startbalans nakijken door je boekhouder.</p>
+        </div>
       </div>
     </section>
 
@@ -289,7 +334,8 @@
       <h2>Veelgestelde vragen</h2>
         <details><summary>Is Gratis Boekhouden echt gratis?</summary><p>Ja. Het programma is gratis te downloaden en te gebruiken, zonder abonnement en zonder account. Je administratie staat op je eigen computer.</p></details>
         <details><summary>Kan ik als zzp'er mijn btw-aangifte ermee doen?</summary><p>Ja. Het programma rekent je btw per kwartaal (of maand) uit uit je facturen en aankopen, en laat precies zien wat je invult bij de rubrieken 1a, 1b, 1e, 2a en 5b in Mijn Belastingdienst Zakelijk. Direct elektronisch indienen via Digipoort is nog in voorbereiding.</p></details>
-        <details><summary>Werkt het met btw verlegd en de kleineondernemersregeling (KOR)?</summary><p>Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij btw verlegd controleert het programma of het btw-nummer van je klant op de factuur staat.</p></details>
+        <details><summary>Werkt het met btw verlegd en de kleineondernemersregeling (KOR)?</summary><p>Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij btw verlegd controleert het programma of het btw-nummer van je klant op de factuur staat. Met de KOR telt de btw op je inkopen bij de kosten, en verlegde btw die je toch moet betalen staat per kwartaal op het btw-scherm.</p></details>
+        <details><summary>Kan ik overstappen vanuit een ander boekhoudprogramma?</summary><p>Ja. Kies een instapdatum en lees een auditfile (XAF) uit je vorige programma in, of het overzicht van je boekhouder (kolommen- of saldibalans en openstaande facturen). Heb je een auditfile per jaar, dan zet je ze allemaal tegelijk neer. De app vult je startbalans in; jij kijkt het na.</p></details>
         <details><summary>Welke banken worden ondersteund?</summary><p>Je leest een bankafschrift in als CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of een eigen kolomindeling), MT940 of CAMT.053. Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes.</p></details>
         <details><summary>Heb ik boekhoudkennis nodig?</summary><p>Nee. Je werkt met klanten, klussen, offertes, facturen en bonnetjes. Het programma maakt daar automatisch een dubbele boekhouding van en vraagt alleen iets als het niet zeker is.</p></details>
         <details><summary>Waar staat mijn administratie?</summary><p>Op je eigen computer, in een lokaal databasebestand. Er is geen cloud nodig. Elke dag wordt automatisch een back-up gemaakt en je kunt zelf een kopie maken op een USB-stick.</p></details>
@@ -324,7 +370,7 @@
 
   <footer class="wrap foot">
     <span>Gratis Boekhouden, een project van <a href="https://github.com/shipdocs">Shipdocs</a> · open source onder AGPL-3.0-or-later</span>
-    <span><a href="voorwaarden.html">Voorwaarden</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/shipdocs/gratis-boekhouden/issues">Feedback & vragen</a></span>
+    <span><a href="wijzigingen.html">Wat is er nieuw</a> · <a href="voorwaarden.html">Voorwaarden</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/shipdocs/gratis-boekhouden/issues">Feedback & vragen</a></span>
   </footer>
 </body>
 </html>
