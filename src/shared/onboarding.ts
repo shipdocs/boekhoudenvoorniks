@@ -21,6 +21,12 @@ export interface OnboardingStep {
 export const ONBOARDING_STEPS: OnboardingStep[] = [
   { id: 'welkom', version: 1, title: 'Welkom', satisfied: (s) => !!s.profile.trade },
   { id: 'alleen', version: 1, title: 'Werk je alleen?' },
+  {
+    id: 'kosten',
+    version: 1,
+    title: 'Je kosten',
+    whatsNew: 'Nieuw: de app stelt kostenposten voor die bij je werk horen (bv. AI-tools en hosting voor webdevelopers), zodat je bonnetjes meteen goed staan.',
+  },
   { id: 'bedrijf', version: 1, title: 'Je bedrijf', satisfied: (s) => !!(s.company.name && s.company.address && s.company.city) },
   { id: 'btw', version: 1, title: 'BTW', satisfied: (s) => s.kor || !!s.company.vatNumber },
   { id: 'bank', version: 1, title: 'Bank', satisfied: (s) => !!s.company.iban },

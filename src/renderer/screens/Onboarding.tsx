@@ -23,7 +23,7 @@ const AUTOPILOT: [AppSettings['autopilot'], string, string][] = [
  * gebruikt, krijgt na een update alleen de stappen die nieuw of gewijzigd zijn.
  */
 export function Onboarding() {
-  const { meta, settings, reloadSettings, go, toast } = useApp();
+  const { meta, settings, reloadSettings, reloadMeta, go, toast } = useApp();
   const { run, busy } = useAction();
   // vast bij binnenkomst: de lijst mag niet verspringen terwijl je invult
   const [steps] = useState(() => pendingSteps(settings));
@@ -41,6 +41,15 @@ export function Onboarding() {
   const [workspace, setWorkspace] = useState(settings.homeWorkspace);
   const [partnerHours, setPartnerHours] = useState(settings.partnerHours ? String(settings.partnerHours) : '');
   const [lastNumber, setLastNumber] = useState('');
+  // kostenposten van het beroep: standaard alles aangevinkt; opnieuw als je een ander beroep kiest
+  const [costChoice, setCostChoice] = useState<{ trade: string; add: string[]; hide: string[] } | null>(null);
+  const trade = meta.trades.find((t) => t.key === profile.trade);
+  const has = (label: string) => meta.expenseCategories.some((c) => c.label.toLowerCase() === label.toLowerCase());
+  const costs = costChoice?.trade === profile.trade
+    ? costChoice
+    : { trade: profile.trade, add: trade?.costs.map((c) => c.label).filter((l) => !has(l)) ?? [], hide: trade?.hide.filter((k) => meta.expenseCategories.some((c) => c.key === k)) ?? [] };
+  const toggleCost = (list: 'add' | 'hide', value: string) =>
+    setCostChoice({ ...costs, [list]: costs[list].includes(value) ? costs[list].filter((v) => v !== value) : [...costs[list], value] });
   const [terms, setTerms] = useState(settings.termsAcceptedVersion === TERMS_VERSION);
   const [switchMode, setSwitchMode] = useState(settings.switchover.mode);
   const [switchDate, setSwitchDate] = useState(settings.switchover.date ?? `${new Date().getFullYear()}-01-01`);
@@ -66,6 +75,8 @@ export function Onboarding() {
       if (shows('nummering')) patch.termsAcceptedVersion = TERMS_VERSION;
       if (shows('thuis')) Object.assign(patch, { phoneInternetBusinessPct: phonePct, homeWorkspace: workspace, partnerHours: Number(partnerHours) || 0 });
       if (shows('fiscaal')) Object.assign(patch, { carUse, startYear: Number(startYear) || null, startersaftrekUsed: { count: startersUsed, asOfYear: year } });
+      // vóór de instellingen: mislukt dit, dan is de onboarding nog niet klaar en probeer je opnieuw (dubbel toepassen kan geen kwaad)
+      if (shows('kosten') && trade && (costs.add.length || costs.hide.length)) await api.categories.applyTrade(trade.key, { add: costs.add, hide: costs.hide });
       await api.settings.update(patch);
       if (shows('bank')) {
         const accounts = await api.bank.accounts();
@@ -78,7 +89,7 @@ export function Onboarding() {
       return true;
     });
     if (!ok) return;
-    await reloadSettings();
+    await Promise.all([reloadSettings(), reloadMeta()]);
     go(then === 'factuur' ? { screen: 'factuur' } : then === 'overstap' ? { screen: 'overstap' } : { screen: 'home' });
   };
 
@@ -163,6 +174,44 @@ export function Onboarding() {
             <button className={profile.worksAlone ? 'selected' : ''} onClick={() => { setProfile({ ...profile, worksAlone: true }); if (!isLast) next(); }}>Ja, ik werk alleen</button>
             <button className={!profile.worksAlone ? 'selected' : ''} onClick={() => { setProfile({ ...profile, worksAlone: false }); if (!isLast) next(); }}>Nee, ik heb personeel of werk met anderen</button>
           </div>
+          {footer()}
+        </>
+      )}
+
+      {step.id === 'kosten' && (
+        <>
+          <h1>Waar geef je geld aan uit?</h1>
+          <p className="sub">Dit zijn kosten die vaak voorkomen in jouw vak{trade && trade.key !== 'anders' ? ` (${trade.label})` : ''}. Vink uit wat je niet gebruikt; je kunt dit later altijd aanpassen bij Instellingen → Categorieën.</p>
+          {trade && trade.costs.length > 0 && (
+            <div>
+              {trade.costs.map((c) => {
+                const already = has(c.label);
+                return (
+                  <label key={c.label} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '6px 0' }}>
+                    <input type="checkbox" disabled={already} checked={already || costs.add.includes(c.label)} onChange={() => toggleCost('add', c.label)} />
+                    <span style={{ flex: 1 }}>
+                      {c.label}{already && <span className="muted small"> (heb je al)</span>}
+                      <div className="hint small muted">{c.hint}</div>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          {trade && trade.hide.some((k) => meta.expenseCategories.some((c) => c.key === k)) && (
+            <>
+              <h2>Gebruik je deze niet? Dan verbergen we ze</h2>
+              <div>
+                {trade.hide.map((k) => meta.expenseCategories.find((c) => c.key === k)).filter((c) => !!c).map((c) => (
+                  <label key={c.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '6px 0' }}>
+                    <input type="checkbox" checked={costs.hide.includes(c.key)} onChange={() => toggleCost('hide', c.key)} />
+                    <span style={{ flex: 1 }}>{c.label}<div className="hint small muted">verbergen kan altijd terug; eerdere boekingen blijven gewoon staan</div></span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+          <p className="small muted">Software, telefoon, reclame, verzekeringen en de andere vaste categorieën blijven er gewoon bij.</p>
           {footer()}
         </>
       )}

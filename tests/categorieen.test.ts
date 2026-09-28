@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { setup } from './helpers';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
+import { TRADES } from '../src/shared/trades';
 
 function withTx(amount = -6050) {
   const { s } = setup();
@@ -76,5 +77,36 @@ describe('eigen en aangepaste categorieën', () => {
     s.quick.recordExpense({ date: '2026-05-02', supplierName: 'Steigerverhuur BV', description: '', categoryKey: c.key, grossAmount: 12100, vatCode: 'hoog', paidWith: 'kas' });
     expect(s.ledger.balance(s.categories.find('huur')!.account)).toBe(10000);
     expect(s.ledger.balance(ACCOUNTS.kas)).toBe(-12100);
+  });
+});
+
+describe('kostenposten per beroep (onboarding)', () => {
+  it('webdeveloper: AI-tools en hosting erbij, materiaal en werkkleding weg; nog een keer doet niets dubbel', () => {
+    const { s } = setup();
+    const r = s.categories.applyTrade('webdev', { add: ['AI-tools', 'Hosting en servers'], hide: ['materiaal', 'werkkleding'] });
+    expect(r.added).toHaveLength(2);
+    expect(r.hidden).toEqual(['materiaal', 'werkkleding']);
+    const ai = s.categories.list().find((c) => c.label === 'AI-tools')!;
+    expect(ai).toMatchObject({ account: s.categories.find('software')!.account, defaultVat: 'buiten-eu' });
+    expect(s.categories.list().some((c) => c.key === 'materiaal')).toBe(false);
+    expect(s.categories.find('materiaal')).toBeDefined();
+    const again = s.categories.applyTrade('webdev', { add: ['AI-tools', 'Hosting en servers'], hide: ['materiaal'] });
+    expect(again).toEqual({ added: [], hidden: [] });
+    expect(s.categories.list().filter((c) => c.label === 'AI-tools')).toHaveLength(1);
+  });
+
+  it('alleen wat bij het beroep hoort; onbekend beroep geweigerd', () => {
+    const { s } = setup();
+    expect(s.categories.applyTrade('stukadoor', { add: ['AI-tools'], hide: ['software', 'overig'] })).toEqual({ added: [], hidden: [] });
+    expect(() => s.categories.applyTrade('bestaat-niet', { add: [], hide: [] })).toThrow(/beroep/);
+    expect(() => s.categories.applyTrade('webdev', { add: 'AI-tools' } as never)).toThrow(/Kies welke kosten/);
+  });
+
+  it('elk voorstel is een geldige eigen categorie', () => {
+    for (const t of TRADES) {
+      const { s } = setup();
+      const r = s.categories.applyTrade(t.key, { add: t.costs.map((c) => c.label), hide: t.hide });
+      expect(r.added).toHaveLength(t.costs.length);
+    }
   });
 });
