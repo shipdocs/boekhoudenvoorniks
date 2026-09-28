@@ -411,6 +411,8 @@ function createWindow(): void {
     minHeight: 640,
     title: 'Gratis Boekhouden',
     backgroundColor: '#f6f7f9',
+    // menubalk (File/Edit/View/Window) blijft uit het zicht; Alt laat hem even zien
+    autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
