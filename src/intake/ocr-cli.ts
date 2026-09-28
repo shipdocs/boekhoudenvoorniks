@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { delimiter, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { OcrOutput, OcrProvider } from './ocr';
 import type { DocumentResult, DocumentType, Field, LineItem, VatLine } from './types';
 
@@ -52,7 +52,7 @@ export function findCli(kind: CliKind, env: NodeJS.ProcessEnv = process.env, pla
   const base = kind === 'claude-code' ? 'claude' : 'codex';
   const names = platform === 'win32' ? [`${base}.exe`, `${base}.cmd`] : [base];
   const home = env.HOME ?? env.USERPROFILE ?? '';
-  const sep = platform === 'win32' ? ';' : delimiter;
+  const sep = platform === 'win32' ? ';' : ':';
   const dirs = [
     ...(env.PATH ?? env.Path ?? '').split(sep).filter(Boolean),
     ...(platform === 'win32'
@@ -107,7 +107,7 @@ export function nodeDirs(env: NodeJS.ProcessEnv = process.env, platform: string 
  * login-shell) en de plekken van de Node-versiebeheerders.
  */
 export function cliEnv(cli: string, base: NodeJS.ProcessEnv = process.env, extraPath = '', platform: string = process.platform, list: (dir: string) => string[] = listDir): NodeJS.ProcessEnv {
-  const sep = platform === 'win32' ? ';' : delimiter;
+  const sep = platform === 'win32' ? ';' : ':';
   const parts = [dirname(cli), ...(base.PATH ?? base.Path ?? '').split(sep), ...extraPath.split(sep), ...nodeDirs(base, platform, list)];
   return { ...base, PATH: [...new Set(parts.filter(Boolean))].join(sep) };
 }
