@@ -59,6 +59,25 @@ export interface XafBank {
 /** Wat voor bestand het was. */
 export type ImportKind = 'auditfile' | 'kolommenbalans' | TableKind;
 
+/** Rol van één bestand als er meerdere tegelijk zijn neergezet (bv. een auditfile per jaar). */
+export interface ImportFileRole {
+  index: number;
+  startDate: IsoDate;
+  endDate: IsoDate;
+  role: 'gebruikt' | 'eerder' | 'later' | 'dubbel';
+  /** uitleg in gewone taal */
+  reason: string;
+}
+
+/** Meerdere bestanden: het voorstel voor het bestand dat bij de instapdatum hoort, plus wat er met de rest gebeurt. */
+export type MultiImportAnalysis = ImportAnalysis & {
+  files: ImportFileRole[];
+  /** index van het bestand waarmee de startstand is berekend */
+  chosen: number;
+  /** een latere instapdatum waarmee je het jongste bestand helemaal gebruikt (niets opnieuw inboeken), of null */
+  alternativeDate: IsoDate | null;
+};
+
 /** Het voorstel, of (alleen als de app een kolom echt niet vindt) een paar vragen. */
 export type ImportAnalysis =
   | { kind: ImportKind; plan: XafPlan }
@@ -194,6 +213,68 @@ export class XafImportService {
     return { kind: src.kind, plan: this.planOpenItems(src.table, src.mapping) };
   }
 
+  /**
+   * Meerdere bestanden tegelijk, bv. een auditfile per jaar (2024, 2025, 2026). De app kiest het bestand
+   * dat tot de instapdatum loopt en rekent daarmee de startstand uit. Oudere jaren zitten al in je
+   * vorige administratie; daaruit haalt de app alleen de aankoopdatums van bus en gereedschap. Een jaar
+   * dat na de instapdatum begint, is voor de startstand niet nodig.
+   */
+  analyzeFiles(files: (string | Uint8Array)[], mapping?: ColumnMapping): MultiImportAnalysis {
+    if (files.length === 1) {
+      const r = this.analyzeFile(files[0]!, { mapping });
+      const period = 'plan' in r ? { startDate: r.plan.meta.startDate, endDate: r.plan.meta.endDate } : { startDate: '', endDate: '' };
+      return { ...r, files: [{ index: 0, ...period, role: 'gebruikt', reason: '' }], chosen: 0, alternativeDate: null };
+    }
+    const pick = this.pickFile(files);
+    return { kind: pick.chosenKind, plan: this.plan(pick.xafs[pick.chosen]!, undefined, pick.history), files: pick.roles, chosen: pick.chosen, alternativeDate: pick.alternativeDate };
+  }
+
+  /** Overnemen uit meerdere bestanden: de startstand uit het gekozen bestand, aankoopdatums uit alle. */
+  applyFiles(files: (string | Uint8Array)[], choices: XafApplyChoices, mapping?: ColumnMapping): SwitchoverState {
+    if (files.length === 1) return this.apply(files[0]!, choices, mapping);
+    const pick = this.pickFile(files);
+    return this.applyXaf(pick.xafs[pick.chosen]!, choices, pick.history);
+  }
+
+  private pickFile(files: (string | Uint8Array)[]) {
+    const s = this.settings.get();
+    if (s.switchover.mode !== 'overstapper' || !s.switchover.date) throw new ValidationError('Kies eerst een instapdatum');
+    const date = s.switchover.date;
+    const until = addDays(date, -1);
+    const sources = files.map((f) => this.source(f));
+    if (sources.some((x) => x.type !== 'xaf')) {
+      throw new ValidationError('Meerdere bestanden tegelijk kan alleen met auditfiles (.xaf) of kolommenbalansen. Zet een lijst met openstaande facturen of een saldibalans er apart op.');
+    }
+    const xafs = sources.map((x) => (x as Extract<typeof x, { type: 'xaf' }>).xaf);
+    const kinds = sources.map((x) => x.kind);
+    const idx = xafs.map((_, i) => i);
+    // 1. loopt door tot de dag vóór de instapdatum: met losse boekingen (en facturen) het beste
+    const covering = idx.filter((i) => xafs[i]!.startDate <= until && xafs[i]!.endDate >= until).sort((a, b) => Number(!!xafs[a]!.totalsOnly) - Number(!!xafs[b]!.totalsOnly) || xafs[a]!.endDate.localeCompare(xafs[b]!.endDate));
+    // 2. begint precies op de instapdatum, met een beginbalans
+    const startsOn = idx.filter((i) => xafs[i]!.startDate === date && xafs[i]!.opening.lines.length > 0);
+    // 3. anders het jongste bestand dat vóór de instapdatum eindigt (de app waarschuwt voor het gat)
+    const before = idx.filter((i) => xafs[i]!.endDate < until).sort((a, b) => xafs[b]!.endDate.localeCompare(xafs[a]!.endDate));
+    const chosen = covering[0] ?? startsOn[0] ?? before[0];
+    if (chosen === undefined) {
+      throw new ValidationError(`Alle bestanden beginnen na je instapdatum (${formatDateNl(date)}). Zet ook het jaar ervoor erbij, of kies een latere instapdatum.`);
+    }
+    const c = xafs[chosen]!;
+    const year = (x: XafFile) => (x.startDate.slice(0, 4) === x.endDate.slice(0, 4) ? x.startDate.slice(0, 4) : `${formatDateNl(x.startDate)} t/m ${formatDateNl(x.endDate)}`);
+    const roles: ImportFileRole[] = idx.map((i) => {
+      const x = xafs[i]!;
+      const base = { index: i, startDate: x.startDate, endDate: x.endDate };
+      if (i === chosen) return { ...base, role: 'gebruikt', reason: `Hiermee rekent de app uit wat er op ${formatDateNl(until)} op elke rekening stond.` };
+      if (x.startDate === c.startDate && x.endDate === c.endDate) return { ...base, role: 'dubbel', reason: 'Zelfde periode als het gebruikte bestand: niet nodig.' };
+      if (x.endDate < c.startDate || x.endDate < until) return { ...base, role: 'eerder', reason: `${year(x)} zit al in je vorige administratie. De app haalt er alleen de aankoopdatums van je bus en gereedschap uit.` };
+      return { ...base, role: 'later', reason: `Loopt na je instapdatum. Voor de startstand niet nodig: die periode lees je in met je bankafschriften.` };
+    });
+    // een jonger bestand: met de dag erna als instapdatum hoef je die periode niet opnieuw in te boeken
+    const latest = idx.filter((i) => roles[i]!.role === 'later' && !xafs[i]!.totalsOnly).sort((a, b) => xafs[b]!.endDate.localeCompare(xafs[a]!.endDate))[0];
+    const alternativeDate = latest !== undefined ? addDays(xafs[latest]!.endDate, 1) : null;
+    const history = idx.filter((i) => i !== chosen && roles[i]!.role !== 'dubbel').map((i) => xafs[i]!);
+    return { xafs, chosen, chosenKind: kinds[chosen]!, roles, alternativeDate, history };
+  }
+
   private source(file: string | Uint8Array, given?: ColumnMapping):
     | { type: 'xaf'; kind: ImportKind; xaf: XafFile }
     | { type: 'table'; kind: TableKind; table: Table; mapping: ColumnMapping; questions: ColumnQuestion[] } {
@@ -306,7 +387,7 @@ export class XafImportService {
   }
 
 
-  private plan(xaf: XafFile, requested?: IsoDate): XafPlan {
+  private plan(xaf: XafFile, requested?: IsoDate, history: XafFile[] = []): XafPlan {
     const s = this.settings.get();
     // alleen totalen (kolommenbalans): het liefst instappen op de begindatum, met de beginbalans
     const suggestedDate = xaf.totalsOnly ? xaf.startDate : addDays(xaf.endDate, 1);
@@ -432,14 +513,15 @@ export class XafImportService {
     openItems('leverancier', of('crediteuren'));
 
     // --- bus en gereedschap: per groep (RGS-prefix of naam) de boekwaarde
-    const assetGroups = new Map<string, { name: string; cost: Cents; depr: Cents; type: 'vervoer' | 'inventaris' }>();
+    const assetGroups = new Map<string, { name: string; cost: Cents; depr: Cents; type: 'vervoer' | 'inventaris'; ids: string[] }>();
     const groupKey = (a: XafAccount) => (a.rgs ? a.rgs.slice(0, 7) : a.name.toLowerCase().replace(/afschrijving(en)?|cumulatie(f|ve)|\(.*?\)/g, '').trim());
     for (const a of [...of('bezit'), ...of('afschrijving-cum')]) {
       const k = groupKey(a);
-      const g = assetGroups.get(k) ?? { name: a.name, cost: 0, depr: 0, type: /Tev|Tra|Vvm|auto|bus|vervoer|wagen/i.test(`${a.rgs ?? ''} ${a.name}`) ? 'vervoer' : 'inventaris' };
+      const g = assetGroups.get(k) ?? { name: a.name, cost: 0, depr: 0, type: /Tev|Tra|Vvm|auto|bus|vervoer|wagen/i.test(`${a.rgs ?? ''} ${a.name}`) ? 'vervoer' : 'inventaris', ids: [] };
       if (cls.get(a.id) === 'bezit') {
         g.cost += balance.get(a.id) ?? 0;
         g.name = a.name;
+        g.ids.push(a.id);
       } else g.depr += balance.get(a.id) ?? 0;
       assetGroups.set(k, g);
     }
@@ -449,12 +531,13 @@ export class XafImportService {
       const cost = Math.max(g.cost, value);
       // 20% per jaar van de aanschaf: zoveel jaar is er nog over (minstens 1)
       const remainingYears = Math.max(1, Math.min(5, Math.round((value / Math.max(1, cost)) * 5)));
+      const acquired = acquisitionDate([...history, xaf], g.ids, until);
       push(
         {
           key: `bezit:${k}`,
           label: g.name,
-          input: { kind: 'bezit', name: g.name, type: g.type, acquiredOn: `${Number(date.slice(0, 4)) - 1}-01-01`, cost, bookValue: Math.max(0, value), remainingYears, bron: 'xaf' },
-          note: 'aankoopdatum en resterende jaren zijn geschat: kijk ze na',
+          input: { kind: 'bezit', name: g.name, type: g.type, acquiredOn: acquired ?? `${Number(date.slice(0, 4)) - 1}-01-01`, cost, bookValue: Math.max(0, value), remainingYears, bron: 'xaf' },
+          note: acquired ? `aankoopdatum uit je auditfile (${formatDateNl(acquired)}); resterende jaren zijn geschat: kijk ze na` : 'aankoopdatum en resterende jaren zijn geschat: kijk ze na',
         },
         Math.max(0, value),
       );
@@ -590,7 +673,13 @@ export class XafImportService {
     if (src.type === 'table' && src.questions.length > 0) throw new ValidationError(src.questions[0]!.question);
     if (src.type === 'table' && src.kind === 'openstaande-posten') return this.applyOpenItems(this.planOpenItems(src.table, src.mapping), choices);
     const xaf = src.type === 'xaf' ? src.xaf : this.saldibalans(src.table, src.mapping);
-    const plan = this.plan(xaf, s.switchover.date);
+    return this.applyXaf(xaf, choices);
+  }
+
+  private applyXaf(xaf: XafFile, choices: XafApplyChoices, history: XafFile[] = []): SwitchoverState {
+    const s = this.settings.get();
+    if (s.switchover.mode !== 'overstapper' || !s.switchover.date) throw new ValidationError('Kies eerst een instapdatum');
+    const plan = this.plan(xaf, s.switchover.date, history);
     const same = (a: OpeningInput, b: OpeningInput) =>
       a.kind === b.kind &&
       ((a.kind === 'klant' && b.kind === 'klant' && a.number === b.number) ||
@@ -681,4 +770,20 @@ export class XafImportService {
       }
     }
   }
+}
+
+/**
+ * Wanneer een bus of gereedschap gekocht is: de eerste debetboeking op die rekening(en) in de
+ * auditfiles, als het oudste bestand dat de rekening kent er nog geen beginsaldo op had (anders is
+ * hij van vóór alle bestanden en weet de app het niet). Null als het niet vast te stellen is.
+ */
+export function acquisitionDate(files: XafFile[], accountIds: string[], until: IsoDate): IsoDate | null {
+  if (accountIds.length === 0) return null;
+  const ids = new Set(accountIds);
+  const knowing = files.filter((f) => f.accounts.some((a) => ids.has(a.id))).sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const oldest = knowing[0];
+  if (!oldest || oldest.totalsOnly) return null;
+  if (oldest.opening.lines.some((l) => ids.has(l.accountId) && l.amount !== 0)) return null;
+  const debits = knowing.flatMap((f) => f.lines).filter((l) => ids.has(l.accountId) && l.amount > 0 && l.date <= until).map((l) => l.date).sort();
+  return debits[0] ?? null;
 }
