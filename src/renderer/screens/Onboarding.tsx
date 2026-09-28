@@ -75,6 +75,8 @@ export function Onboarding() {
       if (shows('nummering')) patch.termsAcceptedVersion = TERMS_VERSION;
       if (shows('thuis')) Object.assign(patch, { phoneInternetBusinessPct: phonePct, homeWorkspace: workspace, partnerHours: Number(partnerHours) || 0 });
       if (shows('fiscaal')) Object.assign(patch, { carUse, startYear: Number(startYear) || null, startersaftrekUsed: { count: startersUsed, asOfYear: year } });
+      // vóór de instellingen: mislukt dit, dan is de onboarding nog niet klaar en probeer je opnieuw (dubbel toepassen kan geen kwaad)
+      if (shows('kosten') && trade && (costs.add.length || costs.hide.length)) await api.categories.applyTrade(trade.key, { add: costs.add, hide: costs.hide });
       await api.settings.update(patch);
       if (shows('bank')) {
         const accounts = await api.bank.accounts();
@@ -83,7 +85,6 @@ export function Onboarding() {
       const n = Number(lastNumber.replace(/\D/g, '').slice(-4));
       if (lastNumber && Number.isInteger(n) && n > 0) await api.settings.setInvoiceCounter(year, n);
       // na de btw-keuze: de instapdatum markeert eerdere btw-periodes als al aangegeven
-      if (shows('kosten') && trade && (costs.add.length || costs.hide.length)) await api.categories.applyTrade(trade.key, { add: costs.add, hide: costs.hide });
       if (shows('start') && switchMode) await api.switchover.setMode(switchMode, switchMode === 'overstapper' ? switchDate : null);
       return true;
     });
