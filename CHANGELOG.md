@@ -2,6 +2,9 @@
 
 ## Nog niet uitgebracht
 
+### Vandaag
+- **Betaling bekijken**: klik op de naam van een betaling in de lijst (bv. "PAYPAL EUROPE … € 13,11") en je ziet alles wat de bank erover gaf: datum, tegenpartij, rekeningnummer, de volledige omschrijving en het kenmerk. Eronder staan eerdere betalingen aan dezelfde partij en hoe je die verwerkte. Vanuit dat venster kies je meteen zakelijk of privé.
+
 ### Overstappen
 - **Instapdatum vóór je auditfiles**: beginnen al je auditfiles op of na je instapdatum (bijvoorbeeld instapdatum 1 januari 2024 terwijl je administratie toen begon), dan legt de app uit dat hij de stand óp de instapdatum overneemt, niet elke boeking, en stelt hij de dag na je laatste boeking voor. Met één knop kies je die datum en leest de app de bestanden opnieuw in. Voorheen kwam er alleen een foutmelding.
 

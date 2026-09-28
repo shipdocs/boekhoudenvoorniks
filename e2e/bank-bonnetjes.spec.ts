@@ -62,3 +62,25 @@ test('categorieën: aanpassen en verbergen in Instellingen', async ({ page }) =>
   // "Overige kosten" kan niet weg
   await expect(dlg.locator('tr', { hasText: 'Overige kosten' }).getByRole('button', { name: 'Verbergen' })).toHaveCount(0);
 });
+
+test('betaling op Vandaag aanklikken: alle gegevens van de bank om hem te beoordelen', async ({ page, problems }) => {
+  await onboard(page);
+  await nav(page, 'Bank');
+  await page.locator('main input[type=file]').first().setInputFiles({ name: 'afschrift.csv', mimeType: 'text/csv', buffer: CSV });
+  await expect(page.getByText(/betalingen ingelezen|ingelezen/).first()).toBeVisible();
+  await nav(page, 'Vandaag');
+  const link = page.locator('.task .title-link').first();
+  await expect(link).toBeVisible();
+  const title = (await link.textContent())!;
+  await link.click();
+  const dlg = page.getByRole('dialog', { name: 'Betaling bekijken' });
+  await expect(dlg).toBeVisible();
+  await expect(dlg.getByRole('row', { name: /Omschrijving/ })).toBeVisible();
+  await expect(dlg.getByRole('row', { name: /Rekeningnummer/ })).toBeVisible();
+  await expect(dlg.getByRole('heading', { name: /^Eerder/ })).toBeVisible();
+  await dlg.getByRole('button', { name: 'Later' }).click();
+  await expect(dlg).toBeHidden();
+  // niets verwerkt: de taak staat er nog
+  await expect(page.locator('.task .title-link', { hasText: title }).first()).toBeVisible();
+  expect(problems.apiErrors).toEqual([]);
+});
