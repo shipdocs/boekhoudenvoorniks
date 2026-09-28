@@ -4,6 +4,8 @@ import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { parseXaf, XafError } from '../src/import/xaf';
 import { classify } from '../src/onboarding/xaf-import';
 import { OTHER_PACKAGE, IBAN } from './fixtures/xaf-ander-pakket';
+import { XAF_2024, XAF_2025, XAF_2026 } from './fixtures/xaf-jaren';
+import { acquisitionDate } from '../src/onboarding/xaf-import';
 import { kolommenbalans, makeXlsx } from './fixtures/xlsx';
 import { readXlsx } from '../src/import/xlsx';
 
@@ -223,5 +225,53 @@ describe('auditfile (XAF) inlezen bij overstappen', () => {
     expect(c('8000', 'Omzet werkzaamheden', 'P')).toBe('omzet');
     expect(c('4100', 'Brandstof bus', 'P')).toBe('auto');
     expect(c('1998', 'Diversen')).toBe('onbekend');
+  });
+});
+
+describe('meerdere auditfiles tegelijk (een per jaar)', () => {
+  it('instap 1 januari 2026: de app kiest 2025, legt uit wat er met 2024 en 2026 gebeurt', () => {
+    const { s } = overstapper('2026-01-01');
+    // in willekeurige volgorde neergezet
+    const r = s.xafImport.analyzeFiles([XAF_2026, XAF_2024, XAF_2025]);
+    expect(r.chosen).toBe(2);
+    expect(r.files.map((f) => f.role)).toEqual(['later', 'eerder', 'gebruikt']);
+    expect(r.files[1]!.reason).toMatch(/aankoopdatums/);
+    // met 1 september als instapdatum hoef je 2026 niet opnieuw in te boeken
+    expect(r.alternativeDate).toBe('2026-09-01');
+    if (!('plan' in r)) throw new Error('geen voorstel');
+    expect(r.plan.banks[0]!.amount).toBe(8_500_00);
+    expect(r.plan.equity).toBe(13_700_00);
+    const bus = r.plan.proposals.find((p) => p.label === 'Bestelbus')!;
+    // aankoopdatum uit 2024, niet geschat
+    expect(bus.input).toMatchObject({ kind: 'bezit', acquiredOn: '2024-03-15', bookValue: 13_000_00 });
+    expect(r.plan.proposals.find((p) => p.label === 'Inventaris')!.input).toMatchObject({ acquiredOn: '2025-06-01', bookValue: 1_200_00 });
+    expect(r.plan.warnings.join(' ')).not.toMatch(/ontbreken/);
+
+    const state = s.xafImport.applyFiles([XAF_2026, XAF_2024, XAF_2025], { include: allKeys(r.plan), banks: { '1100': 'nieuw' }, relations: true });
+    expect(state.position?.eigenVermogen).toBe(13_700_00);
+    expect(state.items.find((i) => i.kind === 'klant')?.data).toMatchObject({ number: '2025-099' });
+  });
+
+  it('instap na het laatste bestand: de app gebruikt 2026 en de oudere jaren alleen voor aankoopdatums', () => {
+    const { s } = overstapper('2026-09-01');
+    const r = s.xafImport.analyzeFiles([XAF_2024, XAF_2025, XAF_2026]);
+    expect(r.chosen).toBe(2);
+    expect(r.files.map((f) => f.role)).toEqual(['eerder', 'eerder', 'gebruikt']);
+    expect(r.alternativeDate).toBeNull();
+    if (!('plan' in r)) throw new Error('geen voorstel');
+    expect(r.plan.banks[0]!.amount).toBe(9_710_00);
+  });
+
+  it('alleen jaren na de instapdatum: duidelijke melding', () => {
+    const { s } = overstapper('2023-07-01');
+    expect(() => s.xafImport.analyzeFiles([XAF_2025, XAF_2026])).toThrow(/beginnen na je instapdatum/);
+  });
+
+  it('aankoopdatum alleen als het oudste bestand de rekening nog leeg begon', () => {
+    const f24 = parseXaf(XAF_2024);
+    const f25 = parseXaf(XAF_2025);
+    expect(acquisitionDate([f24, f25], ['0100'], '2025-12-31')).toBe('2024-03-15');
+    // zonder 2024: de bus staat al in de beginbalans van 2025, dus onbekend
+    expect(acquisitionDate([f25], ['0100'], '2025-12-31')).toBeNull();
   });
 });

@@ -4,7 +4,7 @@ import { Button, DateNl, DropZone, Euro, Field, Modal, MoneyInput, readAsBytes, 
 import { addDays, isIsoDate, today } from '../../shared/dates';
 import { SKIPPABLE_SECTIONS, defaultBookValue, startDateConsequences, startDateOptions } from '../../shared/switchover';
 import type { OpeningInput, OpeningItem, OpeningKind, OpeningSuggestion, SectionKey, SwitchoverState } from '../../onboarding/switchover';
-import type { ImportAnalysis, XafPlan } from '../../onboarding/xaf-import';
+import type { ImportAnalysis, MultiImportAnalysis, XafPlan } from '../../onboarding/xaf-import';
 
 /**
  * Overstap-hulp: een lopende administratie overzetten. Hoofdstukken in gewone taal; de app boekt
@@ -160,7 +160,7 @@ function Papers({ state, refresh, nextButton, onSection }: SectionProps) {
       <div className="choice">
         <button onClick={() => onSection('import')}>
           📂 Ik had een boekhoudprogramma
-          <div className="hint">Het snelst. Exporteer een auditfile (.xaf) uit bijvoorbeeld e-Boekhouden, Moneybird, SnelStart of Exact. Dan vult de app saldi, openstaande facturen en je bus zelf in.</div>
+          <div className="hint">Het snelst. Exporteer een auditfile (.xaf) uit bijvoorbeeld e-Boekhouden, Moneybird, SnelStart of Exact. Dan vult de app saldi, openstaande facturen en je bus zelf in. Een bestand per jaar is ook goed: zet ze allemaal tegelijk neer.</div>
         </button>
         <button onClick={() => onSection('import')}>
           📊 Mijn boekhouder heeft een overzicht
@@ -219,6 +219,8 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
   const { run, busy } = useAction();
   const { toast } = useApp();
   const [file, setFile] = useState<{ name: string; data: string | Uint8Array } | null>(null);
+  // meerdere bestanden tegelijk (bv. een auditfile per jaar): welke de app gebruikt en waarom
+  const [multi, setMulti] = useState<{ files: { name: string; data: string | Uint8Array }[]; roles: MultiImportAnalysis['files']; alternativeDate: string | null } | null>(null);
   const [plan, setPlan] = useState<XafPlan | null>(null);
   const [include, setInclude] = useState<Set<string>>(new Set());
   const [banks, setBanks] = useState<Record<string, number | 'nieuw' | null>>({});
@@ -246,11 +248,21 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
     setRelations(true);
   };
 
-  const load = async (f: File) => {
-    // auditfile en CSV zijn tekst; Excel gaat als bytes
-    const data = /\.xlsx$/i.test(f.name) ? await readAsBytes(f) : await readAsText(f);
-    const r = await run(() => api.switchover.analyzeXaf(data));
-    if (r) show(r, { name: f.name, data });
+  // auditfile en CSV zijn tekst; Excel gaat als bytes
+  const read = async (f: File) => ({ name: f.name, data: /\.xlsx$/i.test(f.name) ? await readAsBytes(f) : await readAsText(f) });
+  const load = async (list: File[]) => {
+    if (list.length === 1) {
+      const f = await read(list[0]!);
+      setMulti(null);
+      const r = await run(() => api.switchover.analyzeXaf(f.data));
+      if (r) show(r, f);
+      return;
+    }
+    const files = await Promise.all(list.map(read));
+    const r = await run(() => api.switchover.analyzeXafFiles(files.map((f) => f.data)));
+    if (!r) return;
+    setMulti({ files, roles: r.files, alternativeDate: r.alternativeDate });
+    show(r, files[r.chosen]!);
   };
   const toggle = (key: string) => setInclude((cur) => {
     const next = new Set(cur);
@@ -265,6 +277,7 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
       <p className="muted">
         Gebruikte je een boekhoudprogramma? Exporteer daar een <strong>auditfile</strong> (een .xaf-bestand) tot en met <DateNl date={addDays(date, -1)} />.
         De app rekent dan zelf uit wat er op je rekeningen stond, welke facturen nog open stonden en wat je bus nog waard is. Jij kijkt het na en vinkt aan wat klopt.
+        Maakt je programma een bestand per jaar (bijvoorbeeld 2024, 2025 en 2026)? Zet ze allemaal tegelijk neer: de app kiest het jaar dat bij je instapdatum hoort.
       </p>
       <details className="small" style={{ marginBottom: 12 }}>
         <summary>Waar vind ik de auditfile?</summary>
@@ -290,10 +303,11 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
           })()}
         </div>
       )}
-      <DropZone accept=".xaf,.xml,.xlsx,.csv" onFile={(f) => void load(f)}>
+      <DropZone accept=".xaf,.xml,.xlsx,.csv" multiple onFiles={(list) => void load(list)}>
         <div style={{ fontSize: 26 }}>📂</div>
         <strong>Sleep je auditfile (.xaf) hierheen</strong>
-        <div className="small">of een overzicht uit je vorige programma of Excel (.xlsx, .csv)</div>
+        <div className="small">Een bestand per jaar? Sleep ze allemaal tegelijk; de app kiest zelf welk jaar hij nodig heeft.</div>
+        <div className="small">Ook een overzicht uit je vorige programma of Excel (.xlsx, .csv) werkt.</div>
       </DropZone>
       <p className="small muted" style={{ marginTop: 6 }}>
         Lukt het niet? <a href="#" onClick={(e) => { e.preventDefault(); void run(() => api.switchover.saveTemplate()); }}>Download het voorbeeldbestand</a>, zet je openstaande facturen erin en sleep het hierheen.
@@ -314,6 +328,23 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
 
       {plan && file && (
         <div className="card" style={{ marginTop: 16 }}>
+          {multi && (
+            <div className="notice small" style={{ marginTop: 0 }}>
+              <strong>{multi.files.length} bestanden</strong>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                {[...multi.roles].sort((x, y) => x.startDate.localeCompare(y.startDate)).map((r) => (
+                  <li key={r.index}>
+                    {r.role === 'gebruikt' ? '✓ ' : ''}<strong>{multi.files[r.index]!.name}</strong> (<DateNl date={r.startDate} /> t/m <DateNl date={r.endDate} />): {r.reason}
+                  </li>
+                ))}
+              </ul>
+              {multi.alternativeDate && (
+                <div style={{ marginTop: 6 }}>
+                  Wil je de periode van je nieuwste bestand niet opnieuw inboeken? Kies dan <strong><DateNl date={multi.alternativeDate} /></strong> als instapdatum (bij "Hoe stap je over?") en zet de bestanden er opnieuw op.
+                </div>
+              )}
+            </div>
+          )}
           <div className="small muted">
             {file.name} · {plan.meta.software || 'onbekend programma'} · <DateNl date={plan.meta.startDate} /> t/m <DateNl date={plan.meta.endDate} /> · {plan.meta.accounts} rekeningen{plan.meta.version === 'kolommenbalans' ? ' (alleen saldi)' : `, ${plan.meta.lines} boekingsregels`}
           </div>
@@ -359,16 +390,18 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
           {plan.check && <p style={{ marginTop: 12 }}>{plan.check}</p>}
           {plan.equity !== null && <p style={{ marginTop: 12 }}>Volgens je vorige administratie zat er <strong><Euro cents={plan.equity} /></strong> van jou in de zaak. De app vergelijkt dat straks met je startpositie.</p>}
           <div className="row end">
-            <Button onClick={() => { setPlan(null); setFile(null); }}>Annuleren</Button>
+            <Button onClick={() => { setPlan(null); setFile(null); setMulti(null); }}>Annuleren</Button>
             <Button
               kind="primary"
               disabled={busy}
               onClick={async () => {
-                const r = await run(() => api.switchover.applyXaf(file.data, { include: [...include], banks, relations }, mapping));
+                const choices = { include: [...include], banks, relations };
+                const r = await run(() => (multi ? api.switchover.applyXafFiles(multi.files.map((f) => f.data), choices) : api.switchover.applyXaf(file.data, choices, mapping)));
                 if (!r) return;
-                toast('Overgenomen uit je auditfile');
+                toast(multi ? `Overgenomen uit ${file.name}` : 'Overgenomen uit je auditfile');
                 setPlan(null);
                 setFile(null);
+                setMulti(null);
                 await refresh(r);
                 await accounts.reload();
               }}
