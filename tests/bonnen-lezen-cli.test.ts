@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { CliAiProvider, extractJson, findCli, toOcrOutput, type CliRunner, type Workspace } from '../src/intake/ocr-cli';
+import { CliAiProvider, cliEnv, codexBaseArgs, codexMcpOff, extractJson, findCli, friendlyCliError, nodeDirs, toOcrOutput, type CliRunner, type Workspace } from '../src/intake/ocr-cli';
 import { setup } from './helpers';
 
 const ANSWER = {
@@ -59,7 +59,9 @@ describe('bonnen lezen met Claude Code of Codex', () => {
     expect(call!.args).toContain('--allowedTools');
     expect(call!.args[call!.args.indexOf('--allowedTools') + 1]).toBe('Read');
     expect(call!.args).toContain('--strict-mcp-config');
-    expect(call!.args).toContain('Bash'); // expliciet verboden
+    expect(call!.args[call!.args.indexOf('--tools') + 1]).toBe('Read'); // geen andere hulpmiddelen
+    expect(call!.args[call!.args.indexOf('--setting-sources') + 1]).toBe(''); // geen hooks of instellingen van de gebruiker
+    expect(call!.args[call!.args.indexOf('--model') + 1]).toBe('sonnet');
     expect(call!.input).toContain('document.jpg');
     expect(ws.created.map((f) => f.name)).toEqual(['document.jpg']);
     expect(ws.removed).toBe(1);
@@ -90,6 +92,35 @@ describe('bonnen lezen met Claude Code of Codex', () => {
     expect(findCli('claude-code', { PATH: '/usr/bin', HOME: '/home/jan' }, 'linux', exists)).toBe(join('/home/jan', '.local', 'bin', 'claude'));
     expect(findCli('codex', { PATH: '/usr/bin', HOME: '/home/jan' }, 'linux', exists)).toBeNull();
     expect(findCli('codex', { PATH: 'C:\\npm', USERPROFILE: 'C:\\Users\\jan' }, 'win32', exists)).toBe(join('C:\\npm', 'codex.cmd'));
+  });
+
+  it('npm-installatie onder nvm: gevonden, en Node staat in het PATH (ook als de app vanuit het menu start)', () => {
+    const nvm = join('/home/jan', '.nvm', 'versions', 'node');
+    const list = (d: string) => (d === nvm ? ['v9.0.0', 'v22.1.0', 'v24.15.0'] : []);
+    const env = { PATH: '/usr/bin', HOME: '/home/jan' };
+    expect(nodeDirs(env, 'linux', list).slice(0, 3)).toEqual([join(nvm, 'v24.15.0', 'bin'), join(nvm, 'v22.1.0', 'bin'), join(nvm, 'v9.0.0', 'bin')]);
+    const claude = join(nvm, 'v22.1.0', 'bin', 'claude');
+    expect(findCli('claude-code', env, 'linux', (p) => p === claude, list)).toBe(claude);
+    // los npm-prefix (~/.npm-global) met Node uit nvm: Node moet toch te vinden zijn
+    const path = cliEnv('/home/jan/.npm-global/bin/claude', env, '/home/jan/bin', 'linux', list).PATH!.split(':');
+    expect(path[0]).toBe('/home/jan/.npm-global/bin');
+    expect(path).toContain('/home/jan/bin');
+    expect(path).toContain(join(nvm, 'v24.15.0', 'bin'));
+    expect(nodeDirs({ HOME: 'C:\\Users\\jan' }, 'win32', list)).toEqual([]);
+  });
+
+  it('Codex: MCP-servers uit de eigen config staan uit', () => {
+    const toml = '[mcp_servers.Context7]\ncommand = "x"\n\n[mcp_servers.Context7.env]\nA = "1"\n[mcp_servers."gratis-boekhouden"]\n[mcp_servers.x y]\n';
+    expect(codexMcpOff(toml)).toEqual(['-c', 'mcp_servers.Context7.enabled=false', '-c', 'mcp_servers.gratis-boekhouden.enabled=false']);
+    expect(codexBaseArgs('')).toEqual(['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never']);
+  });
+
+  it('startproblemen en een verouderde versie: zeggen wat er aan de hand is', () => {
+    const err = (stderr: string, code: number | null = 1) => friendlyCliError('codex', { code, stdout: '', stderr, timedOut: false }).message;
+    expect(err("/usr/bin/env: 'node': No such file or directory", 127)).toMatch(/Node\.js/);
+    expect(err('spawn /x/codex ENOENT', null)).toMatch(/niet \(meer\) te vinden/);
+    expect(err(`ERROR: {"detail":"The 'gpt-5.5' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again."}`)).toMatch(/verouderd.*npm install -g @openai\/codex@latest/);
+    expect(err('ERROR: stream disconnected')).toMatch(/kon deze bon niet lezen.*stream disconnected/);
   });
 
   it('bonnen die nog niet gelezen zijn: opnieuw lezen na het kiezen, nooit zelf boeken', async () => {

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, delimiter, dirname, extname, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
@@ -15,7 +15,7 @@ import { seedDemo } from '../demo/demo';
 import { decryptBackup, encryptBackup, isEncryptedBackup } from './encrypted-backup';
 import { tmpdir } from 'node:os';
 import { HttpOcrProvider } from '../intake/ocr';
-import { CliAiProvider, findCli } from '../intake/ocr-cli';
+import { CliAiProvider, cliEnv, findCli } from '../intake/ocr-cli';
 import { nodeCliRunner, tempWorkspace } from './cli-runner';
 import { checkCli, openLoginTerminal, programExists } from './assistant-tools';
 import { LocalOcrRuntime } from '../ocr-runtime/runtime';
@@ -197,8 +197,7 @@ function initServices(): void {
     connectMcp: async (kind, cli) => {
       const { command, args } = mcpCommand();
       const add = kind === 'codex' ? ['mcp', 'add', 'gratis-boekhouden', '--', command, ...args] : ['mcp', 'add', '--scope', 'user', 'gratis-boekhouden', '--', command, ...args];
-      const env = { ...process.env, PATH: [dirname(cli), process.env.PATH ?? ''].join(delimiter) };
-      const r = await nodeCliRunner(cli, add, { cwd: app.getPath('home'), input: '', timeoutMs: 30_000, env });
+      const r = await nodeCliRunner(cli, add, { cwd: app.getPath('home'), input: '', timeoutMs: 30_000, env: cliEnv(cli) });
       const out = `${r.stdout}\n${r.stderr}`;
       if (r.code === 0) return 'Toegevoegd ✓';
       if (/already exists|bestaat al/i.test(out)) return 'Stond er al in ✓';
