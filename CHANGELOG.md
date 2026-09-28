@@ -1,6 +1,6 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.6.1 — overstappen vanuit DigiBoox en betrouwbaardere updates
 
 ### Hersteld
 - **Auditfiles zonder beginbalans (bv. DigiBoox)**: de app telt de jaren nu bij elkaar op. Voorheen gebruikte hij alleen het jaar van de instapdatum, waardoor banksaldi, openstaande rekeningen en btw uit de jaren ervoor ontbraken. Bij één bestand zonder beginbalans waarschuwt de app dat eerdere jaren erbij horen. Btw-rekeningen met de code `BSchBtw` en de "Overboekingsrekening winst" worden goed herkend.

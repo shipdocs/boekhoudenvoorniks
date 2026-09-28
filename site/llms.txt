@@ -16,9 +16,9 @@ Belangrijke feiten:
 - Klussen: offerte → klus → factuur, met kosten per klus.
 - Voor de boekhouder: expertmodus met grootboek (RGS), journaal, balans, winst-en-verliesrekening, correctieboekingen, auditfile (XAF 3.2) en CSV-exports.
 - Koppelingen: WooCommerce, Shopify, Mollie, Stripe.
-- Overstappen: overstap-hulp met instapdatum; inlezen van auditfiles (XAF, ook meerdere tegelijk, één per boekjaar), kolommen- of saldibalans en lijsten met openstaande facturen. Bedrijfsmiddelen krijgen hun aankoopdatum uit oudere auditfiles.
+- Overstappen: overstap-hulp met instapdatum; inlezen van auditfiles (XAF, ook meerdere tegelijk, één per boekjaar), kolommen- of saldibalans en lijsten met openstaande facturen. Auditfiles zonder beginbalans (zoals DigiBoox) worden per jaar opgeteld. Bedrijfsmiddelen krijgen hun aankoopdatum uit oudere auditfiles.
 - Fiscaal: KOR (btw op inkopen naar de kosten), ICP-opgaaf met goederen en diensten apart, aftrekposten (afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek) en een schatting van de inkomstenbelasting. Altijd laten controleren door een boekhouder.
-- Huidige versie: 0.6.0 (28 september 2026). Release notes: https://shipdocs.github.io/gratis-boekhouden/wijzigingen.html
+- Huidige versie: 0.6.1 (28 september 2026). Release notes: https://shipdocs.github.io/gratis-boekhouden/wijzigingen.html
 - Broncode: https://github.com/shipdocs/gratis-boekhouden
 - Uitgever: Shipdocs (info@shipdocs.app)
 
