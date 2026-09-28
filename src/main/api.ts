@@ -359,6 +359,8 @@ export function createApi(s: Services, host: HostContext) {
       update: (key: string, input: { label?: string; hint?: string; defaultVat?: string; groupKey?: string }) => s.categories.update(key, input),
       setHidden: (key: string, hidden: boolean) => s.categories.setHidden(key, hidden),
       reset: (key: string) => s.categories.reset(key),
+      /** onboarding: kostenposten die bij je beroep horen toevoegen, wat je niet gebruikt verbergen */
+      applyTrade: (tradeKey: string, choice: { add: string[]; hide: string[] }) => s.categories.applyTrade(tradeKey, choice),
     },
     /** Inkomende post: een apart mailadres voor de administratie. */
     mail: {

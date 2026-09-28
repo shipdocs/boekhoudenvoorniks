@@ -1,5 +1,6 @@
 import type { Db } from '../db/database';
 import { EXPENSE_CATEGORIES, type CategoryLookup, type ExpenseCategory } from '../shared/categories';
+import { TRADES } from '../shared/trades';
 import { ValidationError } from '../shared/validation';
 import { isPurchaseVatCode, type PurchaseVatCode } from '../shared/vat';
 
@@ -189,6 +190,36 @@ export class CategoryService implements CategoryLookup {
       )
       .run(key, hidden ? 1 : 0);
     return this.all().find((c) => c.key === key)!;
+  }
+
+  /**
+   * Voorstellen van een beroep (onboarding): de aangevinkte kostenposten als eigen categorie
+   * toevoegen en de aangevinkte vaste categorieën verbergen. Alleen wat bij dat beroep hoort.
+   * Veilig om vaker te doen: een categorie met dezelfde naam wordt niet dubbel gemaakt.
+   */
+  applyTrade(tradeKey: string, choice: { add: string[]; hide: string[] }): { added: string[]; hidden: string[] } {
+    const trade = TRADES.find((t) => t.key === tradeKey);
+    if (!trade) throw new ValidationError('Onbekend beroep');
+    const added: string[] = [];
+    const hidden: string[] = [];
+    this.db.transaction(() => {
+      for (const cost of trade.costs) {
+        if (!choice.add.includes(cost.label)) continue;
+        const existing = this.all().find((c) => c.label.toLowerCase() === cost.label.toLowerCase());
+        if (existing) {
+          if (existing.hidden) this.setHidden(existing.key, false);
+          continue;
+        }
+        added.push(this.add(cost).key);
+      }
+      for (const key of trade.hide) {
+        if (!choice.hide.includes(key) || ALWAYS_VISIBLE.has(key)) continue;
+        if (this.all().find((c) => c.key === key)?.hidden) continue;
+        this.setHidden(key, true);
+        hidden.push(key);
+      }
+    })();
+    return { added, hidden };
   }
 
   /** Ingebouwde categorie terug naar de standaard naam, uitleg en btw (en weer zichtbaar). */

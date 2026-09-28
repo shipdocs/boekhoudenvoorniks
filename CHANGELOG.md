@@ -1,5 +1,11 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Onboarding
+- **Nieuw beroep: Webdeveloper / ICT**, met factuurregels voor ontwikkeling, hosting en onderhoud, en licenties.
+- **Kostenposten per beroep**: een nieuwe stap "Waar geef je geld aan uit?" stelt categorieën voor die bij je vak horen, allemaal aangevinkt. Voor webdevelopers bv. AI-tools en developer-tools (standaard: leverancier buiten de EU, geen btw op de factuur), hosting, domeinnamen, computerspullen, cursussen en flexplek; voor de bouw steiger- en machinehuur en stortkosten. Wat je vak niet gebruikt (materiaal, werkkleding, onderaannemer bij webdev) stelt de app voor te verbergen. Bestaande gebruikers krijgen deze stap één keer te zien; wat je al hebt wordt niet dubbel aangemaakt.
+
 ## 0.6.2 — elke vraag begrijpelijk: details, uitleg per keuze, rente en refunds
 
 ### Vandaag
