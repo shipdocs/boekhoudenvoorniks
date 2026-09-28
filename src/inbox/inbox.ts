@@ -501,13 +501,15 @@ export class InboxService {
       if (this.isSkipped(key)) continue;
       const who = m.relation_name ?? m.from_name ?? m.from_address ?? 'Iemand';
       const subject = m.subject ? `"${m.subject}"` : 'Een bericht zonder onderwerp';
+      // de inhoud van mail bewaart de app niet: afzender en datum, zodat je hem in je mailprogramma terugvindt
+      const from = [m.from_address ? `van ${m.from_name ? `${m.from_name} <${m.from_address}>` : m.from_address}` : null, m.received_on ? `op ${formatDateNl(m.received_on)}` : null].filter(Boolean).join(', ');
       if (m.outcome === 'online-factuur') {
         tasks.push({
           key,
           kind: 'mail-online',
           icon: '📧',
           title: `${who}: factuur staat online`,
-          question: `${subject}. Er zat geen bijlage bij. Log in op ${m.link_domain} (typ het adres zelf in; klik bij twijfel niet op de link in de mail), download de factuur en zet hem bij Aankopen & bonnetjes. Staat de factuur in de mail zelf? Bewaar dan de mail als bon.`,
+          question: `${subject}${from ? ` (${from})` : ''}. Er zat geen bijlage bij. Log in op ${m.link_domain} (typ het adres zelf in; klik bij twijfel niet op de link in de mail), download de factuur en zet hem bij Aankopen & bonnetjes. Staat de factuur in de mail zelf? Bewaar dan de mail als bon.`,
           actions: [{ id: 'open', label: 'Bonnetje toevoegen', primary: true }, { id: 'bon', label: 'Mail als bon bewaren' }, { id: 'klaar', label: 'Gedaan' }],
           priority: 2,
           ref: { mailId: m.id },
@@ -518,7 +520,7 @@ export class InboxService {
           kind: 'mail-customer',
           icon: '✉️',
           title: `Mail van ${who}`,
-          question: `${subject}${m.received_on ? ` (${formatDateNl(m.received_on)})` : ''}. Staat in je administratie-mailbox; de app heeft hem niet aangeraakt. Beantwoord hem in je mailprogramma.`,
+          question: `${subject}${from ? ` (${from})` : ''}. Staat in je administratie-mailbox; de app heeft hem niet aangeraakt. Beantwoord hem in je mailprogramma.`,
           actions: [{ id: 'klaar', label: 'Gezien', primary: true }, ...(m.relation_id ? [{ id: 'open', label: 'Bekijk klant' }] : [])],
           priority: 2,
           ref: { mailId: m.id, relationId: m.relation_id ?? undefined },
