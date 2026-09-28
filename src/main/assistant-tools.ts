@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
-import { delimiter, dirname } from 'node:path';
-import { CLI_LABELS, extractJson, friendlyCliError, type CliKind } from '../intake/ocr-cli';
-import { nodeCliRunner, tempWorkspace } from './cli-runner';
+import { delimiter } from 'node:path';
+import { CLI_LABELS, claudeBaseArgs, cliEnv, codexBaseArgs, extractJson, friendlyCliError, type CliKind } from '../intake/ocr-cli';
+import { cliEnvFor, nodeCliRunner, tempWorkspace } from './cli-runner';
 
 /** Bestaat dit programma nog (de gebruiker kan het verwijderd of verplaatst hebben)? */
 export function programExists(path: string | null | undefined): path is string {
@@ -14,8 +14,6 @@ export function programExists(path: string | null | undefined): path is string {
   }
 }
 
-const envFor = (cli: string) => ({ ...process.env, PATH: [dirname(cli), process.env.PATH ?? ''].join(delimiter) });
-
 /**
  * Werkt het? Een heel klein proefverzoek ("antwoord met ok"): dan weten we dat het programma start,
  * de gebruiker is ingelogd en het abonnement het toelaat. Kost een fractie van een bericht.
@@ -24,9 +22,9 @@ export async function checkCli(kind: CliKind, cli: string): Promise<string> {
   const dir = await tempWorkspace.create([]);
   try {
     const args = kind === 'claude-code'
-      ? ['-p', '--output-format', 'json', '--max-turns', '1', '--strict-mcp-config', '--disallowedTools', 'Bash', 'Edit', 'Write', 'WebFetch', 'WebSearch', 'Task']
-      : ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '-'];
-    const r = await nodeCliRunner(cli, args, { cwd: dir, input: 'Antwoord alleen met het woord: ok', timeoutMs: 90_000, env: envFor(cli) });
+      ? [...claudeBaseArgs('haiku', ''), '--max-turns', '1']
+      : [...codexBaseArgs(), '-'];
+    const r = await nodeCliRunner(cli, args, { cwd: dir, input: 'Antwoord alleen met het woord: ok', timeoutMs: 90_000, env: cliEnv(cli) });
     if (r.timedOut || r.code !== 0) throw friendlyCliError(kind, r);
     if (kind === 'claude-code') {
       const w = extractJson(r.stdout) as { is_error?: boolean } | null;
@@ -45,10 +43,11 @@ export async function checkCli(kind: CliKind, cli: string): Promise<string> {
 export async function openLoginTerminal(kind: CliKind, cli: string, platform: string = process.platform): Promise<string> {
   const { name } = CLI_LABELS[kind];
   const manual = `Open zelf een terminal en typ: ${kind === 'claude-code' ? 'claude' : 'codex'}`;
+  const env = await cliEnvFor(cli);
   const detached = (cmd: string, args: string[], opts: { shell?: boolean } = {}) =>
     new Promise<boolean>((resolve) => {
       try {
-        const child = spawn(cmd, args, { detached: true, stdio: 'ignore', env: envFor(cli), shell: opts.shell ?? false, windowsHide: false });
+        const child = spawn(cmd, args, { detached: true, stdio: 'ignore', env, shell: opts.shell ?? false, windowsHide: false });
         child.once('error', () => resolve(false));
         child.once('spawn', () => {
           child.unref();
@@ -75,7 +74,7 @@ export async function openLoginTerminal(kind: CliKind, cli: string, platform: st
       ['alacritty', ['-e', cli]],
       ['xterm', ['-e', cli]],
     ];
-    const pathDirs = (process.env.PATH ?? '').split(delimiter);
+    const pathDirs = (env.PATH ?? '').split(delimiter);
     for (const [term, args] of candidates) {
       if (!pathDirs.some((d) => existsSync(`${d}/${term}`))) continue;
       ok = await detached(term, args);

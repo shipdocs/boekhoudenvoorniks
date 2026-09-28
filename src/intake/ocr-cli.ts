@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import type { OcrOutput, OcrProvider } from './ocr';
 import type { DocumentResult, DocumentType, Field, LineItem, VatLine } from './types';
@@ -10,7 +10,8 @@ import type { DocumentResult, DocumentType, Field, LineItem, VatLine } from './t
  * Belangrijk verschil met de lokale herkenning: de foto gaat naar Anthropic of OpenAI. Daarom
  * alleen als de gebruiker dat zelf kiest, met uitleg. De assistent krijgt zo weinig mogelijk:
  * - een lege tijdelijke map met alleen deze ene foto als werkmap;
- * - Claude Code: alleen het hulpmiddel Read, geen MCP-servers, hooguit een paar beurten;
+ * - Claude Code: alleen het hulpmiddel Read, geen MCP-servers, geen eigen instellingen of hooks,
+ *   hooguit een paar beurten;
  * - Codex: sandbox read-only;
  * - een tijdslimiet.
  * Het antwoord is alleen een voorstel (winkel, datum, bedragen); de gebruiker controleert, en de
@@ -47,7 +48,7 @@ const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', '
  * Waar staat `claude` of `codex`? Een app die vanuit het menu start, krijgt niet altijd het PATH
  * van de terminal; daarom ook de gebruikelijke installatieplekken.
  */
-export function findCli(kind: CliKind, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, exists: (p: string) => boolean = existsSync): string | null {
+export function findCli(kind: CliKind, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, exists: (p: string) => boolean = existsSync, list: (dir: string) => string[] = listDir): string | null {
   const base = kind === 'claude-code' ? 'claude' : 'codex';
   const names = platform === 'win32' ? [`${base}.exe`, `${base}.cmd`] : [base];
   const home = env.HOME ?? env.USERPROFILE ?? '';
@@ -56,13 +57,92 @@ export function findCli(kind: CliKind, env: NodeJS.ProcessEnv = process.env, pla
     ...(env.PATH ?? env.Path ?? '').split(sep).filter(Boolean),
     ...(platform === 'win32'
       ? [env.APPDATA && join(env.APPDATA, 'npm'), env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Programs', base), home && join(home, '.local', 'bin')]
-      : [home && join(home, '.local', 'bin'), home && join(home, '.claude', 'local'), home && join(home, '.npm-global', 'bin'), home && join(home, '.bun', 'bin'), home && join(home, '.volta', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']),
+      : [home && join(home, '.local', 'bin'), home && join(home, '.claude', 'local'), home && join(home, '.npm-global', 'bin'), home && join(home, '.bun', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']),
+    // npm install -g onder nvm/fnm/volta: het programma staat naast die Node
+    ...nodeDirs(env, platform, list),
   ].filter((d): d is string => Boolean(d));
   for (const d of dirs) for (const n of names) {
     const p = join(d, n);
     if (exists(p)) return p;
   }
   return null;
+}
+
+function listDir(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** "v24.15.0" > "v22.1.0": nieuwste versie eerst */
+const byVersionDesc = (a: string, b: string) => b.localeCompare(a, undefined, { numeric: true });
+
+/**
+ * Waar Node staat bij de gebruikelijke versiebeheerders (nvm, fnm, volta, asdf, mise), nieuwste
+ * eerst. Claude Code en Codex via npm zijn scripts die "node" nodig hebben; een app die vanuit het
+ * menu start, krijgt het PATH uit .bashrc/.zshrc niet mee en vindt Node dan niet.
+ */
+export function nodeDirs(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, list: (dir: string) => string[] = listDir): string[] {
+  if (platform === 'win32') return [];
+  const home = env.HOME ?? '';
+  if (!home) return [];
+  const versions = (dir: string, sub: string[]) => list(dir).sort(byVersionDesc).map((v) => join(dir, v, ...sub));
+  const fnm = env.FNM_DIR ?? (platform === 'darwin' ? join(home, 'Library', 'Application Support', 'fnm') : join(home, '.local', 'share', 'fnm'));
+  return [
+    ...versions(join(env.NVM_DIR ?? join(home, '.nvm'), 'versions', 'node'), ['bin']),
+    ...versions(join(fnm, 'node-versions'), ['installation', 'bin']),
+    join(home, '.volta', 'bin'),
+    join(home, '.asdf', 'shims'),
+    join(home, '.local', 'share', 'mise', 'shims'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ];
+}
+
+/**
+ * De omgeving om Claude Code of Codex te starten: de map van het programma vooraan (daar staat bij
+ * een npm-installatie vaak ook "node"), daarna het PATH van de app, `extraPath` (het PATH van de
+ * login-shell) en de plekken van de Node-versiebeheerders.
+ */
+export function cliEnv(cli: string, base: NodeJS.ProcessEnv = process.env, extraPath = '', platform: string = process.platform, list: (dir: string) => string[] = listDir): NodeJS.ProcessEnv {
+  const sep = platform === 'win32' ? ';' : delimiter;
+  const parts = [dirname(cli), ...(base.PATH ?? base.Path ?? '').split(sep), ...extraPath.split(sep), ...nodeDirs(base, platform, list)];
+  return { ...base, PATH: [...new Set(parts.filter(Boolean))].join(sep) };
+}
+
+/**
+ * Codex start ook de MCP-servers uit de eigen config.toml van de gebruiker (en eventueel de
+ * koppeling met deze app zelf). Voor een bon is dat niet nodig: allemaal uit, per naam.
+ */
+export function codexMcpOff(configToml: string): string[] {
+  const names = new Set<string>();
+  for (const m of configToml.matchAll(/^\s*\[mcp_servers\.(?:"([A-Za-z0-9_-]+)"|([A-Za-z0-9_-]+))\]\s*$/gm)) names.add(m[1] ?? m[2] ?? '');
+  return [...names].flatMap((n) => ['-c', `mcp_servers.${n}.enabled=false`]);
+}
+
+function readCodexConfig(env: NodeJS.ProcessEnv = process.env): string {
+  const home = env.CODEX_HOME ?? join(env.HOME ?? env.USERPROFILE ?? '', '.codex');
+  try {
+    return readFileSync(join(home, 'config.toml'), 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Claude Code afgeschermd: alleen de genoemde hulpmiddelen (ook een kortere opdracht vooraf, dus
+ * minder verbruik), geen MCP-servers, geen instellingen of hooks van de gebruiker, geen skills en
+ * geen opgeslagen gesprek.
+ */
+export function claudeBaseArgs(model: string, tools: string): string[] {
+  return ['-p', '--output-format', 'json', '--model', model, '--tools', tools, '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence'];
+}
+
+/** Codex: niets schrijven, geen MCP-servers van de gebruiker. */
+export function codexBaseArgs(configToml: string = readCodexConfig()): string[] {
+  return ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', ...codexMcpOff(configToml)];
 }
 
 export const RECEIPT_PROMPT = `Je leest een document voor een Nederlandse boekhouding: een kassabon, factuur of creditnota.
@@ -157,11 +237,22 @@ export function friendlyCliError(kind: CliKind, r: CliRunResult): Error {
   const { name } = CLI_LABELS[kind];
   const out = `${r.stderr}\n${r.stdout}`;
   if (r.timedOut) return new Error(`${name} deed er te lang over. Probeer het nog eens, of vul de bon zelf in.`);
+  if (/env: .?node|node: (No such file|not found)|node.*(niet gevonden|is not recognized)/i.test(out)) {
+    return new Error(`${name} start niet: het heeft Node.js nodig, en de app vindt Node niet. Installeer Node.js (nodejs.org), of installeer ${name} met het installatieprogramma van ${CLI_LABELS[kind].company} (dan is Node niet nodig).`);
+  }
+  if (r.code === 127 || (r.code === null && /ENOENT/.test(out))) {
+    return new Error(`${name} start niet: het programma is niet (meer) te vinden. Zoek het opnieuw in Instellingen, of kies het zelf.`);
+  }
+  if (/requires a newer version|newer version of|please (update|upgrade) to the latest|update (codex|claude) to|unknown option|unexpected argument/i.test(out)) {
+    return new Error(`${name} is verouderd. Werk het bij: open een terminal en typ "${kind === 'claude-code' ? 'claude update' : 'npm install -g @openai/codex@latest'}". Probeer het daarna opnieuw.`);
+  }
   if (/log ?in|logged in|authenticat|unauthori[sz]ed|api key|credit|subscription|401|403/i.test(out)) {
     return new Error(`${name} is niet ingelogd of je abonnement laat het niet toe. Open een terminal, typ "${kind === 'claude-code' ? 'claude' : 'codex'}" en log in. Vul deze bon nu zelf in.`);
   }
   if (/rate.?limit|usage limit|429|overloaded/i.test(out)) return new Error(`${name} heeft even geen ruimte (limiet van je abonnement bereikt). Probeer het later, of vul de bon zelf in.`);
-  return new Error(`${name} kon deze bon niet lezen. Vul de gegevens zelf in.`);
+  // de laatste foutregel erbij: dan is te zien wat er misging
+  const detail = r.stderr.trim().split('\n').filter((l) => /error|fout|failed/i.test(l)).pop()?.trim().slice(0, 200);
+  return new Error(`${name} kon deze bon niet lezen. Vul de gegevens zelf in.${detail ? ` (Melding: ${detail})` : ''}`);
 }
 
 export class CliAiProvider implements OcrProvider {
@@ -187,11 +278,12 @@ export class CliAiProvider implements OcrProvider {
   args(file: string): { args: string[]; answerFile: string | null } {
     if (this.kind === 'claude-code') {
       return {
-        args: ['-p', '--output-format', 'json', '--max-turns', '4', '--strict-mcp-config', '--allowedTools', 'Read', '--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task'],
+        // Sonnet: leest bonnen even goed als Opus, voor een derde van het verbruik
+        args: [...claudeBaseArgs('sonnet', 'Read'), '--max-turns', '4', '--allowedTools', 'Read'],
         answerFile: null,
       };
     }
-    return { args: ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '--image', file, '--output-last-message', 'antwoord.txt', '-'], answerFile: 'antwoord.txt' };
+    return { args: [...codexBaseArgs(), '--image', file, '--output-last-message', 'antwoord.txt', '-'], answerFile: 'antwoord.txt' };
   }
 
   async recognize(input: { data: Uint8Array; mimeType: string; filename: string }): Promise<OcrOutput> {
@@ -202,9 +294,7 @@ export class CliAiProvider implements OcrProvider {
     const dir = await this.workspace.create([{ name: file, data: input.data }]);
     try {
       const { args, answerFile } = this.args(file);
-      // de map van het programma vooraan in PATH: dan vindt een npm-installatie ook "node"
-      const env = { ...process.env, PATH: [dirname(this.command), process.env.PATH ?? ''].join(delimiter) };
-      const r = await this.runner(this.command, args, { cwd: dir, input: RECEIPT_PROMPT.replace('FILE', file), timeoutMs: this.timeoutMs, env });
+      const r = await this.runner(this.command, args, { cwd: dir, input: RECEIPT_PROMPT.replace('FILE', file), timeoutMs: this.timeoutMs, env: cliEnv(this.command) });
       if (r.timedOut || r.code !== 0) throw friendlyCliError(this.kind, r);
       let text = r.stdout;
       if (this.kind === 'claude-code') {
