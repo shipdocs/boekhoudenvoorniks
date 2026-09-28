@@ -78,6 +78,10 @@ npm run dist:win    # Windows-installer (NSIS)
 `better-sqlite3` is een native module. `npm test` bouwt hem voor Node en `npm run dev`/`npm start` voor
 Electron (`electron-builder install-app-deps`).
 
+Zie [Testen](docs/testen.md) voor de testlagen, gerichte commando's en de werkwijze bij een afwijkend
+saldo. De bronbestanden en onafhankelijke handberekening van de vaste proefadministratie staan in
+[tests/proefadministratie](tests/proefadministratie/README.md).
+
 Tekstherkenning voor foto's is optioneel. De ingebouwde herkenning (GLM-OCR via llama.cpp, lokaal, CPU)
 installeer je bij eerste gebruik in de instellingen; zie [`docs/lokale-ocr.md`](docs/lokale-ocr.md).
 Een eigen OCR-dienst kan ook, zie [`docs/ocr-sidecar.md`](docs/ocr-sidecar.md). De benchmark met een
