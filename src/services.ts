@@ -36,6 +36,7 @@ import { CategoryService } from './settings/categories';
 import { MailIntakeService } from './mail/mail-intake';
 import { FxService } from './fx/fx';
 import { FxRepair } from './fx/repair';
+import { BookedPayments } from './documents/booked-payment';
 
 export interface ServiceDeps {
   pdf: PdfRenderer;
@@ -91,6 +92,10 @@ export function createServices(db: Db, deps: ServiceDeps) {
   // vreemde valuta in wat er al stond (#74): bonnen en aankopen van vóór 0.3.9 omrekenen
   const fxRepair = new FxRepair(db, fx, intake, purchases, bank);
   inbox.setFxRepair(fxRepair);
+  // aankoop dubbel met een betaling die al als kosten geboekt is (bv. via een gemengde rekening)
+  const bookedPayments = new BookedPayments(db, purchases, intake, relations);
+  quick.setBookedPayments(bookedPayments);
+  inbox.setBookedPayments(bookedPayments);
   const checklist = new ChecklistService(db, settings);
   const switchover = new SwitchoverService(db, ledger, settings, relations, bank, vat);
   const xafImport = new XafImportService(db, settings, relations, bank, switchover);
