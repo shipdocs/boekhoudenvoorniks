@@ -5,7 +5,7 @@ export const STRIPE: IntegrationDefinition = {
   id: 'stripe',
   label: 'Stripe',
   kind: 'betaalprovider',
-  description: 'Boekt uitbetalingen (payouts) inclusief Stripe-kosten, zodat de bankbijschrijving vanzelf klopt.',
+  description: 'Boekt de uitbetalingen (payouts) van Stripe naar je bank, met de Stripe-kosten, zodat de bijschrijving op je bank vanzelf klopt. Boekt zelf geen omzet: gebruik je Stripe niet via een gekoppelde webshop, boek de omzet dan zelf bij die bijschrijving met "Verkoop via een ander systeem".',
   fields: [{ key: 'apiKey', label: 'Restricted API key', type: 'secret', help: 'Stripe dashboard → Developers → API keys → restricted key met leesrechten op Balance en Payouts' }],
 };
 

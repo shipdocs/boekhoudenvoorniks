@@ -6,7 +6,7 @@ export const MOLLIE: IntegrationDefinition = {
   id: 'mollie',
   label: 'Mollie (uitbetalingen)',
   kind: 'betaalprovider',
-  description: 'Boekt uitbetalingen (settlements) inclusief transactiekosten, zodat de bankbijschrijving vanzelf klopt. Werkt samen met "Mollie Facturen" hieronder, of met een webshopkoppeling.',
+  description: 'Boekt de uitbetalingen (settlements) van Mollie naar je bank, met de transactiekosten en de btw daarover, zodat de bijschrijving op je bank vanzelf klopt. Boekt zelf geen omzet: daarvoor heb je "Mollie Facturen" hieronder nodig, of een webshopkoppeling (WooCommerce/Shopify). Gebruik je geen van die twee, zet deze koppeling dan niet aan: je tussenrekening bij de betaalprovider loopt dan alsmaar verder in de min.',
   fields: [{ key: 'apiKey', label: 'Organisatie-access-token', type: 'secret', help: 'Mollie dashboard → Ontwikkelaars → Organisatie-access-tokens (settlements.read)' }],
 };
 
@@ -20,7 +20,7 @@ export const MOLLIE_FACTUREN: IntegrationDefinition = {
   id: 'mollie-facturen',
   label: 'Mollie Facturen',
   kind: 'webshop',
-  description: 'Leest betaalde facturen uit Mollie Facturen en maakt er automatisch gewone facturen van. Je maakt en verstuurt de factuur zelf in Mollie; hier komt hij alleen ter registratie binnen.',
+  description: 'Leest betaalde facturen uit Mollie Facturen (mollie.com/producten/facturen) en maakt er automatisch gewone, betaalde facturen van, met klant en btw. Alleen lezen: de factuur zelf maak en verstuur je in Mollie, niet in deze app, en er gaat niets terug naar Mollie. Voeg ook "Mollie (uitbetalingen)" hierboven toe, anders klopt de bijschrijving op je bank niet vanzelf met het bedrag.',
   fields: [{ key: 'apiKey', label: 'Advanced-access-token', type: 'secret', help: 'Mollie dashboard → Ontwikkelaars → Access-tokens, met scope "sales-invoices.read"' }],
 };
 
