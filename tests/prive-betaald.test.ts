@@ -26,8 +26,8 @@ describe('rekening privé betaald (privérekening, telefoonrekening)', () => {
     const { s } = setup();
     const lev = s.relations.findOrCreateSupplier('Google');
     const p = buy(s, lev.id, '2026-09-27');
-    const { paid: [paid], alreadyBooked } = s.quick.payPurchaseWith(p.id, 'prive');
-    expect(alreadyBooked).toEqual([]);
+    const { paid: [paid], skipped } = s.quick.payPurchaseWith(p.id, 'prive');
+    expect(skipped).toEqual([]);
     expect(paid).toMatchObject({ status: 'betaald', open_amount: 0 });
     expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
     expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(-p.total);
@@ -58,14 +58,13 @@ describe('rekening privé betaald (privérekening, telefoonrekening)', () => {
 });
 
 describe('betaling al geboekt op een eigen rekening (gemengde rekening zoals Revolut)', () => {
-  it('"Al betaald" ziet de geboekte afschrijving: de aankoop vervalt, niet privé en niet voortaan privé', () => {
+  it('"Al betaald" vraagt eerst: ja = de aankoop vervalt, niet privé en niet voortaan privé', () => {
     const { s } = setup();
     const txId = bookedDebit(s, 'Moonshot AI', '2026-07-20', 1728);
     const p = buyUsd(s, 'Moonshot AI', '2026-07-15');
     const before = software(s);
-    const r = s.quick.payPurchaseWith(p.id, 'prive', { always: true });
-    expect(r.paid).toEqual([]);
-    expect(r.alreadyBooked).toEqual([expect.objectContaining({ purchaseId: p.id, bankTransactionId: txId, amount: 1728 })]);
+    expect(s.bookedPayments.find(p)?.id).toBe(txId);
+    s.bookedPayments.resolve(p.id, txId, p.invoice_date);
     expect(s.purchases.list().find((x) => x.id === p.id)).toBeUndefined();
     expect(software(s)).toBe(before - 1666); // alleen de afschrijving telt nog
     expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(0);
@@ -73,10 +72,22 @@ describe('betaling al geboekt op een eigen rekening (gemengde rekening zoals Rev
     expect(s.relations.get(p.relation_id!).paid_with).toBeNull();
   });
 
-  it('wat al dubbel stond, herstelt de app vanzelf: privé-betaling terug, aankoop weg, voortaan privé uit, in het logboek', () => {
+  it('voortaan altijd: een andere open rekening waarvan de betaling al op de bank staat, blijft open', () => {
+    const { s } = setup();
+    const txId = bookedDebit(s, 'Vercel', '2026-08-09', 1675);
+    const aug = buyUsd(s, 'Vercel', '2026-08-05');
+    const sep = buyUsd(s, 'Vercel', '2026-09-05');
+    const r = s.quick.payPurchaseWith(sep.id, 'prive', { always: true });
+    expect(r.paid.map((x) => x.id)).toEqual([sep.id]);
+    expect(r.skipped.map((x) => x.id)).toEqual([aug.id]);
+    expect(s.purchases.get(aug.id).status).toBe('open');
+    expect(s.relations.get(sep.relation_id!).paid_with).toBeNull();
+    expect(s.bookedPayments.find(s.purchases.get(aug.id))?.id).toBe(txId);
+  });
+
+  it('zeker dubbel (0.6.4: voortaan privé, en toch op de bank als kosten): de app herstelt het vanzelf', () => {
     const { s } = setup();
     const p = buyUsd(s, 'Render', '2026-05-05');
-    // zo ging het in 0.6.4: eerst privé betaald gezet (voortaan altijd), daarna kwam de afschrijving en werd die als kosten geboekt
     s.quick.payPurchaseWith(p.id, 'prive', { always: true });
     const txId = bookedDebit(s, 'Render', '2026-05-07', 1675);
     const onlyBank = software(s) - 1666;
@@ -88,9 +99,48 @@ describe('betaling al geboekt op een eigen rekening (gemengde rekening zoals Rev
     expect(s.relations.get(p.relation_id!).paid_with).toBeNull();
     const log = s.db.prepare(`SELECT * FROM automation_log WHERE kind = 'dubbel-weg'`).all() as { ref_id: number; summary: string }[];
     expect(log).toEqual([expect.objectContaining({ ref_id: txId, summary: expect.stringMatching(/Render .* dubbel/) })]);
-    // nog een keer: niets meer te doen
     s.inbox.autoProcess('2026-09-28');
     expect(s.db.prepare(`SELECT COUNT(*) AS n FROM automation_log WHERE kind = 'dubbel-weg'`).get()).toEqual({ n: 1 });
+    expect(s.inbox.tasks('2026-09-28').filter((t) => t.kind === 'purchase-double')).toEqual([]);
+  });
+
+  it('niet zeker (privé betaald zonder "voortaan privé"): niets vanzelf, wel een vraag; "nee" laat alles staan', () => {
+    const { s } = setup();
+    const p = buyUsd(s, 'Hetzner', '2026-06-01');
+    s.quick.payPurchaseWith(p.id, 'prive');
+    const txId = bookedDebit(s, 'Hetzner', '2026-06-03', 1675);
+    s.inbox.autoProcess('2026-09-28');
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+    const [task] = s.inbox.tasks('2026-09-28').filter((t) => t.kind === 'purchase-double');
+    expect(task).toMatchObject({ ref: { purchaseId: p.id, bankTransactionId: txId }, actions: [expect.objectContaining({ id: 'ja' }), expect.objectContaining({ id: 'nee' })] });
+    s.inbox.skipTask(task!.key, 'nee');
+    expect(s.inbox.tasks('2026-09-28').filter((t) => t.kind === 'purchase-double')).toEqual([]);
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+  });
+
+  it('contant bij Gamma en een dag later hetzelfde bedrag gepind: nooit vanzelf weg, ook niet met voortaan contant', () => {
+    const { s } = setup();
+    const lev = s.relations.findOrCreateSupplier('Gamma');
+    const p = s.purchases.create({ relationId: lev.id, invoiceDate: '2026-09-10', description: 'Materiaal — Gamma', lines: [{ account: ACCOUNTS.inkoopMaterialen, netAmount: 4132, vatCode: 'hoog', vatAmount: 868 }] });
+    s.quick.payPurchaseWith(p.id, 'kas', { always: true });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-11', amount: -5000, description: 'GAMMA UTRECHT', counterName: 'Gamma' }] });
+    s.bank.bookToAccount(s.bank.list({ status: 'nieuw' })[0]!.id, { account: ACCOUNTS.inkoopMaterialen, vatCode: 'hoog' });
+    s.inbox.autoProcess('2026-09-28');
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+    expect(s.inbox.tasks('2026-09-28').filter((t) => t.kind === 'purchase-double')).toHaveLength(1);
+  });
+
+  it('een privé-opname met hetzelfde bedrag telt niet als "al geboekt"', () => {
+    const { s } = setup();
+    const lev = s.relations.findOrCreateSupplier('Google');
+    const p = s.purchases.create({ relationId: lev.id, invoiceDate: '2026-09-27', description: 'Software — Google', lines: [{ account: 'WBedKanSof', netAmount: 826, vatCode: 'hoog', vatAmount: 173 }] });
+    s.quick.payPurchaseWith(p.id, 'prive', { always: true });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-27', amount: -999, description: 'GOOGLE PLAY', counterName: 'Google' }] });
+    s.bank.bookToAccount(s.bank.list({ status: 'nieuw' })[0]!.id, { account: ACCOUNTS.priveOpnamen });
+    expect(s.bookedPayments.find(s.purchases.get(p.id))).toBeNull();
+    s.inbox.autoProcess('2026-09-28');
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+    expect(s.relations.get(lev.id).paid_with).toBe('prive');
   });
 
   it('laat staan wat echt privé betaald is: geen afschrijving op een eigen rekening', () => {

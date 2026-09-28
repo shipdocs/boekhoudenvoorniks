@@ -107,7 +107,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, fx, fxRepair, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
+  return { db, fx, fxRepair, bookedPayments, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;
