@@ -18,6 +18,18 @@ export function UpdateBanner() {
       if (event === 'update') setStatus(payload as UpdateStatus);
     });
   }, []);
+  if (status?.state === 'downloaden') {
+    return (
+      <div className="notice row between" role="status" style={{ margin: '0 0 16px', alignItems: 'center' }}>
+        <span className="row" style={{ gap: 10, flex: 1 }}>
+          <span>⬇️ Versie {status.version ?? ''} wordt gedownload…</span>
+          <progress max={100} value={status.percent ?? 0} style={{ flex: 1, maxWidth: 200 }} />
+          <span className="muted small">{status.percent ?? 0}%</span>
+        </span>
+        <span className="muted small">Je kunt gewoon doorwerken</span>
+      </div>
+    );
+  }
   if (status?.state !== 'klaar') return null;
   return (
     <>
