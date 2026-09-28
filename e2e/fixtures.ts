@@ -123,6 +123,8 @@ export async function onboard(page: Page, opts: { kor?: boolean; overstap?: bool
       await page.getByRole('button', { name: 'Half-half' }).click();
       await page.getByRole('button', { name: 'Nee', exact: true }).click();
       await page.getByRole('button', { name: 'Verder' }).click();
+    } else if (/Waar geef je geld aan uit/.test(h1)) {
+      await page.getByRole('button', { name: 'Verder' }).click();
     } else if (/Hoeveel mag de app zelf doen/.test(h1)) {
       await page.getByRole('button', { name: 'Verder' }).click();
     } else if (/eerder gefactureerd/.test(h1)) {
