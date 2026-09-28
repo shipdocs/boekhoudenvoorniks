@@ -75,7 +75,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const memory = new SupplierMemory(db);
   const classifier = new Classifier(memory, categories, deps.llm ?? null);
   const fx = new FxService(db, deps.fetch);
-  const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, categories, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse);
+  const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, categories, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse, () => settings.get().company.vatNumber);
   intake.setFx(fx);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);

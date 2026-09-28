@@ -138,6 +138,8 @@ export class IntakeService {
     private readonly autopilot: () => AutopilotLevel = () => 'normaal',
     private readonly locationEnabled: () => boolean = () => false,
     private readonly carUse: () => string = () => 'onbekend',
+    /** je eigen btw-nummer: staat vaak bij "Bill to" op een buitenlandse factuur, maar is niet van de leverancier */
+    private readonly ownVatNumber: () => string = () => '',
   ) {}
 
   setOcrProvider(provider: OcrProvider | null): void {
@@ -173,7 +175,15 @@ export class IntakeService {
   }
 
   /** EXTRACTIE: wat staat er op het document? */
+  /** Uitlezen, zonder je eigen btw-nummer als dat van de leverancier. */
   async extract(filename: string, data: Uint8Array): Promise<{ result: DocumentResult; source: string; issues: Issue[] }> {
+    const out = await this.extractRaw(filename, data);
+    const own = this.ownVatNumber().replace(/[\s.]/g, '').toUpperCase();
+    if (own && out.result.supplierVatNumber?.value.replace(/[\s.]/g, '').toUpperCase() === own) out.result.supplierVatNumber = null;
+    return out;
+  }
+
+  async extractRaw(filename: string, data: Uint8Array): Promise<{ result: DocumentResult; source: string; issues: Issue[] }> {
     const mime = mimeFor(filename);
     if (mime === 'application/xml') {
       const xml = Buffer.from(data).toString('utf8');
