@@ -304,7 +304,7 @@ describe('meerdere auditfiles tegelijk (een per jaar)', () => {
 
   it('alleen jaren op of na de instapdatum: de app stelt een instapdatum voor', () => {
     const { s } = overstapper('2023-07-01');
-    expect(s.xafImport.analyzeFiles([XAF_2025, XAF_2026])).toMatchObject({ kind: 'instapdatum', firstDate: '2025-01-01', lastBooking: '2026-02-10', suggestedDate: '2026-09-01', startedOnDate: false });
+    expect(s.xafImport.analyzeFiles([XAF_2025, XAF_2026])).toMatchObject({ kind: 'instapdatum', firstDate: '2025-01-01', lastBooking: '2026-02-10', suggestedDate: '2026-09-01', ready: true, startedOnDate: false });
     // instapdatum = begin van het eerste jaar zonder beginbalans (bedrijf begon toen), ook met één bestand
     const b = overstapper('2024-01-01');
     expect(b.s.xafImport.analyzeFiles([XAF_2024])).toMatchObject({ kind: 'instapdatum', startedOnDate: true, suggestedDate: '2025-01-01' });

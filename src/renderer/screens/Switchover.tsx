@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { Button, DateNl, DropZone, Euro, Field, Modal, MoneyInput, readAsBytes, readAsText, useAction, useApp, useLoad } from '../ui';
 import { addDays, isIsoDate, today } from '../../shared/dates';
@@ -252,9 +252,12 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
 
   // auditfile en CSV zijn tekst; Excel gaat als bytes
   const read = async (f: File) => ({ name: f.name, data: /\.xlsx$/i.test(f.name) ? await readAsBytes(f) : await readAsText(f) });
+  // alleen het antwoord op de laatst neergezette bestanden telt: een oudere, tragere analyse overschrijft niets
+  const request = useRef(0);
   const analyze = async (files: { name: string; data: string | Uint8Array }[]) => {
+    const mine = ++request.current;
     const r = await run(() => api.switchover.analyzeXafFiles(files.map((f) => f.data)));
-    if (!r) return;
+    if (!r || mine !== request.current) return;
     if (r.kind === 'instapdatum') {
       setAdvice({ files, advice: r });
       setMulti(null);
@@ -329,12 +332,18 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
             De app neemt je vorige administratie niet boeking voor boeking over, maar de <strong>stand op je instapdatum</strong>: je banksaldo, wat klanten en leveranciers nog open hadden, je bus en gereedschap, de btw, en je omzet en kosten van dit jaar tot dan.
             Daarvoor moet de instapdatum na je laatste boeking liggen. Die is van <DateNl date={advice.advice.lastBooking} />. Alle boekingen daarvoor blijven in je vorige programma en in je auditfiles.
           </p>
-          <div className="row">
-            <Button kind="primary" disabled={busy} onClick={() => void chooseDate(advice)}>
-              Stand overnemen op <DateNl date={advice.advice.suggestedDate} />
-            </Button>
-            <Button onClick={() => setAdvice(null)}>Laat maar</Button>
-          </div>
+          {advice.advice.ready ? (
+            <div className="row">
+              <Button kind="primary" disabled={busy} onClick={() => void chooseDate(advice)}>
+                Stand overnemen op <DateNl date={advice.advice.suggestedDate} />
+              </Button>
+              <Button onClick={() => setAdvice(null)}>Laat maar</Button>
+            </div>
+          ) : (
+            <p style={{ margin: '6px 0' }}>
+              Je laatste boeking is van vandaag. Kies morgen <strong><DateNl date={advice.advice.suggestedDate} /></strong> als instapdatum (bij "Hoe stap je over?") en zet de bestanden er dan opnieuw op.
+            </p>
+          )}
           {advice.advice.startedOnDate && (
             <p className="small muted" style={{ marginBottom: 0 }}>
               Wil je je administratie echt vanaf <DateNl date={advice.advice.date} /> in deze app bijhouden? Dan hoef je hier niets in te lezen: sla dit onderdeel over en lees bij Bank je afschriften vanaf <DateNl date={advice.advice.date} /> in.
