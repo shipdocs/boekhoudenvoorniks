@@ -60,7 +60,10 @@ test('categorieën: aanpassen en verbergen in Instellingen', async ({ page }) =>
   await dlg.getByLabel(/Toon verborgen/).check();
   await expect(dlg.locator('tr', { hasText: 'Werkkleding' })).toContainText('verborgen');
   // "Overige kosten" kan niet weg
-  await expect(dlg.locator('tr', { hasText: 'Overige kosten' }).getByRole('button', { name: 'Verbergen' })).toHaveCount(0);
+  // op de naam zelf: eigen categorieën noemen "hoort bij overige kosten"
+  const overig = dlg.locator('tr').filter({ has: page.locator('strong', { hasText: /^Overige kosten$/ }) });
+  await expect(overig).toHaveCount(1);
+  await expect(overig.getByRole('button', { name: 'Verbergen' })).toHaveCount(0);
 });
 
 test('betaling op Vandaag aanklikken: alle gegevens van de bank om hem te beoordelen', async ({ page, problems }) => {
