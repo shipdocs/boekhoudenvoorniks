@@ -531,8 +531,17 @@ export function createApi(s: Services, host: HostContext) {
     bank: {
       accounts: () => s.bank.listAccounts(),
       importStatus: () => s.bank.importStatus(),
-      addAccount: (name: string, iban: string | null) => s.bank.addAccount(name, iban),
-      updateAccount: (id: number, patch: { name?: string; iban?: string | null }) => s.bank.updateAccount(id, patch),
+      addAccount: (name: string, iban: string | null, opts?: { pot?: boolean }) => s.bank.addAccount(name, iban, opts),
+      updateAccount: (id: number, patch: { name?: string; iban?: string | null; pot?: boolean }) => s.bank.updateAccount(id, patch),
+      removableAccount: (id: number) => s.bank.removable(id),
+      removeAccount: (id: number) => {
+        s.bank.removeAccount(id);
+        const st = s.settings.get();
+        const patch: Record<string, unknown> = {};
+        if (st.vatPotAccountId === id) patch.vatPotAccountId = null;
+        if (st.switchover.xafBanks?.includes(id)) patch.switchover = { ...st.switchover, xafBanks: st.switchover.xafBanks.filter((x) => x !== id) };
+        if (Object.keys(patch).length) s.settings.update(patch);
+      },
       openingBalance: (bankAccountId: number, amount: Cents, date: IsoDate) => s.bank.setOpeningBalance(bankAccountId, amount, date),
       getOpeningBalance: (bankAccountId: number) => s.bank.openingBalance(bankAccountId),
       ownTransfer: (txId: number) => s.bank.ownTransferTarget(s.bank.get(txId)),

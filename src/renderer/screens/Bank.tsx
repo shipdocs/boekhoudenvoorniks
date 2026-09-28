@@ -28,7 +28,7 @@ export function Bank({ focus }: { focus?: number }) {
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
   const [last, setLast] = useState<{ imported: number; duplicates: number; autoMatched: number; periods: { from: string; to: string }[] } | null>(null);
   const [opening, setOpening] = useState<{ id: number; name: string } | null>(null);
-  const [editing, setEditing] = useState<{ id: number; name: string; iban: string | null } | 'nieuw' | null>(null);
+  const [editing, setEditing] = useState<{ id: number; name: string; iban: string | null; isPot: boolean } | 'nieuw' | null>(null);
 
   const importFile = async (file: File) => {
     const content = await readAsText(file);
@@ -115,12 +115,17 @@ export function Bank({ focus }: { focus?: number }) {
         <tbody>
           {(status.data ?? []).map((st) => (
             <tr key={st.bankAccountId}>
-              <td>{st.name}{settings.vatPotAccountId === st.bankAccountId && <> <span className="pill">btw-potje</span></>}<div className="small muted">{st.iban ?? 'IBAN nog onbekend'}</div></td>
+              <td>
+                {st.name}
+                {settings.vatPotAccountId === st.bankAccountId && <> <span className="pill">btw-potje</span></>}
+                {accounts.data?.find((a) => a.id === st.bankAccountId)?.is_pot ? <> <span className="pill">potje</span></> : null}
+                <div className="small muted">{st.iban ?? 'IBAN nog onbekend'}</div>
+              </td>
               <td>{st.lastImport ? <>{formatDateTime(st.lastImport.at)}<div className="small muted">{st.lastImport.filename ?? st.lastImport.source.toUpperCase()}</div></> : <span className="muted">nog nooit</span>}</td>
               <td>{st.lastImport ? <><DateNl date={st.lastImport.from} /> t/m <DateNl date={st.lastImport.to} /><div className="small muted">{st.lastImport.transactions} betalingen, {st.lastImport.imported} nieuw</div></> : '—'}</td>
               <td>{st.coverageTo ? <><DateNl date={st.coverageTo} />{staleDays(st.coverageTo) >= 14 && <div><span className="pill warn">{staleDays(st.coverageTo)} dagen geleden</span></div>}</> : '—'}</td>
               <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                <Button small kind="ghost" onClick={() => setEditing({ id: st.bankAccountId, name: st.name, iban: st.iban })}>Wijzigen</Button>
+                <Button small kind="ghost" onClick={() => setEditing({ id: st.bankAccountId, name: st.name, iban: st.iban, isPot: Boolean(accounts.data?.find((a) => a.id === st.bankAccountId)?.is_pot) })}>Wijzigen</Button>
                 <Button small kind="ghost" onClick={() => setOpening({ id: st.bankAccountId, name: st.name })}>Beginsaldo</Button>
               </td>
             </tr>
@@ -137,17 +142,20 @@ export function Bank({ focus }: { focus?: number }) {
 }
 
 /** Rekening toevoegen of wijzigen: naam, IBAN, of het je btw-potje is en (bij nieuw) het beginsaldo. */
-function AccountDialog({ account, onClose, onSaved }: { account: { id: number; name: string; iban: string | null } | null; onClose: () => void; onSaved: () => Promise<void> }) {
+function AccountDialog({ account, onClose, onSaved }: { account: { id: number; name: string; iban: string | null; isPot: boolean } | null; onClose: () => void; onSaved: () => Promise<void> }) {
   const { settings, reloadSettings } = useApp();
   const { run, busy } = useAction();
   const [name, setName] = useState(account?.name ?? '');
   const [iban, setIban] = useState(account?.iban ?? '');
+  // zonder rekeningnummer: een potje binnen je bank, of een echte rekening waarvan je het nummer nog niet invulde
+  const [isPot, setIsPot] = useState(account ? account.isPot : true);
+  const removable = useLoad(async () => (account ? api.bank.removableAccount(account.id) : null), [account?.id]);
   const [pot, setPot] = useState(account ? settings.vatPotAccountId === account.id : false);
   const [amount, setAmount] = useState<number | null>(null);
   const [date, setDate] = useState(`${new Date().getFullYear()}-01-01`);
   const save = async () => {
     const ok = await run(async () => {
-      const id = account ? (await api.bank.updateAccount(account.id, { name, iban: iban.trim() || null }), account.id) : (await api.bank.addAccount(name, iban.trim() || null)).id;
+      const id = account ? (await api.bank.updateAccount(account.id, { name, iban: iban.trim() || null, pot: isPot }), account.id) : (await api.bank.addAccount(name, iban.trim() || null, { pot: isPot })).id;
       if (!account && amount) await api.bank.openingBalance(id, amount, date);
       const potId = pot ? id : settings.vatPotAccountId === id ? null : settings.vatPotAccountId;
       if (potId !== settings.vatPotAccountId) {
@@ -165,7 +173,16 @@ function AccountDialog({ account, onClose, onSaved }: { account: { id: number; n
         <Field label="Rekeningnummer (IBAN)" hint="zo herkent de app betalingen van en naar deze rekening"><input value={iban} placeholder="NL00 BANK 0123 4567 89" onChange={(e) => setIban(e.target.value)} /></Field>
       </div>
       {!iban.trim() && (
-        <p className="small muted">Geen rekeningnummer? Dan is het een potje binnen je bank, zoals een Knab-potje. Daar lees je geen afschrift van in: bij een betaling naar of uit het potje kies je dan zelf "Naar potje" of "Uit potje".</p>
+        <>
+          <label className="row" style={{ marginTop: 10 }}>
+            <input type="checkbox" checked={isPot} onChange={(e) => setIsPot(e.target.checked)} /> Dit is een potje binnen een andere rekening (zoals een Knab-potje)
+          </label>
+          <p className="small muted">
+            {isPot
+              ? 'Van een potje lees je geen afschrift in: bij een betaling naar of uit het potje kies je zelf "Naar potje" of "Uit potje".'
+              : 'Een gewone rekening: vul het rekeningnummer in zodra je het weet, dan herkent de app de afschriften.'}
+          </p>
+        </>
       )}
       {!settings.kor && (
         <label className="row" style={{ marginTop: 10 }}>
@@ -182,6 +199,19 @@ function AccountDialog({ account, onClose, onSaved }: { account: { id: number; n
             <Field label="Saldo"><MoneyInput value={amount} onChange={setAmount} /></Field>
           </div>
         </>
+      )}
+      {account && removable.data && (
+        <div className="card flat" style={{ marginTop: 14 }}>
+          <strong>Rekening weghalen</strong>
+          {removable.data.ok ? (
+            <>
+              <p className="small muted">Er staat niets op deze rekening. Is hij dubbel (bijvoorbeeld aangemaakt bij het inlezen van je vorige administratie) of gebruik je hem niet? Dan kun je hem weghalen.</p>
+              <Button small disabled={busy} onClick={async () => { if ((await run(async () => { await api.bank.removeAccount(account.id); return true; }, 'Rekening weggehaald')) !== undefined) await onSaved(); }}>Rekening weghalen</Button>
+            </>
+          ) : (
+            <p className="small muted">Kan niet: {removable.data.reason?.toLowerCase()}.</p>
+          )}
+        </div>
       )}
       <div className="row end" style={{ marginTop: 14 }}>
         <Button onClick={onClose}>Annuleren</Button>
