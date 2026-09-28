@@ -35,8 +35,14 @@ const EU_IBAN_PREFIXES = new Set([...EU_VAT_PREFIXES].filter((c) => c !== 'EL' &
  * Verlegde btw: waar zit de leverancier? Afgeleid uit het btw-nummer (landcode). NL of onbekend = 2a;
  * een ander EU-land = 4b; een btw-nummer van buiten de EU (bv. GB, CHE, NO) = 4a (#16).
  */
-export function reverseChargeOrigin(supplierVatNumber: string | null, supplierIban: string | null = null): 'verlegd' | 'eu' | 'buiten-eu' {
+export function reverseChargeOrigin(supplierVatNumber: string | null, supplierIban: string | null = null, supplierCountry: string | null = null): 'verlegd' | 'eu' | 'buiten-eu' {
   const prefix = supplierVatNumber?.replace(/[\s.-]/g, '').toUpperCase().match(/^([A-Z]{2,3})/)?.[1];
+  // een NL-nummer bij een leverancier uit het buitenland is dat van de klant (jij): het land telt
+  if (supplierCountry && (!prefix || (prefix === 'NL' && supplierCountry !== 'NL'))) {
+    // geen btw-nummer, wel een land in het adres (bv. "United States" op een factuur van Stripe)
+    if (supplierCountry === 'NL') return 'verlegd';
+    return EU_IBAN_PREFIXES.has(supplierCountry) ? 'eu' : 'buiten-eu';
+  }
   if (!prefix) {
     // geen btw-nummer gevonden: dan het land van het rekeningnummer als aanwijzing
     const iban = supplierIban?.replace(/\s/g, '').toUpperCase().slice(0, 2);
@@ -49,8 +55,11 @@ export function reverseChargeOrigin(supplierVatNumber: string | null, supplierIb
 }
 
 export function vatFromDocument(doc: DocumentResult): Classification['vatCode'] | null {
-  if (doc.reverseCharge) return reverseChargeOrigin(doc.supplierVatNumber?.value ?? null, doc.supplierIban?.value ?? null);
+  const country = doc.supplierCountry?.value ?? null;
+  if (doc.reverseCharge) return reverseChargeOrigin(doc.supplierVatNumber?.value ?? null, doc.supplierIban?.value ?? null, country);
   const rates = doc.vat.value.filter((v) => v.amount !== 0).map((v) => v.rate);
+  // een buitenlandse leverancier zonder btw op de factuur (bv. een Amerikaans abonnement): btw verlegd naar jou
+  if (rates.length === 0 && country && country !== 'NL') return reverseChargeOrigin(null, null, country);
   if (rates.length === 0) return doc.vat.value.length > 0 ? 'nul' : null;
   if (rates.every((r) => r === 21)) return 'hoog';
   if (rates.every((r) => r === 9)) return 'laag';
