@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Overstappen
+- **Instapdatum vóór je auditfiles**: beginnen al je auditfiles op of na je instapdatum (bijvoorbeeld instapdatum 1 januari 2024 terwijl je administratie toen begon), dan legt de app uit dat hij de stand óp de instapdatum overneemt, niet elke boeking, en stelt hij de dag na je laatste boeking voor. Met één knop kies je die datum en leest de app de bestanden opnieuw in. Voorheen kwam er alleen een foutmelding.
+
 ## 0.6.1 — overstappen vanuit DigiBoox en betrouwbaardere updates
 
 ### Hersteld
