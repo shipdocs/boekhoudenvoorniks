@@ -1,5 +1,11 @@
 # Wijzigingen
 
+## 0.6.9 — Mollie Facturen inlezen
+
+### Koppelingen
+- **Mollie Facturen**: een nieuwe koppeling (Instellingen → Koppelingen) die betaalde facturen uit [Mollie Facturen](https://www.mollie.com/producten/facturen) inleest en er automatisch gewone facturen van maakt, met de klant en de btw erbij. Je blijft de factuur zelf in Mollie maken en versturen; deze app boekt hem alleen. Werkt samen met de bestaande Mollie-koppeling voor uitbetalingen (settlements): die trekt het bedrag er later weer vanaf, met de transactiekosten, zodat de bijschrijving op je bank vanzelf klopt — net als bij een webshopkoppeling.
+- Het btw-nummer van een klant uit een webshop-order of Mollie-factuur wordt voortaan ook echt bij de klant opgeslagen (eerder werd het wel gelezen, maar niet bewaard).
+
 ## 0.6.8 — zoeken, en zien waar alles geboekt staat
 
 ### Zoeken
