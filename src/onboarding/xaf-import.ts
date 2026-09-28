@@ -2,7 +2,7 @@ import { tx, type Db } from '../db/database';
 import type { BankService } from '../import/bank';
 import type { RelationsService } from '../relations/relations';
 import type { SettingsService } from '../settings/settings';
-import { parseXaf, XafError, type XafAccount, type XafFile, type XafLine } from '../import/xaf';
+import { parseXaf, XafError, type XafAccount, type XafFile, type XafLine, type XafRelation } from '../import/xaf';
 import { readXlsx } from '../import/xlsx';
 import { isTrialBalance, parseTrialBalance } from '../import/trial-balance';
 import {
@@ -121,7 +121,8 @@ function classByRgs(rgs: string): XafClass | null {
   if (r.startsWith('BVorDeb')) return 'debiteuren';
   if (r.startsWith('BSchCre')) return 'crediteuren';
   if (r.startsWith('BMva') || r.startsWith('BIva')) return /Cae|Cua|Cuh|Afs|Cum/.test(r.slice(7)) ? 'afschrijving-cum' : 'bezit';
-  if (r.startsWith('BSchBepBtw')) return 'btw';
+  // officieel BSchBepBtw…; sommige pakketten (bv. DigiBoox) gebruiken BSchBtw
+  if (/^BSch\w*Btw/.test(r)) return 'btw';
   if (r.startsWith('BEiv')) return 'eigen-vermogen';
   if (r.startsWith('BLas') || r.startsWith('BSchAos') || r.startsWith('BSchSkk')) return 'lening';
   if (r.startsWith('BVor') || r.startsWith('BFva') || r.startsWith('BLimKru') || r.startsWith('BLiqKru')) return 'vordering';
@@ -170,7 +171,34 @@ function classByName(a: XafAccount): XafClass {
 }
 
 export function classify(a: XafAccount): XafClass {
-  return (a.rgs ? classByRgs(a.rgs) : null) ?? classByName(a);
+  // een resultaatrekening (P) met een balanscode is tegenstrijdig, bv. DigiBoox' "Overboekingsrekening
+  // winst" met BLimKru: dan telt het soort rekening, en herkent de app hem op de naam
+  const rgs = a.rgs && !(a.type === 'P' && a.rgs.startsWith('B')) ? a.rgs : null;
+  return (rgs ? classByRgs(rgs) : null) ?? classByName(a);
+}
+
+/**
+ * Opeenvolgende jaren als één bestand. Sommige pakketten (bv. DigiBoox) zetten geen beginbalans in de
+ * auditfile: dan is de stand op een dag de optelsom van alle jaren tot en met die dag.
+ */
+export function mergeYears(files: XafFile[]): XafFile {
+  const first = files[0]!;
+  const last = files.at(-1)!;
+  const accounts = new Map<string, XafAccount>();
+  const relations = new Map<string, XafRelation>();
+  for (const f of files) {
+    for (const a of f.accounts) accounts.set(a.id, a);
+    for (const r of f.relations) relations.set(r.id, r);
+  }
+  return {
+    ...last,
+    startDate: first.startDate,
+    accounts: [...accounts.values()],
+    relations: [...relations.values()],
+    opening: first.opening,
+    lines: files.flatMap((f) => f.lines),
+    warnings: [...new Set(files.flatMap((f) => f.warnings))],
+  };
 }
 
 /** Btw-rekening: hoog, laag, voorbelasting of anders (af te dragen / afrekening). */
@@ -226,14 +254,14 @@ export class XafImportService {
       return { ...r, files: [{ index: 0, ...period, role: 'gebruikt', reason: '' }], chosen: 0, alternativeDate: null };
     }
     const pick = this.pickFile(files);
-    return { kind: pick.chosenKind, plan: this.plan(pick.xafs[pick.chosen]!, undefined, pick.history), files: pick.roles, chosen: pick.chosen, alternativeDate: pick.alternativeDate };
+    return { kind: pick.chosenKind, plan: this.plan(pick.xaf, undefined, pick.history), files: pick.roles, chosen: pick.chosen, alternativeDate: pick.alternativeDate };
   }
 
   /** Overnemen uit meerdere bestanden: de startstand uit het gekozen bestand, aankoopdatums uit alle. */
   applyFiles(files: (string | Uint8Array)[], choices: XafApplyChoices, mapping?: ColumnMapping): SwitchoverState {
     if (files.length === 1) return this.apply(files[0]!, choices, mapping);
     const pick = this.pickFile(files);
-    return this.applyXaf(pick.xafs[pick.chosen]!, choices, pick.history);
+    return this.applyXaf(pick.xaf, choices, pick.history);
   }
 
   private pickFile(files: (string | Uint8Array)[]) {
@@ -259,11 +287,25 @@ export class XafImportService {
       throw new ValidationError(`Alle bestanden beginnen na je instapdatum (${formatDateNl(date)}). Zet ook het jaar ervoor erbij, of kies een latere instapdatum.`);
     }
     const c = xafs[chosen]!;
+    // geen beginbalans in het gekozen jaar (bv. DigiBoox): de jaren ervoor die er direct op aansluiten
+    // tellen mee, tot en met een jaar dat wél een beginbalans heeft (of het eerste jaar)
+    const chain: number[] = [];
+    if (c.opening.lines.length === 0 && !c.totalsOnly) {
+      let cur = c;
+      for (;;) {
+        const prev = idx.find((i) => i !== chosen && !chain.includes(i) && !xafs[i]!.totalsOnly && addDays(xafs[i]!.endDate, 1) === cur.startDate);
+        if (prev === undefined) break;
+        chain.unshift(prev);
+        cur = xafs[prev]!;
+        if (cur.opening.lines.length > 0) break;
+      }
+    }
     const year = (x: XafFile) => (x.startDate.slice(0, 4) === x.endDate.slice(0, 4) ? x.startDate.slice(0, 4) : `${formatDateNl(x.startDate)} t/m ${formatDateNl(x.endDate)}`);
     const roles: ImportFileRole[] = idx.map((i) => {
       const x = xafs[i]!;
       const base = { index: i, startDate: x.startDate, endDate: x.endDate };
       if (i === chosen) return { ...base, role: 'gebruikt', reason: `Hiermee rekent de app uit wat er op ${formatDateNl(until)} op elke rekening stond.` };
+      if (chain.includes(i)) return { ...base, role: 'gebruikt', reason: `Telt mee voor de startstand: in je auditfiles staat geen beginbalans, dus de app telt ${year(x)} erbij op.` };
       if (x.startDate === c.startDate && x.endDate === c.endDate) return { ...base, role: 'dubbel', reason: 'Zelfde periode als het gebruikte bestand: niet nodig.' };
       if (x.endDate < c.startDate || x.endDate < until) return { ...base, role: 'eerder', reason: `${year(x)} zit al in je vorige administratie. De app haalt er alleen de aankoopdatums van je bus en gereedschap uit.` };
       return { ...base, role: 'later', reason: `Loopt na je instapdatum. Voor de startstand niet nodig: die periode lees je in met je bankafschriften.` };
@@ -272,7 +314,8 @@ export class XafImportService {
     const latest = idx.filter((i) => roles[i]!.role === 'later' && !xafs[i]!.totalsOnly).sort((a, b) => xafs[b]!.endDate.localeCompare(xafs[a]!.endDate))[0];
     const alternativeDate = latest !== undefined ? addDays(xafs[latest]!.endDate, 1) : null;
     const history = idx.filter((i) => i !== chosen && roles[i]!.role !== 'dubbel').map((i) => xafs[i]!);
-    return { xafs, chosen, chosenKind: kinds[chosen]!, roles, alternativeDate, history };
+    const xaf = chain.length > 0 ? mergeYears([...chain.map((i) => xafs[i]!), c]) : c;
+    return { xaf, chosen, chosenKind: kinds[chosen]!, roles, alternativeDate, history };
   }
 
   private source(file: string | Uint8Array, given?: ColumnMapping):
@@ -405,6 +448,9 @@ export class XafImportService {
       warnings.push(`De auditfile loopt tot ${formatDateNl(xaf.endDate)}. Boekingen van ${formatDateNl(addDays(xaf.endDate, 1))} tot ${formatDateNl(date)} ontbreken: exporteer tot en met ${formatDateNl(until)}, of kies ${formatDateNl(suggestedDate)} als instapdatum.`);
     }
 
+    if (!xaf.totalsOnly && xaf.opening.lines.length === 0 && xaf.startDate < date) {
+      warnings.push(`In de auditfile staat geen beginbalans: de app rekent vanaf ${formatDateNl(xaf.startDate)} met € 0 op elke rekening. Liep je bedrijf al eerder? Zet dan ook de auditfiles van de jaren ervoor erbij; dat kan tegelijk.`);
+    }
     const byId = new Map(xaf.accounts.map((a) => [a.id, a]));
     const cls = new Map(xaf.accounts.map((a) => [a.id, classify(a)]));
     const lines = xaf.lines.filter((l) => l.date <= until);

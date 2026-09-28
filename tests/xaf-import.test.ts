@@ -262,6 +262,39 @@ describe('meerdere auditfiles tegelijk (een per jaar)', () => {
     expect(r.plan.banks[0]!.amount).toBe(9_710_00);
   });
 
+  it('auditfiles zonder beginbalans (bv. DigiBoox): de app telt de jaren op tot de instapdatum', () => {
+    const zonder = (xml: string) => xml.replace(/<openingBalance>[\s\S]*?<\/openingBalance>/, '');
+    const files = [zonder(XAF_2026), XAF_2024, zonder(XAF_2025)];
+    const { s } = overstapper('2026-01-01');
+    const r = s.xafImport.analyzeFiles(files);
+    expect(r.chosen).toBe(2);
+    expect(r.files.map((f) => f.role)).toEqual(['later', 'gebruikt', 'gebruikt']);
+    expect(r.files[1]!.reason).toMatch(/geen beginbalans.*2024 erbij op/);
+    if (!('plan' in r)) throw new Error('geen voorstel');
+    // precies dezelfde startstand als met de beginbalansen
+    expect(r.plan.banks[0]!.amount).toBe(8_500_00);
+    expect(r.plan.equity).toBe(13_700_00);
+    expect(r.plan.proposals.find((p) => p.label === 'Bestelbus')!.input).toMatchObject({ acquiredOn: '2024-03-15', bookValue: 13_000_00 });
+    expect(r.plan.proposals.find((p) => p.input.kind === 'klant')!.input).toMatchObject({ number: '2025-099', amount: 1_210_00 });
+    expect(r.plan.warnings.join(' ')).toMatch(/geen beginbalans: de app rekent vanaf 1 januari 2024/);
+
+    const state = s.xafImport.applyFiles(files, { include: allKeys(r.plan), banks: { '1100': 'nieuw' }, relations: true });
+    expect(state.position?.eigenVermogen).toBe(13_700_00);
+  });
+
+  it('één auditfile zonder beginbalans: de app waarschuwt dat eerdere jaren ontbreken', () => {
+    const { s } = overstapper('2026-09-01');
+    const plan = s.xafImport.analyze(XAF_2026.replace(/<openingBalance>[\s\S]*?<\/openingBalance>/, ''));
+    expect(plan.warnings.join(' ')).toMatch(/geen beginbalans.*Liep je bedrijf al eerder\? Zet dan ook de auditfiles van de jaren ervoor erbij/);
+  });
+
+  it('DigiBoox-rekeningen: btw met BSchBtw, en een resultaatrekening met een balanscode', () => {
+    expect(classify({ id: '1802', name: 'Te vorderen btw', type: 'B', rgs: 'BSchBtw' })).toBe('btw');
+    expect(classify({ id: '1830', name: 'Betaalde / ontvangen btw', type: 'B', rgs: 'BSchBtw' })).toBe('btw');
+    expect(classify({ id: '9999', name: 'Overboekingsrekening winst', type: 'P', rgs: 'BLimKru' })).toBe('eigen-vermogen');
+    expect(classify({ id: '2000', name: 'Kruisposten / Spaartransactie', type: 'B', rgs: 'BLimKru' })).toBe('vordering');
+  });
+
   it('alleen jaren na de instapdatum: duidelijke melding', () => {
     const { s } = overstapper('2023-07-01');
     expect(() => s.xafImport.analyzeFiles([XAF_2025, XAF_2026])).toThrow(/beginnen na je instapdatum/);
