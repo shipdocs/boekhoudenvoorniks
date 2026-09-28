@@ -20,11 +20,13 @@ export interface Relation {
   iban: string | null;
   payment_term_days: number | null;
   notes: string | null;
+  /** hoe rekeningen van deze leverancier altijd betaald worden (null: van de zakelijke rekening) */
+  paid_with: 'kas' | 'prive' | null;
   archived: number;
   created_at: string;
 }
 
-export type RelationInput = Partial<Omit<Relation, 'id' | 'archived' | 'created_at'>> & { name: string; type?: RelationType };
+export type RelationInput = Partial<Omit<Relation, 'id' | 'archived' | 'created_at' | 'paid_with'>> & { name: string; type?: RelationType };
 
 const FIELDS = ['type', 'name', 'contact_name', 'email', 'phone', 'address', 'postcode', 'city', 'country', 'vat_number', 'kvk_number', 'iban', 'payment_term_days', 'notes'] as const;
 
@@ -74,6 +76,13 @@ export class RelationsService {
       .prepare(`INSERT INTO relations (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
       .run(...cols.map((c) => clean[c] ?? null));
     return this.get(Number(result.lastInsertRowid));
+  }
+
+  /** "Deze betaal ik altijd privé/contant": nieuwe rekeningen van deze leverancier staan meteen op betaald. */
+  setPaidWith(id: number, paidWith: 'kas' | 'prive' | null): Relation {
+    this.get(id);
+    this.db.prepare('UPDATE relations SET paid_with = ? WHERE id = ?').run(paidWith, id);
+    return this.get(id);
   }
 
   update(id: number, input: Partial<RelationInput>): Relation {

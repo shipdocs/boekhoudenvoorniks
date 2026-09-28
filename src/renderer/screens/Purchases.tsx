@@ -8,6 +8,7 @@ import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
 import { formatDateNl } from '../../shared/dates';
 import type { FxCandidate } from '../../fx/repair';
 import { CategoryChips } from './Categories';
+import type { PurchaseInvoice } from '../../documents/purchases';
 
 export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const { go, toast } = useApp();
@@ -16,6 +17,8 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const purchases = useLoad(() => api.purchases.list());
   const [manual, setManual] = useState(false);
   const [pay, setPay] = useState<number | null>(payInitial ?? null);
+  // niet van de zakelijke rekening betaald (privérekening, telefoonrekening, contant)
+  const [paidElsewhere, setPaidElsewhere] = useState<PurchaseInvoice | null>(null);
   const [uploading, setUploading] = useState(0);
   // vreemde valuta (#74): een aankoop omrekenen (uit de lijst van de app, of met de hand)
   const [fx, setFx] = useState<{ id: number; fromDocument: boolean } | null>(null);
@@ -97,6 +100,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                 <td onClick={(e) => e.stopPropagation()}>
                   <span className="row">
                     {p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}
+                    {p.status === 'open' && p.open_amount > 0 && <Button small kind="ghost" title="Al betaald, maar niet van je zakelijke rekening (bv. privé of contant)" onClick={() => setPaidElsewhere(p)}>Al betaald</Button>}
                     {!p.currency && <Button small kind="ghost" title="Was deze bon in dollars of een andere munt? Dan reken je hem hier om naar euro's." ariaLabel="Omrekenen uit een andere munt" onClick={() => setFx({ id: p.id, fromDocument: false })}>💱</Button>}
                     <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={async () => {
                       const v = prompt('Hoeveel maanden garantie? (leeg = geen)', p.warranty_months ? String(p.warranty_months) : '24');
@@ -115,6 +119,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
       )}
       {manual && <ManualExpense onClose={() => setManual(false)} onDone={async () => { setManual(false); await purchases.reload(); }} />}
       {pay !== null && <PayModal id={pay} onClose={() => setPay(null)} />}
+      {paidElsewhere && <PaidElsewhereModal purchase={paidElsewhere} others={(purchases.data ?? []).filter((x) => x.id !== paidElsewhere.id && x.relation_id !== null && x.relation_id === paidElsewhere.relation_id && x.status === 'open' && x.open_amount > 0).length} onClose={() => setPaidElsewhere(null)} onDone={async () => { setPaidElsewhere(null); await purchases.reload(); }} />}
       {fx && <ForeignModal purchaseId={fx.id} fromDocument={fx.fromDocument} onClose={() => setFx(null)} onDone={async () => { setFx(null); await foreign.reload(); await purchases.reload(); }} />}
     </div>
   );
@@ -232,6 +237,44 @@ function ForeignModal({ purchaseId, fromDocument, onClose, onDone }: { purchaseI
           );
           if (r) await onDone();
         }}>{p?.alreadyBooked ? 'Weghalen' : 'Omrekenen'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Al betaald, maar niet van de zakelijke rekening: van je privérekening, via je telefoonrekening of
+ * contant. Privé wordt Crediteuren aan Privé-stortingen; de kosten en de btw blijven gewoon staan.
+ */
+function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase: PurchaseInvoice; others: number; onClose: () => void; onDone: () => Promise<void> }) {
+  const { run, busy } = useAction();
+  const [via, setVia] = useState<'prive' | 'kas'>('prive');
+  const [always, setAlways] = useState(false);
+  const name = p.relation_name ?? p.description;
+  return (
+    <Modal title="Al betaald" onClose={onClose}>
+      <div className="grid">
+        <p><strong>{name}</strong> · <Euro cents={p.open_amount} /> · <DateNl date={p.invoice_date} /></p>
+        <Field label="Hoe betaald?">
+          <div className="chips">
+            <button className={via === 'prive' ? 'selected' : ''} onClick={() => setVia('prive')}>Met privégeld</button>
+            <button className={via === 'kas' ? 'selected' : ''} onClick={() => setVia('kas')}>Contant uit de zaak</button>
+          </div>
+        </Field>
+        {via === 'prive' && <p className="small muted">Bv. van je privérekening of via je telefoonrekening. De kosten en de btw die je terugkrijgt blijven gewoon staan; het bedrag telt als geld dat je privé in de zaak stopt.</p>}
+        {p.relation_id !== null && (
+          <label className="row small">
+            <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} />
+            Voortaan altijd zo bij {name}{others > 0 && <> (ook de {others === 1 ? 'andere open rekening' : `${others} andere open rekeningen`})</>}
+          </label>
+        )}
+      </div>
+      <div className="row end" style={{ marginTop: 16 }}>
+        <Button onClick={onClose}>Annuleren</Button>
+        <Button kind="primary" disabled={busy} onClick={async () => {
+          const r = await run(() => api.purchases.paidWith(p.id, via, { always }), 'Op betaald gezet ✓');
+          if (r) await onDone();
+        }}>Op betaald zetten</Button>
       </div>
     </Modal>
   );
