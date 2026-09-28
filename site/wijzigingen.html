@@ -28,12 +28,36 @@
     <p class="lead">Per versie wat er is toegevoegd, verbeterd en opgelost. De app werkt zichzelf bij; bij de eerste start van een nieuwe versie maakt hij eerst een kopie van je administratie.</p>
 
     <nav class="toc" aria-label="Versies">
-      <a href="#v0.6.2">0.6.2</a><a href="#v0.6.1">0.6.1</a><a href="#v0.6.0">0.6.0</a><a href="#v0.5.0">0.5.0</a><a href="#v0.4.0">0.4.0</a><a href="#v0.3">0.3.x</a><a href="#v0.2.0">0.2.0</a><a href="#v0.1.0">0.1.0</a>
+      <a href="#v0.6.3">0.6.3</a><a href="#v0.6.2">0.6.2</a><a href="#v0.6.1">0.6.1</a><a href="#v0.6.0">0.6.0</a><a href="#v0.5.0">0.5.0</a><a href="#v0.4.0">0.4.0</a><a href="#v0.3">0.3.x</a><a href="#v0.2.0">0.2.0</a><a href="#v0.1.0">0.1.0</a>
     </nav>
+
+    <article id="v0.6.3" class="release">
+      <header>
+        <h2>0.6.3 <span class="tag latest">Nieuwste versie</span></h2>
+        <p class="meta"><time datetime="2026-09-28">28 september 2026</time> · <a href="https://github.com/shipdocs/gratis-boekhouden/releases/tag/v0.6.3">Downloads en controlegetallen</a></p>
+        <p class="summary">Revolut inlezen, facturen van Stripe goed gelezen, en Claude Code of Codex die ook vanuit het menu werken.</p>
+      </header>
+      <h3><span class="tag new">Nieuw</span></h3>
+      <ul>
+        <li><strong>Revolut-export</strong>: alleen voltooide betalingen, kosten als eigen regel, en het eindsaldo voor de controle. Het bestand komt op je rekening Revolut.</li>
+        <li><strong>Beroep Webdeveloper / ICT</strong>, en een stap "Waar geef je geld aan uit?" met kostenposten die bij je vak horen.</li>
+      </ul>
+      <h3><span class="tag improved">Verbeterd</span> Facturen van Stripe</h3>
+      <ul>
+        <li>Leverancier, factuurnummer en totaal kloppen bij facturen en betaalbewijzen van Stripe (Vercel, Render, Supabase, ...).</li>
+        <li>De btw van buitenlandse leveranciers volgt uit het land in het adres: zonder btw op de factuur is het verlegd, niet 21%.</li>
+        <li>Een factuur bij een betaling die al geboekt is, wordt het bewijsstuk, ook bij een andere spelling van de naam of een latere kaartbetaling.</li>
+        <li>Claude Code en Codex vinden Node.js ook als je de app vanuit het menu start. De app gebruikt dan geen instellingen of hooks van jezelf, en bonnen lezen is zuiniger.</li>
+      </ul>
+      <h3><span class="tag fixed">Opgelost</span></h3>
+      <ul>
+        <li>Een overboeking naar een spaarrekening zonder IBAN (Knab) bleef aan één kant als vraag staan, en kon dubbel geboekt worden. De app herstelt dit vanzelf.</li>
+      </ul>
+    </article>
 
     <article id="v0.6.2" class="release">
       <header>
-        <h2>0.6.2 <span class="tag latest">Nieuwste versie</span></h2>
+        <h2>0.6.2</h2>
         <p class="meta"><time datetime="2026-09-28">28 september 2026</time> · <a href="https://github.com/shipdocs/gratis-boekhouden/releases/tag/v0.6.2">Downloads en controlegetallen</a></p>
         <p class="summary">Bij elke vraag van de app zie je waar het over gaat en wat je keuze in je boekhouding doet.</p>
       </header>
