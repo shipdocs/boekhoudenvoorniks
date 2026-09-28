@@ -52,5 +52,6 @@ export const OTHER_DESTINATIONS = [
   { key: 'btw', label: 'Btw betaald aan / terug van de Belastingdienst', account: 'BSchBepBtwAfr' },
   { key: 'overboeking', label: 'Overboeking tussen eigen rekeningen', account: 'BLiqKru' },
   { key: 'omzet', label: 'Verkoop via een ander systeem', hint: 'Een klant betaalde je via bv. Mollie, je webshop, kassa, pin of contant, of voor een factuur die je ergens anders maakte', account: 'WOmzNopOlh' },
+  { key: 'rente', label: 'Rente ontvangen', hint: 'Rente van de bank op je zakelijke rekening. Geen omzet en geen btw, wel winst', account: 'WFbeRlmObr' },
   { key: 'onbekend', label: 'Weet ik nog niet (later uitzoeken)', account: 'BSchOvsVrp' },
 ];

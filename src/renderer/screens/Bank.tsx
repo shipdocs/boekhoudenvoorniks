@@ -335,6 +335,8 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const overdue = useLoad(() => api.invoices.list({ status: 'vervallen' }));
   const [recat, setRecat] = useState(false);
   const [sale, setSale] = useState(false);
+  // geld terug van een leverancier (refund): onder welke kosten viel de aankoop?
+  const [refund, setRefund] = useState(false);
   const own = useLoad(() => api.bank.ownTransfer(id), [id]);
   // potjes zonder eigen rekeningnummer (bv. Knab): daar komt geen afschrift van, dus hier kiezen
   const pots = useLoad(() => api.bank.accounts().then((list) => list.filter((a) => a.is_pot)));
@@ -429,7 +431,24 @@ export function CategorizeTransaction({ id }: { id: number }) {
                     <div className="hint">Geld terug van een potje binnen je eigen bank: geen omzet</div>
                   </button>
                 ))}
-                {['omzet', 'prive-storting', 'btw', 'overboeking', 'onbekend'].map((key) => meta.otherDestinations.find((d) => d.key === key)!).map((d) => (
+                <button disabled={busy} className={refund ? 'selected' : ''} aria-expanded={refund} onClick={() => setRefund(!refund)}>
+                  Geld terug van een aankoop (refund)
+                  <div className="hint">Een leverancier of webshop betaalde je iets terug. Dat verlaagt je kosten (en de btw die je terugkreeg), het is geen omzet</div>
+                </button>
+                {refund && (
+                  <div className="card flat">
+                    <CategoryPicker
+                      incoming
+                      amount={Math.abs(t.amount)}
+                      onPick={(categoryKey, vatCode) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode }))}
+                    />
+                    <p className="small muted">Kies dezelfde categorie en btw als bij de oorspronkelijke aankoop.</p>
+                    <Button small disabled={busy} onClick={() => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'prive'))}>
+                      Het was een privé-aankoop
+                    </Button>
+                  </div>
+                )}
+                {['omzet', 'rente', 'prive-storting', 'btw', 'overboeking', 'onbekend'].map((key) => meta.otherDestinations.find((d) => d.key === key)!).map((d) => (
                   <Fragment key={d.key}>
                     <button disabled={busy} className={d.key === 'omzet' && sale ? 'selected' : ''} aria-expanded={d.key === 'omzet' ? sale : undefined} onClick={() => (d.key === 'omzet' ? setSale(!sale) : void done(api.bank.book(t.id, { account: d.account })))}>
                       {d.label}
