@@ -1,5 +1,15 @@
 # Wijzigingen
 
+## 0.6.6 — dubbele aankopen: eerst vragen
+
+### Aankopen
+- **Eerst vragen, niet zelf weghalen**: lijkt een aankoop dubbel met een afschrijving op je rekening, dan vraagt de app het eerst:
+  - bij **Al betaald**: "Op Revolut staat op 20 juli al € 17,28 aan Moonshot AI, geboekt als kosten. Is dat dezelfde betaling?";
+  - in **Vandaag**, voor aankopen die al op privé of contant betaald staan: "Staat deze aankoop dubbel?", met *Ja, dezelfde betaling* of *Nee, twee aankopen*.
+- Vanzelf herstellen doet de app alleen als het zeker is: een leverancier op "voortaan privé" waarvan dezelfde betaling toch als kosten op je rekening staat (het geval uit 0.6.4). Contant betaald is nooit zeker, want dat staat niet op de bank.
+- **Alleen als kosten geboekt telt**: een afschrijving die als privé-opname of eigen overboeking staat, telt niet als "deze betaling staat al op je rekening". Dat geldt ook bij het inlezen van bonnen.
+- Bij **voortaan altijd** blijft een andere open rekening waarvan de betaling mogelijk al op je rekening staat open, en gaat de leverancier niet op privé.
+
 ## 0.6.5 — privé betaald, zonder dubbele kosten
 
 ### Aankopen

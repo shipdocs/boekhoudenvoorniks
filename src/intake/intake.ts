@@ -499,7 +499,10 @@ export class IntakeService {
           .prepare(
             `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount < 0 AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
                AND julianday(transaction_date) - julianday(?) BETWEEN -10 AND 20
-               AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || bank_transactions.id || '"%')`,
+               AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || bank_transactions.id || '"%')
+               -- alleen als kosten geboekt: niet een privé-opname of eigen overboeking met toevallig hetzelfde bedrag
+               AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+                            WHERE l.journal_entry_id = bank_transactions.matched_journal_entry_id AND a.category = 'kosten')`,
           )
           .all(result.invoiceDate.value) as BankTransaction[]
       ).filter((t) => withinFx(-t.amount, result.total!.value) && !!t.counter_name && same(t.counter_name));
@@ -512,7 +515,10 @@ export class IntakeService {
       .prepare(
         `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount = ? AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
            AND ABS(julianday(transaction_date) - julianday(?)) <= 3
-           AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || bank_transactions.id || '"%')`,
+           AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || bank_transactions.id || '"%')
+               -- alleen als kosten geboekt: niet een privé-opname of eigen overboeking met toevallig hetzelfde bedrag
+               AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+                            WHERE l.journal_entry_id = bank_transactions.matched_journal_entry_id AND a.category = 'kosten')`,
       )
       .all(-result.total.value, result.invoiceDate.value) as BankTransaction[];
     return rows.length === 1 ? rows[0]! : null;
