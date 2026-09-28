@@ -6,6 +6,7 @@ import type { PurchaseVatCode } from '../../shared/vat';
 import { mightBeInvestment, netAmount } from '../../shared/investment';
 import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
 import { formatDateNl } from '../../shared/dates';
+import { formatEuro } from '../../shared/money';
 import type { FxCandidate } from '../../fx/repair';
 import { CategoryChips } from './Categories';
 import type { PurchaseInvoice } from '../../documents/purchases';
@@ -247,6 +248,7 @@ function ForeignModal({ purchaseId, fromDocument, onClose, onDone }: { purchaseI
  * contant. Privé wordt Crediteuren aan Privé-stortingen; de kosten en de btw blijven gewoon staan.
  */
 function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase: PurchaseInvoice; others: number; onClose: () => void; onDone: () => Promise<void> }) {
+  const { toast } = useApp();
   const { run, busy } = useAction();
   const [via, setVia] = useState<'prive' | 'kas'>('prive');
   const [always, setAlways] = useState(false);
@@ -272,8 +274,17 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
         <Button kind="primary" disabled={busy} onClick={async () => {
-          const r = await run(() => api.purchases.paidWith(p.id, via, { always }), 'Op betaald gezet ✓');
-          if (r) await onDone();
+          const r = await run(() => api.purchases.paidWith(p.id, via, { always }));
+          if (!r) return;
+          const n = r.alreadyBooked.length;
+          if (n > 0) {
+            const b = r.alreadyBooked[0]!;
+            toast(n === 1
+              ? `Deze betaling stond al op je rekening (${formatDateNl(b.date)}, ${formatEuro(b.amount)}). De aankoop is weggehaald; de bon is nu het bewijsstuk bij die betaling.`
+              : `${n} betalingen stonden al op je rekening. Die aankopen zijn weggehaald; de bonnen zijn nu het bewijsstuk.`);
+          }
+          if (r.paid.length > 0) toast(r.paid.length === 1 ? 'Op betaald gezet ✓' : `${r.paid.length} rekeningen op betaald gezet ✓`);
+          await onDone();
         }}>Op betaald zetten</Button>
       </div>
     </Modal>
