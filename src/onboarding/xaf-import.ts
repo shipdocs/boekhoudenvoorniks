@@ -190,6 +190,20 @@ function classByName(a: XafAccount): XafClass {
   return 'onbekend';
 }
 
+/**
+ * Dezelfde bank, ook als je vorige programma hem anders noemt: "Bank Knab" en "KNAB", "Rabo zakelijk" en
+ * "Rabobank zakelijk". Woorden als bank, rekening en zakelijk tellen niet mee.
+ */
+export function sameBankName(a: string, b: string): boolean {
+  const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w && !['bank', 'rekening', 'zakelijk', 'zakelijke', 'betaalrekening', 'nl', 'bv', 'b', 'v'].includes(w));
+  const x = words(a);
+  const y = words(b);
+  if (x.length === 0 || y.length === 0) return a.trim().toLowerCase() === b.trim().toLowerCase();
+  // elk woord van de kortste naam komt (als begin van een woord) in de andere voor: rabo ~ rabobank
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.every((w) => long.some((v) => v.startsWith(w) || w.startsWith(v)));
+}
+
 export function classify(a: XafAccount): XafClass {
   // een resultaatrekening (P) met een balanscode is tegenstrijdig, bv. DigiBoox' "Overboekingsrekening
   // winst" met BLimKru: dan telt het soort rekening, en herkent de app hem op de naam
@@ -532,7 +546,7 @@ export class XafImportService {
         const iban = xaf.lines.find((l) => l.accountId === a.id && l.journalIban)?.journalIban ?? null;
         // één rekening aan beide kanten: dezelfde, tenzij de rekeningnummers verschillen
         const only = of('bank').length === 1 && appBanks.length === 1 && (!iban || !appBanks[0]!.iban) ? appBanks[0] : undefined;
-        const match = appBanks.find((b) => (iban && b.iban === iban) || b.name.toLowerCase() === a.name.toLowerCase()) ?? only;
+        const match = appBanks.find((b) => iban && b.iban === iban) ?? appBanks.find((b) => !b.is_pot && sameBankName(b.name, a.name)) ?? only;
         return { accountId: a.id, name: a.name, iban, amount: balance.get(a.id) ?? 0, bankAccountId: match?.id ?? null };
       });
     for (const b of banks) {
@@ -803,7 +817,8 @@ export class XafImportService {
       for (const b of plan.banks) {
         const target = choices.banks[b.accountId];
         if (target === null || target === undefined) continue;
-        const id = target === 'nieuw' ? this.bank.addAccount(b.name, b.iban && !this.bank.listAccounts().some((x) => x.iban === b.iban) ? b.iban : null).id : target;
+        // een rekening uit je vorige programma is een echte rekening, ook als het nummer er niet bij staat
+        const id = target === 'nieuw' ? this.bank.addAccount(b.name, b.iban && !this.bank.listAccounts().some((x) => x.iban === b.iban) ? b.iban : null, { pot: false }).id : target;
         this.switchover.setBankOpening(id, b.amount);
         used.push(id);
       }

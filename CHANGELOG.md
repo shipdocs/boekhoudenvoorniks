@@ -3,6 +3,8 @@
 ## Nog niet uitgebracht
 
 ### Bank
+- **Rekeningen uit je vorige administratie**: de app herkent dezelfde bank ook onder een andere naam ("Bank Knab" en "KNAB", "Rabo" en "Rabobank"), zodat er geen dubbele rekening bijkomt. Een rekening die bij het inlezen wordt aangemaakt is een gewone rekening, geen potje.
+- Bij **Rekening wijzigen** zet je een rekening zonder nummer op potje of gewone rekening, en een lege rekening (geen afschriften, geen boekingen, beginsaldo € 0) haal je weg.
 - **Rente ontvangen**: nieuwe keuze bij geld dat binnenkomt. Telt mee in je winst (bij de financiële baten en lasten), niet als omzet en zonder btw.
 - **Geld terug van een aankoop (refund)**: kies de categorie en btw van de oorspronkelijke aankoop; de app verlaagt je kosten en de btw die je terugkreeg. Was het een privé-aankoop, dan boekt de app het als privé.
 

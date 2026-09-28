@@ -59,3 +59,38 @@ describe('geld dat binnenkomt: rente en refunds', () => {
     expect(s.ledger.balance('BEivPriStr')).toBe(-13_900);
   });
 });
+
+describe('bankrekeningen uit een auditfile', () => {
+  it('dezelfde bank met een andere naam wordt herkend', async () => {
+    const { sameBankName } = await import('../src/onboarding/xaf-import');
+    expect(sameBankName('Bank Knab', 'KNAB')).toBe(true);
+    expect(sameBankName('Rabo zakelijk', 'Rabobank Zakelijke rekening')).toBe(true);
+    expect(sameBankName('revolut', 'Revolut Business')).toBe(true);
+    expect(sameBankName('Bank Knab', 'Rabobank')).toBe(false);
+    expect(sameBankName('ING', 'Triodos')).toBe(false);
+  });
+
+  it('een rekening zonder nummer kan een echte rekening zijn (geen potje), en een lege rekening kan weg', () => {
+    const { s } = setup();
+    s.bank.ensureDefaultAccount('NL91ABNA0417164300');
+    const echt = s.bank.addAccount('Rabo zakelijk', null, { pot: false });
+    const potje = s.bank.addAccount('Btw-potje', null);
+    expect(echt.is_pot).toBe(0);
+    expect(potje.is_pot).toBe(1);
+    s.bank.updateAccount(potje.id, { pot: false });
+    expect(s.bank.getAccount(potje.id).is_pot).toBe(0);
+
+    // leeg: weg te halen; daarna kan er gewoon weer een rekening bij
+    expect(s.bank.removable(echt.id).ok).toBe(true);
+    s.bank.removeAccount(echt.id);
+    expect(s.bank.listAccounts().some((a) => a.id === echt.id)).toBe(false);
+    const nieuw = s.bank.addAccount('Spaar', null);
+    expect(nieuw.rgs_code).not.toBe(echt.rgs_code);
+
+    // met een beginsaldo of afschriften niet
+    s.bank.setOpeningBalance(potje.id, 10_000, '2026-01-01');
+    expect(s.bank.removable(potje.id)).toMatchObject({ ok: false, reason: expect.stringMatching(/beginsaldo/) });
+    const hoofd = s.bank.listAccounts()[0]!;
+    expect(s.bank.removable(hoofd.id).ok).toBe(false);
+  });
+});
