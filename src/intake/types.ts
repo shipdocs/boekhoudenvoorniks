@@ -60,6 +60,8 @@ export interface DocumentResult {
   linesBasis?: 'incl' | 'excl' | null;
   /** "btw verlegd" op het document */
   reverseCharge: boolean;
+  /** land van de leverancier (ISO-code) uit het adres, als dat er staat: voor verlegde btw (2a/4a/4b) */
+  supplierCountry?: Field<string> | null;
   /** ruwe tekst voor debugging en classificatie */
   rawText: string;
   /**

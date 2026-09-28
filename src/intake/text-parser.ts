@@ -35,8 +35,16 @@ export function toLines(items: TextItem[]): Line[] {
   }
   return lines.map((l) => {
     const items = l.items.sort((a, b) => a.bbox![0] - b.bbox![0]);
+    // stukjes die tegen elkaar aan staan (bv. "P6ARUBNL" "-" "0001") zijn één woord: geen spatie ertussen
+    const text = items.reduce((t, it, i) => {
+      if (i === 0) return it.text;
+      const prev = items[i - 1]!;
+      const gap = it.bbox![0] - prev.bbox![2];
+      const h = Math.max(it.bbox![3] - it.bbox![1], prev.bbox![3] - prev.bbox![1]);
+      return t + (gap < h * 0.15 ? '' : ' ') + it.text;
+    }, '');
     return {
-      text: items.map((i) => i.text).join(' ').replace(/\s+/g, ' ').trim(),
+      text: text.replace(/\s+/g, ' ').trim(),
       page: l.page,
       bbox: [Math.min(...items.map((i) => i.bbox![0])), Math.min(...items.map((i) => i.bbox![1])), Math.max(...items.map((i) => i.bbox![2])), Math.max(...items.map((i) => i.bbox![3]))],
       confidence: Math.min(...items.map((i) => i.confidence ?? 1)),
@@ -94,25 +102,95 @@ function parseDateText(text: string): string | null {
   return null;
 }
 
+/** "(Includes VAT of € 1,73)", "incl. btw € 1,73" */
+const INCL_VAT = /\b(?:includes|including|incl\.?|inclusief|inkl\.?)\s*(?:vat|btw|mwst|tax)\s*(?:of|van|von)?\s*:?\s*([€$£]?\s*\d[\d.,]*\d)/i;
+
+/** Betaaldiensten: staan vaak op een factuur ("paid via Stripe"), maar zijn niet de leverancier. */
+const PAYMENT_PROVIDERS = new Set(['Stripe', 'PayPal', 'Mollie', 'Adyen']);
+const VIA_LINE = /\b(?:paid|betaald|bezahlt)\s+(?:via|with|met|mit)\b|\b(?:processed|powered|provided)\s+by\b/i;
+/** "Cloudflare, Inc. @cloudflare Bill to": links de verkoper, rechts het kopje van de klant */
+const BILL_TO = /^(.*?)\s*\b(?:bill(?:ed)?\s+to|invoice\s+to|factuur\s+aan|rechnung\s+an)\b/i;
+/** Kopjes, geen naam van een leverancier */
+const LABEL_LINE = /factuur|\bbon\b|kassabon|invoice|receipt|rechnung|datum|\bdate\b|nummer|number|\bdue\b|pagina|page|bill to|ship to|account\s*id|billing\s*period|company\s*name|team\s*name|customer|klantnummer|\b(?:vat|btw|gst|ein)\b/i;
+
+/** Naam van de verkoper links van "Bill to": zonder @handle; bij "X dba Y" de handelsnaam Y. */
+function sellerName(raw: string): string | null {
+  let name = raw.replace(/\(?@[\w.-]+\)?/g, ' ');
+  const dba = /\bd\/?b\/?a\b\.?\s+(.+)$/i.exec(name);
+  if (dba) name = dba[1]!;
+  name = name.replace(/\s+/g, ' ').trim().replace(/[,;:]+$/, '');
+  return /[a-z]{2,}/i.test(name) && !LABEL_LINE.test(name) ? name.slice(0, 80) : null;
+}
+
+/** Landen zoals ze in een adres staan → landcode (ISO). */
+const COUNTRIES: [RegExp, string][] = [
+  [/\bUnited States\b|\bUSA\b|\bU\.S\.A\b|\bVerenigde Staten\b/i, 'US'],
+  [/\bUnited Kingdom\b|\bGreat Britain\b|\bVerenigd Koninkrijk\b/i, 'GB'],
+  [/\bSingapore\b/i, 'SG'],
+  [/\bCanada\b/i, 'CA'],
+  [/\bAustralia\b|\bAustralië\b/i, 'AU'],
+  [/\bSwitzerland\b|\bSchweiz\b|\bSuisse\b|\bZwitserland\b/i, 'CH'],
+  [/\bIsrael\b/i, 'IL'],
+  [/\bHong Kong\b/i, 'HK'],
+  [/\bChina\b/i, 'CN'],
+  [/\bJapan\b/i, 'JP'],
+  [/\bIndia\b/i, 'IN'],
+  [/\bNorway\b|\bNorwegen\b|\bNoorwegen\b/i, 'NO'],
+  [/\bIreland\b|\bIerland\b/i, 'IE'],
+  [/\bGermany\b|\bDeutschland\b|\bDuitsland\b/i, 'DE'],
+  [/\bFrance\b|\bFrankrijk\b/i, 'FR'],
+  [/\bBelgium\b|\bBelgië\b|\bBelgique\b/i, 'BE'],
+  [/\bLuxembourg\b|\bLuxemburg\b/i, 'LU'],
+  [/\bSweden\b|\bZweden\b/i, 'SE'],
+  [/\bDenmark\b|\bDenemarken\b/i, 'DK'],
+  [/\bSpain\b|\bSpanje\b/i, 'ES'],
+  [/\bItaly\b|\bItalië\b/i, 'IT'],
+  [/\bAustria\b|\bÖsterreich\b|\bOostenrijk\b/i, 'AT'],
+  [/\bPoland\b|\bPolen\b/i, 'PL'],
+  [/\bLithuania\b|\bLitouwen\b/i, 'LT'],
+  [/\bEstonia\b|\bEstland\b/i, 'EE'],
+  [/\bNetherlands\b|\bNederland\b/i, 'NL'],
+];
+
 export function parseDocumentText(items: TextItem[], source: ExtractionSource): DocumentResult {
   const lines = toLines(items);
   const rawText = lines.map((l) => l.text).join('\n');
   const field = <T>(value: T, line: Line, confidence: number): Field<T> => ({ value, confidence: confidence * line.confidence, source, page: line.page, bbox: line.bbox, raw: line.text });
 
-  // Leverancier: bekende naam of eerste regel met letters
+  // Leverancier: 1. bekende naam; 2. "<verkoper> Bill to" (twee kolommen op één regel, bv. een
+  // factuur van Stripe); 3. de eerste regel met letters; 4. desnoods een betaaldienst
   let supplier: Field<string> | null = null;
+  let provider: Field<string> | null = null;
   for (const line of lines.slice(0, 40)) {
+    // "(paid via Stripe)": de betaaldienst, niet de leverancier
+    if (VIA_LINE.test(line.text)) continue;
     const known = KNOWN_SUPPLIERS.find((s) => s.pattern.test(line.text));
-    if (known) {
-      supplier = field(known.name, line, 0.95);
-      break;
+    if (!known) continue;
+    if (PAYMENT_PROVIDERS.has(known.name)) {
+      provider ??= field(known.name, line, 0.6);
+      continue;
+    }
+    supplier = field(known.name, line, 0.95);
+    break;
+  }
+  let supplierLine = supplier ? lines.findIndex((l) => l.text === supplier!.raw) : -1;
+  if (!supplier) {
+    const i = lines.slice(0, 40).findIndex((l) => BILL_TO.test(l.text));
+    const name = i >= 0 ? sellerName(BILL_TO.exec(lines[i]!.text)![1]!) : null;
+    if (name) {
+      supplier = field(name, lines[i]!, 0.85);
+      supplierLine = i;
     }
   }
   if (!supplier) {
-    // de eerste regel met letters, maar geen kopje als "Factuur", "Date of issue" of "Invoice number"
-    const first = lines.find((l) => /[a-z]{3,}/i.test(l.text) && !/factuur|bon|kassabon|invoice|receipt|datum|\bdate\b|nummer|number|\bdue\b|pagina|page|bill to|ship to/i.test(l.text));
-    if (first) supplier = field(first.text.slice(0, 80), first, 0.5);
+    // de eerste regel met letters, maar geen kopje als "Factuur", "Date of issue" of "Account ID"
+    const i = lines.findIndex((l) => /[a-z]{3,}/i.test(l.text) && !LABEL_LINE.test(l.text) && !VIA_LINE.test(l.text));
+    if (i >= 0) {
+      supplier = field(lines[i]!.text.slice(0, 80), lines[i]!, 0.5);
+      supplierLine = i;
+    }
   }
+  supplier ??= provider;
 
   // Datum: bij voorkeur een regel met "datum"
   let invoiceDate: Field<string> | null = null;
@@ -154,8 +232,10 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     if (/sub\s*totaal|subtotal|excl|totaal\s*btw|btw\s*totaal|korting/.test(t)) continue;
     const a = amounts(line.text);
     if (a.length === 0) continue;
-    if (/te\s*betalen|totaal\s*incl|amount\s*due|te voldoen/.test(t)) totalCandidates.push({ line, value: a[a.length - 1]!, conf: 0.95 });
+    if (/te\s*betalen|totaal\s*incl|amount\s*(?:due|paid)|total\s*paid|te voldoen|betaald\s*bedrag/.test(t)) totalCandidates.push({ line, value: a[a.length - 1]!, conf: 0.95 });
     else if (/\btotaal\b|\btotal\b|^bedrag|pin(nen)?\b|betaald/.test(t)) totalCandidates.push({ line, value: a[a.length - 1]!, conf: 0.85 });
+    // Stripe zet het bedrag ook bovenaan: "$5.00 USD due September 2, 2026"
+    else if (/^[€$£]?\s*[\d.,]+\s*[a-z]{3}\s+due\b/.test(t)) totalCandidates.push({ line, value: a[0]!, conf: 0.9 });
   }
   if (totalCandidates.length) {
     const best = totalCandidates.sort((a, b) => b.conf - a.conf || Math.abs(b.value) - Math.abs(a.value))[0]!;
@@ -176,7 +256,7 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
   let vatLine: Line | null = null;
   const VAT_WORD = /btw|vat|b\.t\.w|omzetbelasting/i;
   const candidates: { line: Line; vat: VatLine; word: boolean }[] = [];
-  for (const line of lines) {
+  for (const [i, line] of lines.entries()) {
     const m = /(\d{1,2})(?:[.,]0+)?\s*%/.exec(line.text);
     if (!m) continue;
     const rate = Number(m[1]);
@@ -184,6 +264,21 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     const a = amounts(line.text.replace(m[0], ' '));
     if (a.length === 0) continue;
     const word = VAT_WORD.test(line.text);
+    // "VAT - Netherlands 21% on $5.00": dat bedrag is de grondslag; de btw staat op dezelfde regel of
+    // vlak erboven/eronder (Stripe zet hem in een eigen kolom)
+    const on = /%\s*(?:on|over|of|van|auf)\s*[€$£]?\s*(\d[\d.,]*\d)/i.exec(line.text);
+    if (on && word) {
+      const base = amounts(on[1]!)[0];
+      if (base !== undefined) {
+        const expected = Math.round((base * rate) / 100);
+        const near = [line, lines[i - 1], lines[i + 1], lines[i - 2], lines[i + 2]].filter((l): l is Line => !!l);
+        const amount = near.flatMap((l) => amounts(l === line ? line.text.replace(on[0], ' ') : l.text)).find((x) => Math.abs(x - expected) <= 2);
+        if (amount !== undefined) {
+          candidates.push({ line, vat: { rate, base, amount }, word });
+          continue;
+        }
+      }
+    }
     // zonder "btw" en met maar één bedrag: alleen een kale regel als "21%  14,74", geen artikelregel met tekst
     if (!word && a.length === 1 && /[a-z]{3,}/i.test(line.text)) continue;
     if (a.length >= 2) {
@@ -200,6 +295,14 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
       candidates.push({ line, vat: { rate, base: null, amount: a[0]! }, word });
     }
   }
+  // "(Includes VAT of € 1,73)" zonder percentage: het tarief volgt uit het bedrag en het totaal
+  const inclLine = lines.find((l) => INCL_VAT.test(l.text));
+  if (candidates.length === 0 && inclLine && total) {
+    const vat = amounts(INCL_VAT.exec(inclLine.text)![1]!)[0];
+    const base = vat === undefined ? 0 : total.value - vat;
+    const rate = vat !== undefined && base > 0 ? [21, 9].find((r) => Math.abs(Math.round((base * r) / 100) - vat) <= 2) : undefined;
+    if (rate !== undefined) candidates.push({ line: inclLine, vat: { rate, base, amount: vat! }, word: true });
+  }
   // staan er regels met "btw" in, dan alleen die: losse "21%" is dan een kolom in de artikeltabel
   const chosen = candidates.some((c) => c.word) ? candidates.filter((c) => c.word) : candidates;
   for (const c of chosen) {
@@ -208,6 +311,18 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     vatLine ??= c.line;
   }
   const reverseCharge = /btw\s*verlegd|verlegd|reverse\s*charge|vat\s*reverse/i.test(rawText);
+
+  // Land van de leverancier: het eerste land onder de naam van de leverancier, vóór de artikelen.
+  // Staat het adres van de klant ernaast (twee kolommen), dan het meest linkse.
+  let supplierCountry: Field<string> | null = null;
+  const tableStart = lines.findIndex((l) => /^(description|omschrijving|beschrijving|artikel)\b/i.test(l.text));
+  for (const line of lines.slice(Math.max(0, supplierLine), tableStart > supplierLine ? tableStart : undefined)) {
+    const hits = COUNTRIES.map(([re, code]) => ({ code, at: re.exec(line.text)?.index ?? -1 })).filter((h) => h.at >= 0).sort((x, y) => x.at - y.at);
+    if (hits.length) {
+      supplierCountry = field(hits[0]!.code, line, 0.8);
+      break;
+    }
+  }
 
   const ibanMatch = /\b([A-Z]{2}\d{2}\s?(?:[A-Z0-9]{4}\s?){2,7}[A-Z0-9]{1,4})\b/.exec(rawText);
   const iban = ibanMatch && isValidIban(ibanMatch[1]!) ? normalizeIban(ibanMatch[1]!) : null;
@@ -264,6 +379,8 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     linesBasis,
     lineDescriptions: lines.filter((l) => amounts(l.text).length === 1 && /[a-z]{4,}/i.test(l.text) && !/totaal|btw|subtotaal|pin|betaald|wisselgeld/i.test(l.text)).map((l) => l.text).slice(0, 30),
     reverseCharge,
+    // een land alleen als er geen btw op het document staat: "incl. btw" is nooit verlegd
+    supplierCountry: inclLine ? null : supplierCountry,
     rawText,
   };
 }
