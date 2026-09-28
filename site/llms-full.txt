@@ -11,8 +11,8 @@ Belangrijke feiten:
 - Facturen en offertes: pdf en e-mail via eigen mailserver (SMTP), doorlopende factuurnummering, creditfacturen, automatische betalingsherinneringen, eigen opmaak (logo, kleuren, teksten).
 - Btw per factuurregel: 21%, 9%, 0%, btw verlegd, vrijgesteld/KOR. Bij btw verlegd verplicht btw-nummer van de klant.
 - Btw-aangifte: berekening per kwartaal, maand of jaar met rubrieken 1a, 1b, 1e, 2a, 5a, 5b en 5g. De gebruiker neemt de bedragen over in Mijn Belastingdienst Zakelijk. Direct indienen via SBR/Digipoort is in voorbereiding (nog niet beschikbaar).
-- Bank: import van CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos, eigen kolomindeling), MT940 en CAMT.053; automatische koppeling van betalingen aan facturen en bonnetjes. Een live bankkoppeling (open banking) is nog niet beschikbaar.
-- Bonnetjes: e-facturen (UBL/XML) en pdf's met tekst worden automatisch gelezen; foto's via een optionele lokale tekstherkenning (OCR). AI doet alleen voorstellen; boekingen worden door vaste regels gemaakt.
+- Bank: import van CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos, Revolut, eigen kolomindeling), MT940 en CAMT.053; automatische koppeling van betalingen aan facturen en bonnetjes. Een live bankkoppeling (open banking) is nog niet beschikbaar.
+- Bonnetjes: e-facturen (UBL/XML) en pdf's met tekst worden automatisch gelezen; foto's via een optionele lokale tekstherkenning (OCR). AI doet alleen voorstellen; boekingen worden door vaste regels gemaakt. Een aankoop die privé (privérekening, telefoonrekening, privé-creditcard) of contant betaald is, zet je met één klik op betaald; per leverancier te onthouden.
 - Klussen: offerte → klus → factuur, met kosten per klus.
 - Voor de boekhouder: expertmodus met grootboek (RGS), journaal, balans, winst-en-verliesrekening, correctieboekingen, auditfile (XAF 3.2) en CSV-exports.
 - Koppelingen: WooCommerce, Shopify, Mollie, Stripe.
@@ -38,7 +38,7 @@ Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij 
 
 ### Welke banken worden ondersteund?
 
-Je leest een bankafschrift in als CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of een eigen kolomindeling), MT940 of CAMT.053. Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes.
+Je leest een bankafschrift in als CSV (ING, Rabobank, ABN AMRO, bunq, Knab, Triodos, Revolut of een eigen kolomindeling), MT940 of CAMT.053. Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes.
 
 ### Heb ik boekhoudkennis nodig?
 
