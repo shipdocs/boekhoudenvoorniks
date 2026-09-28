@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
 import { CategoryChoice, InvestmentHint, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
 import type { PurchaseVatCode } from '../../shared/vat';
@@ -136,6 +136,8 @@ export function DocumentReview({ id }: { id: number }) {
   const jobSuggestion = useLoad(() => api.jobs.suggestForDocument(id), [id]);
   const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
+  // mogelijk dubbel: de andere bon ernaast bekijken
+  const [compare, setCompare] = useState<number | null>(null);
   const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
 
   const d = doc.data;
@@ -224,11 +226,19 @@ export function DocumentReview({ id }: { id: number }) {
                     const done = await run(() => api.documents.markDuplicate(d.id, i.suggestion as { documentId: number | null; purchaseId: number | null }), 'Dubbel document weggelegd');
                     if (done) go({ screen: 'aankopen' });
                   }}>Ja, zelfde aankoop</Button>
+                  {(i.suggestion as { documentId: number | null } | undefined)?.documentId && (
+                    <Button small kind="ghost" onClick={() => setCompare((i.suggestion as { documentId: number }).documentId)}>Bekijk de andere</Button>
+                  )}
                   <span className="small muted">Anders: controleer de gegevens hieronder en verwerk het gewoon.</span>
                 </div>
               )}
             </div>
           ))}
+          {compare !== null && (
+            <Modal title="De bon die hierop lijkt" wide onClose={() => setCompare(null)}>
+              <OtherDocument id={compare} />
+            </Modal>
+          )}
           {d.status === 'controle' && (d.decisions ?? []).some((x) => !x.field && !x.ok) && (
             <div className="notice small">
               Hier twijfelen we nog over: {(d.decisions ?? []).filter((x) => !x.field && !x.ok).map((x) => `${x.label.toLowerCase()} (${x.value})`).join(', ')}. Kies hieronder wat klopt.
@@ -349,5 +359,63 @@ function ForeignNotice({ foreign, euro }: { foreign: NonNullable<DocumentResult[
       )}
       {!foreign.source && <>De koers kon niet opgehaald worden. Vul hieronder het bedrag in euro's in, zoals het van je rekening is afgeschreven.</>}
     </div>
+  );
+}
+
+/**
+ * Een bon of factuur bekijken vanaf Vandaag, voordat je "Ja, klopt" of "Ja, zelfde" kiest. Bij een
+ * mogelijk dubbel document staat het andere ernaast.
+ */
+export function DocumentPreview({ id }: { id: number }) {
+  const { meta } = useApp();
+  const doc = useLoad(() => api.documents.get(id), [id]);
+  const d = doc.data;
+  if (!d) return <ErrorBox error={doc.error} />;
+  const r = d.result;
+  const dup = d.issues.find((i) => i.field === 'duplicate')?.suggestion as { documentId: number | null; purchaseId: number | null } | undefined;
+  const category = d.classification ? meta.expenseCategories.find((c) => c.key === d.classification!.categoryKey)?.label : null;
+  return (
+    <div className="grid" style={{ gridTemplateColumns: dup?.documentId ? '1fr 1fr' : '1fr', gap: 12 }}>
+      <div>
+        {dup?.documentId && <h3 style={{ marginTop: 0 }}>Deze</h3>}
+        <table className="list details"><tbody>
+          <tr><th>Winkel / leverancier</th><td>{r?.supplier?.value ?? d.original_name}</td></tr>
+          <tr><th>Datum</th><td>{r?.invoiceDate?.value ? formatDateNl(r.invoiceDate.value) : '?'}</td></tr>
+          <tr><th>Bedrag</th><td>{r?.total ? <Euro cents={r.total.value} /> : '?'}</td></tr>
+          {r?.invoiceNumber?.value && <tr><th>Factuurnummer</th><td>{r.invoiceNumber.value}</td></tr>}
+          {category && <tr><th>Voorstel</th><td>{category}{d.classification?.business === false ? ' (privé)' : ''}</td></tr>}
+          <tr><th>Bestand</th><td>{d.original_name}</td></tr>
+        </tbody></table>
+        <div style={{ maxHeight: 420, overflow: 'auto', marginTop: 8 }}>
+          <DocumentView id={d.id} mime={d.mime_type} highlight={null} pageSizes={r?.pageSizes} />
+        </div>
+      </div>
+      {dup?.documentId && (
+        <div>
+          <h3 style={{ marginTop: 0 }}>Lijkt op</h3>
+          <OtherDocument id={dup.documentId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OtherDocument({ id }: { id: number }) {
+  const doc = useLoad(() => api.documents.get(id), [id]);
+  const d = doc.data;
+  if (!d) return <ErrorBox error={doc.error} />;
+  const r = d.result;
+  return (
+    <>
+      <table className="list details"><tbody>
+        <tr><th>Winkel / leverancier</th><td>{r?.supplier?.value ?? d.original_name}</td></tr>
+        <tr><th>Datum</th><td>{r?.invoiceDate?.value ? formatDateNl(r.invoiceDate.value) : '?'}</td></tr>
+        <tr><th>Bedrag</th><td>{r?.total ? <Euro cents={r.total.value} /> : '?'}</td></tr>
+        <tr><th>Bestand</th><td>{d.original_name}</td></tr>
+      </tbody></table>
+      <div style={{ maxHeight: 420, overflow: 'auto', marginTop: 8 }}>
+        <DocumentView id={d.id} mime={d.mime_type} highlight={null} pageSizes={r?.pageSizes} />
+      </div>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, Modal, readAsBytes, useAction, useApp, useLoad } from '../ui';
 import type { Task } from '../../inbox/inbox';
@@ -8,6 +8,12 @@ import { CategoryPicker } from './Bank';
 import { investmentInfo } from './Purchases';
 import { hasOnboardingUpdate } from '../../shared/onboarding';
 import { CheckLines } from './CheckLines';
+import { PaymentDetails } from './PaymentDetails';
+import { CheckItems } from './CheckItems';
+import type { CheckItem } from '../../btw/checks';
+
+// bon bekijken: pas laden als je er een opent (PDF.js is groot)
+const DocumentPreview = lazy(() => import('./DocumentReview').then((m) => ({ default: m.DocumentPreview })));
 
 export function Home() {
   const { go, settings, refreshBadge, toast, showInvestmentSaved } = useApp();
@@ -21,6 +27,9 @@ export function Home() {
   const activeJobs = useLoad(async () => (pickingJob ? api.jobs.list({ active: true }) : []), [pickingJob]);
   const [showAll, setShowAll] = useState(false);
   const [why, setWhy] = useState<string | null>(null);
+  // een betaling bekijken: alle gegevens van de bank en eerdere betalingen aan dezelfde partij
+  const [viewing, setViewing] = useState<Task | null>(null);
+  const [checkItems, setCheckItems] = useState<{ task: Task; items: CheckItem[]; detail: string } | null>(null);
   const [monthOpen, setMonthOpen] = useState(false);
   // factuur bij een bestaande afschrijving (vaste lasten): bestand kiezen en direct koppelen
   const evidenceInput = useRef<HTMLInputElement>(null);
@@ -38,6 +47,11 @@ export function Home() {
 
   const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number }) => {
     if (task.kind === 'vat-check' && actionId === 'open' && task.ref.account) return setCheckLines(task);
+    // een controle over losse betalingen of aankopen: eerst laten zien welke het zijn
+    if (task.kind === 'vat-check' && actionId === 'open' && task.ref.periodKey) {
+      const check = (await api.vat.checks(task.ref.periodKey)).find((c) => c.key === task.ref.checkKey);
+      if (check?.items?.length) return setCheckItems({ task, items: check.items, detail: check.detail });
+    }
     // `?? {}`: ook een actie zonder antwoord telt als gelukt (undefined = fout)
     const r = await run(async () => (await api.home.act(task, actionId, payload)) ?? {});
     if (r && !('navigate' in r && r.navigate)) {
@@ -48,6 +62,7 @@ export function Home() {
     if (r && 'navigate' in r && r.navigate) {
       if (r.navigate.screen === 'categorie') return setPicking(task);
       if (r.navigate.screen === 'klus-kiezen') return setPickingJob(task);
+      if (r.navigate.screen === 'betaling') return go({ screen: 'categorie', id: r.navigate.id });
       if (r.navigate.screen === 'bewijs') {
         evidenceFor.current = r.navigate.id as number;
         return evidenceInput.current?.click();
@@ -167,16 +182,25 @@ export function Home() {
             <div className="task">
               <div className="icon" aria-hidden>{t.icon}</div>
               <div className="grow">
-                <div className="title">{t.title}</div>
+                <div className="title">
+                  {t.ref.bankTransactionId || t.ref.documentId || t.ref.purchaseId ? (
+                    <button className="linklike title-link" title={t.ref.documentId && !t.ref.bankTransactionId ? 'Bekijk de bon' : 'Bekijk alle gegevens van deze betaling'} onClick={() => setViewing(t)}>{t.title}</button>
+                  ) : t.title}
+                </div>
                 <div className="q">
                   {t.question}
-                  {t.why && <> <button className="linklike small" onClick={() => setWhy(why === t.key ? null : t.key)}>Waarom?</button></>}
+                  {(t.why || t.actions.some((a) => a.hint)) && <> <button className="linklike small" aria-expanded={why === t.key} onClick={() => setWhy(why === t.key ? null : t.key)}>{t.why ? 'Waarom? Wat gebeurt er?' : 'Wat gebeurt er?'}</button></>}
                 </div>
-                {why === t.key && <div className="small muted">{t.why}</div>}
+                {why === t.key && (
+                  <div className="small muted">
+                    {t.why && <div>{t.why}</div>}
+                    <ActionHints task={t} />
+                  </div>
+                )}
               </div>
               <div className="row">
                 {t.actions.map((a) => (
-                  <Button key={a.id} kind={a.primary ? 'primary' : undefined} small disabled={busy} onClick={() => void act(t, a.id)}>
+                  <Button key={a.id} kind={a.primary ? 'primary' : undefined} small disabled={busy} title={a.hint} onClick={() => void act(t, a.id)}>
                     {a.label}
                   </Button>
                 ))}
@@ -229,12 +253,63 @@ export function Home() {
         </Modal>
       )}
 
+      {viewing && !viewing.ref.bankTransactionId && viewing.ref.documentId && (
+        <Modal title="Bon bekijken" wide onClose={() => setViewing(null)}>
+          <Suspense fallback={<p className="muted">Laden…</p>}>
+            <DocumentPreview id={viewing.ref.documentId} />
+          </Suspense>
+          <div className="q" style={{ marginTop: 12 }}>{viewing.question}</div>
+          <ActionHints task={viewing} />
+          <div className="row end" style={{ marginTop: 8 }}>
+            <Button onClick={() => setViewing(null)}>Later</Button>
+            {viewing.actions.map((a) => (
+              <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={async () => { const t = viewing; setViewing(null); await act(t, a.id); }}>{a.label}</Button>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {viewing && !viewing.ref.bankTransactionId && !viewing.ref.documentId && viewing.ref.purchaseId && (
+        <Modal title="Aankoop bekijken" onClose={() => setViewing(null)}>
+          <PurchaseInfo purchaseId={viewing.ref.purchaseId} />
+          <div className="q" style={{ marginTop: 12 }}>{viewing.question}</div>
+          <ActionHints task={viewing} />
+          <div className="row end" style={{ marginTop: 8 }}>
+            <Button onClick={() => setViewing(null)}>Later</Button>
+            {viewing.actions.map((a) => (
+              <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={async () => { const t = viewing; setViewing(null); await act(t, a.id); }}>{a.label}</Button>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {viewing && viewing.ref.bankTransactionId && (
+        <PaymentModal
+          task={viewing}
+          txId={viewing.ref.bankTransactionId}
+          busy={busy}
+          onClose={() => setViewing(null)}
+          onAct={async (actionId) => { const t = viewing; setViewing(null); await act(t, actionId); }}
+        />
+      )}
+
+      {checkItems && (
+        <Modal title={checkItems.task.title} onClose={() => setCheckItems(null)}>
+          <p className="muted small">{checkItems.detail}</p>
+          <CheckItems items={checkItems.items} onOpen={() => setCheckItems(null)} />
+          <div className="row end" style={{ marginTop: 10 }}><Button onClick={() => setCheckItems(null)}>Sluiten</Button></div>
+        </Modal>
+      )}
       {checkLines && (
         <CheckLines account={checkLines.ref.account!} upTo={checkLines.ref.upTo} title={checkLines.title} hint={checkLines.question} onClose={() => { setCheckLines(null); void reload(); refreshBadge(); }} />
       )}
       {picking && (
         <Modal title="Waar was deze betaling voor?" onClose={() => setPicking(null)}>
           <p className="muted">{picking.title}</p>
+          {picking.ref.bankTransactionId && (
+            <details className="small" style={{ marginBottom: 10 }}>
+              <summary>Alle gegevens van deze betaling</summary>
+              <PaymentDetails txId={picking.ref.bankTransactionId} />
+            </details>
+          )}
           <CategoryPicker
             amount={picking.amount !== undefined ? Math.abs(picking.amount) : undefined}
             initial={picking.ref.categoryKey}
@@ -345,5 +420,54 @@ function GettingStarted() {
         </div>
       )}
     </>
+  );
+}
+
+/** Eén betaling met alles wat de bank erover gaf, zodat je kunt beoordelen wat het was. */
+function PaymentModal({ task, txId, busy, onClose, onAct }: { task: Task; txId: number; busy: boolean; onClose: () => void; onAct: (actionId: string) => Promise<void> }) {
+  return (
+    <Modal title="Betaling bekijken" onClose={onClose}>
+      <PaymentDetails txId={txId} proposal={{ invoiceId: task.ref.invoiceId, purchaseId: task.ref.purchaseId }} />
+      <p className="small muted">
+            Weet je het nog steeds niet? Zoek de factuur of het bonnetje op in je mail of bij de leverancier (bij PayPal: in je PayPal-overzicht op dezelfde datum en hetzelfde bedrag).
+            Alle betalingen staan ook bij <strong>Bank</strong>.
+      </p>
+      <div className="q" style={{ marginTop: 12 }}>{task.question}</div>
+      <ActionHints task={task} />
+      <div className="row end" style={{ marginTop: 8 }}>
+        <Button onClick={onClose}>Later</Button>
+        {task.actions.map((a) => (
+          <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={() => void onAct(a.id)}>{a.label}</Button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+/** Een aankoop met de bon, om te beoordelen of het een investering is of bij een klus hoort. */
+function PurchaseInfo({ purchaseId }: { purchaseId: number }) {
+  const { data, error } = useLoad(() => api.bank.proposal({ purchaseId }), [purchaseId]);
+  if (!data) return <ErrorBox error={error} />;
+  return (
+    <>
+      <table className="list details"><tbody>
+        <tr><th>Leverancier</th><td>{data.relation ?? 'onbekend'}{data.number ? ` · ${data.number}` : ''}</td></tr>
+        <tr><th>Datum</th><td>{formatDateNl(data.date)}</td></tr>
+        <tr><th>Bedrag</th><td><Euro cents={data.total} /></td></tr>
+        {'description' in data && data.description && <tr><th>Omschrijving</th><td style={{ whiteSpace: 'pre-wrap' }}>{data.description}</td></tr>}
+      </tbody></table>
+      {data.attachmentPath ? <Button small onClick={() => void api.app.openAttachment(data.attachmentPath!)}>Bon of factuur openen</Button> : <p className="small muted">Er zit geen bon bij deze aankoop.</p>}
+    </>
+  );
+}
+
+/** Per knop wat hij doet ("Zakelijk: wordt geboekt als …"), zodat je weet wat je kiest. */
+function ActionHints({ task }: { task: Task }) {
+  const hinted = task.actions.filter((a) => a.hint);
+  if (hinted.length === 0) return null;
+  return (
+    <ul className="small muted action-hints">
+      {hinted.map((a) => <li key={a.id}><strong>{a.label}:</strong> {a.hint}</li>)}
+    </ul>
   );
 }

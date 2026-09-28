@@ -127,7 +127,11 @@ export class BankService {
    * Zonder IBAN: een potje binnen je bank zonder eigen rekeningnummer (bv. een Knab-potje voor de
    * btw). Daar komen geen afschriften van; geld erheen of eruit kies je bij de betaling zelf.
    */
-  addAccount(name: string, iban: string | null): BankAccount {
+  /**
+   * Nieuwe rekening. Zonder rekeningnummer is het standaard een potje binnen je bank (bv. Knab), tenzij
+   * `pot: false`: een echte rekening waarvan het nummer nog niet bekend is (bv. uit een auditfile).
+   */
+  addAccount(name: string, iban: string | null, opts: { pot?: boolean } = {}): BankAccount {
     const clean = iban?.trim() ? normalizeIban(iban) : null;
     if (clean && !isValidIban(clean)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${iban}`);
     if (!name.trim()) throw new ValidationError('Geef de rekening een naam, bijvoorbeeld "Spaarrekening"');
@@ -135,18 +139,21 @@ export class BankService {
     if (!clean && this.listAccounts().some((a) => a.name.toLowerCase() === name.trim().toLowerCase())) throw new ValidationError('Er is al een rekening met deze naam');
     name = name.trim();
     return tx(this.db, () => {
-      const n = this.listAccounts().length;
+      let n = this.listAccounts().length;
+      // een weggehaalde rekening laat zijn (verborgen) grootboekrekening achter: het eerstvolgende vrije nummer
+      const taken = (k: number) => this.db.prepare('SELECT 1 FROM chart_of_accounts WHERE rgs_code = ? OR code = ?').get(`${ACCOUNTS.bank}${k + 1}`, String(1100 + k));
+      if (n > 0) while (taken(n)) n++;
       // tweede en volgende rekeningen krijgen een eigen grootboekrekening
       const rgs = n === 0 ? ACCOUNTS.bank : `${ACCOUNTS.bank}${n + 1}`;
       // RGS: 'Rekening-courant bank - Naam A..E' (BLimBanRbb..f) voor extra rekeningen
       const rgsRef = n >= 1 && n <= 5 ? `BLimBanRb${String.fromCharCode(97 + n)}` : null;
       const ledgerAccount = n === 0 ? this.ledger.getAccount(ACCOUNTS.bank) : this.ledger.createAccount({ code: String(1100 + n), rgs, rgsRef, name: `Bank ${name}`, category: 'activa' });
-      const id = Number(this.db.prepare('INSERT INTO bank_accounts (name, iban, account_id, is_pot) VALUES (?, ?, ?, ?)').run(name, clean, ledgerAccount.id, clean ? 0 : 1).lastInsertRowid);
+      const id = Number(this.db.prepare('INSERT INTO bank_accounts (name, iban, account_id, is_pot) VALUES (?, ?, ?, ?)').run(name, clean, ledgerAccount.id, clean ? 0 : opts.pot === false ? 0 : 1).lastInsertRowid);
       return this.getAccount(id);
     });
   }
 
-  updateAccount(id: number, patch: { name?: string; iban?: string | null }): void {
+  updateAccount(id: number, patch: { name?: string; iban?: string | null; pot?: boolean }): void {
     const iban = patch.iban ? normalizeIban(patch.iban) : patch.iban;
     if (iban && !isValidIban(iban)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${patch.iban}`);
     const current = this.getAccount(id);
@@ -157,7 +164,38 @@ export class BankService {
     if (this.listAccounts().some((a) => a.id !== id && a.name.toLowerCase() === name.toLowerCase())) throw new ValidationError('Er is al een rekening met deze naam');
     const nextIban = iban === undefined ? current.iban : iban;
     // krijgt een potje toch een rekeningnummer, dan is het een gewone rekening
-    this.db.prepare('UPDATE bank_accounts SET name = ?, iban = ?, is_pot = ? WHERE id = ?').run(name, nextIban, nextIban ? 0 : current.is_pot, id);
+    const pot = nextIban ? 0 : patch.pot === undefined ? current.is_pot : patch.pot ? 1 : 0;
+    this.db.prepare('UPDATE bank_accounts SET name = ?, iban = ?, is_pot = ? WHERE id = ?').run(name, nextIban, pot, id);
+  }
+
+  /** Kan deze rekening weg? Alleen als er niets op staat: geen afschriften, geen boekingen, saldo 0. */
+  removable(id: number): { ok: boolean; reason: string | null } {
+    const account = this.getAccount(id);
+    if (this.listAccounts().length === 1) return { ok: false, reason: 'Je hebt minstens één rekening nodig' };
+    if (account.rgs_code === ACCOUNTS.bank) return { ok: false, reason: 'Dit is je hoofdrekening; die kan niet weg' };
+    if (this.db.prepare('SELECT 1 FROM bank_transactions WHERE bank_account_id = ?').get(id)) return { ok: false, reason: 'Er zijn afschriften van deze rekening ingelezen' };
+    const used = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(l.debit), 0) - COALESCE(SUM(l.credit), 0) AS balance FROM journal_lines l
+         JOIN journal_entries e ON e.id = l.journal_entry_id WHERE l.account_id = ? AND e.source <> 'opening'`,
+      )
+      .get(account.account_id) as { n: number; balance: number };
+    if (used.n > 0) return { ok: false, reason: 'Er staan boekingen op deze rekening' };
+    if (this.openingBalance(id).amount !== 0) return { ok: false, reason: 'Er staat nog een beginsaldo op; zet dat eerst op € 0' };
+    return { ok: true, reason: null };
+  }
+
+  /** Een lege rekening weghalen (bv. dubbel aangemaakt bij het inlezen van een auditfile). */
+  removeAccount(id: number): void {
+    const check = this.removable(id);
+    if (!check.ok) throw new ValidationError(check.reason!);
+    const account = this.getAccount(id);
+    tx(this.db, () => {
+      this.db.prepare('DELETE FROM import_batch_accounts WHERE bank_account_id = ?').run(id);
+      this.db.prepare('DELETE FROM bank_accounts WHERE id = ?').run(id);
+      // de grootboekrekening blijft bestaan (er kunnen teruggedraaide beginsaldi op staan), maar verborgen
+      this.db.prepare('UPDATE chart_of_accounts SET archived = 1 WHERE id = ?').run(account.account_id);
+    });
   }
 
   getAccount(id: number): BankAccount {
@@ -372,6 +410,45 @@ export class BankService {
     const t = this.db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(id) as BankTransaction | undefined;
     if (!t) throw new ValidationError('Deze betaling bestaat niet (meer)');
     return t;
+  }
+
+  /**
+   * Alles wat je nodig hebt om een betaling te beoordelen: de regel zoals de bank hem gaf, en eerdere
+   * betalingen aan of van dezelfde partij met hoe die verwerkt zijn.
+   */
+  details(txId: number): {
+    transaction: BankTransaction;
+    account: { name: string; iban: string | null };
+    history: { id: number; date: IsoDate; amount: Cents; description: string; how: string }[];
+  } {
+    const t = this.get(txId);
+    const account = this.getAccount(t.bank_account_id);
+    const same = t.counter_iban
+      ? { sql: 'counter_iban = ?', value: t.counter_iban }
+      : t.counter_name
+        ? { sql: 'counter_iban IS NULL AND lower(counter_name) = lower(?)', value: t.counter_name }
+        : null;
+    const rows = same
+      ? (this.db.prepare(`SELECT * FROM bank_transactions WHERE ${same.sql} AND id <> ? ORDER BY transaction_date DESC, id DESC LIMIT 8`).all(same.value, t.id) as BankTransaction[])
+      : [];
+    const bookedTo = this.db.prepare(
+      `SELECT DISTINCT a.name FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+       WHERE l.journal_entry_id = ? AND l.account_id NOT IN (SELECT account_id FROM bank_accounts) AND a.category <> 'btw'`,
+    );
+    const how = (h: BankTransaction): string => {
+      if (h.status === 'nieuw') return 'nog niet verwerkt';
+      if (h.status === 'genegeerd') return 'overgeslagen';
+      if (h.matched_invoice_id) return 'betaling van een factuur';
+      if (h.matched_purchase_invoice_id) return 'betaling van een aankoop';
+      if (!h.matched_journal_entry_id) return 'verwerkt';
+      const names = (bookedTo.all(h.matched_journal_entry_id) as { name: string }[]).map((r) => r.name);
+      return names.length > 0 ? names.join(', ') : 'verwerkt';
+    };
+    return {
+      transaction: t,
+      account: { name: account.name, iban: account.iban },
+      history: rows.map((h) => ({ id: h.id, date: h.transaction_date, amount: h.amount, description: h.description, how: how(h) })),
+    };
   }
 
   private assertOpen(t: BankTransaction): void {

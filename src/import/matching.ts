@@ -3,7 +3,8 @@ import type { InvoiceService, InvoiceSummary } from '../documents/invoices';
 import type { PurchaseService, PurchaseInvoice } from '../documents/purchases';
 import type { RelationsService } from '../relations/relations';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import { today, type IsoDate } from '../shared/dates';
+import { formatDateNl, today, type IsoDate } from '../shared/dates';
+import { formatEuro } from '../shared/money';
 import { withinFx } from '../shared/currency';
 import { THRESHOLDS, thresholdFor, type AutopilotLevel } from '../automation/decisions';
 
@@ -78,7 +79,7 @@ export class MatchingEngine {
         const rel = this.relations.get(inv.relation_id);
         if (t.counter_iban && rel.iban && t.counter_iban === rel.iban) (score += 50, reasons.push('rekeningnummer van de klant'));
         else if (nameSimilar(t.counter_name, inv.relation_name)) (score += 15, reasons.push('naam lijkt op klant'));
-        if (score >= 40) out.push({ kind: 'factuur', invoiceId: inv.id, label: `Factuur ${inv.number} — ${inv.relation_name}`, score, reasons });
+        if (score >= 40) out.push({ kind: 'factuur', invoiceId: inv.id, label: `Factuur ${inv.number} — ${inv.relation_name} · ${formatEuro(inv.open_amount)} open, factuurdatum ${formatDateNl(inv.invoice_date)}`, score, reasons });
       }
     } else {
       for (const inv of openInvoices ?? this.invoices.listOpen()) {
@@ -90,7 +91,7 @@ export class MatchingEngine {
         const rel = this.relations.get(inv.relation_id);
         if (t.counter_iban && rel.iban && t.counter_iban === rel.iban) (score += 50, reasons.push('rekeningnummer van de klant'));
         else if (nameSimilar(t.counter_name, inv.relation_name)) (score += 15, reasons.push('naam lijkt op klant'));
-        if (score >= 40) out.push({ kind: 'factuur', invoiceId: inv.id, label: `Terugbetaling credit ${inv.number} — ${inv.relation_name}`, score, reasons });
+        if (score >= 40) out.push({ kind: 'factuur', invoiceId: inv.id, label: `Terugbetaling credit ${inv.number} — ${inv.relation_name} · ${formatEuro(-inv.open_amount)}`, score, reasons });
       }
       for (const p of openPurchases ?? this.purchases.listOpen()) {
         const reasons: string[] = [];
@@ -100,7 +101,7 @@ export class MatchingEngine {
         else if (p.currency && p.currency !== 'EUR' && withinFx(-t.amount, p.open_amount)) (score += 40, reasons.push(`bedrag klopt ongeveer (${p.currency}, andere koers)`));
         if (p.supplier_reference && mentions(text, p.supplier_reference)) (score += 60, reasons.push('factuurnummer staat in de omschrijving'));
         if (p.relation_name && nameSimilar(t.counter_name, p.relation_name)) (score += 20, reasons.push('naam van de leverancier'));
-        if (score >= 50) out.push({ kind: 'inkoop', purchaseId: p.id, label: `Aankoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''}`, score, reasons });
+        if (score >= 50) out.push({ kind: 'inkoop', purchaseId: p.id, label: `Aankoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''} · ${formatEuro(p.open_amount)} open, ${formatDateNl(p.invoice_date)}`, score, reasons });
       }
     }
 

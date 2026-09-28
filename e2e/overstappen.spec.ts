@@ -429,3 +429,18 @@ test('overstapper met een auditfile per jaar: alle drie tegelijk neerzetten', as
   await expect(equity(page).getByText(/13\.700,00/)).toBeVisible();
   noApiErrors(problems);
 });
+
+test('overstapper: auditfile begint op de instapdatum zonder beginbalans, de app stelt een latere instapdatum voor', async ({ page, problems }) => {
+  await onboard(page, { overstap: true });
+  await page.getByRole('button', { name: /Ik had een boekhoudprogramma/ }).click();
+  // zoals DigiBoox: geen beginbalans, en het jaar begint precies op de instapdatum (1 januari)
+  const c = xafJaren(year)[2].replace(/<openingBalance>[\s\S]*?<\/openingBalance>/, '');
+  await page.locator('main input[type=file]').first().setInputFiles([{ name: `${year}.xaf`, mimeType: 'application/xml', buffer: Buffer.from(c) }]);
+  const advice = page.locator('.notice', { hasText: 'Kies een latere instapdatum' });
+  await expect(advice).toBeVisible();
+  await expect(advice).toContainText('Je vorige administratie begon');
+  await advice.getByRole('button', { name: /Stand overnemen op/ }).click();
+  await expect(advice).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Overnemen' })).toBeVisible();
+  noApiErrors(problems);
+});

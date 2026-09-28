@@ -146,6 +146,8 @@ export interface OpeningSuggestion {
   /** factuurnummer als dat in de omschrijving lijkt te staan */
   number: string | null;
   question: string;
+  /** waarom de app dit denkt, in gewone taal */
+  why: string;
 }
 
 export interface SwitchoverState {
@@ -994,7 +996,7 @@ export class SwitchoverService {
       if (/belastingdienst/i.test(name) || /omzetbelasting/i.test(text)) {
         if (hasBtw || this.settings.get().kor) continue;
         const pays = t.amount < 0;
-        out.push({ txId: t.id, kind: 'btw', date: t.transaction_date, amount: Math.abs(t.amount), name, description: t.description, number: null, question: pays ? `Was dit de btw die je op ${formatDateNl(addDays(date, -1))} nog moest betalen?` : 'Kreeg je hiermee btw terug van een aangifte van vóór de overstap?' });
+        out.push({ txId: t.id, kind: 'btw', date: t.transaction_date, amount: Math.abs(t.amount), name, description: t.description, number: null, question: pays ? `Was dit de btw die je op ${formatDateNl(addDays(date, -1))} nog moest betalen?` : 'Kreeg je hiermee btw terug van een aangifte van vóór de overstap?', why: 'Omdat de betaling van of naar de Belastingdienst gaat, kort na je instapdatum. Ja: de app boekt hem als de btw van vóór de overstap, niet als kosten.' });
         continue;
       }
       const number = guessInvoiceNumber(text);
@@ -1004,10 +1006,10 @@ export class SwitchoverService {
         // zonder factuurnummer alleen de eerste twee maanden: later is het eerder nieuw werk
         if (!number && diffDays(date, t.transaction_date) > 60) continue;
         if (number && this.db.prepare('SELECT 1 FROM invoices WHERE number = ?').get(number)) continue;
-        out.push({ txId: t.id, kind: 'klant', date: t.transaction_date, amount: t.amount, name, description: t.description, number, question: `Betaalde ${name} hiermee een factuur van vóór ${formatDateNl(date)}?` });
+        out.push({ txId: t.id, kind: 'klant', date: t.transaction_date, amount: t.amount, name, description: t.description, number, question: `Betaalde ${name} hiermee een factuur van vóór ${formatDateNl(date)}?`, why: `${number ? `Omdat er een factuurnummer (${number}) in de omschrijving staat` : `Omdat het geld ${diffDays(date, t.transaction_date)} dagen na je instapdatum binnenkwam`}. Ja: de app zet de factuur in je startbalans en koppelt deze betaling eraan; het telt niet nog eens als omzet.` });
       } else if (t.amount < 0 && (number || /factuur|nota|invoice|rekening/i.test(text)) && diffDays(date, t.transaction_date) <= 60) {
         if (openPurchaseAmounts.has(-t.amount)) continue;
-        out.push({ txId: t.id, kind: 'leverancier', date: t.transaction_date, amount: -t.amount, name, description: t.description, number, question: `Betaalde je hiermee een rekening van ${name} van vóór ${formatDateNl(date)}?` });
+        out.push({ txId: t.id, kind: 'leverancier', date: t.transaction_date, amount: -t.amount, name, description: t.description, number, question: `Betaalde je hiermee een rekening van ${name} van vóór ${formatDateNl(date)}?`, why: `${number ? `Omdat er een factuurnummer (${number}) in de omschrijving staat` : 'Omdat er "factuur" of "nota" in de omschrijving staat'}, kort na je instapdatum. Ja: de app zet de rekening in je startbalans en koppelt deze betaling eraan; het telt niet nog eens als kosten.` });
       }
     }
     return out;
