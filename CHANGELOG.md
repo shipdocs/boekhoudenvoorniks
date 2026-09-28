@@ -1,31 +1,32 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
-
-### Bank
-- **Rekeningen uit je vorige administratie**: de app herkent dezelfde bank ook onder een andere naam ("Bank Knab" en "KNAB", "Rabo" en "Rabobank"), zodat er geen dubbele rekening bijkomt. Een rekening die bij het inlezen wordt aangemaakt is een gewone rekening, geen potje.
-- Bij **Rekening wijzigen** zet je een rekening zonder nummer op potje of gewone rekening, en een lege rekening (geen afschriften, geen boekingen, beginsaldo € 0) haal je weg.
-- **Rente ontvangen**: nieuwe keuze bij geld dat binnenkomt. Telt mee in je winst (bij de financiële baten en lasten), niet als omzet en zonder btw.
-- **Geld terug van een aankoop (refund)**: kies de categorie en btw van de oorspronkelijke aankoop; de app verlaagt je kosten en de btw die je terugkreeg. Was het een privé-aankoop, dan boekt de app het als privé.
+## 0.6.2 — elke vraag begrijpelijk: details, uitleg per keuze, rente en refunds
 
 ### Vandaag
-- **Wat gebeurt er als ik dit kies?** Bij elke vraag op Vandaag staat per knop wat die in je boekhouding doet, bijvoorbeeld "Zakelijk: wordt geboekt als software, telt mee als kosten, de btw krijg je terug" of "Privé: geen kosten en geen btw".
-- **Btw-controles noemen de posten**: bij "3 uitgaven zonder bonnetje", "mogelijk dubbele aankopen", "betalingen nog uitzoeken" en "btw verlegd zonder btw-nummer" zie je welke het zijn, met een knop om elk te openen (ook op het Belasting-scherm).
-- Voorstellen bij de bank ("Hoort dit hierbij?") tonen het openstaande bedrag en de datum van de factuur of aankoop.
+- **Zien waar een vraag over gaat**: klik op de naam van een taak.
+  - Bij een betaling (bv. "PAYPAL EUROPE … € 13,11") zie je wat de bank gaf: datum, tegenpartij, rekeningnummer, volledige omschrijving en kenmerk, plus eerdere betalingen aan dezelfde partij en hoe je die verwerkte.
+  - Bij een voorgestelde koppeling zie je de factuur of aankoop: datum, bedrag, wat nog open staat en het verschil.
+  - Bij een bon zie je de bon zelf, en bij een mogelijk dubbele bon de andere ernaast.
+  - Bij een aankoop (investering, klus) zie je de aankoop, met een knop om de bon te openen.
+- **Wat gebeurt er als ik dit kies?** Per knop staat wat die in je boekhouding doet, bijvoorbeeld "Zakelijk: wordt geboekt als software, telt mee als kosten, de btw krijg je terug" of "Privé: geen kosten en geen btw".
+- **Btw-controles noemen de posten**: bij "uitgaven zonder bonnetje", "mogelijk dubbele aankopen", "betalingen nog uitzoeken" en "btw verlegd zonder btw-nummer" zie je welke het zijn, met een knop om elk te openen (ook op het Belasting-scherm).
+- **Uitzoeken** bij geld dat binnenkwam opent meteen het scherm om de betaling in te delen.
+- Een verlopen offerte noemt nummer, datum, bedrag en geldigheid, met **Bekijken**. Bij een vaste last zie je welke betalingen de app zag en wanneer de laatste was; bij "voortaan automatisch" de laatste betalingen; bij mail afzender en datum.
+
+### Bank
+- **Rente ontvangen**: nieuwe keuze bij geld dat binnenkomt. Telt mee in je winst, niet als omzet en zonder btw.
+- **Geld terug van een aankoop (refund)**: kies de categorie en btw van de oorspronkelijke aankoop; de app verlaagt je kosten en de btw die je terugkreeg. Was het een privé-aankoop, dan boekt de app het als privé.
+- Bij het indelen van een betaling zie je alle gegevens van de bank en eerdere betalingen aan dezelfde partij. Uitleg bij elke keuze (btw, overboeking, privé, weet ik nog niet, negeren), bij de gekozen categorie en bij "Stond er btw op?".
+- Voorstellen ("Hoort dit hierbij?") tonen het openstaande bedrag en de datum.
+- **Rekeningen uit je vorige administratie**: dezelfde bank wordt ook onder een andere naam herkend ("Bank Knab" en "KNAB", "Rabo" en "Rabobank"), en een rekening die bij het inlezen wordt aangemaakt is een gewone rekening, geen potje. Bij **Rekening wijzigen** zet je een rekening zonder nummer op potje of gewone rekening, en haal je een lege rekening weg.
 
 ### Overstappen
-- Voorstellen uit je bankafschriften zeggen waarom (bv. "factuurnummer 2025-0042 in de omschrijving") en wat "Ja" doet, met alle gegevens van de betaling. Bij "betalingen van vóór je instapdatum" zie je welke het zijn en wat overslaan betekent.
+- **Instapdatum vóór je auditfiles** (bijvoorbeeld 1 januari 2024 terwijl je administratie toen begon): de app legt uit dat hij de stand óp de instapdatum overneemt, niet elke boeking, en stelt de dag na je laatste boeking voor. Met één knop kies je die datum en leest de app de bestanden opnieuw in.
+- Voorstellen uit je bankafschriften zeggen waarom en wat "Ja" doet, met alle gegevens van de betaling. Bij "betalingen van vóór je instapdatum" zie je welke het zijn en wat overslaan betekent.
 
-### Bonnetjes
+### Bonnetjes en instellen
 - Bij een mogelijk dubbele bon bekijk je met **Bekijk de andere** de bon die erop lijkt.
-- **Zien waar een vraag over gaat**: bij een bon op Vandaag klik je op de naam en zie je de bon zelf, en bij een mogelijk dubbele bon de andere ernaast. Bij een aankoop (investering, klus) zie je de aankoop met een knop om de bon te openen. Bij een betaling die aan een factuur of aankoop gekoppeld wordt, zie je die factuur met datum, bedrag, wat nog open staat en het verschil.
-- **Uitzoeken** bij geld dat binnenkwam opent meteen het scherm om de betaling in te delen, niet de hele banklijst.
-- Een verlopen offerte noemt nummer, datum, bedrag en geldigheid, met een knop **Bekijken**. Bij een vaste last zie je welke betalingen de app zag en wanneer de laatste was; bij "voortaan automatisch" de laatste betalingen.
-- Uitleg bij elke keuze bij de bank (btw, overboeking, privé, weet ik nog niet, negeren), bij de gekozen categorie en bij "Stond er btw op?". Bij het indelen van een betaling zie je alle gegevens van de bank en eerdere betalingen aan dezelfde partij.
-- **Betaling bekijken**: klik op de naam van een betaling in de lijst (bv. "PAYPAL EUROPE … € 13,11") en je ziet alles wat de bank erover gaf: datum, tegenpartij, rekeningnummer, de volledige omschrijving en het kenmerk. Eronder staan eerdere betalingen aan dezelfde partij en hoe je die verwerkte. Vanuit dat venster kies je meteen zakelijk of privé.
-
-### Overstappen
-- **Instapdatum vóór je auditfiles**: beginnen al je auditfiles op of na je instapdatum (bijvoorbeeld instapdatum 1 januari 2024 terwijl je administratie toen begon), dan legt de app uit dat hij de stand óp de instapdatum overneemt, niet elke boeking, en stelt hij de dag na je laatste boeking voor. Met één knop kies je die datum en leest de app de bestanden opnieuw in. Voorheen kwam er alleen een foutmelding.
+- Uitleg bij "Hoe vaak doe je aangifte?".
 
 ## 0.6.1 — overstappen vanuit DigiBoox en betrouwbaardere updates
 
