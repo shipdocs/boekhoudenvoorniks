@@ -6,7 +6,7 @@ export const WOOCOMMERCE: IntegrationDefinition = {
   id: 'woocommerce',
   label: 'WooCommerce',
   kind: 'webshop',
-  description: 'Haalt betaalde bestellingen op en maakt er automatisch facturen van.',
+  description: 'Haalt betaalde bestellingen op uit je webshop en maakt er automatisch definitieve facturen van, met klant en btw. Alleen lezen: er verandert niets in WooCommerce zelf. Niet-betaalde bestellingen worden overgeslagen.',
   fields: [
     { key: 'url', label: 'Webshop-adres', type: 'url', placeholder: 'https://mijnwinkel.nl' },
     { key: 'consumerKey', label: 'Consumer key', type: 'secret', help: 'WooCommerce → Instellingen → Geavanceerd → REST API (alleen-lezen)' },

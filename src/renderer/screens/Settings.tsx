@@ -506,7 +506,7 @@ function Integrations() {
   const [values, setValues] = useState<Record<string, Record<string, string>>>({});
   return (
     <div className="grid">
-      <p className="muted">Heb je een webshop of betaalprovider? Dan worden bestellingen automatisch facturen en kloppen uitbetalingen vanzelf met je bank.</p>
+      <p className="muted">Twee soorten koppelingen. Een <strong>omzetbron</strong> (webshop of Mollie Facturen) maakt van betaalde bestellingen/facturen automatisch omzet. Een <strong>betaalprovider</strong> (Mollie, Stripe) boekt alleen de uitbetaling en de kosten, zodat de bijschrijving op je bank klopt — daarvoor moet de omzet al ergens anders geboekt zijn. Gebruik je Mollie of Stripe zonder omzetbron hieronder, boek je omzet dan handmatig via "Verkoop via een ander systeem" bij de bank.</p>
       <ErrorBox error={list.error} />
       {(list.data ?? []).map((s) => {
         const id = s.definition.id;
