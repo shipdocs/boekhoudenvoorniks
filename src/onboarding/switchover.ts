@@ -871,7 +871,7 @@ export class SwitchoverService {
     const startOfYear = date.endsWith('-01-01');
     const split = this.splitPeriod(date);
     const list: Requirement[] = [
-      { key: 'auditfile', label: `Een auditfile (.xaf) uit je vorige boekhoudprogramma, tot en met ${before}`, hint: 'Heb je een programma gebruikt (Exact, e-Boekhouden, Moneybird, SnelStart, Jortt, …)? Exporteer daar een "auditfile". Dan vult de app bijna alles hieronder zelf in.', optional: true },
+      { key: 'auditfile', label: `Een auditfile (.xaf) uit je vorige boekhoudprogramma, tot en met ${before}`, hint: 'Heb je een programma gebruikt (Exact, e-Boekhouden, Moneybird, SnelStart, Jortt, …)? Exporteer daar een "auditfile". Dan vult de app bijna alles hieronder zelf in. Een bestand per jaar? Neem ze allemaal mee: uit de oudere jaren haalt de app de aankoopdatums van je bus en gereedschap.', optional: true },
       { key: 'bank', label: `Bankafschriften vanaf ${day}`, hint: 'Van al je zakelijke rekeningen, ook je spaarrekening en creditcard. Download ze bij je bank als CAMT.053 (XML) of MT940: daar staat ook het saldo in. CSV kan ook.', optional: false },
       { key: 'saldo', label: `Het saldo van elke rekening op ${before}`, hint: 'Staat op je afschrift of in je internetbankieren. Uit een CAMT- of MT940-bestand rekent de app het zelf uit.', optional: false },
       { key: 'klanten', label: `Facturen die klanten op ${before} nog niet hadden betaald`, hint: 'Nummer, klant, datum en bedrag (inclusief btw). Uit je vorige programma of je eigen lijstje.', optional: false },

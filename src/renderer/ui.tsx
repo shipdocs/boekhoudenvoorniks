@@ -200,7 +200,13 @@ export function ErrorBox({ error }: { error: string | null }) {
 }
 
 /** Leest een bestand (drag & drop of kiezen) als tekst of bytes. */
-export function DropZone({ accept, onFile, children, multiple }: { accept: string; onFile: (file: File) => void; children: ReactNode; multiple?: boolean }) {
+/** `onFiles`: alle bestanden van één keer slepen of kiezen samen (in plaats van één voor één via `onFile`). */
+export function DropZone({ accept, onFile, onFiles, children, multiple }: { accept: string; onFile?: (file: File) => void; onFiles?: (files: File[]) => void; children: ReactNode; multiple?: boolean }) {
+  const handle = (files: File[]) => {
+    if (files.length === 0) return;
+    if (onFiles) onFiles(files);
+    else for (const f of files) onFile?.(f);
+  };
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   return (
@@ -215,7 +221,7 @@ export function DropZone({ accept, onFile, children, multiple }: { accept: strin
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
-        for (const f of Array.from(e.dataTransfer.files)) onFile(f);
+        handle(Array.from(e.dataTransfer.files));
       }}
     >
       <input
@@ -225,7 +231,7 @@ export function DropZone({ accept, onFile, children, multiple }: { accept: strin
         multiple={multiple}
         hidden
         onChange={(e) => {
-          for (const f of Array.from(e.target.files ?? [])) onFile(f);
+          handle(Array.from(e.target.files ?? []));
           e.target.value = '';
         }}
       />
