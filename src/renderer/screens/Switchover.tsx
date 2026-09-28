@@ -4,7 +4,7 @@ import { Button, DateNl, DropZone, Euro, Field, Modal, MoneyInput, readAsBytes, 
 import { addDays, isIsoDate, today } from '../../shared/dates';
 import { SKIPPABLE_SECTIONS, defaultBookValue, startDateConsequences, startDateOptions } from '../../shared/switchover';
 import type { OpeningInput, OpeningItem, OpeningKind, OpeningSuggestion, SectionKey, SwitchoverState } from '../../onboarding/switchover';
-import type { ImportAnalysis, MultiImportAnalysis, XafPlan } from '../../onboarding/xaf-import';
+import type { DateAdvice, ImportAnalysis, ImportFileRole, XafPlan } from '../../onboarding/xaf-import';
 
 /**
  * Overstap-hulp: een lopende administratie overzetten. Hoofdstukken in gewone taal; de app boekt
@@ -220,7 +220,9 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
   const { toast } = useApp();
   const [file, setFile] = useState<{ name: string; data: string | Uint8Array } | null>(null);
   // meerdere bestanden tegelijk (bv. een auditfile per jaar): welke de app gebruikt en waarom
-  const [multi, setMulti] = useState<{ files: { name: string; data: string | Uint8Array }[]; roles: MultiImportAnalysis['files']; alternativeDate: string | null } | null>(null);
+  const [multi, setMulti] = useState<{ files: { name: string; data: string | Uint8Array }[]; roles: ImportFileRole[]; alternativeDate: string | null } | null>(null);
+  // de bestanden beginnen op of na de instapdatum: een betere instapdatum voorstellen
+  const [advice, setAdvice] = useState<{ files: { name: string; data: string | Uint8Array }[]; advice: DateAdvice } | null>(null);
   const [plan, setPlan] = useState<XafPlan | null>(null);
   const [include, setInclude] = useState<Set<string>>(new Set());
   const [banks, setBanks] = useState<Record<string, number | 'nieuw' | null>>({});
@@ -250,19 +252,26 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
 
   // auditfile en CSV zijn tekst; Excel gaat als bytes
   const read = async (f: File) => ({ name: f.name, data: /\.xlsx$/i.test(f.name) ? await readAsBytes(f) : await readAsText(f) });
-  const load = async (list: File[]) => {
-    if (list.length === 1) {
-      const f = await read(list[0]!);
-      setMulti(null);
-      const r = await run(() => api.switchover.analyzeXaf(f.data));
-      if (r) show(r, f);
-      return;
-    }
-    const files = await Promise.all(list.map(read));
+  const analyze = async (files: { name: string; data: string | Uint8Array }[]) => {
     const r = await run(() => api.switchover.analyzeXafFiles(files.map((f) => f.data)));
     if (!r) return;
-    setMulti({ files, roles: r.files, alternativeDate: r.alternativeDate });
+    if (r.kind === 'instapdatum') {
+      setAdvice({ files, advice: r });
+      setMulti(null);
+      setPlan(null);
+      setAsk(null);
+      return;
+    }
+    setAdvice(null);
+    setMulti(files.length > 1 ? { files, roles: r.files, alternativeDate: r.alternativeDate } : null);
     show(r, files[r.chosen]!);
+  };
+  const load = async (list: File[]) => analyze(await Promise.all(list.map(read)));
+  const chooseDate = async (a: { files: { name: string; data: string | Uint8Array }[]; advice: DateAdvice }) => {
+    const next = await run(() => api.switchover.setMode('overstapper', a.advice.suggestedDate), 'Instapdatum aangepast');
+    if (!next) return;
+    await refresh(next);
+    await analyze(a.files);
   };
   const toggle = (key: string) => setInclude((cur) => {
     const next = new Set(cur);
@@ -312,6 +321,27 @@ function XafImport({ state, refresh, nextButton, onSection }: SectionProps) {
       <p className="small muted" style={{ marginTop: 6 }}>
         Lukt het niet? <a href="#" onClick={(e) => { e.preventDefault(); void run(() => api.switchover.saveTemplate()); }}>Download het voorbeeldbestand</a>, zet je openstaande facturen erin en sleep het hierheen.
       </p>
+      {advice && (
+        <div className="notice warn" style={{ marginTop: 12 }}>
+          <strong>Kies een latere instapdatum</strong>
+          <p style={{ margin: '6px 0' }}>
+            {advice.advice.startedOnDate ? 'Je vorige administratie begon' : 'Je auditfiles beginnen'} op <DateNl date={advice.advice.firstDate} />, en je instapdatum is <DateNl date={advice.advice.date} />.
+            De app neemt je vorige administratie niet boeking voor boeking over, maar de <strong>stand op je instapdatum</strong>: je banksaldo, wat klanten en leveranciers nog open hadden, je bus en gereedschap, de btw, en je omzet en kosten van dit jaar tot dan.
+            Daarvoor moet de instapdatum na je laatste boeking liggen. Die is van <DateNl date={advice.advice.lastBooking} />. Alle boekingen daarvoor blijven in je vorige programma en in je auditfiles.
+          </p>
+          <div className="row">
+            <Button kind="primary" disabled={busy} onClick={() => void chooseDate(advice)}>
+              Stand overnemen op <DateNl date={advice.advice.suggestedDate} />
+            </Button>
+            <Button onClick={() => setAdvice(null)}>Laat maar</Button>
+          </div>
+          {advice.advice.startedOnDate && (
+            <p className="small muted" style={{ marginBottom: 0 }}>
+              Wil je je administratie echt vanaf <DateNl date={advice.advice.date} /> in deze app bijhouden? Dan hoef je hier niets in te lezen: sla dit onderdeel over en lees bij Bank je afschriften vanaf <DateNl date={advice.advice.date} /> in.
+            </p>
+          )}
+        </div>
+      )}
       {ask && file && (
         <ColumnQuestions
           // een nieuw bestand: nieuwe vragen, niet de keuzes van het vorige
