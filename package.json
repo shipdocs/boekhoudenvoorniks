@@ -1,6 +1,6 @@
 {
   "name": "gratis-boekhouden",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Gratis boekhouding voor zzp en mkb: offertes, facturen, bankimport en BTW-overzicht op een echte dubbele boekhouding.",
   "author": "Martin <info@shipdocs.app>",
   "license": "AGPL-3.0-or-later",
@@ -58,7 +58,7 @@
         "provider": "github",
         "owner": "shipdocs",
         "repo": "gratis-boekhouden",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ],
     "electronFuses": {

@@ -1,6 +1,6 @@
 import { app } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import { notesAsText } from './update-notes';
+import { notesAsText, updateErrorText } from './update-notes';
 
 /** Wat de renderer over updates laat zien. */
 export interface UpdateStatus {
@@ -33,12 +33,12 @@ export class Updates {
     autoUpdater.on('update-available', (info) => this.set({ state: autoUpdater.autoDownload ? 'downloaden' : 'wacht', version: info.version, notes: notesAsText(info.releaseNotes) }));
     autoUpdater.on('download-progress', (p) => this.set({ state: 'downloaden', percent: Math.round(p.percent) }));
     autoUpdater.on('update-downloaded', (info) => this.set({ state: 'klaar', version: info.version, notes: notesAsText(info.releaseNotes) ?? this.status.notes, percent: 100 }));
-    autoUpdater.on('error', (e) => this.set({ state: 'fout', error: (e as Error)?.message ?? String(e) }));
+    autoUpdater.on('error', (e) => this.set({ state: 'fout', error: updateErrorText(e) }));
   }
 
   private set(patch: Partial<UpdateStatus>): void {
-    // een klaarstaande update blijft klaarstaan, ook als een latere controle niets nieuws vindt
-    if (this.status.state === 'klaar' && patch.state && patch.state !== 'klaar' && patch.state !== 'fout') return;
+    // een klaarstaande update blijft klaarstaan, ook als een latere controle niets nieuws vindt of mislukt
+    if (this.status.state === 'klaar' && patch.state && patch.state !== 'klaar') return;
     this.status = { ...this.status, ...patch };
     this.emit(this.status);
   }
@@ -53,7 +53,7 @@ export class Updates {
     if (!app.isPackaged) return;
     if (this.status.state !== 'klaar') this.set({ state: on ? 'wacht' : 'uit' });
     if (!on) return;
-    const check = () => void autoUpdater.checkForUpdates().catch((e) => this.set({ state: 'fout', error: (e as Error).message }));
+    const check = () => void autoUpdater.checkForUpdates().catch((e) => this.set({ state: 'fout', error: updateErrorText(e) }));
     setTimeout(check, 20_000);
     this.timer = setInterval(check, FOUR_HOURS);
   }
@@ -63,7 +63,12 @@ export class Updates {
     if (!app.isPackaged) return 'Updates zijn alleen beschikbaar in de geïnstalleerde versie';
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
-    const r = await autoUpdater.checkForUpdates();
+    let r;
+    try {
+      r = await autoUpdater.checkForUpdates();
+    } catch (e) {
+      throw new Error(updateErrorText(e));
+    }
     const v = r?.updateInfo.version;
     return v && v !== app.getVersion() ? `Versie ${v} wordt gedownload. Hij wordt geïnstalleerd als je de app sluit.` : 'Je hebt de nieuwste versie';
   }
