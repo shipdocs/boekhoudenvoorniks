@@ -1,5 +1,11 @@
 # Wijzigingen
 
+## 0.6.7 — zien waar verlegde btw vandaan komt
+
+### Belasting
+- **"Btw die naar jou is verlegd" heeft een vergrootglas**: je ziet welke aankopen erin zitten (vak 2a, 4a en 4b samen), met een korte uitleg: bij een dienst van een buitenlandse leverancier of een onderaannemer met btw verlegd reken je de btw zelf uit, en krijg je hetzelfde bedrag in vak 5b meteen terug.
+- In de details van vak 2a, 4a en 4b heet de kolom met bedragen nu "Aankoop" in plaats van "Omzet".
+
 ## 0.6.6 — dubbele aankopen: eerst vragen
 
 ### Aankopen

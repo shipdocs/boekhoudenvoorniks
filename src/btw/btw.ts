@@ -244,21 +244,23 @@ export class VatService {
     const corrections = VatService.excludedCorrectionPeriods(this.corrections(period.start, period.end));
     const afdragen = [ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag, ACCOUNTS.btwPriveGebruik, ACCOUNTS.btwAfdragenVerlegd, ACCOUNTS.btwAfdragenEu, ACCOUNTS.btwAfdragenBuitenEu];
     // per vak: welke rekeningen tellen als omzet/grondslag en welke als btw; inkoop = kosten/activa met die btw-code
-    const spec: Record<string, { omzet?: string[]; inkoop?: string; btw?: string[]; btwSign?: 1 | -1 }> = {
+    const spec: Record<string, { omzet?: string[]; inkoop?: string[]; btw?: string[]; btwSign?: 1 | -1 }> = {
       '1a': { omzet: [ACCOUNTS.omzetHoog], btw: [ACCOUNTS.btwAfdragenHoog] },
       '1b': { omzet: [ACCOUNTS.omzetLaag], btw: [ACCOUNTS.btwAfdragenLaag] },
       '1d': { btw: [ACCOUNTS.btwPriveGebruik] },
       '1e': { omzet: [ACCOUNTS.omzetNul, ACCOUNTS.omzetVerlegd] },
-      '2a': { inkoop: 'verlegd', btw: [ACCOUNTS.btwAfdragenVerlegd] },
+      '2a': { inkoop: ['verlegd'], btw: [ACCOUNTS.btwAfdragenVerlegd] },
       '3a': { omzet: [ACCOUNTS.omzetExport] },
       '3b': { omzet: [ACCOUNTS.omzetIcp, ACCOUNTS.omzetIcpDienst] },
-      '4a': { inkoop: 'buiten-eu', btw: [ACCOUNTS.btwAfdragenBuitenEu] },
-      '4b': { inkoop: 'eu', btw: [ACCOUNTS.btwAfdragenEu] },
+      '4a': { inkoop: ['buiten-eu'], btw: [ACCOUNTS.btwAfdragenBuitenEu] },
+      '4b': { inkoop: ['eu'], btw: [ACCOUNTS.btwAfdragenEu] },
       '5a': { btw: afdragen },
       '5b': { btw: [ACCOUNTS.btwVoorbelasting], btwSign: -1 },
       // regels uit de samenvatting bovenaan
       omzet: { omzet: [ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, ACCOUNTS.omzetNul, ACCOUNTS.omzetVerlegd, ACCOUNTS.omzetVrijgesteld, ACCOUNTS.omzetExport, ACCOUNTS.omzetIcp, ACCOUNTS.omzetIcpDienst, ACCOUNTS.omzetDienstBuitenEu] },
       'btw-omzet': { btw: [ACCOUNTS.btwAfdragenHoog, ACCOUNTS.btwAfdragenLaag] },
+      // "btw die naar jou is verlegd": 2a + 4a + 4b
+      verlegd: { inkoop: ['verlegd', 'buiten-eu', 'eu'], btw: [ACCOUNTS.btwAfdragenVerlegd, ACCOUNTS.btwAfdragenBuitenEu, ACCOUNTS.btwAfdragenEu] },
     };
     const s = spec[code];
     if (!s) throw new ValidationError(`Onbekend vak ${code}`);
@@ -280,7 +282,7 @@ export class VatService {
     }[];
     const byEntry = new Map<number, VatDetailLine>();
     for (const r of rows) {
-      const omzet = s.omzet?.includes(r.rgs_code) ? r.net : s.inkoop && r.vat_code === s.inkoop && (r.category === 'kosten' || r.category === 'activa') ? -r.net : 0;
+      const omzet = s.omzet?.includes(r.rgs_code) ? r.net : s.inkoop && r.vat_code !== null && s.inkoop.includes(r.vat_code) && (r.category === 'kosten' || r.category === 'activa') ? -r.net : 0;
       const btw = s.btw?.includes(r.rgs_code) ? r.net * (s.btwSign ?? 1) : 0;
       if (omzet === 0 && btw === 0) continue;
       const line = byEntry.get(r.id) ?? {
