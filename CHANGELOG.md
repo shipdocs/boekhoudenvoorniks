@@ -9,6 +9,15 @@
 - **Geld terug van een aankoop (refund)**: kies de categorie en btw van de oorspronkelijke aankoop; de app verlaagt je kosten en de btw die je terugkreeg. Was het een privé-aankoop, dan boekt de app het als privé.
 
 ### Vandaag
+- **Wat gebeurt er als ik dit kies?** Bij elke vraag op Vandaag staat per knop wat die in je boekhouding doet, bijvoorbeeld "Zakelijk: wordt geboekt als software, telt mee als kosten, de btw krijg je terug" of "Privé: geen kosten en geen btw".
+- **Btw-controles noemen de posten**: bij "3 uitgaven zonder bonnetje", "mogelijk dubbele aankopen", "betalingen nog uitzoeken" en "btw verlegd zonder btw-nummer" zie je welke het zijn, met een knop om elk te openen (ook op het Belasting-scherm).
+- Voorstellen bij de bank ("Hoort dit hierbij?") tonen het openstaande bedrag en de datum van de factuur of aankoop.
+
+### Overstappen
+- Voorstellen uit je bankafschriften zeggen waarom (bv. "factuurnummer 2025-0042 in de omschrijving") en wat "Ja" doet, met alle gegevens van de betaling. Bij "betalingen van vóór je instapdatum" zie je welke het zijn en wat overslaan betekent.
+
+### Bonnetjes
+- Bij een mogelijk dubbele bon bekijk je met **Bekijk de andere** de bon die erop lijkt.
 - **Zien waar een vraag over gaat**: bij een bon op Vandaag klik je op de naam en zie je de bon zelf, en bij een mogelijk dubbele bon de andere ernaast. Bij een aankoop (investering, klus) zie je de aankoop met een knop om de bon te openen. Bij een betaling die aan een factuur of aankoop gekoppeld wordt, zie je die factuur met datum, bedrag, wat nog open staat en het verschil.
 - **Uitzoeken** bij geld dat binnenkwam opent meteen het scherm om de betaling in te delen, niet de hele banklijst.
 - Een verlopen offerte noemt nummer, datum, bedrag en geldigheid, met een knop **Bekijken**. Bij een vaste last zie je welke betalingen de app zag en wanneer de laatste was; bij "voortaan automatisch" de laatste betalingen.

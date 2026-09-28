@@ -68,6 +68,8 @@ export interface TaskAction {
   id: string;
   label: string;
   primary?: boolean;
+  /** wat deze keuze in je boekhouding doet, in gewone taal */
+  hint?: string;
 }
 
 /** Eén ding dat de aandacht van de gebruiker nodig heeft, in mensentaal. */
@@ -489,7 +491,7 @@ export class InboxService {
           : bad ? [{ id: 'open', label: 'Bekijken', primary: true }] : [{ id: 'klopt', label: 'Ja', primary: true }, { id: 'open', label: 'Aanpassen' }],
         group: bad ? undefined : { key: 'document-klopt', label: 'Alle bonnetjes bevestigen' },
         why: d.classification ? `Omdat ${d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(', ')}.` : undefined,
-        ref: { documentId: d.id },
+        ref: { documentId: d.id, categoryKey: d.classification?.business === false ? undefined : d.classification?.categoryKey },
       });
     }
 
@@ -822,7 +824,53 @@ export class InboxService {
       });
     }
     // stabiel sorteren op prioriteit; binnen een prioriteit blijft de volgorde gelijk
+    for (const t of tasks) this.explainActions(t);
     return tasks.map((t, i) => ({ t, i })).sort((a, b) => (a.t.priority ?? 2) - (b.t.priority ?? 2) || a.i - b.i).map((x) => x.t);
+  }
+
+  /** Bij elke knop: wat er in je boekhouding gebeurt als je hem kiest. */
+  private explainActions(t: Task): void {
+    const cat = t.ref.categoryKey ? this.categories.label(t.ref.categoryKey) : null;
+    const vatBack = t.ref.vatCode && !['geen', 'vrijgesteld'].includes(t.ref.vatCode) && !this.settings.get().kor ? ', de btw krijg je terug' : '';
+    const asCost = cat ? `Wordt geboekt als ${cat}: telt mee als kosten${vatBack}.` : 'Je kiest daarna wat voor kosten het waren en of er btw op stond.';
+    const hints: Record<string, string> = {
+      'bank-business:zakelijk': asCost,
+      'bank-business:prive': 'Geen kosten en geen btw: de betaling telt als privé.',
+      'bank-category:klopt': asCost,
+      'bank-category:anders': 'Je kiest zelf wat het wel was (andere kosten, privé, overboeking, …).',
+      'bank-invoice:klopt': 'De betaling wordt aan de factuur gekoppeld; die staat daarna als betaald. Geen nieuwe omzet: die telde al bij de factuur.',
+      'bank-invoice:nee': 'Je deelt de betaling zelf in.',
+      'bank-purchase:klopt': 'De betaling wordt aan de aankoop gekoppeld; die staat daarna als betaald. De kosten telden al bij de aankoop.',
+      'bank-purchase:nee': 'Je deelt de betaling zelf in.',
+      'bank-sale:klopt': 'Wordt geboekt als omzet, met dezelfde btw als de vorige keer.',
+      'bank-sale:anders': 'Je deelt de betaling zelf in.',
+      'bank-refund:klopt': 'Geen kosten: het geld ging terug naar je klant.',
+      'bank-refund:anders': 'Je deelt de betaling zelf in.',
+      'bank-pot:klopt': 'Geen omzet en geen kosten: geld verplaatst binnen je eigen bank.',
+      'bank-own:klopt': 'Geen omzet en geen kosten: geld verplaatst tussen je eigen rekeningen.',
+      'bank-income:open': 'Je kiest waar het geld voor was: een factuur, een verkoop, rente, een refund, privé, …',
+      'document-review:klopt': cat ? `De bon wordt geboekt als ${cat}.` : 'De bon wordt geboekt zoals voorgesteld.',
+      'document-review:dubbel': 'De bon wordt niet nog een keer geboekt.',
+      'document-review:open': 'Je ziet de bon en past aan wat niet klopt.',
+      'quote-expired:akkoord': 'Er komt een klus bij voor deze offerte; als het werk klaar is maak je de factuur.',
+      'quote-expired:afgewezen': 'De offerte gaat naar afgewezen. In je boekhouding verandert niets.',
+      'recurring-confirm:ja': 'De app let voortaan op of de factuur en de betaling elke keer binnenkomen. Er wordt niets extra geboekt.',
+      'recurring-confirm:nee': 'De app vraagt er niet meer naar.',
+      'recurring-stopped:ja': 'De app verwacht deze betaling niet meer.',
+      'recurring-stopped:nee': 'De app blijft de betaling verwachten.',
+      'supplier-auto:ja': 'Betalingen aan deze leverancier boekt de app voortaan zelf zo. Je ziet ze bij "Automatisch gedaan" en kunt ze altijd terugdraaien.',
+      'supplier-auto:nee': 'De app blijft het je elke keer vragen.',
+      'investment-check:ja': 'Wordt een bedrijfsmiddel: de kosten worden over minstens 5 jaar verdeeld, en je krijgt misschien extra aftrek (KIA).',
+      'investment-check:nee': 'Blijft gewone kosten in dit jaar.',
+      'vat-check:open': 'Je gaat naar de plek waar je het oplost.',
+      'vat-check:overslaan': 'De controle verdwijnt; de aangifte gaat door zoals het nu is.',
+      'customer-overpaid:klopt': 'Het te veel betaalde blijft als tegoed van de klant staan.',
+      'job-link:ja': 'De kosten tellen mee bij deze klus.',
+      'job-link:algemeen': 'Hoort niet bij een klus: gewone bedrijfskosten.',
+      'mail-online:bon': 'De mail wordt als bon bewaard; je controleert hem daarna.',
+      'recurring-invoice:geen': 'De app vraagt voor deze betaling niet meer om een factuur.',
+    };
+    for (const a of t.actions) a.hint ??= hints[`${t.kind}:${a.id}`];
   }
 
   /** Legt vast dat de gebruiker een taak heeft afgehandeld (voor "door jou gecontroleerd", #29). */

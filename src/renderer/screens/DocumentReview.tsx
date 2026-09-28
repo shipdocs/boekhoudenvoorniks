@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
 import { CategoryChoice, InvestmentHint, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
 import type { PurchaseVatCode } from '../../shared/vat';
@@ -136,6 +136,8 @@ export function DocumentReview({ id }: { id: number }) {
   const jobSuggestion = useLoad(() => api.jobs.suggestForDocument(id), [id]);
   const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
+  // mogelijk dubbel: de andere bon ernaast bekijken
+  const [compare, setCompare] = useState<number | null>(null);
   const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
 
   const d = doc.data;
@@ -224,11 +226,19 @@ export function DocumentReview({ id }: { id: number }) {
                     const done = await run(() => api.documents.markDuplicate(d.id, i.suggestion as { documentId: number | null; purchaseId: number | null }), 'Dubbel document weggelegd');
                     if (done) go({ screen: 'aankopen' });
                   }}>Ja, zelfde aankoop</Button>
+                  {(i.suggestion as { documentId: number | null } | undefined)?.documentId && (
+                    <Button small kind="ghost" onClick={() => setCompare((i.suggestion as { documentId: number }).documentId)}>Bekijk de andere</Button>
+                  )}
                   <span className="small muted">Anders: controleer de gegevens hieronder en verwerk het gewoon.</span>
                 </div>
               )}
             </div>
           ))}
+          {compare !== null && (
+            <Modal title="De bon die hierop lijkt" wide onClose={() => setCompare(null)}>
+              <OtherDocument id={compare} />
+            </Modal>
+          )}
           {d.status === 'controle' && (d.decisions ?? []).some((x) => !x.field && !x.ok) && (
             <div className="notice small">
               Hier twijfelen we nog over: {(d.decisions ?? []).filter((x) => !x.field && !x.ok).map((x) => `${x.label.toLowerCase()} (${x.value})`).join(', ')}. Kies hieronder wat klopt.
