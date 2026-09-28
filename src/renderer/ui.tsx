@@ -8,7 +8,7 @@ import { api } from './api';
 
 export type Screen =
   | 'home' | 'welkom' | 'werk' | 'factuur' | 'offerte' | 'klussen' | 'klus' | 'aankopen' | 'document' | 'categorie'
-  | 'klanten' | 'klant' | 'bank' | 'belasting' | 'aangifte' | 'overzicht' | 'instellingen' | 'opmaak' | 'expert' | 'overstap';
+  | 'klanten' | 'klant' | 'bank' | 'belasting' | 'aangifte' | 'overzicht' | 'instellingen' | 'opmaak' | 'expert' | 'overstap' | 'zoeken';
 
 export interface Route {
   screen: Screen;

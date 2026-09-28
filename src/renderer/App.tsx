@@ -7,7 +7,7 @@ import { Work } from './screens/Work';
 import { DocumentEditor } from './screens/DocumentEditor';
 import { Jobs, JobDetail } from './screens/Jobs';
 import { Purchases } from './screens/Purchases';
-import { SearchOverlay } from './screens/Search';
+import { SearchOverlay, SearchScreen } from './screens/Search';
 import { Customers, CustomerDetail } from './screens/Customers';
 import { Bank, CategorizeTransaction } from './screens/Bank';
 import { Tax } from './screens/Tax';
@@ -118,6 +118,7 @@ export function App() {
       case 'instellingen': return <SettingsScreen />;
       case 'opmaak': return <TemplateEditor />;
       case 'expert': return <Expert />;
+      case 'zoeken': return <SearchScreen />;
       case 'overstap': return <Switchover />;
     }
   })();
@@ -130,7 +131,7 @@ export function App() {
         {route.screen !== 'welkom' && (
           <nav className="nav" aria-label="Hoofdmenu">
             <div className="brand">Gratis Boekhouden</div>
-            <button className="search-btn" onClick={() => setSearching(true)} title="Zoeken (Ctrl+K)"><span>🔍</span>Zoeken<kbd>Ctrl K</kbd></button>
+            <button className={`search-btn${route.screen === 'zoeken' ? ' active' : ''}`} onClick={() => go({ screen: 'zoeken' })} title="Zoeken (Ctrl+K voor snel zoeken)"><span>🔍</span>Zoeken<kbd>Ctrl K</kbd></button>
             {NAV.map((n) => (
               <button key={n.screen} className={isActive(n) ? 'active' : ''} onClick={() => go({ screen: n.screen })}>
                 <span>{n.icon}</span>
