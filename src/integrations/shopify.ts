@@ -6,7 +6,7 @@ export const SHOPIFY: IntegrationDefinition = {
   id: 'shopify',
   label: 'Shopify',
   kind: 'webshop',
-  description: 'Haalt betaalde bestellingen op en maakt er automatisch facturen van.',
+  description: 'Haalt betaalde bestellingen op uit je webshop en maakt er automatisch definitieve facturen van, met klant en btw. Alleen lezen: er verandert niets in Shopify zelf. Niet-betaalde bestellingen worden overgeslagen.',
   fields: [
     { key: 'shop', label: 'Winkeldomein', type: 'text', placeholder: 'mijnwinkel.myshopify.com' },
     { key: 'accessToken', label: 'Admin API access token', type: 'secret', help: 'Shopify admin → Apps → App ontwikkelen → read_orders' },
