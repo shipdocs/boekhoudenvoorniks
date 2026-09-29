@@ -9,6 +9,8 @@
   - Lees zijn antwoord in: zijn correcties komen in de periode, wat je intussen deed blijft staan, en de periode is daarna afgesloten.
   - Voor boekhouders (Instellingen > Administraties): je kantoor instellen, klanten uitnodigen, hun export inlezen als aparte administratie, corrigeren (correctieboeking, terugdraaien, grootboekrekening toevoegen) en een antwoord maken.
   - Er gaat niets via een server van ons: alles loopt via je eigen e-mail of een bestand.
+  - Draait je boekhouder een factuur of inkoop terug waarop al betaald is, dan zie je dat na het inlezen op Vandaag, zodat je het met hem kunt afhandelen.
+  - Kantoren met meer medewerkers delen de kantoorsleutel via een bestand met wachtwoord (Instellingen > Administraties > Met collega's werken). In de kopie van een klant zie je zijn takenlijst niet.
 - **Periode afsluiten** (Hoe gaat het? > Periode afsluiten): klaar met een kwartaal of een jaar? Sluit het af, dan verandert er niets meer aan. De app laat eerst zien wat er nog moet (betalingen verwerken, bonnen controleren, afschriften t/m de einddatum) en maakt een back-up voordat hij afsluit. Afsluiten kan niet ongedaan gemaakt worden.
   - Komt er daarna nog een bon of factuur van daarvóór binnen, dan komt die in de eerste open periode, met de echte datum erbij. De btw hoort bij de periode van de bon, zolang je die aangifte nog niet gedaan hebt.
   - Een betaling of correctieboeking in een afgesloten periode kan niet meer. Iets uit die periode terugdraaien kan wel: de correctie komt dan in de open periode.

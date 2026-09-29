@@ -49,7 +49,7 @@ test('uitwisseling: uitnodigen, versturen, corrigeren bij de boekhouder, antwoor
 
   // de boekhouder leest de export in: een aparte administratie, de kopie
   await administrationsTab(page);
-  await page.getByTestId('kantoor').locator('input[type=file]').setInputFiles(exportFile);
+  await page.getByTestId('kantoor').locator('input[type=file][accept=".gbpakket"]').setInputFiles(exportFile);
   await expect(page.locator('.toasts').getByText('Export ingelezen')).toBeVisible();
   await page.reload(); // de app ververst het venster na het wisselen
   const banner = page.getByTestId('kopie-antwoord');
@@ -95,4 +95,33 @@ test('uitwisseling: uitnodigen, versturen, corrigeren bij de boekhouder, antwoor
   await klaar.getByRole('button', { name: 'Oké' }).click();
   await expect(page.getByTestId('periode-afsluiten').getByText(`Afgesloten t/m ${date}.`)).toBeVisible();
   await expect(page.getByTestId('uitwisseling').getByText(/Laatste antwoord: uitwisseling 1/)).toBeVisible();
+});
+
+test('kantoorsleutel delen met een collega: met wachtwoord, en dezelfde controlecode', async ({ page }) => {
+  await onboard(page);
+  await administrationsTab(page);
+  const kantoor = page.getByTestId('kantoor');
+  await kantoor.locator('input').nth(0).fill('Kantoor De Vries');
+  await kantoor.getByRole('button', { name: 'Opslaan' }).click();
+  const code = (await kantoor.locator('code').filter({ hasText: /^[A-Z2-9]{4}-[A-Z2-9]{4}$/ }).textContent())!;
+
+  const collega = page.getByTestId('collega');
+  await collega.locator('summary').click();
+  await collega.locator('input[type=password]').first().fill('lange zin als wachtwoord');
+  await collega.getByRole('button', { name: 'Kantoorsleutel bewaren voor een collega' }).click();
+  const file = await savedPath(page, /Kantoorsleutel bewaard: (.+?)\. Geef/);
+
+  // bij de collega: eerst een eigen (andere) sleutel, dan die van het kantoor inlezen
+  await call(page, 'exchange.saveOffice', 'Kantoor De Vries', '', true);
+  await page.reload();
+  await administrationsTab(page);
+  await expect(page.getByTestId('kantoor').locator('code').filter({ hasText: code })).toHaveCount(0);
+  await collega.locator('summary').click();
+  await collega.locator('input[type=password]').last().fill('verkeerd wachtwoord!');
+  await collega.locator('input[type=file]').setInputFiles(file);
+  await expect(page.getByText('Verkeerd wachtwoord, of het bestand is beschadigd')).toBeVisible();
+  await collega.locator('input[type=password]').last().fill('lange zin als wachtwoord');
+  await collega.locator('input[type=file]').setInputFiles(file);
+  await expect(page.locator('.toasts').getByText('Kantoorsleutel overgenomen')).toBeVisible();
+  await expect(page.getByTestId('kantoor').locator('code').filter({ hasText: code })).toBeVisible();
 });

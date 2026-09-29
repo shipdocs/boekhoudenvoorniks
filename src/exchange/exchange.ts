@@ -5,6 +5,7 @@ import type { Ledger } from '../core-ledger/ledger';
 import type { PeriodCloseService } from '../closing/period-close';
 import type { SettingsService } from '../settings/settings';
 import type { SecretStore } from '../integrations/types';
+import type { ExchangeConflict } from '../inbox/inbox';
 import type { Cents } from '../shared/money';
 import { assertIsoDate, formatDateNl, today, type IsoDate } from '../shared/dates';
 import { ValidationError } from '../shared/validation';
@@ -293,7 +294,7 @@ export class ExchangeService {
    * en deze versie hoort, de handelingen opnieuw uitvoeren in de vergrendelde periode, en afsluiten.
    * Alles of niets.
    */
-  readAnswer(data: Uint8Array, appVersion: string): { office: string; count: number; summaries: string[]; closedUntil: IsoDate } {
+  readAnswer(data: Uint8Array, appVersion: string): { office: string; count: number; summaries: string[]; closedUntil: IsoDate; conflicts: ExchangeConflict[] } {
     const header = readHeader(data);
     if (header.richting !== 'naar-klant') throw new ValidationError('Dit is een export naar de boekhouder, geen antwoord');
     if (header.administratie !== this.settings.administrationId()) throw new ValidationError('Dit antwoord hoort bij een andere administratie');
@@ -305,6 +306,7 @@ export class ExchangeService {
     if (!key) throw new ValidationError('De sleutel van deze uitwisseling ontbreekt (bv. na een nieuwe installatie). Breek de uitwisseling af en maak een nieuwe export.');
     const body = JSON.parse(openWithKey(Buffer.from(key, 'base64'), data).plain.toString('utf8')) as AnswerBody;
     const until = ex.until;
+    const conflicts: ExchangeConflict[] = [];
     this.periods.withoutLock(() => {
       const created = new Map<number, number[]>();
       const resolve = (ref: EntryRef): number => {
@@ -320,19 +322,23 @@ export class ExchangeService {
         } else if (a.kind === 'terugdraaien') {
           this.assertInPeriod(a.input.date, until);
           const id = resolve(a.input.entry);
-          this.assertInPeriod(this.ledger.getEntry(id).entry_date, until);
+          const entry = this.ledger.getEntry(id);
+          this.assertInPeriod(entry.entry_date, until);
           created.set(a.seq, [this.ledger.reverse(id, a.input.date)]);
+          const conflict = this.paidDocument(entry.source_ref);
+          if (conflict) conflicts.push({ ...conflict, exchange: ex.no!, office: body.office });
         } else if (a.kind === 'rekening') {
           this.ledger.createAccount(a.input);
         } else {
           throw new ValidationError('Het antwoord bevat een onbekende handeling; werk de app bij');
         }
       }
+      if (conflicts.length > 0) this.setSetting('exchangeConflicts', [...(this.getSetting<ExchangeConflict[]>('exchangeConflicts') ?? []), ...conflicts]);
       this.periods.finishExchange(ex.no!);
     });
     this.secrets.delete(exportKeySecret(ex.no));
     this.setSetting('exchangeLast', { exchange: ex.no, until, office: body.office, count: body.actions.length, readAt: new Date().toISOString() });
-    return { office: body.office, count: body.actions.length, summaries: body.actions.map((a) => a.summary), closedUntil: until };
+    return { office: body.office, count: body.actions.length, summaries: body.actions.map((a) => a.summary), closedUntil: until, conflicts };
   }
 
   lastAnswer(): { exchange: number; until: IsoDate; office: string; count: number; readAt: string } | null {
@@ -340,6 +346,19 @@ export class ExchangeService {
   }
 
   // ---- hulp ---------------------------------------------------------------------------------
+
+  /** De factuur of inkoop achter een boeking, als daar al op betaald is (`invoice:12`, `purchase:7`). */
+  private paidDocument(sourceRef: string | null): Omit<ExchangeConflict, 'exchange' | 'office'> | null {
+    const m = /^(invoice|purchase):(\d+)$/.exec(sourceRef ?? '');
+    if (!m) return null;
+    const id = Number(m[2]);
+    if (m[1] === 'invoice') {
+      const inv = this.db.prepare('SELECT number, amount_paid AS paid FROM invoices WHERE id = ?').get(id) as { number: string | null; paid: number } | undefined;
+      return inv && inv.paid > 0 ? { kind: 'factuur', id, label: inv.number ?? `#${id}`, paid: inv.paid } : null;
+    }
+    const p = this.db.prepare('SELECT COALESCE(r.name, p.description) AS label, p.amount_paid AS paid FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id WHERE p.id = ?').get(id) as { label: string; paid: number } | undefined;
+    return p && p.paid > 0 ? { kind: 'inkoop', id, label: p.label, paid: p.paid } : null;
+  }
 
   private refFor(entryId: number, baseEntryId: number): EntryRef {
     if (entryId <= baseEntryId) return { id: entryId };

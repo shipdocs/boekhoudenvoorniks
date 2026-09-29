@@ -48,6 +48,7 @@ export type TaskKind =
   | 'vat-due'
   | 'bank-stale'
   | 'bank-locked'
+  | 'exchange-conflict'
   | 'vat-suppletie'
   | 'supplier-auto'
   | 'vat-check'
@@ -76,6 +77,16 @@ export interface TaskAction {
 }
 
 /** Eén ding dat de aandacht van de gebruiker nodig heeft, in mensentaal. */
+/** Een factuur of inkoop die de boekhouder terugdraaide terwijl er al op betaald was (ExchangeService.readAnswer). */
+export interface ExchangeConflict {
+  kind: 'factuur' | 'inkoop';
+  id: number;
+  label: string;
+  paid: Cents;
+  exchange: number;
+  office: string;
+}
+
 export interface Task {
   key: string;
   kind: TaskKind;
@@ -177,6 +188,8 @@ export class InboxService {
    * die de gebruiker al vaak genoeg heeft bevestigd. Deterministisch, geen AI.
    */
   autoProcess(asOf: IsoDate = today()): { matched: number; booked: number } {
+    // de kopie bij de boekhouder boekt niets zelf
+    if (this.settings.officeCopy()) return { matched: 0, booked: 0 };
     this.recurring.detect(); // vaste lasten herkennen (alleen voorstellen, niets boeken)
     const level = this.settings.get().autopilot;
     // dubbel geboekte aankopen herstellen: geen nieuwe beslissing, dus ook bij "voorzichtig"
@@ -317,6 +330,8 @@ export class InboxService {
   }
 
   tasks(asOf: IsoDate = today()): Task[] {
+    // in de kopie bij de boekhouder zijn de vragen van de klant niet aan hem; zijn werk staat in de balk
+    if (this.settings.officeCopy()) return [];
     const tasks: Task[] = [];
     const s = this.settings.get();
     if (!s.onboardingDone || !s.company.name) {
@@ -491,6 +506,24 @@ export class InboxService {
           ref: { bankTransactionId: t.id, categoryKey: sug?.categoryKey, vatCode: sug?.vatCode },
         });
       }
+    }
+
+    // na het antwoord van de boekhouder: iets teruggedraaid waarop al betaald was
+    const conflicts = this.db.prepare(`SELECT value FROM settings WHERE key = 'exchangeConflicts'`).get() as { value: string } | undefined;
+    for (const c of conflicts ? (JSON.parse(conflicts.value) as ExchangeConflict[]) : []) {
+      const key = `exchange-conflict-${c.exchange}-${c.kind}-${c.id}`;
+      if (this.isSkipped(key)) continue;
+      tasks.push({
+        key,
+        kind: 'exchange-conflict',
+        icon: '⚠️',
+        title: `${c.kind === 'factuur' ? 'Factuur' : 'Inkoop'} ${c.label}: teruggedraaid door ${c.office}`,
+        question: `Je boekhouder heeft ${c.kind === 'factuur' ? 'deze factuur' : 'deze inkoop'} in uitwisseling ${c.exchange} teruggedraaid, maar er is ${formatEuro(c.paid)} op betaald. Vraag hem hoe je die betaling verwerkt, en vink dit daarna af.`,
+        amount: c.paid,
+        priority: 1,
+        actions: [{ id: 'open', label: 'Bekijken', primary: true }, { id: 'klaar', label: 'Afgehandeld' }],
+        ref: c.kind === 'factuur' ? { invoiceId: c.id } : { purchaseId: c.id },
+      });
     }
 
     const lock = this.ledger.periodLock();
