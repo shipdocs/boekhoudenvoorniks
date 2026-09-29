@@ -21,7 +21,8 @@ test('rapporten voor de boekhouder: kolommenbalans, kaarten, relatiekaarten en p
 
   await page.getByRole('button', { name: 'Relatiekaarten' }).click();
   await page.getByRole('button', { name: /Gamma/ }).click();
-  await expect(page.getByText(/Openstaand op/)).toContainText('-');
+  await expect(page.getByText(/Openstaand op/)).toContainText('€ 0,00');
+  await expect(page.locator('table.list tbody')).toContainText('Betaling inkoop');
 
   await page.getByRole('button', { name: 'Periodebalans' }).click();
   await expect(page.locator('table.list thead')).toContainText('P2');
