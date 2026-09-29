@@ -815,4 +815,42 @@ export const migrations: string[] = [
     lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
     substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))) || '"');
   `,
+  /* 22: periodeslot — afgewerkt is afgewerkt (docs/uitwisseling.md) */ `
+  -- Alles t/m until_date ligt vast. 'afgesloten' is definitief; 'uitwisseling' loopt zolang de periode
+  -- bij de boekhouder ligt en wordt 'afgesloten' als zijn antwoord is ingelezen (of vervalt bij afbreken).
+  CREATE TABLE ledger_locks (
+    id INTEGER PRIMARY KEY,
+    until_date TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('uitwisseling','afgesloten')),
+    exchange_no INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at TEXT
+  );
+  -- Eén rij zolang het antwoord van de boekhouder of een migratie wordt ingelezen: dan geldt het slot niet.
+  CREATE TABLE ledger_lock_bypass (id INTEGER PRIMARY KEY CHECK (id = 1));
+
+  -- Geen nieuwe posten t/m het slot. Uitzondering: de btw-aangifte (geboekt op de laatste dag van de
+  -- btw-periode; correcties gaan via de btw-datum naar de volgende periode).
+  CREATE TRIGGER journal_entries_period_lock BEFORE INSERT ON journal_entries
+  WHEN NEW.source <> 'btw' AND NOT EXISTS (SELECT 1 FROM ledger_lock_bypass)
+    AND NEW.entry_date <= (SELECT MAX(until_date) FROM ledger_locks)
+  BEGIN SELECT RAISE(ABORT, 'Deze periode is afgesloten: boek dit na de afgesloten periode'); END;
+
+  -- Zolang de periode bij de boekhouder ligt, blijft hij precies zoals de boekhouder hem kreeg: ook niets
+  -- terugdraaien of vervangen. Na het afsluiten mag dat wel, met de correctie in een open periode.
+  CREATE TRIGGER journal_entries_exchange_status BEFORE UPDATE OF status ON journal_entries
+  WHEN OLD.source <> 'btw' AND NOT EXISTS (SELECT 1 FROM ledger_lock_bypass)
+    AND OLD.entry_date <= (SELECT MAX(until_date) FROM ledger_locks WHERE kind = 'uitwisseling')
+  BEGIN SELECT RAISE(ABORT, 'Deze periode ligt bij je boekhouder'); END;
+  CREATE TRIGGER events_exchange_status BEFORE UPDATE OF status ON events
+  WHEN NOT EXISTS (SELECT 1 FROM ledger_lock_bypass)
+    AND OLD.event_date <= (SELECT MAX(until_date) FROM ledger_locks WHERE kind = 'uitwisseling')
+  BEGIN SELECT RAISE(ABORT, 'Deze periode ligt bij je boekhouder'); END;
+
+  -- Afgesloten is definitief: niet te verwijderen, te verschuiven of terug te zetten.
+  CREATE TRIGGER ledger_locks_final_delete BEFORE DELETE ON ledger_locks WHEN OLD.kind = 'afgesloten'
+  BEGIN SELECT RAISE(ABORT, 'Een afgesloten periode kan niet heropend worden'); END;
+  CREATE TRIGGER ledger_locks_final_update BEFORE UPDATE ON ledger_locks WHEN OLD.kind = 'afgesloten'
+  BEGIN SELECT RAISE(ABORT, 'Een afgesloten periode kan niet heropend worden'); END;
+  `,
 ];

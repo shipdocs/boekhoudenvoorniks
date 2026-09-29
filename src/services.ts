@@ -22,6 +22,7 @@ import { DashboardService } from './dashboard/dashboard';
 import { QuickActions } from './quick/quick';
 import { IntegrationService } from './integrations/integrations';
 import type { FetchLike, SecretStore } from './integrations/types';
+import { PeriodCloseService } from './closing/period-close';
 import { AccountantExport } from './export/accountant';
 import { AccountantPackage } from './export/accountant-package';
 import { SupplierMemory } from './intake/supplier-memory';
@@ -80,6 +81,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const matching = new MatchingEngine(bank, invoices, purchases, relations);
   const vat = new VatService(db, ledger, settings);
   const dashboard = new DashboardService(db, ledger, invoices, bank, vat);
+  const periods = new PeriodCloseService(db, ledger, bank);
   const quick = new QuickActions(db, ledger, purchases, invoices, relations, categories);
   const integrations = new IntegrationService(db, ledger, invoices, relations, deps.secrets, integrationFetch);
   const exports = new AccountantExport(db, ledger);
@@ -123,7 +125,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
+  return { db, periods, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;
