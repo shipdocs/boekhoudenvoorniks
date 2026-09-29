@@ -1,4 +1,4 @@
-import { createPublicKey, verify } from 'node:crypto';
+import { createPublicKey, randomBytes, verify } from 'node:crypto';
 import type { Db } from '../db/database';
 import type { SettingsService } from '../settings/settings';
 import { formatDateNl, type IsoDate } from '../shared/dates';
@@ -76,6 +76,21 @@ export class LicenseService {
   /** Staan licenties aan (is er een sleutel om ze te controleren)? */
   get enabled(): boolean {
     return this.publicKey !== '';
+  }
+
+  /**
+   * Geheim waarmee deze administratie haar licentie kan ophalen en het abonnement kan opzeggen.
+   * Het blijft lokaal in de administratie(database) en gaat alleen in de body/header naar de Worker.
+   */
+  managementKey(): string {
+    const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'licenseManagementKey'`).get() as { value: string } | undefined;
+    if (row) {
+      const value = JSON.parse(row.value) as unknown;
+      if (typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value)) return value;
+    }
+    const value = randomBytes(32).toString('base64url');
+    this.db.prepare(`INSERT INTO settings (key, value) VALUES ('licenseManagementKey', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(value));
+    return value;
   }
 
   status(today: IsoDate): LicenseStatus {

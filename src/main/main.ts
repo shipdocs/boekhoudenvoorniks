@@ -148,8 +148,13 @@ async function openClientExport(data: Uint8Array): Promise<{ company: string; ex
 }
 
 /** POST naar de licentie-Worker; een foutmelding van de Worker ("Voor de factuur ontbreekt …") komt zo door. */
-async function postLicense<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${LICENSE_API_URL}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) });
+async function postLicense<T>(path: string, body: unknown, managementKey?: string): Promise<T> {
+  const res = await fetch(`${LICENSE_API_URL}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(managementKey ? { authorization: `Bearer ${managementKey}` } : {}) },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20_000),
+  });
   const data = (await res.json().catch(() => ({}))) as T & { fout?: string };
   if (!res.ok) throw new Error(data.fout ?? `De licentieserver gaf een fout (${res.status}); probeer het later opnieuw`);
   return data;
@@ -484,14 +489,14 @@ function initServices(): void {
         const res = await fetch(`${LICENSE_API_URL}/prijs`, { signal: AbortSignal.timeout(10_000) });
         return res.ok ? ((await res.json()) as { bedrag: string; valuta: string; per: string }) : null;
       },
-      async fetch(administrationId) {
-        const res = await fetch(`${LICENSE_API_URL}/licentie?administratie=${encodeURIComponent(administrationId)}`, { signal: AbortSignal.timeout(15_000) });
+      async fetch(administrationId, managementKey) {
+        const res = await fetch(`${LICENSE_API_URL}/licentie?administratie=${encodeURIComponent(administrationId)}`, { headers: { authorization: `Bearer ${managementKey}` }, signal: AbortSignal.timeout(15_000) });
         if (res.status === 404) return null;
         if (!res.ok) throw new Error(`De licentieserver gaf een fout (${res.status}); probeer het later opnieuw`);
         return ((await res.json()) as { token: string }).token;
       },
       start: (input) => postLicense<{ checkout?: string; al?: boolean }>('/start', input),
-      cancel: (administrationId) => postLicense<{ betaaldTot: string; geldigTot: string }>('/opzeggen', { administratie: administrationId }),
+      cancel: (administrationId, managementKey) => postLicense<{ betaaldTot: string; geldigTot: string }>('/opzeggen', { administratie: administrationId }, managementKey),
     },
     exchange: {
       bundle: () =>

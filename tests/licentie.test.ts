@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -66,7 +66,10 @@ function fakeMollie(payments: Record<string, object>) {
   const subscriptions = new Map<string, { id: string; status: string; metadata: unknown }>();
   const byKey = new Map<string, string>();
   const invoiceByKey = new Map<string, string>();
+  const customerByKey = new Map<string, string>();
+  const paymentByKey = new Map<string, string>();
   const failures: RegExp[] = [];
+  const conflicts: RegExp[] = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const path = url.pathname.replace('/v2', '');
@@ -81,9 +84,23 @@ function fakeMollie(payments: Record<string, object>) {
       failures.splice(i, 1);
       return new Response('{"detail":"storing"}', { status: 503 });
     }
+    const conflict = conflicts.findIndex((r) => r.test(`${method} ${path}`));
+    if (conflict >= 0) {
+      conflicts.splice(conflict, 1);
+      return new Response('{"detail":"nog bezig"}', { status: 409 });
+    }
     const reply = (x: object) => new Response(JSON.stringify(x), { status: 200 });
-    if (path === '/customers') return reply({ id: 'cst_1' });
-    if (path === '/payments') return reply({ id: 'tr_first', _links: { checkout: { href: 'https://www.mollie.com/checkout/test' } } });
+    if (method === 'POST' && path === '/customers') {
+      const key = headers.get('idempotency-key') ?? `geen-${calls.length}`;
+      if (!customerByKey.has(key)) customerByKey.set(key, `cst_${customerByKey.size + 1}`);
+      return reply({ id: customerByKey.get(key)! });
+    }
+    if (method === 'POST' && path === '/payments') {
+      const key = headers.get('idempotency-key') ?? `geen-${calls.length}`;
+      if (!paymentByKey.has(key)) paymentByKey.set(key, `tr_start_${paymentByKey.size + 1}`);
+      const id = paymentByKey.get(key)!;
+      return reply({ id, _links: { checkout: { href: `https://www.mollie.com/checkout/${id}` } } });
+    }
     if (method === 'POST' && path === '/sales-invoices') {
       const key = headers.get('idempotency-key') ?? `geen-${calls.length}`;
       let id = invoiceByKey.get(key);
@@ -116,7 +133,7 @@ function fakeMollie(payments: Record<string, object>) {
   }) as typeof fetch;
   const created = () => calls.filter((c) => c.method === 'POST' && c.path === '/customers/cst_1/subscriptions').map((c) => c.key);
   const invoices = () => calls.filter((c) => c.method === 'POST' && c.path === '/sales-invoices');
-  return { calls, subscriptions, created, invoices, invoiceIds: () => new Set(invoiceByKey.values()), fetchImpl, failNext: (r: RegExp) => void failures.push(r) };
+  return { calls, subscriptions, created, invoices, customerIds: () => new Set(customerByKey.values()), paymentIds: () => new Set(paymentByKey.values()), invoiceIds: () => new Set(invoiceByKey.values()), fetchImpl, failNext: (r: RegExp) => void failures.push(r), conflictNext: (r: RegExp) => void conflicts.push(r) };
 }
 
 function worker(payments: Record<string, object> = {}, extra: Partial<Env> = {}) {
@@ -125,19 +142,23 @@ function worker(payments: Record<string, object> = {}, extra: Partial<Env> = {})
   const env: Env = { LICENTIES: db.d1, MOLLIE_API_KEY: 'test_abc', LICENSE_PRIVATE_KEY: k.privateJwk, PUBLIC_URL: 'https://licentie.example', PRICE_EUR: '9.99', ...extra };
   const mollie = fakeMollie(payments);
   let today = TODAY;
-  const call = (method: string, path: string, body?: string) =>
-    handle(new Request(`https://licentie.example${path}`, { method, body, headers: body ? { 'content-type': 'application/x-www-form-urlencoded' } : undefined }), env, { fetch: mollie.fetchImpl, today: () => today });
+  const call = (method: string, path: string, body?: string, managementKey?: string) =>
+    handle(new Request(`https://licentie.example${path}`, { method, body, headers: { ...(body ? { 'content-type': 'application/x-www-form-urlencoded' } : {}), ...(managementKey ? { authorization: `Bearer ${managementKey}` } : {}) } }), env, { fetch: mollie.fetchImpl, today: () => today });
   const hook = (id: string) => call('POST', '/mollie', `id=${id}`);
-  const post = (path: string, body: unknown) =>
-    handle(new Request(`https://licentie.example${path}`, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }), env, { fetch: mollie.fetchImpl, today: () => today });
-  const start = (body: Record<string, unknown> = {}) => post('/start', { administratie: ADMIN, email: 'piet@example.nl', bedrijf: BILLING, ...body });
-  return { ...k, db, env, mollie, call, hook, post, start, setToday: (d: string) => void (today = d) };
+  const post = (path: string, body: unknown, managementKey?: string) =>
+    handle(new Request(`https://licentie.example${path}`, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json', ...(managementKey ? { authorization: `Bearer ${managementKey}` } : {}) } }), env, { fetch: mollie.fetchImpl, today: () => today });
+  const start = (body: Record<string, unknown> = {}) => post('/start', { administratie: ADMIN, email: 'piet@example.nl', bedrijf: BILLING, managementKey: MANAGEMENT_KEY, ...body });
+  const license = (managementKey = MANAGEMENT_KEY) => call('GET', `/licentie?administratie=${ADMIN}`, undefined, managementKey);
+  const cancel = (managementKey = MANAGEMENT_KEY) => post('/opzeggen', { administratie: ADMIN }, managementKey);
+  return { ...k, db, env, mollie, call, hook, post, start, license, cancel, setToday: (d: string) => void (today = d) };
 }
 
 const ADMIN = '2c5bf9f4-1bd5-4fc9-a3b4-da8784765123';
+const MANAGEMENT_KEY = 'A'.repeat(43);
+const MANAGEMENT_KEY_HASH = createHash('sha256').update(MANAGEMENT_KEY).digest('hex');
 const BILLING = { naam: 'Stukadoorsbedrijf Piet', adres: 'Kalkweg 1', postcode: '1234 AB', plaats: 'Utrecht', land: 'NL', kvk: '12345678', btw: 'NL123456789B01' };
 const EUR = { currency: 'EUR', value: '9.99' };
-const first = (id: string, paidAt = '2026-10-15T10:00:00+00:00') => ({ id, status: 'paid', amount: EUR, sequenceType: 'first', customerId: 'cst_1', paidAt, metadata: { administratie: ADMIN, email: 'piet@example.nl', billing: BILLING } });
+const first = (id: string, paidAt = '2026-10-15T10:00:00+00:00') => ({ id, status: 'paid', amount: EUR, sequenceType: 'first', customerId: 'cst_1', paidAt, metadata: { administratie: ADMIN, email: 'piet@example.nl', billing: BILLING, managementKeyHash: MANAGEMENT_KEY_HASH } });
 const recurring = (id: string, subscriptionId: string, paidAt: string) => ({ id, status: 'paid', amount: EUR, sequenceType: 'recurring', customerId: 'cst_1', subscriptionId, paidAt });
 
 describe('licentie-Worker', () => {
@@ -145,11 +166,13 @@ describe('licentie-Worker', () => {
     const w = worker();
     const res = await w.start();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ checkout: 'https://www.mollie.com/checkout/test' });
+    expect(await res.json()).toEqual({ checkout: 'https://www.mollie.com/checkout/tr_start_1' });
     const payment = w.mollie.calls.find((c) => c.path === '/payments')!;
     expect(payment.auth).toBe('Bearer test_abc');
     expect(payment.body).toMatchObject({ amount: { currency: 'EUR', value: '9.99' }, customerId: 'cst_1', sequenceType: 'first', webhookUrl: 'https://licentie.example/mollie', metadata: { administratie: ADMIN, billing: BILLING } });
+    expect(payment.key).toBe(`start-${ADMIN}-0`);
     expect(w.mollie.calls.find((c) => c.path === '/customers')!.body).toMatchObject({ name: 'Stukadoorsbedrijf Piet', email: 'piet@example.nl' });
+    expect(w.mollie.calls.find((c) => c.path === '/customers')!.key).toBe(`klant-${ADMIN}`);
     expect((await w.start({ administratie: 'iets' })).status).toBe(400);
     expect((await w.start({ email: 'geen-mail' })).status).toBe(400);
     // de factuur vraagt een adres en een KvK- of btw-nummer
@@ -162,9 +185,30 @@ describe('licentie-Worker', () => {
     expect(((await land.json()) as { fout: string }).fout).toMatch(/landcode van twee letters/);
   });
 
+  it('gelijktijdig starten geeft door Mollie-idempotentie één klant en één betaalpoging', async () => {
+    const w = worker();
+    const responses = await Promise.all([w.start(), w.start(), w.start()]);
+    expect(await Promise.all(responses.map((r) => r.json()))).toEqual([
+      { checkout: 'https://www.mollie.com/checkout/tr_start_1' },
+      { checkout: 'https://www.mollie.com/checkout/tr_start_1' },
+      { checkout: 'https://www.mollie.com/checkout/tr_start_1' },
+    ]);
+    expect(w.mollie.customerIds().size).toBe(1);
+    expect(w.mollie.paymentIds().size).toBe(1);
+  });
+
+  it('een tijdelijke Mollie-conflict op dezelfde betaalpoging wordt veilig herhaald', async () => {
+    const w = worker();
+    w.mollie.conflictNext(/^POST \/payments$/);
+    expect(await (await w.start()).json()).toEqual({ checkout: 'https://www.mollie.com/checkout/tr_start_1' });
+    const calls = w.mollie.calls.filter((c) => c.method === 'POST' && c.path === '/payments');
+    expect(calls).toHaveLength(2);
+    expect(new Set(calls.map((c) => c.key))).toEqual(new Set([`start-${ADMIN}-0`]));
+  });
+
   it('eerste betaling: abonnement vanaf volgende maand met Idempotency-Key, licentie t/m die maand plus marge', async () => {
     const w = worker({ tr_first: first('tr_first') });
-    expect((await w.call('GET', `/licentie?administratie=${ADMIN}`)).status).toBe(404);
+    expect((await w.license()).status).toBe(404);
     expect((await w.hook('tr_first')).status).toBe(200);
     const sub = w.mollie.calls.find((c) => c.method === 'POST' && c.path === '/customers/cst_1/subscriptions')!;
     expect(sub.body).toMatchObject({ amount: { value: '9.99' }, interval: '1 month', startDate: '2026-11-15', webhookUrl: 'https://licentie.example/mollie', metadata: { administratie: ADMIN } });
@@ -174,7 +218,7 @@ describe('licentie-Worker', () => {
     expect(w.mollie.created()).toHaveLength(1);
     expect(w.db.license(ADMIN)).toMatchObject({ months: 1, subscription_id: 'sub_1', subscription_claim: null });
 
-    const { token, validUntil } = (await (await w.call('GET', `/licentie?administratie=${ADMIN}`)).json()) as { token: string; validUntil: string };
+    const { token, validUntil } = (await (await w.license()).json()) as { token: string; validUntil: string };
     expect(validUntil).toBe('2026-11-22');
     // de app keurt de handtekening van de Worker goed
     expect(verifyLicense(token, w.publicKey)).toMatchObject({ administratie: ADMIN, email: 'piet@example.nl', validUntil: '2026-11-22', product: 'uitwisseling' });
@@ -203,7 +247,7 @@ describe('licentie-Worker', () => {
     await Promise.all([w.hook('tr_nov'), w.hook('tr_nov'), w.hook('tr_dec')]);
     await w.hook('tr_nov');
     expect(w.db.license(ADMIN)!.months).toBe(3);
-    expect(((await (await w.call('GET', `/licentie?administratie=${ADMIN}`)).json()) as { validUntil: string }).validUntil).toBe('2027-01-22');
+    expect(((await (await w.license()).json()) as { validUntil: string }).validUntil).toBe('2027-01-22');
     expect((await w.hook('iets; drop')).status).toBe(400);
   });
 
@@ -247,7 +291,7 @@ describe('licentie-Worker', () => {
 
     // opgezegd; de licentie is intussen verlopen
     w.mollie.subscriptions.get('sub_1')!.status = 'canceled';
-    expect(await (await w.start()).json()).toEqual({ checkout: 'https://www.mollie.com/checkout/test' });
+    expect(await (await w.start()).json()).toEqual({ checkout: 'https://www.mollie.com/checkout/tr_start_1' });
     w.setToday('2027-01-10');
     await w.hook('tr_later');
     expect(w.db.license(ADMIN)).toMatchObject({ months: 1, period_start: '2027-01-10', subscription_id: 'sub_2' });
@@ -312,6 +356,8 @@ describe('licentie-Worker', () => {
       testmode: true,
     });
     expect((body.lines as { description: string }[])[0]!.description).toMatch(/uitwisseling met je boekhouder \(oktober 2026\)/);
+    const recurringInvoice = w.mollie.invoices().find((c) => (c.body?.paymentDetails as { sourceReference?: string })?.sourceReference === 'tr_nov')!;
+    expect((recurringInvoice.body!.lines as { description: string }[])[0]!.description).toMatch(/\(november 2026\)/);
     expect(body.emailDetails).toMatchObject({ subject: expect.stringMatching(/factuur/) });
   });
 
@@ -335,24 +381,35 @@ describe('licentie-Worker', () => {
     expect(w.mollie.invoices()).toHaveLength(0);
   });
 
+  it('een oude betaling zonder factuurgegevens wordt niet stil als verwerkt bevestigd', async () => {
+    const old = { ...first('tr_old'), metadata: { administratie: ADMIN, email: 'piet@example.nl', managementKeyHash: MANAGEMENT_KEY_HASH } };
+    const w = worker({ tr_old: old }, { INVOICES: 'true' });
+    expect((await w.hook('tr_old')).status).toBe(500);
+    expect(w.mollie.invoices()).toHaveLength(0);
+    // Na operationeel herstel kan Mollie dezelfde webhook opnieuw aanbieden; hij is niet als factuur-klaar gemarkeerd.
+    expect((await w.hook('tr_old')).status).toBe(500);
+  });
+
   it('opzeggen: abonnement gestopt bij Mollie, licentie loopt af met "opgezegd"; opnieuw afsluiten mag', async () => {
     const w = worker({ tr_first: first('tr_first'), tr_again: first('tr_again', '2026-10-20T10:00:00+00:00') });
-    expect((await w.post('/opzeggen', { administratie: ADMIN })).status).toBe(404);
+    expect((await w.cancel()).status).toBe(404);
     await w.hook('tr_first');
-    const res = await w.post('/opzeggen', { administratie: ADMIN });
+    expect((await w.call('GET', `/licentie?administratie=${ADMIN}`)).status).toBe(403);
+    expect((await w.cancel('B'.repeat(43))).status).toBe(403);
+    const res = await w.cancel();
     expect(await res.json()).toEqual({ ok: true, betaaldTot: '2026-11-15', geldigTot: '2026-11-22' });
     expect(w.mollie.calls.filter((c) => c.method === 'DELETE').map((c) => c.path)).toEqual(['/customers/cst_1/subscriptions/sub_1']);
     expect(w.mollie.subscriptions.get('sub_1')!.status).toBe('canceled');
     // nog een keer: geen tweede DELETE, geen fout
-    expect((await w.post('/opzeggen', { administratie: ADMIN })).status).toBe(200);
+    expect((await w.cancel()).status).toBe(200);
     expect(w.mollie.calls.filter((c) => c.method === 'DELETE')).toHaveLength(1);
-    const { token } = (await (await w.call('GET', `/licentie?administratie=${ADMIN}`)).json()) as { token: string };
+    const { token } = (await (await w.license()).json()) as { token: string };
     expect(verifyLicense(token, w.publicKey)).toMatchObject({ cancelled: true, validUntil: '2026-11-22' });
     // opnieuw afsluiten vóór het verloopt: een maand erbij, nieuw abonnement, niet meer opgezegd
-    expect(await (await w.start()).json()).toEqual({ checkout: 'https://www.mollie.com/checkout/test' });
+    expect(await (await w.start()).json()).toEqual({ checkout: 'https://www.mollie.com/checkout/tr_start_1' });
     await w.hook('tr_again');
     expect(w.db.license(ADMIN)).toMatchObject({ months: 2, period_start: '2026-10-15', subscription_id: 'sub_2' });
-    const again = verifyLicense(((await (await w.call('GET', `/licentie?administratie=${ADMIN}`)).json()) as { token: string }).token, w.publicKey);
+    const again = verifyLicense(((await (await w.license()).json()) as { token: string }).token, w.publicKey);
     expect(again.cancelled).toBeUndefined();
     expect(again.validUntil).toBe('2026-12-22');
   });
@@ -414,7 +471,8 @@ describe('licentie in de app', () => {
     let served: string | null = null;
     const opened: string[] = [];
     const started: unknown[] = [];
-    const cancelled: string[] = [];
+    const fetched: { administratie: string; managementKey: string }[] = [];
+    const cancelled: { administratie: string; managementKey: string }[] = [];
     let running = false;
     const api = createApi(s, {
       appVersion: () => '1.0.0',
@@ -422,13 +480,16 @@ describe('licentie in de app', () => {
       openExternal: async (url: string) => void opened.push(url),
       licenseApi: {
         price: async () => ({ bedrag: '9.99', valuta: 'EUR', per: 'maand' }),
-        fetch: async () => served,
+        fetch: async (administratie: string, managementKey: string) => {
+          fetched.push({ administratie, managementKey });
+          return served;
+        },
         start: async (input: unknown) => {
           started.push(input);
           return running ? { al: true } : { checkout: 'https://www.mollie.com/checkout/test' };
         },
-        cancel: async (administratie: string) => {
-          cancelled.push(administratie);
+        cancel: async (administratie: string, managementKey: string) => {
+          cancelled.push({ administratie, managementKey });
           served = await token(k.privateJwk, id, '2099-01-31', true);
           return { betaaldTot: '2099-01-24', geldigTot: '2099-01-31' };
         },
@@ -448,7 +509,8 @@ describe('licentie in de app', () => {
     expect(started).toHaveLength(0);
     s.settings.update({ company: { ...s.settings.get().company, kvkNumber: '12345678' } });
     expect(await api.license.checkout('piet@example.nl')).toEqual({ al: false });
-    expect(started[0]).toEqual({ administratie: id, email: 'piet@example.nl', bedrijf: { naam: 'Stukadoorsbedrijf Piet', adres: 'Kalkweg 1', postcode: '1234 AB', plaats: 'Utrecht', land: 'NL', kvk: '12345678', btw: undefined } });
+    expect(started[0]).toEqual({ administratie: id, email: 'piet@example.nl', bedrijf: { naam: 'Stukadoorsbedrijf Piet', adres: 'Kalkweg 1', postcode: '1234 AB', plaats: 'Utrecht', land: 'NL', kvk: '12345678', btw: undefined }, managementKey: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
+    const managementKey = (started[0] as { managementKey: string }).managementKey;
     expect(opened).toEqual(['https://www.mollie.com/checkout/test']);
     await expect(api.license.refresh()).rejects.toThrow(/Nog geen betaald abonnement/);
 
@@ -463,7 +525,8 @@ describe('licentie in de app', () => {
 
     // opzeggen: de licentie loopt af, versturen kan tot dan
     expect(await api.license.cancel()).toMatchObject({ state: 'actief', cancelled: true, validUntil: '2099-01-31' });
-    expect(cancelled).toEqual([id]);
+    expect(cancelled).toEqual([{ administratie: id, managementKey }]);
+    expect(fetched).toEqual(fetched.map(() => ({ administratie: id, managementKey })));
     expect(s.license.needsRefresh(TODAY)).toBe(false);
     expect(await api.license.price()).toEqual({ bedrag: '9.99', valuta: 'EUR', per: 'maand' });
   });
