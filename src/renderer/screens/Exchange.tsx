@@ -16,6 +16,7 @@ export function ExchangeCard({ onChange }: { onChange?: () => void }) {
   const [invite, setInvite] = useState<{ office: string; email: string; code: string; data: Uint8Array } | null>(null);
   const [sending, setSending] = useState<'mail' | 'bestand' | null>(null);
   const [aborting, setAborting] = useState(false);
+  const license = useLoad(() => api.license.status());
   const [result, setResult] = useState<{ office: string; count: number; summaries: string[]; closedUntil: string; conflicts: { kind: string; label: string }[] } | null>(null);
   const st = status.data;
   if (!st || st.copy) return null;
@@ -68,6 +69,7 @@ export function ExchangeCard({ onChange }: { onChange?: () => void }) {
             </p>
           )}
           {choice.dates.data && choice.dates.data.length === 0 && <p className="small muted" style={{ margin: 0 }}>Alles t/m het vorige kwartaal is al afgesloten.</p>}
+          {license.data && <Subscription status={license.data} onChange={() => void license.reload()} />}
           <PeriodPicker label="Sturen t/m" choice={choice} />
           {choice.until && (
             <div className="row" style={{ alignItems: 'center' }}>
@@ -153,6 +155,41 @@ export function ExchangeCard({ onChange }: { onChange?: () => void }) {
           <div className="row end"><Button kind="primary" onClick={() => setResult(null)}>Oké</Button></div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+type LicenseState = Awaited<ReturnType<typeof api.license.status>>;
+
+/**
+ * Het abonnement: alleen versturen naar de boekhouder vraagt het. Niets te zien zolang licenties uit
+ * staan (geen sleutel in de app).
+ */
+function Subscription({ status, onChange }: { status: LicenseState; onChange: () => void }) {
+  const { settings, toast } = useApp();
+  const price = useLoad(() => api.license.price(), [status.state]);
+  const { run, busy } = useAction();
+  const [email, setEmail] = useState(settings.company.email);
+  if (status.state === 'uit') return null;
+  if (status.state === 'actief') return <p className="small muted" style={{ margin: 0 }}>Abonnement actief t/m {formatDateNl(status.validUntil)}.</p>;
+  const amount = price.data ? `€ ${price.data.bedrag.replace('.', ',')} per ${price.data.per}` : null;
+  return (
+    <div className="notice grid" data-testid="abonnement">
+      <div>
+        <strong>{status.state === 'verlopen' ? `Je abonnement liep tot ${formatDateNl(status.validUntil)}.` : 'Versturen naar je boekhouder hoort bij het abonnement.'}</strong>{' '}
+        {amount ? `Het kost ${amount}. ` : ''}Koppelen en een antwoord inlezen kan altijd; alleen het versturen vraagt een abonnement. Je betaalt via Mollie (iDEAL, daarna automatische incasso).
+      </div>
+      <div className="row" style={{ alignItems: 'flex-end', gap: 10 }}>
+        <Field label="E-mailadres voor het abonnement"><input value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Button kind="primary" disabled={busy || !email.trim()} onClick={() => void run(() => api.license.checkout(email), 'De betaalpagina is geopend in je browser')}>{status.state === 'verlopen' ? 'Verlengen' : 'Abonnement nemen'}</Button>
+        <Button disabled={busy} onClick={async () => {
+          const r = await run(() => api.license.refresh());
+          if (r) {
+            toast(r.state === 'actief' ? `Abonnement actief t/m ${formatDateNl(r.validUntil)}` : 'Licentie opgehaald');
+            onChange();
+          }
+        }}>Ik heb betaald: licentie ophalen</Button>
+      </div>
     </div>
   );
 }

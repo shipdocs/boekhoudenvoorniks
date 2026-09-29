@@ -1,0 +1,16 @@
+{
+  // Licentie-Worker van BoekhoudenVoorNiks (zie README.md). Geheimen gaan via `wrangler secret put`,
+  // nooit in dit bestand: MOLLIE_API_KEY, LICENSE_PRIVATE_KEY, PRICE_EUR.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "boekhoudenvoorniks-licentie",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "routes": [{ "pattern": "licentie.boekhoudenvoorniks.nl", "custom_domain": true }],
+  "vars": { "PUBLIC_URL": "https://licentie.boekhoudenvoorniks.nl" },
+  "kv_namespaces": [
+    // id na `npx wrangler kv namespace create LICENTIES`
+    { "binding": "LICENTIES", "id": "VUL-IN-NA-AANMAKEN" }
+  ]
+}

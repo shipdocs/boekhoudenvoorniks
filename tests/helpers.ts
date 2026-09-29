@@ -5,7 +5,7 @@ import type { Mailer, MailMessage } from '../src/documents/sending';
 import type { FetchLike } from '../src/integrations/types';
 import type { OcrProvider } from '../src/intake/ocr';
 
-export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mailer } = {}) {
+export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mailer; licensePublicKey?: string } = {}) {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   migrate(db);
@@ -23,6 +23,7 @@ export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mai
     fetch: opts.fetch ?? (async () => { throw new Error('geen netwerk in tests'); }),
     storeFile: async (name) => `/tmp/test-bijlagen/${name}`,
     ocr: opts.ocr ?? null,
+    licensePublicKey: opts.licensePublicKey,
   });
   s.settings.update({
     company: {
