@@ -2,6 +2,7 @@ import type { Db } from '../db/database';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import type { Cents } from '../shared/money';
 import type { IsoDate } from '../shared/dates';
+import { OPENING_ON_FROM, openingBalance } from './opening-balance';
 
 /** Rapporten uit het grootboek voor de boekhouder: kolommenbalans, kaarten en periodebalans. */
 
@@ -14,7 +15,7 @@ export interface TrialBalanceRow {
   /** 'balans' (activa, passiva, btw) of 'resultaat' (omzet, kosten) */
   kind: 'balans' | 'resultaat';
   category: string;
-  /** stand vóór de periode (debet − credit); alleen balansrekeningen hebben een beginbalans */
+  /** stand aan het begin van de periode (debet − credit), gelijk aan de beginbalans in het pakket; resultaat- en privérekeningen beginnen bij nul */
   opening: Cents;
   debit: Cents;
   credit: Cents;
@@ -89,24 +90,29 @@ const kindOf = (category: string): 'balans' | 'resultaat' => (category === 'omze
 export class LedgerReports {
   constructor(private readonly db: Db) {}
 
+  /** Beginbalans per rekening-id; resultaatrekeningen staan er niet in (die beginnen bij nul). */
+  private openings(from: IsoDate): Map<number, Cents> {
+    return new Map(openingBalance(this.db, from).map((o) => [o.accountId, o.amount]));
+  }
+
   trialBalance(from: IsoDate, to: IsoDate): TrialBalance {
     const rows = this.db
       .prepare(
         `SELECT a.id AS accountId, a.code, a.rgs_code AS rgs, a.rgs_ref AS rgsRef, a.name, a.category,
-                COALESCE(SUM(CASE WHEN e.entry_date < ? THEN l.debit - l.credit END), 0) AS before,
-                COALESCE(SUM(CASE WHEN e.entry_date BETWEEN ? AND ? THEN l.debit END), 0) AS debit,
-                COALESCE(SUM(CASE WHEN e.entry_date BETWEEN ? AND ? THEN l.credit END), 0) AS credit
+                COALESCE(SUM(CASE WHEN e.entry_date BETWEEN ? AND ? AND NOT ${OPENING_ON_FROM} THEN l.debit END), 0) AS debit,
+                COALESCE(SUM(CASE WHEN e.entry_date BETWEEN ? AND ? AND NOT ${OPENING_ON_FROM} THEN l.credit END), 0) AS credit
          FROM chart_of_accounts a
          LEFT JOIN journal_lines l ON l.account_id = a.id
          LEFT JOIN journal_entries e ON e.id = l.journal_entry_id
          GROUP BY a.id ORDER BY a.code`,
       )
-      .all(from, from, to, from, to) as { accountId: number; code: string; rgs: string; rgsRef: string | null; name: string; category: string; before: number; debit: number; credit: number }[];
+      .all(from, to, from, from, to, from) as { accountId: number; code: string; rgs: string; rgsRef: string | null; name: string; category: string; debit: number; credit: number }[];
+    const before = this.openings(from);
     const out: TrialBalanceRow[] = rows
       .map((r) => {
         const kind = kindOf(r.category);
-        // een resultaatrekening begint elke periode bij nul; de beginbalans hoort bij de balansrekeningen
-        const opening = kind === 'balans' ? r.before : 0;
+        // dezelfde beginbalans als in het pakket: resultaat en privé van vóór de periode zitten in het eigen vermogen
+        const opening = before.get(r.accountId) ?? 0;
         return { accountId: r.accountId, code: r.code, rgs: r.rgs, rgsRef: r.rgsRef, name: r.name, kind, category: r.category, opening, debit: r.debit, credit: r.credit, closing: opening + r.debit - r.credit };
       })
       .filter((r) => r.opening !== 0 || r.debit !== 0 || r.credit !== 0);
@@ -120,16 +126,16 @@ export class LedgerReports {
     const a = this.db.prepare('SELECT id, code, name, category FROM chart_of_accounts WHERE id = ?').get(accountId) as { id: number; code: string; name: string; category: string } | undefined;
     if (!a) throw new Error('Deze rekening bestaat niet');
     const kind = kindOf(a.category);
-    const before = kind === 'balans' ? (this.db.prepare('SELECT COALESCE(SUM(l.debit - l.credit), 0) AS s FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id WHERE l.account_id = ? AND e.entry_date < ?').get(a.id, from) as { s: number }).s : 0;
+    const before = this.openings(from).get(a.id) ?? 0;
     const rows = this.db
       .prepare(
         `SELECT e.id AS entryId, e.entry_date AS date, e.description, e.source, e.source_ref AS sourceRef, e.status, e.reverses_entry_id AS reverses,
                 SUM(l.debit) AS debit, SUM(l.credit) AS credit
          FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
-         WHERE l.account_id = ? AND e.entry_date BETWEEN ? AND ?
+         WHERE l.account_id = ? AND e.entry_date BETWEEN ? AND ? AND NOT ${OPENING_ON_FROM}
          GROUP BY e.id ORDER BY e.entry_date, e.id`,
       )
-      .all(a.id, from, to) as { entryId: number; date: string; description: string; source: string; sourceRef: string | null; status: string; reverses: number | null; debit: number; credit: number }[];
+      .all(a.id, from, to, from) as { entryId: number; date: string; description: string; source: string; sourceRef: string | null; status: string; reverses: number | null; debit: number; credit: number }[];
     return this.card(a, kind, before, rows);
   }
 
@@ -203,8 +209,8 @@ export class LedgerReports {
     const start = `${year}-01-01`;
     const idx = (date: string) => (granularity === 'maand' ? Number(date.slice(5, 7)) - 1 : Math.floor((Number(date.slice(5, 7)) - 1) / 3));
     const accounts = this.db.prepare('SELECT id, code, name, category FROM chart_of_accounts ORDER BY code').all() as { id: number; code: string; name: string; category: string }[];
-    const before = new Map((this.db.prepare('SELECT l.account_id AS id, SUM(l.debit - l.credit) AS s FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id WHERE e.entry_date < ? GROUP BY l.account_id').all(start) as { id: number; s: number }[]).map((r) => [r.id, r.s]));
-    const moves = this.db.prepare(`SELECT l.account_id AS id, e.entry_date AS date, l.debit - l.credit AS net FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id WHERE e.entry_date BETWEEN ? AND ?`).all(start, `${year}-12-31`) as { id: number; date: string; net: number }[];
+    const before = this.openings(start);
+    const moves = this.db.prepare(`SELECT l.account_id AS id, e.entry_date AS date, l.debit - l.credit AS net FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id WHERE e.entry_date BETWEEN ? AND ? AND NOT ${OPENING_ON_FROM}`).all(start, `${year}-12-31`, start) as { id: number; date: string; net: number }[];
     const per = new Map<number, number[]>();
     for (const m of moves) {
       const arr = per.get(m.id) ?? Array<number>(n).fill(0);
@@ -214,7 +220,7 @@ export class LedgerReports {
     const rows = accounts
       .map((a) => {
         const kind = kindOf(a.category);
-        const opening = kind === 'balans' ? before.get(a.id) ?? 0 : 0;
+        const opening = before.get(a.id) ?? 0;
         const periods = per.get(a.id) ?? Array<number>(n).fill(0);
         return { accountId: a.id, code: a.code, name: a.name, kind, opening, periods, closing: opening + periods.reduce((t, x) => t + x, 0) };
       })
