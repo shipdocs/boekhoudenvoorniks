@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { generateKeyPairSync } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { addMonth, addMonths, handle, type Env, type LicenseDb, type LicenseStatement } from '../workers/licentie/src/app';
@@ -23,7 +23,9 @@ function keys() {
  */
 function fakeD1() {
   const db = new Database(':memory:');
-  db.exec(readFileSync(join(__dirname, '../workers/licentie/migrations/0001_licenties.sql'), 'utf8'));
+  // alle migraties op volgorde, zoals `wrangler d1 migrations apply`
+  const dir = join(__dirname, '../workers/licentie/migrations');
+  for (const f of readdirSync(dir).filter((x) => x.endsWith('.sql')).sort()) db.exec(readFileSync(join(dir, f), 'utf8'));
   const failures: RegExp[] = [];
   const check = (sql: string) => {
     const i = failures.findIndex((r) => r.test(sql));
@@ -63,6 +65,7 @@ function fakeMollie(payments: Record<string, object>) {
   const calls: { method: string; path: string; query: string; body: Record<string, unknown> | null; auth: string | null; key: string | null }[] = [];
   const subscriptions = new Map<string, { id: string; status: string; metadata: unknown }>();
   const byKey = new Map<string, string>();
+  const invoiceByKey = new Map<string, string>();
   const failures: RegExp[] = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -81,6 +84,20 @@ function fakeMollie(payments: Record<string, object>) {
     const reply = (x: object) => new Response(JSON.stringify(x), { status: 200 });
     if (path === '/customers') return reply({ id: 'cst_1' });
     if (path === '/payments') return reply({ id: 'tr_first', _links: { checkout: { href: 'https://www.mollie.com/checkout/test' } } });
+    if (method === 'POST' && path === '/sales-invoices') {
+      const key = headers.get('idempotency-key') ?? `geen-${calls.length}`;
+      let id = invoiceByKey.get(key);
+      if (!id) {
+        id = `invoice_${invoiceByKey.size + 1}`;
+        invoiceByKey.set(key, id);
+      }
+      return reply({ id, status: 'paid' });
+    }
+    const del = /^\/customers\/cst_1\/subscriptions\/(sub_\w+)$/.exec(path);
+    if (method === 'DELETE' && del && subscriptions.has(del[1]!)) {
+      subscriptions.get(del[1]!)!.status = 'canceled';
+      return reply(subscriptions.get(del[1]!)!);
+    }
     if (method === 'POST' && path === '/customers/cst_1/subscriptions') {
       const key = headers.get('idempotency-key') ?? `geen-${calls.length}`;
       let id = byKey.get(key);
@@ -98,7 +115,8 @@ function fakeMollie(payments: Record<string, object>) {
     return new Response('{"detail":"not found"}', { status: 404 });
   }) as typeof fetch;
   const created = () => calls.filter((c) => c.method === 'POST' && c.path === '/customers/cst_1/subscriptions').map((c) => c.key);
-  return { calls, subscriptions, created, fetchImpl, failNext: (r: RegExp) => void failures.push(r) };
+  const invoices = () => calls.filter((c) => c.method === 'POST' && c.path === '/sales-invoices');
+  return { calls, subscriptions, created, invoices, invoiceIds: () => new Set(invoiceByKey.values()), fetchImpl, failNext: (r: RegExp) => void failures.push(r) };
 }
 
 function worker(payments: Record<string, object> = {}, extra: Partial<Env> = {}) {
@@ -110,24 +128,35 @@ function worker(payments: Record<string, object> = {}, extra: Partial<Env> = {})
   const call = (method: string, path: string, body?: string) =>
     handle(new Request(`https://licentie.example${path}`, { method, body, headers: body ? { 'content-type': 'application/x-www-form-urlencoded' } : undefined }), env, { fetch: mollie.fetchImpl, today: () => today });
   const hook = (id: string) => call('POST', '/mollie', `id=${id}`);
-  return { ...k, db, env, mollie, call, hook, setToday: (d: string) => void (today = d) };
+  const post = (path: string, body: unknown) =>
+    handle(new Request(`https://licentie.example${path}`, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }), env, { fetch: mollie.fetchImpl, today: () => today });
+  const start = (body: Record<string, unknown> = {}) => post('/start', { administratie: ADMIN, email: 'piet@example.nl', bedrijf: BILLING, ...body });
+  return { ...k, db, env, mollie, call, hook, post, start, setToday: (d: string) => void (today = d) };
 }
 
 const ADMIN = '2c5bf9f4-1bd5-4fc9-a3b4-da8784765123';
-const first = (id: string, paidAt = '2026-10-15T10:00:00+00:00') => ({ id, status: 'paid', sequenceType: 'first', customerId: 'cst_1', paidAt, metadata: { administratie: ADMIN, email: 'piet@example.nl' } });
-const recurring = (id: string, subscriptionId: string, paidAt: string) => ({ id, status: 'paid', sequenceType: 'recurring', customerId: 'cst_1', subscriptionId, paidAt });
+const BILLING = { naam: 'Stukadoorsbedrijf Piet', adres: 'Kalkweg 1', postcode: '1234 AB', plaats: 'Utrecht', land: 'NL', kvk: '12345678', btw: 'NL123456789B01' };
+const EUR = { currency: 'EUR', value: '9.99' };
+const first = (id: string, paidAt = '2026-10-15T10:00:00+00:00') => ({ id, status: 'paid', amount: EUR, sequenceType: 'first', customerId: 'cst_1', paidAt, metadata: { administratie: ADMIN, email: 'piet@example.nl', billing: BILLING } });
+const recurring = (id: string, subscriptionId: string, paidAt: string) => ({ id, status: 'paid', amount: EUR, sequenceType: 'recurring', customerId: 'cst_1', subscriptionId, paidAt });
 
 describe('licentie-Worker', () => {
   it('afrekenen: klant en eerste betaling bij Mollie, door naar de betaalpagina', async () => {
     const w = worker();
-    const res = await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`);
-    expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe('https://www.mollie.com/checkout/test');
+    const res = await w.start();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ checkout: 'https://www.mollie.com/checkout/test' });
     const payment = w.mollie.calls.find((c) => c.path === '/payments')!;
     expect(payment.auth).toBe('Bearer test_abc');
-    expect(payment.body).toMatchObject({ amount: { currency: 'EUR', value: '9.99' }, customerId: 'cst_1', sequenceType: 'first', webhookUrl: 'https://licentie.example/mollie', metadata: { administratie: ADMIN } });
-    expect((await w.call('GET', '/start?administratie=iets&email=piet@example.nl')).status).toBe(400);
-    expect((await w.call('GET', `/start?administratie=${ADMIN}&email=geen-mail`)).status).toBe(400);
+    expect(payment.body).toMatchObject({ amount: { currency: 'EUR', value: '9.99' }, customerId: 'cst_1', sequenceType: 'first', webhookUrl: 'https://licentie.example/mollie', metadata: { administratie: ADMIN, billing: BILLING } });
+    expect(w.mollie.calls.find((c) => c.path === '/customers')!.body).toMatchObject({ name: 'Stukadoorsbedrijf Piet', email: 'piet@example.nl' });
+    expect((await w.start({ administratie: 'iets' })).status).toBe(400);
+    expect((await w.start({ email: 'geen-mail' })).status).toBe(400);
+    // de factuur vraagt een adres en een KvK- of btw-nummer
+    const incomplete = await w.start({ bedrijf: { ...BILLING, adres: '', kvk: '', btw: '' } });
+    expect(incomplete.status).toBe(400);
+    expect(((await incomplete.json()) as { fout: string }).fout).toBe('Voor de factuur ontbreekt: adres, KvK- of btw-nummer');
+    expect((await w.post('/start', 'geen object')).status).toBe(400);
   });
 
   it('eerste betaling: abonnement vanaf volgende maand met Idempotency-Key, licentie t/m die maand plus marge', async () => {
@@ -209,14 +238,13 @@ describe('licentie-Worker', () => {
   it('opnieuw afrekenen terwijl het abonnement loopt: geen nieuwe betaling; na opzeggen en verlopen: nieuwe periode', async () => {
     const w = worker({ tr_first: first('tr_first'), tr_later: first('tr_later', '2027-01-10T09:00:00+00:00') });
     await w.hook('tr_first');
-    const again = await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`);
-    expect(again.status).toBe(200);
-    expect(await again.text()).toMatch(/al een abonnement/);
+    const again = await w.start();
+    expect(await again.json()).toEqual({ al: true });
     expect(w.mollie.calls.filter((c) => c.path === '/payments')).toHaveLength(0);
 
     // opgezegd; de licentie is intussen verlopen
     w.mollie.subscriptions.get('sub_1')!.status = 'canceled';
-    expect((await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`)).status).toBe(303);
+    expect(await (await w.start()).json()).toEqual({ checkout: 'https://www.mollie.com/checkout/test' });
     w.setToday('2027-01-10');
     await w.hook('tr_later');
     expect(w.db.license(ADMIN)).toMatchObject({ months: 1, period_start: '2027-01-10', subscription_id: 'sub_2' });
@@ -232,7 +260,7 @@ describe('licentie-Worker', () => {
 
   it('met een API-sleutel: geen profileId of testmode (Mollie weigert die dan)', async () => {
     const w = worker({ tr_first: first('tr_first') });
-    await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`);
+    await w.start();
     await w.hook('tr_first');
     for (const c of w.mollie.calls) {
       expect(c.query).toBe('');
@@ -243,9 +271,9 @@ describe('licentie-Worker', () => {
 
   it('met een organisatie-toegangstoken: testmode overal, profileId bij betaling en abonnement', async () => {
     const w = worker({ tr_first: first('tr_first') }, { MOLLIE_API_KEY: 'access_abc', MOLLIE_PROFILE_ID: 'pfl_test', MOLLIE_TESTMODE: 'true' });
-    await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`);
+    await w.start();
     await w.hook('tr_first');
-    await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`); // haalt het abonnement op
+    await w.start(); // haalt het abonnement op
     const post = (path: string) => w.mollie.calls.find((c) => c.method === 'POST' && c.path === path)!.body;
     expect(post('/customers')).toMatchObject({ testmode: true });
     expect(post('/customers')).not.toHaveProperty('profileId');
@@ -257,9 +285,78 @@ describe('licentie-Worker', () => {
     expect(w.mollie.calls[0]!.auth).toBe('Bearer access_abc');
   });
 
+  it('factuur bij elke betaling: betaald, op naam van het bedrijf, btw inclusief, één per betaling', async () => {
+    const w = worker(
+      { tr_first: first('tr_first'), tr_nov: recurring('tr_nov', 'sub_1', '2026-11-15T06:00:00+00:00') },
+      { INVOICES: 'true', MOLLIE_API_KEY: 'access_abc', MOLLIE_PROFILE_ID: 'pfl_test', MOLLIE_TESTMODE: 'true' },
+    );
+    await Promise.all([w.hook('tr_first'), w.hook('tr_first')]);
+    await w.hook('tr_first');
+    await Promise.all([w.hook('tr_nov'), w.hook('tr_nov')]);
+    // één factuur per betaling, ook bij dubbele en gelijktijdige meldingen
+    expect(w.mollie.invoiceIds().size).toBe(2);
+    expect(new Set(w.mollie.invoices().map((c) => c.key))).toEqual(new Set(['factuur-tr_first', 'factuur-tr_nov']));
+    const body = w.mollie.invoices()[0]!.body!;
+    expect(body).toMatchObject({
+      status: 'paid',
+      recipientIdentifier: `administratie:${ADMIN}`,
+      recipient: { type: 'business', organizationName: 'Stukadoorsbedrijf Piet', organizationNumber: '12345678', vatNumber: 'NL123456789B01', email: 'piet@example.nl', streetAndNumber: 'Kalkweg 1', postalCode: '1234 AB', city: 'Utrecht', country: 'NL', locale: 'nl_NL' },
+      lines: [{ quantity: 1, unitPrice: { currency: 'EUR', value: '9.99' }, vatRate: '21.00' }],
+      vatScheme: 'standard',
+      vatMode: 'inclusive',
+      paymentDetails: { source: 'payment', sourceReference: 'tr_first' },
+      profileId: 'pfl_test',
+      testmode: true,
+    });
+    expect((body.lines as { description: string }[])[0]!.description).toMatch(/uitwisseling met je boekhouder \(oktober 2026\)/);
+    expect(body.emailDetails).toMatchObject({ subject: expect.stringMatching(/factuur/) });
+  });
+
+  it('storing bij het maken van de factuur: 500, en de herhaling maakt hem één keer, zonder extra maand', async () => {
+    const w = worker({ tr_first: first('tr_first') }, { INVOICES: 'true' });
+    w.mollie.failNext(/^POST \/sales-invoices$/);
+    expect((await w.hook('tr_first')).status).toBe(500);
+    expect(w.db.license(ADMIN)).toMatchObject({ months: 1, subscription_id: 'sub_1' });
+    // de factuur is gemaakt, maar het vastleggen mislukt: de herhaling krijgt dezelfde factuur terug
+    w.db.failNext(/UPDATE payments SET invoice_id/);
+    expect((await w.hook('tr_first')).status).toBe(500);
+    expect((await w.hook('tr_first')).status).toBe(200);
+    expect(w.mollie.invoiceIds().size).toBe(1);
+    expect(w.db.license(ADMIN)!.months).toBe(1);
+    expect(w.mollie.created()).toHaveLength(1);
+  });
+
+  it('facturen staan uit tot INVOICES aan staat', async () => {
+    const w = worker({ tr_first: first('tr_first') });
+    await w.hook('tr_first');
+    expect(w.mollie.invoices()).toHaveLength(0);
+  });
+
+  it('opzeggen: abonnement gestopt bij Mollie, licentie loopt af met "opgezegd"; opnieuw afsluiten mag', async () => {
+    const w = worker({ tr_first: first('tr_first'), tr_again: first('tr_again', '2026-10-20T10:00:00+00:00') });
+    expect((await w.post('/opzeggen', { administratie: ADMIN })).status).toBe(404);
+    await w.hook('tr_first');
+    const res = await w.post('/opzeggen', { administratie: ADMIN });
+    expect(await res.json()).toEqual({ ok: true, betaaldTot: '2026-11-15', geldigTot: '2026-11-22' });
+    expect(w.mollie.calls.filter((c) => c.method === 'DELETE').map((c) => c.path)).toEqual(['/customers/cst_1/subscriptions/sub_1']);
+    expect(w.mollie.subscriptions.get('sub_1')!.status).toBe('canceled');
+    // nog een keer: geen tweede DELETE, geen fout
+    expect((await w.post('/opzeggen', { administratie: ADMIN })).status).toBe(200);
+    expect(w.mollie.calls.filter((c) => c.method === 'DELETE')).toHaveLength(1);
+    const { token } = (await (await w.call('GET', `/licentie?administratie=${ADMIN}`)).json()) as { token: string };
+    expect(verifyLicense(token, w.publicKey)).toMatchObject({ cancelled: true, validUntil: '2026-11-22' });
+    // opnieuw afsluiten vóór het verloopt: een maand erbij, nieuw abonnement, niet meer opgezegd
+    expect(await (await w.start()).json()).toEqual({ checkout: 'https://www.mollie.com/checkout/test' });
+    await w.hook('tr_again');
+    expect(w.db.license(ADMIN)).toMatchObject({ months: 2, period_start: '2026-10-15', subscription_id: 'sub_2' });
+    const again = verifyLicense(((await (await w.call('GET', `/licentie?administratie=${ADMIN}`)).json()) as { token: string }).token, w.publicKey);
+    expect(again.cancelled).toBeUndefined();
+    expect(again.validUntil).toBe('2026-12-22');
+  });
+
   it('prijs komt uit de instellingen van de Worker; onbekende routes 404', async () => {
     const w = worker();
-    expect(await (await w.call('GET', '/prijs')).json()).toEqual({ bedrag: '9.99', valuta: 'EUR', per: 'maand' });
+    expect(await (await w.call('GET', '/prijs')).json()).toEqual({ bedrag: '9.99', valuta: 'EUR', per: 'maand', btw: 'inclusief' });
     expect((await w.call('GET', '/iets')).status).toBe(404);
     expect((await w.call('GET', '/bedankt')).headers.get('content-type')).toMatch(/text\/html/);
   });
@@ -275,8 +372,8 @@ describe('licentie-Worker', () => {
 });
 
 describe('licentie in de app', () => {
-  const token = (privateJwk: string, administratie: string, validUntil: string) =>
-    signLicense({ v: 1, product: 'uitwisseling', administratie, email: 'piet@example.nl', validUntil, issuedAt: TODAY }, privateJwk);
+  const token = (privateJwk: string, administratie: string, validUntil: string, cancelled = false) =>
+    signLicense({ v: 1, product: 'uitwisseling', administratie, email: 'piet@example.nl', validUntil, issuedAt: TODAY, ...(cancelled ? { cancelled: true } : {}) }, privateJwk);
 
   it('zonder sleutel staan licenties uit: alles mag', () => {
     const { s } = setup();
@@ -292,7 +389,7 @@ describe('licentie in de app', () => {
     expect(license.status(TODAY)).toEqual({ state: 'geen' });
     expect(() => license.requireActive(TODAY)).toThrow(/hoort bij het abonnement/);
 
-    expect(license.install(await token(k.privateJwk, id, '2026-11-22'), TODAY)).toEqual({ state: 'actief', validUntil: '2026-11-22', email: 'piet@example.nl' });
+    expect(license.install(await token(k.privateJwk, id, '2026-11-22'), TODAY)).toEqual({ state: 'actief', validUntil: '2026-11-22', email: 'piet@example.nl', cancelled: false });
     expect(() => license.requireActive(TODAY)).not.toThrow();
     expect(license.needsRefresh(TODAY)).toBe(false);
     expect(license.needsRefresh('2026-11-16')).toBe(true);
@@ -307,16 +404,32 @@ describe('licentie in de app', () => {
     expect(() => license.install(forged, TODAY)).toThrow(/handtekening/);
   });
 
-  it('versturen haalt eerst de licentie op; zonder abonnement geweigerd; inlezen kan altijd', async () => {
+  it('versturen haalt eerst de licentie op; zonder abonnement geweigerd; afsluiten met bedrijfsgegevens; opzeggen', async () => {
     const k = keys();
     const { s } = setup({ licensePublicKey: k.publicKey });
+    const id = s.settings.administrationId();
     let served: string | null = null;
     const opened: string[] = [];
+    const started: unknown[] = [];
+    const cancelled: string[] = [];
+    let running = false;
     const api = createApi(s, {
       appVersion: () => '1.0.0',
       saveFile: async (name: string) => `/tmp/${name}`,
       openExternal: async (url: string) => void opened.push(url),
-      licenseApi: { price: async () => ({ bedrag: '9.99', valuta: 'EUR', per: 'maand' }), fetch: async () => served },
+      licenseApi: {
+        price: async () => ({ bedrag: '9.99', valuta: 'EUR', per: 'maand' }),
+        fetch: async () => served,
+        start: async (input: unknown) => {
+          started.push(input);
+          return running ? { al: true } : { checkout: 'https://www.mollie.com/checkout/test' };
+        },
+        cancel: async (administratie: string) => {
+          cancelled.push(administratie);
+          served = await token(k.privateJwk, id, '2099-01-31', true);
+          return { betaaldTot: '2099-01-24', geldigTot: '2099-01-31' };
+        },
+      },
       exchange: { bundle: async () => Buffer.from('bundel'), office: () => null, saveOffice: () => { throw new Error('x'); }, openClientExport: async () => { throw new Error('x'); } },
     } as unknown as HostContext);
     const { generateOfficeKeys } = await import('../src/exchange/crypto');
@@ -326,14 +439,28 @@ describe('licentie in de app', () => {
     await expect(api.exchange.send('2026-06-30', [], 'bestand')).rejects.toThrow(/hoort bij het abonnement/);
     expect(s.periods.status().exchange).toBeNull();
 
-    await api.license.checkout('piet@example.nl');
-    expect(opened[0]).toBe(`https://licentie.boekhoudenvoorniks.nl/start?administratie=${s.settings.administrationId()}&email=piet%40example.nl`);
+    // afsluiten: eerst de bedrijfsgegevens compleet (voor de factuur)
+    s.settings.update({ company: { ...s.settings.get().company, kvkNumber: '', vatNumber: '' } });
+    await expect(api.license.checkout('piet@example.nl')).rejects.toThrow(/ontbreekt nog: KvK- of btw-nummer/);
+    s.settings.update({ company: { ...s.settings.get().company, kvkNumber: '12345678' } });
+    expect(await api.license.checkout('piet@example.nl')).toEqual({ al: false });
+    expect(started[0]).toEqual({ administratie: id, email: 'piet@example.nl', bedrijf: { naam: 'Stukadoorsbedrijf Piet', adres: 'Kalkweg 1', postcode: '1234 AB', plaats: 'Utrecht', land: 'NL', kvk: '12345678', btw: undefined } });
+    expect(opened).toEqual(['https://www.mollie.com/checkout/test']);
     await expect(api.license.refresh()).rejects.toThrow(/Nog geen betaald abonnement/);
 
     // betaald: bij versturen wordt de licentie vanzelf opgehaald
-    served = await token(k.privateJwk, s.settings.administrationId(), '2099-01-31');
+    served = await token(k.privateJwk, id, '2099-01-31');
+    running = true;
     expect(await api.exchange.send('2026-06-30', [], 'bestand')).toMatchObject({ exchange: expect.any(Number) });
-    expect(s.license.status(TODAY)).toMatchObject({ state: 'actief' });
+    expect(s.license.status(TODAY)).toMatchObject({ state: 'actief', cancelled: false });
+    // nog een keer afsluiten terwijl het loopt: geen betaalpagina
+    expect(await api.license.checkout('piet@example.nl')).toEqual({ al: true });
+    expect(opened).toHaveLength(1);
+
+    // opzeggen: de licentie loopt af, versturen kan tot dan
+    expect(await api.license.cancel()).toMatchObject({ state: 'actief', cancelled: true, validUntil: '2099-01-31' });
+    expect(cancelled).toEqual([id]);
+    expect(s.license.needsRefresh(TODAY)).toBe(false);
     expect(await api.license.price()).toEqual({ bedrag: '9.99', valuta: 'EUR', per: 'maand' });
   });
 });

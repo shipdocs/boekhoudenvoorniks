@@ -147,6 +147,14 @@ async function openClientExport(data: Uint8Array): Promise<{ company: string; ex
   return result;
 }
 
+/** POST naar de licentie-Worker; een foutmelding van de Worker ("Voor de factuur ontbreekt …") komt zo door. */
+async function postLicense<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${LICENSE_API_URL}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) });
+  const data = (await res.json().catch(() => ({}))) as T & { fout?: string };
+  if (!res.ok) throw new Error(data.fout ?? `De licentieserver gaf een fout (${res.status}); probeer het later opnieuw`);
+  return data;
+}
+
 /** Andere administratie openen: de huidige netjes sluiten, de andere openen en het venster verversen. */
 async function openAdministration(key: string): Promise<void> {
   const admins = administrations();
@@ -482,6 +490,8 @@ function initServices(): void {
         if (!res.ok) throw new Error(`De licentieserver gaf een fout (${res.status}); probeer het later opnieuw`);
         return ((await res.json()) as { token: string }).token;
       },
+      start: (input) => postLicense<{ checkout?: string; al?: boolean }>('/start', input),
+      cancel: (administrationId) => postLicense<{ betaaldTot: string; geldigTot: string }>('/opzeggen', { administratie: administrationId }),
     },
     exchange: {
       bundle: () =>
