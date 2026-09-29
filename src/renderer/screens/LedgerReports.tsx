@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, useApp, useLoad } from '../ui';
 
 /** Rapporten voor de boekhouder: kolommenbalans, grootboekkaarten, relatiekaarten en periodebalans. */
 
@@ -10,8 +10,6 @@ function Toolbar({ children }: { children?: ReactNode }) {
   return (
     <div className="row" style={{ gap: 8, margin: '8px 0', flexWrap: 'wrap', alignItems: 'center' }}>
       {children}
-      <span className="grow" />
-      <Button small onClick={() => window.print()}>Afdrukken</Button>
     </div>
   );
 }
@@ -20,7 +18,6 @@ function Toolbar({ children }: { children?: ReactNode }) {
 const Amount = ({ cents }: { cents: number }) => (cents === 0 ? <span className="muted">–</span> : <Euro cents={cents} />);
 
 export function TrialBalanceTab({ from, to, onOpenCard }: { from: string; to: string; onOpenCard: (accountId: number) => void }) {
-  const { run, busy } = useAction();
   const data = useLoad(() => api.reports.trialBalance(from, to), [from, to]);
   const [kind, setKind] = useState<'alles' | 'balans' | 'resultaat'>('alles');
   const [q, setQ] = useState('');
@@ -40,7 +37,6 @@ export function TrialBalanceTab({ from, to, onOpenCard }: { from: string; to: st
         </div>
         <input type="search" placeholder="Zoek rekening…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Zoek rekening" />
         {data.data && <span className={`pill ${data.data.balanced ? '' : 'warn'}`}>{data.data.balanced ? 'Debet = credit ✓' : 'Debet en credit zijn niet gelijk'}</span>}
-        <Button small disabled={busy} onClick={() => void run(() => api.reports.exportTrialBalance(from, to), 'Opgeslagen ✓')}>CSV</Button>
       </Toolbar>
       <table className="list small">
         <thead><tr><th>Code</th><th>Omschrijving</th><th>RGS</th><th>Soort</th><th className="num">Beginbalans</th><th className="num">Mut. debet</th><th className="num">Mut. credit</th><th className="num">Eindsaldo</th></tr></thead>
@@ -97,7 +93,6 @@ const splitLayout = { display: 'grid', gridTemplateColumns: 'minmax(220px, 300px
 const listBox = { maxHeight: '65vh', overflowY: 'auto', border: '1px solid var(--border, #e3e6ea)', borderRadius: 8 } as const;
 
 export function LedgerCardsTab({ from, to, selected, onSelect }: { from: string; to: string; selected: number | null; onSelect: (id: number) => void }) {
-  const { run, busy } = useAction();
   const list = useLoad(() => api.reports.trialBalance(from, to), [from, to]);
   const card = useLoad(() => (selected ? api.reports.ledgerCard(selected, from, to) : Promise.resolve(null)), [selected, from, to]);
   const [q, setQ] = useState('');
@@ -122,7 +117,6 @@ export function LedgerCardsTab({ from, to, selected, onSelect }: { from: string;
           <>
             <Toolbar>
               <h3 style={{ margin: 0 }}>{card.data.code} {card.data.name}</h3>
-              <Button small disabled={busy} onClick={() => void run(() => api.reports.exportLedgerCard(card.data!.accountId, from, to), 'Opgeslagen ✓')}>CSV</Button>
             </Toolbar>
             <CardTable lines={card.data.lines} opening={card.data.opening} />
             <p style={{ fontWeight: 600 }}>Debet <Euro cents={card.data.debit} /> · Credit <Euro cents={card.data.credit} /> · Eindsaldo <Euro cents={card.data.closing} /></p>
@@ -135,7 +129,6 @@ export function LedgerCardsTab({ from, to, selected, onSelect }: { from: string;
 }
 
 export function RelationCardsTab({ from, to }: { from: string; to: string }) {
-  const { run, busy } = useAction();
   const list = useLoad(() => api.reports.relations(to), [to]);
   const [selected, setSelected] = useState<number | null>(null);
   const [type, setType] = useState<'alle' | 'klant' | 'leverancier'>('alle');
@@ -165,7 +158,6 @@ export function RelationCardsTab({ from, to }: { from: string; to: string }) {
           <>
             <Toolbar>
               <h3 style={{ margin: 0 }}>{card.data.relation.name}</h3>
-              <Button small disabled={busy} onClick={() => void run(() => api.reports.exportRelationCard(card.data!.relation.relationId, from, to), 'Opgeslagen ✓')}>CSV</Button>
             </Toolbar>
             <CardTable lines={card.data.lines} opening={card.data.opening} showAccount />
             <p style={{ fontWeight: 600 }}>Openstaand op <DateNl date={to} />: <Euro cents={card.data.relation.balance} /></p>
@@ -177,7 +169,6 @@ export function RelationCardsTab({ from, to }: { from: string; to: string }) {
 }
 
 export function PeriodBalanceTab({ year }: { year: number }) {
-  const { run, busy } = useAction();
   const [gran, setGran] = useState<'maand' | 'kwartaal'>('maand');
   const data = useLoad(() => api.reports.periodBalance(year, gran), [year, gran]);
   const [q, setQ] = useState('');
@@ -191,7 +182,6 @@ export function PeriodBalanceTab({ year }: { year: number }) {
         </div>
         <input type="search" placeholder="Zoek rekening…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Zoek rekening" />
         <span className="muted small">Jaar {year} (volgt de datum bij Van)</span>
-        <Button small disabled={busy} onClick={() => void run(() => api.reports.exportPeriodBalance(year, gran), 'Opgeslagen ✓')}>CSV</Button>
       </Toolbar>
       <div style={{ overflowX: 'auto' }}>
         <table className="list small">

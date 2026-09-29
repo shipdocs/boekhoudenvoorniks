@@ -64,11 +64,4 @@ describe('rapporten voor de boekhouder', () => {
     // vorig jaar: alleen de balans loopt door
     expect(s.ledgerReports.periodBalance(2027, 'maand').rows.find((r) => r.name === 'Bank')!.opening).toBe(121000);
   });
-
-  it('csv heeft dezelfde totalen', () => {
-    const { s } = scenario();
-    const csv = s.ledgerReports.trialBalanceCsv('2026-01-01', '2026-12-31');
-    expect(csv.split('\r\n')[0]).toBe('Code;Omschrijving;RGS;Soort;Beginbalans;Debet;Credit;Eindsaldo');
-    expect(csv).toContain(';Totaal;');
-  });
 });
