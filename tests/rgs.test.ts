@@ -38,6 +38,9 @@ describe('RGS-referentiecodes (#2)', () => {
     s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-03-01', lines: [{ description: 'x', quantity: 1, unitPrice: 1000, vatCode: 'hoog' }] }).id);
     const xaf = s.exports.auditfile('2026-01-01', '2026-12-31', s.settings.get().company, '0.1.0');
     expect(xaf).toContain('<conceptRef>WOmzNodOdh</conceptRef>');
+    // ook als gewoon XAF-veld, dat viewers en andere software (bv. DigiBoox) als RGS-code lezen
+    expect(xaf).toContain('<leadReference>WOmzNodOdh</leadReference>');
+    expect(xaf.match(/<ledgerAccount>/g)!.length).toBe(xaf.match(/<leadReference>/g)!.length);
     expect(xaf).not.toContain('<conceptRef>WOmzNopOlh</conceptRef>');
     expect(() => s.ledger.createAccount({ code: '4999', rgs: 'eigen-1', rgsRef: 'BestaatNiet', name: 'X', category: 'kosten' })).toThrow(/geen officiële RGS-code/);
     const ok = s.ledger.createAccount({ code: '4999', rgs: 'eigen-1', rgsRef: 'WBedHuiGwe', name: 'Energie werkplaats', category: 'kosten' });
