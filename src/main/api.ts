@@ -569,7 +569,11 @@ export function createApi(s: Services, host: HostContext) {
       checklist: () => s.checklist.items(),
     },
     settings: {
-      get: () => ({ ...s.settings.get(), smtpPasswordSet: host.hasSmtpPassword() }),
+      get: () => {
+        // de beheersleutel van het abonnement blijft in het hoofdproces; het scherm heeft hem niet nodig
+        const { licenseManagementKey: _key, ...settings } = s.settings.get() as AppSettings & { licenseManagementKey?: string };
+        return { ...settings, smtpPasswordSet: host.hasSmtpPassword() };
+      },
       update: (patch: Partial<AppSettings>) => {
         const r = s.settings.update(patch);
         if (patch.ocr) host.reconfigureLocalAi();

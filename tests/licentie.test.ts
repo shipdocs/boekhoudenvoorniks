@@ -68,6 +68,8 @@ function fakeMollie(payments: Record<string, object>) {
   const invoiceByKey = new Map<string, string>();
   const customerByKey = new Map<string, string>();
   const paymentByKey = new Map<string, string>();
+  const bodyByKey = new Map<string, string>();
+  const paymentStatus = new Map<string, string>();
   const failures: RegExp[] = [];
   const conflicts: RegExp[] = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -90,16 +92,26 @@ function fakeMollie(payments: Record<string, object>) {
       return new Response('{"detail":"nog bezig"}', { status: 409 });
     }
     const reply = (x: object) => new Response(JSON.stringify(x), { status: 200 });
+    // zoals Mollie: dezelfde sleutel met andere inhoud is een 400
+    const sameKeyOtherBody = (key: string) => {
+      const seen = bodyByKey.get(key);
+      if (seen !== undefined && seen !== JSON.stringify(body)) return true;
+      bodyByKey.set(key, JSON.stringify(body));
+      return false;
+    };
     if (method === 'POST' && path === '/customers') {
       const key = headers.get('idempotency-key') ?? `geen-${calls.length}`;
+      if (sameKeyOtherBody(key)) return new Response('{"detail":"andere inhoud bij dezelfde sleutel"}', { status: 400 });
       if (!customerByKey.has(key)) customerByKey.set(key, `cst_${customerByKey.size + 1}`);
       return reply({ id: customerByKey.get(key)! });
     }
     if (method === 'POST' && path === '/payments') {
       const key = headers.get('idempotency-key') ?? `geen-${calls.length}`;
+      if (sameKeyOtherBody(key)) return new Response('{"detail":"andere inhoud bij dezelfde sleutel"}', { status: 400 });
       if (!paymentByKey.has(key)) paymentByKey.set(key, `tr_start_${paymentByKey.size + 1}`);
       const id = paymentByKey.get(key)!;
-      return reply({ id, _links: { checkout: { href: `https://www.mollie.com/checkout/${id}` } } });
+      const status = paymentStatus.get(id) ?? 'open';
+      return reply({ id, status, ...(status === 'open' ? { _links: { checkout: { href: `https://www.mollie.com/checkout/${id}` } } } : {}) });
     }
     if (method === 'POST' && path === '/sales-invoices') {
       const key = headers.get('idempotency-key') ?? `geen-${calls.length}`;
@@ -133,7 +145,7 @@ function fakeMollie(payments: Record<string, object>) {
   }) as typeof fetch;
   const created = () => calls.filter((c) => c.method === 'POST' && c.path === '/customers/cst_1/subscriptions').map((c) => c.key);
   const invoices = () => calls.filter((c) => c.method === 'POST' && c.path === '/sales-invoices');
-  return { calls, subscriptions, created, invoices, customerIds: () => new Set(customerByKey.values()), paymentIds: () => new Set(paymentByKey.values()), invoiceIds: () => new Set(invoiceByKey.values()), fetchImpl, failNext: (r: RegExp) => void failures.push(r), conflictNext: (r: RegExp) => void conflicts.push(r) };
+  return { calls, subscriptions, created, invoices, customerIds: () => new Set(customerByKey.values()), paymentIds: () => new Set(paymentByKey.values()), expirePayment: (id: string) => void paymentStatus.set(id, 'expired'), invoiceIds: () => new Set(invoiceByKey.values()), fetchImpl, failNext: (r: RegExp) => void failures.push(r), conflictNext: (r: RegExp) => void conflicts.push(r) };
 }
 
 function worker(payments: Record<string, object> = {}, extra: Partial<Env> = {}) {
@@ -142,15 +154,16 @@ function worker(payments: Record<string, object> = {}, extra: Partial<Env> = {})
   const env: Env = { LICENTIES: db.d1, MOLLIE_API_KEY: 'test_abc', LICENSE_PRIVATE_KEY: k.privateJwk, PUBLIC_URL: 'https://licentie.example', PRICE_EUR: '9.99', ...extra };
   const mollie = fakeMollie(payments);
   let today = TODAY;
+  let nowMs = Date.parse(`${TODAY}T10:00:00Z`);
   const call = (method: string, path: string, body?: string, managementKey?: string) =>
-    handle(new Request(`https://licentie.example${path}`, { method, body, headers: { ...(body ? { 'content-type': 'application/x-www-form-urlencoded' } : {}), ...(managementKey ? { authorization: `Bearer ${managementKey}` } : {}) } }), env, { fetch: mollie.fetchImpl, today: () => today });
+    handle(new Request(`https://licentie.example${path}`, { method, body, headers: { ...(body ? { 'content-type': 'application/x-www-form-urlencoded' } : {}), ...(managementKey ? { authorization: `Bearer ${managementKey}` } : {}) } }), env, { fetch: mollie.fetchImpl, today: () => today, now: () => nowMs });
   const hook = (id: string) => call('POST', '/mollie', `id=${id}`);
   const post = (path: string, body: unknown, managementKey?: string) =>
-    handle(new Request(`https://licentie.example${path}`, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json', ...(managementKey ? { authorization: `Bearer ${managementKey}` } : {}) } }), env, { fetch: mollie.fetchImpl, today: () => today });
+    handle(new Request(`https://licentie.example${path}`, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json', ...(managementKey ? { authorization: `Bearer ${managementKey}` } : {}) } }), env, { fetch: mollie.fetchImpl, today: () => today, now: () => nowMs });
   const start = (body: Record<string, unknown> = {}) => post('/start', { administratie: ADMIN, email: 'piet@example.nl', bedrijf: BILLING, managementKey: MANAGEMENT_KEY, ...body });
   const license = (managementKey = MANAGEMENT_KEY) => call('GET', `/licentie?administratie=${ADMIN}`, undefined, managementKey);
   const cancel = (managementKey = MANAGEMENT_KEY) => post('/opzeggen', { administratie: ADMIN }, managementKey);
-  return { ...k, db, env, mollie, call, hook, post, start, license, cancel, setToday: (d: string) => void (today = d) };
+  return { ...k, db, env, mollie, call, hook, post, start, license, cancel, setToday: (d: string) => void (today = d), later: (minutes: number) => void (nowMs += minutes * 60_000) };
 }
 
 const ADMIN = '2c5bf9f4-1bd5-4fc9-a3b4-da8784765123';
@@ -170,9 +183,9 @@ describe('licentie-Worker', () => {
     const payment = w.mollie.calls.find((c) => c.path === '/payments')!;
     expect(payment.auth).toBe('Bearer test_abc');
     expect(payment.body).toMatchObject({ amount: { currency: 'EUR', value: '9.99' }, customerId: 'cst_1', sequenceType: 'first', webhookUrl: 'https://licentie.example/mollie', metadata: { administratie: ADMIN, billing: BILLING } });
-    expect(payment.key).toBe(`start-${ADMIN}-0`);
+    expect(payment.key).toMatch(new RegExp(`^start-${ADMIN}-0-[0-9a-f]{16}-\\d+$`));
     expect(w.mollie.calls.find((c) => c.path === '/customers')!.body).toMatchObject({ name: 'Stukadoorsbedrijf Piet', email: 'piet@example.nl' });
-    expect(w.mollie.calls.find((c) => c.path === '/customers')!.key).toBe(`klant-${ADMIN}`);
+    expect(w.mollie.calls.find((c) => c.path === '/customers')!.key).toMatch(new RegExp(`^klant-${ADMIN}-[0-9a-f]{16}-\\d+$`));
     expect((await w.start({ administratie: 'iets' })).status).toBe(400);
     expect((await w.start({ email: 'geen-mail' })).status).toBe(400);
     // de factuur vraagt een adres en een KvK- of btw-nummer
@@ -197,13 +210,29 @@ describe('licentie-Worker', () => {
     expect(w.mollie.paymentIds().size).toBe(1);
   });
 
+  it('afgebroken en opnieuw afsluiten, of andere gegevens: een nieuwe betaalpagina, geen 400 of 500', async () => {
+    const w = worker();
+    expect(await (await w.start()).json()).toEqual({ checkout: 'https://www.mollie.com/checkout/tr_start_1' });
+    // de klant breekt af; de betaling verloopt. Binnen hetzelfde kwartier opnieuw: een nieuwe betaling
+    w.mollie.expirePayment('tr_start_1');
+    expect(await (await w.start()).json()).toEqual({ checkout: 'https://www.mollie.com/checkout/tr_start_2' });
+    // ander e-mailadres binnen hetzelfde kwartier: andere sleutels, dus geen 400 van Mollie
+    const other = await w.start({ email: 'kantoor@example.nl' });
+    expect(other.status).toBe(200);
+    expect(((await other.json()) as { checkout: string }).checkout).toMatch(/^https:\/\/www\.mollie\.com\/checkout\/tr_start_\d+$/);
+    // en een half uur later een nieuwe poging: een nieuwe betaling, ook als de oude nog open staat
+    w.later(30);
+    const later = (await (await w.start()).json()) as { checkout: string };
+    expect(later.checkout).not.toBe('https://www.mollie.com/checkout/tr_start_2');
+  });
+
   it('een tijdelijke Mollie-conflict op dezelfde betaalpoging wordt veilig herhaald', async () => {
     const w = worker();
     w.mollie.conflictNext(/^POST \/payments$/);
     expect(await (await w.start()).json()).toEqual({ checkout: 'https://www.mollie.com/checkout/tr_start_1' });
     const calls = w.mollie.calls.filter((c) => c.method === 'POST' && c.path === '/payments');
     expect(calls).toHaveLength(2);
-    expect(new Set(calls.map((c) => c.key))).toEqual(new Set([`start-${ADMIN}-0`]));
+    expect(new Set(calls.map((c) => c.key)).size).toBe(1);
   });
 
   it('eerste betaling: abonnement vanaf volgende maand met Idempotency-Key, licentie t/m die maand plus marge', async () => {
@@ -478,6 +507,7 @@ describe('licentie in de app', () => {
       appVersion: () => '1.0.0',
       saveFile: async (name: string) => `/tmp/${name}`,
       openExternal: async (url: string) => void opened.push(url),
+      hasSmtpPassword: () => false,
       licenseApi: {
         price: async () => ({ bedrag: '9.99', valuta: 'EUR', per: 'maand' }),
         fetch: async (administratie: string, managementKey: string) => {
@@ -511,6 +541,8 @@ describe('licentie in de app', () => {
     expect(await api.license.checkout('piet@example.nl')).toEqual({ al: false });
     expect(started[0]).toEqual({ administratie: id, email: 'piet@example.nl', bedrijf: { naam: 'Stukadoorsbedrijf Piet', adres: 'Kalkweg 1', postcode: '1234 AB', plaats: 'Utrecht', land: 'NL', kvk: '12345678', btw: undefined }, managementKey: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
     const managementKey = (started[0] as { managementKey: string }).managementKey;
+    // de beheersleutel gaat niet mee naar het scherm
+    expect(JSON.stringify(api.settings.get())).not.toContain(managementKey);
     expect(opened).toEqual(['https://www.mollie.com/checkout/test']);
     await expect(api.license.refresh()).rejects.toThrow(/Nog geen betaald abonnement/);
 

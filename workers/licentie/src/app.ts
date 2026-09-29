@@ -56,6 +56,8 @@ export interface Deps {
   fetch: typeof fetch;
   /** vandaag, JJJJ-MM-DD (te vervangen in tests) */
   today: () => string;
+  /** nu, in milliseconden (te vervangen in tests); standaard Date.now() */
+  now?: () => number;
 }
 
 /** Bedrijfsgegevens voor de factuur (uit de app: Instellingen > Je bedrijf). */
@@ -197,10 +199,15 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
 const text = (v: unknown, max = 200): string => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const MANAGEMENT_KEY = /^[A-Za-z0-9_-]{43}$/;
 
-async function managementKeyHash(value: string): Promise<string> {
+async function sha256Hex(value: string): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
   return Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+const managementKeyHash = sha256Hex;
+
+/** Mollie onthoudt een Idempotency-Key 1 uur; dezelfde sleutel met andere inhoud geeft een 400. */
+const IDEMPOTENCY_WINDOW_MS = 10 * 60 * 1000;
 
 function managementKeyFrom(request: Request): string {
   const value = request.headers.get('authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1] ?? '';
@@ -242,28 +249,31 @@ async function start(request: Request, env: Env, deps: Deps): Promise<Response> 
     await env.LICENTIES.prepare('UPDATE licenses SET email = ?, billing = ? WHERE administratie = ?').bind(email, JSON.stringify(billing), administratie).run();
     if (await subscriptionRunning(env, deps, existing)) return json({ al: true });
   }
-  // Dezelfde administratie gebruikt altijd dezelfde Mollie-klant. De eerste-betaalsleutel verandert na
-  // iedere betaalde periode, zodat dubbel klikken dezelfde checkout geeft maar opnieuw afsluiten wel kan.
+  // Idempotency-Key voor klant en eerste betaling: dezelfde inhoud binnen hetzelfde tijdvak van 10 minuten
+  // geeft dezelfde sleutel, dus dubbel klikken levert één betaalpagina op. Andere gegevens (e-mail,
+  // bedrijf, prijs) geven een andere sleutel, want Mollie weigert dezelfde sleutel met andere inhoud.
+  const window = Math.floor((deps.now?.() ?? Date.now()) / IDEMPOTENCY_WINDOW_MS);
   const customer = existing
     ? { id: existing.customer_id }
-    : await mollie<{ id: string }>(env, deps, 'POST', '/customers', { name: billing.naam, email, metadata: { administratie } }, { idempotencyKey: `klant-${administratie}` });
+    : await mollie<{ id: string }>(env, deps, 'POST', '/customers', { name: billing.naam, email, metadata: { administratie } }, {
+        idempotencyKey: `klant-${administratie}-${(await sha256Hex(JSON.stringify([billing.naam, email]))).slice(0, 16)}-${window}`,
+      });
   const attempt = existing?.months ?? 0;
-  const payment = await mollie<MolliePayment>(
-    env,
-    deps,
-    'POST',
-    '/payments',
-    {
-      amount: { currency: 'EUR', value: env.PRICE_EUR },
-      customerId: customer.id,
-      sequenceType: 'first',
-      description: 'BoekhoudenVoorNiks: uitwisseling met je boekhouder (eerste maand)',
-      redirectUrl: `${env.PUBLIC_URL}/bedankt`,
-      webhookUrl: `${env.PUBLIC_URL}/mollie`,
-      metadata: { administratie, email, billing, managementKeyHash: hash },
-    },
-    { idempotencyKey: `start-${administratie}-${attempt}`, withProfile: true },
-  );
+  const paymentBody = {
+    amount: { currency: 'EUR', value: env.PRICE_EUR },
+    customerId: customer.id,
+    sequenceType: 'first',
+    description: 'BoekhoudenVoorNiks: uitwisseling met je boekhouder (eerste maand)',
+    redirectUrl: `${env.PUBLIC_URL}/bedankt`,
+    webhookUrl: `${env.PUBLIC_URL}/mollie`,
+    metadata: { administratie, email, billing, managementKeyHash: hash },
+  };
+  const key = `start-${administratie}-${attempt}-${(await sha256Hex(JSON.stringify(paymentBody))).slice(0, 16)}-${window}`;
+  let payment = await mollie<MolliePayment>(env, deps, 'POST', '/payments', paymentBody, { idempotencyKey: key, withProfile: true });
+  if (payment.status !== 'open' || !payment._links?.checkout?.href) {
+    // dezelfde sleutel gaf een betaling die niet meer open is (afgebroken of verlopen): één nieuwe
+    payment = await mollie<MolliePayment>(env, deps, 'POST', '/payments', paymentBody, { idempotencyKey: `${key}-${crypto.randomUUID()}`, withProfile: true });
+  }
   const checkout = payment._links?.checkout?.href;
   if (!checkout) throw new Error('Mollie gaf geen betaallink');
   return json({ checkout });
@@ -291,7 +301,8 @@ async function firstPayment(env: Env, deps: Deps, payment: MolliePayment, paidOn
          period_start = CASE WHEN ?6 = 1 THEN excluded.period_start ELSE period_start END,
          months = CASE WHEN ?6 = 1 THEN 1 ELSE months + 1 END`,
     ).bind(administratie, payment.metadata!.email ?? '', payment.customerId!, paidOn, payment.id, lapsed, billing, payment.metadata?.managementKeyHash ?? null),
-    env.LICENTIES.prepare('INSERT OR IGNORE INTO payments (payment_id, administratie, processed_at, amount) VALUES (?, ?, ?, ?)').bind(payment.id, administratie, deps.today(), payment.amount?.value ?? env.PRICE_EUR),
+    // processed_at = betaaldatum: daarop is de factuurmaand gebaseerd
+    env.LICENTIES.prepare('INSERT OR IGNORE INTO payments (payment_id, administratie, processed_at, amount) VALUES (?, ?, ?, ?)').bind(payment.id, administratie, paidOn, payment.amount?.value ?? env.PRICE_EUR),
   ]);
   await ensureSubscription(env, deps, administratie, payment.id);
   await ensureInvoice(env, deps, administratie, payment.id);
