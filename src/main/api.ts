@@ -668,6 +668,14 @@ export function createApi(s: Services, host: HostContext) {
       autoMatch: () => s.matching.autoMatch(undefined, s.settings.get().autopilot),
     },
     /** Overstappen met een lopende administratie: instapdatum, startbalans en controles. */
+    /** Rapporten voor de boekhouder: kolommenbalans, grootboekkaarten, relatiekaarten, periodebalans. */
+    reports: {
+      trialBalance: (from: IsoDate, to: IsoDate) => s.ledgerReports.trialBalance(from, to),
+      ledgerCard: (accountId: number, from: IsoDate, to: IsoDate) => s.ledgerReports.ledgerCard(accountId, from, to),
+      relations: (to: IsoDate) => s.ledgerReports.relations(to),
+      relationCard: (relationId: number, from: IsoDate, to: IsoDate) => s.ledgerReports.relationCard(relationId, from, to),
+      periodBalance: (year: number, granularity: 'maand' | 'kwartaal') => s.ledgerReports.periodBalance(year, granularity),
+    },
     /** Gemengd gebruik: zakelijk deel per leverancier (Dropbox 50%, Odido 75%, …). Geen regel = 100%. */
     businessShare: {
       list: () => s.businessShare.list(),
