@@ -7,9 +7,10 @@ alleen wat nodig is om te betalen (administratie-ID, e-mailadres, Mollie-nummers
 | Route | Wat |
 |---|---|
 | `GET /prijs` | prijs per maand (`PRICE_EUR`), voor het scherm in de app |
-| `GET /start?administratie=…&email=…` | klant en eerste betaling (`sequenceType: first`) bij Mollie, door naar het afrekenen |
+| `POST /start` | (JSON: administratie, e-mail, bedrijfsgegevens) klant en eerste betaling (`sequenceType: first`) bij Mollie; geeft de betaallink terug, of `al` als er al een abonnement loopt |
 | `POST /mollie` | webhook: haalt de betaling zelf op bij Mollie. Eerste betaling → abonnement (`1 month`, start over een maand); maandelijkse betaling → een maand erbij. Idempotent en herstelbaar (zie hieronder). |
-| `GET /licentie?administratie=…` | ondertekende licentie (Ed25519) t/m de betaalde periode plus 7 dagen marge |
+| `GET /licentie?administratie=…` | ondertekende licentie (Ed25519) t/m de betaalde periode plus 7 dagen marge; met `cancelled` na opzeggen |
+| `POST /opzeggen` | (JSON: administratie) abonnement stoppen bij Mollie; de licentie loopt af na de betaalde periode |
 | `GET /bedankt` | terugkeerpagina na het afrekenen |
 
 De app controleert licenties offline (`src/license/license.ts`). Alleen *versturen naar je
@@ -54,7 +55,7 @@ Mollie herhaalt een webhook bij een fout, en kan dezelfde melding ook dubbel of 
    ```
 3. **Mollie-sleutel: een organisatie-toegangstoken met alleen deze rechten** (Mollie: *Ontwikkelaars →
    Organisatie-toegangstokens*): `customers.write`, `payments.read`, `payments.write`,
-   `subscriptions.read`, `subscriptions.write`. Geen `refunds`, `payouts` of `mandates`: een uitgelekte
+   `subscriptions.read`, `subscriptions.write` en, voor de facturen, `sales-invoices.write`. Geen `refunds`, `payouts` of `mandates`: een uitgelekte
    sleutel kan dan geen geld terugstorten. Zet in `wrangler.jsonc` bij `vars` het profiel-ID
    (`MOLLIE_PROFILE_ID`, `pfl_…`) en `MOLLIE_TESTMODE: "true"`; live gaan is later alleen
    `MOLLIE_TESTMODE: "false"`. (Een gewone API-sleutel `test_…`/`live_…` werkt ook: laat die twee vars
@@ -77,10 +78,22 @@ organisatie-toegangstoken met de vijf rechten hierboven. D1-database `boekhouden
 West-Europa. Getest met een testbetaling: betaling verwerkt, abonnement aangemaakt, licentie
 ondertekend en door de app goedgekeurd. In de app staan licenties nog **uit** (`LICENSE_PUBLIC_KEY` leeg).
 
+## Facturen
+
+Na elke betaalde betaling (de eerste en elke maandelijkse) maakt de Worker een **betaalde factuur** via
+de Sales Invoices-API van Mollie: op naam van het bedrijf (met KvK- of btw-nummer, die de app bij het
+afsluiten meestuurt), 21% btw inclusief, gekoppeld aan de betaling. Mollie nummert hem en mailt hem naar
+de klant. Eén factuur per betaling (`payments.invoice_id`, Idempotency-Key `factuur-<betaling>`). Staat
+aan met `INVOICES: "true"` in `wrangler.jsonc`; dat vraagt het recht `sales-invoices.write` op het token.
+Onze bedrijfsgegevens op de factuur komen uit het Mollie-account.
+
 ## Live gaan
 
 Pas als het Mollie-profiel is goedgekeurd, en in deze volgorde:
 
+0. Het token het recht `sales-invoices.write` geven (of een nieuw token met de zes rechten maken en het
+   geheim vervangen), `INVOICES: "true"` zetten en deployen; een testbetaling doen en de testfactuur in
+   Mollie bekijken. Laat de voorwaarden (artikel 8) nakijken.
 1. In Mollie (testmodus) de testabonnementen stopzetten. Anders blijft Mollie maandelijks meldingen van
    testbetalingen sturen die de Worker in live-modus niet kan ophalen.
 2. De testregels uit D1 halen:
