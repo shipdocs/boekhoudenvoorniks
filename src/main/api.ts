@@ -58,6 +58,8 @@ export interface HostContext {
   /** test met de ingevulde (nog niet opgeslagen) gegevens en het ingetypte wachtwoord, anders het opgeslagen */
   testSmtp(smtp?: AppSettings['smtp'], password?: string): Promise<void>;
   backupNow(): Promise<string | null>;
+  /** complete back-up in de back-upmap van de administratie, zonder te vragen (bv. vóór het afsluiten) */
+  safetyBackup?(label: string): Promise<string | null>;
   restoreBackup(password?: string): Promise<boolean>;
   exportEncrypted(password: string): Promise<string | null>;
   /** meerdere administraties (alleen in de app zelf) */
@@ -302,6 +304,7 @@ export function createApi(s: Services, host: HostContext) {
           'quote-expired': ['offerte', r.quoteId],
           'vat-due': ['belasting', r.periodKey],
           'bank-stale': ['bank', undefined],
+          'bank-locked': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
           'fx-repair': ['aankopen', undefined],
           'recurring-invoice': ['bewijs', r.bankTransactionId],
@@ -320,6 +323,19 @@ export function createApi(s: Services, host: HostContext) {
   };
 
   return {
+    /** periodes afsluiten: afgewerkt is afgewerkt (docs/uitwisseling.md) */
+    periods: {
+      status: () => s.periods.status(),
+      suggestedDates: () => s.periods.suggestedDates(),
+      checks: (until: IsoDate) => s.periods.checks(String(until)),
+      close: async (until: IsoDate, confirmed: string[]) => {
+        const keys = Array.isArray(confirmed) ? confirmed.map(String) : [];
+        // eerst controleren, dan de back-up, dan pas vast
+        const blocking = s.periods.checks(String(until)).filter((c) => c.level === 'blokkeert');
+        if (blocking.length === 0) await host.safetyBackup?.(`voor-afsluiten-tm-${String(until)}`);
+        return s.periods.close(String(until), keys);
+      },
+    },
     /** meerdere administraties op deze computer (bv. bv en eenmanszaak, of een boekhouder met kopieën van klanten) */
     administrations: {
       list: () => (host.administrations ? host.administrations.list() : []),

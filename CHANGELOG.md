@@ -3,6 +3,10 @@
 ## Nog niet uitgebracht
 
 ### Nieuw
+- **Periode afsluiten** (Hoe gaat het? > Periode afsluiten): klaar met een kwartaal of een jaar? Sluit het af, dan verandert er niets meer aan. De app laat eerst zien wat er nog moet (betalingen verwerken, bonnen controleren, afschriften t/m de einddatum) en maakt een back-up voordat hij afsluit. Afsluiten kan niet ongedaan gemaakt worden.
+  - Komt er daarna nog een bon of factuur van daarvóór binnen, dan komt die in de eerste open periode, met de echte datum erbij. De btw hoort bij de periode van de bon, zolang je die aangifte nog niet gedaan hebt.
+  - Een betaling of correctieboeking in een afgesloten periode kan niet meer. Iets uit die periode terugdraaien kan wel: de correctie komt dan in de open periode.
+  - De btw-aangifte van een afgesloten kwartaal kun je gewoon nog doen.
 - **Meerdere administraties** (Instellingen > Administraties): heb je meer dan één bedrijf, bijvoorbeeld een bv en een eenmanszaak, maak dan voor elk een eigen administratie. Ze staan helemaal los van elkaar, met eigen bijlagen en back-ups. De app opent de laatst gebruikte; met meer dan één administratie zie je onder de naam van de app welke open is.
 
 ### Nieuwe naam: BoekhoudenVoorNiks
@@ -16,6 +20,7 @@
 - **De rapporten in de app hebben dezelfde beginbalans als het pakket voor je boekhouder.** De kolommenbalans, grootboekkaarten, periodebalans en de balans in de expertmodus telden het resultaat van eerdere jaren niet bij het eigen vermogen, waardoor de beginbalans bij een administratie van meer dan één jaar niet op nul uitkwam. Een beginbalansboeking op de eerste dag (overstap) staat nu ook in de app in de kolom beginbalans in plaats van bij de mutaties.
 
 ### Techniek
+- Periodeslot in de database (migratie 22): geen nieuwe boekingen t/m een afgesloten periode, afgedwongen in `Ledger.post` en met triggers. Een afgesloten periode kan niet heropend worden. Voorbereiding op de uitwisseling met de boekhouder: een periode kan ook tijdelijk vastliggen zolang hij bij de boekhouder is.
 - Elke administratie heeft een vaste identiteit (UUID, migratie 21) en er is een kantoormodus voor de kopie van een klant bij de boekhouder: geen e-mail, geen koppelingen, geen post ophalen en niets automatisch boeken. Voorbereiding op de uitwisseling met de boekhouder (`docs/uitwisseling.md`).
 - Eén functie voor de beginbalans (`src/reports/opening-balance.ts`) voor de rapporten in de app, de auditfile en het pakket.
 - Technisch ontwerp voor de uitwisseling met de boekhouder: `docs/uitwisseling.md`.

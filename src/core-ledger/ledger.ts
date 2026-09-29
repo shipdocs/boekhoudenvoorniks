@@ -1,7 +1,8 @@
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { assertCents, type Cents } from '../shared/money';
-import { addDays, assertIsoDate, type IsoDate } from '../shared/dates';
+import { addDays, assertIsoDate, formatDateNl, type IsoDate } from '../shared/dates';
+import { ValidationError } from '../shared/validation';
 import { DEFAULT_ACCOUNTS, type AccountCategory } from './accounts';
 import { RULES_VERSION } from './rules-version';
 import rgsTaxonomy from './rgs-codes.json';
@@ -107,12 +108,27 @@ export class LedgerError extends Error {
 }
 
 /**
+ * Iets kan niet in een vergrendelde periode (afgesloten, of bij de boekhouder). Een gewone melding voor
+ * de gebruiker, geen interne boekhoudfout.
+ */
+export class PeriodLockedError extends ValidationError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PeriodLockedError';
+  }
+}
+
+export type PeriodLockKind = 'afgesloten' | 'uitwisseling';
+
+/**
  * core-ledger: de dubbele boekhouding. Alles wat geld raakt gaat via post().
  * Invarianten (afgedwongen hier én deels in de database):
  *  - elke journaalpost heeft ≥ 2 regels en debet = credit
  *  - bedragen zijn positieve gehele centen; een regel is óf debet óf credit
  *  - journaalposten zijn onveranderlijk; corrigeren = reverse()
  *  - een post in een al aangegeven BTW-periode krijgt een btw-datum in de eerstvolgende open periode
+ *  - niets nieuws t/m een afgesloten periode (migratie 22): een late bon of factuur komt op de eerste open
+ *    dag, met de documentdatum in de omschrijving; een betaling of memoriaalpost wordt geweigerd
  */
 export class Ledger {
   constructor(private readonly db: Db) {}
@@ -154,10 +170,66 @@ export class Ledger {
     return account;
   }
 
+  /** Hoe ver de boekhouding vastligt: definitief afgesloten t/m, en een lopende uitwisseling met de boekhouder. */
+  periodLock(): { closedUntil: IsoDate | null; exchange: { until: IsoDate; no: number | null } | null } {
+    const closed = this.db.prepare(`SELECT MAX(until_date) AS d FROM ledger_locks WHERE kind = 'afgesloten'`).get() as { d: string | null };
+    const ex = this.db.prepare(`SELECT until_date AS until, exchange_no AS no FROM ledger_locks WHERE kind = 'uitwisseling' ORDER BY id DESC LIMIT 1`).get() as { until: string; no: number | null } | undefined;
+    return { closedUntil: closed.d, exchange: ex ?? null };
+  }
+
+  /** Het slot waar deze datum onder valt, of null als de datum open is. */
+  periodLockFor(date: IsoDate): { kind: PeriodLockKind; until: IsoDate } | null {
+    const { closedUntil, exchange } = this.periodLock();
+    if (closedUntil && date <= closedUntil) return { kind: 'afgesloten', until: closedUntil };
+    if (exchange && date <= exchange.until) return { kind: 'uitwisseling', until: exchange.until };
+    return null;
+  }
+
+  /** De eerste dag na alle sloten, of null zonder slot. */
+  firstOpenDate(): IsoDate | null {
+    const row = this.db.prepare('SELECT MAX(until_date) AS d FROM ledger_locks').get() as { d: string | null };
+    return row.d ? addDays(row.d, 1) : null;
+  }
+
+  /** Het antwoord van de boekhouder of een migratie wordt ingelezen: het slot geldt even niet. */
+  private lockBypassed(): boolean {
+    return this.db.prepare('SELECT 1 FROM ledger_lock_bypass').get() !== undefined;
+  }
+
+  /** Tijdens de uitwisseling blijft het rekeningschema zoals de boekhouder het kreeg. */
+  private assertAccountsEditable(): void {
+    if (this.periodLock().exchange && !this.lockBypassed()) {
+      throw new PeriodLockedError('Tijdens de uitwisseling met je boekhouder kun je geen grootboekrekeningen toevoegen of wijzigen.');
+    }
+  }
+
+  /**
+   * Op welke datum een post geboekt wordt. Open periode: zijn eigen datum. Afgesloten: een late bon,
+   * factuur of koppeling op de eerste open dag; een betaling (die hoort bij het afschrift van die
+   * periode), een memoriaalpost of een beginbalans wordt geweigerd. Bij de boekhouder: altijd weigeren.
+   */
+  private bookingDate(entry: PostEntry): IsoDate {
+    if (entry.source === 'btw' || this.lockBypassed()) return entry.date;
+    const lock = this.periodLockFor(entry.date);
+    if (!lock) return entry.date;
+    if (lock.kind === 'uitwisseling') {
+      throw new PeriodLockedError(`De periode t/m ${formatDateNl(lock.until)} ligt bij je boekhouder. Dit kun je verwerken als zijn antwoord is ingelezen.`);
+    }
+    const open = this.firstOpenDate()!;
+    if (entry.source === 'bank') {
+      throw new PeriodLockedError(`Deze betaling valt in de afgesloten periode (t/m ${formatDateNl(lock.until)}). Er ontbrak waarschijnlijk een afschrift toen die periode werd afgesloten; vraag je boekhouder hoe je hem verwerkt.`);
+    }
+    if (entry.source === 'handmatig' || entry.source === 'opening') {
+      throw new PeriodLockedError(`De periode t/m ${formatDateNl(lock.until)} is afgesloten. Boek dit op of na ${formatDateNl(open)}.`);
+    }
+    return open;
+  }
+
   createAccount(input: { code: string; rgs: string; rgsRef?: string | null; name: string; category: AccountCategory; vatCode?: string | null }): Account {
     if (!/^\d{3,6}$/.test(input.code)) throw new LedgerError('Rekeningnummer moet 3 tot 6 cijfers zijn');
     if (!input.name.trim()) throw new LedgerError('Naam is verplicht');
     if (input.rgsRef && !rgsLabel(input.rgsRef)) throw new LedgerError(`${input.rgsRef} is geen officiële RGS-code (release ${RGS_VERSION})`);
+    this.assertAccountsEditable();
     this.db
       .prepare('INSERT INTO chart_of_accounts (rgs_code, rgs_ref, code, name, category, vat_code) VALUES (?, ?, ?, ?, ?, ?)')
       .run(input.rgs, input.rgsRef ?? null, input.code, input.name.trim(), input.category, input.vatCode ?? null);
@@ -166,17 +238,20 @@ export class Ledger {
 
   setRgsRef(id: number, rgsRef: string | null): void {
     if (rgsRef && !rgsLabel(rgsRef)) throw new LedgerError(`${rgsRef} is geen officiële RGS-code (release ${RGS_VERSION})`);
+    this.assertAccountsEditable();
     this.db.prepare('UPDATE chart_of_accounts SET rgs_ref = ? WHERE id = ?').run(rgsRef, id);
   }
 
   renameAccount(id: number, name: string): void {
     if (!name.trim()) throw new LedgerError('Naam is verplicht');
+    this.assertAccountsEditable();
     this.db.prepare('UPDATE chart_of_accounts SET name = ? WHERE id = ?').run(name.trim(), id);
   }
 
   archiveAccount(id: number): void {
     const account = this.getAccountById(id);
     if (account.is_system) throw new LedgerError('Systeemrekeningen kunnen niet gearchiveerd worden');
+    this.assertAccountsEditable();
     this.db.prepare('UPDATE chart_of_accounts SET archived = 1 WHERE id = ?').run(id);
   }
 
@@ -236,6 +311,9 @@ export class Ledger {
   post(entry: PostEntry): number {
     this.validate(entry);
     return tx(this.db, () => {
+      // Afgesloten periode: een late post komt op de eerste open dag; de btw volgt de documentdatum.
+      const bookDate = this.bookingDate(entry);
+      const description = bookDate === entry.date ? entry.description.trim() : `${entry.description.trim()} (documentdatum ${formatDateNl(entry.date)})`;
       // Een al aangegeven btw-periode verandert nooit: het btw-effect gaat naar de volgende open periode.
       let { vatDate, correctionOf } = entry.source === 'btw' ? { vatDate: entry.date, correctionOf: null as string | null } : this.vatDateFor(entry.date);
       if (entry.reversesEntryId && entry.source !== 'btw') {
@@ -274,7 +352,7 @@ export class Ledger {
       }
       const result = this.db
         .prepare('INSERT INTO journal_entries (entry_date, description, source, source_ref, reverses_entry_id, vat_date, vat_correction_of, event_id, rules_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(entry.date, entry.description.trim(), entry.source, entry.sourceRef ?? null, entry.reversesEntryId ?? null, vatDate, correctionOf, eventId, rulesVersion);
+        .run(bookDate, description, entry.source, entry.sourceRef ?? null, entry.reversesEntryId ?? null, vatDate, correctionOf, eventId, rulesVersion);
       const entryId = Number(result.lastInsertRowid);
       const insertLine = this.db.prepare(
         `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit, relation_id, vat_code, description)

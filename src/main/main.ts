@@ -305,6 +305,13 @@ function initServices(): void {
         }
       },
     },
+    async safetyBackup(label) {
+      const dir = join(dataDir(), 'backups');
+      mkdirSync(dir, { recursive: true });
+      const target = join(dir, `${label.replace(/[^\w.-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.gbbackup`);
+      await writeCompleteBackup(db, dataDir(), target);
+      return target;
+    },
     async backupNow() {
       const result = await dialog.showSaveDialog(mainWindow!, {
         defaultPath: join(app.getPath('documents'), `boekhouding-backup-${new Date().toISOString().slice(0, 10)}.gbbackup`),
