@@ -909,6 +909,13 @@ export function createApi(s: Services, host: HostContext) {
       trialBalance: (from: IsoDate, to: IsoDate) => host.saveFile(`saldibalans-${from}-${to}.csv`, s.exports.trialBalanceCsv(from, to), [{ name: 'CSV', extensions: ['csv'] }]),
       auditfile: (from: IsoDate, to: IsoDate) =>
         host.saveFile(`auditfile-${from.slice(0, 4)}.xaf`, s.exports.auditfile(from, to, s.settings.get().company, host.appVersion()), [{ name: 'Auditfile', extensions: ['xaf'] }]),
+      /** "Pakket voor mijn boekhouder": eerst de controles tonen, dan de ZIP maken */
+      accountantPackagePreview: (year: number) => s.accountantPackage.preview(year, host.appVersion()),
+      accountantPackage: async (year: number) => {
+        const r = await s.accountantPackage.build(year, { softwareVersion: host.appVersion(), readAttachment: (path) => host.readAttachment(path) });
+        const path = await host.saveFile(r.filename, r.zip, [{ name: 'ZIP', extensions: ['zip'] }]);
+        return { path, files: r.files, summary: r.summary };
+      },
     },
     integrations: {
       list: () => s.integrations.list(),
