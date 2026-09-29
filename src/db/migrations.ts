@@ -853,4 +853,17 @@ export const migrations: string[] = [
   CREATE TRIGGER ledger_locks_final_update BEFORE UPDATE ON ledger_locks WHEN OLD.kind = 'afgesloten'
   BEGIN SELECT RAISE(ABORT, 'Een afgesloten periode kan niet heropend worden'); END;
   `,
+  /* 23: handelingen van de boekhouder in de kopie van een klant (antwoord van de uitwisseling) */ `
+  -- Alleen gevuld in een kopie bij de boekhouder: wat hij deed, in volgorde. Het antwoord aan de klant
+  -- is deze lijst; de app van de klant voert ze opnieuw uit. 'created' zijn de journaalposten die de
+  -- handeling hier maakte, zodat een latere handeling ernaar kan verwijzen.
+  CREATE TABLE exchange_actions (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    input TEXT NOT NULL,
+    created TEXT NOT NULL DEFAULT '[]',
+    summary TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];

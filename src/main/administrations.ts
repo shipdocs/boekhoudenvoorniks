@@ -15,11 +15,13 @@ export interface AdministrationInfo {
   name: string;
   /** kopie van een klant bij de boekhouder (kantoormodus) */
   officeCopy: OfficeCopy | null;
+  /** vaste identiteit (migratie 21); bij een kopie dezelfde als die van de klant */
+  id: string | null;
   current: boolean;
 }
 
 /** Wat er uit een database te lezen is zonder hem te openen voor gebruik; null als dat niet lukt. */
-export type AdministrationReader = (dbFile: string) => { name: string; officeCopy: OfficeCopy | null } | null;
+export type AdministrationReader = (dbFile: string) => { name: string; officeCopy: OfficeCopy | null; id?: string | null } | null;
 
 const KEY = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DB_FILE = 'boekhouding.sqlite';
@@ -71,7 +73,7 @@ export class Administrations {
     const current = this.current();
     return ['', ...this.keys()].map((key) => {
       const info = existsSync(join(this.dirFor(key), DB_FILE)) ? read(join(this.dirFor(key), DB_FILE)) : null;
-      return { key, name: info?.name || (key === '' ? DEFAULT_NAME : key), officeCopy: info?.officeCopy ?? null, current: key === current };
+      return { key, name: info?.name || (key === '' ? DEFAULT_NAME : key), officeCopy: info?.officeCopy ?? null, id: info?.id ?? null, current: key === current };
     });
   }
 
@@ -96,7 +98,8 @@ export const readAdministrationFile: AdministrationReader = (file) => {
     const get = (key: string) => (conn!.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined)?.value;
     const company = get('company');
     const copy = get('officeCopy');
-    return { name: company ? String((JSON.parse(company) as { name?: string }).name ?? '') : '', officeCopy: copy ? (JSON.parse(copy) as OfficeCopy) : null };
+    const id = get('administrationId');
+    return { name: company ? String((JSON.parse(company) as { name?: string }).name ?? '') : '', officeCopy: copy ? (JSON.parse(copy) as OfficeCopy) : null, id: id ? (JSON.parse(id) as string) : null };
   } catch {
     return null;
   } finally {

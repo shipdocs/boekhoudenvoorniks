@@ -3,6 +3,12 @@
 ## Nog niet uitgebracht
 
 ### Nieuw
+- **Uitwisseling met je boekhouder** (Hoe gaat het? > Uitwisseling met je boekhouder), naar het voorbeeld van de periode-uitwisseling in SnelStart:
+  - Je boekhouder stuurt je een uitnodiging. Open die, vergelijk de controlecode met hem, en je bent gekoppeld.
+  - Stuur een periode (t/m het eind van een kwartaal) per e-mail of als bestand. Alleen het kantoor van je boekhouder kan hem openen; wachtwoorden en koppelingen gaan niet mee. Tot zijn antwoord binnen is, ligt die periode vast; daarna werk je gewoon door.
+  - Lees zijn antwoord in: zijn correcties komen in de periode, wat je intussen deed blijft staan, en de periode is daarna afgesloten.
+  - Voor boekhouders (Instellingen > Administraties): je kantoor instellen, klanten uitnodigen, hun export inlezen als aparte administratie, corrigeren (correctieboeking, terugdraaien, grootboekrekening toevoegen) en een antwoord maken.
+  - Er gaat niets via een server van ons: alles loopt via je eigen e-mail of een bestand.
 - **Periode afsluiten** (Hoe gaat het? > Periode afsluiten): klaar met een kwartaal of een jaar? Sluit het af, dan verandert er niets meer aan. De app laat eerst zien wat er nog moet (betalingen verwerken, bonnen controleren, afschriften t/m de einddatum) en maakt een back-up voordat hij afsluit. Afsluiten kan niet ongedaan gemaakt worden.
   - Komt er daarna nog een bon of factuur van daarvóór binnen, dan komt die in de eerste open periode, met de echte datum erbij. De btw hoort bij de periode van de bon, zolang je die aangifte nog niet gedaan hebt.
   - Een betaling of correctieboeking in een afgesloten periode kan niet meer. Iets uit die periode terugdraaien kan wel: de correctie komt dan in de open periode.
@@ -20,6 +26,7 @@
 - **De rapporten in de app hebben dezelfde beginbalans als het pakket voor je boekhouder.** De kolommenbalans, grootboekkaarten, periodebalans en de balans in de expertmodus telden het resultaat van eerdere jaren niet bij het eigen vermogen, waardoor de beginbalans bij een administratie van meer dan één jaar niet op nul uitkwam. Een beginbalansboeking op de eerste dag (overstap) staat nu ook in de app in de kolom beginbalans in plaats van bij de mutaties.
 
 ### Techniek
+- Uitwisselingspakket (`src/exchange/`): X25519 + HKDF + AES-256-GCM naar de sleutel van het kantoor, het antwoord met een sleutel die alleen in de export zat; kopregel met administratie, uitwisselingsnummer en versie als AAD. Het antwoord is een lijst handelingen die de app van de klant opnieuw uitvoert (migratie 23). Getest met de hele cyclus: na het inlezen is de proefbalans van de periode bij klant en boekhouder gelijk.
 - Periodeslot in de database (migratie 22): geen nieuwe boekingen t/m een afgesloten periode, afgedwongen in `Ledger.post` en met triggers. Een afgesloten periode kan niet heropend worden. Voorbereiding op de uitwisseling met de boekhouder: een periode kan ook tijdelijk vastliggen zolang hij bij de boekhouder is.
 - Elke administratie heeft een vaste identiteit (UUID, migratie 21) en er is een kantoormodus voor de kopie van een klant bij de boekhouder: geen e-mail, geen koppelingen, geen post ophalen en niets automatisch boeken. Voorbereiding op de uitwisseling met de boekhouder (`docs/uitwisseling.md`).
 - Eén functie voor de beginbalans (`src/reports/opening-balance.ts`) voor de rapporten in de app, de auditfile en het pakket.

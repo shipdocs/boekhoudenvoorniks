@@ -20,6 +20,27 @@ const { wipeDatabase } = require(path.join(ROOT, 'main/main/reset.js'));
 const { seedDemo } = require(path.join(ROOT, 'main/demo/demo.js'));
 const { Administrations, readAdministrationFile } = require(path.join(ROOT, 'main/main/administrations.js'));
 const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js'));
+const { createBackupBundle, extractBundle } = require(path.join(ROOT, 'main/main/backup.js'));
+const { ExchangeService, sanitizeForExchange } = require(path.join(ROOT, 'main/exchange/exchange.js'));
+const { generateOfficeKeys } = require(path.join(ROOT, 'main/exchange/crypto.js'));
+const Database = require('better-sqlite3');
+/** het kantoor op deze "computer" (in de app: kantoor.json in de gegevensmap) */
+let officeProfile = null;
+/** geheimen per administratie (in de app: in de eigen database, versleuteld); blijven bewaard bij wisselen */
+let secretStores = new Map();
+const secretsFor = (dbFile) => {
+  if (!secretStores.has(dbFile)) secretStores.set(dbFile, new MemorySecretStore());
+  return secretStores.get(dbFile);
+};
+
+/** zoals de app: de huidige administratie sluiten en een andere openen */
+function openAdmin(key) {
+  const admins = new Administrations(dir);
+  admins.select(key);
+  db.close();
+  file = path.join(admins.dirFor(key), 'boekhouding.sqlite');
+  init(false);
+}
 
 const PORT = Number(process.env.E2E_PORT || 5190);
 let dir, file, db, services, api;
@@ -44,28 +65,52 @@ function init(fresh) {
     // de vorige (tijdelijke) administratie opruimen
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gb-e2e-'));
+    secretStores = new Map();
+    officeProfile = null;
     file = path.join(dir, 'boekhouding.sqlite');
   }
   db = openDatabase(file);
   services = createServices(db, {
     pdf: async (html) => Buffer.from(`%PDF-1.4 test ${html.length}`),
     mailerFactory: async () => ({ send: async (m) => { sent.push({ to: m.to, subject: m.subject }); return { messageId: `<e2e-${sent.length}@test>` }; } }),
-    secrets: new MemorySecretStore(),
+    secrets: secretsFor(file),
     fetch: async () => { throw new Error('geen netwerk in e2e-tests'); },
     storeFile,
   });
   let smtpPassword = null;
   api = createApi(services, {
     appVersion: () => '0.0.0-e2e',
+    exchange: {
+      bundle: () => createBackupBundle(db, path.dirname(file), (copy) => {
+        const d = new Database(copy);
+        try { sanitizeForExchange(d); } finally { d.close(); }
+      }),
+      office: () => officeProfile,
+      saveOffice({ office, email }) {
+        officeProfile = { office, email, ...(officeProfile ?? generateOfficeKeys()) };
+        officeProfile.office = office;
+        officeProfile.email = email;
+        return officeProfile;
+      },
+      async openClientExport(data) {
+        const opened = ExchangeService.openExport(officeProfile, data, '0.0.0-e2e');
+        const admins = new Administrations(dir);
+        const key = admins.create(`${opened.meta.company} uitwisseling ${opened.header.uitwisseling}`);
+        extractBundle(opened.bundle, admins.dirFor(key));
+        const copyDb = openDatabase(path.join(admins.dirFor(key), 'boekhouding.sqlite'));
+        const copyFile = path.join(admins.dirFor(key), 'boekhouding.sqlite');
+        const copy = createServices(copyDb, { pdf: async () => Buffer.from(''), mailerFactory: async () => { throw new Error('geen mail'); }, secrets: secretsFor(copyFile), fetch: async () => { throw new Error('geen netwerk'); }, storeFile });
+        copy.exchange.initCopy(opened.header, opened.meta, officeProfile.office);
+        copyDb.close();
+        openAdmin(key);
+        return { company: opened.meta.company, exchange: opened.header.uitwisseling, endDate: opened.header.einddatum };
+      },
+    },
     // zoals de app: `dir` is de gegevensmap, extra administraties in administraties/<sleutel>/
     administrations: {
       list: () => new Administrations(dir).list(readAdministrationFile),
       async open(key) {
-        const admins = new Administrations(dir);
-        admins.select(key);
-        db.close();
-        file = path.join(admins.dirFor(key), 'boekhouding.sqlite');
-        init(false);
+        openAdmin(key);
       },
       async create(name) {
         const admins = new Administrations(dir);
@@ -74,12 +119,18 @@ function init(fresh) {
         const settings = new SettingsService(fresh);
         settings.update({ company: { ...settings.get().company, name } });
         fresh.close();
-        await this.open(key);
+        openAdmin(key);
         return key;
       },
     },
     async checkForUpdates() { return 'Je hebt de nieuwste versie.'; },
-    async saveFile(name) { return path.join(dir, name); },
+    // echt wegschrijven: de tests lezen bv. een uitnodiging of export terug
+    async saveFile(name, content) {
+      const p = path.join(dir, 'bewaard', name);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, content);
+      return p;
+    },
     storeAttachment: storeFile,
     readAttachment: (p) => fs.readFileSync(p),
     reconfigureLocalAi() {},
