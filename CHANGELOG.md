@@ -1,5 +1,15 @@
 # Wijzigingen
 
+## 0.6.14 — rapporten voor de boekhouder
+
+### Nieuw
+- **Rapporten in het scherm Boekhouding** (Instellingen > Voor de boekhouder aanzetten), zonder je gegevens ergens te uploaden:
+  - **Kolommenbalans**: beginbalans, mutaties debet en credit en eindsaldo per rekening, met controle of debet en credit gelijk zijn. Filter op balans of winst en verlies, zoeken, en klikken op een rekening opent de kaart.
+  - **Grootboekkaarten**: alle boekingen op een rekening met beginsaldo, oplopend saldo, wederpartij en een knop naar de factuur, aankoop of betaling erachter.
+  - **Relatiekaarten**: per klant of leverancier wat er is geboekt en wat er nog openstaat.
+  - **Periodebalans**: alle mutaties per maand of per kwartaal, met beginbalans en eindstand.
+  - Elk rapport heeft CSV en afdrukken.
+
 ## 0.6.13 — zakelijk deel: zie en bevestig wat er verandert
 
 ### Opgelost
