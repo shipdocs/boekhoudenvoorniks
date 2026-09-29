@@ -3,6 +3,7 @@ import { api } from '../api';
 import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useLoad } from '../ui';
 import { today } from '../../shared/dates';
 import { LedgerCardsTab, PeriodBalanceTab, RelationCardsTab, TrialBalanceTab } from './LedgerReports';
+import { AccountantPackageCard } from './AccountantPackage';
 
 type Tab = 'grootboek' | 'kaarten' | 'relaties' | 'periode' | 'journaal' | 'rapport' | 'export' | 'leveranciers' | 'controle';
 
@@ -140,13 +141,16 @@ function Reports({ from, to }: { from: string; to: string }) {
 function Exports({ from, to }: { from: string; to: string }) {
   const { run, busy } = useAction();
   return (
+    <div className="grid">
+    <AccountantPackageCard defaultYear={Number(from.slice(0, 4)) || undefined} />
     <div className="card grid">
-      <p>Exports voor je boekhouder of accountant. Het grootboekschema volgt RGS, zodat elk boekhoudpakket het kan inlezen.</p>
+      <p>Losse exports over de gekozen periode. Het grootboekschema volgt RGS, zodat elk boekhoudpakket het kan inlezen.</p>
       <div className="row">
         <Button disabled={busy} onClick={() => void run(() => api.exports.auditfile(from, to), 'Auditfile opgeslagen')}>Auditfile (XAF 3.2)</Button>
         <Button disabled={busy} onClick={() => void run(() => api.exports.journal(from, to), 'Opgeslagen')}>Journaal (CSV)</Button>
         <Button disabled={busy} onClick={() => void run(() => api.exports.trialBalance(from, to), 'Opgeslagen')}>Saldibalans (CSV)</Button>
       </div>
+    </div>
     </div>
   );
 }

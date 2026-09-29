@@ -57,7 +57,7 @@
           "Btw-aangifte per kwartaal met rubrieken 1a, 1b, 1e, 2a en 5b",
           "Btw verlegd en kleineondernemersregeling (KOR)",
           "Betalingsherinneringen",
-          "Auditfile (XAF) en RGS-grootboek voor de boekhouder",
+          "Pakket voor de boekhouder: auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en bonnen",
           "Koppelingen met WooCommerce, Shopify, Mollie en Stripe",
           "Overstappen met auditfiles (XAF, ook één per jaar), kolommenbalans of saldibalans",
           "Aftrekposten: afschrijving, KIA, kilometers, representatie en jaaroverzicht voor de aangifte",
@@ -152,7 +152,7 @@
             "name": "Kan mijn boekhouder ermee werken?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Ja. In de expertmodus staan het grootboek volgens RGS, het journaal, balans en winst-en-verliesrekening. Je kunt een auditfile (XAF 3.2), journaal en saldibalans exporteren."
+              "text": "Ja, en hij hoeft er zelf niet in te werken. Met één knop maak je per boekjaar een pakket voor je boekhouder: auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en al je facturen en bonnen. Dat leest hij in bij Caseware, AFAS, Visionplanner, Exact, Twinfield, Yuki of SnelStart."
             }
           },
           {
@@ -202,6 +202,7 @@
         <a href="#functies">Functies</a>
         <a href="#overstappen">Overstappen</a>
         <a href="#vragen">Vragen</a>
+        <a href="boekhouders.html">Voor boekhouders</a>
         <a href="wijzigingen.html">Wat is er nieuw</a>
         <a class="btn small" href="https://github.com/shipdocs/gratis-boekhouden/releases/latest">Downloaden</a>
       </nav>
@@ -211,7 +212,7 @@
   <main>
     <section class="hero wrap">
       <div>
-        <a class="announce" href="wijzigingen.html#v0.6.14"><span>Nieuw in 0.6.14</span> Rapporten voor de boekhouder →</a>
+        <a class="announce" href="boekhouders.html"><span>Nieuw in 0.6.15</span> Pakket voor je boekhouder →</a>
         <p class="eyebrow">Voor stukadoors, schilders, timmerlieden, loodgieters, elektriciens en andere vakmensen</p>
         <h1>Jij beheert je bedrijf.<br>Wij maken de boekhouding.</h1>
         <p class="sr-intro">Gratis boekhoudprogramma voor zzp'ers en vakmensen in Nederland.</p>
@@ -284,7 +285,7 @@
         <div><h3>Bonnetjes & e-facturen</h3><p>UBL/XML gaat altijd voor, dan de PDF-tekst, en pas daarna lokale tekstherkenning. Twijfel? Dan zie je waar op de bon we het bedrag lazen.</p></div>
         <div><h3>Alle Nederlandse banken</h3><p>CSV van ING, Rabobank, ABN AMRO, bunq, Knab en Triodos, plus MT940 en CAMT.053.</p></div>
         <div><h3>Webshop & betalingen</h3><p>WooCommerce en Shopify worden facturen; Mollie Facturen ook. Mollie- en Stripe-uitbetalingen kloppen vanzelf met je bank.</p></div>
-        <div><h3>Voor je boekhouder</h3><p>Grootboek (RGS), journaal, balans, W&V, correctieboekingen en de XAF-auditfile, achter een aparte expertmodus.</p></div>
+        <div><h3>Voor je boekhouder</h3><p>Eén knop voor een pakket dat je boekhouder in zijn eigen programma inleest: auditfile, kolommenbalans, openstaande posten, RGS en al je bonnen. <a href="boekhouders.html">Voor boekhouders</a></p></div>
         <div><h3>KOR en buitenland</h3><p>Met de KOR gaat btw op inkopen naar de kosten, verlegde btw blijft zichtbaar. Goederen en diensten aan EU-bedrijven apart in de ICP-opgaaf.</p></div>
         <div><h3>Aftrekposten</h3><p>Bedrijfsmiddelen en afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek, met een jaaroverzicht voor je aangifte.</p></div>
         <div><h3>Back-ups met bijlagen</h3><p>Elke dag een back-up, ook versleuteld, inclusief alle bonnen en facturen. Terugzetten op een nieuwe computer werkt gewoon.</p></div>
@@ -317,6 +318,28 @@
       </div>
     </section>
 
+    <section id="boekhouder" class="wrap split">
+      <div>
+        <h2>Je boekhouder hoeft niet over te stappen</h2>
+        <p>Jij boekt hier. Aan het eind van het jaar maak je met één knop een <strong>pakket voor je boekhouder</strong>. Dat leest hij in zijn eigen programma in: Caseware, AFAS, Visionplanner, Twinfield, Yuki, SnelStart of Exact Online.</p>
+        <ul class="checks">
+          <li><strong>Auditfile (XAF 3.2)</strong><br><span class="muted">Grootboek met RGS-codes, relaties, beginbalans en alle boekingen. Gecontroleerd tegen het officiële schema.</span></li>
+          <li><strong>De overzichten die hij gewend is</strong><br><span class="muted">Kolommenbalans, grootboekkaarten, journaalposten, openstaande posten en RGS-brugstaat, als Excel en CSV.</span></li>
+          <li><strong>Alle facturen en bonnen</strong><br><span class="muted">Als losse bestanden, met een lijst die elk document aan de boeking koppelt.</span></li>
+          <li><strong>Klaar voor SnelStart, Yuki en AFAS</strong><br><span class="muted">Bestanden in het importformaat van die pakketten, zonder kolommen te koppelen.</span></li>
+        </ul>
+        <p class="muted">Vooraf zie je of alles aansluit en bij welke aankopen nog een bon ontbreekt.</p>
+      </div>
+      <div class="card">
+        <h3>Ben je boekhouder?</h3>
+        <p>Probeer het voorbeeldpakket in je eigen dossier: een verzonnen stukadoorsbedrijf met facturen, bonnen en een lees-mij met de aansluiting.</p>
+        <div class="cta">
+          <a class="btn" href="voorbeeld/voorbeeldpakket-boekhouder-2025.zip" download>Download voorbeeldpakket (ZIP, 0,5 MB)</a>
+        </div>
+        <p><a href="boekhouders.html">Alles voor boekhouders: inhoud, importroutes en proefimport →</a></p>
+      </div>
+    </section>
+
     <section id="beroepen" class="wrap">
       <h2>Boekhouding voor jouw vak</h2>
       <div class="features">
@@ -339,7 +362,7 @@
         <details><summary>Welke banken worden ondersteund?</summary><p>Elke bank: lees je afschrift in als CAMT.053 of MT940. Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf; bij andere banken geef je één keer aan welke kolom wat is. Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes.</p></details>
         <details><summary>Heb ik boekhoudkennis nodig?</summary><p>Nee. Je werkt met klanten, klussen, offertes, facturen en bonnetjes. Het programma maakt daar automatisch een dubbele boekhouding van en vraagt alleen iets als het niet zeker is.</p></details>
         <details><summary>Waar staat mijn administratie?</summary><p>Op je eigen computer, in een lokaal databasebestand. Er is geen cloud nodig. Elke dag wordt automatisch een back-up gemaakt en je kunt zelf een kopie maken op een USB-stick.</p></details>
-        <details><summary>Kan mijn boekhouder ermee werken?</summary><p>Ja. In de expertmodus staan het grootboek volgens RGS, het journaal, balans en winst-en-verliesrekening. Je kunt een auditfile (XAF 3.2), journaal en saldibalans exporteren.</p></details>
+        <details><summary>Kan mijn boekhouder ermee werken?</summary><p>Ja, en hij hoeft er zelf niet in te werken. Met één knop maak je per boekjaar een pakket voor je boekhouder: auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en al je facturen en bonnen. Dat leest hij in bij Caseware, AFAS, Visionplanner, Exact, Twinfield, Yuki of SnelStart. <a href="boekhouders.html">Meer voor boekhouders</a>.</p></details>
         <details><summary>Voor welke beroepen is het bedoeld?</summary><p>Voor zzp'ers en kleine ondernemers, met name vakmensen: stukadoors, schilders, timmerlieden, loodgieters, elektriciens en klusbedrijven. Bij het instellen kies je je vak, zodat veelgebruikte factuurregels klaarstaan.</p></details>
         <details><summary>Op welke computers werkt het?</summary><p>Op Windows en Linux. Het programma werkt ook zonder internetverbinding; alleen voor het versturen van e-mail en updates is internet nodig.</p></details>
         <details><summary>Windows zegt "Windows heeft uw pc beveiligd". Is dat veilig?</summary><p>Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. Download de installer alleen van <a href="https://github.com/shipdocs/gratis-boekhouden/releases">github.com/shipdocs/gratis-boekhouden/releases</a>. Wil je zeker weten dat het bestand niet is aangepast? Vergelijk het SHA-256-controlegetal met <code>SHA256SUMS-Windows.txt</code> bij de release (in PowerShell: <code>Get-FileHash</code>). Klopt het, klik dan op "Meer informatie" en daarna op "Toch uitvoeren".</p></details>
