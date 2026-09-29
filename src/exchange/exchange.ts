@@ -9,7 +9,7 @@ import type { Cents } from '../shared/money';
 import { assertIsoDate, formatDateNl, today, type IsoDate } from '../shared/dates';
 import { ValidationError } from '../shared/validation';
 import { formatEuro } from '../shared/money';
-import { checkCode, newExchangeKey, openAsOffice, openWithKey, readHeader, sealForOffice, sealWithKey, type OfficeKeys, type PackageHeader } from './crypto';
+import { assertOfficePublicKey, checkCode, newExchangeKey, openAsOffice, openWithKey, readHeader, sealForOffice, sealWithKey, type OfficeKeys, type PackageHeader } from './crypto';
 
 /**
  * Uitwisseling met de boekhouder (docs/uitwisseling.md), naar het model van de periode-uitwisseling in
@@ -181,7 +181,10 @@ export class ExchangeService {
     return this.db.prepare('SELECT id AS seq, kind, summary, created_at AS createdAt FROM exchange_actions ORDER BY id').all() as { seq: number; kind: string; summary: string; createdAt: string }[];
   }
 
-  /** Het antwoord aan de klant: alle handelingen, versleuteld met de sleutel uit zijn export. */
+  /**
+   * Het antwoord aan de klant: alle handelingen, versleuteld met de sleutel uit zijn export. Markeert
+   * nog niets; dat doet `markAnswered` pas als het bestand bewaard is.
+   */
   createAnswer(appVersion: string): { file: Buffer; filename: string; count: number; email: string } {
     const copy = this.settings.officeCopy();
     if (!copy) throw new ValidationError('Dit kan alleen in de kopie van een klant bij de boekhouder');
@@ -192,8 +195,12 @@ export class ExchangeService {
     const body: AnswerBody = { office: copy.office, actions: rows.map((r) => ({ seq: r.id, kind: r.kind, input: JSON.parse(r.input), summary: r.summary }) as AnswerBody['actions'][number]) };
     const header = { administratie: this.settings.administrationId(), uitwisseling: copy.exchange, einddatum: copy.endDate, appVersie: appVersion };
     const file = sealWithKey(Buffer.from(key, 'base64'), header, Buffer.from(JSON.stringify(body), 'utf8'));
-    this.setSetting('exchangeReturn', { ...info, answeredAt: new Date().toISOString() });
     return { file, filename: `antwoord-${header.administratie.slice(0, 8)}-${copy.exchange}.gbpakket`, count: rows.length, email: info.email };
+  }
+
+  /** Het antwoord is bewaard: vanaf nu geen wijzigingen meer, tenzij bewust heropend. */
+  markAnswered(): void {
+    this.setSetting('exchangeReturn', { ...this.returnInfo(), answeredAt: new Date().toISOString() });
   }
 
   /** Na "antwoord gemaakt" toch nog iets wijzigen: het antwoord moet dan opnieuw. */
@@ -222,6 +229,11 @@ export class ExchangeService {
       throw new ValidationError('Dit is geen uitnodiging van een boekhouder');
     }
     if (raw.type !== INVITE_TYPE || typeof raw.kantoor !== 'string' || typeof raw.publiekeSleutel !== 'string') throw new ValidationError('Dit is geen uitnodiging van een boekhouder');
+    try {
+      assertOfficePublicKey(raw.publiekeSleutel);
+    } catch {
+      throw new ValidationError('Deze uitnodiging is beschadigd: de sleutel van het kantoor klopt niet. Vraag je boekhouder om een nieuwe.');
+    }
     return { office: raw.kantoor, email: typeof raw.email === 'string' ? raw.email : '', publicKey: raw.publiekeSleutel, code: checkCode(raw.publiekeSleutel) };
   }
 

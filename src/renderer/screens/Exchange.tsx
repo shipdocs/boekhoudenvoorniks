@@ -118,7 +118,7 @@ export function ExchangeCard({ onChange }: { onChange?: () => void }) {
 
       {sending && choice.until && st.partner && (
         <Modal title={`T/m ${formatDateNl(choice.until)} naar ${st.partner.office}?`} onClose={() => setSending(null)}>
-          <p>Je boekhouder krijgt je administratie t/m {formatDateNl(choice.until)}, met je bonnen en facturen, versleuteld zodat alleen zijn kantoor hem kan openen. Wachtwoorden en koppelingen gaan niet mee.</p>
+          <p>Je boekhouder krijgt je administratie zoals hij nu is, met je bonnen en facturen, versleuteld zodat alleen zijn kantoor hem kan openen. Wachtwoorden en koppelingen gaan niet mee. Hij corrigeert alleen t/m {formatDateNl(choice.until)}; wat je daarna al geboekt hebt, ziet hij wel (bijvoorbeeld of een klant zijn factuur nog betaalde), maar verandert hij niet.</p>
           <p>Tot zijn antwoord is ingelezen, ligt alles t/m {formatDateNl(choice.until)} vast. Daarna werk je gewoon door. Na het inlezen is die periode afgesloten.</p>
           <div className="row end">
             <Button onClick={() => setSending(null)}>Annuleren</Button>
@@ -173,6 +173,14 @@ export function OfficeSettings() {
         <Field label="Naam van je kantoor"><input value={name} onChange={(e) => setOffice(e.target.value)} placeholder="bv. Administratiekantoor De Vries" /></Field>
         <Field label="E-mailadres" hint="hier sturen klanten hun export heen"><input value={mail} onChange={(e) => setEmail(e.target.value)} /></Field>
       </div>
+      {st.officeProblem && (
+        <div className="notice bad grid">
+          <span>{st.officeProblem} Je kunt een nieuwe kantoorsleutel maken; stuur je klanten daarna een nieuwe uitnodiging. Exports die al onderweg zijn, kun je dan niet meer openen: die maakt je klant opnieuw.</span>
+          <div><Button small disabled={busy || !name.trim()} onClick={async () => {
+            if ((await run(() => api.exchange.saveOffice(name, mail, true), 'Nieuwe kantoorsleutel gemaakt')) !== undefined) await status.reload();
+          }}>Nieuwe kantoorsleutel maken</Button></div>
+        </div>
+      )}
       <div className="row" style={{ alignItems: 'center' }}>
         <Button disabled={busy || !name.trim() || (name === st.office?.office && mail === st.office?.email)} onClick={async () => {
           if ((await run(() => api.exchange.saveOffice(name, mail), 'Opgeslagen')) !== undefined) {

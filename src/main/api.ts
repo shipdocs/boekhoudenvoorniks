@@ -70,7 +70,9 @@ export interface HostContext {
     bundle(): Promise<Buffer>;
     /** het kantoor op deze computer (bij de boekhouder), of null */
     office(): OfficeProfile | null;
-    saveOffice(input: { office: string; email: string }): OfficeProfile;
+    /** waarom het kantoor niet te openen is (bv. sleutelhanger weg), of null */
+    officeProblem?(): string | null;
+    saveOffice(input: { office: string; email: string; newKey?: boolean }): OfficeProfile;
     /** export van een klant uitpakken als nieuwe administratie (de kopie) en die openen */
     openClientExport(data: Uint8Array): Promise<{ company: string; exchange: number; endDate: string }>;
   };
@@ -365,6 +367,7 @@ export function createApi(s: Services, host: HostContext) {
         last: s.exchange.lastAnswer(),
         copy: s.exchange.copyStatus(),
         office: officeInfo(host.exchange?.office() ?? null),
+        officeProblem: host.exchange?.officeProblem?.() ?? null,
         canMail: Boolean(s.settings.get().smtp.host),
       }),
       // klant
@@ -394,7 +397,13 @@ export function createApi(s: Services, host: HostContext) {
             }
           }
         }
-        const path = await host.saveFile(r.filename, r.file, PACKAGE_FILTER);
+        let path: string | null;
+        try {
+          path = await host.saveFile(r.filename, r.file, PACKAGE_FILTER);
+        } catch (e) {
+          s.exchange.abort(); // niet bewaard: de periode hoeft niet op slot
+          throw e;
+        }
         if (!path) {
           // niets verstuurd en niets bewaard: de periode hoeft niet op slot
           s.exchange.abort();
@@ -405,7 +414,7 @@ export function createApi(s: Services, host: HostContext) {
       abort: () => s.exchange.abort(),
       readAnswer: (data: Uint8Array) => s.exchange.readAnswer(data, host.appVersion()),
       // kantoor
-      saveOffice: (office: string, email: string) => officeInfo(hostExchange().saveOffice({ office: String(office), email: String(email) })),
+      saveOffice: (office: string, email: string, newKey?: boolean) => officeInfo(hostExchange().saveOffice({ office: String(office), email: String(email), newKey: newKey === true })),
       invite: async () => {
         const profile = hostExchange().office();
         if (!profile) throw new Error('Vul eerst de naam van je kantoor in');
@@ -416,8 +425,9 @@ export function createApi(s: Services, host: HostContext) {
       actions: () => s.exchange.actions(),
       answer: async () => {
         const a = s.exchange.createAnswer(host.appVersion());
+        // pas als het bestand er is, is het antwoord gemaakt (annuleren of een fout: gewoon verder werken)
         const path = await host.saveFile(a.filename, a.file, PACKAGE_FILTER);
-        if (!path) s.exchange.reopenAnswer();
+        if (path) s.exchange.markAnswered();
         return { path, email: a.email, count: a.count };
       },
       reopenAnswer: () => s.exchange.reopenAnswer(),

@@ -92,9 +92,17 @@ function init(fresh) {
         officeProfile.email = email;
         return officeProfile;
       },
+      // zoals openClientExport in src/main/main.ts
       async openClientExport(data) {
+        if (!officeProfile) throw new Error('Vul eerst de naam van je kantoor in (Instellingen > Administraties)');
         const opened = ExchangeService.openExport(officeProfile, data, '0.0.0-e2e');
+        const result = { company: opened.meta.company, exchange: opened.header.uitwisseling, endDate: opened.header.einddatum };
         const admins = new Administrations(dir);
+        const existing = admins.list(readAdministrationFile).find((a) => a.id === opened.header.administratie && a.officeCopy?.exchange === opened.header.uitwisseling);
+        if (existing) {
+          openAdmin(existing.key);
+          return result;
+        }
         const key = admins.create(`${opened.meta.company} uitwisseling ${opened.header.uitwisseling}`);
         extractBundle(opened.bundle, admins.dirFor(key));
         const copyDb = openDatabase(path.join(admins.dirFor(key), 'boekhouding.sqlite'));
@@ -103,7 +111,7 @@ function init(fresh) {
         copy.exchange.initCopy(opened.header, opened.meta, officeProfile.office);
         copyDb.close();
         openAdmin(key);
-        return { company: opened.meta.company, exchange: opened.header.uitwisseling, endDate: opened.header.einddatum };
+        return result;
       },
     },
     // zoals de app: `dir` is de gegevensmap, extra administraties in administraties/<sleutel>/

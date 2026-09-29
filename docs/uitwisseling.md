@@ -207,7 +207,10 @@ Bestandsnamen bevatten geen klantnaam: `gb-<eerste 8 tekens administratie-ID>-17
 ### Inhoud
 
 - **Export:** de complete back-upbundel (`createBackupBundle`, dus database en bijlagen) plus K, de
-  einddatum en de koppelgegevens. **Zonder de tabel `secrets`** en zonder instellingen voor
+  einddatum en de koppelgegevens. Dus ook wat de klant na de einddatum al geboekt had: de boekhouder
+  ziet dat (handig voor bv. betalingen na balansdatum bij dubieuze debiteuren), maar zijn handelingen
+  moeten t/m de einddatum blijven, en hij kan geen post van na de einddatum terugdraaien. Het scherm zegt
+  dat zo tegen de klant (besluit 4). **Zonder de tabel `secrets`** en zonder instellingen voor
   SMTP, IMAP en koppelingen. De eerste export is groot (bijlagen); de grens van mailservers ligt vaak
   rond 10–25 MB. Is het pakket groter, dan raadt de app de gedeelde map of een bestand aan. Pakketten
   met alleen de wijzigingen sinds de vorige uitwisseling zijn een latere uitbreiding.
@@ -339,6 +342,8 @@ Bewust niet in de eerste versie:
    overgenomen.
 3. **Medewerkers van één kantoor delen de kantoorsleutel**, via een versleutelde export van de
    sleutel (met wachtwoord, alleen aan de kant van het kantoor).
+4. **De export bevat de hele administratie**, niet alleen t/m de einddatum. Alleen de correcties zijn
+   beperkt tot de periode.
 
 ## Bouwvolgorde
 
