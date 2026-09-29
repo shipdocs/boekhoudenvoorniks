@@ -46,6 +46,7 @@ import type { FxApplyInput } from '../fx/repair';
 import { ExchangeService, type OfficeProfile } from '../exchange/exchange';
 import { checkCode, openOfficeKey, sealOfficeKey } from '../exchange/crypto';
 import type { LicenseBilling } from '../license/license';
+import { countryCode } from '../shared/vat';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -491,13 +492,15 @@ export function createApi(s: Services, host: HostContext) {
         if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
         const mail = String(email ?? '').trim();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) throw new Error('Vul een geldig e-mailadres in');
-        const c = s.settings.get().company;
-        const missing = [!c.name && 'bedrijfsnaam', !c.address && 'adres', !c.postcode && 'postcode', !c.city && 'plaats', !c.kvkNumber && !c.vatNumber && 'KvK- of btw-nummer'].filter(Boolean);
+        const company = s.settings.get().company;
+        // zoals de Worker: alleen spaties telt als leeg
+        const c = { name: company.name.trim(), address: company.address.trim(), postcode: company.postcode.trim(), city: company.city.trim(), kvk: company.kvkNumber.trim(), vat: company.vatNumber.trim() };
+        const missing = [!c.name && 'bedrijfsnaam', !c.address && 'adres', !c.postcode && 'postcode', !c.city && 'plaats', !c.kvk && !c.vat && 'KvK- of btw-nummer'].filter(Boolean);
         if (missing.length > 0) throw new Error(`Voor de factuur ontbreekt nog: ${missing.join(', ')}. Vul dat aan bij Instellingen > Je bedrijf.`);
         const r = await host.licenseApi.start({
           administratie: s.settings.administrationId(),
           email: mail,
-          bedrijf: { naam: c.name, adres: c.address, postcode: c.postcode, plaats: c.city, land: (c.country || 'NL').toUpperCase(), kvk: c.kvkNumber || undefined, btw: c.vatNumber || undefined },
+          bedrijf: { naam: c.name, adres: c.address, postcode: c.postcode, plaats: c.city, land: countryCode(company.country) ?? 'NL', kvk: c.kvk || undefined, btw: c.vat || undefined },
         });
         if (r.al) return { al: true };
         if (!r.checkout) throw new Error('De betaalpagina kon niet worden geopend; probeer het later opnieuw');

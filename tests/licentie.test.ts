@@ -157,6 +157,9 @@ describe('licentie-Worker', () => {
     expect(incomplete.status).toBe(400);
     expect(((await incomplete.json()) as { fout: string }).fout).toBe('Voor de factuur ontbreekt: adres, KvK- of btw-nummer');
     expect((await w.post('/start', 'geen object')).status).toBe(400);
+    const land = await w.start({ bedrijf: { ...BILLING, land: 'Nederland' } });
+    expect(land.status).toBe(400);
+    expect(((await land.json()) as { fout: string }).fout).toMatch(/landcode van twee letters/);
   });
 
   it('eerste betaling: abonnement vanaf volgende maand met Idempotency-Key, licentie t/m die maand plus marge', async () => {
@@ -440,8 +443,9 @@ describe('licentie in de app', () => {
     expect(s.periods.status().exchange).toBeNull();
 
     // afsluiten: eerst de bedrijfsgegevens compleet (voor de factuur)
-    s.settings.update({ company: { ...s.settings.get().company, kvkNumber: '', vatNumber: '' } });
+    s.settings.update({ company: { ...s.settings.get().company, kvkNumber: '  ', vatNumber: '' } });
     await expect(api.license.checkout('piet@example.nl')).rejects.toThrow(/ontbreekt nog: KvK- of btw-nummer/);
+    expect(started).toHaveLength(0);
     s.settings.update({ company: { ...s.settings.get().company, kvkNumber: '12345678' } });
     expect(await api.license.checkout('piet@example.nl')).toEqual({ al: false });
     expect(started[0]).toEqual({ administratie: id, email: 'piet@example.nl', bedrijf: { naam: 'Stukadoorsbedrijf Piet', adres: 'Kalkweg 1', postcode: '1234 AB', plaats: 'Utrecht', land: 'NL', kvk: '12345678', btw: undefined } });

@@ -188,10 +188,11 @@ const text = (v: unknown, max = 200): string => (typeof v === 'string' ? v.trim(
 /** Bedrijfsgegevens voor de factuur; Mollie vraagt naam, adres en een KvK- of btw-nummer. */
 function parseBilling(raw: unknown): Billing {
   const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const billing: Billing = { naam: text(b.naam), adres: text(b.adres), postcode: text(b.postcode, 20), plaats: text(b.plaats, 100), land: (text(b.land, 2) || 'NL').toUpperCase(), kvk: text(b.kvk, 20) || undefined, btw: text(b.btw, 20) || undefined };
+  const billing: Billing = { naam: text(b.naam), adres: text(b.adres), postcode: text(b.postcode, 20), plaats: text(b.plaats, 100), land: (text(b.land, 20) || 'NL').toUpperCase(), kvk: text(b.kvk, 20) || undefined, btw: text(b.btw, 20) || undefined };
   const missing = [!billing.naam && 'bedrijfsnaam', !billing.adres && 'adres', !billing.postcode && 'postcode', !billing.plaats && 'plaats', !billing.kvk && !billing.btw && 'KvK- of btw-nummer'].filter(Boolean);
   if (missing.length > 0) throw new BadRequest(`Voor de factuur ontbreekt: ${missing.join(', ')}`);
-  if (!/^[A-Z]{2}$/.test(billing.land)) throw new BadRequest('Onbekend land');
+  // niet afkappen: "Nederland" wordt geen "NE", maar een duidelijke fout
+  if (!/^[A-Z]{2}$/.test(billing.land)) throw new BadRequest('Het land moet een landcode van twee letters zijn, bv. NL');
   return billing;
 }
 
@@ -302,7 +303,9 @@ async function ensureInvoice(env: Env, deps: Deps, administratie: string, paymen
   if (!done || done.invoice_id) return;
   const row = await getLicense(env, administratie);
   if (!row?.billing) {
-    console.error(JSON.stringify({ factuur: 'geen bedrijfsgegevens', administratie, betaling: paymentId }));
+    // alleen bij een licentie van vóór de facturen (zonder bedrijfsgegevens): een herhaling lost dat niet
+    // op, dus niet 500; de betaling telt wel. Zo'n factuur maak je met de hand in Mollie.
+    console.error(JSON.stringify({ factuur: 'geen bedrijfsgegevens, maak hem met de hand', administratie, betaling: paymentId }));
     return;
   }
   const billing = JSON.parse(row.billing) as Billing;
