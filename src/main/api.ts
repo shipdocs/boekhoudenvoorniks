@@ -10,7 +10,8 @@ import type { QuoteInput, QuoteStatus } from '../documents/quotes';
 import type { DocumentTemplate, TemplateType } from '../documents/templates';
 import { renderDocumentHtml, FONTS } from '../documents/templates';
 import type { SendOptions } from '../documents/sending';
-import type { PurchaseInvoiceInput } from '../documents/purchases';
+import { purchaseVat, type PurchaseInvoiceInput } from '../documents/purchases';
+import { businessEffect } from '../shared/business-share';
 import type { BookToAccountInput, SaleInput } from '../import/bank';
 import { parseCsv, previewCsv, headerSignature, type CsvMapping } from '../import/csv';
 import { parseMt940 } from '../import/mt940';
@@ -489,7 +490,27 @@ export function createApi(s: Services, host: HostContext) {
     },
     purchases: {
       /** met hoe hij betaald is: de bankrekening, "privé betaald" of "contant" */
-      list: (filter?: { status?: 'open' | 'betaald' }) => s.purchases.list(filter).map((p) => ({ ...p, paid_via: p.amount_paid > 0 ? s.search.infoFor(`inkoop:${p.id}`)?.paidVia ?? null : null })),
+      list: (filter?: { status?: 'open' | 'betaald' }) =>
+        s.purchases.list(filter).map((p) => {
+          // gemengd gebruik: welk deel is zakelijk, en wat blijft er dan aan kosten en btw-aftrek over
+          const ev = p.journal_entry_id ? s.purchases.eventFor(p.journal_entry_id) : null;
+          const pct = ev?.businessPct ?? 100;
+          const eff = ev ? businessEffect(ev.lines.map((l) => ({ net: l.netAmount, vat: purchaseVat(l) })), pct, ev.noVatDeduction) : null;
+          return {
+            ...p,
+            paid_via: p.amount_paid > 0 ? s.search.infoFor(`inkoop:${p.id}`)?.paidVia ?? null : null,
+            business_pct: pct,
+            /** btw die je terugkrijgt bij dit zakelijke deel (bij verlegde btw: niet apart getoond) */
+            vat_deductible: eff && pct < 100 ? eff.btw : p.vat_total,
+            business_amount: eff && pct < 100 ? eff.kosten + eff.btw : null,
+          };
+        }),
+      /** Zakelijk deel van één aankoop aanpassen; `remember`: voortaan ook voor deze leverancier. */
+      setBusinessPct: (id: number, pct: number, remember?: boolean) => {
+        const p = s.purchases.get(id);
+        if (remember && p.relation_name) s.businessShare.set(p.relation_name, pct);
+        return s.purchases.setBusinessPct(id, pct);
+      },
       create: (input: PurchaseInvoiceInput) => s.purchases.create(input),
       recordExpense: (input: ExpenseInput) => s.quick.recordExpense(input),
       attach: (name: string, data: Uint8Array) => host.storeAttachment(name, data),
@@ -652,6 +673,10 @@ export function createApi(s: Services, host: HostContext) {
       list: () => s.businessShare.list(),
       get: (name: string) => s.businessShare.get(name),
       set: (name: string, pct: number, applyExisting?: boolean) => s.businessShare.set(name, pct, { applyExisting }),
+      /** Alle geboekte uitgaven van een leverancier, om na te kijken. */
+      lines: (name: string) => s.businessShare.lines(name),
+      /** Past de gekozen boekingen aan (na jouw bevestiging in de lijst). */
+      applyLines: (items: { kind: 'bank' | 'inkoop'; refId: number; pct: number }[]) => s.businessShare.applyLines(items),
     },
     switchover: {
       state: () => s.switchover.state(),

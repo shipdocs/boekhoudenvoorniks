@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Field, MoneyInput, useAction, useApp, useLoad, type Settings } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad, type Settings } from '../ui';
 import type { AppSettings } from '../../settings/settings';
 import { ResetCard } from './Reset';
 import { CategoriesDialog } from './Categories';
 import { ReaderChoice } from './Reader';
 import { AssistantCard } from './Assistant';
+import { businessEffect } from '../../shared/business-share';
 import { LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 
 type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'ai' | 'backup' | 'geavanceerd' | 'over';
@@ -686,8 +687,9 @@ function About() {
 /** Instellingen → Categorieën: dezelfde lijst als achter "Aanpassen" bij het boeken. */
 /**
  * Gemengd gebruik per leverancier: welk deel is zakelijk (Dropbox 50%, Odido 75%)? Geen regel = 100%.
- * Bij het boeken gaat het privédeel naar privé, zonder btw-aftrek. Met "toepassen" gaan ook de al
- * geboekte uitgaven van die leverancier mee (tegenboeking + nieuwe post).
+ * Bij het boeken gaat het privédeel naar privé, zonder btw-aftrek. Eerdere boekingen pas je aan in een
+ * lijst die je eerst kunt nakijken: per boeking zie je wat er verandert, je kunt het percentage
+ * aanpassen en je bevestigt zelf.
  */
 function BusinessShareCard() {
   const { run, busy } = useAction();
@@ -695,14 +697,15 @@ function BusinessShareCard() {
   const [name, setName] = useState('');
   const [pct, setPct] = useState('50');
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const save = async (n: string, value: string, apply: boolean) => {
-    const p = Number(value);
-    if (!Number.isInteger(p) || p < 1 || p > 100) return;
-    const r = await run(() => api.businessShare.set(n, p, apply));
-    if (r !== undefined) {
-      setEdits({});
-      await shares.reload();
-    }
+  const [review, setReview] = useState<string | null>(null);
+  const valid = (v: string) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 100;
+  const save = async (n: string, value: string): Promise<boolean> => {
+    if (!valid(value)) return false;
+    const r = await run(() => api.businessShare.set(n, Number(value)), 'Opgeslagen ✓');
+    if (r === undefined) return false;
+    setEdits({});
+    await shares.reload();
+    return true;
   };
   return (
     <div className="card grid">
@@ -720,9 +723,9 @@ function BusinessShareCard() {
                   <input type="number" min={1} max={100} style={{ width: 70 }} value={edits[r.supplier_key] ?? String(r.pct)} onChange={(e) => setEdits({ ...edits, [r.supplier_key]: e.target.value })} /> %
                 </td>
                 <td className="right">
-                  <Button small disabled={busy} onClick={() => void save(r.display_name, edits[r.supplier_key] ?? String(r.pct), false)}>Alleen voortaan</Button>{' '}
-                  <Button small kind="primary" disabled={busy} onClick={() => void save(r.display_name, edits[r.supplier_key] ?? String(r.pct), true)}>Ook eerdere boekingen</Button>{' '}
-                  <Button small kind="ghost" disabled={busy} onClick={() => void save(r.display_name, '100', true)}>Weer 100%</Button>
+                  <Button small disabled={busy || !valid(edits[r.supplier_key] ?? String(r.pct))} onClick={() => void save(r.display_name, edits[r.supplier_key] ?? String(r.pct))}>Opslaan</Button>{' '}
+                  <Button small kind="primary" disabled={busy} onClick={() => setReview(r.display_name)}>Boekingen bekijken</Button>{' '}
+                  <Button small kind="ghost" disabled={busy} onClick={async () => { if (await save(r.display_name, '100')) setReview(r.display_name); }}>Weer 100%…</Button>
                 </td>
               </tr>
             ))}
@@ -732,10 +735,97 @@ function BusinessShareCard() {
       <div className="row" style={{ gap: 8, alignItems: 'end' }}>
         <Field label="Leverancier"><input value={name} placeholder="bv. Dropbox" onChange={(e) => setName(e.target.value)} /></Field>
         <Field label="Zakelijk deel"><span><input type="number" min={1} max={100} style={{ width: 80 }} value={pct} onChange={(e) => setPct(e.target.value)} /> %</span></Field>
-        <Button kind="primary" disabled={busy || name.trim().length < 2} onClick={async () => { await save(name.trim(), pct, true); setName(''); }}>Toevoegen en toepassen</Button>
+        <Button kind="primary" disabled={busy || name.trim().length < 2 || !valid(pct)} onClick={async () => { const n = name.trim(); if (await save(n, pct)) { setName(''); setReview(n); } }}>Opslaan en boekingen bekijken</Button>
       </div>
-      <p className="small muted" style={{ margin: 0 }}>De app gebruikt de naam zoals die op je bankafschrift of bon staat. "Ook eerdere boekingen" schrijft bestaande boekingen van deze leverancier opnieuw weg; is de aangifte al ingediend, dan komt het verschil vanzelf in je volgende aangifte.</p>
+      <p className="small muted" style={{ margin: 0 }}>De app gebruikt de naam zoals die op je bankafschrift of bon staat. Er wordt niets aan eerdere boekingen veranderd voordat jij het in de lijst bevestigt.</p>
+      {review && <BusinessShareReview name={review} onClose={() => { setReview(null); void shares.reload(); }} />}
     </div>
+  );
+}
+
+/** Alle geboekte uitgaven van één leverancier: nakijken, percentage per boeking aanpassen, bevestigen. */
+function BusinessShareReview({ name, onClose }: { name: string; onClose: () => void }) {
+  const { run, busy } = useAction();
+  const data = useLoad(() => api.businessShare.lines(name), [name]);
+  const [pcts, setPcts] = useState<Record<string, string>>({});
+  const [skip, setSkip] = useState<Record<string, boolean>>({});
+  const [done, setDone] = useState<string | null>(null);
+  const lines = data.data ?? [];
+  const keyOf = (l: { kind: string; refId: number }) => `${l.kind}:${l.refId}`;
+  const rows = lines.map((l) => {
+    const raw = pcts[keyOf(l)] ?? String(l.proposedPct);
+    const ok = Number.isInteger(Number(raw)) && Number(raw) >= 1 && Number(raw) <= 100;
+    const newPct = ok ? Number(raw) : l.currentPct;
+    const after = businessEffect(l.parts, newPct, l.noVatDeduction);
+    const changes = ok && newPct !== l.currentPct;
+    return { l, raw, ok, newPct, after, changes, selected: changes && !skip[keyOf(l)] };
+  });
+  const selected = rows.filter((r) => r.selected);
+  const sum = (f: (r: (typeof rows)[number]) => number) => selected.reduce((t, r) => t + f(r), 0);
+  const dKosten = sum((r) => r.after.kosten - r.l.now.kosten);
+  const dBtw = sum((r) => (r.l.reverseCharge ? 0 : r.after.btw - r.l.now.btw));
+  const filedCount = selected.filter((r) => r.l.filedPeriod).length;
+  return (
+    <Modal title={`Boekingen van ${name}`} onClose={onClose} wide>
+      {data.loading && <p>Even laden…</p>}
+      {!data.loading && lines.length === 0 && <p>Geen geboekte uitgaven gevonden voor {name}. Gebruik de naam zoals die op je bankafschrift of bon staat.</p>}
+      {lines.length > 0 && (
+        <>
+          <p className="small muted" style={{ marginTop: 0 }}>
+            Kijk na welk deel zakelijk is per boeking. Vinkjes staan aan bij boekingen die veranderen; vul een ander percentage in als één boeking anders was. Er verandert pas iets als je onderaan bevestigt.
+          </p>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="list small">
+              <thead>
+                <tr><th></th><th>Datum</th><th>Omschrijving</th><th className="right">Bedrag</th><th>Nu</th><th>Wordt</th><th className="right">Kosten nu → straks</th><th className="right">Btw-aftrek nu → straks</th></tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={keyOf(r.l)} className={r.changes ? '' : 'muted'}>
+                    <td><input type="checkbox" disabled={!r.changes} checked={r.selected} onChange={(e) => setSkip({ ...skip, [keyOf(r.l)]: !e.target.checked })} aria-label="Meenemen" /></td>
+                    <td><DateNl date={r.l.date} /></td>
+                    <td>{r.l.description}{r.l.filedPeriod && <div className="small muted">periode al ingediend ({r.l.filedPeriod.replace("-", " ")})</div>}</td>
+                    <td className="right"><Euro cents={r.l.gross} /></td>
+                    <td>{r.l.currentPct}%</td>
+                    <td><input type="number" min={1} max={100} style={{ width: 64 }} value={r.raw} onChange={(e) => setPcts({ ...pcts, [keyOf(r.l)]: e.target.value })} aria-label="Nieuw zakelijk deel" /> %</td>
+                    <td className="right"><Euro cents={r.l.now.kosten} /> → <Euro cents={r.after.kosten} /></td>
+                    <td className="right">{r.l.reverseCharge ? <span className="muted">verlegd, per saldo € 0</span> : <><Euro cents={r.l.now.btw} /> → <Euro cents={r.after.btw} /></>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ marginBottom: 4 }}>
+            {selected.length === 0 ? 'Er verandert niets.' : (
+              <>
+                <strong>{selected.length} {selected.length === 1 ? 'boeking' : 'boekingen'}</strong> aanpassen: kosten <Euro cents={dKosten} />, btw-aftrek <Euro cents={dBtw} />.
+                {filedCount > 0 && ` ${filedCount} ${filedCount === 1 ? 'valt' : 'vallen'} in een periode die al is ingediend; dat verschil komt in je volgende aangifte.`}
+              </>
+            )}
+          </p>
+          <p className="small muted" style={{ marginTop: 0 }}>Het privédeel gaat naar je privé-opnamen. De oude boeking krijgt een tegenboeking; niets wordt verwijderd.</p>
+        </>
+      )}
+      {done && <p role="status"><strong>{done}</strong></p>}
+      <div className="row end" style={{ marginTop: 12 }}>
+        <Button onClick={onClose}>Sluiten</Button>
+        <Button
+          kind="primary"
+          disabled={busy || selected.length === 0}
+          onClick={async () => {
+            const r = await run(() => api.businessShare.applyLines(selected.map((x) => ({ kind: x.l.kind, refId: x.l.refId, pct: x.newPct }))));
+            if (r) {
+              setDone(`${r.changed} ${r.changed === 1 ? 'boeking' : 'boekingen'} aangepast${r.skipped ? `, ${r.skipped} overgeslagen (${r.errors.join('; ')})` : ''} ✓`);
+              setPcts({});
+              setSkip({});
+              await data.reload();
+            }
+          }}
+        >
+          {selected.length === 0 ? 'Bevestigen' : `Bevestig ${selected.length} ${selected.length === 1 ? 'boeking' : 'boekingen'}`}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 
