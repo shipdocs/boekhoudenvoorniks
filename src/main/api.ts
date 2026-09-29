@@ -44,7 +44,7 @@ import type { PollResult } from '../mail/mail-intake';
 import type { UpdateStatus } from './updates';
 import type { FxApplyInput } from '../fx/repair';
 import { ExchangeService, type OfficeProfile } from '../exchange/exchange';
-import { checkCode } from '../exchange/crypto';
+import { checkCode, openOfficeKey, sealOfficeKey } from '../exchange/crypto';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -72,7 +72,7 @@ export interface HostContext {
     office(): OfficeProfile | null;
     /** waarom het kantoor niet te openen is (bv. sleutelhanger weg), of null */
     officeProblem?(): string | null;
-    saveOffice(input: { office: string; email: string; newKey?: boolean }): OfficeProfile;
+    saveOffice(input: { office: string; email: string; newKey?: boolean; keys?: { publicKey: string; privateKey: string } }): OfficeProfile;
     /** export van een klant uitpakken als nieuwe administratie (de kopie) en die openen */
     openClientExport(data: Uint8Array): Promise<{ company: string; exchange: number; endDate: string }>;
   };
@@ -249,6 +249,9 @@ export function createApi(s: Services, host: HostContext) {
       case 'mail-customer:klaar':
         s.inbox.skipTask(task.key, 'gezien');
         return;
+      case 'exchange-conflict:klaar':
+        s.inbox.skipTask(task.key, 'afgehandeld');
+        return;
       case 'mail-online:open':
         return { navigate: { screen: 'aankopen' } };
       case 'mail-online:bon':
@@ -320,6 +323,7 @@ export function createApi(s: Services, host: HostContext) {
           'bank-stale': ['bank', undefined],
           'bank-locked': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
+          'exchange-conflict': r.invoiceId ? ['factuur', r.invoiceId] : ['aankopen', r.purchaseId],
           'fx-repair': ['aankopen', undefined],
           'recurring-invoice': ['bewijs', r.bankTransactionId],
           'recurring-missing-payment': ['bank', undefined],
@@ -422,6 +426,17 @@ export function createApi(s: Services, host: HostContext) {
         return host.saveFile(`uitnodiging-${name}.gbuitnodiging`, ExchangeService.invite(profile), [{ name: 'Uitnodiging', extensions: ['gbuitnodiging'] }]);
       },
       openExport: (data: Uint8Array) => hostExchange().openClientExport(data),
+      /** de kantoorsleutel voor een collega, met een wachtwoord dat je apart doorgeeft */
+      exportOfficeKey: async (password: string) => {
+        const profile = hostExchange().office();
+        if (!profile) throw new Error('Vul eerst de naam van je kantoor in');
+        const name = profile.office.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'kantoor';
+        return host.saveFile(`kantoorsleutel-${name}.gbkantoor`, sealOfficeKey(profile, String(password)), [{ name: 'Kantoorsleutel', extensions: ['gbkantoor'] }]);
+      },
+      importOfficeKey: (data: Uint8Array, password: string) => {
+        const shared = openOfficeKey(data, String(password));
+        return officeInfo(hostExchange().saveOffice({ office: shared.office, email: shared.email, keys: shared }));
+      },
       actions: () => s.exchange.actions(),
       answer: async () => {
         const a = s.exchange.createAnswer(host.appVersion());

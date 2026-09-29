@@ -22,6 +22,8 @@ export class ChecklistService {
   ) {}
 
   items(): ChecklistItem[] {
+    // de kopie bij de boekhouder: het lijstje is van de klant
+    if (this.settings.officeCopy()) return [];
     const s = this.settings.get();
     const has = (sql: string) => this.db.prepare(`SELECT EXISTS(${sql}) AS x`).get() as { x: number };
     const c = s.company;

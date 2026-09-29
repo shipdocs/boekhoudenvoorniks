@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes, scryptSync } from 'node:crypto';
 
 /**
  * Versleuteling van de uitwisseling met de boekhouder (docs/uitwisseling.md, "Sleutels en pakketformaat").
@@ -155,4 +155,56 @@ export function openWithKey(key: Buffer, data: Uint8Array): { header: PackageHea
 
 export function newExchangeKey(): Buffer {
   return randomBytes(32);
+}
+
+/**
+ * De kantoorsleutel delen met een collega (docs/uitwisseling.md, besluit 3): versleuteld met een
+ * wachtwoord dat je apart doorgeeft. Eigen MAGIC, zodat het nooit met een back-up verward wordt.
+ * Formaat: MAGIC "GBKANTOR" | versie (1) | salt (16) | nonce (12) | tag (16) | versleutelde JSON.
+ */
+const OFFICE_KEY_MAGIC = Buffer.from('GBKANTOR');
+const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+export const MIN_OFFICE_PASSWORD = 10;
+
+export interface SharedOffice extends OfficeKeys {
+  office: string;
+  email: string;
+}
+
+export function sealOfficeKey(office: SharedOffice, password: string): Buffer {
+  if (password.length < MIN_OFFICE_PASSWORD) throw new Error(`Kies een wachtwoord van minimaal ${MIN_OFFICE_PASSWORD} tekens`);
+  const salt = randomBytes(16);
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', scryptSync(password.normalize('NFC'), salt, 32, SCRYPT), nonce);
+  cipher.setAAD(OFFICE_KEY_MAGIC);
+  const body = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(office), 'utf8')), cipher.final()]);
+  return Buffer.concat([OFFICE_KEY_MAGIC, Buffer.from([1]), salt, nonce, cipher.getAuthTag(), body]);
+}
+
+export function openOfficeKey(data: Uint8Array, password: string): SharedOffice {
+  const buf = Buffer.from(data);
+  if (buf.length < OFFICE_KEY_MAGIC.length + 45 || !buf.subarray(0, OFFICE_KEY_MAGIC.length).equals(OFFICE_KEY_MAGIC)) throw new Error('Dit is geen gedeelde kantoorsleutel');
+  if (buf[OFFICE_KEY_MAGIC.length] !== 1) throw new Error('Onbekende versie van de kantoorsleutel; werk de app bij');
+  let o = OFFICE_KEY_MAGIC.length + 1;
+  const salt = buf.subarray(o, (o += 16));
+  const nonce = buf.subarray(o, (o += 12));
+  const tag = buf.subarray(o, (o += 16));
+  let office: SharedOffice;
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', scryptSync(password.normalize('NFC'), salt, 32, SCRYPT), nonce);
+    decipher.setAAD(OFFICE_KEY_MAGIC);
+    decipher.setAuthTag(tag);
+    office = JSON.parse(Buffer.concat([decipher.update(buf.subarray(o)), decipher.final()]).toString('utf8')) as SharedOffice;
+  } catch {
+    throw new Error('Verkeerd wachtwoord, of het bestand is beschadigd');
+  }
+  // de privésleutel moet echt bij de publieke horen, anders kan niemand de exports openen
+  let derived: string;
+  try {
+    derived = (createPublicKey(privateKeyObject(office)).export({ format: 'jwk' }) as { x: string }).x;
+  } catch {
+    throw new Error('De kantoorsleutel in dit bestand is ongeldig');
+  }
+  if (derived !== office.publicKey || typeof office.office !== 'string') throw new Error('De kantoorsleutel in dit bestand is ongeldig');
+  return { office: office.office, email: typeof office.email === 'string' ? office.email : '', publicKey: office.publicKey, privateKey: office.privateKey };
 }

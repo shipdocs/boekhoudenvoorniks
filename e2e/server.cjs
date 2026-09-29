@@ -86,8 +86,8 @@ function init(fresh) {
         try { sanitizeForExchange(d); } finally { d.close(); }
       }),
       office: () => officeProfile,
-      saveOffice({ office, email }) {
-        officeProfile = { office, email, ...(officeProfile ?? generateOfficeKeys()) };
+      saveOffice({ office, email, keys }) {
+        officeProfile = { office, email, ...(keys ?? officeProfile ?? generateOfficeKeys()) };
         officeProfile.office = office;
         officeProfile.email = email;
         return officeProfile;
