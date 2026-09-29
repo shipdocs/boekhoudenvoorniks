@@ -36,9 +36,8 @@
       <li><strong>E-mail:</strong> facturen en offertes gaan via de mailserver die jij zelf instelt, naar de ontvanger die jij kiest. Wij zien ze niet.</li>
       <li><strong>Koppelingen die jij aanzet</strong> (bijvoorbeeld een webshop of betaalprovider): het programma haalt daar met jouw eigen sleutels gegevens op. Dat verkeer gaat rechtstreeks tussen jouw computer en die dienst.</li>
       <li><strong>Tekstherkenning en slimme herkenning:</strong> als je die aanzet, draaien ze op je eigen computer. Het programma accepteert daarvoor alleen adressen op je eigen computer (localhost), zodat bonnetjes je computer niet verlaten.</li>
-    </ul>
       <li><strong>Uitwisseling met je boekhouder:</strong> de export gaat per e-mail (via jouw eigen mailserver) of als bestand rechtstreeks van jou naar je boekhouder, versleuteld zodat alleen zijn kantoor hem kan openen. Zijn antwoord komt op dezelfde manier terug. Het gaat niet via ons, en wij kunnen het niet lezen.</li>
-      <li><strong>Licentie voor het abonnement:</strong> alleen als je een abonnement hebt (gehad), vraagt het programma bij onze licentieserver of je licentie nog geldig is. Het stuurt daarbij alleen het nummer van je administratie in het programma mee.</li>
+      <li><strong>Licentie voor het abonnement:</strong> alleen als je een abonnement hebt (gehad), vraagt het programma bij onze licentieserver of je licentie nog geldig is. Het stuurt daarbij het nummer van je administratie en een willekeurige beheersleutel mee. De sleutel blijft lokaal in je administratie; onze server bewaart alleen een niet-terugrekenbare hash om te controleren dat alleen jouw app de licentie kan ophalen of het abonnement kan opzeggen.</li>
     </ul>
     <p>Het programma bevat geen advertenties, geen trackers en geen gebruiksstatistieken.</p>
 
@@ -46,6 +45,7 @@
     <p>Voor het abonnement op de uitwisseling met je boekhouder verwerken wij:</p>
     <ul>
       <li>het nummer van je administratie in het programma (een willekeurige code, geen persoonsgegeven op zich);</li>
+      <li>de hash van een willekeurige beheersleutel, om je licentie en opzegging te beveiligen;</li>
       <li>je e-mailadres, en de bedrijfsgegevens die op de factuur komen: naam, adres, KvK- en/of btw-nummer;</li>
       <li>de nummers die Mollie gebruikt voor jou als klant, je betalingen, je abonnement en je facturen, de betaalde bedragen en de datums.</li>
     </ul>

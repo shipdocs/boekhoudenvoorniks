@@ -80,6 +80,7 @@ interface LicenseRow {
   subscription_claim: string | null;
   billing: string | null;
   cancelled_at: string | null;
+  management_key_hash: string | null;
 }
 
 /** Marge na de betaalde periode: een incasso kan een paar dagen duren. */
@@ -98,7 +99,7 @@ interface MolliePayment {
   customerId?: string;
   subscriptionId?: string;
   paidAt?: string;
-  metadata?: { administratie?: string; email?: string; billing?: Billing } | null;
+  metadata?: { administratie?: string; email?: string; billing?: Billing; managementKeyHash?: string } | null;
   _links?: { checkout?: { href: string } };
 }
 
@@ -117,6 +118,9 @@ class MollieError extends Error {
 
 /** Fout in wat de app stuurde (400). */
 class BadRequest extends Error {}
+
+/** De administratie bestaat, maar de lokale beheersleutel klopt niet (403). */
+class Forbidden extends Error {}
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const page = (html: string) => new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
@@ -156,7 +160,14 @@ async function mollie<T>(env: Env, deps: Deps, method: 'GET' | 'POST' | 'DELETE'
     payload = { ...(body ?? {}), ...(opts.withProfile && env.MOLLIE_PROFILE_ID ? { profileId: env.MOLLIE_PROFILE_ID } : {}), ...(testmode ? { testmode: true } : {}) };
     if (Object.keys(payload).length === 0) payload = undefined;
   }
-  const res = await deps.fetch(url, { method, headers, body: payload === undefined ? undefined : JSON.stringify(payload) });
+  let res: Response;
+  for (let attempt = 0; ; attempt += 1) {
+    res = await deps.fetch(url, { method, headers, body: payload === undefined ? undefined : JSON.stringify(payload) });
+    // Mollie kan bij twee gelijktijdige verzoeken met dezelfde sleutel kort 409 geven terwijl het
+    // eerste nog loopt. Dezelfde POST met dezelfde sleutel mag daarna veilig opnieuw.
+    if (res.status !== 409 || method !== 'POST' || !opts.idempotencyKey || attempt >= 3) break;
+    await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
+  }
   if (!res.ok) throw new MollieError(`Mollie ${method} ${path}: ${res.status} ${(await res.text()).slice(0, 300)}`, res.status);
   return (await res.json()) as T;
 }
@@ -184,6 +195,24 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
 }
 
 const text = (v: unknown, max = 200): string => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+const MANAGEMENT_KEY = /^[A-Za-z0-9_-]{43}$/;
+
+async function managementKeyHash(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+  return Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function managementKeyFrom(request: Request): string {
+  const value = request.headers.get('authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1] ?? '';
+  if (!value) throw new Forbidden('Geen geldige beheersleutel voor dit abonnement');
+  return value;
+}
+
+async function authorize(request: Request, row: LicenseRow): Promise<void> {
+  if (!row.management_key_hash || (await managementKeyHash(managementKeyFrom(request))) !== row.management_key_hash) {
+    throw new Forbidden('Geen toegang tot dit abonnement; neem contact op met info@shipdocs.app als je administratie is hersteld');
+  }
+}
 
 /** Bedrijfsgegevens voor de factuur; Mollie vraagt naam, adres en een KvK- of btw-nummer. */
 function parseBilling(raw: unknown): Billing {
@@ -201,11 +230,24 @@ async function start(request: Request, env: Env, deps: Deps): Promise<Response> 
   const body = await readJson(request);
   const administratie = text(body.administratie, 36);
   const email = text(body.email);
+  const managementKey = text(body.managementKey, 100);
   if (!UUID.test(administratie)) throw new BadRequest('Onbekende administratie');
   if (!EMAIL.test(email)) throw new BadRequest('Vul een geldig e-mailadres in');
+  if (!MANAGEMENT_KEY.test(managementKey)) throw new BadRequest('Ongeldige beheersleutel');
   const billing = parseBilling(body.bedrijf);
-  if (await subscriptionRunning(env, deps, await getLicense(env, administratie))) return json({ al: true });
-  const customer = await mollie<{ id: string }>(env, deps, 'POST', '/customers', { name: billing.naam, email, metadata: { administratie } });
+  const hash = await managementKeyHash(managementKey);
+  const existing = await getLicense(env, administratie);
+  if (existing) {
+    if (!existing.management_key_hash || existing.management_key_hash !== hash) throw new Forbidden('Geen toegang tot dit abonnement; neem contact op met info@shipdocs.app');
+    await env.LICENTIES.prepare('UPDATE licenses SET email = ?, billing = ? WHERE administratie = ?').bind(email, JSON.stringify(billing), administratie).run();
+    if (await subscriptionRunning(env, deps, existing)) return json({ al: true });
+  }
+  // Dezelfde administratie gebruikt altijd dezelfde Mollie-klant. De eerste-betaalsleutel verandert na
+  // iedere betaalde periode, zodat dubbel klikken dezelfde checkout geeft maar opnieuw afsluiten wel kan.
+  const customer = existing
+    ? { id: existing.customer_id }
+    : await mollie<{ id: string }>(env, deps, 'POST', '/customers', { name: billing.naam, email, metadata: { administratie } }, { idempotencyKey: `klant-${administratie}` });
+  const attempt = existing?.months ?? 0;
   const payment = await mollie<MolliePayment>(
     env,
     deps,
@@ -218,9 +260,9 @@ async function start(request: Request, env: Env, deps: Deps): Promise<Response> 
       description: 'BoekhoudenVoorNiks: uitwisseling met je boekhouder (eerste maand)',
       redirectUrl: `${env.PUBLIC_URL}/bedankt`,
       webhookUrl: `${env.PUBLIC_URL}/mollie`,
-      metadata: { administratie, email, billing },
+      metadata: { administratie, email, billing, managementKeyHash: hash },
     },
-    { withProfile: true },
+    { idempotencyKey: `start-${administratie}-${attempt}`, withProfile: true },
   );
   const checkout = payment._links?.checkout?.href;
   if (!checkout) throw new Error('Mollie gaf geen betaallink');
@@ -238,16 +280,17 @@ async function firstPayment(env: Env, deps: Deps, payment: MolliePayment, paidOn
   const billing = payment.metadata?.billing ? JSON.stringify(payment.metadata.billing) : null;
   await env.LICENTIES.batch([
     env.LICENTIES.prepare(
-      `INSERT INTO licenses (administratie, email, customer_id, period_start, months, billing)
-       SELECT ?1, ?2, ?3, ?4, 1, ?7 WHERE NOT EXISTS (SELECT 1 FROM payments WHERE payment_id = ?5)
+      `INSERT INTO licenses (administratie, email, customer_id, period_start, months, billing, management_key_hash)
+       SELECT ?1, ?2, ?3, ?4, 1, ?7, ?8 WHERE NOT EXISTS (SELECT 1 FROM payments WHERE payment_id = ?5)
        ON CONFLICT (administratie) DO UPDATE SET
          email = excluded.email,
          customer_id = excluded.customer_id,
          billing = COALESCE(excluded.billing, billing),
+         management_key_hash = COALESCE(management_key_hash, excluded.management_key_hash),
          cancelled_at = NULL,
          period_start = CASE WHEN ?6 = 1 THEN excluded.period_start ELSE period_start END,
          months = CASE WHEN ?6 = 1 THEN 1 ELSE months + 1 END`,
-    ).bind(administratie, payment.metadata!.email ?? '', payment.customerId!, paidOn, payment.id, lapsed, billing),
+    ).bind(administratie, payment.metadata!.email ?? '', payment.customerId!, paidOn, payment.id, lapsed, billing, payment.metadata?.managementKeyHash ?? null),
     env.LICENTIES.prepare('INSERT OR IGNORE INTO payments (payment_id, administratie, processed_at, amount) VALUES (?, ?, ?, ?)').bind(payment.id, administratie, deps.today(), payment.amount?.value ?? env.PRICE_EUR),
   ]);
   await ensureSubscription(env, deps, administratie, payment.id);
@@ -303,10 +346,8 @@ async function ensureInvoice(env: Env, deps: Deps, administratie: string, paymen
   if (!done || done.invoice_id) return;
   const row = await getLicense(env, administratie);
   if (!row?.billing) {
-    // alleen bij een licentie van vóór de facturen (zonder bedrijfsgegevens): een herhaling lost dat niet
-    // op, dus niet 500; de betaling telt wel. Zo'n factuur maak je met de hand in Mollie.
-    console.error(JSON.stringify({ factuur: 'geen bedrijfsgegevens, maak hem met de hand', administratie, betaling: paymentId }));
-    return;
+    // Niet stil als geslaagd markeren: na operationeel herstel kan Mollie dezelfde webhook herhalen.
+    throw new Error(`Factuurgegevens ontbreken voor ${administratie}; herstel de licentie vóór de webhook opnieuw wordt verwerkt`);
   }
   const billing = JSON.parse(row.billing) as Billing;
   const period = new Intl.DateTimeFormat('nl-NL', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${done.processed_at}T00:00:00Z`));
@@ -365,7 +406,7 @@ async function recurringPayment(env: Env, deps: Deps, payment: MolliePayment): P
   if (!(await getLicense(env, administratie))) throw new Error(`Licentie ${administratie} ontbreekt`); // 500: Mollie probeert het later opnieuw
   await env.LICENTIES.batch([
     env.LICENTIES.prepare('UPDATE licenses SET months = months + 1 WHERE administratie = ? AND NOT EXISTS (SELECT 1 FROM payments WHERE payment_id = ?)').bind(administratie, payment.id),
-    env.LICENTIES.prepare('INSERT OR IGNORE INTO payments (payment_id, administratie, processed_at, amount) VALUES (?, ?, ?, ?)').bind(payment.id, administratie, deps.today(), payment.amount?.value ?? env.PRICE_EUR),
+    env.LICENTIES.prepare('INSERT OR IGNORE INTO payments (payment_id, administratie, processed_at, amount) VALUES (?, ?, ?, ?)').bind(payment.id, administratie, (payment.paidAt ?? deps.today()).slice(0, 10), payment.amount?.value ?? env.PRICE_EUR),
   ]);
   await ensureInvoice(env, deps, administratie, payment.id);
   return json({ ok: true });
@@ -396,6 +437,7 @@ async function cancel(request: Request, env: Env, deps: Deps): Promise<Response>
   if (!UUID.test(administratie)) throw new BadRequest('Onbekende administratie');
   const row = await getLicense(env, administratie);
   if (!row || row.months === 0) return json({ fout: 'Geen abonnement gevonden voor deze administratie' }, 404);
+  await authorize(request, row);
   if (await subscriptionRunning(env, deps, row)) {
     try {
       await mollie(env, deps, 'DELETE', `/customers/${row.customer_id}/subscriptions/${row.subscription_id}`);
@@ -407,11 +449,12 @@ async function cancel(request: Request, env: Env, deps: Deps): Promise<Response>
   return json({ ok: true, betaaldTot: paidUntil(row), geldigTot: addDays(paidUntil(row), GRACE_DAYS) });
 }
 
-async function license(url: URL, env: Env, deps: Deps): Promise<Response> {
+async function license(request: Request, url: URL, env: Env, deps: Deps): Promise<Response> {
   const administratie = url.searchParams.get('administratie') ?? '';
   if (!UUID.test(administratie)) return json({ fout: 'Onbekende administratie' }, 400);
   const row = await getLicense(env, administratie);
   if (!row || row.months === 0) return json({ fout: 'Geen abonnement gevonden voor deze administratie' }, 404);
+  await authorize(request, row);
   const payload: LicensePayload = {
     v: 1,
     product: 'uitwisseling',
@@ -436,12 +479,13 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
     if (request.method === 'GET' && url.pathname === '/prijs') return json({ bedrag: env.PRICE_EUR, valuta: 'EUR', per: 'maand', btw: 'inclusief' });
     if (request.method === 'POST' && url.pathname === '/start') return await start(request, env, deps);
     if (request.method === 'POST' && url.pathname === '/mollie') return await webhook(request, env, deps);
-    if (request.method === 'GET' && url.pathname === '/licentie') return await license(url, env, deps);
+    if (request.method === 'GET' && url.pathname === '/licentie') return await license(request, url, env, deps);
     if (request.method === 'POST' && url.pathname === '/opzeggen') return await cancel(request, env, deps);
     if (request.method === 'GET' && url.pathname === '/bedankt') return page(THANKS);
     return json({ fout: 'Niet gevonden' }, 404);
   } catch (e) {
     if (e instanceof BadRequest) return json({ fout: e.message }, 400);
+    if (e instanceof Forbidden) return json({ fout: e.message }, 403);
     console.error(JSON.stringify({ route: url.pathname, fout: (e as Error).message }));
     // 500: Mollie probeert een webhook dan opnieuw, en de verwerking is herstelbaar
     return json({ fout: 'Er ging iets mis; probeer het later opnieuw' }, 500);

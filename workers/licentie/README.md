@@ -9,13 +9,19 @@ alleen wat nodig is om te betalen (administratie-ID, e-mailadres, Mollie-nummers
 | `GET /prijs` | prijs per maand (`PRICE_EUR`), voor het scherm in de app |
 | `POST /start` | (JSON: administratie, e-mail, bedrijfsgegevens) klant en eerste betaling (`sequenceType: first`) bij Mollie; geeft de betaallink terug, of `al` als er al een abonnement loopt |
 | `POST /mollie` | webhook: haalt de betaling zelf op bij Mollie. Eerste betaling → abonnement (`1 month`, start over een maand); maandelijkse betaling → een maand erbij. Idempotent en herstelbaar (zie hieronder). |
-| `GET /licentie?administratie=…` | ondertekende licentie (Ed25519) t/m de betaalde periode plus 7 dagen marge; met `cancelled` na opzeggen |
-| `POST /opzeggen` | (JSON: administratie) abonnement stoppen bij Mollie; de licentie loopt af na de betaalde periode |
+| `GET /licentie?administratie=…` | met de lokale beheersleutel als Bearer-token: ondertekende licentie (Ed25519) t/m de betaalde periode plus 7 dagen marge; met `cancelled` na opzeggen |
+| `POST /opzeggen` | met de lokale beheersleutel als Bearer-token: abonnement stoppen bij Mollie; de licentie loopt af na de betaalde periode |
 | `GET /bedankt` | terugkeerpagina na het afrekenen |
 
 De app controleert licenties offline (`src/license/license.ts`). Alleen *versturen naar je
 boekhouder* vraagt een licentie; een antwoord inlezen werkt altijd. Zolang `LICENSE_PUBLIC_KEY` in
 de app leeg is, staan licenties uit en is alles vrij.
+
+Bij het eerste afsluiten maakt de app een willekeurige beheersleutel. Die blijft lokaal in de
+administratie en gaat nooit in een URL of export naar de boekhouder. D1 bewaart alleen de SHA-256-hash.
+Daardoor is alleen kennis van een administratie-UUID niet genoeg om de licentie op te halen of het
+abonnement op te zeggen. Bewaar of herstel daarom de volledige administratieback-up; bij verlies van
+de sleutel moet ShipDocs het abonnement handmatig in Mollie afhandelen.
 
 De logica staat in `src/app.ts` en is getest in `tests/licentie.test.ts`: met een nagebootste Mollie
 en D1 als echte SQLite-database (zelfde migratie en SQL), gelijktijdige en herhaalde meldingen,
@@ -35,6 +41,9 @@ Mollie herhaalt een webhook bij een fout, en kan dezelfde melding ook dubbel of 
 - **Eén abonnement:** vóór het aanmaken claimt één betaling het aanmaken (`subscription_claim`), en
   Mollie krijgt `Idempotency-Key: abonnement-<betaling>`. Valt de verwerking halverwege uit, dan maakt de
   herhaling van dezelfde betaling het af en krijgt ze bij Mollie hetzelfde abonnement terug.
+- **Dubbel klikken bij afsluiten:** klant en eerste betaling krijgen stabiele Mollie
+  `Idempotency-Key`-waarden voor dezelfde betaalpoging. Gelijktijdige verzoeken maken daardoor geen
+  dubbele klant of betaalpoging; na een betaalde periode krijgt opnieuw afsluiten een nieuwe sleutel.
 - **Incasso van een abonnement dat nog niet gekoppeld is:** de administratie komt uit de metadata van het
   abonnement. Ontbreekt de licentie nog, dan geeft de Worker 500 zodat Mollie het later opnieuw probeert.
 
@@ -74,7 +83,7 @@ Mollie herhaalt een webhook bij een fout, en kan dezelfde melding ook dubbel of 
 ## Stand (30 september 2026)
 
 Staat live op `licentie.boekhoudenvoorniks.nl`, **in testmodus** (`MOLLIE_TESTMODE: "true"`), met een
-organisatie-toegangstoken met de vijf rechten hierboven. D1-database `boekhoudenvoorniks-licenties` in
+organisatie-toegangstoken met de zes rechten hierboven. D1-database `boekhoudenvoorniks-licenties` in
 West-Europa. Getest met een testbetaling: betaling verwerkt, abonnement aangemaakt, licentie
 ondertekend en door de app goedgekeurd. In de app staan licenties nog **uit** (`LICENSE_PUBLIC_KEY` leeg).
 
@@ -91,9 +100,10 @@ Onze bedrijfsgegevens op de factuur komen uit het Mollie-account.
 
 Pas als het Mollie-profiel is goedgekeurd, en in deze volgorde:
 
-0. Het token het recht `sales-invoices.write` geven (of een nieuw token met de zes rechten maken en het
-   geheim vervangen), `INVOICES: "true"` zetten en deployen; een testbetaling doen en de testfactuur in
-   Mollie bekijken. Laat de voorwaarden (artikel 8) nakijken.
+0. `npm run migrate` uitvoeren (ook migratie 0003 met de hash van de beheersleutel). Het token het recht
+   `sales-invoices.write` geven (of een nieuw token met de zes rechten maken en het geheim vervangen),
+   `INVOICES: "true"` zetten en deployen; een testbetaling doen en de testfactuur in Mollie bekijken.
+   Laat de voorwaarden (artikel 8) nakijken.
 1. In Mollie (testmodus) de testabonnementen stopzetten. Anders blijft Mollie maandelijks meldingen van
    testbetalingen sturen die de Worker in live-modus niet kan ophalen.
 2. De testregels uit D1 halen:
@@ -107,9 +117,7 @@ Pas als het Mollie-profiel is goedgekeurd, en in deze volgorde:
 
 ## Nog niet gebouwd
 
-- Opzeggen vanuit de app (nu: in het Mollie-dashboard het abonnement stopzetten; de licentie loopt
-  dan af na de betaalde maand plus marge).
-- Rate limiting op `/start` (maakt per aanroep een klant bij Mollie aan).
+- Rate limiting op `/start` (Mollie-idempotentie voorkomt dubbele objecten voor dezelfde betaalpoging,
+  maar begrenst niet hoeveel verschillende administratie-UUID's een aanvaller kan aanbieden).
 - De webhookmelding is niet ondertekend (Mollie doet dat niet); de Worker vertrouwt alleen wat hij zelf
   bij Mollie ophaalt.
-- Een factuur per betaling (Mollie stuurt een betaalbevestiging; een echte factuur met btw nog niet).

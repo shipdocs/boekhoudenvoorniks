@@ -82,11 +82,11 @@ export interface HostContext {
   licenseApi?: {
     price(): Promise<{ bedrag: string; valuta: string; per: string } | null>;
     /** de ondertekende licentie voor deze administratie, of null als er (nog) geen betaald abonnement is */
-    fetch(administrationId: string): Promise<string | null>;
+    fetch(administrationId: string, managementKey: string): Promise<string | null>;
     /** eerste betaling bij Mollie klaarzetten; geeft de betaallink, of `al` als er al een abonnement loopt */
-    start(input: { administratie: string; email: string; bedrijf: LicenseBilling }): Promise<{ checkout?: string; al?: boolean }>;
+    start(input: { administratie: string; email: string; bedrijf: LicenseBilling; managementKey: string }): Promise<{ checkout?: string; al?: boolean }>;
     /** het abonnement stoppen; de betaalde periode loopt af */
-    cancel(administrationId: string): Promise<{ betaaldTot: string; geldigTot: string }>;
+    cancel(administrationId: string, managementKey: string): Promise<{ betaaldTot: string; geldigTot: string }>;
   };
   /** meerdere administraties (alleen in de app zelf) */
   administrations?: {
@@ -361,7 +361,7 @@ export function createApi(s: Services, host: HostContext) {
     const st = s.license.status(today());
     if (st.state !== 'uit' && st.state !== 'actief' && host.licenseApi) {
       try {
-        const token = await host.licenseApi.fetch(s.settings.administrationId());
+        const token = await host.licenseApi.fetch(s.settings.administrationId(), s.license.managementKey());
         if (token) s.license.install(token, today());
       } catch {
         /* offline of nog niet betaald: dan de melding van requireActive */
@@ -501,6 +501,7 @@ export function createApi(s: Services, host: HostContext) {
           administratie: s.settings.administrationId(),
           email: mail,
           bedrijf: { naam: c.name, adres: c.address, postcode: c.postcode, plaats: c.city, land: countryCode(company.country) ?? 'NL', kvk: c.kvk || undefined, btw: c.vat || undefined },
+          managementKey: s.license.managementKey(),
         });
         if (r.al) return { al: true };
         if (!r.checkout) throw new Error('De betaalpagina kon niet worden geopend; probeer het later opnieuw');
@@ -510,14 +511,15 @@ export function createApi(s: Services, host: HostContext) {
       /** opzeggen: er wordt niets meer afgeschreven; versturen kan tot het eind van de betaalde periode */
       cancel: async () => {
         if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
-        await host.licenseApi.cancel(s.settings.administrationId());
-        const token = await host.licenseApi.fetch(s.settings.administrationId());
+        const managementKey = s.license.managementKey();
+        await host.licenseApi.cancel(s.settings.administrationId(), managementKey);
+        const token = await host.licenseApi.fetch(s.settings.administrationId(), managementKey);
         return token ? s.license.install(token, today()) : s.license.status(today());
       },
       /** na het betalen of verlengen: de licentie ophalen */
       refresh: async () => {
         if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
-        const token = await host.licenseApi.fetch(s.settings.administrationId());
+        const token = await host.licenseApi.fetch(s.settings.administrationId(), s.license.managementKey());
         if (!token) throw new Error('Nog geen betaald abonnement gevonden. Is de betaling net gedaan? Probeer het over een minuut opnieuw.');
         return s.license.install(token, today());
       },
