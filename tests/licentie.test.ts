@@ -60,7 +60,7 @@ function fakeD1() {
  * Idempotency-Key (zelfde sleutel → zelfde abonnement), zoals Mollie. `failNext` laat een aanroep mislukken.
  */
 function fakeMollie(payments: Record<string, object>) {
-  const calls: { method: string; path: string; body: Record<string, unknown> | null; auth: string | null; key: string | null }[] = [];
+  const calls: { method: string; path: string; query: string; body: Record<string, unknown> | null; auth: string | null; key: string | null }[] = [];
   const subscriptions = new Map<string, { id: string; status: string; metadata: unknown }>();
   const byKey = new Map<string, string>();
   const failures: RegExp[] = [];
@@ -70,7 +70,7 @@ function fakeMollie(payments: Record<string, object>) {
     const method = init?.method ?? 'GET';
     const headers = new Headers(init?.headers);
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
-    calls.push({ method, path, body, auth: headers.get('authorization'), key: headers.get('idempotency-key') });
+    calls.push({ method, path, query: url.search, body, auth: headers.get('authorization'), key: headers.get('idempotency-key') });
     // een tik wachten, zodat gelijktijdige webhooks echt door elkaar lopen
     await new Promise((r) => setTimeout(r, 1));
     const i = failures.findIndex((r) => r.test(`${method} ${path}`));
@@ -101,10 +101,10 @@ function fakeMollie(payments: Record<string, object>) {
   return { calls, subscriptions, created, fetchImpl, failNext: (r: RegExp) => void failures.push(r) };
 }
 
-function worker(payments: Record<string, object> = {}) {
+function worker(payments: Record<string, object> = {}, extra: Partial<Env> = {}) {
   const k = keys();
   const db = fakeD1();
-  const env: Env = { LICENTIES: db.d1, MOLLIE_API_KEY: 'test_abc', LICENSE_PRIVATE_KEY: k.privateJwk, PUBLIC_URL: 'https://licentie.example', PRICE_EUR: '9.99' };
+  const env: Env = { LICENTIES: db.d1, MOLLIE_API_KEY: 'test_abc', LICENSE_PRIVATE_KEY: k.privateJwk, PUBLIC_URL: 'https://licentie.example', PRICE_EUR: '9.99', ...extra };
   const mollie = fakeMollie(payments);
   let today = TODAY;
   const call = (method: string, path: string, body?: string) =>
@@ -228,6 +228,33 @@ describe('licentie-Worker', () => {
     expect(await (await w.hook('tr_x')).json()).toMatchObject({ genegeerd: 'tr_x' });
     w.mollie.subscriptions.set('sub_9', { id: 'sub_9', status: 'active', metadata: { administratie: ADMIN } });
     expect((await w.hook('tr_x')).status).toBe(500);
+  });
+
+  it('met een API-sleutel: geen profileId of testmode (Mollie weigert die dan)', async () => {
+    const w = worker({ tr_first: first('tr_first') });
+    await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`);
+    await w.hook('tr_first');
+    for (const c of w.mollie.calls) {
+      expect(c.query).toBe('');
+      expect(c.body ?? {}).not.toHaveProperty('profileId');
+      expect(c.body ?? {}).not.toHaveProperty('testmode');
+    }
+  });
+
+  it('met een organisatie-toegangstoken: testmode overal, profileId bij betaling en abonnement', async () => {
+    const w = worker({ tr_first: first('tr_first') }, { MOLLIE_API_KEY: 'access_abc', MOLLIE_PROFILE_ID: 'pfl_test', MOLLIE_TESTMODE: 'true' });
+    await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`);
+    await w.hook('tr_first');
+    await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`); // haalt het abonnement op
+    const post = (path: string) => w.mollie.calls.find((c) => c.method === 'POST' && c.path === path)!.body;
+    expect(post('/customers')).toMatchObject({ testmode: true });
+    expect(post('/customers')).not.toHaveProperty('profileId');
+    expect(post('/payments')).toMatchObject({ profileId: 'pfl_test', testmode: true });
+    expect(post('/customers/cst_1/subscriptions')).toMatchObject({ profileId: 'pfl_test', testmode: true });
+    const gets = w.mollie.calls.filter((c) => c.method === 'GET');
+    expect(gets.map((c) => c.path)).toEqual(expect.arrayContaining(['/payments/tr_first', '/customers/cst_1/subscriptions/sub_1']));
+    for (const c of gets) expect(c.query).toBe('?testmode=true');
+    expect(w.mollie.calls[0]!.auth).toBe('Bearer access_abc');
   });
 
   it('prijs komt uit de instellingen van de Worker; onbekende routes 404', async () => {
