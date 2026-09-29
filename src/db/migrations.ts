@@ -798,4 +798,14 @@ export const migrations: string[] = [
   -- van deze leverancier staan meteen op betaald (Crediteuren aan Privé-stortingen of Kas)
   ALTER TABLE relations ADD COLUMN paid_with TEXT CHECK (paid_with IN ('kas','prive'));
   `,
+  /* 20: zakelijk deel per leverancier (gemengd gebruik) */ `
+  -- bv. Dropbox 50% zakelijk: bij het boeken gaat het privédeel naar privé, zonder btw-aftrek.
+  -- Geen regel = 100% zakelijk.
+  CREATE TABLE supplier_business_share (
+    supplier_key TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    pct INTEGER NOT NULL CHECK (pct BETWEEN 1 AND 99),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];

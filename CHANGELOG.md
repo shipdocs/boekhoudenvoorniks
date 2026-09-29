@@ -1,5 +1,14 @@
 # Wijzigingen
 
+## 0.6.12 — zakelijk deel per leverancier
+
+### Nieuw
+- **Gemengd gebruik: zakelijk deel per leverancier.** Gebruik je iets ook privé, zoals Dropbox, Google One of je telefoon? Bij een betaling of bon vraagt de app nu "Hoeveel daarvan is zakelijk?" (standaard 100%). Het privédeel telt niet als kosten en de btw erover trek je niet af: het gaat naar je privé-opnamen. De app onthoudt het percentage per leverancier en gebruikt het voor de volgende betaling of bon. Bij verlegde btw (buitenlandse abonnementen) geven we ook alleen het zakelijke deel aan en trekken we dat af.
+- **Instellingen > Categorieën > Gemengd gebruik**: overzicht van je afspraken per leverancier. "Ook eerdere boekingen" schrijft de al geboekte uitgaven van die leverancier opnieuw weg (tegenboeking + nieuwe post). Is de aangifte al ingediend, dan komt het verschil vanzelf in je volgende aangifte.
+
+### Techniek
+- Boekingsregels: `businessPct` op inkoop- en bankboekingen (ontbreekt = 100%, bestaande boekingen veranderen niet). Nieuwe tabel `supplier_business_share`.
+
 ## 0.6.11 — geen dubbele omzet bij Mollie-orders
 
 ### Opgelost

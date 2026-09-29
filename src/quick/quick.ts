@@ -28,6 +28,8 @@ export interface ExpenseInput {
   paidWith: PaidWith;
   attachmentPath?: string | null;
   jobId?: number | null;
+  /** zakelijk deel in procenten (1–100); weglaten = wat eerder voor deze leverancier gold, anders 100 */
+  businessPct?: number;
 }
 
 export interface CashSaleInput {
@@ -74,6 +76,7 @@ export class QuickActions {
         description: input.description.trim() || category.label,
         attachmentPath: input.attachmentPath ?? null,
         jobId: input.jobId ?? null,
+        businessPct: input.businessPct,
         lines: [{ account: category.account, netAmount: net, vatCode: input.vatCode, vatAmount: vat, description: input.description }],
       });
       if (input.paidWith !== 'bank') {

@@ -67,6 +67,8 @@ export interface Confirmation {
   splits?: { categoryKey: string; gross: Cents; vatRate?: number }[] | null;
   /** het btw-bedrag zoals de gebruiker het invulde (staat op de bon); leeg = uitrekenen */
   vatAmount?: Cents | null;
+  /** zakelijk deel in procenten (1–100); weglaten = wat eerder voor deze leverancier gold, anders 100 */
+  businessPct?: number;
 }
 
 type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'decisions'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
@@ -598,6 +600,7 @@ export class IntakeService {
         jobId: c.jobId ?? null,
         documentId: id,
         payeeIban: doc.result?.supplierIban?.value ?? null,
+        businessPct: c.businessPct,
         lines,
         foreign: doc.result?.foreign ? { currency: doc.result.foreign.currency, total: doc.result.foreign.total, rate: doc.result.foreign.total / c.total } : null,
       });
