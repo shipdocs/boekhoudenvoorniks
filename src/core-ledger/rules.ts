@@ -2,6 +2,7 @@ import { ACCOUNTS, REVERSE_CHARGE_ACCOUNTS, SALES_ACCOUNTS } from './accounts';
 import { signedLine, type EntrySource, type PostLine } from './ledger';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isReverseCharge, isSalesVatCode, type PurchaseVatCode } from '../shared/vat';
 import { assertCents, roundHalfAwayFromZero, type Cents } from '../shared/money';
+import { shareOf } from '../shared/business-share';
 import type { IsoDate } from '../shared/dates';
 import { ValidationError } from '../shared/validation';
 import type { AccountCategory } from './accounts';
@@ -65,7 +66,7 @@ export function expenseLines(lines: PurchaseLineInput[], counterAccount: string,
   let netTotal = 0;
   const pct = businessPct(opts.businessPct);
   // zakelijk deel van een bedrag; 100% laat het bedrag ongemoeid
-  const biz = (n: Cents): Cents => (pct === 100 ? n : roundHalfAwayFromZero((n * pct) / 100));
+  const biz = (n: Cents): Cents => shareOf(n, pct);
   for (const l of lines) {
     assertCents(l.netAmount, 'bedrag');
     if (!isPurchaseVatCode(l.vatCode)) throw new ValidationError('Kies een btw-tarief');
