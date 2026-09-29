@@ -29,7 +29,7 @@
   },
   "build": {
     "appId": "app.shipdocs.gratisboekhouden",
-    "productName": "Gratis Boekhouden",
+    "productName": "BoekhoudenVoorNiks",
     "files": [
       "dist/**/*",
       "package.json"
@@ -44,6 +44,7 @@
         "deb"
       ],
       "category": "Office",
+      "executableName": "boekhoudenvoorniks",
       "icon": "build/icon.png",
       "syncDesktopName": true,
       "synopsis": "Gratis boekhouding voor zzp en vakmensen",
@@ -59,7 +60,7 @@
       {
         "provider": "github",
         "owner": "shipdocs",
-        "repo": "gratis-boekhouden",
+        "repo": "boekhoudenvoorniks",
         "releaseType": "draft"
       }
     ],
@@ -75,7 +76,7 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "Gratis Boekhouden"
+      "shortcutName": "BoekhoudenVoorNiks"
     }
   },
   "dependencies": {
@@ -118,8 +119,8 @@
   "engines": {
     "node": ">=22.12"
   },
-  "homepage": "https://shipdocs.github.io/gratis-boekhouden/",
-  "desktopName": "gratis-boekhouden.desktop",
+  "homepage": "https://boekhoudenvoorniks.nl/",
+  "desktopName": "boekhoudenvoorniks.desktop",
   "overrides": {
     "playwright-core": "1.56.1"
   }

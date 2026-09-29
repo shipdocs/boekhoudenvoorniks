@@ -1,6 +1,6 @@
 # Pakket voor de boekhouder
 
-De belofte: **de ondernemer boekt eenvoudig in Gratis Boekhouden, de boekhouder ontvangt gegevens die in zijn bestaande werkwijze passen.** We vragen boekhouders niet om in nog een pakket te werken.
+De belofte: **de ondernemer boekt eenvoudig in BoekhoudenVoorNiks, de boekhouder ontvangt gegevens die in zijn bestaande werkwijze passen.** We vragen boekhouders niet om in nog een pakket te werken.
 
 Code: `src/export/accountant-package.ts` (inhoud en controles), `src/shared/zip.ts`, knop in
 `src/renderer/screens/AccountantPackage.tsx` (op *Hoe gaat het?* en *Boekhouding > Exports*).

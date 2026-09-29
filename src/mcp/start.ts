@@ -13,7 +13,7 @@ const readonlyError = async (): Promise<never> => {
  */
 export async function startMcp(dbFile: string, version: string): Promise<void> {
   console.log = console.info = console.warn = (...a: unknown[]) => process.stderr.write(`${a.map(String).join(' ')}\n`);
-  if (!existsSync(dbFile)) throw new Error('Nog geen administratie gevonden. Open Gratis Boekhouden eerst één keer.');
+  if (!existsSync(dbFile)) throw new Error('Nog geen administratie gevonden. Open BoekhoudenVoorNiks eerst één keer.');
   const db = openReadonly(dbFile);
   const services = createServices(db, {
     pdf: readonlyError,

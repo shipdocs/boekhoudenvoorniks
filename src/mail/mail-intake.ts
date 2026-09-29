@@ -185,7 +185,7 @@ export function receiptHtml(m: Pick<MailMessage, 'fromName' | 'fromAddress' | 's
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>${escapeHtml(m.subject)}</title>
 <style>body{font:11pt/1.45 Helvetica,Arial,sans-serif;margin:32px;color:#111}h1{font-size:14pt;margin:0 0 6px}.meta{color:#555;font-size:9.5pt;margin-bottom:16px;border-bottom:1px solid #ccc;padding-bottom:8px}pre{white-space:pre-wrap;font:inherit;margin:0}</style>
 </head><body><h1>${escapeHtml(m.subject || 'Bon uit e-mail')}</h1>
-<div class="meta">Van: ${escapeHtml(from)}<br>Datum: ${escapeHtml(m.date)}<br>Bewaard uit e-mail door Gratis Boekhouden</div>
+<div class="meta">Van: ${escapeHtml(from)}<br>Datum: ${escapeHtml(m.date)}<br>Bewaard uit e-mail door BoekhoudenVoorNiks</div>
 <pre>${escapeHtml(body)}</pre></body></html>`;
 }
 

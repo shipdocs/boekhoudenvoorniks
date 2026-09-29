@@ -28,7 +28,7 @@ export function TermsGate({ onAccepted }: { onAccepted: () => void }) {
     <div className="modal-backdrop">
       <div className="modal" role="dialog" aria-label="Gebruiksvoorwaarden">
         <h2 style={{ marginTop: 0 }}>Even iets belangrijks</h2>
-        <p className="muted">Voordat je verdergaat: dit zijn de afspraken over het gebruik van Gratis Boekhouden.</p>
+        <p className="muted">Voordat je verdergaat: dit zijn de afspraken over het gebruik van BoekhoudenVoorNiks.</p>
         <TermsBlock checked={checked} onChange={setChecked} />
         <div className="row end" style={{ marginTop: 16 }}>
           <Button kind="primary" disabled={!checked || busy} onClick={async () => {
