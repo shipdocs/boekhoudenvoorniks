@@ -51,13 +51,5 @@ export function CurrentAdministration() {
   return <div className="small muted" style={{ padding: '0 10px 12px', marginTop: -10 }} title="Wisselen in Instellingen > Administraties">{current.name}</div>;
 }
 
-/** Balk bovenaan in de kopie van een klant bij de boekhouder. */
-export function OfficeCopyBanner() {
-  const copy = useLoad(() => api.app.officeCopy());
-  if (!copy.data) return null;
-  return (
-    <div className="notice warn" role="status" style={{ margin: '0 0 16px' }}>
-      🗂️ <strong>Kopie voor {copy.data.office}</strong> (uitwisseling {copy.data.exchange}, t/m {copy.data.endDate}). Er gaat niets naar buiten: geen e-mail, geen post ophalen, geen koppelingen, en de app boekt niets zelf.
-    </div>
-  );
-}
+/** Balk bovenaan in de kopie van een klant bij de boekhouder: wat er gecorrigeerd is, en het antwoord. */
+export { OfficeCopyAnswer as OfficeCopyBanner } from './Exchange';

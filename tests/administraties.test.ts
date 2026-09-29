@@ -26,7 +26,7 @@ describe('meerdere administraties', () => {
     const { root, admins, read } = registry();
     expect(admins.current()).toBe('');
     expect(admins.dirFor('')).toBe(root);
-    expect(admins.list(read)).toEqual([{ key: '', name: 'Mijn administratie', officeCopy: null, current: true }]);
+    expect(admins.list(read)).toEqual([{ key: '', name: 'Mijn administratie', officeCopy: null, id: null, current: true }]);
   });
 
   it('een nieuwe administratie krijgt een eigen map met een unieke sleutel uit de naam', () => {

@@ -7,6 +7,7 @@ import { CategoriesDialog } from './Categories';
 import { ReaderChoice } from './Reader';
 import { AssistantCard } from './Assistant';
 import { AdministrationsSettings } from './Administrations';
+import { OfficeSettings } from './Exchange';
 import { businessEffect } from '../../shared/business-share';
 import { LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 
@@ -65,7 +66,7 @@ export function SettingsScreen() {
         {TABS.map(([k, l]) => <button key={k} className={tab === k ? 'selected' : ''} onClick={() => setTab(k)}>{l}</button>)}
       </div>
 
-      {tab === 'administraties' && <AdministrationsSettings />}
+      {tab === 'administraties' && <><AdministrationsSettings /><OfficeSettings /></>}
 
       {tab === 'bedrijf' && section(
         <>
