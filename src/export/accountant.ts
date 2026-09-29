@@ -4,8 +4,8 @@ import type { CompanySettings } from '../settings/settings';
 import { centsToDecimalString } from '../shared/money';
 import { escapeHtml } from '../documents/render';
 import type { IsoDate } from '../shared/dates';
-import { ACCOUNTS } from '../core-ledger/accounts';
 import { RGS_VERSION } from '../core-ledger/ledger';
+import { OPENING_ON_FROM, openingBalance } from '../reports/opening-balance';
 
 function csvCell(v: unknown): string {
   const s = String(v ?? '');
@@ -41,26 +41,9 @@ export class AccountantExport {
     return [header.join(';'), ...lines].join('\r\n') + '\r\n';
   }
 
-  /**
-   * Beginbalans op `from`: de balansrekeningen uit alles vóór die dag plus een beginbalansboeking op die
-   * dag zelf (overstap). Het resultaat van eerdere jaren telt bij het eigen vermogen. Debet positief.
-   */
+  /** Beginbalans op `from` (debet positief); dezelfde als in de rapporten in de app, zie `openingBalance`. */
   openingBalance(from: IsoDate): { code: string; amount: number }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT a.code, a.rgs_code, a.category, SUM(l.debit - l.credit) AS amount
-         FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
-         WHERE e.entry_date < ? OR (e.source = 'opening' AND e.entry_date = ?)
-         GROUP BY a.id ORDER BY a.code`,
-      )
-      .all(from, from) as { code: string; rgs_code: string; category: string; amount: number }[];
-    const equity = this.ledger.getAccount(ACCOUNTS.eigenVermogen).code;
-    const result = rows.filter((r) => r.category === 'omzet' || r.category === 'kosten').reduce((s, r) => s + r.amount, 0);
-    const balance = rows.filter((r) => r.category !== 'omzet' && r.category !== 'kosten').map((r) => ({ code: r.code, amount: r.amount }));
-    const ev = balance.find((b) => b.code === equity);
-    if (ev) ev.amount += result;
-    else if (result !== 0) balance.push({ code: equity, amount: result });
-    return balance.filter((b) => b.amount !== 0);
+    return openingBalance(this.db, from).map(({ code, amount }) => ({ code, amount }));
   }
 
   /**
@@ -73,7 +56,7 @@ export class AccountantExport {
     const accounts = this.ledger.listAccounts(true);
     const relations = this.db.prepare('SELECT * FROM relations ORDER BY id').all() as { id: number; name: string; type: string; address: string | null; postcode: string | null; city: string | null; country: string; vat_number: string | null; kvk_number: string | null; iban: string | null }[];
     // een beginbalans op de eerste dag (overstap) hoort in <openingBalance>, niet bij de mutaties
-    const isOpening = `(e.source = 'opening' AND e.entry_date = ?)`;
+    const isOpening = OPENING_ON_FROM;
     const entries = this.db
       .prepare(`SELECT * FROM journal_entries e WHERE entry_date BETWEEN ? AND ? AND NOT ${isOpening} ORDER BY entry_date, id`)
       .all(from, to, from) as { id: number; entry_date: string; description: string; source: string }[];

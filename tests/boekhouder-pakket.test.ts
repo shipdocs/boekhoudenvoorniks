@@ -6,6 +6,7 @@ import { inflateRawSync } from 'node:zlib';
 import { XMLParser } from 'fast-xml-parser';
 import { describe, expect, it } from 'vitest';
 import { setup } from './helpers';
+import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { createZip } from '../src/shared/zip';
 import { createXlsx } from '../src/shared/xlsx';
 import { readXlsx } from '../src/import/xlsx';
@@ -110,6 +111,40 @@ describe('pakket voor mijn boekhouder', () => {
     expect(cents(deb[col('Eindsaldo')])).toBe(30500);
     expect(r.summary.totals.result).toBe(100000 - 20000 - 3000);
     expect(r.summary.checks.filter((c) => !c.ok).map((c) => c.label)).toEqual(['Bij elke inkoop zit een bon of factuur', 'Btw-aangiftes van afgelopen periodes zijn ingediend']);
+  });
+
+  it('privé-opnamen en -stortingen van vorig jaar gaan naar het eigen vermogen; de privérekeningen beginnen bij nul', async () => {
+    const { s, readAttachment } = scenario();
+    const privé = (date: string, account: string, amount: number) =>
+      s.ledger.post({ date, description: 'Privé', source: 'handmatig', lines: account === ACCOUNTS.priveOpnamen ? [{ account, debit: amount }, { account: ACCOUNTS.bank, credit: amount }] : [{ account: ACCOUNTS.bank, debit: amount }, { account, credit: amount }] });
+    privé('2025-12-01', ACCOUNTS.priveOpnamen, 20000);
+    privé('2025-12-15', ACCOUNTS.priveStortingen, 5000);
+    privé('2026-06-01', ACCOUNTS.priveOpnamen, 7000);
+    const opname = s.ledger.getAccount(ACCOUNTS.priveOpnamen).code;
+    const storting = s.ledger.getAccount(ACCOUNTS.priveStortingen).code;
+    const equity = s.ledger.getAccount(ACCOUNTS.eigenVermogen).code;
+
+    const opening = new Map(s.exports.openingBalance('2026-01-01').map((o) => [o.code, o.amount]));
+    expect(opening.has(opname)).toBe(false);
+    expect(opening.has(storting)).toBe(false);
+    // resultaat 2025 (500 omzet, credit) plus 200 opname (debet) min 50 storting (credit)
+    expect(opening.get(equity)).toBe(-50000 + 20000 - 5000);
+    expect([...opening.values()].reduce((t, a) => t + a, 0)).toBe(0);
+
+    const r = await s.accountantPackage.build(2026, { softwareVersion: '9.9.9', readAttachment });
+    const files = unzip(r.zip);
+    const rows = csv(files.get('kolommenbalans.csv')!);
+    const col = (n: string) => rows[0]!.indexOf(n);
+    const row = (code: string) => rows.slice(1).find((x) => x[0] === code);
+    // de opname van 2026 blijft als mutatie op de privérekening staan
+    expect(cents(row(opname)![col('Beginbalans')])).toBe(0);
+    expect(cents(row(opname)![col('Eindsaldo')])).toBe(7000);
+    expect(row(storting)).toBeUndefined();
+
+    const xaf = new XMLParser({ parseTagValue: false, isArray: (name) => ['obLine'].includes(name) }).parse(files.get('auditfile-2026-xaf32.xaf')!.toString());
+    const obAccounts = xaf.auditfile.company.openingBalance.obLine.map((ob: { accID: string | number }) => String(ob.accID));
+    expect(obAccounts).not.toContain(opname);
+    expect(obAccounts).not.toContain(storting);
   });
 
   it('auditfile in het pakket: beginbalans + mutaties per rekening = eindsaldo in de kolommenbalans', async () => {

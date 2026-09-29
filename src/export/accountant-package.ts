@@ -11,6 +11,7 @@ import { centsToDecimalString, type Cents } from '../shared/money';
 import { formatDateNl, periodFor, today, type IsoDate } from '../shared/dates';
 import { createZip, type ZipEntry } from '../shared/zip';
 import { createXlsx } from '../shared/xlsx';
+import { OPENING_ON_FROM } from '../reports/opening-balance';
 
 /**
  * "Pakket voor mijn boekhouder": één ZIP per boekjaar met alles wat een boekhouder in zijn eigen
@@ -251,7 +252,7 @@ export class AccountantPackage {
                 l.relation_id AS relationId, r.name AS relation
          FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
          JOIN chart_of_accounts a ON a.id = l.account_id LEFT JOIN relations r ON r.id = l.relation_id
-         WHERE e.entry_date BETWEEN ? AND ? AND NOT (e.source = 'opening' AND e.entry_date = ?)
+         WHERE e.entry_date BETWEEN ? AND ? AND NOT ${OPENING_ON_FROM}
          ORDER BY e.entry_date, e.id, l.id`,
       )
       .all(from, to, from) as MutationLine[];

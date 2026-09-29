@@ -6,6 +6,7 @@ import type { BankService } from '../import/bank';
 import type { VatService } from '../btw/btw';
 import { periodFor, today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
+import { OPENING_ON_FROM, openingBalance } from '../reports/opening-balance';
 
 export interface DashboardData {
   asOf: IsoDate;
@@ -88,10 +89,24 @@ export class DashboardService {
     };
   }
 
-  /** Winst-en-verliesrekening en balans voor de boekhouder (geavanceerde modus). */
+  /**
+   * Winst-en-verliesrekening en balans voor de boekhouder (geavanceerde modus). De balans is de
+   * beginbalans op `from` (resultaat en privé van daarvóór in het eigen vermogen, zoals in het pakket)
+   * plus de mutaties t/m `to`; het resultaat van de periode staat nog op de W&V.
+   */
   reports(from: IsoDate, to: IsoDate) {
     const pnl = this.ledger.balances({ from, to }).filter((b) => b.category === 'omzet' || b.category === 'kosten');
-    const balance = this.ledger.balances({ to }).filter((b) => !(b.category === 'omzet' || b.category === 'kosten'));
+    const opening = new Map(openingBalance(this.db, from).map((o) => [o.accountId, o.amount]));
+    const moves = new Map(
+      (this.db
+        .prepare(`SELECT l.account_id AS id, SUM(l.debit - l.credit) AS s FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id WHERE e.entry_date BETWEEN ? AND ? AND NOT ${OPENING_ON_FROM} GROUP BY l.account_id`)
+        .all(from, to, from) as { id: number; s: number }[]).map((r) => [r.id, r.s]),
+    );
+    const balance = this.ledger
+      .balances({ to })
+      .filter((b) => !(b.category === 'omzet' || b.category === 'kosten'))
+      // debet en credit zouden over alle jaren gaan en passen dan niet bij het saldo: alleen het saldo
+      .map(({ debit: _d, credit: _c, ...b }) => ({ ...b, balance: (opening.get(b.account_id) ?? 0) + (moves.get(b.account_id) ?? 0) }));
     const revenue = pnl.filter((b) => b.category === 'omzet').reduce((s, b) => s - b.balance, 0);
     const costs = pnl.filter((b) => b.category === 'kosten').reduce((s, b) => s + b.balance, 0);
     return { pnl, balance, revenue, costs, profit: revenue - costs };

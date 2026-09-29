@@ -132,7 +132,7 @@ function Reports({ from, to }: { from: string; to: string }) {
             {x.balance.filter((b) => b.balance).map((b) => <tr key={b.account_id}><td>{b.name} <span className="muted">({b.category})</span></td><td><Euro cents={b.balance} /></td></tr>)}
           </tbody>
         </table>
-        <p className="small muted">Positief = debet (bezittingen), negatief = credit (schulden/eigen vermogen). Het resultaat van het lopende jaar staat nog op de W&V.</p>
+        <p className="small muted">Positief = debet (bezittingen), negatief = credit (schulden/eigen vermogen). Het resultaat van deze periode staat nog op de W&V; dat van eerdere jaren zit in het eigen vermogen.</p>
       </div>
     </div>
   );
