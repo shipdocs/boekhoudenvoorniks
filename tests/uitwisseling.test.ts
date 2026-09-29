@@ -2,9 +2,10 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { openDatabase } from '../src/db/database';
 import { createServices, MemorySecretStore } from '../src/services';
+import { createApi, type HostContext } from '../src/main/api';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { createBackupBundle, extractBundle } from '../src/main/backup';
 import { generateOfficeKeys, readHeader } from '../src/exchange/crypto';
@@ -13,9 +14,13 @@ import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../src
 const VERSION = '1.0.0';
 const ASOF = '2026-10-15';
 
+const open: Database.Database[] = [];
+afterAll(() => open.forEach((db) => db.open && db.close()));
+
 function servicesAt(dir: string) {
   mkdirSync(dir, { recursive: true });
   const db = openDatabase(join(dir, 'boekhouding.sqlite'));
+  open.push(db);
   const secrets = new MemorySecretStore();
   const s = createServices(db, {
     pdf: async () => Buffer.from('%PDF'),
@@ -114,6 +119,7 @@ describe('uitwisseling met de boekhouder: de hele cyclus', () => {
     expect(answer.count).toBe(6);
     expect(answer.email).toBe('piet@example.nl');
     expect(readHeader(answer.file)).toMatchObject({ richting: 'naar-klant', uitwisseling: 1 });
+    o.s.exchange.markAnswered();
     expect(() => o.s.exchange.act({ kind: 'rekening', input: { code: '4991', rgs: 'EigenX', name: 'X', category: 'kosten' } })).toThrow(/al gemaakt/);
 
     // 6. de klant leest in: andere versie eerst niet
@@ -199,5 +205,61 @@ describe('uitwisseling: wat niet mag', () => {
     c.s.exchange.unlink();
     await expect(c.s.exchange.createExport('2026-09-30', [], VERSION, c.bundle, ASOF)).rejects.toThrow(/uitnodiging/);
     expect(existsSync(c.dir)).toBe(true);
+  });
+});
+
+describe('uitwisseling: randgevallen', () => {
+  it('werk van na de einddatum dat al vóór de export bestond: de boekhouder ziet het, maar kan het niet terugdraaien', async () => {
+    const profile = office();
+    const c = client(profile);
+    const oktober = c.s.purchases.create({ relationId: c.gamma.id, invoiceDate: '2026-10-05', description: 'Schroeven', lines: [{ account: 'WKprInkMat', netAmount: 3000, vatCode: 'hoog' }] });
+    const oktoberEntry = (c.db.prepare('SELECT journal_entry_id AS id FROM purchase_invoices WHERE id = ?').get(oktober.id) as { id: number }).id;
+    const exp = await c.s.exchange.createExport('2026-09-30', [], VERSION, c.bundle, ASOF);
+    const o = openAtOffice(profile, exp.file);
+    expect(o.s.ledger.balance('WKprInkMat', { from: '2026-10-01', to: '2026-10-31' })).toBe(3000);
+    expect(() => o.s.exchange.act({ kind: 'terugdraaien', input: { entryId: oktoberEntry, date: '2026-09-30' } })).toThrow(/t\/m 30 september 2026/);
+    // na het inlezen van het (lege) antwoord is de oktoberaankoop bij de klant onveranderd
+    c.s.exchange.readAnswer(o.s.exchange.createAnswer(VERSION).file, VERSION);
+    expect(c.s.ledger.getEntry(oktoberEntry).status).toBe('definitief');
+  });
+
+  it('een uitnodiging met een ongeldige sleutel wordt niet gekoppeld', () => {
+    const invite = JSON.parse(ExchangeService.invite(office()).toString()) as Record<string, unknown>;
+    const broken = Buffer.from(JSON.stringify({ ...invite, publiekeSleutel: 'abc' }));
+    expect(() => ExchangeService.readInvite(broken)).toThrow(/beschadigd/);
+  });
+
+  function apiFor(c: ReturnType<typeof client>, saveFile: HostContext['saveFile']) {
+    return createApi(c.s, { appVersion: () => VERSION, saveFile, exchange: { bundle: c.bundle, office: () => null, saveOffice: () => { throw new Error('x'); }, openClientExport: async () => { throw new Error('x'); } } } as unknown as HostContext);
+  }
+
+  it('export: lukt het bewaren niet (annuleren of een fout), dan gaat de periode niet op slot', async () => {
+    // via de API geldt de echte datum van vandaag: een kwartaal dat zeker voorbij is
+    const c = client(office());
+    const cancel = apiFor(c, async () => null);
+    expect(await cancel.exchange.send('2026-06-30', [], 'bestand')).toMatchObject({ exchange: null, path: null });
+    expect(c.s.periods.status().exchange).toBeNull();
+    const failing = apiFor(c, async () => { throw new Error('Schijf vol'); });
+    await expect(failing.exchange.send('2026-06-30', [], 'bestand')).rejects.toThrow(/Schijf vol/);
+    expect(c.s.periods.status().exchange).toBeNull();
+    const ok = apiFor(c, async (name) => `/tmp/${name}`);
+    expect(await ok.exchange.send('2026-06-30', [], 'bestand')).toMatchObject({ exchange: 3 });
+    expect(c.s.periods.status().exchange).toMatchObject({ no: 3 });
+  });
+
+  it('antwoord: pas als het bestand bewaard is, telt het als gemaakt', async () => {
+    const profile = office();
+    const c = client(profile);
+    const o = openAtOffice(profile, (await c.s.exchange.createExport('2026-09-30', [], VERSION, c.bundle, ASOF)).file);
+    const correction = { kind: 'memoriaal' as const, input: { date: '2026-09-30', description: 'x', lines: [{ account: ACCOUNTS.bankkosten, debit: 100 }, { account: ACCOUNTS.bank, credit: 100 }] } };
+    const failing = createApi(o.s, { appVersion: () => VERSION, saveFile: async () => { throw new Error('Schijf vol'); } } as unknown as HostContext);
+    await expect(failing.exchange.answer()).rejects.toThrow(/Schijf vol/);
+    expect(() => o.s.exchange.act(correction)).not.toThrow();
+    const cancel = createApi(o.s, { appVersion: () => VERSION, saveFile: async () => null } as unknown as HostContext);
+    expect(await cancel.exchange.answer()).toMatchObject({ path: null });
+    expect(() => o.s.exchange.act(correction)).not.toThrow();
+    const ok = createApi(o.s, { appVersion: () => VERSION, saveFile: async (name: string) => `/tmp/${name}` } as unknown as HostContext);
+    expect(await ok.exchange.answer()).toMatchObject({ count: 2 });
+    expect(() => o.s.exchange.act(correction)).toThrow(/al gemaakt/);
   });
 });

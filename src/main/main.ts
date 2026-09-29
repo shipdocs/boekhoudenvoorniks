@@ -76,16 +76,29 @@ function officeFile(): string {
   return join(rootDir(), 'kantoor.json');
 }
 
-function readOffice(): OfficeProfile | null {
-  if (!existsSync(officeFile())) return null;
-  const raw = JSON.parse(readFileSync(officeFile(), 'utf8')) as { office: string; email: string; publicKey: string; privateKey: string };
-  return { office: raw.office, email: raw.email, publicKey: raw.publicKey, privateKey: safeStorage.decryptString(Buffer.from(raw.privateKey, 'base64')) };
+/** Het kantoor, of waarom het niet te openen is (fail-closed: nooit een half profiel). */
+function officeState(): { profile: OfficeProfile | null; problem: string | null } {
+  if (!existsSync(officeFile())) return { profile: null, problem: null };
+  try {
+    const raw = JSON.parse(readFileSync(officeFile(), 'utf8')) as { office: string; email: string; publicKey: string; privateKey: string };
+    if (!secrets.available) return { profile: null, problem: 'De sleutelhanger van je computer is niet beschikbaar, dus de sleutel van je kantoor kan nu niet geopend worden.' };
+    return { profile: { office: raw.office, email: raw.email, publicKey: raw.publicKey, privateKey: safeStorage.decryptString(Buffer.from(raw.privateKey, 'base64')) }, problem: null };
+  } catch {
+    return { profile: null, problem: 'De sleutel van je kantoor kan niet geopend worden (bijvoorbeeld na een nieuwe installatie of een andere sleutelhanger).' };
+  }
 }
 
-function saveOffice(input: { office: string; email: string }): OfficeProfile {
+function readOffice(): OfficeProfile | null {
+  return officeState().profile;
+}
+
+/** `newKey`: bewust een nieuwe kantoorsleutel (klanten koppelen dan opnieuw met een nieuwe uitnodiging). */
+function saveOffice(input: { office: string; email: string; newKey?: boolean }): OfficeProfile {
   if (!input.office.trim()) throw new Error('Vul de naam van je kantoor in');
   if (!secrets.available) throw new Error('Veilige opslag is niet beschikbaar op dit systeem (geen sleutelhanger gevonden); de sleutel van je kantoor kan niet veilig bewaard worden');
-  const keys = readOffice() ?? generateOfficeKeys();
+  const state = officeState();
+  if (state.problem && !input.newKey) throw new Error(`${state.problem} Maak een nieuwe kantoorsleutel; je klanten koppelen dan opnieuw met een nieuwe uitnodiging.`);
+  const keys = (input.newKey ? null : state.profile) ?? generateOfficeKeys();
   const profile: OfficeProfile = { office: input.office.trim(), email: input.email.trim(), publicKey: keys.publicKey, privateKey: keys.privateKey };
   writeFileSync(officeFile(), JSON.stringify({ office: profile.office, email: profile.email, publicKey: profile.publicKey, privateKey: safeStorage.encryptString(profile.privateKey).toString('base64') }), { mode: 0o600 });
   return profile;
@@ -464,6 +477,7 @@ function initServices(): void {
           }
         }),
       office: () => readOffice(),
+      officeProblem: () => officeState().problem,
       saveOffice,
       openClientExport,
     },

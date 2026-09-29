@@ -45,8 +45,13 @@ export function generateOfficeKeys(): OfficeKeys {
 }
 
 function publicKeyObject(x: string) {
-  if (unb64u(x).length !== 32) throw new Error('Ongeldige sleutel van het kantoor');
+  if (!/^[A-Za-z0-9_-]{43}$/.test(x) || unb64u(x).length !== 32) throw new Error('Ongeldige sleutel van het kantoor');
   return createPublicKey({ key: { kty: 'OKP', crv: 'X25519', x }, format: 'jwk' });
+}
+
+/** Is dit een bruikbare publieke sleutel van een kantoor? Gooit anders. */
+export function assertOfficePublicKey(x: string): void {
+  publicKeyObject(x);
 }
 
 function privateKeyObject(keys: OfficeKeys) {

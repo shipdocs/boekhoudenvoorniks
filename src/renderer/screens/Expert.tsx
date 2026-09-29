@@ -44,6 +44,10 @@ export function Expert() {
 function Journal({ from, to }: { from: string; to: string }) {
   const { run } = useAction();
   const entries = useLoad(() => api.ledger.entries({ from, to, limit: 300 }), [from, to]);
+  // in de kopie bij de boekhouder: elke definitieve post in de periode mag terug, op zijn eigen datum
+  const copy = useLoad(() => api.app.officeCopy());
+  const canReverse = (e: { status: string; reverses_entry_id: number | null; source: string; entry_date: string }) =>
+    e.status === 'definitief' && !e.reverses_entry_id && (copy.data ? e.entry_date <= copy.data.endDate && e.source !== 'btw' : e.source === 'handmatig');
   const [manual, setManual] = useState(false);
   return (
     <>
@@ -53,7 +57,7 @@ function Journal({ from, to }: { from: string; to: string }) {
         <div key={e.id} className="card flat" style={{ marginBottom: 8, padding: '10px 14px', opacity: e.status === 'teruggedraaid' ? 0.6 : 1 }}>
           <div className="row between small">
             <span><strong>#{e.id}</strong> <DateNl date={e.entry_date} /> · {e.description} <span className="pill">{e.source}</span> {e.status === 'teruggedraaid' && <span className="pill warn">teruggedraaid</span>}{e.reverses_entry_id && <span className="pill">correctie op #{e.reverses_entry_id}</span>}</span>
-            {e.status === 'definitief' && !e.reverses_entry_id && e.source === 'handmatig' && <Button small kind="ghost" onClick={async () => { if (confirm('Tegenboeking maken?')) { await run(() => api.ledger.reverse(e.id, today()), 'Tegenboeking gemaakt'); await entries.reload(); } }}>Terugdraaien</Button>}
+            {canReverse(e) && <Button small kind="ghost" onClick={async () => { if (confirm('Tegenboeking maken?')) { await run(() => api.ledger.reverse(e.id, copy.data ? e.entry_date : today()), 'Tegenboeking gemaakt'); await entries.reload(); } }}>Terugdraaien</Button>}
           </div>
           <Origin entryId={e.id} />
           <table style={{ width: '100%' }} className="small">
@@ -65,15 +69,16 @@ function Journal({ from, to }: { from: string; to: string }) {
           </table>
         </div>
       ))}
-      {manual && <ManualEntry onClose={() => setManual(false)} onDone={async () => { setManual(false); await entries.reload(); }} />}
+      {manual && <ManualEntry defaultDate={copy.data?.endDate} onClose={() => setManual(false)} onDone={async () => { setManual(false); await entries.reload(); }} />}
     </>
   );
 }
 
-function ManualEntry({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+/** `defaultDate`: in de kopie bij de boekhouder de einddatum van de uitwisseling (correcties horen in die periode). */
+function ManualEntry({ onClose, onDone, defaultDate }: { onClose: () => void; onDone: () => void; defaultDate?: string }) {
   const accounts = useLoad(() => api.ledger.accounts());
   const { run, busy } = useAction();
-  const [date, setDate] = useState(today());
+  const [date, setDate] = useState(defaultDate ?? today());
   const [description, setDescription] = useState('');
   const [lines, setLines] = useState<{ account: string; debit: number | null; credit: number | null }[]>([{ account: '', debit: null, credit: null }, { account: '', debit: null, credit: null }]);
   const d = lines.reduce((s, l) => s + (l.debit ?? 0), 0);
