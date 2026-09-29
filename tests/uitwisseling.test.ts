@@ -37,6 +37,7 @@ function client(profile: OfficeProfile) {
   const c = servicesAt(mkdtempSync(join(tmpdir(), 'gb-klant-')));
   const { s, dir } = c;
   s.settings.update({ onboardingDone: true, company: { ...s.settings.get().company, name: 'Stukadoorsbedrijf Piet', email: 'piet@example.nl', address: 'Kalkweg 1', postcode: '1234 AB', city: 'Utrecht', kvkNumber: '12345678', vatNumber: 'NL123456789B01', iban: 'NL91ABNA0417164300' } });
+  s.license.managementKey();
   s.db.prepare(`INSERT INTO secrets (key, value) VALUES ('smtp:password', x'01020304')`).run();
   s.settings.update({ smtp: { ...s.settings.get().smtp, host: 'smtp.piet.nl', user: 'piet' } });
   const klant = s.relations.create({ name: 'Familie Jansen', country: 'NL', address: 'Dorpsstraat 5', postcode: '3511 AA', city: 'Utrecht' });
@@ -94,6 +95,7 @@ describe('uitwisseling met de boekhouder: de hele cyclus', () => {
     expect(o.s.settings.officeCopy()).toEqual({ office: 'Kantoor De Vries', exchange: 1, endDate: '2026-09-30' });
     expect(o.s.settings.administrationId()).toBe(c.s.settings.administrationId());
     expect((o.db.prepare('SELECT COUNT(*) AS n FROM secrets').get() as { n: number }).n).toBe(0);
+    expect(o.db.prepare(`SELECT 1 FROM settings WHERE key = 'licenseManagementKey'`).get()).toBeUndefined();
     expect(o.s.settings.get().smtp.host).toBe('');
     const bon = (o.db.prepare('SELECT attachment_path AS p FROM purchase_invoices WHERE journal_entry_id = ?').get(c.purchaseEntry) as { p: string }).p;
     expect(bon.startsWith(o.dir)).toBe(true);

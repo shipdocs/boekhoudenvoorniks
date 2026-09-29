@@ -395,6 +395,6 @@ export function sanitizeForExchange(db: Db): void {
   db.exec(`
     DELETE FROM secrets;
     UPDATE integrations SET enabled = 0, config = '{}';
-    DELETE FROM settings WHERE key IN ('smtp', 'mailIn', 'ocr', 'exchangePartner', 'exchangeLast');
+    DELETE FROM settings WHERE key IN ('smtp', 'mailIn', 'ocr', 'exchangePartner', 'exchangeLast', 'licenseManagementKey');
   `);
 }

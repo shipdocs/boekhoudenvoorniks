@@ -8,6 +8,7 @@ import type { AppSettings } from '../../settings/settings';
 import { TermsBlock } from './Terms';
 import { startDateConsequences, startDateOptions } from '../../shared/switchover';
 import { isIsoDate, today } from '../../shared/dates';
+import { Logo } from '../Logo';
 
 const AUTOPILOT: [AppSettings['autopilot'], string, string][] = [
   ['voorzichtig', 'Voorzichtig', 'Ik bevestig alles zelf. De app doet voorstellen, maar boekt niets zonder mij.'],
@@ -141,6 +142,7 @@ export function Onboarding() {
 
       {step.id === 'welkom' && (
         <>
+          <div style={{ marginBottom: 18 }}><Logo variant="gestapeld" width={200} /></div>
           <h1>Welkom 👋</h1>
           <p className="sub">We stellen je in een paar vragen in. Geen boekhoudkennis nodig.</p>
           <Field label="Hoe mogen we je noemen?">
