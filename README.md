@@ -67,6 +67,7 @@ Vereist Node 22.12+.
 ```bash
 npm install
 npm test            # unit- en integratietests (vitest) op een in-memory database
+npm run test:proefadministratie # vaste XAF/UBL/CAMT-administratie met exact verwachte saldi
 npm run typecheck
 npm run dev         # Vite + Electron met hot reload
 npm start           # productiebuild lokaal starten
@@ -76,6 +77,10 @@ npm run dist:win    # Windows-installer (NSIS)
 
 `better-sqlite3` is een native module. `npm test` bouwt hem voor Node en `npm run dev`/`npm start` voor
 Electron (`electron-builder install-app-deps`).
+
+Zie [Testen](docs/testen.md) voor de testlagen, gerichte commando's en de werkwijze bij een afwijkend
+saldo. De bronbestanden en onafhankelijke handberekening van de vaste proefadministratie staan in
+[tests/proefadministratie](tests/proefadministratie/README.md).
 
 Tekstherkenning voor foto's is optioneel. De ingebouwde herkenning (GLM-OCR via llama.cpp, lokaal, CPU)
 installeer je bij eerste gebruik in de instellingen; zie [`docs/lokale-ocr.md`](docs/lokale-ocr.md).
@@ -89,7 +94,7 @@ Download de installer van de [laatste release](https://github.com/shipdocs/grati
 Op **Windows** kan SmartScreen melden dat "Windows uw pc heeft beveiligd". Dat komt doordat de installer (nog) niet met een betaald certificaat ondertekend is. Download de installer alleen van de [GitHub-release](https://github.com/shipdocs/gratis-boekhouden/releases) en controleer eventueel het controlegetal:
 
 ```powershell
-Get-FileHash '.\Gratis-Boekhouden-Setup-0.6.10.exe' -Algorithm SHA256   # vergelijk met SHA256SUMS-Windows.txt
+Get-FileHash '.\Gratis-Boekhouden-Setup-0.6.11.exe' -Algorithm SHA256   # vergelijk met SHA256SUMS-Windows.txt
 ```
 
 Klopt het, klik dan op **Meer informatie → Toch uitvoeren**. Op Linux: `sha256sum -c SHA256SUMS-Linux.txt --ignore-missing`.

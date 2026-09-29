@@ -128,6 +128,17 @@ function DocumentView({ id, mime, highlight, pageSizes }: { id: number; mime: st
   );
 }
 
+/** Waar de gegevens vandaan komen, om te kunnen controleren of Claude Code (en niet de lokale herkenning) het gelezen heeft. */
+function extractionSourceLabel(source: string | null): string {
+  if (source === 'ubl') return 'Gelezen uit e-factuur (UBL)';
+  if (source === 'pdf-text') return 'Gelezen uit de tekst in de PDF';
+  if (source === 'geen') return 'Nog niet uitgelezen';
+  if (source === 'ocr:claude-code') return 'Gelezen door Claude Code (Anthropic)';
+  if (source === 'ocr:codex') return 'Gelezen door Codex (OpenAI)';
+  if (source?.startsWith('ocr:')) return `Gelezen door ${source.slice(4)}`;
+  return '';
+}
+
 export function DocumentReview({ id }: { id: number }) {
   const { go, meta, settings, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
@@ -193,6 +204,7 @@ export function DocumentReview({ id }: { id: number }) {
         <div>
           <h1>{form.supplier || d.original_name}</h1>
           <p className="sub">{d.duplicate_of_document_id || (d.status === 'genegeerd' && d.issues.some((i) => i.field === 'duplicate')) ? 'Dubbel document — niet opnieuw geboekt' : d.status === 'verwerkt' ? '✓ Verwerkt' : d.confidence === 'LOW' ? 'We weten het niet zeker — kijk even mee.' : 'Klopt alles?'}</p>
+          <p className="small muted">{extractionSourceLabel(d.extraction_source)}</p>
         </div>
         <Button kind="ghost" onClick={() => go({ screen: 'aankopen' })}>← Aankopen</Button>
       </div>
