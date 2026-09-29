@@ -1,0 +1,273 @@
+# Uitwisseling met de boekhouder: technisch ontwerp
+
+Status: **ontwerp**, nog niet gebouwd. Peildatum 29 september 2026, `main` @ `1c0497f`.
+
+Dit document beschrijft hoe een klant een deel van zijn administratie naar zijn boekhouder stuurt,
+de boekhouder die in Gratis Boekhouden controleert en corrigeert, en de klant het antwoord weer
+inleest zonder dat werk van tussendoor verloren gaat. Het bestaande **pakket voor je boekhouder**
+(ZIP met XAF, zie [boekhouders.md](boekhouders.md)) blijft bestaan voor boekhouders die in hun eigen
+software werken; dat gaat maar één kant op.
+
+## Uitgangspunten
+
+1. **De administratie van de klant is de echte.** De kopie van de boekhouder is een werkkopie; er
+   worden nooit twee databases samengevoegd.
+2. **De boekhouder werkt in Gratis Boekhouden**, in de kantoormodus. Er is geen terugweg uit andere
+   boekhoudsoftware.
+3. **Niets dat wij beheren.** Geen server, geen portaal, geen account. Transport gaat via e-mail
+   (eigen SMTP), een gedeelde map (OneDrive, Dropbox, Nextcloud, …) of een los bestand.
+4. **De beveiliging zit in het pakket, niet in het transport.** Een onderschept pakket is onleesbaar,
+   en een vervalst of verkeerd pakket wordt geweigerd.
+5. **De werkwijze volgt de periode-uitwisseling van SnelStart**, die boekhouders al kennen: één
+   uitwisseling tegelijk, met een nummer; de klant werkt door na de einddatum; het antwoord moet het
+   nummer van de laatste export hebben; klant en boekhouder gebruiken dezelfde versie van de app.
+
+## Werkwijze
+
+```
+boekhouder                                   klant
+──────────                                   ─────
+Klant uitnodigen ──── uitnodiging.gbuitnod ───▶ Uitnodiging openen
+  (kantoornaam, e-mail, publieke sleutel)         → gekoppeld, e-mailadres boekhouder ingesteld
+
+                                             Naar boekhouder sturen (t/m einddatum)
+                                               controles: bank sluit aan, niets open
+                                               periode t/m einddatum op slot
+                 ◀──── export-17.gbpakket ────
+Inlezen → werkkopie (kantoormodus)
+Controleren, corrigeren, vragen
+Antwoord maken ──── antwoord-17.gbpakket ────▶ Antwoord inlezen
+                                               samenvatting "7 aanpassingen", inlezen
+                                               periode t/m einddatum afgesloten
+```
+
+Het uitwisselingsnummer (hier 17) loopt per administratie op.
+
+## Spelregels
+
+| # | Regel | Waarom |
+|---|---|---|
+| 1 | Er loopt hooguit **één uitwisseling** per administratie. | Het antwoord past altijd op precies één export. |
+| 2 | Exporteren kan alleen als **de bank tot en met de einddatum aansluit** (alle afschriften ingelezen, saldo gelijk) en er in de periode **niets open staat** (geen onverwerkte bankregels of bonnen). | Een bankmutatie kan niet naar een latere periode verschoven worden; een late mutatie in een vergrendelde periode is een fout (ontbrekend afschrift), geen late post. |
+| 3 | Na het versturen ligt alles **tot en met de einddatum vast**. De klant werkt door na de einddatum. | De periode van de klant blijft precies gelijk aan wat de boekhouder heeft; daardoor hoeft niets samengevoegd te worden. |
+| 4 | Tijdens de uitwisseling kan de klant **geen grootboekrekeningen** toevoegen, hernoemen of archiveren. | De handelingen van de boekhouder verwijzen naar rekeningen. |
+| 5 | Het antwoord wordt alleen ingelezen als het **uitwisselingsnummer** en het **administratie-ID** kloppen en **de app-versie gelijk** is. Anders: eerst updaten. | Dezelfde versie betekent dezelfde boekingsregels (`RULES_VERSION`), dus dezelfde uitkomst bij het opnieuw uitvoeren. |
+| 6 | Een nieuwe export kan pas na het inlezen van het antwoord. De klant kan een uitwisseling **afbreken** (bijvoorbeeld als de boekhouder niet reageert); een antwoord op een afgebroken uitwisseling wordt daarna geweigerd. | De klant zit nooit vast. |
+| 7 | Na het inlezen is de periode **afgesloten**. Correcties daarna komen in een open periode, met een verwijzing. | Afgewerkt is afgewerkt. |
+
+## Periodeslot
+
+Nu vergrendelt alleen een ingediende btw-periode, en dan alleen de btw: een late post krijgt een
+`vat_date` in de volgende open periode (`Ledger.vatDateFor`), maar de boeking zelf komt op de echte
+datum. Winst en balans van een afgewerkte periode kunnen dus nog veranderen. Het periodeslot
+vergrendelt de hele boekhouding.
+
+**Opslag.** Een nieuwe tabel met één rij per slot:
+
+```sql
+CREATE TABLE ledger_locks (
+  id INTEGER PRIMARY KEY,
+  until_date TEXT NOT NULL,           -- alles t/m deze datum ligt vast
+  kind TEXT NOT NULL CHECK (kind IN ('uitwisseling','afgesloten')),
+  exchange_no INTEGER,                -- bij kind = 'uitwisseling'
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+**Afdwingen in de database**, net als de bestaande regels voor onveranderlijkheid, zodat geen enkele
+route er omheen kan (automatisch verwerken, vaste lasten, afschrijvingen, koppelingen, "Klopt niet"):
+
+- `BEFORE INSERT ON journal_entries`: weigeren als `entry_date <= MAX(until_date)`.
+- `BEFORE UPDATE OF status ON journal_entries` en `BEFORE UPDATE OF status ON events`: weigeren als de
+  post of gebeurtenis in de vergrendelde periode valt (terugdraaien en vervangen wijzigen de status).
+- Tijdens `kind = 'uitwisseling'`: weigeren van wijzigingen in `chart_of_accounts`.
+
+**De btw-aangifte blijft mogelijk tijdens een uitwisseling.** De aangifte wordt geboekt op de laatste
+dag van de periode (`VatService`, `source = 'btw'`), dus binnen het slot. De trigger laat posten met
+`source = 'btw'` en de statuswijziging in `vat_periods` door. Het maakt dan niet uit of de klant de
+aangifte doet vóór of na het inlezen van het antwoord: correcties van de boekhouder in een al
+aangegeven periode krijgen via `vatDateFor` een btw-datum in de eerstvolgende open periode (boven
+€ 1.000 btw: een suppletie). Let op bij het **vierde kwartaal**: is dat al aangegeven, dan komen de
+btw-correcties van de jaarafsluiting in het eerste kwartaal van het nieuwe jaar. Winst en verlies
+blijven wel in het oude jaar, omdat de boeking zelf haar eigen datum houdt.
+
+Het inlezen van het antwoord zet een vlag die de triggers voor die ene transactie doorlaat, zoals
+een tijdelijke rij in een tabel `ledger_lock_bypass` die aan het eind van de transactie verwijderd
+wordt. Een verbinding-specifieke instelling bestaat in SQLite niet in triggers.
+
+**Late documenten.** Een bon of factuur met een datum in een vergrendelde periode:
+
+- `uitwisseling`: blijft in de inbox staan als "wacht op je boekhouder" en wordt na het inlezen
+  verwerkt zoals bij `afgesloten`.
+- `afgesloten`: wordt geboekt op de eerste dag na het slot. Het document houdt zijn echte datum; de
+  boeking verwijst ernaar. Voor de btw is dat gelijk aan wat `vatDateFor` nu al doet.
+
+**Late bankmutaties** met een datum in een vergrendelde periode worden niet geboekt. Ze worden
+gemeld als fout ("er ontbrak een afschrift"), omdat de bank bij het afsluiten aansloot (regel 2).
+
+## Sleutels en pakketformaat
+
+Er is geen wachtwoord. Een sleutel die in de app zit, beschermt niets, want de broncode is openbaar.
+
+### Koppelen: de uitnodiging
+
+De kantoormodus maakt één keer een sleutelpaar voor het kantoor (X25519, `node:crypto`). De
+privésleutel staat in de sleutelopslag van het besturingssysteem (`safeStorage`, zoals andere geheimen).
+
+*Klant uitnodigen* maakt een uitnodigingsbestand, niet versleuteld (niets erin is geheim):
+
+```json
+{ "type": "gb-uitnodiging", "versie": 1, "kantoor": "Kantoor X", "email": "info@kantoorx.nl",
+  "publiekeSleutel": "<base64>", "transport": "mail" }
+```
+
+De klant opent het bestand. De app bewaart kantoornaam, e-mailadres en publieke sleutel bij de
+administratie, en toont een **controlecode** van 8 tekens (afgeleid van de publieke sleutel). Die kunnen
+klant en boekhouder één keer vergelijken om een verwisselde uitnodiging uit te sluiten; dat is
+aanbevolen, niet verplicht. Een nieuwe uitnodiging vervangt de koppeling; naar het oude kantoor
+exporteren kan dan niet meer.
+
+### Export (klant → boekhouder)
+
+1. De app maakt een willekeurige sleutel **K** (32 bytes) voor deze uitwisseling en bewaart die in de
+   sleutelopslag tot het antwoord is ingelezen of de uitwisseling is afgebroken.
+2. De inhoud (zie hieronder) wordt versleuteld naar de publieke sleutel van het kantoor: een
+   eenmalig X25519-sleutelpaar, ECDH met de kantoorsleutel, HKDF-SHA256 naar een AES-256-GCM-sleutel.
+3. K zit in de versleutelde inhoud. Alleen het kantoor kan K dus lezen.
+
+### Antwoord (boekhouder → klant)
+
+AES-256-GCM met K. Alleen de klant heeft K, dus alleen de klant kan het antwoord openen. Omdat alleen
+het kantoor K uit de export kon halen, is een antwoord dat met K opent ook echt van dat kantoor. Na
+het inlezen wordt K verwijderd; een oud antwoord past daarna nergens meer.
+
+### Kopregel
+
+Beide pakketten gebruiken hetzelfde formaat, met een eigen MAGIC zodat een pakket nooit met een
+back-up (`GBBACKUP`) verward wordt:
+
+```
+MAGIC "GBPAKKET" | kopregel-lengte (u32) | kopregel (JSON, onversleuteld) | nonce (12) | tag (16) | versleutelde inhoud
+```
+
+De kopregel is leesbaar, zodat de app zonder sleutel kan zeggen *waarom* hij een pakket weigert, en
+is als **AAD** aan de versleuteling gebonden: een gewijzigde kopregel maakt het pakket onleesbaar.
+
+```json
+{ "richting": "naar-boekhouder", "administratie": "<uuid>", "uitwisseling": 17,
+  "einddatum": "2026-09-30", "appVersie": "0.7.0", "ephemeral": "<base64, alleen bij export>" }
+```
+
+De app weigert een pakket met de verkeerde richting (de eigen export "terug" inlezen), een onbekend
+administratie-ID, een ander uitwisselingsnummer dan de lopende uitwisseling, of een andere app-versie.
+
+Bestandsnamen bevatten geen klantnaam: `gb-<eerste 8 tekens administratie-ID>-17-export.gbpakket`.
+
+### Inhoud
+
+- **Export:** de complete back-upbundel (`createBackupBundle`, dus database en bijlagen) plus K, de
+  einddatum en de koppelgegevens. **Zonder de tabel `secrets`** en zonder instellingen voor
+  SMTP, IMAP en koppelingen. De eerste export is groot (bijlagen); de grens van mailservers ligt vaak
+  rond 10–25 MB. Is het pakket groter, dan raadt de app de gedeelde map of een bestand aan. Pakketten
+  met alleen de wijzigingen sinds de vorige uitwisseling zijn een latere uitbreiding.
+- **Antwoord:** een lijst handelingen (zie hieronder) en een samenvatting voor de klant. Geen vragen:
+  bij vragen belt of mailt de boekhouder.
+
+## Het antwoord is een lijst handelingen
+
+Terugdraaien (`Ledger.reverse`) en vervangen (`EventService.replace`) voegen niet alleen rijen toe,
+maar zetten ook de status van bestaande posten en gebeurtenissen (`teruggedraaid`, `vervangen`).
+Anders indelen raakt ook tabellen buiten het grootboek, zoals de koppeling van een bankmutatie of het
+leveranciersgeheugen. Het antwoord bevat daarom geen rijen, maar **de handelingen die de boekhouder
+deed**, en de app van de klant voert ze opnieuw uit via dezelfde services.
+
+- **Vastleggen.** In de werkkopie legt de kantoormodus elke aanroep uit een vaste lijst toegestane
+  handelingen vast, met argumenten en wat de handeling aanmaakte. De IPC-whitelist in
+  `src/main/api.ts` is het natuurlijke punt: dezelfde lijst, met een vlag per handeling of hij in een
+  antwoord mag.
+- **Toegestaan:** correctieboeking (memoriaal), terugdraaien, anders indelen (bank, aankoop), afschrijving
+  en investering, grootboekrekening toevoegen.
+- **Niet toegestaan:** facturen en offertes (nummering, en ze gaan naar de klant van de klant), bank
+  inlezen, instellingen, relaties verwijderen, btw-aangifte indienen.
+- **Alleen binnen de periode:** elke handeling moet een datum tot en met de einddatum hebben. Zo raakt
+  de boekhouder nooit de open periode van de klant.
+- **Nummers vertalen.** Bestaande posten hebben aan beide kanten hetzelfde nummer, omdat de periode
+  vastlag. Wat de boekhouder zelf aanmaakt, krijgt bij de klant een ander nummer, omdat de klant na de
+  einddatum doorwerkte. Een handeling die naar iets verwijst dat de boekhouder eerder in hetzelfde
+  antwoord maakte (bijvoorbeeld zijn eigen correctie terugdraaien), verwijst daarom naar
+  "resultaat van handeling 3" en niet naar een nummer. Bij het inlezen houdt de app een vertaaltabel bij.
+- **Alles of niets.** Het inlezen gebeurt in één transactie. Mislukt één handeling, dan wordt niets
+  ingelezen en ziet de klant welke handeling en waarom.
+
+**Het antwoord wordt als juist overgenomen.** De klant ziet een samenvatting en leest in; er is geen
+goedkeuring per correctie en geen keuze om een deel te weigeren.
+
+**Het enige conflict dat overblijft: openstaande posten.** Een factuur van vóór de einddatum kan na de
+einddatum betaald zijn. Boekt de boekhouder die factuur af als oninbaar, dan wordt het antwoord
+gewoon ingelezen. Daarna staat er een taak in "Vandaag": er is een betaling op een afgeboekte factuur,
+die in de open periode verwerkt moet worden.
+
+## Kantoormodus en meerdere administraties
+
+Nu draait alles om één `dbPath()` en één `dataDir()` (`src/main/main.ts`): database, bijlagen,
+back-ups, MCP en instellingen.
+
+- **Eén map per administratie**, met een keuzescherm bij het opstarten. Het keuzescherm werkt ook
+  voor een ondernemer met een bv en een eenmanszaak.
+- **Administratie-ID:** een UUID in `settings`, aangemaakt bij de migratie en opgenomen in back-ups.
+  Een teruggezette back-up houdt hetzelfde ID; de koppelsleutels (sleutelopslag) moeten na een
+  herinstallatie opnieuw.
+- **Kantoormodus** voor administraties die uit een export komen:
+  - alles wat naar buiten gaat staat hard uit: automatische herinneringen, IMAP, koppelingen, vaste
+    lasten, e-mail versturen (dezelfde plekken als `demoMode`, maar dan afgedwongen in de services en
+    niet alleen in `main.ts`);
+  - standaard de expertmodus;
+  - per klant de stand: "export 17 ontvangen op 3 oktober, nog geen antwoord";
+  - de MCP-server kan per administratie gestart worden, alleen lezen, zoals nu.
+
+## Jaarafsluiting
+
+Een jaarafsluiting is een uitwisseling tot en met 31 december; na het inlezen is het jaar afgesloten.
+De boekhouder boekt de correcties aan het eind van het jaar (afschrijvingen, overlopende posten,
+onderhanden werk, privégebruik auto, KIA).
+
+De app **rekent** het resultaat en de privérekeningen van eerdere jaren door naar het eigen vermogen
+(`openingBalance` in `src/reports/opening-balance.ts`, gebruikt door de rapporten in de app én het
+pakket voor de boekhouder); er is geen echte afsluitboeking. Een correctieboeking die
+winst en verlies of de privérekeningen naar het eigen vermogen boekt, zou dan dubbel tellen. De app
+herkent en weigert zo'n boeking, met uitleg.
+
+Een klant zonder boekhouder kan een jaar zelf afsluiten: hetzelfde slot, zonder uitwisseling.
+
+## Licentie
+
+De uitwisseling kan achter een licentie. Technisch zonder server: een licentiebestand dat de maker
+ondertekent (Ed25519) en de app offline controleert met een publieke sleutel die in de app zit. De
+controle zit alleen op *Naar boekhouder sturen*, *Uitnodigen* en *Antwoord maken*; inlezen van een
+antwoord werkt altijd, zodat een klant nooit met een vergrendelde periode blijft zitten.
+
+## Buiten de scope van de eerste versie
+
+- Correcties inlezen uit andere boekhoudsoftware (memoriaal-CSV of XAF).
+- Pakketten met alleen de wijzigingen sinds de vorige uitwisseling.
+- Meerdere uitwisselingen tegelijk.
+- Goedkeuren per correctie; de klant leest het antwoord in zijn geheel in.
+- De btw-aangifte indienen vanuit de app.
+
+## Besluiten
+
+1. **Btw-aangifte tijdens een uitwisseling:** maakt niet uit wie of wanneer; correcties in een
+   aangegeven periode gaan naar de volgende periode. Aandachtspunt is alleen het vierde kwartaal
+   (zie Periodeslot).
+2. **Geen vragen in het antwoord.** De boekhouder belt of mailt; zijn antwoord wordt als juist
+   overgenomen.
+3. **Medewerkers van één kantoor delen de kantoorsleutel**, via een versleutelde export van de
+   sleutel (met wachtwoord, alleen aan de kant van het kantoor).
+
+## Bouwvolgorde
+
+1. **Fundament:** administratie-ID, meerdere administraties en keuzescherm, kantoormodus.
+2. **Periodeslot:** `ledger_locks`, de triggers, late documenten en late bankmutaties, "jaar afsluiten".
+3. **Uitwisseling:** uitnodiging en controlecode, export, vastleggen van handelingen, antwoord maken en
+   inlezen met vertaaltabel.
+4. **Licentie** op de knoppen voor versturen, uitnodigen en antwoord maken.
