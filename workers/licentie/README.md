@@ -82,7 +82,7 @@ Mollie herhaalt een webhook bij een fout, en kan dezelfde melding ook dubbel of 
 
 ## Stand (30 september 2026)
 
-Staat live op `licentie.boekhoudenvoorniks.nl`, **in testmodus** (`MOLLIE_TESTMODE: "true"`), met een
+Staat live op `licentie.boekhoudenvoorniks.nl` (de website zelf staat als aparte Worker in `workers/site`), **in testmodus** (`MOLLIE_TESTMODE: "true"`), met een
 organisatie-toegangstoken met de zes rechten hierboven. D1-database `boekhoudenvoorniks-licenties` in
 West-Europa. Getest met een testbetaling: betaling verwerkt, abonnement aangemaakt, licentie
 ondertekend en door de app goedgekeurd. In de app staan licenties nog **uit** (`LICENSE_PUBLIC_KEY` leeg).
