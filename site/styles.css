@@ -102,3 +102,10 @@ section { padding: 56px 0; }
   .tag.fixed { color: #e0a24d; }
   .tag.security { color: #f08a80; }
 }
+
+/* tabellen op de pagina voor boekhouders */
+.tbl-wrap { overflow-x: auto; margin: 14px 0; }
+.tbl { border-collapse: collapse; width: 100%; font-size: 15px; }
+.tbl th, .tbl td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.tbl th { font-weight: 650; background: var(--surface); }
+.tbl code { font-size: 13.5px; white-space: nowrap; }

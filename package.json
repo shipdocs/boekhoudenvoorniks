@@ -1,6 +1,6 @@
 {
   "name": "gratis-boekhouden",
-  "version": "0.6.14",
+  "version": "0.6.15",
   "description": "Gratis boekhouding voor zzp en mkb: offertes, facturen, bankimport en BTW-overzicht op een echte dubbele boekhouding.",
   "author": "Martin <info@shipdocs.app>",
   "license": "AGPL-3.0-or-later",
@@ -24,7 +24,8 @@
     "benchmark:ocr": "npm run build:main && node dist/main/tools/ocr-benchmark.js",
     "benchmark:maak": "npm run build:main && electron dist/main/tools/render-benchmark.js",
     "e2e": "npm run rebuild:node && npm run build && playwright test",
-    "e2e:only": "playwright test"
+    "e2e:only": "playwright test",
+    "voorbeeldpakket": "npm run rebuild:node && npm run build:main && node scripts/voorbeeldpakket.cjs"
   },
   "build": {
     "appId": "app.shipdocs.gratisboekhouden",

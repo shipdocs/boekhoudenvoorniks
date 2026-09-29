@@ -23,6 +23,7 @@ import { QuickActions } from './quick/quick';
 import { IntegrationService } from './integrations/integrations';
 import type { FetchLike, SecretStore } from './integrations/types';
 import { AccountantExport } from './export/accountant';
+import { AccountantPackage } from './export/accountant-package';
 import { SupplierMemory } from './intake/supplier-memory';
 import { BusinessShareService } from './intake/business-share';
 import { LedgerReports } from './reports/ledger-reports';
@@ -76,6 +77,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const quick = new QuickActions(db, ledger, purchases, invoices, relations, categories);
   const integrations = new IntegrationService(db, ledger, invoices, relations, deps.secrets, deps.fetch);
   const exports = new AccountantExport(db, ledger);
+  const accountantPackage = new AccountantPackage(db, ledger, exports, invoices, vat, settings, deps.pdf);
   const memory = new SupplierMemory(db);
   const businessShare = new BusinessShareService(db, bank, purchases, ledger);
   const ledgerReports = new LedgerReports(db);
@@ -115,7 +117,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
+  return { db, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;

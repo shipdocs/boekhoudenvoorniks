@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voor boekhouders | Gratis Boekhouden</title>
+  <meta name="description" content="Je klant boekt gratis in Gratis Boekhouden; jij krijgt per boekjaar een auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en alle facturen en bonnen, klaar om in te lezen in Caseware, AFAS, Visionplanner, Exact, Twinfield, Yuki of SnelStart.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://shipdocs.github.io/gratis-boekhouden/boekhouders.html">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="./">🧾 Gratis Boekhouden</a>
+      <nav>
+        <a href="./">Home</a>
+        <a href="boekhouders.html" aria-current="page">Voor boekhouders</a>
+        <a href="wijzigingen.html">Wat is er nieuw</a>
+        <a class="btn small" href="https://github.com/shipdocs/gratis-boekhouden/releases/latest">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap notes">
+    <p class="eyebrow">Voor boekhouders en accountants</p>
+    <h1>Je klant boekt hier. Jij werkt gewoon in je eigen pakket.</h1>
+    <p class="lead">Je hoeft geen nieuw programma te leren. Je klant maakt met één knop een <strong>pakket voor de boekhouder</strong>: per boekjaar een ZIP met de auditfile, de rapporten die je gewend bent en alle facturen en bonnen. Die lees je in bij Caseware, AFAS, Visionplanner of het pakket waarmee je al werkt.</p>
+    <div class="cta">
+      <a class="btn" href="voorbeeld/voorbeeldpakket-boekhouder-2025.zip" download>Download het voorbeeldpakket (ZIP, 0,5 MB)</a>
+      <a class="btn ghost" href="#proefimport">Doe een proefimport met ons</a>
+    </div>
+    <p class="fine">Het voorbeeldpakket gebruikt een verzonnen bedrijf en verzonnen bonnen. Lees het in je eigen dossier in en kijk of alles aansluit.</p>
+
+    <h2>Wat zit er in het pakket</h2>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Bestand</th><th>Waarvoor</th></tr></thead>
+      <tbody>
+        <tr><td><code>auditfile-2026-xaf32.xaf</code></td><td>XML Auditfile Financieel 3.2: grootboek met RGS-codes, relaties, beginbalans en alle journaalposten. Gecontroleerd tegen het officiële XAF 3.2-schema. Voor samenstellen en controle.</td></tr>
+        <tr><td><code>rapporten-2026.xlsx</code></td><td>Alle overzichten hieronder als één Excel-werkmap: een tabblad per overzicht, bedragen als getal, datums als datum, filters aan.</td></tr>
+        <tr><td><code>kolommenbalans.csv</code></td><td>Beginbalans, mutaties debet/credit en eindsaldo per rekening, gesplitst naar balans en W&amp;V. Bruikbaar als saldibalans.</td></tr>
+        <tr><td><code>grootboekkaarten.csv</code></td><td>Elke boeking per rekening met beginsaldo, oplopend saldo, relatie en het bijbehorende document.</td></tr>
+        <tr><td><code>journaalposten.csv</code></td><td>Alle boekingsregels, met dezelfde boekstuknummers als in de auditfile.</td></tr>
+        <tr><td><code>openstaande-debiteuren.csv</code><br><code>openstaande-crediteuren.csv</code></td><td>Openstaande posten per factuur op balansdatum, met factuurnummer, datum en vervaldatum.</td></tr>
+        <tr><td><code>rgs-brugstaat.csv</code></td><td>Welke grootboekrekening bij welke officiële RGS-code hoort (RGS-taxonomie release 20251210), met ontbrekende koppelingen gemarkeerd.</td></tr>
+        <tr><td><code>btw-overzicht.csv</code></td><td>Per aangifteperiode: omzet, verschuldigde btw, voorbelasting, te betalen en of de aangifte is ingediend.</td></tr>
+        <tr><td><code>relaties.csv</code></td><td>Klanten en leveranciers met adres, KvK, btw-nummer en IBAN.</td></tr>
+        <tr><td><code>importprofielen/</code></td><td>Bestanden in het eigen importformaat van SnelStart, Yuki en AFAS, volgens hun importdocumentatie: geen kolommen koppelen.</td></tr>
+        <tr><td><code>documenten/</code></td><td>Verkoopfacturen (PDF) en bonnen als losse bestanden. <code>documenten/index.csv</code> koppelt elk bestand aan het boekstuk en noemt wat ontbreekt.</td></tr>
+        <tr><td><code>LEES-MIJ.pdf</code></td><td>Periode, aantallen, begin- en eindbalans, resultaat, btw per periode, openstaande posten, controles en ontbrekende RGS-codes of documenten.</td></tr>
+      </tbody>
+    </table></div>
+    <p>CSV-bestanden openen direct in Excel: puntkomma als scheidingsteken, komma als decimaalteken, UTF-8. Datums als JJJJ-MM-DD, debet positief.</p>
+
+    <h2>Het sluit aan, en dat staat erbij</h2>
+    <p>Alle bestanden komen uit dezelfde selectie als de auditfile. Het pakket controleert zelf, en zet de uitkomst in de lees-mij:</p>
+    <ul class="checks">
+      <li>Beginbalans in evenwicht, met het resultaat van eerdere jaren in het eigen vermogen</li>
+      <li>Beginbalans + mutaties = eindsaldo, per rekening, in de auditfile én in de kolommenbalans</li>
+      <li>Openstaande debiteuren en crediteuren per factuur tellen op tot het saldo in het grootboek</li>
+      <li>Elke gebruikte rekening heeft een geldige RGS-code</li>
+      <li>Bij welke inkopen een bon ontbreekt, en welke btw-aangiftes nog niet zijn ingediend</li>
+    </ul>
+    <p>Onder water is het een echte dubbele boekhouding met het RGS-rekeningschema. Boekingen worden nooit stil gewijzigd: een correctie is een tegenboeking.</p>
+
+    <h2>Inlezen in je eigen pakket</h2>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Pakket</th><th>Route</th></tr></thead>
+      <tbody>
+        <tr><td>Caseware</td><td>Auditfile inlezen als XAF 3.2 (Caseware leest 3.1 en 3.2) en de RGS-versie kiezen.</td></tr>
+        <tr><td>AFAS (verslaglegging)</td><td>Auditfile als financieel project, of <code>importprofielen/afas/saldibalans.csv</code> als saldibalans (cumulatief debet en credit zonder beginbalans, saldo met beginbalans). Controleer de beginbalans: die gaat niet bij elke route vanzelf mee.</td></tr>
+        <tr><td>Visionplanner</td><td>Auditfile inlezen; de RGS-codes staan per rekening in de auditfile.</td></tr>
+        <tr><td>Twinfield</td><td>XAF-conversie (beginbalans in periode 0); vergelijk daarna de eindsaldi met <code>kolommenbalans.csv</code>. Openstaande posten staan ook los als Excel/CSV.</td></tr>
+        <tr><td>Exact Online</td><td>Exact Online leest geen auditfile. <code>journaalposten.csv</code> en <code>relaties.csv</code> importeren met eenmalig een importdefinitie; rekeningen koppelen met <code>rgs-brugstaat.csv</code>.</td></tr>
+        <tr><td>Yuki</td><td>Import-wizard met de auditfile, of <code>importprofielen/yuki/</code>: historische mutaties en openstaande posten in het Yuki-formaat.</td></tr>
+        <tr><td>SnelStart</td><td>SnelStart leest geen auditfile. <code>importprofielen/snelstart/</code> bevat klanten, leveranciers en boekingen (met beginbalans) als Excel met de <code>Fld…</code>-kolommen die SnelStart zelf herkent.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="fine">Eerlijk is eerlijk: de auditfile is technisch gevalideerd, maar we hebben nog niet in elk pakket een proefimport gedaan. Daarvoor zoeken we boekhouders.</p>
+
+    <h2 id="proefimport">Proefimport doen?</h2>
+    <p>Lees het voorbeeldpakket (of het pakket van een klant) in je eigen dossier in en kijk of beginbalans, mutaties, eindsaldi, btw, openstaande posten en documentverwijzingen aansluiten. Sluit iets niet aan, of wil je een importformaat dat precies past bij jouw pakket? Laat het weten. We bouwen importprofielen voor de pakketten waar boekhouders echt mee werken.</p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/shipdocs/gratis-boekhouden/issues/new?title=Proefimport%3A%20%5Bpakket%5D&amp;body=Pakket%20en%20versie%3A%0AWat%20ging%20goed%3A%0AWat%20sloot%20niet%20aan%3A%0A">Meld je uitkomst op GitHub</a>
+      <a class="btn ghost" href="mailto:info@shipdocs.app?subject=Proefimport%20boekhouderspakket">Of mail info@shipdocs.app</a>
+    </div>
+
+    <h2 style="margin-top: 40px">Geen back-up, wel een overdracht</h2>
+    <p>Het pakket is bedoeld om in te lezen, niet om terug te zetten. Een auditfile bevat geen instellingen, sjablonen of koppelingen. Je klant maakt daarvoor apart een volledige back-up in de app (automatisch elke dag, en op verzoek versleuteld).</p>
+
+    <h2>Waarom je klant dit gebruikt</h2>
+    <p>Gratis Boekhouden is gratis en open source, werkt offline en is gemaakt voor vakmensen: offertes, facturen, bonnetjes, bank en btw, zonder boekhoudtermen. De administratie staat op de computer van je klant, niet in een cloud. Jij krijgt aan het eind van het jaar een nette overdracht in plaats van een schoenendoos.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <span>Gratis Boekhouden, een project van <a href="https://github.com/shipdocs">Shipdocs</a> · open source onder AGPL-3.0-or-later</span>
+    <span><a href="wijzigingen.html">Wat is er nieuw</a> · <a href="voorwaarden.html">Voorwaarden</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/shipdocs/gratis-boekhouden/issues">Feedback & vragen</a></span>
+  </footer>
+</body>
+</html>
