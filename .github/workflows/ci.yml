@@ -38,6 +38,9 @@ jobs:
           cache-dependency-path: workers/licentie/package-lock.json
       - run: npm ci
       - run: npm run check
+      # de website-Worker (workers/site) met dezelfde wrangler
+      - run: ../licentie/node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run
+        working-directory: workers/site
 
   # End-to-end: de echte schermen in Chromium, met de echte services (zie e2e/ en playwright.config.ts).
   e2e:

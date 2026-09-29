@@ -1,0 +1,21 @@
+{
+  // De website (map site/) op Cloudflare, met https. Deployen: `npx wrangler deploy` in deze map,
+  // of via de workflow .github/workflows/site.yml.
+  "$schema": "../licentie/node_modules/wrangler/config-schema.json",
+  "name": "boekhoudenvoorniks-site",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-29",
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 },
+  "assets": {
+    "directory": "../../site",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "none",
+    // eerst de Worker: www. omzetten naar het hoofddomein
+    "run_worker_first": true
+  },
+  "routes": [
+    { "pattern": "boekhoudenvoorniks.nl", "custom_domain": true },
+    { "pattern": "www.boekhoudenvoorniks.nl", "custom_domain": true }
+  ]
+}
