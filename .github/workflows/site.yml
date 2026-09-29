@@ -1,0 +1,44 @@
+name: Website (Cloudflare)
+
+# De website (site/) staat op Cloudflare als Worker met static assets (workers/site), met https.
+# Vereist de repository-secrets CLOUDFLARE_API_TOKEN (recht "Workers Scripts: Edit" en
+# "Workers Routes / Custom Domains") en CLOUDFLARE_ACCOUNT_ID. Zonder die secrets slaat de job over;
+# dan deploy je met de hand: `cd workers/site && npx wrangler deploy`.
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', 'workers/site/**', '.github/workflows/site.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: workers/licentie/package-lock.json
+      - name: Wrangler installeren
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        working-directory: workers/licentie
+        run: npm ci
+      - name: Deployen
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        working-directory: workers/site
+        run: ../licentie/node_modules/.bin/wrangler deploy
+      - name: Geen secrets
+        if: env.CLOUDFLARE_API_TOKEN == ''
+        run: echo "CLOUDFLARE_API_TOKEN ontbreekt; de site is niet gedeployd (doe het met de hand)."
