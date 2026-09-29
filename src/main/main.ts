@@ -32,6 +32,8 @@ import { DATA_DIR_NAME, migrateDataDir, OLD_DATA_DIR_NAME } from './data-dir';
 import { Administrations, readAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
 import { generateOfficeKeys } from '../exchange/crypto';
+import { LICENSE_API_URL } from '../license/license';
+import { today } from '../shared/dates';
 import Database from 'better-sqlite3';
 
 const SMTP_SECRET = 'smtp:password';
@@ -469,6 +471,18 @@ function initServices(): void {
       if (withDemo) seedDemo(services);
       return { backup };
     },
+    licenseApi: {
+      async price() {
+        const res = await fetch(`${LICENSE_API_URL}/prijs`, { signal: AbortSignal.timeout(10_000) });
+        return res.ok ? ((await res.json()) as { bedrag: string; valuta: string; per: string }) : null;
+      },
+      async fetch(administrationId) {
+        const res = await fetch(`${LICENSE_API_URL}/licentie?administratie=${encodeURIComponent(administrationId)}`, { signal: AbortSignal.timeout(15_000) });
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`De licentieserver gaf een fout (${res.status}); probeer het later opnieuw`);
+        return ((await res.json()) as { token: string }).token;
+      },
+    },
     exchange: {
       bundle: () =>
         createBackupBundle(db, dataDir(), (copy) => {
@@ -551,6 +565,15 @@ async function backgroundTasks(): Promise<void> {
   }
   // kopie bij de boekhouder: niets zelf boeken en niets naar buiten, dat doet de klant in zijn eigen administratie
   if (services.settings.officeCopy()) return;
+  try {
+    // alleen wie ooit een licentie had: verlopen of bijna verlopen → de verlengde ophalen (Mollie incasseert maandelijks)
+    if (services.license.needsRefresh(today())) {
+      const token = await api.license.refresh().catch(() => null);
+      if (token) emit('license', token);
+    }
+  } catch (e) {
+    console.error('Licentie verversen mislukt', e);
+  }
   try {
     // afschrijving van afgesloten jaren (na de jaarwisseling)
     services.assets.bookDue();

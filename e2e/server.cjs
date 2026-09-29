@@ -76,6 +76,8 @@ function init(fresh) {
     secrets: secretsFor(file),
     fetch: async () => { throw new Error('geen netwerk in e2e-tests'); },
     storeFile,
+    // alleen voor een test van het abonnement; standaard staan licenties uit
+    licensePublicKey: process.env.E2E_LICENSE_PUBLIC_KEY || undefined,
   });
   let smtpPassword = null;
   api = createApi(services, {
