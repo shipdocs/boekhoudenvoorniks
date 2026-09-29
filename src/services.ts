@@ -25,6 +25,7 @@ import type { FetchLike, SecretStore } from './integrations/types';
 import { AccountantExport } from './export/accountant';
 import { SupplierMemory } from './intake/supplier-memory';
 import { BusinessShareService } from './intake/business-share';
+import { LedgerReports } from './reports/ledger-reports';
 import { Classifier, type LlmClassifier } from './intake/classify';
 import { IntakeService } from './intake/intake';
 import type { OcrProvider } from './intake/ocr';
@@ -77,6 +78,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const exports = new AccountantExport(db, ledger);
   const memory = new SupplierMemory(db);
   const businessShare = new BusinessShareService(db, bank, purchases, ledger);
+  const ledgerReports = new LedgerReports(db);
   const classifier = new Classifier(memory, categories, deps.llm ?? null);
   const fx = new FxService(db, deps.fetch);
   const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, categories, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse, () => settings.get().company.vatNumber);
@@ -113,7 +115,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, businessShare, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
+  return { db, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;
