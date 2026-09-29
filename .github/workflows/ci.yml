@@ -60,4 +60,4 @@ jobs:
       - run: npm run build
       - run: npx electron-builder --linux --dir --publish never
       - name: Rooktest verpakte app
-        run: GRATIS_BOEKHOUDEN_SMOKE_TEST=1 GRATIS_BOEKHOUDEN_DATA="$RUNNER_TEMP/smoke" timeout 120 xvfb-run -a release/linux-unpacked/gratis-boekhouden --no-sandbox
+        run: BOEKHOUDENVOORNIKS_SMOKE_TEST=1 BOEKHOUDENVOORNIKS_DATA="$RUNNER_TEMP/smoke" timeout 120 xvfb-run -a release/linux-unpacked/boekhoudenvoorniks --no-sandbox

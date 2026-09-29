@@ -97,7 +97,7 @@ type OverviewData = Awaited<ReturnType<typeof api.incomeTax.overview>>;
 async function copyForAccountant(d: OverviewData): Promise<void> {
   const item = (i: OverviewData['items'][number]) => `- ${i.label}${i.amount !== null ? `: ${euro(i.amount)}` : ''}\n  ${i.explain}${i.note ? `\n  Voor de boekhouder: ${i.note}` : ''}`;
   const lines = [
-    `Overzicht inkomstenbelasting ${d.year} uit Gratis Boekhouden${d.running ? ` (tot en met ${d.asOf}, jaar nog bezig)` : ''}`,
+    `Overzicht inkomstenbelasting ${d.year} uit BoekhoudenVoorNiks${d.running ? ` (tot en met ${d.asOf}, jaar nog bezig)` : ''}`,
     'Graag controleren: dit is berekend door software, niet door een deskundige.',
     '',
     'Bedragen:',

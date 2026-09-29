@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { Button, useAction, useApp, useLoad } from '../ui';
+import { MCP_NAME } from '../../shared/brand';
 
 const quote = (s: string) => (/[\s"']/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s);
 
@@ -16,9 +17,9 @@ export function AssistantCard() {
   const i = info.data;
   if (!i || !i.command) return null;
   const cmd = [i.command.command, ...i.command.args].map(quote).join(' ');
-  const claudeLine = `claude mcp add --scope user gratis-boekhouden -- ${cmd}`;
-  const codexLine = `codex mcp add gratis-boekhouden -- ${cmd}`;
-  const codexToml = `[mcp_servers.gratis-boekhouden]\ncommand = ${JSON.stringify(i.command.command)}\nargs = ${JSON.stringify(i.command.args)}`;
+  const claudeLine = `claude mcp add --scope user ${MCP_NAME} -- ${cmd}`;
+  const codexLine = `codex mcp add ${MCP_NAME} -- ${cmd}`;
+  const codexToml = `[mcp_servers.${MCP_NAME}]\ncommand = ${JSON.stringify(i.command.command)}\nargs = ${JSON.stringify(i.command.args)}`;
   const copy = (text: string) => {
     void navigator.clipboard.writeText(text);
     toast('Gekopieerd');
@@ -67,7 +68,7 @@ export function AssistantCard() {
           <Button small onClick={() => copy(codexLine)}>Kopieer</Button>
           <pre className="mono" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginTop: 8 }}>{codexToml}</pre>
           <Button small onClick={() => copy(codexToml)}>Kopieer</Button>
-          <p className="muted">Stoppen? <code>claude mcp remove gratis-boekhouden</code> of <code>codex mcp remove gratis-boekhouden</code>.</p>
+          <p className="muted">Stoppen? <code>claude mcp remove {MCP_NAME}</code> of <code>codex mcp remove {MCP_NAME}</code>.</p>
         </div>
       )}
     </div>

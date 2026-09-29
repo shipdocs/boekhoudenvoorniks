@@ -1,4 +1,4 @@
-# Gratis Boekhouden
+# BoekhoudenVoorNiks
 
 > Gratis, lokaal boekhoudprogramma (desktop-app voor Windows en Linux) voor zzp'ers en kleine ondernemers in Nederland, vooral vakmensen zoals stukadoors, schilders, timmerlieden, loodgieters en elektriciens. De gebruiker werkt met klanten, klussen, offertes, facturen, bonnetjes en de bank; het programma maakt daar automatisch een dubbele boekhouding van (RGS-grootboekschema) en rekent de btw-aangifte uit. Geen abonnement, geen account, de administratie staat op de eigen computer.
 
@@ -14,17 +14,17 @@ Belangrijke feiten:
 - Bank: elke bank via CAMT.053 of MT940; CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos en Revolut wordt vanzelf herkend, andere CSV-indelingen stel je één keer in; automatische koppeling van betalingen aan facturen en bonnetjes. Een live bankkoppeling (open banking) is nog niet beschikbaar.
 - Bonnetjes: e-facturen (UBL/XML) en pdf's met tekst worden automatisch gelezen; foto's via een optionele lokale tekstherkenning (OCR). AI doet alleen voorstellen; boekingen worden door vaste regels gemaakt. Een aankoop die privé (privérekening, telefoonrekening, privé-creditcard) of contant betaald is, zet je met één klik op betaald; per leverancier te onthouden.
 - Klussen: offerte → klus → factuur, met kosten per klus.
-- Voor de boekhouder: "Pakket voor je boekhouder" — één ZIP per boekjaar met auditfile (XAF 3.2, gevalideerd), kolommenbalans, grootboekkaarten, journaalposten, openstaande debiteuren/crediteuren per factuur, RGS-brugstaat, btw-overzicht, relaties, facturen en bonnen met index, en een lees-mij met aansluiting, controles en importroutes (Caseware, AFAS, Visionplanner, Twinfield, Exact Online, Yuki, SnelStart). Geen back-up maar een overdracht. Voorbeeldpakket: https://shipdocs.github.io/gratis-boekhouden/voorbeeld/voorbeeldpakket-boekhouder-2025.zip. Daarnaast een expertmodus met grootboek (RGS), journaal, balans, W&V, correctieboekingen en losse exports.
+- Voor de boekhouder: "Pakket voor je boekhouder" — één ZIP per boekjaar met auditfile (XAF 3.2, gevalideerd), kolommenbalans, grootboekkaarten, journaalposten, openstaande debiteuren/crediteuren per factuur, RGS-brugstaat, btw-overzicht, relaties, facturen en bonnen met index, en een lees-mij met aansluiting, controles en importroutes (Caseware, AFAS, Visionplanner, Twinfield, Exact Online, Yuki, SnelStart). Geen back-up maar een overdracht. Voorbeeldpakket: https://boekhoudenvoorniks.nl/voorbeeld/voorbeeldpakket-boekhouder-2025.zip. Daarnaast een expertmodus met grootboek (RGS), journaal, balans, W&V, correctieboekingen en losse exports.
 - Koppelingen: WooCommerce, Shopify, Mollie Facturen (leest betaalde facturen), Mollie (uitbetalingen), Stripe.
 - Overstappen: overstap-hulp met instapdatum; inlezen van auditfiles (XAF, ook meerdere tegelijk, één per boekjaar), kolommen- of saldibalans en lijsten met openstaande facturen. Auditfiles zonder beginbalans (zoals DigiBoox) worden per jaar opgeteld. Bedrijfsmiddelen krijgen hun aankoopdatum uit oudere auditfiles.
 - Fiscaal: KOR (btw op inkopen naar de kosten), ICP-opgaaf met goederen en diensten apart, aftrekposten (afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek) en een schatting van de inkomstenbelasting. Altijd laten controleren door een boekhouder.
-- Huidige versie: 0.6.14 (29 september 2026). Release notes: https://shipdocs.github.io/gratis-boekhouden/wijzigingen.html
-- Broncode: https://github.com/shipdocs/gratis-boekhouden
+- Huidige versie: 0.6.14 (29 september 2026). Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
+- Broncode: https://github.com/shipdocs/boekhoudenvoorniks
 - Uitgever: Shipdocs (info@shipdocs.app)
 
 ## Veelgestelde vragen
 
-### Is Gratis Boekhouden echt gratis?
+### Is BoekhoudenVoorNiks echt gratis?
 
 Ja. Het programma is gratis te downloaden en te gebruiken, zonder abonnement en zonder account. Je administratie staat op je eigen computer.
 
@@ -50,7 +50,7 @@ Op je eigen computer, in een lokaal databasebestand. Er is geen cloud nodig. Elk
 
 ### Kan mijn boekhouder ermee werken?
 
-Ja, en hij hoeft er zelf niet in te werken. Met één knop maak je per boekjaar een pakket voor je boekhouder: auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en al je facturen en bonnen. Dat leest hij in bij Caseware, AFAS, Visionplanner, Exact, Twinfield, Yuki of SnelStart. Meer: https://shipdocs.github.io/gratis-boekhouden/boekhouders.html
+Ja, en hij hoeft er zelf niet in te werken. Met één knop maak je per boekjaar een pakket voor je boekhouder: auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en al je facturen en bonnen. Dat leest hij in bij Caseware, AFAS, Visionplanner, Exact, Twinfield, Yuki of SnelStart. Meer: https://boekhoudenvoorniks.nl/boekhouders.html
 
 ### Voor welke beroepen is het bedoeld?
 
@@ -62,11 +62,11 @@ Op Windows en Linux. Het programma werkt ook zonder internetverbinding; alleen v
 
 ### Windows zegt "Windows heeft uw pc beveiligd". Is dat veilig?
 
-Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. Download de installer alleen van github.com/shipdocs/gratis-boekhouden/releases. Controleer eventueel het SHA-256-controlegetal met SHA256SUMS-Windows.txt bij de release (PowerShell: Get-FileHash). Klopt het, klik dan op "Meer informatie" en daarna op "Toch uitvoeren".
+Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. Download de installer alleen van github.com/shipdocs/boekhoudenvoorniks/releases. Controleer eventueel het SHA-256-controlegetal met SHA256SUMS-Windows.txt bij de release (PowerShell: Get-FileHash). Klopt het, klik dan op "Meer informatie" en daarna op "Toch uitvoeren".
 
 ### Is de broncode openbaar?
 
-Ja. Gratis Boekhouden is open source onder de GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later). Iedereen kan de code bekijken en controleren wat het programma doet.
+Ja. BoekhoudenVoorNiks is open source onder de GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later). Iedereen kan de code bekijken en controleren wat het programma doet.
 
 ## Hoe het werkt
 

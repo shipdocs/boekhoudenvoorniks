@@ -85,7 +85,7 @@ export class AccountantExport {
     <endDate>${to}</endDate>
     <curCode>EUR</curCode>
     <dateCreated>${new Date().toISOString().slice(0, 10)}</dateCreated>
-    <softwareDesc>Gratis Boekhouden</softwareDesc>
+    <softwareDesc>BoekhoudenVoorNiks</softwareDesc>
     <softwareVersion>${x(softwareVersion)}</softwareVersion>
   </header>
   <company>

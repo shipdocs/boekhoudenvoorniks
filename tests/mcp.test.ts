@@ -6,6 +6,7 @@ import { PassThrough } from 'node:stream';
 import { openDatabase, openReadonly } from '../src/db/database';
 import { createServices, MemorySecretStore } from '../src/services';
 import { bookkeepingTools, handleMessage, runStdio } from '../src/mcp/server';
+import { hasOldMcp, MCP_NAME, mcpCommands, OLD_MCP_NAME } from '../src/mcp/names';
 
 const deps = { pdf: async () => Buffer.from(''), mailerFactory: async () => { throw new Error('x'); }, secrets: new MemorySecretStore(), fetch: async () => { throw new Error('x'); }, storeFile: async () => '/tmp/x' };
 
@@ -44,7 +45,7 @@ describe('koppeling voor Claude Code/Codex (MCP, alleen lezen)', () => {
   it('protocol: initialize, tools/list, notificaties, onbekend', () => {
     const tools = bookkeepingTools(readonlyServices().s);
     const init = handleMessage({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } }, tools, '0.3.8') as { result: { serverInfo: { name: string }; instructions: string; capabilities: object } };
-    expect(init.result.serverInfo.name).toBe('gratis-boekhouden');
+    expect(init.result.serverInfo.name).toBe('boekhoudenvoorniks');
     expect(init.result.instructions).toMatch(/alleen lezen/);
     expect(init.result.instructions).toMatch(/boekhouder/);
     expect(handleMessage({ method: 'notifications/initialized' }, tools, 'x')).toBeNull();
@@ -76,6 +77,32 @@ describe('koppeling voor Claude Code/Codex (MCP, alleen lezen)', () => {
     const rw = openDatabase(file);
     rw.pragma('user_version = 1');
     rw.close();
-    expect(() => openReadonly(file)).toThrow(/Open Gratis Boekhouden eerst/);
+    expect(() => openReadonly(file)).toThrow(/Open BoekhoudenVoorNiks eerst/);
+  });
+});
+
+describe('naamswijziging van de koppeling', () => {
+  const files = (map: Record<string, string>) => (p: string) => {
+    const hit = Object.entries(map).find(([k]) => p.endsWith(k));
+    if (!hit) throw new Error('ENOENT');
+    return hit[1];
+  };
+
+  it('herkent de oude koppeling in Claude Code en Codex', () => {
+    expect(hasOldMcp('claude-code', '/h', files({ '.claude.json': JSON.stringify({ mcpServers: { 'gratis-boekhouden': { command: 'x' }, other: {} } }) }))).toBe(true);
+    expect(hasOldMcp('claude-code', '/h', files({ '.claude.json': JSON.stringify({ mcpServers: { boekhoudenvoorniks: {} } }) }))).toBe(false);
+    expect(hasOldMcp('claude-code', '/h', files({ '.claude.json': 'geen json' }))).toBe(false);
+    expect(hasOldMcp('claude-code', '/h', files({}))).toBe(false);
+    expect(hasOldMcp('codex', '/h', files({ 'config.toml': '[mcp_servers.Context7]\ncommand = "x"\n\n[mcp_servers.gratis-boekhouden]\ncommand = "y"\n' }))).toBe(true);
+    expect(hasOldMcp('codex', '/h', files({ 'config.toml': '[mcp_servers."gratis-boekhouden"]\n' }))).toBe(true);
+    expect(hasOldMcp('codex', '/h', files({ 'config.toml': '[mcp_servers.boekhoudenvoorniks]\n# gratis-boekhouden\n' }))).toBe(false);
+  });
+
+  it('haalt de oude weg en voegt de nieuwe toe', () => {
+    expect(mcpCommands('claude-code', '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', ['--mcp'])).toEqual({
+      remove: ['mcp', 'remove', '--scope', 'user', OLD_MCP_NAME],
+      add: ['mcp', 'add', '--scope', 'user', MCP_NAME, '--', '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', '--mcp'],
+    });
+    expect(mcpCommands('codex', 'x', []).add).toEqual(['mcp', 'add', 'boekhoudenvoorniks', '--', 'x']);
   });
 });

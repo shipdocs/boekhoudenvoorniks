@@ -1,4 +1,4 @@
-# Gratis Boekhouden
+# BoekhoudenVoorNiks
 
 Gratis, **local-first** boekhoudprogramma voor zzp'ers en kleine ondernemers in de bouw en techniek:
 stukadoor, schilder, timmerman, loodgieter, elektricien, klusbedrijf.
@@ -60,6 +60,22 @@ De renderer heeft geen Node-toegang (`contextIsolation`, `sandbox`). Alle aanroe
 IPC-kanaal naar een whitelist in `src/main/api.ts`. Geheimen (SMTP-wachtwoord, API-sleutels)
 worden versleuteld met het sleutelbeheer van het besturingssysteem.
 
+## Naam en technische namen
+
+De app heette tot en met 0.6.15 *Gratis Boekhouden*. Wat gebruikers zien heet nu BoekhoudenVoorNiks
+(programma `boekhoudenvoorniks`, gegevensmap `boekhoudenvoorniks`, MCP-koppeling `boekhoudenvoorniks`,
+omgevingsvariabelen `BOEKHOUDENVOORNIKS_DATA` en `BOEKHOUDENVOORNIKS_SMOKE_TEST`). Twee namen blijven
+bewust de oude, omdat bestaande installaties eraan hangen:
+
+- `name` in `package.json` (`gratis-boekhouden`): daaraan hangt op Linux de sleutelhanger waarmee
+  wachtwoorden en API-sleutels versleuteld zijn, en de naam van het .deb-pakket.
+- `appId` (`app.shipdocs.gratisboekhouden`): daarmee gaat een update op Windows over de bestaande
+  installatie heen in plaats van ernaast.
+
+De oude gegevensmap wordt bij de eerste start overgezet (`src/main/data-dir.ts`), een MCP-koppeling
+onder de oude naam wordt omgezet (`src/mcp/names.ts`), en de oude omgevingsvariabelen
+(`GRATIS_BOEKHOUDEN_*`) blijven werken.
+
 ## Ontwikkelen
 
 Vereist Node 22.12+.
@@ -89,12 +105,12 @@ synthetische set staat in [`docs/ocr-benchmark.md`](docs/ocr-benchmark.md).
 
 ## Installeren
 
-Download de installer van de [laatste release](https://github.com/shipdocs/gratis-boekhouden/releases/latest): AppImage of `.deb` voor Linux, `Setup.exe` voor Windows.
+Download de installer van de [laatste release](https://github.com/shipdocs/boekhoudenvoorniks/releases/latest): AppImage of `.deb` voor Linux, `Setup.exe` voor Windows.
 
-Op **Windows** kan SmartScreen melden dat "Windows uw pc heeft beveiligd". Dat komt doordat de installer (nog) niet met een betaald certificaat ondertekend is. Download de installer alleen van de [GitHub-release](https://github.com/shipdocs/gratis-boekhouden/releases) en controleer eventueel het controlegetal:
+Op **Windows** kan SmartScreen melden dat "Windows uw pc heeft beveiligd". Dat komt doordat de installer (nog) niet met een betaald certificaat ondertekend is. Download de installer alleen van de [GitHub-release](https://github.com/shipdocs/boekhoudenvoorniks/releases) en controleer eventueel het controlegetal:
 
 ```powershell
-Get-FileHash '.\Gratis-Boekhouden-Setup-0.6.14.exe' -Algorithm SHA256   # vergelijk met SHA256SUMS-Windows.txt
+Get-FileHash '.\BoekhoudenVoorNiks-Setup-0.6.14.exe' -Algorithm SHA256   # vergelijk met SHA256SUMS-Windows.txt
 ```
 
 Klopt het, klik dan op **Meer informatie → Toch uitvoeren**. Op Linux: `sha256sum -c SHA256SUMS-Linux.txt --ignore-missing`.
@@ -116,4 +132,4 @@ Een test controleert elke standaardrekening tegen die lijst.
 
 ## Licentie
 
-Gratis Boekhouden is vrije software onder de [GNU Affero General Public License v3.0 of later](LICENSE) (AGPL-3.0-or-later). Zie ook de [gebruiksvoorwaarden](https://shipdocs.github.io/gratis-boekhouden/voorwaarden.html) en de [privacyverklaring](https://shipdocs.github.io/gratis-boekhouden/privacy.html).
+BoekhoudenVoorNiks is vrije software onder de [GNU Affero General Public License v3.0 of later](LICENSE) (AGPL-3.0-or-later). Zie ook de [gebruiksvoorwaarden](https://boekhoudenvoorniks.nl/voorwaarden.html) en de [privacyverklaring](https://boekhoudenvoorniks.nl/privacy.html).

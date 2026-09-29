@@ -20,7 +20,7 @@ export function openReadonly(filename: string): Db {
   const version = db.pragma('user_version', { simple: true }) as number;
   if (version !== migrations.length) {
     db.close();
-    throw new Error('De administratie hoort bij een andere versie van de app. Open Gratis Boekhouden eerst één keer, dan werkt deze koppeling weer.');
+    throw new Error('De administratie hoort bij een andere versie van de app. Open BoekhoudenVoorNiks eerst één keer, dan werkt deze koppeling weer.');
   }
   return db;
 }

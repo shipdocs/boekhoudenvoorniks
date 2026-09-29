@@ -110,8 +110,8 @@ describe('bonnen lezen met Claude Code of Codex', () => {
   });
 
   it('Codex: MCP-servers uit de eigen config staan uit', () => {
-    const toml = '[mcp_servers.Context7]\ncommand = "x"\n\n[mcp_servers.Context7.env]\nA = "1"\n[mcp_servers."gratis-boekhouden"]\n[mcp_servers.x y]\n';
-    expect(codexMcpOff(toml)).toEqual(['-c', 'mcp_servers.Context7.enabled=false', '-c', 'mcp_servers.gratis-boekhouden.enabled=false']);
+    const toml = '[mcp_servers.Context7]\ncommand = "x"\n\n[mcp_servers.Context7.env]\nA = "1"\n[mcp_servers."boekhoudenvoorniks"]\n[mcp_servers.x y]\n';
+    expect(codexMcpOff(toml)).toEqual(['-c', 'mcp_servers.Context7.enabled=false', '-c', 'mcp_servers.boekhoudenvoorniks.enabled=false']);
     expect(codexBaseArgs('')).toEqual(['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never']);
   });
 
