@@ -47,6 +47,7 @@ export type TaskKind =
   | 'quote-expired'
   | 'vat-due'
   | 'bank-stale'
+  | 'bank-locked'
   | 'vat-suppletie'
   | 'supplier-auto'
   | 'vat-check'
@@ -188,8 +189,10 @@ export class InboxService {
       logAutomation(this.db, { kind: 'bank-match', ref_id: d.txId, summary: `Betaling hoort bij ${d.label}`, reason: explanation.sentence, details: explanation });
       countDecision(this.db, 'bankkoppeling', 'automatic');
     }
+    const firstOpen = this.ledger.firstOpenDate();
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
       if (t.amount >= 0 || !t.counter_name) continue;
+      if (firstOpen && t.transaction_date < firstOpen) continue; // vergrendelde periode: niet boeken
       if (this.bank.ownTransferTarget(t)) continue; // eigen overboeking: nooit als kosten
       const rule = this.memory.get(t.counter_name);
       if (!this.memory.isAutomatic(rule)) continue;
@@ -232,7 +235,9 @@ export class InboxService {
    */
   private autoOwnTransfers(): number {
     let n = 0;
+    const firstOpen = this.ledger.firstOpenDate();
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
+      if (firstOpen && t.transaction_date < firstOpen) continue; // vergrendelde periode: niet boeken
       const other = this.bank.ownTransferTarget(t);
       if (this.db.prepare(`SELECT 1 FROM automation_log WHERE kind = 'bank-own' AND ref_id = ? AND status = 'klopt_niet'`).get(t.id)) continue;
       if (!other) {
@@ -333,7 +338,14 @@ export class InboxService {
         .all(...ids, ...ids) as { relationId: number; iban: string }[];
       for (const r of rows) refundIbans.set(normalizeIban(r.iban), r.relationId);
     }
+    // betalingen in een vergrendelde periode kun je niet meer indelen: één melding in plaats van een vraag per betaling
+    const firstOpen = this.ledger.firstOpenDate();
+    const locked = { afgesloten: 0, uitwisseling: 0 };
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
+      if (firstOpen && t.transaction_date < firstOpen) {
+        locked[this.ledger.periodLockFor(t.transaction_date)?.kind ?? 'afgesloten']++;
+        continue;
+      }
       const who = t.counter_name || t.description.slice(0, 40) || 'Onbekend';
       // terugbetaling aan een klant die te veel betaalde: geen kosten
       if (t.amount < 0 && t.counter_iban) {
@@ -479,6 +491,24 @@ export class InboxService {
           ref: { bankTransactionId: t.id, categoryKey: sug?.categoryKey, vatCode: sug?.vatCode },
         });
       }
+    }
+
+    const lock = this.ledger.periodLock();
+    for (const kind of ['afgesloten', 'uitwisseling'] as const) {
+      const n = locked[kind];
+      if (n === 0) continue;
+      const until = kind === 'afgesloten' ? lock.closedUntil : lock.exchange?.until;
+      tasks.push({
+        key: `bank-locked-${kind}`,
+        kind: 'bank-locked',
+        icon: '🔒',
+        title: `${n} ${n === 1 ? 'betaling' : 'betalingen'} in ${kind === 'afgesloten' ? 'de afgesloten periode' : 'de periode bij je boekhouder'}`,
+        question: kind === 'afgesloten'
+          ? `${n === 1 ? 'Deze betaling valt' : 'Deze betalingen vallen'} vóór ${until ? formatDateNl(addDays(until, 1)) : 'de eerste open dag'}, in een periode die al is afgesloten. Er ontbrak waarschijnlijk een afschrift. Vraag je boekhouder hoe je ${n === 1 ? 'hem' : 'ze'} verwerkt.`
+          : `Je kunt ${n === 1 ? 'hem' : 'ze'} verwerken als het antwoord van je boekhouder is ingelezen.`,
+        actions: [{ id: 'open', label: 'Bekijken', primary: true }],
+        ref: {},
+      });
     }
 
     if (s.onboardingDone && s.profile.hasBusinessAccount) {

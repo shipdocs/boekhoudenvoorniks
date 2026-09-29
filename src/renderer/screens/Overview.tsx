@@ -3,6 +3,7 @@ import { api } from '../api';
 import { Button, DateNl, ErrorBox, Euro, useAction, useLoad } from '../ui';
 import { formatEuro } from '../../shared/money';
 import { AccountantPackageCard } from './AccountantPackage';
+import { PeriodCloseCard } from './PeriodClose';
 
 /** Eén serie (omzet per maand): staafdiagram in één kleur, tooltip per staaf, tabelweergave als alternatief. */
 function RevenueChart({ data }: { data: { month: string; label: string; revenue: number }[] }) {
@@ -86,6 +87,7 @@ export function Overview() {
       )}
       <FixedCosts />
       <div style={{ marginTop: 14 }}><AccountantPackageCard /></div>
+      <div style={{ marginTop: 14 }}><PeriodCloseCard /></div>
     </div>
   );
 }

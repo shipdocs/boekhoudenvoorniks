@@ -39,7 +39,7 @@ export function buildVatXbrl(report: VatReport, company: CompanySettings): strin
     if (c.btw && r.btwEuro !== null) facts.push(`  <bd-i:${c.btw} contextRef="Msg" unitRef="EUR" decimals="INF">${r.btwEuro}</bd-i:${c.btw}>`);
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
-<!-- Gegenereerd door Gratis Boekhouden — ${NT_VERSION}: NIET INDIENEN zonder validatie -->
+<!-- Gegenereerd door BoekhoudenVoorNiks — ${NT_VERSION}: NIET INDIENEN zonder validatie -->
 <xbrli:xbrl xml:lang="nl"
   xmlns:xbrli="http://www.xbrl.org/2003/instance"
   xmlns:link="http://www.xbrl.org/2003/linkbase"

@@ -20,7 +20,7 @@ export function openReadonly(filename: string): Db {
   const version = db.pragma('user_version', { simple: true }) as number;
   if (version !== migrations.length) {
     db.close();
-    throw new Error('De administratie hoort bij een andere versie van de app. Open Gratis Boekhouden eerst één keer, dan werkt deze koppeling weer.');
+    throw new Error('De administratie hoort bij een andere versie van de app. Open BoekhoudenVoorNiks eerst één keer, dan werkt deze koppeling weer.');
   }
   return db;
 }
@@ -30,7 +30,11 @@ export function migrate(db: Db): void {
   for (let i = current; i < migrations.length; i++) {
     const sql = migrations[i]!;
     db.transaction(() => {
+      // een migratie mag altijd boeken of corrigeren, ook in een afgesloten periode (migratie 22)
+      const lockable = Boolean(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger_lock_bypass'`).get());
+      if (lockable) db.exec('INSERT OR IGNORE INTO ledger_lock_bypass (id) VALUES (1)');
       db.exec(sql);
+      if (lockable) db.exec('DELETE FROM ledger_lock_bypass');
       db.pragma(`user_version = ${i + 1}`);
     })();
   }

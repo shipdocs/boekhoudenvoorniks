@@ -58,8 +58,16 @@ export interface HostContext {
   /** test met de ingevulde (nog niet opgeslagen) gegevens en het ingetypte wachtwoord, anders het opgeslagen */
   testSmtp(smtp?: AppSettings['smtp'], password?: string): Promise<void>;
   backupNow(): Promise<string | null>;
+  /** complete back-up in de back-upmap van de administratie, zonder te vragen (bv. vóór het afsluiten) */
+  safetyBackup?(label: string): Promise<string | null>;
   restoreBackup(password?: string): Promise<boolean>;
   exportEncrypted(password: string): Promise<string | null>;
+  /** meerdere administraties (alleen in de app zelf) */
+  administrations?: {
+    list(): { key: string; name: string; officeCopy: { office: string; exchange: number; endDate: string } | null; current: boolean }[];
+    open(key: string): Promise<void>;
+    create(name: string): Promise<string>;
+  };
   appVersion(): string;
   checkForUpdates(): Promise<string>;
   /** Administratie wissen (met veiligheidskopie bij echte gegevens) en eventueel de demo erin zetten. */
@@ -296,6 +304,7 @@ export function createApi(s: Services, host: HostContext) {
           'quote-expired': ['offerte', r.quoteId],
           'vat-due': ['belasting', r.periodKey],
           'bank-stale': ['bank', undefined],
+          'bank-locked': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
           'fx-repair': ['aankopen', undefined],
           'recurring-invoice': ['bewijs', r.bankTransactionId],
@@ -308,9 +317,35 @@ export function createApi(s: Services, host: HostContext) {
     }
   };
 
+  const admins = () => {
+    if (!host.administrations) throw new Error('Meerdere administraties kan alleen in de app zelf');
+    return host.administrations;
+  };
+
   return {
+    /** periodes afsluiten: afgewerkt is afgewerkt (docs/uitwisseling.md) */
+    periods: {
+      status: () => s.periods.status(),
+      suggestedDates: () => s.periods.suggestedDates(),
+      checks: (until: IsoDate) => s.periods.checks(String(until)),
+      close: async (until: IsoDate, confirmed: string[]) => {
+        const keys = Array.isArray(confirmed) ? confirmed.map(String) : [];
+        // eerst controleren, dan de back-up, dan pas vast
+        const blocking = s.periods.checks(String(until)).filter((c) => c.level === 'blokkeert');
+        if (blocking.length === 0) await host.safetyBackup?.(`voor-afsluiten-tm-${String(until)}`);
+        return s.periods.close(String(until), keys);
+      },
+    },
+    /** meerdere administraties op deze computer (bv. bv en eenmanszaak, of een boekhouder met kopieën van klanten) */
+    administrations: {
+      list: () => (host.administrations ? host.administrations.list() : []),
+      open: (key: string) => admins().open(String(key)),
+      create: (name: string) => admins().create(String(name)),
+    },
     app: {
       version: () => host.appVersion(),
+      administrationId: () => s.settings.administrationId(),
+      officeCopy: () => s.settings.officeCopy(),
       checkForUpdates: () => host.checkForUpdates(),
       openExternal: (url: string) => host.openExternal(url),
       openAttachment: (path: string) => host.openPath(path),
@@ -379,6 +414,7 @@ export function createApi(s: Services, host: HostContext) {
       fetchNow: () => {
         if (!host.mail) throw new Error('Mail ophalen kan alleen in de app');
         if (s.settings.get().demoMode) throw new Error('In de demo wordt geen mail opgehaald. Wis de demo om echt te beginnen.');
+        if (s.settings.officeCopy()) throw new Error(s.settings.outboundBlocked()!);
         return host.mail.fetchNow();
       },
       fromCustomer: (relationId: number) => s.mail.fromCustomer(relationId),

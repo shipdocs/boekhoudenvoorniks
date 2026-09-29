@@ -67,7 +67,7 @@ export function isBackupBundle(data: Buffer): boolean {
 }
 
 export function readBackupBundle(data: Buffer): Map<string, Buffer> {
-  if (!isBackupBundle(data)) throw new Error('Dit is geen complete back-up van Gratis Boekhouden');
+  if (!isBackupBundle(data)) throw new Error('Dit is geen complete back-up van BoekhoudenVoorNiks');
   let offset = BUNDLE_MAGIC.length;
   const version = data[offset++];
   if (version !== BUNDLE_VERSION) throw new Error(`Onbekende versie van het back-upformaat (${version})`);
@@ -127,7 +127,7 @@ export function validateBackup(file: string): void {
   const db = new Database(file, { readonly: true, fileMustExist: true });
   try {
     const ok = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name IN ('journal_entries','journal_lines','chart_of_accounts','invoices')`).get() as { n: number };
-    if (ok.n !== 4) throw new Error('Dit bestand is geen back-up van Gratis Boekhouden');
+    if (ok.n !== 4) throw new Error('Dit bestand is geen back-up van BoekhoudenVoorNiks');
     const integrity = db.pragma('integrity_check', { simple: true });
     if (integrity !== 'ok') throw new Error(`Back-up is beschadigd: ${String(integrity)}`);
   } finally {

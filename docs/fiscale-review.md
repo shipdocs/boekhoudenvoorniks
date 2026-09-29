@@ -1,7 +1,7 @@
 # Fiscale review: voor de boekhouder
 
 Dit document is bedoeld om voor te leggen aan een boekhouder of fiscalist (issue #44). Het beschrijft
-hoe Gratis Boekhouden boekt en rekent op de punten die nog niet gecontroleerd zijn. Per punt staat de
+hoe BoekhoudenVoorNiks boekt en rekent op de punten die nog niet gecontroleerd zijn. Per punt staat de
 vraag die we beantwoord willen hebben. Graag per vraag: **klopt** / **klopt niet, want …**.
 
 De app is voor zzp'ers en kleine bouwbedrijven (stukadoor, schilder, timmerman, loodgieter,

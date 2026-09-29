@@ -4,13 +4,13 @@
  * gebruikers moeten dan opnieuw akkoord geven.
  */
 export const TERMS_VERSION = '2026-09-26';
-export const TERMS_URL = 'https://shipdocs.github.io/gratis-boekhouden/voorwaarden.html';
-export const PRIVACY_URL = 'https://shipdocs.github.io/gratis-boekhouden/privacy.html';
-export const SOURCE_URL = 'https://github.com/shipdocs/gratis-boekhouden';
+export const TERMS_URL = 'https://boekhoudenvoorniks.nl/voorwaarden.html';
+export const PRIVACY_URL = 'https://boekhoudenvoorniks.nl/privacy.html';
+export const SOURCE_URL = 'https://github.com/shipdocs/boekhoudenvoorniks';
 export const LICENSE_NAME = 'GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later)';
 
 export const TERMS_SUMMARY: string[] = [
-  'Gratis Boekhouden is gratis software, geleverd zoals hij is, zonder garantie.',
+  'BoekhoudenVoorNiks is gratis software, geleverd zoals hij is, zonder garantie.',
   'Jij blijft zelf verantwoordelijk voor je administratie en je belastingaangiften. Controleer de bedragen voordat je ze overneemt; de software geeft geen fiscaal advies.',
   'Je administratie staat alleen op je eigen computer. Maak regelmatig een back-up; je bent zelf verantwoordelijk voor de bewaarplicht van 7 jaar.',
   'Wij ontvangen geen gegevens uit je administratie. Alleen wat jij zelf verstuurt (e-mail, koppelingen die je aanzet) gaat naar buiten.',

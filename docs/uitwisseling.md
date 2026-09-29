@@ -3,7 +3,7 @@
 Status: **ontwerp**, nog niet gebouwd. Peildatum 29 september 2026, `main` @ `1c0497f`.
 
 Dit document beschrijft hoe een klant een deel van zijn administratie naar zijn boekhouder stuurt,
-de boekhouder die in Gratis Boekhouden controleert en corrigeert, en de klant het antwoord weer
+de boekhouder die in BoekhoudenVoorNiks controleert en corrigeert, en de klant het antwoord weer
 inleest zonder dat werk van tussendoor verloren gaat. Het bestaande **pakket voor je boekhouder**
 (ZIP met XAF, zie [boekhouders.md](boekhouders.md)) blijft bestaan voor boekhouders die in hun eigen
 software werken; dat gaat maar één kant op.
@@ -12,7 +12,7 @@ software werken; dat gaat maar één kant op.
 
 1. **De administratie van de klant is de echte.** De kopie van de boekhouder is een werkkopie; er
    worden nooit twee databases samengevoegd.
-2. **De boekhouder werkt in Gratis Boekhouden**, in de kantoormodus. Er is geen terugweg uit andere
+2. **De boekhouder werkt in BoekhoudenVoorNiks**, in de kantoormodus. Er is geen terugweg uit andere
    boekhoudsoftware.
 3. **Niets dat wij beheren.** Geen server, geen portaal, geen account. Transport gaat via e-mail
    (eigen SMTP), een gedeelde map (OneDrive, Dropbox, Nextcloud, …) of een los bestand.
@@ -57,53 +57,76 @@ Het uitwisselingsnummer (hier 17) loopt per administratie op.
 
 ## Periodeslot
 
-Nu vergrendelt alleen een ingediende btw-periode, en dan alleen de btw: een late post krijgt een
-`vat_date` in de volgende open periode (`Ledger.vatDateFor`), maar de boeking zelf komt op de echte
-datum. Winst en balans van een afgewerkte periode kunnen dus nog veranderen. Het periodeslot
+**Gebouwd** (stap 2 van de bouwvolgorde; migratie 22, `Ledger`, `src/closing/period-close.ts`).
+
+Tot dan vergrendelde alleen een ingediende btw-periode, en alleen de btw: een late post kreeg een
+`vat_date` in de volgende open periode, maar de boeking zelf kwam op de echte datum. Het periodeslot
 vergrendelt de hele boekhouding.
 
-**Opslag.** Een nieuwe tabel met één rij per slot:
+**Opslag.** `ledger_locks` met één rij per slot (`until_date`, `kind` = `afgesloten` of `uitwisseling`,
+`exchange_no`). Alles t/m de hoogste `until_date` ligt vast. Een afgesloten slot kan niet verwijderd of
+gewijzigd worden (trigger); een uitwisseling wordt `afgesloten` als het antwoord is ingelezen
+(`finishExchange`) of verdwijnt bij afbreken (`abortExchange`).
 
-```sql
-CREATE TABLE ledger_locks (
-  id INTEGER PRIMARY KEY,
-  until_date TEXT NOT NULL,           -- alles t/m deze datum ligt vast
-  kind TEXT NOT NULL CHECK (kind IN ('uitwisseling','afgesloten')),
-  exchange_no INTEGER,                -- bij kind = 'uitwisseling'
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
+**Afdwingen.** Op twee plekken, zodat geen route er omheen kan (automatisch verwerken, vaste lasten,
+afschrijvingen, koppelingen, "Klopt niet"):
 
-**Afdwingen in de database**, net als de bestaande regels voor onveranderlijkheid, zodat geen enkele
-route er omheen kan (automatisch verwerken, vaste lasten, afschrijvingen, koppelingen, "Klopt niet"):
+- `Ledger.post` bepaalt de boekingsdatum:
+  - open periode: de eigen datum;
+  - afgesloten, en het is een bon, factuur of koppeling (`inkoop`, `factuur`, `integratie`): de eerste
+    open dag, met "(documentdatum …)" in de omschrijving. Het document en de gebeurtenis houden hun
+    echte datum; de btw volgt de documentdatum (`vatDateFor`), dus hoort bij de btw-periode van het
+    document zolang die niet is aangegeven;
+  - afgesloten, en het is een betaling (`bank`), memoriaalpost (`handmatig`) of beginbalans: geweigerd
+    (`PeriodLockedError`, een gewone melding en geen interne boekhoudfout);
+  - bij de boekhouder: altijd geweigerd.
 
-- `BEFORE INSERT ON journal_entries`: weigeren als `entry_date <= MAX(until_date)`.
-- `BEFORE UPDATE OF status ON journal_entries` en `BEFORE UPDATE OF status ON events`: weigeren als de
-  post of gebeurtenis in de vergrendelde periode valt (terugdraaien en vervangen wijzigen de status).
-- Tijdens `kind = 'uitwisseling'`: weigeren van wijzigingen in `chart_of_accounts`.
+  Een tegenboeking volgt dezelfde regels, dus iets uit een afgesloten periode corrigeren komt vanzelf
+  in de open periode.
+- Triggers in de database als vangnet: geen `INSERT` in `journal_entries` t/m het slot, en tijdens een
+  uitwisseling geen statuswijziging (terugdraaien, vervangen) van posten en gebeurtenissen in de periode.
 
-**De btw-aangifte blijft mogelijk tijdens een uitwisseling.** De aangifte wordt geboekt op de laatste
-dag van de periode (`VatService`, `source = 'btw'`), dus binnen het slot. De trigger laat posten met
-`source = 'btw'` en de statuswijziging in `vat_periods` door. Het maakt dan niet uit of de klant de
-aangifte doet vóór of na het inlezen van het antwoord: correcties van de boekhouder in een al
-aangegeven periode krijgen via `vatDateFor` een btw-datum in de eerstvolgende open periode (boven
-€ 1.000 btw: een suppletie). Let op bij het **vierde kwartaal**: is dat al aangegeven, dan komen de
-btw-correcties van de jaarafsluiting in het eerste kwartaal van het nieuwe jaar. Winst en verlies
-blijven wel in het oude jaar, omdat de boeking zelf haar eigen datum houdt.
+Uitzonderingen: posten met `source = 'btw'` (de aangifte wordt op de laatste dag van de btw-periode
+geboekt, dus binnen het slot) en alles binnen `PeriodCloseService.withoutLock()` (het inlezen van het
+antwoord van de boekhouder; een rij in `ledger_lock_bypass` voor de duur van de transactie). Ook
+migraties draaien zonder slot (`migrate()`).
 
-Het inlezen van het antwoord zet een vlag die de triggers voor die ene transactie doorlaat, zoals
-een tijdelijke rij in een tabel `ledger_lock_bypass` die aan het eind van de transactie verwijderd
-wordt. Een verbinding-specifieke instelling bestaat in SQLite niet in triggers.
+**Afwijkingen van het eerdere ontwerp:**
 
-**Late documenten.** Een bon of factuur met een datum in een vergrendelde periode:
+- Na het **afsluiten** mag de status van een oude post nog veranderen (terugdraaien), omdat de
+  tegenboeking in de open periode komt en het afgesloten kwartaal zelf dus niet verandert. Alleen
+  tijdens een **uitwisseling** is dat geblokkeerd, zodat de handelingen van de boekhouder passen.
+- Het **rekeningschema** wordt tijdens een uitwisseling in `Ledger` beschermd (toevoegen, hernoemen,
+  RGS-code, archiveren), niet met een trigger: een trigger zou ook migraties en het aanvullen van
+  standaardrekeningen tegenhouden.
+- **"De bank sluit aan"** is: geen onverwerkte betalingen t/m de einddatum (blokkeert), en afschriften
+  die t/m de einddatum lopen. Dat laatste moet de gebruiker bevestigen als het niet zo is, want een CSV
+  zonder betalingen bestaat niet: een rekening waar in december niets gebeurde, heeft geen afschrift
+  van december. Een saldovergelijking met het afschrift zit er niet in.
 
-- `uitwisseling`: blijft in de inbox staan als "wacht op je boekhouder" en wordt na het inlezen
-  verwerkt zoals bij `afgesloten`.
-- `afgesloten`: wordt geboekt op de eerste dag na het slot. Het document houdt zijn echte datum; de
-  boeking verwijst ernaar. Voor de btw is dat gelijk aan wat `vatDateFor` nu al doet.
+**Controles vóór het afsluiten** (`PeriodCloseService.checks`):
 
-**Late bankmutaties** met een datum in een vergrendelde periode worden niet geboekt. Ze worden
-gemeld als fout ("er ontbrak een afschrift"), omdat de bank bij het afsluiten aansloot (regel 2).
+| Controle | Niveau |
+|---|---|
+| Betalingen t/m de einddatum nog niet verwerkt | blokkeert |
+| Bonnen of facturen t/m de einddatum nog niet gecontroleerd | blokkeert |
+| Afschriften van een rekening lopen niet t/m de einddatum | bevestigen |
+| Conceptfacturen met een datum t/m de einddatum | ter info (worden bij definitief maken een late post) |
+
+**Late bankmutaties** met een datum in een vergrendelde periode worden niet automatisch verwerkt en
+staan niet als vraag op Vandaag, maar als één melding: "3 betalingen in de afgesloten periode", met het
+advies de boekhouder te vragen hoe ze verwerkt worden.
+
+**Scherm.** *Hoe gaat het?* > *Periode afsluiten*: kies het eind van een afgelopen kwartaal (of het
+jaar), zie de controles, bevestig wat bevestigd moet worden, en sluit af. Vóór het afsluiten maakt de app
+een complete back-up in de back-upmap van de administratie. Afsluiten kan niet ongedaan gemaakt worden.
+
+**De btw-aangifte blijft mogelijk** voor een afgesloten periode en tijdens een uitwisseling. Het maakt
+niet uit of de aangifte vóór of na het inlezen van het antwoord gedaan wordt: correcties van de
+boekhouder in een al aangegeven periode krijgen via `vatDateFor` een btw-datum in de eerstvolgende open
+periode (boven € 1.000 btw: een suppletie). Let op bij het **vierde kwartaal**: is dat al aangegeven,
+dan komen de btw-correcties van de jaarafsluiting in het eerste kwartaal van het nieuwe jaar. Winst en
+verlies blijven wel in het oude jaar, omdat de boeking zelf haar eigen datum houdt.
 
 ## Sleutels en pakketformaat
 
@@ -209,21 +232,28 @@ die in de open periode verwerkt moet worden.
 
 ## Kantoormodus en meerdere administraties
 
-Nu draait alles om één `dbPath()` en één `dataDir()` (`src/main/main.ts`): database, bijlagen,
-back-ups, MCP en instellingen.
+**Gebouwd** (stap 1 van de bouwvolgorde):
 
-- **Eén map per administratie**, met een keuzescherm bij het opstarten. Het keuzescherm werkt ook
-  voor een ondernemer met een bv en een eenmanszaak.
-- **Administratie-ID:** een UUID in `settings`, aangemaakt bij de migratie en opgenomen in back-ups.
-  Een teruggezette back-up houdt hetzelfde ID; de koppelsleutels (sleutelopslag) moeten na een
-  herinstallatie opnieuw.
-- **Kantoormodus** voor administraties die uit een export komen:
-  - alles wat naar buiten gaat staat hard uit: automatische herinneringen, IMAP, koppelingen, vaste
-    lasten, e-mail versturen (dezelfde plekken als `demoMode`, maar dan afgedwongen in de services en
-    niet alleen in `main.ts`);
-  - standaard de expertmodus;
-  - per klant de stand: "export 17 ontvangen op 3 oktober, nog geen antwoord";
-  - de MCP-server kan per administratie gestart worden, alleen lezen, zoals nu.
+- **Meerdere administraties** (`src/main/administrations.ts`). De eerste administratie blijft in de
+  gegevensmap zelf staan; extra administraties staan in `administraties/<sleutel>/`, elk met een eigen
+  database, bijlagen en back-ups. Het OCR-model is gedeeld. De app opent de laatst gebruikte
+  administratie (`administratie.json`); wisselen en aanmaken gaat via *Instellingen > Administraties*,
+  en met meer dan één administratie staat de open administratie onder de naam van de app. Een apart
+  keuzescherm bij het opstarten is er (nog) niet. Alleen de open administratie haalt mail op, verstuurt
+  herinneringen en maakt de dagelijkse back-up. De MCP-koppeling leest de open administratie.
+- **Administratie-ID:** een UUID (versie 4) in `settings` (migratie 21, `SettingsService.administrationId()`),
+  niet te wijzigen via de instellingen. Gaat mee in back-ups; een teruggezette back-up houdt hetzelfde ID.
+- **Kantoormodus** (`SettingsService.officeCopy()` / `markOfficeCopy()`): een instelling in de
+  administratie zelf, niet via de gewone instellingen uit te zetten. In de kopie:
+  - geen e-mail (afgedwongen in de mailer van de services), geen koppelingen (webshop, Mollie,
+    Stripe: afgedwongen in de `fetch` van de koppelingen), geen post ophalen (API en achtergrond);
+  - de achtergrondtaken doen alleen de back-up: geen afschrijvingen, geen automatisch verwerken, geen
+    omrekening van vreemde valuta, geen herinneringen (`main.ts`);
+  - een balk bovenaan: "Kopie voor … (uitwisseling …, t/m …)".
+
+**Nog te doen:** standaard de expertmodus in de kopie, en per klant de stand van de uitwisseling
+("export 17 ontvangen op 3 oktober, nog geen antwoord"). Dat hoort bij stap 3 (uitwisseling), omdat
+de kantoormodus pas ontstaat bij het inlezen van een export.
 
 ## Jaarafsluiting
 

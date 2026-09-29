@@ -18,6 +18,8 @@ const { createServices, MemorySecretStore } = require(path.join(ROOT, 'main/serv
 const { createApi } = require(path.join(ROOT, 'main/main/api.js'));
 const { wipeDatabase } = require(path.join(ROOT, 'main/main/reset.js'));
 const { seedDemo } = require(path.join(ROOT, 'main/demo/demo.js'));
+const { Administrations, readAdministrationFile } = require(path.join(ROOT, 'main/main/administrations.js'));
+const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js'));
 
 const PORT = Number(process.env.E2E_PORT || 5190);
 let dir, file, db, services, api;
@@ -55,6 +57,27 @@ function init(fresh) {
   let smtpPassword = null;
   api = createApi(services, {
     appVersion: () => '0.0.0-e2e',
+    // zoals de app: `dir` is de gegevensmap, extra administraties in administraties/<sleutel>/
+    administrations: {
+      list: () => new Administrations(dir).list(readAdministrationFile),
+      async open(key) {
+        const admins = new Administrations(dir);
+        admins.select(key);
+        db.close();
+        file = path.join(admins.dirFor(key), 'boekhouding.sqlite');
+        init(false);
+      },
+      async create(name) {
+        const admins = new Administrations(dir);
+        const key = admins.create(name);
+        const fresh = openDatabase(path.join(admins.dirFor(key), 'boekhouding.sqlite'));
+        const settings = new SettingsService(fresh);
+        settings.update({ company: { ...settings.get().company, name } });
+        fresh.close();
+        await this.open(key);
+        return key;
+      },
+    },
     async checkForUpdates() { return 'Je hebt de nieuwste versie.'; },
     async saveFile(name) { return path.join(dir, name); },
     storeAttachment: storeFile,
@@ -79,7 +102,7 @@ function init(fresh) {
     pickProgram: async () => null,
     checkCli: async () => 'Claude Code werkt ✓',
     openLoginTerminal: async () => 'Claude Code is geopend in een terminal.',
-    mcpCommand: () => ({ command: '/opt/Gratis Boekhouden/gratis-boekhouden', args: ['--mcp'] }),
+    mcpCommand: () => ({ command: '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', args: ['--mcp'] }),
     localOcr: { status: () => ({ state: 'niet-geinstalleerd' }), install: () => ({ state: 'niet-geinstalleerd' }), uninstall: async () => ({ state: 'niet-geinstalleerd' }) },
     async resetData(withDemo) {
       const backup = await wipeDatabase(db, file, path.join(dir, 'backups'));
