@@ -45,6 +45,7 @@ import type { UpdateStatus } from './updates';
 import type { FxApplyInput } from '../fx/repair';
 import { ExchangeService, type OfficeProfile } from '../exchange/exchange';
 import { checkCode, openOfficeKey, sealOfficeKey } from '../exchange/crypto';
+import { LICENSE_API_URL } from '../license/license';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -75,6 +76,12 @@ export interface HostContext {
     saveOffice(input: { office: string; email: string; newKey?: boolean; keys?: { publicKey: string; privateKey: string } }): OfficeProfile;
     /** export van een klant uitpakken als nieuwe administratie (de kopie) en die openen */
     openClientExport(data: Uint8Array): Promise<{ company: string; exchange: number; endDate: string }>;
+  };
+  /** de licentie-Worker (alleen in de app zelf): prijs en licentie ophalen */
+  licenseApi?: {
+    price(): Promise<{ bedrag: string; valuta: string; per: string } | null>;
+    /** de ondertekende licentie voor deze administratie, of null als er (nog) geen betaald abonnement is */
+    fetch(administrationId: string): Promise<string | null>;
   };
   /** meerdere administraties (alleen in de app zelf) */
   administrations?: {
@@ -344,6 +351,20 @@ export function createApi(s: Services, host: HostContext) {
   /** mailservers weigeren vaak grotere bijlagen */
   const MAIL_LIMIT = 20 * 1024 * 1024;
 
+  /** Vóór versturen: is er een geldige licentie? Zo niet, eerst proberen hem op te halen (net betaald of verlengd). */
+  const ensureLicense = async () => {
+    const st = s.license.status(today());
+    if (st.state !== 'uit' && st.state !== 'actief' && host.licenseApi) {
+      try {
+        const token = await host.licenseApi.fetch(s.settings.administrationId());
+        if (token) s.license.install(token, today());
+      } catch {
+        /* offline of nog niet betaald: dan de melding van requireActive */
+      }
+    }
+    s.license.requireActive(today());
+  };
+
   const admins = () => {
     if (!host.administrations) throw new Error('Meerdere administraties kan alleen in de app zelf');
     return host.administrations;
@@ -381,6 +402,7 @@ export function createApi(s: Services, host: HostContext) {
       /** de periode t/m `until` naar de boekhouder: mailen, of als bestand bewaren om zelf te sturen */
       send: async (until: IsoDate, confirmed: string[], how: 'mail' | 'bestand') => {
         const keys = Array.isArray(confirmed) ? confirmed.map(String) : [];
+        await ensureLicense();
         const r = await s.exchange.createExport(String(until), keys, host.appVersion(), () => hostExchange().bundle());
         let note: string | null = null;
         if (how === 'mail') {
@@ -446,6 +468,30 @@ export function createApi(s: Services, host: HostContext) {
         return { path, email: a.email, count: a.count };
       },
       reopenAnswer: () => s.exchange.reopenAnswer(),
+    },
+    /** abonnement voor de uitwisseling met de boekhouder */
+    license: {
+      status: () => s.license.status(today()),
+      price: async () => {
+        try {
+          return (await host.licenseApi?.price()) ?? null;
+        } catch {
+          return null;
+        }
+      },
+      /** afrekenen bij Mollie, in de browser */
+      checkout: async (email: string) => {
+        const mail = String(email ?? '').trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) throw new Error('Vul een geldig e-mailadres in');
+        await host.openExternal(`${LICENSE_API_URL}/start?administratie=${encodeURIComponent(s.settings.administrationId())}&email=${encodeURIComponent(mail)}`);
+      },
+      /** na het betalen of verlengen: de licentie ophalen */
+      refresh: async () => {
+        if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
+        const token = await host.licenseApi.fetch(s.settings.administrationId());
+        if (!token) throw new Error('Nog geen betaald abonnement gevonden. Is de betaling net gedaan? Probeer het over een minuut opnieuw.');
+        return s.license.install(token, today());
+      },
     },
     /** meerdere administraties op deze computer (bv. bv en eenmanszaak, of een boekhouder met kopieën van klanten) */
     administrations: {

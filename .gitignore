@@ -7,3 +7,5 @@ release/
 *.sqlite-journal
 e2e-results/
 e2e-report/
+.wrangler/
+.dev.vars
