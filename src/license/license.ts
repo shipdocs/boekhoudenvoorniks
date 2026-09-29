@@ -27,6 +27,19 @@ export interface LicensePayload {
   email: string;
   validUntil: IsoDate;
   issuedAt: IsoDate;
+  /** opgezegd: er wordt niets meer afgeschreven, de licentie loopt tot validUntil */
+  cancelled?: boolean;
+}
+
+/** Bedrijfsgegevens voor de factuur van het abonnement (workers/licentie: Billing). */
+export interface LicenseBilling {
+  naam: string;
+  adres: string;
+  postcode: string;
+  plaats: string;
+  land: string;
+  kvk?: string;
+  btw?: string;
 }
 
 export type LicenseStatus =
@@ -34,7 +47,7 @@ export type LicenseStatus =
   | { state: 'geen' }
   | { state: 'ongeldig'; reason: string }
   | { state: 'verlopen'; validUntil: IsoDate; email: string }
-  | { state: 'actief'; validUntil: IsoDate; email: string };
+  | { state: 'actief'; validUntil: IsoDate; email: string; cancelled: boolean };
 
 /** Controleert handtekening en inhoud; gooit bij een vervalst of kapot token. */
 export function verifyLicense(token: string, publicKey: string): LicensePayload {
@@ -76,7 +89,8 @@ export class LicenseService {
       return { state: 'ongeldig', reason: (e as Error).message };
     }
     if (payload.administratie !== this.settings.administrationId()) return { state: 'ongeldig', reason: 'Deze licentie hoort bij een andere administratie' };
-    return { state: payload.validUntil >= today ? 'actief' : 'verlopen', validUntil: payload.validUntil, email: payload.email };
+    if (payload.validUntil < today) return { state: 'verlopen', validUntil: payload.validUntil, email: payload.email };
+    return { state: 'actief', validUntil: payload.validUntil, email: payload.email, cancelled: payload.cancelled === true };
   }
 
   /** Een licentie (van de Worker) bewaren, na controle. */
@@ -96,7 +110,8 @@ export class LicenseService {
   needsRefresh(today: IsoDate, days = 7): boolean {
     const s = this.status(today);
     if (s.state === 'verlopen' || s.state === 'ongeldig') return this.hasLicense();
-    if (s.state !== 'actief') return false;
+    // opgezegd: er komt geen verlenging meer, dus niet steeds opnieuw vragen
+    if (s.state !== 'actief' || s.cancelled) return false;
     const soon = new Date(`${today}T00:00:00Z`);
     soon.setUTCDate(soon.getUTCDate() + days);
     return s.validUntil <= soon.toISOString().slice(0, 10);

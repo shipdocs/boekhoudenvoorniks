@@ -45,7 +45,7 @@ import type { UpdateStatus } from './updates';
 import type { FxApplyInput } from '../fx/repair';
 import { ExchangeService, type OfficeProfile } from '../exchange/exchange';
 import { checkCode, openOfficeKey, sealOfficeKey } from '../exchange/crypto';
-import { LICENSE_API_URL } from '../license/license';
+import type { LicenseBilling } from '../license/license';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -82,6 +82,10 @@ export interface HostContext {
     price(): Promise<{ bedrag: string; valuta: string; per: string } | null>;
     /** de ondertekende licentie voor deze administratie, of null als er (nog) geen betaald abonnement is */
     fetch(administrationId: string): Promise<string | null>;
+    /** eerste betaling bij Mollie klaarzetten; geeft de betaallink, of `al` als er al een abonnement loopt */
+    start(input: { administratie: string; email: string; bedrijf: LicenseBilling }): Promise<{ checkout?: string; al?: boolean }>;
+    /** het abonnement stoppen; de betaalde periode loopt af */
+    cancel(administrationId: string): Promise<{ betaaldTot: string; geldigTot: string }>;
   };
   /** meerdere administraties (alleen in de app zelf) */
   administrations?: {
@@ -479,11 +483,33 @@ export function createApi(s: Services, host: HostContext) {
           return null;
         }
       },
-      /** afrekenen bij Mollie, in de browser */
-      checkout: async (email: string) => {
+      /**
+       * Afrekenen bij Mollie, in de browser. De bedrijfsgegevens gaan mee voor de factuur (in het verzoek,
+       * niet in de URL). `al`: er loopt al een abonnement; dan de licentie ophalen.
+       */
+      checkout: async (email: string): Promise<{ al: boolean }> => {
+        if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
         const mail = String(email ?? '').trim();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) throw new Error('Vul een geldig e-mailadres in');
-        await host.openExternal(`${LICENSE_API_URL}/start?administratie=${encodeURIComponent(s.settings.administrationId())}&email=${encodeURIComponent(mail)}`);
+        const c = s.settings.get().company;
+        const missing = [!c.name && 'bedrijfsnaam', !c.address && 'adres', !c.postcode && 'postcode', !c.city && 'plaats', !c.kvkNumber && !c.vatNumber && 'KvK- of btw-nummer'].filter(Boolean);
+        if (missing.length > 0) throw new Error(`Voor de factuur ontbreekt nog: ${missing.join(', ')}. Vul dat aan bij Instellingen > Je bedrijf.`);
+        const r = await host.licenseApi.start({
+          administratie: s.settings.administrationId(),
+          email: mail,
+          bedrijf: { naam: c.name, adres: c.address, postcode: c.postcode, plaats: c.city, land: (c.country || 'NL').toUpperCase(), kvk: c.kvkNumber || undefined, btw: c.vatNumber || undefined },
+        });
+        if (r.al) return { al: true };
+        if (!r.checkout) throw new Error('De betaalpagina kon niet worden geopend; probeer het later opnieuw');
+        await host.openExternal(r.checkout);
+        return { al: false };
+      },
+      /** opzeggen: er wordt niets meer afgeschreven; versturen kan tot het eind van de betaalde periode */
+      cancel: async () => {
+        if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
+        await host.licenseApi.cancel(s.settings.administrationId());
+        const token = await host.licenseApi.fetch(s.settings.administrationId());
+        return token ? s.license.install(token, today()) : s.license.status(today());
       },
       /** na het betalen of verlengen: de licentie ophalen */
       refresh: async () => {
