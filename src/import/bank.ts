@@ -6,7 +6,8 @@ import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS, SALES_ACCOUNTS } from '../core-ledger/accounts';
 import type { InvoiceService } from '../documents/invoices';
 import type { PurchaseService } from '../documents/purchases';
-import { type BankCategoriePayload } from '../core-ledger/rules';
+import { businessPct, type BankCategoriePayload } from '../core-ledger/rules';
+import { businessShareFor, setBusinessShare } from '../intake/business-share';
 import type { EventService } from '../core-ledger/events';
 import type { RelationsService } from '../relations/relations';
 import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, customerVatSituation, isPurchaseVatCode, isSalesVatCode, suggestedSalesVat, vatNumberMatchesCountry, type SalesVatCode } from '../shared/vat';
@@ -77,6 +78,11 @@ export interface BookToAccountInput {
   jobId?: number | null;
   /** verkoop via een ander systeem (Mollie, webshop, kassa) */
   channel?: string | null;
+  /**
+   * Zakelijk deel van een uitgave in procenten (1–100). Weglaten = wat eerder voor deze tegenpartij
+   * is opgegeven, anders 100. Wordt onthouden voor deze tegenpartij.
+   */
+  businessPct?: number;
 }
 
 export interface SaleInput {
@@ -660,6 +666,10 @@ export class BankService {
     const vatCode = input.vatCode ?? 'geen';
     // omzet komt op de omzetrekening die bij de btw hoort (21%, 0% buiten de EU, …): zo belandt het in de juiste rubriek
     const account = target.category === 'omzet' && isSalesVatCode(vatCode) ? SALES_ACCOUNTS[vatCode]?.revenue ?? target.rgs_code : target.rgs_code;
+    // gemengd gebruik: alleen bij een uitgave op kosten of een bedrijfsmiddel
+    const expense = t.amount < 0 && (target.category === 'kosten' || target.category === 'activa');
+    if (input.businessPct !== undefined && expense && t.counter_name) setBusinessShare(this.db, t.counter_name, input.businessPct);
+    const pct = expense ? businessPct(input.businessPct ?? businessShareFor(this.db, t.counter_name)) : 100;
     const payload: BankCategoriePayload = {
       bankTransactionId: txId,
       date: t.transaction_date,
@@ -670,6 +680,7 @@ export class BankService {
       vatCode,
       relationId,
       description,
+      ...(pct < 100 ? { businessPct: pct } : {}),
       ...(input.channel?.trim() ? { channel: input.channel.trim().slice(0, 60) } : {}),
       // KOR: geen aftrek van voorbelasting op kosten
       ...(target.category !== 'omzet' && korActive(this.db) ? { noVatDeduction: true } : {}),
@@ -685,7 +696,7 @@ export class BankService {
    * Andere categorie of btw-keuze voor een al geboekte transactie (#19): de gebeurtenis wordt
    * vervangen, de oude post krijgt een tegenboeking en de nieuwe wordt opnieuw gecompileerd.
    */
-  reclassify(txId: number, change: { account: string; vatCode?: string; description?: string }, reason = 'andere categorie'): number {
+  reclassify(txId: number, change: { account: string; vatCode?: string; description?: string; businessPct?: number }, reason = 'andere categorie'): number {
     const t = this.get(txId);
     if (t.status !== 'gematcht' || !t.matched_journal_entry_id || t.matched_invoice_id || t.matched_purchase_invoice_id) {
       throw new ValidationError('Alleen een betaling waar je zelf een soort kosten bij koos, kun je zo aanpassen');
@@ -702,6 +713,11 @@ export class BankService {
       vatCode: change.vatCode ?? old.vatCode,
       description: change.description?.trim() || old.description,
     };
+    if (change.businessPct !== undefined) {
+      const pct = businessPct(change.businessPct);
+      if (pct < 100) payload.businessPct = pct;
+      else delete payload.businessPct;
+    }
     return tx(this.db, () => {
       const { entryId } = this.events.replace(event.id, { type: 'bank-categorie', payload }, reason);
       this.db.prepare('UPDATE bank_transactions SET matched_journal_entry_id = ? WHERE id = ?').run(entryId, txId);

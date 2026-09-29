@@ -318,8 +318,13 @@ function CsvMappingDialog({ headers, rows, suggested, onClose, onConfirm }: { he
 }
 
 /** Categoriekeuze in mensentaal (kosten + overige bestemmingen). */
-export function CategoryPicker({ initial, onPick, incoming, amount }: { initial?: string; onPick: (categoryKey: string, vatCode: string) => void; incoming?: boolean; /** betaald bedrag (positief), voor de investeringshint */ amount?: number }) {
+export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { initial?: string; onPick: (categoryKey: string, vatCode: string, businessPct: number) => void; incoming?: boolean; /** betaald bedrag (positief), voor de investeringshint */ amount?: number; /** de betaling: voor het zakelijke deel dat eerder voor deze tegenpartij is opgegeven */ txId?: number }) {
   const { meta } = useApp();
+  const share = useLoad(() => (txId !== undefined && !incoming ? api.bank.businessShare(txId) : Promise.resolve(null)), [txId]);
+  const [pctInput, setPctInput] = useState<string | null>(null);
+  const pct = pctInput ?? String(share.data?.pct ?? 100);
+  const pctNumber = Number(pct);
+  const pctOk = Number.isInteger(pctNumber) && pctNumber >= 1 && pctNumber <= 100;
   const [cat, setCat] = useState(initial ?? 'materiaal');
   const [vat, setVat] = useState<PurchaseVatCode>(meta.expenseCategories.find((c) => c.key === (initial ?? 'materiaal'))?.defaultVat ?? 'hoog');
   return (
@@ -333,7 +338,14 @@ export function CategoryPicker({ initial, onPick, incoming, amount }: { initial?
           {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
         </select>
       </Field>
-      <div className="row end"><Button kind="primary" onClick={() => onPick(cat, vat)}>Opslaan</Button></div>
+      {txId !== undefined && !incoming && (
+        <Field label="Hoeveel daarvan is zakelijk?" hint={pctNumber < 100 && pctOk ? `Het privédeel (${100 - pctNumber}%) telt niet als kosten en de btw erover trek je niet af. De app onthoudt dit voor ${share.data?.name ?? 'deze partij'}.` : 'Alles zakelijk? Laat 100 staan. Gebruik je dit ook privé, bijvoorbeeld opslag, telefoon of internet? Vul het zakelijke deel in.'}>
+          <span className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <input type="number" min={1} max={100} step={1} style={{ width: 90 }} value={pct} onChange={(e) => setPctInput(e.target.value)} /> %
+          </span>
+        </Field>
+      )}
+      <div className="row end"><Button kind="primary" disabled={!pctOk} onClick={() => onPick(cat, vat, pctOk ? pctNumber : 100)}>Opslaan</Button></div>
     </div>
   );
 }
@@ -438,7 +450,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
           </div>
           {recat && (
             <div style={{ marginTop: 12 }}>
-              <CategoryPicker amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode) => void done(api.bank.reclassify(t.id, categoryKey, vatCode), inv(categoryKey, vatCode))} />
+              <CategoryPicker txId={t.id} amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode, businessPct) => void done(api.bank.reclassify(t.id, categoryKey, vatCode, businessPct), inv(categoryKey, vatCode))} />
               <p className="small muted">De app draait de oude keuze terug en verwerkt de nieuwe. Had je de btw-aangifte al gedaan? Dan komt het verschil vanzelf in je volgende aangifte.</p>
             </div>
           )}
@@ -535,13 +547,14 @@ export function CategorizeTransaction({ id }: { id: number }) {
               )}
               <div className="card">
                 <CategoryPicker
+                  txId={t.id}
                   amount={Math.abs(t.amount)}
                   key={String(suggestions.data?.length)}
                   initial={(() => {
                     const s = (suggestions.data ?? []).find((x) => x.kind === 'rekening');
                     return s && s.kind === 'rekening' ? (meta.expenseCategories.find((c) => c.account === s.account && !c.key.startsWith('eigen-')) ?? meta.expenseCategories.find((c) => c.account === s.account))?.key : undefined;
                   })()}
-                  onPick={(categoryKey, vatCode) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode }), inv(categoryKey, vatCode))}
+                  onPick={(categoryKey, vatCode, businessPct) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode, businessPct }), inv(categoryKey, vatCode))}
                 />
               </div>
               <div className="choice" style={{ marginTop: 12 }}>
