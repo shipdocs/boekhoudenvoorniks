@@ -23,6 +23,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const [pay, setPay] = useState<number | null>(payInitial ?? null);
   // niet van de zakelijke rekening betaald (privérekening, telefoonrekening, contant)
   const [paidElsewhere, setPaidElsewhere] = useState<PurchaseInvoice | null>(null);
+  const [share, setShare] = useState<{ id: number; relation_name: string | null; description: string; total: number; vat_total: number; business_pct: number } | null>(null);
   const [uploading, setUploading] = useState(0);
   // vreemde valuta (#74): een aankoop omrekenen (uit de lijst van de app, of met de hand)
   const [fx, setFx] = useState<{ id: number; fromDocument: boolean } | null>(null);
@@ -101,11 +102,12 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                 <td>{p.relation_name ?? '—'}</td>
                 <td>
                   {p.description} {p.attachment_path && <span title="Bewijsstuk aanwezig">📎</span>}
+                  {p.business_pct < 100 && <div className="small"><strong>{p.business_pct}% zakelijk</strong>, {100 - p.business_pct}% privé</div>}
                   {p.warranty_months ? <div className="small muted">🛡️ {warrantyText(p.invoice_date, p.warranty_months)}</div> : null}
                 </td>
                 <td><StatusPill status={p.status} />{p.paid_via && <div className="small muted">{p.paid_via}</div>}</td>
-                <td className="num"><Euro cents={p.vat_total} /></td>
-                <td className="num"><Euro cents={p.total} />{p.currency && p.foreign_total !== null && <div className="small muted">{formatForeign(p.foreign_total, p.currency)}</div>}</td>
+                <td className="num"><Euro cents={p.vat_deductible} />{p.business_pct < 100 && <div className="small muted">van <Euro cents={p.vat_total} /></div>}</td>
+                <td className="num"><Euro cents={p.total} />{p.business_amount !== null && <div className="small muted">zakelijk <Euro cents={p.business_amount} /></div>}{p.currency && p.foreign_total !== null && <div className="small muted">{formatForeign(p.foreign_total, p.currency)}</div>}</td>
                 <td onClick={(e) => e.stopPropagation()}>
                   <span className="row">
                     {p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}
@@ -114,6 +116,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                       if (!confirm(`Aankoop ${p.relation_name ?? p.description} van ${formatDateNl(p.invoice_date)} weghalen? De kosten en de btw gaan eruit; de bon blijft bewaard.`)) return;
                       if ((await run(async () => { await api.purchases.remove(p.id); return true; }, 'Aankoop weggehaald ✓')) !== undefined) await purchases.reload();
                     }}>Weghalen</Button>}
+                    <Button small kind="ghost" title="Gebruik je dit ook privé? Stel in hoeveel zakelijk is" ariaLabel="Zakelijk deel aanpassen" onClick={() => setShare(p)}>%</Button>
                     {!p.currency && <Button small kind="ghost" title="Was deze bon in dollars of een andere munt? Dan reken je hem hier om naar euro's." ariaLabel="Omrekenen uit een andere munt" onClick={() => setFx({ id: p.id, fromDocument: false })}>💱</Button>}
                     <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={async () => {
                       const v = prompt('Hoeveel maanden garantie? (leeg = geen)', p.warranty_months ? String(p.warranty_months) : '24');
@@ -132,6 +135,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
       )}
       {manual && <ManualExpense onClose={() => setManual(false)} onDone={async () => { setManual(false); await purchases.reload(); }} />}
       {pay !== null && <PayModal id={pay} onClose={() => setPay(null)} />}
+      {share && <ShareModal purchase={share} onClose={() => setShare(null)} onDone={async () => { setShare(null); await purchases.reload(); }} />}
       {paidElsewhere && <PaidElsewhereModal purchase={paidElsewhere} others={(purchases.data ?? []).filter((x) => x.id !== paidElsewhere.id && x.relation_id !== null && x.relation_id === paidElsewhere.relation_id && x.status === 'open' && x.open_amount > 0).length} onClose={() => setPaidElsewhere(null)} onDone={async () => { setPaidElsewhere(null); await purchases.reload(); }} />}
       {fx && <ForeignModal purchaseId={fx.id} fromDocument={fx.fromDocument} onClose={() => setFx(null)} onDone={async () => { setFx(null); await foreign.reload(); await purchases.reload(); }} />}
     </div>
@@ -449,6 +453,40 @@ export function BusinessShareField({ supplier, value, onChange }: { supplier: st
         %
       </span>
     </Field>
+  );
+}
+
+/** Zakelijk deel van één aankoop aanpassen (gemengd gebruik), met wat het oplevert vóór je bevestigt. */
+function ShareModal({ purchase, onClose, onDone }: { purchase: { id: number; relation_name: string | null; description: string; total: number; vat_total: number; business_pct: number }; onClose: () => void; onDone: () => Promise<void> }) {
+  const { run, busy } = useAction();
+  const [pct, setPct] = useState(String(purchase.business_pct));
+  const [remember, setRemember] = useState(Boolean(purchase.relation_name));
+  const n = Number(pct);
+  const ok = Number.isInteger(n) && n >= 1 && n <= 100;
+  const net = purchase.total - purchase.vat_total;
+  const kosten = ok ? Math.round((net * n) / 100) : net;
+  const btw = ok ? Math.round((purchase.vat_total * n) / 100) : purchase.vat_total;
+  return (
+    <Modal title="Hoeveel is zakelijk?" onClose={onClose}>
+      <p className="muted">{purchase.relation_name ?? purchase.description} · <Euro cents={purchase.total} /></p>
+      <Field label="Zakelijk deel" hint="Het privédeel telt niet als kosten en de btw erover trek je niet af.">
+        <span className="row" style={{ gap: 6, alignItems: 'center' }}>
+          <input type="number" min={1} max={100} step={1} style={{ width: 90 }} value={pct} onChange={(e) => setPct(e.target.value)} autoFocus /> %
+        </span>
+      </Field>
+      <p>
+        Kosten <Euro cents={kosten} />, btw die je terugkrijgt <Euro cents={btw} />, privé <Euro cents={purchase.total - kosten - btw} />.
+      </p>
+      {purchase.relation_name && (
+        <label className="row" style={{ gap: 6, alignItems: 'center' }}>
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Onthoud voor {purchase.relation_name} (volgende keer vanzelf)
+        </label>
+      )}
+      <div className="row end" style={{ marginTop: 16 }}>
+        <Button onClick={onClose}>Annuleren</Button>
+        <Button kind="primary" disabled={busy || !ok || n === purchase.business_pct} onClick={async () => { if ((await run(async () => { await api.purchases.setBusinessPct(purchase.id, n, remember); return true; }, 'Aangepast ✓')) !== undefined) await onDone(); }}>Opslaan</Button>
+      </div>
+    </Modal>
   );
 }
 

@@ -1,5 +1,15 @@
 # Wijzigingen
 
+## 0.6.13 — zakelijk deel: zie en bevestig wat er verandert
+
+### Opgelost
+- **RGS-codes in de auditfile (XAF)**: de export zette de RGS-code alleen in een eigen blok, waardoor de online XAF-viewer "22 van 22 rekeningen missen een RGS-code" meldde. De code staat nu ook in het standaardveld `leadReference` (zoals DigiBoox dat doet), en het inlezen leest hem daar weer uit.
+
+### Verbeterd
+- **Eerst een lijst, dan pas aanpassen.** In Instellingen > Categorieën > Gemengd gebruik opent "Boekingen bekijken" een lijst met alle geboekte uitgaven van die leverancier. Per boeking zie je het bedrag, het zakelijke deel nu en straks, en wat er met de kosten en de btw-aftrek gebeurt. Je kunt per boeking een ander percentage invullen of een boeking uitvinken, en er verandert pas iets als je bevestigt. Na het bevestigen zie je in dezelfde lijst het nieuwe percentage. Vervangt de knop die eerder alles in één keer aanpaste.
+- **Het zakelijke deel staat in de lijst met aankopen**: "25% zakelijk, 75% privé", de btw die je echt terugkrijgt (met het bedrag op de factuur eronder) en wat zakelijk is. Met de knop % pas je het per aankoop aan.
+- **In het overzicht van je bank** staat bij een betaling nu "40% zakelijk" in plaats van een aparte post Privé-opnamen.
+
 ## 0.6.12 — zakelijk deel per leverancier
 
 ### Nieuw
