@@ -44,6 +44,54 @@ describe('integraties (fase 3)', () => {
     expect((await s.integrations.sync('woocommerce')).created).toBe(0);
   });
 
+  describe('order waarvan de betaling al op de bank staat', () => {
+    const order = (over: Record<string, unknown> = {}) => ({
+      externalId: 'inv_1',
+      number: 'I-MOL-2026-00342',
+      date: '2026-09-22',
+      customer: { name: 'Burando Shipping AG', email: null, address: 'Hafenstrasse 1', postcode: '20457', city: 'Hamburg', country: 'DE', vatNumber: null },
+      lines: [{ description: 'Dienst', quantity: 1, unitPriceExVat: 50000, vatPercentage: 0 }],
+      paid: true,
+      currency: 'EUR',
+      ...over,
+    });
+    const bank = (s: ReturnType<typeof setup>['s']) => {
+      s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-22', amount: 50000, description: 'I-MOL-2026-00342', counterName: 'BURANDO SHIPPING AG' }] });
+      return s.bank.list()[0]!;
+    };
+
+    it('verrekent de factuur direct met een nog niet verwerkte bankregel, niet via de tussenrekening', () => {
+      const { s } = setup();
+      const t = bank(s);
+      const r = s.integrations.importOrders('mollie-facturen', [order()]);
+      expect(r.created).toBe(1);
+      expect(r.messages.filter((m) => !m.includes('ICP'))).toEqual([]);
+      expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(0);
+      expect(s.bank.get(t.id)).toMatchObject({ status: 'gematcht' });
+      expect(s.bank.get(t.id).matched_invoice_id).not.toBeNull();
+      expect(s.invoices.list()[0]).toMatchObject({ status: 'betaald' });
+    });
+
+    it('slaat de order over als de bankbetaling al als verkoop is geboekt (geen dubbele omzet)', () => {
+      const { s } = setup();
+      const t = bank(s);
+      s.bank.bookSale(t.id, { vatCode: 'nul', channel: 'Mollie' } as never);
+      const omzetVoor = s.dashboard.reports('2026-01-01', '2026-12-31').revenue;
+      const r = s.integrations.importOrders('mollie-facturen', [order()]);
+      expect(r.created).toBe(0);
+      expect(r.messages.join(' ')).toContain('al als verkoop geboekt');
+      expect(s.invoices.list()).toHaveLength(0);
+      expect(s.dashboard.reports('2026-01-01', '2026-12-31').revenue).toBe(omzetVoor);
+    });
+
+    it('zonder bankbetaling loopt het nog steeds via de tussenrekening', () => {
+      const { s } = setup();
+      const r = s.integrations.importOrders('mollie-facturen', [order()]);
+      expect(r.created).toBe(1);
+      expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(50000);
+    });
+  });
+
   it('Shopify met prijzen inclusief BTW', async () => {
     const { s } = setup({
       fetch: mockFetch({

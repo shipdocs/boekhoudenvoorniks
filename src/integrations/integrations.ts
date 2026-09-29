@@ -4,7 +4,7 @@ import type { Ledger, PostLine } from '../core-ledger/ledger';
 import { signedLine } from '../core-ledger/ledger';
 import { ACCOUNTS, REVERSE_CHARGE_ACCOUNTS } from '../core-ledger/accounts';
 import { PURCHASE_VAT_RATES } from '../shared/vat';
-import { roundHalfAwayFromZero } from '../shared/money';
+import { formatEuro, roundHalfAwayFromZero } from '../shared/money';
 import { NON_DEDUCTIBLE_VAT } from '../core-ledger/rules';
 import { korActive } from '../settings/settings';
 import type { InvoiceService } from '../documents/invoices';
@@ -195,7 +195,16 @@ export class IntegrationService {
             lines: order.lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unitPriceExVat, vatCode: vatCodeFor(l.vatPercentage), vatPercentage: l.vatPercentage })),
           });
           const inv = this.invoices.finalize(draft.id);
-          this.invoices.registerPayment(inv.id, { amount: inv.total!, date: order.date, moneyAccount: ACCOUNTS.tussenrekeningPsp, description: `Betaling webshoporder ${order.number}` });
+          const bank = this.bankPaymentFor(order, inv.total!);
+          if (bank?.status === 'gematcht') {
+            // rollback: deze order is al als omzet geboekt via de bank; een factuur erbij telt de omzet dubbel
+            throw new Error(`overgeslagen: de bankbetaling van ${formatEuro(inv.total!)} (${bank.transaction_date}) is al als verkoop geboekt. Zet die boeking terug op 'nieuw' en lees de order daarna opnieuw in, dan wordt de factuur direct met de bank verrekend`);
+          }
+          if (bank) {
+            this.invoices.registerPayment(inv.id, { amount: inv.total!, date: bank.transaction_date, moneyAccount: bank.rgs_code, bankTransactionId: bank.id, description: `Ontvangst ${bank.counter_name ?? ''} factuur`.replace(/\s+/g, ' ') });
+          } else {
+            this.invoices.registerPayment(inv.id, { amount: inv.total!, date: order.date, moneyAccount: ACCOUNTS.tussenrekeningPsp, description: `Betaling webshoporder ${order.number}` });
+          }
         });
         result.created++;
       } catch (e) {
@@ -203,6 +212,30 @@ export class IntegrationService {
       }
     }
     return result;
+  }
+
+  /**
+   * Staat de betaling voor deze order al op de bank? Eerst op het ordernummer in de omschrijving of
+   * referentie, anders op exact bedrag + naam van de klant binnen 10 dagen. Een bankregel die al aan
+   * een factuur hangt telt niet; die hoort bij een andere order.
+   */
+  private bankPaymentFor(order: ExternalOrder, total: number) {
+    const rows = this.db
+      .prepare(
+        `SELECT t.id, t.transaction_date, t.counter_name, t.description, t.reference, t.status, a.rgs_code
+         FROM bank_transactions t JOIN bank_accounts b ON b.id = t.bank_account_id JOIN chart_of_accounts a ON a.id = b.account_id
+         WHERE t.amount = ? AND t.matched_invoice_id IS NULL AND t.matched_purchase_invoice_id IS NULL AND t.status != 'genegeerd'
+         ORDER BY t.transaction_date, t.id`,
+      )
+      .all(total) as { id: number; transaction_date: string; counter_name: string | null; description: string | null; reference: string | null; status: string; rgs_code: string }[];
+    const number = String(order.number).toLowerCase();
+    const byNumber = rows.filter((r) => `${r.description ?? ''} ${r.reference ?? ''}`.toLowerCase().includes(number));
+    const name = order.customer.name.trim().toLowerCase();
+    const days = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
+    const byName = rows.filter((r) => name && (r.counter_name ?? '').trim().toLowerCase() === name && days(r.transaction_date, order.date) <= 10);
+    // liever een nog niet verwerkte bankregel; die verrekent de factuur zonder dubbele omzet
+    const pick = (list: typeof rows) => list.find((r) => r.status !== 'gematcht') ?? list[0];
+    return pick(byNumber) ?? pick(byName);
   }
 
   private knownOrders(source: string): Set<string> {

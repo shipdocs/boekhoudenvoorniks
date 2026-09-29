@@ -1,6 +1,12 @@
 # Wijzigingen
 
-## Volgende versie — nog niet uitgebracht
+## 0.6.11 — geen dubbele omzet bij Mollie-orders
+
+### Opgelost
+- **Geen dubbele omzet meer bij Mollie- en webshoporders die al op de bank staan**: staat de betaling van een order al op je bankafschrift, dan wordt de nieuwe factuur direct met die bankregel verrekend in plaats van via de tussenrekening betaalprovider. Was die bankregel al als verkoop geboekt, dan slaat het inlezen de order over met een melding, zodat de omzet niet twee keer meetelt.
+
+### Verbeterd
+- **Bij een bon zie je nu waar de tekst vandaan komt**: Claude Code, lokale herkenning of de tekst uit de PDF, zodat je kunt controleren welke herkenning het document echt gelezen heeft.
 
 ### Techniek
 - **Vaste proefadministratie**: een samenhangende XAF-startpositie, UBL-inkopen, verkoopfacturen en een CAMT-bankafschrift worden periodiek door de echte boekingsservices verwerkt. De test vergelijkt daarna alle niet-nulle grootboeksaldi, bankaansluiting, btw-aangifte, winst, openstaande posten en ontdubbeling met een apart, handmatig doorgerekend verwacht resultaat.
