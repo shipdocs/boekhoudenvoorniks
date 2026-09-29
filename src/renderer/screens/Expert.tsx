@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useLoad } from '../ui';
 import { today } from '../../shared/dates';
+import { LedgerCardsTab, PeriodBalanceTab, RelationCardsTab, TrialBalanceTab } from './LedgerReports';
 
-type Tab = 'grootboek' | 'journaal' | 'rapport' | 'export' | 'leveranciers' | 'controle';
+type Tab = 'grootboek' | 'kaarten' | 'relaties' | 'periode' | 'journaal' | 'rapport' | 'export' | 'leveranciers' | 'controle';
 
 /** Expert-/boekhoudersmodus: alles wat in de normale modus verborgen blijft. */
 export function Expert() {
   const [tab, setTab] = useState<Tab>('grootboek');
+  const [card, setCard] = useState<number | null>(null);
   const year = new Date().getFullYear();
   const [from, setFrom] = useState(`${year}-01-01`);
   const [to, setTo] = useState(`${year}-12-31`);
@@ -17,38 +19,24 @@ export function Expert() {
       <p className="sub">Voor de boekhouder: grootboek (RGS), journaalposten, rapportages en exports.</p>
       <div className="row" style={{ marginBottom: 16 }}>
         <div className="chips">
-          {(['grootboek', 'journaal', 'rapport', 'export', 'leveranciers', 'controle'] as Tab[]).map((t) => (
-            <button key={t} className={tab === t ? 'selected' : ''} onClick={() => setTab(t)}>{{ grootboek: 'Grootboek', journaal: 'Journaal', rapport: 'W&V en balans', export: 'Exports', leveranciers: 'Leveranciersregels', controle: 'Controle' }[t]}</button>
+          {(['grootboek', 'kaarten', 'relaties', 'periode', 'journaal', 'rapport', 'export', 'leveranciers', 'controle'] as Tab[]).map((t) => (
+            <button key={t} className={tab === t ? 'selected' : ''} onClick={() => setTab(t)}>{{ grootboek: 'Kolommenbalans', kaarten: 'Grootboekkaarten', relaties: 'Relatiekaarten', periode: 'Periodebalans', journaal: 'Journaal', rapport: 'W&V en balans', export: 'Exports', leveranciers: 'Leveranciersregels', controle: 'Controle' }[t]}</button>
           ))}
         </div>
         <span className="grow" />
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Van" />
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Tot" />
       </div>
-      {tab === 'grootboek' && <Ledger from={from} to={to} />}
+      {tab === 'grootboek' && <TrialBalanceTab from={from} to={to} onOpenCard={(id) => { setCard(id); setTab('kaarten'); }} />}
+      {tab === 'kaarten' && <LedgerCardsTab from={from} to={to} selected={card} onSelect={setCard} />}
+      {tab === 'relaties' && <RelationCardsTab from={from} to={to} />}
+      {tab === 'periode' && <PeriodBalanceTab year={Number(from.slice(0, 4)) || year} />}
       {tab === 'journaal' && <Journal from={from} to={to} />}
       {tab === 'rapport' && <Reports from={from} to={to} />}
       {tab === 'export' && <Exports from={from} to={to} />}
       {tab === 'leveranciers' && <SupplierRules />}
       {tab === 'controle' && <Integrity />}
     </div>
-  );
-}
-
-function Ledger({ from, to }: { from: string; to: string }) {
-  const b = useLoad(() => api.ledger.balances(from, to), [from, to]);
-  return (
-    <>
-      <ErrorBox error={b.error} />
-      <table className="list small">
-        <thead><tr><th>Nr</th><th>RGS</th><th>Rekening</th><th>Categorie</th><th className="num">Debet</th><th className="num">Credit</th><th className="num">Saldo</th></tr></thead>
-        <tbody>
-          {(b.data ?? []).filter((x) => x.debit || x.credit).map((x) => (
-            <tr key={x.account_id}><td>{x.code}</td><td title={x.rgs_code}>{x.rgs_ref ?? '—'}</td><td>{x.name}</td><td>{x.category}</td><td className="num"><Euro cents={x.debit} /></td><td className="num"><Euro cents={x.credit} /></td><td className="num"><Euro cents={x.balance} /></td></tr>
-          ))}
-        </tbody>
-      </table>
-    </>
   );
 }
 
