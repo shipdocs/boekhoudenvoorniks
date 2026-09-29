@@ -8,9 +8,10 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "routes": [{ "pattern": "licentie.boekhoudenvoorniks.nl", "custom_domain": true }],
-  "vars": { "PUBLIC_URL": "https://licentie.boekhoudenvoorniks.nl" },
+  // MOLLIE_TESTMODE "false" = live (zelfde organisatie-toegangstoken); zie README
+  "vars": { "PUBLIC_URL": "https://licentie.boekhoudenvoorniks.nl", "MOLLIE_PROFILE_ID": "pfl_GTr2c9XX9n", "MOLLIE_TESTMODE": "true" },
   "d1_databases": [
-    // database_id na `npx wrangler d1 create boekhoudenvoorniks-licenties`
-    { "binding": "LICENTIES", "database_name": "boekhoudenvoorniks-licenties", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
+    // aangemaakt met `npx wrangler d1 create boekhoudenvoorniks-licenties --location weur`
+    { "binding": "LICENTIES", "database_name": "boekhoudenvoorniks-licenties", "database_id": "1ab9cdae-3eba-4788-aedb-c608b1e044aa", "migrations_dir": "migrations" }
   ]
 }

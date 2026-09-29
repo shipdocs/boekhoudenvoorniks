@@ -52,16 +52,45 @@ Mollie herhaalt een webhook bij een fout, en kan dezelfde melding ook dubbel of 
    npx wrangler d1 create boekhoudenvoorniks-licenties   # database_id in wrangler.jsonc zetten
    npm run migrate                                         # tabellen aanmaken (migrations/)
    ```
-3. **Geheimen** (nooit in `wrangler.jsonc`):
+3. **Mollie-sleutel: een organisatie-toegangstoken met alleen deze rechten** (Mollie: *Ontwikkelaars →
+   Organisatie-toegangstokens*): `customers.write`, `payments.read`, `payments.write`,
+   `subscriptions.read`, `subscriptions.write`. Geen `refunds`, `payouts` of `mandates`: een uitgelekte
+   sleutel kan dan geen geld terugstorten. Zet in `wrangler.jsonc` bij `vars` het profiel-ID
+   (`MOLLIE_PROFILE_ID`, `pfl_…`) en `MOLLIE_TESTMODE: "true"`; live gaan is later alleen
+   `MOLLIE_TESTMODE: "false"`. (Een gewone API-sleutel `test_…`/`live_…` werkt ook: laat die twee vars
+   dan weg.)
+4. **Geheimen** (nooit in `wrangler.jsonc`):
    ```bash
-   npx wrangler secret put MOLLIE_API_KEY                              # eerst een test_…-sleutel
+   npx wrangler secret put MOLLIE_API_KEY                              # het organisatie-toegangstoken (access_…)
    npx wrangler secret put LICENSE_PRIVATE_KEY < ~/.config/boekhoudenvoorniks-licentiesleutel.json
    npx wrangler secret put PRICE_EUR                                   # bedrag per maand, bv. 7.50
    ```
-4. **Deployen**: `npx wrangler deploy`. De route `licentie.boekhoudenvoorniks.nl` staat in
+5. **Deployen**: `npx wrangler deploy`. De route `licentie.boekhoudenvoorniks.nl` staat in
    `wrangler.jsonc` als custom domain; het domein staat al bij Cloudflare.
-5. **Testen met Mollie in testmodus**: in de app op *Abonnement nemen*, in de testbetaalpagina van
+6. **Testen met Mollie in testmodus**: in de app op *Abonnement nemen*, in de testbetaalpagina van
    Mollie "betaald" kiezen, en daarna *Ik heb betaald: licentie ophalen*.
+
+## Stand (30 september 2026)
+
+Staat live op `licentie.boekhoudenvoorniks.nl`, **in testmodus** (`MOLLIE_TESTMODE: "true"`), met een
+organisatie-toegangstoken met de vijf rechten hierboven. D1-database `boekhoudenvoorniks-licenties` in
+West-Europa. Getest met een testbetaling: betaling verwerkt, abonnement aangemaakt, licentie
+ondertekend en door de app goedgekeurd. In de app staan licenties nog **uit** (`LICENSE_PUBLIC_KEY` leeg).
+
+## Live gaan
+
+Pas als het Mollie-profiel is goedgekeurd, en in deze volgorde:
+
+1. In Mollie (testmodus) de testabonnementen stopzetten. Anders blijft Mollie maandelijks meldingen van
+   testbetalingen sturen die de Worker in live-modus niet kan ophalen.
+2. De testregels uit D1 halen:
+   `npx wrangler d1 execute boekhoudenvoorniks-licenties --remote --command "DELETE FROM payments; DELETE FROM licenses;"`
+3. In `wrangler.jsonc` `MOLLIE_TESTMODE` op `"false"` zetten en `npx wrangler deploy`. Hetzelfde token werkt
+   live; iDEAL en SEPA-incasso moeten aan staan in het profiel.
+4. Eén echte betaling doen en weer opzeggen (via het Mollie-dashboard), en de licentie in de app ophalen.
+5. Pas dan de publieke sleutel in `src/license/license.ts` (`LICENSE_PUBLIC_KEY`) zetten en een release
+   maken. Staat de sleutel in de app terwijl de Worker in testmodus draait, dan geeft een nepbetaling op
+   de testpagina van Mollie een geldige licentie.
 
 ## Nog niet gebouwd
 

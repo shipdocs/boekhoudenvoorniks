@@ -31,8 +31,12 @@ export interface LicenseStatement {
 
 export interface Env {
   LICENTIES: LicenseDb;
-  /** secret: API-sleutel van Mollie (test_… of live_…) */
+  /** secret: organisatie-toegangstoken (access_…) met alleen de rechten hieronder, of een API-sleutel (test_…/live_…) */
   MOLLIE_API_KEY: string;
+  /** var: profiel-ID (pfl_…); alleen bij een organisatie-toegangstoken (bij een API-sleutel juist weglaten) */
+  MOLLIE_PROFILE_ID?: string;
+  /** var: "true" = testmodus; alleen bij een organisatie-toegangstoken */
+  MOLLIE_TESTMODE?: string;
   /** secret: privésleutel voor licenties, JWK (Ed25519) */
   LICENSE_PRIVATE_KEY: string;
   /** var: bv. https://licentie.boekhoudenvoorniks.nl */
@@ -108,10 +112,24 @@ export const addMonth = (date: string): string => addMonths(date, 1);
 /** Betaald t/m: vanaf het begin van de doorlopende periode (geen afwijking door korte maanden). */
 const paidUntil = (row: LicenseRow): string => addMonths(row.period_start, row.months);
 
-async function mollie<T>(env: Env, deps: Deps, path: string, body?: unknown, idempotencyKey?: string): Promise<T> {
+/**
+ * Rechten van het organisatie-toegangstoken: customers.write, payments.read, payments.write,
+ * subscriptions.read, subscriptions.write. Met zo'n token moet elke aanroep `testmode` meesturen, en het
+ * aanmaken van een betaling of abonnement ook `profileId`; met een API-sleutel mag dat juist niet.
+ * `withProfile`: voor betalingen en abonnementen (niet voor klanten).
+ */
+async function mollie<T>(env: Env, deps: Deps, path: string, body?: Record<string, unknown>, opts: { idempotencyKey?: string; withProfile?: boolean } = {}): Promise<T> {
   const headers: Record<string, string> = { authorization: `Bearer ${env.MOLLIE_API_KEY}`, 'content-type': 'application/json' };
-  if (idempotencyKey) headers['idempotency-key'] = idempotencyKey;
-  const res = await deps.fetch(`${MOLLIE}${path}`, { method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (opts.idempotencyKey) headers['idempotency-key'] = opts.idempotencyKey;
+  const testmode = env.MOLLIE_TESTMODE === 'true';
+  let url = `${MOLLIE}${path}`;
+  let payload = body;
+  if (body === undefined) {
+    if (testmode) url += `${path.includes('?') ? '&' : '?'}testmode=true`;
+  } else {
+    payload = { ...body, ...(opts.withProfile && env.MOLLIE_PROFILE_ID ? { profileId: env.MOLLIE_PROFILE_ID } : {}), ...(testmode ? { testmode: true } : {}) };
+  }
+  const res = await deps.fetch(url, { method: body === undefined ? 'GET' : 'POST', headers, body: payload === undefined ? undefined : JSON.stringify(payload) });
   if (!res.ok) throw new MollieError(`Mollie ${path}: ${res.status} ${(await res.text()).slice(0, 300)}`, res.status);
   return (await res.json()) as T;
 }
@@ -134,15 +152,21 @@ async function start(url: URL, env: Env, deps: Deps): Promise<Response> {
   if (!EMAIL.test(email)) return json({ fout: 'Vul een geldig e-mailadres in' }, 400);
   if (await subscriptionRunning(env, deps, await getLicense(env, administratie))) return page(ALREADY);
   const customer = await mollie<{ id: string }>(env, deps, '/customers', { name: email, email, metadata: { administratie } });
-  const payment = await mollie<MolliePayment>(env, deps, '/payments', {
-    amount: { currency: 'EUR', value: env.PRICE_EUR },
-    customerId: customer.id,
-    sequenceType: 'first',
-    description: 'BoekhoudenVoorNiks: uitwisseling met je boekhouder (eerste maand)',
-    redirectUrl: `${env.PUBLIC_URL}/bedankt`,
-    webhookUrl: `${env.PUBLIC_URL}/mollie`,
-    metadata: { administratie, email },
-  });
+  const payment = await mollie<MolliePayment>(
+    env,
+    deps,
+    '/payments',
+    {
+      amount: { currency: 'EUR', value: env.PRICE_EUR },
+      customerId: customer.id,
+      sequenceType: 'first',
+      description: 'BoekhoudenVoorNiks: uitwisseling met je boekhouder (eerste maand)',
+      redirectUrl: `${env.PUBLIC_URL}/bedankt`,
+      webhookUrl: `${env.PUBLIC_URL}/mollie`,
+      metadata: { administratie, email },
+    },
+    { withProfile: true },
+  );
   const checkout = payment._links?.checkout?.href;
   if (!checkout) throw new Error('Mollie gaf geen betaallink');
   return Response.redirect(checkout, 303);
@@ -201,7 +225,7 @@ async function ensureSubscription(env: Env, deps: Deps, administratie: string, p
       webhookUrl: `${env.PUBLIC_URL}/mollie`,
       metadata: { administratie },
     },
-    `abonnement-${paymentId}`,
+    { idempotencyKey: `abonnement-${paymentId}`, withProfile: true },
   );
   await env.LICENTIES.prepare('UPDATE licenses SET subscription_id = ?, subscription_claim = NULL WHERE administratie = ? AND subscription_claim = ?')
     .bind(subscription.id, administratie, paymentId)
