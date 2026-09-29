@@ -44,7 +44,7 @@ test('vragen stellen via Claude Code of Codex: eerst zoeken, dan uitleg en de op
   await expect(page.getByRole('heading', { name: /Vragen stellen over je boekhouding/ })).toBeVisible();
   await expect(page.getByText(/De assistent kan alleen lezen/)).toBeVisible();
   await expect(page.getByText(/Nog niet gevonden: gebruik hierboven/)).toBeVisible();
-  await expect(page.getByText('claude mcp add --scope user gratis-boekhouden -- "/opt/Gratis Boekhouden/gratis-boekhouden" --mcp')).toBeVisible();
+  await expect(page.getByText('claude mcp add --scope user boekhoudenvoorniks -- /opt/BoekhoudenVoorNiks/boekhoudenvoorniks --mcp')).toBeVisible();
   await page.getByRole('button', { name: 'Zoek op deze computer', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Toevoegen aan Claude Code' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Toevoegen aan Codex' })).toHaveCount(0);

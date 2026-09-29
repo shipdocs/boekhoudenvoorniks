@@ -1,4 +1,4 @@
-# Gratis Boekhouden
+# BoekhoudenVoorNiks
 
 > Gratis, lokaal boekhoudprogramma (desktop-app voor Windows en Linux) voor zzp'ers en kleine ondernemers in Nederland, vooral vakmensen zoals stukadoors, schilders, timmerlieden, loodgieters en elektriciens. De gebruiker werkt met klanten, klussen, offertes, facturen, bonnetjes en de bank; het programma maakt daar automatisch een dubbele boekhouding van (RGS-grootboekschema) en rekent de btw-aangifte uit. Geen abonnement, geen account, de administratie staat op de eigen computer.
 
@@ -14,20 +14,20 @@ Belangrijke feiten:
 - Bank: elke bank via CAMT.053 of MT940; CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos en Revolut wordt vanzelf herkend, andere CSV-indelingen stel je één keer in; automatische koppeling van betalingen aan facturen en bonnetjes. Een live bankkoppeling (open banking) is nog niet beschikbaar.
 - Bonnetjes: e-facturen (UBL/XML) en pdf's met tekst worden automatisch gelezen; foto's via een optionele lokale tekstherkenning (OCR). AI doet alleen voorstellen; boekingen worden door vaste regels gemaakt.
 - Klussen: offerte → klus → factuur, met kosten per klus.
-- Voor de boekhouder: "Pakket voor je boekhouder" — één ZIP per boekjaar met auditfile (XAF 3.2, gevalideerd), kolommenbalans, grootboekkaarten, journaalposten, openstaande debiteuren/crediteuren per factuur, RGS-brugstaat, btw-overzicht, relaties, facturen en bonnen met index, en een lees-mij met aansluiting, controles en importroutes (Caseware, AFAS, Visionplanner, Twinfield, Exact Online, Yuki, SnelStart). Geen back-up maar een overdracht. Voorbeeldpakket: https://shipdocs.github.io/gratis-boekhouden/voorbeeld/voorbeeldpakket-boekhouder-2025.zip. Daarnaast een expertmodus met grootboek (RGS), journaal, balans, W&V, correctieboekingen en losse exports.
+- Voor de boekhouder: "Pakket voor je boekhouder" — één ZIP per boekjaar met auditfile (XAF 3.2, gevalideerd), kolommenbalans, grootboekkaarten, journaalposten, openstaande debiteuren/crediteuren per factuur, RGS-brugstaat, btw-overzicht, relaties, facturen en bonnen met index, en een lees-mij met aansluiting, controles en importroutes (Caseware, AFAS, Visionplanner, Twinfield, Exact Online, Yuki, SnelStart). Geen back-up maar een overdracht. Voorbeeldpakket: https://boekhoudenvoorniks.nl/voorbeeld/voorbeeldpakket-boekhouder-2025.zip. Daarnaast een expertmodus met grootboek (RGS), journaal, balans, W&V, correctieboekingen en losse exports.
 - Koppelingen: WooCommerce, Shopify, Mollie Facturen (leest betaalde facturen), Mollie (uitbetalingen), Stripe.
 - Overstappen: overstap-hulp met instapdatum; inlezen van auditfiles (XAF, ook meerdere tegelijk, één per boekjaar), kolommen- of saldibalans en lijsten met openstaande facturen. Auditfiles zonder beginbalans (zoals DigiBoox) worden per jaar opgeteld. Bedrijfsmiddelen krijgen hun aankoopdatum uit oudere auditfiles.
 - Fiscaal: KOR (btw op inkopen naar de kosten), ICP-opgaaf met goederen en diensten apart, aftrekposten (afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek) en een schatting van de inkomstenbelasting. Altijd laten controleren door een boekhouder.
-- Huidige versie: 0.6.14 (29 september 2026). Release notes: https://shipdocs.github.io/gratis-boekhouden/wijzigingen.html
-- Broncode: https://github.com/shipdocs/gratis-boekhouden
+- Huidige versie: 0.6.14 (29 september 2026). Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
+- Broncode: https://github.com/shipdocs/boekhoudenvoorniks
 - Uitgever: Shipdocs (info@shipdocs.app)
 
 ## Links
 
-- [Website](https://shipdocs.github.io/gratis-boekhouden/): productpagina met veelgestelde vragen
-- [Wat is er nieuw](https://shipdocs.github.io/gratis-boekhouden/wijzigingen.html): release notes per versie
-- [Downloads](https://github.com/shipdocs/gratis-boekhouden/releases/latest): installers voor Windows en Linux
-- [Uitgebreide beschrijving voor LLM's](https://shipdocs.github.io/gratis-boekhouden/llms-full.txt)
-- [Gebruiksvoorwaarden en disclaimer](https://shipdocs.github.io/gratis-boekhouden/voorwaarden.html)
-- [Privacyverklaring](https://shipdocs.github.io/gratis-boekhouden/privacy.html)
-- [Broncode en documentatie](https://github.com/shipdocs/gratis-boekhouden)
+- [Website](https://boekhoudenvoorniks.nl/): productpagina met veelgestelde vragen
+- [Wat is er nieuw](https://boekhoudenvoorniks.nl/wijzigingen.html): release notes per versie
+- [Downloads](https://github.com/shipdocs/boekhoudenvoorniks/releases/latest): installers voor Windows en Linux
+- [Uitgebreide beschrijving voor LLM's](https://boekhoudenvoorniks.nl/llms-full.txt)
+- [Gebruiksvoorwaarden en disclaimer](https://boekhoudenvoorniks.nl/voorwaarden.html)
+- [Privacyverklaring](https://boekhoudenvoorniks.nl/privacy.html)
+- [Broncode en documentatie](https://github.com/shipdocs/boekhoudenvoorniks)

@@ -54,15 +54,15 @@ jobs:
 
       - name: Rooktest verpakte app (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: GRATIS_BOEKHOUDEN_SMOKE_TEST=1 GRATIS_BOEKHOUDEN_DATA="$RUNNER_TEMP/smoke" timeout 120 xvfb-run -a release/linux-unpacked/gratis-boekhouden --no-sandbox
+        run: BOEKHOUDENVOORNIKS_SMOKE_TEST=1 BOEKHOUDENVOORNIKS_DATA="$RUNNER_TEMP/smoke" timeout 120 xvfb-run -a release/linux-unpacked/boekhoudenvoorniks --no-sandbox
 
       - name: Rooktest verpakte app (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $env:GRATIS_BOEKHOUDEN_SMOKE_TEST = '1'
-          $env:GRATIS_BOEKHOUDEN_DATA = "$env:RUNNER_TEMP\smoke"
-          $p = Start-Process -FilePath "release\win-unpacked\Gratis Boekhouden.exe" -PassThru -NoNewWindow
+          $env:BOEKHOUDENVOORNIKS_SMOKE_TEST = '1'
+          $env:BOEKHOUDENVOORNIKS_DATA = "$env:RUNNER_TEMP\smoke"
+          $p = Start-Process -FilePath "release\win-unpacked\BoekhoudenVoorNiks.exe" -PassThru -NoNewWindow
           $null = $p.Handle  # nodig zodat ExitCode na afloop beschikbaar is
           try {
             Wait-Process -Id $p.Id -Timeout 120 -ErrorAction Stop

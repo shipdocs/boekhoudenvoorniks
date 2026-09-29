@@ -3,7 +3,7 @@
 Status: **ontwerp**, nog niet gebouwd. Peildatum 29 september 2026, `main` @ `1c0497f`.
 
 Dit document beschrijft hoe een klant een deel van zijn administratie naar zijn boekhouder stuurt,
-de boekhouder die in Gratis Boekhouden controleert en corrigeert, en de klant het antwoord weer
+de boekhouder die in BoekhoudenVoorNiks controleert en corrigeert, en de klant het antwoord weer
 inleest zonder dat werk van tussendoor verloren gaat. Het bestaande **pakket voor je boekhouder**
 (ZIP met XAF, zie [boekhouders.md](boekhouders.md)) blijft bestaan voor boekhouders die in hun eigen
 software werken; dat gaat maar één kant op.
@@ -12,7 +12,7 @@ software werken; dat gaat maar één kant op.
 
 1. **De administratie van de klant is de echte.** De kopie van de boekhouder is een werkkopie; er
    worden nooit twee databases samengevoegd.
-2. **De boekhouder werkt in Gratis Boekhouden**, in de kantoormodus. Er is geen terugweg uit andere
+2. **De boekhouder werkt in BoekhoudenVoorNiks**, in de kantoormodus. Er is geen terugweg uit andere
    boekhoudsoftware.
 3. **Niets dat wij beheren.** Geen server, geen portaal, geen account. Transport gaat via e-mail
    (eigen SMTP), een gedeelde map (OneDrive, Dropbox, Nextcloud, …) of een los bestand.

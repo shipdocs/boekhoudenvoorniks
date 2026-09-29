@@ -1,33 +1,33 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
-    <loc>https://shipdocs.github.io/gratis-boekhouden/</loc>
-    <xhtml:link rel="alternate" hreflang="nl-NL" href="https://shipdocs.github.io/gratis-boekhouden/"/>
+    <loc>https://boekhoudenvoorniks.nl/</loc>
+    <xhtml:link rel="alternate" hreflang="nl-NL" href="https://boekhoudenvoorniks.nl/"/>
     <lastmod>2026-09-29</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://shipdocs.github.io/gratis-boekhouden/boekhouders.html</loc>
+    <loc>https://boekhoudenvoorniks.nl/boekhouders.html</loc>
     <lastmod>2026-09-29</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://shipdocs.github.io/gratis-boekhouden/wijzigingen.html</loc>
+    <loc>https://boekhoudenvoorniks.nl/wijzigingen.html</loc>
     <lastmod>2026-09-29</lastmod>
     <changefreq>weekly</changefreq>
   </url>
   <url>
-    <loc>https://shipdocs.github.io/gratis-boekhouden/voorwaarden.html</loc>
+    <loc>https://boekhoudenvoorniks.nl/voorwaarden.html</loc>
     <lastmod>2026-09-26</lastmod>
   </url>
   <url>
-    <loc>https://shipdocs.github.io/gratis-boekhouden/privacy.html</loc>
+    <loc>https://boekhoudenvoorniks.nl/privacy.html</loc>
     <lastmod>2026-09-26</lastmod>
   </url>
   <url>
-    <loc>https://shipdocs.github.io/gratis-boekhouden/llms.txt</loc>
+    <loc>https://boekhoudenvoorniks.nl/llms.txt</loc>
     <lastmod>2026-09-29</lastmod>
   </url>
 </urlset>

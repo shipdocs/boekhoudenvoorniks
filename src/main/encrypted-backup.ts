@@ -30,7 +30,7 @@ export function isEncryptedBackup(data: Buffer): boolean {
 }
 
 export function decryptBackup(data: Buffer, password: string): Buffer {
-  if (!isEncryptedBackup(data)) throw new Error('Dit is geen versleutelde back-up van Gratis Boekhouden');
+  if (!isEncryptedBackup(data)) throw new Error('Dit is geen versleutelde back-up van BoekhoudenVoorNiks');
   const version = data[MAGIC.length];
   if (version !== VERSION) throw new Error(`Onbekende versie van het back-upformaat (${version})`);
   let o = MAGIC.length + 1;

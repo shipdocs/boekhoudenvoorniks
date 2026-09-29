@@ -24,8 +24,10 @@ import type { FetchLike } from '../integrations/types';
 import { ImapSource } from '../mail/imap-source';
 import { Updates } from './updates';
 import { startMcp } from '../mcp/start';
+import { hasOldMcp, mcpCommands } from '../mcp/names';
 import type { PollResult } from '../mail/mail-intake';
 import { isPathInside } from './path-security';
+import { DATA_DIR_NAME, migrateDataDir, OLD_DATA_DIR_NAME } from './data-dir';
 
 const SMTP_SECRET = 'smtp:password';
 const IMAP_SECRET = 'imap:password';
@@ -39,14 +41,42 @@ let api: Api;
 let secrets: SafeStorageSecretStore;
 let localOcr: LocalOcrRuntime;
 
+/** Eigen gegevensmap (tests, rooktest); GRATIS_BOEKHOUDEN_DATA is de naam van vóór de naamswijziging. */
+const DATA_ENV = process.env.BOEKHOUDENVOORNIKS_DATA ?? process.env.GRATIS_BOEKHOUDEN_DATA;
+
 function dataDir(): string {
-  const dir = process.env.GRATIS_BOEKHOUDEN_DATA ?? app.getPath('userData');
+  const dir = DATA_ENV ?? app.getPath('userData');
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 
 function dbPath(): string {
   return join(dataDir(), 'boekhouding.sqlite');
+}
+
+/** Koppeling (opnieuw) toevoegen onder de huidige naam; een koppeling onder de oude naam gaat eerst weg. */
+async function registerMcp(kind: 'claude-code' | 'codex', cli: string) {
+  const { command, args } = mcpCommand();
+  const { remove, add } = mcpCommands(kind, command, args);
+  const opts = { cwd: app.getPath('home'), input: '', timeoutMs: 30_000, env: cliEnv(cli) };
+  if (hasOldMcp(kind, app.getPath('home'))) await nodeCliRunner(cli, remove, opts);
+  return nodeCliRunner(cli, add, opts);
+}
+
+/** Na de naamswijziging: een koppeling onder de oude naam wijst naar het oude programma; zet hem om. */
+async function migrateMcp(): Promise<void> {
+  const s = services.settings.get().ocr;
+  for (const [kind, stored] of [['claude-code', s.claudeCodePath], ['codex', s.codexPath]] as const) {
+    if (!hasOldMcp(kind, app.getPath('home'))) continue;
+    const cli = stored || findCli(kind);
+    if (!cli) continue;
+    try {
+      const r = await registerMcp(kind, cli);
+      console.log(`Koppeling ${kind} omgezet naar de nieuwe naam: ${r.code === 0 ? 'gelukt' : `${r.stdout}${r.stderr}`.trim().slice(0, 200)}`);
+    } catch (e) {
+      console.error(`Koppeling ${kind} omzetten mislukt`, e);
+    }
+  }
 }
 
 /**
@@ -195,9 +225,7 @@ function initServices(): void {
     openLoginTerminal: (kind, path) => openLoginTerminal(kind, path),
     mcpCommand,
     connectMcp: async (kind, cli) => {
-      const { command, args } = mcpCommand();
-      const add = kind === 'codex' ? ['mcp', 'add', 'gratis-boekhouden', '--', command, ...args] : ['mcp', 'add', '--scope', 'user', 'gratis-boekhouden', '--', command, ...args];
-      const r = await nodeCliRunner(cli, add, { cwd: app.getPath('home'), input: '', timeoutMs: 30_000, env: cliEnv(cli) });
+      const r = await registerMcp(kind, cli);
       const out = `${r.stdout}\n${r.stderr}`;
       if (r.code === 0) return 'Toegevoegd ✓';
       if (/already exists|bestaat al/i.test(out)) return 'Stond er al in ✓';
@@ -409,7 +437,7 @@ function createWindow(): void {
     height: 840,
     minWidth: 960,
     minHeight: 640,
-    title: 'Gratis Boekhouden',
+    title: 'BoekhoudenVoorNiks',
     backgroundColor: '#f6f7f9',
     // menubalk (File/Edit/View/Window) blijft uit het zicht; Alt laat hem even zien
     autoHideMenuBar: true,
@@ -461,7 +489,7 @@ function createWindow(): void {
  * Rooktest voor de verpakte app (release-workflow): start, open de database, laad het venster
  * en sluit af met code 0. Elke fout in het hoofdproces → code 1 in plaats van een verborgen dialoog.
  */
-const SMOKE_TEST = process.env.GRATIS_BOEKHOUDEN_SMOKE_TEST === '1';
+const SMOKE_TEST = (process.env.BOEKHOUDENVOORNIKS_SMOKE_TEST ?? process.env.GRATIS_BOEKHOUDEN_SMOKE_TEST) === '1';
 if (SMOKE_TEST) {
   process.on('uncaughtException', (e) => {
     console.error('SMOKE FAIL', e);
@@ -479,13 +507,31 @@ app.commandLine.appendSwitch('lang', 'nl');
 // "--mcp": de koppeling voor Claude Code/Codex (alleen lezen). Geen venster, geen enkele-instantie-slot:
 // de app zelf kan gewoon tegelijk open zijn.
 const MCP_MODE = process.argv.includes('--mcp');
+
+// Gegevensmap: sinds de naamswijziging "boekhoudenvoorniks" in plaats van "gratis-boekhouden". De interne appnaam
+// (package.json "name") blijft gratis-boekhouden: daaraan hangen de Linux-sleutelhanger van de geheimen
+// en de updates over de bestaande installatie. De oude map wordt één keer overgezet, vóór er iets open is.
+if (!DATA_ENV) {
+  const appData = app.getPath('appData');
+  const oldDir = join(appData, OLD_DATA_DIR_NAME);
+  const newDir = join(appData, DATA_DIR_NAME);
+  if (MCP_MODE) {
+    // de koppeling verplaatst niets (de app kan open zijn); nog niet overgezet → lees de oude map
+    const notYet = !existsSync(join(newDir, 'boekhouding.sqlite')) && existsSync(join(oldDir, 'boekhouding.sqlite'));
+    app.setPath('userData', notYet ? oldDir : newDir);
+  } else {
+    const result = migrateDataDir(oldDir, newDir);
+    if (result !== 'geen' && result !== 'overgeslagen') console.log(`Gegevens ${result} van ${oldDir} naar ${newDir}`);
+    app.setPath('userData', newDir);
+  }
+}
 const gotLock = MCP_MODE ? false : app.requestSingleInstanceLock();
 if (MCP_MODE) {
   app.dock?.hide();
   startMcp(dbPath(), app.getVersion()).then(
     () => app.exit(0),
     (e) => {
-      process.stderr.write(`Gratis Boekhouden (koppeling): ${(e as Error).message}\n`);
+      process.stderr.write(`BoekhoudenVoorNiks (koppeling): ${(e as Error).message}\n`);
       app.exit(1);
     },
   );
@@ -512,6 +558,7 @@ if (MCP_MODE) {
     createWindow();
     if (SMOKE_TEST) return;
     setTimeout(() => void backgroundTasks(), 10_000);
+    setTimeout(() => void migrateMcp(), 20_000);
     setInterval(() => void backgroundTasks(), SIX_HOURS);
     // inkomende post: kort na het opstarten en daarna elk kwartier
     setTimeout(() => void backgroundMail(), 30_000);

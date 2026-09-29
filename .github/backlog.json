@@ -33,7 +33,7 @@
       "title": "GitHub Pages aanzetten (en eventueel een eigen domein)",
       "milestone": "MVP livegang",
       "labels": ["input nodig", "infra"],
-      "body": "De website staat in `site/` en wordt gepubliceerd door `.github/workflows/pages.yml`.\n\n**Actie (repo-admin):** Settings → Pages → *Build and deployment* → Source: **GitHub Actions**. Start daarna de workflow *Website (GitHub Pages)* of push naar `main`.\n\nDe site gaat uit van `https://shipdocs.github.io/gratis-boekhouden/`: canonical, sitemap, Open Graph en `llms.txt`. Kies je een eigen domein, dan moeten die URL's mee worden aangepast (zoek op `shipdocs.github.io`), plus een `site/CNAME`.\n\nDaarna: de site aanmelden bij Google Search Console en Bing Webmaster Tools en `sitemap.xml` indienen."
+      "body": "De website staat in `site/` en wordt gepubliceerd door `.github/workflows/pages.yml`.\n\n**Actie (repo-admin):** Settings → Pages → *Build and deployment* → Source: **GitHub Actions**. Start daarna de workflow *Website (GitHub Pages)* of push naar `main`.\n\nDe site gaat uit van `https://boekhoudenvoorniks.nl/`: canonical, sitemap, Open Graph en `llms.txt`. Kies je een eigen domein, dan moeten die URL's mee worden aangepast (zoek op `shipdocs.github.io`), plus een `site/CNAME`.\n\nDaarna: de site aanmelden bij Google Search Console en Bing Webmaster Tools en `sitemap.xml` indienen."
     },
     {
       "title": "Code signing voor de Windows-installer",

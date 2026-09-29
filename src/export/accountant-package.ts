@@ -31,7 +31,7 @@ import { OPENING_ON_FROM } from '../reports/opening-balance';
  */
 
 export const XAF_VERSION = '3.2';
-export const FEEDBACK_URL = 'https://github.com/shipdocs/gratis-boekhouden/issues';
+export const FEEDBACK_URL = 'https://github.com/shipdocs/boekhoudenvoorniks/issues';
 
 /** SnelStart: nummer van het memoriaaldagboek; staat per administratie anders, zie importprofielen/LEES-MIJ.txt */
 const SNELSTART_MEMORIAAL = 90;
@@ -717,7 +717,7 @@ export class AccountantPackage {
     const L: string[] = [];
     L.push(`OVERDRACHT AAN DE BOEKHOUDER — BOEKJAAR ${s.year}`, '');
     L.push(`${s.company.name}${s.company.kvkNumber ? ` · KvK ${s.company.kvkNumber}` : ''}${s.company.vatNumber ? ` · btw ${s.company.vatNumber}` : ''}`);
-    L.push(`Periode ${formatDateNl(s.from)} t/m ${formatDateNl(s.to)} · gemaakt op ${formatDateNl(s.createdAt)} met Gratis Boekhouden ${s.softwareVersion}`, '');
+    L.push(`Periode ${formatDateNl(s.from)} t/m ${formatDateNl(s.to)} · gemaakt op ${formatDateNl(s.createdAt)} met BoekhoudenVoorNiks ${s.softwareVersion}`, '');
     L.push('Let op: dit is een export voor overdracht, geen back-up. Instellingen, koppelingen en sjablonen zitten er niet in;', 'de ondernemer houdt daarvoor een eigen back-up in de app.', '');
     L.push('INHOUD');
     for (const [f, d] of files) L.push(`  ${f}`, `      ${d}`);
@@ -763,7 +763,7 @@ code { font-size: 9pt; } .ok { color: #1a7f37; font-weight: 700; } .bad { color:
 </style></head><body>
 <h1>Overdracht aan de boekhouder — boekjaar ${s.year}</h1>
 <div class="meta"><strong>${x(s.company.name)}</strong>${s.company.kvkNumber ? ` · KvK ${x(s.company.kvkNumber)}` : ''}${s.company.vatNumber ? ` · btw ${x(s.company.vatNumber)}` : ''}<br>
-Periode ${formatDateNl(s.from)} t/m ${formatDateNl(s.to)} · gemaakt op ${formatDateNl(s.createdAt)} met Gratis Boekhouden ${x(s.softwareVersion)} · XAF ${s.xafVersion} · RGS ${x(s.rgsVersion)}</div>
+Periode ${formatDateNl(s.from)} t/m ${formatDateNl(s.to)} · gemaakt op ${formatDateNl(s.createdAt)} met BoekhoudenVoorNiks ${x(s.softwareVersion)} · XAF ${s.xafVersion} · RGS ${x(s.rgsVersion)}</div>
 <div class="label"><strong>Export voor overdracht, geen back-up.</strong> Dit pakket is gemaakt om in te lezen in het eigen pakket van de boekhouder. Instellingen, koppelingen en sjablonen zitten er niet in; de ondernemer houdt daarvoor een eigen back-up in de app.</div>
 <h2>Inhoud</h2>
 <table>${files.map(([f, d]) => `<tr><td><code>${x(f)}</code></td><td>${x(d)}</td></tr>`).join('')}</table>

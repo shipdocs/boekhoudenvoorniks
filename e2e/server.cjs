@@ -79,7 +79,7 @@ function init(fresh) {
     pickProgram: async () => null,
     checkCli: async () => 'Claude Code werkt ✓',
     openLoginTerminal: async () => 'Claude Code is geopend in een terminal.',
-    mcpCommand: () => ({ command: '/opt/Gratis Boekhouden/gratis-boekhouden', args: ['--mcp'] }),
+    mcpCommand: () => ({ command: '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', args: ['--mcp'] }),
     localOcr: { status: () => ({ state: 'niet-geinstalleerd' }), install: () => ({ state: 'niet-geinstalleerd' }), uninstall: async () => ({ state: 'niet-geinstalleerd' }) },
     async resetData(withDemo) {
       const backup = await wipeDatabase(db, file, path.join(dir, 'backups'));

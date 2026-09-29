@@ -130,7 +130,7 @@ export function App() {
       <div className="app">
         {route.screen !== 'welkom' && (
           <nav className="nav" aria-label="Hoofdmenu">
-            <div className="brand">Gratis Boekhouden</div>
+            <div className="brand">BoekhoudenVoorNiks</div>
             <button className={`search-btn${route.screen === 'zoeken' ? ' active' : ''}`} onClick={() => go({ screen: 'zoeken' })} title="Zoeken (Ctrl+K voor snel zoeken)"><span>🔍</span>Zoeken<kbd>Ctrl K</kbd></button>
             {NAV.map((n) => (
               <button key={n.screen} className={isActive(n) ? 'active' : ''} onClick={() => go({ screen: n.screen })}>

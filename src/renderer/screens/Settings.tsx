@@ -560,7 +560,7 @@ function BackupSettings() {
         <input type="password" placeholder="wachtwoord (alleen bij versleutelde back-up)" value={restorePw} onChange={(e) => setRestorePw(e.target.value)} style={{ minWidth: 280 }} />
       </div>
       <h3>Versleutelde kopie voor je boekhouder</h3>
-      <p className="small muted">Maakt een kopie van je hele administratie die alleen met het wachtwoord te openen is, in Gratis Boekhouden via "Back-up terugzetten". Geef het wachtwoord apart door (bijvoorbeeld telefonisch), niet in dezelfde mail.</p>
+      <p className="small muted">Maakt een kopie van je hele administratie die alleen met het wachtwoord te openen is, in BoekhoudenVoorNiks via "Back-up terugzetten". Geef het wachtwoord apart door (bijvoorbeeld telefonisch), niet in dezelfde mail.</p>
       <div className="row">
         <input type="password" placeholder="wachtwoord (min. 10 tekens)" value={pw} onChange={(e) => setPw(e.target.value)} />
         <input type="password" placeholder="herhaal wachtwoord" value={pw2} onChange={(e) => setPw2(e.target.value)} />
@@ -674,7 +674,7 @@ function About() {
   };
   return (
     <div className="card grid">
-      <h3>Gratis Boekhouden {version.data}</h3>
+      <h3>BoekhoudenVoorNiks {version.data}</h3>
       <p>Gratis en open source onder de {LICENSE_NAME}. Je mag de software gebruiken, bestuderen, aanpassen en delen onder de voorwaarden van die licentie.</p>
       <p>
         <a href="#" onClick={open(SOURCE_URL)}>Broncode</a> · <a href="#" onClick={open(TERMS_URL)}>Gebruiksvoorwaarden</a> · <a href="#" onClick={open(PRIVACY_URL)}>Privacyverklaring</a>

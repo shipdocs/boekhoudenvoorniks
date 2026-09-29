@@ -2,6 +2,7 @@ import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import type { Services } from '../services';
 import { periodFor, today } from '../shared/dates';
+import { MCP_NAME } from '../shared/brand';
 
 /**
  * Vragen over je eigen boekhouding vanuit Claude Code of Codex (MCP, via stdin/stdout).
@@ -11,7 +12,7 @@ import { periodFor, today } from '../shared/dates';
  * belasting laat de gebruiker controleren door een boekhouder.
  */
 
-export const MCP_INSTRUCTIONS = `Je kijkt mee in de boekhouding van een Nederlandse ondernemer (app "Gratis Boekhouden").
+export const MCP_INSTRUCTIONS = `Je kijkt mee in de boekhouding van een Nederlandse ondernemer (app "BoekhoudenVoorNiks").
 Je kunt alleen lezen: niets boeken of wijzigen. Bedragen zijn in centen (12100 = € 121,00), datums JJJJ-MM-DD.
 Leg uit in gewone taal, in het Nederlands. Wat je zegt over btw of inkomstenbelasting is een uitleg, geen advies:
 zeg erbij dat de gebruiker het laat controleren door een boekhouder of accountant.`;
@@ -119,7 +120,7 @@ export function handleMessage(msg: JsonRpc, tools: McpTool[], version: string): 
       return reply({
         protocolVersion: typeof msg.params?.protocolVersion === 'string' ? msg.params.protocolVersion : '2025-06-18',
         capabilities: { tools: {} },
-        serverInfo: { name: 'gratis-boekhouden', version },
+        serverInfo: { name: MCP_NAME, version },
         instructions: MCP_INSTRUCTIONS,
       });
     case 'ping':
