@@ -8,7 +8,7 @@
   - **Grootboekkaarten**: alle boekingen op een rekening met beginsaldo, oplopend saldo, wederpartij en een knop naar de factuur, aankoop of betaling erachter.
   - **Relatiekaarten**: per klant of leverancier wat er is geboekt en wat er nog openstaat.
   - **Periodebalans**: alle mutaties per maand of per kwartaal, met beginbalans en eindstand.
-  - Elk rapport heeft CSV en afdrukken.
+  - Voor het doorgeven aan je boekhouder gebruik je de bestaande exports (auditfile).
 
 ## 0.6.13 — zakelijk deel: zie en bevestig wat er verandert
 

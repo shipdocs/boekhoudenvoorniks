@@ -2,7 +2,6 @@ import type { Db } from '../db/database';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import type { Cents } from '../shared/money';
 import type { IsoDate } from '../shared/dates';
-import { centsToDecimalString } from '../shared/money';
 
 /** Rapporten uit het grootboek voor de boekhouder: kolommenbalans, kaarten en periodebalans. */
 
@@ -221,39 +220,5 @@ export class LedgerReports {
       })
       .filter((r) => r.opening !== 0 || r.periods.some((x) => x !== 0));
     return { year, granularity, labels, rows };
-  }
-
-  // ---- CSV ----
-
-  private csv(rows: (string | number)[][]): string {
-    const cell = (v: string | number) => {
-      const s = String(v);
-      return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    return rows.map((r) => r.map(cell).join(';')).join('\r\n') + '\r\n';
-  }
-
-  trialBalanceCsv(from: IsoDate, to: IsoDate): string {
-    const tb = this.trialBalance(from, to);
-    const e = (c: Cents) => centsToDecimalString(c);
-    return this.csv([['Code', 'Omschrijving', 'RGS', 'Soort', 'Beginbalans', 'Debet', 'Credit', 'Eindsaldo'], ...tb.rows.map((r) => [r.code, r.name, r.rgsRef ?? '', r.kind, e(r.opening), e(r.debit), e(r.credit), e(r.closing)]), ['', 'Totaal', '', '', e(tb.totals.opening), e(tb.totals.debit), e(tb.totals.credit), e(tb.totals.closing)]]);
-  }
-
-  ledgerCardCsv(accountId: number, from: IsoDate, to: IsoDate): string {
-    const c = this.ledgerCard(accountId, from, to);
-    const e = (x: Cents) => centsToDecimalString(x);
-    return this.csv([['Boeking', 'Datum', 'Omschrijving', 'Bron', 'Wederpartij', 'Debet', 'Credit', 'Saldo'], ['', from, 'Beginsaldo', '', '', '', '', e(c.opening)], ...c.lines.map((l) => [l.entryId, l.date, l.description, l.source, l.counterparty ?? '', e(l.debit), e(l.credit), e(l.balance)])]);
-  }
-
-  relationCardCsv(relationId: number, from: IsoDate, to: IsoDate): string {
-    const c = this.relationCard(relationId, from, to);
-    const e = (x: Cents) => centsToDecimalString(x);
-    return this.csv([['Boeking', 'Datum', 'Omschrijving', 'Rekening', 'Debet', 'Credit', 'Saldo'], ...c.lines.map((l) => [l.entryId, l.date, l.description, l.account, e(l.debit), e(l.credit), e(l.balance)])]);
-  }
-
-  periodBalanceCsv(year: number, granularity: 'maand' | 'kwartaal'): string {
-    const p = this.periodBalance(year, granularity);
-    const e = (x: Cents) => centsToDecimalString(x);
-    return this.csv([['Code', 'Omschrijving', 'Beginbalans', ...p.labels, 'Eindstand'], ...p.rows.map((r) => [r.code, r.name, e(r.opening), ...r.periods.map(e), e(r.closing)])]);
   }
 }

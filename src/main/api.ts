@@ -675,10 +675,6 @@ export function createApi(s: Services, host: HostContext) {
       relations: (to: IsoDate) => s.ledgerReports.relations(to),
       relationCard: (relationId: number, from: IsoDate, to: IsoDate) => s.ledgerReports.relationCard(relationId, from, to),
       periodBalance: (year: number, granularity: 'maand' | 'kwartaal') => s.ledgerReports.periodBalance(year, granularity),
-      exportTrialBalance: (from: IsoDate, to: IsoDate) => host.saveFile(`kolommenbalans-${from}-${to}.csv`, s.ledgerReports.trialBalanceCsv(from, to), [{ name: 'CSV', extensions: ['csv'] }]),
-      exportLedgerCard: (accountId: number, from: IsoDate, to: IsoDate) => host.saveFile(`grootboekkaart-${accountId}-${from}-${to}.csv`, s.ledgerReports.ledgerCardCsv(accountId, from, to), [{ name: 'CSV', extensions: ['csv'] }]),
-      exportRelationCard: (relationId: number, from: IsoDate, to: IsoDate) => host.saveFile(`relatiekaart-${relationId}-${from}-${to}.csv`, s.ledgerReports.relationCardCsv(relationId, from, to), [{ name: 'CSV', extensions: ['csv'] }]),
-      exportPeriodBalance: (year: number, granularity: 'maand' | 'kwartaal') => host.saveFile(`periodebalans-${year}.csv`, s.ledgerReports.periodBalanceCsv(year, granularity), [{ name: 'CSV', extensions: ['csv'] }]),
     },
     /** Gemengd gebruik: zakelijk deel per leverancier (Dropbox 50%, Odido 75%, …). Geen regel = 100%. */
     businessShare: {
