@@ -38,11 +38,13 @@ import type { OpeningInput, SectionKey } from '../onboarding/switchover';
 import type { XafApplyChoices } from '../onboarding/xaf-import';
 import { OPEN_ITEMS_TEMPLATE, type ColumnMapping } from '../import/opening-tables';
 import type { EntrySource } from '../core-ledger/ledger';
-import { today, type IsoDate } from '../shared/dates';
+import { formatDateNl, today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 import type { PollResult } from '../mail/mail-intake';
 import type { UpdateStatus } from './updates';
 import type { FxApplyInput } from '../fx/repair';
+import { ExchangeService, type OfficeProfile } from '../exchange/exchange';
+import { checkCode } from '../exchange/crypto';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -62,9 +64,21 @@ export interface HostContext {
   safetyBackup?(label: string): Promise<string | null>;
   restoreBackup(password?: string): Promise<boolean>;
   exportEncrypted(password: string): Promise<string | null>;
+  /** uitwisseling met de boekhouder (alleen in de app zelf) */
+  exchange?: {
+    /** de open administratie als pakket: database zonder geheimen en mail- of koppelinginstellingen, met bijlagen */
+    bundle(): Promise<Buffer>;
+    /** het kantoor op deze computer (bij de boekhouder), of null */
+    office(): OfficeProfile | null;
+    /** waarom het kantoor niet te openen is (bv. sleutelhanger weg), of null */
+    officeProblem?(): string | null;
+    saveOffice(input: { office: string; email: string; newKey?: boolean }): OfficeProfile;
+    /** export van een klant uitpakken als nieuwe administratie (de kopie) en die openen */
+    openClientExport(data: Uint8Array): Promise<{ company: string; exchange: number; endDate: string }>;
+  };
   /** meerdere administraties (alleen in de app zelf) */
   administrations?: {
-    list(): { key: string; name: string; officeCopy: { office: string; exchange: number; endDate: string } | null; current: boolean }[];
+    list(): { key: string; name: string; officeCopy: { office: string; exchange: number; endDate: string } | null; id: string | null; current: boolean }[];
     open(key: string): Promise<void>;
     create(name: string): Promise<string>;
   };
@@ -317,6 +331,15 @@ export function createApi(s: Services, host: HostContext) {
     }
   };
 
+  const hostExchange = () => {
+    if (!host.exchange) throw new Error('De uitwisseling met de boekhouder kan alleen in de app zelf');
+    return host.exchange;
+  };
+  const officeInfo = (p: OfficeProfile | null) => (p ? { office: p.office, email: p.email, code: checkCode(p.publicKey) } : null);
+  const PACKAGE_FILTER = [{ name: 'Uitwisselingspakket', extensions: ['gbpakket'] }];
+  /** mailservers weigeren vaak grotere bijlagen */
+  const MAIL_LIMIT = 20 * 1024 * 1024;
+
   const admins = () => {
     if (!host.administrations) throw new Error('Meerdere administraties kan alleen in de app zelf');
     return host.administrations;
@@ -335,6 +358,79 @@ export function createApi(s: Services, host: HostContext) {
         if (blocking.length === 0) await host.safetyBackup?.(`voor-afsluiten-tm-${String(until)}`);
         return s.periods.close(String(until), keys);
       },
+    },
+    /** uitwisseling met de boekhouder (docs/uitwisseling.md) */
+    exchange: {
+      status: () => ({
+        partner: s.exchange.partner(),
+        running: s.ledger.periodLock().exchange,
+        last: s.exchange.lastAnswer(),
+        copy: s.exchange.copyStatus(),
+        office: officeInfo(host.exchange?.office() ?? null),
+        officeProblem: host.exchange?.officeProblem?.() ?? null,
+        canMail: Boolean(s.settings.get().smtp.host),
+      }),
+      // klant
+      readInvite: (data: Uint8Array) => ExchangeService.readInvite(data),
+      link: (data: Uint8Array) => s.exchange.link(data),
+      unlink: () => s.exchange.unlink(),
+      /** de periode t/m `until` naar de boekhouder: mailen, of als bestand bewaren om zelf te sturen */
+      send: async (until: IsoDate, confirmed: string[], how: 'mail' | 'bestand') => {
+        const keys = Array.isArray(confirmed) ? confirmed.map(String) : [];
+        const r = await s.exchange.createExport(String(until), keys, host.appVersion(), () => hostExchange().bundle());
+        let note: string | null = null;
+        if (how === 'mail') {
+          if (r.file.length > MAIL_LIMIT) note = `Het pakket is te groot om te mailen (${Math.round(r.file.length / 1024 / 1024)} MB). Bewaar het en stuur het via een gedeelde map of WeTransfer.`;
+          else if (!r.partner.email) note = 'Er is geen e-mailadres van je boekhouder bekend. Bewaar het pakket en stuur het zelf.';
+          else {
+            try {
+              const company = s.settings.get().company.name;
+              await s.sendMail({
+                to: r.partner.email,
+                subject: `Administratie ${company} t/m ${formatDateNl(String(until))} (uitwisseling ${r.exchange})`,
+                text: `Beste ${r.partner.office},\n\nIn de bijlage staat mijn administratie t/m ${formatDateNl(String(until))} (uitwisseling ${r.exchange}). Open hem in BoekhoudenVoorNiks via Instellingen > Administraties > Export van een klant inlezen.\n\nMet vriendelijke groet,\n${company}`,
+                attachments: [{ filename: r.filename, content: r.file, contentType: 'application/octet-stream' }],
+              });
+              return { exchange: r.exchange, mailedTo: r.partner.email, path: null, note: null };
+            } catch (e) {
+              note = `Mailen lukte niet (${(e as Error).message}). Bewaar het pakket en stuur het zelf.`;
+            }
+          }
+        }
+        let path: string | null;
+        try {
+          path = await host.saveFile(r.filename, r.file, PACKAGE_FILTER);
+        } catch (e) {
+          s.exchange.abort(); // niet bewaard: de periode hoeft niet op slot
+          throw e;
+        }
+        if (!path) {
+          // niets verstuurd en niets bewaard: de periode hoeft niet op slot
+          s.exchange.abort();
+          return { exchange: null, mailedTo: null, path: null, note: note ?? 'Niet bewaard; er is niets verstuurd.' };
+        }
+        return { exchange: r.exchange, mailedTo: null, path, note };
+      },
+      abort: () => s.exchange.abort(),
+      readAnswer: (data: Uint8Array) => s.exchange.readAnswer(data, host.appVersion()),
+      // kantoor
+      saveOffice: (office: string, email: string, newKey?: boolean) => officeInfo(hostExchange().saveOffice({ office: String(office), email: String(email), newKey: newKey === true })),
+      invite: async () => {
+        const profile = hostExchange().office();
+        if (!profile) throw new Error('Vul eerst de naam van je kantoor in');
+        const name = profile.office.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'kantoor';
+        return host.saveFile(`uitnodiging-${name}.gbuitnodiging`, ExchangeService.invite(profile), [{ name: 'Uitnodiging', extensions: ['gbuitnodiging'] }]);
+      },
+      openExport: (data: Uint8Array) => hostExchange().openClientExport(data),
+      actions: () => s.exchange.actions(),
+      answer: async () => {
+        const a = s.exchange.createAnswer(host.appVersion());
+        // pas als het bestand er is, is het antwoord gemaakt (annuleren of een fout: gewoon verder werken)
+        const path = await host.saveFile(a.filename, a.file, PACKAGE_FILTER);
+        if (path) s.exchange.markAnswered();
+        return { path, email: a.email, count: a.count };
+      },
+      reopenAnswer: () => s.exchange.reopenAnswer(),
     },
     /** meerdere administraties op deze computer (bv. bv en eenmanszaak, of een boekhouder met kopieën van klanten) */
     administrations: {
@@ -929,13 +1025,19 @@ export function createApi(s: Services, host: HostContext) {
     },
     ledger: {
       accounts: () => s.ledger.listAccounts(),
-      createAccount: (input: { code: string; rgs: string; rgsRef?: string | null; name: string; category: AccountCategory }) => s.ledger.createAccount(input),
+      // in de kopie bij de boekhouder gaan deze drie als handeling mee in het antwoord aan de klant
+      createAccount: (input: { code: string; rgs: string; rgsRef?: string | null; name: string; category: AccountCategory }) => {
+        if (!s.settings.officeCopy()) return s.ledger.createAccount(input);
+        s.exchange.act({ kind: 'rekening', input });
+        return s.ledger.getAccount(input.rgs);
+      },
       renameAccount: (id: number, name: string) => s.ledger.renameAccount(id, name),
       archiveAccount: (id: number) => s.ledger.archiveAccount(id),
       entries: (filter?: { from?: IsoDate; to?: IsoDate; source?: EntrySource; accountRgs?: string; limit?: number }) => s.ledger.listEntries(filter),
       balances: (from?: IsoDate, to?: IsoDate) => s.ledger.balances({ from, to }),
-      manualEntry: (entry: { date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents }[] }) => s.ledger.post({ ...entry, source: 'handmatig' }),
-      reverse: (id: number, date: IsoDate) => s.ledger.reverse(id, date),
+      manualEntry: (entry: { date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents }[] }) =>
+        s.settings.officeCopy() ? s.exchange.act({ kind: 'memoriaal', input: entry }).entryIds[0]! : s.ledger.post({ ...entry, source: 'handmatig' }),
+      reverse: (id: number, date: IsoDate) => (s.settings.officeCopy() ? s.exchange.act({ kind: 'terugdraaien', input: { entryId: id, date } }).entryIds[0]! : s.ledger.reverse(id, date)),
       integrity: () => s.ledger.checkIntegrity(),
       /** "Waarom bestaat deze boeking?": de gebeurtenis met bewijs (#19). */
       origin: (entryId: number) => s.events.forEntry(entryId),

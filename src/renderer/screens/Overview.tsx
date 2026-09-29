@@ -4,6 +4,7 @@ import { Button, DateNl, ErrorBox, Euro, useAction, useLoad } from '../ui';
 import { formatEuro } from '../../shared/money';
 import { AccountantPackageCard } from './AccountantPackage';
 import { PeriodCloseCard } from './PeriodClose';
+import { ExchangeCard } from './Exchange';
 
 /** Eén serie (omzet per maand): staafdiagram in één kleur, tooltip per staaf, tabelweergave als alternatief. */
 function RevenueChart({ data }: { data: { month: string; label: string; revenue: number }[] }) {
@@ -54,6 +55,8 @@ function RevenueChart({ data }: { data: { month: string; label: string; revenue:
 
 export function Overview() {
   const d = useLoad(() => api.dashboard.get());
+  // na versturen of inlezen bij de uitwisseling: de kaart voor afsluiten opnieuw laden
+  const [periodVersion, setPeriodVersion] = useState(0);
   if (!d.data) return <div className="page"><ErrorBox error={d.error} /></div>;
   const x = d.data;
   return (
@@ -87,7 +90,8 @@ export function Overview() {
       )}
       <FixedCosts />
       <div style={{ marginTop: 14 }}><AccountantPackageCard /></div>
-      <div style={{ marginTop: 14 }}><PeriodCloseCard /></div>
+      <div style={{ marginTop: 14 }}><ExchangeCard onChange={() => setPeriodVersion((v) => v + 1)} /></div>
+      <div style={{ marginTop: 14 }}><PeriodCloseCard key={periodVersion} /></div>
     </div>
   );
 }

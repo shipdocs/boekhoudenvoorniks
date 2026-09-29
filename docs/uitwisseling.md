@@ -1,6 +1,10 @@
 # Uitwisseling met de boekhouder: technisch ontwerp
 
-Status: **ontwerp**, nog niet gebouwd. Peildatum 29 september 2026, `main` @ `1c0497f`.
+Status: stap 1 t/m 3 van de bouwvolgorde zijn **gebouwd** (zie onderaan); de licentie (stap 4) nog
+niet. Per onderdeel staat wat gebouwd is en waar het afwijkt van het oorspronkelijke ontwerp.
+Code: `src/exchange/` (versleuteling, uitwisseling), `src/closing/` (periodeslot),
+`src/main/administrations.ts`. Tests: `tests/uitwisseling.test.ts` (de hele cyclus met echte
+bestanden), `tests/uitwisseling-crypto.test.ts`, `tests/periodeslot.test.ts`, `e2e/uitwisseling.spec.ts`.
 
 Dit document beschrijft hoe een klant een deel van zijn administratie naar zijn boekhouder stuurt,
 de boekhouder die in BoekhoudenVoorNiks controleert en corrigeert, en de klant het antwoord weer
@@ -130,6 +134,20 @@ verlies blijven wel in het oude jaar, omdat de boeking zelf haar eigen datum hou
 
 ## Sleutels en pakketformaat
 
+**Gebouwd** (`src/exchange/crypto.ts`), zoals hieronder, met deze details:
+
+- De kantoorsleutel staat niet in een administratie maar in `kantoor.json` in de gegevensmap, want
+  hij hoort bij het kantoor en niet bij één klant. De privésleutel is versleuteld met `safeStorage`;
+  zonder sleutelhanger (Linux zonder keyring) weigert de app hem op te slaan.
+- Uitnodiging: `{ "type": "boekhoudenvoorniks-uitnodiging", "versie": 1, "kantoor", "email",
+  "publiekeSleutel" }`, bestand `uitnodiging-<kantoor>.gbuitnodiging`.
+- HKDF-SHA256 met als salt de eenmalige plus de publieke sleutel van het kantoor en als info
+  `boekhoudenvoorniks-pakket-v1`.
+- Bestandsnamen: `export-<8 tekens administratie-ID>-<nr>.gbpakket` en `antwoord-…-<nr>.gbpakket`.
+- De app-versie moet gelijk zijn bij het openen van de export (kantoor) én bij het inlezen van het
+  antwoord (klant).
+- Het delen van de kantoorsleutel tussen medewerkers (besluit 3) is **nog niet gebouwd**.
+
 Er is geen wachtwoord. Een sleutel die in de app zit, beschermt niets, want de broncode is openbaar.
 
 ### Koppelen: de uitnodiging
@@ -189,7 +207,10 @@ Bestandsnamen bevatten geen klantnaam: `gb-<eerste 8 tekens administratie-ID>-17
 ### Inhoud
 
 - **Export:** de complete back-upbundel (`createBackupBundle`, dus database en bijlagen) plus K, de
-  einddatum en de koppelgegevens. **Zonder de tabel `secrets`** en zonder instellingen voor
+  einddatum en de koppelgegevens. Dus ook wat de klant na de einddatum al geboekt had: de boekhouder
+  ziet dat (handig voor bv. betalingen na balansdatum bij dubieuze debiteuren), maar zijn handelingen
+  moeten t/m de einddatum blijven, en hij kan geen post van na de einddatum terugdraaien. Het scherm zegt
+  dat zo tegen de klant (besluit 4). **Zonder de tabel `secrets`** en zonder instellingen voor
   SMTP, IMAP en koppelingen. De eerste export is groot (bijlagen); de grens van mailservers ligt vaak
   rond 10–25 MB. Is het pakket groter, dan raadt de app de gedeelde map of een bestand aan. Pakketten
   met alleen de wijzigingen sinds de vorige uitwisseling zijn een latere uitbreiding.
@@ -197,6 +218,28 @@ Bestandsnamen bevatten geen klantnaam: `gb-<eerste 8 tekens administratie-ID>-17
   bij vragen belt of mailt de boekhouder.
 
 ## Het antwoord is een lijst handelingen
+
+**Gebouwd** (`src/exchange/exchange.ts`), met een kleinere lijst handelingen dan hieronder:
+**correctieboeking** (memoriaal), **terugdraaien** en **grootboekrekening toevoegen**. Anders indelen,
+afschrijving en investering zitten er nog niet in; de boekhouder doet die met terugdraaien en een
+correctieboeking. De handelingen worden niet via de IPC-whitelist vastgelegd maar in de dienst
+(`ExchangeService.act`, tabel `exchange_actions`, migratie 23); de API leidt correctieboeking,
+terugdraaien en rekening toevoegen in de kopie daarheen. In de kopie kan verder niets geboekt worden
+(`Ledger.setWriteGuard`), zodat alles wat de boekhouder boekt ook in het antwoord zit. Wat hij buiten
+het grootboek wijzigt (bv. een relatie), gaat niet mee.
+
+De controle op **openstaande posten** (een afgeboekte factuur die intussen betaald is) is **nog niet
+gebouwd**: het antwoord wordt ingelezen, maar er komt nog geen taak op Vandaag.
+
+**Transport.** De klant mailt de export (eigen SMTP, tot 20 MB; groter of mislukt: bewaren als
+bestand) of bewaart hem als bestand. Wordt er niets gemaild en niets bewaard, dan gaat de periode niet
+op slot. De boekhouder bewaart het antwoord als bestand en stuurt het zelf; de kopie mailt niet. Een
+export die al is ingelezen, opent de bestaande kopie in plaats van een nieuwe te maken.
+
+**Schermen.** Klant: *Hoe gaat het? > Uitwisseling met je boekhouder* (uitnodiging openen met
+controlecode, versturen t/m een kwartaaleinde, antwoord inlezen, afbreken). Kantoor: *Instellingen >
+Administraties > Voor boekhouders: je kantoor* (naam en e-mail, uitnodiging maken, export inlezen). In
+de kopie: een balk met de aanpassingen en de knop *Antwoord maken*.
 
 Terugdraaien (`Ledger.reverse`) en vervangen (`EventService.replace`) voegen niet alleen rijen toe,
 maar zetten ook de status van bestaande posten en gebeurtenissen (`teruggedraaid`, `vervangen`).
@@ -278,6 +321,12 @@ antwoord werkt altijd, zodat een klant nooit met een vergrendelde periode blijft
 
 ## Buiten de scope van de eerste versie
 
+Nog niet gebouwd, maar wel bedoeld: de kantoorsleutel delen tussen medewerkers, de taak voor
+openstaande posten na het inlezen, anders indelen en afschrijvingen als eigen handeling, en in de
+kopie de takenlijst en "Aan de slag" van de klant verbergen.
+
+Bewust niet in de eerste versie:
+
 - Correcties inlezen uit andere boekhoudsoftware (memoriaal-CSV of XAF).
 - Pakketten met alleen de wijzigingen sinds de vorige uitwisseling.
 - Meerdere uitwisselingen tegelijk.
@@ -293,11 +342,14 @@ antwoord werkt altijd, zodat een klant nooit met een vergrendelde periode blijft
    overgenomen.
 3. **Medewerkers van één kantoor delen de kantoorsleutel**, via een versleutelde export van de
    sleutel (met wachtwoord, alleen aan de kant van het kantoor).
+4. **De export bevat de hele administratie**, niet alleen t/m de einddatum. Alleen de correcties zijn
+   beperkt tot de periode.
 
 ## Bouwvolgorde
 
-1. **Fundament:** administratie-ID, meerdere administraties en keuzescherm, kantoormodus.
-2. **Periodeslot:** `ledger_locks`, de triggers, late documenten en late bankmutaties, "jaar afsluiten".
-3. **Uitwisseling:** uitnodiging en controlecode, export, vastleggen van handelingen, antwoord maken en
-   inlezen met vertaaltabel.
-4. **Licentie** op de knoppen voor versturen, uitnodigen en antwoord maken.
+1. **Fundament** (gebouwd): administratie-ID, meerdere administraties, kantoormodus.
+2. **Periodeslot** (gebouwd): `ledger_locks`, de triggers, late documenten en late bankmutaties,
+   periode afsluiten.
+3. **Uitwisseling** (gebouwd): uitnodiging en controlecode, export, vastleggen van handelingen, antwoord
+   maken en inlezen met vertaaltabel.
+4. **Licentie** op de knoppen voor versturen, uitnodigen en antwoord maken (nog niet gebouwd).
