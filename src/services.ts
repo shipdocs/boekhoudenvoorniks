@@ -76,7 +76,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const integrations = new IntegrationService(db, ledger, invoices, relations, deps.secrets, deps.fetch);
   const exports = new AccountantExport(db, ledger);
   const memory = new SupplierMemory(db);
-  const businessShare = new BusinessShareService(db, bank, purchases);
+  const businessShare = new BusinessShareService(db, bank, purchases, ledger);
   const classifier = new Classifier(memory, categories, deps.llm ?? null);
   const fx = new FxService(db, deps.fetch);
   const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, categories, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse, () => settings.get().company.vatNumber);

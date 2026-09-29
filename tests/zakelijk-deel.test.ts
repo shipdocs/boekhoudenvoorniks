@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { setup } from './helpers';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
+import { businessEffect } from '../src/shared/business-share';
 
 const bal = (s: ReturnType<typeof setup>['s'], rgs: string) => s.ledger.balance(rgs);
 
@@ -131,5 +132,44 @@ describe('zakelijk deel: toepassen en vragen', () => {
     expect(bal(s, 'WBedKanSof')).toBe(6000);
     expect(bal(s, ACCOUNTS.priveOpnamen)).toBe(12100 - 6000 - 1260);
     expect(s.businessShare.get('dropbox')).toBe(60);
+  });
+});
+
+describe('zakelijk deel: lijst om te bevestigen', () => {
+  it('toont per boeking wat er verandert en past alleen de gekozen boekingen aan', () => {
+    const { s } = setup();
+    const rel = s.relations.findOrCreateSupplier('Dropbox');
+    s.purchases.create({ relationId: rel.id, invoiceDate: '2026-02-01', description: 'Dropbox jaar', lines: [{ account: 'WBedKanSof', netAmount: 10000, vatCode: 'hoog' }] });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-03-01', amount: -12100, description: 'Card Payment: Dropbox', counterName: 'Dropbox' }] });
+    s.bank.bookToAccount(s.bank.list()[0]!.id, { account: 'WBedKanSof', vatCode: 'hoog' });
+    s.vat.markSubmitted('2026-Q1', { alreadyFiled: true });
+    s.businessShare.set('Dropbox', 50);
+
+    // alleen voorstel: er is nog niets aangepast
+    expect(bal(s, 'WBedKanSof')).toBe(20000);
+    const lines = s.businessShare.lines('Dropbox');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({ kind: 'inkoop', currentPct: 100, proposedPct: 50, filedPeriod: '2026-Q1', now: { kosten: 10000, btw: 2100 }, parts: [{ net: 10000, vat: 2100 }] });
+    expect(lines[1]).toMatchObject({ kind: 'bank', currentPct: 100, proposedPct: 50, gross: 12100 });
+    expect(businessEffect(lines[0]!.parts, 50, false)).toEqual({ kosten: 5000, btw: 1050 });
+
+    // de gebruiker bevestigt maar één boeking, met een eigen percentage
+    const r = s.businessShare.applyLines([{ kind: 'inkoop', refId: lines[0]!.refId, pct: 40 }]);
+    expect(r).toEqual({ changed: 1, skipped: 0, errors: [] });
+    expect(bal(s, 'WBedKanSof')).toBe(4000 + 10000);
+    const after = s.businessShare.lines('Dropbox');
+    expect(after.map((l) => l.currentPct)).toEqual([40, 100]);
+    // dezelfde bevestiging nog eens verandert niets
+    expect(s.businessShare.applyLines([{ kind: 'inkoop', refId: lines[0]!.refId, pct: 40 }]).changed).toBe(0);
+    expect(s.ledger.checkIntegrity()).toMatchObject({ balanced: true });
+  });
+
+  it('een fout percentage in de lijst laat niets half gebeuren', () => {
+    const { s } = setup();
+    const rel = s.relations.findOrCreateSupplier('Dropbox');
+    const a = s.purchases.create({ relationId: rel.id, invoiceDate: '2026-02-01', description: 'a', lines: [{ account: 'WBedKanSof', netAmount: 10000, vatCode: 'hoog' }] });
+    const b = s.purchases.create({ relationId: rel.id, invoiceDate: '2026-03-01', description: 'b', lines: [{ account: 'WBedKanSof', netAmount: 10000, vatCode: 'hoog' }] });
+    expect(() => s.businessShare.applyLines([{ kind: 'inkoop', refId: a.id, pct: 50 }, { kind: 'inkoop', refId: b.id, pct: 0 }])).toThrow();
+    expect(bal(s, 'WBedKanSof')).toBe(20000);
   });
 });

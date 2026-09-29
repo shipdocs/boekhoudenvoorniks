@@ -124,7 +124,7 @@ ${r.iban ? `        <bankAccount><bankAccNr>${x(r.iban)}</bankAccNr></bankAccoun
   .join('\n')}
     </customersSuppliers>
     <generalLedger>
-${accounts.map((a) => `      <ledgerAccount><accID>${x(a.code)}</accID><accDesc>${x(a.name)}</accDesc><accTp>${accTp(a.category)}</accTp>${a.rgs_ref ? `<taxonomy><taxoRef>${rgsTaxonomy}</taxoRef><entryPoint><entryPointRef>${rgsTaxonomy}</entryPointRef><conceptRef>${x(a.rgs_ref)}</conceptRef></entryPoint></taxonomy>` : ''}</ledgerAccount>`).join('\n')}
+${accounts.map((a) => `      <ledgerAccount><accID>${x(a.code)}</accID><accDesc>${x(a.name)}</accDesc><accTp>${accTp(a.category)}</accTp>${a.rgs_ref ? `<leadReference>${x(a.rgs_ref)}</leadReference>` : ''}${a.rgs_ref ? `<taxonomy><taxoRef>${rgsTaxonomy}</taxoRef><entryPoint><entryPointRef>${rgsTaxonomy}</entryPointRef><conceptRef>${x(a.rgs_ref)}</conceptRef></entryPoint></taxonomy>` : ''}</ledgerAccount>`).join('\n')}
     </generalLedger>
 ${
   opening.length > 0
