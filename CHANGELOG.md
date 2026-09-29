@@ -1,5 +1,15 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Verbeterd
+- **Privé-opnamen en -stortingen beginnen elk boekjaar bij nul.** Wat je in eerdere jaren privé opnam of stortte, zit in de beginbalans nu in het eigen vermogen, zoals een boekhouder dat verwacht. Dat geldt voor de auditfile (XAF), de kolommenbalans in het pakket voor je boekhouder en de rapporten in de app.
+- **De rapporten in de app hebben dezelfde beginbalans als het pakket voor je boekhouder.** De kolommenbalans, grootboekkaarten, periodebalans en de balans in de expertmodus telden het resultaat van eerdere jaren niet bij het eigen vermogen, waardoor de beginbalans bij een administratie van meer dan één jaar niet op nul uitkwam. Een beginbalansboeking op de eerste dag (overstap) staat nu ook in de app in de kolom beginbalans in plaats van bij de mutaties.
+
+### Techniek
+- Eén functie voor de beginbalans (`src/reports/opening-balance.ts`) voor de rapporten in de app, de auditfile en het pakket.
+- Technisch ontwerp voor de uitwisseling met de boekhouder: `docs/uitwisseling.md`.
+
 ## 0.6.15 — pakket voor je boekhouder
 
 ### Nieuw
