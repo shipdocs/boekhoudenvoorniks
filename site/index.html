@@ -7,8 +7,8 @@
   <meta name="description" content="Gratis boekhoudprogramma voor zzp'ers, stukadoors, schilders en andere vakmensen. Offertes en facturen maken, bonnetjes scannen, bank koppelen en btw-aangifte in gewone taal. Lokaal op je eigen pc, zonder abonnement.">
   <meta name="keywords" content="gratis boekhoudprogramma, boekhouding zzp, gratis facturatieprogramma, facturen maken zzp, btw-aangifte zzp, boekhouden voor vakmensen, boekhouding stukadoor, boekhouding schilder, bonnetjes scannen, offerte maken, RGS, auditfile, KOR, btw verlegd, boekhoudsoftware Windows Linux">
   <meta name="robots" content="index, follow, max-image-preview:large">
-  <meta name="author" content="Shipdocs">
-  <meta name="theme-color" content="#1f5f99">
+  <meta name="author" content="ShipDocs">
+  <meta name="theme-color" content="#225F9B">
   <link rel="canonical" href="https://boekhoudenvoorniks.nl/">
   <link rel="alternate" hreflang="nl-NL" href="https://boekhoudenvoorniks.nl/">
   <link rel="alternate" hreflang="x-default" href="https://boekhoudenvoorniks.nl/">
@@ -28,6 +28,9 @@
   <meta name="twitter:description" content="Offertes, facturen, bonnetjes, bank en btw-aangifte zonder boekhoudkennis. Gratis en lokaal.">
   <meta name="twitter:image" content="https://boekhoudenvoorniks.nl/img/vandaag.png">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
   <link rel="stylesheet" href="styles.css">
   <script type="application/ld+json">
   {
@@ -45,7 +48,10 @@
         "inLanguage": "nl-NL",
         "isAccessibleForFree": true,
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+        "offers": [
+          { "@type": "Offer", "name": "BoekhoudenVoorNiks", "price": "0", "priceCurrency": "EUR" },
+          { "@type": "Offer", "name": "Abonnement uitwisseling met je boekhouder", "description": "Een periode naar je boekhouder sturen en zijn correcties inlezen. Per maand opzegbaar.", "price": "10.00", "priceCurrency": "EUR", "priceSpecification": { "@type": "UnitPriceSpecification", "price": "10.00", "priceCurrency": "EUR", "unitText": "maand", "valueAddedTaxIncluded": true }, "seller": { "@id": "https://boekhoudenvoorniks.nl/#org" } }
+        ],
         "areaServed": { "@type": "Country", "name": "Nederland" },
         "audience": { "@type": "BusinessAudience", "audienceType": "zzp'ers, eenmanszaken en vakmensen zoals stukadoors, schilders, timmerlieden, loodgieters en elektriciens" },
         "featureList": [
@@ -63,9 +69,12 @@
           "Aftrekposten: afschrijving, KIA, kilometers, representatie en jaaroverzicht voor de aangifte",
           "ICP-opgaaf met goederen en diensten apart",
           "Dagelijkse back-up inclusief bijlagen",
-          "Lokale opslag, werkt offline"
+          "Lokale opslag, werkt offline",
+          "Uitwisseling met je boekhouder: periode versturen, correcties inlezen",
+          "Periode afsluiten: afgewerkt is afgewerkt",
+          "Meerdere administraties op één computer"
         ],
-        "softwareVersion": "0.6.14",
+        "softwareVersion": "0.6.15",
         "releaseNotes": "https://boekhoudenvoorniks.nl/wijzigingen.html",
         "screenshot": ["https://boekhoudenvoorniks.nl/img/vandaag.png", "https://boekhoudenvoorniks.nl/img/belasting.png", "https://boekhoudenvoorniks.nl/img/werk.png", "https://boekhoudenvoorniks.nl/img/overzicht.png"],
         "downloadUrl": "https://github.com/shipdocs/boekhoudenvoorniks/releases/latest",
@@ -74,9 +83,13 @@
       {
         "@type": "Organization",
         "@id": "https://boekhoudenvoorniks.nl/#org",
-        "name": "Shipdocs",
-        "url": "https://github.com/shipdocs",
-        "email": "info@shipdocs.app"
+        "name": "ShipDocs",
+        "url": "https://shipdocs.app/",
+        "email": "info@shipdocs.app",
+        "telephone": "+31 20 369 5765",
+        "vatID": "NL005138041B29",
+        "identifier": { "@type": "PropertyValue", "propertyID": "KvK", "value": "95207341" },
+        "address": { "@type": "PostalAddress", "streetAddress": "Middelweg 211", "postalCode": "1911 EE", "addressLocality": "Uitgeest", "addressCountry": "NL" }
       },
       {
         "@type": "WebSite",
@@ -96,7 +109,55 @@
             "name": "Is BoekhoudenVoorNiks echt gratis?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Ja. Het programma is gratis te downloaden en te gebruiken, zonder abonnement en zonder account. Je administratie staat op je eigen computer."
+              "text": "Ja. Het programma is gratis te downloaden en te gebruiken, zonder account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement van € 10 per maand inclusief btw. Die heb je niet nodig om je boekhouding te doen."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wat is de uitwisseling met je boekhouder?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Werkt je boekhouder ook met BoekhoudenVoorNiks, dan stuur je hem een kwartaal of jaar, versleuteld zodat alleen zijn kantoor het kan openen. Hij corrigeert wat nodig is en stuurt een antwoord terug. Jij leest dat in; wat je intussen deed blijft staan, en de periode is daarna afgesloten. Beschikbaar vanaf versie 0.7."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wat als mijn boekhouder niet met BoekhoudenVoorNiks werkt?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Dan gebruik je het gratis pakket voor je boekhouder: met één knop een auditfile en de overzichten die hij in zijn eigen programma inleest. Een abonnement heb je daarvoor niet nodig."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Hoe betaal ik het abonnement, en krijg ik een factuur?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Je sluit het af in de app en betaalt via Mollie: de eerste maand met iDEAL, daarna automatisch per incasso. Elke maand krijg je per e-mail een factuur op naam van je bedrijf, met de btw apart vermeld. Voor de factuur vraagt de app je bedrijfsnaam, adres en KvK- of btw-nummer."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Hoe zeg ik mijn abonnement op?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "In de app, met de knop Opzeggen. Er wordt daarna niets meer afgeschreven. Je kunt nog versturen tot het eind van de maand die je betaald hebt; een antwoord van je boekhouder inlezen kan altijd. Je krijgt het bedrag van de lopende maand niet terug."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Kan ik een periode afsluiten, ook zonder boekhouder?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja, dat is gratis. Kies het kwartaal of jaar, de app laat zien wat er nog moet (betalingen verwerken, bonnen controleren) en sluit het af. Daarna verandert er niets meer in die periode; een bon die later binnenkomt, komt in de volgende periode. Beschikbaar vanaf versie 0.7."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Ik heb een bv én een eenmanszaak. Kan dat?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja. Vanaf versie 0.7 maak je voor elk bedrijf een eigen administratie op dezelfde computer, met eigen klanten, bonnen, bank, btw en back-ups, en wissel je er snel tussen."
             }
           },
           {
@@ -152,7 +213,7 @@
             "name": "Kan mijn boekhouder ermee werken?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Ja, en hij hoeft er zelf niet in te werken. Met één knop maak je per boekjaar een pakket voor je boekhouder: auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en al je facturen en bonnen. Dat leest hij in bij Caseware, AFAS, Visionplanner, Exact, Twinfield, Yuki of SnelStart."
+              "text": "Ja, en hij hoeft er zelf niet in te werken. Met één knop maak je per boekjaar een pakket voor je boekhouder: auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en al je facturen en bonnen. Dat leest hij in bij Caseware, AFAS, Visionplanner, Exact, Twinfield, Yuki of SnelStart. Meer voor boekhouders."
             }
           },
           {
@@ -176,7 +237,15 @@
             "name": "Windows zegt \"Windows heeft uw pc beveiligd\". Is dat veilig?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. Download de installer alleen van github.com/shipdocs/boekhoudenvoorniks/releases. Wil je zeker weten dat het bestand niet is aangepast? Vergelijk de SHA-256-controlegetal met SHA256SUMS-Windows.txt bij de release (PowerShell: Get-FileHash). Klopt het, klik dan op \"Meer informatie\" en daarna op \"Toch uitvoeren\"."
+              "text": "Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. Download de installer alleen van github.com/shipdocs/boekhoudenvoorniks/releases. Wil je zeker weten dat het bestand niet is aangepast? Vergelijk het SHA-256-controlegetal met SHA256SUMS-Windows.txt bij de release (in PowerShell: Get-FileHash). Klopt het, klik dan op \"Meer informatie\" en daarna op \"Toch uitvoeren\"."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wie maakt BoekhoudenVoorNiks?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "ShipDocs, Middelweg 211, 1911 EE Uitgeest (KvK 95207341, btw NL005138041B29). Je bereikt ons via info@shipdocs.app of +31 20 369 5765."
             }
           },
           {
@@ -196,11 +265,12 @@
 <body>
   <header class="top">
     <div class="wrap nav">
-      <a class="brand" href="#">🧾 BoekhoudenVoorNiks</a>
+      <a class="brand" href="#"><picture><source srcset="img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
       <nav>
         <a href="#hoe">Hoe het werkt</a>
         <a href="#functies">Functies</a>
         <a href="#overstappen">Overstappen</a>
+        <a href="#prijzen">Prijzen</a>
         <a href="#vragen">Vragen</a>
         <a href="boekhouders.html">Voor boekhouders</a>
         <a href="wijzigingen.html">Wat is er nieuw</a>
@@ -212,7 +282,7 @@
   <main>
     <section class="hero wrap">
       <div>
-        <a class="announce" href="boekhouders.html"><span>Nieuw in 0.6.15</span> Pakket voor je boekhouder →</a>
+        <a class="announce" href="#uitwisseling"><span>Binnenkort in 0.7</span> Samenwerken met je boekhouder →</a>
         <p class="eyebrow">Voor stukadoors, schilders, timmerlieden, loodgieters, elektriciens en andere vakmensen</p>
         <h1>Jij beheert je bedrijf.<br>Wij maken de boekhouding.</h1>
         <p class="sr-intro">Gratis boekhoudprogramma voor zzp'ers en vakmensen in Nederland.</p>
@@ -288,6 +358,9 @@
         <div><h3>Voor je boekhouder</h3><p>Eén knop voor een pakket dat je boekhouder in zijn eigen programma inleest: auditfile, kolommenbalans, openstaande posten, RGS en al je bonnen. <a href="boekhouders.html">Voor boekhouders</a></p></div>
         <div><h3>KOR en buitenland</h3><p>Met de KOR gaat btw op inkopen naar de kosten, verlegde btw blijft zichtbaar. Goederen en diensten aan EU-bedrijven apart in de ICP-opgaaf.</p></div>
         <div><h3>Aftrekposten</h3><p>Bedrijfsmiddelen en afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek, met een jaaroverzicht voor je aangifte.</p></div>
+        <div><h3>Samenwerken met je boekhouder <span class="soon">vanaf 0.7</span></h3><p>Stuur een kwartaal of jaar naar je boekhouder, laat hem corrigeren en lees zijn antwoord in. Wat je intussen deed, blijft staan. <a href="#uitwisseling">Hoe het werkt</a></p></div>
+        <div><h3>Periode afsluiten <span class="soon">vanaf 0.7</span></h3><p>Klaar met een kwartaal of jaar? Sluit het af, dan verandert er niets meer aan. Een bon die later binnenkomt, gaat naar de volgende periode.</p></div>
+        <div><h3>Meer dan één bedrijf <span class="soon">vanaf 0.7</span></h3><p>Een bv én een eenmanszaak? Elk bedrijf een eigen administratie, met eigen bonnen en back-ups, en snel wisselen.</p></div>
         <div><h3>Back-ups met bijlagen</h3><p>Elke dag een back-up, ook versleuteld, inclusief alle bonnen en facturen. Terugzetten op een nieuwe computer werkt gewoon.</p></div>
       </div>
       <p class="fine">De fiscale regels zijn in versie 0.5.0 aangescherpt na een review van de btw- en inkomstenbelastingberekeningen. Zie <a href="wijzigingen.html#v0.5.0">wat er veranderde</a>.</p>
@@ -340,6 +413,31 @@
       </div>
     </section>
 
+    <section id="uitwisseling" class="band">
+      <div class="wrap split">
+        <div>
+          <h2>Samenwerken met je boekhouder <span class="soon">vanaf 0.7</span></h2>
+          <p>Werkt je boekhouder ook met BoekhoudenVoorNiks? Dan hoef je niets te mailen of over te typen. Je stuurt hem een periode, hij corrigeert, en jij leest zijn antwoord in.</p>
+          <ul class="checks">
+            <li><strong>Alleen jouw boekhouder kan het openen</strong><br><span class="muted">Hij stuurt je een uitnodiging; jullie vergelijken één keer een controlecode. Daarna is elke export versleuteld voor zijn kantoor. Wachtwoorden en koppelingen gaan niet mee.</span></li>
+            <li><strong>Jij werkt gewoon door</strong><br><span class="muted">De periode die bij je boekhouder ligt, staat vast. Alles daarna kun je gewoon boeken, en blijft staan als je zijn antwoord inleest.</span></li>
+            <li><strong>Afgewerkt is afgewerkt</strong><br><span class="muted">Na het inlezen is de periode afgesloten. Zijn correcties staan erin, precies zoals hij ze maakte.</span></li>
+            <li><strong>Niets via onze servers</strong><br><span class="muted">Het bestand gaat per e-mail of als bestand rechtstreeks van jou naar je boekhouder en terug.</span></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Zo werkt het</h3>
+          <ol class="steps">
+            <li>Je boekhouder stuurt je een uitnodiging. Je opent hem en vergelijkt de controlecode.</li>
+            <li>Kies het kwartaal of jaar en klik op <em>Mailen naar je boekhouder</em>.</li>
+            <li>Je boekhouder opent je administratie, corrigeert wat nodig is en stuurt een antwoord.</li>
+            <li>Je leest het antwoord in. Klaar: de periode is afgesloten.</li>
+          </ol>
+          <p class="fine">Voor boekhouders gratis. Voor jou onderdeel van het <a href="#prijzen">abonnement</a>; een antwoord inlezen kan altijd. <a href="boekhouders.html#uitwisseling">Voor boekhouders →</a></p>
+        </div>
+      </div>
+    </section>
+
     <section id="beroepen" class="wrap">
       <h2>Boekhouding voor jouw vak</h2>
       <div class="features">
@@ -353,9 +451,55 @@
       <p class="fine">Het 9%-tarief voor arbeid geldt onder voorwaarden. Twijfel je, vraag het dan na bij je boekhouder.</p>
     </section>
 
+    <section id="prijzen" class="wrap">
+      <h2>Prijzen</h2>
+      <p class="lead">Het programma is gratis. Alleen als je met je boekhouder wilt uitwisselen, neem je een abonnement.</p>
+      <div class="prices">
+        <div class="price">
+          <h3>BoekhoudenVoorNiks</h3>
+          <p class="amount">Gratis</p>
+          <p class="per">voor altijd, zonder account</p>
+          <ul>
+            <li>Offertes, facturen, bonnetjes, bank en btw</li>
+            <li>Pakket voor je boekhouder (auditfile)</li>
+            <li>Overstappen, back-ups, periode afsluiten</li>
+            <li>Open source; je administratie op je eigen computer</li>
+          </ul>
+        </div>
+        <div class="price featured">
+          <h3>Uitwisseling met je boekhouder <span class="soon">vanaf 0.7</span></h3>
+          <p class="amount">€ 10</p>
+          <p class="per">per maand, inclusief 21% btw</p>
+          <ul>
+            <li>Een periode naar je boekhouder sturen en zijn correcties inlezen</li>
+            <li>Per maand opzegbaar, in de app</li>
+            <li>Betalen via Mollie: eerst iDEAL, daarna automatische incasso</li>
+            <li>Elke maand een factuur op naam van je bedrijf</li>
+          </ul>
+        </div>
+        <div class="price">
+          <h3>Voor boekhouders</h3>
+          <p class="amount">Gratis</p>
+          <p class="per">voor elk kantoor</p>
+          <ul>
+            <li>Klanten uitnodigen en hun export openen</li>
+            <li>Corrigeren en een antwoord terugsturen</li>
+            <li>Meerdere klanten in één app, sleutel delen met collega's</li>
+          </ul>
+        </div>
+      </div>
+      <p class="fine">Het abonnement is voor ondernemers en loopt per maand; je betaalt vooruit en zegt op wanneer je wilt, dan loopt het af na de betaalde maand. Zie de <a href="voorwaarden.html#abonnement">voorwaarden</a>.</p>
+    </section>
+
     <section id="vragen" class="wrap faq">
       <h2>Veelgestelde vragen</h2>
-        <details><summary>Is BoekhoudenVoorNiks echt gratis?</summary><p>Ja. Het programma is gratis te downloaden en te gebruiken, zonder abonnement en zonder account. Je administratie staat op je eigen computer.</p></details>
+        <details><summary>Is BoekhoudenVoorNiks echt gratis?</summary><p>Ja. Het programma is gratis te downloaden en te gebruiken, zonder account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement van € 10 per maand inclusief btw. Die heb je niet nodig om je boekhouding te doen.</p></details>
+        <details><summary>Wat is de uitwisseling met je boekhouder?</summary><p>Werkt je boekhouder ook met BoekhoudenVoorNiks, dan stuur je hem een kwartaal of jaar, versleuteld zodat alleen zijn kantoor het kan openen. Hij corrigeert wat nodig is en stuurt een antwoord terug. Jij leest dat in; wat je intussen deed blijft staan, en de periode is daarna afgesloten. Beschikbaar vanaf versie 0.7.</p></details>
+        <details><summary>Wat als mijn boekhouder niet met BoekhoudenVoorNiks werkt?</summary><p>Dan gebruik je het gratis pakket voor je boekhouder: met één knop een auditfile en de overzichten die hij in zijn eigen programma inleest. Een abonnement heb je daarvoor niet nodig.</p></details>
+        <details><summary>Hoe betaal ik het abonnement, en krijg ik een factuur?</summary><p>Je sluit het af in de app en betaalt via Mollie: de eerste maand met iDEAL, daarna automatisch per incasso. Elke maand krijg je per e-mail een factuur op naam van je bedrijf, met de btw apart vermeld. Voor de factuur vraagt de app je bedrijfsnaam, adres en KvK- of btw-nummer.</p></details>
+        <details><summary>Hoe zeg ik mijn abonnement op?</summary><p>In de app, met de knop <em>Opzeggen</em>. Er wordt daarna niets meer afgeschreven. Je kunt nog versturen tot het eind van de maand die je betaald hebt; een antwoord van je boekhouder inlezen kan altijd. Je krijgt het bedrag van de lopende maand niet terug.</p></details>
+        <details><summary>Kan ik een periode afsluiten, ook zonder boekhouder?</summary><p>Ja, dat is gratis. Kies het kwartaal of jaar, de app laat zien wat er nog moet (betalingen verwerken, bonnen controleren) en sluit het af. Daarna verandert er niets meer in die periode; een bon die later binnenkomt, komt in de volgende periode. Beschikbaar vanaf versie 0.7.</p></details>
+        <details><summary>Ik heb een bv én een eenmanszaak. Kan dat?</summary><p>Ja. Vanaf versie 0.7 maak je voor elk bedrijf een eigen administratie op dezelfde computer, met eigen klanten, bonnen, bank, btw en back-ups, en wissel je er snel tussen.</p></details>
         <details><summary>Kan ik als zzp'er mijn btw-aangifte ermee doen?</summary><p>Ja. Het programma rekent je btw per kwartaal (of maand) uit uit je facturen en aankopen, en laat precies zien wat je invult bij de rubrieken 1a, 1b, 1e, 2a en 5b in Mijn Belastingdienst Zakelijk. Direct elektronisch indienen via Digipoort is nog in voorbereiding.</p></details>
         <details><summary>Werkt het met btw verlegd en de kleineondernemersregeling (KOR)?</summary><p>Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij btw verlegd controleert het programma of het btw-nummer van je klant op de factuur staat. Met de KOR telt de btw op je inkopen bij de kosten, en verlegde btw die je toch moet betalen staat per kwartaal op het btw-scherm.</p></details>
         <details><summary>Kan ik overstappen vanuit een ander boekhoudprogramma?</summary><p>Ja. Kies een instapdatum en lees een auditfile (XAF) uit je vorige programma in, of het overzicht van je boekhouder (kolommen- of saldibalans en openstaande facturen). Heb je een auditfile per jaar, dan zet je ze allemaal tegelijk neer. De app vult je startbalans in; jij kijkt het na.</p></details>
@@ -366,6 +510,7 @@
         <details><summary>Voor welke beroepen is het bedoeld?</summary><p>Voor zzp'ers en kleine ondernemers, met name vakmensen: stukadoors, schilders, timmerlieden, loodgieters, elektriciens en klusbedrijven. Bij het instellen kies je je vak, zodat veelgebruikte factuurregels klaarstaan.</p></details>
         <details><summary>Op welke computers werkt het?</summary><p>Op Windows en Linux. Het programma werkt ook zonder internetverbinding; alleen voor het versturen van e-mail en updates is internet nodig.</p></details>
         <details><summary>Windows zegt "Windows heeft uw pc beveiligd". Is dat veilig?</summary><p>Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. Download de installer alleen van <a href="https://github.com/shipdocs/boekhoudenvoorniks/releases">github.com/shipdocs/boekhoudenvoorniks/releases</a>. Wil je zeker weten dat het bestand niet is aangepast? Vergelijk het SHA-256-controlegetal met <code>SHA256SUMS-Windows.txt</code> bij de release (in PowerShell: <code>Get-FileHash</code>). Klopt het, klik dan op "Meer informatie" en daarna op "Toch uitvoeren".</p></details>
+        <details><summary>Wie maakt BoekhoudenVoorNiks?</summary><p>ShipDocs, Middelweg 211, 1911 EE Uitgeest (KvK 95207341, btw NL005138041B29). Je bereikt ons via <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> of <a href="tel:+31203695765">+31 20 369 5765</a>.</p></details>
         <details><summary>Is de broncode openbaar?</summary><p>Ja. BoekhoudenVoorNiks is open source onder de GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later). Iedereen kan de code bekijken en controleren wat het programma doet.</p></details>
     </section>
 
@@ -373,7 +518,7 @@
       <div class="wrap split">
         <div>
           <h2>Je administratie blijft van jou</h2>
-          <p>Alles staat op je eigen computer: geen account, geen cloud, geen abonnement. Tekstherkenning en AI draaien lokaal (als je ze aanzet), en er gaan geen bonnetjes naar externe servers.</p>
+          <p>Alles staat op je eigen computer: geen account en geen cloud. Tekstherkenning en AI draaien lokaal (als je ze aanzet), en er gaan geen bonnetjes naar externe servers. Ook bij de uitwisseling gaat je administratie rechtstreeks van jou naar je boekhouder, niet via ons.</p>
           <p>Elke dag wordt er automatisch een back-up gemaakt. Wachtwoorden en API-sleutels worden versleuteld opgeslagen.</p>
         </div>
         <div class="card principle">
@@ -392,8 +537,8 @@
   </main>
 
   <footer class="wrap foot">
-    <span>BoekhoudenVoorNiks, een project van <a href="https://github.com/shipdocs">Shipdocs</a> · open source onder AGPL-3.0-or-later</span>
-    <span><a href="wijzigingen.html">Wat is er nieuw</a> · <a href="voorwaarden.html">Voorwaarden</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/shipdocs/boekhoudenvoorniks/issues">Feedback & vragen</a></span>
+    <span>BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a></span>
+    <span><a href="index.html#prijzen">Prijzen</a> · <a href="wijzigingen.html">Wat is er nieuw</a> · <a href="voorwaarden.html">Voorwaarden</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a> · <a href="https://github.com/shipdocs/boekhoudenvoorniks/issues">Feedback &amp; vragen</a></span>
   </footer>
 </body>
 </html>

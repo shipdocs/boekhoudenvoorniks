@@ -1,10 +1,10 @@
 # BoekhoudenVoorNiks
 
-> Gratis, lokaal boekhoudprogramma (desktop-app voor Windows en Linux) voor zzp'ers en kleine ondernemers in Nederland, vooral vakmensen zoals stukadoors, schilders, timmerlieden, loodgieters en elektriciens. De gebruiker werkt met klanten, klussen, offertes, facturen, bonnetjes en de bank; het programma maakt daar automatisch een dubbele boekhouding van (RGS-grootboekschema) en rekent de btw-aangifte uit. Geen abonnement, geen account, de administratie staat op de eigen computer.
+> Gratis, lokaal boekhoudprogramma (desktop-app voor Windows en Linux) voor zzp'ers en kleine ondernemers in Nederland, vooral vakmensen zoals stukadoors, schilders, timmerlieden, loodgieters en elektriciens. De gebruiker werkt met klanten, klussen, offertes, facturen, bonnetjes en de bank; het programma maakt daar automatisch een dubbele boekhouding van (RGS-grootboekschema) en rekent de btw-aangifte uit. Geen account, de administratie staat op de eigen computer. Het programma is gratis; alleen de uitwisseling met de boekhouder is een los abonnement.
 
 Belangrijke feiten:
 
-- Prijs: gratis. Geen abonnement.
+- Prijs: het programma is gratis. Optioneel abonnement "Uitwisseling met je boekhouder" (vanaf versie 0.7): € 10 per maand inclusief 21% btw, per maand opzegbaar in de app, betalen via Mollie (iDEAL, daarna SEPA-incasso), maandelijkse factuur. Voor boekhoudkantoren gratis.
 - Licentie: open source, AGPL-3.0-or-later.
 - Platform: Windows en Linux (Electron). Werkt offline; gegevens in een lokale SQLite-database met dagelijkse automatische back-up.
 - Taal en markt: Nederlands, Nederlandse btw-regels.
@@ -18,15 +18,41 @@ Belangrijke feiten:
 - Koppelingen: WooCommerce, Shopify, Mollie Facturen (leest betaalde facturen), Mollie (uitbetalingen), Stripe.
 - Overstappen: overstap-hulp met instapdatum; inlezen van auditfiles (XAF, ook meerdere tegelijk, één per boekjaar), kolommen- of saldibalans en lijsten met openstaande facturen. Auditfiles zonder beginbalans (zoals DigiBoox) worden per jaar opgeteld. Bedrijfsmiddelen krijgen hun aankoopdatum uit oudere auditfiles.
 - Fiscaal: KOR (btw op inkopen naar de kosten), ICP-opgaaf met goederen en diensten apart, aftrekposten (afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek) en een schatting van de inkomstenbelasting. Altijd laten controleren door een boekhouder.
-- Huidige versie: 0.6.14 (29 september 2026). Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
+- Uitwisseling met de boekhouder (vanaf versie 0.7): de klant stuurt een periode (kwartaal of jaar) versleuteld naar het kantoor van zijn boekhouder (uitnodiging met controlecode, alleen dat kantoor kan het openen), de boekhouder corrigeert in BoekhoudenVoorNiks (correctieboekingen, terugdraaien, grootboekrekeningen) en stuurt een antwoord terug; bij het inlezen is de periode afgesloten en blijft het werk van daarna staan. Loopt niet via servers van de maker.
+- Periode afsluiten en meerdere administraties op één computer (vanaf versie 0.7).
+- Huidige versie: 0.6.15. Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
 - Broncode: https://github.com/shipdocs/boekhoudenvoorniks
-- Uitgever: Shipdocs (info@shipdocs.app)
+- Uitgever: ShipDocs, Middelweg 211, 1911 EE Uitgeest, Nederland. KvK 95207341, btw NL005138041B29. info@shipdocs.app, +31 20 369 5765.
 
 ## Veelgestelde vragen
 
 ### Is BoekhoudenVoorNiks echt gratis?
 
-Ja. Het programma is gratis te downloaden en te gebruiken, zonder abonnement en zonder account. Je administratie staat op je eigen computer.
+Ja. Het programma is gratis te downloaden en te gebruiken, zonder account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement van € 10 per maand inclusief btw. Die heb je niet nodig om je boekhouding te doen.
+
+### Wat is de uitwisseling met je boekhouder?
+
+Werkt je boekhouder ook met BoekhoudenVoorNiks, dan stuur je hem een kwartaal of jaar, versleuteld zodat alleen zijn kantoor het kan openen. Hij corrigeert wat nodig is en stuurt een antwoord terug. Jij leest dat in; wat je intussen deed blijft staan, en de periode is daarna afgesloten. Beschikbaar vanaf versie 0.7.
+
+### Wat als mijn boekhouder niet met BoekhoudenVoorNiks werkt?
+
+Dan gebruik je het gratis pakket voor je boekhouder: met één knop een auditfile en de overzichten die hij in zijn eigen programma inleest. Een abonnement heb je daarvoor niet nodig.
+
+### Hoe betaal ik het abonnement, en krijg ik een factuur?
+
+Je sluit het af in de app en betaalt via Mollie: de eerste maand met iDEAL, daarna automatisch per incasso. Elke maand krijg je per e-mail een factuur op naam van je bedrijf, met de btw apart vermeld. Voor de factuur vraagt de app je bedrijfsnaam, adres en KvK- of btw-nummer.
+
+### Hoe zeg ik mijn abonnement op?
+
+In de app, met de knop Opzeggen. Er wordt daarna niets meer afgeschreven. Je kunt nog versturen tot het eind van de maand die je betaald hebt; een antwoord van je boekhouder inlezen kan altijd. Je krijgt het bedrag van de lopende maand niet terug.
+
+### Kan ik een periode afsluiten, ook zonder boekhouder?
+
+Ja, dat is gratis. Kies het kwartaal of jaar, de app laat zien wat er nog moet (betalingen verwerken, bonnen controleren) en sluit het af. Daarna verandert er niets meer in die periode; een bon die later binnenkomt, komt in de volgende periode. Beschikbaar vanaf versie 0.7.
+
+### Ik heb een bv én een eenmanszaak. Kan dat?
+
+Ja. Vanaf versie 0.7 maak je voor elk bedrijf een eigen administratie op dezelfde computer, met eigen klanten, bonnen, bank, btw en back-ups, en wissel je er snel tussen.
 
 ### Kan ik als zzp'er mijn btw-aangifte ermee doen?
 
@@ -34,7 +60,11 @@ Ja. Het programma rekent je btw per kwartaal (of maand) uit uit je facturen en a
 
 ### Werkt het met btw verlegd en de kleineondernemersregeling (KOR)?
 
-Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij btw verlegd controleert het programma of het btw-nummer van je klant op de factuur staat.
+Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij btw verlegd controleert het programma of het btw-nummer van je klant op de factuur staat. Met de KOR telt de btw op je inkopen bij de kosten, en verlegde btw die je toch moet betalen staat per kwartaal op het btw-scherm.
+
+### Kan ik overstappen vanuit een ander boekhoudprogramma?
+
+Ja. Kies een instapdatum en lees een auditfile (XAF) uit je vorige programma in, of het overzicht van je boekhouder (kolommen- of saldibalans en openstaande facturen). Heb je een auditfile per jaar, dan zet je ze allemaal tegelijk neer. De app vult je startbalans in; jij kijkt het na.
 
 ### Welke banken worden ondersteund?
 
@@ -50,7 +80,7 @@ Op je eigen computer, in een lokaal databasebestand. Er is geen cloud nodig. Elk
 
 ### Kan mijn boekhouder ermee werken?
 
-Ja, en hij hoeft er zelf niet in te werken. Met één knop maak je per boekjaar een pakket voor je boekhouder: auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en al je facturen en bonnen. Dat leest hij in bij Caseware, AFAS, Visionplanner, Exact, Twinfield, Yuki of SnelStart. Meer: https://boekhoudenvoorniks.nl/boekhouders.html
+Ja, en hij hoeft er zelf niet in te werken. Met één knop maak je per boekjaar een pakket voor je boekhouder: auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en al je facturen en bonnen. Dat leest hij in bij Caseware, AFAS, Visionplanner, Exact, Twinfield, Yuki of SnelStart. Meer voor boekhouders.
 
 ### Voor welke beroepen is het bedoeld?
 
@@ -62,7 +92,11 @@ Op Windows en Linux. Het programma werkt ook zonder internetverbinding; alleen v
 
 ### Windows zegt "Windows heeft uw pc beveiligd". Is dat veilig?
 
-Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. Download de installer alleen van github.com/shipdocs/boekhoudenvoorniks/releases. Controleer eventueel het SHA-256-controlegetal met SHA256SUMS-Windows.txt bij de release (PowerShell: Get-FileHash). Klopt het, klik dan op "Meer informatie" en daarna op "Toch uitvoeren".
+Die melding (SmartScreen) verschijnt bij programma's die nog niet met een betaald certificaat ondertekend zijn. Download de installer alleen van github.com/shipdocs/boekhoudenvoorniks/releases. Wil je zeker weten dat het bestand niet is aangepast? Vergelijk het SHA-256-controlegetal met SHA256SUMS-Windows.txt bij de release (in PowerShell: Get-FileHash). Klopt het, klik dan op "Meer informatie" en daarna op "Toch uitvoeren".
+
+### Wie maakt BoekhoudenVoorNiks?
+
+ShipDocs, Middelweg 211, 1911 EE Uitgeest (KvK 95207341, btw NL005138041B29). Je bereikt ons via info@shipdocs.app of +31 20 369 5765.
 
 ### Is de broncode openbaar?
 

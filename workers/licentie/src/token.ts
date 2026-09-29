@@ -12,6 +12,8 @@ export interface LicensePayload {
   /** t/m deze datum (JJJJ-MM-DD), inclusief een paar dagen marge voor de incasso */
   validUntil: string;
   issuedAt: string;
+  /** opgezegd: er wordt niets meer afgeschreven, de licentie loopt tot validUntil */
+  cancelled?: boolean;
 }
 
 const b64u = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');

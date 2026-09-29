@@ -17,7 +17,9 @@ img { max-width: 100%; height: auto; display: block; }
 .muted { color: var(--muted); }
 .top { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
 .nav { display: flex; align-items: center; justify-content: space-between; height: 60px; gap: 12px; }
-.brand { font-weight: 700; color: var(--text); text-decoration: none; white-space: nowrap; }
+.brand { font-weight: 700; color: var(--text); text-decoration: none; white-space: nowrap; display: flex; align-items: center; }
+.brand img { display: block; height: 54px; width: auto; }
+@media (max-width: 520px) { .brand img { height: 40px; } }
 .nav nav { display: flex; gap: 20px; align-items: center; }
 .nav nav a { color: var(--muted); text-decoration: none; font-size: 15px; }
 .nav nav a.btn { color: #fff; }
@@ -53,6 +55,7 @@ section { padding: 56px 0; }
 .features p { margin: 0; color: var(--muted); font-size: 16px; }
 .principle { border-left: 4px solid var(--good); }
 .final { padding: 80px 16px; }
+.foot span { flex: 1 1 100%; }
 .foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 28px; padding-bottom: 40px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
 @media (max-width: 900px) {
   .hero, .split, .split.reverse { grid-template-columns: 1fr; gap: 28px; }
@@ -109,3 +112,13 @@ section { padding: 56px 0; }
 .tbl th, .tbl td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--border); }
 .tbl th { font-weight: 650; background: var(--surface); }
 .tbl code { font-size: 13.5px; white-space: nowrap; }
+
+/* prijzen */
+.prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-top: 24px; }
+.price { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 6px; }
+.price.featured { border-color: var(--primary); box-shadow: 0 10px 30px rgba(20, 30, 50, .08); }
+.price h3 { margin: 0; }
+.price .amount { font-size: 34px; font-weight: 700; margin: 6px 0 0; }
+.price .per { color: var(--muted); font-size: 15px; margin: 0 0 8px; }
+.price ul { margin: 8px 0 0; padding-left: 20px; }
+.soon { display: inline-block; font-size: 12px; font-weight: 600; background: var(--surface); border: 1px solid var(--border); color: var(--primary); border-radius: 99px; padding: 2px 10px; margin-left: 6px; vertical-align: middle; white-space: nowrap; }

@@ -1,4 +1,4 @@
-import { createPublicKey, verify } from 'node:crypto';
+import { createPublicKey, randomBytes, verify } from 'node:crypto';
 import type { Db } from '../db/database';
 import type { SettingsService } from '../settings/settings';
 import { formatDateNl, type IsoDate } from '../shared/dates';
@@ -27,6 +27,19 @@ export interface LicensePayload {
   email: string;
   validUntil: IsoDate;
   issuedAt: IsoDate;
+  /** opgezegd: er wordt niets meer afgeschreven, de licentie loopt tot validUntil */
+  cancelled?: boolean;
+}
+
+/** Bedrijfsgegevens voor de factuur van het abonnement (workers/licentie: Billing). */
+export interface LicenseBilling {
+  naam: string;
+  adres: string;
+  postcode: string;
+  plaats: string;
+  land: string;
+  kvk?: string;
+  btw?: string;
 }
 
 export type LicenseStatus =
@@ -34,7 +47,7 @@ export type LicenseStatus =
   | { state: 'geen' }
   | { state: 'ongeldig'; reason: string }
   | { state: 'verlopen'; validUntil: IsoDate; email: string }
-  | { state: 'actief'; validUntil: IsoDate; email: string };
+  | { state: 'actief'; validUntil: IsoDate; email: string; cancelled: boolean };
 
 /** Controleert handtekening en inhoud; gooit bij een vervalst of kapot token. */
 export function verifyLicense(token: string, publicKey: string): LicensePayload {
@@ -65,6 +78,21 @@ export class LicenseService {
     return this.publicKey !== '';
   }
 
+  /**
+   * Geheim waarmee deze administratie haar licentie kan ophalen en het abonnement kan opzeggen.
+   * Het blijft lokaal in de administratie(database) en gaat alleen in de body/header naar de Worker.
+   */
+  managementKey(): string {
+    const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'licenseManagementKey'`).get() as { value: string } | undefined;
+    if (row) {
+      const value = JSON.parse(row.value) as unknown;
+      if (typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value)) return value;
+    }
+    const value = randomBytes(32).toString('base64url');
+    this.db.prepare(`INSERT INTO settings (key, value) VALUES ('licenseManagementKey', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(value));
+    return value;
+  }
+
   status(today: IsoDate): LicenseStatus {
     if (!this.enabled) return { state: 'uit' };
     const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'license'`).get() as { value: string } | undefined;
@@ -76,7 +104,8 @@ export class LicenseService {
       return { state: 'ongeldig', reason: (e as Error).message };
     }
     if (payload.administratie !== this.settings.administrationId()) return { state: 'ongeldig', reason: 'Deze licentie hoort bij een andere administratie' };
-    return { state: payload.validUntil >= today ? 'actief' : 'verlopen', validUntil: payload.validUntil, email: payload.email };
+    if (payload.validUntil < today) return { state: 'verlopen', validUntil: payload.validUntil, email: payload.email };
+    return { state: 'actief', validUntil: payload.validUntil, email: payload.email, cancelled: payload.cancelled === true };
   }
 
   /** Een licentie (van de Worker) bewaren, na controle. */
@@ -96,7 +125,8 @@ export class LicenseService {
   needsRefresh(today: IsoDate, days = 7): boolean {
     const s = this.status(today);
     if (s.state === 'verlopen' || s.state === 'ongeldig') return this.hasLicense();
-    if (s.state !== 'actief') return false;
+    // opgezegd: er komt geen verlenging meer, dus niet steeds opnieuw vragen
+    if (s.state !== 'actief' || s.cancelled) return false;
     const soon = new Date(`${today}T00:00:00Z`);
     soon.setUTCDate(soon.getUTCDate() + days);
     return s.validUntil <= soon.toISOString().slice(0, 10);

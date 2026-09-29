@@ -3,6 +3,9 @@
 ## Nog niet uitgebracht
 
 ### Nieuw
+- **Nieuw logo**: in de zijbalk (wit in de donkere modus), op het welkomstscherm en als app-icoon.
+- **Abonnement op de uitwisseling** (staat nog uit tot de licentieserver live is): afsluiten via Mollie met een factuur op naam van je bedrijf bij elke betaling, en opzeggen in de app. Opgezegd? Dan kun je versturen tot het eind van de betaalde maand.
+- **Nieuwe voorwaarden**: artikel 8 over het abonnement (prijs inclusief btw, per maand opzegbaar, geen terugbetaling van een lopende maand). Je geeft opnieuw akkoord.
 - **Uitwisseling met je boekhouder** (Hoe gaat het? > Uitwisseling met je boekhouder), naar het voorbeeld van de periode-uitwisseling in SnelStart:
   - Je boekhouder stuurt je een uitnodiging. Open die, vergelijk de controlecode met hem, en je bent gekoppeld.
   - Stuur een periode (t/m het eind van een kwartaal) per e-mail of als bestand. Alleen het kantoor van je boekhouder kan hem openen; wachtwoorden en koppelingen gaan niet mee. Tot zijn antwoord binnen is, ligt die periode vast; daarna werk je gewoon door.

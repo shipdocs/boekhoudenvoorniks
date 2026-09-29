@@ -8,24 +8,27 @@
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://boekhoudenvoorniks.nl/privacy.html">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="top">
     <div class="wrap nav">
-      <a class="brand" href="./">🧾 BoekhoudenVoorNiks</a>
+      <a class="brand" href="./"><picture><source srcset="img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
       <nav><a href="./">Home</a><a href="voorwaarden.html">Voorwaarden</a><a href="privacy.html">Privacy</a></nav>
     </div>
   </header>
   <main class="wrap legal">
     <h1>Privacyverklaring</h1>
-    <p class="muted">Versie 26 september 2026</p>
+    <p class="muted">Versie 30 september 2026</p>
 
     <h2>Kort gezegd</h2>
-    <p><strong>Je administratie blijft op je eigen computer.</strong> Wij ontvangen geen gegevens over je klanten, facturen, bonnetjes of bank. Er is geen account en er is geen cloud.</p>
+    <p><strong>Je administratie blijft op je eigen computer.</strong> Wij ontvangen geen gegevens over je klanten, facturen, bonnetjes of bank. Er is geen account en er is geen cloud. Neem je een abonnement voor de uitwisseling met je boekhouder, dan bewaren wij alleen wat nodig is om te betalen en te factureren (zie hieronder).</p>
 
     <h2>Wie is verantwoordelijk?</h2>
-    <p>Shipdocs (<a href="mailto:info@shipdocs.app">info@shipdocs.app</a>) ontwikkelt BoekhoudenVoorNiks en deze website. Voor de persoonsgegevens die jij in het programma bijhoudt, zoals de namen en adressen van je klanten, ben jij als ondernemer zelf verantwoordelijk. Wij verwerken die gegevens niet.</p>
+    <p>ShipDocs, Middelweg 211, 1911 EE Uitgeest (KvK 95207341, <a href="mailto:info@shipdocs.app">info@shipdocs.app</a>, <a href="tel:+31203695765">+31 20 369 5765</a>) ontwikkelt BoekhoudenVoorNiks en deze website. Voor de persoonsgegevens die jij in het programma bijhoudt, zoals de namen en adressen van je klanten, ben jij als ondernemer zelf verantwoordelijk. Wij verwerken die gegevens niet.</p>
 
     <h2>Welke verbindingen maakt het programma?</h2>
     <ul>
@@ -33,8 +36,22 @@
       <li><strong>E-mail:</strong> facturen en offertes gaan via de mailserver die jij zelf instelt, naar de ontvanger die jij kiest. Wij zien ze niet.</li>
       <li><strong>Koppelingen die jij aanzet</strong> (bijvoorbeeld een webshop of betaalprovider): het programma haalt daar met jouw eigen sleutels gegevens op. Dat verkeer gaat rechtstreeks tussen jouw computer en die dienst.</li>
       <li><strong>Tekstherkenning en slimme herkenning:</strong> als je die aanzet, draaien ze op je eigen computer. Het programma accepteert daarvoor alleen adressen op je eigen computer (localhost), zodat bonnetjes je computer niet verlaten.</li>
+      <li><strong>Uitwisseling met je boekhouder:</strong> de export gaat per e-mail (via jouw eigen mailserver) of als bestand rechtstreeks van jou naar je boekhouder, versleuteld zodat alleen zijn kantoor hem kan openen. Zijn antwoord komt op dezelfde manier terug. Het gaat niet via ons, en wij kunnen het niet lezen.</li>
+      <li><strong>Licentie voor het abonnement:</strong> alleen als je een abonnement hebt (gehad), vraagt het programma bij onze licentieserver of je licentie nog geldig is. Het stuurt daarbij het nummer van je administratie en een willekeurige beheersleutel mee. De sleutel blijft lokaal in je administratie; onze server bewaart alleen een niet-terugrekenbare hash om te controleren dat alleen jouw app de licentie kan ophalen of het abonnement kan opzeggen.</li>
     </ul>
     <p>Het programma bevat geen advertenties, geen trackers en geen gebruiksstatistieken.</p>
+
+    <h2>Het abonnement</h2>
+    <p>Voor het abonnement op de uitwisseling met je boekhouder verwerken wij:</p>
+    <ul>
+      <li>het nummer van je administratie in het programma (een willekeurige code, geen persoonsgegeven op zich);</li>
+      <li>de hash van een willekeurige beheersleutel, om je licentie en opzegging te beveiligen;</li>
+      <li>je e-mailadres, en de bedrijfsgegevens die op de factuur komen: naam, adres, KvK- en/of btw-nummer;</li>
+      <li>de nummers die Mollie gebruikt voor jou als klant, je betalingen, je abonnement en je facturen, de betaalde bedragen en de datums.</li>
+    </ul>
+    <p><strong>Waarvoor:</strong> om je abonnement uit te voeren (betalen, verlengen, opzeggen, je licentie geven) en om facturen te maken. De grondslag is de uitvoering van de overeenkomst met jou, en voor de facturen onze wettelijke bewaarplicht.</p>
+    <p><strong>Wie het nog meer verwerkt:</strong> <a href="https://www.mollie.com/nl/privacy">Mollie B.V.</a> voor de betalingen, de incasso en het maken en versturen van de facturen, en <a href="https://www.cloudflare.com/nl-nl/privacypolicy/">Cloudflare</a>, waar onze licentieserver draait; de gegevens daarvan staan in een database in West-Europa.</p>
+    <p><strong>Hoe lang:</strong> zolang je abonnement loopt, en daarna zo lang als nodig voor onze administratie: facturen en de gegevens daarop bewaren wij 7 jaar, zoals de wet voorschrijft. Wil je dat wij de overige gegevens eerder verwijderen, mail ons dan.</p>
 
     <h2>Wachtwoorden en sleutels</h2>
     <p>Wachtwoorden en API-sleutels worden versleuteld opgeslagen met het beveiligde sleutelbeheer van je besturingssysteem.</p>
@@ -49,8 +66,8 @@
     <p>Je hebt recht op inzage, correctie en verwijdering van persoonsgegevens die wij van je hebben. Mail daarvoor naar <a href="mailto:info@shipdocs.app">info@shipdocs.app</a>. Ben je het niet eens met hoe wij met je gegevens omgaan, dan kun je een klacht indienen bij de <a href="https://autoriteitpersoonsgegevens.nl">Autoriteit Persoonsgegevens</a>.</p>
   </main>
   <footer class="wrap foot">
-    <span>BoekhoudenVoorNiks · open source onder AGPL-3.0-or-later · <a href="https://github.com/shipdocs/boekhoudenvoorniks">broncode</a></span>
-    <span><a href="voorwaarden.html">Voorwaarden</a> · <a href="privacy.html">Privacy</a></span>
+    <span>BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a></span>
+    <span><a href="index.html#prijzen">Prijzen</a> · <a href="wijzigingen.html">Wat is er nieuw</a> · <a href="voorwaarden.html">Voorwaarden</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a> · <a href="https://github.com/shipdocs/boekhoudenvoorniks/issues">Feedback &amp; vragen</a></span>
   </footer>
 </body>
 </html>

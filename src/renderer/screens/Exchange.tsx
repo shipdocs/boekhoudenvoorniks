@@ -170,25 +170,69 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
   const price = useLoad(() => api.license.price(), [status.state]);
   const { run, busy } = useAction();
   const [email, setEmail] = useState(settings.company.email);
+  const [cancelling, setCancelling] = useState(false);
   if (status.state === 'uit') return null;
-  if (status.state === 'actief') return <p className="small muted" style={{ margin: 0 }}>Abonnement actief t/m {formatDateNl(status.validUntil)}.</p>;
-  const amount = price.data ? `€ ${price.data.bedrag.replace('.', ',')} per ${price.data.per}` : null;
+
+  const fetchLicense = async () => {
+    const r = await run(() => api.license.refresh());
+    if (r) {
+      toast(r.state === 'actief' ? `Abonnement actief t/m ${formatDateNl(r.validUntil)}` : 'Licentie opgehaald');
+      onChange();
+    }
+  };
+  const checkout = async () => {
+    const r = await run(() => api.license.checkout(email));
+    if (!r) return;
+    if (r.al) {
+      toast('Je hebt al een abonnement; we halen je licentie op');
+      await fetchLicense();
+    } else toast('De betaalpagina is geopend in je browser');
+  };
+
+  if (status.state === 'actief') {
+    return (
+      <div className="small" style={{ margin: 0 }}>
+        {status.cancelled ? (
+          <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+            <span className="muted">Abonnement opgezegd: je kunt versturen t/m {formatDateNl(status.validUntil)}; er wordt niets meer afgeschreven.</span>
+            <Button small disabled={busy} onClick={() => void checkout()}>Opnieuw afsluiten</Button>
+          </div>
+        ) : (
+          <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+            <span className="muted">Abonnement actief; de maandelijkse factuur krijg je per e-mail.</span>
+            <Button small kind="ghost" onClick={() => setCancelling(true)}>Opzeggen</Button>
+          </div>
+        )}
+        {cancelling && (
+          <Modal title="Abonnement opzeggen?" onClose={() => setCancelling(false)}>
+            <p>Er wordt daarna niets meer afgeschreven. Je kunt nog naar je boekhouder versturen tot het eind van de maand waarvoor je betaald hebt; een antwoord inlezen kan altijd.</p>
+            <div className="row end">
+              <Button onClick={() => setCancelling(false)}>Niet opzeggen</Button>
+              <Button kind="danger" disabled={busy} onClick={async () => {
+                const r = await run(() => api.license.cancel());
+                setCancelling(false);
+                if (r) {
+                  toast(r.state === 'actief' ? `Opgezegd; versturen kan nog t/m ${formatDateNl(r.validUntil)}` : 'Opgezegd');
+                  onChange();
+                }
+              }}>Opzeggen</Button>
+            </div>
+          </Modal>
+        )}
+      </div>
+    );
+  }
+  const amount = price.data ? `€ ${price.data.bedrag.replace('.', ',')} per ${price.data.per} (inclusief btw)` : null;
   return (
     <div className="notice grid" data-testid="abonnement">
       <div>
         <strong>{status.state === 'verlopen' ? `Je abonnement liep tot ${formatDateNl(status.validUntil)}.` : 'Versturen naar je boekhouder hoort bij het abonnement.'}</strong>{' '}
-        {amount ? `Het kost ${amount}. ` : ''}Koppelen en een antwoord inlezen kan altijd; alleen het versturen vraagt een abonnement. Je betaalt via Mollie (iDEAL, daarna automatische incasso).
+        {amount ? `Het kost ${amount}, per maand opzegbaar. ` : 'Per maand opzegbaar. '}Koppelen en een antwoord inlezen kan altijd; alleen het versturen vraagt een abonnement. Je betaalt via Mollie (iDEAL, daarna automatische incasso) en krijgt elke maand een factuur op naam van je bedrijf.
       </div>
       <div className="row" style={{ alignItems: 'flex-end', gap: 10 }}>
-        <Field label="E-mailadres voor het abonnement"><input value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-        <Button kind="primary" disabled={busy || !email.trim()} onClick={() => void run(() => api.license.checkout(email), 'De betaalpagina is geopend in je browser')}>{status.state === 'verlopen' ? 'Verlengen' : 'Abonnement nemen'}</Button>
-        <Button disabled={busy} onClick={async () => {
-          const r = await run(() => api.license.refresh());
-          if (r) {
-            toast(r.state === 'actief' ? `Abonnement actief t/m ${formatDateNl(r.validUntil)}` : 'Licentie opgehaald');
-            onChange();
-          }
-        }}>Ik heb betaald: licentie ophalen</Button>
+        <Field label="E-mailadres voor het abonnement en de facturen"><input value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Button kind="primary" disabled={busy || !email.trim()} onClick={() => void checkout()}>{status.state === 'verlopen' ? 'Verlengen' : 'Abonnement nemen'}</Button>
+        <Button disabled={busy} onClick={() => void fetchLicense()}>Ik heb betaald: licentie ophalen</Button>
       </div>
     </div>
   );
