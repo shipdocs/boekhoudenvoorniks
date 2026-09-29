@@ -45,7 +45,7 @@ export function Home() {
     }
   };
 
-  const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number }) => {
+  const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }) => {
     if (task.kind === 'vat-check' && actionId === 'open' && task.ref.account) return setCheckLines(task);
     // een controle over losse betalingen of aankopen: eerst laten zien welke het zijn
     if (task.kind === 'vat-check' && actionId === 'open' && task.ref.periodKey) {
@@ -311,12 +311,13 @@ export function Home() {
             </details>
           )}
           <CategoryPicker
+            txId={picking.ref.bankTransactionId}
             amount={picking.amount !== undefined ? Math.abs(picking.amount) : undefined}
             initial={picking.ref.categoryKey}
-            onPick={async (categoryKey, vatCode) => {
+            onPick={async (categoryKey, vatCode, businessPct) => {
               const t = picking;
               setPicking(null);
-              await act(t, t.kind === 'bank-business' ? 'zakelijk' : 'anders', { categoryKey, vatCode });
+              await act(t, t.kind === 'bank-business' ? 'zakelijk' : 'anders', { categoryKey, vatCode, businessPct });
             }}
           />
         </Modal>

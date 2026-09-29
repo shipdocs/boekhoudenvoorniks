@@ -129,7 +129,7 @@ export function createApi(s: Services, host: HostContext) {
   };
 
   /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
-  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
+  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
     const r = task.ref;
     switch (`${task.kind}:${actionId}`) {
       case 'bank-invoice:klopt':
@@ -161,7 +161,7 @@ export function createApi(s: Services, host: HostContext) {
       // falls through
       case 'bank-category:anders':
         if (payload?.categoryKey) {
-          s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: payload.categoryKey, vatCode: payload.vatCode });
+          s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: payload.categoryKey, vatCode: payload.vatCode, businessPct: payload.businessPct });
           return;
         }
         return { navigate: { screen: 'categorie', id: r.bankTransactionId } };
@@ -437,7 +437,7 @@ export function createApi(s: Services, host: HostContext) {
     home: {
       get: () => s.inbox.home(),
       /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
-      act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
+      act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
         const result = await doAct(task, actionId, payload);
         if (!result?.navigate) s.inbox.recordUserAction(task, actionId);
         return result;
@@ -627,21 +627,32 @@ export function createApi(s: Services, host: HostContext) {
       saleChannels: () => s.bank.saleChannels(),
       ignore: (txId: number) => s.bank.ignore(txId),
       /** Andere categorie voor een al geboekte betaling: tegenboeking + nieuwe boeking (#19), en leren. */
-      reclassify: (txId: number, categoryKey: string, vatCode: string) => {
+      reclassify: (txId: number, categoryKey: string, vatCode: string, businessPct?: number) => {
         const category = s.categories.find(categoryKey);
         if (!category) throw new Error('Onbekende categorie');
         // boeken en leren in één transactie: nooit een gewijzigde boeking met een mislukte leerstap
         return tx(s.db, () => {
-          const entryId = s.bank.reclassify(txId, { account: category.account, vatCode }, `categorie gewijzigd naar ${category.label.toLowerCase()}`);
+          const entryId = s.bank.reclassify(txId, { account: category.account, vatCode, ...(businessPct !== undefined ? { businessPct } : {}) }, `categorie gewijzigd naar ${category.label.toLowerCase()}`);
           const t = s.bank.get(txId);
           if (t.counter_name && supplierKey(t.counter_name)) s.memory.learn(t.counter_name, { categoryKey, vatCode, business: true });
           return entryId;
         });
       },
+      /** Zakelijk deel dat eerder voor de tegenpartij van deze betaling is opgegeven (100 = alles zakelijk). */
+      businessShare: (txId: number) => {
+        const t = s.bank.get(txId);
+        return { name: t.counter_name, pct: s.businessShare.get(t.counter_name) };
+      },
       unmatch: (txId: number) => s.bank.unmatch(txId),
       autoMatch: () => s.matching.autoMatch(undefined, s.settings.get().autopilot),
     },
     /** Overstappen met een lopende administratie: instapdatum, startbalans en controles. */
+    /** Gemengd gebruik: zakelijk deel per leverancier (Dropbox 50%, Odido 75%, …). Geen regel = 100%. */
+    businessShare: {
+      list: () => s.businessShare.list(),
+      get: (name: string) => s.businessShare.get(name),
+      set: (name: string, pct: number, applyExisting?: boolean) => s.businessShare.set(name, pct, { applyExisting }),
+    },
     switchover: {
       state: () => s.switchover.state(),
       setMode: (mode: 'nieuw' | 'overstapper', date?: IsoDate | null) => s.switchover.setMode(mode, date ?? null),
