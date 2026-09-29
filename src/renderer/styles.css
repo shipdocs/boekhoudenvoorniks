@@ -50,7 +50,7 @@ a { color: var(--primary); }
 
 .app { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
 .nav { background: var(--surface); border-right: 1px solid var(--border); padding: 18px 12px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
-.nav .brand { font-weight: 700; font-size: 17px; padding: 4px 10px 16px; }
+.nav .brand { padding: 2px 8px 14px; }
 .nav button { text-align: left; border: 0; background: none; padding: 9px 12px; border-radius: 8px; cursor: pointer; display: flex; gap: 10px; align-items: center; color: var(--text-2); }
 .nav button:hover { background: var(--surface-2); }
 .nav button.active { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
