@@ -1,5 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Notification, session, shell } from 'electron';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session, shell } from 'electron';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, type Db } from '../db/database';
@@ -10,7 +10,7 @@ import { createSmtpMailer, verifySmtp } from '../documents/smtp-mailer';
 import { createApi, type Api } from './api';
 import { renderPdf } from './pdf';
 import { SafeStorageSecretStore } from './secrets';
-import { createBackupBundle, dailyBackup, isBackupBundle, restoreCompleteBackup, restoreLegacyDatabase, validateBackup, validateCompleteBackup, writeCompleteBackup } from './backup';
+import { createBackupBundle, dailyBackup, extractBundle, isBackupBundle, restoreCompleteBackup, restoreLegacyDatabase, validateBackup, validateCompleteBackup, writeCompleteBackup } from './backup';
 import { wipeDatabase } from './reset';
 import { seedDemo } from '../demo/demo';
 import { decryptBackup, encryptBackup, isEncryptedBackup } from './encrypted-backup';
@@ -30,6 +30,9 @@ import type { PollResult } from '../mail/mail-intake';
 import { isPathInside } from './path-security';
 import { DATA_DIR_NAME, migrateDataDir, OLD_DATA_DIR_NAME } from './data-dir';
 import { Administrations, readAdministrationFile } from './administrations';
+import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
+import { generateOfficeKeys } from '../exchange/crypto';
+import Database from 'better-sqlite3';
 
 const SMTP_SECRET = 'smtp:password';
 const IMAP_SECRET = 'imap:password';
@@ -62,6 +65,81 @@ function dataDir(): string {
   const dir = administrations().dirFor(administrations().current());
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/**
+ * Het kantoor op deze computer (bij de boekhouder): gedeeld door alle administraties, dus niet in een
+ * database maar in de gegevensmap. De privésleutel is versleuteld met de sleutelopslag van het
+ * besturingssysteem.
+ */
+function officeFile(): string {
+  return join(rootDir(), 'kantoor.json');
+}
+
+/** Het kantoor, of waarom het niet te openen is (fail-closed: nooit een half profiel). */
+function officeState(): { profile: OfficeProfile | null; problem: string | null } {
+  if (!existsSync(officeFile())) return { profile: null, problem: null };
+  try {
+    const raw = JSON.parse(readFileSync(officeFile(), 'utf8')) as { office: string; email: string; publicKey: string; privateKey: string };
+    if (!secrets.available) return { profile: null, problem: 'De sleutelhanger van je computer is niet beschikbaar, dus de sleutel van je kantoor kan nu niet geopend worden.' };
+    return { profile: { office: raw.office, email: raw.email, publicKey: raw.publicKey, privateKey: safeStorage.decryptString(Buffer.from(raw.privateKey, 'base64')) }, problem: null };
+  } catch {
+    return { profile: null, problem: 'De sleutel van je kantoor kan niet geopend worden (bijvoorbeeld na een nieuwe installatie of een andere sleutelhanger).' };
+  }
+}
+
+function readOffice(): OfficeProfile | null {
+  return officeState().profile;
+}
+
+/** `newKey`: bewust een nieuwe kantoorsleutel (klanten koppelen dan opnieuw met een nieuwe uitnodiging). */
+function saveOffice(input: { office: string; email: string; newKey?: boolean }): OfficeProfile {
+  if (!input.office.trim()) throw new Error('Vul de naam van je kantoor in');
+  if (!secrets.available) throw new Error('Veilige opslag is niet beschikbaar op dit systeem (geen sleutelhanger gevonden); de sleutel van je kantoor kan niet veilig bewaard worden');
+  const state = officeState();
+  if (state.problem && !input.newKey) throw new Error(`${state.problem} Maak een nieuwe kantoorsleutel; je klanten koppelen dan opnieuw met een nieuwe uitnodiging.`);
+  const keys = (input.newKey ? null : state.profile) ?? generateOfficeKeys();
+  const profile: OfficeProfile = { office: input.office.trim(), email: input.email.trim(), publicKey: keys.publicKey, privateKey: keys.privateKey };
+  writeFileSync(officeFile(), JSON.stringify({ office: profile.office, email: profile.email, publicKey: profile.publicKey, privateKey: safeStorage.encryptString(profile.privateKey).toString('base64') }), { mode: 0o600 });
+  return profile;
+}
+
+/** Export van een klant: uitpakken als nieuwe administratie (de kopie), klaarzetten en openen. */
+async function openClientExport(data: Uint8Array): Promise<{ company: string; exchange: number; endDate: string }> {
+  const profile = readOffice();
+  if (!profile) throw new Error('Vul eerst de naam van je kantoor in (Instellingen > Administraties)');
+  const opened = ExchangeService.openExport(profile, data, app.getVersion());
+  const result = { company: opened.meta.company, exchange: opened.header.uitwisseling, endDate: opened.header.einddatum };
+  const admins = administrations();
+  // al ingelezen? dan die kopie openen, niet nog een
+  const existing = admins.list(readAdministrationFile).find((a) => a.id === opened.header.administratie && a.officeCopy?.exchange === opened.header.uitwisseling);
+  if (existing) {
+    await openAdministration(existing.key);
+    return result;
+  }
+  const key = admins.create(`${opened.meta.company || 'Klant'} uitwisseling ${opened.header.uitwisseling}`);
+  const dir = admins.dirFor(key);
+  try {
+    extractBundle(opened.bundle, dir);
+    const copyDb = openDatabase(join(dir, 'boekhouding.sqlite'));
+    try {
+      const copyServices = createServices(copyDb, {
+        pdf: renderPdf,
+        mailerFactory: async () => { throw new Error('In de kopie van een klant gaat er geen e-mail naar buiten'); },
+        secrets: new SafeStorageSecretStore(copyDb),
+        fetch: localFetch,
+        storeFile: storeAttachment,
+      });
+      copyServices.exchange.initCopy(opened.header, opened.meta, profile.office);
+    } finally {
+      copyDb.close();
+    }
+  } catch (e) {
+    rmSync(dir, { recursive: true, force: true });
+    throw e;
+  }
+  await openAdministration(key);
+  return result;
 }
 
 /** Andere administratie openen: de huidige netjes sluiten, de andere openen en het venster verversen. */
@@ -387,6 +465,21 @@ function initServices(): void {
       initServices();
       if (withDemo) seedDemo(services);
       return { backup };
+    },
+    exchange: {
+      bundle: () =>
+        createBackupBundle(db, dataDir(), (copy) => {
+          const d = new Database(copy);
+          try {
+            sanitizeForExchange(d);
+          } finally {
+            d.close();
+          }
+        }),
+      office: () => readOffice(),
+      officeProblem: () => officeState().problem,
+      saveOffice,
+      openClientExport,
     },
     administrations: {
       list: () => administrations().list(readAdministrationFile),

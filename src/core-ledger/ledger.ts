@@ -133,6 +133,18 @@ export type PeriodLockKind = 'afgesloten' | 'uitwisseling';
 export class Ledger {
   constructor(private readonly db: Db) {}
 
+  /** Waarom er nu niet geboekt mag worden (bv. in de kopie bij de boekhouder buiten een vastgelegde handeling), of null. */
+  private writeGuard: (() => string | null) | null = null;
+
+  setWriteGuard(guard: (() => string | null) | null): void {
+    this.writeGuard = guard;
+  }
+
+  private assertWritable(): void {
+    const reason = this.writeGuard?.();
+    if (reason) throw new PeriodLockedError(reason);
+  }
+
   seedDefaultAccounts(): void {
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO chart_of_accounts (rgs_code, rgs_ref, code, name, category, vat_code, is_system)
@@ -198,6 +210,7 @@ export class Ledger {
 
   /** Tijdens de uitwisseling blijft het rekeningschema zoals de boekhouder het kreeg. */
   private assertAccountsEditable(): void {
+    this.assertWritable();
     if (this.periodLock().exchange && !this.lockBypassed()) {
       throw new PeriodLockedError('Tijdens de uitwisseling met je boekhouder kun je geen grootboekrekeningen toevoegen of wijzigen.');
     }
@@ -310,6 +323,7 @@ export class Ledger {
 
   post(entry: PostEntry): number {
     this.validate(entry);
+    this.assertWritable();
     return tx(this.db, () => {
       // Afgesloten periode: een late post komt op de eerste open dag; de btw volgt de documentdatum.
       const bookDate = this.bookingDate(entry);

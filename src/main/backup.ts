@@ -39,11 +39,15 @@ export async function backupDatabase(db: Db, target: string): Promise<void> {
   await db.backup(target);
 }
 
-/** Compleet, zelfcontrolerend back-uppakket: database plus alle bijlagen. */
-export async function createBackupBundle(db: Db, dataRoot: string): Promise<Buffer> {
+/**
+ * Compleet, zelfcontrolerend back-uppakket: database plus alle bijlagen. `prepare` mag de losse kopie
+ * van de database aanpassen voordat hij in het pakket gaat (bv. geheimen eruit voor de boekhouder).
+ */
+export async function createBackupBundle(db: Db, dataRoot: string, prepare?: (databaseCopy: string) => void): Promise<Buffer> {
   const temp = join(tmpdir(), `gb-backup-${randomUUID()}.sqlite`);
   try {
     await backupDatabase(db, temp);
+    prepare?.(temp);
     const entries: BundleEntry[] = [{ path: 'boekhouding.sqlite', data: readFileSync(temp) }, ...attachmentEntries(dataRoot)];
     const parts: Buffer[] = [BUNDLE_MAGIC, Buffer.from([BUNDLE_VERSION])];
     const count = Buffer.alloc(4);
@@ -199,6 +203,24 @@ export function restoreCompleteBackup(data: Buffer, target: string, dataRoot: st
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
+}
+
+/** Pakt een bundel uit in een nieuwe, lege map (bv. de kopie van een klant bij de boekhouder). */
+export function extractBundle(data: Buffer, dir: string): void {
+  const entries = readBackupBundle(data);
+  const target = join(dir, 'boekhouding.sqlite');
+  if (existsSync(target)) throw new Error('Hier staat al een administratie');
+  mkdirSync(dir, { recursive: true });
+  for (const [path, content] of entries) {
+    const destination = join(dir, ...path.split('/'));
+    const rel = relative(dir, resolve(destination));
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Bundel bevat een onveilig bestandspad');
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, content, { mode: 0o600 });
+  }
+  validateBackup(target);
+  mkdirSync(join(dir, 'bijlagen'), { recursive: true });
+  rebaseAttachmentPaths(target, join(dir, 'bijlagen'));
 }
 
 /** Alleen voor oude .sqlite-back-ups zonder bijlagen. */
