@@ -209,21 +209,28 @@ die in de open periode verwerkt moet worden.
 
 ## Kantoormodus en meerdere administraties
 
-Nu draait alles om één `dbPath()` en één `dataDir()` (`src/main/main.ts`): database, bijlagen,
-back-ups, MCP en instellingen.
+**Gebouwd** (stap 1 van de bouwvolgorde):
 
-- **Eén map per administratie**, met een keuzescherm bij het opstarten. Het keuzescherm werkt ook
-  voor een ondernemer met een bv en een eenmanszaak.
-- **Administratie-ID:** een UUID in `settings`, aangemaakt bij de migratie en opgenomen in back-ups.
-  Een teruggezette back-up houdt hetzelfde ID; de koppelsleutels (sleutelopslag) moeten na een
-  herinstallatie opnieuw.
-- **Kantoormodus** voor administraties die uit een export komen:
-  - alles wat naar buiten gaat staat hard uit: automatische herinneringen, IMAP, koppelingen, vaste
-    lasten, e-mail versturen (dezelfde plekken als `demoMode`, maar dan afgedwongen in de services en
-    niet alleen in `main.ts`);
-  - standaard de expertmodus;
-  - per klant de stand: "export 17 ontvangen op 3 oktober, nog geen antwoord";
-  - de MCP-server kan per administratie gestart worden, alleen lezen, zoals nu.
+- **Meerdere administraties** (`src/main/administrations.ts`). De eerste administratie blijft in de
+  gegevensmap zelf staan; extra administraties staan in `administraties/<sleutel>/`, elk met een eigen
+  database, bijlagen en back-ups. Het OCR-model is gedeeld. De app opent de laatst gebruikte
+  administratie (`administratie.json`); wisselen en aanmaken gaat via *Instellingen > Administraties*,
+  en met meer dan één administratie staat de open administratie onder de naam van de app. Een apart
+  keuzescherm bij het opstarten is er (nog) niet. Alleen de open administratie haalt mail op, verstuurt
+  herinneringen en maakt de dagelijkse back-up. De MCP-koppeling leest de open administratie.
+- **Administratie-ID:** een UUID (versie 4) in `settings` (migratie 21, `SettingsService.administrationId()`),
+  niet te wijzigen via de instellingen. Gaat mee in back-ups; een teruggezette back-up houdt hetzelfde ID.
+- **Kantoormodus** (`SettingsService.officeCopy()` / `markOfficeCopy()`): een instelling in de
+  administratie zelf, niet via de gewone instellingen uit te zetten. In de kopie:
+  - geen e-mail (afgedwongen in de mailer van de services), geen koppelingen (webshop, Mollie,
+    Stripe: afgedwongen in de `fetch` van de koppelingen), geen post ophalen (API en achtergrond);
+  - de achtergrondtaken doen alleen de back-up: geen afschrijvingen, geen automatisch verwerken, geen
+    omrekening van vreemde valuta, geen herinneringen (`main.ts`);
+  - een balk bovenaan: "Kopie voor … (uitwisseling …, t/m …)".
+
+**Nog te doen:** standaard de expertmodus in de kopie, en per klant de stand van de uitwisseling
+("export 17 ontvangen op 3 oktober, nog geen antwoord"). Dat hoort bij stap 3 (uitwisseling), omdat
+de kantoormodus pas ontstaat bij het inlezen van een export.
 
 ## Jaarafsluiting
 

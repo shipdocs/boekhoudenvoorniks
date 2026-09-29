@@ -19,6 +19,7 @@ import { TermsGate } from './screens/Terms';
 import { TERMS_VERSION } from '../shared/legal';
 import { hasOnboardingUpdate } from '../shared/onboarding';
 import { DemoBanner } from './screens/Reset';
+import { CurrentAdministration, OfficeCopyBanner } from './screens/Administrations';
 import { UpdateBanner } from './screens/UpdateBanner';
 
 const DocumentReview = lazy(() => import('./screens/DocumentReview').then((module) => ({ default: module.DocumentReview })));
@@ -131,6 +132,7 @@ export function App() {
         {route.screen !== 'welkom' && (
           <nav className="nav" aria-label="Hoofdmenu">
             <div className="brand">BoekhoudenVoorNiks</div>
+            <CurrentAdministration />
             <button className={`search-btn${route.screen === 'zoeken' ? ' active' : ''}`} onClick={() => go({ screen: 'zoeken' })} title="Zoeken (Ctrl+K voor snel zoeken)"><span>🔍</span>Zoeken<kbd>Ctrl K</kbd></button>
             {NAV.map((n) => (
               <button key={n.screen} className={isActive(n) ? 'active' : ''} onClick={() => go({ screen: n.screen })}>
@@ -155,6 +157,7 @@ export function App() {
         )}
         <main className="main" style={route.screen === 'welkom' ? { gridColumn: '1 / -1' } : undefined}>
           {settings.demoMode && route.screen !== 'welkom' && <DemoBanner />}
+          {route.screen !== 'welkom' && <OfficeCopyBanner />}
           {route.screen !== 'welkom' && <UpdateBanner />}
           <Suspense fallback={<div className="card">Laden…</div>}>{screen}</Suspense>
         </main>

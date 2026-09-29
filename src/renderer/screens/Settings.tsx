@@ -6,10 +6,11 @@ import { ResetCard } from './Reset';
 import { CategoriesDialog } from './Categories';
 import { ReaderChoice } from './Reader';
 import { AssistantCard } from './Assistant';
+import { AdministrationsSettings } from './Administrations';
 import { businessEffect } from '../../shared/business-share';
 import { LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 
-type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'ai' | 'backup' | 'geavanceerd' | 'over';
+type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
 
 const TABS: [Tab, string][] = [
   ['bedrijf', 'Je bedrijf'],
@@ -20,6 +21,7 @@ const TABS: [Tab, string][] = [
   ['koppelingen', 'Koppelingen'],
   ['ai', 'Automatisch & herkenning'],
   ['backup', 'Back-up, demo & updates'],
+  ['administraties', 'Administraties'],
   ['geavanceerd', 'Voor de boekhouder'],
   ['over', 'Over'],
 ];
@@ -62,6 +64,8 @@ export function SettingsScreen() {
       <div className="chips" style={{ margin: '12px 0 18px' }}>
         {TABS.map(([k, l]) => <button key={k} className={tab === k ? 'selected' : ''} onClick={() => setTab(k)}>{l}</button>)}
       </div>
+
+      {tab === 'administraties' && <AdministrationsSettings />}
 
       {tab === 'bedrijf' && section(
         <>

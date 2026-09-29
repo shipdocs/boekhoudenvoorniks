@@ -808,4 +808,11 @@ export const migrations: string[] = [
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  /* 21: vaste identiteit van de administratie (uitwisseling met de boekhouder) */ `
+  -- Een willekeurige UUID (versie 4), één keer per administratie. Gaat mee in back-ups en exports, zodat
+  -- een pakket van de boekhouder alleen bij deze administratie past. Niet te wijzigen via de instellingen.
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('administrationId', '"' ||
+    lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+    substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))) || '"');
+  `,
 ];

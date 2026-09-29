@@ -64,10 +64,16 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const quotes = new QuoteService(db, settings, relations, templates, invoices);
   const events = new EventService(db, ledger);
   const purchases = new PurchaseService(db, ledger, events);
-  // in de demo gaat er nooit e-mail naar de (verzonnen) klanten
+  // in de demo gaat er nooit e-mail naar de (verzonnen) klanten, en in de kopie bij de boekhouder niet naar de echte
   const mailerFactory = async () => {
     if (settings.get().demoMode) throw new Error('In de demo worden geen e-mails verstuurd. Wis de demo om echt te beginnen.');
+    if (settings.officeCopy()) throw new Error(settings.outboundBlocked()!);
     return deps.mailerFactory();
+  };
+  // koppelingen (webshop, Mollie, Stripe) halen in de kopie bij de boekhouder niets op: dat boekt de klant zelf
+  const integrationFetch: FetchLike = (url, init) => {
+    if (settings.officeCopy()) return Promise.reject(new Error(settings.outboundBlocked()!));
+    return deps.fetch(url, init);
   };
   const sender = new DocumentSender(db, settings, invoices, quotes, deps.pdf, mailerFactory);
   const bank = new BankService(db, ledger, invoices, purchases, relations, events);
@@ -75,7 +81,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const vat = new VatService(db, ledger, settings);
   const dashboard = new DashboardService(db, ledger, invoices, bank, vat);
   const quick = new QuickActions(db, ledger, purchases, invoices, relations, categories);
-  const integrations = new IntegrationService(db, ledger, invoices, relations, deps.secrets, deps.fetch);
+  const integrations = new IntegrationService(db, ledger, invoices, relations, deps.secrets, integrationFetch);
   const exports = new AccountantExport(db, ledger);
   const accountantPackage = new AccountantPackage(db, ledger, exports, invoices, vat, settings, deps.pdf);
   const memory = new SupplierMemory(db);
