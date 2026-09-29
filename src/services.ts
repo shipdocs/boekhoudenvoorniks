@@ -24,6 +24,7 @@ import { IntegrationService } from './integrations/integrations';
 import type { FetchLike, SecretStore } from './integrations/types';
 import { PeriodCloseService } from './closing/period-close';
 import { ExchangeService } from './exchange/exchange';
+import { LicenseService } from './license/license';
 import { AccountantExport } from './export/accountant';
 import { AccountantPackage } from './export/accountant-package';
 import { SupplierMemory } from './intake/supplier-memory';
@@ -53,6 +54,8 @@ export interface ServiceDeps {
   storeFile: (name: string, data: Uint8Array) => Promise<string>;
   ocr?: OcrProvider | null;
   llm?: LlmClassifier | null;
+  /** publieke sleutel voor licenties (tests); standaard die van de licentie-Worker */
+  licensePublicKey?: string;
 }
 
 /** Composition root: bouwt alle modules op één database. */
@@ -86,6 +89,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   /** een losse e-mail met de instellingen van de gebruiker (bv. de export voor de boekhouder) */
   const sendMail = async (message: MailMessage) => (await mailerFactory()).send(message);
   const exchange = new ExchangeService(db, ledger, settings, periods, deps.secrets);
+  const license = new LicenseService(db, settings, deps.licensePublicKey);
   const quick = new QuickActions(db, ledger, purchases, invoices, relations, categories);
   const integrations = new IntegrationService(db, ledger, invoices, relations, deps.secrets, integrationFetch);
   const exports = new AccountantExport(db, ledger);
@@ -129,7 +133,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, periods, exchange, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
+  return { db, periods, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;

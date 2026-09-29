@@ -21,6 +21,24 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # Licentie-Worker (workers/licentie): eigen package. Installeren uit de lockfile, typecheck en
+  # bundelen met wrangler (dry-run: geen account nodig, er wordt niets gedeployd). De logica zelf wordt
+  # getest in tests/licentie.test.ts (job test).
+  licentie-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/licentie
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: workers/licentie/package-lock.json
+      - run: npm ci
+      - run: npm run check
+
   # End-to-end: de echte schermen in Chromium, met de echte services (zie e2e/ en playwright.config.ts).
   e2e:
     runs-on: ubuntu-latest

@@ -1,7 +1,7 @@
 # Uitwisseling met de boekhouder: technisch ontwerp
 
-Status: stap 1 t/m 3 van de bouwvolgorde zijn **gebouwd** (zie onderaan); de licentie (stap 4) nog
-niet. Per onderdeel staat wat gebouwd is en waar het afwijkt van het oorspronkelijke ontwerp.
+Status: stap 1 t/m 4 van de bouwvolgorde zijn **gebouwd** (zie onderaan); de licentie (stap 4) staat
+nog uit tot de licentie-Worker live is. Per onderdeel staat wat gebouwd is en waar het afwijkt van het oorspronkelijke ontwerp.
 Code: `src/exchange/` (versleuteling, uitwisseling), `src/closing/` (periodeslot),
 `src/main/administrations.ts`. Tests: `tests/uitwisseling.test.ts` (de hele cyclus met echte
 bestanden), `tests/uitwisseling-crypto.test.ts`, `tests/periodeslot.test.ts`, `e2e/uitwisseling.spec.ts`.
@@ -325,10 +325,21 @@ Een klant zonder boekhouder kan een jaar zelf afsluiten: hetzelfde slot, zonder 
 
 ## Licentie
 
-De uitwisseling kan achter een licentie. Technisch zonder server: een licentiebestand dat de maker
-ondertekent (Ed25519) en de app offline controleert met een publieke sleutel die in de app zit. De
-controle zit alleen op *Naar boekhouder sturen*, *Uitnodigen* en *Antwoord maken*; inlezen van een
-antwoord werkt altijd, zodat een klant nooit met een vergrendelde periode blijft zitten.
+**Gebouwd, nog niet actief** (`src/license/license.ts`, `workers/licentie/`).
+
+- Alleen **versturen naar de boekhouder** vraagt een licentie. Een antwoord inlezen werkt altijd, zodat
+  een klant nooit met een vergrendelde periode blijft zitten. Koppelen en alles aan de kant van het
+  kantoor is gratis.
+- De licentie is een token dat de licentie-Worker ondertekent (Ed25519) met administratie-ID,
+  e-mailadres en "geldig tot" (betaalde periode plus 7 dagen marge). De app controleert het offline met
+  de publieke sleutel in `LICENSE_PUBLIC_KEY`. **Zolang die leeg is, staan licenties uit** en is alles vrij.
+- Afrekenen via Mollie: eerste betaling (`sequenceType: first`) voor de machtiging, daarna een
+  maandabonnement. De Worker verwerkt de webhook (haalt de betaling zelf op, idempotent) en verlengt
+  per betaalde maand. De prijs staat in de Worker (`PRICE_EUR`), niet in de app.
+- De app haalt de licentie op na *Ik heb betaald*, vóór het versturen als hij ontbreekt of verlopen is,
+  en op de achtergrond als hij binnen 7 dagen verloopt. Wie nooit een licentie had, maakt geen
+  verbinding.
+- Opzetten en deployen: `workers/licentie/README.md`.
 
 ## Buiten de scope van de eerste versie
 
@@ -361,4 +372,4 @@ Bewust niet in de eerste versie:
    periode afsluiten.
 3. **Uitwisseling** (gebouwd): uitnodiging en controlecode, export, vastleggen van handelingen, antwoord
    maken en inlezen met vertaaltabel.
-4. **Licentie** op de knoppen voor versturen, uitnodigen en antwoord maken (nog niet gebouwd).
+4. **Licentie** (gebouwd, nog niet actief): alleen op versturen; aan zodra `LICENSE_PUBLIC_KEY` gevuld is.
