@@ -16,7 +16,7 @@ export function ExchangeCard({ onChange }: { onChange?: () => void }) {
   const [invite, setInvite] = useState<{ office: string; email: string; code: string; data: Uint8Array } | null>(null);
   const [sending, setSending] = useState<'mail' | 'bestand' | null>(null);
   const [aborting, setAborting] = useState(false);
-  const [result, setResult] = useState<{ office: string; count: number; summaries: string[]; closedUntil: string } | null>(null);
+  const [result, setResult] = useState<{ office: string; count: number; summaries: string[]; closedUntil: string; conflicts: { kind: string; label: string }[] } | null>(null);
   const st = status.data;
   if (!st || st.copy) return null;
 
@@ -145,6 +145,11 @@ export function ExchangeCard({ onChange }: { onChange?: () => void }) {
         <Modal title={`Antwoord van ${result.office} ingelezen`} onClose={() => setResult(null)}>
           <p>Alles t/m {formatDateNl(result.closedUntil)} is nu afgesloten. {result.count === 0 ? 'Je boekhouder hoefde niets aan te passen.' : `Je boekhouder heeft ${result.count === 1 ? '1 aanpassing' : `${result.count} aanpassingen`} gedaan:`}</p>
           {result.summaries.length > 0 && <ul className="small">{result.summaries.map((s, i) => <li key={i}>{s}</li>)}</ul>}
+          {result.conflicts.length > 0 && (
+            <div className="notice warn small">
+              Let op: je boekhouder heeft {result.conflicts.map((c) => `${c.kind === 'factuur' ? 'factuur' : 'inkoop'} ${c.label}`).join(', ')} teruggedraaid, terwijl er al op betaald is. Dat staat op Vandaag, zodat je het met hem kunt afhandelen.
+            </div>
+          )}
           <div className="row end"><Button kind="primary" onClick={() => setResult(null)}>Oké</Button></div>
         </Modal>
       )}
@@ -159,6 +164,8 @@ export function OfficeSettings() {
   const { run, busy } = useAction();
   const [office, setOffice] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [sharePassword, setSharePassword] = useState('');
+  const [importPassword, setImportPassword] = useState('');
   const st = status.data;
   if (!st) return <ErrorBox error={status.error} />;
   const name = office ?? st.office?.office ?? '';
@@ -207,6 +214,38 @@ export function OfficeSettings() {
           </DropZone>
         </>
       )}
+      <details data-testid="collega">
+        <summary>Met collega's werken: de kantoorsleutel delen</summary>
+        <div className="grid" style={{ marginTop: 10 }}>
+          <p className="small muted" style={{ margin: 0 }}>
+            Alle computers van je kantoor hebben dezelfde kantoorsleutel nodig, anders kan alleen deze computer de exports van je klanten openen. Geef het wachtwoord apart door (niet in dezelfde mail als het bestand).
+          </p>
+          {st.office && (
+            <div className="row" style={{ alignItems: 'flex-end', gap: 10 }}>
+              <Field label="Wachtwoord" hint="minimaal 10 tekens"><input type="password" value={sharePassword} onChange={(e) => setSharePassword(e.target.value)} /></Field>
+              <Button disabled={busy || sharePassword.length < 10} onClick={async () => {
+                const path = await run(() => api.exchange.exportOfficeKey(sharePassword));
+                if (path) {
+                  toast(`Kantoorsleutel bewaard: ${path}. Geef het wachtwoord apart door.`);
+                  setSharePassword('');
+                }
+              }}>Kantoorsleutel bewaren voor een collega</Button>
+            </div>
+          )}
+          <Field label="Wachtwoord van de kantoorsleutel van je collega"><input type="password" value={importPassword} onChange={(e) => setImportPassword(e.target.value)} /></Field>
+          <DropZone accept=".gbkantoor" onFile={async (f) => {
+            const data = await readAsBytes(f);
+            if ((await run(() => api.exchange.importOfficeKey(data, importPassword), 'Kantoorsleutel overgenomen')) !== undefined) {
+              setImportPassword('');
+              setOffice(null);
+              setEmail(null);
+              await status.reload();
+            }
+          }}>
+            <p style={{ margin: 0 }}>Kantoorsleutel van een collega (<code>.gbkantoor</code>): vul eerst het wachtwoord in en sleep het bestand hierheen.{st.office ? ' Je eigen sleutel wordt dan vervangen; uitnodigingen die deze computer eerder maakte, werken daarna niet meer.' : ''}</p>
+          </DropZone>
+        </div>
+      </details>
     </div>
   );
 }

@@ -263,3 +263,44 @@ describe('uitwisseling: randgevallen', () => {
     expect(() => o.s.exchange.act(correction)).toThrow(/al gemaakt/);
   });
 });
+
+describe('uitwisseling: afronden', () => {
+  it('in de kopie bij de boekhouder: geen takenlijst en geen "Aan de slag" van de klant', async () => {
+    const profile = office();
+    const c = client(profile);
+    c.s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-10-02', amount: -2500, description: 'Pin', counterName: 'SHELL' }] });
+    expect(c.s.inbox.tasks(ASOF).length).toBeGreaterThan(0);
+    const o = openAtOffice(profile, (await c.s.exchange.createExport('2026-09-30', [], VERSION, c.bundle, ASOF)).file);
+    expect(o.s.inbox.tasks(ASOF)).toEqual([]);
+    expect(o.s.checklist.items()).toEqual([]);
+    expect(o.s.inbox.autoProcess(ASOF)).toEqual({ matched: 0, booked: 0 });
+  });
+
+  it('teruggedraaid terwijl er al op betaald is: een taak op Vandaag die je kunt afvinken', async () => {
+    const profile = office();
+    const c = client(profile);
+    const exp = await c.s.exchange.createExport('2026-09-30', [], VERSION, c.bundle, ASOF);
+    // de klant krijgt de factuur van augustus in oktober betaald (na de einddatum: mag)
+    c.s.invoices.registerPayment(c.inv.id, { amount: 121000, date: '2026-10-03' });
+    const o = openAtOffice(profile, exp.file);
+    // de boekhouder draait de factuur terug (bv. dubieus), zonder de betaling te kennen
+    o.s.exchange.act({ kind: 'terugdraaien', input: { entryId: c.inv.journal_entry_id!, date: '2026-08-10' } });
+    const r = c.s.exchange.readAnswer(o.s.exchange.createAnswer(VERSION).file, VERSION);
+    expect(r.conflicts).toEqual([{ kind: 'factuur', id: c.inv.id, label: c.inv.number, paid: 121000, exchange: 1, office: 'Kantoor De Vries' }]);
+    const task = c.s.inbox.tasks(ASOF).find((t) => t.kind === 'exchange-conflict')!;
+    expect(task).toMatchObject({ title: `Factuur ${c.inv.number}: teruggedraaid door Kantoor De Vries`, ref: { invoiceId: c.inv.id } });
+    expect(task.question).toMatch(/€\s1\.210,00 op betaald/);
+    const api = createApi(c.s, { appVersion: () => VERSION } as unknown as HostContext);
+    expect(await api.home.act(task, 'open')).toEqual({ navigate: { screen: 'factuur', id: c.inv.id } });
+    await api.home.act(task, 'klaar');
+    expect(c.s.inbox.tasks(ASOF).some((t) => t.kind === 'exchange-conflict')).toBe(false);
+  });
+
+  it('teruggedraaid zonder betaling: geen taak', async () => {
+    const profile = office();
+    const c = client(profile);
+    const o = openAtOffice(profile, (await c.s.exchange.createExport('2026-09-30', [], VERSION, c.bundle, ASOF)).file);
+    o.s.exchange.act({ kind: 'terugdraaien', input: { entryId: c.purchaseEntry, date: '2026-09-10' } });
+    expect(c.s.exchange.readAnswer(o.s.exchange.createAnswer(VERSION).file, VERSION).conflicts).toEqual([]);
+  });
+});

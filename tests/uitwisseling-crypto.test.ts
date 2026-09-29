@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkCode, generateOfficeKeys, newExchangeKey, openAsOffice, openWithKey, readHeader, sealForOffice, sealWithKey } from '../src/exchange/crypto';
+import { checkCode, generateOfficeKeys, openOfficeKey, sealOfficeKey, newExchangeKey, openAsOffice, openWithKey, readHeader, sealForOffice, sealWithKey } from '../src/exchange/crypto';
 
 const header = { administratie: '2c5bf9f4-1bd5-4fc9-a3b4-da8784765123', uitwisseling: 3, einddatum: '2026-09-30', appVersie: '0.7.0' };
 
@@ -43,5 +43,28 @@ describe('versleuteling van de uitwisseling', () => {
     expect(checkCode(a.publicKey)).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
     expect(checkCode(a.publicKey)).toBe(checkCode(a.publicKey));
     expect(checkCode(a.publicKey)).not.toBe(checkCode(generateOfficeKeys().publicKey));
+  });
+});
+
+describe('kantoorsleutel delen met een collega', () => {
+  const office = { office: 'Kantoor De Vries', email: 'info@kantoordevries.nl', ...generateOfficeKeys() };
+
+  it('met het goede wachtwoord krijgt de collega precies dezelfde sleutel', () => {
+    const file = sealOfficeKey(office, 'lange zin als wachtwoord');
+    expect(file.includes(Buffer.from(office.privateKey))).toBe(false);
+    const shared = openOfficeKey(file, 'lange zin als wachtwoord');
+    expect(shared).toEqual(office);
+    // en die opent een export die naar het kantoor gestuurd is
+    const pkg = sealForOffice(office.publicKey, header, Buffer.from('voor het kantoor'));
+    expect(openAsOffice(shared, pkg).plain.toString()).toBe('voor het kantoor');
+  });
+
+  it('verkeerd wachtwoord, te kort wachtwoord, een ander bestand of een vervalste sleutel: niet', () => {
+    const file = sealOfficeKey(office, 'lange zin als wachtwoord');
+    expect(() => openOfficeKey(file, 'iets anders dan dat')).toThrow(/Verkeerd wachtwoord/);
+    expect(() => sealOfficeKey(office, 'kort')).toThrow(/minimaal 10/);
+    expect(() => openOfficeKey(Buffer.from('GBBACKUP-iets'), 'lange zin als wachtwoord')).toThrow(/geen gedeelde kantoorsleutel/);
+    const forged = sealOfficeKey({ ...office, publicKey: generateOfficeKeys().publicKey }, 'lange zin als wachtwoord');
+    expect(() => openOfficeKey(forged, 'lange zin als wachtwoord')).toThrow(/ongeldig/);
   });
 });

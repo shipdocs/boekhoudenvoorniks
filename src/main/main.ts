@@ -92,13 +92,16 @@ function readOffice(): OfficeProfile | null {
   return officeState().profile;
 }
 
-/** `newKey`: bewust een nieuwe kantoorsleutel (klanten koppelen dan opnieuw met een nieuwe uitnodiging). */
-function saveOffice(input: { office: string; email: string; newKey?: boolean }): OfficeProfile {
+/**
+ * `newKey`: bewust een nieuwe kantoorsleutel (klanten koppelen dan opnieuw met een nieuwe uitnodiging).
+ * `keys`: de sleutel van een collega overnemen (gedeelde kantoorsleutel).
+ */
+function saveOffice(input: { office: string; email: string; newKey?: boolean; keys?: { publicKey: string; privateKey: string } }): OfficeProfile {
   if (!input.office.trim()) throw new Error('Vul de naam van je kantoor in');
   if (!secrets.available) throw new Error('Veilige opslag is niet beschikbaar op dit systeem (geen sleutelhanger gevonden); de sleutel van je kantoor kan niet veilig bewaard worden');
   const state = officeState();
-  if (state.problem && !input.newKey) throw new Error(`${state.problem} Maak een nieuwe kantoorsleutel; je klanten koppelen dan opnieuw met een nieuwe uitnodiging.`);
-  const keys = (input.newKey ? null : state.profile) ?? generateOfficeKeys();
+  if (state.problem && !input.newKey && !input.keys) throw new Error(`${state.problem} Maak een nieuwe kantoorsleutel; je klanten koppelen dan opnieuw met een nieuwe uitnodiging.`);
+  const keys = input.keys ?? (input.newKey ? null : state.profile) ?? generateOfficeKeys();
   const profile: OfficeProfile = { office: input.office.trim(), email: input.email.trim(), publicKey: keys.publicKey, privateKey: keys.privateKey };
   writeFileSync(officeFile(), JSON.stringify({ office: profile.office, email: profile.email, publicKey: profile.publicKey, privateKey: safeStorage.encryptString(profile.privateKey).toString('base64') }), { mode: 0o600 });
   return profile;

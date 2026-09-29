@@ -146,7 +146,12 @@ verlies blijven wel in het oude jaar, omdat de boeking zelf haar eigen datum hou
 - Bestandsnamen: `export-<8 tekens administratie-ID>-<nr>.gbpakket` en `antwoord-…-<nr>.gbpakket`.
 - De app-versie moet gelijk zijn bij het openen van de export (kantoor) én bij het inlezen van het
   antwoord (klant).
-- Het delen van de kantoorsleutel tussen medewerkers (besluit 3) is **nog niet gebouwd**.
+- **Kantoorsleutel delen** (besluit 3): *Instellingen > Administraties > Met collega's werken*. Een
+  bestand `kantoorsleutel-<kantoor>.gbkantoor` (MAGIC `GBKANTOR`, scrypt + AES-256-GCM, wachtwoord van
+  minimaal 10 tekens, apart doorgeven). Bij het inlezen controleert de app of de privésleutel bij de
+  publieke hoort; een eigen sleutel wordt vervangen, met een waarschuwing.
+- Is de kantoorsleutel niet te openen (geen sleutelhanger, andere sleutelhanger), dan meldt de app dat en
+  biedt hij expliciet een nieuwe sleutel aan; klanten koppelen dan opnieuw.
 
 Er is geen wachtwoord. Een sleutel die in de app zit, beschermt niets, want de broncode is openbaar.
 
@@ -228,8 +233,14 @@ terugdraaien en rekening toevoegen in de kopie daarheen. In de kopie kan verder 
 (`Ledger.setWriteGuard`), zodat alles wat de boekhouder boekt ook in het antwoord zit. Wat hij buiten
 het grootboek wijzigt (bv. een relatie), gaat niet mee.
 
-De controle op **openstaande posten** (een afgeboekte factuur die intussen betaald is) is **nog niet
-gebouwd**: het antwoord wordt ingelezen, maar er komt nog geen taak op Vandaag.
+**Conflict bij openstaande posten.** Draait de boekhouder een factuur of inkoop terug waarop de klant
+intussen betaald heeft gekregen of betaald heeft, dan wordt het antwoord gewoon ingelezen, maar legt de
+app het vast (`exchangeConflicts`) en staat er een taak op Vandaag ("Factuur 2026-0012: teruggedraaid door
+…"), af te vinken als het met de boekhouder is afgehandeld. Een correctieboeking op debiteuren of
+crediteuren zonder verwijzing naar een factuur is niet te herkennen en geeft geen taak.
+
+**In de kopie** zijn de takenlijst, "Aan de slag" en het automatisch verwerken van de klant uitgezet: die
+vragen zijn niet aan de boekhouder.
 
 **Transport.** De klant mailt de export (eigen SMTP, tot 20 MB; groter of mislukt: bewaren als
 bestand) of bewaart hem als bestand. Wordt er niets gemaild en niets bewaard, dan gaat de periode niet
@@ -321,9 +332,7 @@ antwoord werkt altijd, zodat een klant nooit met een vergrendelde periode blijft
 
 ## Buiten de scope van de eerste versie
 
-Nog niet gebouwd, maar wel bedoeld: de kantoorsleutel delen tussen medewerkers, de taak voor
-openstaande posten na het inlezen, anders indelen en afschrijvingen als eigen handeling, en in de
-kopie de takenlijst en "Aan de slag" van de klant verbergen.
+Nog niet gebouwd, maar wel bedoeld: anders indelen en afschrijvingen als eigen handeling.
 
 Bewust niet in de eerste versie:
 
