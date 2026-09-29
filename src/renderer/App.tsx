@@ -20,6 +20,7 @@ import { TERMS_VERSION } from '../shared/legal';
 import { hasOnboardingUpdate } from '../shared/onboarding';
 import { DemoBanner } from './screens/Reset';
 import { CurrentAdministration, OfficeCopyBanner } from './screens/Administrations';
+import { Logo } from './Logo';
 import { UpdateBanner } from './screens/UpdateBanner';
 
 const DocumentReview = lazy(() => import('./screens/DocumentReview').then((module) => ({ default: module.DocumentReview })));
@@ -131,7 +132,7 @@ export function App() {
       <div className="app">
         {route.screen !== 'welkom' && (
           <nav className="nav" aria-label="Hoofdmenu">
-            <div className="brand">BoekhoudenVoorNiks</div>
+            <div className="brand"><Logo width={180} /></div>
             <CurrentAdministration />
             <button className={`search-btn${route.screen === 'zoeken' ? ' active' : ''}`} onClick={() => go({ screen: 'zoeken' })} title="Zoeken (Ctrl+K voor snel zoeken)"><span>🔍</span>Zoeken<kbd>Ctrl K</kbd></button>
             {NAV.map((n) => (
