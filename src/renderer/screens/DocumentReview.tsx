@@ -3,7 +3,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
-import { CategoryChoice, InvestmentHint, investmentInfo } from './Purchases';
+import { BusinessShareField, CategoryChoice, InvestmentHint, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
 import type { PurchaseVatCode } from '../../shared/vat';
 import { ReaderChoice } from './Reader';
@@ -149,7 +149,7 @@ export function DocumentReview({ id }: { id: number }) {
   const [active, setActive] = useState<string | null>(null);
   // mogelijk dubbel: de andere bon ernaast bekijken
   const [compare, setCompare] = useState<number | null>(null);
-  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
+  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; businessPct: number | null; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
 
   const d = doc.data;
   useEffect(() => {
@@ -164,6 +164,7 @@ export function DocumentReview({ id }: { id: number }) {
       categoryKey: d.classification?.categoryKey ?? 'materiaal',
       vatCode: (d.classification?.vatCode ?? 'hoog') as PurchaseVatCode,
       business: d.classification?.business ?? true,
+      businessPct: null,
       paidWith: d.bank_match ? 'bank' : 'later',
       jobId: null,
       splits: null,
@@ -321,6 +322,7 @@ export function DocumentReview({ id }: { id: number }) {
                       </Field>
                     )}
                   </div>
+                  {!form.splits && <BusinessShareField supplier={form.supplier} value={form.businessPct} onChange={(v) => setForm({ ...form, businessPct: v })} />}
                   <Field label="Hoe betaald?">
                     <div className="chips">
                       <button className={form.paidWith === 'bank' || form.paidWith === 'later' ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: d.bank_match ? 'bank' : 'later' })}>Zakelijke rekening</button>
@@ -342,7 +344,7 @@ export function DocumentReview({ id }: { id: number }) {
                 <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
                 <Button kind="primary" disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
                   const isInvestment = form.business && !form.splits && form.categoryKey === 'investering';
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits }), isInvestment ? undefined : 'Verwerkt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : 'Verwerkt ✓');
                   if (res) {
                     go({ screen: 'aankopen' });
                     if (isInvestment) showInvestmentSaved(investmentInfo(form.total!, form.vatCode, true));

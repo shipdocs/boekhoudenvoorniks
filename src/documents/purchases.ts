@@ -10,7 +10,8 @@ import { korActive } from '../settings/settings';
 
 export type { PurchaseLineInput } from '../core-ledger/rules';
 export { expenseLines, purchaseVat } from '../core-ledger/rules';
-import { expenseLines, purchaseVat, type InkoopPayload, type PurchaseLineInput } from '../core-ledger/rules';
+import { businessPct, expenseLines, purchaseVat, type InkoopPayload, type PurchaseLineInput } from '../core-ledger/rules';
+import { businessShareFor, setBusinessShare } from '../intake/business-share';
 import type { EventService, Evidence } from '../core-ledger/events';
 
 export interface PurchaseInvoiceInput {
@@ -21,6 +22,11 @@ export interface PurchaseInvoiceInput {
   description: string;
   lines: PurchaseLineInput[];
   attachmentPath?: string | null;
+  /**
+   * Zakelijk deel in procenten (1–100). Weglaten = wat eerder voor deze leverancier is opgegeven, anders 100.
+   * Het privédeel telt niet als kosten en de btw erover wordt niet afgetrokken.
+   */
+  businessPct?: number;
   jobId?: number | null;
   documentId?: number | null;
   externalSource?: string | null;
@@ -75,7 +81,11 @@ export class PurchaseService {
     return tx(this.db, () => {
       // KOR: geen aftrek van voorbelasting; vastgelegd in de gebeurtenis, zodat hercompileren hetzelfde blijft
       const noVatDeduction = korActive(this.db);
+      // de factuur zelf blijft wat hij is; het zakelijke deel bepaalt alleen wat er als kosten en voorbelasting geboekt wordt
       const booking = expenseLines(input.lines, ACCOUNTS.crediteuren, input.relationId ?? null, input.supplierReference ?? undefined, { noVatDeduction });
+      const supplier = input.relationId ? (this.db.prepare('SELECT name FROM relations WHERE id = ?').get(input.relationId) as { name: string } | undefined)?.name : undefined;
+      if (input.businessPct !== undefined && supplier) setBusinessShare(this.db, supplier, input.businessPct);
+      const pct = businessPct(input.businessPct ?? businessShareFor(this.db, supplier));
       const vatPaid = booking.payable - booking.net;
       const result = this.db
         .prepare(
@@ -89,7 +99,7 @@ export class PurchaseService {
       const { entryId } = this.events.record(
         {
           type: 'inkoop',
-          payload: { purchaseId: id, date: input.invoiceDate, description: input.description.trim(), relationId: input.relationId ?? null, supplierReference: input.supplierReference ?? null, lines: input.lines, ...(noVatDeduction ? { noVatDeduction } : {}) },
+          payload: { purchaseId: id, date: input.invoiceDate, description: input.description.trim(), relationId: input.relationId ?? null, supplierReference: input.supplierReference ?? null, lines: input.lines, ...(noVatDeduction ? { noVatDeduction } : {}), ...(pct < 100 ? { businessPct: pct } : {}) },
         },
         evidence,
         { jobId: input.jobId ?? null },
@@ -107,6 +117,17 @@ export class PurchaseService {
    */
   reclassify(id: number, lines: PurchaseLineInput[], reason = 'andere categorie'): PurchaseInvoice {
     return this.rewrite(id, () => lines, reason, { samePayable: true });
+  }
+
+  /** De inkoop-gebeurtenis achter een journaalpost (voor het zakelijke deel), of null bij een oudere boeking. */
+  eventFor(journalEntryId: number): InkoopPayload | null {
+    const event = this.events.forEntry(journalEntryId);
+    return event && event.type === 'inkoop' ? (event.payload as InkoopPayload) : null;
+  }
+
+  /** Ander zakelijk deel voor een geboekte inkoop (gemengd gebruik): tegenboeking + nieuwe post. */
+  setBusinessPct(id: number, pct: number, reason = 'zakelijk deel aangepast'): PurchaseInvoice {
+    return this.rewrite(id, (old) => old, reason, { samePayable: true, businessPct: pct });
   }
 
   /**
@@ -131,7 +152,7 @@ export class PurchaseService {
   }
 
   /** Vervangt de regels van een geboekte inkoop: tegenboeking + nieuwe post (#19). */
-  private rewrite(id: number, next: (old: PurchaseLineInput[]) => PurchaseLineInput[], reason: string, opts: { samePayable: boolean }): PurchaseInvoice {
+  private rewrite(id: number, next: (old: PurchaseLineInput[]) => PurchaseLineInput[], reason: string, opts: { samePayable: boolean; businessPct?: number }): PurchaseInvoice {
     return tx(this.db, () => {
       const p = this.get(id);
       if (p.is_opening) throw new ValidationError('Deze rekening komt uit je vorige administratie. Pas hem aan in de overstap-hulp');
@@ -143,7 +164,13 @@ export class PurchaseService {
       if (lines.length === 0) throw new ValidationError('Voeg minimaal één regel toe');
       const booking = expenseLines(lines, ACCOUNTS.crediteuren, p.relation_id, p.supplier_reference ?? undefined, { noVatDeduction: old.noVatDeduction });
       if (opts.samePayable && p.amount_paid !== 0 && booking.payable !== p.total) throw new ValidationError('Het te betalen bedrag verandert; maak eerst de betaling ongedaan');
-      const { entryId } = this.events.replace(event.id, { type: 'inkoop', payload: { ...old, lines } }, reason);
+      const payload: InkoopPayload = { ...old, lines };
+      if (opts.businessPct !== undefined) {
+        const pct = businessPct(opts.businessPct);
+        if (pct < 100) payload.businessPct = pct;
+        else delete payload.businessPct;
+      }
+      const { entryId } = this.events.replace(event.id, { type: 'inkoop', payload }, reason);
       this.db
         .prepare('UPDATE purchase_invoices SET journal_entry_id = ?, subtotal = ?, vat_total = ?, total = ?, status = ? WHERE id = ?')
         .run(entryId, booking.net, booking.payable - booking.net, booking.payable, p.amount_paid >= booking.payable ? 'betaald' : 'open', id);

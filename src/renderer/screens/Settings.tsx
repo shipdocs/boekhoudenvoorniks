@@ -108,7 +108,12 @@ export function SettingsScreen() {
 
       {tab === 'email' && <EmailSettings draft={draft} set={set} section={section} />}
 
-      {tab === 'categorieen' && <CategoriesCard />}
+      {tab === 'categorieen' && (
+        <>
+          <CategoriesCard />
+          <BusinessShareCard />
+        </>
+      )}
 
       {tab === 'btw' && section(
         <>
@@ -237,7 +242,7 @@ export function SettingsScreen() {
             </Field>
           )}
           <div className="grid cols-2">
-            <Field label="Zakelijk deel telefoon & internet" hint="het privédeel telt niet als kosten">
+            <Field label="Zakelijk deel telefoon & internet" hint="het privédeel telt niet als kosten. Voor één leverancier (bijv. Odido)? Stel dat liever in bij Categorieën, dan klopt ook de btw meteen">
               <select value={draft.phoneInternetBusinessPct ?? 100} onChange={(e) => set({ phoneInternetBusinessPct: Number(e.target.value) })}>
                 {[100, 90, 75, 50, 25, 0].map((p) => <option key={p} value={p}>{p}%</option>)}
               </select>
@@ -679,6 +684,61 @@ function About() {
 }
 
 /** Instellingen → Categorieën: dezelfde lijst als achter "Aanpassen" bij het boeken. */
+/**
+ * Gemengd gebruik per leverancier: welk deel is zakelijk (Dropbox 50%, Odido 75%)? Geen regel = 100%.
+ * Bij het boeken gaat het privédeel naar privé, zonder btw-aftrek. Met "toepassen" gaan ook de al
+ * geboekte uitgaven van die leverancier mee (tegenboeking + nieuwe post).
+ */
+function BusinessShareCard() {
+  const { run, busy } = useAction();
+  const shares = useLoad(() => api.businessShare.list());
+  const [name, setName] = useState('');
+  const [pct, setPct] = useState('50');
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const save = async (n: string, value: string, apply: boolean) => {
+    const p = Number(value);
+    if (!Number.isInteger(p) || p < 1 || p > 100) return;
+    const r = await run(() => api.businessShare.set(n, p, apply));
+    if (r !== undefined) {
+      setEdits({});
+      await shares.reload();
+    }
+  };
+  return (
+    <div className="card grid">
+      <h3 style={{ margin: 0 }}>Gemengd gebruik: zakelijk deel per leverancier</h3>
+      <p className="small muted" style={{ margin: 0 }}>
+        Gebruik je iets ook privé, zoals Dropbox, Google One of je telefoon? Geef hier het zakelijke deel op. Het privédeel telt niet als kosten en de btw erover trek je niet af. Bij een betaling of bon vraagt de app het ook. Niets opgegeven betekent 100% zakelijk.
+      </p>
+      {(shares.data ?? []).length > 0 && (
+        <table className="list small">
+          <tbody>
+            {shares.data!.map((r) => (
+              <tr key={r.supplier_key}>
+                <td>{r.display_name}</td>
+                <td style={{ width: 140 }}>
+                  <input type="number" min={1} max={100} style={{ width: 70 }} value={edits[r.supplier_key] ?? String(r.pct)} onChange={(e) => setEdits({ ...edits, [r.supplier_key]: e.target.value })} /> %
+                </td>
+                <td className="right">
+                  <Button small disabled={busy} onClick={() => void save(r.display_name, edits[r.supplier_key] ?? String(r.pct), false)}>Alleen voortaan</Button>{' '}
+                  <Button small kind="primary" disabled={busy} onClick={() => void save(r.display_name, edits[r.supplier_key] ?? String(r.pct), true)}>Ook eerdere boekingen</Button>{' '}
+                  <Button small kind="ghost" disabled={busy} onClick={() => void save(r.display_name, '100', true)}>Weer 100%</Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="row" style={{ gap: 8, alignItems: 'end' }}>
+        <Field label="Leverancier"><input value={name} placeholder="bv. Dropbox" onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="Zakelijk deel"><span><input type="number" min={1} max={100} style={{ width: 80 }} value={pct} onChange={(e) => setPct(e.target.value)} /> %</span></Field>
+        <Button kind="primary" disabled={busy || name.trim().length < 2} onClick={async () => { await save(name.trim(), pct, true); setName(''); }}>Toevoegen en toepassen</Button>
+      </div>
+      <p className="small muted" style={{ margin: 0 }}>De app gebruikt de naam zoals die op je bankafschrift of bon staat. "Ook eerdere boekingen" schrijft bestaande boekingen van deze leverancier opnieuw weg; is de aangifte al ingediend, dan komt het verschil vanzelf in je volgende aangifte.</p>
+    </div>
+  );
+}
+
 function CategoriesCard() {
   const [open, setOpen] = useState(false);
   return (

@@ -30,6 +30,16 @@ export interface PurchaseLineInput {
   vatAmount?: Cents;
 }
 
+/**
+ * Zakelijk deel van een uitgave in procenten. Leeg of 100 = alles zakelijk (standaard). Het privédeel
+ * van een uitgave telt niet als kosten en de btw daarover mag je niet aftrekken.
+ */
+export function businessPct(pct: number | null | undefined): number {
+  if (pct === undefined || pct === null) return 100;
+  if (!Number.isInteger(pct) || pct < 1 || pct > 100) throw new ValidationError('Het zakelijke deel moet een heel percentage tussen 1 en 100 zijn');
+  return pct;
+}
+
 /** Berekent de BTW op een inkoopregel. Bij verlegd is de BTW wel te berekenen maar niet te betalen aan de leverancier. */
 export function purchaseVat(line: PurchaseLineInput): Cents {
   if (line.vatAmount !== undefined) return line.vatAmount;
@@ -48,17 +58,28 @@ export function purchaseVat(line: PurchaseLineInput): Cents {
  * van 2a/4a/4b netto blijft). Verlegde btw blijft verschuldigd.
  * Retourneert de regels en het bedrag dat daadwerkelijk betaald wordt.
  */
-export function expenseLines(lines: PurchaseLineInput[], counterAccount: string, relationId: number | null, description?: string, opts: { noVatDeduction?: boolean } = {}): { lines: PostLine[]; payable: Cents; vat: Cents; net: Cents } {
+export function expenseLines(lines: PurchaseLineInput[], counterAccount: string, relationId: number | null, description?: string, opts: { noVatDeduction?: boolean; businessPct?: number } = {}): { lines: PostLine[]; payable: Cents; vat: Cents; net: Cents } {
   const out: (PostLine | null)[] = [];
   let payable = 0;
   let vatTotal = 0;
   let netTotal = 0;
+  const pct = businessPct(opts.businessPct);
+  // zakelijk deel van een bedrag; 100% laat het bedrag ongemoeid
+  const biz = (n: Cents): Cents => (pct === 100 ? n : roundHalfAwayFromZero((n * pct) / 100));
   for (const l of lines) {
     assertCents(l.netAmount, 'bedrag');
     if (!isPurchaseVatCode(l.vatCode)) throw new ValidationError('Kies een btw-tarief');
-    const vat = purchaseVat(l);
-    netTotal += l.netAmount;
-    out.push(signedLine(l.account, l.netAmount, { relationId, vatCode: l.vatCode, description: l.description ?? null }));
+    const fullVat = purchaseVat(l);
+    const netBiz = biz(l.netAmount);
+    const vat = biz(fullVat);
+    // het privédeel telt niet als kosten en heeft geen btw-aftrek: het gaat naar de privé-opnamen
+    const privateShare = pct === 100 ? 0 : l.netAmount + (isReverseCharge(l.vatCode) ? 0 : fullVat) - (netBiz + (isReverseCharge(l.vatCode) ? 0 : vat));
+    netTotal += netBiz;
+    out.push(signedLine(l.account, netBiz, { relationId, vatCode: l.vatCode, description: l.description ?? null }));
+    if (privateShare !== 0) {
+      out.push(signedLine(ACCOUNTS.priveOpnamen, privateShare, { relationId, description: `Privédeel (${100 - pct}%)${l.description ? `: ${l.description}` : ''}` }));
+      payable += privateShare;
+    }
     if (vat !== 0) {
       out.push(
         opts.noVatDeduction
@@ -70,7 +91,7 @@ export function expenseLines(lines: PurchaseLineInput[], counterAccount: string,
         out.push(signedLine(REVERSE_CHARGE_ACCOUNTS[l.vatCode], -vat, { relationId, vatCode: l.vatCode }));
       }
     }
-    payable += l.netAmount + (isReverseCharge(l.vatCode) ? 0 : vat);
+    payable += netBiz + (isReverseCharge(l.vatCode) ? 0 : vat);
   }
   out.push(signedLine(counterAccount, -payable, { relationId, description: description ?? null }));
   return { lines: out.filter((l): l is PostLine => l !== null), payable, vat: vatTotal, net: netTotal };
@@ -115,6 +136,8 @@ export interface BankCategoriePayload {
   channel?: string | null;
   /** geen recht op aftrek van voorbelasting (KOR) op het moment van boeken */
   noVatDeduction?: boolean;
+  /** zakelijk deel in procenten (1–99); ontbreekt = 100. De rest gaat naar privé. */
+  businessPct?: number;
 }
 
 /** Een inkoopfactuur of bonnetje. */
@@ -127,6 +150,8 @@ export interface InkoopPayload {
   lines: PurchaseLineInput[];
   /** geen recht op aftrek van voorbelasting (KOR) op het moment van boeken */
   noVatDeduction?: boolean;
+  /** zakelijk deel in procenten (1–99); ontbreekt = 100. De rest gaat naar privé. */
+  businessPct?: number;
 }
 
 export type DomainEvent =
@@ -150,7 +175,7 @@ export function compile(event: DomainEvent): CompiledEntry {
     }
     case 'inkoop': {
       const p = event.payload;
-      const booking = expenseLines(p.lines, ACCOUNTS.crediteuren, p.relationId, p.supplierReference ?? undefined, { noVatDeduction: p.noVatDeduction });
+      const booking = expenseLines(p.lines, ACCOUNTS.crediteuren, p.relationId, p.supplierReference ?? undefined, { noVatDeduction: p.noVatDeduction, businessPct: p.businessPct });
       return { date: p.date, description: `Inkoop: ${p.description.trim()}`, source: 'inkoop', sourceRef: `purchase:${p.purchaseId}`, lines: booking.lines };
     }
     case 'bank-categorie':
@@ -167,7 +192,7 @@ export function bankCategoryLines(p: BankCategoriePayload): PostLine[] {
     // een negatieve transactie is een uitgave; een positieve op een kostenrekening is een terugbetaling
     const gross = -p.amount;
     const { net, vat } = splitGross(gross, rate.percentage, isReverseCharge(vatCode));
-    return expenseLines([{ account: p.account, netAmount: net, vatCode, vatAmount: vat, description: p.description }], p.bankAccount, p.relationId, p.description, { noVatDeduction: p.noVatDeduction }).lines;
+    return expenseLines([{ account: p.account, netAmount: net, vatCode, vatAmount: vat, description: p.description }], p.bankAccount, p.relationId, p.description, { noVatDeduction: p.noVatDeduction, businessPct: p.businessPct }).lines;
   }
   if (p.accountCategory === 'omzet') {
     if (!isSalesVatCode(vatCode)) throw new ValidationError('Kies een ander btw-tarief');

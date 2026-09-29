@@ -372,6 +372,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
   const [vat, setVat] = useState<PurchaseVatCode>('hoog');
   const [paidWith, setPaidWith] = useState<'bank' | 'kas' | 'prive'>('bank');
   const [jobId, setJobId] = useState<number | null>(null);
+  const [businessPct, setBusinessPct] = useState<number | null>(null);
   return (
     <Modal title="Aankoop toevoegen" onClose={onClose}>
       <div className="grid">
@@ -387,6 +388,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
             {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
           </select>
         </Field>
+        <BusinessShareField supplier={supplier} value={businessPct} onChange={setBusinessPct} />
         <Field label="Hoe betaald?">
           <div className="chips">
             <button className={paidWith === 'bank' ? 'selected' : ''} onClick={() => setPaidWith('bank')}>Zakelijke rekening</button>
@@ -406,7 +408,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
         <Button kind="primary" disabled={busy || !amount} onClick={async () => {
-          const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, paidWith, jobId }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
+          const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, paidWith, jobId, ...(businessPct !== null ? { businessPct } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
           if (r) {
             onDone();
             if (category === 'investering') showInvestmentSaved(investmentInfo(amount!, vat));
@@ -414,6 +416,39 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
         }}>Opslaan</Button>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * "Hoeveel is zakelijk?" voor een aankoop die je ook privé gebruikt (opslag, telefoon, internet).
+ * Leeg = wat je eerder voor deze leverancier opgaf, anders 100%. Het privédeel telt niet als kosten
+ * en de btw erover trek je niet af; de app onthoudt het percentage voor de volgende keer.
+ */
+export function BusinessShareField({ supplier, value, onChange }: { supplier: string; value: number | null; onChange: (pct: number | null) => void }) {
+  const name = supplier.trim();
+  const remembered = useLoad(() => (name.length >= 2 ? api.businessShare.get(name) : Promise.resolve(100)), [name]);
+  const shown = value ?? remembered.data ?? 100;
+  return (
+    <Field
+      label="Hoeveel is zakelijk?"
+      hint={shown < 100 ? `Het privédeel (${100 - shown}%) telt niet als kosten en de btw erover trek je niet af. De app onthoudt dit voor ${name || 'deze leverancier'}.` : 'Alles zakelijk? Laat 100 staan. Gebruik je dit ook privé, bijvoorbeeld opslag, telefoon of internet? Vul het zakelijke deel in.'}
+    >
+      <span className="row" style={{ gap: 6, alignItems: 'center' }}>
+        <input
+          type="number"
+          min={1}
+          max={100}
+          step={1}
+          style={{ width: 90 }}
+          value={shown}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            onChange(e.target.value === '' || !Number.isInteger(n) ? null : Math.min(100, Math.max(1, n)));
+          }}
+        />{' '}
+        %
+      </span>
+    </Field>
   );
 }
 

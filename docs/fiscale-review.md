@@ -368,6 +368,7 @@ Code: `src/tax/assets.ts`, `src/tax/mileage.ts`, `src/tax/overview.ts`; bedragen
   auto of overig vraagt de app al bij de invoer: "Gaat dit langer dan een jaar mee?". Op Vandaag staat daarna
   nog een vangnet: "Was dit een investering?". Bij "ja" wordt de kostenregel omgeboekt naar Inventaris. De
   bonherkenning gebruikt nu het bedrag excl. btw (subtotaal, of het totaal teruggerekend).
+- **Gemengd gebruik per leverancier** (sinds 0.6.12): bij een betaling of bon vraagt de app het zakelijke deel (standaard 100%); het privédeel gaat naar privé-opnamen zonder btw-aftrek, ook bij verlegde btw. Zo hoeft er aan het eind van het jaar niets gecorrigeerd te worden. Onderstaande instelling voor telefoon & internet blijft bestaan.
 - **Telefoon & internet**: de gebruiker geeft een zakelijk percentage op. Het privédeel van de kosten
   (WBedKanTel) telt bij de winst. De btw daarover (± 21% van het privédeel van de kosten tegen 21%) wordt als
   correctie genoemd voor de laatste btw-aangifte van het jaar (minder voorbelasting, 5b). Die boekt de
