@@ -95,11 +95,19 @@ async function getRecord(env: Env, administratie: string): Promise<LicenseRecord
   return raw ? (JSON.parse(raw) as LicenseRecord) : null;
 }
 
+/** Loopt het abonnement van deze administratie nog bij Mollie? Dan nooit een tweede aanmaken (dubbele incasso). */
+async function hasRunningSubscription(env: Env, deps: Deps, record: LicenseRecord | null): Promise<boolean> {
+  if (!record?.subscriptionId) return false;
+  const sub = await mollie<{ status: string }>(env, deps, `/customers/${record.customerId}/subscriptions/${record.subscriptionId}`);
+  return sub.status === 'active' || sub.status === 'pending';
+}
+
 async function start(url: URL, env: Env, deps: Deps): Promise<Response> {
   const administratie = url.searchParams.get('administratie') ?? '';
   const email = (url.searchParams.get('email') ?? '').trim();
   if (!UUID.test(administratie)) return json({ fout: 'Onbekende administratie' }, 400);
   if (!EMAIL.test(email)) return json({ fout: 'Vul een geldig e-mailadres in' }, 400);
+  if (await hasRunningSubscription(env, deps, await getRecord(env, administratie))) return page(ALREADY);
   const customer = await mollie<{ id: string }>(env, deps, '/customers', { name: email, email, metadata: { administratie } });
   const payment = await mollie<MolliePayment>(env, deps, '/payments', {
     amount: { currency: 'EUR', value: env.PRICE_EUR },
@@ -137,6 +145,14 @@ async function webhook(request: Request, env: Env, deps: Deps): Promise<Response
   } else if (payment.sequenceType === 'first' && payment.customerId && payment.metadata?.administratie) {
     // eerste betaling: de eerste maand is betaald; het abonnement begint over een maand
     const { administratie, email } = payment.metadata;
+    const existing = await getRecord(env, administratie);
+    if (await hasRunningSubscription(env, deps, existing)) {
+      // tweede eerste betaling terwijl het abonnement al loopt (bv. twee keer geklikt): een maand erbij, geen tweede abonnement
+      const from = existing!.paidUntil > paidOn ? existing!.paidUntil : paidOn;
+      await env.LICENTIES.put(recordKey(administratie), JSON.stringify({ ...existing!, paidUntil: addMonth(from) } satisfies LicenseRecord));
+      await env.LICENTIES.put(`betaald:${id}`, deps.today());
+      return json({ ok: true, verlengd: true });
+    }
     const paidUntil = addMonth(paidOn);
     const subscription = await mollie<{ id: string }>(env, deps, `/customers/${payment.customerId}/subscriptions`, {
       amount: { currency: 'EUR', value: env.PRICE_EUR },
@@ -165,6 +181,13 @@ async function license(url: URL, env: Env, deps: Deps): Promise<Response> {
   return json({ token: await signLicense(payload, env.LICENSE_PRIVATE_KEY), validUntil: payload.validUntil });
 }
 
+const page = (html: string) => new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+
+const ALREADY = `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Je hebt al een abonnement</title>
+<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 16px;line-height:1.5;color:#1b1f24;background:#f6f7f9}</style></head>
+<body><h1>Je hebt al een abonnement</h1><p>Voor deze administratie loopt al een abonnement; je betaalt niet dubbel. Klik in BoekhoudenVoorNiks op <strong>Ik heb betaald: licentie ophalen</strong>.</p>
+<p>Je kunt dit venster sluiten.</p></body></html>`;
+
 const THANKS = `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bedankt</title>
 <style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 16px;line-height:1.5;color:#1b1f24;background:#f6f7f9}</style></head>
 <body><h1>Bedankt!</h1><p>Zodra je betaling binnen is, kun je in BoekhoudenVoorNiks op <strong>Licentie ophalen</strong> klikken (Hoe gaat het? &gt; Uitwisseling met je boekhouder). Daarna kun je versturen naar je boekhouder.</p>
@@ -177,7 +200,7 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
     if (request.method === 'GET' && url.pathname === '/start') return await start(url, env, deps);
     if (request.method === 'POST' && url.pathname === '/mollie') return await webhook(request, env, deps);
     if (request.method === 'GET' && url.pathname === '/licentie') return await license(url, env, deps);
-    if (request.method === 'GET' && url.pathname === '/bedankt') return new Response(THANKS, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    if (request.method === 'GET' && url.pathname === '/bedankt') return page(THANKS);
     return json({ fout: 'Niet gevonden' }, 404);
   } catch (e) {
     console.error(JSON.stringify({ route: url.pathname, fout: (e as Error).message }));

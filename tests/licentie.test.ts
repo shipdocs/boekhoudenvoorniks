@@ -15,6 +15,8 @@ function keys() {
 }
 
 /** Een nagebootste Mollie: onthoudt wat de Worker vroeg en geeft vaste antwoorden. */
+const subscriptionStatus = { value: 'active' };
+
 function fakeMollie(payments: Record<string, object>) {
   const calls: { method: string; path: string; body: Record<string, unknown> | null; auth: string | null }[] = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -26,6 +28,7 @@ function fakeMollie(payments: Record<string, object>) {
     if (path === '/customers') return reply({ id: 'cst_1' });
     if (path === '/payments') return reply({ id: 'tr_first', _links: { checkout: { href: 'https://www.mollie.com/checkout/test' } } });
     if (/^\/customers\/cst_1\/subscriptions$/.test(path)) return reply({ id: 'sub_1' });
+    if (/^\/customers\/cst_1\/subscriptions\/sub_1$/.test(path)) return reply({ id: 'sub_1', status: subscriptionStatus.value });
     const m = /^\/payments\/(tr_\w+)$/.exec(path);
     if (m && payments[m[1]!]) return reply(payments[m[1]!]!);
     return new Response('{"detail":"not found"}', { status: 404 });
@@ -68,7 +71,7 @@ describe('licentie-Worker', () => {
     expect(sub.body).toMatchObject({ amount: { value: '9.99' }, interval: '1 month', startDate: '2026-11-15', webhookUrl: 'https://licentie.example/mollie' });
     // dezelfde melding nog eens: geen tweede abonnement
     await w.call('POST', '/mollie', 'id=tr_first');
-    expect(w.mollie.calls.filter((c) => c.path === '/customers/cst_1/subscriptions')).toHaveLength(1);
+    expect(w.mollie.calls.filter((c) => c.method === 'POST' && c.path === '/customers/cst_1/subscriptions')).toHaveLength(1);
 
     const res = await w.call('GET', `/licentie?administratie=${ADMIN}`);
     const { token, validUntil } = (await res.json()) as { token: string; validUntil: string };
@@ -92,6 +95,25 @@ describe('licentie-Worker', () => {
     await w.call('POST', '/mollie', 'id=tr_nov');
     expect(JSON.parse(w.kv.get(`lic:${ADMIN}`)!).paidUntil).toBe('2026-12-15');
     expect((await w.call('POST', '/mollie', 'id=iets; drop')).status).toBe(400);
+  });
+
+  it('nooit een tweede abonnement: opnieuw afrekenen of dubbel betalen terwijl het loopt', async () => {
+    subscriptionStatus.value = 'active';
+    const w = worker({ tr_first: firstPaid, tr_second: { ...firstPaid, id: 'tr_second', paidAt: '2026-10-15T10:05:00+00:00' } });
+    await w.call('POST', '/mollie', 'id=tr_first');
+    // opnieuw op "Abonnement nemen": geen nieuwe betaling, maar de melding dat het al loopt
+    const again = await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`);
+    expect(again.status).toBe(200);
+    expect(await again.text()).toMatch(/al een abonnement/);
+    expect(w.mollie.calls.filter((c) => c.path === '/payments')).toHaveLength(0);
+    // twee keer geklikt en twee keer betaald: één abonnement, en de tweede betaling is een maand extra
+    await w.call('POST', '/mollie', 'id=tr_second');
+    expect(w.mollie.calls.filter((c) => c.method === 'POST' && c.path === '/customers/cst_1/subscriptions')).toHaveLength(1);
+    expect(JSON.parse(w.kv.get(`lic:${ADMIN}`)!).paidUntil).toBe('2026-12-15');
+    // gestopt abonnement: opnieuw afsluiten mag weer
+    subscriptionStatus.value = 'canceled';
+    expect((await w.call('GET', `/start?administratie=${ADMIN}&email=piet@example.nl`)).status).toBe(303);
+    subscriptionStatus.value = 'active';
   });
 
   it('prijs komt uit de instellingen van de Worker; onbekende routes 404', async () => {
