@@ -1,6 +1,6 @@
 {
   "name": "gratis-boekhouden",
-  "version": "0.6.10",
+  "version": "0.6.11",
   "description": "Gratis boekhouding voor zzp en mkb: offertes, facturen, bankimport en BTW-overzicht op een echte dubbele boekhouding.",
   "author": "Martin <info@shipdocs.app>",
   "license": "AGPL-3.0-or-later",
@@ -14,6 +14,7 @@
     "dev": "npm run build:main && npm run rebuild:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run rebuild:node && vitest run",
+    "test:proefadministratie": "npm run rebuild:node && vitest run tests/proefadministratie/proefadministratie.test.ts",
     "test:watch": "vitest",
     "rebuild:node": "npm rebuild better-sqlite3",
     "rebuild:electron": "electron-builder install-app-deps",
