@@ -1,5 +1,24 @@
 # Wijzigingen
 
+## 0.6.15 — pakket voor je boekhouder
+
+### Nieuw
+- **Pakket voor je boekhouder** (Hoe gaat het? en Boekhouding > Exports): één ZIP per boekjaar die je boekhouder in zijn eigen pakket inleest. Hij hoeft niet in Gratis Boekhouden te werken. Erin:
+  - `auditfile-2026-xaf32.xaf`: XAF 3.2 met grootboek (RGS), relaties, beginbalans en alle journaalposten; gevalideerd tegen het officiële schema.
+  - `kolommenbalans.csv`, `grootboekkaarten.csv`, `journaalposten.csv`, `openstaande-debiteuren.csv` en `openstaande-crediteuren.csv` (per factuur), `rgs-brugstaat.csv`, `btw-overzicht.csv` en `relaties.csv`. Excel (NL) opent ze direct.
+  - `rapporten-2026.xlsx`: dezelfde overzichten als Excel-werkmap, één tabblad per overzicht, bedragen als getal en datums als datum.
+  - `importprofielen/`: bestanden in het eigen importformaat van SnelStart (Excel met `Fld…`-kolommen: klanten, leveranciers, boekingen met beginbalans), Yuki (historische mutaties en openstaande posten) en AFAS (saldibalans), volgens de importdocumentatie van die pakketten.
+  - `documenten/`: verkoopfacturen als PDF en je bonnen, met `index.csv` die elk bestand aan het boekstuk koppelt en noemt wat ontbreekt.
+  - `LEES-MIJ.pdf`: periode, aansluiting (begin, mutaties, eind, resultaat), btw per periode, openstaande posten, controles en hoe je het inleest in Caseware, AFAS, Visionplanner, Twinfield, Exact Online, Yuki en SnelStart.
+- **Controles vóór het maken**: de app laat zien of beginbalans, mutaties en eindsaldi aansluiten, of openstaande posten optellen tot het grootboek, of elke rekening een RGS-code heeft, bij welke inkopen een bon ontbreekt en welke btw-aangiftes nog open staan.
+- Duidelijk gelabeld als **overdracht, geen back-up**: instellingen en koppelingen gaan niet mee.
+- **Pagina voor boekhouders** op de site met een voorbeeldpakket om zelf in te lezen.
+
+### Techniek
+- Alle bestanden gebruiken dezelfde selectie als de auditfile (beginbalansboeking op dag één als beginbalans, resultaat eerdere jaren in het eigen vermogen), zodat ze onderling aansluiten; getest door de auditfile terug te lezen.
+- Eigen ZIP- en Excel-schrijver zonder extra afhankelijkheid (`src/shared/zip.ts`, `src/shared/xlsx.ts`); de werkmap is getest met LibreOffice.
+- `npm run voorbeeldpakket` maakt `site/voorbeeld/voorbeeldpakket-boekhouder-2025.zip` uit de demo-administratie.
+
 ## 0.6.14 — rapporten voor de boekhouder
 
 ### Nieuw
