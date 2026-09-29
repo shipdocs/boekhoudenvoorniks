@@ -9,8 +9,8 @@
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "routes": [{ "pattern": "licentie.boekhoudenvoorniks.nl", "custom_domain": true }],
   "vars": { "PUBLIC_URL": "https://licentie.boekhoudenvoorniks.nl" },
-  "kv_namespaces": [
-    // id na `npx wrangler kv namespace create LICENTIES`
-    { "binding": "LICENTIES", "id": "VUL-IN-NA-AANMAKEN" }
+  "d1_databases": [
+    // database_id na `npx wrangler d1 create boekhoudenvoorniks-licenties`
+    { "binding": "LICENTIES", "database_name": "boekhoudenvoorniks-licenties", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
   ]
 }

@@ -5,12 +5,16 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "types": "wrangler types",
-    "typecheck": "tsc --noEmit"
+    "check": "tsc --noEmit && wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "typecheck": "tsc --noEmit",
+    "migrate": "wrangler d1 migrations apply boekhoudenvoorniks-licenties --remote"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260901.0",
-    "typescript": "^5.9.0",
-    "wrangler": "^4.40.0"
+    "@cloudflare/workers-types": "5.20260929.1",
+    "typescript": "5.9.3",
+    "wrangler": "4.144.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
