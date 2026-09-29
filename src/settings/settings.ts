@@ -301,8 +301,50 @@ export function korActive(db: Db): boolean {
   return row ? JSON.parse(row.value) === true : DEFAULT_SETTINGS.kor;
 }
 
+/**
+ * Deze administratie is een werkkopie bij de boekhouder (kantoormodus): er gaat niets naar buiten
+ * (e-mail, post ophalen, koppelingen) en de app boekt niets zelf. Staat in de administratie zelf,
+ * niet in de gewone instellingen, zodat hij niet per ongeluk uit te zetten is.
+ */
+export interface OfficeCopy {
+  /** naam van het kantoor dat de kopie heeft */
+  office: string;
+  /** uitwisselingsnummer van de export waar deze kopie uit komt */
+  exchange: number;
+  /** alles t/m deze datum is de periode van de uitwisseling */
+  endDate: string;
+}
+
 export class SettingsService {
   constructor(private readonly db: Db) {}
+
+  /** Vaste identiteit van deze administratie (UUID, migratie 21). */
+  administrationId(): string {
+    const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'administrationId'`).get() as { value: string } | undefined;
+    if (!row) throw new Error('Deze administratie heeft geen identiteit; open hem eerst één keer in de app');
+    return JSON.parse(row.value) as string;
+  }
+
+  officeCopy(): OfficeCopy | null {
+    const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'officeCopy'`).get() as { value: string } | undefined;
+    return row ? (JSON.parse(row.value) as OfficeCopy) : null;
+  }
+
+  /** Alleen voor het inlezen van een export bij de boekhouder. */
+  markOfficeCopy(copy: OfficeCopy): void {
+    this.db.prepare(`INSERT INTO settings (key, value) VALUES ('officeCopy', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(copy));
+  }
+
+  /**
+   * Waarom er niets naar buiten mag (e-mail, post ophalen, koppelingen), of null als het wel mag.
+   * Eén plek voor de demo en de kantoormodus; de services controleren dit zelf.
+   */
+  outboundBlocked(): string | null {
+    if (this.get().demoMode) return 'In de demo gaat er niets naar buiten. Wis de demo om echt te beginnen.';
+    const copy = this.officeCopy();
+    if (copy) return `Dit is de kopie voor ${copy.office} (uitwisseling ${copy.exchange}): er gaat niets naar buiten.`;
+    return null;
+  }
 
   get(): AppSettings {
     const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];

@@ -2,6 +2,9 @@
 
 ## Nog niet uitgebracht
 
+### Nieuw
+- **Meerdere administraties** (Instellingen > Administraties): heb je meer dan één bedrijf, bijvoorbeeld een bv en een eenmanszaak, maak dan voor elk een eigen administratie. Ze staan helemaal los van elkaar, met eigen bijlagen en back-ups. De app opent de laatst gebruikte; met meer dan één administratie zie je onder de naam van de app welke open is.
+
 ### Nieuwe naam: BoekhoudenVoorNiks
 - **Gratis Boekhouden heet nu BoekhoudenVoorNiks**, met een eigen site op [boekhoudenvoorniks.nl](https://boekhoudenvoorniks.nl). De app blijft gratis en open source.
 - **Je hoeft niets te doen.** De update gaat gewoon over de oude installatie heen. Je administratie wordt bij de eerste start verplaatst naar de nieuwe map (`boekhoudenvoorniks` in plaats van `gratis-boekhouden`); je wachtwoorden en koppelingen blijven werken.
@@ -13,6 +16,7 @@
 - **De rapporten in de app hebben dezelfde beginbalans als het pakket voor je boekhouder.** De kolommenbalans, grootboekkaarten, periodebalans en de balans in de expertmodus telden het resultaat van eerdere jaren niet bij het eigen vermogen, waardoor de beginbalans bij een administratie van meer dan één jaar niet op nul uitkwam. Een beginbalansboeking op de eerste dag (overstap) staat nu ook in de app in de kolom beginbalans in plaats van bij de mutaties.
 
 ### Techniek
+- Elke administratie heeft een vaste identiteit (UUID, migratie 21) en er is een kantoormodus voor de kopie van een klant bij de boekhouder: geen e-mail, geen koppelingen, geen post ophalen en niets automatisch boeken. Voorbereiding op de uitwisseling met de boekhouder (`docs/uitwisseling.md`).
 - Eén functie voor de beginbalans (`src/reports/opening-balance.ts`) voor de rapporten in de app, de auditfile en het pakket.
 - Technisch ontwerp voor de uitwisseling met de boekhouder: `docs/uitwisseling.md`.
 

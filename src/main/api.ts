@@ -60,6 +60,12 @@ export interface HostContext {
   backupNow(): Promise<string | null>;
   restoreBackup(password?: string): Promise<boolean>;
   exportEncrypted(password: string): Promise<string | null>;
+  /** meerdere administraties (alleen in de app zelf) */
+  administrations?: {
+    list(): { key: string; name: string; officeCopy: { office: string; exchange: number; endDate: string } | null; current: boolean }[];
+    open(key: string): Promise<void>;
+    create(name: string): Promise<string>;
+  };
   appVersion(): string;
   checkForUpdates(): Promise<string>;
   /** Administratie wissen (met veiligheidskopie bij echte gegevens) en eventueel de demo erin zetten. */
@@ -308,9 +314,22 @@ export function createApi(s: Services, host: HostContext) {
     }
   };
 
+  const admins = () => {
+    if (!host.administrations) throw new Error('Meerdere administraties kan alleen in de app zelf');
+    return host.administrations;
+  };
+
   return {
+    /** meerdere administraties op deze computer (bv. bv en eenmanszaak, of een boekhouder met kopieën van klanten) */
+    administrations: {
+      list: () => (host.administrations ? host.administrations.list() : []),
+      open: (key: string) => admins().open(String(key)),
+      create: (name: string) => admins().create(String(name)),
+    },
     app: {
       version: () => host.appVersion(),
+      administrationId: () => s.settings.administrationId(),
+      officeCopy: () => s.settings.officeCopy(),
       checkForUpdates: () => host.checkForUpdates(),
       openExternal: (url: string) => host.openExternal(url),
       openAttachment: (path: string) => host.openPath(path),
@@ -379,6 +398,7 @@ export function createApi(s: Services, host: HostContext) {
       fetchNow: () => {
         if (!host.mail) throw new Error('Mail ophalen kan alleen in de app');
         if (s.settings.get().demoMode) throw new Error('In de demo wordt geen mail opgehaald. Wis de demo om echt te beginnen.');
+        if (s.settings.officeCopy()) throw new Error(s.settings.outboundBlocked()!);
         return host.mail.fetchNow();
       },
       fromCustomer: (relationId: number) => s.mail.fromCustomer(relationId),

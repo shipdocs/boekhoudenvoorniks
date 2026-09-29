@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { openDatabase, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
 import { createServices, type Services } from '../services';
+import { SettingsService } from '../settings/settings';
 import { createSmtpMailer, verifySmtp } from '../documents/smtp-mailer';
 import { createApi, type Api } from './api';
 import { renderPdf } from './pdf';
@@ -28,6 +29,7 @@ import { hasOldMcp, mcpCommands } from '../mcp/names';
 import type { PollResult } from '../mail/mail-intake';
 import { isPathInside } from './path-security';
 import { DATA_DIR_NAME, migrateDataDir, OLD_DATA_DIR_NAME } from './data-dir';
+import { Administrations, readAdministrationFile } from './administrations';
 
 const SMTP_SECRET = 'smtp:password';
 const IMAP_SECRET = 'imap:password';
@@ -44,10 +46,42 @@ let localOcr: LocalOcrRuntime;
 /** Eigen gegevensmap (tests, rooktest); GRATIS_BOEKHOUDEN_DATA is de naam van vóór de naamswijziging. */
 const DATA_ENV = process.env.BOEKHOUDENVOORNIKS_DATA ?? process.env.GRATIS_BOEKHOUDEN_DATA;
 
-function dataDir(): string {
+/** Map met alle administraties (en het gedeelde OCR-model). */
+function rootDir(): string {
   const dir = DATA_ENV ?? app.getPath('userData');
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function administrations(): Administrations {
+  return new Administrations(rootDir());
+}
+
+/** Map van de open administratie: database, bijlagen, back-ups. */
+function dataDir(): string {
+  const dir = administrations().dirFor(administrations().current());
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** Andere administratie openen: de huidige netjes sluiten, de andere openen en het venster verversen. */
+async function openAdministration(key: string): Promise<void> {
+  const admins = administrations();
+  if (key === admins.current()) return;
+  // eerst controleren of hij bestaat (gooit ook bij een ongeldige sleutel), vóór we iets sluiten
+  if (!existsSync(join(admins.dirFor(key), 'boekhouding.sqlite')) && key !== '') throw new Error('Deze administratie bestaat niet (meer)');
+  const current = dataDir();
+  try {
+    await dailyBackup(db, join(current, 'backups'), current);
+  } catch (e) {
+    console.error('Back-up vóór wisselen mislukt', e);
+  }
+  localOcr.stop();
+  db.close();
+  admins.select(key);
+  backupBeforeUpgrade();
+  initServices();
+  mainWindow?.webContents.reload();
 }
 
 function dbPath(): string {
@@ -114,7 +148,7 @@ function fetchMail(): Promise<PollResult> {
 
 async function backgroundMail(): Promise<void> {
   const s = services.settings.get();
-  if (!s.mailIn.enabled || s.demoMode || !secrets.get(IMAP_SECRET)) return;
+  if (!s.mailIn.enabled || services.settings.outboundBlocked() || !secrets.get(IMAP_SECRET)) return;
   try {
     await fetchMail();
   } catch (e) {
@@ -202,7 +236,7 @@ function initServices(): void {
     fetch: localFetch,
     storeFile: storeAttachment,
   });
-  localOcr = new LocalOcrRuntime(join(dataDir(), 'ocr'), {
+  localOcr = new LocalOcrRuntime(join(rootDir(), 'ocr'), {
     fetch: (url, init) => fetch(url, init) as never,
   });
   configureLocalAi();
@@ -347,6 +381,24 @@ function initServices(): void {
       if (withDemo) seedDemo(services);
       return { backup };
     },
+    administrations: {
+      list: () => administrations().list(readAdministrationFile),
+      open: (key) => openAdministration(key),
+      async create(name) {
+        if (!name.trim()) throw new Error('Geef de administratie een naam');
+        const key = administrations().create(name.trim());
+        // de database aanmaken (migraties) met de naam van het bedrijf, daarna openen
+        const fresh = openDatabase(join(administrations().dirFor(key), 'boekhouding.sqlite'));
+        try {
+          const settings = new SettingsService(fresh);
+          settings.update({ company: { ...settings.get().company, name: name.trim() } });
+        } finally {
+          fresh.close();
+        }
+        await openAdministration(key);
+        return key;
+      },
+    },
     appVersion: () => app.getVersion(),
     localOcr: {
       status: () => localOcr.status(),
@@ -394,6 +446,8 @@ async function backgroundTasks(): Promise<void> {
   } catch (e) {
     console.error('Back-up mislukt', e);
   }
+  // kopie bij de boekhouder: niets zelf boeken en niets naar buiten, dat doet de klant in zijn eigen administratie
+  if (services.settings.officeCopy()) return;
   try {
     // afschrijving van afgesloten jaren (na de jaarwisseling)
     services.assets.bookDue();
