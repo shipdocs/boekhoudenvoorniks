@@ -3,7 +3,7 @@ import { createHash, createPublicKey, generateKeyPairSync } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { addMonth, addMonths, authorizeAssistant, handle, inclVat, type Env, type LicenseDb, type LicenseStatement } from '../workers/licentie/src/app';
+import { addDays, addMonth, addMonths, authorizeAssistant, handle, inclVat, type Env, type LicenseDb, type LicenseStatement } from '../workers/licentie/src/app';
 import { signLicense } from '../workers/licentie/src/token';
 import { LICENSE_PUBLIC_KEY, LicenseService, verifyLicense } from '../src/license/license';
 import { createApi, type HostContext } from '../src/main/api';
@@ -509,6 +509,70 @@ describe('licentie-Worker', () => {
     // vanaf 31 januari: februari afgekapt, maar maart weer de 31e (niet de 28e)
     expect(addMonths('2026-01-31', 2)).toBe('2026-03-31');
     expect(addMonths('2026-01-31', 13)).toBe('2027-02-28');
+  });
+});
+
+describe('licentie-Worker: terugboekingen en misbruik', () => {
+  it('terugboeking van een maandelijkse incasso: maand eraf, abonnement gestopt, één keer', async () => {
+    const payments: Record<string, object> = { tr_1: first('tr_1'), tr_2: recurring('tr_2', 'sub_1', '2026-11-15T10:00:00+00:00') };
+    const w = worker(payments);
+    expect((await w.hook('tr_1')).status).toBe(200);
+    expect((await w.hook('tr_2')).status).toBe(200);
+    expect(w.db.license(ADMIN)!.months).toBe(2);
+    // de klant laat de incasso terugboeken: Mollie meldt dat via dezelfde webhook, status blijft 'paid'
+    payments.tr_2 = { ...recurring('tr_2', 'sub_1', '2026-11-15T10:00:00+00:00'), amountChargedBack: EUR };
+    expect((await w.hook('tr_2')).status).toBe(200);
+    expect((await w.hook('tr_2')).status).toBe(200); // herhaald: niet nog een maand eraf
+    expect(w.db.license(ADMIN)!.months).toBe(1);
+    expect(w.mollie.subscriptions.get('sub_1')!.status).toBe('canceled');
+    const token = JSON.parse(await (await w.license()).text()) as { validUntil: string };
+    expect(token.validUntil).toBe(addDays(addMonths('2026-10-15', 1), 7));
+  });
+
+  it('terugbetaling van de eerste maand: geen licentie meer over; een teruggeboekte betaling die nog niet verwerkt was wordt nooit bijgeschreven', async () => {
+    const payments: Record<string, object> = { tr_1: first('tr_1') };
+    const w = worker(payments);
+    await w.hook('tr_1');
+    payments.tr_1 = { ...first('tr_1'), amountRefunded: EUR };
+    await w.hook('tr_1');
+    expect(w.db.license(ADMIN)!.months).toBe(0);
+    expect((await w.license()).status).toBe(404);
+
+    const other: Record<string, object> = { tr_9: { ...first('tr_9'), amountChargedBack: EUR } };
+    const v = worker(other);
+    await v.hook('tr_9');
+    other.tr_9 = first('tr_9');
+    await v.hook('tr_9');
+    expect(v.db.license(ADMIN)).toBeUndefined();
+  });
+
+  it('/start: alleen JSON, echt begrensd op 8 KB, en per IP-adres begrensd', async () => {
+    let allowed = true;
+    const keys: string[] = [];
+    const w = worker({}, { START_PER_IP: { limit: async ({ key }) => (keys.push(key), { success: allowed }) } });
+    const form = await w.call('POST', '/start', 'administratie=x');
+    expect(form.status).toBe(400);
+    const big = await handle(new Request('https://licentie.example/start', { method: 'POST', body: JSON.stringify({ x: 'y'.repeat(9000) }), headers: { 'content-type': 'application/json' } }), w.env, { fetch: w.mollie.fetchImpl, today: () => TODAY });
+    expect(big.status).toBe(400);
+    expect((await w.start()).status).toBe(200);
+    allowed = false;
+    expect((await w.start()).status).toBe(429);
+    expect(keys.every((k) => k === 'ip:onbekend')).toBe(true);
+  });
+
+  it('foutmeldingen van Mollie in de logs: titel en detail, zonder e-mailadressen', async () => {
+    const logged: string[] = [];
+    const original = console.error;
+    console.error = (...a: unknown[]) => void logged.push(a.join(' '));
+    try {
+      const w = worker({ tr_1: first('tr_1') });
+      w.mollie.failNext(/POST \/customers\/cst_1\/subscriptions/);
+      expect((await w.hook('tr_1')).status).toBe(500);
+    } finally {
+      console.error = original;
+    }
+    expect(logged.join('\n')).toMatch(/503 storing/);
+    expect(logged.join('\n')).not.toContain('piet@example.nl');
   });
 });
 
