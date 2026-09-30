@@ -1,0 +1,399 @@
+goal: 'Lever de Windows Store (MSIX)-route voor BoekhoudenVoorNiks op in drie gefaseerde
+  PR''s: PR 1 een gedeelde datamap buiten AppData met veilige, hervatbare migratie
+  en bijlagepad-rebase op Windows en Linux, PR 2 een appx/MSIX-build met de vastgelegde
+  Partner Center-identiteit en process.windowsStore-guards, en PR 3 het bijgewerkte
+  onderzoeks-/publicatiedocument met proefprotocol, Store-listingconcept en de over
+  te nemen Partner Center-gegevens'
+task_type: code
+brownfield_context:
+  project_type: brownfield
+  context_references:
+  - path: .
+    role: primary
+    summary: Electron desktop-boekhoudapp BoekhoudenVoorNiks; release bouwt Linux
+      + Windows (NSIS)
+  - path: src/main/data-dir.ts
+    role: primary
+    summary: 'migrateDataDir: rename met cpSync-fallback, oude map blijft staan, rebase
+      van bijlagepaden ontbreekt; hier komen resolveDataDir, staging, marker en pointer'
+  - path: src/main/main.ts
+    role: primary
+    summary: rootDir = BOEKHOUDENVOORNIKS_DATA ?? app.getPath('userData') (regel 53-61);
+      readAttachment/openPath weigeren paden buiten dataDir()/bijlagen (378-384);
+      mcpCommand() gebruikt process.execPath (221)
+  - path: src/main/updates.ts
+    role: primary
+    summary: Roept electron-updater altijd aan, zonder process.windowsStore-check
+  - path: src/main/backup.ts
+    role: reference
+    summary: rebaseAttachmentPaths op regel 142-160, nu alleen gebruikt bij restore/extract;
+      te hergebruiken in de migratie
+  - path: src/ocr-runtime/runtime.ts
+    role: reference
+    summary: Spawnt llama-server.exe uit de datamap (regel 253); runtime-download
+      valt onder Store policy 10.2.2/10.1.5
+  - path: package.json
+    role: primary
+    summary: build.win.target = ['nsis'] only; geen appx-blok en geen build/appx-assets
+  - path: .github/workflows/release.yml
+    role: primary
+    summary: Matrix ubuntu + windows; electron-builder --publish always naar GitHub
+      draft; hier komt de aparte Store-job zonder release-publicatie
+  - path: tests/data-dir.test.ts
+    role: reference
+    summary: Bestaande tests voor de datamapmigratie; uit te breiden met staging,
+      marker, pointer en rebase
+  - path: docs/windows-store.md
+    role: primary
+    summary: 'Onderzoeksdocument uit PR #173 (branch docs/windows-store-msix-172,
+      Closes #172); bij te werken in PR 3'
+  - path: https://github.com/shipdocs/boekhoudenvoorniks/issues/172
+    role: reference
+    summary: Issue met de oorspronkelijke onderzoeksvragen en acceptatiecriteria plus
+      de owner-comment met de Store-identiteit
+  - path: https://learn.microsoft.com
+    role: reference
+    summary: Primaire bron voor MSIX-AppData-virtualisatie (Win10 1903+), unvirtualizedResources,
+      uap3 windows.appExecutionAlias en Store Policies 7.20 d.d. 2026-09-14
+  existing_patterns:
+  - Datamap wordt centraal geresolved en overschrijfbaar met de BOEKHOUDENVOORNIKS_DATA-omgevingsvariabele
+    (gebruikt door tests en smoke)
+  - Eenmalige datamapmigratie met rename en cpSync-fallback waarbij de oude map blijft
+    staan (bestaand patroon gratis-boekhouden -> boekhoudenvoorniks in src/main/data-dir.ts)
+  - Bijlagen staan als absolute paden in de database en worden met rebaseAttachmentPaths
+    herschreven (src/main/backup.ts)
+  - readAttachment/openPath weigeren elk pad buiten dataDir()/bijlagen als padbeveiliging
+  - 'Meerdere administraties: root plus administraties/*, elk met een eigen boekhouding.sqlite'
+  - backups/ ligt binnen de datamap; ocr/ (GB's, herdownloadbaar) in de root van de
+    datamap
+  - --mcp-modus resolvet de datamap zelfstandig zonder Electron-app-context
+  - Logging via console.log in src/main/main.ts; geen telemetrie
+  - electron-builder configuratie in package.json (build.win); release via .github/workflows/release.yml
+    met matrix ubuntu + windows en --publish always naar een GitHub draft-release
+  - NSIS per-user installatie; deleteAppDataOnUninstall niet gezet
+  existing_dependencies:
+  - Electron (process.windowsStore, app.getPath('userData'), safeStorage, Chromium
+    'Local State')
+  - electron-builder (build.win.target, appx-target, customExtensionsPath/customManifestPath
+    voor uap3 windows.appExecutionAlias)
+  - electron-updater (uit te schakelen in de Store-build)
+  - better-sqlite3 (native module; moet in MSIX laden; backup-API/checkpoint voor
+    veilig kopiëren)
+  - SQLite integrity_check en WAL-checkpoint
+  - llama-server.exe als runtime-download in de datamap (lokale OCR)
+  - MCP stdio-registratie via process.execPath / App Execution Alias
+  - GitHub Actions (release.yml, workflow-artifacts)
+  - Node fs (rename, cpSync) voor de migratie
+  - Bestaande testrunner met tests/data-dir.test.ts
+constraints:
+- Al het werk gebeurt op nieuwe branches in eigen git-worktrees naast de hoofd-checkout
+  (../gratis-boekhouden-<branch>), niet onder /tmp, zodat een andere agent in de hoofd-checkout
+  kan doorwerken
+- 'PR 1 op branch feat/gedeelde-datamap-172; PR 2 op branch feat/windows-store-msix-172;
+  PR 3 hergebruikt de bestaande branch docs/windows-store-msix-172 (PR #173)'
+- 'Gedeelde datamap op alle platforms: %USERPROFILE%\BoekhoudenVoorNiks op Windows,
+  ~/BoekhoudenVoorNiks op Linux; bewust niet Documents vanwege OneDrive Known Folder
+  Move + SQLite-corruptierisico'
+- app.setPath('userData') wijst naar de gedeelde datamap, zodat ook Chromium 'Local
+  State' (de safeStorage-sleutel) daar staat en nooit in per-pakket-omgeleide AppData
+- 'Datamapresolutie in één functie resolveDataDir(), gebruikt door app en --mcp, in
+  deze volgorde: BOEKHOUDENVOORNIKS_DATA-override, dan pointerbestand (alleen aanwezig
+  als de gebruiker zelf een afwijkende map koos), dan het standaardpad mits dat de
+  marker ''migratie-klaar'' bevat, anders de legacy AppData-bron (boekhoudenvoorniks
+  vóór gratis-boekhouden)'
+- 'Pointerbestand (alleen bij zelf gekozen map) staat in de thuismap buiten AppData:
+  %USERPROFILE%\.boekhoudenvoorniks.json of ~/.boekhoudenvoorniks.json, met versieveld;
+  nooit %LOCALAPPDATA%. Een pointerpad wordt met realpath gevalideerd en moet een
+  boekhouding.sqlite plus marker bevatten, anders wordt het geweigerd'
+- 'Migratievolgorde: eerst atomaire rename van de bronmap; lukt dat niet, dan kopie
+  via de SQLite backup-API (na WAL-checkpoint) naar een vaste staging-map ''.staging-migratie''
+  naast de doelmap, integrity_check per boekhouding.sqlite, rebase van bijlagepaden,
+  atomische rename naar de doelmap, en als laatste de marker ''migratie-klaar'''
+- integrity_check slaagt alleen bij het resultaat 'ok'; elk ander resultaat laat de
+  staging-map weggooien en de bron ongewijzigd in gebruik
+- Tijdens de migratie staat een lockbestand in de doelmap; een tweede proces (app
+  of --mcp) migreert dan niet zelf en opent de bron alleen-lezen
+- Een achtergebleven '.staging-migratie' wordt bij elke start verwijderd voordat een
+  nieuwe poging begint
+- Een trage kopie toont voortgang en heeft geen harde timeout; afbreken op elk moment
+  laat de bron intact
+- De oude AppData-bronmap wordt nooit automatisch gewist; na geslaagde kopie-migratie
+  hernoemd naar <naam>.gemigreerd-YYYYMMDD-HHmmss (met -2, -3 bij een bestaande naam);
+  als hernoemen mislukt blijft hij staan met een waarschuwing
+- De bijlagepad-rebase herstelt ook paden die sinds de eerdere naamswijziging gratis-boekhouden
+  -> boekhoudenvoorniks naar de oude map wijzen
+- Data in de gedeelde map blijft intact na verwijderen van het MSIX-pakket (bewaarplicht)
+- 'Store-identiteit is vastgelegd en mag niet wijzigen: identity name ShipDocs.BoekhoudenVoorNiks,
+  publisher CN=B884F2A1-35F1-4BD8-9EB7-F2746D9FB427, publisher display name ShipDocs,
+  Store ID 9NZ4D5JNN5BM'
+- Alleen MSIX vermijdt een eigen publiek code-signingcertificaat; de Win32 MSI/EXE-route
+  vereist een eigen vertrouwd certificaat
+- Het appx-target staat niet in build.win.target van de bestaande release-matrix;
+  een aparte CI-job bouwt het met 'electron-builder --win appx --publish never' en
+  bewaart het pakket uitsluitend als workflow-artifact
+- De bestaande ongesigneerde NSIS/GitHub-route blijft ongewijzigd naast de Store-route
+  bestaan
+- 'Lokale OCR in de Store-build staat standaard uit zolang niet vaststaat dat het
+  onder Store policy 10.2.2 valt; aanzetten alleen na expliciete toestemming van de
+  gebruiker, met vaste versie en hash van llama-server.exe, en OCR vermeld in de
+  Store-beschrijving'
+- De MSIX-fallback opent SQLite met mode=ro, nooit met immutable=1 (dat negeert de
+  WAL en kan verouderde data lezen)
+- Geen nieuwe telemetrie
+- PR 2 wordt pas gemerged na (1) geslaagde upgrade van de eigenaar op echte data,
+  (2) geslaagde upgrade vanuit de vorige NSIS-versie op een schone Windows 11-VM,
+  en (3) minstens 1 externe gebruiker die via feedbackmail of issue een geslaagde
+  upgrade naar de NSIS-release van PR 1 bevestigt
+- 'Out of scope: indienen, certificering en openbaar publiceren (handmatig door de
+  eigenaar na de proef)'
+- 'Out of scope: Partner Center API-upload vanuit CI; geen nieuwe Azure AD-secrets'
+- 'Out of scope: aanpassen van site-/README-tekst over SmartScreen en de Store-link
+  tot na publicatie'
+- unvirtualizedResources-ontheffing wordt niet gebruikt (bedoeld voor games, Store-goedkeuring
+  onzeker)
+- Bronnen moeten verwijzen naar learn.microsoft.com, inclusief Store Policies 7.20
+  d.d. 2026-09-14
+acceptance_criteria:
+- description: 'PR 1: app en --mcp openen altijd dezelfde administratie; een ontbrekende,
+    ongeldige of onbereikbare pointer of een map zonder marker levert een expliciete
+    fout of dialoog op en nooit stil een nieuwe lege administratie'
+  verify_command: npm test -- tests/data-dir.test.ts
+  expected_artifacts:
+  - src/main/data-dir.ts
+  - tests/data-dir.test.ts
+- description: 'PR 1: na migratie opent een bestaande administratie (root en administraties/*)
+    vanuit de gedeelde map, openen alle bijlagen (ook met Windows-backslashpaden en
+    paden van vóór de naamswijziging), zijn safeStorage-secrets leesbaar, en bestaat
+    de oude bronmap nog (hernoemd of ongewijzigd)'
+  verify_command: npm test -- tests/data-dir.test.ts
+  expected_artifacts:
+  - src/main/data-dir.ts
+  - tests/data-dir.test.ts
+- description: 'PR 1: een migratie die op elk willekeurig punt wordt afgebroken (tussen
+    elke twee stappen) of die integrity_check niet haalt, laat de bron intact en leesbaar,
+    schrijft geen marker, en wordt bij de volgende start schoon opnieuw geprobeerd;
+    de NSIS-build start intussen door vanuit de bron met een niet-blokkerende waarschuwing'
+  verify_command: npm test -- tests/data-dir.test.ts
+  expected_artifacts:
+  - tests/data-dir.test.ts
+- description: 'PR 2: de CI levert naast de ongewijzigde NSIS Setup.exe een appx/MSIX-workflow-artifact
+    met de exacte Store-identiteit en een App Execution Alias voor --mcp, en er komt
+    geen appx-bestand in de GitHub-release'
+  verify_command: node -e "const p=require('./package.json');const w=p.build.win;const
+    a=p.build.appx||{};if(!w.target.includes('nsis'))throw new Error('nsis weg');if(w.target.includes('appx'))throw
+    new Error('appx hoort niet in de release-matrix');if(a.identityName!=='ShipDocs.BoekhoudenVoorNiks'||a.publisher!=='CN=B884F2A1-35F1-4BD8-9EB7-F2746D9FB427'||a.publisherDisplayName!=='ShipDocs')throw
+    new Error('identiteit fout');const y=require('fs').readFileSync('.github/workflows/release.yml','utf8');if(!/--win appx --publish never/.test(y))throw
+    new Error('Store-job ontbreekt');console.log('OK')"
+  expected_artifacts:
+  - package.json
+  - .github/workflows/release.yml
+  output_assertion: OK
+- description: 'PR 2: met process.windowsStore === true wordt electron-updater nooit
+    aangeroepen, staat lokale OCR standaard uit, verwijst een melding bij OCR en een
+    niet-werkende MCP-koppeling naar de NSIS/GitHub-download, geeft mcpCommand() de
+    alias in plaats van process.execPath, opent een mislukte migratie de bron alleen-lezen
+    (mode=ro) met de keuzes opnieuw proberen of zelf een map kiezen, waarschuwt de
+    app als een gekozen map in een synchronisatiemap (OneDrive) ligt, en meldt de eerste
+    start dat een oude NSIS-versie verwijderd of bijgewerkt moet worden; met process.windowsStore
+    undefined verandert niets aan de NSIS-build'
+  verify_command: npm test -- tests/windows-store.test.ts
+  expected_artifacts:
+  - src/main/updates.ts
+  - tests/windows-store.test.ts
+- description: 'PR 2 handmatige proef (niet in CI): op een schone Windows 11-VM (Smart
+    App Control/Defender aan) slagen alle harde blokkers: upgrade NSIS met realistische
+    testdata naar MSIX, NSIS 0.7.5 direct naar MSIX, secrets leesbaar, better-sqlite3
+    laadt in MSIX, de gedeelde map inclusief Local State blijft na verwijderen staan,
+    en stdio-MCP via de alias werkt ook na een tweede MSIX-versie'
+  expected_artifacts:
+  - docs/windows-store.md
+  verify_exemption_reason: Vereist een echte Windows 11-machine met MSIX-installatie;
+    uitkomst wordt vastgelegd in het proefverslag in docs/windows-store.md
+- description: 'PR 3: docs/windows-store.md bevat de kopjes Besluit, MSIX versus MSI/EXE,
+    Stappenplan Partner Center, Gevolgen voor updater en administratie, Proefprotocol,
+    Harde blokkers, Uitschakelbare functies, Store-listingconcept, Certificeringsnotities
+    en Partner Center-gegevens, en elk besluit heeft minstens één learn.microsoft.com-link'
+  verify_command: |-
+    bash -c 'f=docs/windows-store.md; for h in "Besluit" "MSIX versus MSI/EXE" "Stappenplan Partner Center" "Gevolgen voor updater en administratie" "Proefprotocol" "Harde blokkers" "Uitschakelbare functies" "Store-listingconcept" "Certificeringsnotities" "Partner Center-gegevens"; do grep -q "^## .*$h" "$f" || { echo "mist: $h"; exit 1; }; done; grep -q "learn.microsoft.com" "$f" && echo OK'
+  expected_artifacts:
+  - docs/windows-store.md
+  output_assertion: OK
+ontology_schema:
+  name: WindowsStoreMigratie
+  description: 'Domeinmodel voor de gefaseerde overgang van BoekhoudenVoorNiks naar
+    een Microsoft Store (MSIX)-distributie met een gedeelde datamap: de PR-fasen,
+    de datamap- en pointerresolutie, het migratieprotocol, de guards per distributiekanaal
+    en de proefcriteria'
+  fields:
+  - name: fase
+    type: string
+    description: 'PR-fase: pr1-gedeelde-datamap, pr2-msix-appx of pr3-documentatie'
+    required: true
+  - name: branch
+    type: string
+    description: Branchnaam en bijbehorende worktree waarin de fase wordt gebouwd
+    required: true
+  - name: distributiekanaal
+    type: string
+    description: nsis-github of msix-store; bepaalt welke guards en fallbacks gelden
+    required: true
+  - name: platform
+    type: string
+    description: win32 of linux; bepaalt het gedeelde pad en de pointerlocatie
+    required: true
+  - name: gedeelde_datamap
+    type: string
+    description: Definitief pad van de gedeelde datamap buiten AppData
+    required: true
+  - name: pointerbestand
+    type: object
+    description: Pointer in de thuismap met versieveld, alleen bij een zelf gekozen map;
+      pad wordt met realpath gevalideerd
+    required: true
+  - name: bronmappen
+    type: array
+    description: 'Kandidaat-bronmappen in AppData in prioriteitsorde: boekhoudenvoorniks,
+      daarna gratis-boekhouden indien de eerste geen boekhouding.sqlite heeft'
+    required: true
+  - name: migratiestap
+    type: string
+    description: rename, staging-kopie via backup-API, integrity_check, bijlagepad-rebase,
+      atomische rename, marker, pointer of opruimen van staging
+    required: true
+  - name: migratiestatus
+    type: string
+    description: niet-gestart, staging, klaar of mislukt; alleen klaar bij aanwezige
+      marker
+    required: true
+  - name: falen_gedrag
+    type: string
+    description: 'Gedrag bij mislukte migratie per kanaal: doorstarten-met-waarschuwing
+      (NSIS) of alleen-lezen-met-keuze (MSIX)'
+    required: true
+  - name: store_identiteit
+    type: object
+    description: 'Vastgelegde Partner Center-identiteit: identity name, publisher,
+      publisher display name en Store ID'
+    required: true
+  - name: windows_store_guard
+    type: array
+    description: 'Functies achter process.windowsStore: updater uit, OCR uitschakelbaar,
+      MCP uitschakelbaar'
+    required: true
+  - name: proefcheck
+    type: object
+    description: Proefpunt met naam, of het een harde blokker is, en de pass/fail-uitkomst
+    required: true
+  - name: go_no_go_signaal
+    type: object
+    description: De drie voorwaarden voor het mergen van PR 2, inclusief 1 externe upgradebevestiging
+      via feedbackmail of issue
+    required: true
+  - name: bron
+    type: object
+    description: Verwijzing naar learn.microsoft.com-documentatie of Store-beleid
+      met datum, die een besluit in het document draagt
+    required: true
+  - name: buiten_scope
+    type: array
+    description: 'Expliciet uitgesloten werk: indienen, certificeren, publiceren,
+      Partner Center API-upload, site-/README-tekst'
+    required: true
+  - name: marker
+    type: string
+    description: Bestand 'migratie-klaar' in de doelmap; alleen een map met marker
+      geldt als gemigreerd
+    required: true
+  - name: staging_map
+    type: string
+    description: Vaste map '.staging-migratie' naast de doelmap; bij elke start eerst
+      verwijderd
+    required: true
+  - name: lockbestand
+    type: string
+    description: Lock in de doelmap tijdens migratie; voorkomt gelijktijdig migreren
+      door app en --mcp
+    required: true
+  - name: administratie
+    type: object
+    description: Een boekhouding.sqlite met bijlagen/ en backups/, in de root of in
+      administraties/<slug>
+    required: true
+  - name: bijlagepad
+    type: string
+    description: Absoluut pad naar een bijlage in de database; na rebase altijd binnen
+      <datamap>/bijlagen
+    required: true
+evaluation_principles:
+- name: Dataveiligheid boven gemak
+  description: Geen enkel migratiepad mag administratie, bijlagen of safeStorage-secrets
+    kwijtraken; een onderbroken kopie telt nooit als geslaagd en de bronmap wordt
+    nooit automatisch gewist
+  weight: 1.0
+- name: Bewaarplicht overleeft verwijdering
+  description: De gedeelde datamap en de Chromium Local State-sleutel blijven intact
+    na verwijderen van het MSIX-pakket; nieuwe data komt nooit in per-pakket-omgeleide
+    AppData terecht
+  weight: 1.0
+- name: Eén bron van waarheid voor de datamap
+  description: App en --mcp-modus resolven de datamap via dezelfde functie, pointer
+    en overridevolgorde, zodat de twee nooit uiteenlopen
+  weight: 0.9
+- name: Gefaseerd en omkeerbaar
+  description: PR 1 gaat via de NSIS-release naar bestaande gebruikers vóór er een
+    MSIX bestaat; PR 2 wacht op het expliciete go/no-go-signaal
+  weight: 0.85
+- name: Geverifieerd op Linux/CI
+  description: Migratie, rebase van backslashpaden, pointerresolutie en hervatten
+    na afgebroken staging zijn met geautomatiseerde tests gedekt die op Linux in CI
+    draaien
+  weight: 0.85
+- name: Onderbouwing met primaire bronnen
+  description: Elk besluit over MSIX, AppData-virtualisatie, runtime-downloads en
+    aliassen verwijst naar learn.microsoft.com of het Store-beleid met datum
+  weight: 0.8
+- name: Beide kanalen blijven werken
+  description: De bestaande NSIS/GitHub-route blijft ongewijzigd functioneren naast
+    de Store-build; guards schakelen alleen in de Store-build
+  weight: 0.8
+- name: Respecteer de scopegrens
+  description: Geen indienen, publiceren, Partner Center API-secrets of site-/README-wijzigingen;
+    die blijven handmatig bij de eigenaar
+  weight: 0.75
+exit_conditions:
+- name: PR 1 gereed
+  description: Gedeelde datamap, veilige hervatbare migratie, datamapresolutie en bijlagepad-rebase
+    zijn geïmplementeerd en met Linux/CI-tests gedekt
+  criteria: De drie PR 1-acceptatiecriteria slagen met npm test -- tests/data-dir.test.ts
+- name: PR 2 gereed
+  description: Appx/MSIX-artifact met de vastgelegde Store-identiteit, alias en windowsStore-guards
+  criteria: De twee geautomatiseerde PR 2-criteria slagen; de handmatige Windows-proef
+    staat klaar om uit te voeren
+- name: PR 3 gereed
+  description: docs/windows-store.md bevat alle verplichte kopjes en bronnen
+  criteria: Het verify_command van het PR 3-criterium geeft OK
+- name: Harde blokker gefaald
+  description: Een harde blokker in de Windows-proef faalt, waardoor de Store-route
+    stopt
+  criteria: Migratie/integrity_check/bijlagen, secrets na NSIS->MSIX, better-sqlite3
+    in MSIX, behoud van de gedeelde map na verwijderen, of NSIS 0.7.5 direct naar
+    MSIX faalt
+- name: Scopegrens bereikt
+  description: Het werk stopt bij de grens van indienen en publiceren
+  criteria: Store-pakket en document zijn gereed; indienen, certificering en openbare
+    publicatie blijven bij de eigenaar
+metadata:
+  seed_id: seed_70f581426b5d
+  version: 1.1.0
+  created_at: '2026-09-30T18:19:03.094546Z'
+  revised_at: '2026-09-30'
+  ambiguity_score: 0.1445
+  gate_forced: false
+  interview_id: interview_20260930_173110
+  parent_seed_id: null
+  generation_mode: normal
+  degraded: false
+  unresolved_slots: []
+  recovery_reason: null
+  revision_note: 'Verfijningsronde 1: A-H, S1-S4, I-L toegepast; pointer alleen bij
+    eigen map; 7-dagenregel vervangen door 1 externe bevestiging'
