@@ -51,18 +51,20 @@
         top.querySelectorAll('details.sub[open]').forEach(function (o) { if (o !== d) o.open = false; });
       });
     });
-    document.addEventListener('click', function (e) {
-      if (top.contains(e.target)) return;
-      top.querySelectorAll('details.sub[open]').forEach(function (o) { o.open = false; });
+    function closeAll() {
+      var focused = document.activeElement, wasInside = top.contains(focused);
+      top.querySelectorAll('details.sub[open]').forEach(function (o) {
+        o.open = false;
+        if (o.contains(focused)) { o.querySelector('summary').focus(); wasInside = false; }
+      });
+      if (!top.classList.contains('open')) return;
       top.classList.remove('open');
       button.setAttribute('aria-expanded', 'false');
-    });
-    document.addEventListener('keydown', function (e) {
-      if (e.key !== 'Escape') return;
-      top.querySelectorAll('details.sub[open]').forEach(function (o) { o.open = false; });
-      top.classList.remove('open');
-      button.setAttribute('aria-expanded', 'false');
-    });
+      // de focus nooit achterlaten op een verborgen link
+      if (wasInside && focused !== button) button.focus();
+    }
+    document.addEventListener('click', function (e) { if (!top.contains(e.target)) closeAll(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
   })();
   </script>
 
