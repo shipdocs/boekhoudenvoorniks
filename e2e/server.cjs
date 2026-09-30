@@ -100,6 +100,8 @@ let sent = [];
 /** nagebootste update-status (POST /__update), en of "Nu herstarten" is aangeklikt */
 let updateStatus = { state: 'uit', version: null, notes: null, percent: null, error: null };
 let updateInstalled = false;
+/** aanroepen van "Back-up terugzetten" (in de test annuleert de gebruiker het keuzevenster) */
+let restoreCalls = [];
 
 async function storeFile(name, data) {
   const p = path.join(dir, 'bijlagen', `${Date.now()}-${name.replace(/[^\w.-]+/g, '_')}`);
@@ -200,7 +202,7 @@ function init(fresh) {
     hasSmtpPassword: () => smtpPassword !== null,
     async testSmtp() { throw new Error('Geen mailserver in de test'); },
     async backupNow() { return path.join(dir, 'backup.sqlite'); },
-    async restoreBackup() { return false; },
+    async restoreBackup(password) { restoreCalls.push(password ?? null); return false; },
     async exportEncrypted() { return path.join(dir, 'export.gbbackup'); },
     updates: {
       status: () => updateStatus,
@@ -243,11 +245,13 @@ http
         sent = [];
         updateStatus = { state: 'uit', version: null, notes: null, percent: null, error: null };
         updateInstalled = false;
+        restoreCalls = [];
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         init(true);
         return res.end('{"ok":true}');
       }
       if (req.url === '/__sent') return res.end(JSON.stringify({ ok: sent }));
+      if (req.url === '/__restore') return res.end(JSON.stringify({ ok: restoreCalls }));
       if (req.url === '/__pay') {
         const a = licensing?.accounts.get(licensing.lastStarted);
         if (a) a.paid = true;

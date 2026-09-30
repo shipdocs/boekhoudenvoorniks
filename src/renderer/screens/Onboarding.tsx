@@ -155,8 +155,9 @@ export function Onboarding() {
             ))}
           </div>
           {footer(!!profile.trade)}
+          {!update && <RestoreCard />}
           {!update && (
-            <div className="card flat" style={{ marginTop: 28 }}>
+            <div className="card flat" style={{ marginTop: 16 }}>
               <strong>Eerst rustig rondkijken?</strong>
               <p className="small muted" style={{ margin: '4px 0 10px' }}>
                 Bekijk de app met een voorbeeldbedrijf: klanten, facturen, bonnetjes en een bankafschrift. Er gaat niets naar buiten.
@@ -438,6 +439,29 @@ export function Onboarding() {
           {footer()}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Al een administratie, bv. op een nieuwe computer of na een herinstallatie: een back-up terugzetten in
+ * plaats van opnieuw beginnen. Zelfde functie als Instellingen > Back-up; de app start daarna opnieuw.
+ */
+function RestoreCard() {
+  const { run, busy } = useAction();
+  const [password, setPassword] = useState('');
+  return (
+    <div className="card flat" style={{ marginTop: 28 }} data-testid="backup-terugzetten">
+      <strong>Heb je al een administratie?</strong>
+      <p className="small muted" style={{ margin: '4px 0 10px' }}>
+        Bijvoorbeeld op een nieuwe computer, of na een herinstallatie: zet je back-up terug in plaats van opnieuw te beginnen.
+        Dat kan een complete back-up zijn (<code>.gbbackup</code>, ook de automatische van elke dag) of een oude databaseback-up (<code>.sqlite</code>).
+        De app start daarna opnieuw met jouw administratie.
+      </p>
+      <div className="row" style={{ alignItems: 'center' }}>
+        <Button disabled={busy} onClick={() => void run(() => api.app.restore(password || undefined))}>Back-up terugzetten…</Button>
+        <input type="password" aria-label="Wachtwoord van de back-up" placeholder="wachtwoord (alleen bij een versleutelde back-up)" value={password} onChange={(e) => setPassword(e.target.value)} style={{ minWidth: 280 }} />
+      </div>
     </div>
   );
 }
