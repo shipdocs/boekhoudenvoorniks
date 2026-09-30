@@ -51,11 +51,21 @@ niet worden getoond.
 
 ### 1. Product in Partner Center aanmaken
 
-1. Kies **New product → MSIX or PWA app** en reserveer `BoekhoudenVoorNiks`.
-2. Kopieer op **Product management → Product identity** exact deze drie waarden:
-   `Package/Identity/Name`, `Package/Identity/Publisher` en
-   `Package/Properties/PublisherDisplayName`.
-3. Zet de eerste inzending op **Private audience** met Microsoft-accounts van de testers. Let op:
+De productnaam is gereserveerd. Partner Center heeft de volgende publieke identiteit toegekend:
+
+| Veld | Waarde |
+|---|---|
+| `Package/Identity/Name` | `ShipDocs.BoekhoudenVoorNiks` |
+| `Package/Identity/Publisher` | `CN=B884F2A1-35F1-4BD8-9EB7-F2746D9FB427` |
+| `Package/Properties/PublisherDisplayName` | `ShipDocs` |
+| Package Family Name | `ShipDocs.BoekhoudenVoorNiks_xxc75kaw9g27y` |
+| Package SID | `S-1-15-2-3905005716-3216547000-2216740364-2595733345-4201265192-1642952654-1993401824` |
+| Store ID | `9NZ4D5JNN5BM` |
+
+De HTML-weergave in Partner Center zette achter enkele gekopieerde waarden `&#x20;`; dat is alleen
+een afsluitende spatie en maakt geen deel uit van de identiteit.
+
+Zet de eerste inzending op **Private audience** met Microsoft-accounts van de testers. Let op:
    een product dat eenmaal met een public audience is ingediend, kan later niet terug naar private.
 
 De drie identiteitswaarden worden door Partner Center toegekend en mogen daarom niet worden
@@ -134,12 +144,10 @@ en [updates publiceren](https://learn.microsoft.com/en-us/windows/apps/publish/p
 
 ## Nog nodig van de accounteigenaar
 
-De repository kan de Store-build pas betrouwbaar configureren nadat de accounteigenaar:
+De productnaam en identiteit zijn bekend. Voor de besloten publicatie moet de accounteigenaar nog:
 
-1. de productnaam heeft gereserveerd;
-2. de drie exacte Product identity-waarden heeft aangeleverd;
-3. Microsoft-accounts voor de besloten proef heeft gekozen;
-4. de uiteindelijke Store-tekst, screenshots en marktkeuze heeft bevestigd.
+1. Microsoft-accounts voor de besloten proef kiezen;
+2. de uiteindelijke Store-tekst, screenshots en marktkeuze bevestigen.
 
 Dit onderzoek autoriseert nog geen openbare publicatie. De eerstvolgende technische tranche is:
 Store-build, Store-updatergedrag en regressietests implementeren, daarna het private pakket op echte
