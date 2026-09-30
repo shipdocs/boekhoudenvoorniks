@@ -118,3 +118,7 @@ Ja. BoekhoudenVoorNiks is open source onder de GNU Affero General Public License
 4. Bankafschrift inlezen; betalingen worden gekoppeld.
 5. Het startscherm toont saldo, nog te ontvangen, btw om apart te houden en de paar dingen die aandacht nodig hebben ("Je bent bij").
 6. Aan het eind van het kwartaal: btw-overzicht bekijken en overnemen in Mijn Belastingdienst Zakelijk.
+
+## Waarom BoekhoudenVoorNiks bestaat
+
+Het programma is in één week gemaakt met AI als gereedschap: de maker bepaalt de regels, de AI schrijft en test sneller. Boekingen worden altijd door vaste, geteste regels gemaakt; AI doet in het programma alleen voorstellen. Het draait bewust lokaal: de maker is geen fan van de cloud, omdat steeds meer van het leven naar een betaalde cloud verschuift waar je niets hebt als er iets misgaat. Nu AI een groot deel van het internetverkeer is en nieuwe modellen ongevraagd systemen binnendringen, is dit volgens de maker het moment om terug te gaan naar de basis: software die lokaal draait en gewoon werkt. Meer: https://boekhoudenvoorniks.nl/waarom.html
