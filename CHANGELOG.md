@@ -1,6 +1,6 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.7.2 — nieuwe voorwaarden, akkoord bij het afsluiten
 
 ### Nieuw
 - **Nieuwe voorwaarden (versie 2026-10-02)**: duidelijkere aansprakelijkheid (artikel 9), het abonnement uitsluitend voor ondernemers, afspraken over terugboekingen, storingen, misbruik, overmacht en wat er gebeurt als wij de dienst stoppen, en een preciezere forumkeuze. Je geeft opnieuw akkoord. De voorwaarden zijn ook als PDF te downloaden.
