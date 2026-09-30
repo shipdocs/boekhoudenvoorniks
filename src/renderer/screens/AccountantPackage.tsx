@@ -1,18 +1,28 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, useAction, useLoad } from '../ui';
+import { CheckItems } from './CheckItems';
+import type { CheckItem } from '../../btw/checks';
+import type { MissingDocument } from '../../export/accountant-package';
 
 /**
- * "Pakket voor mijn boekhouder": één ZIP per boekjaar die de boekhouder in zijn eigen pakket
- * inleest (auditfile, kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat,
- * facturen en bonnen). Eerst de controles, zodat je ziet wat er nog ontbreekt.
+ * De inkopen zonder bon als regels waar je meteen een bon bij kunt zoeken (zoals bij de btw-controles).
+ * Het voorbeeld in de app kent alleen inkopen zonder bon; andere soorten (bv. een bestand dat niet meer
+ * gevonden wordt) blijken pas bij het maken van het pakket en staan dan in de lees-mij.
  */
+function missingAsItems(missing: MissingDocument[]): CheckItem[] {
+  return missing
+    .filter((m) => m.kind === 'inkoop' && m.purchaseId)
+    .map((m) => ({ kind: 'aankoop' as const, id: m.purchaseId!, date: m.date, label: [m.relation, m.description].filter(Boolean).join(' · '), amount: m.total || null, hint: m.reason }));
+}
+
 export function AccountantPackageCard({ defaultYear }: { defaultYear?: number }) {
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(defaultYear ?? (new Date().getMonth() < 6 ? thisYear - 1 : thisYear));
   const preview = useLoad(() => api.exports.accountantPackagePreview(year), [year]);
   const { run, busy } = useAction();
   const [saved, setSaved] = useState<string | null>(null);
+  const [showMissing, setShowMissing] = useState(false);
   const p = preview.data;
   const problems = p?.checks.filter((c) => !c.ok) ?? [];
   return (
@@ -39,9 +49,20 @@ export function AccountantPackageCard({ defaultYear }: { defaultYear?: number })
                 {!c.ok && <span className="pill warn" style={{ marginRight: 6 }}>let op</span>}
                 {c.label}
                 {!c.ok && c.detail && <div className="muted">{c.detail}</div>}
+                {!c.ok && c.label === 'Bij elke inkoop zit een bon of factuur' && p.missingDocuments.length > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <Button small onClick={() => setShowMissing((v) => !v)}>{showMissing ? 'Lijst verbergen' : 'Bonnen erbij zoeken'}</Button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
+          {showMissing && p.missingDocuments.length > 0 && (
+            <div className="card flat" data-testid="pakket-ontbrekende-documenten">
+              <p className="small muted" style={{ margin: '0 0 8px' }}>Bij deze boekingen zit geen bon of factuur. Voeg hem toe (foto, PDF of e-factuur), of open de aankoop om hem na te kijken.</p>
+              <CheckItems items={missingAsItems(p.missingDocuments)} onChanged={async () => { await preview.reload(); }} />
+            </div>
+          )}
           {problems.length > 0 && <p className="small muted" style={{ margin: 0 }}>Je kunt het pakket toch maken; wat ontbreekt staat ook in de lees-mij, zodat je boekhouder weet waar hij op moet letten.</p>}
         </>
       )}

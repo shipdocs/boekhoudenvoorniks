@@ -93,6 +93,8 @@ export interface MissingDocument {
   total: Cents;
   entryId: number | null;
   reason: string;
+  /** bij een inkoop: de aankoop, zodat de app de bon erbij kan laten zoeken */
+  purchaseId?: number;
 }
 
 export interface VatPeriodSummary {
@@ -363,7 +365,7 @@ export class AccountantPackage {
     const docs = this.documentSources(from, to);
     const missing: MissingDocument[] = docs.purchases
       .filter((p) => !p.path)
-      .map((p) => ({ kind: 'inkoop' as const, date: p.date, description: p.description, relation: p.relation, total: p.total, entryId: p.entryId, reason: 'geen bon of factuur bewaard' }));
+      .map((p) => ({ kind: 'inkoop' as const, date: p.date, description: p.description, relation: p.relation, total: p.total, entryId: p.entryId, reason: 'geen bon of factuur bewaard', purchaseId: p.id }));
     return this.summarize(year, from, to, rows, mutations, missing, docs.sales.length + docs.purchases.filter((p) => p.path).length + docs.receipts.length, softwareVersion);
   }
 
@@ -400,7 +402,7 @@ export class AccountantPackage {
       { ok: openReceivables === this.balanceAt(ACCOUNTS.debiteuren, to), label: 'Openstaande debiteuren sluiten aan op het grootboek', detail: `${receivables.length} posten, ${eur(openReceivables)}` },
       { ok: openPayables === -this.balanceAt(ACCOUNTS.crediteuren, to), label: 'Openstaande crediteuren sluiten aan op het grootboek', detail: `${payables.length} posten, ${eur(openPayables)}` },
       { ok: missingRgs.length === 0, label: 'Elke gebruikte rekening heeft een RGS-code', detail: missingRgs.length ? `zonder RGS-code: ${missingRgs.map((m) => `${m.code} ${m.name}`).join(', ')}` : `RGS ${RGS_VERSION}` },
-      { ok: missingDocuments.length === 0, label: 'Bij elke inkoop zit een bon of factuur', detail: missingDocuments.length ? `${missingDocuments.length} zonder document (zie documenten/index.csv)` : undefined },
+      { ok: missingDocuments.length === 0, label: 'Bij elke inkoop zit een bon of factuur', detail: missingDocuments.length ? `${missingDocuments.length} zonder document; in het pakket staan ze in documenten/index.csv` : undefined },
       { ok: vatOpen.length === 0, label: 'Btw-aangiftes van afgelopen periodes zijn ingediend', detail: vatOpen.length ? `nog niet ingediend: ${vatOpen.map((v) => v.label).join(', ')}` : undefined },
     ];
     return {
@@ -485,7 +487,7 @@ export class AccountantPackage {
       indexed.push(doc);
     };
     for (const p of src.purchases) {
-      const missingDoc = (reason: string) => missing.push({ kind: 'inkoop', date: p.date, description: p.description, relation: p.relation, total: p.total, entryId: p.entryId, reason });
+      const missingDoc = (reason: string) => missing.push({ kind: 'inkoop', date: p.date, description: p.description, relation: p.relation, total: p.total, entryId: p.entryId, reason, purchaseId: p.id });
       if (!p.path) {
         missingDoc('geen bon of factuur bewaard');
         continue;

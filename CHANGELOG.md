@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Verbeterd
+- **Pakket voor je boekhouder**: meldt de controle dat er inkopen zonder bon zijn, dan klik je op *Bonnen erbij zoeken*. Je ziet die aankopen in een lijst en voegt de bon meteen toe (foto, PDF of e-factuur) of opent de aankoop.
+
 ## 0.7.2 — nieuwe voorwaarden, akkoord bij het afsluiten
 
 ### Nieuw
