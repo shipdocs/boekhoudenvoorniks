@@ -510,6 +510,31 @@ async function license(request: Request, url: URL, env: Env, deps: Deps): Promis
   return json({ token: await signLicense(payload, env.LICENSE_PRIVATE_KEY), validUntil: payload.validUntil });
 }
 
+/** Uitkomst van de controle voor de assistent-Worker (RPC via een Service Binding, zie index.ts). */
+export type AssistantAuthorization = { ok: true } | { ok: false; reason: 'sleutel' | 'geen-abonnement' | 'quotum' };
+
+/**
+ * Mag deze administratie de online hulp (workers/assistent) gebruiken? Alleen met een abonnement dat
+ * betaald is t/m vandaag (plus de marge, zoals de licentie), de juiste lokale beheersleutel, en zolang
+ * het dagquotum niet op is. Het quotum wordt in één statement opgehoogd, dus ook bij gelijktijdige
+ * aanroepen nooit meer dan `dailyLimit`. Een geweigerde aanroep telt niet mee.
+ */
+export async function authorizeAssistant(env: Pick<Env, 'LICENTIES'>, input: { administratie: string; managementKey: string; today: string; dailyLimit: number }): Promise<AssistantAuthorization> {
+  if (!UUID.test(input.administratie) || !MANAGEMENT_KEY.test(input.managementKey)) return { ok: false, reason: 'sleutel' };
+  const row = await getLicense(env as Env, input.administratie);
+  if (!row || !row.management_key_hash || (await managementKeyHash(input.managementKey)) !== row.management_key_hash) return { ok: false, reason: 'sleutel' };
+  if (row.months === 0 || addDays(paidUntil(row), GRACE_DAYS) < input.today) return { ok: false, reason: 'geen-abonnement' };
+  const limit = Math.max(0, Math.floor(input.dailyLimit));
+  const used = await env.LICENTIES
+    .prepare(
+      `INSERT INTO assistant_usage (administratie, day, calls) SELECT ?1, ?2, 1 WHERE ?3 > 0
+       ON CONFLICT(administratie, day) DO UPDATE SET calls = calls + 1 WHERE calls < ?3`,
+    )
+    .bind(input.administratie, input.today, limit)
+    .run();
+  return used.meta.changes === 1 ? { ok: true } : { ok: false, reason: 'quotum' };
+}
+
 const STYLE = '<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 16px;line-height:1.5;color:#1b1f24;background:#f6f7f9}</style>';
 
 const THANKS = `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bedankt</title>${STYLE}</head>

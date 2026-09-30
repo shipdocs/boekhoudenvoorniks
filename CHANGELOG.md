@@ -3,6 +3,8 @@
 ## Nog niet uitgebracht
 
 ### Nieuw
+- **Online hulp bij categorievoorstellen** (standaard uit, hoort bij het abonnement; Instellingen > Automatisch & herkenning): weet de app bij een onbekende winkel niet waar een bon voor was, dan kan JEV via Cloudflare een categorie kiezen uit jouw categorieën. Er gaan alleen de naam van de winkel en maximaal 15 artikelomschrijvingen (zonder bedragen) naar buiten; nooit de foto, bedragen, IBAN of je administratie. Op Vandaag zie je wie het voorstel deed; "Ja" of "Aanpassen" blijft jouw keuze, en wat je kiest onthoudt de app op je eigen computer, zodat de volgende bon van die winkel meteen goed staat. Er wordt nooit automatisch geboekt op alleen dit voorstel.
+- "Ja" op Vandaag boekt alleen het voorstel dat je zag: is het intussen veranderd, dan vraagt de app je de bon opnieuw te bekijken.
 - **Nieuw logo**: in de zijbalk (wit in de donkere modus), op het welkomstscherm en als app-icoon.
 - **Abonnement op de uitwisseling** (staat nog uit tot de licentieserver live is): afsluiten via Mollie met een factuur op naam van je bedrijf bij elke betaling, en opzeggen in de app. Opgezegd? Dan kun je versturen tot het eind van de betaalde maand.
 - **Nieuwe voorwaarden**: artikel 8 over het abonnement (prijs inclusief btw, per maand opzegbaar, geen terugbetaling van een lopende maand). Je geeft opnieuw akkoord.

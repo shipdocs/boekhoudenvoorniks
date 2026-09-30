@@ -7,7 +7,8 @@ import type { MatchingEngine } from '../import/matching';
 import type { InvoiceService } from '../documents/invoices';
 import type { QuoteService } from '../documents/quotes';
 import type { JobService } from '../jobs/jobs';
-import type { IntakeService } from '../intake/intake';
+import type { IntakeDocument, IntakeService } from '../intake/intake';
+import { PROPOSED_BY_LABEL, type Classification } from '../intake/classify';
 import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
 import type { PurchaseService } from '../documents/purchases';
 import type { RecurringService } from '../import/recurring';
@@ -101,7 +102,9 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string };
+  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
+    /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
+    proposal?: string };
 }
 
 export interface HomeData {
@@ -142,6 +145,33 @@ export { vatDeadline };
  * "Wat is er gebeurd?" en "Ben ik bij?" — de administratie als inbox die leeg kan.
  * De software doet het werk en vraagt alleen om uitzonderingen.
  */
+/** Waar een LLM-voorstel vandaan komt, in de vraag op Vandaag (regels en geheugen noemt "Waarom?" al). */
+function proposalNote(c: Classification): string {
+  return c.proposedBy === 'jev' || c.proposedBy === 'ollama' ? ` (voorstel van ${PROPOSED_BY_LABEL[c.proposedBy]})` : '';
+}
+
+/**
+ * Vingerafdruk van alles wat "Ja" bij een bon zal boeken. Zo kan een opnieuw gelezen document niet
+ * stil met een andere leverancier, datum, bedrag of factuurnummer worden bevestigd vanuit een oude taak.
+ */
+export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classification' | 'bank_match'>): string | undefined {
+  const c = d.classification;
+  const r = d.result;
+  return c && r
+    ? JSON.stringify([
+        2,
+        r.supplier?.value ?? null,
+        r.invoiceDate?.value ?? null,
+        r.total?.value ?? null,
+        r.invoiceNumber?.value ?? null,
+        c.categoryKey,
+        c.vatCode,
+        c.business,
+        d.bank_match?.id ?? null,
+      ])
+    : undefined;
+}
+
 export class InboxService {
   constructor(
     private readonly db: Db,
@@ -568,14 +598,14 @@ export class InboxService {
         kind: 'document-review',
         icon: '📷',
         title: `${name}${d.result?.total ? ' ' + formatEuro(d.result.total.value) : ''}`,
-        question: bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}. Alles klopt?` : 'Even controleren?',
+        question: bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}. Alles klopt?` : 'Even controleren?',
         amount: d.result?.total?.value,
         actions: bad?.field === 'duplicate'
           ? [{ id: 'dubbel', label: 'Ja, zelfde', primary: true }, { id: 'open', label: 'Nee, bekijken' }]
           : bad ? [{ id: 'open', label: 'Bekijken', primary: true }] : [{ id: 'klopt', label: 'Ja', primary: true }, { id: 'open', label: 'Aanpassen' }],
         group: bad ? undefined : { key: 'document-klopt', label: 'Alle bonnetjes bevestigen' },
         why: d.classification ? `Omdat ${d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(', ')}.` : undefined,
-        ref: { documentId: d.id, categoryKey: d.classification?.business === false ? undefined : d.classification?.categoryKey },
+        ref: { documentId: d.id, categoryKey: d.classification?.business === false ? undefined : d.classification?.categoryKey, proposal: documentProposal(d) },
       });
     }
 

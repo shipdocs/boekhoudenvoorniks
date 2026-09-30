@@ -866,4 +866,15 @@ export const migrations: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  /* 24: wie deed het voorstel, en nam de gebruiker het over? (evaluatie van regels/AI, #132) */ `
+  -- Alleen tellers per voorsteller en model: geen inhoud van documenten en niets van wat er naar een
+  -- online dienst ging. Bijgewerkt als de gebruiker een bon bevestigt (niet bij automatisch verwerken).
+  CREATE TABLE proposal_stats (
+    proposed_by TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT '',
+    accepted INTEGER NOT NULL DEFAULT 0,
+    corrected INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (proposed_by, model)
+  );
+  `,
 ];

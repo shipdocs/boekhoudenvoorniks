@@ -75,6 +75,11 @@ export interface OcrSettings {
   /** optionele lokale LLM (Ollama-compatibel) voor classificatievoorstellen — leeg = uit */
   llmUrl: string;
   llmModel: string;
+  /**
+   * Online hulp bij categorievoorstellen (JEV via Cloudflare, #132). Standaard uit; alleen met een actief
+   * abonnement. Aan = vervangt de lokale AI, zodat er nooit ongemerkt twee tegelijk meedoen.
+   */
+  onlineCategoryHelp: boolean;
 }
 
 /**
@@ -218,7 +223,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     bic: '',
   },
   profile: { trade: '', worksAlone: true, hasBusinessAccount: true, firstName: '' },
-  ocr: { url: '', engine: 'glm-ocr', askedReader: false, claudeCodePath: '', codexPath: '', assistantsSearched: false, llmUrl: '', llmModel: '' },
+  ocr: { url: '', engine: 'glm-ocr', askedReader: false, claudeCodePath: '', codexPath: '', assistantsSearched: false, llmUrl: '', llmModel: '', onlineCategoryHelp: false },
   smtp: { host: '', port: 587, secure: false, user: '', fromName: '', fromEmail: '', bcc: '', replyTo: '' },
   mailIn: { enabled: false, host: '', port: 993, secure: true, user: '', folder: 'INBOX', extraFolders: [], processedFolder: 'Verwerkt', since: '' },
   autoUpdate: true,

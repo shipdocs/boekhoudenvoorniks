@@ -293,6 +293,7 @@ export function SettingsScreen() {
           <ReaderChoice context="instellingen" onToolsChanged={() => setAiVersion((v) => v + 1)} />
           {settings.ocr.engine === 'ingebouwd' && <LocalOcr engine={draft.ocr.engine} />}
           <AssistantCard key={aiVersion} />
+          <OnlineCategoryHelp checked={draft.ocr.onlineCategoryHelp} onChange={(on) => set({ ocr: { ...draft.ocr, onlineCategoryHelp: on } })} />
           {settings.advancedMode && (
           <details style={{ marginTop: 12 }}>
             <summary className="small">Voor technische gebruikers: eigen herkenningsdienst of lokale AI</summary>
@@ -302,7 +303,7 @@ export function SettingsScreen() {
             <Field label="Lokale AI voor herkennen van aankopen" hint="Ollama-adres, optioneel"><input value={draft.ocr.llmUrl} onChange={(e) => set({ ocr: { ...draft.ocr, llmUrl: e.target.value } })} placeholder="http://127.0.0.1:11434" /></Field>
             <Field label="AI-model"><input value={draft.ocr.llmModel} onChange={(e) => set({ ocr: { ...draft.ocr, llmModel: e.target.value } })} placeholder="bv. qwen2.5:3b" /></Field>
           </div>
-          <p className="small muted">De AI doet alleen voorstellen ("dit lijkt gereedschap"). De boeking zelf wordt altijd door vaste regels gemaakt.</p>
+          <p className="small muted">De AI doet alleen voorstellen ("dit lijkt gereedschap"). De boeking zelf wordt altijd door vaste regels gemaakt.{draft.ocr.onlineCategoryHelp ? ' Staat online hulp aan, dan wordt de lokale AI niet gebruikt.' : ''}</p>
           </details>
           )}
         </>,
@@ -845,6 +846,32 @@ function CategoriesCard() {
       <p className="small muted">Veilig: er wordt nooit iets verwijderd en eerdere boekingen veranderen niet mee.</p>
       <div className="row end"><Button kind="primary" onClick={() => setOpen(true)}>Categorieën bekijken en aanpassen</Button></div>
       {open && <CategoriesDialog onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+/**
+ * Online hulp bij categorievoorstellen (JEV via Cloudflare, #132): standaard uit, alleen met een actief
+ * abonnement. De tekst zegt precies wat er naar buiten gaat.
+ */
+function OnlineCategoryHelp({ checked, onChange }: { checked: boolean; onChange: (on: boolean) => void }) {
+  const license = useLoad(() => api.license.status());
+  const active = license.data?.state === 'actief';
+  // uitzetten kan altijd; aanzetten alleen met een abonnement
+  const disabled = !checked && !active;
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <label className="row" style={{ alignItems: 'flex-start' }}>
+        <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} aria-describedby="online-hulp-uitleg" />
+        <span>
+          <strong>Online hulp bij categorievoorstellen (JEV via Cloudflare)</strong>
+          <br />
+          <span id="online-hulp-uitleg" className="small muted">
+            Standaard uit. Als eerdere keuzes en vaste regels niet genoeg zekerheid geven, sturen we alleen de naam van de winkel of leverancier en maximaal 15 artikelomschrijvingen (zonder bedragen) naar onze server bij Cloudflare, die het externe model JEV laat kiezen uit jouw categorieën. Nooit de foto, PDF, bedragen, IBAN of je administratie. Er wordt niets geboekt zonder jouw controle, en wat je bevestigt of aanpast onthoudt de app op deze computer, zodat hij het de volgende keer zelf weet. Staat dit aan, dan wordt een lokale AI niet gebruikt.
+            {!active && <><br /><strong>Hoort bij het abonnement</strong> (Hoe gaat het? &gt; Uitwisseling met je boekhouder).</>}
+          </span>
+        </span>
+      </label>
     </div>
   );
 }

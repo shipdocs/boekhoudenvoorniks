@@ -1,0 +1,15 @@
+{
+  // Gebruikt de packages van workers/licentie (zelfde wrangler en workers-types), zoals workers/site.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "lib": ["es2022"],
+    "typeRoots": ["../licentie/node_modules/@cloudflare"],
+    "types": ["workers-types"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["worker-configuration.d.ts", "src"]
+}
