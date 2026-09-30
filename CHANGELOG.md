@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Techniek
+- De licentie- en assistent-Worker staan nu in een aparte, privé-repo (`shipdocs/boekhoudenvoorniks-server`). De app blijft open source; de website staat hier nog, met een eigen `wrangler` in `workers/site`.
+
 ## 0.7.1 — meer bekende winkels, back-up terugzetten bij het begin
 
 ### Nieuw

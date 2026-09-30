@@ -56,8 +56,10 @@ src/
   renderer/      React-UI
 ```
 
-Online onderdelen (Cloudflare Workers, elk met eigen README): `workers/licentie` (abonnement en
-licentie), `workers/assistent` (online hulp bij categorievoorstellen, #132) en `workers/site` (de website).
+Online onderdelen (Cloudflare Workers): `workers/site` (de website) staat hier; de licentie-Worker
+(abonnement en licentie) en de assistent-Worker (online hulp bij categorievoorstellen, #132) staan sinds
+30 september 2026 in de privé-repo `shipdocs/boekhoudenvoorniks-server`. Het contract met de app: de licentie (`src/license/license.ts`)
+en de routes in `src/main/main.ts` (`licenseApi`) en `src/intake/llm-jev.ts`.
 
 De renderer heeft geen Node-toegang (`contextIsolation`, `sandbox`). Alle aanroepen gaan via één
 IPC-kanaal naar een whitelist in `src/main/api.ts`. Geheimen (SMTP-wachtwoord, API-sleutels)

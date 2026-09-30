@@ -14,7 +14,7 @@ deterministisch of een keuze van de gebruiker.
 | Ollama én JEV? | Nooit ongemerkt samen. Staat online hulp aan (en is het abonnement actief), dan vervangt JEV de lokale AI. Anders geldt de lokale AI zoals ingesteld. |
 | Hoe authenticeert de app? | Administratie-ID + de bestaande lokale beheersleutel (Bearer). De Worker kent alleen de SHA-256-hash (licentie-D1). Geen Cloudflare-token of gedeeld geheim in Electron. |
 | Quota | Per administratie per dag in de licentie-D1 (`assistant_usage`), atomisch opgehoogd; plus een rate limit per administratie in de assistent-Worker. |
-| Kill switch | `ENABLED` in `workers/assistent/wrangler.jsonc`; standaard `"false"`. Uit = 503, de app valt terug. |
+| Kill switch | `ENABLED` in `assistent/wrangler.jsonc` (privé-repo); standaard `"false"`. Uit = 503, de app valt terug. |
 | Leren | Alleen de uiteindelijke keuze van de gebruiker, via het bestaande `SupplierMemory.learn(...)`. Geen apart JEV-geheugen. |
 | Audit | `classification.proposedBy` (`geheugen`, `regel`, `ollama`, `jev`, `standaard`) plus `model`; bij bevestigen `classification.accepted` en een teller in `proposal_stats` (geaccepteerd/gecorrigeerd per voorsteller en model). De verstuurde payload wordt nergens bewaard. |
 
@@ -67,11 +67,11 @@ alles behalve een geldig 200-antwoord als "geen voorstel" en gaat door met de st
 2. **Licentie-Worker**: `authorizeAssistant()` in `app.ts` (abonnement actief t/m betaalde periode +
    marge, beheersleutel, dagquotum atomisch) en RPC-entrypoint `Controle` in `index.ts`. Migratie
    `0005_assistent_gebruik.sql`.
-3. **Assistent-Worker** `workers/assistent`: `POST /v1/classificeren`, Workers AI-binding `AI`, AI
+3. **Assistent-Worker** `assistent/` in de privé-repo `shipdocs/boekhoudenvoorniks-server`: `POST /v1/classificeren`, Workers AI-binding `AI`, AI
    Gateway met `skipCache: true` en `collectLog: false` en zonder metadata, Service Binding `LICENTIE`,
    rate limits `PER_IP` (vóór de licentie-controle) en `PER_ADMINISTRATIE`, kill switch, bodylimiet 16 KB, strikte schema's, time-out, logs alleen
    met status, schema-/app-/modelversie en latency-bucket.
-4. **Tests**: `tests/jev.test.ts` (app), `tests/assistent-worker.test.ts` (Worker), uitbreiding van
+4. **Tests**: `tests/jev.test.ts` (app); in de privé-repo `tests/assistent.test.ts` (Worker) en
    `tests/licentie.test.ts` (autorisatie en quotum).
 5. **Benchmark (fase 0)**: `tests/fixtures/jev-benchmark.json` (synthetisch) en
    `src/tools/jev-benchmark.ts` (`npm run benchmark:jev`): regels, optioneel Ollama en optioneel JEV.
@@ -81,7 +81,7 @@ alles behalve een geldig 200-antwoord als "geen voorstel" en gaat door met de st
 
 1. Benchmark draaien met JEV op staging (zie onder) en de uitkomst hieronder vastleggen. Geeft JEV geen
    duidelijke winst boven "regels + standaard", dan niet activeren.
-2. Licentie-D1: `cd workers/licentie && npm run migrate` en controleren met
+2. Licentie-D1: `cd licentie && npm run migrate` (privé-repo) en controleren met
    `npx wrangler d1 migrations list boekhoudenvoorniks-licenties --remote` dat 0005 is toegepast.
    Pas daarna de licentie-Worker deployen (hij exporteert dan het entrypoint `Controle`).
 3. AI Gateway `boekhoudenvoorniks-assistent` aanmaken (dashboard: AI > AI Gateway), en expliciet
