@@ -1,4 +1,5 @@
 import { ValidationError } from '../shared/validation';
+import { TERMS_VERSION } from '../shared/legal';
 import type { RuntimeStatus } from '../ocr-runtime/runtime';
 import type { CliKind } from '../intake/ocr-cli';
 import { DOWNLOAD_SIZE, GLM_OCR, LLAMA_CPP, REQUIREMENTS } from '../ocr-runtime/manifest';
@@ -86,7 +87,7 @@ export interface HostContext {
     /** de ondertekende licentie voor deze administratie, of null als er (nog) geen betaald abonnement is */
     fetch(administrationId: string, managementKey: string): Promise<string | null>;
     /** eerste betaling bij Mollie klaarzetten; geeft de betaallink, of `al` als er al een abonnement loopt */
-    start(input: { administratie: string; email: string; bedrijf: LicenseBilling; managementKey: string }): Promise<{ checkout?: string; al?: boolean }>;
+    start(input: { administratie: string; email: string; bedrijf: LicenseBilling; managementKey: string; voorwaarden: string; zakelijk: true }): Promise<{ checkout?: string; al?: boolean }>;
     /** het abonnement stoppen; de betaalde periode loopt af */
     cancel(administrationId: string, managementKey: string): Promise<{ betaaldTot: string; geldigTot: string }>;
   };
@@ -493,8 +494,10 @@ export function createApi(s: Services, host: HostContext) {
        * Afrekenen bij Mollie, in de browser. De bedrijfsgegevens gaan mee voor de factuur (in het verzoek,
        * niet in de URL). `al`: er loopt al een abonnement; dan de licentie ophalen.
        */
-      checkout: async (email: string): Promise<{ al: boolean }> => {
+      checkout: async (email: string, accepted?: { terms: string; business: boolean }): Promise<{ al: boolean }> => {
         if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
+        // artikel 8.2 en 8.3 van de voorwaarden: alleen voor je bedrijf, en akkoord met de huidige versie
+        if (accepted?.terms !== TERMS_VERSION || accepted.business !== true) throw new ValidationError('Bevestig dat je het abonnement voor je bedrijf afsluit en ga akkoord met de voorwaarden');
         const mail = String(email ?? '').trim();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) throw new Error('Vul een geldig e-mailadres in');
         const company = s.settings.get().company;
@@ -507,6 +510,8 @@ export function createApi(s: Services, host: HostContext) {
           email: mail,
           bedrijf: { naam: c.name, adres: c.address, postcode: c.postcode, plaats: c.city, land: countryCode(company.country) ?? 'NL', kvk: c.kvk || undefined, btw: c.vat || undefined },
           managementKey: s.license.managementKey(),
+          voorwaarden: TERMS_VERSION,
+          zakelijk: true,
         });
         if (r.al) return { al: true };
         if (!r.checkout) throw new Error('De betaalpagina kon niet worden geopend; probeer het later opnieuw');
