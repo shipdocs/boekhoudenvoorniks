@@ -47,7 +47,7 @@
       ],
       "category": "Office",
       "executableName": "boekhoudenvoorniks",
-      "icon": "build/icon.png",
+      "icon": "build/icons",
       "syncDesktopName": true,
       "synopsis": "Gratis boekhouding voor zzp en vakmensen",
       "maintainer": "Martin <info@shipdocs.app>"
