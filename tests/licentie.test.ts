@@ -45,7 +45,7 @@ describe('licentie in de app', () => {
     const license = new LicenseService(s.db, s.settings, k.publicKey);
     const id = s.settings.administrationId();
     expect(license.status(TODAY)).toEqual({ state: 'geen' });
-    expect(() => license.requireActive(TODAY)).toThrow(/hoort bij het abonnement/);
+    expect(() => license.requireActive(TODAY)).toThrow(/extra functie van het abonnement/);
 
     expect(license.install(await token(k.privateJwk, id, '2026-11-22'), TODAY)).toEqual({ state: 'actief', validUntil: '2026-11-22', email: 'piet@example.nl', cancelled: false });
     expect(() => license.requireActive(TODAY)).not.toThrow();
@@ -99,7 +99,7 @@ describe('licentie in de app', () => {
     const { ExchangeService } = await import('../src/exchange/exchange');
     s.exchange.link(ExchangeService.invite({ office: 'Kantoor', email: 'k@example.nl', ...generateOfficeKeys() }));
 
-    await expect(api.exchange.send('2026-06-30', [], 'bestand')).rejects.toThrow(/hoort bij het abonnement/);
+    await expect(api.exchange.send('2026-06-30', [], 'bestand')).rejects.toThrow(/extra functie van het abonnement/);
     expect(s.periods.status().exchange).toBeNull();
 
     // afsluiten: eerst de bedrijfsgegevens compleet (voor de factuur)

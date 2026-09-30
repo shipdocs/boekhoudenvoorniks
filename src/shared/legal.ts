@@ -3,7 +3,7 @@
  * (site/voorwaarden.html en site/privacy.html). Verhoog TERMS_VERSION bij een inhoudelijke wijziging:
  * gebruikers moeten dan opnieuw akkoord geven.
  */
-export const TERMS_VERSION = '2026-10-02';
+export const TERMS_VERSION = '2026-09-30';
 export const TERMS_URL = 'https://boekhoudenvoorniks.nl/voorwaarden.html';
 /** De voorwaarden als PDF, om te bewaren (artikel 8.3). */
 export const TERMS_PDF_URL = 'https://boekhoudenvoorniks.nl/voorwaarden.pdf';
@@ -12,7 +12,7 @@ export const SOURCE_URL = 'https://github.com/shipdocs/boekhoudenvoorniks';
 export const LICENSE_NAME = 'GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later)';
 
 export const TERMS_SUMMARY: string[] = [
-  'BoekhoudenVoorNiks is gratis software, geleverd zoals hij is, zonder garantie. Alleen de uitwisseling met je boekhouder is een los abonnement voor ondernemers: de eerste 4 maanden gratis, daarna per maand opzegbaar; het staat in artikel 8 van de voorwaarden. Aansprakelijkheid: artikel 9.',
+  'BoekhoudenVoorNiks is gratis software, geleverd zoals hij is, zonder garantie. Met een abonnement (alleen voor ondernemers) steun je de ontwikkeling en krijg je de extra functies, nu de uitwisseling met je boekhouder: de eerste 4 maanden gratis, daarna per maand opzegbaar (artikel 8). Wij zijn niet aansprakelijk voor schade (artikel 9); bij een storing lossen we het op, en anders een maand gratis.',
   'Jij blijft zelf verantwoordelijk voor je administratie en je belastingaangiften. Controleer de bedragen voordat je ze overneemt; de software geeft geen fiscaal advies.',
   'Je administratie staat alleen op je eigen computer. Maak regelmatig een back-up; je bent zelf verantwoordelijk voor de bewaarplicht van 7 jaar.',
   'Wij ontvangen geen gegevens uit je administratie. Alleen wat jij zelf verstuurt (e-mail, koppelingen die je aanzet, een export naar je boekhouder) gaat naar buiten. Voor een abonnement bewaren wij alleen je e-mailadres, je bedrijfsgegevens voor de factuur en de betaalgegevens van Mollie.',
