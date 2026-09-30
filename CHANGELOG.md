@@ -3,6 +3,7 @@
 ## Nog niet uitgebracht
 
 ### Nieuw
+- **Vragen en feedback per mail**: in de app bij Instellingen → Over de knop *Vraag of feedback mailen*, en op de site verwijst "Vragen en feedback" naar info@shipdocs.app in plaats van naar GitHub.
 - **Bon op "weet ik nog niet: vraag mijn boekhouder"**: past een bon in geen enkele categorie (of weet je het gewoon niet), zet hem dan apart op *vraagposten*, zonder btw-aftrek. Hij komt terug als controle vóór je btw-aangifte en in het pakket voor je boekhouder. Weet je het later wel, dan deel je hem in bij Aankopen met de knop *Indelen*; dan krijg je ook de btw terug.
 
 ### Opgelost

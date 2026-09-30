@@ -9,7 +9,7 @@ import { AssistantCard } from './Assistant';
 import { AdministrationsSettings } from './Administrations';
 import { OfficeSettings } from './Exchange';
 import { businessEffect } from '../../shared/business-share';
-import { LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
+import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 import { ONLINE_HELP } from '../../shared/online-help';
 
 type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
@@ -686,6 +686,10 @@ function About() {
       <p>
         <a href="#" onClick={open(SOURCE_URL)}>Broncode</a> · <a href="#" onClick={open(TERMS_URL)}>Gebruiksvoorwaarden</a> · <a href="#" onClick={open(PRIVACY_URL)}>Privacyverklaring</a>
       </p>
+      <div className="row" style={{ alignItems: 'center' }}>
+        <Button onClick={() => void api.app.openExternal(feedbackMailto(version.data ?? ''))}>✉️ Vraag of feedback mailen</Button>
+        <span className="small muted">naar {FEEDBACK_EMAIL}; we lezen alles en antwoorden zo snel mogelijk</span>
+      </div>
       <p className="small muted">De software wordt geleverd zonder garantie. Jij blijft verantwoordelijk voor je administratie en aangiften.</p>
     </div>
   );

@@ -9,6 +9,10 @@ export const TERMS_URL = 'https://boekhoudenvoorniks.nl/voorwaarden.html';
 export const TERMS_PDF_URL = 'https://boekhoudenvoorniks.nl/voorwaarden.pdf';
 export const PRIVACY_URL = 'https://boekhoudenvoorniks.nl/privacy.html';
 export const SOURCE_URL = 'https://github.com/shipdocs/boekhoudenvoorniks';
+/** Vragen en feedback: gewoon per mail (GitHub-issues zijn voor ontwikkelaars). */
+export const FEEDBACK_EMAIL = 'info@shipdocs.app';
+export const feedbackMailto = (version: string) =>
+  `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(`Vraag over BoekhoudenVoorNiks ${version}`.trim())}&body=${encodeURIComponent(`\n\n\n(BoekhoudenVoorNiks ${version})`)}`;
 export const LICENSE_NAME = 'GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later)';
 
 export const TERMS_SUMMARY: string[] = [
