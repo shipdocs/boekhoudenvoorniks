@@ -1,6 +1,11 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.7.2 — nieuwe voorwaarden, akkoord bij het afsluiten
+
+### Nieuw
+- **Nieuwe voorwaarden (versie 2026-10-02)**: duidelijkere aansprakelijkheid (artikel 9), het abonnement uitsluitend voor ondernemers, afspraken over terugboekingen, storingen, misbruik, overmacht en wat er gebeurt als wij de dienst stoppen, en een preciezere forumkeuze. Je geeft opnieuw akkoord. De voorwaarden zijn ook als PDF te downloaden.
+- **Privacyverklaring bijgewerkt**: al je rechten onder de AVG, per soort gegeven een concrete bewaartermijn (die de licentieserver nu ook echt elke dag toepast), de grondslag per doel, en doorgifte buiten de EU.
+- **Abonnement afsluiten**: je bevestigt eerst dat je het voor je bedrijf afsluit en akkoord gaat met de voorwaarden (met een link naar de PDF). Welke versie je accepteerde en wanneer, wordt bij je abonnement vastgelegd.
 
 ### Techniek
 - De licentie- en assistent-Worker staan nu in een aparte, privé-repo (`shipdocs/boekhoudenvoorniks-server`). De app blijft open source; de website staat hier nog, met een eigen `wrangler` in `workers/site`.

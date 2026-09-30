@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../api';
 import { Button, DropZone, ErrorBox, Field, Modal, readAsBytes, useAction, useApp, useLoad } from '../ui';
 import { formatDateNl } from '../../shared/dates';
+import { TERMS_PDF_URL, TERMS_URL, TERMS_VERSION } from '../../shared/legal';
 import { PeriodPicker, usePeriodChoice } from './PeriodClose';
 
 /**
@@ -171,7 +172,18 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
   const { run, busy } = useAction();
   const [email, setEmail] = useState(settings.company.email);
   const [cancelling, setCancelling] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   if (status.state === 'uit') return null;
+
+  // artikel 8.2 en 8.3 van de voorwaarden: vóór het afsluiten, ook bij opnieuw afsluiten
+  const consent = (
+    <label className="row" style={{ alignItems: 'flex-start', gap: 8 }}>
+      <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} aria-describedby="abonnement-voorwaarden" />
+      <span id="abonnement-voorwaarden" className="small">
+        Ik sluit dit abonnement af voor mijn bedrijf en ga akkoord met de <a href={TERMS_URL} onClick={(e) => { e.preventDefault(); void api.app.openExternal(TERMS_URL); }}>gebruiksvoorwaarden</a> (versie {TERMS_VERSION}, in het bijzonder artikel 8 over het abonnement en artikel 9 over aansprakelijkheid). <a href={TERMS_PDF_URL} onClick={(e) => { e.preventDefault(); void api.app.openExternal(TERMS_PDF_URL); }}>Download de voorwaarden als PDF</a> om ze te bewaren.
+      </span>
+    </label>
+  );
 
   const fetchLicense = async () => {
     const r = await run(() => api.license.refresh());
@@ -181,7 +193,7 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
     }
   };
   const checkout = async () => {
-    const r = await run(() => api.license.checkout(email));
+    const r = await run(() => api.license.checkout(email, { terms: TERMS_VERSION, business: agreed }));
     if (!r) return;
     if (r.al) {
       toast('Je hebt al een abonnement; we halen je licentie op');
@@ -193,9 +205,12 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
     return (
       <div className="small" style={{ margin: 0 }}>
         {status.cancelled ? (
-          <div className="row" style={{ alignItems: 'center', gap: 10 }}>
-            <span className="muted">Abonnement opgezegd: je kunt versturen t/m {formatDateNl(status.validUntil)}; er wordt niets meer afgeschreven.</span>
-            <Button small disabled={busy} onClick={() => void checkout()}>Opnieuw afsluiten</Button>
+          <div className="grid" style={{ gap: 6 }}>
+            <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+              <span className="muted">Abonnement opgezegd: je kunt versturen t/m {formatDateNl(status.validUntil)}; er wordt niets meer afgeschreven.</span>
+              <Button small disabled={busy || !agreed} onClick={() => void checkout()}>Opnieuw afsluiten</Button>
+            </div>
+            {consent}
           </div>
         ) : (
           <div className="row" style={{ alignItems: 'center', gap: 10 }}>
@@ -237,9 +252,10 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
           ? 'Bij het afsluiten betaal je via Mollie alleen € 0,01 met iDEAL, voor de machtiging. De eerste incasso is na de gratis maanden; zeg je daarvoor op, dan betaal je niets. Van elke betaalde maand krijg je een factuur op naam van je bedrijf.'
           : 'Je betaalt via Mollie (iDEAL, daarna automatische incasso) en krijgt elke maand een factuur op naam van je bedrijf.'}
       </div>
+      {consent}
       <div className="row" style={{ alignItems: 'flex-end', gap: 10 }}>
         <Field label="E-mailadres voor het abonnement en de facturen"><input value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-        <Button kind="primary" disabled={busy || !email.trim()} onClick={() => void checkout()}>{status.state === 'verlopen' ? 'Verlengen' : trial > 0 ? `${trial} maanden gratis beginnen` : 'Abonnement nemen'}</Button>
+        <Button kind="primary" disabled={busy || !email.trim() || !agreed} onClick={() => void checkout()}>{status.state === 'verlopen' ? 'Verlengen' : trial > 0 ? `${trial} maanden gratis beginnen` : 'Abonnement nemen'}</Button>
         <Button disabled={busy} onClick={() => void fetchLicense()}>Ik heb betaald: licentie ophalen</Button>
       </div>
     </div>
