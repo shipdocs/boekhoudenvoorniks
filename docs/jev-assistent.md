@@ -133,9 +133,29 @@ Per soort: bekend 88%, onbekend 0%, gemengd 0%, misleidend 0%, weinig informatie
 dus volledig in de onbekende leveranciers; daar moet de meting winst laten zien, met een hoge precisie
 in de hoge-zekerheidsgroep.
 
-JEV-meting: nog te doen vóór activering (stap 1); vul dan deze tabel aan met `jev los` en
-`regels + jev`, het teruggegeven model en de kosten (tokens × de actuele prijs in het
-Cloudflare-dashboard; de openbare modelpagina noemt geen vast tarief).
+**JEV-meting, 30 september 2026** (`JEV_PROXY_URL`, model `jev-1.13.0`, zelfde 40 gevallen, na de
+winkelindex):
+
+| methode | top-1 | top-2 | dekking | precisie | hoog zeker (n) | ongeldig | p50 | p95 | tokens |
+|---|---|---|---|---|---|---|---|---|---|
+| regels | 28% | 28% | 28% | 100% | 100% (11) | 0 | 0 ms | 1 ms | 0 |
+| jev los | 90% | 93% | 100% | 90% | 94% (34) | 0 | 384 ms | 504 ms | 34023 |
+| regels + jev | 88% | 88% | 95% | 92% | 94% (34) | 0 | 358 ms | 483 ms | 24681 |
+
+Per soort (top-1), regels → regels + jev: bekend 100% → 100%, onbekend 16% → 100%, gemengd 0% → 75%,
+misleidend 0% → 40%, weinig informatie 0% → 75%. Calibratie JEV: zekerheid 0,9–1,0 → 93% goed (29),
+0,7–0,9 → 100% (5), 0,5–0,7 → 75% (4), onder 0,5 → 50% (2); de ondergrens van 0,5 in de app klopt dus.
+De fouten zijn verdedigbaar (tweedehands steigerdelen als investering, een adviesbureau als "boekhouder /
+advies", boodschappen bij Albert Heijn als overig). Ongeveer 600 invoertokens per vraag, p95 onder 0,5 s.
+Kosten: het actuele tarief staat in het dashboard (AI Gateway-credits).
+
+**Conclusie:** JEV voegt duidelijk iets toe, juist waar de regels niets weten (onbekende leveranciers).
+De set is klein en zelfgemaakt; na activering meten de tellers in `proposal_stats` hoe vaak gebruikers
+een JEV-voorstel accepteren of aanpassen.
+
+Gevonden bij de eerste echte aanroep: `env.AI.run` geeft bij JEV `{ state: 'Completed', result: { model,
+answers, usage } }`. De assistent-Worker las `answers` direct en zou altijd "geen voorstel" hebben gegeven;
+opgelost in de privé-repo (PR #4).
 
 ## Waar JEV verder waarde kan toevoegen (onderzoek, niet gebouwd)
 
