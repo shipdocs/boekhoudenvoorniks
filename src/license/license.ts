@@ -137,6 +137,6 @@ export class LicenseService {
     const s = this.status(today);
     if (s.state === 'uit' || s.state === 'actief') return;
     if (s.state === 'verlopen') throw new ValidationError(`Je abonnement liep tot ${formatDateNl(s.validUntil)}. Verleng het om weer naar je boekhouder te versturen; een antwoord inlezen kan altijd.`);
-    throw new ValidationError('Versturen naar je boekhouder hoort bij het abonnement. Neem een abonnement, of haal je licentie op als je al betaald hebt; een antwoord inlezen kan altijd.');
+    throw new ValidationError('Versturen naar je boekhouder is een extra functie van het abonnement. Neem een abonnement, of haal je licentie op als je al betaald hebt; een antwoord inlezen kan altijd, en het pakket voor je boekhouder kun je altijd zelf sturen.');
   }
 }
