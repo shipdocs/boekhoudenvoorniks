@@ -18,7 +18,7 @@ export const LICENSE_API_URL = 'https://licentie.boekhoudenvoorniks.nl';
  * Publieke sleutel (Ed25519, base64url) van de licentie-Worker. Leeg = licenties staan nog uit en alles
  * is vrij te gebruiken. Zie workers/licentie/README.md voor het aanmaken van het sleutelpaar.
  */
-export const LICENSE_PUBLIC_KEY = '';
+export const LICENSE_PUBLIC_KEY = '5X4g-WVye2XVXEURIEBkQorBD_vqDmWyEqHMsA1T_b8';
 
 export interface LicensePayload {
   v: 1;
