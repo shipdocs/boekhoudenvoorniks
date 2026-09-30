@@ -46,7 +46,7 @@ function openAdmin(key) {
 }
 
 /**
- * Nagebootste licentie-Worker (workers/licentie) voor de test van het abonnement: zelfde tokenformaat
+ * Nagebootste licentie-Worker (privé-repo boekhoudenvoorniks-server) voor de test van het abonnement: zelfde tokenformaat
  * (`<payload>.<handtekening>`, base64url, Ed25519 over de payloadtekst), zodat de app hem echt controleert.
  */
 let licensing = null;

@@ -2,7 +2,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ONLINE_HELP } from '../src/shared/online-help';
 import { setup } from './helpers';
-import { signLicense } from '../workers/licentie/src/token';
+import { signLicense } from './license-token';
 import { JevClassifier, minimizeJevRequest, parseJevResponse, scrubLine } from '../src/intake/llm-jev';
 import { createApi, type HostContext } from '../src/main/api';
 import type { FetchLike } from '../src/integrations/types';

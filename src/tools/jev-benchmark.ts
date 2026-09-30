@@ -48,7 +48,7 @@ interface Outcome {
 
 type Category = { key: string; label: string; hint: string };
 
-/** Zelfde vraag als workers/assistent/src/app.ts (jevInput). */
+/** Zelfde vraag als assistent/src/app.ts (jevInput) in de privé-repo boekhoudenvoorniks-server. */
 function jevInput(supplier: string | null, lines: string[], categories: Category[]) {
   return {
     state: { leverancier: supplier ?? 'onbekend', artikelen: lines },

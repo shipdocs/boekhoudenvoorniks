@@ -325,7 +325,7 @@ Een klant zonder boekhouder kan een jaar zelf afsluiten: hetzelfde slot, zonder 
 
 ## Licentie
 
-**Gebouwd, nog niet actief** (`src/license/license.ts`, `workers/licentie/`).
+**Gebouwd, nog niet actief** (`src/license/license.ts`; de Worker in de privé-repo `shipdocs/boekhoudenvoorniks-server`).
 
 - Alleen **versturen naar de boekhouder** vraagt een licentie. Een antwoord inlezen werkt altijd, zodat
   een klant nooit met een vergrendelde periode blijft zitten. Koppelen en alles aan de kant van het
@@ -339,7 +339,7 @@ Een klant zonder boekhouder kan een jaar zelf afsluiten: hetzelfde slot, zonder 
 - De app haalt de licentie op na *Ik heb betaald*, vóór het versturen als hij ontbreekt of verlopen is,
   en op de achtergrond als hij binnen 7 dagen verloopt. Wie nooit een licentie had, maakt geen
   verbinding.
-- Opzetten en deployen: `workers/licentie/README.md`.
+- Opzetten en deployen: `licentie/README.md` in de privé-repo `shipdocs/boekhoudenvoorniks-server`.
 
 ## Buiten de scope van de eerste versie
 

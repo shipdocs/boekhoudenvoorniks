@@ -30,15 +30,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: workers/licentie/package-lock.json
+          cache-dependency-path: workers/site/package-lock.json
       - name: Wrangler installeren
         if: env.CLOUDFLARE_API_TOKEN != ''
-        working-directory: workers/licentie
+        working-directory: workers/site
         run: npm ci
       - name: Deployen
         if: env.CLOUDFLARE_API_TOKEN != ''
         working-directory: workers/site
-        run: ../licentie/node_modules/.bin/wrangler deploy
+        run: npx wrangler deploy
       - name: Geen secrets
         if: env.CLOUDFLARE_API_TOKEN == ''
         run: echo "CLOUDFLARE_API_TOKEN ontbreekt; de site is niet gedeployd (doe het met de hand)."

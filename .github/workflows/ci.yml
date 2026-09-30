@@ -21,33 +21,23 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  # Licentie-Worker (workers/licentie): eigen package. Installeren uit de lockfile, typecheck en
-  # bundelen met wrangler (dry-run: geen account nodig, er wordt niets gedeployd). De logica zelf wordt
-  # getest in tests/licentie.test.ts (job test).
-  licentie-worker:
+  # Website-Worker (workers/site): eigen package met wrangler. Bundelen met een dry-run (geen account
+  # nodig, er wordt niets gedeployd). De licentie- en assistent-Worker staan in de privé-repo
+  # shipdocs/boekhoudenvoorniks-server, met hun eigen CI.
+  site-worker:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: workers/licentie
+        working-directory: workers/site
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: workers/licentie/package-lock.json
+          cache-dependency-path: workers/site/package-lock.json
       - run: npm ci
       - run: npm run check
-      # de website-Worker (workers/site) met dezelfde wrangler
-      - run: ../licentie/node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run
-        working-directory: workers/site
-      # de assistent-Worker (workers/assistent, #132) met dezelfde packages; logica in tests/assistent-worker.test.ts
-      - run: ../licentie/node_modules/.bin/wrangler types worker-configuration.d.ts --env-interface AssistantEnv --include-runtime false --strict-vars false --check
-        working-directory: workers/assistent
-      - run: ../licentie/node_modules/.bin/tsc -p tsconfig.json
-        working-directory: workers/assistent
-      - run: ../licentie/node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run
-        working-directory: workers/assistent
 
   # End-to-end: de echte schermen in Chromium, met de echte services (zie e2e/ en playwright.config.ts).
   e2e:

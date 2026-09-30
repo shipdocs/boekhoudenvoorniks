@@ -1,0 +1,15 @@
+{
+  "name": "boekhoudenvoorniks-site",
+  "private": true,
+  "description": "De website (map site/) als Cloudflare Worker met static assets.",
+  "scripts": {
+    "check": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.144.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
