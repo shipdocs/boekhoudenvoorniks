@@ -76,6 +76,9 @@ async function jevRaw(target: JevTarget, supplier: string | null, lines: string[
   });
   const ms = Date.now() - started;
   const body = (await res.json().catch(() => null)) as { result?: { model?: string; answers?: { categorie?: { type?: unknown; choice?: unknown; confidence?: unknown; probabilities?: Record<string, unknown> } }; usage?: { input_tokens?: number } } } | null;
+  // env.AI.run geeft bij een extern model { state: 'Completed', result: { model, answers, usage } }
+  const inner = ((body?.result as { state?: string; result?: unknown } | undefined)?.result ?? body?.result) as NonNullable<NonNullable<typeof body>['result']> | undefined;
+  if (inner && body) body.result = inner;
   const a = body?.result?.answers?.categorie;
   // Gebruik dezelfde strikte validator als de desktop-adapter, plus het JEV-discriminatorveld. Zo
   // maakt een malformed response de benchmark niet kunstmatig beter dan de productie-integratie.
