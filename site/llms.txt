@@ -4,7 +4,7 @@
 
 Belangrijke feiten:
 
-- Prijs: het programma is gratis. Optioneel abonnement "Uitwisseling met je boekhouder" (vanaf versie 0.7): € 10 per maand inclusief 21% btw, per maand opzegbaar in de app, betalen via Mollie (iDEAL, daarna SEPA-incasso), maandelijkse factuur. Voor boekhoudkantoren gratis.
+- Prijs: het programma is gratis. Optioneel abonnement "Uitwisseling met je boekhouder" (vanaf versie 0.7): de eerste 4 maanden gratis (bij het afsluiten € 0,01 via iDEAL voor de machtiging), daarna € 9 per maand exclusief btw (€ 10,89 inclusief), per maand opzegbaar in de app, betalen via Mollie (iDEAL, daarna SEPA-incasso), maandelijkse factuur. Voor boekhoudkantoren gratis.
 - Licentie: open source, AGPL-3.0-or-later.
 - Platform: Windows en Linux (Electron). Werkt offline; gegevens in een lokale SQLite-database met dagelijkse automatische back-up.
 - Taal en markt: Nederlands, Nederlandse btw-regels.
