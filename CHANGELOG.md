@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## 0.7.3 — het abonnement: steun de ontwikkeling en krijg de extra functies
+
+### Nieuw
+- **Voorwaarden en privacyverklaring (versie 2026-09-30)**: het abonnement heet nu wat het is: je steunt de verdere ontwikkeling en krijgt de extra functies, nu de uitwisseling met je boekhouder; daar kunnen er meer bij komen, en wat je hebt houd je zolang je abonnement loopt. Alles wat gratis is blijft gratis; het pakket voor je boekhouder en je back-ups kun je altijd zelf versturen. Artikel 9 is rechtgezet: wij zijn niet aansprakelijk voor schade; bij een storing lossen we het op, en lukt dat niet binnen een maand, dan een maand gratis erbij. Het minimumbedrag dat er per abuis in stond, is weg. Je geeft opnieuw akkoord.
+
 ## 0.7.2 — nieuwe voorwaarden, akkoord bij het afsluiten
 
 ### Nieuw

@@ -44,13 +44,13 @@ test('abonnement: zonder abonnement geweigerd, proefperiode afsluiten, licentie 
 
   const card = page.getByTestId('uitwisseling');
   const abonnement = card.getByTestId('abonnement');
-  await expect(abonnement.getByText('Versturen naar je boekhouder hoort bij het abonnement.')).toBeVisible();
+  await expect(abonnement.getByText('Versturen naar je boekhouder is een extra functie van het abonnement.')).toBeVisible();
   await expect(abonnement.getByText('De eerste 4 maanden zijn gratis.')).toBeVisible();
   await expect(abonnement.getByText(/€ 9,00 per maand exclusief btw \(€ 10,89 inclusief\)/)).toBeVisible();
 
   // versturen zonder abonnement: geweigerd, en er ligt niets vast
   await sendAsFile(page);
-  await expect(page.locator('.toasts').getByText(/hoort bij het abonnement/)).toBeVisible();
+  await expect(page.locator('.toasts').getByText(/extra functie van het abonnement/)).toBeVisible();
   await expect(card.getByText(/ligt bij Kantoor De Vries/)).toHaveCount(0);
 
   // afsluiten: het e-mailadres uit de onboarding staat klaar; de betaalpagina "opent"
@@ -68,7 +68,7 @@ test('abonnement: zonder abonnement geweigerd, proefperiode afsluiten, licentie 
 
   // betaald (webhook): de bedrijfsgegevens voor de factuur gingen mee
   const accounts = (await (await request.post('/__pay')).json()).ok as { email: string; bedrijf: Record<string, string> }[];
-  expect(accounts).toEqual([expect.objectContaining({ email: 'piet@example.nl', voorwaarden: '2026-10-02', zakelijk: true, bedrijf: expect.objectContaining({ naam: 'Stukadoorsbedrijf Piet', kvk: '12345678', land: 'NL' }) })]);
+  expect(accounts).toEqual([expect.objectContaining({ email: 'piet@example.nl', voorwaarden: '2026-09-30', zakelijk: true, bedrijf: expect.objectContaining({ naam: 'Stukadoorsbedrijf Piet', kvk: '12345678', land: 'NL' }) })]);
   await abonnement.getByRole('button', { name: 'Ik heb betaald: licentie ophalen' }).click();
   await expect(page.locator('.toasts').getByText(/Abonnement actief t\/m/)).toBeVisible();
   await expect(card.getByText(/Abonnement actief; de maandelijkse factuur krijg je per e-mail/)).toBeVisible();

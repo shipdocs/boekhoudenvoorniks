@@ -180,7 +180,7 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
     <label className="row" style={{ alignItems: 'flex-start', gap: 8 }}>
       <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} aria-describedby="abonnement-voorwaarden" />
       <span id="abonnement-voorwaarden" className="small">
-        Ik sluit dit abonnement af voor mijn bedrijf en ga akkoord met de <a href={TERMS_URL} onClick={(e) => { e.preventDefault(); void api.app.openExternal(TERMS_URL); }}>gebruiksvoorwaarden</a> (versie {TERMS_VERSION}, in het bijzonder artikel 8 over het abonnement en artikel 9 over aansprakelijkheid). <a href={TERMS_PDF_URL} onClick={(e) => { e.preventDefault(); void api.app.openExternal(TERMS_PDF_URL); }}>Download de voorwaarden als PDF</a> om ze te bewaren.
+        Ik sluit dit abonnement af voor mijn bedrijf (niet als consument) en ga akkoord met de <a href={TERMS_URL} onClick={(e) => { e.preventDefault(); void api.app.openExternal(TERMS_URL); }}>gebruiksvoorwaarden</a> (versie {TERMS_VERSION}, in het bijzonder artikel 8 over het abonnement en artikel 9 over aansprakelijkheid). <a href={TERMS_PDF_URL} onClick={(e) => { e.preventDefault(); void api.app.openExternal(TERMS_PDF_URL); }}>Download de voorwaarden als PDF</a> om ze te bewaren.
       </span>
     </label>
   );
@@ -245,9 +245,9 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
   return (
     <div className="notice grid" data-testid="abonnement">
       <div>
-        <strong>{status.state === 'verlopen' ? `Je abonnement liep tot ${formatDateNl(status.validUntil)}.` : 'Versturen naar je boekhouder hoort bij het abonnement.'}</strong>{' '}
+        <strong>{status.state === 'verlopen' ? `Je abonnement liep tot ${formatDateNl(status.validUntil)}.` : 'Versturen naar je boekhouder is een extra functie van het abonnement.'}</strong>{' '}
         {trial > 0 && <><strong>De eerste {trial} maanden zijn gratis.</strong>{' '}</>}
-        {amount ? `${trial > 0 ? 'Daarna kost het' : 'Het kost'} ${amount}, per maand opzegbaar. ` : 'Per maand opzegbaar. '}Koppelen en een antwoord inlezen kan altijd; alleen het versturen vraagt een abonnement.{' '}
+        {amount ? `${trial > 0 ? 'Daarna kost het' : 'Het kost'} ${amount}, per maand opzegbaar. ` : 'Per maand opzegbaar. '}Met het abonnement steun je de verdere ontwikkeling en krijg je de extra functies. Koppelen, een antwoord inlezen en het pakket voor je boekhouder blijven gratis; alleen het versturen vraagt een abonnement.{' '}
         {trial > 0
           ? 'Bij het afsluiten betaal je via Mollie alleen € 0,01 met iDEAL, voor de machtiging. De eerste incasso is na de gratis maanden; zeg je daarvoor op, dan betaal je niets. Van elke betaalde maand krijg je een factuur op naam van je bedrijf.'
           : 'Je betaalt via Mollie (iDEAL, daarna automatische incasso) en krijgt elke maand een factuur op naam van je bedrijf.'}
