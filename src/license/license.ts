@@ -6,7 +6,7 @@ import { ValidationError } from '../shared/validation';
 
 /**
  * Abonnement voor de uitwisseling met de boekhouder. De licentie is een token dat de licentie-Worker
- * ondertekent (workers/licentie) en dat de app offline controleert met de publieke sleutel hieronder.
+ * ondertekent (privé-repo shipdocs/boekhoudenvoorniks-server) en dat de app offline controleert met de publieke sleutel hieronder.
  * Alleen *versturen naar je boekhouder* vraagt een licentie; een antwoord inlezen werkt altijd, zodat
  * een klant nooit met een vergrendelde periode blijft zitten. De kantoorkant is gratis.
  */
@@ -16,7 +16,7 @@ export const LICENSE_API_URL = 'https://licentie.boekhoudenvoorniks.nl';
 
 /**
  * Publieke sleutel (Ed25519, base64url) van de licentie-Worker. Leeg = licenties staan nog uit en alles
- * is vrij te gebruiken. Zie workers/licentie/README.md voor het aanmaken van het sleutelpaar.
+ * is vrij te gebruiken. Het sleutelpaar maak je met licentie/sleutel-maken.mjs in de privé-repo.
  */
 export const LICENSE_PUBLIC_KEY = '5X4g-WVye2XVXEURIEBkQorBD_vqDmWyEqHMsA1T_b8';
 
@@ -31,7 +31,7 @@ export interface LicensePayload {
   cancelled?: boolean;
 }
 
-/** Bedrijfsgegevens voor de factuur van het abonnement (workers/licentie: Billing). */
+/** Bedrijfsgegevens voor de factuur van het abonnement (licentie-Worker: Billing). */
 export interface LicenseBilling {
   naam: string;
   adres: string;
