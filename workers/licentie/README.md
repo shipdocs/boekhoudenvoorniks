@@ -108,6 +108,11 @@ de klant. Eén factuur per betaling (`payments.invoice_id`, Idempotency-Key `fac
 aan met `INVOICES: "true"` in `wrangler.jsonc`; dat vraagt de rechten `sales-invoices.read` en `sales-invoices.write` op het token.
 Onze bedrijfsgegevens op de factuur komen uit het Mollie-account.
 
+Mislukt een factuur (bv. een ontbrekend recht op het token), dan geeft de webhook 500 en herhaalt Mollie
+hem; de betaling telt maar één keer. Let op: Mollie geeft voor dezelfde `Idempotency-Key` (`factuur-<betaling>`)
+tot een uur hetzelfde antwoord terug, ook een fout. Na het herstellen van het token krijgt een herhaling
+van dezelfde betaling dus nog tot een uur de oude fout; daarna lukt het vanzelf (gezien op 30 september 2026).
+
 ## Live gaan
 
 Pas als het Mollie-profiel is goedgekeurd, en in deze volgorde:
