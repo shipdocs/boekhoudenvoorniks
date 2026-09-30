@@ -107,6 +107,11 @@ alles behalve een geldig 200-antwoord als "geen voorstel" en gaat door met de st
 - `JEV_ACCOUNT_ID` + `JEV_API_TOKEN`: JEV rechtstreeks via de Workers AI REST-API (alleen voor de
   benchmark, met synthetische data; nooit in de app).
 
+Na de winkelindex uit OpenStreetMap (`src/intake/brand-index.ts`) en de handmatige aanvulling
+(software, hosting, verzekeraars), 30 september 2026: top-1 28%, dekking 28%, precisie 100% (11 van 11);
+bekend 100%, onbekend 16%. De set bestaat vooral uit verzonnen lokale zaken, dus de winst voor echte
+ketens staat hier nauwelijks in.
+
 Nulmeting, 30 september 2026, 40 synthetische gevallen (`npm run benchmark:jev`, alleen regels):
 
 | methode | top-1 | top-2 | dekking | precisie | hoog zeker (n) | ongeldig | p50 | p95 | tokens |
