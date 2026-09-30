@@ -146,9 +146,9 @@ describe('JEV in de documentstroom', () => {
 
     expect(d.status).toBe('controle');
     expect(d.classification).toMatchObject({ categoryKey: 'kantoor', source: 'llm', proposedBy: 'jev', model: 'jev-1.13.0', automatic: false, confidence: 0.7 });
-    expect(d.classification!.reasons.join(' ')).toContain('online hulp (JEV)');
+    expect(d.classification!.reasons.join(' ')).toContain('online hulp koos deze');
     const task = w.s.inbox.tasks('2026-09-30').find((t) => t.ref.documentId === d.id)!;
-    expect(task.question).toContain('voorstel van online hulp (JEV)');
+    expect(task.question).toContain('voorstel van online hulp');
     expect(task.actions.map((a) => a.label)).toEqual(['Ja', 'Aanpassen']);
   });
 
@@ -163,7 +163,7 @@ describe('JEV in de documentstroom', () => {
     expect(w.s.memory.get('Pennenwinkel De Vulpen')).toMatchObject({ category_key: 'kantoor', confirmations: 1 });
     expect(w.stats()).toEqual([{ proposed_by: 'jev', model: 'jev-1.13.0', accepted: 1, corrected: 0 }]);
     // wat de gebruiker deed staat in het logboek, met wie het voorstel deed
-    expect(w.s.inbox.month('2026-09', '2026-09-30').byUser[0]!.reason).toContain('online hulp (JEV)');
+    expect(w.s.inbox.month('2026-09', '2026-09-30').byUser[0]!.reason).toContain('online hulp');
 
     const d2 = await w.add('pen2.jpg', pennenwinkel(10));
     expect(w.calls).toHaveLength(1);
