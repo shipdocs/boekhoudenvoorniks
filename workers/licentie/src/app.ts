@@ -52,6 +52,8 @@ export interface Env {
   PRICE_EXCL_VAT: string;
   /** var: gratis maanden bij een eerste abonnement, bv. "4"; "0" of leeg = geen proefperiode */
   TRIAL_MONTHS?: string;
+  /** Workers Rate Limiting per IP-adres voor /start (elke aanroep maakt een klant en betaling bij Mollie) */
+  START_PER_IP?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 
 export interface Deps {
@@ -117,6 +119,10 @@ interface MolliePayment {
   customerId?: string;
   subscriptionId?: string;
   paidAt?: string;
+  /** teruggeboekt (chargeback, bv. een SEPA-incasso die de klant liet terugboeken) */
+  amountChargedBack?: { currency: string; value: string };
+  /** (deels) terugbetaald */
+  amountRefunded?: { currency: string; value: string };
   metadata?: { administratie?: string; email?: string; billing?: Billing; managementKeyHash?: string; proefMaanden?: number } | null;
   _links?: { checkout?: { href: string } };
 }
@@ -186,8 +192,23 @@ async function mollie<T>(env: Env, deps: Deps, method: 'GET' | 'POST' | 'DELETE'
     if (res.status !== 409 || method !== 'POST' || !opts.idempotencyKey || attempt >= 3) break;
     await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
   }
-  if (!res.ok) throw new MollieError(`Mollie ${method} ${path}: ${res.status} ${(await res.text()).slice(0, 300)}`, res.status);
+  if (!res.ok) throw new MollieError(`Mollie ${method} ${path}: ${res.status} ${mollieErrorSummary(await res.text())}`, res.status);
   return (await res.json()) as T;
+}
+
+/**
+ * Wat we van een Mollie-fout loggen: titel en detail (bv. "Not all required permissions (…) were granted"),
+ * zonder e-mailadressen en ingekort; niet de hele respons.
+ */
+function mollieErrorSummary(body: string): string {
+  let text = body;
+  try {
+    const e = JSON.parse(body) as { title?: unknown; detail?: unknown; field?: unknown };
+    text = [e.title, e.detail, e.field ? `veld ${String(e.field)}` : null].filter((x) => typeof x === 'string' && x).join(': ');
+  } catch {
+    /* geen JSON: de tekst zelf */
+  }
+  return text.replace(/[^\s@"]+@[^\s@"]+/g, '<e-mail>').slice(0, 200);
 }
 
 function getLicense(env: Env, administratie: string): Promise<LicenseRow | null> {
@@ -202,9 +223,14 @@ async function subscriptionRunning(env: Env, deps: Deps, row: LicenseRow | null)
 }
 
 async function readJson(request: Request): Promise<Record<string, unknown>> {
+  // alleen JSON: een formulier of text/plain van een andere website (zonder CORS-controle) wordt geweigerd
+  if (!/^application\/json\b/i.test(request.headers.get('content-type') ?? '')) throw new BadRequest('Verwacht JSON');
   if (Number(request.headers.get('content-length') ?? '0') > 8192) throw new BadRequest('Te groot');
+  // ook zonder (juiste) content-length: nooit meer dan 8 KB lezen
+  const buf = await request.arrayBuffer();
+  if (buf.byteLength > 8192) throw new BadRequest('Te groot');
   try {
-    const body = (await request.json()) as unknown;
+    const body = JSON.parse(new TextDecoder().decode(buf)) as unknown;
     if (body && typeof body === 'object' && !Array.isArray(body)) return body as Record<string, unknown>;
   } catch {
     /* hieronder */
@@ -456,11 +482,48 @@ async function recurringPayment(env: Env, deps: Deps, payment: MolliePayment): P
 }
 
 /** Mollie meldt alleen een betalings-ID; de status halen we zelf op (de melding zelf is niet te vertrouwen). */
+/**
+ * Terugboeking (chargeback) of terugbetaling: de maand die ermee betaald was gaat eraf (bij de betaling van
+ * de proefperiode: de proefmaanden), het abonnement stopt, en er wordt niets meer afgeschreven. Eén keer per
+ * betaling (reversed_at), in dezelfde transactie. Was de betaling nog niet verwerkt, dan wordt hij ook niet
+ * meer bijgeschreven. Een al gemaakte factuur moet met de hand gecrediteerd worden (in Mollie).
+ */
+async function reversePayment(env: Env, deps: Deps, payment: MolliePayment): Promise<Response> {
+  const row = await env.LICENTIES.prepare('SELECT administratie, trial, reversed_at FROM payments WHERE payment_id = ?').bind(payment.id).first<{ administratie: string; trial: number | null; reversed_at: string | null }>();
+  if (!row) {
+    // nooit bijgeschreven: vastleggen als teruggedraaid, zodat een latere 'paid'-melding hem niet alsnog bijschrijft
+    const administratie = payment.metadata?.administratie ?? null;
+    if (administratie && UUID.test(administratie)) {
+      await env.LICENTIES.prepare('INSERT OR IGNORE INTO payments (payment_id, administratie, processed_at, amount, reversed_at) VALUES (?, ?, ?, ?, ?)').bind(payment.id, administratie, deps.today(), payment.amount?.value ?? '', deps.today()).run();
+    }
+    return json({ ok: true, teruggedraaid: payment.id });
+  }
+  if (row.reversed_at) return json({ ok: true, teruggedraaid: payment.id });
+  const credit = row.trial ? Math.max(0, Math.floor(Number(payment.metadata?.proefMaanden ?? 0)) || 0) : 1;
+  await env.LICENTIES.batch([
+    env.LICENTIES.prepare('UPDATE licenses SET months = MAX(0, months - ?), cancelled_at = COALESCE(cancelled_at, ?) WHERE administratie = ? AND EXISTS (SELECT 1 FROM payments WHERE payment_id = ? AND reversed_at IS NULL)').bind(credit, deps.today(), row.administratie, payment.id),
+    env.LICENTIES.prepare('UPDATE payments SET reversed_at = ? WHERE payment_id = ? AND reversed_at IS NULL').bind(deps.today(), payment.id),
+  ]);
+  // niets meer afschrijven
+  const license = await getLicense(env, row.administratie);
+  if (await subscriptionRunning(env, deps, license)) {
+    try {
+      await mollie(env, deps, 'DELETE', `/customers/${license!.customer_id}/subscriptions/${license!.subscription_id}`);
+    } catch (e) {
+      if (!(e instanceof MollieError && e.status === 404)) throw e;
+    }
+  }
+  console.log(JSON.stringify({ route: '/mollie', teruggedraaid: true, maanden: credit }));
+  return json({ ok: true, teruggedraaid: payment.id });
+}
+
 async function webhook(request: Request, env: Env, deps: Deps): Promise<Response> {
   const id = new URLSearchParams(await request.text()).get('id') ?? '';
   if (!/^tr_[A-Za-z0-9]+$/.test(id)) return json({ fout: 'Onbekende betaling' }, 400);
   const payment = await mollie<MolliePayment>(env, deps, 'GET', `/payments/${id}`);
   if (payment.status !== 'paid') return json({ ok: true, status: payment.status });
+  // teruggeboekt of terugbetaald: Mollie meldt dat via dezelfde webhook, de status blijft 'paid'
+  if (Number(payment.amountChargedBack?.value ?? 0) > 0 || Number(payment.amountRefunded?.value ?? 0) > 0) return reversePayment(env, deps, payment);
   if (payment.subscriptionId) return recurringPayment(env, deps, payment);
   const administratie = payment.metadata?.administratie;
   if (payment.sequenceType === 'first' && payment.customerId && administratie && UUID.test(administratie)) {
@@ -547,7 +610,13 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
     if (request.method === 'GET' && url.pathname === '/prijs') {
       return json({ bedrag: env.PRICE_EXCL_VAT, inclusiefBtw: inclVat(env.PRICE_EXCL_VAT), valuta: 'EUR', per: 'maand', btw: 'exclusief', proefMaanden: trialMonths(env) });
     }
-    if (request.method === 'POST' && url.pathname === '/start') return await start(request, env, deps);
+    if (request.method === 'POST' && url.pathname === '/start') {
+      // elke aanroep maakt een klant en een betaling bij Mollie: per IP-adres begrenzen (wordt niet gelogd)
+      if (env.START_PER_IP && !(await env.START_PER_IP.limit({ key: `ip:${request.headers.get('cf-connecting-ip') ?? 'onbekend'}` })).success) {
+        return json({ fout: 'Te veel pogingen; probeer het over een minuut opnieuw' }, 429);
+      }
+      return await start(request, env, deps);
+    }
     if (request.method === 'POST' && url.pathname === '/mollie') return await webhook(request, env, deps);
     if (request.method === 'GET' && url.pathname === '/licentie') return await license(request, url, env, deps);
     if (request.method === 'POST' && url.pathname === '/opzeggen') return await cancel(request, env, deps);
