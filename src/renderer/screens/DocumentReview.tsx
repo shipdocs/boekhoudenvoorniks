@@ -3,7 +3,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
-import { BusinessShareField, CategoryChoice, InvestmentHint, investmentInfo } from './Purchases';
+import { BusinessShareField, CategoryChoice, InvestmentHint, SupplierInput, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
 import type { PurchaseVatCode } from '../../shared/vat';
 import { ReaderChoice } from './Reader';
@@ -293,7 +293,7 @@ export function DocumentReview({ id }: { id: number }) {
             // minmax: het formulier blijft binnen de kaart, hoe breed de keuzeknoppen of het datumveld ook zijn
             <div className="card grid" style={{ marginTop: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
               <div className="grid cols-2">
-                <Field label="Winkel / leverancier"><input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} /></Field>
+                <Field label="Winkel / leverancier"><SupplierInput value={form.supplier} onChange={(v) => setForm({ ...form, supplier: v })} /></Field>
                 <Field label="Datum"><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
               </div>
               <div className="grid cols-2">

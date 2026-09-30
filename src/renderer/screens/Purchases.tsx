@@ -385,7 +385,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
     <Modal title="Aankoop toevoegen" onClose={onClose}>
       <div className="grid">
         <div className="grid cols-2">
-          <Field label="Waar gekocht?"><input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="bv. Gamma" autoFocus /></Field>
+          <Field label="Waar gekocht?"><SupplierInput value={supplier} onChange={setSupplier} placeholder="bv. Gamma" autoFocus /></Field>
           <Field label="Wanneer?"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         </div>
         <Field label="Bedrag op de bon" hint="inclusief btw"><MoneyInput value={amount} onChange={setAmount} /></Field>
@@ -424,6 +424,24 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
         }}>Opslaan</Button>
       </div>
     </Modal>
+  );
+}
+
+/** Invoerveld voor de leverancier dat bekende leveranciers voorstelt (relaties en geleerde leveranciers). */
+export function SupplierInput({ value, onChange, placeholder, autoFocus }: { value: string; onChange: (value: string) => void; placeholder?: string; autoFocus?: boolean }) {
+  const known = useLoad(async () => {
+    const [relations, learned] = await Promise.all([api.relations.list({ type: 'leverancier' }), api.documents.suppliers()]);
+    const names = new Map<string, string>();
+    for (const n of [...relations.map((r) => r.name), ...learned.map((r) => r.display_name)]) {
+      if (!names.has(n.trim().toLowerCase())) names.set(n.trim().toLowerCase(), n.trim());
+    }
+    return [...names.values()].sort((a, b) => a.localeCompare(b, 'nl'));
+  });
+  return (
+    <>
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} autoFocus={autoFocus} list="bekende-leveranciers" />
+      <datalist id="bekende-leveranciers">{(known.data ?? []).map((n) => <option key={n} value={n} />)}</datalist>
+    </>
   );
 }
 

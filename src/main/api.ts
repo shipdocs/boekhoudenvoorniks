@@ -588,10 +588,10 @@ export function createApi(s: Services, host: HostContext) {
       update: (patch: Partial<AppSettings>) => {
         // online hulp (JEV) hoort bij het abonnement: alleen aan te zetten met een actieve licentie (#132)
         if (patch.ocr?.onlineCategoryHelp === true && !s.settings.get().ocr.onlineCategoryHelp && !ONLINE_HELP.available) {
-          throw new ValidationError('Online hulp bij categorievoorstellen is nog niet beschikbaar.');
+          throw new ValidationError('Online hulp bij het indelen van bonnen is nog niet beschikbaar.');
         }
         if (patch.ocr?.onlineCategoryHelp === true && !s.settings.get().ocr.onlineCategoryHelp && s.license.status(today()).state !== 'actief') {
-          throw new ValidationError('Online hulp bij categorievoorstellen is een extra functie van het abonnement. Neem eerst een abonnement.');
+          throw new ValidationError('Online hulp bij het indelen van bonnen is een extra functie van het abonnement. Neem eerst een abonnement.');
         }
         const r = s.settings.update(patch);
         if (patch.ocr) host.reconfigureLocalAi();

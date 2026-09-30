@@ -304,7 +304,7 @@ export function SettingsScreen() {
             <Field label="Lokale AI voor herkennen van aankopen" hint="Ollama-adres, optioneel"><input value={draft.ocr.llmUrl} onChange={(e) => set({ ocr: { ...draft.ocr, llmUrl: e.target.value } })} placeholder="http://127.0.0.1:11434" /></Field>
             <Field label="AI-model"><input value={draft.ocr.llmModel} onChange={(e) => set({ ocr: { ...draft.ocr, llmModel: e.target.value } })} placeholder="bv. qwen2.5:3b" /></Field>
           </div>
-          <p className="small muted">De AI doet alleen voorstellen ("dit lijkt gereedschap"). De boeking zelf wordt altijd door vaste regels gemaakt.{ONLINE_HELP.available && draft.ocr.onlineCategoryHelp ? ' Staat online hulp aan, dan wordt de lokale AI niet gebruikt.' : ''}</p>
+          <p className="small muted">De AI doet alleen voorstellen ("dit lijkt gereedschap"). De boeking zelf wordt altijd door vaste regels gemaakt.{ONLINE_HELP.available && draft.ocr.onlineCategoryHelp ? ' Staat de online hulp aan, dan wordt deze AI niet gebruikt.' : ''}</p>
           </details>
           )}
         </>,
@@ -869,10 +869,10 @@ function OnlineCategoryHelp({ checked, onChange }: { checked: boolean; onChange:
       <label className="row" style={{ alignItems: 'flex-start' }}>
         <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} aria-describedby="online-hulp-uitleg" />
         <span>
-          <strong>Online hulp bij categorievoorstellen (JEV via Cloudflare)</strong>
+          <strong>Online hulp bij het indelen van bonnen</strong>
           <br />
           <span id="online-hulp-uitleg" className="small muted">
-            Standaard uit. Als eerdere keuzes en vaste regels niet genoeg zekerheid geven, sturen we alleen de naam van de winkel of leverancier en maximaal 15 artikelomschrijvingen (zonder bedragen) naar onze server bij Cloudflare, die het externe model JEV laat kiezen uit jouw categorieën. Nooit de foto, PDF, bedragen, IBAN of je administratie. Er wordt niets geboekt zonder jouw controle, en wat je bevestigt of aanpast onthoudt de app op deze computer, zodat hij het de volgende keer zelf weet. Staat dit aan, dan wordt een lokale AI niet gebruikt.
+            Standaard uit. Weet de app niet waar een bon voor was, dan vraagt hij het na bij onze server. Daarvoor gaan alleen de naam van de winkel en de namen van de artikelen mee. Er gaat niets mee waaraan jij of je klanten te herkennen zijn: geen naam of adres, geen rekeningnummer, geen bedragen en geen foto's. We bewaren de vraag ook niet. Jij bevestigt of past het voorstel aan, en de app onthoudt jouw keuze voor de volgende keer. Staat dit aan, dan wordt de AI op je computer niet gebruikt.
             {!active && <><br /><strong>Hoort bij het abonnement</strong> (Hoe gaat het? &gt; Uitwisseling met je boekhouder).</>}
           </span>
         </span>
