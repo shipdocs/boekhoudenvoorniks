@@ -21,7 +21,7 @@ import { extractPdf } from './pdf-text';
 import { parseDocumentText } from './text-parser';
 import { validateDocument } from './validation';
 import { assessConfidence } from './confidence';
-import type { Classifier, Classification } from './classify';
+import { PROPOSED_BY_LABEL, type Classifier, type Classification } from './classify';
 import type { SupplierMemory } from './supplier-memory';
 import { supplierKey } from './supplier-memory';
 import type { OcrProvider } from './ocr';
@@ -580,7 +580,11 @@ export class IntakeService {
     if (!isPurchaseVatCode(c.vatCode)) throw new ValidationError('Kies of er btw op de bon stond');
 
     tx(this.db, () => {
-      if (opts.learn !== false) this.memory.learn(c.supplier, { categoryKey: c.categoryKey, vatCode: c.vatCode, business: c.business });
+      if (opts.learn !== false) {
+        // de eindkeuze van de gebruiker is de leerbron, wie het voorstel ook deed (#132)
+        this.memory.learn(c.supplier, { categoryKey: c.categoryKey, vatCode: c.vatCode, business: c.business });
+        this.recordProposalOutcome(doc, c);
+      }
       const bankTx = doc.bank_match && (doc.bank_match.amount === -c.total || (doc.result?.foreign && withinFx(-doc.bank_match.amount, c.total))) ? doc.bank_match : null;
       if (!c.business) {
         // privé: niet in de boekhouding; als het van de zakelijke rekening betaald is → privé-opname
@@ -617,6 +621,33 @@ export class IntakeService {
       }
     });
     return this.get(id);
+  }
+
+  /**
+   * Audit en evaluatie (#132): wie deed het voorstel (`proposedBy`), en wat koos de gebruiker uiteindelijk
+   * (`accepted`)? Een afwijkende categorie telt als correctie van dat voorstel. Geen inhoud, alleen tellers.
+   */
+  private recordProposalOutcome(doc: IntakeDocument, c: Confirmation): void {
+    const proposal = doc.classification;
+    if (!proposal) return;
+    const proposedBy = proposal.proposedBy ?? (proposal.source === 'llm' ? 'ollama' : proposal.source);
+    const corrected = proposal.categoryKey !== c.categoryKey || proposal.business !== c.business;
+    const accepted = { categoryKey: c.categoryKey, vatCode: c.vatCode, business: c.business, corrected };
+    this.db.prepare('UPDATE documents SET classification = ? WHERE id = ?').run(JSON.stringify({ ...proposal, proposedBy, accepted }), doc.id);
+    this.db
+      .prepare(`INSERT INTO proposal_stats (proposed_by, model, ${corrected ? 'corrected' : 'accepted'}) VALUES (?, ?, 1)
+        ON CONFLICT(proposed_by, model) DO UPDATE SET ${corrected ? 'corrected = corrected' : 'accepted = accepted'} + 1`)
+      .run(proposedBy, proposal.model ?? '');
+    if (corrected && (proposedBy === 'jev' || proposedBy === 'ollama')) {
+      // "Ja" op Vandaag staat al in het logboek; een aangepast AI-voorstel hier, zodat terug te zien is wie wat koos
+      logAutomation(this.db, {
+        kind: 'gebruiker',
+        ref_id: doc.id,
+        summary: `${c.supplier}: voorstel van ${PROPOSED_BY_LABEL[proposedBy]} aangepast`,
+        reason: `${PROPOSED_BY_LABEL[proposedBy]} stelde ${this.categories.label(proposal.categoryKey)} voor; jij koos ${c.business ? this.categories.label(c.categoryKey) : 'privé'}.`,
+        actor: 'gebruiker',
+      });
+    }
   }
 
   /** Splitst per BTW-tarief als het document dat laat zien en het klopt met het totaal; anders één regel. */

@@ -16,15 +16,35 @@ export interface Classification {
   /** 0..1 */
   confidence: number;
   source: 'geheugen' | 'regel' | 'llm' | 'standaard';
+  /** wie het voorstel deed (voor audit en evaluatie); bij `llm` welke: lokale Ollama of online JEV */
+  proposedBy?: ProposedBy;
+  /** modelversie van het LLM-voorstel, zoals de dienst hem teruggaf */
+  model?: string;
   reasons: string[];
   /** true = gebruiker heeft dit al vaak genoeg bevestigd */
   automatic: boolean;
+  /** de uiteindelijke keuze van de gebruiker (na bevestigen), los van het voorstel */
+  accepted?: { categoryKey: string; vatCode: string; business: boolean; corrected: boolean };
 }
 
-/** Optionele lokale LLM (bv. via Ollama/llama.cpp). Mag alleen een categorie voorstellen. */
+export type ProposedBy = 'geheugen' | 'regel' | 'ollama' | 'jev' | 'standaard';
+
+/** Vaste uitleg per voorsteller: geen vrije modeltekst als boekhoudreden (#132). */
+export const PROPOSED_BY_LABEL: Record<ProposedBy, string> = {
+  geheugen: 'eerder door jou bevestigd',
+  regel: 'vaste regel',
+  ollama: 'lokale AI',
+  jev: 'online hulp (JEV)',
+  standaard: 'standaard',
+};
+
+/**
+ * Optionele LLM: lokaal (Ollama) of online (JEV, alleen met abonnement en opt-in). Mag alleen een
+ * categorie voorstellen; `explanation` wordt alleen getoond bij de lokale AI.
+ */
 export interface LlmClassifier {
-  readonly id: string;
-  classify(input: { supplier: string | null; lines: string[]; categories: { key: string; label: string; hint: string }[] }): Promise<{ categoryKey: string; confidence: number; explanation: string } | null>;
+  readonly id: 'ollama' | 'jev';
+  classify(input: { supplier: string | null; lines: string[]; categories: { key: string; label: string; hint: string }[] }): Promise<{ categoryKey: string; confidence: number; explanation: string; model?: string } | null>;
 }
 
 const EU_VAT_PREFIXES = new Set(['AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES', 'FI', 'FR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK', 'XI']);
@@ -93,6 +113,7 @@ export class Classifier {
         business: Boolean(rule.business),
         confidence: automatic ? 0.97 : 0.8,
         source: 'geheugen',
+        proposedBy: 'geheugen',
         reasons: [`${rule.display_name}: eerder ${rule.confirmations}× zo bevestigd`],
         automatic,
       };
@@ -106,16 +127,16 @@ export class Classifier {
         reasons.push('artikel lijkt gereedschap');
       }
       reasons.push(`${known.name} is een bekende leverancier`);
-      return { categoryKey: category, vatCode: docVat === 'verlegd' && known.vatCode === 'eu' ? 'eu' : docVat ?? known.vatCode, business: true, confidence: 0.75, source: 'regel', reasons, automatic: false };
+      return { categoryKey: category, vatCode: docVat === 'verlegd' && known.vatCode === 'eu' ? 'eu' : docVat ?? known.vatCode, business: true, confidence: 0.75, source: 'regel', proposedBy: 'regel', reasons, automatic: false };
     }
 
     if (doc.lineDescriptions.some((l) => DEVICE_KEYWORDS.test(l))) {
       const invest = this.netTotal(doc, docVat) >= INVESTMENT_THRESHOLD;
-      return { categoryKey: invest ? 'investering' : 'kantoor', vatCode: docVat ?? 'hoog', business: true, confidence: 0.6, source: 'regel', reasons: [invest ? 'apparaat van € 450 of meer (excl. btw): gaat jaren mee' : 'apparaat'], automatic: false };
+      return { categoryKey: invest ? 'investering' : 'kantoor', vatCode: docVat ?? 'hoog', business: true, confidence: 0.6, source: 'regel', proposedBy: 'regel', reasons: [invest ? 'apparaat van € 450 of meer (excl. btw): gaat jaren mee' : 'apparaat'], automatic: false };
     }
 
     if (doc.lineDescriptions.some((l) => TOOL_KEYWORDS.test(l))) {
-      return { categoryKey: this.netTotal(doc, docVat) >= INVESTMENT_THRESHOLD ? 'investering' : 'gereedschap', vatCode: docVat ?? 'hoog', business: true, confidence: 0.6, source: 'regel', reasons: ['artikel lijkt gereedschap'], automatic: false };
+      return { categoryKey: this.netTotal(doc, docVat) >= INVESTMENT_THRESHOLD ? 'investering' : 'gereedschap', vatCode: docVat ?? 'hoog', business: true, confidence: 0.6, source: 'regel', proposedBy: 'regel', reasons: ['artikel lijkt gereedschap'], automatic: false };
     }
 
     if (this.llm) {
@@ -123,12 +144,13 @@ export class Classifier {
         const r = await this.llm.classify({ supplier, lines: doc.lineDescriptions, categories: this.categories.list().map(({ key, label, hint }) => ({ key, label, hint })) });
         if (r && this.categories.list().some((c) => c.key === r.categoryKey)) {
           // LLM-zekerheid wordt bewust afgetopt: nooit automatisch boeken op alleen een LLM-voorstel
-          return { categoryKey: r.categoryKey, vatCode: docVat ?? 'hoog', business: true, confidence: Math.min(0.7, r.confidence), source: 'llm', reasons: [`voorstel van de slimme herkenning: ${r.explanation}`], automatic: false };
+          const reason = this.llm.id === 'jev' ? 'online hulp (JEV) koos deze uit jouw categorieën' : `voorstel van de slimme herkenning: ${r.explanation}`;
+          return { categoryKey: r.categoryKey, vatCode: docVat ?? 'hoog', business: true, confidence: Math.min(0.7, r.confidence), source: 'llm', proposedBy: this.llm.id, ...(r.model ? { model: r.model } : {}), reasons: [reason], automatic: false };
         }
       } catch {
         // LLM is optioneel; val terug op standaard
       }
     }
-    return { categoryKey: 'overig', vatCode: docVat ?? 'hoog', business: true, confidence: 0.3, source: 'standaard', reasons: ['onbekende leverancier'], automatic: false };
+    return { categoryKey: 'overig', vatCode: docVat ?? 'hoog', business: true, confidence: 0.3, source: 'standaard', proposedBy: 'standaard', reasons: ['onbekende leverancier'], automatic: false };
   }
 }

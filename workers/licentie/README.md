@@ -12,6 +12,7 @@ alleen wat nodig is om te betalen (administratie-ID, e-mailadres, Mollie-nummers
 | `GET /licentie?administratie=…` | met de lokale beheersleutel als Bearer-token: ondertekende licentie (Ed25519) t/m de betaalde periode plus 7 dagen marge; met `cancelled` na opzeggen |
 | `POST /opzeggen` | met de lokale beheersleutel als Bearer-token: abonnement stoppen bij Mollie; de licentie loopt af na de betaalde periode |
 | `GET /bedankt` | terugkeerpagina na het afrekenen |
+| RPC `Controle.assistent()` | alleen via de Service Binding van `workers/assistent` (niet via internet): mag deze administratie de online hulp gebruiken (actief abonnement, juiste beheersleutel) en is het dagquotum nog niet op? Telt de aanroep in `assistant_usage` (migratie 0005) |
 
 De app controleert licenties offline (`src/license/license.ts`). Alleen *versturen naar je
 boekhouder* vraagt een licentie; een antwoord inlezen werkt altijd. Zolang `LICENSE_PUBLIC_KEY` in

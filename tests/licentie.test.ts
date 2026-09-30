@@ -3,7 +3,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { addMonth, addMonths, handle, inclVat, type Env, type LicenseDb, type LicenseStatement } from '../workers/licentie/src/app';
+import { addMonth, addMonths, authorizeAssistant, handle, inclVat, type Env, type LicenseDb, type LicenseStatement } from '../workers/licentie/src/app';
 import { signLicense } from '../workers/licentie/src/token';
 import { LicenseService, verifyLicense } from '../src/license/license';
 import { createApi, type HostContext } from '../src/main/api';
@@ -509,6 +509,50 @@ describe('licentie-Worker', () => {
     // vanaf 31 januari: februari afgekapt, maar maart weer de 31e (niet de 28e)
     expect(addMonths('2026-01-31', 2)).toBe('2026-03-31');
     expect(addMonths('2026-01-31', 13)).toBe('2027-02-28');
+  });
+});
+
+describe('licentie-Worker: toegang tot de online hulp (workers/assistent, #132)', () => {
+  const ADMIN = '11111111-2222-4333-8444-555555555555';
+  const KEY = 'k'.repeat(43);
+  const hash = (v: string) => createHash('sha256').update(v).digest('hex');
+  const withLicense = async (row: { period_start: string; months: number; cancelled?: boolean; key?: string | null }) => {
+    const f = fakeD1();
+    await f.d1
+      .prepare('INSERT INTO licenses (administratie, email, customer_id, period_start, months, cancelled_at, management_key_hash) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(ADMIN, 'piet@example.nl', 'cst_1', row.period_start, row.months, row.cancelled ? '2026-10-01' : null, row.key === null ? null : hash(row.key ?? KEY))
+      .run();
+    return f;
+  };
+  const ask = (d1: LicenseDb, over: Partial<{ administratie: string; managementKey: string; today: string; dailyLimit: number }> = {}) =>
+    authorizeAssistant({ LICENTIES: d1 }, { administratie: ADMIN, managementKey: KEY, today: TODAY, dailyLimit: 3, ...over });
+
+  it('alleen met de juiste beheersleutel en een abonnement dat betaald is t/m vandaag (plus marge)', async () => {
+    const { d1 } = await withLicense({ period_start: '2026-10-01', months: 1 });
+    expect(await ask(d1)).toEqual({ ok: true });
+    expect(await ask(d1, { managementKey: 'x'.repeat(43) })).toEqual({ ok: false, reason: 'sleutel' });
+    expect(await ask(d1, { managementKey: 'kort' })).toEqual({ ok: false, reason: 'sleutel' });
+    expect(await ask(d1, { administratie: '99999999-2222-4333-8444-555555555555' })).toEqual({ ok: false, reason: 'sleutel' });
+    // betaald t/m 1 november, plus 7 dagen marge
+    expect(await ask(d1, { today: '2026-11-08' })).toEqual({ ok: true });
+    expect(await ask(d1, { today: '2026-11-09' })).toEqual({ ok: false, reason: 'geen-abonnement' });
+    // opgezegd maar nog betaald: mag tot het eind
+    const cancelled = await withLicense({ period_start: '2026-10-01', months: 1, cancelled: true });
+    expect(await ask(cancelled.d1)).toEqual({ ok: true });
+    // nog niet betaald, of zonder beheersleutel: nee
+    expect(await ask((await withLicense({ period_start: '2026-10-01', months: 0 })).d1)).toEqual({ ok: false, reason: 'geen-abonnement' });
+    expect(await ask((await withLicense({ period_start: '2026-10-01', months: 1, key: null })).d1)).toEqual({ ok: false, reason: 'sleutel' });
+  });
+
+  it('dagquotum per administratie, ook bij gelijktijdige aanroepen; geweigerde aanroepen tellen niet', async () => {
+    const f = await withLicense({ period_start: '2026-10-01', months: 1 });
+    await ask(f.d1, { managementKey: 'x'.repeat(43) });
+    const results = await Promise.all(Array.from({ length: 5 }, () => ask(f.d1)));
+    expect(results.filter((r) => r.ok)).toHaveLength(3);
+    expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'quotum' }, { ok: false, reason: 'quotum' }]);
+    // de volgende dag weer ruimte; quotum 0 = uit
+    expect(await ask(f.d1, { today: '2026-10-16' })).toEqual({ ok: true });
+    expect(await ask(f.d1, { today: '2026-10-17', dailyLimit: 0 })).toEqual({ ok: false, reason: 'quotum' });
   });
 });
 
