@@ -441,7 +441,9 @@ function initServices(): void {
       return result.filePath;
     },
     async restoreBackup(password) {
-      const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile'], filters: [{ name: 'Back-up', extensions: ['sqlite', 'gbbackup'] }] });
+      // begin in de map met de automatische back-ups van elke dag, als die er is
+      const backups = join(dataDir(), 'backups');
+      const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile'], filters: [{ name: 'Back-up', extensions: ['sqlite', 'gbbackup'] }], ...(existsSync(backups) ? { defaultPath: backups } : {}) });
       if (result.canceled || !result.filePaths[0]) return false;
       const selected = result.filePaths[0];
       const raw = readFileSync(selected);
