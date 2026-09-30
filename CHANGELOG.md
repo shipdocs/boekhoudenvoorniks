@@ -1,14 +1,12 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.7.1 — meer bekende winkels, back-up terugzetten bij het begin
 
 ### Nieuw
 - **Back-up terugzetten vanaf het welkomstscherm**: heb je al een administratie (nieuwe computer, herinstallatie), dan zet je meteen je back-up terug in plaats van opnieuw te beginnen. Het keuzevenster opent in de map met de automatische back-ups van elke dag.
-
 - **Meer bekende winkels en leveranciers**: de app kent nu zo'n 3300 winkelketens uit Nederland, Europa en Noord-Amerika (bouwmarkten, verfwinkels, tankstations en laadpalen, garages, verhuur van gereedschap, elektronica, kantoorartikelen, telefoonwinkels, horeca en verzekeraars), uit de lijst van OpenStreetMap. Bij een bon of betaling van zo'n keten staat de categorie al klaar; jij bevestigt of past aan. Voor horeca rekent de app geen btw-aftrek, want de btw op eten en drinken is niet aftrekbaar. Ook software en hosting (bv. Adobe, TransIP, GitHub) en Nederlandse verzekeraars worden herkend.
 
 ### Opgelost
-- **Q-Park** hoorde al bij "Brandstof & parkeren"; de benchmark verwachtte ten onrechte "auto".
 - **Linux: het icoon van de app ontbrak** in het menu en de taakbalk. Het pakket bevat nu het icoon in alle gangbare formaten.
 
 ## 0.7.0 — uitwisseling met je boekhouder
