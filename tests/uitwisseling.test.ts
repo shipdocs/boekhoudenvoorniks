@@ -28,6 +28,7 @@ function servicesAt(dir: string) {
     secrets,
     fetch: async () => { throw new Error('geen netwerk in tests'); },
     storeFile: async (name) => join(dir, 'bijlagen', name),
+    licensePublicKey: '', // licenties uit: dit test de uitwisseling zelf
   });
   return { db, s, secrets, dir };
 }

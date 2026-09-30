@@ -1,11 +1,11 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.7.0 — uitwisseling met je boekhouder
 
 ### Nieuw
 - "Ja" op Vandaag boekt alleen het voorstel dat je zag: is het intussen veranderd, dan vraagt de app je de bon opnieuw te bekijken.
 - **Nieuw logo**: in de zijbalk (wit in de donkere modus), op het welkomstscherm en als app-icoon.
-- **Abonnement op de uitwisseling** (staat nog uit tot de licentieserver live is): afsluiten via Mollie met een factuur op naam van je bedrijf bij elke betaling, en opzeggen in de app. Opgezegd? Dan kun je versturen tot het eind van de betaalde maand.
+- **Abonnement op de uitwisseling**: versturen naar je boekhouder hoort bij een abonnement van € 9 per maand exclusief btw (€ 10,89 inclusief), per maand opzegbaar. Een eerste abonnement is de eerste 4 maanden gratis; je betaalt dan alleen € 0,01 met iDEAL voor de machtiging. Afsluiten gaat via Mollie, met een factuur op naam van je bedrijf bij elke betaalde maand, en opzeggen in de app. Opgezegd? Dan kun je versturen tot het eind van de betaalde maand. Koppelen en een antwoord van je boekhouder inlezen kan altijd, ook zonder abonnement; de rest van de app blijft gratis.
 - **Nieuwe voorwaarden**: artikel 8 over het abonnement (prijs inclusief btw, per maand opzegbaar, geen terugbetaling van een lopende maand). Je geeft opnieuw akkoord.
 - **Uitwisseling met je boekhouder** (Hoe gaat het? > Uitwisseling met je boekhouder), naar het voorbeeld van de periode-uitwisseling in SnelStart:
   - Je boekhouder stuurt je een uitnodiging. Open die, vergelijk de controlecode met hem, en je bent gekoppeld.
@@ -33,7 +33,7 @@
 
 ### Techniek
 - De website staat op Cloudflare (`workers/site`: Worker met static assets), met https; http en www gaan naar https://boekhoudenvoorniks.nl. De workflow `site.yml` publiceert bij elke wijziging (vraagt de secrets CLOUDFLARE_API_TOKEN en CLOUDFLARE_ACCOUNT_ID); GitHub Pages is niet meer in gebruik.
-- Licentie voor het versturen naar de boekhouder voorbereid (`src/license/`, `workers/licentie/`): offline gecontroleerde, ondertekende licentie en een Worker voor afrekenen via Mollie (opslag in D1, idempotente en herstelbare webhook). Staat uit tot de licentie-Worker live is; tot die tijd is alles vrij.
+- Licentie voor het versturen naar de boekhouder voorbereid (`src/license/`, `workers/licentie/`): offline gecontroleerde, ondertekende licentie en een Worker voor afrekenen via Mollie (opslag in D1, idempotente en herstelbare webhook). De licentie-Worker staat live (`licentie.boekhoudenvoorniks.nl`) en de publieke sleutel zit in de app.
 - Uitwisselingspakket (`src/exchange/`): X25519 + HKDF + AES-256-GCM naar de sleutel van het kantoor, het antwoord met een sleutel die alleen in de export zat; kopregel met administratie, uitwisselingsnummer en versie als AAD. Het antwoord is een lijst handelingen die de app van de klant opnieuw uitvoert (migratie 23). Getest met de hele cyclus: na het inlezen is de proefbalans van de periode bij klant en boekhouder gelijk.
 - Periodeslot in de database (migratie 22): geen nieuwe boekingen t/m een afgesloten periode, afgedwongen in `Ledger.post` en met triggers. Een afgesloten periode kan niet heropend worden. Voorbereiding op de uitwisseling met de boekhouder: een periode kan ook tijdelijk vastliggen zolang hij bij de boekhouder is.
 - Elke administratie heeft een vaste identiteit (UUID, migratie 21) en er is een kantoormodus voor de kopie van een klant bij de boekhouder: geen e-mail, geen koppelingen, geen post ophalen en niets automatisch boeken. Voorbereiding op de uitwisseling met de boekhouder (`docs/uitwisseling.md`).

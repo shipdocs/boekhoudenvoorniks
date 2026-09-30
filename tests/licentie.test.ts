@@ -1,11 +1,11 @@
 import Database from 'better-sqlite3';
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { addMonth, addMonths, authorizeAssistant, handle, inclVat, type Env, type LicenseDb, type LicenseStatement } from '../workers/licentie/src/app';
 import { signLicense } from '../workers/licentie/src/token';
-import { LicenseService, verifyLicense } from '../src/license/license';
+import { LICENSE_PUBLIC_KEY, LicenseService, verifyLicense } from '../src/license/license';
 import { createApi, type HostContext } from '../src/main/api';
 import { setup } from './helpers';
 
@@ -559,6 +559,15 @@ describe('licentie-Worker: toegang tot de online hulp (workers/assistent, #132)'
 describe('licentie in de app', () => {
   const token = (privateJwk: string, administratie: string, validUntil: string, cancelled = false) =>
     signLicense({ v: 1, product: 'uitwisseling', administratie, email: 'piet@example.nl', validUntil, issuedAt: TODAY, ...(cancelled ? { cancelled: true } : {}) }, privateJwk);
+
+  it('de sleutel in de app is een geldige Ed25519-sleutel (die van de live licentie-Worker)', () => {
+    // Op 30 september 2026 is een echte licentie van de live Worker met deze sleutel gecontroleerd. Die
+    // licentie zelf staat bewust niet in de repo: hij is geldig. Hier: vorm en bruikbaarheid van de sleutel.
+    expect(LICENSE_PUBLIC_KEY).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(Buffer.from(LICENSE_PUBLIC_KEY, 'base64url')).toHaveLength(32);
+    expect(() => createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: LICENSE_PUBLIC_KEY }, format: 'jwk' })).not.toThrow();
+    expect(() => verifyLicense('e30.AAAA', LICENSE_PUBLIC_KEY)).toThrow(/handtekening/);
+  });
 
   it('zonder sleutel staan licenties uit: alles mag', () => {
     const { s } = setup();
