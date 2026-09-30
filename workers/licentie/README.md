@@ -82,10 +82,11 @@ Mollie herhaalt een webhook bij een fout, en kan dezelfde melding ook dubbel of 
 
 ## Stand (30 september 2026)
 
-Staat live op `licentie.boekhoudenvoorniks.nl` (de website zelf staat als aparte Worker in `workers/site`), **in testmodus** (`MOLLIE_TESTMODE: "true"`), met een
-organisatie-toegangstoken met de rechten hierboven (zonder `sales-invoices.read`: facturen mislukten nog, 30 september 2026). D1-database `boekhoudenvoorniks-licenties` in
-West-Europa. Getest met een testbetaling: betaling verwerkt, abonnement aangemaakt, licentie
-ondertekend en door de app goedgekeurd. In de app staan licenties nog **uit** (`LICENSE_PUBLIC_KEY` leeg).
+Staat **live** op `licentie.boekhoudenvoorniks.nl` (`MOLLIE_TESTMODE: "false"`, facturen aan), met een
+organisatie-toegangstoken met de zeven rechten hierboven. D1-database `boekhoudenvoorniks-licenties` in
+West-Europa, migraties t/m 0005; de testregels zijn verwijderd. Getest in testmodus: betaling, abonnement,
+factuur (met `sales-invoices.read`), licentie ondertekend. In de app staan licenties nog **uit**
+(`LICENSE_PUBLIC_KEY` leeg) tot na de eerste echte betaling (stap 4 van "Live gaan").
 
 ## Prijs en proefperiode
 
