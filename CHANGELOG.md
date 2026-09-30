@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Opgelost
+- **Linux: het icoon van de app ontbrak** in het menu en de taakbalk. Het pakket bevat nu het icoon in alle gangbare formaten.
+
 ## 0.7.0 — uitwisseling met je boekhouder
 
 ### Nieuw
