@@ -23,7 +23,8 @@ export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mai
     fetch: opts.fetch ?? (async () => { throw new Error('geen netwerk in tests'); }),
     storeFile: async (name) => `/tmp/test-bijlagen/${name}`,
     ocr: opts.ocr ?? null,
-    licensePublicKey: opts.licensePublicKey,
+    // licenties standaard uit in tests (de app heeft sinds 0.7.0 een echte sleutel); aan met een eigen testsleutel
+    licensePublicKey: opts.licensePublicKey ?? '',
   });
   s.settings.update({
     company: {
