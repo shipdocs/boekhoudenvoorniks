@@ -134,9 +134,22 @@ Pas als het Mollie-profiel is goedgekeurd, en in deze volgorde:
    maken. Staat de sleutel in de app terwijl de Worker in testmodus draait, dan geeft een nepbetaling op
    de testpagina van Mollie een geldige licentie.
 
+## Terugboekingen en misbruik
+
+- **Terugboeking of terugbetaling** (Mollie meldt dat via dezelfde webhook; de status blijft `paid`, met
+  `amountChargedBack` of `amountRefunded`): de maand die ermee betaald was gaat eraf (bij de betaling van
+  een proefperiode: de proefmaanden), het abonnement stopt bij Mollie, één keer per betaling
+  (`payments.reversed_at`, migratie 0006). Was hij nog niet verwerkt, dan wordt hij nooit bijgeschreven.
+  Een al gemaakte factuur crediteer je met de hand in Mollie.
+- **`/start`**: 10 per minuut per IP-adres (`START_PER_IP`), en alleen `application/json` (geen formulier
+  of `text/plain` van een andere website). Elke body is echt begrensd op 8 KB.
+- **Logs**: van een Mollie-fout alleen titel en detail, zonder e-mailadressen; de automatische regel per
+  aanroep staat uit.
+
 ## Nog niet gebouwd
 
-- Rate limiting op `/start` (Mollie-idempotentie voorkomt dubbele objecten voor dezelfde betaalpoging,
-  maar begrenst niet hoeveel verschillende administratie-UUID's een aanvaller kan aanbieden).
+- De proefperiode is te herhalen met een nieuw e-mailadres en een nieuwe administratie. Nu weinig schade
+  (de app is open source), maar vóór het aanzetten van de online hulp (die proefmaanden als betaald ziet)
+  vergelijken op het rekeningnummer van de machtiging en e-mailadressen normaliseren.
 - De webhookmelding is niet ondertekend (Mollie doet dat niet); de Worker vertrouwt alleen wat hij zelf
   bij Mollie ophaalt.

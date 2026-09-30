@@ -6,7 +6,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-29",
   "compatibility_flags": ["nodejs_compat"],
-  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  // logs van de Worker zelf aan; de automatische regel per aanroep (URL, headers) uit
+  "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "enabled": true, "invocation_logs": false } },
   "routes": [{ "pattern": "licentie.boekhoudenvoorniks.nl", "custom_domain": true }],
   // MOLLIE_TESTMODE "false" = live (zelfde organisatie-toegangstoken); INVOICES "true" zodra het token
   // de rechten sales-invoices.read en sales-invoices.write heeft (factuur bij elke betaling); zie README
@@ -15,5 +16,7 @@
   "d1_databases": [
     // aangemaakt met `npx wrangler d1 create boekhoudenvoorniks-licenties --location weur`
     { "binding": "LICENTIES", "database_name": "boekhoudenvoorniks-licenties", "database_id": "1ab9cdae-3eba-4788-aedb-c608b1e044aa", "migrations_dir": "migrations" }
-  ]
+  ],
+  // /start maakt bij elke aanroep een klant en een betaling bij Mollie: 10 per minuut per IP-adres
+  "ratelimits": [{ "name": "START_PER_IP", "namespace_id": "1330", "simple": { "limit": 10, "period": 60 } }]
 }
