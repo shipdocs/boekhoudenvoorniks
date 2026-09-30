@@ -41,6 +41,13 @@ jobs:
       # de website-Worker (workers/site) met dezelfde wrangler
       - run: ../licentie/node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run
         working-directory: workers/site
+      # de assistent-Worker (workers/assistent, #132) met dezelfde packages; logica in tests/assistent-worker.test.ts
+      - run: ../licentie/node_modules/.bin/wrangler types worker-configuration.d.ts --env-interface AssistantEnv --include-runtime false --strict-vars false --check
+        working-directory: workers/assistent
+      - run: ../licentie/node_modules/.bin/tsc -p tsconfig.json
+        working-directory: workers/assistent
+      - run: ../licentie/node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run
+        working-directory: workers/assistent
 
   # End-to-end: de echte schermen in Chromium, met de echte services (zie e2e/ en playwright.config.ts).
   e2e:

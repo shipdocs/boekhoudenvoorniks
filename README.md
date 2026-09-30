@@ -31,7 +31,7 @@ eigen computer, zonder account, cloud of abonnement.
 
 1. **Wat is er gebeurd?** in plaats van *wat wilt u boeken?* Boekhoudtermen staan alleen in de expertmodus.
 2. **De software doet het werk en vraagt alleen om uitzonderingen** (HIGH → automatisch, MEDIUM → één vraag, LOW → controle). Een leverancier wordt pas automatisch verwerkt als jij daar ja op zegt, en alles wat de app zelf deed staat onder "Automatisch gedaan". Zekerheid wordt per veld en per beslissing bepaald; automatisch alleen als álles boven de drempel zit. Instelbaar: voorzichtig / normaal / maximaal. Elke automatische verwerking heeft een "Waarom?" (vaste sjablonen, geen AI) en een knop "Klopt niet" die het terugdraait.
-3. **AI verzint nooit de boekhouding.** Extractie (*wat staat er?*), classificatie (*wat is dit?*) en boeking (*hoe boeken we dit?*) zijn strikt gescheiden. Een lokale LLM mag alleen een categorie voorstellen; boekingen worden altijd met vaste, testbare regels in code gemaakt.
+3. **AI verzint nooit de boekhouding.** Extractie (*wat staat er?*), classificatie (*wat is dit?*) en boeking (*hoe boeken we dit?*) zijn strikt gescheiden. Een lokale LLM, of met een abonnement de optionele online hulp (JEV via Cloudflare, standaard uit, alleen leveranciersnaam en artikelomschrijvingen; zie [docs/jev-assistent.md](docs/jev-assistent.md)), mag alleen een categorie voorstellen en alleen als het leveranciersgeheugen en de vaste regels het niet weten; boekingen worden altijd met vaste, testbare regels in code gemaakt.
 4. **Journaalposten zijn onveranderlijk** (afgedwongen met database-triggers); corrigeren gaat via een tegenboeking. Elke post is in balans. Een ingediende BTW-periode verandert nooit: wat later nog in die periode geboekt wordt, telt mee in de volgende aangifte (boven € 1.000 btw: een suppletie).
 5. **Bedragen in centen** (integers), BTW-percentage per regel, BTW per tarief berekend over de som van de regels.
 6. **Gebeurtenissen zijn de bron van waarheid.** Wat er gebeurd is (een bankbetaling, een inkoop) wordt met bewijs vastgelegd; de journaalregels worden daar met vaste, geversioneerde regels uit gecompileerd (`src/core-ledger/rules.ts`). Een andere categorie kiezen vervangt de gebeurtenis: tegenboeking van de oude post en een nieuwe post, nooit een stille wijziging. In de expertmodus toont elke post zijn herkomst.
@@ -55,6 +55,9 @@ src/
   main/          Electron-hoofdproces: IPC-whitelist, PDF (Chromium printToPDF), safeStorage, back-ups, updater
   renderer/      React-UI
 ```
+
+Online onderdelen (Cloudflare Workers, elk met eigen README): `workers/licentie` (abonnement en
+licentie), `workers/assistent` (online hulp bij categorievoorstellen, #132) en `workers/site` (de website).
 
 De renderer heeft geen Node-toegang (`contextIsolation`, `sandbox`). Alle aanroepen gaan via één
 IPC-kanaal naar een whitelist in `src/main/api.ts`. Geheimen (SMTP-wachtwoord, API-sleutels)
