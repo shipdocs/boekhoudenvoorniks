@@ -26,7 +26,7 @@ const QUESTION = 'categorie';
 export interface AiBinding {
   run(model: string, inputs: Record<string, unknown>, options: { gateway: { id: string; skipCache: boolean; collectLog: boolean } }): Promise<unknown>;
 }
-/** Workers Rate Limiting (binding PER_ADMINISTRATIE). */
+/** Workers Rate Limiting (bindings PER_IP en PER_ADMINISTRATIE). */
 export interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>;
 }
@@ -43,6 +43,8 @@ export interface Env {
   AI: AiBinding;
   LICENTIE: LicentieControle;
   PER_ADMINISTRATIE: RateLimiter;
+  /** eerste, ruime grens per IP-adres: ook verzoeken met willekeurige sleutels bereiken de licentie-controle niet onbeperkt */
+  PER_IP: RateLimiter;
   /** var: kill switch; alleen "true" = aan */
   ENABLED?: string;
   /** var: naam van de AI Gateway */
@@ -182,6 +184,10 @@ async function classify(request: Request, env: Env, deps: Deps, meta: Record<str
   if (env.ENABLED !== 'true') throw new HttpError(503, 'Online hulp staat tijdelijk uit');
   const managementKey = request.headers.get('authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1] ?? '';
   if (!MANAGEMENT_KEY.test(managementKey)) throw new HttpError(401, 'Geen geldige sleutel');
+  // Per IP vóór alles wat kost (body, licentie-controle): de grens per administratie + sleutel hieronder
+  // krijgt bij elke verzonnen sleutel een nieuwe emmer, deze niet. Het IP-adres wordt niet gelogd.
+  const ip = request.headers.get('cf-connecting-ip') ?? 'onbekend';
+  if (!(await env.PER_IP.limit({ key: `ip:${ip}` })).success) throw new HttpError(429, 'Te veel verzoeken; probeer het zo opnieuw');
   const req = parseRequest(await readBody(request));
   meta.appVersion = req.appVersion;
   meta.categories = req.categories.length;

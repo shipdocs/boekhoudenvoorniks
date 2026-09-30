@@ -21,10 +21,11 @@ const JEV_OK = {
   usage: { input_tokens: 380, output_tokens: 45 },
 };
 
-function worker(opts: { ai?: (model: string, inputs: Record<string, unknown>, options: unknown) => Promise<unknown>; auth?: Awaited<ReturnType<LicentieControle['assistent']>>; rate?: boolean; env?: Partial<Env> } = {}) {
+function worker(opts: { ai?: (model: string, inputs: Record<string, unknown>, options: unknown) => Promise<unknown>; auth?: Awaited<ReturnType<LicentieControle['assistent']>>; rate?: boolean; ipRate?: boolean; env?: Partial<Env> } = {}) {
   const aiCalls: { model: string; inputs: Record<string, unknown>; options: unknown }[] = [];
   const authCalls: unknown[] = [];
   const rateKeys: string[] = [];
+  const ipKeys: string[] = [];
   const logs: string[] = [];
   const env: Env = {
     ENABLED: 'true',
@@ -44,6 +45,12 @@ function worker(opts: { ai?: (model: string, inputs: Record<string, unknown>, op
         return opts.auth ?? { ok: true };
       },
     },
+    PER_IP: {
+      limit: async ({ key }) => {
+        ipKeys.push(key);
+        return { success: opts.ipRate ?? true };
+      },
+    },
     PER_ADMINISTRATIE: {
       limit: async ({ key }) => {
         rateKeys.push(key);
@@ -60,7 +67,7 @@ function worker(opts: { ai?: (model: string, inputs: Record<string, unknown>, op
     });
     return { status: res.status, json: (await res.json()) as Record<string, unknown> };
   };
-  return { call, aiCalls, authCalls, rateKeys, logs };
+  return { call, aiCalls, authCalls, rateKeys, ipKeys, logs };
 }
 
 describe('assistent-Worker', () => {
@@ -109,6 +116,19 @@ describe('assistent-Worker', () => {
     await w.call(body(), { authorization: `Bearer ${'R'.repeat(43)}` });
     expect(w.rateKeys).toHaveLength(2);
     expect(w.rateKeys[0]).not.toBe(w.rateKeys[1]);
+  });
+
+  it('grens per IP-adres vóór de licentie-controle: verzonnen sleutels krijgen geen eigen emmer', async () => {
+    const w = worker();
+    for (const k of ['R', 'S', 'T']) await w.call(body(), { authorization: `Bearer ${k.repeat(43)}`, 'cf-connecting-ip': '203.0.113.7' });
+    expect(w.ipKeys).toEqual(['ip:203.0.113.7', 'ip:203.0.113.7', 'ip:203.0.113.7']);
+    const blocked = worker({ ipRate: false });
+    expect((await blocked.call(body(), { authorization: `Bearer ${KEY}`, 'cf-connecting-ip': '203.0.113.7' })).status).toBe(429);
+    expect(blocked.rateKeys).toHaveLength(0);
+    expect(blocked.authCalls).toHaveLength(0);
+    expect(blocked.aiCalls).toHaveLength(0);
+    // het IP-adres komt niet in de logs
+    expect(w.logs.join('\n')).not.toContain('203.0.113.7');
   });
 
   it('kill switch: alles behalve ENABLED "true" = 503, zonder licentie- of modelaanroep', async () => {

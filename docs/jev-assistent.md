@@ -69,7 +69,7 @@ alles behalve een geldig 200-antwoord als "geen voorstel" en gaat door met de st
    `0005_assistent_gebruik.sql`.
 3. **Assistent-Worker** `workers/assistent`: `POST /v1/classificeren`, Workers AI-binding `AI`, AI
    Gateway met `skipCache: true` en `collectLog: false` en zonder metadata, Service Binding `LICENTIE`,
-   rate limit `PER_ADMINISTRATIE`, kill switch, bodylimiet 16 KB, strikte schema's, time-out, logs alleen
+   rate limits `PER_IP` (vóór de licentie-controle) en `PER_ADMINISTRATIE`, kill switch, bodylimiet 16 KB, strikte schema's, time-out, logs alleen
    met status, schema-/app-/modelversie en latency-bucket.
 4. **Tests**: `tests/jev.test.ts` (app), `tests/assistent-worker.test.ts` (Worker), uitbreiding van
    `tests/licentie.test.ts` (autorisatie en quotum).

@@ -13,7 +13,8 @@ geldig 200-antwoord terug op de gewone flow.
 
 - **Bindings**: `AI` (Workers AI), `LICENTIE` (Service Binding naar het entrypoint `Controle` van
   `boekhoudenvoorniks-licentie`: abonnement, beheersleutel en dagquotum in de licentie-D1),
-  `PER_ADMINISTRATIE` (rate limit, 30 per minuut per administratie).
+  `PER_IP` (rate limit, 120 per minuut per IP-adres, vóór de licentie-controle) en `PER_ADMINISTRATIE`
+  (30 per minuut per administratie + beheersleutel).
 - **Vars**: `ENABLED` (kill switch, alleen `"true"` = aan), `GATEWAY_ID`, `MODEL`, `DAILY_QUOTA`,
   `TIMEOUT_MS`. Geen geheimen.
 - **AI Gateway**: aanroep met `skipCache: true` en `collectLog: false`, zonder metadata. Zet in het
