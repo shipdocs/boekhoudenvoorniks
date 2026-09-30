@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { LICENSE_PUBLIC_KEY, LicenseService, verifyLicense } from '../src/license/license';
 import { createApi, type HostContext } from '../src/main/api';
 import { setup } from './helpers';
+import { TERMS_VERSION } from '../src/shared/legal';
 import { signLicense } from './license-token';
 
 /**
@@ -11,6 +12,7 @@ import { signLicense } from './license-token';
  */
 
 const TODAY = '2026-10-15';
+const ACCEPT = { terms: TERMS_VERSION, business: true };
 
 function keys() {
   const { privateKey } = generateKeyPairSync('ed25519');
@@ -102,11 +104,16 @@ describe('licentie in de app', () => {
 
     // afsluiten: eerst de bedrijfsgegevens compleet (voor de factuur)
     s.settings.update({ company: { ...s.settings.get().company, kvkNumber: '  ', vatNumber: '' } });
-    await expect(api.license.checkout('piet@example.nl')).rejects.toThrow(/ontbreekt nog: KvK- of btw-nummer/);
+    // zonder akkoord (artikel 8.2/8.3), of met een oude versie van de voorwaarden: niet afsluiten
+    await expect(api.license.checkout('piet@example.nl')).rejects.toThrow(/voor je bedrijf afsluit en ga akkoord/);
+    await expect(api.license.checkout('piet@example.nl', { terms: '2026-10-01', business: true })).rejects.toThrow(/ga akkoord met de voorwaarden/);
+    await expect(api.license.checkout('piet@example.nl', { terms: TERMS_VERSION, business: false })).rejects.toThrow(/voor je bedrijf/);
+    expect(started).toHaveLength(0);
+    await expect(api.license.checkout('piet@example.nl', ACCEPT)).rejects.toThrow(/ontbreekt nog: KvK- of btw-nummer/);
     expect(started).toHaveLength(0);
     s.settings.update({ company: { ...s.settings.get().company, kvkNumber: '12345678' } });
-    expect(await api.license.checkout('piet@example.nl')).toEqual({ al: false });
-    expect(started[0]).toEqual({ administratie: id, email: 'piet@example.nl', bedrijf: { naam: 'Stukadoorsbedrijf Piet', adres: 'Kalkweg 1', postcode: '1234 AB', plaats: 'Utrecht', land: 'NL', kvk: '12345678', btw: undefined }, managementKey: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
+    expect(await api.license.checkout('piet@example.nl', ACCEPT)).toEqual({ al: false });
+    expect(started[0]).toEqual({ administratie: id, email: 'piet@example.nl', bedrijf: { naam: 'Stukadoorsbedrijf Piet', adres: 'Kalkweg 1', postcode: '1234 AB', plaats: 'Utrecht', land: 'NL', kvk: '12345678', btw: undefined }, managementKey: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), voorwaarden: TERMS_VERSION, zakelijk: true });
     const managementKey = (started[0] as { managementKey: string }).managementKey;
     // de beheersleutel gaat niet mee naar het scherm
     expect(JSON.stringify(api.settings.get())).not.toContain(managementKey);
@@ -119,7 +126,7 @@ describe('licentie in de app', () => {
     expect(await api.exchange.send('2026-06-30', [], 'bestand')).toMatchObject({ exchange: expect.any(Number) });
     expect(s.license.status(TODAY)).toMatchObject({ state: 'actief', cancelled: false });
     // nog een keer afsluiten terwijl het loopt: geen betaalpagina
-    expect(await api.license.checkout('piet@example.nl')).toEqual({ al: true });
+    expect(await api.license.checkout('piet@example.nl', ACCEPT)).toEqual({ al: true });
     expect(opened).toHaveLength(1);
 
     // opzeggen: de licentie loopt af, versturen kan tot dan
@@ -128,5 +135,15 @@ describe('licentie in de app', () => {
     expect(fetched).toEqual(fetched.map(() => ({ administratie: id, managementKey })));
     expect(s.license.needsRefresh(TODAY)).toBe(false);
     expect(await api.license.price()).toEqual({ bedrag: '9.99', valuta: 'EUR', per: 'maand' });
+  });
+});
+
+describe('voorwaarden', () => {
+  it('site, PDF en app hebben dezelfde versie (anders vraagt de app om akkoord met een andere tekst)', async () => {
+    const { readFileSync, statSync } = await import('node:fs');
+    const html = readFileSync(new URL('../site/voorwaarden.html', import.meta.url), 'utf8');
+    expect(html).toContain(`Versie ${TERMS_VERSION}`);
+    // na een wijziging: npm run voorwaarden:pdf
+    expect(statSync(new URL('../site/voorwaarden.pdf', import.meta.url)).mtimeMs).toBeGreaterThanOrEqual(statSync(new URL('../site/voorwaarden.html', import.meta.url)).mtimeMs - 60_000);
   });
 });

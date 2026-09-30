@@ -55,6 +55,10 @@ test('abonnement: zonder abonnement geweigerd, proefperiode afsluiten, licentie 
 
   // afsluiten: het e-mailadres uit de onboarding staat klaar; de betaalpagina "opent"
   await expect(abonnement.getByLabel('E-mailadres voor het abonnement en de facturen')).toHaveValue('piet@example.nl');
+  // eerst akkoord (artikel 8.2/8.3): zonder vinkje kan afsluiten niet
+  await expect(abonnement.getByRole('button', { name: '4 maanden gratis beginnen' })).toBeDisabled();
+  await expect(abonnement.getByRole('link', { name: 'Download de voorwaarden als PDF' })).toBeVisible();
+  await abonnement.getByRole('checkbox', { name: /Ik sluit dit abonnement af voor mijn bedrijf/ }).check();
   await abonnement.getByRole('button', { name: '4 maanden gratis beginnen' }).click();
   await expect(page.locator('.toasts').getByText('De betaalpagina is geopend in je browser')).toBeVisible();
 
@@ -64,7 +68,7 @@ test('abonnement: zonder abonnement geweigerd, proefperiode afsluiten, licentie 
 
   // betaald (webhook): de bedrijfsgegevens voor de factuur gingen mee
   const accounts = (await (await request.post('/__pay')).json()).ok as { email: string; bedrijf: Record<string, string> }[];
-  expect(accounts).toEqual([expect.objectContaining({ email: 'piet@example.nl', bedrijf: expect.objectContaining({ naam: 'Stukadoorsbedrijf Piet', kvk: '12345678', land: 'NL' }) })]);
+  expect(accounts).toEqual([expect.objectContaining({ email: 'piet@example.nl', voorwaarden: '2026-10-02', zakelijk: true, bedrijf: expect.objectContaining({ naam: 'Stukadoorsbedrijf Piet', kvk: '12345678', land: 'NL' }) })]);
   await abonnement.getByRole('button', { name: 'Ik heb betaald: licentie ophalen' }).click();
   await expect(page.locator('.toasts').getByText(/Abonnement actief t\/m/)).toBeVisible();
   await expect(card.getByText(/Abonnement actief; de maandelijkse factuur krijg je per e-mail/)).toBeVisible();
