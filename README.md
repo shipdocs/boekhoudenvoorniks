@@ -131,6 +131,10 @@ Get-FileHash '.\BoekhoudenVoorNiks-Setup-0.7.3.exe' -Algorithm SHA256   # vergel
 
 Klopt het, klik dan op **Meer informatie → Toch uitvoeren**. Op Linux: `sha256sum -c SHA256SUMS-Linux.txt --ignore-missing`.
 
+Voor Windows is publicatie via de Microsoft Store onderzocht. Een Store-MSIX wordt door Microsoft
+ondertekend en heeft geen eigen publiek code-signingcertificaat nodig; de bestaande EXE-route wel.
+Het besluit, de randvoorwaarden en het stappenplan staan in [docs/windows-store.md](docs/windows-store.md).
+
 ## Releases en updates
 
 Een tag `v*`, of het handmatig starten van de workflow *Release* op main (Actions → Release → Run
