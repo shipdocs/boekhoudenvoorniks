@@ -33,7 +33,7 @@ import { TRADES } from '../shared/trades';
 import type { Confirmation } from '../intake/intake';
 import type { JobStatus } from '../jobs/jobs';
 import type { LineInput } from '../documents/totals';
-import type { Task } from '../inbox/inbox';
+import { documentProposal, type Task } from '../inbox/inbox';
 import type { OpeningInput, SectionKey } from '../onboarding/switchover';
 import type { XafApplyChoices } from '../onboarding/xaf-import';
 import { OPEN_ITEMS_TEMPLATE, type ColumnMapping } from '../import/opening-tables';
@@ -205,6 +205,9 @@ export function createApi(s: Services, host: HostContext) {
         const d = s.intake.get(r.documentId!);
         const res = d.result;
         if (!res?.supplier || !res.total || !res.invoiceDate || !d.classification) return { navigate: { screen: 'document', id: d.id } };
+        // alleen het voorstel dat de gebruiker zag: is het intussen veranderd (opnieuw gelezen, betaling gekoppeld), dan niet uitvoeren
+        if (r.proposal !== undefined && r.proposal !== documentProposal(d)) throw new ValidationError('Het voorstel voor deze bon is intussen veranderd. Bekijk hem opnieuw.');
+        if (d.status !== 'controle') throw new ValidationError('Deze bon is al verwerkt');
         s.intake.confirm(d.id, {
           supplier: res.supplier.value,
           date: res.invoiceDate.value,
@@ -576,6 +579,10 @@ export function createApi(s: Services, host: HostContext) {
         return { ...settings, smtpPasswordSet: host.hasSmtpPassword() };
       },
       update: (patch: Partial<AppSettings>) => {
+        // online hulp (JEV) hoort bij het abonnement: alleen aan te zetten met een actieve licentie (#132)
+        if (patch.ocr?.onlineCategoryHelp === true && !s.settings.get().ocr.onlineCategoryHelp && s.license.status(today()).state !== 'actief') {
+          throw new ValidationError('Online hulp bij categorievoorstellen hoort bij het abonnement. Neem eerst een abonnement.');
+        }
         const r = s.settings.update(patch);
         if (patch.ocr) host.reconfigureLocalAi();
         if (patch.autoUpdate !== undefined) host.updates?.reconfigure();

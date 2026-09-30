@@ -1,0 +1,385 @@
+{
+ "beschrijving": "Synthetische benchmarkset voor online hulp bij categorievoorstellen (#132). Verzonnen leveranciers en omschrijvingen, handmatig vastgelegde verwachte categorie. Geen echte klantdocumenten.",
+ "gevallen": [
+  {
+   "id": 1,
+   "leverancier": "Gamma Utrecht",
+   "artikelen": [
+    "Gipsplaat 12,5mm",
+    "Schroeven 3,5x25"
+   ],
+   "verwacht": "materiaal",
+   "soort": "bekend"
+  },
+  {
+   "id": 2,
+   "leverancier": "Bouwmaat Amersfoort",
+   "artikelen": [
+    "Kalk-cementmortel 25kg",
+    "Hoekprofiel"
+   ],
+   "verwacht": "materiaal",
+   "soort": "bekend"
+  },
+  {
+   "id": 3,
+   "leverancier": "Toolstation",
+   "artikelen": [
+    "Makita accuboormachine 18V"
+   ],
+   "verwacht": "gereedschap",
+   "soort": "bekend"
+  },
+  {
+   "id": 4,
+   "leverancier": "Shell Station A2",
+   "artikelen": [
+    "Diesel"
+   ],
+   "verwacht": "brandstof",
+   "soort": "bekend"
+  },
+  {
+   "id": 5,
+   "leverancier": "KPN B.V.",
+   "artikelen": [
+    "Mobiel abonnement september"
+   ],
+   "verwacht": "telefoon",
+   "soort": "bekend"
+  },
+  {
+   "id": 6,
+   "leverancier": "Microsoft Ireland",
+   "artikelen": [
+    "Microsoft 365 Business Standard"
+   ],
+   "verwacht": "software",
+   "soort": "bekend"
+  },
+  {
+   "id": 7,
+   "leverancier": "Sikkens Center",
+   "artikelen": [
+    "Rubbol BL Satura 2,5L",
+    "Afplaktape"
+   ],
+   "verwacht": "materiaal",
+   "soort": "bekend"
+  },
+  {
+   "id": 8,
+   "leverancier": "Q-Park Centrum",
+   "artikelen": [
+    "Parkeren 2 uur"
+   ],
+   "verwacht": "auto",
+   "soort": "bekend"
+  },
+  {
+   "id": 9,
+   "leverancier": "Pennenwinkel De Vulpen",
+   "artikelen": [
+    "Notitieblokken A4",
+    "Balpennen blauw"
+   ],
+   "verwacht": "kantoor",
+   "soort": "onbekend"
+  },
+  {
+   "id": 10,
+   "leverancier": "Drukkerij Van Dam",
+   "artikelen": [
+    "Visitekaartjes 500 stuks",
+    "Flyers A5 dubbelzijdig"
+   ],
+   "verwacht": "reclame",
+   "soort": "onbekend"
+  },
+  {
+   "id": 11,
+   "leverancier": "Werkkledingshop Noord",
+   "artikelen": [
+    "Werkbroek met kniezakken",
+    "Veiligheidsschoenen S3"
+   ],
+   "verwacht": "werkkleding",
+   "soort": "onbekend"
+  },
+  {
+   "id": 12,
+   "leverancier": "Restaurant De Gouden Leeuw",
+   "artikelen": [
+    "Lunch 2 personen",
+    "Koffie"
+   ],
+   "verwacht": "representatie",
+   "soort": "onbekend"
+  },
+  {
+   "id": 13,
+   "leverancier": "Hostnet",
+   "artikelen": [
+    "Domeinnaam verlenging",
+    "Webhosting pakket"
+   ],
+   "verwacht": "software",
+   "soort": "onbekend"
+  },
+  {
+   "id": 14,
+   "leverancier": "Interpolis",
+   "artikelen": [
+    "Bedrijfsaansprakelijkheidsverzekering"
+   ],
+   "verwacht": "verzekering",
+   "soort": "onbekend"
+  },
+  {
+   "id": 15,
+   "leverancier": "Administratiekantoor Jansen",
+   "artikelen": [
+    "Samenstellen jaarrekening 2025"
+   ],
+   "verwacht": "boekhouder",
+   "soort": "onbekend"
+  },
+  {
+   "id": 16,
+   "leverancier": "Bedrijfsverzamelgebouw De Hallen",
+   "artikelen": [
+    "Huur werkplaats oktober"
+   ],
+   "verwacht": "huur",
+   "soort": "onbekend"
+  },
+  {
+   "id": 17,
+   "leverancier": "Klusbedrijf Smit",
+   "artikelen": [
+    "Uren tegelwerk badkamer project Kerkstraat"
+   ],
+   "verwacht": "onderaannemer",
+   "soort": "onbekend"
+  },
+  {
+   "id": 18,
+   "leverancier": "Houthandel Bakker",
+   "artikelen": [
+    "Vuren balk 44x69",
+    "Multiplex 18mm"
+   ],
+   "verwacht": "materiaal",
+   "soort": "onbekend"
+  },
+  {
+   "id": 19,
+   "leverancier": "Tegelhuys",
+   "artikelen": [
+    "Wandtegels 30x60 wit",
+    "Tegellijm flexibel"
+   ],
+   "verwacht": "materiaal",
+   "soort": "onbekend"
+  },
+  {
+   "id": 20,
+   "leverancier": "Kantoorcentrum Online",
+   "artikelen": [
+    "Printerpapier 80 gram",
+    "Nietjes"
+   ],
+   "verwacht": "kantoor",
+   "soort": "onbekend"
+  },
+  {
+   "id": 21,
+   "leverancier": "Adobe Systems",
+   "artikelen": [
+    "Creative Cloud maandabonnement"
+   ],
+   "verwacht": "software",
+   "soort": "onbekend"
+  },
+  {
+   "id": 22,
+   "leverancier": "Canva",
+   "artikelen": [
+    "Canva Pro jaarabonnement"
+   ],
+   "verwacht": "software",
+   "soort": "onbekend"
+  },
+  {
+   "id": 23,
+   "leverancier": "Garage Van den Berg",
+   "artikelen": [
+    "APK keuring",
+    "Olie verversen"
+   ],
+   "verwacht": "auto",
+   "soort": "onbekend"
+  },
+  {
+   "id": 24,
+   "leverancier": "Verfgroothandel Oost",
+   "artikelen": [
+    "Grondverf wit 2,5L",
+    "Kwasten set"
+   ],
+   "verwacht": "materiaal",
+   "soort": "onbekend"
+  },
+  {
+   "id": 25,
+   "leverancier": "Vakbeurs Bouw",
+   "artikelen": [
+    "Standhuur vakbeurs"
+   ],
+   "verwacht": "reclame",
+   "soort": "onbekend"
+  },
+  {
+   "id": 26,
+   "leverancier": "Opleidingscentrum Bouw",
+   "artikelen": [
+    "Cursus VCA basis"
+   ],
+   "verwacht": "overig",
+   "soort": "onbekend"
+  },
+  {
+   "id": 27,
+   "leverancier": "ING Bank",
+   "artikelen": [
+    "Kosten zakelijke rekening"
+   ],
+   "verwacht": "bank",
+   "soort": "onbekend"
+  },
+  {
+   "id": 28,
+   "leverancier": "Action",
+   "artikelen": [
+    "Afplaktape",
+    "Schoonmaakdoekjes",
+    "Snoep"
+   ],
+   "verwacht": "materiaal",
+   "soort": "gemengd"
+  },
+  {
+   "id": 29,
+   "leverancier": "Hema",
+   "artikelen": [
+    "Ordners",
+    "Koffiebekers",
+    "Handdoek"
+   ],
+   "verwacht": "kantoor",
+   "soort": "gemengd"
+  },
+  {
+   "id": 30,
+   "leverancier": "Albert Heijn",
+   "artikelen": [
+    "Koffie",
+    "Melk",
+    "Koekjes"
+   ],
+   "verwacht": "representatie",
+   "soort": "gemengd"
+  },
+  {
+   "id": 31,
+   "leverancier": "Kruidvat",
+   "artikelen": [
+    "Pleisters",
+    "Handcrème"
+   ],
+   "verwacht": "overig",
+   "soort": "gemengd"
+  },
+  {
+   "id": 32,
+   "leverancier": "Boekhandel Het Boek",
+   "artikelen": [
+    "Boek: Boekhouden voor dummies"
+   ],
+   "verwacht": "kantoor",
+   "soort": "misleidend"
+  },
+  {
+   "id": 33,
+   "leverancier": "De Materiaalman Consultancy",
+   "artikelen": [
+    "Advies duurzaamheid"
+   ],
+   "verwacht": "overig",
+   "soort": "misleidend"
+  },
+  {
+   "id": 34,
+   "leverancier": "Software Snacks",
+   "artikelen": [
+    "Broodjes",
+    "Frisdrank"
+   ],
+   "verwacht": "representatie",
+   "soort": "misleidend"
+  },
+  {
+   "id": 35,
+   "leverancier": "Autobedrijf Kantoor",
+   "artikelen": [
+    "Ruitenwisserbladen"
+   ],
+   "verwacht": "auto",
+   "soort": "misleidend"
+  },
+  {
+   "id": 36,
+   "leverancier": "Kledingwinkel Mode",
+   "artikelen": [
+    "Colbert",
+    "Stropdas"
+   ],
+   "verwacht": "overig",
+   "soort": "misleidend"
+  },
+  {
+   "id": 37,
+   "leverancier": "Onbekend BV",
+   "artikelen": [],
+   "verwacht": "overig",
+   "soort": "weinig-info"
+  },
+  {
+   "id": 38,
+   "leverancier": "J. de Vries",
+   "artikelen": [
+    "Diversen"
+   ],
+   "verwacht": "overig",
+   "soort": "weinig-info"
+  },
+  {
+   "id": 39,
+   "leverancier": "Webshop 24",
+   "artikelen": [
+    "Artikel 8821"
+   ],
+   "verwacht": "overig",
+   "soort": "weinig-info"
+  },
+  {
+   "id": 40,
+   "leverancier": "Marktplaats",
+   "artikelen": [
+    "Gebruikte steigerdelen"
+   ],
+   "verwacht": "gereedschap",
+   "soort": "weinig-info"
+  }
+ ]
+}

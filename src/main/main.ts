@@ -21,6 +21,7 @@ import { nodeCliRunner, tempWorkspace } from './cli-runner';
 import { checkCli, openLoginTerminal, programExists } from './assistant-tools';
 import { LocalOcrRuntime } from '../ocr-runtime/runtime';
 import { OllamaClassifier } from '../intake/llm-ollama';
+import { JevClassifier } from '../intake/llm-jev';
 import type { FetchLike } from '../integrations/types';
 import { ImapSource } from '../mail/imap-source';
 import { Updates } from './updates';
@@ -290,7 +291,19 @@ function configureLocalAi(): void {
     services.intake.setOcrProvider(null);
   }
   try {
-    services.classifier.setLlm(ocr.llmUrl && ocr.llmModel ? new OllamaClassifier(ocr.llmUrl, ocr.llmModel, localFetch) : null);
+    if (ocr.onlineCategoryHelp) {
+      // online hulp (JEV) vervangt de lokale AI; per aanroep opnieuw gecontroleerd: opt-in én actief abonnement
+      services.classifier.setLlm(
+        new JevClassifier({
+          fetch: localFetch,
+          allowed: () => services.settings.get().ocr.onlineCategoryHelp && services.license.status(today()).state === 'actief',
+          credentials: () => ({ administrationId: services.settings.administrationId(), managementKey: services.license.managementKey() }),
+          appVersion: app.getVersion(),
+        }),
+      );
+    } else {
+      services.classifier.setLlm(ocr.llmUrl && ocr.llmModel ? new OllamaClassifier(ocr.llmUrl, ocr.llmModel, localFetch) : null);
+    }
   } catch (e) {
     console.error('LLM-instelling ongeldig', e);
     services.classifier.setLlm(null);
