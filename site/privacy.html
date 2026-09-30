@@ -22,10 +22,10 @@
   </header>
   <main class="wrap legal">
     <h1>Privacyverklaring</h1>
-    <p class="muted">Versie 1 oktober 2026</p>
+    <p class="muted">Versie 2026-10-02 · geldig vanaf 2 oktober 2026</p>
 
     <h2>Kort gezegd</h2>
-    <p><strong>Je administratie blijft op je eigen computer.</strong> Wij ontvangen geen gegevens over je klanten, facturen, bonnetjes of bank. (Alleen als je met een abonnement zelf de online hulp bij categorievoorstellen aanzet, gaan de winkelnaam en artikelomschrijvingen van een onbekende bon naar onze server; zie hieronder.) Er is geen account en er is geen cloud. Neem je een abonnement voor de uitwisseling met je boekhouder, dan bewaren wij alleen wat nodig is om te betalen en te factureren (zie hieronder).</p>
+    <p><strong>Je administratie blijft op je eigen computer.</strong> Wij ontvangen geen gegevens over je klanten, facturen, bonnetjes of bank. (De online hulp bij categorievoorstellen, die de winkelnaam en artikelomschrijvingen van een onbekende bon naar onze server zou sturen, is nog niet beschikbaar; zie hieronder.) Er is geen account en er is geen cloud. Neem je een abonnement voor de uitwisseling met je boekhouder, dan bewaren wij alleen wat nodig is om te betalen en te factureren (zie hieronder).</p>
 
     <h2>Wie is verantwoordelijk?</h2>
     <p>ShipDocs, Middelweg 211, 1911 EE Uitgeest (KvK 95207341, <a href="mailto:info@shipdocs.app">info@shipdocs.app</a>, <a href="tel:+31203695765">+31 20 369 5765</a>) ontwikkelt BoekhoudenVoorNiks en deze website. Voor de persoonsgegevens die jij in het programma bijhoudt, zoals de namen en adressen van je klanten, ben jij als ondernemer zelf verantwoordelijk. Wij verwerken die gegevens niet.</p>
@@ -36,7 +36,7 @@
       <li><strong>E-mail:</strong> facturen en offertes gaan via de mailserver die jij zelf instelt, naar de ontvanger die jij kiest. Wij zien ze niet.</li>
       <li><strong>Koppelingen die jij aanzet</strong> (bijvoorbeeld een webshop of betaalprovider): het programma haalt daar met jouw eigen sleutels gegevens op. Dat verkeer gaat rechtstreeks tussen jouw computer en die dienst.</li>
       <li><strong>Tekstherkenning en lokale slimme herkenning:</strong> als je die aanzet, draaien ze op je eigen computer. Het programma accepteert daarvoor alleen adressen op je eigen computer (localhost), zodat bonnetjes je computer niet verlaten.</li>
-      <li><strong>Online hulp bij categorievoorstellen (alleen met abonnement, standaard uit):</strong> als je dit zelf aanzet en de app bij een onbekende winkel niet weet waar een bon voor was, stuurt het programma de naam van de winkel, maximaal 15 korte artikelomschrijvingen (bedragen, rekeningnummers en e-mailadressen haalt het er eerst uit) en de namen van je kostencategorieën naar onze server bij Cloudflare. Die laat het model JEV van TypeSafe (via Cloudflare Workers AI) één categorie kiezen en stuurt alleen die keuze terug. Het nummer van je administratie en je beheersleutel gaan mee om je abonnement te controleren, maar niet naar het model. Foto's, PDF's, bedragen, btw-nummers, klantgegevens en je administratie gaan nooit mee. Wij bewaren de vraag niet: onze server en de AI-gateway loggen of bewaren de inhoud niet (geen cache, geen payloadlogs); wij houden alleen per administratie per dag bij hoeveel vragen er zijn gesteld, voor het maximum. Volgens Cloudflare bewaart het model zelf niets (zero data retention). Wat je daarna bevestigt of aanpast, onthoudt het programma alleen op je eigen computer.</li>
+      <li><strong>Online hulp bij categorievoorstellen (nog niet beschikbaar; straks alleen met abonnement en standaard uit):</strong> deze functie zit nog niet in het programma. Zodra hij er is, werkt hij zo: als je hem zelf aanzet en de app bij een onbekende winkel niet weet waar een bon voor was, stuurt het programma de naam van de winkel, maximaal 15 korte artikelomschrijvingen (bedragen, rekeningnummers en e-mailadressen haalt het er eerst uit) en de namen van je kostencategorieën naar onze server bij Cloudflare. Die laat het model JEV van TypeSafe (via Cloudflare Workers AI) één categorie kiezen en stuurt alleen die keuze terug. Het nummer van je administratie en je beheersleutel gaan mee om je abonnement te controleren, maar niet naar het model. Foto's, PDF's, bedragen, btw-nummers, klantgegevens en je administratie gaan nooit mee. Wij bewaren de vraag niet: onze server en de AI-gateway loggen of bewaren de inhoud niet (geen cache, geen payloadlogs); wij houden alleen per administratie per dag bij hoeveel vragen er zijn gesteld, voor het maximum. Volgens Cloudflare bewaart het model zelf niets (zero data retention). Wat je daarna bevestigt of aanpast, onthoudt het programma alleen op je eigen computer.</li>
       <li><strong>Uitwisseling met je boekhouder:</strong> de export gaat per e-mail (via jouw eigen mailserver) of als bestand rechtstreeks van jou naar je boekhouder, versleuteld zodat alleen zijn kantoor hem kan openen. Zijn antwoord komt op dezelfde manier terug. Het gaat niet via ons, en wij kunnen het niet lezen.</li>
       <li><strong>Licentie voor het abonnement:</strong> alleen als je een abonnement hebt (gehad), vraagt het programma bij onze licentieserver of je licentie nog geldig is. Het stuurt daarbij het nummer van je administratie en een willekeurige beheersleutel mee. De sleutel blijft lokaal in je administratie; onze server bewaart alleen een niet-terugrekenbare hash om te controleren dat alleen jouw app de licentie kan ophalen of het abonnement kan opzeggen.</li>
     </ul>
@@ -51,9 +51,21 @@
       <li>de nummers die Mollie gebruikt voor jou als klant, je betalingen, je abonnement en je facturen, de betaalde bedragen en de datums.</li>
       <li>met welke versie van de gebruiksvoorwaarden je bij het afsluiten akkoord ging, en wanneer.</li>
     </ul>
-    <p><strong>Waarvoor:</strong> om je abonnement uit te voeren (betalen, verlengen, opzeggen, je licentie geven), om facturen te maken en om te zien of je de gratis proefperiode al eens hebt gehad. De grondslag is de uitvoering van de overeenkomst met jou, en voor de facturen onze wettelijke bewaarplicht.</p>
-    <p><strong>Wie het nog meer verwerkt:</strong> <a href="https://www.mollie.com/nl/privacy">Mollie B.V.</a> voor de betalingen, de incasso en het maken en versturen van de facturen, en <a href="https://www.cloudflare.com/nl-nl/privacypolicy/">Cloudflare</a>, waar onze licentieserver en de server voor de online hulp draaien; de gegevens daarvan staan in een database in West-Europa. Zet je de online hulp aan, dan verwerkt ook TypeSafe (het model JEV, via Cloudflare Workers AI) de artikelomschrijvingen, zonder ze te bewaren.</p>
-    <p><strong>Hoe lang:</strong> zolang je abonnement loopt, en daarna zo lang als nodig voor onze administratie: facturen en de gegevens daarop bewaren wij 7 jaar, zoals de wet voorschrijft. Wil je dat wij de overige gegevens eerder verwijderen, mail ons dan.</p>
+    <p><strong>Waarvoor en op welke grondslag:</strong></p>
+    <ul>
+      <li>je abonnement uitvoeren: betalen, verlengen, opzeggen, je licentie geven, en je per e-mail informeren over bijvoorbeeld een prijswijziging (uitvoering van de overeenkomst);</li>
+      <li>facturen maken en bewaren (wettelijke verplichting: de fiscale bewaarplicht);</li>
+      <li>vastleggen met welke versie van de voorwaarden je akkoord ging, zien of je de gratis proefperiode al eens hebt gehad, en misbruik en fraude tegengaan (ons gerechtvaardigd belang: aantonen wat is afgesproken, en de proefperiode eerlijk houden).</li>
+    </ul>
+    <p><strong>Wie het nog meer verwerkt:</strong> <a href="https://www.mollie.com/nl/privacy">Mollie B.V.</a> voor de betalingen, de incasso en het maken en versturen van de facturen, en <a href="https://www.cloudflare.com/nl-nl/privacypolicy/">Cloudflare</a>, waar onze licentieserver en de server voor de online hulp draaien; de gegevens daarvan staan in een database in West-Europa. Zodra de online hulp beschikbaar is en je hem aanzet, verwerkt ook TypeSafe (het model JEV, via Cloudflare Workers AI) de artikelomschrijvingen, zonder ze te bewaren.</p>
+    <p><strong>Hoe lang:</strong></p>
+    <ul>
+      <li>de gegevens van je abonnement en je betalingen (hierboven): zolang het abonnement loopt en daarna 7 jaar na het einde van de laatste betaalde periode, vanwege de fiscale bewaarplicht voor facturen. Daarna verwijdert onze server ze automatisch; dat controleert hij elke dag.</li>
+      <li>het aantal vragen per dag aan de online hulp (als die er is): 90 dagen, daarna automatisch verwijderd.</li>
+      <li>facturen en betalingen bij Mollie: zolang Mollie die wettelijk moet bewaren, volgens de <a href="https://www.mollie.com/nl/privacy">privacyverklaring van Mollie</a>. Ook een betaling die je begon maar niet afrondde, staat bij Mollie.</li>
+      <li>technische logboeken van onze servers bij Cloudflare (tijdstip, route, status; zonder e-mailadres, inhoud of beheersleutel): enkele dagen, maximaal 7.</li>
+    </ul>
+    <p><strong>Buiten de Europese Unie:</strong> Cloudflare en GitHub zijn Amerikaanse bedrijven. Bij het tonen van deze website, het draaien van onze servers en het aanbieden van updates kunnen gegevens zoals je IP-adres daardoor in de Verenigde Staten worden verwerkt. Beide zijn gecertificeerd onder het EU-VS Data Privacy Framework, waardoor die doorgifte volgens de Europese Commissie een passend beschermingsniveau heeft. De database van onze licentieserver staat in West-Europa.</p>
 
     <h2>Wachtwoorden en sleutels</h2>
     <p>Wachtwoorden en API-sleutels worden versleuteld opgeslagen met het beveiligde sleutelbeheer van je besturingssysteem.</p>
@@ -62,10 +74,11 @@
     <p>Deze website wordt gehost bij <a href="https://www.cloudflare.com/nl-nl/privacypolicy/">Cloudflare</a>. Cloudflare verwerkt daarbij technische gegevens zoals je IP-adres om de site te kunnen tonen en te beveiligen. De website gebruikt geen cookies, geen analytics en geen trackers.</p>
 
     <h2>Contact met ons</h2>
-    <p>Mail je ons of maak je een issue aan op GitHub, dan gebruiken we je naam en e-mailadres alleen om je vraag te beantwoorden. We bewaren die correspondentie niet langer dan nodig.</p>
+    <p>Mail je ons, dan gebruiken we je naam, e-mailadres en wat je schrijft alleen om je vraag te beantwoorden. We bewaren die mail tot 2 jaar na ons laatste contact, tenzij hij langer nodig is, bijvoorbeeld bij een geschil of als hij bij de administratie van je abonnement hoort. Een issue op GitHub is openbaar en staat bij GitHub; je kunt het zelf aanpassen of verwijderen.</p>
 
     <h2>Je rechten</h2>
-    <p>Je hebt recht op inzage, correctie en verwijdering van persoonsgegevens die wij van je hebben. Mail daarvoor naar <a href="mailto:info@shipdocs.app">info@shipdocs.app</a>. Ben je het niet eens met hoe wij met je gegevens omgaan, dan kun je een klacht indienen bij de <a href="https://autoriteitpersoonsgegevens.nl">Autoriteit Persoonsgegevens</a>.</p>
+    <p>Je hebt, voor zover de AVG dat in jouw situatie bepaalt, recht op inzage in je persoonsgegevens, correctie of verwijdering daarvan, beperking van de verwerking en overdracht van je gegevens. Verwerken wij gegevens op grond van ons gerechtvaardigd belang (zie hierboven), dan kun je daartegen bezwaar maken. Gegevens die wij wettelijk moeten bewaren, zoals facturen, kunnen wij niet eerder verwijderen.</p>
+    <p>Wil je een van deze rechten gebruiken, mail dan naar <a href="mailto:info@shipdocs.app">info@shipdocs.app</a>. Wij kunnen je vragen om informatie waarmee we kunnen controleren dat je bent wie je zegt, en reageren binnen een maand. Ben je het niet eens met hoe wij met je gegevens omgaan, dan kun je een klacht indienen bij de <a href="https://www.autoriteitpersoonsgegevens.nl">Autoriteit Persoonsgegevens</a>.</p>
   </main>
   <footer class="wrap foot">
     <span>BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a></span>
