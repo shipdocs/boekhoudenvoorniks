@@ -131,3 +131,4 @@ section { padding: 56px 0; }
 .card.trial ul { padding-left: 20px; }
 .price .badge { display: inline-block; margin: 0 0 6px; padding: 3px 10px; border-radius: 999px; background: var(--primary); color: var(--bg); font-weight: 600; font-size: 13px; }
 .notes .cta { margin-bottom: 28px; }
+.notes .card.trial { margin: 28px 0; }
