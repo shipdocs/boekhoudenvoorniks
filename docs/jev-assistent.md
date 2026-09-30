@@ -77,7 +77,13 @@ alles behalve een geldig 200-antwoord als "geen voorstel" en gaat door met de st
    `src/tools/jev-benchmark.ts` (`npm run benchmark:jev`): regels, optioneel Ollama en optioneel JEV.
 6. **Teksten**: instelling, privacyverklaring, README, CHANGELOG.
 
-## Activeren (handmatig, in deze volgorde)
+## Stand: live sinds 30 september 2026
+
+De assistent-Worker draait op `assistent.boekhoudenvoorniks.nl` via de AI Gateway `default` (Cloudflare maakte
+die zelf aan; een eigen gateway is niet nodig, de Worker zet cache en payloadlogging per verzoek uit). De app
+toont de instelling vanaf 0.7.4. Uitzetten: `ENABLED: "false"` in de privé-repo en deployen.
+
+## Activeren (zoals het ging)
 
 1. Benchmark draaien met JEV op staging (zie onder) en de uitkomst hieronder vastleggen. Geeft JEV geen
    duidelijke winst boven "regels + standaard", dan niet activeren.
