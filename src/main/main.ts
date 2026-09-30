@@ -385,7 +385,8 @@ function initServices(): void {
       if (err) throw new Error(err);
     },
     async openExternal(url) {
-      if (!/^https:\/\//.test(url)) throw new Error('Alleen https-links');
+      // https, en een mail aan ons (vragen en feedback); geen andere schema's
+      if (!/^https:\/\//.test(url) && !/^mailto:info@shipdocs\.app(\?|$)/.test(url)) throw new Error('Alleen https-links');
       await shell.openExternal(url);
     },
     setSmtpPassword: (pw) => (pw ? secrets.set(SMTP_SECRET, pw) : secrets.delete(SMTP_SECRET)),
