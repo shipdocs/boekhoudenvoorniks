@@ -79,9 +79,15 @@ function amounts(text: string): Cents[] {
   }).filter((n) => Number.isFinite(n));
 }
 
-function parseDateText(text: string): string | null {
+function parseDateText(text: string, opts: { loose?: boolean } = {}): string | null {
   let m = /\b(\d{4})-(\d{2})-(\d{2})\b/.exec(text);
   if (m) return isIsoDate(`${m[1]}-${m[2]}-${m[3]}`) ? `${m[1]}-${m[2]}-${m[3]}` : null;
+  // "30 09 2026" (streepjes weggevallen in de tekstlaag) en, alleen achter een kopje als "Datum", "30092026"
+  m = /\b(\d{2}) (\d{2}) (20\d{2})\b/.exec(text) ?? (opts.loose ? /\b(\d{2})(\d{2})(20\d{2})\b/.exec(text) : null);
+  if (m) {
+    const iso = `${m[3]}-${m[2]}-${m[1]}`;
+    if (isIsoDate(iso)) return iso;
+  }
   m = /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b/.exec(text);
   if (m) {
     const y = m[3]!.length === 2 ? `20${m[3]}` : m[3]!;
@@ -111,7 +117,7 @@ const VIA_LINE = /\b(?:paid|betaald|bezahlt)\s+(?:via|with|met|mit)\b|\b(?:proce
 /** "Cloudflare, Inc. @cloudflare Bill to": links de verkoper, rechts het kopje van de klant */
 const BILL_TO = /^(.*?)\s*\b(?:bill(?:ed)?\s+to|invoice\s+to|factuur\s+aan|rechnung\s+an)\b/i;
 /** Kopjes, geen naam van een leverancier */
-const LABEL_LINE = /factuur|\bbon\b|kassabon|invoice|receipt|rechnung|datum|\bdate\b|nummer|number|\bdue\b|pagina|page|bill to|ship to|account\s*id|billing\s*period|company\s*name|team\s*name|customer|klantnummer|\b(?:vat|btw|gst|ein)\b/i;
+const LABEL_LINE = /factuur|\bbon\b|kassabon|invoice|receipt|rechnung|datum|\bdate\b|nummer|number|\bdue\b|pagina|page|bill to|ship to|account\s*id|billing\s*period|company\s*name|team\s*name|customer|klantnummer|\b(?:vat|btw|gst|ein)\b|\b(?:betaald|paid|bezahlt)\s+(?:op|on|am)\b/i;
 
 /** Naam van de verkoper links van "Bill to": zonder @handle; bij "X dba Y" de handelsnaam Y. */
 function sellerName(raw: string): string | null {
@@ -186,7 +192,9 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     // de eerste regel met letters, maar geen kopje als "Factuur", "Date of issue" of "Account ID"
     const i = lines.findIndex((l) => /[a-z]{3,}/i.test(l.text) && !LABEL_LINE.test(l.text) && !VIA_LINE.test(l.text));
     if (i >= 0) {
-      supplier = field(lines[i]!.text.slice(0, 80), lines[i]!, 0.5);
+      // "ShipDocs ShipDocs": twee kolommen (afzender en klant zijn hetzelfde bedrijf) op één regel
+      const t = lines[i]!.text.replace(/^(.{2,40}?) \1$/, '$1');
+      supplier = field(t.slice(0, 80), lines[i]!, 0.5);
       supplierLine = i;
     }
   }
@@ -202,7 +210,7 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
       if (pass === 'label' && !/datum|date/i.test(line.text)) continue;
       if (pass !== 'alles' && isPayment(line.text)) continue;
       if (/verval|due/i.test(line.text)) continue;
-      const d = parseDateText(line.text);
+      const d = parseDateText(line.text, { loose: pass === 'label' });
       if (d) {
         invoiceDate = field(d, line, conf);
         break;
