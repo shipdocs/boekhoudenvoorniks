@@ -75,6 +75,8 @@ export const KNOWN_SUPPLIERS: KnownSupplier[] = [
   { name: 'Achmea', pattern: /\bachmea\b/i, category: 'verzekering', vatCode: 'geen' },
   { name: 'Klaverblad', pattern: /\bklaverblad\b/i, category: 'verzekering', vatCode: 'geen' },
   { name: 'De Goudse', pattern: /\bde\s+goudse\b/i, category: 'verzekering', vatCode: 'geen' },
+  // onze eigen factuur (Mollie); niet op 'ShipDocs': dat staat als klant op andermans facturen aan ons
+  { name: 'BoekhoudenVoorNiks', pattern: /\bboekhoudenvoorniks\b/i, category: 'software', vatCode: 'hoog' },
   // Drukwerk
   { name: 'Vistaprint', pattern: /\bvistaprint\b/i, category: 'reclame', vatCode: 'hoog' },
   { name: 'Drukwerkdeal', pattern: /\bdrukwerkdeal\b/i, category: 'reclame', vatCode: 'hoog' },

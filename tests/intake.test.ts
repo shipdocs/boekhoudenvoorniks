@@ -62,6 +62,45 @@ describe('validatie', () => {
     const issues = validateDocument(bad, '2026-09-25');
     expect(issues.find((i) => i.field === 'vat.0')).toMatchObject({ severity: 'fout', suggestion: 4200 });
   });
+  it('factuur van Mollie: streepjes als eigen tekens van het lettertype, "Betaald op" is geen leverancier, afzender twee keer op een regel', () => {
+    // in de tekstlaag staat het streepje als Private Use Area-teken (U+E088); zonder vertaling wordt dat "30092026"
+    const d = '\uE088';
+    // stukjes op één regel staan tegen elkaar aan (zoals in de tekstlaag): x loopt door, 5 punten per teken
+    const row = (y: number, x0: number, parts: string[], gapAfter = 0) => {
+      let x = x0;
+      return parts.map((text) => {
+        const w = text.length * 5;
+        const item = { text, page: 1, bbox: [x, y, x + w, y + 8] as [number, number, number, number], confidence: 1 };
+        x += w + gapAfter;
+        return item;
+      });
+    };
+    const items = [
+      ...row(100, 195, ['Factuur I', d, 'MOL', d, '2026', d, '00347']),
+      ...row(126, 238, ['Datum van uitgifte: 30', d, '09', d, '2026']),
+      ...row(138, 249, ['Vervaldatum: 30', d, '10', d, '2026']),
+      ...row(150, 252, ['Betaald op: 30', d, '09', d, '2026']),
+      ...row(168, 28, ['Onbekende Uitgever']), ...row(168, 532, ['Onbekende Uitgever']),
+      ...row(264, 28, ['KVK', '95207341'], 6),
+      ...row(369, 28, ['Abonnement (september 2026)']), ...row(369, 315, ['€ 10,89']), ...row(369, 454, ['21%']), ...row(369, 537, ['€ 10,89']),
+      ...row(420, 380, ['Subtotaal excl. BTW']), ...row(420, 520, ['€ 9,00']),
+      ...row(432, 380, ['Totaal BTW (21%)']), ...row(432, 520, ['€ 1,89']),
+      ...row(444, 380, ['Totaal (EUR)']), ...row(444, 520, ['€ 10,89']),
+    ];
+    // zoals pdf-text.ts doet vóór het parsen: eigen tekens van het lettertype worden streepjes
+    const fixed = items.map((i) => ({ ...i, text: i.text.replace(/[\u0000\uE000-\uF8FF]/g, '-') }));
+    const r = parseDocumentText(fixed, 'pdf-text');
+    expect(r.invoiceNumber?.value).toBe('I-MOL-2026-00347');
+    expect(r.invoiceDate?.value).toBe('2026-09-30');
+    expect(r.dueDate?.value).toBe('2026-10-30');
+    expect(r.supplier?.value).toBe('Onbekende Uitgever');
+    expect(r.total?.value).toBe(1089);
+    expect(r.vat.value).toEqual([{ rate: 21, base: null, amount: 189 }]);
+    // en zonder de vertaling (bv. OCR die "30092026" leest): de datum achter het kopje wordt toch gevonden
+    const glued = items.map((i) => ({ ...i, text: i.text.replace(d, '') }));
+    expect(parseDocumentText(glued, 'pdf-text').invoiceDate?.value).toBe('2026-09-30');
+  });
+
   it('normaliseert leveranciersnamen', () => {
     expect(supplierKey('GAMMA UTRECHT B.V. 1234')).toBe('gamma utrecht');
     expect(supplierKey('Bouwmaat Nederland B.V.')).toBe('bouwmaat');

@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Opgelost
+- **PDF-facturen van Mollie werden niet gelezen**: het streepje in de datum en het factuurnummer zit in die PDF als eigen teken van het lettertype, waardoor de datum ontbrak en "Betaald op: …" als leverancier werd gezien. Nu worden datum, vervaldatum, factuurnummer en leverancier goed gelezen; ook een datum die aan elkaar geplakt is ("30092026") achter een kopje als "Datum" wordt herkend. Onze eigen factuur wordt herkend als software-abonnement.
+
 ## 0.7.3 — het abonnement: steun de ontwikkeling en krijg de extra functies
 
 ### Nieuw
