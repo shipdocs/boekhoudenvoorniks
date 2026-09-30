@@ -590,7 +590,7 @@ export function createApi(s: Services, host: HostContext) {
           throw new ValidationError('Online hulp bij categorievoorstellen is nog niet beschikbaar.');
         }
         if (patch.ocr?.onlineCategoryHelp === true && !s.settings.get().ocr.onlineCategoryHelp && s.license.status(today()).state !== 'actief') {
-          throw new ValidationError('Online hulp bij categorievoorstellen hoort bij het abonnement. Neem eerst een abonnement.');
+          throw new ValidationError('Online hulp bij categorievoorstellen is een extra functie van het abonnement. Neem eerst een abonnement.');
         }
         const r = s.settings.update(patch);
         if (patch.ocr) host.reconfigureLocalAi();

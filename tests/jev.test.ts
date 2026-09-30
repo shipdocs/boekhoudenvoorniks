@@ -263,7 +263,7 @@ describe('JEV in de documentstroom', () => {
     expect(noLicense.calls).toHaveLength(0);
 
     const fresh = world({ optIn: false, license: 'geen' });
-    expect(() => fresh.api.settings.update({ ocr: { ...fresh.s.settings.get().ocr, onlineCategoryHelp: true } })).toThrow(/hoort bij het abonnement/);
+    expect(() => fresh.api.settings.update({ ocr: { ...fresh.s.settings.get().ocr, onlineCategoryHelp: true } })).toThrow(/extra functie van het abonnement/);
     expect(fresh.s.settings.get().ocr.onlineCategoryHelp).toBe(false);
     // uitzetten kan altijd
     const on = world({ license: 'geen' });
