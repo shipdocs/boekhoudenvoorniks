@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ONLINE_HELP } from '../src/shared/online-help';
 import { setup } from './helpers';
 import { signLicense } from '../workers/licentie/src/token';
 import { JevClassifier, minimizeJevRequest, parseJevResponse, scrubLine } from '../src/intake/llm-jev';
@@ -109,6 +110,22 @@ describe('JEV: minimaal verzoek en strikte controle', () => {
 });
 
 describe('JEV in de documentstroom', () => {
+  // de functie zelf testen we alsof hij beschikbaar is; zie ook de test "nog niet beschikbaar" hieronder
+  beforeEach(() => {
+    ONLINE_HELP.available = true;
+  });
+  afterEach(() => {
+    ONLINE_HELP.available = false;
+  });
+
+  it('nog niet beschikbaar (vlag uit): niet aan te zetten, ook niet met abonnement', async () => {
+    ONLINE_HELP.available = false;
+    const w = world({ optIn: false });
+    await w.install();
+    expect(() => w.api.settings.update({ ocr: { ...w.s.settings.get().ocr, onlineCategoryHelp: true } })).toThrow(/nog niet beschikbaar/);
+    expect(w.s.settings.get().ocr.onlineCategoryHelp).toBe(false);
+  });
+
   it('pas na geheugen en vaste regels; alleen minimale gegevens; afgetopt en nooit automatisch', async () => {
     const w = world();
     await w.install();

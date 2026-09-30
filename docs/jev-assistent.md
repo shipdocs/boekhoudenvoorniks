@@ -94,7 +94,9 @@ alles behalve een geldig 200-antwoord als "geen voorstel" en gaat door met de st
    branch). Laten nakijken of artikel 8 van de voorwaarden (het abonnement) de online hulp moet noemen.
    Licenties moeten in de app aan staan (`LICENSE_PUBLIC_KEY`); zonder licentie is de instelling niet
    aan te zetten.
-7. `ENABLED: "true"` en deployen. Terugdraaien kan altijd met `"false"`: de app valt dan stil terug.
+7. `ENABLED: "true"` en deployen. Daarna in de app `ONLINE_HELP.available` op `true` zetten
+   (`src/shared/online-help.ts`), de regel in de CHANGELOG terugzetten en een release maken. Tot dan is de
+   instelling onzichtbaar en wordt een eerder aangezette instelling genegeerd. Terugdraaien kan altijd met `"false"`: de app valt dan stil terug.
 
 ## Benchmark
 

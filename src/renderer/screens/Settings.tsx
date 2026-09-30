@@ -10,6 +10,7 @@ import { AdministrationsSettings } from './Administrations';
 import { OfficeSettings } from './Exchange';
 import { businessEffect } from '../../shared/business-share';
 import { LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
+import { ONLINE_HELP } from '../../shared/online-help';
 
 type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
 
@@ -293,7 +294,7 @@ export function SettingsScreen() {
           <ReaderChoice context="instellingen" onToolsChanged={() => setAiVersion((v) => v + 1)} />
           {settings.ocr.engine === 'ingebouwd' && <LocalOcr engine={draft.ocr.engine} />}
           <AssistantCard key={aiVersion} />
-          <OnlineCategoryHelp checked={draft.ocr.onlineCategoryHelp} onChange={(on) => set({ ocr: { ...draft.ocr, onlineCategoryHelp: on } })} />
+          {ONLINE_HELP.available && <OnlineCategoryHelp checked={draft.ocr.onlineCategoryHelp} onChange={(on) => set({ ocr: { ...draft.ocr, onlineCategoryHelp: on } })} />}
           {settings.advancedMode && (
           <details style={{ marginTop: 12 }}>
             <summary className="small">Voor technische gebruikers: eigen herkenningsdienst of lokale AI</summary>
@@ -303,7 +304,7 @@ export function SettingsScreen() {
             <Field label="Lokale AI voor herkennen van aankopen" hint="Ollama-adres, optioneel"><input value={draft.ocr.llmUrl} onChange={(e) => set({ ocr: { ...draft.ocr, llmUrl: e.target.value } })} placeholder="http://127.0.0.1:11434" /></Field>
             <Field label="AI-model"><input value={draft.ocr.llmModel} onChange={(e) => set({ ocr: { ...draft.ocr, llmModel: e.target.value } })} placeholder="bv. qwen2.5:3b" /></Field>
           </div>
-          <p className="small muted">De AI doet alleen voorstellen ("dit lijkt gereedschap"). De boeking zelf wordt altijd door vaste regels gemaakt.{draft.ocr.onlineCategoryHelp ? ' Staat online hulp aan, dan wordt de lokale AI niet gebruikt.' : ''}</p>
+          <p className="small muted">De AI doet alleen voorstellen ("dit lijkt gereedschap"). De boeking zelf wordt altijd door vaste regels gemaakt.{ONLINE_HELP.available && draft.ocr.onlineCategoryHelp ? ' Staat online hulp aan, dan wordt de lokale AI niet gebruikt.' : ''}</p>
           </details>
           )}
         </>,
