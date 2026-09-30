@@ -65,7 +65,7 @@ Mollie herhaalt een webhook bij een fout, en kan dezelfde melding ook dubbel of 
    ```
 3. **Mollie-sleutel: een organisatie-toegangstoken met alleen deze rechten** (Mollie: *Ontwikkelaars →
    Organisatie-toegangstokens*): `customers.write`, `payments.read`, `payments.write`,
-   `subscriptions.read`, `subscriptions.write` en, voor de facturen, `sales-invoices.write`. Geen `refunds`, `payouts` of `mandates`: een uitgelekte
+   `subscriptions.read`, `subscriptions.write` en, voor de facturen, `sales-invoices.read` en `sales-invoices.write` (Mollie weigert het aanmaken van een factuur zonder het leesrecht). Geen `refunds`, `payouts` of `mandates`: een uitgelekte
    sleutel kan dan geen geld terugstorten. Zet in `wrangler.jsonc` bij `vars` het profiel-ID
    (`MOLLIE_PROFILE_ID`, `pfl_…`) en `MOLLIE_TESTMODE: "true"`; live gaan is later alleen
    `MOLLIE_TESTMODE: "false"`. (Een gewone API-sleutel `test_…`/`live_…` werkt ook: laat die twee vars
@@ -83,7 +83,7 @@ Mollie herhaalt een webhook bij een fout, en kan dezelfde melding ook dubbel of 
 ## Stand (30 september 2026)
 
 Staat live op `licentie.boekhoudenvoorniks.nl` (de website zelf staat als aparte Worker in `workers/site`), **in testmodus** (`MOLLIE_TESTMODE: "true"`), met een
-organisatie-toegangstoken met de zes rechten hierboven. D1-database `boekhoudenvoorniks-licenties` in
+organisatie-toegangstoken met de rechten hierboven (zonder `sales-invoices.read`: facturen mislukten nog, 30 september 2026). D1-database `boekhoudenvoorniks-licenties` in
 West-Europa. Getest met een testbetaling: betaling verwerkt, abonnement aangemaakt, licentie
 ondertekend en door de app goedgekeurd. In de app staan licenties nog **uit** (`LICENSE_PUBLIC_KEY` leeg).
 
@@ -105,7 +105,7 @@ Na elke betaalde betaling (de eerste en elke maandelijkse) maakt de Worker een *
 de Sales Invoices-API van Mollie: op naam van het bedrijf (met KvK- of btw-nummer, die de app bij het
 afsluiten meestuurt), over het afgeschreven bedrag met 21% btw daarin, gekoppeld aan de betaling. Mollie nummert hem en mailt hem naar
 de klant. Eén factuur per betaling (`payments.invoice_id`, Idempotency-Key `factuur-<betaling>`). Staat
-aan met `INVOICES: "true"` in `wrangler.jsonc`; dat vraagt het recht `sales-invoices.write` op het token.
+aan met `INVOICES: "true"` in `wrangler.jsonc`; dat vraagt de rechten `sales-invoices.read` en `sales-invoices.write` op het token.
 Onze bedrijfsgegevens op de factuur komen uit het Mollie-account.
 
 ## Live gaan
@@ -114,7 +114,7 @@ Pas als het Mollie-profiel is goedgekeurd, en in deze volgorde:
 
 0. `npm run migrate` uitvoeren (t/m migratie 0004, de proefperiode) en controleren met
    `npx wrangler d1 migrations list boekhoudenvoorniks-licenties --remote`. Het token het recht
-   `sales-invoices.write` geven (of een nieuw token met de zes rechten maken en het geheim vervangen),
+   `sales-invoices.read` en `sales-invoices.write` geven (of een nieuw token met de zeven rechten maken en het geheim vervangen),
    `INVOICES: "true"` zetten en deployen; een testbetaling doen en de testfactuur in Mollie bekijken.
    Laat de voorwaarden (artikel 8) nakijken.
 1. In Mollie (testmodus) de testabonnementen stopzetten. Anders blijft Mollie maandelijks meldingen van

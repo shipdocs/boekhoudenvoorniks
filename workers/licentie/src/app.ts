@@ -35,14 +35,14 @@ export interface Env {
   LICENTIES: LicenseDb;
   /**
    * secret: organisatie-toegangstoken (access_…) met alleen de rechten customers.write, payments.read,
-   * payments.write, subscriptions.read, subscriptions.write en sales-invoices.write; of een API-sleutel
+   * payments.write, subscriptions.read, subscriptions.write, sales-invoices.read en sales-invoices.write; of een API-sleutel
    */
   MOLLIE_API_KEY: string;
   /** var: profiel-ID (pfl_…); alleen bij een organisatie-toegangstoken (bij een API-sleutel juist weglaten) */
   MOLLIE_PROFILE_ID?: string;
   /** var: "true" = testmodus; alleen bij een organisatie-toegangstoken */
   MOLLIE_TESTMODE?: string;
-  /** var: "true" = bij elke betaling een factuur via Mollie (vraagt het recht sales-invoices.write) */
+  /** var: "true" = bij elke betaling een factuur via Mollie (vraagt de rechten sales-invoices.read en .write) */
   INVOICES?: string;
   /** secret: privésleutel voor licenties, JWK (Ed25519) */
   LICENSE_PRIVATE_KEY: string;
