@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Nieuw
+- **Back-up terugzetten vanaf het welkomstscherm**: heb je al een administratie (nieuwe computer, herinstallatie), dan zet je meteen je back-up terug in plaats van opnieuw te beginnen. Het keuzevenster opent in de map met de automatische back-ups van elke dag.
+
 ## 0.7.0 — uitwisseling met je boekhouder
 
 ### Nieuw
