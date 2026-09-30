@@ -4,10 +4,13 @@
  * daar een window.bridge neer die naar deze server praat.
  *
  * POST /api            { method, args }  → { ok } of { error }
- * POST /__reset        lege administratie (nieuwe map), voor elke test
+ * POST /__reset        lege administratie (nieuwe map), voor elke test; body {"licenses":true} = licenties aan,
+ *                      met een nagebootste licentie-Worker (echte Ed25519-handtekening, eigen sleutelpaar)
+ * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
  * alles anders         bestanden uit dist/renderer
  */
 const http = require('node:http');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -40,6 +43,52 @@ function openAdmin(key) {
   db.close();
   file = path.join(admins.dirFor(key), 'boekhouding.sqlite');
   init(false);
+}
+
+/**
+ * Nagebootste licentie-Worker (workers/licentie) voor de test van het abonnement: zelfde tokenformaat
+ * (`<payload>.<handtekening>`, base64url, Ed25519 over de payloadtekst), zodat de app hem echt controleert.
+ */
+let licensing = null;
+function makeLicensing() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  return { publicKey: publicKey.export({ format: 'jwk' }).x, privateKey, accounts: new Map(), lastStarted: null };
+}
+const isoAddDays = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+function signLicense(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${body}.${crypto.sign(null, Buffer.from(body, 'ascii'), licensing.privateKey).toString('base64url')}`;
+}
+function fakeLicenseApi() {
+  const account = (administratie, managementKey) => {
+    const a = licensing.accounts.get(administratie);
+    if (a && a.managementKey !== managementKey) throw new Error('De licentieserver gaf een fout (403); probeer het later opnieuw');
+    return a;
+  };
+  return {
+    async price() {
+      return { bedrag: '9.00', inclusiefBtw: '10.89', valuta: 'EUR', per: 'maand', btw: 'exclusief', proefMaanden: 4 };
+    },
+    async start(input) {
+      if (!/^[A-Za-z0-9_-]{43}$/.test(input.managementKey)) throw new Error('Ongeldige beheersleutel');
+      const a = account(input.administratie, input.managementKey);
+      if (a?.paid && !a.cancelled) return { al: true };
+      licensing.accounts.set(input.administratie, { ...input, paid: false, cancelled: false });
+      licensing.lastStarted = input.administratie;
+      return { checkout: 'https://www.mollie.com/checkout/test-e2e' };
+    },
+    async fetch(administratie, managementKey) {
+      const a = account(administratie, managementKey);
+      if (!a?.paid) return null;
+      return signLicense({ v: 1, product: 'uitwisseling', administratie, email: a.email, validUntil: isoAddDays(37), issuedAt: isoAddDays(0), ...(a.cancelled ? { cancelled: true } : {}) });
+    },
+    async cancel(administratie, managementKey) {
+      const a = account(administratie, managementKey);
+      if (!a?.paid) throw new Error('Geen abonnement gevonden voor deze administratie');
+      a.cancelled = true;
+      return { betaaldTot: isoAddDays(30), geldigTot: isoAddDays(37) };
+    },
+  };
 }
 
 const PORT = Number(process.env.E2E_PORT || 5190);
@@ -77,11 +126,12 @@ function init(fresh) {
     fetch: async () => { throw new Error('geen netwerk in e2e-tests'); },
     storeFile,
     // alleen voor een test van het abonnement; standaard staan licenties uit
-    licensePublicKey: process.env.E2E_LICENSE_PUBLIC_KEY || undefined,
+    licensePublicKey: licensing?.publicKey ?? process.env.E2E_LICENSE_PUBLIC_KEY ?? undefined,
   });
   let smtpPassword = null;
   api = createApi(services, {
     appVersion: () => '0.0.0-e2e',
+    licenseApi: licensing ? fakeLicenseApi() : undefined,
     exchange: {
       bundle: () => createBackupBundle(db, path.dirname(file), (copy) => {
         const d = new Database(copy);
@@ -193,10 +243,16 @@ http
         sent = [];
         updateStatus = { state: 'uit', version: null, notes: null, percent: null, error: null };
         updateInstalled = false;
+        licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         init(true);
         return res.end('{"ok":true}');
       }
       if (req.url === '/__sent') return res.end(JSON.stringify({ ok: sent }));
+      if (req.url === '/__pay') {
+        const a = licensing?.accounts.get(licensing.lastStarted);
+        if (a) a.paid = true;
+        return res.end(JSON.stringify({ ok: licensing ? [...licensing.accounts.values()].map(({ managementKey: _k, ...rest }) => rest) : null }));
+      }
       if (req.url === '/__update') {
         if (body) updateStatus = { ...updateStatus, ...JSON.parse(body) };
         return res.end(JSON.stringify({ ok: { status: updateStatus, installed: updateInstalled } }));
