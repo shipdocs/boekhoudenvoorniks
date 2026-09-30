@@ -133,6 +133,12 @@ GitHub, per milestone en met prioriteit.
 Het rekeningschema gebruikt de officiële RGS-referentiecodes (taxonomie-release 20251210, `src/core-ledger/rgs-codes.json`).
 Een test controleert elke standaardrekening tegen die lijst.
 
+## Gegevens van derden
+
+`src/intake/brand-index.json` komt uit de [Name Suggestion Index](https://github.com/osmlab/name-suggestion-index)
+van OpenStreetMap (BSD-3-Clause, © name-suggestion-index contributors; de licentietekst staat in het bestand).
+Opnieuw maken met `npm run leveranciers:nsi`.
+
 ## Licentie
 
 BoekhoudenVoorNiks is vrije software onder de [GNU Affero General Public License v3.0 of later](LICENSE) (AGPL-3.0-or-later). Zie ook de [gebruiksvoorwaarden](https://boekhoudenvoorniks.nl/voorwaarden.html) en de [privacyverklaring](https://boekhoudenvoorniks.nl/privacy.html).

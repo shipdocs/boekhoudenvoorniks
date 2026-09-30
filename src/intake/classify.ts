@@ -1,7 +1,7 @@
 import type { CategoryLookup } from '../shared/categories';
 import type { PurchaseVatCode } from '../shared/vat';
 import type { DocumentResult } from './types';
-import { DEVICE_KEYWORDS, KNOWN_SUPPLIERS, TOOL_KEYWORDS } from './suppliers';
+import { DEVICE_KEYWORDS, findKnownSupplier, TOOL_KEYWORDS } from './suppliers';
 import { INVESTMENT_THRESHOLD, netAmount } from '../shared/investment';
 import type { SupplierMemory } from './supplier-memory';
 
@@ -119,15 +119,17 @@ export class Classifier {
       };
     }
 
-    const known = supplier ? KNOWN_SUPPLIERS.find((s) => s.pattern.test(supplier)) : undefined;
+    const known = findKnownSupplier(supplier);
     if (known) {
       let category = known.category;
       if (category === 'materiaal' && doc.lineDescriptions.some((l) => TOOL_KEYWORDS.test(l)) && !doc.lineDescriptions.every((l) => !TOOL_KEYWORDS.test(l))) {
         category = this.netTotal(doc, docVat) >= INVESTMENT_THRESHOLD ? 'investering' : 'gereedschap';
         reasons.push('artikel lijkt gereedschap');
       }
-      reasons.push(`${known.name} is een bekende leverancier`);
-      return { categoryKey: category, vatCode: docVat === 'verlegd' && known.vatCode === 'eu' ? 'eu' : docVat ?? known.vatCode, business: true, confidence: 0.75, source: 'regel', proposedBy: 'regel', reasons, automatic: false };
+      reasons.push(known.source === 'index' ? `${known.name} is een bekende winkelketen (lijst van OpenStreetMap)` : `${known.name} is een bekende leverancier`);
+      // horeca: de btw op eten en drinken is niet aftrekbaar, ook als hij op de bon staat
+      const vatCode = known.source === 'index' && known.vatCode === 'geen' ? 'geen' : docVat === 'verlegd' && known.vatCode === 'eu' ? 'eu' : docVat ?? known.vatCode;
+      return { categoryKey: category, vatCode, business: true, confidence: known.source === 'index' ? 0.65 : 0.75, source: 'regel', proposedBy: 'regel', reasons, automatic: false };
     }
 
     if (doc.lineDescriptions.some((l) => DEVICE_KEYWORDS.test(l))) {

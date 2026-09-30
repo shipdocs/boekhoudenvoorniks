@@ -22,6 +22,7 @@
     "dist:linux": "npm run build && electron-builder --linux",
     "dist:win": "npm run build && electron-builder --win",
     "benchmark:ocr": "npm run build:main && node dist/main/tools/ocr-benchmark.js",
+    "leveranciers:nsi": "npm run build:main && node dist/main/tools/leveranciers-nsi.js",
     "benchmark:jev": "npm run build:main && node dist/main/tools/jev-benchmark.js",
     "benchmark:maak": "npm run build:main && electron dist/main/tools/render-benchmark.js",
     "e2e": "npm run rebuild:node && npm run build && playwright test",
