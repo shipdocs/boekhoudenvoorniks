@@ -6,6 +6,7 @@
  *   npm run benchmark:jev                               # alleen de vaste regels
  *   OLLAMA_URL=http://127.0.0.1:11434 OLLAMA_MODEL=qwen2.5:3b npm run benchmark:jev
  *   JEV_ACCOUNT_ID=… JEV_API_TOKEN=… npm run benchmark:jev   # JEV rechtstreeks via de Workers AI REST-API
+ *   JEV_PROXY_URL=http://localhost:8799 npm run benchmark:jev  # via een tijdelijke Worker (zie docs/jev-assistent.md)
  *
  * Alleen met de synthetische set (tests/fixtures/jev-benchmark.json); nooit met echte klantdocumenten.
  * Het API-token is alleen voor deze meting en hoort nooit in de app. Optioneel tweede argument: een pad
@@ -62,11 +63,14 @@ function jevInput(supplier: string | null, lines: string[], categories: Category
   };
 }
 
-async function jevRaw(accountId: string, token: string, supplier: string | null, lines: string[], categories: Category[]) {
+/** REST-API met een token, of een tijdelijke Worker via `wrangler dev --remote` (docs/jev-assistent.md). */
+type JevTarget = { url: string; token?: string };
+
+async function jevRaw(target: JevTarget, supplier: string | null, lines: string[], categories: Category[]) {
   const started = Date.now();
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/typesafe/jev`, {
+  const res = await fetch(target.url, {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    headers: { ...(target.token ? { authorization: `Bearer ${target.token}` } : {}), 'content-type': 'application/json' },
     body: JSON.stringify(jevInput(supplier, lines, categories)),
     signal: AbortSignal.timeout(20_000),
   });
@@ -158,14 +162,15 @@ async function main() {
     results['regels + ollama'] = await viaClassifier(cases, new Classifier(memory, categories, ollama));
   }
 
-  const { JEV_ACCOUNT_ID: account, JEV_API_TOKEN: token } = process.env;
+  const { JEV_ACCOUNT_ID: account, JEV_API_TOKEN: token, JEV_PROXY_URL: proxy } = process.env;
+  const target: JevTarget | null = proxy ? { url: proxy } : account && token ? { url: `https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/typesafe/jev`, token } : null;
   let model: string | null = null;
-  if (account && token) {
+  if (target) {
     const raw: Outcome[] = [];
     for (const c of cases) {
       // precies wat de app zou versturen (zelfde filter en grenzen)
       const req = minimizeJevRequest({ administrationId: 'benchmark', appVersion: 'benchmark', supplier: c.leverancier, lines: c.artikelen, categories: cats });
-      const r = await jevRaw(account, token, req.supplier, req.lines, req.categories).catch(() => ({ valid: false, choice: null, second: null, confidence: null, ms: 20_000, tokens: 0, model: null }));
+      const r = await jevRaw(target, req.supplier, req.lines, req.categories).catch(() => ({ valid: false, choice: null, second: null, confidence: null, ms: 20_000, tokens: 0, model: null }));
       model ??= r.model;
       raw.push({ id: c.id, soort: c.soort, verwacht: c.verwacht, voorstel: r.choice, tweede: r.second, zekerheid: r.confidence, ongeldig: !r.valid, ms: r.ms, tokens: r.tokens });
     }

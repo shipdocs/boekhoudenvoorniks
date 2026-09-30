@@ -106,6 +106,16 @@ alles behalve een geldig 200-antwoord als "geen voorstel" en gaat door met de st
 - `OLLAMA_URL` + `OLLAMA_MODEL`: lokale AI meenemen;
 - `JEV_ACCOUNT_ID` + `JEV_API_TOKEN`: JEV rechtstreeks via de Workers AI REST-API (alleen voor de
   benchmark, met synthetische data; nooit in de app).
+- `JEV_PROXY_URL`: zonder API-token, via een tijdelijke Worker onder je `wrangler login`. Maak een map
+  met `wrangler.jsonc` (`"name": "jev-benchmark-tijdelijk"`, `"main": "src/index.ts"`, `"ai": { "binding": "AI" }`)
+  en een `src/index.ts` die de body doorgeeft aan `env.AI.run('typesafe/jev', body)` en `{ result }` teruggeeft;
+  start hem met `wrangler dev --remote --port 8799` en draai `JEV_PROXY_URL=http://localhost:8799 npm run benchmark:jev`.
+  Niet deployen.
+
+**Vooraf nodig:** JEV is een model van een externe partij en loopt via **AI Gateway-credits** (vooraf
+opgewaardeerd tegoed), niet via het gewone Workers AI-tegoed. Zonder credits geeft Cloudflare
+`2021: Insufficient AI Gateway credits` (gezien op 30 september 2026). Waardeer eerst op in het
+dashboard (AI → AI Gateway → Credits); een paar dollar is ruim voor de benchmark.
 
 Na de winkelindex uit OpenStreetMap (`src/intake/brand-index.ts`) en de handmatige aanvulling
 (software, hosting, verzekeraars), 30 september 2026: top-1 28%, dekking 28%, precisie 100% (11 van 11);
