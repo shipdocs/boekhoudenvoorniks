@@ -1,6 +1,6 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.7.5 — bekende leveranciers voorgesteld, eenvoudiger uitleg online hulp
 
 ### Verbeterd
 - **Leverancier invullen stelt bekende leveranciers voor**: typ je bij een bon (of bij *Aankoop zonder bon*) de naam van de winkel of leverancier, dan zie je de leveranciers die de app al kent uit je relaties en eerdere bonnen.
