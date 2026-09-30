@@ -31,7 +31,7 @@ import { OPENING_ON_FROM } from '../reports/opening-balance';
  */
 
 export const XAF_VERSION = '3.2';
-export const FEEDBACK_URL = 'https://github.com/shipdocs/boekhoudenvoorniks/issues';
+export const FEEDBACK_URL = 'info@shipdocs.app';
 
 /** SnelStart: nummer van het memoriaaldagboek; staat per administratie anders, zie importprofielen/LEES-MIJ.txt */
 const SNELSTART_MEMORIAAL = 90;
@@ -41,7 +41,7 @@ const IMPORT_README = (year: number) => `IMPORTPROFIELEN — bestanden in het fo
 
 Deze bestanden volgen de importdocumentatie van elk pakket, zodat je geen kolommen hoeft te koppelen.
 Ze zijn nog niet in elk pakket proefgedraaid: controleer na het inlezen de saldi met kolommenbalans.csv
-en meld afwijkingen op ${FEEDBACK_URL}
+en mail afwijkingen naar ${FEEDBACK_URL}
 
 SNELSTART 12 (snelstart/)
   SnelStart leest geen auditfile. Importeer via Bestand > Importeren:
@@ -745,7 +745,7 @@ export class AccountantPackage {
     L.push('', 'INLEZEN IN JE EIGEN PAKKET');
     for (const [p, r] of routes) L.push(`  ${p}: ${r}`);
     L.push('', '  Controleer na het inlezen of beginbalans, mutaties, eindsaldi, btw en openstaande posten gelijk zijn aan dit overzicht.');
-    L.push(`  Sluit iets niet aan of mist er een importformaat voor jouw pakket? Meld het op ${FEEDBACK_URL}`);
+    L.push(`  Sluit iets niet aan of mist er een importformaat voor jouw pakket? Mail het naar ${FEEDBACK_URL}`);
     L.push('', 'FORMAAT', '  CSV: puntkomma als scheidingsteken, komma als decimaalteken, UTF-8 met BOM (opent direct in Excel).', '  Datums als JJJJ-MM-DD. Saldo: debet positief, credit negatief. Boekstuk = transactienummer in de auditfile.');
     return L.join('\r\n') + '\r\n';
   }
@@ -786,7 +786,7 @@ ${s.missingRgs.length ? `<h2>Rekeningen zonder RGS-code</h2><p>${s.missingRgs.ma
 ${missingDocs.length ? `<h2>Ontbrekende documenten (${s.missingDocuments.length})</h2><table>${missingDocs.map((m) => `<tr><td>${m.date}</td><td>${x(m.description)}${m.relation ? ` <span class="small">${x(m.relation)}</span>` : ''}</td><td class="num">${m.total ? eur(m.total) : ''}</td><td class="small">${x(m.reason)}${m.entryId ? `, boekstuk ${m.entryId}` : ''}</td></tr>`).join('')}</table>${s.missingDocuments.length > missingDocs.length ? `<p class="small">De volledige lijst staat in documenten/index.csv.</p>` : ''}` : ''}
 <h2>Inlezen in je eigen pakket</h2>
 <table>${routes.map(([p, r]) => `<tr><td><strong>${x(p)}</strong></td><td>${x(r)}</td></tr>`).join('')}</table>
-<p>Controleer na het inlezen of beginbalans, mutaties, eindsaldi, btw en openstaande posten gelijk zijn aan dit overzicht. Sluit iets niet aan of mist er een importformaat voor jouw pakket? Meld het op <strong>${FEEDBACK_URL}</strong>.</p>
+<p>Controleer na het inlezen of beginbalans, mutaties, eindsaldi, btw en openstaande posten gelijk zijn aan dit overzicht. Sluit iets niet aan of mist er een importformaat voor jouw pakket? Mail het naar <strong>${FEEDBACK_URL}</strong>.</p>
 <p class="small">CSV: puntkomma als scheidingsteken, komma als decimaalteken, UTF-8 met BOM (opent direct in Excel). Datums als JJJJ-MM-DD. Saldo: debet positief, credit negatief. Boekstuk = transactienummer in de auditfile.</p>
 </body></html>`;
   }
