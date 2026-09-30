@@ -34,7 +34,7 @@ export const PROPOSED_BY_LABEL: Record<ProposedBy, string> = {
   geheugen: 'eerder door jou bevestigd',
   regel: 'vaste regel',
   ollama: 'lokale AI',
-  jev: 'online hulp (JEV)',
+  jev: 'online hulp',
   standaard: 'standaard',
 };
 
@@ -146,7 +146,7 @@ export class Classifier {
         const r = await this.llm.classify({ supplier, lines: doc.lineDescriptions, categories: this.categories.list().map(({ key, label, hint }) => ({ key, label, hint })) });
         if (r && this.categories.list().some((c) => c.key === r.categoryKey)) {
           // LLM-zekerheid wordt bewust afgetopt: nooit automatisch boeken op alleen een LLM-voorstel
-          const reason = this.llm.id === 'jev' ? 'online hulp (JEV) koos deze uit jouw categorieën' : `voorstel van de slimme herkenning: ${r.explanation}`;
+          const reason = this.llm.id === 'jev' ? 'online hulp koos deze uit jouw categorieën' : `voorstel van de slimme herkenning: ${r.explanation}`;
           return { categoryKey: r.categoryKey, vatCode: docVat ?? 'hoog', business: true, confidence: Math.min(0.7, r.confidence), source: 'llm', proposedBy: this.llm.id, ...(r.model ? { model: r.model } : {}), reasons: [reason], automatic: false };
         }
       } catch {
