@@ -16,7 +16,7 @@ import { normalizeIban, ValidationError } from '../shared/validation';
 import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
 import { PRIVATE_CAR_CATEGORIES, type CategoryLookup } from '../shared/categories';
-import { KNOWN_SUPPLIERS } from '../intake/suppliers';
+import { findKnownSupplier, KNOWN_SUPPLIERS } from '../intake/suppliers';
 import { addDays, diffDays, formatDateNl, periodFor, today, vatDeadline, type IsoDate } from '../shared/dates';
 
 /** Na zoveel dagen zonder nieuwe bankgegevens vragen we om een afschrift in te lezen. */
@@ -354,7 +354,8 @@ export class InboxService {
       const label = this.categories.label(rule.category_key);
       return { categoryKey: rule.category_key, vatCode: rule.vat_code, business: Boolean(rule.business), confident: rule.confirmations >= 1, why: `Omdat je ${rule.display_name} eerder ${rule.confirmations}× als ${label} hebt bevestigd.` };
     }
-    const known = KNOWN_SUPPLIERS.find((k) => k.pattern.test(`${t.counter_name ?? ''} ${t.description}`));
+    // de handmatige lijst mag ook in de omschrijving zoeken; de winkelindex alleen op de naam van de tegenpartij
+    const known = KNOWN_SUPPLIERS.find((k) => k.pattern.test(`${t.counter_name ?? ''} ${t.description}`)) ?? findKnownSupplier(t.counter_name);
     if (known) return { categoryKey: known.category, vatCode: known.vatCode, business: true, confident: false, why: 'Omdat de naam lijkt op een bekende winkel.' };
     return null;
   }
