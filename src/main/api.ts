@@ -80,7 +80,8 @@ export interface HostContext {
   };
   /** de licentie-Worker (alleen in de app zelf): prijs en licentie ophalen */
   licenseApi?: {
-    price(): Promise<{ bedrag: string; valuta: string; per: string } | null>;
+    /** `bedrag` exclusief btw (`btw: 'exclusief'`); `proefMaanden`: gratis maanden bij een eerste abonnement */
+    price(): Promise<{ bedrag: string; valuta: string; per: string; inclusiefBtw?: string; btw?: string; proefMaanden?: number } | null>;
     /** de ondertekende licentie voor deze administratie, of null als er (nog) geen betaald abonnement is */
     fetch(administrationId: string, managementKey: string): Promise<string | null>;
     /** eerste betaling bij Mollie klaarzetten; geeft de betaallink, of `al` als er al een abonnement loopt */

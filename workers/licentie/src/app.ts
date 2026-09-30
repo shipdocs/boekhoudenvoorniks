@@ -6,7 +6,7 @@ import { signLicense, type LicensePayload } from './token';
  * Hier staat alleen wat nodig is om te betalen en te factureren: administratie-ID, e-mailadres,
  * bedrijfsgegevens voor de factuur en de Mollie-nummers. Geen boekhouding.
  *
- *   GET  /prijs                  prijs per maand (uit de instellingen van de Worker)
+ *   GET  /prijs                  prijs per maand en proefperiode (uit de instellingen van de Worker)
  *   POST /start                  (JSON) klant en eerste betaling bij Mollie; geeft de betaallink terug
  *   POST /mollie                 webhook: betaling opzoeken bij Mollie en verwerken, met factuur
  *   GET  /licentie?administratie=…   ondertekende licentie t/m de betaalde periode (+ marge)
@@ -48,8 +48,10 @@ export interface Env {
   LICENSE_PRIVATE_KEY: string;
   /** var: bv. https://licentie.boekhoudenvoorniks.nl */
   PUBLIC_URL: string;
-  /** secret of var: prijs per maand inclusief btw, bv. "7.50" */
-  PRICE_EUR: string;
+  /** var: prijs per maand exclusief btw, bv. "9.00"; afgeschreven wordt dit plus 21% btw */
+  PRICE_EXCL_VAT: string;
+  /** var: gratis maanden bij een eerste abonnement, bv. "4"; "0" of leeg = geen proefperiode */
+  TRIAL_MONTHS?: string;
 }
 
 export interface Deps {
@@ -87,8 +89,22 @@ interface LicenseRow {
 
 /** Marge na de betaalde periode: een incasso kan een paar dagen duren. */
 export const GRACE_DAYS = 7;
-/** Btw op het abonnement (de prijs is inclusief). */
+/** Btw op het abonnement. */
 const VAT_RATE = '21.00';
+/**
+ * Eerste betaling bij een proefperiode: alleen voor de machtiging voor de incasso daarna. Mollie kan
+ * € 0 alleen met creditcard of PayPal; iDEAL vraagt minstens € 0,01.
+ */
+export const TRIAL_AMOUNT = '0.01';
+
+/** Prijs exclusief btw ("9.00") → wat er wordt afgeschreven, inclusief 21% btw ("10.89"), in hele centen. */
+export function inclVat(exclVat: string): string {
+  const cents = Math.round(Number(exclVat) * 100);
+  if (!Number.isFinite(cents) || cents <= 0) throw new Error(`Ongeldige prijs: ${exclVat}`);
+  return (Math.round((cents * 121) / 100) / 100).toFixed(2);
+}
+
+const trialMonths = (env: Env): number => Math.max(0, Math.floor(Number(env.TRIAL_MONTHS ?? '0')) || 0);
 const MOLLIE = 'https://api.mollie.com/v2';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -101,7 +117,7 @@ interface MolliePayment {
   customerId?: string;
   subscriptionId?: string;
   paidAt?: string;
-  metadata?: { administratie?: string; email?: string; billing?: Billing; managementKeyHash?: string } | null;
+  metadata?: { administratie?: string; email?: string; billing?: Billing; managementKeyHash?: string; proefMaanden?: number } | null;
   _links?: { checkout?: { href: string } };
 }
 
@@ -259,14 +275,19 @@ async function start(request: Request, env: Env, deps: Deps): Promise<Response> 
         idempotencyKey: `klant-${administratie}-${(await sha256Hex(JSON.stringify([billing.naam, email]))).slice(0, 16)}-${window}`,
       });
   const attempt = existing?.months ?? 0;
+  // Proefperiode alleen bij een eerste abonnement: deze administratie en dit e-mailadres hadden er nog geen.
+  const trial = !existing && (await usedTrial(env, email)) === false ? trialMonths(env) : 0;
+  const price = inclVat(env.PRICE_EXCL_VAT);
   const paymentBody = {
-    amount: { currency: 'EUR', value: env.PRICE_EUR },
+    amount: { currency: 'EUR', value: trial > 0 ? TRIAL_AMOUNT : price },
     customerId: customer.id,
     sequenceType: 'first',
-    description: 'BoekhoudenVoorNiks: uitwisseling met je boekhouder (eerste maand)',
+    description: trial > 0
+      ? `BoekhoudenVoorNiks: machtiging, ${trial} maanden gratis, daarna € ${price.replace('.', ',')} per maand`
+      : 'BoekhoudenVoorNiks: uitwisseling met je boekhouder (eerste maand)',
     redirectUrl: `${env.PUBLIC_URL}/bedankt`,
     webhookUrl: `${env.PUBLIC_URL}/mollie`,
-    metadata: { administratie, email, billing, managementKeyHash: hash },
+    metadata: { administratie, email, billing, managementKeyHash: hash, ...(trial > 0 ? { proefMaanden: trial } : {}) },
   };
   const key = `start-${administratie}-${attempt}-${(await sha256Hex(JSON.stringify(paymentBody))).slice(0, 16)}-${window}`;
   let payment = await mollie<MolliePayment>(env, deps, 'POST', '/payments', paymentBody, { idempotencyKey: key, withProfile: true });
@@ -276,22 +297,32 @@ async function start(request: Request, env: Env, deps: Deps): Promise<Response> 
   }
   const checkout = payment._links?.checkout?.href;
   if (!checkout) throw new Error('Mollie gaf geen betaallink');
-  return json({ checkout });
+  return json({ checkout, proefMaanden: trial });
+}
+
+/** Had dit e-mailadres al een abonnement (en dus een proefperiode)? */
+async function usedTrial(env: Env, email: string): Promise<boolean> {
+  return (await env.LICENTIES.prepare('SELECT 1 AS x FROM licenses WHERE lower(email) = lower(?) LIMIT 1').bind(email).first()) !== null;
 }
 
 /**
  * Eerste betaling: een maand erbij (of een nieuwe periode als de vorige verlopen was) en de betaling
  * vastleggen, in één transactie; daarna zorgen dat er een abonnement loopt en dat er een factuur is.
+ * Bij een proefperiode telt de machtigingsbetaling voor de gratis maanden; het abonnement begint daarna.
+ * Een proefperiode telt alleen voor een nieuwe licentie: twee proefbetalingen tegelijk geven er één.
  */
 async function firstPayment(env: Env, deps: Deps, payment: MolliePayment, paidOn: string): Promise<void> {
   const administratie = payment.metadata!.administratie!;
   const existing = await getLicense(env, administratie);
   const lapsed = existing && existing.months > 0 && paidUntil(existing) < paidOn ? 1 : 0;
+  const trial = Math.max(0, Math.floor(Number(payment.metadata?.proefMaanden ?? 0)) || 0);
+  // proef: ?9 maanden voor een nieuwe licentie, 0 als er al een is; anders een betaalde maand
+  const credit = trial > 0 ? 0 : 1;
   const billing = payment.metadata?.billing ? JSON.stringify(payment.metadata.billing) : null;
   await env.LICENTIES.batch([
     env.LICENTIES.prepare(
       `INSERT INTO licenses (administratie, email, customer_id, period_start, months, billing, management_key_hash)
-       SELECT ?1, ?2, ?3, ?4, 1, ?7, ?8 WHERE NOT EXISTS (SELECT 1 FROM payments WHERE payment_id = ?5)
+       SELECT ?1, ?2, ?3, ?4, CASE WHEN ?9 > 0 THEN ?9 ELSE 1 END, ?7, ?8 WHERE NOT EXISTS (SELECT 1 FROM payments WHERE payment_id = ?5)
        ON CONFLICT (administratie) DO UPDATE SET
          email = excluded.email,
          customer_id = excluded.customer_id,
@@ -299,10 +330,10 @@ async function firstPayment(env: Env, deps: Deps, payment: MolliePayment, paidOn
          management_key_hash = COALESCE(management_key_hash, excluded.management_key_hash),
          cancelled_at = NULL,
          period_start = CASE WHEN ?6 = 1 THEN excluded.period_start ELSE period_start END,
-         months = CASE WHEN ?6 = 1 THEN 1 ELSE months + 1 END`,
-    ).bind(administratie, payment.metadata!.email ?? '', payment.customerId!, paidOn, payment.id, lapsed, billing, payment.metadata?.managementKeyHash ?? null),
+         months = CASE WHEN ?6 = 1 THEN ?10 ELSE months + ?10 END`,
+    ).bind(administratie, payment.metadata!.email ?? '', payment.customerId!, paidOn, payment.id, lapsed, billing, payment.metadata?.managementKeyHash ?? null, trial, credit),
     // processed_at = betaaldatum: daarop is de factuurmaand gebaseerd
-    env.LICENTIES.prepare('INSERT OR IGNORE INTO payments (payment_id, administratie, processed_at, amount) VALUES (?, ?, ?, ?)').bind(payment.id, administratie, paidOn, payment.amount?.value ?? env.PRICE_EUR),
+    env.LICENTIES.prepare('INSERT OR IGNORE INTO payments (payment_id, administratie, processed_at, amount, trial) VALUES (?, ?, ?, ?, ?)').bind(payment.id, administratie, paidOn, payment.amount?.value ?? '', trial > 0 ? 1 : 0),
   ]);
   await ensureSubscription(env, deps, administratie, payment.id);
   await ensureInvoice(env, deps, administratie, payment.id);
@@ -332,7 +363,7 @@ async function ensureSubscription(env: Env, deps: Deps, administratie: string, p
     'POST',
     `/customers/${current.customer_id}/subscriptions`,
     {
-      amount: { currency: 'EUR', value: env.PRICE_EUR },
+      amount: { currency: 'EUR', value: inclVat(env.PRICE_EXCL_VAT) },
       interval: '1 month',
       startDate: paidUntil(current),
       description: 'BoekhoudenVoorNiks: uitwisseling met je boekhouder',
@@ -353,8 +384,9 @@ async function ensureSubscription(env: Env, deps: Deps, administratie: string, p
  */
 async function ensureInvoice(env: Env, deps: Deps, administratie: string, paymentId: string): Promise<void> {
   if (env.INVOICES !== 'true') return;
-  const done = await env.LICENTIES.prepare('SELECT invoice_id, amount, processed_at FROM payments WHERE payment_id = ?').bind(paymentId).first<{ invoice_id: string | null; amount: string | null; processed_at: string }>();
-  if (!done || done.invoice_id) return;
+  const done = await env.LICENTIES.prepare('SELECT invoice_id, amount, processed_at, trial FROM payments WHERE payment_id = ?').bind(paymentId).first<{ invoice_id: string | null; amount: string | null; processed_at: string; trial: number }>();
+  // de machtigingsbetaling van de proefperiode is geen levering: geen factuur
+  if (!done || done.invoice_id || done.trial) return;
   const row = await getLicense(env, administratie);
   if (!row?.billing) {
     // Niet stil als geslaagd markeren: na operationeel herstel kan Mollie dezelfde webhook herhalen.
@@ -383,9 +415,9 @@ async function ensureInvoice(env: Env, deps: Deps, administratie: string, paymen
         country: billing.land,
         locale: billing.land === 'BE' ? 'nl_BE' : 'nl_NL',
       },
-      lines: [{ description: `BoekhoudenVoorNiks: uitwisseling met je boekhouder (${period})`, quantity: 1, unitPrice: { currency: 'EUR', value: done.amount ?? env.PRICE_EUR }, vatRate: VAT_RATE }],
+      lines: [{ description: `BoekhoudenVoorNiks: uitwisseling met je boekhouder (${period})`, quantity: 1, unitPrice: { currency: 'EUR', value: done.amount || inclVat(env.PRICE_EXCL_VAT) }, vatRate: VAT_RATE }],
       vatScheme: 'standard',
-      // de prijs is inclusief btw: de factuur telt op tot wat er is afgeschreven
+      // het afgeschreven bedrag, inclusief btw: de factuur telt precies op tot wat er is betaald
       vatMode: 'inclusive',
       paymentTerm: '30 days',
       paymentDetails: { source: 'payment', sourceReference: paymentId },
@@ -417,7 +449,7 @@ async function recurringPayment(env: Env, deps: Deps, payment: MolliePayment): P
   if (!(await getLicense(env, administratie))) throw new Error(`Licentie ${administratie} ontbreekt`); // 500: Mollie probeert het later opnieuw
   await env.LICENTIES.batch([
     env.LICENTIES.prepare('UPDATE licenses SET months = months + 1 WHERE administratie = ? AND NOT EXISTS (SELECT 1 FROM payments WHERE payment_id = ?)').bind(administratie, payment.id),
-    env.LICENTIES.prepare('INSERT OR IGNORE INTO payments (payment_id, administratie, processed_at, amount) VALUES (?, ?, ?, ?)').bind(payment.id, administratie, (payment.paidAt ?? deps.today()).slice(0, 10), payment.amount?.value ?? env.PRICE_EUR),
+    env.LICENTIES.prepare('INSERT OR IGNORE INTO payments (payment_id, administratie, processed_at, amount) VALUES (?, ?, ?, ?)').bind(payment.id, administratie, (payment.paidAt ?? deps.today()).slice(0, 10), payment.amount?.value ?? ''),
   ]);
   await ensureInvoice(env, deps, administratie, payment.id);
   return json({ ok: true });
@@ -481,13 +513,15 @@ async function license(request: Request, url: URL, env: Env, deps: Deps): Promis
 const STYLE = '<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 16px;line-height:1.5;color:#1b1f24;background:#f6f7f9}</style>';
 
 const THANKS = `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bedankt</title>${STYLE}</head>
-<body><h1>Bedankt!</h1><p>Zodra je betaling binnen is, kun je in BoekhoudenVoorNiks op <strong>Ik heb betaald: licentie ophalen</strong> klikken (Hoe gaat het? &gt; Uitwisseling met je boekhouder). Daarna kun je versturen naar je boekhouder. De factuur krijg je per e-mail.</p>
+<body><h1>Bedankt!</h1><p>Zodra je betaling binnen is, kun je in BoekhoudenVoorNiks op <strong>Ik heb betaald: licentie ophalen</strong> klikken (Hoe gaat het? &gt; Uitwisseling met je boekhouder). Daarna kun je versturen naar je boekhouder. Bij een proefperiode betaal je nu alleen € 0,01 voor de machtiging; de eerste afschrijving is na de gratis maanden. Van elke betaalde maand krijg je een factuur per e-mail.</p>
 <p>Je kunt dit venster sluiten.</p></body></html>`;
 
 export async function handle(request: Request, env: Env, deps: Deps): Promise<Response> {
   const url = new URL(request.url);
   try {
-    if (request.method === 'GET' && url.pathname === '/prijs') return json({ bedrag: env.PRICE_EUR, valuta: 'EUR', per: 'maand', btw: 'inclusief' });
+    if (request.method === 'GET' && url.pathname === '/prijs') {
+      return json({ bedrag: env.PRICE_EXCL_VAT, inclusiefBtw: inclVat(env.PRICE_EXCL_VAT), valuta: 'EUR', per: 'maand', btw: 'exclusief', proefMaanden: trialMonths(env) });
+    }
     if (request.method === 'POST' && url.pathname === '/start') return await start(request, env, deps);
     if (request.method === 'POST' && url.pathname === '/mollie') return await webhook(request, env, deps);
     if (request.method === 'GET' && url.pathname === '/licentie') return await license(request, url, env, deps);

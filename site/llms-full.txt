@@ -4,7 +4,7 @@
 
 Belangrijke feiten:
 
-- Prijs: het programma is gratis. Optioneel abonnement "Uitwisseling met je boekhouder" (vanaf versie 0.7): € 10 per maand inclusief 21% btw, per maand opzegbaar in de app, betalen via Mollie (iDEAL, daarna SEPA-incasso), maandelijkse factuur. Voor boekhoudkantoren gratis.
+- Prijs: het programma is gratis. Optioneel abonnement "Uitwisseling met je boekhouder" (vanaf versie 0.7): de eerste 4 maanden gratis (bij het afsluiten € 0,01 via iDEAL voor de machtiging), daarna € 9 per maand exclusief btw (€ 10,89 inclusief), per maand opzegbaar in de app, betalen via Mollie (iDEAL, daarna SEPA-incasso), maandelijkse factuur. Voor boekhoudkantoren gratis.
 - Licentie: open source, AGPL-3.0-or-later.
 - Platform: Windows en Linux (Electron). Werkt offline; gegevens in een lokale SQLite-database met dagelijkse automatische back-up.
 - Taal en markt: Nederlands, Nederlandse btw-regels.
@@ -28,7 +28,7 @@ Belangrijke feiten:
 
 ### Is BoekhoudenVoorNiks echt gratis?
 
-Ja. Het programma is gratis te downloaden en te gebruiken, zonder account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement van € 10 per maand inclusief btw. Die heb je niet nodig om je boekhouding te doen.
+Ja. Het programma is gratis te downloaden en te gebruiken, zonder account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen.
 
 ### Wat is de uitwisseling met je boekhouder?
 
@@ -40,7 +40,7 @@ Dan gebruik je het gratis pakket voor je boekhouder: met één knop een auditfil
 
 ### Hoe betaal ik het abonnement, en krijg ik een factuur?
 
-Je sluit het af in de app en betaalt via Mollie: de eerste maand met iDEAL, daarna automatisch per incasso. Elke maand krijg je per e-mail een factuur op naam van je bedrijf, met de btw apart vermeld. Voor de factuur vraagt de app je bedrijfsnaam, adres en KvK- of btw-nummer.
+Je sluit het af in de app. Bij je eerste abonnement betaal je via Mollie alleen € 0,01 met iDEAL, voor de machtiging; de eerste 4 maanden zijn gratis. Daarna gaat het automatisch per incasso, en zeg je voor die tijd op, dan betaal je niets. Van elke betaalde maand krijg je per e-mail een factuur op naam van je bedrijf, met de btw apart vermeld. Voor de factuur vraagt de app je bedrijfsnaam, adres en KvK- of btw-nummer.
 
 ### Hoe zeg ik mijn abonnement op?
 
