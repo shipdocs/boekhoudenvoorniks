@@ -70,7 +70,10 @@ describe('assistent-Worker', () => {
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ schemaVersion: 1, categoryKey: 'kantoor', confidence: 0.93, probabilities: { kantoor: 0.93, materiaal: 0.04, overig: 0.03 }, model: 'jev-1.13.0' });
     expect(w.authCalls).toEqual([{ administratie: ADMIN, managementKey: KEY, today: '2026-10-15', dailyLimit: 200 }]);
-    expect(w.rateKeys).toEqual([ADMIN]);
+    expect(w.rateKeys).toHaveLength(1);
+    expect(w.rateKeys[0]).toMatch(/^[a-f0-9]{64}$/);
+    expect(w.rateKeys[0]).not.toContain(ADMIN);
+    expect(w.rateKeys[0]).not.toContain(KEY);
     expect(w.aiCalls).toHaveLength(1);
     const { model, inputs, options } = w.aiCalls[0]!;
     expect(model).toBe('typesafe/jev');
@@ -98,6 +101,14 @@ describe('assistent-Worker', () => {
       await w.call(body());
       expect(w.aiCalls).toHaveLength(0);
     }
+  });
+
+  it('bindt de minuutlimiet aan de geheime sleutel, zodat een bekende administratie-ID de echte limiet niet kan uitputten', async () => {
+    const w = worker();
+    await w.call(body());
+    await w.call(body(), { authorization: `Bearer ${'R'.repeat(43)}` });
+    expect(w.rateKeys).toHaveLength(2);
+    expect(w.rateKeys[0]).not.toBe(w.rateKeys[1]);
   });
 
   it('kill switch: alles behalve ENABLED "true" = 503, zonder licentie- of modelaanroep', async () => {

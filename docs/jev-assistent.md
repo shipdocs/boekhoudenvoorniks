@@ -117,7 +117,8 @@ dus volledig in de onbekende leveranciers; daar moet de meting winst laten zien,
 in de hoge-zekerheidsgroep.
 
 JEV-meting: nog te doen vóór activering (stap 1); vul dan deze tabel aan met `jev los` en
-`regels + jev`, het teruggegeven model en de kosten (tokens × $0,042 per miljoen).
+`regels + jev`, het teruggegeven model en de kosten (tokens × de actuele prijs in het
+Cloudflare-dashboard; de openbare modelpagina noemt geen vast tarief).
 
 ## Waar JEV verder waarde kan toevoegen (onderzoek, niet gebouwd)
 

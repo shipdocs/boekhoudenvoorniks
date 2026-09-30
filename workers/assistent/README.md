@@ -26,6 +26,7 @@ Geen eigen `package.json`: typecheck en bundelen met de packages van `workers/li
 ```bash
 cd workers/licentie && npm ci
 cd ../assistent
+../licentie/node_modules/.bin/wrangler types worker-configuration.d.ts --env-interface AssistantEnv --include-runtime false --strict-vars false
 ../licentie/node_modules/.bin/tsc -p tsconfig.json
 ../licentie/node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run
 ```

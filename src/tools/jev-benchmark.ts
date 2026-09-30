@@ -199,7 +199,7 @@ async function main() {
       const g = jev.filter((o) => o.zekerheid !== null && o.zekerheid >= lo && o.zekerheid < hi);
       console.log(`- ${lo.toFixed(1)}–${Math.min(hi, 1).toFixed(1)}: ${pct(g.filter((o) => o.voorstel === o.verwacht).length, g.length)} goed (${g.length} gevallen)`);
     }
-    console.log('\nKosten: $0,042 per miljoen invoertokens (modelpagina); tokens hierboven × die prijs.');
+    console.log('\nKosten: vermenigvuldig het tokenaantal hierboven met de actuele JEV-prijs in het Cloudflare-dashboard; de openbare modelpagina noemt geen vast tarief.');
   }
   if (out) writeFileSync(out, JSON.stringify({ file, model, rows, results }, null, 1));
 }

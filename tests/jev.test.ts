@@ -72,6 +72,9 @@ describe('JEV: minimaal verzoek en strikte controle', () => {
     expect(scrubLine('Vragen? info@winkel.nl')).toBe('Vragen?');
     expect(scrubLine('Klantnr 123456789 Tape')).toBe('Klantnr Tape');
     expect(scrubLine('Balpennen blauw 5,00')).toBe('Balpennen blauw');
+    expect(scrubLine('BTW-nummer NL123456789B01 Tape 12 EUR')).toBe('');
+    expect(scrubLine('VAT ID DE 123 456 789 Hosting')).toBe('');
+    expect(scrubLine('NL123456789B01 Tape 12 EUR')).toBe('Tape');
   });
 
   it('stuurt alleen de afgesproken velden, begrensd', () => {
@@ -201,6 +204,10 @@ describe('JEV in de documentstroom', () => {
     await expect(w.api.home.act(stale, 'klopt')).rejects.toThrow(/intussen veranderd/);
     expect(w.s.intake.get(d.id).status).toBe('controle');
     expect(w.s.memory.get('Pennenwinkel De Vulpen')).toBeNull();
+    const current = w.s.intake.get(d.id);
+    w.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify({ ...current.result, total: { ...current.result!.total!, value: 9999 } }), d.id);
+    await expect(w.api.home.act(task, 'klopt')).rejects.toThrow(/intussen veranderd/);
+    w.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(current.result), d.id);
     await w.api.home.act(task, 'klopt');
     await expect(w.api.home.act(task, 'klopt')).rejects.toThrow(/al verwerkt/);
     expect(w.stats()).toEqual([{ proposed_by: 'jev', model: 'jev-1.13.0', accepted: 1, corrected: 0 }]);

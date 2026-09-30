@@ -48,7 +48,12 @@ export function scrubLine(line: string): string {
   return line
     .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, ' ')
     .replace(/\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b/gi, ' ')
+    // Een regel die expliciet een btw-/VAT-nummer noemt heeft geen categorisatiewaarde en gaat geheel weg;
+    // zo hoeven we niet ieder landspecifiek nummerformaat te raden.
+    .replace(/^.*\b(?:btw(?:-?(?:id|nr|nummer))?|vat(?:-?(?:id|no|number))?)\b.*$/gi, ' ')
+    .replace(/\bNL\s*\d{9}\s*B\s*\d{2}\b/gi, ' ')
     .replace(/(€|eur\b|euro\b)\s*-?\d[\d.,]*/gi, ' ')
+    .replace(/-?\d[\d.,]*\s*(€|eur\b|euro\b)/gi, ' ')
     .replace(/-?\d+[.,]\d{2}\b/g, ' ')
     .replace(/\d{5,}/g, ' ')
     .replace(/[€]/g, ' ')

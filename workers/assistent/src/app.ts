@@ -35,6 +35,10 @@ export interface LicentieControle {
   assistent(input: { administratie: string; managementKey: string; today: string; dailyLimit: number }): Promise<{ ok: true } | { ok: false; reason: 'sleutel' | 'geen-abonnement' | 'quotum' }>;
 }
 
+/**
+ * De drie aanroepcontracten zijn hier verfijnd voor unit-tests en de getypeerde RPC-entrypoint.
+ * Wrangler genereert daarnaast worker-configuration.d.ts uit wrangler.jsonc; CI controleert dat bestand.
+ */
 export interface Env {
   AI: AiBinding;
   LICENTIE: LicentieControle;
@@ -148,6 +152,12 @@ export function parseJevOutput(out: unknown, req: ClassifyRequest): Proposal | n
 
 const latencyBucket = (ms: number) => (ms < 250 ? '<250ms' : ms < 1000 ? '<1s' : ms < 3000 ? '<3s' : ms < 8000 ? '<8s' : '>=8s');
 
+/** Niet de geheime beheersleutel zelf als rate-limit-sleutel gebruiken, maar wel aan die sleutel binden. */
+async function rateLimitKey(administrationId: string, managementKey: string): Promise<string> {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${administrationId}:${managementKey}`)));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function readBody(request: Request): Promise<unknown> {
   if (Number(request.headers.get('content-length') ?? '0') > MAX_BODY_BYTES) throw new HttpError(413, 'Verzoek te groot');
   const buf = await request.arrayBuffer();
@@ -177,8 +187,9 @@ async function classify(request: Request, env: Env, deps: Deps, meta: Record<str
   meta.categories = req.categories.length;
   meta.lines = req.lines.length;
 
-  // eerst goedkoop per administratie begrenzen, dan de licentie en het dagquotum
-  const { success } = await env.PER_ADMINISTRATIE.limit({ key: req.administrationId });
+  // Begrens per administratie én geheime beheersleutel. Alleen het administratie-ID gebruiken zou een
+  // aanvaller die dat ID kent in staat stellen de minuutlimiet van de echte gebruiker op te maken.
+  const { success } = await env.PER_ADMINISTRATIE.limit({ key: await rateLimitKey(req.administrationId, managementKey) });
   if (!success) throw new HttpError(429, 'Te veel verzoeken; probeer het zo opnieuw');
   const auth = await env.LICENTIE.assistent({ administratie: req.administrationId, managementKey, today: deps.today(), dailyLimit: Number(env.DAILY_QUOTA ?? '200') || 0 });
   if (!auth.ok) {

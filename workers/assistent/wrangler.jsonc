@@ -5,10 +5,15 @@
   "$schema": "../licentie/node_modules/wrangler/config-schema.json",
   "name": "boekhoudenvoorniks-assistent",
   "main": "src/index.ts",
-  "compatibility_date": "2026-09-29",
+  "compatibility_date": "2026-09-30",
   "compatibility_flags": ["nodejs_compat"],
   // Workers Logs en traces aan; de Worker logt zelf alleen status, versies en latency-bucket (geen inhoud)
-  "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "enabled": true, "invocation_logs": false },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  },
   "routes": [{ "pattern": "assistent.boekhoudenvoorniks.nl", "custom_domain": true }],
   // ENABLED is de kill switch: alleen "true" = aan. GATEWAY_ID: AI Gateway met logs en cache UIT en
   // rate limiting AAN (instellen in het dashboard, zie docs). DAILY_QUOTA: aanroepen per administratie per dag.
