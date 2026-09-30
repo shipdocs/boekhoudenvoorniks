@@ -222,16 +222,24 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
       </div>
     );
   }
-  const amount = price.data ? `€ ${price.data.bedrag.replace('.', ',')} per ${price.data.per} (inclusief btw)` : null;
+  const euro = (v: string) => `€ ${v.replace('.', ',')}`;
+  const p = price.data;
+  const amount = p ? (p.btw === 'exclusief' ? `${euro(p.bedrag)} per ${p.per} exclusief btw${p.inclusiefBtw ? ` (${euro(p.inclusiefBtw)} inclusief)` : ''}` : `${euro(p.bedrag)} per ${p.per} (inclusief btw)`) : null;
+  // een proefperiode alleen bij een eerste abonnement; na verlopen is het gewoon verlengen
+  const trial = status.state === 'geen' && p?.proefMaanden ? p.proefMaanden : 0;
   return (
     <div className="notice grid" data-testid="abonnement">
       <div>
         <strong>{status.state === 'verlopen' ? `Je abonnement liep tot ${formatDateNl(status.validUntil)}.` : 'Versturen naar je boekhouder hoort bij het abonnement.'}</strong>{' '}
-        {amount ? `Het kost ${amount}, per maand opzegbaar. ` : 'Per maand opzegbaar. '}Koppelen en een antwoord inlezen kan altijd; alleen het versturen vraagt een abonnement. Je betaalt via Mollie (iDEAL, daarna automatische incasso) en krijgt elke maand een factuur op naam van je bedrijf.
+        {trial > 0 && <><strong>De eerste {trial} maanden zijn gratis.</strong>{' '}</>}
+        {amount ? `${trial > 0 ? 'Daarna kost het' : 'Het kost'} ${amount}, per maand opzegbaar. ` : 'Per maand opzegbaar. '}Koppelen en een antwoord inlezen kan altijd; alleen het versturen vraagt een abonnement.{' '}
+        {trial > 0
+          ? 'Bij het afsluiten betaal je via Mollie alleen € 0,01 met iDEAL, voor de machtiging. De eerste incasso is na de gratis maanden; zeg je daarvoor op, dan betaal je niets. Van elke betaalde maand krijg je een factuur op naam van je bedrijf.'
+          : 'Je betaalt via Mollie (iDEAL, daarna automatische incasso) en krijgt elke maand een factuur op naam van je bedrijf.'}
       </div>
       <div className="row" style={{ alignItems: 'flex-end', gap: 10 }}>
         <Field label="E-mailadres voor het abonnement en de facturen"><input value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-        <Button kind="primary" disabled={busy || !email.trim()} onClick={() => void checkout()}>{status.state === 'verlopen' ? 'Verlengen' : 'Abonnement nemen'}</Button>
+        <Button kind="primary" disabled={busy || !email.trim()} onClick={() => void checkout()}>{status.state === 'verlopen' ? 'Verlengen' : trial > 0 ? `${trial} maanden gratis beginnen` : 'Abonnement nemen'}</Button>
         <Button disabled={busy} onClick={() => void fetchLicense()}>Ik heb betaald: licentie ophalen</Button>
       </div>
     </div>

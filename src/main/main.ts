@@ -487,7 +487,7 @@ function initServices(): void {
     licenseApi: {
       async price() {
         const res = await fetch(`${LICENSE_API_URL}/prijs`, { signal: AbortSignal.timeout(10_000) });
-        return res.ok ? ((await res.json()) as { bedrag: string; valuta: string; per: string }) : null;
+        return res.ok ? ((await res.json()) as { bedrag: string; valuta: string; per: string; inclusiefBtw?: string; btw?: string; proefMaanden?: number }) : null;
       },
       async fetch(administrationId, managementKey) {
         const res = await fetch(`${LICENSE_API_URL}/licentie?administratie=${encodeURIComponent(administrationId)}`, { headers: { authorization: `Bearer ${managementKey}` }, signal: AbortSignal.timeout(15_000) });

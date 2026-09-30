@@ -6,9 +6,9 @@ alleen wat nodig is om te betalen (administratie-ID, e-mailadres, Mollie-nummers
 
 | Route | Wat |
 |---|---|
-| `GET /prijs` | prijs per maand (`PRICE_EUR`), voor het scherm in de app |
-| `POST /start` | (JSON: administratie, e-mail, bedrijfsgegevens) klant en eerste betaling (`sequenceType: first`) bij Mollie; geeft de betaallink terug, of `al` als er al een abonnement loopt |
-| `POST /mollie` | webhook: haalt de betaling zelf op bij Mollie. Eerste betaling → abonnement (`1 month`, start over een maand); maandelijkse betaling → een maand erbij. Idempotent en herstelbaar (zie hieronder). |
+| `GET /prijs` | prijs per maand exclusief en inclusief btw (`PRICE_EXCL_VAT`) en de proefperiode (`TRIAL_MONTHS`), voor het scherm in de app |
+| `POST /start` | (JSON: administratie, e-mail, bedrijfsgegevens) klant en eerste betaling (`sequenceType: first`) bij Mollie; bij een eerste abonnement is dat alleen € 0,01 voor de machtiging (proefperiode, zie hieronder); geeft de betaallink terug, of `al` als er al een abonnement loopt |
+| `POST /mollie` | webhook: haalt de betaling zelf op bij Mollie. Eerste betaling → abonnement (`1 month`, start na de betaalde maand of na de proefperiode); maandelijkse betaling → een maand erbij. Idempotent en herstelbaar (zie hieronder). |
 | `GET /licentie?administratie=…` | met de lokale beheersleutel als Bearer-token: ondertekende licentie (Ed25519) t/m de betaalde periode plus 7 dagen marge; met `cancelled` na opzeggen |
 | `POST /opzeggen` | met de lokale beheersleutel als Bearer-token: abonnement stoppen bij Mollie; de licentie loopt af na de betaalde periode |
 | `GET /bedankt` | terugkeerpagina na het afrekenen |
@@ -73,7 +73,6 @@ Mollie herhaalt een webhook bij een fout, en kan dezelfde melding ook dubbel of 
    ```bash
    npx wrangler secret put MOLLIE_API_KEY                              # het organisatie-toegangstoken (access_…)
    npx wrangler secret put LICENSE_PRIVATE_KEY < ~/.config/boekhoudenvoorniks-licentiesleutel.json
-   npx wrangler secret put PRICE_EUR                                   # bedrag per maand, bv. 7.50
    ```
 5. **Deployen**: `npx wrangler deploy`. De route `licentie.boekhoudenvoorniks.nl` staat in
    `wrangler.jsonc` als custom domain; het domein staat al bij Cloudflare.
@@ -87,11 +86,23 @@ organisatie-toegangstoken met de zes rechten hierboven. D1-database `boekhoudenv
 West-Europa. Getest met een testbetaling: betaling verwerkt, abonnement aangemaakt, licentie
 ondertekend en door de app goedgekeurd. In de app staan licenties nog **uit** (`LICENSE_PUBLIC_KEY` leeg).
 
+## Prijs en proefperiode
+
+`PRICE_EXCL_VAT` (in `wrangler.jsonc`, bv. `"9.00"`) is de prijs per maand exclusief btw; afgeschreven
+wordt die plus 21% btw (`€ 10,89`). Een prijswijziging geldt alleen voor nieuwe abonnementen: een
+lopend Mollie-abonnement houdt zijn bedrag (en de voorwaarden vragen een maand vooraankondiging).
+
+`TRIAL_MONTHS` (bv. `"4"`) geeft een eerste abonnement gratis maanden: de eerste betaling is dan € 0,01,
+alleen voor de machtiging (Mollie kan € 0 alleen met creditcard of PayPal, niet met iDEAL). Die telt voor
+de gratis maanden, krijgt geen factuur (`payments.trial`) en het abonnement begint daarna. Een
+proefperiode krijgt alleen een administratie zonder licentie én een e-mailadres dat nog geen abonnement
+had; opnieuw afsluiten na opzeggen is een gewone betaalde eerste maand.
+
 ## Facturen
 
 Na elke betaalde betaling (de eerste en elke maandelijkse) maakt de Worker een **betaalde factuur** via
 de Sales Invoices-API van Mollie: op naam van het bedrijf (met KvK- of btw-nummer, die de app bij het
-afsluiten meestuurt), 21% btw inclusief, gekoppeld aan de betaling. Mollie nummert hem en mailt hem naar
+afsluiten meestuurt), over het afgeschreven bedrag met 21% btw daarin, gekoppeld aan de betaling. Mollie nummert hem en mailt hem naar
 de klant. Eén factuur per betaling (`payments.invoice_id`, Idempotency-Key `factuur-<betaling>`). Staat
 aan met `INVOICES: "true"` in `wrangler.jsonc`; dat vraagt het recht `sales-invoices.write` op het token.
 Onze bedrijfsgegevens op de factuur komen uit het Mollie-account.
@@ -100,7 +111,8 @@ Onze bedrijfsgegevens op de factuur komen uit het Mollie-account.
 
 Pas als het Mollie-profiel is goedgekeurd, en in deze volgorde:
 
-0. `npm run migrate` uitvoeren (ook migratie 0003 met de hash van de beheersleutel). Het token het recht
+0. `npm run migrate` uitvoeren (t/m migratie 0004, de proefperiode) en controleren met
+   `npx wrangler d1 migrations list boekhoudenvoorniks-licenties --remote`. Het token het recht
    `sales-invoices.write` geven (of een nieuw token met de zes rechten maken en het geheim vervangen),
    `INVOICES: "true"` zetten en deployen; een testbetaling doen en de testfactuur in Mollie bekijken.
    Laat de voorwaarden (artikel 8) nakijken.
