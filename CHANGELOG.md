@@ -1,6 +1,6 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.7.4 — online hulp bij categorievoorstellen, vraagposten bij bonnen
 
 ### Nieuw
 - **Online hulp bij categorievoorstellen** (extra functie van het abonnement, standaard uit; Instellingen → Automatisch & herkenning): weet de app bij een onbekende winkel niet waar een bon voor was, dan kiest het model JEV via Cloudflare een categorie uit jouw categorieën. Er gaan alleen de winkelnaam en maximaal 15 artikelomschrijvingen (zonder bedragen) naar buiten. Op Vandaag zie je dat het voorstel van de online hulp komt; "Ja" of "Aanpassen" blijft jouw keuze, en wat je kiest onthoudt de app op je eigen computer. Er wordt nooit automatisch geboekt op alleen dit voorstel. In onze meting: van 28% naar 88% goed ingedeeld, en bij onbekende winkels van 16% naar 100%.
