@@ -110,15 +110,15 @@ describe('JEV: minimaal verzoek en strikte controle', () => {
 });
 
 describe('JEV in de documentstroom', () => {
-  // de functie zelf testen we alsof hij beschikbaar is; zie ook de test "nog niet beschikbaar" hieronder
+  // standaard beschikbaar (sinds 0.7.4); de test "nog niet beschikbaar" zet de vlag tijdelijk uit
   beforeEach(() => {
     ONLINE_HELP.available = true;
   });
   afterEach(() => {
-    ONLINE_HELP.available = false;
+    ONLINE_HELP.available = true;
   });
 
-  it('nog niet beschikbaar (vlag uit): niet aan te zetten, ook niet met abonnement', async () => {
+  it('vlag uit (bv. als de Worker uit moet): niet aan te zetten, ook niet met abonnement', async () => {
     ONLINE_HELP.available = false;
     const w = world({ optIn: false });
     await w.install();
