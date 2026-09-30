@@ -160,7 +160,7 @@ export function runVatChecks(
 
   const vraag = ledger.balance(ACCOUNTS.vraagposten);
   if (vraag !== 0) {
-    found.push({ key: 'vraagposten', blocking: true, title: `${formatEuro(Math.abs(vraag))} staat nog bij "weet ik nog niet"`, detail: 'Zoek uit waar deze betalingen bij horen: er kan btw in zitten die je terugkrijgt.', count: 1, fingerprint: String(vraag), screen: 'bank', account: { rgs: ACCOUNTS.vraagposten } });
+    found.push({ key: 'vraagposten', blocking: true, title: `${formatEuro(Math.abs(vraag))} staat nog bij "weet ik nog niet"`, detail: 'Zoek uit waar deze betalingen of bonnen bij horen (of vraag het je boekhouder): er kan btw in zitten die je terugkrijgt. Bonnen deel je in bij Aankopen, knop Indelen.', count: 1, fingerprint: String(vraag), screen: 'bank', account: { rgs: ACCOUNTS.vraagposten } });
   }
 
   // Geld "onderweg" tussen eigen rekeningen of van een betaalprovider: dan mist er meestal een afschrift

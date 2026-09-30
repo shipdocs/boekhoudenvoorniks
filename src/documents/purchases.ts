@@ -119,6 +119,30 @@ export class PurchaseService {
     return this.rewrite(id, () => lines, reason, { samePayable: true });
   }
 
+  /** Staat (een deel van) deze aankoop nog op Vraagposten ("weet ik nog niet")? */
+  isQuestion(id: number): boolean {
+    return this.db
+      .prepare(`SELECT 1 FROM purchase_invoice_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.purchase_invoice_id = ? AND a.rgs_code = ?`)
+      .get(id, ACCOUNTS.vraagposten) !== undefined;
+  }
+
+  /**
+   * Een aankoop van "weet ik nog niet" alsnog indelen: één regel met de gekozen rekening en btw over het
+   * hele bedrag (tegenboeking + nieuwe post, zoals reclassify). De betaling blijft staan.
+   */
+  resolveQuestion(id: number, input: { account: string; vatCode: PurchaseVatCode; description: string }): PurchaseInvoice {
+    if (!this.isQuestion(id)) throw new ValidationError('Deze aankoop staat niet (meer) bij "weet ik nog niet"');
+    const p = this.get(id);
+    const rate = PURCHASE_VAT_RATES[input.vatCode].percentage;
+    const verlegd = isReverseCharge(input.vatCode);
+    // verlegd: het totaal is het bedrag zonder btw; anders zit de btw in het totaal
+    const vat = verlegd || rate === 0 ? 0 : Math.round((p.total * rate) / (100 + rate));
+    const updated = this.reclassify(id, [{ account: input.account, netAmount: p.total - vat, vatCode: input.vatCode, ...(verlegd ? {} : { vatAmount: vat }), description: input.description }], 'ingedeeld (was: weet ik nog niet)');
+    // "Nog uitzoeken — Winkel" wordt "Materiaal — Winkel"
+    this.db.prepare('UPDATE purchase_invoices SET description = ? WHERE id = ?').run(updated.description.replace(/^Nog uitzoeken\b/, input.description), id);
+    return this.get(id);
+  }
+
   /** De inkoop-gebeurtenis achter een journaalpost (voor het zakelijke deel), of null bij een oudere boeking. */
   eventFor(journalEntryId: number): InkoopPayload | null {
     const event = this.events.forEntry(journalEntryId);

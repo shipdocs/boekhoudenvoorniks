@@ -403,6 +403,7 @@ export class AccountantPackage {
       { ok: openPayables === -this.balanceAt(ACCOUNTS.crediteuren, to), label: 'Openstaande crediteuren sluiten aan op het grootboek', detail: `${payables.length} posten, ${eur(openPayables)}` },
       { ok: missingRgs.length === 0, label: 'Elke gebruikte rekening heeft een RGS-code', detail: missingRgs.length ? `zonder RGS-code: ${missingRgs.map((m) => `${m.code} ${m.name}`).join(', ')}` : `RGS ${RGS_VERSION}` },
       { ok: missingDocuments.length === 0, label: 'Bij elke inkoop zit een bon of factuur', detail: missingDocuments.length ? `${missingDocuments.length} zonder document; in het pakket staan ze in documenten/index.csv` : undefined },
+      { ok: this.balanceAt(ACCOUNTS.vraagposten, to) === 0, label: 'Niets meer bij "weet ik nog niet"', detail: this.balanceAt(ACCOUNTS.vraagposten, to) !== 0 ? `${eur(Math.abs(this.balanceAt(ACCOUNTS.vraagposten, to)))} op vraagposten (rekening 1690): nog in te delen, door jou of je boekhouder` : undefined },
       { ok: vatOpen.length === 0, label: 'Btw-aangiftes van afgelopen periodes zijn ingediend', detail: vatOpen.length ? `nog niet ingediend: ${vatOpen.map((v) => v.label).join(', ')}` : undefined },
     ];
     return {

@@ -1,4 +1,5 @@
 import { ValidationError } from '../shared/validation';
+import { isPurchaseVatCode } from '../shared/vat';
 import { TERMS_VERSION } from '../shared/legal';
 import type { RuntimeStatus } from '../ocr-runtime/runtime';
 import type { CliKind } from '../intake/ocr-cli';
@@ -748,8 +749,17 @@ export function createApi(s: Services, host: HostContext) {
             /** btw die je terugkrijgt bij dit zakelijke deel (bij verlegde btw: niet apart getoond) */
             vat_deductible: eff && pct < 100 ? eff.btw : p.vat_total,
             business_amount: eff && pct < 100 ? eff.kosten + eff.btw : null,
+            /** staat nog bij "weet ik nog niet" (Vraagposten): nog indelen */
+            question: s.purchases.isQuestion(p.id),
           };
         }),
+      /** Een aankoop van "weet ik nog niet" alsnog indelen (categorie en btw); de btw-aftrek komt er dan bij. */
+      resolveQuestion: (id: number, categoryKey: string, vatCode: string) => {
+        const category = s.categories.find(String(categoryKey));
+        if (!category) throw new ValidationError('Kies waar de aankoop voor was');
+        if (!isPurchaseVatCode(vatCode)) throw new ValidationError('Kies of er btw op de bon stond');
+        return s.purchases.resolveQuestion(Number(id), { account: category.account, vatCode, description: category.label });
+      },
       /** Zakelijk deel van één aankoop aanpassen; `remember`: voortaan ook voor deze leverancier. */
       setBusinessPct: (id: number, pct: number, remember?: boolean) => {
         const p = s.purchases.get(id);

@@ -308,9 +308,22 @@ export function DocumentReview({ id }: { id: number }) {
               </Field>
               {form.business && (
                 <>
-                  <CategoryChoice value={form.categoryKey} onChange={(c) => setForm({ ...form, categoryKey: c })} />
-                  {!form.splits && <InvestmentHint categoryKey={form.categoryKey} gross={form.total} vatCode={form.vatCode} onUse={() => setForm({ ...form, categoryKey: 'investering' })} />}
-                  <div className="grid cols-2">
+                  {form.categoryKey !== 'onbekend' && <CategoryChoice value={form.categoryKey} onChange={(c) => setForm({ ...form, categoryKey: c })} />}
+                  {form.categoryKey === 'onbekend' ? (
+                    <div className="notice" role="note" data-testid="vraagpost">
+                      <strong>Weet ik nog niet: vraag mijn boekhouder.</strong>
+                      <div className="small" style={{ marginTop: 4 }}>
+                        De bon wordt apart gezet op <em>vraagposten</em>, zonder btw-aftrek. Hij komt terug als controle vóór je btw-aangifte en staat in het pakket voor je boekhouder. Weet je het later wel, dan deel je hem in bij Aankopen (knop <em>Indelen</em>); dan krijg je ook de btw terug.
+                      </div>
+                      <Button small kind="ghost" onClick={() => setForm({ ...form, categoryKey: d.classification?.categoryKey && d.classification.categoryKey !== 'onbekend' ? d.classification.categoryKey : 'overig', vatCode: d.classification?.vatCode ?? 'hoog' })}>Toch een categorie kiezen</Button>
+                    </div>
+                  ) : (
+                    <p className="small" style={{ margin: '-4px 0 8px' }}>
+                      <Button small kind="ghost" onClick={() => setForm({ ...form, categoryKey: 'onbekend', vatCode: 'geen', vatAmount: null, splits: null, businessPct: null })}>❓ Weet ik nog niet: vraag mijn boekhouder</Button>
+                    </p>
+                  )}
+                  {!form.splits && form.categoryKey !== 'onbekend' && <InvestmentHint categoryKey={form.categoryKey} gross={form.total} vatCode={form.vatCode} onUse={() => setForm({ ...form, categoryKey: 'investering' })} />}
+                  {form.categoryKey !== 'onbekend' && <div className="grid cols-2">
                     <Field label="Btw op de bon">
                       <select value={form.vatCode} onChange={(e) => setForm({ ...form, vatCode: e.target.value as PurchaseVatCode, vatAmount: null })}>
                         {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
@@ -321,8 +334,8 @@ export function DocumentReview({ id }: { id: number }) {
                         <MoneyInput value={form.vatAmount ?? defaultVat} onChange={(v) => setForm({ ...form, vatAmount: v })} />
                       </Field>
                     )}
-                  </div>
-                  {!form.splits && <BusinessShareField supplier={form.supplier} value={form.businessPct} onChange={(v) => setForm({ ...form, businessPct: v })} />}
+                  </div>}
+                  {!form.splits && form.categoryKey !== 'onbekend' && <BusinessShareField supplier={form.supplier} value={form.businessPct} onChange={(v) => setForm({ ...form, businessPct: v })} />}
                   <Field label="Hoe betaald?">
                     <div className="chips">
                       <button className={form.paidWith === 'bank' || form.paidWith === 'later' ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: d.bank_match ? 'bank' : 'later' })}>Zakelijke rekening</button>
