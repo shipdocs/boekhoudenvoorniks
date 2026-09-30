@@ -32,6 +32,7 @@ Belangrijke feiten:
 - [Btw-aangifte zelf doen](https://boekhoudenvoorniks.nl/btw-aangifte.html)
 - [Zonder abonnement, offline en open source](https://boekhoudenvoorniks.nl/zonder-abonnement.html)
 - [Voor boekhouders](https://boekhoudenvoorniks.nl/boekhouders.html): pakket voor de boekhouder en uitwisseling
+- [Waarom we dit maakten](https://boekhoudenvoorniks.nl/waarom.html): in één week gebouwd met AI, bewust lokaal en zonder cloud
 - [Wat is er nieuw](https://boekhoudenvoorniks.nl/wijzigingen.html): release notes per versie
 - [Downloads](https://github.com/shipdocs/boekhoudenvoorniks/releases/latest): installers voor Windows en Linux
 - [Uitgebreide beschrijving voor LLM's](https://boekhoudenvoorniks.nl/llms-full.txt)
