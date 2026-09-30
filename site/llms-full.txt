@@ -28,7 +28,15 @@ Belangrijke feiten:
 
 ### Is BoekhoudenVoorNiks echt gratis?
 
-Ja. Het programma is gratis te downloaden en te gebruiken, zonder account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen.
+Ja. Het programma is altijd gratis te downloaden en te gebruiken: geen proefperiode, geen limiet op facturen of bonnetjes en geen account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen.
+
+### Ik ben net gestart als zzp'er. Is BoekhoudenVoorNiks iets voor mij?
+
+Ja. Het programma is gemaakt voor ondernemers die geen boekhouder willen worden. Je maakt je eerste offerte en factuur, verwerkt bonnetjes en bank, en ziet elk kwartaal wat je bij de btw-aangifte invult. Wil je dat een boekhouder meekijkt, dan zijn de eerste 4 maanden samenwerken gratis: genoeg voor je eerste btw-kwartaal. Het programma zelf blijft altijd gratis.
+
+### Wanneer doe ik mijn eerste btw-aangifte?
+
+Meestal doe je per kwartaal aangifte. De aangifte en de betaling moeten uiterlijk de laatste dag van de maand na het kwartaal binnen zijn: voor het eerste kwartaal dus 30 april. Het programma laat per kwartaal zien wat je moet betalen of terugkrijgt, tot wanneer, en precies wat je in elke rubriek invult.
 
 ### Wat is de uitwisseling met je boekhouder?
 
