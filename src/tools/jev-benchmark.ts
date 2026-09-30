@@ -22,7 +22,7 @@ import { CategoryService } from '../settings/categories';
 import { SupplierMemory } from '../intake/supplier-memory';
 import { Classifier, type LlmClassifier } from '../intake/classify';
 import { OllamaClassifier } from '../intake/llm-ollama';
-import { minimizeJevRequest } from '../intake/llm-jev';
+import { minimizeJevRequest, parseJevResponse } from '../intake/llm-jev';
 import type { DocumentResult } from '../intake/types';
 
 interface Case {
@@ -71,12 +71,16 @@ async function jevRaw(accountId: string, token: string, supplier: string | null,
     signal: AbortSignal.timeout(20_000),
   });
   const ms = Date.now() - started;
-  const body = (await res.json().catch(() => null)) as { result?: { model?: string; answers?: { categorie?: { choice?: unknown; confidence?: unknown; probabilities?: Record<string, unknown> } }; usage?: { input_tokens?: number } } } | null;
+  const body = (await res.json().catch(() => null)) as { result?: { model?: string; answers?: { categorie?: { type?: unknown; choice?: unknown; confidence?: unknown; probabilities?: Record<string, unknown> } }; usage?: { input_tokens?: number } } } | null;
   const a = body?.result?.answers?.categorie;
-  const keys = new Set(categories.map((c) => c.key));
-  const valid = res.ok && typeof a?.choice === 'string' && keys.has(a.choice) && typeof a.confidence === 'number' && a.confidence >= 0 && a.confidence <= 1;
-  const ranked = Object.entries(a?.probabilities ?? {}).filter(([k, v]) => keys.has(k) && typeof v === 'number').sort((x, y) => (y[1] as number) - (x[1] as number));
-  return { valid, choice: valid ? (a!.choice as string) : null, second: ranked[1]?.[0] ?? null, confidence: valid ? (a!.confidence as number) : null, ms, tokens: body?.result?.usage?.input_tokens ?? 0, model: body?.result?.model ?? null };
+  // Gebruik dezelfde strikte validator als de desktop-adapter, plus het JEV-discriminatorveld. Zo
+  // maakt een malformed response de benchmark niet kunstmatig beter dan de productie-integratie.
+  const proposal = a?.type === 'choice'
+    ? parseJevResponse({ schemaVersion: 1, model: body?.result?.model, categoryKey: a.choice, confidence: a.confidence, probabilities: a.probabilities }, categories)
+    : null;
+  if (!res.ok || !proposal) return { valid: false, choice: null, second: null, confidence: null, ms, tokens: body?.result?.usage?.input_tokens ?? 0, model: null };
+  const ranked = Object.entries(proposal.probabilities).sort((x, y) => y[1] - x[1]);
+  return { valid: true, choice: proposal.categoryKey, second: ranked[1]?.[0] ?? null, confidence: proposal.confidence, ms, tokens: body?.result?.usage?.input_tokens ?? 0, model: proposal.model };
 }
 
 const doc = (c: Case): DocumentResult =>
