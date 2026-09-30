@@ -27,6 +27,8 @@ Belangrijke feiten:
 ## Links
 
 - [Website](https://boekhoudenvoorniks.nl/): productpagina met veelgestelde vragen
+- [Voor starters](https://boekhoudenvoorniks.nl/starters.html): checklist van KvK-inschrijving tot eerste btw-aangifte
+- [Voor boekhouders](https://boekhoudenvoorniks.nl/boekhouders.html): pakket voor de boekhouder en uitwisseling
 - [Wat is er nieuw](https://boekhoudenvoorniks.nl/wijzigingen.html): release notes per versie
 - [Downloads](https://github.com/shipdocs/boekhoudenvoorniks/releases/latest): installers voor Windows en Linux
 - [Uitgebreide beschrijving voor LLM's](https://boekhoudenvoorniks.nl/llms-full.txt)
