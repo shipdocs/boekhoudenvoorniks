@@ -5,6 +5,9 @@
 ### Nieuw
 - **Back-up terugzetten vanaf het welkomstscherm**: heb je al een administratie (nieuwe computer, herinstallatie), dan zet je meteen je back-up terug in plaats van opnieuw te beginnen. Het keuzevenster opent in de map met de automatische back-ups van elke dag.
 
+### Opgelost
+- **Linux: het icoon van de app ontbrak** in het menu en de taakbalk. Het pakket bevat nu het icoon in alle gangbare formaten.
+
 ## 0.7.0 — uitwisseling met je boekhouder
 
 ### Nieuw
