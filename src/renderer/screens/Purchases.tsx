@@ -27,6 +27,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const [uploading, setUploading] = useState(0);
   // vreemde valuta (#74): een aankoop omrekenen (uit de lijst van de app, of met de hand)
   const [fx, setFx] = useState<{ id: number; fromDocument: boolean } | null>(null);
+  const [resolving, setResolving] = useState<{ id: number; label: string } | null>(null);
   const foreign = useLoad(() => api.valuta.candidates());
 
   const upload = async (file: File) => {
@@ -102,6 +103,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                 <td>{p.relation_name ?? '—'}</td>
                 <td>
                   {p.description} {p.attachment_path && <span title="Bewijsstuk aanwezig">📎</span>}
+                  {p.question && <div className="small"><span className="pill warn">nog uitzoeken</span> staat bij "weet ik nog niet", zonder btw-aftrek</div>}
                   {p.business_pct < 100 && <div className="small"><strong>{p.business_pct}% zakelijk</strong>, {100 - p.business_pct}% privé</div>}
                   {p.warranty_months ? <div className="small muted">🛡️ {warrantyText(p.invoice_date, p.warranty_months)}</div> : null}
                 </td>
@@ -116,6 +118,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                       if (!confirm(`Aankoop ${p.relation_name ?? p.description} van ${formatDateNl(p.invoice_date)} weghalen? De kosten en de btw gaan eruit; de bon blijft bewaard.`)) return;
                       if ((await run(async () => { await api.purchases.remove(p.id); return true; }, 'Aankoop weggehaald ✓')) !== undefined) await purchases.reload();
                     }}>Weghalen</Button>}
+                    {p.question && <Button small kind="primary" onClick={() => setResolving({ id: p.id, label: `${p.relation_name ?? p.description} ${formatDateNl(p.invoice_date)}` })}>Indelen</Button>}
                     <Button small kind="ghost" title="Gebruik je dit ook privé? Stel in hoeveel zakelijk is" ariaLabel="Zakelijk deel aanpassen" onClick={() => setShare(p)}>%</Button>
                     {!p.currency && <Button small kind="ghost" title="Was deze bon in dollars of een andere munt? Dan reken je hem hier om naar euro's." ariaLabel="Omrekenen uit een andere munt" onClick={() => setFx({ id: p.id, fromDocument: false })}>💱</Button>}
                     <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={async () => {
@@ -136,6 +139,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
       {manual && <ManualExpense onClose={() => setManual(false)} onDone={async () => { setManual(false); await purchases.reload(); }} />}
       {pay !== null && <PayModal id={pay} onClose={() => setPay(null)} />}
       {share && <ShareModal purchase={share} onClose={() => setShare(null)} onDone={async () => { setShare(null); await purchases.reload(); }} />}
+      {resolving && <ResolveQuestionModal purchase={resolving} onClose={() => setResolving(null)} onDone={async () => { setResolving(null); await purchases.reload(); }} />}
       {paidElsewhere && <PaidElsewhereModal purchase={paidElsewhere} others={(purchases.data ?? []).filter((x) => x.id !== paidElsewhere.id && x.relation_id !== null && x.relation_id === paidElsewhere.relation_id && x.status === 'open' && x.open_amount > 0).length} onClose={() => setPaidElsewhere(null)} onDone={async () => { setPaidElsewhere(null); await purchases.reload(); }} />}
       {fx && <ForeignModal purchaseId={fx.id} fromDocument={fx.fromDocument} onClose={() => setFx(null)} onDone={async () => { setFx(null); await foreign.reload(); await purchases.reload(); }} />}
     </div>
@@ -573,4 +577,29 @@ function warrantyText(from: string, months: number): string {
   if (left < 0) return `garantie verlopen op ${d.toISOString().slice(0, 10)}`;
   const m = Math.floor(left / 30.44);
   return m >= 1 ? `nog ${m} ${m === 1 ? 'maand' : 'maanden'} garantie` : `nog ${Math.ceil(left)} dagen garantie`;
+}
+
+/** Een aankoop van "weet ik nog niet" alsnog indelen: categorie en btw; de btw-aftrek komt er dan bij. */
+function ResolveQuestionModal({ purchase, onClose, onDone }: { purchase: { id: number; label: string }; onClose: () => void; onDone: () => void | Promise<void> }) {
+  const { meta } = useApp();
+  const { run, busy } = useAction();
+  const [category, setCategory] = useState('overig');
+  const [vat, setVat] = useState<string>(meta.expenseCategories.find((c) => c.key === 'overig')?.defaultVat ?? 'hoog');
+  return (
+    <Modal title={`Indelen: ${purchase.label}`} onClose={onClose}>
+      <CategoryChoice value={category} onChange={(c) => { setCategory(c); setVat(meta.expenseCategories.find((x) => x.key === c)?.defaultVat ?? 'hoog'); }} />
+      <Field label="Btw op de bon">
+        <select value={vat} onChange={(e) => setVat(e.target.value)}>
+          {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
+        </select>
+      </Field>
+      <p className="small muted">De boeking op vraagposten wordt tegengeboekt en opnieuw gemaakt met deze categorie en btw. De betaling blijft gekoppeld.</p>
+      <div className="row end">
+        <Button onClick={onClose}>Annuleren</Button>
+        <Button kind="primary" disabled={busy} onClick={async () => {
+          if ((await run(() => api.purchases.resolveQuestion(purchase.id, category, vat), 'Ingedeeld ✓')) !== undefined) await onDone();
+        }}>Indelen</Button>
+      </div>
+    </Modal>
+  );
 }
