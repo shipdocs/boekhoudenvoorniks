@@ -9,9 +9,9 @@
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "routes": [{ "pattern": "licentie.boekhoudenvoorniks.nl", "custom_domain": true }],
   // MOLLIE_TESTMODE "false" = live (zelfde organisatie-toegangstoken); INVOICES "true" zodra het token
-  // het recht sales-invoices.write heeft (factuur bij elke betaling); zie README
+  // de rechten sales-invoices.read en sales-invoices.write heeft (factuur bij elke betaling); zie README
   // PRICE_EXCL_VAT: prijs per maand exclusief btw (afgeschreven: plus 21%); TRIAL_MONTHS: gratis maanden bij een eerste abonnement
-  "vars": { "PRICE_EXCL_VAT": "9.00", "TRIAL_MONTHS": "4", "PUBLIC_URL": "https://licentie.boekhoudenvoorniks.nl", "MOLLIE_PROFILE_ID": "pfl_GTr2c9XX9n", "MOLLIE_TESTMODE": "true", "INVOICES": "false" },
+  "vars": { "PRICE_EXCL_VAT": "9.00", "TRIAL_MONTHS": "4", "PUBLIC_URL": "https://licentie.boekhoudenvoorniks.nl", "MOLLIE_PROFILE_ID": "pfl_GTr2c9XX9n", "MOLLIE_TESTMODE": "true", "INVOICES": "true" },
   "d1_databases": [
     // aangemaakt met `npx wrangler d1 create boekhoudenvoorniks-licenties --location weur`
     { "binding": "LICENTIES", "database_name": "boekhoudenvoorniks-licenties", "database_id": "1ab9cdae-3eba-4788-aedb-c608b1e044aa", "migrations_dir": "migrations" }
