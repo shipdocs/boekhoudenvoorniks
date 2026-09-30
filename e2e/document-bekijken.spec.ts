@@ -42,3 +42,32 @@ test('een PDF van meerdere pagina\'s: alle pagina\'s zijn te zien', async ({ pag
   await expect(marker).toHaveCount(1);
   await expect(marker).toBeInViewport();
 });
+
+test('bon "weet ik nog niet": apart gezet, en later indelen bij Aankopen', async ({ page }) => {
+  await onboard(page);
+  await nav(page, 'Aankopen & bonnetjes');
+  await page.locator('main input[type=file]').first().setInputFiles({ name: 'bon.pdf', mimeType: 'application/pdf', buffer: pdf(['Rare Winkel Zoveel', 'Datum 10-09-2026', 'Totaal 121,00']) });
+  await page.getByRole('button', { name: 'Bekijken' }).first().click();
+  const skip = page.getByRole('button', { name: /Nee, ik vul bonnen zelf in/ });
+  if (await skip.isVisible().catch(() => false)) await skip.click();
+
+  await page.getByRole('button', { name: /Weet ik nog niet: vraag mijn boekhouder/ }).click();
+  await expect(page.getByTestId('vraagpost')).toContainText('zonder btw-aftrek');
+  // de btw-keuze doet dan niet mee
+  await expect(page.getByText('Btw op de bon')).toHaveCount(0);
+  const date = page.locator('input[type=date]').first();
+  if (!(await date.inputValue())) await date.fill('2026-09-10');
+  await page.getByRole('button', { name: 'Klopt, verwerken' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Aankopen', exact: true })).toBeVisible();
+  const row = page.locator('tr', { has: page.locator('.pill', { hasText: 'nog uitzoeken' }) });
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: 'Indelen' }).click();
+  const dialog = page.getByRole('dialog', { name: /Indelen:/ });
+  await dialog.locator('.chips button', { hasText: /^Materiaal$/ }).click();
+  await dialog.getByRole('button', { name: 'Indelen' }).click();
+  await expect(page.locator('.toasts').getByText('Ingedeeld ✓')).toBeVisible();
+  await expect(page.locator('.pill', { hasText: 'nog uitzoeken' })).toHaveCount(0);
+  await expect(page.locator('tr', { hasText: 'Materiaal — Rare Winkel Zoveel' })).toBeVisible();
+});
+

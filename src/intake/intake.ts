@@ -52,6 +52,9 @@ export interface IntakeDocument {
   bank_match: BankTransaction | null;
 }
 
+/** Categorie voor "weet ik nog niet (vraag mijn boekhouder)": boekt op Vraagposten (1690). */
+export const QUESTION_CATEGORY = 'onbekend';
+
 export interface Confirmation {
   supplier: string;
   date: IsoDate;
@@ -575,12 +578,15 @@ export class IntakeService {
     if (doc.status === 'verwerkt') throw new ValidationError('Dit bonnetje is al verwerkt');
     if (!c.supplier?.trim()) throw new ValidationError('Vul de winkel of leverancier in');
     if (!Number.isSafeInteger(c.total) || c.total === 0) throw new ValidationError('Vul het totaalbedrag in');
-    const category = this.categories.find(c.categoryKey);
+    // "Weet ik nog niet (vraag mijn boekhouder)": apart op Vraagposten, zonder btw-aftrek en zonder iets te
+    // leren; de btw-controle en het pakket voor de boekhouder melden hem tot hij is ingedeeld
+    if (c.categoryKey === QUESTION_CATEGORY) c = { ...c, vatCode: 'geen', vatAmount: null, splits: null, business: true, businessPct: undefined };
+    const category = c.categoryKey === QUESTION_CATEGORY ? { key: QUESTION_CATEGORY, label: 'Nog uitzoeken', account: ACCOUNTS.vraagposten } : this.categories.find(c.categoryKey);
     if (!category) throw new ValidationError('Kies waar de aankoop voor was');
     if (!isPurchaseVatCode(c.vatCode)) throw new ValidationError('Kies of er btw op de bon stond');
 
     tx(this.db, () => {
-      if (opts.learn !== false) {
+      if (opts.learn !== false && c.categoryKey !== QUESTION_CATEGORY) {
         // de eindkeuze van de gebruiker is de leerbron, wie het voorstel ook deed (#132)
         this.memory.learn(c.supplier, { categoryKey: c.categoryKey, vatCode: c.vatCode, business: c.business });
         this.recordProposalOutcome(doc, c);
