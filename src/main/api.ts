@@ -34,6 +34,7 @@ import type { Confirmation } from '../intake/intake';
 import type { JobStatus } from '../jobs/jobs';
 import type { LineInput } from '../documents/totals';
 import { documentProposal, type Task } from '../inbox/inbox';
+import { ONLINE_HELP } from '../shared/online-help';
 import type { OpeningInput, SectionKey } from '../onboarding/switchover';
 import type { XafApplyChoices } from '../onboarding/xaf-import';
 import { OPEN_ITEMS_TEMPLATE, type ColumnMapping } from '../import/opening-tables';
@@ -580,6 +581,9 @@ export function createApi(s: Services, host: HostContext) {
       },
       update: (patch: Partial<AppSettings>) => {
         // online hulp (JEV) hoort bij het abonnement: alleen aan te zetten met een actieve licentie (#132)
+        if (patch.ocr?.onlineCategoryHelp === true && !s.settings.get().ocr.onlineCategoryHelp && !ONLINE_HELP.available) {
+          throw new ValidationError('Online hulp bij categorievoorstellen is nog niet beschikbaar.');
+        }
         if (patch.ocr?.onlineCategoryHelp === true && !s.settings.get().ocr.onlineCategoryHelp && s.license.status(today()).state !== 'actief') {
           throw new ValidationError('Online hulp bij categorievoorstellen hoort bij het abonnement. Neem eerst een abonnement.');
         }
