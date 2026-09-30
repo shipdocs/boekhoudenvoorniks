@@ -1,9 +1,9 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.7.5 — bekende leveranciers voorgesteld, eenvoudiger uitleg online hulp
 
 ### Verbeterd
-- **Leverancier invullen stelt bekende leveranciers voor**: typ je bij een bon (of bij *Aankoop zonder bon*) de naam van de winkel of leverancier, dan zie je de leveranciers die de app al kent uit je relaties en eerdere bonnen.
+- **Leverancier invullen stelt bekende leveranciers voor**: typ je bij een bon (of bij *Bonnetje zonder foto*) de naam van de winkel of leverancier, dan zie je de leveranciers die de app al kent uit je relaties en eerdere bonnen.
 - **Uitleg van de online hulp eenvoudiger**: in Instellingen heet het nu *Online hulp bij het indelen van bonnen*, in gewone woorden, met erbij dat er niets meegaat waaraan jij of je klanten te herkennen zijn.
 
 ## 0.7.4 — online hulp bij categorievoorstellen, vraagposten bij bonnen
