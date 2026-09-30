@@ -24,8 +24,9 @@ export async function extractPdf(data: Uint8Array, maxPages = 5): Promise<PdfExt
       const content = await page.getTextContent();
       for (const it of content.items as { str: string; transform: number[]; width: number; height: number }[]) {
         // een streepje zonder tekstcode in het lettertype komt door als nul-teken (bv. Stripe:
-        // "P6ARUBNL-0001", "Aug 23 – Sep 23"): weer een streepje van maken
-        it.str = it.str?.replace(/\u0000/g, '-');
+        // "P6ARUBNL-0001", "Aug 23 – Sep 23") of als eigen teken van het lettertype (Private Use Area,
+        // bv. Mollie: "30-09-2026", "I-MOL-2026-00347"): weer een streepje van maken
+        it.str = it.str?.replace(/[\u0000\uE000-\uF8FF]/g, '-');
         if (!it.str?.trim()) continue;
         const x = it.transform[4]!;
         const h = it.height || Math.abs(it.transform[3]!) || 10;
