@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Waarom we BoekhoudenVoorNiks maakten | BoekhoudenVoorNiks</title>
+  <meta name="description" content="Waarom een gratis boekhoudprogramma dat lokaal op je eigen computer draait, in één week gebouwd met AI. Over de cloud, AI en terug naar de basis: software die gewoon werkt.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/waarom.html">
+  <meta property="og:type" content="article">
+  <meta property="og:locale" content="nl_NL">
+  <meta property="og:site_name" content="BoekhoudenVoorNiks">
+  <meta property="og:url" content="https://boekhoudenvoorniks.nl/waarom.html">
+  <meta property="og:title" content="Waarom we BoekhoudenVoorNiks maakten">
+  <meta property="og:description" content="In één week gebouwd met AI, en bewust lokaal: je administratie hoort op je eigen computer, niet in een cloud die niet van jou is.">
+  <meta property="og:image" content="https://boekhoudenvoorniks.nl/img/vandaag.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://boekhoudenvoorniks.nl/" },
+          { "@type": "ListItem", "position": 2, "name": "Waarom", "item": "https://boekhoudenvoorniks.nl/waarom.html" }
+        ]
+      },
+      {
+        "@type": "Article",
+        "headline": "Waarom we BoekhoudenVoorNiks maakten",
+        "inLanguage": "nl-NL",
+        "url": "https://boekhoudenvoorniks.nl/waarom.html",
+        "author": { "@type": "Organization", "name": "ShipDocs" },
+        "publisher": { "@type": "Organization", "name": "ShipDocs" },
+        "about": { "@type": "SoftwareApplication", "name": "BoekhoudenVoorNiks", "url": "https://boekhoudenvoorniks.nl/" }
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="./"><picture><source srcset="img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href="./#functies">Functies</a>
+        <a href="./#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="stukadoors.html">Stukadoors</a>
+            <a href="schilders.html">Schilders</a>
+            <a href="webdevelopers.html">Webdevelopers</a>
+            <a href="boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="waarom.html" aria-current="page">Waarom</a>
+        <a href="wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="https://github.com/shipdocs/boekhoudenvoorniks/releases/latest">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script>
+  (function () {
+    var top = document.querySelector('.top'), button = top.querySelector('.menu-button');
+    button.addEventListener('click', function () {
+      var open = top.classList.toggle('open');
+      button.setAttribute('aria-expanded', String(open));
+    });
+    top.querySelectorAll('details.sub').forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (!d.open) return;
+        top.querySelectorAll('details.sub[open]').forEach(function (o) { if (o !== d) o.open = false; });
+      });
+    });
+    function closeAll() {
+      var focused = document.activeElement, wasInside = top.contains(focused);
+      top.querySelectorAll('details.sub[open]').forEach(function (o) {
+        o.open = false;
+        if (o.contains(focused)) { o.querySelector('summary').focus(); wasInside = false; }
+      });
+      if (!top.classList.contains('open')) return;
+      top.classList.remove('open');
+      button.setAttribute('aria-expanded', 'false');
+      // de focus nooit achterlaten op een verborgen link
+      if (wasInside && focused !== button) button.focus();
+    }
+    document.addEventListener('click', function (e) { if (!top.contains(e.target)) closeAll(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
+  })();
+  </script>
+
+  <main class="wrap notes">
+    <p class="eyebrow">Over dit programma</p>
+    <h1>Waarom we dit maakten</h1>
+    <p class="lead">Een boekhoudprogramma dat gewoon op je eigen computer draait. Gratis, zonder account, zonder cloud. Dit is het verhaal erachter, in het kort.</p>
+
+    <h2>In één week gebouwd, met AI</h2>
+    <p>Dit hele pakket is in één week gemaakt, met AI. Dat klinkt misschien onvoorzichtig voor iets waar je btw-aangifte van afhangt. Toch is het andersom: AI is een goed gereedschap om ontwikkeling te versnellen, mits je het goed gebruikt.</p>
+    <p>Goed gebruiken betekent voor ons: de mens bepaalt wat het programma moet doen en welke regels gelden, de AI schrijft en test sneller dan een mens dat kan. Elke boekingsregel staat vast in code en wordt met tests gecontroleerd. Wat de AI voorstelt, wordt nagekeken, en wat niet klopt gaat eruit. Zo hebben we in een week gebouwd wat anders maanden had geduurd, zonder in te leveren op hoe het rekent.</p>
+    <p>Dezelfde regel geldt in het programma zelf. AI mag een voorstel doen, bijvoorbeeld welke categorie een bonnetje is, maar verzint nooit de boekhouding. Boekingen worden altijd met vaste, controleerbare regels gemaakt. Bij elke automatische verwerking zie je waarom, en met één knop draai je hem terug.</p>
+
+    <h2>Lokaal, omdat we geen fan zijn van de cloud</h2>
+    <p>We maakten het bewust lokaal. Ja, de cloud is makkelijk. Ja, het werkt goed. Maar de laatste jaren verschuift het hele leven naar een cloud die niet gratis is: je administratie, je foto's, je documenten, allemaal bij iemand anders, tegen een bedrag per maand. Gaat daar iets mis, valt de dienst om, wordt je account geblokkeerd of gaat de prijs omhoog, dan heb je niets.</p>
+    <p>Wij vinden dat je eigen administratie niet van een abonnement mag afhangen. Daarom staat bij BoekhoudenVoorNiks alles op je eigen computer, in een map met je database en al je bonnen en facturen, met elke dag een back-up van allebei. Wij ontvangen er niets van. Stopt ShipDocs morgen, dan werkt het programma overmorgen nog.</p>
+
+    <h2>AI verandert het internet</h2>
+    <p>Met de recente ontwikkelingen in AI zien we dat AI-systemen nu al een groot deel van het internetverkeer zijn. Nieuwe modellen blijken ongevraagd systemen binnen te dringen en zelf beslissingen te nemen. Hoe meer van je bedrijf online staat, hoe groter het doelwit.</p>
+    <p>Wat ons betreft is dit een mooi moment om terug te gaan naar de basis: software die lokaal draait en gewoon werkt. Jouw computer, jouw bestand, jouw back-up. Internet gebruik je alleen als je dat zelf wilt: voor een update, een e-mail, een koppeling die je zelf aanzet, of het eenmalig ophalen van de lokale tekstherkenning.</p>
+
+    <h2>Wat dat in de praktijk betekent</h2>
+    <ul class="checks">
+      <li><strong>Je administratie staat op je eigen computer</strong><br><span class="muted">In een map met een databasebestand en al je bonnen en facturen. Geen account, geen cloud, en wij ontvangen er niets van.</span></li>
+      <li><strong>Werkt zonder internet</strong><br><span class="muted">Alleen voor updates, e-mail, koppelingen die je zelf aanzet en het eenmalig ophalen van de lokale tekstherkenning is internet nodig.</span></li>
+      <li><strong>Elke dag een back-up</strong><br><span class="muted">Automatisch, met database én bijlagen, op verzoek versleuteld, en je zet zelf een kopie op een USB-stick.</span></li>
+      <li><strong>Tekstherkenning en AI draaien lokaal</strong><br><span class="muted">Als je ze aanzet. Er gaan geen bonnetjes naar externe servers.</span></li>
+      <li><strong>Rechtstreeks naar je boekhouder</strong><br><span class="muted">Stuur je een kwartaal naar je boekhouder, dan gaat het versleuteld van jou naar hem, niet via ons.</span></li>
+      <li><strong>Open source</strong><br><span class="muted">De broncode staat op GitHub onder de AGPL-licentie. Iedereen kan lezen en controleren wat het programma doet.</span></li>
+      <li><strong>Je zit nergens aan vast</strong><br><span class="muted">Je administratie exporteer je als auditfile (XAF), dus weggaan kan altijd. Overstappen kan ook via de auditfile.</span></li>
+    </ul>
+
+    <h2>Waarom gratis?</h2>
+    <p>Omdat een vakman geen abonnement zou moeten betalen om zijn eigen cijfers te mogen zien. Het programma is en blijft gratis, zonder proefperiode en zonder limiet. Alleen samenwerken met je boekhouder vanuit de app, een kwartaal versturen en zijn correcties inlezen, is een los abonnement. Dat betaalt de servers voor de uitwisseling en het werk om het programma bij te houden. Heb je dat niet nodig, dan betaal je nooit iets. Zie de <a href="./#prijzen">prijzen</a>.</p>
+
+    <div class="cta" style="margin-top: 32px">
+      <a class="btn" href="https://github.com/shipdocs/boekhoudenvoorniks/releases/latest">Gratis downloaden voor Windows of Linux</a>
+      <a class="btn ghost" href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode op GitHub</a>
+    </div>
+    <p class="fine">Vragen of een andere mening? Mail naar <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> of open een <a href="https://github.com/shipdocs/boekhoudenvoorniks/issues">issue op GitHub</a>. Meer lezen: <a href="zonder-abonnement.html">zonder abonnement en offline</a> · <a href="privacy.html">privacyverklaring</a>.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="./#functies">Functies</a></li>
+          <li><a href="./#prijzen">Prijzen</a></li>
+          <li><a href="./#overstappen">Overstappen</a></li>
+          <li><a href="btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="zonder-abonnement.html">Zonder abonnement, offline</a></li>
+          <li><a href="./#vragen">Veelgestelde vragen</a></li>
+          <li><a href="wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="starters.html">Starters</a></li>
+          <li><a href="stukadoors.html">Stukadoors</a></li>
+          <li><a href="schilders.html">Schilders</a></li>
+          <li><a href="webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="waarom.html" aria-current="page">Waarom we dit maakten</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks/releases/latest">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks/issues">Feedback &amp; vragen</a></li>
+          <li><a href="voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a></p>
+  </footer>
+</body>
+</html>

@@ -28,7 +28,8 @@
     "benchmark:maak": "npm run build:main && electron dist/main/tools/render-benchmark.js",
     "e2e": "npm run rebuild:node && npm run build && playwright test",
     "e2e:only": "playwright test",
-    "voorbeeldpakket": "npm run rebuild:node && npm run build:main && node scripts/voorbeeldpakket.cjs"
+    "voorbeeldpakket": "npm run rebuild:node && npm run build:main && node scripts/voorbeeldpakket.cjs",
+    "site:menu": "node scripts/site-menu.cjs"
   },
   "build": {
     "appId": "app.shipdocs.gratisboekhouden",
