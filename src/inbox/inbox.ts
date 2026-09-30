@@ -150,10 +150,26 @@ function proposalNote(c: Classification): string {
   return c.proposedBy === 'jev' || c.proposedBy === 'ollama' ? ` (voorstel van ${PROPOSED_BY_LABEL[c.proposedBy]})` : '';
 }
 
-/** Vingerafdruk van wat "Ja" bij een bon zal boeken: categorie, btw, zakelijk en de gekoppelde betaling. */
-export function documentProposal(d: Pick<IntakeDocument, 'classification' | 'bank_match'>): string | undefined {
+/**
+ * Vingerafdruk van alles wat "Ja" bij een bon zal boeken. Zo kan een opnieuw gelezen document niet
+ * stil met een andere leverancier, datum, bedrag of factuurnummer worden bevestigd vanuit een oude taak.
+ */
+export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classification' | 'bank_match'>): string | undefined {
   const c = d.classification;
-  return c ? [c.categoryKey, c.vatCode, c.business ? 'zakelijk' : 'prive', d.bank_match?.id ?? '-'].join('|') : undefined;
+  const r = d.result;
+  return c && r
+    ? JSON.stringify([
+        2,
+        r.supplier?.value ?? null,
+        r.invoiceDate?.value ?? null,
+        r.total?.value ?? null,
+        r.invoiceNumber?.value ?? null,
+        c.categoryKey,
+        c.vatCode,
+        c.business,
+        d.bank_match?.id ?? null,
+      ])
+    : undefined;
 }
 
 export class InboxService {
