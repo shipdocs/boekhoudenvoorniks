@@ -35,7 +35,7 @@ import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
 import { CHOICE_SESSION, chromiumDir, forgetMoved, handOverLocalState, markComplete, noteMoved, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type MigrationOutcome, type SwitchAction, type SwitchOutcome, type SwitchPlan } from './data-dir';
 import { chooseAfterFailedMigration, chooseAfterMove, chooseOldFolder, confirmSyncFolder, migrateWithProgress, pickDataFolder, refuseDataFolder, switchWithProgress } from './data-dir-app';
-import { isWindowsStore, mcpCommand as mcpCommandFor, migrateForStore, READ_ONLY_MESSAGE, readOnlyError, storeFallbackHint, storeAppDataNotice, storeFirstStartNotice, storeFolderProblem, type StartNotice } from './windows-store';
+import { isWindowsStore, mcpCommand as mcpCommandFor, migrateForStore, READ_ONLY_MESSAGE, readOnlyError, storeFallbackHint, storeAppDataNotice, findOldInstall, oldInstallPrompt, OLD_INSTALL_IGNORE_FLAG, storeFolderProblem, type StartNotice } from './windows-store';
 import { STORE_LLAMA_CPP } from '../ocr-runtime/manifest';
 import { Administrations, readAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
@@ -983,7 +983,8 @@ async function prepareDataDir(): Promise<boolean> {
 /** Het overzetten zelf; een fout ná de marker telt als gelukt (alleen de afronding ging mis). */
 async function migrateOldFolder(source: string, target: string): Promise<MigrationOutcome> {
   try {
-    return await migrateWithProgress(source, target, !SMOKE_TEST);
+    // in de Store-versie lukt het hernoemen van een map in AppData nooit (Windows weigert dat een Store-app): niet proberen
+    return await migrateWithProgress(source, target, !SMOKE_TEST, STORE);
   } catch (e) {
     // de marker staat er al: de gedeelde map is compleet, alleen de afronding ging mis
     console.error('Afronden van het overzetten mislukt', e);
@@ -997,7 +998,11 @@ function movedNotice(source: string, target: string, outcome: Extract<MigrationO
     message: 'Je gegevens staan nu in een vaste map',
     detail:
       `Je administratie staat voortaan in ${target}. Daar blijft hij ook staan als je de app verwijdert of opnieuw installeert.\n\n` +
-      (outcome.renamedSource ? `De oude map is bewaard als ${outcome.renamedSource}.` : (outcome.warning ?? `De oude map ${source} is blijven staan.`)) +
+      (outcome.renamedSource
+        ? `De oude map is bewaard als ${outcome.renamedSource}.`
+        : STORE
+          ? `De oude map ${source} is niet aangeraakt en blijft staan; de versie uit de Microsoft Store mag hem niet hernoemen. Controleer eerst of alles klopt (en maak een back-up). Daarna kun je hem zelf verwijderen. Gebruik je daarnaast nog de oude versie van de website, dan werkt die verder in die oude map.`
+          : (outcome.warning ?? `De oude map ${source} is blijven staan.`)) +
       (outcome.movedAside ? `\n\nIn de nieuwe map stond al iets; dat is bewaard in ${outcome.movedAside}.` : '') +
       '\n\nGebruik je de koppeling met Claude Code of Codex? Start dat programma dan opnieuw, zodat het de nieuwe map leest.',
   };
@@ -1124,6 +1129,30 @@ async function showDataDirNotice(): Promise<void> {
     await dialog.showMessageBox(mainWindow, { ...notice, title: 'BoekhoudenVoorNiks', buttons: ['OK'] });
   }
 }
+/**
+ * Staat er een oude installatie van de website naast deze Store-versie, dan vragen of die weg mag. Er wordt nooit
+ * vanzelf iets verwijderd: de knop opent het verwijderprogramma van die versie (Windows vraagt zelf om toestemming).
+ */
+async function askAboutOldInstall(): Promise<void> {
+  const dir = app.getPath('userData');
+  if (!mainWindow || existsSync(join(dir, OLD_INSTALL_IGNORE_FLAG))) return;
+  const found = findOldInstall({ localAppData: process.env.LOCALAPPDATA, programFiles: [process.env.ProgramFiles, process.env.ProgramW6432, process.env['ProgramFiles(x86)']] });
+  if (!found) return;
+  const prompt = oldInstallPrompt(found);
+  const { response } = await dialog.showMessageBox(mainWindow, { type: 'question', title: 'BoekhoudenVoorNiks', message: prompt.message, detail: prompt.detail, buttons: prompt.buttons, defaultId: 0, cancelId: prompt.actions.indexOf('later'), noLink: true });
+  const action = prompt.actions[response];
+  if (action === 'verwijderen' && found.uninstaller) {
+    const error = await shell.openPath(found.uninstaller);
+    if (error) dialog.showErrorBox('De oude versie verwijderen lukte niet', `${error}\n\nVerwijder hem via Instellingen van Windows → Apps.`);
+  } else if (action === 'negeren') {
+    try {
+      writeFileSync(join(dir, OLD_INSTALL_IGNORE_FLAG), `${new Date().toISOString()}\n`);
+    } catch {
+      /* niet te onthouden: dan komt de vraag de volgende keer nog eens */
+    }
+  }
+}
+
 if (MCP_MODE) {
   app.dock?.hide();
   if (DATA_ENV || dataRoot) startMcp(dbPath(), app.getVersion()).then(
@@ -1158,13 +1187,11 @@ if (MCP_MODE) {
     preparing = false;
     if (SMOKE_TEST) return;
     if (STORE && !DATA_ENV) {
-      const first = storeFirstStartNotice(app.getPath('userData'));
-      if (first) dataDirNotices.push(first);
       // een eerder zelf gekozen map onder AppData (verwijzing, of teruggevonden na "Waar staat je administratie?")
       const risky = readOnly ? null : storeAppDataNotice(rootDir(), app.getPath('appData'));
       if (risky) dataDirNotices.push(risky);
     }
-    void showDataDirNotice();
+    void showDataDirNotice().then(() => (STORE && !DATA_ENV ? askAboutOldInstall() : undefined));
     // alleen bekijken: geen back-ups, post of automatisch verwerken in de oude map
     if (!readOnly) {
       setTimeout(() => void backgroundTasks(), 10_000);

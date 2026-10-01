@@ -15,7 +15,9 @@ import { resolveAttachmentPath, saveAttachment } from '../src/main/attachments';
 import { Updates, type UpdateStatus } from '../src/main/updates';
 import {
   DOWNLOAD_URL,
-  FIRST_START_FLAG,
+  OLD_INSTALL_IGNORE_FLAG,
+  findOldInstall,
+  oldInstallPrompt,
   isWindowsStore,
   mcpCommand,
   migrateForStore,
@@ -26,7 +28,6 @@ import {
   storeAliasPath,
   storeAppDataNotice,
   storeFallbackHint,
-  storeFirstStartNotice,
   storeFolderProblem,
   type StoreMigrationChoice,
   type StoreMigrationDeps,
@@ -648,15 +649,47 @@ describe('Store-versie met de gegevens in een eerder zelf gekozen map', () => {
   });
 });
 
-describe('eerste start van de Store-versie', () => {
-  it('meldt één keer dat een oude installatie van de website weg moet of bijgewerkt moet worden', () => {
-    const dir = tempDir();
-    const notice = storeFirstStartNotice(dir);
-    expect(notice?.type).toBe('info');
-    expect(notice?.detail).toMatch(/Setup\.exe/);
-    expect(notice?.detail).toMatch(/Verwijder die oude versie.*of werk hem bij naar versie 0\.7\.6 of nieuwer/s);
-    expect(existsSync(join(dir, FIRST_START_FLAG))).toBe(true);
-    expect(storeFirstStartNotice(dir)).toBeNull();
+describe('een oude installatie van de website naast de Store-versie', () => {
+  const env = { localAppData: 'C:\\Users\\Piet\\AppData\\Local', programFiles: ['C:\\Program Files', undefined, 'C:\\Program Files (x86)'] };
+  const has = (...files: string[]) => (file: string) => files.includes(file);
+
+  it('vindt een installatie voor één gebruiker', () => {
+    const exe = 'C:\\Users\\Piet\\AppData\\Local\\Programs\\BoekhoudenVoorNiks\\BoekhoudenVoorNiks.exe';
+    const uninstall = 'C:\\Users\\Piet\\AppData\\Local\\Programs\\BoekhoudenVoorNiks\\Uninstall BoekhoudenVoorNiks.exe';
+    expect(findOldInstall(env, has(exe, uninstall), 'win32')).toEqual({ dir: 'C:\\Users\\Piet\\AppData\\Local\\Programs\\BoekhoudenVoorNiks', uninstaller: uninstall });
+  });
+
+  it('vindt een installatie voor alle gebruikers (zoals bij de proef met 0.7.5)', () => {
+    const exe = 'C:\\Program Files\\BoekhoudenVoorNiks\\BoekhoudenVoorNiks.exe';
+    const uninstall = 'C:\\Program Files\\BoekhoudenVoorNiks\\Uninstall BoekhoudenVoorNiks.exe';
+    expect(findOldInstall(env, has(exe, uninstall), 'win32')).toEqual({ dir: 'C:\\Program Files\\BoekhoudenVoorNiks', uninstaller: uninstall });
+  });
+
+  it('zonder verwijderprogramma wordt de installatie toch gevonden, met uitleg waar hij staat', () => {
+    const exe = 'C:\\Program Files (x86)\\BoekhoudenVoorNiks\\BoekhoudenVoorNiks.exe';
+    const found = findOldInstall(env, has(exe), 'win32');
+    expect(found).toEqual({ dir: 'C:\\Program Files (x86)\\BoekhoudenVoorNiks', uninstaller: null });
+    const prompt = oldInstallPrompt(found!);
+    expect(prompt.actions).toEqual(['later', 'negeren']);
+    expect(prompt.detail).toContain('Instellingen van Windows → Apps');
+    expect(prompt.detail).toContain('C:\\Program Files (x86)\\BoekhoudenVoorNiks');
+  });
+
+  it('niets gevonden, een andere map, of niet op Windows: geen vraag', () => {
+    expect(findOldInstall(env, () => false, 'win32')).toBeNull();
+    expect(findOldInstall(env, has('D:\\Programma\\BoekhoudenVoorNiks\\BoekhoudenVoorNiks.exe'), 'win32')).toBeNull();
+    expect(findOldInstall(env, () => true, 'linux')).toBeNull();
+    expect(findOldInstall({}, () => true, 'win32')).toBeNull();
+  });
+
+  it('de vraag verwijdert nooit zelf iets: drie keuzes, en de gegevens blijven staan', () => {
+    const prompt = oldInstallPrompt({ dir: 'C:\\Program Files\\BoekhoudenVoorNiks', uninstaller: 'C:\\Program Files\\BoekhoudenVoorNiks\\Uninstall BoekhoudenVoorNiks.exe' });
+    expect(prompt.buttons).toEqual(['Oude versie verwijderen', 'Later', 'Niet meer vragen']);
+    expect(prompt.actions).toEqual(['verwijderen', 'later', 'negeren']);
+    expect(prompt.buttons).toHaveLength(prompt.actions.length);
+    expect(prompt.detail).toMatch(/administratie blijft gewoon staan/);
+    expect(prompt.detail).toMatch(/ouder dan 0\.7\.6/);
+    expect(OLD_INSTALL_IGNORE_FLAG).toBe('.store-oude-versie-negeren');
   });
 });
 
