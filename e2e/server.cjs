@@ -195,8 +195,9 @@ function init(fresh) {
         try { sanitizeForExchange(d); } finally { d.close(); }
       }),
       office: () => officeProfile,
-      saveOffice({ office, email, keys }) {
-        officeProfile = { office, email, ...(keys ?? officeProfile ?? generateOfficeKeys()) };
+      // zoals saveOffice in src/main/main.ts: `newKey` = bewust een nieuwe kantoorsleutel
+      saveOffice({ office, email, keys, newKey }) {
+        officeProfile = { office, email, ...(keys ?? (newKey ? null : officeProfile) ?? generateOfficeKeys()) };
         officeProfile.office = office;
         officeProfile.email = email;
         return officeProfile;
