@@ -145,7 +145,7 @@ function extractionSourceLabel(source: string | null): string {
 export function DocumentReview({ id }: { id: number }) {
   const { go, meta, settings, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
-  const doc = useLoad(() => api.documents.get(id), [id]);
+  const doc = useLoad(() => api.documents.open(id), [id]);
   const jobs = useLoad(() => api.jobs.list({ active: true }));
   const jobSuggestion = useLoad(() => api.jobs.suggestForDocument(id), [id]);
   const jobSuggested = useRef(false);

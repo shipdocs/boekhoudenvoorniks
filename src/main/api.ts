@@ -734,6 +734,8 @@ export function createApi(s: Services, host: HostContext) {
       addPurchaseEvidence: (name: string, data: Uint8Array, purchaseId: number) => s.intake.addPurchaseEvidence(name, data, purchaseId),
       list: (status?: 'nieuw' | 'controle' | 'verwerkt' | 'genegeerd') => s.intake.list(status),
       get: (id: number) => s.intake.get(id),
+      /** De bon openen om te controleren; ontbrak de koers van een vreemde munt, dan nu nog een keer proberen. */
+      open: (id: number) => s.intake.retryRate(Number(id)),
       confirm: (id: number, c: Confirmation) => s.intake.confirm(id, c),
       ignore: (id: number) => s.intake.ignore(id),
       /** Het antwoord op "dezelfde aankoop?" of "alleen als bewijs koppelen?" (#179): ja, nee of later. */

@@ -290,7 +290,7 @@ export class IntakeService {
     const cur = result.currency?.value;
     if (!cur || cur === 'EUR' || !result.total || result.foreign) return [];
     const foreignTotal = result.total.value;
-    const fx = this.fx ? await this.fx.rateFor(cur, result.invoiceDate?.value ?? today()) : null;
+    const fx = this.fx ? await this.fx.rateFor(cur, rateDate(result)) : null;
     result.foreign = { currency: cur, total: foreignTotal, rate: fx?.rate ?? null, rateDate: fx?.date ?? null, source: fx ? 'ecb' : null };
     const name = CURRENCY_NAMES[cur]?.name ?? cur;
     if (!fx) {
@@ -302,6 +302,27 @@ export class IntakeService {
     }
     scaleMoney(result, (c) => toEuro(c, fx.rate));
     return [];
+  }
+
+  /**
+   * Een bon in een vreemde munt die binnenkwam toen de koers niet op te halen was (#177): nog een keer
+   * proberen, bv. bij het openen van de bon. Lukt het, dan staat het bedrag in euro's er alsnog; lukt
+   * het niet (of duurt het te lang), dan verandert er niets en vult de gebruiker het bedrag zelf in.
+   */
+  async retryRate(id: number, asOf: IsoDate = today(), timeoutMs = 4000): Promise<IntakeDocument> {
+    const doc = this.get(id);
+    const result = doc.result;
+    if (!this.fx || !result?.foreign || result.foreign.rate !== null || result.total || doc.status === 'verwerkt' || doc.status === 'genegeerd') return doc;
+    const fx = await Promise.race([
+      this.fx.rateFor(result.foreign.currency, rateDate(result)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+    if (!fx) return doc;
+    result.total = { value: toEuro(result.foreign.total, fx.rate), confidence: 0.9, source: result.currency?.source ?? 'gebruiker' };
+    result.foreign = { ...result.foreign, rate: fx.rate, rateDate: fx.date, source: 'ecb' };
+    this.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(result), id);
+    // de melding "koers kon niet opgehaald worden" vervalt; de rest opnieuw beoordelen, nooit zelf boeken
+    return this.evaluate(id, [], asOf, { autoConfirm: false });
   }
 
   /** EXTRACTIE: wat staat er op het document? */
@@ -1068,6 +1089,15 @@ export class IntakeService {
 }
 
 /** Alle geldbedragen van een document omrekenen (vreemde munt → euro's). */
+/**
+ * De datum voor de koers: de factuurdatum, maar nooit in de toekomst. Een verkeerd gelezen datum
+ * (bv. een Amerikaanse 12/10/2026) mag het omrekenen niet tegenhouden: voor morgen bestaat geen koers.
+ */
+function rateDate(result: DocumentResult): IsoDate {
+  const date = result.invoiceDate?.value;
+  return date && date <= today() ? date : today();
+}
+
 function scaleMoney(result: DocumentResult, f: (cents: number) => number): void {
   if (result.total) result.total = { ...result.total, value: f(result.total.value) };
   result.vat = { ...result.vat, value: result.vat.value.map((v) => ({ ...v, base: v.base === null ? null : f(v.base), amount: f(v.amount) })) };
