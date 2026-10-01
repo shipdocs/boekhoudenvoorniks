@@ -596,6 +596,8 @@ export class IntakeService {
     const match = issue?.suggestion as DuplicateMatch | undefined;
     if (!match) return null;
     const target = this.targetOf(match);
+    // het voorstel is achterhaald: de aankoop is weg, of het andere document is intussen weggelegd
+    if (target ? !this.links.describe(target) : !this.db.prepare(`SELECT 1 FROM documents WHERE id = ? AND status <> 'genegeerd'`).get(match.documentId)) return null;
     return { kind: 'duplicate', candidate: candidateOf(match), documentId: match.documentId, target: target ? this.links.describe(target) : null };
   }
 
@@ -651,7 +653,7 @@ export class IntakeService {
     let duplicate = this.findDuplicate(id, result);
     if (duplicate?.strength === 'zeker' && !opts.ask) {
       const original = duplicate.documentId ? this.get(duplicate.documentId) : null;
-      if (original && !this.targetOf(duplicate) && evidenceRank(doc.extraction_source) > evidenceRank(original.extraction_source)) {
+      if (original && original.status !== 'verwerkt' && !this.targetOf(duplicate) && evidenceRank(doc.extraction_source) > evidenceRank(original.extraction_source)) {
         // geen van beide is geboekt en het nieuwe is beter gelezen: daarmee gaat de app verder, het oude wordt de kopie
         this.markDuplicate(original.id, { documentId: id, purchaseId: null }, 'automatisch');
         duplicate = null;
