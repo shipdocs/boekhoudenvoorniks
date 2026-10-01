@@ -32,6 +32,7 @@ import { toEuro } from '../fx/fx';
 import { CURRENCY_NAMES, formatForeign, withinFx } from '../shared/currency';
 import { EvidenceLinks, sameTarget, targetKey, type DocumentLink, type LinkOrigin, type LinkProvenance, type LinkTarget, type TargetInfo } from '../documents/evidence-links';
 import type { DocumentOutcome } from '../shared/document-outcome';
+import { detectOwnInvoice, sameCompanyName, OWN_COMPANY_CANDIDATE, OWN_COMPANY_ISSUE, type OwnIdentity, type OwnInvoice } from './own-company';
 import type { PaidWith } from '../shared/paid-with';
 
 
@@ -238,6 +239,11 @@ export function documentFingerprint(r: DocumentResult | null): string {
 const candidateOf = (m: Pick<DuplicateMatch, 'documentId' | 'purchaseId' | 'bankTransactionId'>): string =>
   m.purchaseId ? `aankoop:${m.purchaseId}` : m.bankTransactionId ? `bank:${m.bankTransactionId}` : `document:${m.documentId}`;
 
+/** Wat de gebruiker ziet bij een factuur van het eigen bedrijf (#205). */
+export const OWN_INVOICE_NOTE =
+  'Dit is een factuur van je eigen bedrijf: verkoper en koper zijn hetzelfde. Dat is geen gewone aankoop, dus de app boekt hem niet als kosten en trekt de btw niet af.';
+export const OWN_INVOICE_QUESTION = 'Dit lijkt een factuur van je eigen bedrijf: verkoper en koper lijken hetzelfde. Klopt dat?';
+
 /** Melding bij een bon die bij het bijwerken van zijn oude tekstkoppeling af is gehaald (zie de migratie). */
 const MIGRATION_ISSUE = 'evidence-migration';
 
@@ -278,6 +284,88 @@ export class IntakeService {
   private removeFile: ((path: string) => void) | null = null;
   setFileRemover(remove: ((path: string) => void) | null): void {
     this.removeFile = remove;
+  }
+
+  /** je eigen bedrijf (naam, btw- en KvK-nummer, rekeningnummers): om een factuur van jezelf te herkennen (#205) */
+  private ownIdentity: () => OwnIdentity | null = () => null;
+  setOwnIdentity(identity: () => OwnIdentity | null): void {
+    this.ownIdentity = identity;
+  }
+
+  /** Is dit document (zoals bewaard) een factuur van het eigen bedrijf? Ook voor wat met een oudere versie gelezen is. */
+  isOwnInvoice(result: DocumentResult | null): boolean {
+    return !!result && (result.ownCompany === undefined ? this.detectOwn(result) : result.ownCompany) !== null;
+  }
+
+  /** Is dit gelezen document een factuur van het eigen bedrijf? Kijkt naar het document zoals het gelezen is. */
+  private detectOwn(result: DocumentResult): OwnInvoice | null {
+    const own = this.ownIdentity();
+    if (!own || !(own.name.trim() || own.vatNumber.trim() || own.kvkNumber.trim())) return null;
+    const ownNumber = (number: string) => !!this.db.prepare('SELECT 1 FROM invoices WHERE number = ? OR (external_id IS NOT NULL AND external_id = ?)').get(number, number);
+    return detectOwnInvoice(result, own, ownNumber);
+  }
+
+  /**
+   * De afschrijving die bij een factuur van het eigen bedrijf hoort: zelfde bedrag, je eigen bedrijfsnaam
+   * als tegenpartij (geen eigen rekening: dat is een overboeking), binnen twee weken. `settled`: al door
+   * jou op privé of "weet ik nog niet" gezet (dan is de factuur alleen nog het bewijs erbij); anders nog open.
+   */
+  findOwnPayment(result: DocumentResult, settled = false): BankTransaction | null {
+    const own = this.ownIdentity();
+    if (!own || !result.total || result.total.value <= 0) return null;
+    const date = result.invoiceDate?.value ?? null;
+    const rows = (this.db
+      .prepare(
+        settled
+          ? `SELECT b.* FROM bank_transactions b WHERE b.status = 'gematcht' AND b.amount = ? AND b.matched_invoice_id IS NULL AND b.matched_purchase_invoice_id IS NULL
+               AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.bank_transaction_id = b.id)
+               AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = b.matched_journal_entry_id AND a.rgs_code IN (?, ?))`
+          : `SELECT b.* FROM bank_transactions b WHERE b.status = 'nieuw' AND b.amount = ?`,
+      )
+      .all(...(settled ? [-result.total.value, ACCOUNTS.priveOpnamen, ACCOUNTS.vraagposten] : [-result.total.value])) as BankTransaction[])
+      .filter((t) => sameCompanyName(t.counter_name, own.name) && !this.bank.ownTransferTarget(t) && (!date || Math.abs(diffDays(date, t.transaction_date)) <= 14))
+      .sort((a, b) => (date ? Math.abs(diffDays(date, a.transaction_date)) - Math.abs(diffDays(date, b.transaction_date)) : 0) || a.id - b.id);
+    return rows[0] ?? null;
+  }
+
+  /** De melding "factuur van je eigen bedrijf" bij dit document, of null. */
+  ownIssue(doc: Pick<IntakeDocument, 'issues'>): (Issue & { suggestion: OwnInvoice }) | null {
+    return (doc.issues.find((i) => i.field === OWN_COMPANY_ISSUE) as (Issue & { suggestion: OwnInvoice }) | undefined) ?? null;
+  }
+
+  /**
+   * Antwoord op "is dit een factuur van je eigen bedrijf?". Ja: voortaan zo behandeld (alleen privé of
+   * "weet ik nog niet"). Nee ("toch een gewone aankoop"): de gewone controle, zolang leverancier, datum,
+   * bedrag en nummer gelijk blijven. Er wordt hier niets geboekt.
+   */
+  async decideOwn(id: number, answer: 'ja' | 'nee', asOf: IsoDate = today()): Promise<IntakeDocument> {
+    const doc = this.get(id);
+    const issue = this.ownIssue(doc);
+    if (!issue || !doc.result || (doc.status !== 'controle' && doc.status !== 'nieuw')) throw new ValidationError('Bij deze bon staat die vraag niet (meer). Bekijk hem opnieuw.');
+    if (answer === 'nee') this.reject(id, OWN_COMPANY_CANDIDATE, doc.result);
+    else {
+      const result: DocumentResult = { ...doc.result, ownCompany: { level: 'zeker', signals: [...issue.suggestion.signals, 'je hebt het zelf bevestigd'] } };
+      this.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(result), id);
+    }
+    return this.evaluate(id, this.carriedIssues(doc), asOf, { autoConfirm: false, ask: true });
+  }
+
+  /**
+   * Een factuur van je eigen bedrijf afhandelen met wat er gelezen is: privé, of op "weet ik nog niet"
+   * (Vraagposten, zonder btw-aftrek). Hoort er een afschrijving bij, dan gaat die in dezelfde keuze mee.
+   * Ontbreekt het bedrag of de datum, dan null: de gebruiker vult dat eerst zelf in.
+   */
+  settleOwn(id: number, choice: 'prive' | 'vraag', bankTransactionId?: number): IntakeDocument | null {
+    const doc = this.get(id);
+    if (!this.ownIssue(doc)) throw new ValidationError('Deze bon is intussen anders beoordeeld. Bekijk hem opnieuw.');
+    const r = doc.result;
+    if (!r?.total || !r.invoiceDate) return null;
+    const supplier = this.ownIdentity()?.name.trim() || r.supplier?.value || doc.original_name;
+    return this.confirm(
+      id,
+      { supplier, date: r.invoiceDate.value, total: r.total.value, invoiceNumber: r.invoiceNumber?.value ?? null, categoryKey: choice === 'vraag' ? QUESTION_CATEGORY : 'overig', vatCode: 'geen', business: choice === 'vraag', paidWith: 'bank' },
+      { bankTransactionId },
+    );
   }
 
   setOcrProvider(provider: OcrProvider | null): void {
@@ -337,6 +425,8 @@ export class IntakeService {
   /** Uitlezen, zonder je eigen btw-nummer als dat van de leverancier. */
   async extract(filename: string, data: Uint8Array): Promise<{ result: DocumentResult; source: string; issues: Issue[] }> {
     const out = await this.extractRaw(filename, data);
+    // factuur van het eigen bedrijf (#205): vastleggen vóórdat het eigen btw-nummer als leveranciersnummer vervalt
+    if (out.source !== 'geen') out.result.ownCompany = this.detectOwn(out.result);
     const own = this.ownVatNumber().replace(/[\s.]/g, '').toUpperCase();
     if (own && out.result.supplierVatNumber?.value.replace(/[\s.]/g, '').toUpperCase() === own) out.result.supplierVatNumber = null;
     return out;
@@ -766,7 +856,13 @@ export class IntakeService {
       }
     }
     const rejected = this.rejected(id, result);
-    const alreadyBooked = this.findBookedBankTransaction(result, rejected) ?? legacy?.payments.find((t) => !rejected.has(`bank:${t.id}`)) ?? null;
+    // Factuur van je eigen bedrijf (#205): nooit vanzelf boeken, en alleen privé of "weet ik nog niet".
+    // Gelezen met een oudere versie: nu alsnog kijken.
+    const own = rejected.has(OWN_COMPANY_CANDIDATE) ? null : result.ownCompany === undefined ? this.detectOwn(result) : result.ownCompany;
+    if (own) extraIssues = [...extraIssues.filter((i) => i.field !== OWN_COMPANY_ISSUE), { field: OWN_COMPANY_ISSUE, severity: 'fout', message: own.level === 'zeker' ? OWN_INVOICE_NOTE : OWN_INVOICE_QUESTION, suggestion: own }];
+    // de afschrijving is al door jou op privé of "weet ik nog niet" gezet: dan is de factuur het bewijs daarbij
+    const ownSettled = own ? [this.findOwnPayment(result, true)].find((t) => t && !rejected.has(`bank:${t.id}`)) ?? null : null;
+    const alreadyBooked = this.findBookedBankTransaction(result, rejected) ?? ownSettled ?? legacy?.payments.find((t) => !rejected.has(`bank:${t.id}`)) ?? null;
     if (alreadyBooked) {
       // De betaling is al rechtstreeks als kosten geboekt (bv. automatisch herkende leverancier): het
       // document is dan hooguit het bewijsstuk. Nooit stil koppelen en nooit nog een keer boeken: eerst vragen.
@@ -1012,8 +1108,14 @@ export class IntakeService {
    * BOEKHOUDING (deterministisch): verwerkt het document met de (bevestigde) gegevens.
    * Leert de leverancier alleen als de gebruiker zelf bevestigde.
    */
-  confirm(id: number, c: Confirmation, opts: { learn?: boolean } = {}): IntakeDocument {
+  confirm(id: number, c: Confirmation, opts: { learn?: boolean; bankTransactionId?: number } = {}): IntakeDocument {
     const doc = this.get(id);
+    // factuur van je eigen bedrijf (#205): alleen privé of "weet ik nog niet", en de leverancier niet onthouden
+    const ownInvoice = this.ownIssue(doc) !== null;
+    if (ownInvoice && c.business && c.categoryKey !== QUESTION_CATEGORY) {
+      throw new ValidationError('Dit is een factuur van je eigen bedrijf. Kies "Privé" of "Weet ik nog niet: vraag mijn boekhouder". Is het toch een gewone aankoop? Kies dat dan eerst bij de bon.');
+    }
+    if (ownInvoice) opts = { ...opts, learn: false };
     if (doc.status === 'verwerkt' || doc.link) throw new ValidationError('Dit bonnetje is al verwerkt');
     if (doc.status === 'genegeerd' && doc.duplicate_of_document_id !== null) throw new ValidationError('Dit is een kopie van een bon die er al in staat. Verwerk die andere bon, of kies eerst "Toch geen kopie".');
     // stond als bewijs bij een betaling (oude tekstkoppeling) en is nog niet opnieuw bekeken: eerst kijken of hij al ergens bij hoort
@@ -1035,11 +1137,20 @@ export class IntakeService {
         this.memory.learn(c.supplier, { categoryKey: c.categoryKey, vatCode: c.vatCode, business: c.business });
         this.recordProposalOutcome(doc, c);
       }
-      const bankTx = doc.bank_match && (doc.bank_match.amount === -c.total || (doc.result?.foreign && withinFx(-doc.bank_match.amount, c.total))) ? doc.bank_match : null;
+      // de afschrijving die de gebruiker erbij zag (eigen bedrijf), anders de betaling die de app zelf vond
+      const chosen = opts.bankTransactionId ? this.bank.get(opts.bankTransactionId) : null;
+      if (chosen && (chosen.status !== 'nieuw' || chosen.amount !== -c.total)) throw new ValidationError('Deze betaling is intussen anders verwerkt. Kijk het opnieuw na.');
+      const found = chosen ?? doc.bank_match;
+      const bankTx = found && (found.amount === -c.total || (doc.result?.foreign && withinFx(-found.amount, c.total))) ? found : null;
       if (!c.business) {
         // privé: niet in de boekhouding; als het van de zakelijke rekening betaald is → privé-opname
         if (bankTx) this.bank.bookToAccount(bankTx.id, { account: ACCOUNTS.priveOpnamen, description: `Privé: ${c.supplier}` });
         this.db.prepare(`UPDATE documents SET status = 'genegeerd' WHERE id = ?`).run(id);
+        // factuur van je eigen bedrijf: hij blijft als bewijs bij de betaling staan, zodat ze samen terug te vinden zijn
+        if (ownInvoice && bankTx) {
+          this.links.link(id, { kind: 'bank', id: bankTx.id }, 'bewijs');
+          this.db.prepare(`UPDATE documents SET status = 'verwerkt', issues = '[]' WHERE id = ?`).run(id);
+        }
         return;
       }
       const relation = this.relations.findOrCreateSupplier(c.supplier, doc.result?.supplierIban ? { iban: doc.result.supplierIban.value } : {});
@@ -1168,7 +1279,7 @@ export class IntakeService {
       classification: row.classification ? JSON.parse(row.classification) : null,
       issues,
       decisions: row.decisions ? (JSON.parse(row.decisions) as Decision[]) : null,
-      bank_match: row.status === 'verwerkt' || !result ? null : this.findBankMatch(result),
+      bank_match: row.status === 'verwerkt' || !result ? null : (issues.some((i) => i.field === OWN_COMPANY_ISSUE) ? this.findOwnPayment(result) : null) ?? this.findBankMatch(result),
       link,
       outcome: this.links.outcome({ ...row, issues }, link),
     };

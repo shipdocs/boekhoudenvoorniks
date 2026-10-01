@@ -23,7 +23,7 @@ const TABS: [Tab, string][] = [
   ['btw', 'Btw'],
   ['categorieen', 'Categorieën'],
   ['koppelingen', 'Koppelingen'],
-  ['scanner', 'Telefoon & bonnenmap'],
+  ['scanner', 'Bonnenmap'],
   ['ai', 'Automatisch & herkenning'],
   ['backup', 'Back-up, demo & updates'],
   ['administraties', 'Administraties'],
@@ -32,7 +32,7 @@ const TABS: [Tab, string][] = [
 ];
 
 export function SettingsScreen() {
-  const { settings, reloadSettings, route, go } = useApp();
+  const { settings, reloadSettings, route, go, meta } = useApp();
   const { run, busy } = useAction();
   const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'bedrijf');
   const [draft, setDraft] = useState<Settings>(settings);
@@ -67,7 +67,7 @@ export function SettingsScreen() {
     <div className="page">
       <h1>Instellingen</h1>
       <div className="chips" style={{ margin: '12px 0 18px' }}>
-        {TABS.map(([k, l]) => <button key={k} className={tab === k ? 'selected' : ''} onClick={() => setTab(k)}>{l}</button>)}
+        {TABS.map(([k, l]) => <button key={k} className={tab === k ? 'selected' : ''} onClick={() => setTab(k)}>{k === 'scanner' && meta.phoneScanner ? 'Telefoon & bonnenmap' : l}</button>)}
       </div>
 
       {tab === 'administraties' && <><AdministrationsSettings /><DataFolderSettings /><OfficeSettings /></>}

@@ -15,6 +15,11 @@ export interface NormalizedTransaction {
   ownIban?: string | null;
   /** unieke id van de bank, als beschikbaar (beter voor ontdubbelen) */
   bankId?: string | null;
+  /**
+   * Deelpost van een verzamelboeking (CAMT): de id van die boeking en haar totaal (met teken). Een ander
+   * soort afschrift toont dezelfde boeking als één regel met dat totaal.
+   */
+  batch?: { ref: string; total: Cents } | null;
 }
 
 export type BankSource = 'csv' | 'mt940' | 'camt' | 'openbanking' | 'handmatig';

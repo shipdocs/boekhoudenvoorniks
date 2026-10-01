@@ -44,6 +44,7 @@ import { MailIntakeService } from './mail/mail-intake';
 import { FxService } from './fx/fx';
 import { FxRepair } from './fx/repair';
 import { BookedPayments } from './documents/booked-payment';
+import { OwnCompanyPayments } from './documents/own-company';
 import { BookedInfo } from './search/booked-info';
 
 export interface ServiceDeps {
@@ -107,6 +108,13 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, categories, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse, () => settings.get().company.vatNumber);
   intake.setFx(fx);
   intake.setFileRemover(deps.removeFile ?? null);
+  // je eigen bedrijf, om een factuur van jezelf en de betaling ervan te herkennen (#205)
+  const ownIdentity = () => {
+    const c = settings.get().company;
+    return { name: c.name, vatNumber: c.vatNumber, kvkNumber: c.kvkNumber, ibans: [c.iban, ...bank.listAccounts().map((a) => a.iban ?? '')].filter(Boolean) };
+  };
+  intake.setOwnIdentity(ownIdentity);
+  const ownCompany = new OwnCompanyPayments(db, bank, purchases, intake, ownIdentity);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);
   // "waar staat dit op?" bij zoekresultaten en in de lijsten
@@ -128,6 +136,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const bookedPayments = new BookedPayments(db, purchases, intake, relations);
   quick.setBookedPayments(bookedPayments);
   inbox.setBookedPayments(bookedPayments);
+  inbox.setOwnCompany(ownCompany);
   // afschriften uit de downloadmap (#184): standaard uit; de vraag "Inlezen?" komt op Vandaag
   const statementFolder = new StatementFolder(db, settings, bank, deps.statementFiles ?? null);
   inbox.setStatementFolder(statementFolder);
@@ -142,7 +151,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, statementFolder, periods, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
+  return { db, ownCompany, statementFolder, periods, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;
