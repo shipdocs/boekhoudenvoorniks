@@ -9,7 +9,11 @@
 - **Terug naar de standaardmap**: met één knop gaan je gegevens terug naar `BoekhoudenVoorNiks` in je thuismap. Wat daar nog stond, wordt bewaard in een aparte map.
 - **Opgeslagen wachtwoorden blijven werken** na het wisselen (e-mail en andere koppelingen), en de koppeling met Claude Code of Codex leest dezelfde map als de app; start dat programma na het wisselen één keer opnieuw. Laat de standaardmap staan, ook als je een andere map gebruikt: de app bewaart daar de sleutel van je opgeslagen wachtwoorden.
 
+### Verbeterd
+- **Bon bij "weet ik nog niet" meteen indelen**: in het venster dat laat zien wat er nog bij "weet ik nog niet" staat (op Vandaag en bij Belasting) heeft een bon nu een knop *Indelen*. Je hoeft hem niet meer bij Aankopen op te zoeken.
+
 ### Opgelost
+- **Bon in dollars of een andere munt alsnog omgerekend**: kon de koers bij het binnenkomen van de bon niet opgehaald worden, dan probeert de app het opnieuw zodra je de bon opent. Een datum die per ongeluk in de toekomst is gelezen (bijvoorbeeld een Amerikaanse datum) houdt het omrekenen niet meer tegen.
 - **Koppeling met Claude Code of Codex op Windows**: de koppeling startte wel, maar las de vragen van Claude Code of Codex niet en gaf dus nooit antwoord. Op Windows werkt hij nu net als op Linux.
 
 ## 0.7.6 — je gegevens in een vaste map buiten de app

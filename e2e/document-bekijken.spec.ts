@@ -71,3 +71,29 @@ test('bon "weet ik nog niet": apart gezet, en later indelen bij Aankopen', async
   await expect(page.locator('tr', { hasText: 'Materiaal — Rare Winkel Zoveel' })).toBeVisible();
 });
 
+test('bon "weet ik nog niet": indelen vanuit de controle bij Belasting, zonder hem bij Aankopen op te zoeken', async ({ page }) => {
+  await onboard(page);
+  await nav(page, 'Aankopen & bonnetjes');
+  await page.locator('main input[type=file]').first().setInputFiles({ name: 'bon.pdf', mimeType: 'application/pdf', buffer: pdf(['Rare Winkel Zoveel', 'Datum 10-09-2026', 'Totaal 121,00']) });
+  await page.getByRole('button', { name: 'Bekijken' }).first().click();
+  const skip = page.getByRole('button', { name: /Nee, ik vul bonnen zelf in/ });
+  if (await skip.isVisible().catch(() => false)) await skip.click();
+  await page.getByRole('button', { name: /Weet ik nog niet: vraag mijn boekhouder/ }).click();
+  const date = page.locator('input[type=date]').first();
+  if (!(await date.inputValue())) await date.fill('2026-09-10');
+  await page.getByRole('button', { name: 'Klopt, verwerken' }).click();
+  await expect(page.getByRole('heading', { name: 'Aankopen', exact: true })).toBeVisible();
+
+  await nav(page, 'Belasting');
+  const check = page.locator('ul.checks li', { hasText: 'weet ik nog niet' });
+  await check.getByRole('button', { name: 'Oplossen' }).click();
+  const lines = page.getByRole('dialog', { name: /weet ik nog niet/ });
+  await expect(lines.locator('tbody tr')).toHaveCount(1);
+  await lines.getByRole('button', { name: 'Indelen' }).click();
+  const dialog = page.getByRole('dialog', { name: /Indelen:/ });
+  await dialog.locator('.chips button', { hasText: /^Materiaal$/ }).click();
+  await dialog.getByRole('button', { name: 'Indelen' }).click();
+  await expect(page.locator('.toasts').getByText('Ingedeeld ✓')).toBeVisible();
+  // het venster met de controle blijft open en is nu leeg
+  await expect(lines).toContainText('Hier staat niets (meer) op');
+});
