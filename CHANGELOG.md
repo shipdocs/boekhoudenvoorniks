@@ -14,10 +14,12 @@
 - **Van bon naar aankoop of betaling en terug**: bij een bon staat waar hij bij hoort, met welke bestanden er nog meer bij horen; bij een betaling op de bank staat de bon; zoeken vindt beide kanten op.
 - **Pakket voor je boekhouder**: per aankoop of betaling gaat alleen het hoofdbewijsstuk mee. De andere bestanden blijven in de app.
 - **Bijlagen uit je mail**: de mail gaat pas naar de map *Verwerkt* als elke bijlage bewaard en beoordeeld is.
+- **Bon bij "weet ik nog niet" meteen indelen**: in het venster dat laat zien wat er nog bij "weet ik nog niet" staat (op Vandaag en bij Belasting) heeft een bon nu een knop *Indelen*. Je hoeft hem niet meer bij Aankopen op te zoeken.
 
 ### Opgelost
 - **Bon bij een bankbetaling stond alleen als tekst vast**: welke bon bij welke betaling hoorde, stond in de uitleg bij de bon. Dat is nu een echte koppeling. Bestaande bonnen worden bij het bijwerken omgezet als de betaling er nog is en nog zo geboekt staat. Is dat niet zeker, dan koppelt de app niets en komt de bon met uitleg bij *Nog controleren*. Aan je boekhouding verandert daarbij niets.
 - **Twee keer hetzelfde bestand tegelijk slepen**: gaf soms een foutmelding of een los bestand in de bijlagenmap. Het wordt nu één document.
+- **Bon in dollars of een andere munt alsnog omgerekend**: kon de koers bij het binnenkomen van de bon niet opgehaald worden, dan probeert de app het opnieuw zodra je de bon opent. Een datum die per ongeluk in de toekomst is gelezen (bijvoorbeeld een Amerikaanse datum) houdt het omrekenen niet meer tegen.
 - **Koppeling met Claude Code of Codex op Windows**: de koppeling startte wel, maar las de vragen van Claude Code of Codex niet en gaf dus nooit antwoord. Op Windows werkt hij nu net als op Linux.
 
 ## 0.7.6 — je gegevens in een vaste map buiten de app
