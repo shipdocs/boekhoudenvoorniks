@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import path, { join } from 'node:path';
-import { SHARED_DIR_NAME, type MigrationOutcome } from './data-dir';
+import { sameDir, type MigrationOutcome, type SwitchOutcome, type SwitchPlan } from './data-dir';
 import { isPathInside } from './path-security';
 
 /**
@@ -95,86 +95,28 @@ export function storeFirstStartNotice(dir: string): StartNotice | null {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Zelf een map kiezen
-
-function samePath(a: string, b: string, platform: NodeJS.Platform): boolean {
-  const p = platform === 'win32' ? path.win32 : path.posix;
-  const fold = (value: string): string => (platform === 'win32' ? p.resolve(value).toLowerCase() : p.resolve(value));
-  return fold(a) === fold(b);
-}
-
-function sameOrInside(root: string, candidate: string, platform: NodeJS.Platform): boolean {
-  return samePath(root, candidate, platform) || isPathInside(root, candidate, platform);
-}
-
-const SYNC_NAMES: [RegExp, string][] = [
-  [/^OneDrive( - .+)?$/i, 'OneDrive'],
-  [/^Dropbox( \(.+\))?$/i, 'Dropbox'],
-  [/^(Google ?Drive|Mijn Drive|My Drive)$/i, 'Google Drive'],
-  [/^iCloud ?Drive$/i, 'iCloud Drive'],
-];
-
-/**
- * Ligt deze map in een map die met de cloud gesynchroniseerd wordt? Geeft de naam van de dienst, of
- * null. Zo'n dienst kan de database kopiëren terwijl de app erin schrijft; dan raakt hij beschadigd.
- */
-export function syncFolder(dir: string, env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): string | null {
-  for (const key of ['OneDrive', 'OneDriveConsumer', 'OneDriveCommercial']) {
-    const root = env[key];
-    if (root && sameOrInside(root, dir, platform)) return 'OneDrive';
-  }
-  for (const part of dir.split(/[\\/]+/)) {
-    const hit = SYNC_NAMES.find(([pattern]) => pattern.test(part));
-    if (hit) return hit[1];
-  }
-  return null;
-}
-
-export function syncFolderWarning(dir: string, service: string): string {
-  return (
-    `De map ${dir} wordt gesynchroniseerd met ${service}. Zo'n dienst kan je administratie kopiëren terwijl de app erin schrijft, en dan kan hij beschadigd raken.\n\n` +
-    'Kies liever een map die niet gesynchroniseerd wordt. Een back-up in je cloudmap zetten kan wel: Instellingen → Back-up.'
-  );
-}
-
-export type FolderCheck = { ok: true; target: string } | { ok: false; reason: string };
-
-export interface FolderCheckContext {
-  /** de oude map waar de gegevens nu staan */
-  source: string;
-  /** %APPDATA% (Roaming); alles onder de map AppData is in de Store-versie geen vaste plek */
-  appData: string;
-  platform?: NodeJS.Platform;
-}
-
-/**
- * De map die de gebruiker zelf koos als nieuwe plek voor de gegevens. Een lege map wordt zelf de
- * gegevensmap; staat er al iets in, dan komt er een map `BoekhoudenVoorNiks` in.
- */
-export function checkChosenFolder(chosen: string, ctx: FolderCheckContext): FolderCheck {
-  const platform = ctx.platform ?? process.platform;
-  const p = platform === 'win32' ? path.win32 : path.posix;
-  if (!p.isAbsolute(chosen)) return { ok: false, reason: 'Kies een volledige map.' };
-  if (sameOrInside(ctx.source, chosen, platform)) return { ok: false, reason: 'Dit is de oude map zelf. Kies een andere map.' };
-  if (platform === 'win32' && sameOrInside(p.dirname(ctx.appData), chosen, platform)) {
-    return { ok: false, reason: 'Kies een map buiten AppData. Wat de versie uit de Microsoft Store daar neerzet, verdwijnt als je de app verwijdert.' };
-  }
-  const entries = (dir: string): string[] => (existsSync(dir) ? readdirSync(dir) : []);
-  const target = entries(chosen).length === 0 ? chosen : p.join(chosen, SHARED_DIR_NAME);
-  const taken = [chosen, target].find((dir) => entries(dir).includes('boekhouding.sqlite'));
-  if (taken) return { ok: false, reason: `In ${taken} staat al een administratie. Kies een lege map.` };
-  return { ok: true, target };
-}
-
-// ---------------------------------------------------------------------------------------------
 // Overzetten in de Store-versie
+
+/**
+ * Waarom een zelf gekozen map in de Store-versie niet kan, bovenop wat `planSwitch` al weigert: alles
+ * onder AppData. Wat een Store-app daar neerzet, komt in een eigen kopie die bij verwijderen van de app
+ * gewist wordt. Null = geen bezwaar.
+ */
+export function storeFolderProblem(chosen: string, appData: string, platform: NodeJS.Platform = process.platform): string | null {
+  if (platform !== 'win32') return null;
+  const root = path.win32.dirname(appData);
+  const fold = (value: string): string => path.win32.resolve(value).toLowerCase();
+  if (fold(root) !== fold(chosen) && !isPathInside(root, chosen, platform)) return null;
+  return 'Kies een map buiten AppData. Wat de versie uit de Microsoft Store daar neerzet, verdwijnt als je de app verwijdert.';
+}
 
 export type StoreMigrationChoice = 'opnieuw' | 'kiezen' | 'bekijken' | 'afsluiten';
 
 export interface StoreMigrationFailure {
-  status: 'gestopt' | 'geen-ruimte' | 'mislukt';
+  status: 'geweigerd' | 'gestopt' | 'geen-ruimte' | 'mislukt';
   reason: string;
   source: string;
+  /** de map waar de laatste poging heen ging */
   target: string;
   /** waarom alleen bekijken niet kan, of null als dat wel kan */
   viewProblem: string | null;
@@ -185,7 +127,12 @@ export interface StoreMigrationDeps {
   /** de gedeelde map in de thuismap */
   target: string;
   appData: string;
+  /** het gewone overzetten naar de gedeelde map (`migrateToSharedDir`) */
   migrate(source: string, target: string): Promise<MigrationOutcome>;
+  /** een zelf gekozen map beoordelen, zoals Instellingen dat doet (`planSwitch`) */
+  plan(chosen: string): SwitchPlan;
+  /** naar de gekozen map kopiëren en als laatste de verwijzing schrijven (`switchDataDir`) */
+  switchTo(target: string): Promise<SwitchOutcome>;
   /** waarom de oude map niet alleen-lezen te openen is (bv. van een oudere versie), of null */
   viewProblem(): string | null;
   choose(failure: StoreMigrationFailure): Promise<StoreMigrationChoice>;
@@ -195,14 +142,13 @@ export interface StoreMigrationDeps {
   refuse(reason: string): Promise<void>;
   /** waar = toch gebruiken */
   confirmSyncFolder(dir: string, service: string): Promise<boolean>;
-  /** de zelf gekozen map vastleggen (pointer) */
-  remember(dir: string): string;
-  env?: Record<string, string | undefined>;
   platform?: NodeJS.Platform;
 }
 
 export type StoreMigrationResult =
   | { kind: 'gemigreerd'; dir: string; outcome: Extract<MigrationOutcome, { status: 'gemigreerd' }> }
+  /** naar een zelf gekozen map gekopieerd; de oude map blijft onder zijn eigen naam staan */
+  | { kind: 'gekozen'; dir: string; outcome: Extract<SwitchOutcome, { status: 'gewisseld' }> }
   /** niets overgezet: de oude map gaat alleen-lezen open */
   | { kind: 'alleen-lezen'; dir: string; reason: string }
   | { kind: 'afsluiten' };
@@ -211,44 +157,52 @@ export type StoreMigrationResult =
  * Overzetten in de versie uit de Microsoft Store. De gewone versie werkt na een mislukte poging door in
  * de oude map; hier kan dat niet, want wat een Store-app in AppData schrijft komt in een eigen kopie
  * terecht die bij verwijderen van de app gewist wordt. Daarom: opnieuw proberen, zelf een map kiezen,
- * of de oude map alleen bekijken.
+ * of de oude map alleen bekijken. Een zelf gekozen map gaat langs dezelfde weg als in Instellingen
+ * (beoordelen met `planSwitch`, kopiëren met `switchDataDir`); hier komt alleen kopiëren in aanmerking.
  */
 export async function migrateForStore(deps: StoreMigrationDeps): Promise<StoreMigrationResult> {
   const platform = deps.platform ?? process.platform;
-  let target = deps.target;
+  let failure: Omit<StoreMigrationFailure, 'source' | 'viewProblem'> | null = null;
   for (;;) {
-    let outcome = await deps.migrate(deps.source, target);
-    if (outcome.status === 'gemigreerd') {
-      if (target === deps.target) return { kind: 'gemigreerd', dir: target, outcome };
-      try {
-        return { kind: 'gemigreerd', dir: deps.remember(target), outcome };
-      } catch (e) {
-        outcome = { status: 'mislukt', reason: `de gekozen map kon niet worden vastgelegd: ${(e as Error).message}` };
-        target = deps.target;
-      }
+    if (!failure) {
+      const outcome = await deps.migrate(deps.source, deps.target);
+      if (outcome.status === 'gemigreerd') return { kind: 'gemigreerd', dir: deps.target, outcome };
+      failure = { status: outcome.status, reason: outcome.reason, target: deps.target };
     }
-    for (;;) {
-      const viewProblem = deps.viewProblem();
-      const choice = await deps.choose({ status: outcome.status, reason: outcome.reason, source: deps.source, target, viewProblem });
-      if (choice === 'afsluiten') return { kind: 'afsluiten' };
-      if (choice === 'opnieuw') break;
-      if (choice === 'bekijken') {
-        if (viewProblem === null) return { kind: 'alleen-lezen', dir: deps.source, reason: outcome.reason };
-        continue;
-      }
-      const picked = await deps.pickFolder();
-      if (!picked) continue;
-      // de gewone gedeelde map aanwijzen is hetzelfde als opnieuw proberen
-      const check: FolderCheck = samePath(picked, deps.target, platform) ? { ok: true, target: deps.target } : checkChosenFolder(picked, { source: deps.source, appData: deps.appData, platform });
-      if (!check.ok) {
-        await deps.refuse(check.reason);
-        continue;
-      }
-      const service = check.target === deps.target ? null : syncFolder(check.target, deps.env ?? process.env, platform);
-      if (service && !(await deps.confirmSyncFolder(check.target, service))) continue;
-      target = check.target;
-      break;
+    const viewProblem = deps.viewProblem();
+    const choice = await deps.choose({ ...failure, source: deps.source, viewProblem });
+    if (choice === 'afsluiten') return { kind: 'afsluiten' };
+    if (choice === 'opnieuw') {
+      failure = null;
+      continue;
     }
+    if (choice === 'bekijken') {
+      if (viewProblem === null) return { kind: 'alleen-lezen', dir: deps.source, reason: failure.reason };
+      continue;
+    }
+    const picked = await deps.pickFolder();
+    if (!picked) continue;
+    // de gewone gedeelde map aanwijzen is hetzelfde als opnieuw proberen
+    if (sameDir(picked, deps.target)) {
+      failure = null;
+      continue;
+    }
+    const blocked = storeFolderProblem(picked, deps.appData, platform);
+    if (blocked) {
+      await deps.refuse(blocked);
+      continue;
+    }
+    const plan = deps.plan(picked);
+    // hier alleen kopiëren: een map waar al een administratie staat openen zou de oude gegevens achterlaten
+    const problem = plan.problem ?? (plan.action === 'kopieren' ? null : `In ${plan.dir} staat al een administratie. Kies een lege map; dan zet de app je gegevens erin.`);
+    if (problem) {
+      await deps.refuse(problem);
+      continue;
+    }
+    if (plan.sync && !(await deps.confirmSyncFolder(plan.dir, plan.sync))) continue;
+    const switched = await deps.switchTo(plan.dir);
+    if (switched.status === 'gewisseld') return { kind: 'gekozen', dir: switched.dir, outcome: switched };
+    failure = { status: switched.status, reason: switched.reason, target: plan.dir };
   }
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { setup } from './helpers';
+import { financialSnapshot, setup } from './helpers';
 import { looksLikeReceipt, onlineInvoiceDomain, receiptHtml, usableAttachments, type MailAttachment, type MailMessage, type MailSource } from '../src/mail/mail-intake';
 import { makePdf } from './pdf';
 
@@ -167,6 +167,100 @@ describe('inkomende post', () => {
     expect((await s.mail.poll(box)).documents).toBe(0);
     expect(await s.mail.poll(box)).toMatchObject({ documents: 1, errors: 1 });
     expect(s.mail.summary().counts.fout).toBe(1);
+  });
+});
+
+describe('dubbele bonnen en bewijs uit de mail (#179)', () => {
+  const BOUWMAAT = ['Bouwmaat Nederland B.V.', 'Factuurnummer: 2026018472', 'Factuurdatum 23-09-2026', 'Knauf Goldband 100,00', 'BTW 21% 100,00 21,00', 'Totaal 121,00'];
+
+  it('de mail gaat pas naar Verwerkt als elke bijlage bewaard en beoordeeld is', async () => {
+    const { s, box } = withMail();
+    box.add('INBOX', { uid: 1, attachments: [att('a.pdf', makePdf(['Gamma', 'Datum 01-09-2026', 'Totaal 10,00'])), att('b.pdf', makePdf(['Praxis', 'Datum 02-09-2026', 'Totaal 20,00']))] });
+    // bij elke verplaatsing: staan alle bijlagen er al in, en zijn ze beoordeeld?
+    const seen: string[][] = [];
+    const move = box.move.bind(box);
+    box.move = async (uid, target) => { seen.push(s.intake.list().map((d) => `${d.original_name}:${d.status}`).sort()); return move(uid, target); };
+    expect(await s.mail.poll(box, '2026-09-05')).toMatchObject({ documents: 2, errors: 0 });
+    expect(seen).toEqual([['a.pdf:controle', 'b.pdf:controle']]);
+    expect(box.moved).toEqual([{ uid: 1, from: 'INBOX', to: 'Verwerkt' }]);
+  });
+
+  it('mislukt een bijlage, dan blijft de mail staan; de volgende keer telt wat al binnen was niet als dubbel', async () => {
+    const ctx = withMail();
+    const { s, box, db } = ctx;
+    box.add('INBOX', { uid: 1, attachments: [att('a.pdf', makePdf(['Gamma', 'Datum 01-09-2026', 'Totaal 10,00'])), att('b.pdf', makePdf(['Praxis', 'Datum 02-09-2026', 'Totaal 20,00']))] });
+    const add = s.intake.add.bind(s.intake);
+    let broken = true;
+    s.intake.add = async (name, ...rest) => { if (broken && name === 'b.pdf') throw new Error('schijf vol'); return add(name, ...rest); };
+    expect(await s.mail.poll(box, '2026-09-05')).toMatchObject({ documents: 0, errors: 1 });
+    expect(box.moved).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM mail_messages').get()).toEqual({ n: 0 });
+    expect(s.intake.list().map((d) => d.original_name)).toEqual(['a.pdf']);
+    broken = false;
+    expect(await s.mail.poll(box, '2026-09-05')).toMatchObject({ documents: 2, errors: 0 });
+    expect(box.moved).toEqual([{ uid: 1, from: 'INBOX', to: 'Verwerkt' }]);
+    expect(s.intake.list()).toHaveLength(2);
+    expect(ctx.stored).toHaveLength(2);
+    // a.pdf kwam bij de eerste poging al binnen: geen melding "stond er al in"
+    expect(s.intake.notices()).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM mail_attachment_progress').get()).toEqual({ n: 0 });
+  });
+
+  it('exact hetzelfde bestand opnieuw per mail: melding op Vandaag met "Bestaand document bekijken", niets geboekt of veranderd', async () => {
+    const ctx = withMail();
+    const { s, box } = ctx;
+    const pdf = makePdf(BOUWMAAT);
+    const eerste = await s.intake.add('factuur.pdf', pdf, '2026-09-25', { autoConfirm: false });
+    s.intake.confirm(eerste.id, { supplier: 'Bouwmaat', date: '2026-09-23', total: 12100, invoiceNumber: '2026018472', categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    const before = financialSnapshot(ctx, { evidence: true });
+    box.add('INBOX', { uid: 1, fromName: 'Bouwmaat', attachments: [att('Factuur 2026018472.pdf', pdf), att('nog-een-keer.pdf', pdf)] });
+    expect(await s.mail.poll(box, '2026-09-26')).toMatchObject({ documents: 1, errors: 0 });
+    expect(financialSnapshot(ctx, { evidence: true })).toEqual(before);
+    expect(ctx.stored).toHaveLength(1);
+    // de mail is afgehandeld; twee keer hetzelfde bestand in één mail geeft één melding
+    expect(box.moved).toEqual([{ uid: 1, from: 'INBOX', to: 'Verwerkt' }]);
+    const tasks = s.inbox.tasks('2026-09-26').filter((t) => t.kind === 'document-notice');
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ title: 'Dit document stond er al in.', ref: { documentId: eerste.id }, actions: [{ id: 'open', label: 'Bestaand document bekijken', primary: true }, { id: 'klaar', label: 'Gezien' }] });
+    expect(tasks[0]!.question).toMatch(/Factuur 2026018472\.pdf.*van Bouwmaat.*niets opnieuw geboekt/);
+    s.intake.dismissNotice(tasks[0]!.ref.noticeId!);
+    expect(s.inbox.tasks('2026-09-26').some((t) => t.kind === 'document-notice')).toBe(false);
+  });
+
+  it('zeker dezelfde factuur als ander bestand per mail: beide bewaard, melding op Vandaag, niets opnieuw geboekt', async () => {
+    const ctx = withMail();
+    const { s, box } = ctx;
+    const eerste = await s.intake.add('factuur.pdf', makePdf(BOUWMAAT), '2026-09-25', { autoConfirm: false });
+    s.intake.confirm(eerste.id, { supplier: 'Bouwmaat', date: '2026-09-23', total: 12100, invoiceNumber: '2026018472', categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    const before = financialSnapshot(ctx);
+    box.add('INBOX', { uid: 1, attachments: [att('factuur.xml', UBL)] });
+    expect(await s.mail.poll(box, '2026-09-26')).toMatchObject({ documents: 1, errors: 0 });
+    expect(financialSnapshot(ctx)).toEqual(before);
+    const [xml] = s.intake.list();
+    // de losse e-factuur is bewaard als kopie; de leesbare PDF blijft het hoofdbewijsstuk
+    expect(xml).toMatchObject({ original_name: 'factuur.xml', outcome: 'dubbel', link: { is_primary: false } });
+    expect(s.purchases.list()[0]!.document_id).toBe(eerste.id);
+    expect(s.inbox.tasks('2026-09-26').filter((t) => t.kind === 'document-notice')).toEqual([expect.objectContaining({ title: 'Dit document stond er al in.', ref: expect.objectContaining({ documentId: eerste.id }) })]);
+  });
+
+  it('mogelijk dubbel of een bon bij een al geboekte betaling per mail: wacht als vraag op Vandaag, niets gekoppeld of geboekt', async () => {
+    const ctx = withMail();
+    const { s, box } = ctx;
+    // een betaling die rechtstreeks als kosten geboekt is, en een geboekte aankoop zonder nummer
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-23', amount: -12100, description: 'Pin', counterName: 'BOUWMAAT UTRECHT' }] });
+    const payment = s.bank.list()[0]!;
+    s.bank.bookToAccount(payment.id, { account: 'WKprInkMat', vatCode: 'hoog' });
+    s.quick.recordExpense({ date: '2026-09-02', supplierName: 'Praxis', description: 'Verf', categoryKey: 'materiaal', grossAmount: 2000, vatCode: 'hoog', paidWith: 'kas' });
+    const before = financialSnapshot(ctx, { evidence: true });
+    box.add('INBOX', { uid: 1, attachments: [att('bouwmaat.pdf', makePdf(BOUWMAAT)), att('praxis.pdf', makePdf(['Praxis', 'Datum 02-09-2026', 'Totaal 20,00']))] });
+    expect(await s.mail.poll(box, '2026-09-26')).toMatchObject({ documents: 2, errors: 0 });
+    const after = financialSnapshot(ctx, { evidence: true });
+    expect({ ...after, documents: [] }).toEqual({ ...before, documents: [] });
+    const tasks = s.inbox.tasks('2026-09-26').filter((t) => t.kind === 'document-review');
+    expect(tasks.map((t) => t.actions[0]!.id).sort()).toEqual(['bewijs', 'dubbel']);
+    expect(s.intake.list().map((d) => [d.status, d.link])).toEqual([['controle', null], ['controle', null]]);
+    expect(s.intake.notices()).toEqual([]);
+    expect(box.moved).toHaveLength(1);
   });
 });
 

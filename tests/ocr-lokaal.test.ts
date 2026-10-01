@@ -23,11 +23,16 @@ const model: OcrModel = {
   ],
 };
 
-function fakeFetch(opts: { corrupt?: boolean; ranges?: string[]; health?: boolean; chat?: (body: unknown) => string } = {}): DownloadFetch & { calls: string[] } {
+function fakeFetch(opts: { corrupt?: boolean; ranges?: string[]; health?: boolean; chat?: (body: unknown) => string; pointer?: string } = {}): DownloadFetch & { calls: string[] } {
   const calls: string[] = [];
   const fn = (async (url: string, init?: { headers?: Record<string, string>; body?: string; method?: string }) => {
     calls.push(url);
     const bytes = (b: Buffer, status = 200) => ({ ok: true, status, headers: { get: () => null }, body: (async function* () { yield new Uint8Array(b); })(), json: async () => ({}) });
+    // llama.cpp met versienummers: de laatste release bevat alleen een verwijzing naar de build
+    if (opts.pointer && url.endsWith('/releases/latest')) {
+      return { ok: true, status: 200, headers: { get: () => null }, body: null, json: async () => ({ tag_name: 'v0.5.0', assets: [{ name: 'nightly-tag.txt', size: 7, browser_download_url: 'https://gh.example/nightly-tag.txt' }] }) };
+    }
+    if (url.endsWith('nightly-tag.txt')) return bytes(Buffer.from(opts.pointer ?? ''));
     if (url.includes('api.github.com')) {
       return { ok: true, status: 200, headers: { get: () => null }, body: null, json: async () => ({ tag_name: 'b9999', assets: [
         { name: 'llama-b9999-bin-win-cpu-x64.zip', size: ARCHIVE.length, browser_download_url: 'https://gh.example/win.zip', digest: `sha256:${sha(ARCHIVE)}` },
@@ -92,6 +97,24 @@ describe('ingebouwde tekstherkenning: installeren (#9)', () => {
     expect(new LocalOcrRuntime(dir, { fetch, platform: 'linux', arch: 'x64', model }).isInstalled()).toBe(true);
     await rt.uninstall();
     expect(existsSync(dir)).toBe(false);
+  });
+
+  it('laatste release met alleen een verwijzing (nightly-tag.txt): de genoemde build wordt opgehaald', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ocr-'));
+    const fetch = fakeFetch({ pointer: 'b9999\n' });
+    const rt = new LocalOcrRuntime(dir, { fetch, extract: fakeExtract, platform: 'linux', arch: 'x64', model });
+    await rt.install();
+    expect(rt.status()).toMatchObject({ state: 'geinstalleerd', llamaVersion: 'b9999' });
+    expect(fetch.calls.some((u) => u.endsWith('/releases/tags/b9999'))).toBe(true);
+  });
+
+  it('een verwijzing die geen gewone buildnaam is, wordt niet gevolgd', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ocr-'));
+    const fetch = fakeFetch({ pointer: '../../andere/repo' });
+    const rt = new LocalOcrRuntime(dir, { fetch, extract: fakeExtract, platform: 'linux', arch: 'x64', model });
+    await rt.install().catch(() => undefined);
+    expect(rt.status()).toMatchObject({ state: 'fout', error: expect.stringContaining('Geen passende runtime') });
+    expect(fetch.calls.some((u) => u.includes('/releases/tags/'))).toBe(false);
   });
 
   it('een beschadigde download wordt geweigerd', async () => {

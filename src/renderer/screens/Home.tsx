@@ -11,6 +11,8 @@ import { CheckLines } from './CheckLines';
 import { PaymentDetails } from './PaymentDetails';
 import { CheckItems } from './CheckItems';
 import type { CheckItem } from '../../btw/checks';
+import type { UploadResult } from '../../intake/intake';
+import { UploadBlocked } from './UploadOutcome';
 
 // bon bekijken: pas laden als je er een opent (PDF.js is groot)
 const DocumentPreview = lazy(() => import('./DocumentReview').then((m) => ({ default: m.DocumentPreview })));
@@ -34,15 +36,18 @@ export function Home() {
   // factuur bij een bestaande afschrijving (vaste lasten): bestand kiezen en direct koppelen
   const evidenceInput = useRef<HTMLInputElement>(null);
   const evidenceFor = useRef<number | null>(null);
+  const [blocked, setBlocked] = useState<{ result: UploadResult; txId: number } | null>(null);
   const addEvidence = async (file: File) => {
     const txId = evidenceFor.current;
     if (txId === null) return;
     const bytes = await readAsBytes(file);
-    const r = await run(() => api.documents.addEvidence(file.name, bytes, txId), 'Factuur gekoppeld ✓');
-    if (r) {
-      await reload();
-      refreshBadge();
-    }
+    const r = await run(() => api.documents.addEvidence(file.name, bytes, txId));
+    if (!r) return;
+    // stond het bestand er al in, of hoort dezelfde bon al bij iets anders: niets gekoppeld, laten zien waarom
+    if (r.already_present || r.blocked) setBlocked({ result: r, txId });
+    else toast('Bewijs gekoppeld — niet opnieuw geboekt ✓');
+    await reload();
+    refreshBadge();
   };
 
   const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }) => {
@@ -67,7 +72,7 @@ export function Home() {
         evidenceFor.current = r.navigate.id as number;
         return evidenceInput.current?.click();
       }
-      return go({ screen: r.navigate.screen as never, id: r.navigate.id });
+      return go({ screen: r.navigate.screen as never, id: r.navigate.id, extra: r.navigate.extra });
     }
     await reload();
     refreshBadge();
@@ -291,6 +296,7 @@ export function Home() {
         />
       )}
 
+      {blocked && <UploadBlocked result={blocked.result} target={{ kind: 'bank', id: blocked.txId }} onClose={() => setBlocked(null)} onChanged={async () => { await reload(); refreshBadge(); }} />}
       {checkItems && (
         <Modal title={checkItems.task.title} onClose={() => setCheckItems(null)}>
           <p className="muted small">{checkItems.detail}</p>

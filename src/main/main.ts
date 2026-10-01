@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { basename, extname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, openReadonly, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
@@ -31,9 +31,11 @@ import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
 import type { PollResult } from '../mail/mail-intake';
 import { isPathInside } from './path-security';
-import { CHOICE_SESSION, handOverLocalState, markComplete, resolveDataDir, resolveForMcp, sharedDataDir, writeChoice, writePointer, type DataDirResolution, type MigrationOutcome } from './data-dir';
-import { chooseAfterFailedMigration, chooseOldFolder, confirmSyncFolder, migrateWithProgress, pickDataFolder, refuseDataFolder } from './data-dir-app';
-import { isWindowsStore, mcpCommand as mcpCommandFor, migrateForStore, READ_ONLY_MESSAGE, readOnlyError, storeFallbackHint, storeFirstStartNotice, type StartNotice } from './windows-store';
+import { folderAccess } from './statement-files';
+import { StatementWatch } from './statement-watch';
+import { CHOICE_SESSION, chromiumDir, handOverLocalState, markComplete, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type MigrationOutcome, type SwitchAction, type SwitchOutcome, type SwitchPlan } from './data-dir';
+import { chooseAfterFailedMigration, chooseOldFolder, confirmSyncFolder, migrateWithProgress, pickDataFolder, refuseDataFolder, switchWithProgress } from './data-dir-app';
+import { isWindowsStore, mcpCommand as mcpCommandFor, migrateForStore, READ_ONLY_MESSAGE, readOnlyError, storeFallbackHint, storeFirstStartNotice, storeFolderProblem, type StartNotice } from './windows-store';
 import { STORE_LLAMA_CPP } from '../ocr-runtime/manifest';
 import { Administrations, readAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
@@ -76,11 +78,21 @@ const DATA_ENV = process.env.BOEKHOUDENVOORNIKS_DATA ?? process.env.GRATIS_BOEKH
  */
 let dataRoot: string | null = null;
 
+/** De map die in Instellingen gekozen is als nieuwe gegevensmap, tot de gebruiker bevestigt. */
+let folderPlan: SwitchPlan | null = null;
+
 /** Map met alle administraties (en het gedeelde OCR-model). */
 function rootDir(): string {
   const dir = DATA_ENV ?? dataRoot ?? app.getPath('userData');
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function planFolder(chosen: string, copyToStandard = false): SwitchPlan {
+  const plan = planSwitch({ home: app.getPath('home'), current: rootDir(), chosen, copyToStandard });
+  // Store-versie: een map onder AppData is geen vaste plek (zie storeFolderProblem)
+  const blocked = STORE ? storeFolderProblem(chosen, app.getPath('appData')) : null;
+  return blocked ? { ...plan, problem: blocked } : plan;
 }
 
 function administrations(): Administrations {
@@ -275,6 +287,20 @@ async function backgroundMail(): Promise<void> {
   }
 }
 
+/**
+ * Afschriften uit de downloadmap (#184): alleen als de gebruiker het aanzette, en alleen in de map die hij
+ * koos. Er gaat niets vanzelf de boeken in: op Vandaag komt de vraag "Inlezen?". Niet in de kopie bij de
+ * boekhouder en niet in de koppeling voor Claude Code/Codex (die start dit proces niet op).
+ */
+const statementWatch = new StatementWatch({
+  folder() {
+    const cfg = services.statementFolder.config();
+    return cfg.enabled && cfg.path && !services.settings.officeCopy() ? cfg.path : null;
+  },
+  scan: () => services.statementFolder.scan(),
+  onFound: (found) => emit('statement-found', { found }),
+});
+
 const ALLOWED_ATTACHMENTS = ['.pdf', '.jpg', '.jpeg', '.png', '.heic', '.webp', '.xml'];
 
 async function storeAttachment(name: string, data: Uint8Array): Promise<string> {
@@ -288,6 +314,15 @@ async function storeAttachment(name: string, data: Uint8Array): Promise<string> 
   const target = join(dir, `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}-${basename(name).replace(/[^\w.-]+/g, '_')}`);
   writeFileSync(target, Buffer.from(data));
   return target;
+}
+
+/** Een net bewaarde bijlage weer weghalen (alleen binnen de bijlagenmap); mislukt dat, dan blijft hij staan. */
+function removeAttachment(path: string): void {
+  try {
+    if (resolve(path).startsWith(resolve(join(dataDir(), 'bijlagen')) + sep) && existsSync(path)) unlinkSync(path);
+  } catch {
+    // niet erg: het bestand staat dan los in de map, er verwijst niets naar
+  }
 }
 
 const localFetch: FetchLike = (url, init) => fetch(url, init);
@@ -367,6 +402,8 @@ function initServices(): void {
     secrets,
     fetch: localFetch,
     storeFile: storeAttachment,
+    removeFile: removeAttachment,
+    statementFiles: folderAccess,
   });
   localOcr = new LocalOcrRuntime(join(rootDir(), 'ocr'), {
     fetch: (url, init) => fetch(url, init) as never,
@@ -402,6 +439,14 @@ function initServices(): void {
     readAttachment(path) {
       if (!isPathInside(join(dataDir(), 'bijlagen'), path)) throw new Error('Alleen bijlagen van de administratie');
       return readFileSync(path);
+    },
+    statementFolder: {
+      defaultPath: () => app.getPath('downloads'),
+      async choose(current) {
+        const r = await dialog.showOpenDialog(mainWindow!, { title: 'Map met gedownloade afschriften', properties: ['openDirectory'], ...(current && existsSync(current) ? { defaultPath: current } : {}) });
+        return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+      },
+      reconfigure: () => statementWatch.start(),
     },
     async openPath(path) {
       if (!isPathInside(join(dataDir(), 'bijlagen'), path)) throw new Error('Alleen bijlagen van de administratie kunnen geopend worden');
@@ -576,6 +621,35 @@ function initServices(): void {
         return key;
       },
     },
+    // met een eigen map uit de omgeving (tests, rooktest) valt er niets te kiezen
+    dataFolder: DATA_ENV
+      ? undefined
+      : {
+          info: () => {
+            const standard = sharedDataDir(app.getPath('home'));
+            return { dir: rootDir(), standard, isStandard: sameDir(rootDir(), standard) };
+          },
+          async choose() {
+            const r = await dialog.showOpenDialog(mainWindow!, { title: 'Kies de map voor je gegevens', buttonLabel: 'Deze map kiezen', defaultPath: app.getPath('home'), properties: ['openDirectory', 'createDirectory'] });
+            if (r.canceled || !r.filePaths[0]) return null;
+            return (folderPlan = planFolder(r.filePaths[0]));
+          },
+          chooseStandard: () => (folderPlan = planFolder(sharedDataDir(app.getPath('home')), true)),
+          async apply() {
+            assertWritable();
+            if (!folderPlan) throw new Error('Kies eerst een map');
+            // opnieuw beoordelen: de renderer geeft geen pad door, en de map kan intussen veranderd zijn
+            const plan = planFolder(folderPlan.dir, folderPlan.standard && folderPlan.action === 'kopieren');
+            if (plan.problem) throw new Error(plan.problem);
+            if (plan.action !== folderPlan.action) throw new Error('De map is veranderd sinds je hem koos. Kies hem opnieuw.');
+            // het wisselen zelf gebeurt bij de volgende start, vóór er een database open is (zie switchFolderIfAsked)
+            writeSwitchRequest(app.getPath('home'), plan.dir, plan.action);
+            localOcr.stop();
+            db.close();
+            app.relaunch();
+            app.exit(0);
+          },
+        },
     appVersion: () => app.getVersion(),
     windowsStore: STORE,
     readOnly: () => readOnly,
@@ -602,6 +676,8 @@ function initServices(): void {
       reconfigure: () => updates?.configure(),
     },
   });
+  // ook na het wisselen van administratie: elke administratie heeft haar eigen instelling
+  if (!SMOKE_TEST && !readOnly) statementWatch.start();
 }
 
 function registerIpc(): void {
@@ -789,31 +865,20 @@ if (!DATA_ENV) {
       app.setPath('userData', join(app.getPath('temp'), 'boekhoudenvoorniks-fout'));
     } else if (resolution.kind === 'keuze') {
       // alleen de keuzevraag: Chromium krijgt een wegwerpmap, zodat de gedeelde map nog geen eigen sleutel krijgt
-      app.setPath('userData', join(shared, CHOICE_SESSION));
+      app.setPath('userData', chromiumDir(resolution, env.home));
     } else {
       rmSync(join(shared, CHOICE_SESSION), { recursive: true, force: true });
       // de sleutel van de opgeslagen wachtwoorden moet er staan vóór Chromium start
       if (resolution.kind === 'oud') handOverLocalState(resolution.dir, shared);
-      app.setPath('userData', shared);
+      // ook bij een zelf gekozen gegevensmap blijft Chromium in de gedeelde map: daar staat de sleutel
+      app.setPath('userData', chromiumDir(resolution, env.home));
       dataRoot = resolution.dir;
     }
   }
 }
 const gotLock = MCP_MODE ? false : app.requestSingleInstanceLock();
 let preparing = true;
-/** Meldingen die na het opstarten één voor één getoond worden. */
-const startNotices: StartNotice[] = [];
-
-/** Het overzetten zelf; een fout ná de marker telt als gelukt (alleen de afronding ging mis). */
-async function migrate(source: string, target: string): Promise<MigrationOutcome> {
-  try {
-    return await migrateWithProgress(source, target, !SMOKE_TEST);
-  } catch (e) {
-    // de marker staat er al: de gedeelde map is compleet, alleen de afronding ging mis
-    console.error('Afronden van het overzetten mislukt', e);
-    return { status: 'gemigreerd', databases: [], renamedSource: null, movedAside: null, warning: null };
-  }
-}
+const dataDirNotices: StartNotice[] = [];
 
 /** Waarom de administratie in `root` niet alleen-lezen te openen is, of null als dat kan. */
 function viewProblem(root: string): string | null {
@@ -824,18 +889,6 @@ function viewProblem(root: string): string | null {
   } catch (e) {
     return /andere versie/.test((e as Error).message) ? 'de administratie is van een oudere versie van de app en moet eerst overgezet worden.' : (e as Error).message;
   }
-}
-
-function migratedNotice(source: string, target: string, outcome: Extract<MigrationOutcome, { status: 'gemigreerd' }>): StartNotice {
-  return {
-    type: 'info',
-    message: 'Je gegevens staan nu in een vaste map',
-    detail:
-      `Je administratie staat voortaan in ${target}. Daar blijft hij ook staan als je de app verwijdert of opnieuw installeert.\n\n` +
-      (outcome.renamedSource ? `De oude map is bewaard als ${outcome.renamedSource}.` : (outcome.warning ?? `De oude map ${source} is blijven staan.`)) +
-      (outcome.movedAside ? `\n\nIn de nieuwe map stond al iets; dat is bewaard in ${outcome.movedAside}.` : '') +
-      '\n\nGebruik je de koppeling met Claude Code of Codex? Start dat programma dan opnieuw, zodat het de nieuwe map leest.',
-  };
 }
 
 /**
@@ -860,43 +913,77 @@ async function prepareDataDir(): Promise<boolean> {
     return false;
   }
   if (resolution.kind === 'nieuw') markComplete(resolution.dir);
-  if (resolution.kind !== 'oud') return true;
-  const { dir: source, target } = resolution;
-  if (STORE) return prepareForStore(source, target);
-  const outcome = await migrate(source, target);
+  if (resolution.kind === 'oud') {
+    // Store-versie: na een mislukte poging werkt de app niet door in de oude map (zie moveOldFolderForStore)
+    if (!STORE) await moveOldFolder(resolution.dir, resolution.target);
+    else if (!(await moveOldFolderForStore(resolution.dir, resolution.target))) return false;
+  }
+  // alleen bekijken: er wordt niets gewisseld
+  if (!readOnly) await switchFolderIfAsked();
+  return true;
+}
+
+/** Het overzetten zelf; een fout ná de marker telt als gelukt (alleen de afronding ging mis). */
+async function migrateOldFolder(source: string, target: string): Promise<MigrationOutcome> {
+  try {
+    return await migrateWithProgress(source, target, !SMOKE_TEST);
+  } catch (e) {
+    // de marker staat er al: de gedeelde map is compleet, alleen de afronding ging mis
+    console.error('Afronden van het overzetten mislukt', e);
+    return { status: 'gemigreerd', databases: [], renamedSource: null, movedAside: null, warning: null };
+  }
+}
+
+function movedNotice(source: string, target: string, outcome: Extract<MigrationOutcome, { status: 'gemigreerd' }>): StartNotice {
+  return {
+    type: 'info',
+    message: 'Je gegevens staan nu in een vaste map',
+    detail:
+      `Je administratie staat voortaan in ${target}. Daar blijft hij ook staan als je de app verwijdert of opnieuw installeert.\n\n` +
+      (outcome.renamedSource ? `De oude map is bewaard als ${outcome.renamedSource}.` : (outcome.warning ?? `De oude map ${source} is blijven staan.`)) +
+      (outcome.movedAside ? `\n\nIn de nieuwe map stond al iets; dat is bewaard in ${outcome.movedAside}.` : '') +
+      '\n\nGebruik je de koppeling met Claude Code of Codex? Start dat programma dan opnieuw, zodat het de nieuwe map leest.',
+  };
+}
+
+/** De oude map in AppData overzetten naar de gedeelde map; lukt dat niet, dan werkt de app verder vanuit de oude. */
+async function moveOldFolder(source: string, target: string): Promise<void> {
+  const outcome = await migrateOldFolder(source, target);
   if (outcome.status === 'gemigreerd') {
     dataRoot = target;
     console.log(`Gegevens overgezet van ${source} naar ${target}`);
-    startNotices.push(migratedNotice(source, target, outcome));
+    dataDirNotices.push(movedNotice(source, target, outcome));
   } else {
     console.error(`Gegevens overzetten niet gelukt (${outcome.status}): ${outcome.reason}`);
-    startNotices.push({
+    dataDirNotices.push({
       type: 'warning',
       message: 'Je gegevens zijn nog niet overgezet',
       detail: `${outcome.status === 'mislukt' ? `Het overzetten naar ${target} lukte niet (${outcome.reason}).` : outcome.reason}\n\nEr is niets veranderd: je werkt gewoon verder vanuit ${source}. Bij de volgende start probeert de app het opnieuw.`,
     });
   }
-  return true;
 }
 
 /**
  * Store-versie: lukt het overzetten niet, dan werkt de app niet verder in de oude map (wat een
  * Store-app in AppData schrijft, verdwijnt bij verwijderen). De gebruiker kiest: opnieuw, een eigen map,
- * of alleen bekijken. Zie `migrateForStore`.
+ * of alleen bekijken. Een eigen map gaat langs dezelfde weg als in Instellingen (`planSwitch`,
+ * `switchDataDir`). Onwaar = de app sluit. Zie `migrateForStore`.
  */
-async function prepareForStore(source: string, target: string): Promise<boolean> {
+async function moveOldFolderForStore(source: string, target: string): Promise<boolean> {
+  const home = app.getPath('home');
   const result = await migrateForStore({
     source,
     target,
     appData: app.getPath('appData'),
-    migrate,
+    migrate: migrateOldFolder,
+    plan: (chosen) => planSwitch({ home, current: source, chosen }),
+    switchTo: (chosen) => switchFolder(home, source, { target: chosen, action: 'kopieren' }),
     viewProblem: () => viewProblem(source),
     // de rooktest kan niets kiezen: een mislukte poging is daar gewoon een fout
     choose: async (failure) => (SMOKE_TEST ? 'afsluiten' : chooseAfterFailedMigration(failure)),
-    pickFolder: () => pickDataFolder(app.getPath('home')),
+    pickFolder: () => pickDataFolder(home),
     refuse: refuseDataFolder,
     confirmSyncFolder,
-    remember: (dir) => writePointer(app.getPath('home'), dir),
   });
   if (result.kind === 'afsluiten') {
     app.exit(SMOKE_TEST ? 1 : 0);
@@ -909,13 +996,74 @@ async function prepareForStore(source: string, target: string): Promise<boolean>
   }
   dataRoot = result.dir;
   console.log(`Gegevens overgezet van ${source} naar ${result.dir}`);
-  startNotices.push(migratedNotice(source, result.dir, result.outcome));
+  dataDirNotices.push(result.kind === 'gekozen' ? switchedNotice(source, result.outcome) : movedNotice(source, result.dir, result.outcome));
   return true;
 }
 
-/** De meldingen na het opstarten (overzetten gelukt of niet, eerste start uit de Store); houden de app niet tegen. */
-async function showStartNotices(): Promise<void> {
-  for (let notice = startNotices.shift(); notice && mainWindow; notice = startNotices.shift()) {
+/**
+ * In Instellingen is een andere gegevensmap gekozen: nu wisselen, vóór er een database open is. De
+ * verwijzing wordt pas geschreven als de nieuwe map compleet is; lukt het niet, dan is er niets
+ * veranderd en werkt de app verder vanuit de huidige map. Chromium blijft in de gedeelde map, dus de
+ * sleutel van de opgeslagen wachtwoorden is dezelfde en de app hoeft niet nog een keer te starten.
+ */
+async function switchFolderIfAsked(): Promise<void> {
+  if (SMOKE_TEST) return;
+  const home = app.getPath('home');
+  const request = takeSwitchRequest(home);
+  if (!request) return;
+  const source = rootDir();
+  const outcome = await switchFolder(home, source, request);
+  if (outcome.status !== 'gewisseld') {
+    console.error(`Gegevensmap wisselen niet gelukt (${outcome.status}): ${outcome.reason}`);
+    dataDirNotices.push({
+      type: 'warning',
+      message: 'Je gegevensmap is niet gewijzigd',
+      detail: `${outcome.status === 'mislukt' ? `Het wisselen naar ${request.target} lukte niet (${outcome.reason}).` : outcome.reason}\n\nEr is niets veranderd: je werkt gewoon verder vanuit ${source}. Wil je het opnieuw proberen, kies de map dan opnieuw bij Instellingen > Administraties.`,
+    });
+    return;
+  }
+  dataRoot = outcome.dir;
+  console.log(`Gegevensmap gewisseld van ${source} naar ${outcome.dir} (${outcome.action})`);
+  dataDirNotices.push(switchedNotice(source, outcome));
+}
+
+/** Het wisselen zelf, met voortgangsvenster; een fout ná het schrijven van de verwijzing telt als gelukt. */
+async function switchFolder(home: string, source: string, request: { target: string; action: SwitchAction }): Promise<SwitchOutcome> {
+  try {
+    return await switchWithProgress(home, source, request, true);
+  } catch (e) {
+    // de verwijzing is het laatste wat geschreven wordt: wat `resolveDataDir` nu zegt, is waar
+    console.error('Afronden van het wisselen van gegevensmap mislukt', e);
+    try {
+      const now = resolveDataDir({ home, appData: app.getPath('appData') });
+      if ((now.kind === 'pointer' || now.kind === 'gedeeld') && sameDir(now.dir, request.target)) return { status: 'gewisseld', dir: now.dir, action: request.action, databases: [], movedAside: null };
+    } catch (again) {
+      console.error(again);
+    }
+    return { status: 'mislukt', reason: (e as Error).message };
+  }
+}
+
+function switchedNotice(source: string, outcome: Extract<SwitchOutcome, { status: 'gewisseld' }>): StartNotice {
+  const standard = sharedDataDir(app.getPath('home'));
+  const toStandard = sameDir(outcome.dir, standard);
+  return {
+    type: 'info',
+    message: outcome.action === 'kopieren' ? 'Je gegevens staan nu in de map die je koos' : 'Je werkt nu met de administratie in de map die je koos',
+    detail:
+      (outcome.action === 'kopieren'
+        ? `Je administratie staat voortaan in ${outcome.dir}.\n\nDe map ${source} is blijven staan; er is niets gewist. De app gebruikt die map niet meer, dus wat je vanaf nu invoert komt daar niet in.`
+        : `De app opent voortaan de administratie in ${outcome.dir}.\n\nJe vorige gegevens zijn niet meegegaan: die staan nog in ${source}. Komt deze map van een andere computer, dan moet je opgeslagen wachtwoorden (bijvoorbeeld van je e-mail) opnieuw invullen.`) +
+      (toStandard ? '' : `\n\nLaat de map ${standard} staan, ook als hij leeg lijkt: de app bewaart daar de sleutel van je opgeslagen wachtwoorden.`) +
+      (outcome.movedAside ? `\n\nIn de map stond nog een oudere administratie; die is bewaard in ${outcome.movedAside}.` : '') +
+      '\n\nGebruik je de koppeling met Claude Code of Codex? Start dat programma dan opnieuw, zodat het de nieuwe map leest.',
+  };
+}
+
+/** De meldingen na het overzetten of wisselen (of als dat niet lukte), na elkaar; houdt de app niet tegen. */
+async function showDataDirNotice(): Promise<void> {
+  for (const notice of dataDirNotices.splice(0)) {
+    if (!mainWindow) return;
     await dialog.showMessageBox(mainWindow, { ...notice, title: 'BoekhoudenVoorNiks', buttons: ['OK'] });
   }
 }
@@ -954,9 +1102,9 @@ if (MCP_MODE) {
     if (SMOKE_TEST) return;
     if (STORE && !DATA_ENV) {
       const first = storeFirstStartNotice(app.getPath('userData'));
-      if (first) startNotices.push(first);
+      if (first) dataDirNotices.push(first);
     }
-    void showStartNotices();
+    void showDataDirNotice();
     // alleen bekijken: geen back-ups, post of automatisch verwerken in de oude map
     if (!readOnly) {
       setTimeout(() => void backgroundTasks(), 10_000);
@@ -982,6 +1130,7 @@ if (MCP_MODE) {
   });
 
   app.on('will-quit', () => {
+    statementWatch.stop();
     localOcr?.stop();
     try {
       db?.close();

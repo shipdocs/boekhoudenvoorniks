@@ -877,4 +877,240 @@ export const migrations: string[] = [
     PRIMARY KEY (proposed_by, model)
   );
   `,
+  /* 25: betrouwbaar inlezen (#184): een betaling die er al staat, komt er niet nog een keer in */ `
+  -- De id die de bank zelf aan een betaling gaf (CAMT, MT940). Tot nu toe zat die alleen in dedup_hash.
+  -- Betalingen die al waren ingelezen hebben hem niet (NULL) en tellen als "zonder bank-id"; hun
+  -- dedup_hash blijft zoals hij was, zodat hetzelfde afschrift opnieuw inlezen niets dubbel geeft.
+  ALTER TABLE bank_transactions ADD COLUMN bank_id TEXT;
+  CREATE INDEX idx_bank_transactions_amount ON bank_transactions(bank_account_id, amount, transaction_date);
+  -- Het soort afschrift van een import: de bron, en bij CSV ook de indeling (kolommen en toewijzing).
+  -- Twee afschriften van hetzelfde soort geven dezelfde betaling dezelfde hash; bij een ander soort
+  -- zoekt de app de betaling op bedrag, tegenrekening en datum. Oude imports: NULL (soort onbekend).
+  ALTER TABLE import_batches ADD COLUMN kind TEXT;
+
+  -- Regels uit een afschrift die niet zijn toegevoegd omdat dezelfde betaling er al stond uit een ander
+  -- soort afschrift (andere hash, zelfde betaling). matched_transaction_id is de betaling die er al stond
+  -- (de tegenhanger): die telt per soort afschrift maar voor één overgeslagen regel. Met "Toch toevoegen"
+  -- komt de regel er alsnog in (added_transaction_id) en is de tegenhanger weer vrij.
+  CREATE TABLE import_skipped (
+    id INTEGER PRIMARY KEY,
+    batch_id INTEGER NOT NULL REFERENCES import_batches(id),
+    bank_account_id INTEGER NOT NULL REFERENCES bank_accounts(id),
+    transaction_date TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    counter_iban TEXT,
+    counter_name TEXT,
+    description TEXT NOT NULL DEFAULT '',
+    reference TEXT,
+    source TEXT NOT NULL,
+    bank_id TEXT,
+    dedup_hash TEXT NOT NULL UNIQUE,
+    matched_transaction_id INTEGER NOT NULL REFERENCES bank_transactions(id),
+    added_transaction_id INTEGER REFERENCES bank_transactions(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_import_skipped_matched ON import_skipped(matched_transaction_id);
+  CREATE INDEX idx_import_skipped_batch ON import_skipped(batch_id);
+
+  -- Welke dagen een import besloeg staat sinds migratie 4 in import_batch_accounts. Mocht er van een
+  -- oude import toch geen regel zijn, dan alsnog uit de betalingen zelf (bestaande regels blijven staan).
+  INSERT OR IGNORE INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates)
+    SELECT import_batch_id, bank_account_id, MIN(transaction_date), MAX(transaction_date), COUNT(*), COUNT(*), 0
+    FROM bank_transactions WHERE import_batch_id IS NOT NULL GROUP BY import_batch_id, bank_account_id;
+  `,
+  /* 26: afschriften uit de downloadmap (#184): de app ziet een gedownload afschrift en vraagt "Inlezen?" */ `
+  -- Welk bestand een import was (hash van de inhoud). Een afschrift dat al is ingelezen, bijvoorbeeld door
+  -- het in de app te slepen, vraagt de app niet nog een keer. Oude imports: NULL.
+  ALTER TABLE import_batches ADD COLUMN content_hash TEXT;
+
+  -- Bestanden in de map die de gebruiker koos (standaard uit; de map zelf staat in settings onder
+  -- 'statementFolder'). file_key is een hash van map, naam, grootte en wijzigingstijd: zo leest de app niet
+  -- elke keer alles opnieuw. Van een bestand dat geen afschrift van deze administratie is ('geen'),
+  -- bewaren we alleen die hash: geen naam en geen inhoud. De app verplaatst of verwijdert nooit iets.
+  CREATE TABLE statement_files (
+    id INTEGER PRIMARY KEY,
+    file_key TEXT NOT NULL UNIQUE,
+    -- geen = geen afschrift van deze administratie; gevonden = de app vraagt "Inlezen?"; ingelezen;
+    -- afgewezen = drie keer "Niet nu"; dubbel = zelfde inhoud als een ander bestand
+    status TEXT NOT NULL CHECK (status IN ('geen','gevonden','ingelezen','afgewezen','dubbel')),
+    -- staat het bestand er nog? (bijgewerkt bij elke keer kijken)
+    present INTEGER NOT NULL DEFAULT 1,
+    filename TEXT,
+    content_hash TEXT,
+    source TEXT,
+    -- de namen van de rekeningen in het afschrift, voor de vraag op Vandaag
+    accounts TEXT,
+    period_from TEXT,
+    period_to TEXT,
+    transactions INTEGER,
+    -- hoe vaak "Niet nu", en vanaf welke dag de app het weer vraagt
+    declined INTEGER NOT NULL DEFAULT 0,
+    ask_from TEXT,
+    import_batch_id INTEGER REFERENCES import_batches(id),
+    seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_statement_files_status ON statement_files(status);
+  `,
+  /* 27: bewijs als echte koppeling, afgewezen voorstellen en meldingen over dubbele documenten (#179) */ `
+  -- Eén document hoort bij precies één aankoop of bankbetaling; een aankoop of betaling mag meer
+  -- bestanden hebben, waarvan er precies één het hoofdbewijsstuk is. Dit is de enige bron voor
+  -- "welke bon hoort waarbij": de uitlegtekst bij een document wordt daar nooit meer voor gelezen.
+  -- origin: 'geboekt' = de aankoop is uit dit document geboekt, 'bewijs' = alleen als bewijs erbij
+  -- gezet (niets geboekt), 'dubbel' = hetzelfde document nog een keer (niets geboekt).
+  CREATE TABLE IF NOT EXISTS document_links (
+    id INTEGER PRIMARY KEY,
+    document_id INTEGER NOT NULL UNIQUE REFERENCES documents(id),
+    purchase_invoice_id INTEGER REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+    bank_transaction_id INTEGER REFERENCES bank_transactions(id),
+    is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0, 1)),
+    origin TEXT NOT NULL CHECK (origin IN ('geboekt','bewijs','dubbel')),
+    provenance TEXT NOT NULL DEFAULT 'gebruiker' CHECK (provenance IN ('gebruiker','automatisch','migratie')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK ((purchase_invoice_id IS NULL) <> (bank_transaction_id IS NULL))
+  );
+  CREATE INDEX IF NOT EXISTS idx_document_links_purchase ON document_links(purchase_invoice_id);
+  CREATE INDEX IF NOT EXISTS idx_document_links_bank ON document_links(bank_transaction_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_document_links_primary_purchase ON document_links(purchase_invoice_id) WHERE is_primary = 1 AND purchase_invoice_id IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_document_links_primary_bank ON document_links(bank_transaction_id) WHERE is_primary = 1 AND bank_transaction_id IS NOT NULL;
+
+  -- "Nee, andere aankoop": dit voorstel niet opnieuw doen. Geldt zolang leverancier, datum, bedrag en
+  -- nummer van het document (fingerprint) gelijk blijven. candidate: 'aankoop:5', 'bank:7' of 'document:3'.
+  CREATE TABLE IF NOT EXISTS document_proposal_rejections (
+    document_id INTEGER NOT NULL REFERENCES documents(id),
+    candidate TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (document_id, candidate)
+  );
+
+  -- Melding op Vandaag: een document dat zonder jou binnenkwam (e-mail) stond er al in.
+  CREATE TABLE IF NOT EXISTS document_notices (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('stond-er-al','dubbel')),
+    original_name TEXT NOT NULL,
+    source TEXT NOT NULL,
+    sender TEXT,
+    existing_document_id INTEGER REFERENCES documents(id),
+    purchase_invoice_id INTEGER,
+    seen_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Bijlagen van een mail die al binnen zijn, zolang de mail nog niet helemaal verwerkt is: bij een
+  -- nieuwe poging is zo'n bijlage geen "dubbel document".
+  CREATE TABLE IF NOT EXISTS mail_attachment_progress (
+    message_key TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    document_id INTEGER NOT NULL,
+    PRIMARY KEY (message_key, sha256)
+  );
+
+  -- Wat er met elke oude tekstkoppeling ("bewijsstuk bij banktransactie #...") gebeurd is.
+  -- Een bon die hierdoor op controle komt, beoordeelt de app daarna opnieuw (IntakeService.reassessMigrated):
+  -- named_payments = de betalingen die de oude tekst noemde (alleen om een vraag te kunnen stellen, nooit
+  -- als koppeling); reassessed_at = wanneer dat gebeurd is. Tot dan is de bon niet te boeken.
+  CREATE TABLE IF NOT EXISTS document_link_migration (
+    document_id INTEGER PRIMARY KEY REFERENCES documents(id),
+    result TEXT NOT NULL CHECK (result IN ('gemigreerd','onzeker','conflict')),
+    bank_transaction_id INTEGER,
+    detail TEXT NOT NULL,
+    named_payments TEXT,
+    reassessed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- 1. Bonnen die al bij een aankoop horen. De aankoop zelf verandert niet.
+  INSERT OR IGNORE INTO document_links (document_id, purchase_invoice_id, is_primary, origin, provenance)
+  SELECT d.id, p.id, CASE WHEN p.document_id = d.id THEN 1 ELSE 0 END,
+         CASE
+           WHEN d.duplicate_of_document_id IS NOT NULL OR d.status = 'genegeerd' THEN 'dubbel'
+           WHEN EXISTS (SELECT 1 FROM event_evidence a JOIN event_evidence b ON b.event_id = a.event_id
+                         WHERE a.kind = 'document' AND a.ref_id = d.id AND b.kind = 'inkoop' AND b.ref_id = p.id) THEN 'geboekt'
+           -- van vóór de gebeurtenissen (#19): niet te zien of de bon later is toegevoegd; dan de voorzichtige keuze
+           WHEN NOT EXISTS (SELECT 1 FROM journal_entries e WHERE e.id = p.journal_entry_id AND e.rules_version <> 'backfill') THEN 'geboekt'
+           ELSE 'bewijs'
+         END,
+         'migratie'
+  FROM documents d
+  JOIN purchase_invoices p ON p.id = COALESCE(d.purchase_invoice_id, (SELECT MIN(p2.id) FROM purchase_invoices p2 WHERE p2.document_id = d.id));
+
+  -- 2. Oude tekstkoppelingen aan een bankbetaling: per document vastleggen wat ermee gebeurt.
+  WITH refs AS (
+    SELECT d.id AS document_id, substr(j.value, length('bewijsstuk bij banktransactie #') + 1) AS rest
+    FROM documents d, json_each(json_extract(CASE WHEN json_valid(d.classification) THEN d.classification ELSE '{}' END, '$.reasons')) j
+    WHERE d.classification IS NOT NULL AND j.type = 'text' AND j.value LIKE 'bewijsstuk bij banktransactie #%'
+  ),
+  per_document AS (
+    SELECT document_id, COUNT(DISTINCT rest) AS n,
+           CASE WHEN MIN(rest) <> '' AND MIN(rest) NOT GLOB '*[^0-9]*' THEN CAST(MIN(rest) AS INTEGER) END AS bank_id
+    FROM refs GROUP BY document_id
+  ),
+  judged AS (
+    SELECT d.id AS document_id, r.bank_id,
+           CASE
+             WHEN r.n > 1 THEN 'meerdere'
+             WHEN r.bank_id IS NULL THEN 'onleesbaar'
+             WHEN EXISTS (SELECT 1 FROM document_links k WHERE k.document_id = d.id) THEN 'aankoop'
+             WHEN d.status <> 'verwerkt' THEN 'status'
+             WHEN b.id IS NULL THEN 'geen-betaling'
+             WHEN b.matched_purchase_invoice_id IS NOT NULL OR b.matched_invoice_id IS NOT NULL THEN 'anders-gekoppeld'
+             WHEN b.status <> 'gematcht' OR NOT EXISTS (
+                    SELECT 1 FROM journal_entries e JOIN events ev ON ev.id = e.event_id
+                     WHERE e.id = b.matched_journal_entry_id AND e.status = 'definitief') THEN 'niet-geboekt'
+             ELSE 'ok'
+           END AS why
+    FROM per_document r JOIN documents d ON d.id = r.document_id
+    LEFT JOIN bank_transactions b ON b.id = r.bank_id
+  )
+  INSERT OR IGNORE INTO document_link_migration (document_id, result, bank_transaction_id, detail)
+  SELECT document_id,
+         CASE why WHEN 'ok' THEN 'gemigreerd' WHEN 'meerdere' THEN 'conflict' WHEN 'aankoop' THEN 'conflict' WHEN 'anders-gekoppeld' THEN 'conflict' ELSE 'onzeker' END,
+         bank_id,
+         CASE why
+           WHEN 'ok' THEN 'gekoppeld aan de betaling'
+           WHEN 'meerdere' THEN 'er worden meerdere betalingen genoemd'
+           WHEN 'onleesbaar' THEN 'het nummer van de betaling is niet te lezen'
+           WHEN 'aankoop' THEN 'de bon hoort al bij een aankoop'
+           WHEN 'status' THEN 'de bon stond niet (meer) op verwerkt'
+           WHEN 'geen-betaling' THEN 'de betaling bestaat niet meer'
+           WHEN 'anders-gekoppeld' THEN 'de betaling hoort intussen bij een aankoop of factuur'
+           ELSE 'de betaling is niet (meer) geboekt'
+         END
+  FROM judged;
+
+  INSERT OR IGNORE INTO document_links (document_id, bank_transaction_id, is_primary, origin, provenance)
+  SELECT document_id, bank_transaction_id, 0, 'bewijs', 'migratie' FROM document_link_migration WHERE result = 'gemigreerd';
+
+  -- 3. Een kopie van een document dat ergens bij hoort, hoort daar ook bij (beide bestanden blijven bewaard).
+  INSERT OR IGNORE INTO document_links (document_id, purchase_invoice_id, bank_transaction_id, is_primary, origin, provenance)
+  SELECT d.id, k.purchase_invoice_id, k.bank_transaction_id, 0, 'dubbel', 'migratie'
+  FROM documents d JOIN document_links k ON k.document_id = d.duplicate_of_document_id
+  WHERE d.status = 'genegeerd';
+  UPDATE documents SET purchase_invoice_id = (SELECT k.purchase_invoice_id FROM document_links k WHERE k.document_id = documents.id)
+  WHERE purchase_invoice_id IS NULL AND EXISTS (SELECT 1 FROM document_links k WHERE k.document_id = documents.id AND k.purchase_invoice_id IS NOT NULL);
+
+  -- 4. Precies één hoofdbewijsstuk per aankoop of betaling. Wat al de bijlage van de aankoop was, blijft
+  -- dat; anders het best leesbare bestand (PDF met e-factuur erin, PDF, foto, losse e-factuur), dan het oudste.
+  UPDATE document_links SET is_primary = 1
+  WHERE is_primary = 0
+    AND NOT EXISTS (SELECT 1 FROM document_links o WHERE o.purchase_invoice_id IS document_links.purchase_invoice_id
+                     AND o.bank_transaction_id IS document_links.bank_transaction_id AND o.is_primary = 1)
+    AND id = (SELECT o.id FROM document_links o JOIN documents d ON d.id = o.document_id
+               WHERE o.purchase_invoice_id IS document_links.purchase_invoice_id AND o.bank_transaction_id IS document_links.bank_transaction_id
+               ORDER BY CASE WHEN d.mime_type = 'application/pdf' AND d.extraction_source = 'ubl' THEN 5
+                             WHEN d.mime_type = 'application/pdf' AND d.extraction_source = 'pdf-text' THEN 4
+                             WHEN d.mime_type = 'application/pdf' THEN 3
+                             WHEN d.mime_type = 'application/xml' THEN 1 ELSE 2 END DESC, o.document_id
+               LIMIT 1);
+
+  -- 5. Onzeker of tegenstrijdig: niets koppelen en niets boeken. De bon komt bij "Nog controleren" met uitleg.
+  UPDATE documents
+     SET status = 'controle',
+         issues = json_insert(CASE WHEN json_valid(issues) AND json_type(issues) = 'array' THEN issues ELSE '[]' END, '$[#]',
+                    json_object('field', 'evidence-migration', 'severity', 'fout', 'message',
+                      'Deze bon stond als bewijs bij een betaling, maar de app kan niet meer zeker zien bij welke. Kijk waar hij bij hoort. Aan je boekhouding is niets veranderd.'))
+   WHERE status = 'verwerkt'
+     AND id IN (SELECT document_id FROM document_link_migration WHERE result IN ('onzeker','conflict'))
+     AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.document_id = documents.id);
+  `,
 ];
