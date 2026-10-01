@@ -1,6 +1,8 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 1.0.0 — geen dubbele bonnen of betalingen meer, je gegevens waar jij wilt
+
+Versie 1.0: de app is de afgelopen maanden uitgegroeid tot een complete administratie. Deze versie maakt het inlezen van bonnen en bankafschriften betrouwbaarder en laat je zelf kiezen waar je gegevens staan.
 
 ### Nieuw
 - **Dezelfde bon twee keer toevoegen kan niet meer ongemerkt**: voeg je precies hetzelfde bestand nog een keer toe, dan zegt de app *Dit document stond er al in* en kun je met *Bestaand document bekijken* het document openen dat er al was. Er komt niets bij en er verandert niets. Dat geldt overal: bij Aankopen & bonnetjes, bij *Bon toevoegen* bij een aankoop of betaling, en bij bijlagen uit je mail (dan staat de melding op Vandaag).
