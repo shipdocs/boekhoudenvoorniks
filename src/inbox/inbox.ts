@@ -3,7 +3,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import type { BalanceCheck, BankService, BankTransaction } from '../import/bank';
+import type { BalanceCheck, BankService, BankTransaction, BookToAccountInput } from '../import/bank';
 import type { MatchingEngine } from '../import/matching';
 import type { InvoiceService } from '../documents/invoices';
 import type { QuoteService } from '../documents/quotes';
@@ -33,6 +33,8 @@ import { explain } from '../automation/explain';
 import type { InvestmentCheck } from '../tax/investment-check';
 import type { MailIntakeService } from '../mail/mail-intake';
 import type { BookedPayments } from '../documents/booked-payment';
+import { BankPurchaseMatcher, describePurchase, dueOf, mentionsNumber, pairKey, purchaseSupplierName, supplierNameFit, type PaymentQuestion, type PurchaseIndex } from '../documents/bank-purchase-match';
+import { formatForeign } from '../shared/currency';
 import type { FxRepair } from '../fx/repair';
 import type { StatementFolder } from '../import/statement-folder';
 import { statementHelp } from '../shared/bank-statement-help';
@@ -210,7 +212,12 @@ export class InboxService {
     private readonly categories: CategoryLookup,
     private readonly investments?: InvestmentCheck,
     private readonly mail?: MailIntakeService,
-  ) {}
+  ) {
+    this.matcher = new BankPurchaseMatcher(db);
+  }
+
+  /** de gedeelde vergelijking van een betaling met een aankoop die er al staat (#221) */
+  private readonly matcher: BankPurchaseMatcher;
 
   /** betalingen aan je eigen bedrijf en de factuur die erbij hoort (#205) */
   private own: OwnCompanyPayments | null = null;
@@ -287,6 +294,9 @@ export class InboxService {
       countDecision(this.db, 'bankkoppeling', 'automatic');
     }
     const firstOpen = this.ledger.firstOpenDate();
+    // aankopen waar een afschrijving bij kan horen, en betalingen waar een bon op wacht: pas laden als het nodig is
+    let index: PurchaseIndex | null = null;
+    let waiting: Set<number> | null = null;
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
       if (t.amount >= 0 || !t.counter_name) continue;
       if (firstOpen && t.transaction_date < firstOpen) continue; // vergrendelde periode: niet boeken
@@ -296,9 +306,13 @@ export class InboxService {
       if (!this.memory.isAutomatic(rule)) continue;
       // privéauto: tanken en parkeren nooit automatisch als zakelijke kosten
       if (rule!.business && this.fuelIsPrivate(rule!.category_key)) continue;
-      // Staat er een open bonnetje/inkoopfactuur met dit bedrag? Dan niet als losse kosten boeken.
-      const openPurchase = this.db.prepare(`SELECT 1 FROM purchase_invoices WHERE status = 'open' AND total - amount_paid = ?`).get(-t.amount);
-      if (openPurchase) continue;
+      // Kan deze betaling bij een aankoop horen die er al staat (open, of op privé of contant betaald gezet)?
+      // Ook met een bedrag dat door de koers iets afwijkt. Dan niet als losse kosten boeken: eerst de vraag.
+      index ??= this.matcher.index();
+      if (this.matcher.blocksAuto(t, index)) continue;
+      // een bon die nog op controle wacht en deze betaling als voorstel heeft: de bon neemt de betaling straks mee
+      waiting ??= new Set(this.intake.list('controle').flatMap((d) => (d.bank_match ? [d.bank_match.id] : [])));
+      if (waiting.has(t.id)) continue;
       try {
         // boeken en vastleggen in één transactie: nooit een automatische boeking zonder logregel
         tx(this.db, () => {
@@ -382,9 +396,24 @@ export class InboxService {
     if (learn && t.counter_name) this.memory.learn(t.counter_name, { categoryKey, vatCode, business });
   }
 
+  /**
+   * Mag de gebruiker deze afschrijving zelf indelen? Past er een aankoop sterk bij die er al staat, dan
+   * eerst de vraag beantwoorden ("Ja" of "Nee, iets anders"): anders staan de kosten er twee keer in.
+   */
+  private guardBank(t: BankTransaction): void {
+    if (t.amount < 0) this.matcher.assertAnswered(t);
+  }
+
+  /** Een betaling zelf op een rekening boeken (kosten, privé, "weet ik nog niet", …), na de controle hierboven. */
+  bookBank(bankTransactionId: number, input: BookToAccountInput): number {
+    this.guardBank(this.bank.get(bankTransactionId));
+    return this.bank.bookToAccount(bankTransactionId, input);
+  }
+
   /** De gebruiker beantwoordt een vraag uit de inbox. */
   answerBank(bankTransactionId: number, answer: { business: boolean; categoryKey?: string; vatCode?: string; businessPct?: number }): void {
     const t = this.bank.get(bankTransactionId);
+    this.guardBank(t);
     const category = answer.categoryKey ?? 'overig';
     const vatCode = answer.vatCode ?? this.categories.find(category)?.defaultVat ?? 'hoog';
     this.bookCategory(t, category, vatCode, answer.business, true, answer.businessPct);
@@ -444,6 +473,7 @@ export class InboxService {
     // betalingen in een vergrendelde periode kun je niet meer indelen: één melding in plaats van een vraag per betaling
     const firstOpen = this.ledger.firstOpenDate();
     const locked = { afgesloten: 0, uitwisseling: 0 };
+    const index = this.matcher.index();
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
       if (firstOpen && t.transaction_date < firstOpen) {
         locked[this.ledger.periodLockFor(t.transaction_date)?.kind ?? 'afgesloten']++;
@@ -524,6 +554,12 @@ export class InboxService {
           priority: 2,
           ref: { bankTransactionId: t.id, documentId: doc?.id, purchaseId: ownMatch.purchase?.id },
         });
+        continue;
+      }
+      // hoort deze afschrijving bij een aankoop die er al staat? Eerst die vraag, vóór een soort kosten
+      const q = t.amount < 0 ? this.matcher.question(t, index) : null;
+      if (q) {
+        tasks.push(this.purchaseTask(t, q, who));
         continue;
       }
       const suggestions = this.matching.suggest(t);
@@ -1074,21 +1110,35 @@ export class InboxService {
       });
     }
 
-    // privé/contant betaald gezet, en een afschrijving met hetzelfde bedrag staat al als kosten op je rekening
+    // een aankoop (open, of op privé/contant betaald gezet) en een afschrijving die er precies bij lijkt te
+    // horen, maar die al los geboekt is als kosten of op "weet ik nog niet"
     for (const c of this.booked?.candidates().filter((x) => !x.certain) ?? []) {
-      const key = `dubbel-${c.purchase.id}-${c.bankTransaction.id}`;
+      const key = pairKey({ purchaseId: c.purchase.id, bankTransactionId: c.bankTransaction.id });
       if (this.isSkipped(key)) continue;
       const name = c.purchase.relation_name ?? c.purchase.description;
       const account = this.bank.getAccount(c.bankTransaction.bank_account_id).name;
+      const elsewhere = c.state === 'elders';
+      const onQuestion = c.booking === 'vraag';
       tasks.push({
         key,
         kind: 'purchase-double',
         icon: '👯',
         title: `${name}: staat deze aankoop dubbel?`,
-        question: `De bon van ${formatDateNl(c.purchase.invoice_date)} (${formatEuro(c.purchase.total)}) staat op betaald met privégeld of contant. Op ${account} staat op ${formatDateNl(c.bankTransaction.transaction_date)} ook ${formatEuro(-c.bankTransaction.amount)} aan ${c.bankTransaction.counter_name ?? name}, al geboekt als kosten. Is dat dezelfde betaling?`,
+        question:
+          `De bon van ${formatDateNl(c.purchase.invoice_date)} (${formatEuro(c.purchase.total)}) staat ${elsewhere ? 'op betaald met privégeld of contant' : 'nog open'}. ` +
+          `Op ${account} staat op ${formatDateNl(c.bankTransaction.transaction_date)} ook ${formatEuro(-c.bankTransaction.amount)} aan ${c.bankTransaction.counter_name ?? name}, ${onQuestion ? 'al verwerkt als "weet ik nog niet"' : 'al geboekt als kosten'}. Is dat dezelfde betaling?`,
         amount: -c.purchase.total,
         actions: [
-          { id: 'ja', label: 'Ja, dezelfde betaling', primary: true },
+          {
+            id: 'ja',
+            label: 'Ja, dezelfde betaling',
+            primary: true,
+            hint: onQuestion
+              ? `De betaling wordt aan de aankoop gekoppeld; die staat daarna als betaald. De losse post op "weet ik nog niet" vervalt.${elsewhere ? ' De privé- of contante betaling wordt teruggedraaid.' : ''}`
+              : elsewhere
+                ? undefined
+                : 'De aankoop vervalt en de bon wordt het bewijsstuk bij de betaling op je rekening. Kosten en btw blijven zoals ze bij de betaling geboekt zijn.',
+          },
           { id: 'nee', label: 'Nee, twee aankopen' },
         ],
         why: 'Anders tellen de kosten en de btw twee keer.',
@@ -1132,6 +1182,56 @@ export class InboxService {
     return tasks.map((t, i) => ({ t, i })).sort((a, b) => (a.t.priority ?? 2) - (b.t.priority ?? 2) || a.i - b.i).map((x) => x.t);
   }
 
+  /**
+   * De vraag bij een afschrijving waar een aankoop bij past die er al staat (#221). Eén aankoop en het
+   * bedrag klopt: met één klik koppelen (Crediteuren aan Bank, geen tweede kostenpost). Meer aankopen, een
+   * bedrag dat net niet klopt, of een aankoop die al op privé of contant betaald staat: bekijken op het
+   * bankscherm en daar kiezen.
+   */
+  private purchaseTask(t: BankTransaction, q: PaymentQuestion, who: string): Task {
+    const p = q.fit.purchase;
+    const paid = formatEuro(-t.amount);
+    const due = dueOf(p, q.fit.state);
+    const base = { key: `bank-${t.id}`, kind: 'bank-purchase' as const, icon: '🧾', title: `${paid} betaald aan ${who}`, amount: t.amount, ref: { bankTransactionId: t.id, purchaseId: p.id } };
+    if (q.kind === 'open') {
+      const amounts = [formatEuro(p.total), p.currency && p.foreign_total !== null ? formatForeign(p.foreign_total, p.currency) : null, p.amount_paid > 0 ? `nog ${formatEuro(due)} open` : null].filter(Boolean).join(', ');
+      const number = mentionsNumber(`${t.description} ${t.reference ?? ''}`, p.supplier_reference);
+      const reasons = [q.fit.amount === 'gelijk' ? 'het bedrag klopt' : 'het bedrag klopt op de koers na', supplierNameFit(t, p) === 'ja' ? 'de naam van de leverancier past' : null, number ? 'het factuurnummer in de omschrijving staat' : null];
+      return {
+        ...base,
+        question:
+          `Hoort dit bij ${describePurchase(p)} (${amounts})?` +
+          (q.fit.amount === 'koers' ? ` De bank schreef ${paid} af: een andere koers dan geschat. Het verschil van ${formatEuro(Math.abs(-t.amount - due))} boekt de app als koersverschil.` : '') +
+          (p.question ? ' Die aankoop staat op "weet ik nog niet". Dat blijft zo tot je hem indeelt; de betaling komt er niet nog een keer bij.' : '') +
+          (q.fit.inWindow ? '' : ' De datums liggen ver uit elkaar; kijk of het klopt.'),
+        actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'nee', label: 'Nee' }],
+        group: { key: 'bank-purchase', label: 'Alle betalingen koppelen' },
+        why: `Omdat ${reasons.filter(Boolean).join(', ')}.`,
+      };
+    }
+    const all = [q.fit, ...q.others];
+    const name = purchaseSupplierName(p);
+    let question: string;
+    if (all.length > 1) {
+      const at = name && all.every((f) => purchaseSupplierName(f.purchase) === name) ? ` bij ${name}` : '';
+      const of = all.every((f) => dueOf(f.purchase, f.state) === due) ? ` van ${formatEuro(due)}` : '';
+      question = `Er staan ${all.length} ${all.every((f) => f.state === 'open') ? 'open ' : ''}aankopen${at}${of}${at || of ? '' : ' die bij deze betaling passen'}. Bij welke hoort deze betaling?`;
+    } else if (q.fit.state === 'elders') {
+      const how = q.fit.via === 'kas' ? 'contant betaald' : q.fit.via === 'prive' ? 'betaald met privégeld' : 'betaald met privégeld of contant';
+      question = `${describePurchase(p).replace(/^de/, 'De')} (${formatEuro(p.total)}) staat op ${how}. Is dit dezelfde betaling? Verwerk je deze betaling als zakelijk, dan tellen de kosten en de btw twee keer.`;
+    } else {
+      question = `Er staat nog een open aankoop ${name ? `bij ${name}` : `"${p.description}"`} van ${formatDateNl(p.invoice_date)} van ${formatEuro(due)}. Deze betaling is ${paid}. Hoort die erbij?`;
+    }
+    return {
+      ...base,
+      question,
+      actions: [
+        { id: 'open', label: 'Bekijken', primary: true, hint: 'Je ziet de betaling naast de aankoop die erbij kan horen, en kiest daar. Er wordt nog niets geboekt.' },
+        { id: 'nee', label: 'Nee, iets anders' },
+      ],
+    };
+  }
+
   /** Bij elke knop: wat er in je boekhouding gebeurt als je hem kiest. */
   private explainActions(t: Task): void {
     const cat = t.ref.categoryKey ? this.categories.label(t.ref.categoryKey) : null;
@@ -1147,7 +1247,7 @@ export class InboxService {
       'bank-invoice:klopt': 'De betaling wordt aan de factuur gekoppeld; die staat daarna als betaald. Geen nieuwe omzet: die telde al bij de factuur.',
       'bank-invoice:nee': 'Je deelt de betaling zelf in.',
       'bank-purchase:klopt': 'De betaling wordt aan de aankoop gekoppeld; die staat daarna als betaald. De kosten telden al bij de aankoop.',
-      'bank-purchase:nee': 'Je deelt de betaling zelf in.',
+      'bank-purchase:nee': 'De app vraagt dit niet meer. Je deelt de betaling daarna zelf in.',
       'bank-sale:klopt': 'Wordt geboekt als omzet, met dezelfde btw als de vorige keer.',
       'bank-sale:anders': 'Je deelt de betaling zelf in.',
       'bank-refund:klopt': 'Geen kosten: het geld ging terug naar je klant.',

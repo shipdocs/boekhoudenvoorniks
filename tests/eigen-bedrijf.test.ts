@@ -267,12 +267,14 @@ describe('factuur en betaling van je eigen bedrijf: één keuze, nooit vanzelf (
     const purchase = s.purchases.create({ relationId: lev.id, supplierReference: 'I-MOL-2026-00347', invoiceDate: '2026-09-30', description: 'Nog uitzoeken — stukadoorsbedrijf piet', lines: [{ account: ACCOUNTS.vraagposten, netAmount: 1089, vatCode: 'geen' }] });
     const t = payment(s);
     expect(tasksFor(s)).toEqual([expect.objectContaining({ kind: 'bank-own-company', ref: expect.objectContaining({ bankTransactionId: t.id, purchaseId: purchase.id }) })]);
-    // allebei al op "weet ik nog niet" gezet (zoals in het issue): de app laat dat staan en vraagt niets
+    // allebei al op "weet ik nog niet" gezet (zoals in het issue): de app laat staan wat geboekt is en boekt niets
+    // vanzelf; wel vraagt hij of het dezelfde betaling is, want zo staat het bedrag er twee keer (#221)
     s.bank.bookToAccount(t.id, { account: ACCOUNTS.vraagposten, vatCode: 'geen' });
     const booked = financialSnapshot(ctx, { vatPeriods: ['2026-Q3', '2026-Q4'] });
     s.inbox.autoProcess('2026-10-02');
     expect(tasksFor(s)).toEqual([]);
     expect(financialSnapshot(ctx, { vatPeriods: ['2026-Q3', '2026-Q4'] })).toEqual(booked);
+    expect(s.inbox.tasks('2026-10-02').filter((x) => x.kind === 'purchase-double')).toMatchObject([{ ref: { purchaseId: purchase.id, bankTransactionId: t.id }, question: expect.stringContaining('al verwerkt als "weet ik nog niet"') }]);
   });
 
   it('waarschijnlijk: eerst de vraag; ja geeft de twee keuzes, nee ("toch een gewone aankoop") de gewone controle', async () => {

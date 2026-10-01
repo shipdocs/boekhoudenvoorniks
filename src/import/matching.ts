@@ -7,6 +7,7 @@ import { formatDateNl, today, type IsoDate } from '../shared/dates';
 import { formatEuro } from '../shared/money';
 import { withinFx } from '../shared/currency';
 import { THRESHOLDS, thresholdFor, type AutopilotLevel } from '../automation/decisions';
+import { mentionsNumber, supplierNameFit, type Pair } from '../documents/bank-purchase-match';
 
 export type Suggestion =
   | { kind: 'factuur'; invoiceId: number; label: string; score: number; reasons: string[] }
@@ -28,24 +29,8 @@ export function matchConfidence(best: number, second?: number): { confidence: nu
   return { confidence: doubt ? base / 2 : base, doubt };
 }
 
-function compact(s: string | null | undefined): string {
-  return (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function mentions(haystack: string, number: string | null): boolean {
-  if (!number) return false;
-  const n = compact(number);
-  if (n.length < 3) return false;
-  const h = compact(haystack);
-  if (h.includes(n)) return true;
-  // "factuur 42" matcht "2026-0042": vergelijk ook het volgnummer zonder voorloopnullen
-  const seq = /(\d+)$/.exec(number)?.[1]?.replace(/^0+/, '');
-  const year = /(\d{4})/.exec(number)?.[1];
-  if (seq && seq.length >= 2 && year) return new RegExp(`${year}\\D{0,3}0*${seq}(?!\\d)`).test(haystack.toLowerCase());
-  return false;
-}
-
 function nameSimilar(a: string | null, b: string | null): boolean {
+  const compact = (s: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const x = compact(a);
   const y = compact(b);
   if (x.length < 3 || y.length < 3) return false;
@@ -62,6 +47,8 @@ export class MatchingEngine {
     private readonly invoices: InvoiceService,
     private readonly purchases: PurchaseService,
     private readonly relations: RelationsService,
+    /** een paar dat de gebruiker afwees ("Nee, iets anders") stelt de app niet opnieuw voor */
+    private readonly rejected: (pair: Pair) => boolean = () => false,
   ) {}
 
   suggest(t: BankTransaction, openInvoices?: InvoiceSummary[], openPurchases?: PurchaseInvoice[]): Suggestion[] {
@@ -74,8 +61,8 @@ export class MatchingEngine {
         let score = 0;
         if (inv.open_amount === t.amount) (score += 50, reasons.push('bedrag klopt'));
         else if (inv.total === t.amount) (score += 35, reasons.push('bedrag is gelijk aan het totaal van de factuur'));
-        else if (t.amount < inv.open_amount && mentions(text, inv.number)) (score += 10, reasons.push('deel van het bedrag'));
-        if (mentions(text, inv.number)) (score += 60, reasons.push(`factuurnummer ${inv.number} staat in de omschrijving`));
+        else if (t.amount < inv.open_amount && mentionsNumber(text, inv.number)) (score += 10, reasons.push('deel van het bedrag'));
+        if (mentionsNumber(text, inv.number)) (score += 60, reasons.push(`factuurnummer ${inv.number} staat in de omschrijving`));
         const rel = this.relations.get(inv.relation_id);
         if (t.counter_iban && rel.iban && t.counter_iban === rel.iban) (score += 50, reasons.push('rekeningnummer van de klant'));
         else if (nameSimilar(t.counter_name, inv.relation_name)) (score += 15, reasons.push('naam lijkt op klant'));
@@ -87,7 +74,7 @@ export class MatchingEngine {
         const reasons: string[] = [];
         let score = 0;
         if (inv.open_amount === t.amount) (score += 50, reasons.push('terugbetaald bedrag klopt'));
-        if (mentions(text, inv.number)) (score += 60, reasons.push(`creditnummer ${inv.number} staat in de omschrijving`));
+        if (mentionsNumber(text, inv.number)) (score += 60, reasons.push(`creditnummer ${inv.number} staat in de omschrijving`));
         const rel = this.relations.get(inv.relation_id);
         if (t.counter_iban && rel.iban && t.counter_iban === rel.iban) (score += 50, reasons.push('rekeningnummer van de klant'));
         else if (nameSimilar(t.counter_name, inv.relation_name)) (score += 15, reasons.push('naam lijkt op klant'));
@@ -99,9 +86,9 @@ export class MatchingEngine {
         if (p.open_amount === -t.amount) (score += 50, reasons.push('bedrag klopt'));
         // andere munt (#74): de bank rekende een eigen koers, dus ongeveer hetzelfde bedrag
         else if (p.currency && p.currency !== 'EUR' && withinFx(-t.amount, p.open_amount)) (score += 40, reasons.push(`bedrag klopt ongeveer (${p.currency}, andere koers)`));
-        if (p.supplier_reference && mentions(text, p.supplier_reference)) (score += 60, reasons.push('factuurnummer staat in de omschrijving'));
-        if (p.relation_name && nameSimilar(t.counter_name, p.relation_name)) (score += 20, reasons.push('naam van de leverancier'));
-        if (score >= 50) out.push({ kind: 'inkoop', purchaseId: p.id, label: `Aankoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''} · ${formatEuro(p.open_amount)} open, ${formatDateNl(p.invoice_date)}`, score, reasons });
+        if (p.supplier_reference && mentionsNumber(text, p.supplier_reference)) (score += 60, reasons.push('factuurnummer staat in de omschrijving'));
+        if (supplierNameFit(t, p) === 'ja') (score += 20, reasons.push('naam van de leverancier'));
+        if (score >= 50 && !this.rejected({ purchaseId: p.id, bankTransactionId: t.id })) out.push({ kind: 'inkoop', purchaseId: p.id, label: `Aankoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''} · ${formatEuro(p.open_amount)} open, ${formatDateNl(p.invoice_date)}`, score, reasons });
       }
     }
 

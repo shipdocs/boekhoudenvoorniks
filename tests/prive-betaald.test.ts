@@ -130,6 +130,21 @@ describe('betaling al geboekt op een eigen rekening (gemengde rekening zoals Rev
     expect(s.inbox.tasks('2026-09-28').filter((t) => t.kind === 'purchase-double')).toHaveLength(1);
   });
 
+  it('voortaan privé, maar in dezelfde dagen staan twee afschrijvingen van dat bedrag als kosten: niet vanzelf, wel een vraag (#221)', () => {
+    const { s } = setup();
+    const lev = s.relations.findOrCreateSupplier('Kantoorhal');
+    const p = s.purchases.create({ relationId: lev.id, invoiceDate: '2026-09-10', description: 'Kantoor — Kantoorhal', lines: [{ account: 'WBedKanKan', netAmount: 2500, vatCode: 'geen' }] });
+    s.quick.payPurchaseWith(p.id, 'prive', { always: true });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-11', amount: -2500, description: 'KANTOORHAL UTRECHT', counterName: 'Kantoorhal' }, { date: '2026-09-12', amount: -2500, description: 'pinbetaling 991', counterName: 'Snelpay Kassa' }] });
+    for (const t of s.bank.list({ status: 'nieuw' })) s.bank.bookToAccount(t.id, { account: 'WBedKanKan', vatCode: 'geen' });
+    const kantoorhal = s.bank.list().find((t) => t.counter_name === 'Kantoorhal')!;
+    s.inbox.autoProcess('2026-09-28');
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+    expect(s.relations.get(lev.id).paid_with).toBe('prive');
+    expect(s.bookedPayments.candidates()).toMatchObject([{ purchase: { id: p.id }, bankTransaction: { id: kantoorhal.id }, certain: false, state: 'elders', booking: 'kosten' }]);
+    expect(s.inbox.tasks('2026-09-28').filter((t) => t.kind === 'purchase-double')).toHaveLength(1);
+  });
+
   it('een privé-opname met hetzelfde bedrag telt niet als "al geboekt"', () => {
     const { s } = setup();
     const lev = s.relations.findOrCreateSupplier('Google');
