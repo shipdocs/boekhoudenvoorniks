@@ -139,3 +139,44 @@ test('bon bij een betaling die al geboekt is: eerst de vraag, daarna alleen bewi
   expect(await call<unknown[]>(page, 'documents.list', 'controle')).toHaveLength(1);
   expect(problems.apiErrors).toEqual([]);
 });
+
+test('"Bon toevoegen" met een bestand dat er al in staat: geweigerd, en daarna zelf als bewijs te koppelen', async ({ page, problems }) => {
+  await onboard(page);
+  // een betaling van vandaag, rechtstreeks als kosten geboekt en nog zonder bon: daar vraagt de btw-controle om
+  const paid = day(0);
+  const csv = [
+    '"Datum";"Naam / Omschrijving";"Rekening";"Tegenrekening";"Code";"Af Bij";"Bedrag (EUR)";"Mutatiesoort";"Mededelingen"',
+    `"${ing(paid)}";"GAMMA UTRECHT";"NL91ABNA0417164300";"";"BA";"Af";"121,00";"Betaalautomaat";"Pasvolgnr: 001"`,
+  ].join('\n');
+  await call(page, 'bank.importFile', 'afschrift.csv', csv);
+  const [payment] = await call<{ id: number }[]>(page, 'bank.transactions', { status: 'nieuw' });
+  await call(page, 'bank.book', payment!.id, { account: 'WKprInkMat', vatCode: 'hoog' });
+  // de bon staat al in de app (toegevoegd bij Aankopen) en wacht daar op een antwoord
+  const file = Buffer.from(makePdf(['Gamma', `Datum ${nl(paid)}`, 'Verf 100,00', 'BTW 21% 100,00 21,00', 'Totaal 121,00']));
+  await nav(page, 'Aankopen & bonnetjes');
+  await upload(page, 'gamma.pdf', file);
+  await expect(page.getByTestId('toegevoegd').getByText('Nog controleren')).toBeVisible();
+
+  // bij Belasting staat de controle van de lopende periode, met de betaling erbij
+  await nav(page, 'Belasting');
+  const check = page.locator('ul.checks li', { hasText: /zonder bonnetje of factuur/ });
+  await check.locator('summary').click();
+  const chooser = page.waitForEvent('filechooser');
+  await check.getByRole('button', { name: 'Bon toevoegen' }).click();
+  await (await chooser).setFiles({ name: 'gamma.pdf', mimeType: 'application/pdf', buffer: file });
+
+  const blocked = page.getByRole('dialog', { name: 'Dit document stond er al in' });
+  await expect(blocked.getByText('Dit document stond er al in.')).toBeVisible();
+  await expect(blocked.getByText('Er is niets toegevoegd, gekoppeld of geboekt.')).toBeVisible();
+  await expect(blocked.getByRole('button', { name: 'Bestaand document bekijken' })).toBeVisible();
+  expect(await call<unknown[]>(page, 'documents.list')).toHaveLength(1);
+  expect(await call<unknown[]>(page, 'documents.forTarget', 'bank', payment!.id)).toHaveLength(0);
+
+  // het bestaande document hoort nog nergens bij: zelf koppelen kan, en dat is alleen bewijs
+  await blocked.getByRole('button', { name: 'Koppel het bestaande document hier als bewijs' }).click();
+  await expect(page.locator('.toasts').getByText('Bewijs gekoppeld — niet opnieuw geboekt ✓')).toBeVisible();
+  expect(await call<unknown[]>(page, 'documents.forTarget', 'bank', payment!.id)).toHaveLength(1);
+  expect(await call<unknown[]>(page, 'purchases.list')).toHaveLength(0);
+  await expect(page.locator('ul.checks li', { hasText: /zonder bonnetje of factuur/ })).toHaveCount(0);
+  expect(problems.apiErrors).toEqual([]);
+});
