@@ -461,7 +461,8 @@ describe('Store-versie: het overzetten van de gegevens lukt niet', () => {
     // (hier alleen kopiëren, niet openen), 5: OneDrive (gewaarschuwd, niet gebruikt), 6: een lege eigen map
     expect(log.failures).toHaveLength(6);
     expect(log.refused).toHaveLength(3);
-    expect(log.refused[0]).toBe('Dit is de map die je nu al gebruikt.');
+    // op Windows staat de oude map onder AppData, en die weigering van de Store-versie komt eerst
+    expect(log.refused[0]).toBe(process.platform === 'win32' ? storeFolderProblem(m.source, m.appData) : 'Dit is de map die je nu al gebruikt.');
     expect(log.refused[1]).toMatch(/staan al andere bestanden\. Kies een lege map/);
     expect(log.refused[2]).toBe(`In ${taken} staat al een administratie. Kies een lege map; dan zet de app je gegevens erin.`);
     expect(log.syncWarnings).toEqual([`OneDrive: ${oneDrive}`]);
