@@ -5,6 +5,7 @@ import { decide, thresholdFor, THRESHOLDS } from '../src/automation/decisions';
 import { explain } from '../src/automation/explain';
 import { matchConfidence, AUTO_MATCH_THRESHOLD } from '../src/import/matching';
 import type { OcrProvider } from '../src/intake/ocr';
+import { today } from '../src/shared/dates';
 
 const items = (lines: string[]) => lines.map((text, i) => ({ text, page: 1, bbox: [10, 20 + i * 20, 300, 34 + i * 20] as [number, number, number, number], confidence: 0.97 }));
 const varOcr = () => {
@@ -19,6 +20,7 @@ const bon = (day: number, withVat = true) => [
   ...(withVat ? ['Subtotaal 100,00', 'BTW 21% 100,00 21,00'] : []),
   'Totaal 121,00',
 ];
+const currentMonth = () => today().slice(0, 7);
 
 /** Leverancier 3× bevestigen en goedkeuren voor automatisch. */
 async function trainBouwmaat(s: ReturnType<typeof setup>['s'], state: { lines: string[] }) {
@@ -89,7 +91,7 @@ describe('"Waarom?" en autopilot (#28, #29)', () => {
     expect(s.ledger.balance('WKprInkMat')).toBe(before - 10000);
     expect(s.intake.get(d.id).status).toBe('controle');
     expect(s.memory.isAutomatic(s.memory.get('Bouwmaat'))).toBe(false);
-    expect(s.inbox.month('2026-09', '2026-09-25').automatic[0]!.status).toBe('klopt_niet');
+    expect(s.inbox.month(currentMonth(), '2026-09-25').automatic[0]!.status).toBe('klopt_niet');
     expect(() => s.inbox.correctAutomation(entry!.id)).toThrow(/al teruggedraaid/);
     expect(s.ledger.checkIntegrity().balanced).toBe(true);
   });
@@ -128,8 +130,9 @@ describe('"Waarom?" en autopilot (#28, #29)', () => {
     s.memory.setAutomatic(s.memory.get('SHELL')!.supplier_key, true);
     s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-20', amount: -6050, description: 'Tank', counterName: 'SHELL' }] });
     expect(s.inbox.autoProcess('2026-09-20').booked).toBe(1);
-    const month = s.inbox.month('2026-09', '2026-09-20');
-    const home = s.inbox.home('2026-09-20');
+    const asOf = today();
+    const month = s.inbox.month(currentMonth(), asOf);
+    const home = s.inbox.home(asOf);
     // tellers kloppen met de lijsten
     expect(home.monthCounts.automatic).toBe(month.automatic.filter((e) => e.status === 'auto').length);
     expect(home.monthCounts.byUser).toBe(month.byUser.length);
@@ -139,7 +142,7 @@ describe('"Waarom?" en autopilot (#28, #29)', () => {
     s.inbox.correctAutomation(month.automatic[0]!.id, '2026-09-21');
     expect(s.bank.list({ status: 'nieuw' })).toHaveLength(1);
     expect(s.memory.isAutomatic(s.memory.get('SHELL'))).toBe(false);
-    expect(s.inbox.home('2026-09-21').monthCounts.automatic).toBe(0);
+    expect(s.inbox.home(today()).monthCounts.automatic).toBe(0);
     expect(s.ledger.balance(ACCOUNTS.bank)).toBe(0); // boeking teruggedraaid; de betaling wacht weer op een antwoord
   });
 
@@ -159,7 +162,7 @@ describe('"Waarom?" en autopilot (#28, #29)', () => {
     expect(task.why).toMatch(/^Omdat /);
     s.bank.matchInvoice(task.ref.bankTransactionId!, task.ref.invoiceId!);
     s.inbox.recordUserAction(task, 'klopt');
-    expect(s.inbox.home('2026-09-25').monthCounts.byUser).toBe(1);
+    expect(s.inbox.home(today()).monthCounts.byUser).toBe(1);
   });
 
   it('taken van dezelfde soort hebben een gemeenschappelijke groep voor "Alle bevestigen"', () => {

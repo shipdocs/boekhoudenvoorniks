@@ -7,6 +7,7 @@ import { JevClassifier, minimizeJevRequest, parseJevResponse, scrubLine } from '
 import { createApi, type HostContext } from '../src/main/api';
 import type { FetchLike } from '../src/integrations/types';
 import type { OcrProvider } from '../src/intake/ocr';
+import { today } from '../src/shared/dates';
 
 /**
  * Online hulp bij categorievoorstellen (JEV via de assistent-Worker, #132): pas na geheugen en regels,
@@ -26,6 +27,7 @@ const pennenwinkel = (day: number) => [
   'BTW 21% 15,00 3,15',
   'Totaal 18,15',
 ];
+const currentMonth = () => today().slice(0, 7);
 
 type Call = { url: string; headers: Record<string, string>; body: Record<string, unknown> };
 
@@ -163,7 +165,7 @@ describe('JEV in de documentstroom', () => {
     expect(w.s.memory.get('Pennenwinkel De Vulpen')).toMatchObject({ category_key: 'kantoor', confirmations: 1 });
     expect(w.stats()).toEqual([{ proposed_by: 'jev', model: 'jev-1.13.0', accepted: 1, corrected: 0 }]);
     // wat de gebruiker deed staat in het logboek, met wie het voorstel deed
-    expect(w.s.inbox.month('2026-09', '2026-09-30').byUser[0]!.reason).toContain('online hulp');
+    expect(w.s.inbox.month(currentMonth(), '2026-09-30').byUser[0]!.reason).toContain('online hulp');
 
     const d2 = await w.add('pen2.jpg', pennenwinkel(10));
     expect(w.calls).toHaveLength(1);
@@ -188,7 +190,7 @@ describe('JEV in de documentstroom', () => {
     w.s.intake.confirm(d.id, { supplier: 'Pennenwinkel De Vulpen', date: '2026-09-03', total: 1815, categoryKey: 'overig', vatCode: 'hoog', business: true, paidWith: 'kas' });
     expect(w.s.memory.get('Pennenwinkel De Vulpen')).toMatchObject({ category_key: 'overig' });
     expect(w.stats()).toEqual([{ proposed_by: 'jev', model: 'jev-1.13.0', accepted: 0, corrected: 1 }]);
-    expect(w.s.inbox.month('2026-09', '2026-09-30').byUser[0]).toMatchObject({ summary: expect.stringContaining('aangepast'), reason: expect.stringContaining('jij koos overig') });
+    expect(w.s.inbox.month(currentMonth(), '2026-09-30').byUser[0]).toMatchObject({ summary: expect.stringContaining('aangepast'), reason: expect.stringContaining('jij koos overig') });
 
     const d2 = await w.add('pen2.jpg', pennenwinkel(10));
     expect(d2.classification).toMatchObject({ categoryKey: 'overig', source: 'geheugen' });
