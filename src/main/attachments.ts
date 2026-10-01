@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { ATTACHMENTS_DIR, isStoredAttachmentPath } from '../db/attachment-paths';
 import { isPathInside } from './path-security';
 
-export const ALLOWED_ATTACHMENTS = ['.pdf', '.jpg', '.jpeg', '.png', '.heic', '.webp', '.xml'];
+const ALLOWED_ATTACHMENTS = ['.pdf', '.jpg', '.jpeg', '.png', '.heic', '.webp', '.xml'];
 
 /**
  * Bewaart een bijlage in `bijlagen/<jaar>/` van de administratie in `adminDir`. Geeft het pad zoals het

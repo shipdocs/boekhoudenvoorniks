@@ -194,6 +194,22 @@ describe('opgeslagen pad → bestand: één plek, alleen binnen bijlagen/ van de
     expect(() => resolveAttachmentPath(winAdmin, smuggled, 'win32')).toThrow(REFUSED);
   });
 
+  it('een pad dat niet in de opgeslagen vorm staat, telt nooit ten opzichte van de map waarin de app toevallig draait', () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, 'bijlagen', '2026'), { recursive: true });
+    writeFileSync(join(dir, 'bijlagen', '2026', 'bon.pdf'), 'bewijs');
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      for (const stored of ['./bijlagen/2026/bon.pdf', 'bijlagen/2026/../2026/bon.pdf', 'bijlagen//2026/bon.pdf', 'Bijlagen/../bijlagen/2026/bon.pdf']) {
+        expect(() => resolveAttachmentPath(dir, stored), stored).toThrow(REFUSED);
+      }
+      expect(resolveAttachmentPath(dir, 'bijlagen/2026/bon.pdf')).toBe(join(dir, 'bijlagen', '2026', 'bon.pdf'));
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
   it('weigert iets anders dan tekst (de renderer geeft het pad door)', () => {
     for (const value of [null, undefined, 12, { path: 'bijlagen/x.pdf' }, ['bijlagen/x.pdf']]) {
       expect(() => resolveAttachmentPath(admin, value as unknown as string, 'linux')).toThrow(REFUSED);
