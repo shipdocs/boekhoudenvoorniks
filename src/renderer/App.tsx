@@ -9,7 +9,7 @@ import { Jobs, JobDetail } from './screens/Jobs';
 import { Purchases } from './screens/Purchases';
 import { SearchOverlay, SearchScreen } from './screens/Search';
 import { Customers, CustomerDetail } from './screens/Customers';
-import { Bank, CategorizeTransaction } from './screens/Bank';
+import { Bank, CategorizeTransaction, type ImportResult } from './screens/Bank';
 import { Tax } from './screens/Tax';
 import { TaxYear } from './screens/TaxYear';
 import { InvestmentSaved } from './screens/Purchases';
@@ -87,6 +87,10 @@ export function App() {
     return window.bridge.onEvent((event, payload) => {
       if (event === 'reminders') toast(`${(payload as { sent: number }).sent} ${(payload as { sent: number }).sent === 1 ? 'herinnering' : 'herinneringen'} om te betalen verstuurd`);
       if (event === 'auto-processed') refreshBadge();
+      if (event === 'statement-found') {
+        refreshBadge();
+        toast('Nieuw bankafschrift gevonden in je downloadmap. De vraag "Inlezen?" staat op Vandaag.');
+      }
       if (event === 'reminders-failed') toast('Een of meer herinneringen konden niet verstuurd worden', 'error');
     });
   }, [toast, refreshBadge]);
@@ -113,7 +117,7 @@ export function App() {
       case 'categorie': return <CategorizeTransaction id={route.id as number} key={String(route.id)} />;
       case 'klanten': return <Customers />;
       case 'klant': return <CustomerDetail id={route.id as number | undefined} key={String(route.id ?? 'new')} />;
-      case 'bank': return <Bank focus={route.id as number | undefined} skippedFor={route.extra?.skippedFor as number | undefined} />;
+      case 'bank': return <Bank focus={route.id as number | undefined} skippedFor={route.extra?.skippedFor as number | undefined} imported={route.extra?.imported as ImportResult | undefined} />;
       case 'belasting': return <Tax periodKey={route.id as string | undefined} key={String(route.id ?? '')} />;
       case 'aangifte': return <TaxYear />;
       case 'overzicht': return <Overview />;

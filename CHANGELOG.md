@@ -2,7 +2,11 @@
 
 ## Nog niet uitgebracht
 
+### Nieuw
+- **Afschriften uit je downloadmap** (gratis, standaard uit; Bank → *Afschriften vanzelf inlezen*): zet het aan en de app kijkt in je Downloads-map, of een map die je zelf kiest, naar nieuwe bankafschriften. Je downloadt het afschrift bij je bank zoals je gewend bent; op Vandaag staat dan "Nieuw afschrift gevonden: Knab zakelijk, 1 t/m 29 september" met *Inlezen* en *Niet nu*. Er gaat niets vanzelf je boekhouding in. *Niet nu* vraagt het de volgende dag opnieuw, en na drie keer niet meer voor dat bestand. De app kijkt alleen naar afschriften van rekeningen die al in je administratie staan (CAMT.053, MT940, of een CSV van een bank die de app kent), en bij het aanzetten ook naar die van de afgelopen 14 dagen. Alles gebeurt op je eigen computer: de app opent in die map alleen bestanden die eindigen op .xml, .sta, .940, .txt of .csv, onthoudt van andere bestanden alleen dat het geen afschrift is, en verplaatst of verwijdert er nooit iets.
+
 ### Verbeterd
+- **De vraag om een nieuw afschrift** zegt nu ook welk soort je het beste kiest (CAMT.053 als je bank dat heeft: daar staat je saldo in).
 - **Wisselen van soort bankafschrift geeft geen dubbele betalingen meer**: lees je eerst een CSV in en daarna een CAMT.053 of MT940 over dezelfde dagen (of andersom, of een CSV met andere kolommen), dan herkent de app dezelfde betaling aan rekening, bedrag, tegenrekening en datum (hooguit drie werkdagen verschil, zoals bij een kaartbetaling van vrijdag die op maandag wordt geboekt). Na het inlezen zie je hoeveel betalingen nieuw zijn, hoeveel er al stonden en uit welk afschrift. Met *Bekijken* staat elke overgeslagen regel naast de betaling die er al stond; waren het toch twee betalingen, dan kies je *Toch toevoegen*. Een betaling die in je eerdere afschrift ontbrak, komt er gewoon bij. Wat je al had ingelezen en verwerkt, blijft zoals het was.
 - **Klopt het saldo?** Staat er een beginsaldo in de app en heeft je afschrift een eindsaldo (CAMT.053, MT940, Revolut), dan vergelijkt de app die twee. Klopt het niet, dan staat het op Vandaag: wat de bank zegt, wat de app heeft en hoe groot het verschil is, met de overgeslagen betaling van dat bedrag als die er is. Je leest het ontbrekende afschrift in, of zegt dat het klopt.
 

@@ -15,11 +15,10 @@ import type { SendOptions } from '../documents/sending';
 import { purchaseVat, type PurchaseInvoiceInput } from '../documents/purchases';
 import { businessEffect } from '../shared/business-share';
 import type { BookToAccountInput, SaleInput } from '../import/bank';
-import { parseCsv, previewCsv, headerSignature, type CsvMapping } from '../import/csv';
-import { parseMt940 } from '../import/mt940';
-import { parseCamt053 } from '../import/camt053';
+import { previewCsv, headerSignature, type CsvMapping } from '../import/csv';
 import { detectFormat } from '../import/detect';
-import type { ParseResult } from '../import/types';
+import { parseBankFile } from '../import/parse-file';
+import { statementHash } from '../import/statement-folder';
 import { buildVatXbrl } from '../btw/xbrl';
 import { PORTAL_URL, SUPPLETIE_URL } from '../btw/btw';
 import { decisionStats } from '../inbox/automation-log';
@@ -118,6 +117,15 @@ export interface HostContext {
     /** "Toch als bon bewaren": de tekst van een mail die bleef liggen als PDF-bon */
     saveAsReceipt(id: number): Promise<unknown>;
   };
+  /** afschriften uit de downloadmap (#184); ontbreekt buiten Electron */
+  statementFolder?: {
+    /** de Downloads-map van deze computer */
+    defaultPath(): string;
+    /** de gebruiker kiest zelf een map; null = geannuleerd */
+    choose(current?: string): Promise<string | null>;
+    /** de instelling is gewijzigd: opnieuw (of niet meer) op de map letten */
+    reconfigure(): void;
+  };
   /** zoeken waar Claude Code of Codex staat (alleen als de gebruiker daarom vraagt); null = niet gevonden */
   findCli?(kind: CliKind): string | null;
   /** bestaat dit programma (nog)? */
@@ -155,16 +163,34 @@ export function createApi(s: Services, host: HostContext) {
     const path = kind === 'codex' ? ocr.codexPath : ocr.claudeCodePath;
     return path && (host.programExists?.(path) ?? true) ? path : null;
   };
-  const parseBankFile = async (filename: string, content: string, mapping?: CsvMapping): Promise<ParseResult> => {
-    const format = detectFormat(filename, content);
-    if (format === 'camt') return parseCamt053(content);
-    if (format === 'mt940') return parseMt940(Buffer.from(content, 'utf8'));
-    if (format === 'csv') {
-      const m = mapping ?? previewCsv(content).suggestedMapping;
-      if (!m) throw new Error('Kolommen niet herkend; wijs ze handmatig aan');
-      return parseCsv(content, m);
+  /** de toewijzing die de gebruiker eerder aan deze kolommen gaf, als die er is */
+  const savedCsvMapping = (content: string): CsvMapping | null => {
+    const saved = s.db.prepare('SELECT mapping FROM csv_mappings WHERE header_signature = ?').get(headerSignature(previewCsv(content).headers)) as { mapping: string } | undefined;
+    return saved ? (JSON.parse(saved.mapping) as CsvMapping) : null;
+  };
+  /** Eén route voor een afschrift dat in de app is gesleept en voor een afschrift uit de downloadmap. */
+  const importBankFile = async (filename: string, content: string, mapping?: CsvMapping, bankAccountId?: number) => {
+    const parsed = await parseBankFile(filename, content, mapping);
+    if (mapping) {
+      const sig = headerSignature(previewCsv(content).headers);
+      s.db
+        .prepare('INSERT INTO csv_mappings (name, header_signature, mapping) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET mapping = excluded.mapping, header_signature = excluded.header_signature')
+        .run(`mapping-${sig.slice(0, 60)}`, sig, JSON.stringify(mapping));
     }
-    throw new Error('Dit bestand herkennen we niet. Download bij je bank een afschrift als CSV-, MT940- of CAMT-bestand.');
+    const contentHash = statementHash(content);
+    const summary = s.bank.import(parsed, { filename, bankAccountId, contentHash });
+    // staat hetzelfde afschrift ook in de downloadmap, dan hoeft de app er niet meer naar te vragen
+    s.statementFolder.noteImported(contentHash, summary.batchId);
+    const auto = s.inbox.autoProcess();
+    return { ...summary, autoMatched: auto.matched + auto.booked };
+  };
+  /** de mappen die de app de gebruiker zelf heeft voorgesteld of liet kiezen: alleen daar mag hij kijken */
+  const offeredFolders = new Set<string>();
+  const statementFolderState = () => {
+    const defaultPath = host.statementFolder?.defaultPath() ?? null;
+    if (defaultPath) offeredFolders.add(defaultPath);
+    const cfg = s.statementFolder.config();
+    return { available: Boolean(host.statementFolder) && s.statementFolder.available && !s.settings.officeCopy(), enabled: cfg.enabled, path: cfg.path || defaultPath || '', defaultPath };
   };
 
   /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
@@ -327,6 +353,17 @@ export function createApi(s: Services, host: HostContext) {
       case 'quote-expired:afgewezen':
         s.quotes.setStatus(r.quoteId!, 'afgewezen');
         return;
+      case 'bank-statement:inlezen': {
+        // dezelfde route als slepen: zelfde regels voor wat er al staat, zelfde automatische verwerking
+        const file = s.statementFolder.open(r.statementId!);
+        const mapping = detectFormat(file.filename, file.content) === 'csv' ? (savedCsvMapping(file.content) ?? undefined) : undefined;
+        const summary = await importBankFile(file.filename, file.content, mapping);
+        s.statementFolder.markImported(r.statementId!, summary.batchId);
+        return { navigate: { screen: 'bank', extra: { imported: summary } } };
+      }
+      case 'bank-statement:niet-nu':
+        s.statementFolder.notNow(r.statementId!);
+        return;
       case 'bank-balance:negeren':
         s.inbox.ignoreBalance(r.bankAccountId!);
         return;
@@ -347,6 +384,7 @@ export function createApi(s: Services, host: HostContext) {
           'vat-due': ['belasting', r.periodKey],
           'bank-stale': ['bank', undefined],
           'bank-balance': ['bank', undefined],
+          'bank-statement': ['bank', undefined],
           'bank-locked': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
           'exchange-conflict': r.invoiceId ? ['factuur', r.invoiceId] : ['aankopen', r.purchaseId],
@@ -860,22 +898,35 @@ export function createApi(s: Services, host: HostContext) {
       previewFile: (filename: string, content: string) => {
         const format = detectFormat(filename, content);
         if (format !== 'csv') return { format, csv: null, savedMapping: null };
-        const csv = previewCsv(content);
-        const saved = s.db.prepare('SELECT mapping FROM csv_mappings WHERE header_signature = ?').get(headerSignature(csv.headers)) as { mapping: string } | undefined;
-        return { format, csv, savedMapping: saved ? (JSON.parse(saved.mapping) as CsvMapping) : null };
+        return { format, csv: previewCsv(content), savedMapping: savedCsvMapping(content) };
       },
-      importFile: async (filename: string, content: string, mapping?: CsvMapping, bankAccountId?: number) => {
-        const parsed = await parseBankFile(filename, content, mapping);
-        if (mapping) {
-          const sig = headerSignature(previewCsv(content).headers);
-          s.db
-            .prepare('INSERT INTO csv_mappings (name, header_signature, mapping) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET mapping = excluded.mapping, header_signature = excluded.header_signature')
-            .run(`mapping-${sig.slice(0, 60)}`, sig, JSON.stringify(mapping));
-        }
-        const summary = s.bank.import(parsed, { filename, bankAccountId });
-        const auto = s.inbox.autoProcess();
-        return { ...summary, autoMatched: auto.matched + auto.booked };
+      importFile: (filename: string, content: string, mapping?: CsvMapping, bankAccountId?: number) => importBankFile(filename, content, mapping, bankAccountId),
+      /**
+       * Afschriften vanzelf inlezen (#184): kijkt de app in een map naar nieuwe afschriften, en in welke?
+       * Standaard uit. `path` is de gekozen map, of de Downloads-map als er nog niets gekozen is.
+       */
+      statementFolder: () => statementFolderState(),
+      /** de gebruiker kiest zelf een map (venster van het besturingssysteem); null = geannuleerd */
+      chooseStatementFolder: async () => {
+        const path = (await host.statementFolder?.choose(statementFolderState().path)) ?? null;
+        if (path) offeredFolders.add(path);
+        return path;
       },
+      /** aan- of uitzetten. Aanzetten kan alleen voor de Downloads-map of een map die de gebruiker net zelf koos. */
+      setStatementFolder: async (enabled: boolean, path?: string) => {
+        if (!host.statementFolder) throw new ValidationError('In mappen kijken kan alleen in de app zelf');
+        const state = statementFolderState();
+        const target = path ?? state.path;
+        if (!offeredFolders.has(target) && target !== s.statementFolder.config().path) throw new ValidationError('Kies de map met de knop "Andere map kiezen".');
+        if (enabled) s.statementFolder.enable(target);
+        // uitzetten lukt altijd; een andere map onthouden alleen als de gebruiker er net een koos
+        else s.statementFolder.disable(path && path !== s.statementFolder.config().path && path !== state.defaultPath ? path : undefined);
+        host.statementFolder.reconfigure();
+        const scan = enabled ? await s.statementFolder.scan() : { found: 0, waiting: false };
+        return { ...statementFolderState(), found: scan.found };
+      },
+      /** nu in de map kijken (de app doet dit ook zelf: bij het starten, bij een nieuw bestand en elke paar minuten) */
+      scanStatements: () => s.statementFolder.scan(),
       /**
        * Na het inlezen (per import) of bij een saldo dat niet klopt (per rekening): de regels die zijn
        * overgeslagen omdat de betaling er al stond, en wat nieuw was in dagen die al waren ingelezen.
