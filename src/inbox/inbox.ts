@@ -216,8 +216,9 @@ export class InboxService {
 
   /**
    * Het saldo volgens het laatste afschrift klopt niet met wat de app heeft (#184), en de gebruiker heeft
-   * dit verschil niet eerder goedgevonden. Per saldodatum één keer; een verschil dat "klopt" is gezegd,
-   * komt bij een later afschrift niet terug zolang het precies even groot blijft.
+   * dit verschil niet eerder goedgevonden. Per saldodatum één taak; een verschil waarvan de gebruiker zei
+   * dat het klopt, komt niet terug zolang het precies even groot blijft (ook niet bij een later afschrift).
+   * Verandert het verschil, dan vraagt de app het weer.
    */
   balanceMismatch(bankAccountId: number): (BalanceCheck & { key: string }) | null {
     const sw = this.settings.get().switchover;
@@ -226,7 +227,6 @@ export class InboxService {
     const check = this.bank.balanceCheck(bankAccountId, zeroFrom);
     if (!check || check.difference === 0) return null;
     const key = `bank-balance-${bankAccountId}-${check.date}`;
-    if (this.isSkipped(key)) return null;
     const accepted = this.db.prepare(`SELECT 1 FROM task_skips WHERE task_key LIKE ? AND reason = ?`).get(`bank-balance-${bankAccountId}-%`, `verschil ${check.difference}`);
     return accepted ? null : { ...check, key };
   }
@@ -632,8 +632,8 @@ export class InboxService {
             (c
               ? `Bij het inlezen is een betaling van ${size} op ${formatDateNl(c.date)} overgeslagen, omdat hij er al leek te staan. Bekijk of dat klopt.`
               : check.difference > 0
-                ? `Er mist waarschijnlijk een betaling van ${size}.`
-                : `Er mist waarschijnlijk een afschrijving van ${size}, of er staat een betaling dubbel in.`),
+                ? `In de app staat ${size} te weinig: er mist waarschijnlijk geld dat binnenkwam, of een afschrijving staat er dubbel in.`
+                : `In de app staat ${size} te veel: er mist waarschijnlijk een afschrijving, of geld dat binnenkwam staat er dubbel in.`),
           amount: Math.abs(check.difference),
           actions: c
             ? [{ id: 'bekijken', label: 'Bekijken', primary: true }, { id: 'open', label: 'Afschrift inlezen' }, { id: 'negeren', label: 'Dit klopt, negeren' }]

@@ -284,6 +284,25 @@ describe('een betaling die er al staat, komt er niet nog een keer in', () => {
     expect(s2.bank.import(result('camt', [tx('2026-09-07', -1500, { bankId: 'K' }), tx('2026-09-07', -750, { bankId: 'L2' })]))).toMatchObject({ imported: 1, duplicates: 1, skipped: 0 });
     // de hash bewees dat de oude regel deze id had: die is nu vastgelegd
     expect(db2.prepare('SELECT bank_id FROM bank_transactions ORDER BY id').all()).toEqual([{ bank_id: null }, { bank_id: 'K' }, { bank_id: 'L2' }]);
+    // ook als er intussen een CSV over die dagen is ingelezen en niets van het oude CAMT-afschrift terugkomt:
+    // twee CAMT-regels met een andere id zijn twee betalingen
+    const { s: s3, db: db3 } = setup();
+    s3.bank.import(result('camt', [tx('2026-08-28', -100, { bankId: 'A0' }), tx('2026-08-31', -2500, { bankId: 'P1' })]));
+    db3.exec('UPDATE bank_transactions SET bank_id = NULL; UPDATE import_batches SET kind = NULL');
+    s3.bank.import(knabCsv([{ key: 'x', tx: '2026-09-01', book: '2026-09-01', amount: -900, name: 'Praxis', iban: null, text: 'schroeven' }, { key: 'y', tx: '2026-09-10', book: '2026-09-10', amount: -900, name: 'Praxis', iban: null, text: 'verf' }]));
+    expect(s3.bank.import(result('camt', [tx('2026-09-01', -2500, { bankId: 'P2' }), tx('2026-09-01', -900, { bankId: 'P3' })]))).toMatchObject({ imported: 1, skipped: 1 });
+    expect(db3.prepare('SELECT amount FROM import_skipped').all()).toEqual([{ amount: -900 }]);
+  });
+
+  it('dezelfde tegenrekening gaat vóór de dichtstbijzijnde datum', () => {
+    const { s, db } = setup();
+    const A = 'NL20INGB0001234567';
+    const B = 'NL86INGB0002445588';
+    // de CSV kent geen tegenrekening bij de eerste en wel bij de tweede
+    s.bank.import(result('csv', [tx('2026-09-01', -100), tx('2026-09-08', -5000, { description: 'zonder' }), tx('2026-09-09', -5000, { counterIban: A, description: 'met' }), tx('2026-09-18', -100)]));
+    const r = s.bank.import(result('camt', [tx('2026-09-08', -5000, { counterIban: A, bankId: 'A' }), tx('2026-09-08', -5000, { counterIban: B, bankId: 'B' })]));
+    expect(r).toMatchObject({ imported: 0, skipped: 2 });
+    expect(db.prepare('SELECT k.bank_id, t.description FROM import_skipped k JOIN bank_transactions t ON t.id = k.matched_transaction_id ORDER BY k.bank_id').all()).toEqual([{ bank_id: 'A', description: 'met' }, { bank_id: 'B', description: 'zonder' }]);
   });
 
   it('het soort afschrift: de bron, en bij CSV ook de indeling', () => {
@@ -300,12 +319,42 @@ describe('een betaling die er al staat, komt er niet nog een keer in', () => {
     expect(books(s, db)).toMatchObject({ count: WEEKS.length, sum: SUM });
   });
 
-  it('dezelfde id van de bank twee keer in één bestand: zelfde inhoud is één betaling, andere inhoud zijn er twee', () => {
+  it('een bank die dezelfde id voor verschillende betalingen gebruikt: de id telt dan niet, er valt niets stil weg', () => {
     const { s, db } = setup();
-    const r = s.bank.import(result('mt940', [tx('2026-09-01', -100, { bankId: 'X' }), tx('2026-09-01', -100, { bankId: 'X' }), tx('2026-09-02', -250, { bankId: 'X' })]));
-    expect(r).toMatchObject({ imported: 2, duplicates: 1 });
-    expect(db.prepare('SELECT amount, bank_id FROM bank_transactions ORDER BY id').all()).toEqual([{ amount: -100, bank_id: 'X' }, { amount: -250, bank_id: 'X#3' }]);
-    expect(s.bank.import(result('mt940', [tx('2026-09-01', -100, { bankId: 'X' }), tx('2026-09-01', -100, { bankId: 'X' }), tx('2026-09-02', -250, { bankId: 'X' })]))).toMatchObject({ imported: 0, duplicates: 3 });
+    const first = () => result('mt940', [tx('2026-09-01', -100, { bankId: 'X' }), tx('2026-09-01', -100, { bankId: 'X' }), tx('2026-09-02', -250, { bankId: 'X' })]);
+    // zelfde id, zelfde bedrag en dag: dezelfde regel; zelfde id met een ander bedrag: een andere betaling
+    expect(s.bank.import(first())).toMatchObject({ imported: 2, duplicates: 1 });
+    expect(db.prepare('SELECT amount, bank_id FROM bank_transactions ORDER BY id').all()).toEqual([{ amount: -100, bank_id: 'X' }, { amount: -250, bank_id: null }]);
+    expect(s.bank.import(first())).toMatchObject({ imported: 0, duplicates: 3 });
+    // een volgend afschrift met weer die id: andere bedragen en dagen, dus nieuwe betalingen
+    const next = () => result('mt940', [tx('2026-09-21', -400, { bankId: 'X' }), tx('2026-09-22', -500, { bankId: 'X' }), tx('2026-09-23', -100, { bankId: 'X' })]);
+    expect(s.bank.import(next())).toMatchObject({ imported: 3, duplicates: 0 });
+    expect(s.bank.import(next())).toMatchObject({ imported: 0, duplicates: 3 });
+    expect(books(s, db)).toMatchObject({ count: 5, sum: -1350 });
+  });
+
+  it('de indeling van een CSV is dezelfde met of zonder lege keuzes in de toewijzing', () => {
+    const { s } = setup();
+    const file = (rows: string[]) => ['datum;rekening;bedrag;tekst', ...rows].join('\n');
+    // zoals het venster "Welke kolom is wat?" hem geeft (lege keuzes erbij), en zoals hij daarna onthouden is
+    const fromDialog = { date: 'datum', amount: 'bedrag', ownIban: 'rekening', description: ['tekst'], dateFormat: 'DD-MM-YYYY', debitCredit: undefined, counterName: undefined, counterIban: '', reference: undefined } as never;
+    const saved = JSON.parse(JSON.stringify(fromDialog));
+    const a = parseCsv(file([`03-09-2026;${OWN};-7,50;lunch 1`, `04-09-2026;${OWN};-7,50;lunch 2`]), fromDialog);
+    const b = parseCsv(file([`07-09-2026;${OWN};-7,50;lunch 3`, `08-09-2026;${OWN};-7,50;lunch 4`]), saved);
+    expect(a.layout).toBe(b.layout);
+    expect(parseCsv(file([]), { ...saved, description: [] }).layout).not.toBe(a.layout);
+    s.bank.import(a);
+    expect(s.bank.import(b)).toMatchObject({ imported: 2, skipped: 0 });
+  });
+
+  it('een rekening die later pas een rekeningnummer kreeg: hetzelfde afschrift wordt nog steeds herkend', () => {
+    const { s, db } = setup();
+    const account = s.bank.listAccounts()[0]!;
+    const rows = () => result('csv', [tx('2026-09-01', -100, { ownIban: null }), tx('2026-09-02', -250, { ownIban: null, bankId: 'B' })]);
+    expect(s.bank.import(rows(), { bankAccountId: account.id })).toMatchObject({ imported: 2 });
+    s.bank.updateAccount(account.id, { iban: OWN });
+    expect(s.bank.import(rows(), { bankAccountId: account.id })).toMatchObject({ imported: 0, duplicates: 2, skipped: 0 });
+    expect(books(s, db)).toMatchObject({ count: 2 });
   });
 });
 
@@ -528,7 +577,7 @@ describe('controle: klopt het saldo?', () => {
     s.bank.import(camt(WEEKS, { closing: { date: '2026-09-11', amount: OPENING + SUM + 2500 } }));
     const [task] = balanceTasks(s);
     expect(task).toMatchObject({ key: `bank-balance-${account.id}-2026-09-11`, title: 'Zakelijke rekening: het saldo klopt niet', amount: 2500, ref: { bankAccountId: account.id } });
-    expect(task!.question).toBe(`Volgens je bank stond er op 11 september 2026 ${formatEuro(192218)}, volgens de app ${formatEuro(189718)}. Er mist waarschijnlijk een betaling van ${formatEuro(2500)}.`);
+    expect(task!.question).toBe(`Volgens je bank stond er op 11 september 2026 ${formatEuro(192218)}, volgens de app ${formatEuro(189718)}. In de app staat ${formatEuro(2500)} te weinig: er mist waarschijnlijk geld dat binnenkwam, of een afschrijving staat er dubbel in.`);
     expect(task!.actions.map((a) => a.label)).toEqual(['Afschrift inlezen', 'Dit klopt, negeren']);
     expect(balanceTasks(s), 'per saldodatum één taak').toHaveLength(1);
     expect(s.inbox.home('2026-09-12').checklist.find((c) => c.label === 'Bankgegevens bijgewerkt')).toMatchObject({ ok: false });
@@ -537,7 +586,7 @@ describe('controle: klopt het saldo?', () => {
   it('de app heeft meer dan de bank: er mist een afschrijving, of er staat iets dubbel in', () => {
     const { s } = start();
     s.bank.import(camt(WEEKS, { closing: { date: '2026-09-11', amount: OPENING + SUM - 1500 } }));
-    expect(balanceTasks(s)[0]!.question).toContain(`Er mist waarschijnlijk een afschrijving van ${formatEuro(1500)}, of er staat een betaling dubbel in.`);
+    expect(balanceTasks(s)[0]!.question).toContain(`In de app staat ${formatEuro(1500)} te veel: er mist waarschijnlijk een afschrijving, of geld dat binnenkwam staat er dubbel in.`);
   });
 
   it('een genegeerde betaling telt mee: hij ging wel van de rekening af', () => {
@@ -612,5 +661,28 @@ describe('controle: klopt het saldo?', () => {
     const more: Payment = { key: 'more', tx: '2026-09-15', book: '2026-09-15', amount: -2000, name: 'Praxis', iban: null, text: 'verf' };
     s.bank.import(camt([more], { closing: { date: '2026-09-15', amount: OPENING + SUM + 2500 - 1000 - 2000 - 700 } }));
     expect(balanceTasks(s).map((t) => t.amount), 'ander verschil').toEqual([1800]);
+    // ook dat verschil klopt volgens de gebruiker; verandert het daarna op dezelfde saldodatum, dan vraagt de app het weer
+    s.inbox.ignoreBalance(account.id);
+    expect(balanceTasks(s)).toEqual([]);
+    s.bank.import(result('csv', [tx('2026-09-15', -300, { description: 'nagekomen' })]));
+    expect(balanceTasks(s).map((t) => t.amount), 'zelfde saldodatum, ander verschil').toEqual([2100]);
+  });
+
+  it('het saldo hoort bij de datums van het afschrift met dat saldo: een dag verschil met een ander soort afschrift is geen verschil', async () => {
+    const { s, account } = start();
+    // MT940 met de valutadatum: de betaling van 30 september staat daar op 1 oktober
+    s.bank.import(result('mt940', [tx('2026-09-28', -1000), tx('2026-10-01', -2500, { description: 'valutadatum' }), tx('2026-10-02', -100)]));
+    // CAMT over september, met de boekdatum (30 september) en het eindsaldo van die dag
+    const r = s.bank.import(result('camt', [tx('2026-09-28', -1000, { bankId: 'C1' }), tx('2026-09-30', -2500, { bankId: 'C2' })], { balances: [{ ownIban: OWN, date: '2026-09-30', amount: OPENING - 3500 }] }));
+    expect(r).toMatchObject({ imported: 0, skipped: 2 });
+    expect(s.bank.balanceCheck(account.id)).toMatchObject({ app: OPENING - 3500, difference: 0, candidate: null });
+    expect(balanceTasks(s)).toEqual([]);
+    // klopt het saldo echt niet, dan is die overgeslagen regel geen kandidaat: de betaling die er al stond
+    // valt buiten de dagen van het saldo, dus "toch toevoegen" zou hem dubbel maken
+    const { s: s2, account: a2 } = start();
+    s2.bank.import(result('mt940', [tx('2026-09-28', -1000), tx('2026-10-01', -2500), tx('2026-10-02', -100)]));
+    s2.bank.import(result('camt', [tx('2026-09-28', -1000, { bankId: 'C1' })], { balances: [{ ownIban: OWN, date: '2026-09-30', amount: OPENING - 3500 }] }));
+    s2.bank.import(result('csv', [tx('2026-09-30', -2500, { description: 'derde soort' })]));
+    expect(s2.bank.balanceCheck(a2.id)).toMatchObject({ difference: -2500, candidate: null });
   });
 });

@@ -207,6 +207,18 @@ export function parseDate(value: string, format: string): string {
   return iso;
 }
 
+/**
+ * De indeling van een CSV: dezelfde kolommen met dezelfde toewijzing lezen dezelfde betaling altijd
+ * hetzelfde. Lege keuzes tellen niet mee: de toewijzing uit het venster (met lege velden) en dezelfde
+ * toewijzing zoals hij onthouden is (zonder die velden) zijn dezelfde indeling.
+ */
+export function csvLayout(headers: string[], mapping: CsvMapping): string {
+  const used = Object.entries(JSON.parse(JSON.stringify(mapping)) as Record<string, unknown>)
+    .filter(([, v]) => v !== null && v !== '' && !(Array.isArray(v) && v.length === 0))
+    .sort(([a], [b]) => a.localeCompare(b));
+  return createHash('sha256').update(`${headerSignature(headers)}\n${JSON.stringify(used)}`).digest('hex').slice(0, 16);
+}
+
 function isDebitMarker(value: string): boolean {
   return /^(af|d|debet|debit|dbit)$/i.test(value.trim());
 }
@@ -277,7 +289,6 @@ export function parseCsv(text: string, mapping: CsvMapping): ParseResult {
     warnings,
     ...(last ? { balances: [{ ownIban: transactions[0]?.ownIban ?? null, date: last.date, amount: last.amount }] } : {}),
     ...(mapping.bank ? { bank: mapping.bank } : {}),
-    // dezelfde kolommen met dezelfde toewijzing lezen dezelfde betaling altijd hetzelfde
-    layout: createHash('sha256').update(`${headerSignature((parsed.meta.fields ?? []).filter(Boolean))}\n${JSON.stringify(Object.entries(mapping).sort(([a], [b]) => a.localeCompare(b)))}`).digest('hex').slice(0, 16),
+    layout: csvLayout((parsed.meta.fields ?? []).filter(Boolean), mapping),
   };
 }

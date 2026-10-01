@@ -107,7 +107,7 @@ test('het saldo klopt niet zonder kandidaat: afschrift inlezen of zeggen dat het
   const show = page.getByRole('button', { name: /^Toon alle/ });
   if (await show.isVisible()) await show.click();
   const task = page.locator('.task', { hasText: 'het saldo klopt niet' });
-  await expect(task).toContainText('volgens de app € 1.806,43. Er mist waarschijnlijk een betaling van € 25,00.');
+  await expect(task).toContainText('volgens de app € 1.806,43. In de app staat € 25,00 te weinig: er mist waarschijnlijk geld dat binnenkwam, of een afschrijving staat er dubbel in.');
   await expect(task.getByRole('button', { name: 'Afschrift inlezen' })).toBeVisible();
   await task.getByRole('button', { name: 'Dit klopt, negeren' }).click();
   await expect(page.locator('.task', { hasText: 'het saldo klopt niet' })).toHaveCount(0);
