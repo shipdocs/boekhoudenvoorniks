@@ -19,7 +19,7 @@ function staleDays(date: string): number {
   return diffDays(date, today());
 }
 
-type ImportResult = Awaited<ReturnType<typeof api.bank.importFile>>;
+export type ImportResult = Awaited<ReturnType<typeof api.bank.importFile>>;
 
 /** "12 stonden er al (uit je afschrift van 1 t/m 15 september)": uit welk eerder afschrift, als dat er één is. */
 function knownFromText(known: { from: string; to: string }[]): string {
@@ -27,7 +27,7 @@ function knownFromText(known: { from: string; to: string }[]): string {
   return known.length === 1 ? ` (uit je afschrift van ${formatDateNl(known[0]!.from)} t/m ${formatDateNl(known[0]!.to)})` : ' (uit eerdere afschriften)';
 }
 
-export function Bank({ focus, skippedFor }: { focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number }) {
+export function Bank({ focus, skippedFor, imported }: { focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult }) {
   const { go, toast, settings, refreshBadge } = useApp();
   const { run } = useAction();
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
@@ -42,7 +42,7 @@ export function Bank({ focus, skippedFor }: { focus?: number; /** rekening waarv
   const accounts = useLoad(() => api.bank.accounts());
   const status = useLoad(() => api.bank.importStatus());
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
-  const [last, setLast] = useState<ImportResult | null>(null);
+  const [last, setLast] = useState<ImportResult | null>(imported ?? null);
   // de regels die zijn overgeslagen omdat de betaling er al stond: van één import of van één rekening
   const [review, setReview] = useState<{ batchId?: number; bankAccountId?: number } | null>(skippedFor ? { bankAccountId: skippedFor } : null);
   const [opening, setOpening] = useState<{ id: number; name: string } | null>(null);
@@ -175,10 +175,54 @@ export function Bank({ focus, skippedFor }: { focus?: number; /** rekening waarv
       </table>
       <p className="small muted">Een nieuwe rekening komt er ook vanzelf bij als je een afschrift inleest met een rekeningnummer dat de app nog niet kent. Automatisch ophalen bij je bank komt later.</p>
 
+      <StatementFolderCard />
+
       {review && <ImportReview {...review} onClose={() => setReview(null)} onChanged={async () => { await Promise.all([txs.reload(), status.reload()]); refreshBadge(); }} />}
       {mapping && <CsvMappingDialog {...mapping} onClose={() => setMapping(null)} onConfirm={async (m) => { const x = mapping; setMapping(null); await doImport(x.filename, x.content, m); }} />}
       {opening && <OpeningBalance accountId={opening.id} name={opening.name} onClose={() => setOpening(null)} />}
       {editing && <AccountDialog account={editing === 'nieuw' ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await Promise.all([status.reload(), accounts.reload()]); }} />}
+    </div>
+  );
+}
+
+/**
+ * Afschriften vanzelf inlezen (#184): de app kijkt in een map (standaard Downloads) naar nieuwe
+ * afschriften en vraagt op Vandaag "Inlezen?". Standaard uit; de gebruiker zet het zelf aan.
+ */
+function StatementFolderCard() {
+  const { toast, refreshBadge } = useApp();
+  const { run, busy } = useAction();
+  const state = useLoad(() => api.bank.statementFolder());
+  const st = state.data;
+  if (!st?.available) return null;
+  const set = async (enabled: boolean, path: string) => {
+    const r = await run(() => api.bank.setStatementFolder(enabled, path));
+    if (!r) return;
+    await state.reload();
+    refreshBadge();
+    if (enabled) toast(r.found > 0 ? `${r.found === 1 ? '1 afschrift' : `${r.found} afschriften`} gevonden. De vraag "Inlezen?" staat op Vandaag.` : 'De app let nu op deze map.');
+  };
+  const choose = async () => {
+    const path = await run(() => api.bank.chooseStatementFolder());
+    if (path) await set(st.enabled, path);
+  };
+  return (
+    <div className="card" style={{ marginTop: 24 }}>
+      <h2 style={{ marginTop: 0 }}>Afschriften vanzelf inlezen</h2>
+      <label className="row">
+        <input type="checkbox" checked={st.enabled} disabled={busy} onChange={(e) => void set(e.target.checked, st.path)} /> Kijk in deze map naar nieuwe afschriften
+      </label>
+      <div className="row" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+        <code style={{ overflowWrap: 'anywhere' }}>{st.path}</code>
+        <Button small disabled={busy} onClick={() => void choose()}>Andere map kiezen</Button>
+      </div>
+      <p className="small muted">
+        Download je afschrift bij je bank zoals je gewend bent. Staat dit aan, dan ziet de app het bestand in deze map en vraagt op Vandaag: "Inlezen?". Er gaat niets vanzelf je boekhouding in.
+        {!st.enabled && ' Bij het aanzetten kijkt de app ook naar afschriften van de afgelopen 14 dagen.'}
+      </p>
+      <p className="small muted">
+        Alles gebeurt op je eigen computer; er gaat niets naar buiten. De app opent in deze map alleen bestanden die eindigen op .xml, .sta, .940, .txt of .csv, om te zien of het een afschrift van een van je rekeningen is. Van andere bestanden onthoudt hij alleen dat het geen afschrift is. De app verplaatst of verwijdert nooit iets in deze map.
+      </p>
     </div>
   );
 }

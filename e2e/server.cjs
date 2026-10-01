@@ -6,6 +6,7 @@
  * POST /api            { method, args }  → { ok } of { error }
  * POST /__reset        lege administratie (nieuwe map), voor elke test; body {"licenses":true} = licenties aan,
  *                      met een nagebootste licentie-Worker (echte Ed25519-handtekening, eigen sleutelpaar)
+ * POST /__downloads    de map die in de test de Downloads-map is (leeg aangemaakt per test); de test zet er bestanden in
  * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
  * POST /__datafolder   body {"pick":{"name","kind"}} = de map die het keuzevenster "teruggeeft" (kind: leeg, vol of
  *                      compleet; null = annuleren), {"custom":true} = de app werkt uit een zelf gekozen map,
@@ -29,6 +30,7 @@ const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js')
 const { createBackupBundle, extractBundle } = require(path.join(ROOT, 'main/main/backup.js'));
 const { ExchangeService, sanitizeForExchange } = require(path.join(ROOT, 'main/exchange/exchange.js'));
 const { generateOfficeKeys } = require(path.join(ROOT, 'main/exchange/crypto.js'));
+const { folderAccess } = require(path.join(ROOT, 'main/main/statement-files.js'));
 const { markComplete, planSwitch, sharedDataDir } = require(path.join(ROOT, 'main/main/data-dir.js'));
 const Database = require('better-sqlite3');
 /** het kantoor op deze "computer" (in de app: kantoor.json in de gegevensmap) */
@@ -107,6 +109,7 @@ let updateInstalled = false;
 /** aanroepen van "Back-up terugzetten" (in de test annuleert de gebruiker het keuzevenster) */
 let restoreCalls = [];
 
+const downloadsDir = () => path.join(dir, 'Downloads');
 /**
  * Gegevensmap wijzigen: de echte beoordeling van de gekozen map (planSwitch), op echte mappen in een
  * nagebootste thuismap. Alleen het keuzevenster en de herstart van de app zijn vervangen.
@@ -142,6 +145,8 @@ function init(fresh) {
     secretStores = new Map();
     officeProfile = null;
     file = path.join(dir, 'boekhouding.sqlite');
+    // de "Downloads-map" van deze test: buiten de administratie, zoals in het echt
+    fs.mkdirSync(downloadsDir(), { recursive: true });
   }
   db = openDatabase(file);
   services = createServices(db, {
@@ -150,6 +155,7 @@ function init(fresh) {
     secrets: secretsFor(file),
     fetch: async () => { throw new Error('geen netwerk in e2e-tests'); },
     storeFile,
+    statementFiles: folderAccess,
     // alleen voor een test van het abonnement; standaard staan licenties uit ('' = uit, ook nu de app een echte sleutel heeft)
     licensePublicKey: licensing?.publicKey ?? process.env.E2E_LICENSE_PUBLIC_KEY ?? '',
   });
@@ -208,6 +214,16 @@ function init(fresh) {
         openAdmin(key);
         return key;
       },
+    },
+    // afschriften uit de downloadmap: echt in een (tijdelijke) map kijken; "Andere map kiezen" kiest een tweede map
+    statementFolder: {
+      defaultPath: () => downloadsDir(),
+      async choose() {
+        const other = path.join(dir, 'Andere map');
+        fs.mkdirSync(other, { recursive: true });
+        return other;
+      },
+      reconfigure() {},
     },
     dataFolder: {
       info: () => ({ dir, standard: folders.custom ? sharedDataDir(folders.home) : dir, isStandard: !folders.custom }),
@@ -288,6 +304,7 @@ http
         return res.end('{"ok":true}');
       }
       if (req.url === '/__sent') return res.end(JSON.stringify({ ok: sent }));
+      if (req.url === '/__downloads') return res.end(JSON.stringify({ ok: downloadsDir() }));
       if (req.url === '/__restore') return res.end(JSON.stringify({ ok: restoreCalls }));
       if (req.url === '/__pay') {
         const a = licensing?.accounts.get(licensing.lastStarted);
