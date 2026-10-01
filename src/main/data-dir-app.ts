@@ -136,12 +136,12 @@ async function withProgress<T>(title: string, text: string, showWindow: boolean,
  * Zet over met een voortgangsvenster. Stoppen (de knop of het venster sluiten) breekt netjes af: de
  * oude map blijft zoals hij was en de app werkt daar verder.
  */
-export function migrateWithProgress(source: string, target: string, showWindow: boolean): Promise<MigrationOutcome> {
+export function migrateWithProgress(source: string, target: string, showWindow: boolean, keepSource = false): Promise<MigrationOutcome> {
   return withProgress(
     'Je gegevens worden overgezet',
     'Je administratie verhuist naar een vaste map in je persoonlijke map. De oude map blijft bewaard. Dit gebeurt één keer.',
     showWindow,
-    (hooks) => migrateToSharedDir({ source, target, log: (message) => console.log(message), ...hooks }),
+    (hooks) => migrateToSharedDir({ source, target, keepSource, log: (message) => console.log(message), ...hooks }),
   );
 }
 

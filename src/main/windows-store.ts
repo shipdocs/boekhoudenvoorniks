@@ -59,11 +59,7 @@ export function mcpCommand(ctx: McpCommandContext): { command: string; args: str
   return { command: ctx.execPath, args: ['--mcp'] };
 }
 
-// ---------------------------------------------------------------------------------------------
-// Eerste start
-
-/** Staat in de gegevensmap zodra de melding bij de eerste start getoond is. */
-export const FIRST_START_FLAG = '.store-eerste-start';
+// Meldingen bij het starten
 
 export interface StartNotice {
   type: 'info' | 'warning';
@@ -71,26 +67,75 @@ export interface StartNotice {
   detail: string;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Een oude installatie van de website naast de Store-versie
+
+/** Staat in de gegevensmap als de gebruiker koos om niet meer naar de oude versie te vragen. */
+export const OLD_INSTALL_IGNORE_FLAG = '.store-oude-versie-negeren';
+
+const INSTALL_DIR = 'BoekhoudenVoorNiks';
+const EXE_NAME = 'BoekhoudenVoorNiks.exe';
+const UNINSTALLER_NAME = 'Uninstall BoekhoudenVoorNiks.exe';
+
+export interface OldInstall {
+  /** de map waarin de oude versie staat */
+  dir: string;
+  /** het verwijderprogramma van die versie, of null als het er niet (meer) staat */
+  uninstaller: string | null;
+}
+
+export interface OldInstallEnv {
+  /** %LOCALAPPDATA%: een installatie "alleen voor mij" staat in Programs\BoekhoudenVoorNiks */
+  localAppData?: string;
+  /** %ProgramFiles% en varianten: een installatie "voor alle gebruikers" */
+  programFiles?: (string | undefined)[];
+}
+
 /**
- * Eén keer, bij de eerste start van de Store-versie: een oude installatie van de website moet weg of
- * bijgewerkt worden, anders werkt die verder in de oude map. Null = al getoond.
+ * Staat er een oude installatie van de website (Setup.exe) op deze computer? Die staat naast de Store-versie
+ * en werkt zich zelf apart bij. Alleen kijken, niets aanpassen. De Store-versie zelf staat nooit in deze mappen
+ * (die staat onder WindowsApps), dus een treffer is altijd een andere installatie.
  */
-export function storeFirstStartNotice(dir: string): StartNotice | null {
-  const flag = join(dir, FIRST_START_FLAG);
-  if (existsSync(flag)) return null;
-  try {
-    writeFileSync(flag, `${new Date().toISOString()}\n`);
-  } catch {
-    /* niet te onthouden: dan komt de melding de volgende keer nog eens */
+export function findOldInstall(env: OldInstallEnv, exists: (file: string) => boolean = existsSync, platform: NodeJS.Platform = process.platform): OldInstall | null {
+  if (platform !== 'win32') return null;
+  const w = path.win32;
+  const dirs = [env.localAppData ? w.join(env.localAppData, 'Programs', INSTALL_DIR) : null, ...(env.programFiles ?? []).map((base) => (base ? w.join(base, INSTALL_DIR) : null))];
+  for (const dir of dirs) {
+    if (!dir || !exists(w.join(dir, EXE_NAME))) continue;
+    const uninstaller = w.join(dir, UNINSTALLER_NAME);
+    return { dir, uninstaller: exists(uninstaller) ? uninstaller : null };
   }
+  return null;
+}
+
+export type OldInstallAction = 'verwijderen' | 'later' | 'negeren';
+
+export interface OldInstallPrompt {
+  message: string;
+  detail: string;
+  /** de knoppen, in volgorde; `actions` zegt wat elke knop doet */
+  buttons: string[];
+  actions: OldInstallAction[];
+}
+
+/**
+ * De vraag bij het starten van de Store-versie als er een oude installatie van de website staat. Er wordt
+ * nooit vanzelf iets verwijderd: de gebruiker kiest, en het verwijderprogramma van de oude versie doet de rest.
+ * Het wist de gegevens niet; die staan in een eigen map.
+ */
+export function oldInstallPrompt(found: OldInstall): OldInstallPrompt {
+  const canRemove = found.uninstaller !== null;
   return {
-    type: 'info',
-    message: 'Had je BoekhoudenVoorNiks al op deze computer staan?',
+    message: 'Er staat nog een oudere versie van BoekhoudenVoorNiks op deze computer',
     detail:
-      'Dit is de versie uit de Microsoft Store. Heb je de app eerder geïnstalleerd met het installatieprogramma van de website (Setup.exe)? ' +
-      'Verwijder die oude versie dan via de instellingen van Windows (Apps), of werk hem bij naar versie 0.7.6 of nieuwer. Je administratie blijft daarbij gewoon staan.\n\n' +
-      'Een versie ouder dan 0.7.6 werkt met een andere map: wat je daar nog in boekt, komt niet in deze versie terecht.\n\n' +
-      'Gebruik je de koppeling met Claude Code of Codex? Voeg die dan opnieuw toe bij Instellingen → Automatisch & herkenning, zodat hij deze versie start.',
+      'Je gebruikt nu de versie uit de Microsoft Store. Daarnaast staat er een versie die je eerder installeerde met het installatieprogramma van de website. ' +
+      'Twee versies naast elkaar zijn verwarrend, en de oude werkt zich apart bij.\n\n' +
+      'Verwijder de oude versie. Je administratie blijft gewoon staan, want die staat in een eigen map. ' +
+      'Een versie ouder dan 0.7.6 werkt met een andere map: wat je daar nog invoert, komt niet in deze versie terecht.\n\n' +
+      (canRemove ? 'Windows kan om toestemming vragen.' : `Verwijder hem via Instellingen van Windows → Apps (hij staat in ${found.dir}).`) +
+      '\n\nGebruik je de koppeling met Claude Code of Codex? Voeg die dan opnieuw toe bij Instellingen → Automatisch & herkenning, zodat hij deze versie start.',
+    buttons: canRemove ? ['Oude versie verwijderen', 'Later', 'Niet meer vragen'] : ['Later', 'Niet meer vragen'],
+    actions: canRemove ? ['verwijderen', 'later', 'negeren'] : ['later', 'negeren'],
   };
 }
 
