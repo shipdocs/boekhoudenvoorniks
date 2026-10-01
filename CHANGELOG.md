@@ -1,9 +1,11 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 1.0.1 — klaar voor de Microsoft Store
+
+Voor de gewone Windows-versie (`Setup.exe`) en Linux verandert er in deze versie niets; het is de eerste versie die ook als Store-pakket is gebouwd.
 
 ### Techniek
-- **Pakket voor de Microsoft Store (in voorbereiding, nog niet in de Store)**: de app kan nu ook als Store-pakket (MSIX/appx) gebouwd worden, in een eigen job die het pakket alleen als artefact bewaart; het komt nooit bij de GitHub-release. Voor de gewone Windows-versie (`Setup.exe`) en voor Linux verandert er niets. In de Store-versie gaat een aantal dingen anders:
+- **Pakket voor de Microsoft Store (binnenkort in de Store)**: de app kan nu ook als Store-pakket (MSIX/appx) gebouwd worden, in een eigen job die het pakket alleen als artefact bewaart; het komt nooit bij de GitHub-release. Voor de gewone Windows-versie (`Setup.exe`) en voor Linux verandert er niets. In de Store-versie gaat een aantal dingen anders:
   - **Updates** komen via de Store; de app zoekt of downloadt zelf niets, en Instellingen legt dat uit.
   - **Bonnen lezen op deze computer** staat standaard uit. Aanzetten kan pas nadat je er uitdrukkelijk ja op zegt; de app downloadt dan altijd dezelfde, gecontroleerde versie van het leesprogramma (llama.cpp b11146) en start het niet als het bestand afwijkt.
   - **Koppeling met Claude Code of Codex** gebruikt een vaste naam (`boekhoudenvoorniks.exe`) die bij een update niet verandert.
