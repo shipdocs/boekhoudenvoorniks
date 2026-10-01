@@ -11,11 +11,14 @@
 
 ### Verbeterd
 - **Bon bij "weet ik nog niet" meteen indelen**: in het venster dat laat zien wat er nog bij "weet ik nog niet" staat (op Vandaag en bij Belasting) heeft een bon nu een knop *Indelen*. Je hoeft hem niet meer bij Aankopen op te zoeken.
+- **Wisselen van soort bankafschrift geeft geen dubbele betalingen meer**: lees je eerst een CSV in en daarna een CAMT.053 of MT940 over dezelfde dagen (of andersom, of een CSV met andere kolommen), dan herkent de app dezelfde betaling aan rekening, bedrag, tegenrekening en datum (hooguit drie werkdagen verschil, zoals bij een kaartbetaling van vrijdag die op maandag wordt geboekt). Na het inlezen zie je hoeveel betalingen nieuw zijn, hoeveel er al stonden en uit welk afschrift. Met *Bekijken* staat elke overgeslagen regel naast de betaling die er al stond; waren het toch twee betalingen, dan kies je *Toch toevoegen*. Een betaling die in je eerdere afschrift ontbrak, komt er gewoon bij. Wat je al had ingelezen en verwerkt, blijft zoals het was.
+- **Klopt het saldo?** Staat er een beginsaldo in de app en heeft je afschrift een eindsaldo (CAMT.053, MT940, Revolut), dan vergelijkt de app die twee. Klopt het niet, dan staat het op Vandaag: wat de bank zegt, wat de app heeft en hoe groot het verschil is, met de overgeslagen betaling van dat bedrag als die er is. Je leest het ontbrekende afschrift in, of zegt dat het klopt.
 
 ### Opgelost
 - **Bonnen lezen op deze computer weer te installeren**: het installeren van de ingebouwde herkenning eindigde met "Geen passende runtime gevonden", omdat het onderdeel dat de app daarvoor downloadt (llama.cpp) zijn releases anders is gaan aanbieden. Wie het al geïnstalleerd had, merkte er niets van.
 - **Bon in dollars of een andere munt alsnog omgerekend**: kon de koers bij het binnenkomen van de bon niet opgehaald worden, dan probeert de app het opnieuw zodra je de bon opent. Een datum die per ongeluk in de toekomst is gelezen (bijvoorbeeld een Amerikaanse datum) houdt het omrekenen niet meer tegen.
 - **Koppeling met Claude Code of Codex op Windows**: de koppeling startte wel, maar las de vragen van Claude Code of Codex niet en gaf dus nooit antwoord. Op Windows werkt hij nu net als op Linux.
+- **Deelposten van een verzamelboeking in CAMT.053**: van een boeking met meerdere deelposten (bijvoorbeeld een batch met betalingen) kwam alleen de eerste erin; de rest telde als "al bekend". Nu komen ze er allemaal in. Lees je het oude afschrift opnieuw in, dan komen alleen de ontbrekende deelposten erbij.
 
 ## 0.7.6 — je gegevens in een vaste map buiten de app
 
