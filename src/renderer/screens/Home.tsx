@@ -72,7 +72,7 @@ export function Home() {
         evidenceFor.current = r.navigate.id as number;
         return evidenceInput.current?.click();
       }
-      return go({ screen: r.navigate.screen as never, id: r.navigate.id });
+      return go({ screen: r.navigate.screen as never, id: r.navigate.id, extra: r.navigate.extra });
     }
     await reload();
     refreshBadge();

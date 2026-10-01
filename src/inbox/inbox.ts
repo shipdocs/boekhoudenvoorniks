@@ -2,7 +2,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import type { BankService, BankTransaction } from '../import/bank';
+import type { BalanceCheck, BankService, BankTransaction } from '../import/bank';
 import type { MatchingEngine } from '../import/matching';
 import type { InvoiceService } from '../documents/invoices';
 import type { QuoteService } from '../documents/quotes';
@@ -32,6 +32,8 @@ import type { InvestmentCheck } from '../tax/investment-check';
 import type { MailIntakeService } from '../mail/mail-intake';
 import type { BookedPayments } from '../documents/booked-payment';
 import type { FxRepair } from '../fx/repair';
+import type { StatementFolder } from '../import/statement-folder';
+import { statementHelp } from '../shared/bank-statement-help';
 
 
 export type TaskKind =
@@ -50,6 +52,8 @@ export type TaskKind =
   | 'quote-expired'
   | 'vat-due'
   | 'bank-stale'
+  | 'bank-balance'
+  | 'bank-statement'
   | 'bank-locked'
   | 'exchange-conflict'
   | 'vat-suppletie'
@@ -104,7 +108,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
+  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
     proposal?: string;
     /** waar de vraag "dezelfde aankoop?" of "alleen als bewijs?" over gaat (#179); is dat intussen iets anders, dan gebeurt er niets */
@@ -201,6 +205,11 @@ export class InboxService {
     this.booked = booked;
   }
 
+  private statements: StatementFolder | null = null;
+  setStatementFolder(statements: StatementFolder): void {
+    this.statements = statements;
+  }
+
   private fxRepair: FxRepair | null = null;
   setFxRepair(repair: FxRepair): void {
     this.fxRepair = repair;
@@ -215,6 +224,29 @@ export class InboxService {
 
   private isSkipped(key: string): boolean {
     return !!this.db.prepare(`SELECT 1 FROM task_skips WHERE task_key = ? AND fingerprint = 'x'`).get(key);
+  }
+
+  /**
+   * Het saldo volgens het laatste afschrift klopt niet met wat de app heeft (#184), en de gebruiker heeft
+   * dit verschil niet eerder goedgevonden. Per saldodatum één taak; een verschil waarvan de gebruiker zei
+   * dat het klopt, komt niet terug zolang het precies even groot blijft (ook niet bij een later afschrift).
+   * Verandert het verschil, dan vraagt de app het weer.
+   */
+  balanceMismatch(bankAccountId: number): (BalanceCheck & { key: string }) | null {
+    const sw = this.settings.get().switchover;
+    // bij het overstappen bevestigd dat de rekening met € 0 begon: dan staat er geen beginsaldo geboekt
+    const zeroFrom = sw.date && sw.bankConfirmed.includes(bankAccountId) ? sw.date : null;
+    const check = this.bank.balanceCheck(bankAccountId, zeroFrom);
+    if (!check || check.difference === 0) return null;
+    const key = `bank-balance-${bankAccountId}-${check.date}`;
+    const accepted = this.db.prepare(`SELECT 1 FROM task_skips WHERE task_key LIKE ? AND reason = ?`).get(`bank-balance-${bankAccountId}-%`, `verschil ${check.difference}`);
+    return accepted ? null : { ...check, key };
+  }
+
+  /** "Dit klopt, negeren" bij een saldo dat niet klopt: het verschil van nu is goed zo. */
+  ignoreBalance(bankAccountId: number): void {
+    const check = this.balanceMismatch(bankAccountId);
+    if (check) this.skipTask(check.key, `verschil ${check.difference}`);
   }
 
   /**
@@ -580,6 +612,7 @@ export class InboxService {
     }
 
     if (s.onboardingDone && s.profile.hasBusinessAccount) {
+      const watching = this.statements?.available && this.statements.config().enabled;
       for (const st of this.bank.importStatus()) {
         const days = st.coverageTo ? diffDays(st.coverageTo, asOf) : null;
         if (days !== null && days < BANK_STALE_DAYS) continue;
@@ -588,9 +621,52 @@ export class InboxService {
           kind: 'bank-stale',
           icon: '🏦',
           title: st.coverageTo ? `${st.name}: bank bijgewerkt tot ${formatDateNl(st.coverageTo)}` : `${st.name}: nog geen bankafschrift ingelezen`,
-          question: st.coverageTo ? `Dat is ${days} dagen geleden. Download een nieuw afschrift bij je bank en sleep het in de app. Dan zoeken we uit wat bij welke factuur hoort.` : 'Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes.',
+          question: st.coverageTo
+            ? `Dat is ${days} dagen geleden. Download een nieuw afschrift bij je bank${watching ? ': de app ziet het in je downloadmap en vraagt of hij het mag inlezen' : ' en sleep het in de app'}. Dan zoeken we uit wat bij welke factuur hoort. ${statementHelp(st.iban)}`
+            : `Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes. ${statementHelp(st.iban)}`,
           actions: [{ id: 'open', label: 'Afschrift inlezen', primary: true }],
           ref: { bankAccountId: st.bankAccountId },
+        });
+      }
+    }
+
+    // een afschrift in de downloadmap (#184): niets gaat vanzelf de boeken in, de gebruiker zegt "Inlezen"
+    for (const f of this.statements?.pending(asOf) ?? []) {
+      tasks.push({
+        key: `bank-statement-${f.id}`,
+        kind: 'bank-statement',
+        icon: '📥',
+        title: `Nieuw afschrift gevonden: ${f.accounts}, ${f.from === f.to ? formatDateNl(f.from) : `${formatDateNl(f.from)} t/m ${formatDateNl(f.to)}`}`,
+        question: `${f.filename} staat in je downloadmap, met ${f.transactions === 1 ? '1 betaling' : `${f.transactions} betalingen`}. Inlezen?`,
+        actions: [{ id: 'inlezen', label: 'Inlezen', primary: true }, { id: 'niet-nu', label: 'Niet nu' }],
+        ref: { statementId: f.id },
+      });
+    }
+
+    // Klopt het saldo met het laatste afschrift? (#184) Tijdens het overstappen doet de overstap-hulp dat zelf.
+    if (!(s.switchover.mode === 'overstapper' && s.switchover.status !== 'klaar')) {
+      for (const a of this.bank.listAccounts()) {
+        const check = this.balanceMismatch(a.id);
+        if (!check) continue;
+        const size = formatEuro(Math.abs(check.difference));
+        const c = check.candidate;
+        tasks.push({
+          key: check.key,
+          kind: 'bank-balance',
+          icon: '⚖️',
+          title: `${a.name}: het saldo klopt niet`,
+          question:
+            `Volgens je bank stond er op ${formatDateNl(check.date)} ${formatEuro(check.bank)}, volgens de app ${formatEuro(check.app)}. ` +
+            (c
+              ? `Bij het inlezen is een betaling van ${size} op ${formatDateNl(c.date)} overgeslagen, omdat hij er al leek te staan. Bekijk of dat klopt.`
+              : check.difference > 0
+                ? `In de app staat ${size} te weinig: er mist waarschijnlijk geld dat binnenkwam, of een afschrijving staat er dubbel in.`
+                : `In de app staat ${size} te veel: er mist waarschijnlijk een afschrijving, of geld dat binnenkwam staat er dubbel in.`),
+          amount: Math.abs(check.difference),
+          actions: c
+            ? [{ id: 'bekijken', label: 'Bekijken', primary: true }, { id: 'open', label: 'Afschrift inlezen' }, { id: 'negeren', label: 'Dit klopt, negeren' }]
+            : [{ id: 'open', label: 'Afschrift inlezen', primary: true }, { id: 'negeren', label: 'Dit klopt, negeren' }],
+          ref: { bankAccountId: a.id },
         });
       }
     }
@@ -1035,6 +1111,11 @@ export class InboxService {
       'job-link:algemeen': 'Hoort niet bij een klus: gewone bedrijfskosten.',
       'mail-online:bon': 'De mail wordt als bon bewaard; je controleert hem daarna.',
       'recurring-invoice:geen': 'De app vraagt voor deze betaling niet meer om een factuur.',
+      'bank-statement:inlezen': 'De app leest het afschrift in, net als wanneer je het bij Bank in de app sleept. Wat er al staat, slaat hij over.',
+      'bank-statement:niet-nu': 'De app vraagt het morgen opnieuw, en na drie keer niet meer voor dit bestand. Het bestand blijft staan waar het staat.',
+      'bank-balance:bekijken': 'Je ziet de overgeslagen betaling naast de betaling die er al stond, en kunt hem alsnog toevoegen.',
+      'bank-balance:open': 'Lees het afschrift in van de dagen die nog ontbreken. Wat er al staat, slaat de app over.',
+      'bank-balance:negeren': 'Er verandert niets in je boekhouding. De app vraagt er pas weer naar als het verschil verandert.',
     };
     for (const a of t.actions) a.hint ??= hints[`${t.kind}:${a.id}`];
   }
@@ -1112,8 +1193,8 @@ export class InboxService {
     const status = this.bank.importStatus();
     const bankUpdatedTo = status.map((st) => st.coverageTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
-      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') },
-      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && k !== 'bank-stale') },
+      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') },
+      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement'].includes(k)) },
       { label: 'Alle bonnetjes verwerkt', ok: !kinds.has('document-review') },
       { label: 'Geen facturen te laat', ok: !kinds.has('invoice-overdue') },
       { label: 'Btw-aangifte op tijd', ok: !kinds.has('vat-due') },

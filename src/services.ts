@@ -16,6 +16,7 @@ import { QuoteService } from './documents/quotes';
 import { PurchaseService } from './documents/purchases';
 import { DocumentSender, type Mailer, type MailMessage, type PdfRenderer } from './documents/sending';
 import { BankService } from './import/bank';
+import { StatementFolder, type FolderAccess } from './import/statement-folder';
 import { MatchingEngine } from './import/matching';
 import { VatService } from './btw/btw';
 import { DashboardService } from './dashboard/dashboard';
@@ -56,6 +57,8 @@ export interface ServiceDeps {
   removeFile?: (path: string) => void;
   ocr?: OcrProvider | null;
   llm?: LlmClassifier | null;
+  /** lezen in de map met gedownloade afschriften (alleen in de app zelf); zonder kan de app daar niet kijken */
+  statementFiles?: FolderAccess | null;
   /** publieke sleutel voor licenties (tests); standaard die van de licentie-Worker */
   licensePublicKey?: string;
 }
@@ -125,6 +128,9 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const bookedPayments = new BookedPayments(db, purchases, intake, relations);
   quick.setBookedPayments(bookedPayments);
   inbox.setBookedPayments(bookedPayments);
+  // afschriften uit de downloadmap (#184): standaard uit; de vraag "Inlezen?" komt op Vandaag
+  const statementFolder = new StatementFolder(db, settings, bank, deps.statementFiles ?? null);
+  inbox.setStatementFolder(statementFolder);
   const checklist = new ChecklistService(db, settings);
   const switchover = new SwitchoverService(db, ledger, settings, relations, bank, vat);
   const xafImport = new XafImportService(db, settings, relations, bank, switchover);
@@ -136,7 +142,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, periods, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
+  return { db, statementFolder, periods, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
 }
 
 export type Services = ReturnType<typeof createServices>;
