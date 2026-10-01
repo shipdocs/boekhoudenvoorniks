@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Opgelost
+- **Bijlagen na de naamswijziging weer te openen**: bijlagepaden die nog naar de oude map `gratis-boekhouden` wezen, worden bij het starten omgezet naar de huidige gegevensmap (voor alle administraties). Er verandert niets aan de bestanden zelf.
+
 ## 0.7.5 — bekende leveranciers voorgesteld, eenvoudiger uitleg online hulp
 
 ### Verbeterd
