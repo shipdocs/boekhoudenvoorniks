@@ -54,6 +54,7 @@ export type TaskKind =
   | 'vat-due'
   | 'bank-stale'
   | 'bank-balance'
+  | 'bank-double'
   | 'bank-statement'
   | 'bank-locked'
   | 'exchange-conflict'
@@ -109,7 +110,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
+  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
     proposal?: string;
     /** waar de vraag "dezelfde aankoop?" of "alleen als bewijs?" over gaat (#179); is dat intussen iets anders, dan gebeurt er niets */
@@ -645,6 +646,22 @@ export class InboxService {
       });
     }
 
+    // een verzamelbetaling die er twee keer in staat: als één regel en als losse deelposten (#184)
+    for (const d of this.bank.batchDoubles()) {
+      const size = formatEuro(Math.abs(d.total));
+      tasks.push({
+        key: `bank-double-${d.lineId}-${d.firstPartId}`,
+        kind: 'bank-double',
+        icon: '⚠️',
+        title: `${d.accountName}: ${size} staat er waarschijnlijk twee keer in`,
+        question: `Op ${formatDateNl(d.line.date)} staat één regel van ${size}, en op ${formatDateNl(d.parts[0]!.date)} staan ${d.parts.length} deelposten die samen ook ${size} zijn. Dat is waarschijnlijk hetzelfde geld, uit twee soorten afschrift. Bekijk ze naast elkaar en haal één kant eruit.`,
+        amount: Math.abs(d.total),
+        priority: 1,
+        actions: [{ id: 'bekijken', label: 'Bekijken', primary: true }],
+        ref: { bankAccountId: d.bankAccountId, doubleLineId: d.lineId, doublePartId: d.firstPartId },
+      });
+    }
+
     // Klopt het saldo met het laatste afschrift? (#184) Tijdens het overstappen doet de overstap-hulp dat zelf.
     if (!(s.switchover.mode === 'overstapper' && s.switchover.status !== 'klaar')) {
       for (const a of this.bank.listAccounts()) {
@@ -1115,6 +1132,7 @@ export class InboxService {
       'recurring-invoice:geen': 'De app vraagt voor deze betaling niet meer om een factuur.',
       'bank-statement:inlezen': 'De app leest het afschrift in, net als wanneer je het bij Bank in de app sleept. Wat er al staat, slaat hij over.',
       'bank-statement:niet-nu': 'De app vraagt het morgen opnieuw, en na drie keer niet meer voor dit bestand. Het bestand blijft staan waar het staat.',
+      'bank-double:bekijken': 'Je ziet de ene regel en de deelposten naast elkaar en kiest welke kant blijft. De andere kant haalt de app uit je boekhouding; die blijft bewaard en is terug te zetten.',
       'bank-balance:bekijken': 'Je ziet de overgeslagen betaling naast de betaling die er al stond, en kunt hem alsnog toevoegen.',
       'bank-balance:open': 'Lees het afschrift in van de dagen die nog ontbreken. Wat er al staat, slaat de app over.',
       'bank-balance:negeren': 'Er verandert niets in je boekhouding. De app vraagt er pas weer naar als het verschil verandert.',
@@ -1195,8 +1213,8 @@ export class InboxService {
     const status = this.bank.importStatus();
     const bankUpdatedTo = status.map((st) => st.coverageTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
-      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') },
-      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement'].includes(k)) },
+      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') && !kinds.has('bank-double') },
+      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement', 'bank-double'].includes(k)) },
       { label: 'Alle bonnetjes verwerkt', ok: !kinds.has('document-review') },
       { label: 'Geen facturen te laat', ok: !kinds.has('invoice-overdue') },
       { label: 'Btw-aangifte op tijd', ok: !kinds.has('vat-due') },
