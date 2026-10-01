@@ -54,6 +54,7 @@ import { countryCode } from '../shared/vat';
 import { proposedPaidWith } from '../shared/paid-with';
 import QRCode from 'qrcode';
 import type { Bonnenscanner } from '../scanner/scanner';
+import { PHONE_SCANNER } from '../shared/phone-scanner';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -671,6 +672,8 @@ export function createApi(s: Services, host: HostContext) {
         trades: TRADES,
         vatPortalUrl: PORTAL_URL,
         vatSuppletieUrl: SUPPLETIE_URL,
+        /** telefoon koppelen voor de bonnenscanner is beschikbaar (nu nog niet: shared/phone-scanner.ts) */
+        phoneScanner: PHONE_SCANNER.available,
       }),
     },
     onboarding: {
@@ -732,12 +735,15 @@ export function createApi(s: Services, host: HostContext) {
       },
     },
     /**
-     * Bonnenscanner (#48): telefoon koppelen met een QR-code en de bonnenmap. De sleutel van een
-     * telefoon komt alleen als QR-code naar het scherm, en alleen op het moment van koppelen.
+     * Bonnenscanner (#48): de bonnenmap, en (zodra PHONE_SCANNER aan staat) telefoon koppelen met een
+     * QR-code. De sleutel van een telefoon komt alleen als QR-code naar het scherm, en alleen op het
+     * moment van koppelen.
      */
     scanner: {
       status: () => (host.scanner ? host.scanner.service().status() : null),
       pair: async () => {
+        // tot de Android-app er is (#49) weigert de api te koppelen: het ontvangstpunt en mDNS starten dan nooit
+        if (!PHONE_SCANNER.available) throw new ValidationError('Een telefoon koppelen kan nog niet: de scanner-app voor Android is er nog niet.');
         const p = await scanner().pair();
         const svg = await QRCode.toString(p.payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
         return { deviceId: p.deviceId, expiresAt: p.expiresAt, addresses: p.addresses, port: p.port, svg };
