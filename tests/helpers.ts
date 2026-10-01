@@ -1,5 +1,8 @@
 import Database from 'better-sqlite3';
-import { migrate } from '../src/db/database';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { migrate, openDatabase } from '../src/db/database';
+import { saveAttachment } from '../src/main/attachments';
 import { createServices, MemorySecretStore } from '../src/services';
 import type { Mailer, MailMessage } from '../src/documents/sending';
 import type { FetchLike } from '../src/integrations/types';
@@ -88,4 +91,26 @@ export function financialSnapshot(ctx: { db: Database.Database; s: ReturnType<ty
         }
       : {}),
   };
+}
+
+/**
+ * Een administratie op schijf zoals de app hem nu maakt: een aankoop met een bon en een ingelezen
+ * document, de bestanden in `bijlagen/<jaar>/` en relatieve paden in de database. Geeft die paden terug.
+ */
+export async function administrationOnDisk(dir: string, label: string): Promise<{ bon: string; scan: string }> {
+  mkdirSync(dir, { recursive: true });
+  const s = createServices(openDatabase(join(dir, 'boekhouding.sqlite')), {
+    pdf: async () => Buffer.from('PDF'),
+    mailerFactory: async () => ({ send: async () => ({ messageId: '<x@local>' }) }),
+    secrets: new MemorySecretStore(),
+    fetch: async () => { throw new Error('geen netwerk in tests'); },
+    storeFile: async (name, data) => saveAttachment(dir, name, data),
+    licensePublicKey: '',
+  });
+  // zoals het scherm Aankopen: eerst de bon bewaren, dan de aankoop met het pad dat terugkwam
+  const bon = saveAttachment(dir, `bon-${label}.pdf`, Buffer.from(`bewijs ${label}`));
+  s.purchases.create({ invoiceDate: '2026-09-20', description: `bon ${label}`, attachmentPath: bon, lines: [{ account: 'WBedAlkOvr', netAmount: 1000, vatCode: 'geen', vatAmount: 0 }] });
+  const scan = (await s.intake.add(`scan-${label}.jpg`, Buffer.from(`scan ${label}`), '2026-09-21')).file_path;
+  s.db.close();
+  return { bon, scan };
 }

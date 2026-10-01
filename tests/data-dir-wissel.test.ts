@@ -27,6 +27,9 @@ import {
   type SwitchStep,
 } from '../src/main/data-dir';
 import { detectSyncService, type SyncContext } from '../src/main/sync-folders';
+import { isStoredAttachmentPath } from '../src/db/attachment-paths';
+import { resolveAttachmentPath } from '../src/main/attachments';
+import { administrationOnDisk } from './helpers';
 
 const NOW = () => new Date(2026, 9, 1, 12, 34, 56);
 const STAMP = '20261001-123456';
@@ -57,7 +60,10 @@ function machine() {
   return { root, home, appData, env: { home, appData }, shared: sharedDataDir(home), oldNew: join(appData, 'boekhoudenvoorniks'), folder };
 }
 
-/** Een echte administratie met een aankoop (bijlage) en een ingelezen document, in `dir`. */
+/**
+ * Een echte administratie met een aankoop (bijlage) en een ingelezen document, in `dir`. De bijlagepaden
+ * staan er absoluut in, zoals een versie t/m 0.7.6 ze opsloeg.
+ */
 async function administration(dir: string, label: string): Promise<void> {
   mkdirSync(join(dir, 'bijlagen', '2026'), { recursive: true });
   const s = createServices(openDatabase(join(dir, 'boekhouding.sqlite')), {
@@ -170,17 +176,23 @@ function setDescription(dir: string, text: string): void {
   db.close();
 }
 
-/** Elke bijlage van elke administratie in `dir` wijst naar een bestaand bestand in die map zelf. */
+/**
+ * Elke bijlage van elke administratie in `dir` opent vanuit die map zelf, zoals in de app: de
+ * administratie openen (paden uit een oudere versie worden dan relatief) en elk opgeslagen pad opzoeken.
+ */
 function expectAttachmentsOpen(dir: string, elsewhere: string): void {
   for (const admin of [dir, join(dir, 'administraties', 'klant')]) {
     const db = new Database(join(admin, 'boekhouding.sqlite'), { readonly: true });
     expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
     db.close();
+    openDatabase(join(admin, 'boekhouding.sqlite'), () => undefined).close();
     const paths = attachmentPaths(join(admin, 'boekhouding.sqlite'));
     expect(paths).toHaveLength(2);
     for (const p of paths) {
-      expect(p.startsWith(join(admin, 'bijlagen') + sep)).toBe(true);
-      expect(existsSync(p)).toBe(true);
+      expect(isStoredAttachmentPath(p)).toBe(true);
+      const file = resolveAttachmentPath(admin, p);
+      expect(file.startsWith(join(admin, 'bijlagen') + sep)).toBe(true);
+      expect(existsSync(file)).toBe(true);
     }
     // guard: nergens in de database staat nog een pad naar de map waar hij vandaan komt
     expect(textValuesStartingWith(join(admin, 'boekhouding.sqlite'), elsewhere + sep)).toEqual([]);
@@ -341,8 +353,8 @@ describe('wisselen naar een lege map', () => {
       action: 'kopieren',
       movedAside: null,
       databases: [
-        { administration: '', rebased: 2, missing: 0 },
-        { administration: 'administraties/klant', rebased: 2, missing: 0 },
+        { administration: '', missing: 0 },
+        { administration: 'administraties/klant', missing: 0 },
       ],
     });
     expect(progress.at(-1)).toBe(1);
@@ -595,15 +607,18 @@ describe('wisselen naar een map waarin al een complete administratie staat', () 
     const target = await movedFolder(m);
     for (const p of attachmentPaths(join(target, 'boekhouding.sqlite'))) expect(existsSync(p)).toBe(false); // de paden wijzen nog naar "elders"
 
+    const moved = snapshot(target);
     const outcome = await switchDataDir({ home: m.home, source: m.shared, target, action: 'openen', now: NOW });
+    // het wisselen zelf schrijft niets in de gekozen map: er worden geen paden herschreven
+    expect(snapshot(target)).toEqual(moved);
     expect(outcome).toEqual({
       status: 'gewisseld',
       dir: target,
       action: 'openen',
       movedAside: null,
       databases: [
-        { administration: '', rebased: 2, missing: 0 },
-        { administration: 'administraties/klant', rebased: 2, missing: 0 },
+        { administration: '', missing: 0 },
+        { administration: 'administraties/klant', missing: 0 },
       ],
     });
     expectAttachmentsOpen(target, join(m.root, 'elders'));
@@ -612,6 +627,33 @@ describe('wisselen naar een map waarin al een complete administratie staat', () 
     expect(description(target)).toBe('bon eigen');
     // de huidige gegevens gaan niet mee en blijven staan
     expect(snapshot(m.shared)).toEqual(before);
+  });
+
+  it('een map met relatieve paden (deze versie), met de hand verplaatst: de bijlagen openen zonder dat er iets herschreven wordt', async () => {
+    const m = machine();
+    await standardFolder(m);
+    const elsewhere = join(m.root, 'elders');
+    const admins = [
+      { rel: '', stored: await administrationOnDisk(elsewhere, 'eigen'), label: 'eigen' },
+      { rel: join('administraties', 'klant'), stored: await administrationOnDisk(join(elsewhere, 'administraties', 'klant'), 'klant'), label: 'klant' },
+    ];
+    markComplete(elsewhere);
+    const target = join(m.root, 'eigen');
+    renameSync(elsewhere, target);
+    const moved = snapshot(target);
+
+    const outcome = await switchDataDir({ home: m.home, source: m.shared, target, action: 'openen', now: NOW });
+    expect(outcome.status).toBe('gewisseld');
+    expect(snapshot(target)).toEqual(moved);
+    for (const { rel, stored, label } of admins) {
+      const admin = join(target, rel);
+      const log: string[] = [];
+      openDatabase(join(admin, 'boekhouding.sqlite'), (message) => log.push(message)).close();
+      expect(log).toEqual([]);
+      expect(attachmentPaths(join(admin, 'boekhouding.sqlite')).sort()).toEqual([stored.bon, stored.scan].sort());
+      expect(readFileSync(resolveAttachmentPath(admin, stored.bon), 'utf8')).toBe(`bewijs ${label}`);
+      expect(readFileSync(resolveAttachmentPath(admin, stored.scan), 'utf8')).toBe(`scan ${label}`);
+    }
   });
 
   it('een beschadigde administratie wordt niet geopend', async () => {

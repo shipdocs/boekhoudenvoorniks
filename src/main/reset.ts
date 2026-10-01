@@ -1,7 +1,17 @@
 import { existsSync, mkdirSync, rmSync, unlinkSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { Db } from '../db/database';
+import { resolveAttachmentPath } from './attachments';
 import { writeCompleteBackup } from './backup';
+
+/** Het bestand van een opgeslagen bijlagepad, of null als het niet in de bijlagenmap ligt (dan blijven we eraf). */
+function insideAttachments(attachmentsDir: string, stored: string): string | null {
+  try {
+    return resolveAttachmentPath(dirname(resolve(attachmentsDir)), stored);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Staat er iets in deze administratie dat de moeite van bewaren waard is? Een demo niet;
@@ -35,9 +45,11 @@ export async function wipeDatabase(db: Db, file: string, backupDir: string, atta
     backup = join(backupDir, `voor-wissen-${new Date().toISOString().replace(/[:.]/g, '-')}.gbbackup`);
     await writeCompleteBackup(db, resolve(attachmentsDir ? join(attachmentsDir, '..') : join(file, '..')), backup);
   } else if (attachmentsDir) {
-    const root = resolve(attachmentsDir) + sep;
     const rows = db.prepare('SELECT file_path AS p FROM documents UNION SELECT attachment_path FROM purchase_invoices WHERE attachment_path IS NOT NULL').all() as { p: string }[];
-    for (const { p } of rows) if (resolve(p).startsWith(root) && existsSync(p)) unlinkSync(p);
+    for (const { p } of rows) {
+      const file = insideAttachments(attachmentsDir, p);
+      if (file && existsSync(file)) unlinkSync(file);
+    }
   }
   db.close();
   for (const suffix of ['', '-wal', '-shm']) if (existsSync(file + suffix)) unlinkSync(file + suffix);
