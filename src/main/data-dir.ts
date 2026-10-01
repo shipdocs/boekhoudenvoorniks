@@ -21,11 +21,18 @@ export const CHOICE_FILE = '.migratie-keuze';
 export const CHOICE_SESSION = '.keuze-sessie';
 /** Verzoek uit Instellingen om van gegevensmap te wisselen; de volgende start voert het uit. */
 export const SWITCH_REQUEST = '.map-wissel';
+/**
+ * Staat in de standaardmap zolang de gegevens in een zelf gekozen map staan: waarheen en sinds wanneer.
+ * Raakt de verwijzing (pointer) weg, dan weet de app hierdoor dat wat er nog in de standaardmap staat
+ * een oudere kopie is, en opent hij die niet stil.
+ */
+export const MOVED_NOTE = 'verhuisd-naar.json';
 export const POINTER_NAME = '.boekhoudenvoorniks.json';
 const POINTER_VERSION = 1;
 const DB_FILE = 'boekhouding.sqlite';
 const LOCAL_STATE = 'Local State';
 export const MCP_CHOICE_PENDING = 'Open de app eerst om je gegevens over te zetten';
+export const MCP_MOVED_PENDING = 'Je administratie is verplaatst naar een andere map en de verwijzing daarnaar is weg. Open de app eerst en kies daar welke map je wilt gebruiken';
 
 /** Een fout die de gebruiker te zien krijgt; nooit stil doorgaan met een lege administratie. */
 export class DataDirError extends Error {}
@@ -47,14 +54,31 @@ export interface OldFolderInfo {
   administrationCount: number;
 }
 
-export type DataDirResolution =
-  | { kind: 'env' | 'pointer' | 'gedeeld'; dir: string }
+/** Wat er zonder verwijzing geopend wordt. */
+export type StandardResolution =
+  | { kind: 'gedeeld'; dir: string }
   /** nog niets: de gedeelde map wordt de administratie */
   | { kind: 'nieuw'; dir: string }
   /** nog niet overgezet: werken vanuit de oude map; de app zet hem over naar `target` */
   | { kind: 'oud'; dir: string; target: string }
   /** twee oude mappen met een administratie: de gebruiker kiest (alleen in de app) */
   | { kind: 'keuze'; target: string; candidates: OldFolderInfo[] };
+
+/** Waar de gegevens heen zijn gegaan (`MOVED_NOTE`). */
+export interface MovedNote {
+  to: string;
+  /** ISO-tijdstip */
+  since: string;
+}
+
+export type DataDirResolution =
+  | { kind: 'env' | 'pointer'; dir: string }
+  | StandardResolution
+  /**
+   * De gegevens zijn verplaatst naar een eigen map, maar de verwijzing daarnaar is weg: de gebruiker
+   * kiest (alleen in de app). `fallback` is wat er zonder die map geopend zou worden: een oudere kopie.
+   */
+  | { kind: 'verhuisd'; moved: MovedNote; fallback: StandardResolution };
 
 export function sharedDataDir(home: string): string {
   return join(home, SHARED_DIR_NAME);
@@ -99,7 +123,7 @@ function isLiveSidecar(name: string): boolean {
  * keuze, verzoek), wat eerder opzij is gezet, en wat Chromium in de standaardmap bijhoudt.
  */
 const STAYS = (name: string): boolean =>
-  [MARKER, MIGRATION_LOCK, CHOICE_FILE, CHOICE_SESSION, SWITCH_REQUEST, 'declarative_performance_observer.db', 'declarative_performance_observer.db-journal'].includes(name) || name.startsWith('.onbekend-');
+  [MARKER, MIGRATION_LOCK, CHOICE_FILE, CHOICE_SESSION, SWITCH_REQUEST, MOVED_NOTE, 'declarative_performance_observer.db', 'declarative_performance_observer.db-journal'].includes(name) || name.startsWith('.onbekend-');
 
 /** Alle gewone bestanden die meegaan, relatief aan de bron (met `/`). */
 function dataFiles(source: string, stays: (name: string) => boolean = () => false): { rel: string; size: number }[] {
@@ -192,6 +216,126 @@ export function clearPointer(home: string): void {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Verhuisd: het spoor in de standaardmap
+
+function movedNoteFile(home: string): string {
+  return join(sharedDataDir(home), MOVED_NOTE);
+}
+
+/** Waar de gegevens heen zijn gegaan, of null als ze (voor zover de standaardmap weet) niet verplaatst zijn. */
+export function readMovedNote(home: string): MovedNote | null {
+  try {
+    const parsed = JSON.parse(readFileSync(movedNoteFile(home), 'utf8')) as { version?: unknown; naar?: unknown; sinds?: unknown };
+    if (parsed.version !== 1 || typeof parsed.naar !== 'string' || !isAbsolute(parsed.naar) || typeof parsed.sinds !== 'string') return null;
+    return { to: parsed.naar, since: parsed.sinds };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Legt in de standaardmap vast dat de gegevens in `dir` staan. Staat dat er al, dan verandert er niets.
+ * De datum is die waarop `dir` vanuit de standaardmap gevuld is (zijn marker), anders nu: zo krijgt ook
+ * wie vóór deze versie al wisselde de goede datum. Raakt alleen dit ene eigen bestand aan.
+ */
+export function noteMoved(home: string, dir: string, now: () => Date = () => new Date()): void {
+  const standard = sharedDataDir(home);
+  if (sameDir(dir, standard)) return;
+  const existing = readMovedNote(home);
+  if (existing && sameDir(existing.to, dir)) return;
+  let since = now().toISOString();
+  try {
+    const marker = JSON.parse(readFileSync(join(dir, MARKER), 'utf8')) as { sinds?: unknown; herkomst?: unknown };
+    if (typeof marker.herkomst === 'string' && sameDir(marker.herkomst, standard) && typeof marker.sinds === 'string' && !Number.isNaN(Date.parse(marker.sinds))) since = marker.sinds;
+  } catch {
+    /* een marker zonder herkomst (nieuwe installatie, oudere versie): nu */
+  }
+  mkdirSync(standard, { recursive: true });
+  const file = movedNoteFile(home);
+  writeFileSync(`${file}.nieuw`, `${JSON.stringify({ version: 1, naar: dir, sinds: since }, null, 2)}\n`);
+  renameSync(`${file}.nieuw`, file);
+}
+
+/** De standaardmap is weer de gegevensmap (terug, of bewust gekozen voor de oudere kopie). */
+export function forgetMoved(home: string): void {
+  rmSync(movedNoteFile(home), { force: true });
+}
+
+/** Hoe de verplaatste map erbij staat: te openen, niet te bereiken, of zonder complete administratie. */
+export type MovedState = { state: 'compleet'; dir: string; info: OldFolderInfo } | { state: 'onbereikbaar' } | { state: 'onvolledig' };
+
+export function inspectMoved(moved: MovedNote): MovedState {
+  let dir: string;
+  try {
+    dir = realpathSync(moved.to);
+  } catch {
+    return { state: 'onbereikbaar' };
+  }
+  if (!hasData(dir) || !hasMarker(dir)) return { state: 'onvolledig' };
+  return { state: 'compleet', dir, info: describeOldFolder(dir) };
+}
+
+export type MovedAnswer = 'verplaatst' | 'ouder' | 'opnieuw' | 'stoppen';
+
+export interface MovedQuestion {
+  message: string;
+  detail: string;
+  /** in de volgorde van de knoppen; de laatste (stoppen) is ook wat sluiten van het venster betekent */
+  buttons: { label: string; answer: MovedAnswer }[];
+}
+
+function when(time: number | string, withTime = false): string {
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return 'een eerdere datum';
+  return date.toLocaleString('nl-NL', withTime ? { dateStyle: 'long', timeStyle: 'short' } : { dateStyle: 'long' });
+}
+
+/**
+ * De vraag bij `verhuisd`: de teksten en de knoppen. De verplaatste map is alleen te kiezen als er een
+ * complete administratie in staat; anders kan de gebruiker het opnieuw proberen (schijf aansluiten).
+ * Verdergaan zonder die map is altijd een uitdrukkelijke keuze, nooit de standaard.
+ */
+export function movedQuestion(resolution: Extract<DataDirResolution, { kind: 'verhuisd' }>, state: MovedState, home: string): MovedQuestion {
+  const { moved, fallback } = resolution;
+  const standard = sharedDataDir(home);
+  const buttons: MovedQuestion['buttons'] = [];
+  let detail = `Op ${when(moved.since)} heb je je administratie verplaatst naar:\n${moved.to}\n\nDe app is kwijt dat je gegevens daar staan (het bestand ${pointerFile(home)} is weg). `;
+  if (state.state === 'compleet') {
+    const count = state.info.administrationCount === 1 ? '1 administratie' : `${state.info.administrationCount} administraties`;
+    detail += `In die map staat nog steeds een complete administratie (laatst gewijzigd ${when(state.info.lastModified, true)}, ${count}).`;
+    buttons.push({ label: 'De verplaatste map gebruiken', answer: 'verplaatst' });
+  } else {
+    detail +=
+      state.state === 'onbereikbaar'
+        ? 'De app kan die map nu niet bereiken. Staat hij op een usb-schijf of een netwerkschijf? Sluit die aan en kies dan Opnieuw proberen.'
+        : 'In die map staat nu geen complete administratie. Heb je hem verplaatst of hernoemd? Zet hem terug en kies dan Opnieuw proberen.';
+    buttons.push({ label: 'Opnieuw proberen', answer: 'opnieuw' });
+  }
+  if (fallback.kind === 'gedeeld') {
+    detail += `\n\nIn de standaardmap ${standard} staat een oudere kopie, van vóór het verplaatsen (laatst gewijzigd ${when(describeOldFolder(standard).lastModified, true)}). Wat je na het verplaatsen hebt ingevoerd, staat daar niet in.`;
+    buttons.push({ label: 'De oudere kopie gebruiken', answer: 'ouder' });
+  } else if (fallback.kind === 'nieuw') {
+    detail += '\n\nEr staat op deze computer geen andere administratie. Ga je zonder de verplaatste map verder, dan begint de app met een lege administratie; daarin kun je een back-up terugzetten.';
+    buttons.push({ label: 'Leeg beginnen', answer: 'ouder' });
+  } else {
+    const where = fallback.kind === 'oud' ? fallback.dir : fallback.candidates.map((c) => c.dir).join(' en ');
+    detail += `\n\nOp deze computer staan nog oudere gegevens, van vóór het verplaatsen, in ${where}. Wat je na het verplaatsen hebt ingevoerd, staat daar niet in.`;
+    buttons.push({ label: 'De oudere gegevens gebruiken', answer: 'ouder' });
+  }
+  detail += '\n\nDe app opent niets tot je gekozen hebt, en er wordt niets gewist.';
+  buttons.push({ label: 'Afsluiten', answer: 'stoppen' });
+  return { message: 'Waar staat je administratie?', detail, buttons };
+}
+
+/**
+ * Het antwoord "de verplaatste map gebruiken": de verwijzing komt terug. Alleen als er (nog) een complete
+ * administratie staat; anders een fout en verandert er niets.
+ */
+export function resumeMoved(home: string, moved: MovedNote): string {
+  return writePointer(home, moved.to);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Welke map
 
 /** De bron die de gebruiker koos toen er twee oude mappen waren, als die er nog is. */
@@ -211,12 +355,20 @@ export function writeChoice(target: string, source: string): void {
 
 /**
  * Eén regel voor de app én de koppeling (`--mcp`): eigen map uit de omgeving → zelf gekozen map
- * (pointer) → de gedeelde map als die compleet is → de oude map in AppData. Verandert niets op schijf.
+ * (pointer) → de gedeelde map als die compleet is → de oude map in AppData. Zegt de standaardmap dat
+ * de gegevens verplaatst zijn terwijl de verwijzing ontbreekt, dan wordt er niets stil geopend
+ * (`verhuisd`). Verandert niets op schijf.
  */
 export function resolveDataDir(env: DataDirEnv): DataDirResolution {
   if (env.env) return { kind: 'env', dir: env.env };
   const pointed = readPointer(env.home);
   if (pointed) return { kind: 'pointer', dir: pointed };
+  const fallback = resolveStandard(env);
+  const moved = readMovedNote(env.home);
+  return moved ? { kind: 'verhuisd', moved, fallback } : fallback;
+}
+
+function resolveStandard(env: DataDirEnv): StandardResolution {
   const target = sharedDataDir(env.home);
   if (hasMarker(target)) return { kind: 'gedeeld', dir: target };
   const candidates = oldFolders(env.appData);
@@ -230,6 +382,7 @@ export function resolveDataDir(env: DataDirEnv): DataDirResolution {
 export function resolveForMcp(env: DataDirEnv): string {
   const r = resolveDataDir(env);
   if (r.kind === 'keuze') throw new DataDirError(MCP_CHOICE_PENDING);
+  if (r.kind === 'verhuisd') throw new DataDirError(MCP_MOVED_PENDING);
   if (r.kind === 'nieuw') throw new DataDirError('Er is nog geen administratie. Open BoekhoudenVoorNiks eerst één keer.');
   return r.dir;
 }
@@ -664,10 +817,21 @@ export async function switchDataDir(options: SwitchOptions): Promise<SwitchOutco
   }
 
   try {
+    // terug naar de standaardmap: eerst het spoor weg, dan de verwijzing. Valt het daartussen stil, dan
+    // geldt de verwijzing nog en zet de volgende start het spoor terug.
+    if (plan.standard) forgetMoved(home);
     if (plan.standard) clearPointer(home);
     else writePointer(home, plan.dir);
   } catch (e) {
     return { status: 'mislukt', reason: `De keuze voor ${plan.dir} kon niet vastgelegd worden (${(e as Error).message}).` };
+  }
+  if (!plan.standard) {
+    try {
+      noteMoved(home, plan.dir, options.now);
+    } catch (e) {
+      // de verwijzing staat er; de volgende start legt het spoor alsnog vast
+      log(`Vastleggen in de standaardmap dat de gegevens in ${plan.dir} staan lukte niet (${(e as Error).message})`);
+    }
   }
   options.afterStep?.('pointer');
   return { status: 'gewisseld', dir: plan.dir, action: plan.action, databases, movedAside };

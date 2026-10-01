@@ -1,5 +1,5 @@
 import { BrowserWindow, dialog } from 'electron';
-import { migrateToSharedDir, switchDataDir, type MigrationOutcome, type OldFolderInfo, type SwitchAction, type SwitchOutcome } from './data-dir';
+import { inspectMoved, migrateToSharedDir, movedQuestion, resumeMoved, switchDataDir, type DataDirResolution, type MigrationOutcome, type OldFolderInfo, type SwitchAction, type SwitchOutcome } from './data-dir';
 
 function megabytes(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1e6))} MB`;
@@ -29,6 +29,39 @@ export async function chooseOldFolder(candidates: OldFolderInfo[]): Promise<OldF
     noLink: true,
   });
   return candidates[result.response] ?? null;
+}
+
+/**
+ * De gegevens zijn verplaatst naar een eigen map, maar de verwijzing daarnaar is weg: de app raadt niet.
+ * `{ dir }` = de verplaatste map weer gebruiken (de verwijzing is teruggezet), `ouder` = bewust verder
+ * met wat er zonder die map is, null = afsluiten zonder iets te wijzigen. Opnieuw proberen kijkt opnieuw
+ * of de map er is (schijf aangesloten).
+ */
+export async function chooseAfterMove(resolution: Extract<DataDirResolution, { kind: 'verhuisd' }>, home: string): Promise<{ dir: string } | 'ouder' | null> {
+  for (;;) {
+    const question = movedQuestion(resolution, inspectMoved(resolution.moved), home);
+    const result = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'BoekhoudenVoorNiks',
+      message: question.message,
+      detail: question.detail,
+      buttons: question.buttons.map((b) => b.label),
+      cancelId: question.buttons.length - 1,
+      defaultId: question.buttons.length - 1,
+      noLink: true,
+    });
+    const answer = question.buttons[result.response]?.answer ?? 'stoppen';
+    if (answer === 'stoppen') return null;
+    if (answer === 'ouder') return 'ouder';
+    if (answer === 'verplaatst') {
+      try {
+        return { dir: resumeMoved(home, resolution.moved) };
+      } catch (e) {
+        // de map is net verdwenen: opnieuw kijken en opnieuw vragen
+        console.error(e);
+      }
+    }
+  }
 }
 
 const progressPage = (title: string, text: string): string => `<!doctype html><html lang="nl"><head><meta charset="utf-8">
