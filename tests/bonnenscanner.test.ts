@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +15,8 @@ import { Bonnenscanner, type ScannerDeps } from '../src/scanner/scanner';
 import { PAIRING_TTL_MS } from '../src/scanner/pairing';
 import { jpegInfo, jpegsToPdf } from '../src/scanner/jpeg-pdf';
 import { isPrivateIpv4, localInterfaces, sameSubnet } from '../src/scanner/network';
-import { mdnsAnswer, mdnsNames, type Advertisement } from '../src/scanner/mdns';
+import makeMdns from 'multicast-dns';
+import { MdnsAdvertiser, mdnsAnswer, mdnsNames, type Advertisement } from '../src/scanner/mdns';
 import { extractPdf } from '../src/intake/pdf-text';
 import { today } from '../src/shared/dates';
 import { CONTENT_TYPE, ENDPOINT_PATH, LIMITS, decodePairing, encodeFrame, openRequest, openResponse, parseFrame, sealRequest, type PairingPayload } from '../src/scanner/protocol';
@@ -249,6 +250,13 @@ describe('bonnenscanner: koppelen (#48)', () => {
     expect(t.scanner.status().running).toBe(false);
     expect(await listening(port)).toBe(false);
     await expect(b.hallo()).rejects.toThrow();
+  });
+
+  it('zonder netwerk kan er niet gekoppeld worden, en blijft er geen sleutel achter', async () => {
+    const t = start({ interfaces: () => [] });
+    await expect(t.scanner.pair()).rejects.toThrow(/niet op een thuis- of kantoornetwerk/);
+    expect(t.scanner.status()).toMatchObject({ running: false, devices: [] });
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_devices').get()).toEqual({ n: 0 });
   });
 
   it('in de demo en in de kopie bij de boekhouder kan er niet gekoppeld worden', async () => {
@@ -597,10 +605,22 @@ describe('bonnenscanner: ontvangen via wifi (#48)', () => {
   it('de locatie volgt de opt-in van #32: zonder toestemming wordt hij niet bewaard', async () => {
     const t = start();
     const p = await pair(t);
-    await p.bon({ locatie: { lat: 52.0907, lon: 5.1214 } }, [makeJpeg('zonder toestemming')]);
+    // de inbox doet het even niet: zo is te zien wat er in de wachtrij op schijf staat
+    const add = t.s.intake.add.bind(t.s.intake);
+    let hold = true;
+    t.s.intake.add = async (...args) => {
+      if (hold) throw new Error('nog niet');
+      return add(...args);
+    };
+    await p.bon({ locatie: { lat: 52.0907, lon: 5.1214 }, onbekendVeld: 'geheim-van-de-telefoon' }, [makeJpeg('zonder toestemming')]);
+    await t.scanner.processSpool();
+    // ook in de wachtrij staat de locatie niet, en geen velden die de app niet kent
+    const spooled = readFileSync(join(t.spoolDir, readdirSync(t.spoolDir)[0]!));
+    expect(parseFrame(spooled)).toMatchObject({ soort: 'bon', locatie: null });
+    expect(spooled.toString('latin1')).not.toMatch(/52\.0907|geheim-van-de-telefoon/);
+    hold = false;
     await t.scanner.processSpool();
     expect(t.documents()[0]).toMatchObject({ gps_lat: null, gps_lon: null });
-    // de wachtrij (waar de locatie even in stond) is opgeruimd
     expect(readdirSync(t.spoolDir)).toEqual([]);
     t.s.settings.update({ jobLocation: true });
     await p.bon({ locatie: { lat: 52.0907, lon: 5.1214 } }, [makeJpeg('met toestemming')]);
@@ -700,30 +720,70 @@ describe('bonnenscanner: protocol (docs/bonnenscanner-protocol.md)', () => {
     expect(openResponse(Buffer.from(response, 'hex'), key, nonce)).toEqual({ ok: true, soort: 'bon', id: '3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b', al: false });
   });
 
-  it('een telefoon die alleen het document volgt (eigen code, geen code van de app) wordt begrepen', async () => {
+  it('een telefoon die alleen het document volgt (de WebCrypto-code uit het document) wordt begrepen', async () => {
     const t = start();
-    const p = decodePairing((await t.scanner.pair()).payload);
-    const k = Buffer.from(p.sleutel, 'base64url');
-    const dev = Buffer.from(p.apparaat, 'base64url');
-    const photo = makeJpeg('eigen code');
-    const text = Buffer.from(JSON.stringify({ soort: 'bon', tijd: t.clock.now, id: '3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b', betaalwijze: 'later', fotos: [{ grootte: photo.length }] }), 'utf8');
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(text.length);
-    const iv = randomBytes(12);
-    const aad = Buffer.concat([Buffer.from('BVNS'), Buffer.from([1, 1]), dev]);
-    const cipher = createCipheriv('aes-256-gcm', k, iv);
-    cipher.setAAD(aad);
-    const body = Buffer.concat([aad, iv, cipher.update(Buffer.concat([len, text, photo])), cipher.final(), cipher.getAuthTag()]);
-    const res = await fetch(`http://${p.adressen[0]}:${p.poort}/v1/bericht`, { method: 'POST', headers: { 'content-type': 'application/vnd.boekhoudenvoorniks.scanner' }, body: new Uint8Array(body) });
-    expect(res.status).toBe(200);
-    const raw = Buffer.from(await res.arrayBuffer());
-    // antwoord: "BVNS" 01 02 | apparaat-ID | nonce | cijfertekst | tag; AAD = eerste 22 bytes + de nonce van het verzoek
-    expect(raw.subarray(0, 22).equals(Buffer.concat([Buffer.from('BVNS'), Buffer.from([1, 2]), dev]))).toBe(true);
-    const decipher = createDecipheriv('aes-256-gcm', k, raw.subarray(22, 34));
-    decipher.setAAD(Buffer.concat([raw.subarray(0, 22), iv]));
-    decipher.setAuthTag(raw.subarray(raw.length - 16));
-    const answer = JSON.parse(Buffer.concat([decipher.update(raw.subarray(34, raw.length - 16)), decipher.final()]).toString('utf8')) as unknown;
-    expect(answer).toEqual({ ok: true, soort: 'bon', id: '3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b', al: false });
+    const k = decodePairing((await t.scanner.pair()).payload);
+    const b64url = (text: string) => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+    const type = 'application/vnd.boekhoudenvoorniks.scanner';
+
+    const verstuur = async (json: object, fotos: Uint8Array[] = []) => {
+      const sleutel = await crypto.subtle.importKey('raw', b64url(k.sleutel), 'AES-GCM', false, ['encrypt', 'decrypt']);
+      const kop = new Uint8Array([0x42, 0x56, 0x4e, 0x53, 1, 1, ...b64url(k.apparaat)]);
+      const nonce = crypto.getRandomValues(new Uint8Array(12));
+      const tekst = new TextEncoder().encode(JSON.stringify(json));
+      const inhoud = new Uint8Array(4 + tekst.length + fotos.reduce((n, f) => n + f.length, 0));
+      new DataView(inhoud.buffer).setUint32(0, tekst.length);
+      inhoud.set(tekst, 4);
+      let plek = 4 + tekst.length;
+      for (const f of fotos) {
+        inhoud.set(f, plek);
+        plek += f.length;
+      }
+      const cijfer = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce, additionalData: kop }, sleutel, inhoud));
+      const body = new Uint8Array([...kop, ...nonce, ...cijfer]);
+      const res = await fetch(`http://${k.adressen[0]}:${k.poort}/v1/bericht`, { method: 'POST', headers: { 'content-type': type }, body });
+      if (res.headers.get('content-type') !== type) return { vertrouwd: false, ...((await res.json()) as object) };
+      const r = new Uint8Array(await res.arrayBuffer());
+      const aad = new Uint8Array([...r.slice(0, 22), ...nonce]);
+      const open = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: r.slice(22, 34), additionalData: aad }, sleutel, r.slice(34));
+      return { vertrouwd: true, ...(JSON.parse(new TextDecoder().decode(open)) as object) };
+    };
+
+    expect(await verstuur({ soort: 'hallo', tijd: t.clock.now, naam: 'Pixel van Piet', app: '1.0.0' })).toMatchObject({ vertrouwd: true, ok: true, soort: 'hallo', pc: k.pc });
+    const foto = new Uint8Array(makeJpeg('uit het document'));
+    const id = '3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b';
+    expect(await verstuur({ soort: 'bon', tijd: t.clock.now, id, betaalwijze: 'contant', notitie: 'uit het document', fotos: [{ grootte: foto.length }] }, [foto])).toEqual({ vertrouwd: true, ok: true, soort: 'bon', id, al: false });
+    await t.scanner.processSpool();
+    expect(t.documents()).toMatchObject([{ note: 'uit het document', proposed_paid_with: 'kas' }]);
+    expect(t.scanner.status().devices).toMatchObject([{ name: 'Pixel van Piet', pending: false }]);
+  });
+
+  it('de voorbeelden in het document zijn geldig en gelijk aan wat hier getest wordt', () => {
+    const doc = readFileSync(join(__dirname, '..', 'docs', 'bonnenscanner-protocol.md'), 'utf8');
+    const blocks = [...doc.matchAll(/```(json|text)\n([\s\S]*?)```/g)].map((m) => ({ lang: m[1]!, body: m[2]!.trim() }));
+    const examples = blocks.filter((b) => b.lang === 'json').map((b) => JSON.parse(b.body) as Record<string, unknown>);
+    // de QR-code
+    const qr = examples.find((e) => e.bvn === 'scanner')!;
+    expect(decodePairing(JSON.stringify(qr))).toMatchObject({ poort: 51234, adressen: ['192.168.1.35'] });
+    // elk voorbeeldbericht wordt door de pc begrepen
+    const messages = examples.filter((e) => typeof e.soort === 'string' && e.ok === undefined);
+    expect(messages.map((m) => m.soort).sort()).toEqual(['bon', 'hallo', 'hallo']);
+    for (const m of messages) {
+      const fotos = ((m.fotos as { grootte: number }[] | undefined) ?? []).map((f) => Buffer.alloc(f.grootte));
+      expect(parseFrame(encodeFrame(m, fotos))).toMatchObject({ soort: m.soort, tijd: m.tijd });
+    }
+    // de hexadecimale blokken: sleutel, verzoek en antwoord van het uitgewerkte voorbeeld
+    const hex = blocks.filter((b) => b.lang === 'text').map((b) => b.body.replace(/\s+/g, ''));
+    expect(hex).toContain(request);
+    expect(hex).toContain(response);
+    expect(doc).toContain(key.toString('hex'));
+    expect(doc).toContain(key.toString('base64url'));
+    expect(doc).toContain(deviceId.toString('base64url'));
+    expect(hex).toContain(Buffer.concat([Buffer.from('0000004c', 'hex'), Buffer.from(json, 'utf8')]).toString('hex'));
+    // de grenzen die het document noemt
+    expect(doc).toContain(`${LIMITS.maxBodyBytes.toLocaleString('nl-NL')} bytes`);
+    expect(doc).toContain(`${LIMITS.maxPhotoBytes.toLocaleString('nl-NL')} bytes`);
+    expect(doc).toContain(`"fotoBytes":${LIMITS.maxPhotoBytes}`);
   });
 
   it('een antwoord hoort bij precies één verzoek en kan niet als verzoek terugkomen', () => {
@@ -784,6 +844,52 @@ describe('bonnenscanner: alleen het lokale netwerk, vindbaar via mDNS', () => {
     expect(t.advertised.at(-1)).toEqual([{ pcId: pc, port: Number(new URL(p.url).port), address: '127.0.0.1' }]);
     for (const d of t.scanner.status().devices) await t.scanner.unpair(d.id);
     expect(t.advertised.at(-1)).toEqual([]);
+  });
+
+  // Echte mDNS-pakketten (UDP-multicast, poort 5353). Niet standaard aan: in een afgeschermde
+  // testomgeving is multicast er vaak niet. Draaien: BVN_TEST_MDNS=127.0.0.1 npx vitest run tests/bonnenscanner.test.ts
+  it.skipIf(!process.env.BVN_TEST_MDNS)('live: een andere mDNS-socket vindt het ontvangstpunt en ziet het weer verdwijnen', async () => {
+    const address = process.env.BVN_TEST_MDNS!;
+    const ad = { pcId: 'oKGio6SlpqeoqaqrrK2urw', port: 51234, address };
+    const advertiser = new MdnsAdvertiser();
+    const client = makeMdns({ interface: address, bind: '0.0.0.0', reuseAddr: true });
+    const seen: string[] = [];
+    client.on('response', (r) => {
+      for (const a of [...r.answers, ...r.additionals] as { name: string; type: string; ttl?: number; data: unknown }[]) {
+        if (/gratisboekhouden|bvn-/.test(a.name)) seen.push(`${a.type} ttl=${a.ttl === 0 ? 0 : 'n'} ${a.type === 'A' ? String(a.data) : ''}`.trim());
+      }
+    });
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    try {
+      advertiser.update([ad]);
+      await wait(500);
+      client.query([{ name: '_gratisboekhouden._tcp.local', type: 'PTR' }]);
+      await wait(700);
+      expect(seen).toEqual(expect.arrayContaining(['PTR ttl=n', 'SRV ttl=n', 'TXT ttl=n', `A ttl=n ${address}`]));
+      advertiser.stop();
+      await wait(500);
+      expect(seen).toContain('PTR ttl=0');
+    } finally {
+      advertiser.stop();
+      client.destroy();
+    }
+  });
+
+  // 127.0.0.2 als tweede adres van deze computer bestaat op Linux en Windows, niet op macOS
+  it.skipIf(process.platform === 'darwin')('een nieuw IP-adres (router herstart): het ontvangstpunt verhuist mee, op dezelfde poort', async () => {
+    let current = LOOPBACK;
+    const t = start({ interfaces: () => current });
+    const p = await pair(t);
+    expect((await p.hallo()).status).toBe(200);
+    const port = Number(new URL(p.url).port);
+    current = [{ address: '127.0.0.2', netmask: '255.0.0.0' }];
+    await t.scanner.refresh();
+    expect(t.scanner.status()).toMatchObject({ running: true, port, addresses: ['127.0.0.2'] });
+    expect(t.advertised.at(-1)).toEqual([{ pcId: t.scanner.pairing.pcId(), port, address: '127.0.0.2' }]);
+    // op het oude adres luistert niets meer; op het nieuwe werkt dezelfde koppeling
+    await expect(p.hallo()).rejects.toThrow();
+    const moved = phone({ pc: t.scanner.pairing.pcId(), apparaat: p.deviceId.toString('base64url'), sleutel: p.key.toString('base64url'), poort: port, adressen: ['127.0.0.2'] }, t.clock);
+    expect((await moved.hallo()).status).toBe(200);
   });
 
   it('antwoordt op de vraag naar _gratisboekhouden._tcp met poort, pc-ID en adres, en zegt verder niets', () => {

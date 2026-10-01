@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Db } from '../db/database';
-import { parseFrame, type ReceiptMessage } from './protocol';
+import { encodeFrame, parseFrame, type ReceiptMessage } from './protocol';
 
 export interface SpoolRow {
   id: string;
@@ -54,11 +54,18 @@ export class ReceiptSpool {
   /**
    * Bewaart een ontvangen bon. 'nieuw' = nu veilig opgeslagen; 'al' = deze bon hadden we al (zelfde
    * ID, zelfde inhoud); 'botst' = dit ID is al gebruikt voor een andere bon.
+   *
+   * Op schijf komt alleen wat gecontroleerd is (de velden die de app kent, niet het ruwe bericht), en
+   * de locatie alleen als de gebruiker daar toestemming voor gaf (#32).
    */
-  accept(msg: ReceiptMessage, deviceId: string, frame: Buffer): 'nieuw' | 'al' | 'botst' {
+  accept(msg: ReceiptMessage, deviceId: string, opts: { keepLocation: boolean }): 'nieuw' | 'al' | 'botst' {
     const hash = ReceiptSpool.hash(msg);
     const existing = this.row(msg.id);
     if (existing) return existing.content_hash === hash ? 'al' : 'botst';
+    const frame = encodeFrame(
+      { soort: 'bon', tijd: msg.tijd, id: msg.id, betaalwijze: msg.betaalwijze, notitie: msg.notitie, locatie: opts.keepLocation ? msg.locatie : null, fotos: msg.fotos.map((f) => ({ grootte: f.length })) },
+      msg.fotos,
+    );
     mkdirSync(this.dir, { recursive: true });
     const target = this.file(msg.id);
     const tmp = `${target}.tmp`;

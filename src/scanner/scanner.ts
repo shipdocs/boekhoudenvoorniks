@@ -101,6 +101,7 @@ export class Bonnenscanner {
       interfaces: () => (this.blocked() ? [] : (deps.interfaces ?? localInterfaces)()),
       peerAllowed: deps.peerAllowed,
       now: deps.now,
+      keepLocation: () => deps.settings.get().jobLocation,
       onStored: () => void this.processSpool(),
       onActivity: () => deps.onChange?.(),
       log: this.log,
@@ -162,12 +163,15 @@ export class Bonnenscanner {
   }
 
   status(): ScannerStatus {
+    const devices = this.pairing.list();
+    // net de laatste (verlopen) QR-code opgeruimd: dan het ontvangstpunt meteen uit, niet pas bij de volgende ronde
+    if (this.receiver.running && !devices.some((d) => d.usable)) void this.refresh();
     return {
       blocked: this.blocked(),
       running: this.receiver.running,
       port: this.receiver.port,
       addresses: this.receiver.addresses,
-      devices: this.pairing.list(),
+      devices,
       firewallHint: (this.deps.platform ?? process.platform) === 'win32' && !this.pairing.firewallSeen(),
       waiting: this.spool.waiting().length,
       failed: this.spool.failed().map((r) => ({ id: r.id, path: this.spool.pathOf(r.id), error: r.error })),

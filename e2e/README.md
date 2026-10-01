@@ -23,6 +23,11 @@ De datums zijn relatief aan het huidige jaar, zodat de tests niet verlopen.
 Bij een fout staan een schermafbeelding en een trace in `e2e-results/`
 (`npx playwright show-trace e2e-results/…/trace.zip`).
 
+`bonnenscanner.spec.ts` gebruikt het echte ontvangstpunt van de bonnenscanner (op de testserver alleen op
+127.0.0.1, zonder mDNS): de test leest de QR-code van het scherm en meldt zich als telefoon met echte,
+versleutelde verzoeken. "Map kiezen…" krijgt de map die de test via `POST /__scanner` opgeeft, en met
+`POST /__reset {"scannerPlatform":"win32"}` doet de server alsof de app op Windows draait.
+
 De E2E-tests bewijzen de bediening in de echte schermen. De aparte
 [proefadministratie](../tests/proefadministratie/README.md) controleert aanvullend dat één vaste set
 XAF-, UBL- en CAMT-gegevens exact dezelfde grootboeksaldi, btw en openstaande posten blijft geven.
