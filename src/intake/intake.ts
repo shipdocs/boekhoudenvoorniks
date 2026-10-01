@@ -30,6 +30,8 @@ import { splitGross } from '../import/bank';
 import type { FxService } from '../fx/fx';
 import { toEuro } from '../fx/fx';
 import { CURRENCY_NAMES, formatForeign, withinFx } from '../shared/currency';
+import { EvidenceLinks, sameTarget, targetKey, type DocumentLink, type LinkOrigin, type LinkProvenance, type LinkTarget, type TargetInfo } from '../documents/evidence-links';
+import type { DocumentOutcome } from '../shared/document-outcome';
 
 
 export interface IntakeDocument {
@@ -50,7 +52,49 @@ export interface IntakeDocument {
   duplicate_of_document_id: number | null;
   created_at: string;
   bank_match: BankTransaction | null;
+  /** de aankoop of bankbetaling waar dit document bij hoort (#179); null = nergens aan gekoppeld */
+  link: DocumentLink | null;
+  /** wat er met het document gebeurd is: geboekt, alleen bewijs, dubbel, of nog controleren */
+  outcome: DocumentOutcome;
 }
+
+/**
+ * Wat er bij het toevoegen van een bestand gebeurde. `already_present`: exact dit bestand stond er
+ * al in; dan is er niets bijgekomen of veranderd en is dit het bestaande document.
+ */
+export interface UploadResult extends IntakeDocument {
+  already_present: boolean;
+  /** "Bon toevoegen" bij een ander doel dan waar dit document (of dezelfde factuur) al bij hoort: niets gekoppeld */
+  blocked: { existing: TargetInfo; requested: TargetInfo } | null;
+  /** het bestaande document hoort nog nergens bij: je kunt het alsnog zelf aan dit doel koppelen */
+  linkable: boolean;
+}
+
+/** Een voorstel dat op een keuze wacht: "is dit dezelfde aankoop?" of "alleen als bewijs koppelen?". */
+export interface PendingProposal {
+  kind: 'duplicate' | 'evidence';
+  /** 'aankoop:5', 'bank:7' of 'document:3': waar het voorstel over gaat */
+  candidate: string;
+  /** het bestaande document om ernaast te leggen, als dat er is */
+  documentId: number | null;
+  /** de aankoop of betaling waar het om gaat (leverancier, datum, bedrag, kenmerk), als die er is */
+  target: TargetInfo | null;
+}
+
+/** "Dit document stond er al in": een bijlage uit de mail die er al was (exact hetzelfde bestand, of dezelfde factuur). */
+export interface DocumentNotice {
+  id: number;
+  kind: 'stond-er-al' | 'dubbel';
+  original_name: string;
+  source: string;
+  sender: string | null;
+  existing_document_id: number | null;
+  purchase_invoice_id: number | null;
+  created_at: string;
+}
+
+/** Vraag bij een bon waarvan de betaling al rechtstreeks als kosten geboekt is (#179). */
+export const EVIDENCE_QUESTION = 'Deze betaling is al geboekt. Wil je deze bon alleen als bewijsstuk koppelen?';
 
 /** Categorie voor "weet ik nog niet (vraag mijn boekhouder)": boekt op Vraagposten (1690). */
 export const QUESTION_CATEGORY = 'onbekend';
@@ -74,7 +118,7 @@ export interface Confirmation {
   businessPct?: number;
 }
 
-type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'decisions'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
+type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'decisions' | 'link' | 'outcome'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
 
 const MIME: Record<string, string> = { pdf: 'application/pdf', xml: 'application/xml', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
 
@@ -104,7 +148,11 @@ function emptyResult(): DocumentResult {
   };
 }
 
-/** Hoe betrouwbaar is de bron? Bij dubbele documenten bewaren we het beste bewijs. */
+/**
+ * Hoe betrouwbaar zijn de gelezen gegevens? Van twee kopieën die nog niet geboekt zijn, gaat de app
+ * verder met de best gelezen (e-factuur boven PDF-tekst boven een foto). Welk bestand het
+ * hoofdbewijsstuk wordt, is iets anders: zie primaryRank.
+ */
 export function evidenceRank(source: string | null): number {
   if (source === 'ubl') return 3;
   if (source === 'pdf-text') return 2;
@@ -114,13 +162,81 @@ export function evidenceRank(source: string | null): number {
 
 const normalizeInvoiceNumber = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
 
+/** Een gelezen factuur- of bonnummer telt pas als bewijs vanaf deze zekerheid (en minstens 3 tekens). */
+export const RELIABLE_NUMBER_CONFIDENCE = 0.8;
+
 export interface DuplicateMatch {
-  /** zeker: zelfde leverancier, factuurnummer en bedrag. Mogelijk: zelfde leverancier en bedrag rond dezelfde datum. */
+  /**
+   * zeker: zelfde leverancier, bedrag en betrouwbaar factuur- of bonnummer, geen andere datum en
+   * dezelfde soort (factuur of creditnota). Al het andere dat erop lijkt is "mogelijk": dan vraagt de app het.
+   */
   strength: 'zeker' | 'mogelijk';
   documentId: number | null;
   purchaseId: number | null;
+  /** het bestaande document is het bewijs bij deze bankbetaling */
+  bankTransactionId?: number | null;
   label: string;
+  /** waarom het niet zeker is */
+  reason?: 'datum' | 'nummer' | 'soort';
 }
+
+/** Wat er van een document of aankoop nodig is om te zien of het hetzelfde is. */
+export interface DuplicateProbe {
+  /** genormaliseerd factuur- of bonnummer, of null */
+  number: string | null;
+  /** het nummer is goed genoeg gelezen (of door de gebruiker bevestigd) om op te vertrouwen */
+  reliable: boolean;
+  date: IsoDate | null;
+  /** creditnota (of negatief bedrag) */
+  credit: boolean;
+}
+
+/**
+ * Vergelijkt twee documenten van dezelfde leverancier met hetzelfde bedrag. Zeker dubbel alleen met
+ * hetzelfde betrouwbare nummer, zonder andere datum en van dezelfde soort; twee verschillende
+ * nummers zijn twee facturen. Zonder nummer telt alleen een datum binnen 3 dagen, en dan als "mogelijk".
+ */
+export function compareDuplicate(a: DuplicateProbe, b: DuplicateProbe): Pick<DuplicateMatch, 'strength' | 'reason'> | null {
+  if (a.number && b.number) {
+    if (a.number !== b.number) return null;
+    if (a.credit !== b.credit) return { strength: 'mogelijk', reason: 'soort' };
+    if (!a.reliable || !b.reliable) return { strength: 'mogelijk', reason: 'nummer' };
+    if (a.date && b.date && a.date !== b.date) return { strength: 'mogelijk', reason: 'datum' };
+    return { strength: 'zeker' };
+  }
+  return a.date && b.date && Math.abs(diffDays(a.date, b.date)) <= 3 ? { strength: 'mogelijk', reason: a.credit !== b.credit ? 'soort' : 'nummer' } : null;
+}
+
+function probeOf(r: DocumentResult): DuplicateProbe {
+  const number = r.invoiceNumber?.value ? normalizeInvoiceNumber(r.invoiceNumber.value) : '';
+  return {
+    number: number || null,
+    reliable: number.length >= 3 && (r.invoiceNumber?.confidence ?? 0) >= RELIABLE_NUMBER_CONFIDENCE,
+    date: r.invoiceDate?.value ?? null,
+    credit: r.documentType?.value === 'credit_note' || (r.total?.value ?? 0) < 0,
+  };
+}
+
+/**
+ * Vingerafdruk van wat een document is: leverancier, datum, bedrag en nummer. Een afgewezen voorstel
+ * ("Nee, andere aankoop") geldt alleen zolang deze gelijk blijft.
+ */
+export function documentFingerprint(r: DocumentResult | null): string {
+  return JSON.stringify([
+    r?.supplier ? supplierKey(r.supplier.value) : null,
+    r?.invoiceDate?.value ?? null,
+    r?.total?.value ?? null,
+    r?.invoiceNumber?.value ? normalizeInvoiceNumber(r.invoiceNumber.value) : null,
+  ]);
+}
+
+const candidateOf = (m: Pick<DuplicateMatch, 'documentId' | 'purchaseId' | 'bankTransactionId'>): string =>
+  m.purchaseId ? `aankoop:${m.purchaseId}` : m.bankTransactionId ? `bank:${m.bankTransactionId}` : `document:${m.documentId}`;
+
+/** Melding bij een bon die bij het bijwerken van zijn oude tekstkoppeling af is gehaald (zie de migratie). */
+const MIGRATION_ISSUE = 'evidence-migration';
+
+const DUPLICATE_NOTE: Issue = { field: 'duplicate', severity: 'waarschuwing', message: 'Dubbel: dit document hadden we al. Niet opnieuw geboekt.' };
 
 /**
  * Documentinbox: bonnetjes en inkoopfacturen → (extractie → classificatie → validatie → confidence)
@@ -145,7 +261,19 @@ export class IntakeService {
     private readonly carUse: () => string = () => 'onbekend',
     /** je eigen btw-nummer: staat vaak bij "Bill to" op een buitenlandse factuur, maar is niet van de leverancier */
     private readonly ownVatNumber: () => string = () => '',
-  ) {}
+  ) {
+    this.links = new EvidenceLinks(db);
+  }
+
+  /** de koppeling tussen een document en de aankoop of bankbetaling waar het bij hoort (#179) */
+  readonly links: EvidenceLinks;
+  /** per bestand één toevoeging tegelijk (zie exclusive) */
+  private readonly busy = new Map<string, Promise<unknown>>();
+  /** een bewaard bestand weer weghalen als het document toch niet vastgelegd kon worden */
+  private removeFile: ((path: string) => void) | null = null;
+  setFileRemover(remove: ((path: string) => void) | null): void {
+    this.removeFile = remove;
+  }
 
   setOcrProvider(provider: OcrProvider | null): void {
     this.ocr = provider;
@@ -197,7 +325,7 @@ export class IntakeService {
     result.foreign = { ...result.foreign, rate: fx.rate, rateDate: fx.date, source: 'ecb' };
     this.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(result), id);
     // de melding "koers kon niet opgehaald worden" vervalt; de rest opnieuw beoordelen, nooit zelf boeken
-    return this.evaluate(id, [], asOf, { autoConfirm: false });
+    return this.evaluate(id, this.carriedIssues(this.get(id)), asOf, { autoConfirm: false });
   }
 
   /** EXTRACTIE: wat staat er op het document? */
@@ -246,50 +374,198 @@ export class IntakeService {
     return { result, source: `ocr:${this.ocr.id}`, issues: [] };
   }
 
-  /** Voegt een document toe en verwerkt het zo ver als verantwoord is. */
-  async add(filename: string, data: Uint8Array, asOf: IsoDate = today(), opts: { autoConfirm?: boolean } = {}): Promise<IntakeDocument> {
+  /** Per bestand één toevoeging tegelijk: twee keer hetzelfde bestand (ook tegelijk) wordt één document. */
+  private async exclusive<T>(data: Uint8Array, fn: (sha: string) => Promise<T>): Promise<T> {
     const sha = createHash('sha256').update(data).digest('hex');
-    const existing = this.db.prepare('SELECT id FROM documents WHERE sha256 = ?').get(sha) as { id: number } | undefined;
-    if (existing) return this.get(existing.id);
+    const before = this.busy.get(sha) ?? Promise.resolve();
+    const run = before.catch(() => undefined).then(() => fn(sha));
+    this.busy.set(sha, run);
+    try {
+      return await run;
+    } finally {
+      if (this.busy.get(sha) === run) this.busy.delete(sha);
+    }
+  }
+
+  private bySha(sha: string): number | null {
+    return (this.db.prepare('SELECT id FROM documents WHERE sha256 = ?').get(sha) as { id: number } | undefined)?.id ?? null;
+  }
+
+  /**
+   * Exact dit bestand stond er al in: er komt niets bij en er verandert niets. Met `requested`
+   * ("Bon toevoegen" bij een aankoop of betaling): hoort het bestaande document al bij iets anders, dan
+   * staan beide erbij, zodat je het zelf kunt rechtzetten.
+   */
+  private alreadyPresent(id: number, requested: LinkTarget | null): UploadResult {
+    const doc = this.get(id);
+    const blocked = requested && doc.link && !sameTarget(doc.link.target, requested) ? { existing: this.links.describe(doc.link.target)!, requested: this.links.describe(requested)! } : null;
+    return { ...doc, already_present: true, blocked, linkable: !!requested && !doc.link && doc.status !== 'verwerkt' && doc.duplicate_of_document_id === null };
+  }
+
+  /**
+   * Leest het bestand, bewaart het en legt het document vast (nog niet beoordeeld). `existed`: het
+   * document kwam er intussen langs een andere weg al in; dan is dat het document en blijft er geen
+   * tweede bestand staan.
+   */
+  private async ingest(filename: string, data: Uint8Array, sha: string): Promise<{ id: number; issues: Issue[]; existed: boolean }> {
     const mime = mimeFor(filename);
-    const path = await this.storeFile(filename, data);
+    // eerst lezen, dan pas bewaren: kan het bestand niet (bv. geen e-factuur), dan blijft er geen los bestand achter
     const { result, source, issues: extracted } = await this.extract(filename, data);
-    const extractionIssues = [...extracted, ...(await this.toEuros(result))];
-    const id = Number(
-      this.db.prepare('INSERT INTO documents (file_path, original_name, mime_type, sha256, extraction_source, result) VALUES (?, ?, ?, ?, ?, ?)').run(path, filename, mime, sha, source, JSON.stringify(result)).lastInsertRowid,
-    );
+    const issues = [...extracted, ...(await this.toEuros(result))];
+    const path = await this.storeFile(filename, data);
+    let id: number;
+    try {
+      id = Number(
+        this.db.prepare('INSERT INTO documents (file_path, original_name, mime_type, sha256, extraction_source, result) VALUES (?, ?, ?, ?, ?, ?)').run(path, filename, mime, sha, source, JSON.stringify(result)).lastInsertRowid,
+      );
+    } catch (e) {
+      // niet vastgelegd: dan hoort het bestand ook niet te blijven staan
+      this.removeFile?.(path);
+      const existing = this.bySha(sha);
+      if (existing === null) throw e;
+      return { id: existing, issues: [], existed: true };
+    }
     // Locatie alleen na expliciete toestemming (#32), en alleen in de lokale database
     if (this.locationEnabled() && mime === 'image/jpeg') {
       const gps = readJpegGps(data);
       if (gps) this.db.prepare('UPDATE documents SET gps_lat = ?, gps_lon = ? WHERE id = ?').run(gps.lat, gps.lon, id);
     }
-    await this.evaluate(id, extractionIssues, asOf, opts);
-    return this.get(id);
+    return { id, issues, existed: false };
+  }
+
+  /** Voegt een document toe en verwerkt het zo ver als verantwoord is. */
+  async add(filename: string, data: Uint8Array, asOf: IsoDate = today(), opts: { autoConfirm?: boolean } = {}): Promise<UploadResult> {
+    return this.exclusive(data, async (sha) => {
+      const existing = this.bySha(sha);
+      if (existing !== null) return this.alreadyPresent(existing, null);
+      const { id, issues, existed } = await this.ingest(filename, data, sha);
+      if (existed) return this.alreadyPresent(id, null);
+      await this.evaluate(id, issues, asOf, opts);
+      return { ...this.get(id), already_present: false, blocked: null, linkable: false };
+    });
   }
 
   /**
    * Een factuur als bewijsstuk bij een al bestaande afschrijving (vaste lasten, #25): niet opnieuw
-   * boeken, alleen bewaren en koppelen. Een document dat al als aankoop verwerkt is, blijft zoals het is.
+   * boeken, alleen bewaren en koppelen. Je kiest de betaling zelf, dus dat is de toestemming.
    */
-  async addEvidence(filename: string, data: Uint8Array, bankTransactionId: number): Promise<IntakeDocument> {
-    const tx = this.db.prepare('SELECT id FROM bank_transactions WHERE id = ?').get(bankTransactionId);
-    if (!tx) throw new ValidationError('Deze betaling bestaat niet (meer)');
-    const classification = JSON.stringify({ categoryKey: 'overig', vatCode: 'hoog', business: true, confidence: 1, source: 'geheugen', reasons: [`bewijsstuk bij banktransactie #${bankTransactionId}`], automatic: true });
-    const sha = createHash('sha256').update(data).digest('hex');
-    const existing = this.db.prepare('SELECT id, status FROM documents WHERE sha256 = ?').get(sha) as { id: number; status: string } | undefined;
-    if (existing) {
-      if (existing.status !== 'verwerkt') this.db.prepare(`UPDATE documents SET status = 'verwerkt', confidence = 'HIGH', issues = '[]', classification = ? WHERE id = ?`).run(classification, existing.id);
-      return this.get(existing.id);
+  async addEvidence(filename: string, data: Uint8Array, bankTransactionId: number): Promise<UploadResult> {
+    if (!this.db.prepare('SELECT id FROM bank_transactions WHERE id = ?').get(bankTransactionId)) throw new ValidationError('Deze betaling bestaat niet (meer)');
+    return this.attachEvidence(filename, data, { kind: 'bank', id: bankTransactionId });
+  }
+
+  /** Een bon of factuur als bijlage bij een aankoop die er nog geen had ("Bon toevoegen"). */
+  async addPurchaseEvidence(filename: string, data: Uint8Array, purchaseId: number): Promise<UploadResult> {
+    if (!this.db.prepare('SELECT id FROM purchase_invoices WHERE id = ?').get(purchaseId)) throw new ValidationError('Deze aankoop bestaat niet (meer)');
+    return this.attachEvidence(filename, data, { kind: 'aankoop', id: purchaseId });
+  }
+
+  /**
+   * "Bon toevoegen": het bestand bewaren en als bewijs koppelen, zonder iets te boeken. Dezelfde regels
+   * als bij gewoon toevoegen: exact hetzelfde bestand wordt geweigerd, en hoort dezelfde factuur al bij
+   * iets anders, dan wordt er niets gekoppeld en komt de bon bij "Nog controleren".
+   */
+  private attachEvidence(filename: string, data: Uint8Array, requested: LinkTarget): Promise<UploadResult> {
+    return this.exclusive(data, async (sha) => {
+      const existing = this.bySha(sha);
+      if (existing !== null) return this.alreadyPresent(existing, requested);
+      const { id, existed } = await this.ingest(filename, data, sha);
+      if (existed) return this.alreadyPresent(id, requested);
+      const duplicate = this.findDuplicate(id, this.get(id).result ?? emptyResult());
+      const certain = duplicate?.strength === 'zeker' ? duplicate : null;
+      const elsewhere = certain ? this.targetOf(certain) : null;
+      if (certain && elsewhere && !sameTarget(elsewhere, requested)) {
+        const issue: Issue = { field: 'duplicate', severity: 'fout', message: `Lijkt op ${certain.label}. Is dit dezelfde aankoop?`, suggestion: certain };
+        this.db.prepare(`UPDATE documents SET status = 'controle', confidence = 'LOW', issues = ? WHERE id = ?`).run(JSON.stringify([issue]), id);
+        return { ...this.get(id), already_present: false, blocked: { existing: this.links.describe(elsewhere)!, requested: this.links.describe(requested)! }, linkable: false };
+      }
+      tx(this.db, () => {
+        if (certain?.documentId && elsewhere) {
+          // hetzelfde document zit hier al bij (ander bestand): dit is een kopie; het beste wordt het hoofdbewijsstuk
+          this.links.link(id, requested, 'dubbel');
+          this.db.prepare(`UPDATE documents SET status = 'genegeerd', duplicate_of_document_id = ?, issues = ? WHERE id = ?`).run(certain.documentId, JSON.stringify([DUPLICATE_NOTE]), id);
+          return;
+        }
+        this.links.link(id, requested, 'bewijs');
+        this.db.prepare(`UPDATE documents SET status = 'verwerkt', confidence = 'HIGH', issues = '[]' WHERE id = ?`).run(id);
+        // lag dezelfde factuur nog te wachten op controle, dan is dat een kopie van deze: niet ook nog boeken
+        if (certain?.documentId && this.get(certain.documentId).status !== 'verwerkt') {
+          this.markDuplicate(certain.documentId, { documentId: id, purchaseId: requested.kind === 'aankoop' ? requested.id : null, bankTransactionId: requested.kind === 'bank' ? requested.id : null }, 'automatisch');
+        }
+      });
+      return { ...this.get(id), already_present: false, blocked: null, linkable: false };
+    });
+  }
+
+  /**
+   * Een document dat al in de app staat en nog nergens bij hoort, zelf als bewijs aan een aankoop of
+   * betaling koppelen. Er wordt niets geboekt.
+   */
+  linkExisting(id: number, target: LinkTarget): IntakeDocument {
+    return tx(this.db, () => {
+      const doc = this.get(id);
+      if (doc.link && sameTarget(doc.link.target, target)) return doc;
+      if (!doc.link && doc.status === 'verwerkt') throw new ValidationError('Dit bonnetje is al verwerkt');
+      this.links.link(id, target, 'bewijs');
+      this.db.prepare(`UPDATE documents SET status = 'verwerkt', duplicate_of_document_id = NULL, issues = '[]' WHERE id = ?`).run(id);
+      return this.get(id);
+    });
+  }
+
+  /**
+   * Na het vervallen van een aankoop (de betaling stond al als kosten geboekt): de bestanden die bij
+   * de aankoop hoorden worden het bewijs bij die betaling. Er wordt hier niets geboekt.
+   */
+  moveToBank(files: { document_id: number; origin: LinkOrigin }[], bankTransactionId: number, provenance: LinkProvenance): void {
+    tx(this.db, () => {
+      for (const f of files) {
+        const copy = f.origin === 'dubbel';
+        this.links.unlink(f.document_id);
+        this.links.link(f.document_id, { kind: 'bank', id: bankTransactionId }, copy ? 'dubbel' : 'bewijs', provenance);
+        if (copy) this.db.prepare(`UPDATE documents SET status = 'genegeerd' WHERE id = ?`).run(f.document_id);
+        else this.db.prepare(`UPDATE documents SET status = 'verwerkt', confidence = 'HIGH', issues = '[]' WHERE id = ?`).run(f.document_id);
+      }
+    });
+  }
+
+  /**
+   * "Koppeling ongedaan maken": de bon hoort nergens meer bij en gaat terug naar "Nog controleren". De
+   * aankoop of de geboekte betaling zelf blijft precies zoals hij is. Hetzelfde doel wordt daarna niet
+   * meteen opnieuw voorgesteld, en er wordt niets vanzelf opnieuw gekoppeld of geboekt.
+   */
+  async unlink(id: number, asOf: IsoDate = today()): Promise<IntakeDocument> {
+    const doc = this.get(id);
+    // een kopie van een document dat zelf nog niet geboekt is: "toch geen kopie"
+    const copyOf = !doc.link && doc.status === 'genegeerd' ? doc.duplicate_of_document_id : null;
+    if (!doc.link && copyOf === null) throw new ValidationError('Deze bon is nergens aan gekoppeld');
+    if (doc.link?.origin === 'geboekt') {
+      throw new ValidationError('Deze aankoop is uit deze bon geboekt. Klopt de aankoop niet? Haal hem dan weg bij Aankopen (knop "Weghalen"); de bon komt daarna terug bij "Nog controleren".');
     }
-    const mime = mimeFor(filename);
-    const path = await this.storeFile(filename, data);
-    const { result, source } = await this.extract(filename, data);
-    const id = Number(
-      this.db
-        .prepare(`INSERT INTO documents (file_path, original_name, mime_type, sha256, extraction_source, result, status, confidence, issues, classification) VALUES (?, ?, ?, ?, ?, ?, 'verwerkt', 'HIGH', '[]', ?)`)
-        .run(path, filename, mime, sha, source, JSON.stringify(result), classification).lastInsertRowid,
-    );
-    return this.get(id);
+    tx(this.db, () => {
+      this.links.unlink(id);
+      this.reject(id, doc.link ? targetKey(doc.link.target) : `document:${copyOf}`, doc.result);
+      this.db.prepare(`UPDATE documents SET status = 'controle', duplicate_of_document_id = NULL WHERE id = ?`).run(id);
+    });
+    return this.evaluate(id, this.carriedIssues(doc), asOf, { autoConfirm: false, ask: true });
+  }
+
+  /**
+   * Melding voor Vandaag: een document dat zonder jou binnenkwam (e-mail) stond er al in. `existing`
+   * is het document dat er al was; er is niets geboekt of gekoppeld.
+   */
+  notify(notice: { kind: 'stond-er-al' | 'dubbel'; originalName: string; source: string; sender?: string | null; existingDocumentId: number | null; purchaseId?: number | null }): void {
+    this.db
+      .prepare('INSERT INTO document_notices (kind, original_name, source, sender, existing_document_id, purchase_invoice_id) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(notice.kind, notice.originalName.slice(0, 200), notice.source, notice.sender?.slice(0, 200) ?? null, notice.existingDocumentId, notice.purchaseId ?? null);
+  }
+
+  /** Meldingen die de gebruiker nog niet heeft gezien. */
+  notices(): DocumentNotice[] {
+    return this.db.prepare('SELECT id, kind, original_name, source, sender, existing_document_id, purchase_invoice_id, created_at FROM document_notices WHERE seen_at IS NULL ORDER BY id').all() as DocumentNotice[];
+  }
+
+  dismissNotice(id: number): void {
+    this.db.prepare(`UPDATE document_notices SET seen_at = datetime('now') WHERE id = ? AND seen_at IS NULL`).run(id);
   }
 
   /** De instapdatum bij overstappen met een lopende administratie (daarvoor hoort alles bij de vorige). */
@@ -302,29 +578,6 @@ export class IntakeService {
     } catch {
       return null;
     }
-  }
-
-  /** Een bon of factuur als bijlage bij een aankoop die er nog geen had ("Bon toevoegen"). */
-  async addPurchaseEvidence(filename: string, data: Uint8Array, purchaseId: number): Promise<IntakeDocument> {
-    const p = this.db.prepare('SELECT id, document_id FROM purchase_invoices WHERE id = ?').get(purchaseId) as { id: number; document_id: number | null } | undefined;
-    if (!p) throw new ValidationError('Deze aankoop bestaat niet (meer)');
-    const sha = createHash('sha256').update(data).digest('hex');
-    const existing = this.db.prepare('SELECT id FROM documents WHERE sha256 = ?').get(sha) as { id: number } | undefined;
-    const path = existing ? null : await this.storeFile(filename, data);
-    const { result, source } = existing ? { result: null, source: null } : await this.extract(filename, data);
-    return tx(this.db, () => {
-      const id = existing
-        ? existing.id
-        : Number(
-            this.db
-              .prepare(`INSERT INTO documents (file_path, original_name, mime_type, sha256, extraction_source, result, status, confidence, issues) VALUES (?, ?, ?, ?, ?, ?, 'verwerkt', 'HIGH', '[]')`)
-              .run(path, filename, mimeFor(filename), sha, source, JSON.stringify(result)).lastInsertRowid,
-          );
-      const doc = this.get(id);
-      this.db.prepare(`UPDATE documents SET status = 'verwerkt', purchase_invoice_id = ? WHERE id = ?`).run(purchaseId, id);
-      this.db.prepare('UPDATE purchase_invoices SET attachment_path = ?, document_id = ? WHERE id = ?').run(doc.file_path, id, purchaseId);
-      return this.get(id);
-    });
   }
 
   /** Bonnen die nog niet uitgelezen konden worden (geen herkenning), nog niet verwerkt. */
@@ -353,31 +606,170 @@ export class IntakeService {
     return this.get(id);
   }
 
+  /** Meldingen die bij het bestand zelf horen (niet uitgelezen, geen koers) en bij opnieuw beoordelen blijven staan. */
+  private carriedIssues(doc: IntakeDocument): Issue[] {
+    return doc.issues.filter((i) => i.field === 'document' || i.field === MIGRATION_ISSUE || (i.field === 'total' && !!doc.result?.foreign && doc.result.foreign.rate === null));
+  }
+
+  /**
+   * Staat deze bon op controle omdat zijn oude tekstkoppeling ("bewijsstuk bij banktransactie #...")
+   * niet zeker om te zetten was, en is hij daarna nog niet opnieuw beoordeeld? Dan is hij nog niet te boeken.
+   */
+  awaitsReassessment(doc: Pick<IntakeDocument, 'id' | 'issues'>): boolean {
+    if (!doc.issues.some((i) => i.field === MIGRATION_ISSUE)) return false;
+    return !!this.db.prepare(`SELECT 1 FROM document_link_migration WHERE document_id = ? AND result IN ('onzeker','conflict') AND reassessed_at IS NULL`).get(doc.id);
+  }
+
+  private reassessing: Promise<number> | null = null;
+
+  /**
+   * Bonnen die bij het bijwerken van hun oude tekstkoppeling af zijn gehaald, alsnog beoordelen zoals
+   * een bon die net binnenkomt (#179): hoort hij bij een betaling die al als kosten geboekt is, of bij
+   * een aankoop die er al staat, dan komt daar de gewone vraag over. Er wordt hier nooit iets geboekt of
+   * gekoppeld, ook een zekere kopie niet. Elke bon één keer; mislukt het, dan de volgende keer opnieuw.
+   * Wordt aangeroepen bij het openen van Vandaag, de bonnenlijst en een bon. Geeft terug hoeveel er beoordeeld zijn.
+   */
+  reassessMigrated(asOf: IsoDate = today()): Promise<number> {
+    this.reassessing ??= (async () => {
+      const rows = this.db
+        .prepare(
+          `SELECT m.document_id AS id FROM document_link_migration m JOIN documents d ON d.id = m.document_id
+            WHERE m.reassessed_at IS NULL AND m.result IN ('onzeker','conflict') AND d.status IN ('nieuw','controle') ORDER BY m.document_id`,
+        )
+        .all() as { id: number }[];
+      let n = 0;
+      for (const { id } of rows) {
+        const doc = this.get(id);
+        if (!this.awaitsReassessment(doc)) continue;
+        // welke betalingen noemde de oude tekst? Alleen bewaard om er een vraag over te kunnen stellen
+        const named = [...new Set((doc.classification?.reasons ?? []).map((r) => /^bewijsstuk bij banktransactie #(\d+)$/.exec(String(r))?.[1]).filter((x): x is string => !!x).map(Number))];
+        this.db.prepare('UPDATE document_link_migration SET named_payments = ? WHERE document_id = ? AND named_payments IS NULL').run(JSON.stringify(named), id);
+        try {
+          await this.evaluate(id, this.carriedIssues(doc), asOf, { autoConfirm: false, ask: true });
+        } catch {
+          continue; // bv. de herkenning is even niet bereikbaar: de bon blijft niet te boeken tot het lukt
+        }
+        this.db.prepare(`UPDATE document_link_migration SET reassessed_at = datetime('now') WHERE document_id = ?`).run(id);
+        n++;
+      }
+      return n;
+    })().finally(() => {
+      this.reassessing = null;
+    });
+    return this.reassessing;
+  }
+
+  /**
+   * De betalingen die de oude tekst bij deze bon noemde en die er nu nog toe doen: nog rechtstreeks als
+   * kosten geboekt (dan is de bon hooguit bewijs), of intussen de betaling van een aankoop (dan staat
+   * die aankoop er al). Dit is nooit een koppeling: het levert alleen een vraag op.
+   */
+  private legacyHints(id: number): { payments: BankTransaction[]; purchases: number[] } {
+    const row = this.db.prepare('SELECT named_payments FROM document_link_migration WHERE document_id = ?').get(id) as { named_payments: string | null } | undefined;
+    const out = { payments: [] as BankTransaction[], purchases: [] as number[] };
+    for (const bankId of row?.named_payments ? (JSON.parse(row.named_payments) as number[]) : []) {
+      const t = this.db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(bankId) as BankTransaction | undefined;
+      if (!t || t.status !== 'gematcht' || t.matched_invoice_id) continue;
+      if (t.matched_purchase_invoice_id) out.purchases.push(t.matched_purchase_invoice_id);
+      else if (
+        this.db
+          .prepare(`SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = ? AND a.category = 'kosten'`)
+          .get(t.matched_journal_entry_id)
+      ) out.payments.push(t);
+    }
+    return out;
+  }
+
+  /** Het voorstel dat bij dit document op een keuze wacht, of null. */
+  pending(doc: IntakeDocument): PendingProposal | null {
+    if (doc.status !== 'controle' && doc.status !== 'nieuw') return null;
+    const evidence = doc.issues.find((i) => i.field === 'evidence')?.suggestion as { bankTransactionId: number } | undefined;
+    if (evidence) return { kind: 'evidence', candidate: `bank:${evidence.bankTransactionId}`, documentId: null, target: this.links.describe({ kind: 'bank', id: evidence.bankTransactionId }) };
+    const issue = doc.issues.find((i) => i.field === 'duplicate' && i.severity === 'fout');
+    const match = issue?.suggestion as DuplicateMatch | undefined;
+    if (!match) return null;
+    const target = this.targetOf(match);
+    // het voorstel is achterhaald: de aankoop is weg, of het andere document is intussen weggelegd
+    if (target ? !this.links.describe(target) : !this.db.prepare(`SELECT 1 FROM documents WHERE id = ? AND status <> 'genegeerd'`).get(match.documentId)) return null;
+    return { kind: 'duplicate', candidate: candidateOf(match), documentId: match.documentId, target: target ? this.links.describe(target) : null };
+  }
+
+  /** Legt vast dat dit voorstel is afgewezen, voor het document zoals het nu gelezen is. */
+  private reject(id: number, candidate: string, result: DocumentResult | null): void {
+    this.db
+      .prepare(`INSERT INTO document_proposal_rejections (document_id, candidate, fingerprint) VALUES (?, ?, ?)
+        ON CONFLICT(document_id, candidate) DO UPDATE SET fingerprint = excluded.fingerprint, created_at = datetime('now')`)
+      .run(id, candidate, documentFingerprint(result));
+  }
+
+  /** Voorstellen die voor dit document zijn afgewezen en nog gelden (de gegevens zijn niet veranderd). */
+  private rejected(id: number, result: DocumentResult): Set<string> {
+    const rows = this.db.prepare('SELECT candidate FROM document_proposal_rejections WHERE document_id = ? AND fingerprint = ?').all(id, documentFingerprint(result)) as { candidate: string }[];
+    return new Set(rows.map((r) => r.candidate));
+  }
+
+  /**
+   * Het antwoord op een voorstel. Ja: de bon wordt bewijs of kopie, er wordt niets geboekt. Nee: dit
+   * voorstel vervalt en de gewone controle gaat verder. Later: er verandert niets.
+   * `candidate`: het voorstel dat de gebruiker zag; is het intussen een ander, dan gebeurt er niets.
+   */
+  async decide(id: number, answer: 'ja' | 'nee' | 'later', candidate?: string, asOf: IsoDate = today()): Promise<IntakeDocument> {
+    const doc = this.get(id);
+    if (answer === 'later') return doc;
+    const pending = this.pending(doc);
+    if (!pending) throw new ValidationError('Bij deze bon staat geen voorstel (meer). Bekijk hem opnieuw.');
+    if (candidate !== undefined && candidate !== pending.candidate) throw new ValidationError('Het voorstel voor deze bon is intussen veranderd. Bekijk hem opnieuw.');
+    if (answer === 'nee') {
+      this.reject(id, pending.candidate, doc.result);
+      return this.evaluate(id, this.carriedIssues(doc), asOf, { autoConfirm: false, ask: true });
+    }
+    if (pending.kind === 'duplicate') return this.markDuplicate(id, doc.issues.find((i) => i.field === 'duplicate')!.suggestion as DuplicateMatch);
+    const bankId = Number(pending.candidate.slice(5));
+    return tx(this.db, () => {
+      const t = this.db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(bankId) as BankTransaction | undefined;
+      if (!t || t.status !== 'gematcht' || t.matched_purchase_invoice_id || t.matched_invoice_id) throw new ValidationError('Deze betaling is intussen anders verwerkt. Kijk het opnieuw na.');
+      this.links.link(id, { kind: 'bank', id: bankId }, 'bewijs');
+      this.db.prepare(`UPDATE documents SET status = 'verwerkt', confidence = 'HIGH', issues = '[]' WHERE id = ?`).run(id);
+      return this.get(id);
+    });
+  }
+
   /** CLASSIFICATIE + VALIDATIE + CONFIDENCE, en bij HIGH direct verwerken. */
-  /** autoConfirm: false = nooit zelf boeken, altijd eerst laten controleren (bv. binnengekomen per e-mail) */
-  async evaluate(id: number, extraIssues: Issue[] = [], asOf: IsoDate = today(), opts: { autoConfirm?: boolean } = {}): Promise<IntakeDocument> {
+  /**
+   * autoConfirm: false = nooit zelf boeken, altijd eerst laten controleren (bv. binnengekomen per e-mail).
+   * ask: true = ook een zekere kopie eerst vragen (na een keuze van de gebruiker gebeurt er niets vanzelf).
+   */
+  async evaluate(id: number, extraIssues: Issue[] = [], asOf: IsoDate = today(), opts: { autoConfirm?: boolean; ask?: boolean } = {}): Promise<IntakeDocument> {
     const doc = this.get(id);
     const result = doc.result ?? emptyResult();
+    // Een bon die bij het bijwerken van zijn oude tekstkoppeling af is gehaald: die melding blijft staan
+    // tot hij ergens bij hoort of geboekt is, en de betalingen die de tekst noemde tellen mee als vraag.
+    const migrated = doc.issues.find((i) => i.field === MIGRATION_ISSUE);
+    if (migrated && !extraIssues.some((i) => i.field === MIGRATION_ISSUE)) extraIssues = [...extraIssues, migrated];
+    const legacy = migrated ? this.legacyHints(id) : null;
     // Eerst: hebben we dit al? Hetzelfde document komt vaak twee keer binnen (mail + foto, PDF + e-factuur).
     let duplicate = this.findDuplicate(id, result);
-    if (duplicate?.strength === 'zeker') {
+    if (duplicate?.strength === 'zeker' && !opts.ask) {
       const original = duplicate.documentId ? this.get(duplicate.documentId) : null;
-      if (original && original.status !== 'verwerkt' && evidenceRank(doc.extraction_source) > evidenceRank(original.extraction_source)) {
-        // het nieuwe document is beter bewijs en het oude is nog niet geboekt: het oude wordt de kopie
-        this.markDuplicate(original.id, { documentId: id, purchaseId: null });
+      if (original && original.status !== 'verwerkt' && !this.targetOf(duplicate) && evidenceRank(doc.extraction_source) > evidenceRank(original.extraction_source)) {
+        // geen van beide is geboekt en het nieuwe is beter gelezen: daarmee gaat de app verder, het oude wordt de kopie
+        this.markDuplicate(original.id, { documentId: id, purchaseId: null }, 'automatisch');
         duplicate = null;
       } else {
-        this.markDuplicate(id, duplicate);
+        this.markDuplicate(id, duplicate, 'automatisch');
         return this.get(id);
       }
     }
-    const alreadyBooked = this.findBookedBankTransaction(result);
+    const rejected = this.rejected(id, result);
+    const alreadyBooked = this.findBookedBankTransaction(result, rejected) ?? legacy?.payments.find((t) => !rejected.has(`bank:${t.id}`)) ?? null;
     if (alreadyBooked) {
-      // De betaling is al rechtstreeks als kosten geboekt (bv. automatisch herkende leverancier):
-      // het document is dan alleen het bewijsstuk — niet nógmaals boeken.
+      // De betaling is al rechtstreeks als kosten geboekt (bv. automatisch herkende leverancier): het
+      // document is dan hooguit het bewijsstuk. Nooit stil koppelen en nooit nog een keer boeken: eerst vragen.
+      const label = `${formatEuro(-alreadyBooked.amount)} op ${formatDateNl(alreadyBooked.transaction_date)}${alreadyBooked.counter_name ? ` aan ${alreadyBooked.counter_name}` : ''}`;
+      const issue: Issue = { field: 'evidence', severity: 'fout', message: EVIDENCE_QUESTION, suggestion: { bankTransactionId: alreadyBooked.id, label } };
       this.db
-        .prepare(`UPDATE documents SET status = 'verwerkt', confidence = 'HIGH', issues = ?, classification = ? WHERE id = ?`)
-        .run('[]', JSON.stringify({ categoryKey: 'overig', vatCode: 'hoog', business: true, confidence: 1, source: 'geheugen', reasons: [`bewijsstuk bij banktransactie #${alreadyBooked.id}`], automatic: true }), id);
+        .prepare(`UPDATE documents SET status = 'controle', confidence = 'LOW', issues = ?, classification = NULL, decisions = NULL WHERE id = ?`)
+        .run(JSON.stringify([...extraIssues, issue]), id);
       return this.get(id);
     }
     let classification = await this.classifier.classify(result);
@@ -388,6 +780,13 @@ export class IntakeService {
     const issues = [...extraIssues, ...validateDocument(result, asOf)];
     if (duplicate) {
       issues.push({ field: 'duplicate', severity: 'fout', message: `Lijkt op ${duplicate.label}. Is dit dezelfde aankoop?`, suggestion: duplicate });
+    } else {
+      // de betaling waar deze bon vroeger bij stond, hoort intussen bij een aankoop: die aankoop is er dus al
+      const purchase = legacy?.purchases.map((p) => this.links.describe({ kind: 'aankoop', id: p })).find((p) => p && !rejected.has(`aankoop:${p.id}`));
+      if (purchase) {
+        const match: DuplicateMatch = { strength: 'mogelijk', documentId: this.links.forTarget({ kind: 'aankoop', id: purchase.id })[0]?.document_id ?? null, purchaseId: purchase.id, label: purchase.label, reason: 'nummer' };
+        issues.push({ field: 'duplicate', severity: 'fout', message: `De betaling waar deze bon bij stond, hoort nu bij ${purchase.label}. Is dit dezelfde aankoop?`, suggestion: match });
+      }
     }
     // van vóór de instapdatum: hoort bij de vorige administratie, niet als nieuwe (open) aankoop
     const start = this.startDate();
@@ -441,74 +840,86 @@ export class IntakeService {
     return this.get(id);
   }
 
+  /** De aankoop of betaling waar een gevonden kopie bij hoort; null als die nog nergens bij hoort. */
+  private targetOf(match: Pick<DuplicateMatch, 'documentId' | 'purchaseId' | 'bankTransactionId'>): LinkTarget | null {
+    if (match.purchaseId) return { kind: 'aankoop', id: match.purchaseId };
+    if (match.bankTransactionId) return { kind: 'bank', id: match.bankTransactionId };
+    return match.documentId ? this.links.forDocument(match.documentId)?.target ?? null : null;
+  }
+
   /**
-   * Zoekt of dit document al eerder binnenkwam of al geboekt is.
-   * Zeker = zelfde leverancier + factuurnummer + totaal. Mogelijk = zelfde leverancier + totaal, datum ±3 dagen.
+   * Zoekt of dit document al eerder binnenkwam of al geboekt is: zelfde leverancier en zelfde bedrag,
+   * en dan compareDuplicate (zeker of mogelijk). Een voorstel dat voor dit document is afgewezen, komt
+   * niet terug zolang leverancier, datum, bedrag en nummer gelijk blijven.
    */
   findDuplicate(id: number, result: DocumentResult): DuplicateMatch | null {
     if (!result.total || !result.supplier) return null;
     const key = supplierKey(result.supplier.value);
     if (!key) return null;
-    const number = result.invoiceNumber?.value ? normalizeInvoiceNumber(result.invoiceNumber.value) : null;
-    const date = result.invoiceDate?.value ?? null;
+    const probe = probeOf(result);
     const total = result.total.value;
+    const rejected = this.rejected(id, result);
     // vreemde munt (#74): ook hetzelfde bedrag in die munt, en een oudere boeking waarin dat bedrag als euro's staat
     const foreign = result.foreign ?? null;
 
     const purchases = this.db
       .prepare(
-        `SELECT p.id, p.supplier_reference, p.invoice_date, p.document_id, r.name AS supplier
+        `SELECT p.id, p.supplier_reference, p.invoice_date, p.total, r.name AS supplier,
+                (SELECT k.document_id FROM document_links k WHERE k.purchase_invoice_id = p.id AND k.is_primary = 1) AS document_id
          FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id
          WHERE p.total = ? OR (? IS NOT NULL AND ((p.currency = ? AND p.foreign_total = ?) OR (p.currency IS NULL AND p.total = ?)))`,
       )
-      .all(total, foreign?.currency ?? null, foreign?.currency ?? null, foreign?.total ?? null, foreign?.total ?? null) as { id: number; supplier_reference: string | null; invoice_date: string; document_id: number | null; supplier: string | null }[];
+      .all(total, foreign?.currency ?? null, foreign?.currency ?? null, foreign?.total ?? null, foreign?.total ?? null) as { id: number; supplier_reference: string | null; invoice_date: string; total: number; document_id: number | null; supplier: string | null }[];
     const sameAmount = (r: DocumentResult) =>
       r.total!.value === total || (!!foreign && (r.foreign ? r.foreign.currency === foreign.currency && r.foreign.total === foreign.total : r.total!.value === foreign.total));
     const docs = this.db
-      .prepare(`SELECT id, result, status, purchase_invoice_id FROM documents WHERE id < ? AND status IN ('nieuw','controle','verwerkt') AND result IS NOT NULL`)
-      .all(id) as { id: number; result: string; status: string; purchase_invoice_id: number | null }[];
+      .prepare(
+        `SELECT d.id, d.result, k.purchase_invoice_id, k.bank_transaction_id FROM documents d LEFT JOIN document_links k ON k.document_id = d.id
+          WHERE d.id <> ? AND d.status IN ('nieuw','controle','verwerkt') AND d.result IS NOT NULL AND d.duplicate_of_document_id IS NOT ? ORDER BY d.id`,
+      )
+      .all(id, id) as { id: number; result: string; purchase_invoice_id: number | null; bank_transaction_id: number | null }[];
 
     let weak: DuplicateMatch | null = null;
-    const near = (d: string | null) => !!date && !!d && Math.abs(diffDays(date, d)) <= 3;
+    const consider = (found: ReturnType<typeof compareDuplicate>, match: Omit<DuplicateMatch, 'strength' | 'reason'>): DuplicateMatch | null => {
+      if (!found || rejected.has(candidateOf(match))) return null;
+      if (found.strength === 'zeker') return { ...match, ...found };
+      weak ??= { ...match, ...found };
+      return null;
+    };
     for (const p of purchases) {
       if (!p.supplier || supplierKey(p.supplier) !== key) continue;
-      const label = `de aankoop bij ${p.supplier} van ${p.invoice_date}`;
-      if (number && p.supplier_reference && normalizeInvoiceNumber(p.supplier_reference) === number) {
-        return { strength: 'zeker', documentId: p.document_id, purchaseId: p.id, label };
-      }
-      if (!weak && near(p.invoice_date) && !(number && p.supplier_reference)) weak = { strength: 'mogelijk', documentId: p.document_id, purchaseId: p.id, label };
+      const number = p.supplier_reference ? normalizeInvoiceNumber(p.supplier_reference) : '';
+      // een bevestigde aankoop: het nummer is nagekeken, of het document waar het uit komt telt hieronder mee
+      const other: DuplicateProbe = { number: number || null, reliable: number.length >= 3, date: p.invoice_date, credit: p.total < 0 };
+      const certain = consider(compareDuplicate(probe, other), { documentId: p.document_id, purchaseId: p.id, label: `de aankoop bij ${p.supplier} van ${formatDateNl(p.invoice_date)}` });
+      if (certain) return certain;
     }
     for (const d of docs) {
       const r = JSON.parse(d.result) as DocumentResult;
       if (!r.total || !sameAmount(r) || !r.supplier || supplierKey(r.supplier.value) !== key) continue;
-      const label = `het document van ${r.supplier.value}${r.invoiceDate ? ` van ${r.invoiceDate.value}` : ''}`;
-      const otherNumber = r.invoiceNumber?.value ? normalizeInvoiceNumber(r.invoiceNumber.value) : null;
-      if (number && otherNumber === number) return { strength: 'zeker', documentId: d.id, purchaseId: d.purchase_invoice_id, label };
-      if (!weak && near(r.invoiceDate?.value ?? null) && !(number && otherNumber)) weak = { strength: 'mogelijk', documentId: d.id, purchaseId: d.purchase_invoice_id, label };
+      const label = `het document van ${r.supplier.value}${r.invoiceDate ? ` van ${formatDateNl(r.invoiceDate.value)}` : ''}`;
+      const certain = consider(compareDuplicate(probe, probeOf(r)), { documentId: d.id, purchaseId: d.purchase_invoice_id, bankTransactionId: d.bank_transaction_id, label });
+      if (certain) return certain;
     }
     return weak;
   }
 
   /**
-   * Legt vast dat een document een kopie is. Is de kopie beter bewijs (bv. e-factuur i.p.v. foto),
-   * dan wordt die de bijlage van de aankoop; er wordt nooit iets dubbel geboekt.
+   * Legt vast dat een document een kopie is ("Ja, dezelfde aankoop", of vanzelf bij een zekere kopie).
+   * Beide bestanden blijven bewaard. Hoort het origineel bij een aankoop of betaling, dan komt de kopie
+   * daar ook bij en wordt het best leesbare bestand het hoofdbewijsstuk; er wordt nooit iets geboekt.
    */
-  markDuplicate(id: number, match: Pick<DuplicateMatch, 'documentId' | 'purchaseId'>): IntakeDocument {
+  markDuplicate(id: number, match: Pick<DuplicateMatch, 'documentId' | 'purchaseId' | 'bankTransactionId'>, provenance: LinkProvenance = 'gebruiker'): IntakeDocument {
     tx(this.db, () => {
       const doc = this.get(id);
-      if (doc.status === 'verwerkt') throw new ValidationError('Dit bonnetje is al verwerkt');
-      const original = match.documentId ? this.get(match.documentId) : null;
-      const purchaseId = match.purchaseId ?? original?.purchase_invoice_id ?? null;
-      if (purchaseId) {
-        const current = this.db.prepare('SELECT document_id FROM purchase_invoices WHERE id = ?').get(purchaseId) as { document_id: number | null } | undefined;
-        const currentDoc = current?.document_id ? this.get(current.document_id) : null;
-        if (current && evidenceRank(doc.extraction_source) > evidenceRank(currentDoc?.extraction_source ?? null)) {
-          this.db.prepare('UPDATE purchase_invoices SET attachment_path = ?, document_id = ? WHERE id = ?').run(doc.file_path, id, purchaseId);
-        }
-      }
+      if (doc.status === 'verwerkt' || doc.link) throw new ValidationError('Dit bonnetje is al verwerkt');
+      if (match.documentId && !this.db.prepare('SELECT 1 FROM documents WHERE id = ?').get(match.documentId)) throw new ValidationError('Het voorstel voor deze bon is intussen veranderd. Bekijk hem opnieuw.');
+      const target = this.targetOf(match);
+      if (target && !this.links.describe(target)) throw new ValidationError('Het voorstel voor deze bon is intussen veranderd. Bekijk hem opnieuw.');
       this.db
-        .prepare(`UPDATE documents SET status = 'genegeerd', duplicate_of_document_id = ?, purchase_invoice_id = ?, issues = ? WHERE id = ?`)
-        .run(match.documentId, purchaseId, JSON.stringify([{ field: 'duplicate', severity: 'waarschuwing', message: 'Dubbel: dit document hadden we al. Niet opnieuw geboekt.' }]), id);
+        .prepare(`UPDATE documents SET status = 'genegeerd', duplicate_of_document_id = ?, issues = ? WHERE id = ?`)
+        .run(match.documentId, JSON.stringify([DUPLICATE_NOTE]), id);
+      if (target) this.links.link(id, target, 'dubbel', provenance);
     });
     return this.get(id);
   }
@@ -548,8 +959,10 @@ export class IntakeService {
    * en alleen met de naam van de leverancier. Is er rond die datum (10 dagen vóór tot 20 dagen na) nog
    * een vergelijkbare afschrijving van die leverancier, dan is het te onzeker: dan niets aannemen.
    */
-  findBookedBankTransaction(result: DocumentResult): BankTransaction | null {
+  findBookedBankTransaction(result: DocumentResult, rejected: Set<string> = new Set()): BankTransaction | null {
     if (!result.total || !result.invoiceDate) return null;
+    // een betaling waarbij deze bon is afgewezen ("Nee, andere aankoop") stellen we niet opnieuw voor
+    const open = (t: BankTransaction) => !rejected.has(`bank:${t.id}`);
     if (result.foreign) {
       const supplier = result.supplier ? supplierKey(result.supplier.value) : '';
       if (!supplier) return null;
@@ -565,28 +978,28 @@ export class IntakeService {
           .prepare(
             `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount < 0 AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
                AND julianday(transaction_date) - julianday(?) BETWEEN -10 AND 20
-               AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || bank_transactions.id || '"%')
+               AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.bank_transaction_id = bank_transactions.id)
                -- alleen als kosten geboekt: niet een privé-opname of eigen overboeking met toevallig hetzelfde bedrag
                AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
                             WHERE l.journal_entry_id = bank_transactions.matched_journal_entry_id AND a.category = 'kosten')`,
           )
           .all(result.invoiceDate.value) as BankTransaction[]
-      ).filter((t) => withinFx(-t.amount, result.total!.value) && !!t.counter_name && same(t.counter_name));
+      ).filter((t) => open(t) && withinFx(-t.amount, result.total!.value) && !!t.counter_name && same(t.counter_name));
       // een factuur in dollars wordt vaak pas later met de kaart betaald (bv. 1 aug gefactureerd, 14 aug betaald);
       // een abonnement komt maar eens per maand langs, dus binnen 20 dagen is het deze betaling
       const days = (t: BankTransaction) => diffDays(result.invoiceDate!.value, t.transaction_date);
       return rows.length === 1 && days(rows[0]!) >= -3 && days(rows[0]!) <= 20 ? rows[0]! : null;
     }
-    const rows = this.db
+    const rows = (this.db
       .prepare(
         `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount = ? AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
            AND ABS(julianday(transaction_date) - julianday(?)) <= 3
-           AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || bank_transactions.id || '"%')
+           AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.bank_transaction_id = bank_transactions.id)
                -- alleen als kosten geboekt: niet een privé-opname of eigen overboeking met toevallig hetzelfde bedrag
                AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
                             WHERE l.journal_entry_id = bank_transactions.matched_journal_entry_id AND a.category = 'kosten')`,
       )
-      .all(-result.total.value, result.invoiceDate.value) as BankTransaction[];
+      .all(-result.total.value, result.invoiceDate.value) as BankTransaction[]).filter(open);
     return rows.length === 1 ? rows[0]! : null;
   }
 
@@ -596,7 +1009,12 @@ export class IntakeService {
    */
   confirm(id: number, c: Confirmation, opts: { learn?: boolean } = {}): IntakeDocument {
     const doc = this.get(id);
-    if (doc.status === 'verwerkt') throw new ValidationError('Dit bonnetje is al verwerkt');
+    if (doc.status === 'verwerkt' || doc.link) throw new ValidationError('Dit bonnetje is al verwerkt');
+    if (doc.status === 'genegeerd' && doc.duplicate_of_document_id !== null) throw new ValidationError('Dit is een kopie van een bon die er al in staat. Verwerk die andere bon, of kies eerst "Toch geen kopie".');
+    // stond als bewijs bij een betaling (oude tekstkoppeling) en is nog niet opnieuw bekeken: eerst kijken of hij al ergens bij hoort
+    if (this.awaitsReassessment(doc)) throw new ValidationError('Deze bon stond eerder als bewijs bij een betaling. Open hem eerst: dan kijkt de app of hij bij iets hoort dat er al staat.');
+    // eerst de vraag beantwoorden ("dezelfde aankoop?", "alleen als bewijs?"): anders staat het zo dubbel
+    if (this.pending(doc)) throw new ValidationError('Kies eerst of deze bon bij iets hoort dat er al staat. Daarna kun je hem verwerken.');
     if (!c.supplier?.trim()) throw new ValidationError('Vul de winkel of leverancier in');
     if (!Number.isSafeInteger(c.total) || c.total === 0) throw new ValidationError('Vul het totaalbedrag in');
     // "Weet ik nog niet (vraag mijn boekhouder)": apart op Vraagposten, zonder btw-aftrek en zonder iets te
@@ -641,7 +1059,14 @@ export class IntakeService {
         const paidWith = c.paidWith === 'later' ? relation.paid_with : c.paidWith === 'bank' ? null : c.paidWith;
         if (paidWith) this.purchases.registerPayment(purchase.id, { amount: purchase.total, date: c.date, moneyAccount: paidWith === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen });
       }
-      this.db.prepare(`UPDATE documents SET status = 'verwerkt', purchase_invoice_id = ? WHERE id = ?`).run(purchase.id, id);
+      // de aankoop is uit dit document geboekt; kopieën die erop wachtten horen er nu ook bij (niets extra geboekt)
+      const target: LinkTarget = { kind: 'aankoop', id: purchase.id };
+      this.links.link(id, target, 'geboekt', opts.learn === false ? 'automatisch' : 'gebruiker');
+      const copies = this.db
+        .prepare(`SELECT d.id FROM documents d WHERE d.duplicate_of_document_id = ? AND d.status = 'genegeerd' AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.document_id = d.id) ORDER BY d.id`)
+        .all(id) as { id: number }[];
+      for (const copy of copies) this.links.link(copy.id, target, 'dubbel', 'automatisch');
+      this.db.prepare(`UPDATE documents SET status = 'verwerkt' WHERE id = ?`).run(id);
       if (c.jobId) {
         // eerste foto met locatie bij een klus zonder locatie wordt de kluslocatie (alleen als opt-in de locatie heeft opgeslagen)
         this.db.prepare('UPDATE jobs SET lat = (SELECT gps_lat FROM documents WHERE id = ?), lon = (SELECT gps_lon FROM documents WHERE id = ?) WHERE id = ? AND lat IS NULL AND (SELECT gps_lat FROM documents WHERE id = ?) IS NOT NULL').run(id, id, c.jobId, id);
@@ -730,13 +1155,17 @@ export class IntakeService {
     const row = this.db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as Row | undefined;
     if (!row) throw new ValidationError('Dit bonnetje bestaat niet (meer)');
     const result = row.result ? (JSON.parse(row.result) as DocumentResult) : null;
+    const issues = JSON.parse(row.issues) as Issue[];
+    const link = this.links.forDocument(id);
     return {
       ...row,
       result,
       classification: row.classification ? JSON.parse(row.classification) : null,
-      issues: JSON.parse(row.issues),
+      issues,
       decisions: row.decisions ? (JSON.parse(row.decisions) as Decision[]) : null,
       bank_match: row.status === 'verwerkt' || !result ? null : this.findBankMatch(result),
+      link,
+      outcome: this.links.outcome({ ...row, issues }, link),
     };
   }
 

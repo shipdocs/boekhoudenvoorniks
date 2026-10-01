@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import type { Db } from '../db/database';
+import { tx } from '../db/database';
 import type { IntakeService } from '../intake/intake';
 import type { SettingsService } from '../settings/settings';
 import { today, type IsoDate } from '../shared/dates';
@@ -68,6 +70,12 @@ export interface PollResult {
   errors: number;
   /** mappen die niet bestaan */
   missingFolders: string[];
+}
+
+/** Wat er van één mail als document binnenkwam, en welke bijlagen er al in stonden. */
+interface AddedFiles {
+  ids: number[];
+  notices: Parameters<IntakeService['notify']>[0][];
 }
 
 export const MAIL_LIMITS = {
@@ -222,10 +230,49 @@ export class MailIntakeService {
   }
 
   /** De mailtekst als PDF-bon toevoegen (wacht op controle, nooit vanzelf geboekt). */
-  private async addBodyAsReceipt(m: MailMessage, asOf: IsoDate): Promise<number> {
+  private async addBodyAsReceipt(key: string, m: MailMessage, asOf: IsoDate): Promise<AddedFiles> {
     if (!this.pdf) throw new Error('Een mail als bon bewaren kan hier niet');
     const data = await this.pdf(receiptHtml(m));
-    return (await this.intake.add(receiptFilename(m), data, asOf, { autoConfirm: false })).id;
+    return this.addFiles(key, m, [{ name: receiptFilename(m), data }], asOf);
+  }
+
+  /**
+   * Alle bijlagen van één mail bewaren en beoordelen (#179). Niets wordt vanzelf geboekt of gekoppeld:
+   * een mogelijk dubbele bon of een bon bij een al geboekte betaling wacht als vraag op Vandaag. Stond
+   * een bijlage er al in, dan komt daar een melding van. Pas als dit voor élke bijlage gelukt is, mag de
+   * mail naar "Verwerkt"; mislukt er een, dan volgt een fout en blijft de mail staan.
+   * Wat bij een eerdere, mislukte poging van dezelfde mail al binnenkwam, telt niet als dubbel.
+   */
+  private async addFiles(key: string, m: MailMessage, files: { name: string; data: Uint8Array }[], asOf: IsoDate): Promise<AddedFiles> {
+    const ids: number[] = [];
+    const notices: AddedFiles['notices'] = [];
+    const sender = m.fromName || m.fromAddress || null;
+    for (const f of files) {
+      const sha = createHash('sha256').update(f.data).digest('hex');
+      const earlier = this.db.prepare('SELECT document_id FROM mail_attachment_progress WHERE message_key = ? AND sha256 = ?').get(key, sha) as { document_id: number } | undefined;
+      if (earlier) {
+        if (!ids.includes(earlier.document_id)) ids.push(earlier.document_id);
+        continue;
+      }
+      const d = await this.intake.add(f.name, f.data, asOf, { autoConfirm: false });
+      this.db.prepare('INSERT OR IGNORE INTO mail_attachment_progress (message_key, sha256, document_id) VALUES (?, ?, ?)').run(key, sha, d.id);
+      if (!ids.includes(d.id)) ids.push(d.id);
+      const purchaseId = d.link?.target.kind === 'aankoop' ? d.link.target.id : null;
+      if (d.already_present) notices.push({ kind: 'stond-er-al', originalName: f.name, source: 'mail', sender, existingDocumentId: d.id, purchaseId });
+      else if (d.outcome === 'dubbel') notices.push({ kind: 'dubbel', originalName: f.name, source: 'mail', sender, existingDocumentId: d.duplicate_of_document_id ?? d.id, purchaseId });
+    }
+    const unassessed = ids.filter((id) => this.intake.get(id).status === 'nieuw');
+    if (unassessed.length > 0) throw new Error('Nog niet alle bijlagen zijn beoordeeld');
+    return { ids, notices };
+  }
+
+  /** De mail is klaar: vastleggen wat ermee gebeurd is, met de meldingen over bijlagen die er al in stonden. */
+  private finish(key: string, added: AddedFiles, record: () => void): void {
+    tx(this.db, () => {
+      record();
+      for (const n of added.notices) this.intake.notify(n);
+      this.db.prepare('DELETE FROM mail_attachment_progress WHERE message_key = ?').run(key);
+    });
   }
 
   /** Verwerkte mail naar de map "Verwerkt" (alleen uit de gewone map); lukt dat niet, dan blijft hij staan. */
@@ -255,12 +302,14 @@ export class MailIntakeService {
     if (!m || (rec.message_key.startsWith('id:') && key !== rec.message_key)) {
       throw new Error('Deze mail staat niet meer op dezelfde plek (verplaatst of verwijderd). Sla hem zelf op als PDF en zet hem bij Aankopen.');
     }
-    const docId = await this.addBodyAsReceipt(m, asOf);
+    const added = await this.addBodyAsReceipt(rec.message_key, m, asOf);
     const main = rec.folder === (this.settings.get().mailIn.folder || 'INBOX');
     const movedTo = await this.moveProcessed(source, rec.uid, main);
-    this.db
-      .prepare(`UPDATE mail_messages SET outcome = 'bijlage', document_ids = ?, note = ?, moved_to = ? WHERE id = ?`)
-      .run(JSON.stringify([docId]), 'mailtekst als bon bewaard', movedTo, id);
+    this.finish(rec.message_key, added, () =>
+      this.db
+        .prepare(`UPDATE mail_messages SET outcome = 'bijlage', document_ids = ?, note = ?, moved_to = ? WHERE id = ?`)
+        .run(JSON.stringify(added.ids), 'mailtekst als bon bewaard', movedTo, id),
+    );
     return this.get(id);
   }
 
@@ -366,16 +415,16 @@ export class MailIntakeService {
           } else {
             const files = usableAttachments(m.attachments);
             if (files.length > 0) {
-              const ids: number[] = [];
-              for (const f of files) ids.push((await this.intake.add(f.name, f.data, asOf, { autoConfirm: false })).id);
+              // eerst alle bijlagen bewaren en beoordelen, dan pas de mail verplaatsen
+              const added = await this.addFiles(key, m, files, asOf);
               const movedTo = await this.moveProcessed(source, uid, main);
-              this.record(key, folder, uid, m, 'bijlage', { documentIds: ids, movedTo });
-              result.documents += ids.length;
+              this.finish(key, added, () => this.record(key, folder, uid, m!, 'bijlage', { documentIds: added.ids, movedTo }));
+              result.documents += added.ids.length;
             } else if (this.pdf && looksLikeReceipt(m)) {
               // de bon staat in de mail zelf (webshop, app): de tekst als PDF bewaren
-              const docId = await this.addBodyAsReceipt(m, asOf);
+              const added = await this.addBodyAsReceipt(key, m, asOf);
               const movedTo = await this.moveProcessed(source, uid, main);
-              this.record(key, folder, uid, m, 'bijlage', { documentIds: [docId], movedTo, note: 'mailtekst als bon bewaard' });
+              this.finish(key, added, () => this.record(key, folder, uid, m!, 'bijlage', { documentIds: added.ids, movedTo, note: 'mailtekst als bon bewaard' }));
               result.documents++;
             } else {
               const domain = onlineInvoiceDomain(m);
@@ -389,7 +438,7 @@ export class MailIntakeService {
             }
           }
         } catch (e) {
-          // bijlagen die al binnen waren, worden bij een nieuwe poging herkend (zelfde bestand)
+          // bijlagen die al binnen waren, worden bij een nieuwe poging herkend (mail_attachment_progress)
           if (failed(uid, m, key, (e as Error).message.slice(0, 300)) === 'opnieuw') break;
           continue;
         }

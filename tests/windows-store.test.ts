@@ -10,10 +10,9 @@ import { XMLValidator } from 'fast-xml-parser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDatabase, openReadonly } from '../src/db/database';
 import { createApi, type HostContext } from '../src/main/api';
-import { MARKER, migrateToSharedDir, readPointer, resolveDataDir, sharedDataDir, writePointer, type MigrationOutcome } from '../src/main/data-dir';
+import { MARKER, markComplete, migrateToSharedDir, planSwitch, readPointer, resolveDataDir, sharedDataDir, switchDataDir, type MigrationOutcome } from '../src/main/data-dir';
 import { Updates, type UpdateStatus } from '../src/main/updates';
 import {
-  checkChosenFolder,
   DOWNLOAD_URL,
   FIRST_START_FLAG,
   isWindowsStore,
@@ -26,8 +25,7 @@ import {
   storeAliasPath,
   storeFallbackHint,
   storeFirstStartNotice,
-  syncFolder,
-  syncFolderWarning,
+  storeFolderProblem,
   type StoreMigrationChoice,
   type StoreMigrationDeps,
   type StoreMigrationFailure,
@@ -389,9 +387,13 @@ function machine() {
   return { root, home, appData, source, target: sharedDataDir(home) };
 }
 
-/** De afhankelijkheden van `migrateForStore`: echt overzetten, met antwoorden van de gebruiker op een rij. */
-function storeFlow(m: ReturnType<typeof machine>, answers: StoreMigrationChoice[], opts: { failFirst?: number; picks?: (string | null)[]; syncOk?: boolean; viewProblem?: string | null } = {}) {
-  const log = { failures: [] as StoreMigrationFailure[], targets: [] as string[], refused: [] as string[], syncWarnings: [] as string[] };
+/**
+ * De afhankelijkheden van `migrateForStore` zoals de app ze geeft: echt overzetten, en voor een zelf
+ * gekozen map de weg van Instellingen (`planSwitch`, `switchDataDir`). De antwoorden van de gebruiker
+ * staan op een rij.
+ */
+function storeFlow(m: ReturnType<typeof machine>, answers: StoreMigrationChoice[], opts: { failFirst?: number; picks?: (string | null)[]; syncOk?: boolean; viewProblem?: string | null; stopSwitch?: boolean; platform?: NodeJS.Platform } = {}) {
+  const log = { failures: [] as StoreMigrationFailure[], targets: [] as string[], switched: [] as string[], refused: [] as string[], syncWarnings: [] as string[] };
   let attempts = 0;
   const deps: StoreMigrationDeps = {
     source: m.source,
@@ -401,6 +403,12 @@ function storeFlow(m: ReturnType<typeof machine>, answers: StoreMigrationChoice[
       log.targets.push(target);
       // de eerste poging(en) mislukken: geen ruimte op de schijf
       return migrateToSharedDir({ source, target, freeSpace: () => (attempts++ < (opts.failFirst ?? 1) ? 0 : 1e12) });
+    },
+    // een eigen "computer" voor de synchronisatiediensten: alleen wat er in de testmap staat telt
+    plan: (chosen) => planSwitch({ home: m.home, current: m.source, chosen, sync: { platform: process.platform, home: m.home, env: {}, exists: existsSync, readFile: (file) => readFileSync(file, 'utf8') } }),
+    switchTo: (target) => {
+      log.switched.push(target);
+      return switchDataDir({ home: m.home, source: m.source, target, action: 'kopieren', shouldStop: () => opts.stopSwitch === true });
     },
     viewProblem: () => opts.viewProblem ?? null,
     choose: async (failure) => {
@@ -413,9 +421,7 @@ function storeFlow(m: ReturnType<typeof machine>, answers: StoreMigrationChoice[
       log.syncWarnings.push(`${service}: ${dir}`);
       return opts.syncOk ?? false;
     },
-    remember: (dir) => writePointer(m.home, dir),
-    env: {},
-    platform: process.platform,
+    platform: opts.platform ?? process.platform,
   };
   return { deps, log };
 }
@@ -439,25 +445,67 @@ describe('Store-versie: het overzetten van de gegevens lukt niet', () => {
     expect(log.failures).toEqual([]);
   });
 
-  it('zelf een map kiezen: waarschuwing bij OneDrive, daarna een eigen map die de app onthoudt', async () => {
+  it('zelf een map kiezen: dezelfde weigeringen en waarschuwing als in Instellingen, daarna een eigen map die de app onthoudt', async () => {
     const m = machine();
     const oneDrive = join(m.home, 'OneDrive', 'Boekhouding');
+    const used = join(m.root, 'documenten');
+    const taken = join(m.root, 'andere-administratie');
     const own = join(m.root, 'schijf-d', 'Administratie');
-    mkdirSync(oneDrive, { recursive: true });
-    mkdirSync(own, { recursive: true });
-    const { deps, log } = storeFlow(m, ['kiezen', 'kiezen', 'kiezen', 'kiezen'], { picks: [null, m.source, oneDrive, own] });
+    for (const dir of [oneDrive, used, taken, own]) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(used, 'brief.txt'), 'x');
+    openDatabase(join(taken, 'boekhouding.sqlite')).close();
+    markComplete(taken);
+    const { deps, log } = storeFlow(m, ['kiezen', 'kiezen', 'kiezen', 'kiezen', 'kiezen', 'kiezen'], { picks: [null, m.source, used, taken, oneDrive, own] });
     const result = await migrateForStore(deps);
-    // 1: geannuleerd, 2: de oude map zelf (geweigerd), 3: OneDrive (gewaarschuwd, niet gebruikt), 4: eigen map
-    expect(log.failures).toHaveLength(4);
-    expect(log.refused).toEqual(['Dit is de oude map zelf. Kies een andere map.']);
+    // 1: geannuleerd, 2: de oude map zelf, 3: een map met andere bestanden, 4: een map met een administratie
+    // (hier alleen kopiëren, niet openen), 5: OneDrive (gewaarschuwd, niet gebruikt), 6: een lege eigen map
+    expect(log.failures).toHaveLength(6);
+    expect(log.refused).toHaveLength(3);
+    expect(log.refused[0]).toBe('Dit is de map die je nu al gebruikt.');
+    expect(log.refused[1]).toMatch(/staan al andere bestanden\. Kies een lege map/);
+    expect(log.refused[2]).toBe(`In ${taken} staat al een administratie. Kies een lege map; dan zet de app je gegevens erin.`);
     expect(log.syncWarnings).toEqual([`OneDrive: ${oneDrive}`]);
-    expect(log.targets).toEqual([m.target, own]);
-    expect(result).toMatchObject({ kind: 'gemigreerd', dir: own });
+    // het gewone overzetten is één keer geprobeerd; alleen de laatste keuze is gekopieerd
+    expect(log.targets).toEqual([m.target]);
+    expect(log.switched).toEqual([own]);
+    expect(result).toMatchObject({ kind: 'gekozen', dir: own, outcome: { status: 'gewisseld', action: 'kopieren' } });
     expect(existsSync(join(own, MARKER))).toBe(true);
     expect(existsSync(join(oneDrive, 'boekhouding.sqlite'))).toBe(false);
-    // app en koppeling vinden de gekozen map voortaan via de pointer
+    // de oude map blijft onder zijn eigen naam staan; app en koppeling vinden de gekozen map via de pointer
+    expect(existsSync(join(m.source, 'boekhouding.sqlite'))).toBe(true);
     expect(readPointer(m.home)).toBe(own);
     expect(resolveDataDir({ home: m.home, appData: m.appData })).toEqual({ kind: 'pointer', dir: own });
+  });
+
+  it('een map onder AppData kan niet: wat de Store-versie daar neerzet, verdwijnt bij verwijderen', async () => {
+    const m = machine();
+    const local = join(m.root, 'AppData', 'Local', 'Boekhouding');
+    mkdirSync(local, { recursive: true });
+    const { deps, log } = storeFlow(m, ['kiezen', 'afsluiten'], { picks: [local], platform: 'win32' });
+    expect(await migrateForStore(deps)).toEqual({ kind: 'afsluiten' });
+    expect(log.refused).toEqual(['Kies een map buiten AppData. Wat de versie uit de Microsoft Store daar neerzet, verdwijnt als je de app verwijdert.']);
+    expect(log.switched).toEqual([]);
+    expect(readPointer(m.home)).toBeNull();
+
+    const appData = 'C:\\Users\\Piet\\AppData\\Roaming';
+    expect(storeFolderProblem('C:\\Users\\Piet\\AppData\\Local\\Boekhouding', appData, 'win32')).toMatch(/buiten AppData/);
+    expect(storeFolderProblem('c:\\users\\piet\\appdata', appData, 'win32')).toMatch(/buiten AppData/);
+    expect(storeFolderProblem('C:\\Users\\Piet\\AppDataBackup', appData, 'win32')).toBeNull();
+    expect(storeFolderProblem('D:\\Administratie', appData, 'win32')).toBeNull();
+    // alleen Windows kent die omleiding
+    expect(storeFolderProblem('/home/piet/.config/boekhouding', '/home/piet/.config', 'linux')).toBeNull();
+  });
+
+  it('lukt het kopiëren naar de gekozen map niet, dan komt de vraag terug en is er niets vastgelegd', async () => {
+    const m = machine();
+    const own = join(m.root, 'schijf-d');
+    mkdirSync(own);
+    const { deps, log } = storeFlow(m, ['kiezen', 'afsluiten'], { picks: [own], stopSwitch: true });
+    expect(await migrateForStore(deps)).toEqual({ kind: 'afsluiten' });
+    expect(log.failures[1]).toMatchObject({ status: 'gestopt', target: own, source: m.source });
+    expect(readPointer(m.home)).toBeNull();
+    expect(existsSync(join(own, MARKER))).toBe(false);
+    expect(existsSync(join(m.source, 'boekhouding.sqlite'))).toBe(true);
   });
 
   it('de gewone gedeelde map aanwijzen is opnieuw proberen: geen map erin en geen pointer', async () => {
@@ -477,8 +525,9 @@ describe('Store-versie: het overzetten van de gegevens lukt niet', () => {
     const dropbox = join(m.home, 'Dropbox', 'Boekhouding');
     mkdirSync(dropbox, { recursive: true });
     const { deps, log } = storeFlow(m, ['kiezen'], { picks: [dropbox], syncOk: true });
-    expect(await migrateForStore(deps)).toMatchObject({ kind: 'gemigreerd', dir: dropbox });
+    expect(await migrateForStore(deps)).toMatchObject({ kind: 'gekozen', dir: dropbox });
     expect(log.syncWarnings).toEqual([`Dropbox: ${dropbox}`]);
+    expect(readPointer(m.home)).toBe(dropbox);
   });
 
   it('alleen bekijken: de oude map blijft zoals hij was en gaat alleen-lezen open', async () => {
@@ -548,46 +597,6 @@ describe('Store-versie: het overzetten van de gegevens lukt niet', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
-
-describe('een zelf gekozen map', () => {
-  it('herkent synchronisatiemappen (OneDrive, Dropbox, Google Drive, iCloud)', () => {
-    const env = { OneDrive: 'C:\\Users\\Piet\\OneDrive', OneDriveCommercial: 'D:\\Werk\\Bedrijf BV' };
-    expect(syncFolder('C:\\Users\\Piet\\OneDrive\\Documenten\\Boekhouding', env, 'win32')).toBe('OneDrive');
-    expect(syncFolder('c:\\users\\piet\\onedrive', env, 'win32')).toBe('OneDrive');
-    // de map van OneDrive voor bedrijven heet zoals het bedrijf: alleen via de omgeving te herkennen
-    expect(syncFolder('D:\\Werk\\Bedrijf BV\\Administratie', env, 'win32')).toBe('OneDrive');
-    expect(syncFolder('C:\\Users\\Piet\\OneDrive - Bedrijf BV\\Boekhouding', {}, 'win32')).toBe('OneDrive');
-    expect(syncFolder('C:\\Users\\Piet\\Dropbox\\Boekhouding', {}, 'win32')).toBe('Dropbox');
-    expect(syncFolder('G:\\Mijn Drive\\Boekhouding', {}, 'win32')).toBe('Google Drive');
-    expect(syncFolder('C:\\Users\\Piet\\iCloudDrive\\Boekhouding', {}, 'win32')).toBe('iCloud Drive');
-    expect(syncFolder('/home/piet/Dropbox/boekhouding', {}, 'linux')).toBe('Dropbox');
-    expect(syncFolder('C:\\Users\\Piet\\BoekhoudenVoorNiks', env, 'win32')).toBeNull();
-    expect(syncFolder('D:\\Administratie', env, 'win32')).toBeNull();
-    expect(syncFolder('C:\\Users\\Piet\\OneDriveBackup', {}, 'win32')).toBeNull();
-    expect(syncFolderWarning('C:\\Users\\Piet\\OneDrive\\Boekhouding', 'OneDrive')).toMatch(/gesynchroniseerd met OneDrive.*beschadigd/s);
-  });
-
-  it('weigert de oude map, AppData en een map waar al een administratie staat; een niet-lege map krijgt een eigen submap', () => {
-    const ctx = { source: 'C:\\Users\\Piet\\AppData\\Roaming\\boekhoudenvoorniks', appData: 'C:\\Users\\Piet\\AppData\\Roaming', platform: 'win32' as const };
-    expect(checkChosenFolder('C:\\Users\\Piet\\AppData\\Roaming\\boekhoudenvoorniks', ctx)).toMatchObject({ ok: false, reason: expect.stringMatching(/oude map zelf/) });
-    expect(checkChosenFolder('C:\\Users\\Piet\\AppData\\Local\\Boekhouding', ctx)).toMatchObject({ ok: false, reason: expect.stringMatching(/buiten AppData/) });
-    expect(checkChosenFolder('c:\\users\\piet\\appdata', ctx)).toMatchObject({ ok: false });
-    expect(checkChosenFolder('Boekhouding', ctx)).toMatchObject({ ok: false, reason: 'Kies een volledige map.' });
-    expect(checkChosenFolder('D:\\Administratie', ctx)).toEqual({ ok: true, target: 'D:\\Administratie' });
-
-    const root = tempDir();
-    const local = { source: join(root, 'oud'), appData: join(root, 'AppData', 'Roaming') };
-    const empty = join(root, 'leeg');
-    const used = join(root, 'documenten');
-    const taken = join(root, 'bezet');
-    for (const dir of [empty, used, taken]) mkdirSync(dir);
-    writeFileSync(join(used, 'brief.txt'), 'x');
-    writeFileSync(join(taken, 'boekhouding.sqlite'), 'x');
-    expect(checkChosenFolder(empty, local)).toEqual({ ok: true, target: empty });
-    expect(checkChosenFolder(used, local)).toEqual({ ok: true, target: join(used, 'BoekhoudenVoorNiks') });
-    expect(checkChosenFolder(taken, local)).toMatchObject({ ok: false, reason: expect.stringMatching(/staat al een administratie/) });
-  });
-});
 
 describe('eerste start van de Store-versie', () => {
   it('meldt één keer dat een oude installatie van de website weg moet of bijgewerkt moet worden', () => {

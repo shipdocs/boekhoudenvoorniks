@@ -3,6 +3,7 @@ import { setup } from './helpers';
 import { parseQuery } from '../src/search/search';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
 import type { OcrProvider } from '../src/intake/ocr';
+import { makePdf } from './pdf';
 
 const items = (lines: string[]) => lines.map((text, i) => ({ text, page: 1, bbox: [10, 20 + i * 20, 300, 34 + i * 20] as [number, number, number, number], confidence: 0.97 }));
 
@@ -102,6 +103,51 @@ describe('zoeken (#26)', () => {
     const avg = (performance.now() - t0) / 5;
     expect(avg).toBeLessThan(100);
     expect(s.search.search('artikel 9999')).toHaveLength(1);
+  });
+});
+
+describe('zoeken volgt de koppeling tussen bon en aankoop of betaling (#179)', () => {
+  const TRANSIP = ['TransIP BV', 'Factuurnummer F0000.2607.0000.1394', 'Factuurdatum 01-07-2026', 'Hosting glasvezelpakket 127,46', 'BTW 21% 127,46 26,77', 'Totaal 154,23'];
+
+  it('bon als bewijs bij een betaling: vanaf de bon naar de betaling en de boeking, en vanaf de betaling naar de bon', async () => {
+    const { s } = setup();
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-07-08', amount: -15423, description: 'Incasso domeinen', counterName: 'TRANSIP B.V.' }] });
+    const t = s.bank.list()[0]!;
+    s.bank.bookToAccount(t.id, { account: 'WBedKanSof', vatCode: 'hoog' });
+    expect(s.search.infoFor(`bank:${t.id}`)?.evidence).toBe(false);
+    const doc = await s.intake.addEvidence('transip.pdf', makePdf(TRANSIP), t.id);
+    // een woord dat alleen op de bon staat: het resultaat is de betaling, met de bon en de boeking eraan
+    const [viaBon] = s.search.search('glasvezelpakket');
+    expect(viaBon).toMatchObject({ key: `bank:${t.id}`, info: { status: 'Verwerkt', evidence: true } });
+    expect(viaBon!.links.map((l) => [l.kind, l.id])).toEqual(expect.arrayContaining([['bank', t.id], ['document', doc.id], ['boeking', s.bank.get(t.id).matched_journal_entry_id]]));
+    // een woord dat alleen op het afschrift staat: de bon hangt er ook aan
+    const [viaBank] = s.search.search('domeinen');
+    expect(viaBank!.key).toBe(`bank:${t.id}`);
+    expect(viaBank!.links).toContainEqual({ kind: 'document', id: doc.id, label: 'bon/factuur' });
+
+    // koppeling ongedaan gemaakt: de bon staat weer los, met de status in gewone woorden
+    await s.intake.unlink(doc.id, '2026-07-10');
+    const [los] = s.search.search('glasvezelpakket');
+    expect(los).toMatchObject({ key: `document:${doc.id}`, info: { status: 'Nog controleren', attention: true } });
+    expect(s.search.infoFor(`bank:${t.id}`)?.evidence).toBe(false);
+    expect(s.search.search('domeinen')[0]!.links.some((l) => l.kind === 'document')).toBe(false);
+  });
+
+  it('aankoop met twee bestanden: beide te vinden, het hoofdbewijsstuk eerst; de status zegt wat er gebeurd is', async () => {
+    const { s } = setup();
+    const eerste = await s.intake.add('transip.pdf', makePdf(TRANSIP), '2026-07-02', { autoConfirm: false });
+    s.intake.confirm(eerste.id, { supplier: 'TransIP', date: '2026-07-01', total: 15423, invoiceNumber: 'F0000.2607.0000.1394', categoryKey: 'software', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    const kopie = await s.intake.add('transip-kopie.pdf', makePdf([...TRANSIP, 'Kopie factuur']), '2026-07-03');
+    const purchase = s.purchases.list()[0]!;
+    const [g] = s.search.search('glasvezelpakket');
+    expect(g!.key).toBe(`inkoop:${purchase.id}`);
+    expect(g!.links.filter((l) => l.kind === 'document')).toEqual([
+      { kind: 'document', id: eerste.id, label: 'bon/factuur' },
+      { kind: 'document', id: kopie.id, label: 'ook bewaard: transip-kopie.pdf' },
+    ]);
+    expect(s.search.infoFor(`document:${eerste.id}`)?.status).toBe('Nieuwe aankoop geboekt');
+    expect(s.search.infoFor(`document:${kopie.id}`)?.status).toBe('Dubbel document — niet geboekt');
+    expect(s.search.infoFor(`inkoop:${purchase.id}`)?.evidence).toBe(true);
   });
 });
 
