@@ -89,6 +89,7 @@ describe('"Waarom?" en autopilot (#28, #29)', () => {
     expect(s.ledger.balance('WKprInkMat')).toBe(before - 10000);
     expect(s.intake.get(d.id).status).toBe('controle');
     expect(s.memory.isAutomatic(s.memory.get('Bouwmaat'))).toBe(false);
+    s.db.prepare(`UPDATE automation_log SET created_at = '2026-09-20 12:00:00'`).run(); // het logboek noteert het echte moment; deze test speelt in september 2026
     expect(s.inbox.month('2026-09', '2026-09-25').automatic[0]!.status).toBe('klopt_niet');
     expect(() => s.inbox.correctAutomation(entry!.id)).toThrow(/al teruggedraaid/);
     expect(s.ledger.checkIntegrity().balanced).toBe(true);
@@ -128,6 +129,7 @@ describe('"Waarom?" en autopilot (#28, #29)', () => {
     s.memory.setAutomatic(s.memory.get('SHELL')!.supplier_key, true);
     s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-20', amount: -6050, description: 'Tank', counterName: 'SHELL' }] });
     expect(s.inbox.autoProcess('2026-09-20').booked).toBe(1);
+    s.db.prepare(`UPDATE automation_log SET created_at = '2026-09-20 12:00:00'`).run(); // het logboek noteert het echte moment; deze test speelt in september 2026
     const month = s.inbox.month('2026-09', '2026-09-20');
     const home = s.inbox.home('2026-09-20');
     // tellers kloppen met de lijsten
@@ -159,6 +161,7 @@ describe('"Waarom?" en autopilot (#28, #29)', () => {
     expect(task.why).toMatch(/^Omdat /);
     s.bank.matchInvoice(task.ref.bankTransactionId!, task.ref.invoiceId!);
     s.inbox.recordUserAction(task, 'klopt');
+    s.db.prepare(`UPDATE automation_log SET created_at = '2026-09-20 12:00:00'`).run(); // het logboek noteert het echte moment; deze test speelt in september 2026
     expect(s.inbox.home('2026-09-25').monthCounts.byUser).toBe(1);
   });
 
