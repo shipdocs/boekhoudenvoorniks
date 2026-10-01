@@ -20,7 +20,7 @@ Belangrijke feiten:
 - Fiscaal: KOR (btw op inkopen naar de kosten), ICP-opgaaf met goederen en diensten apart, aftrekposten (afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek) en een schatting van de inkomstenbelasting. Altijd laten controleren door een boekhouder.
 - Uitwisseling met de boekhouder (vanaf versie 0.7): de klant stuurt een periode (kwartaal of jaar) versleuteld naar het kantoor van zijn boekhouder (uitnodiging met controlecode, alleen dat kantoor kan het openen), de boekhouder corrigeert in BoekhoudenVoorNiks (correctieboekingen, terugdraaien, grootboekrekeningen) en stuurt een antwoord terug; bij het inlezen is de periode afgesloten en blijft het werk van daarna staan. Loopt niet via servers van de maker.
 - Periode afsluiten en meerdere administraties op één computer (vanaf versie 0.7).
-- Huidige versie: 0.7.6. Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
+- Huidige versie: 1.0.0. Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
 - Broncode: https://github.com/shipdocs/boekhoudenvoorniks
 - Uitgever: ShipDocs, Middelweg 211, 1911 EE Uitgeest, Nederland. KvK 95207341, btw NL005138041B29. info@shipdocs.app, +31 20 369 5765.
 
