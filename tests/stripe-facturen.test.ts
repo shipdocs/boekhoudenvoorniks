@@ -110,7 +110,7 @@ describe('facturen van Stripe', () => {
     expect(doc.classification?.vatCode).toBe('buiten-eu');
   });
 
-  it('betaling al rechtstreeks geboekt: de factuur wordt bewijsstuk, ook bij een andere schrijfwijze en 13 dagen later betaald', async () => {
+  it('betaling al rechtstreeks geboekt: de app stelt voor de factuur als bewijsstuk te koppelen, ook bij een andere schrijfwijze en 13 dagen later betaald', async () => {
     const csv = ['KEY,FREQ,CURRENCY,CURRENCY_DENOM,EXR_TYPE,EXR_SUFFIX,TIME_PERIOD,OBS_VALUE', 'EXR.D.USD.EUR.SP00.A,D,USD,EUR,SP00,A,2026-07-31,1.1000'].join('\n');
     const ecb: FetchLike = (async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => csv })) as FetchLike;
     const { s } = setup({ fetch: ecb });
@@ -123,8 +123,11 @@ describe('facturen van Stripe', () => {
     const entries = s.db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get() as { n: number };
     const lines = ['Invoice', 'Invoice number EL55AA01-0007', 'Date of issue August 1, 2026', 'Eleven Labs Inc. @elevenlabs Bill to', '169 Example Ave Shipdocs', 'United States Netherlands', 'Description Qty Unit price Amount', 'Creator 1 $55.00 $55.00', 'Total $55.00', 'Amount due $55.00 USD'];
     const doc = await s.intake.add('Invoice-EL55AA01-0007.pdf', makePdf(lines), '2026-08-20', { autoConfirm: false });
-    expect(doc.status).toBe('verwerkt');
-    expect(doc.classification?.reasons.join(' ')).toMatch(new RegExp(`banktransactie #${tx.id}`));
+    // nooit stil koppelen (#179): eerst de vraag, daarna pas het bewijs bij de betaling
+    expect(doc.status).toBe('controle');
+    expect(s.intake.pending(doc)).toMatchObject({ kind: 'evidence', candidate: `bank:${tx.id}` });
+    const linked = await s.intake.decide(doc.id, 'ja');
+    expect(linked).toMatchObject({ status: 'verwerkt', outcome: 'bewijs-gekoppeld', link: { target: { kind: 'bank', id: tx.id }, origin: 'bewijs', is_primary: true } });
     expect(s.purchases.list()).toHaveLength(0);
     expect((s.db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get() as { n: number }).n).toBe(entries.n);
   });

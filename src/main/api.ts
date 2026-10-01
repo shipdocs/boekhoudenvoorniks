@@ -33,6 +33,7 @@ import { PURCHASE_VAT_RATES, SALES_VAT_RATES } from '../shared/vat';
 import { ACCOUNTS, type AccountCategory } from '../core-ledger/accounts';
 import { TRADES } from '../shared/trades';
 import type { Confirmation } from '../intake/intake';
+import type { LinkTarget } from '../documents/evidence-links';
 import type { JobStatus } from '../jobs/jobs';
 import type { LineInput } from '../documents/totals';
 import { documentProposal, type Task } from '../inbox/inbox';
@@ -145,6 +146,10 @@ export interface HostContext {
  * Alle argumenten komen uit de renderer en worden door de services zelf gevalideerd.
  */
 export function createApi(s: Services, host: HostContext) {
+  const linkTarget = (kind: string, id: number): LinkTarget => {
+    if (kind !== 'aankoop' && kind !== 'bank') throw new ValidationError('Kies een aankoop of een betaling');
+    return { kind, id: Number(id) };
+  };
   const cliKind = (kind: string): CliKind => {
     if (kind !== 'claude-code' && kind !== 'codex') throw new Error('Onbekend programma');
     return kind;
@@ -223,13 +228,20 @@ export function createApi(s: Services, host: HostContext) {
         });
         return;
       }
-      case 'document-review:dubbel': {
-        const issue = s.intake.get(r.documentId!).issues.find((i) => i.field === 'duplicate');
-        const match = issue?.suggestion as { documentId: number | null; purchaseId: number | null } | undefined;
-        if (!match) return { navigate: { screen: 'document', id: r.documentId } };
-        s.intake.markDuplicate(r.documentId!, match);
+      case 'document-review:dubbel':
+      case 'document-review:bewijs':
+      case 'document-review:nee': {
+        // alleen het voorstel dat de gebruiker zag (#179): is het intussen een ander, dan eerst opnieuw bekijken
+        const pending = s.intake.pending(s.intake.get(r.documentId!));
+        if (!pending || pending.kind !== (actionId === 'bewijs' ? 'evidence' : actionId === 'dubbel' ? 'duplicate' : pending.kind)) return { navigate: { screen: 'document', id: r.documentId } };
+        await s.intake.decide(r.documentId!, actionId === 'nee' ? 'nee' : 'ja', r.candidate);
         return;
       }
+      case 'document-notice:klaar':
+        s.intake.dismissNotice(r.noticeId!);
+        return;
+      case 'document-notice:open':
+        return r.documentId ? { navigate: { screen: 'document', id: r.documentId } } : { navigate: { screen: 'aankopen' } };
       case 'invoice-overdue:herinnering':
         await s.sender.sendReminder(r.invoiceId!);
         return;
@@ -724,7 +736,24 @@ export function createApi(s: Services, host: HostContext) {
       get: (id: number) => s.intake.get(id),
       confirm: (id: number, c: Confirmation) => s.intake.confirm(id, c),
       ignore: (id: number) => s.intake.ignore(id),
-      markDuplicate: (id: number, match: { documentId: number | null; purchaseId: number | null }) => s.intake.markDuplicate(id, match),
+      /** Het antwoord op "dezelfde aankoop?" of "alleen als bewijs koppelen?" (#179): ja, nee of later. */
+      decide: (id: number, answer: 'ja' | 'nee' | 'later', candidate?: string) => {
+        if (answer !== 'ja' && answer !== 'nee' && answer !== 'later') throw new ValidationError('Kies ja, nee of later');
+        return s.intake.decide(Number(id), answer, candidate === undefined ? undefined : String(candidate));
+      },
+      /** Het voorstel dat op een keuze wacht, met wat ernaast gelegd kan worden (het andere document, of de aankoop of betaling). */
+      pending: (id: number) => s.intake.pending(s.intake.get(id)),
+      /** Waar een document bij hoort, en welke bestanden daar nog meer bij horen (het hoofdbewijsstuk eerst). */
+      linked: (id: number) => {
+        const link = s.intake.links.forDocument(id);
+        return link ? { link, target: s.intake.links.describe(link.target), files: s.intake.links.forTarget(link.target) } : null;
+      },
+      /** De bonnen bij een aankoop of bankbetaling (het hoofdbewijsstuk eerst). */
+      forTarget: (kind: 'aankoop' | 'bank', id: number) => s.intake.links.forTarget(linkTarget(kind, id)),
+      /** "Koppeling ongedaan maken": de bon gaat terug naar "Nog controleren"; de boeking blijft zoals hij is. */
+      unlink: (id: number) => s.intake.unlink(Number(id)),
+      /** Een document dat er al in staat en nog nergens bij hoort, zelf als bewijs koppelen (er wordt niets geboekt). */
+      linkExisting: (id: number, kind: 'aankoop' | 'bank', targetId: number) => s.intake.linkExisting(Number(id), linkTarget(kind, targetId)),
       /** Bestand als data-URL voor de controle-weergave (document links, velden rechts). */
       file: (id: number) => {
         const d = s.intake.get(id);
@@ -780,8 +809,10 @@ export function createApi(s: Services, host: HostContext) {
       remove: (id: number) => {
         const p = s.purchases.get(id);
         if (p.amount_paid !== 0) throw new ValidationError('Deze aankoop is (deels) betaald. Maak eerst de betaling ongedaan.');
+        // alle bestanden van deze aankoop (ook een kopie) blijven bewaard, maar komen niet terug als vraag
+        const files = s.intake.links.forTarget({ kind: 'aankoop', id }).map((f) => f.document_id);
         s.purchases.cancel(id, p.invoice_date);
-        if (p.document_id) s.db.prepare(`UPDATE documents SET status = 'genegeerd' WHERE id = ?`).run(p.document_id);
+        for (const documentId of new Set([...files, ...(p.document_id ? [p.document_id] : [])])) s.db.prepare(`UPDATE documents SET status = 'genegeerd' WHERE id = ?`).run(documentId);
       },
       /** Staat de betaling van deze aankoop al als kosten op een van je rekeningen? (dan is hij dubbel) */
       bookedPayment: (id: number) => {

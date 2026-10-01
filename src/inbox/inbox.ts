@@ -7,7 +7,8 @@ import type { MatchingEngine } from '../import/matching';
 import type { InvoiceService } from '../documents/invoices';
 import type { QuoteService } from '../documents/quotes';
 import type { JobService } from '../jobs/jobs';
-import type { IntakeDocument, IntakeService } from '../intake/intake';
+import { EVIDENCE_QUESTION, type IntakeDocument, type IntakeService } from '../intake/intake';
+import { ALREADY_PRESENT, VIEW_EXISTING } from '../shared/document-outcome';
 import { PROPOSED_BY_LABEL, type Classification } from '../intake/classify';
 import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
 import type { PurchaseService } from '../documents/purchases';
@@ -42,6 +43,7 @@ export type TaskKind =
   | 'bank-income'
   | 'bank-sale'
   | 'document-review'
+  | 'document-notice'
   | 'invoice-overdue'
   | 'invoice-concept'
   | 'job-done'
@@ -102,9 +104,11 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
+  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
-    proposal?: string };
+    proposal?: string;
+    /** waar de vraag "dezelfde aankoop?" of "alleen als bewijs?" over gaat (#179); is dat intussen iets anders, dan gebeurt er niets */
+    candidate?: string };
 }
 
 export interface HomeData {
@@ -592,21 +596,38 @@ export class InboxService {
     }
 
     for (const d of this.intake.list('controle')) {
-      const bad = d.issues.find((i) => i.severity === 'fout');
+      // eerst de vraag of de bon bij iets hoort dat er al staat (#179): niets koppelen of boeken zonder antwoord
+      const pending = this.intake.pending(d);
+      const bad = pending ? d.issues.find((i) => i.field === pending.kind) : d.issues.find((i) => i.severity === 'fout');
       const name = d.result?.supplier?.value ?? d.original_name;
+      const paid = pending?.kind === 'evidence' && pending.target ? `Op ${formatDateNl(pending.target.date)} is ${formatEuro(pending.target.amount)} betaald aan ${pending.target.supplier}. ` : '';
       tasks.push({
         key: `doc-${d.id}`,
         kind: 'document-review',
         icon: '📷',
         title: `${name}${d.result?.total ? ' ' + formatEuro(d.result.total.value) : ''}`,
-        question: bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}. Alles klopt?` : 'Even controleren?',
+        question: pending?.kind === 'evidence' ? `${paid}${EVIDENCE_QUESTION}` : bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}. Alles klopt?` : 'Even controleren?',
         amount: d.result?.total?.value,
-        actions: bad?.field === 'duplicate'
-          ? [{ id: 'dubbel', label: 'Ja, zelfde', primary: true }, { id: 'open', label: 'Nee, bekijken' }]
+        actions: pending
+          ? [{ id: pending.kind === 'evidence' ? 'bewijs' : 'dubbel', label: pending.kind === 'evidence' ? 'Ja, alleen als bewijs' : 'Ja, dezelfde aankoop', primary: true }, { id: 'nee', label: 'Nee, andere aankoop' }, { id: 'open', label: 'Bekijken' }]
           : bad ? [{ id: 'open', label: 'Bekijken', primary: true }] : [{ id: 'klopt', label: 'Ja', primary: true }, { id: 'open', label: 'Aanpassen' }],
         group: bad ? undefined : { key: 'document-klopt', label: 'Alle bonnetjes bevestigen' },
         why: d.classification ? `Omdat ${d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(', ')}.` : undefined,
-        ref: { documentId: d.id, categoryKey: d.classification?.business === false ? undefined : d.classification?.categoryKey, proposal: documentProposal(d) },
+        ref: { documentId: d.id, categoryKey: d.classification?.business === false ? undefined : d.classification?.categoryKey, proposal: documentProposal(d), candidate: pending?.candidate },
+      });
+    }
+
+    // zonder jou binnengekomen (e-mail) en het stond er al in: laten zien, er is niets opnieuw geboekt
+    for (const n of this.intake.notices()) {
+      tasks.push({
+        key: `doc-notice-${n.id}`,
+        kind: 'document-notice',
+        icon: '📎',
+        title: ALREADY_PRESENT,
+        question: `"${n.original_name}" kwam binnen per e-mail${n.sender ? ` van ${n.sender}` : ''}${n.kind === 'dubbel' ? ', maar dezelfde bon of factuur staat al in de app. Beide bestanden zijn bewaard' : ', maar precies dit bestand staat al in de app'}. Er is niets opnieuw geboekt.`,
+        actions: [{ id: 'open', label: VIEW_EXISTING, primary: true }, { id: 'klaar', label: 'Gezien' }],
+        priority: 3,
+        ref: { noticeId: n.id, documentId: n.existing_document_id ?? undefined, purchaseId: n.existing_document_id ? undefined : n.purchase_invoice_id ?? undefined },
       });
     }
 
@@ -992,7 +1013,10 @@ export class InboxService {
       'bank-own:klopt': 'Geen omzet en geen kosten: geld verplaatst tussen je eigen rekeningen.',
       'bank-income:open': 'Je kiest waar het geld voor was: een factuur, een verkoop, rente, een refund, privé, …',
       'document-review:klopt': cat ? `De bon wordt geboekt als ${cat}.` : 'De bon wordt geboekt zoals voorgesteld.',
-      'document-review:dubbel': 'De bon wordt niet nog een keer geboekt.',
+      'document-review:dubbel': 'Beide bestanden blijven bewaard; het best leesbare wordt het bewijs. Er wordt niets opnieuw geboekt.',
+      'document-review:bewijs': 'De bon wordt bij de betaling bewaard. Er komt geen nieuwe kosten- of btw-boeking bij.',
+      'document-review:nee': 'Dit voorstel vervalt. Je controleert de bon daarna zoals een nieuwe aankoop.',
+      'document-notice:klaar': 'De melding verdwijnt. Het document blijft bewaard.',
       'document-review:open': 'Je ziet de bon en past aan wat niet klopt.',
       'quote-expired:akkoord': 'Er komt een klus bij voor deze offerte; als het werk klaar is maak je de factuur.',
       'quote-expired:afgewezen': 'De offerte gaat naar afgewezen. In je boekhouding verandert niets.',
