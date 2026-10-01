@@ -7,12 +7,15 @@
  * POST /__reset        lege administratie (nieuwe map), voor elke test; body {"licenses":true} = licenties aan,
  *                      met een nagebootste licentie-Worker (echte Ed25519-handtekening, eigen sleutelpaar)
  * POST /__downloads    de map die in de test de Downloads-map is (leeg aangemaakt per test); de test zet er bestanden in
+ * POST /__opened       de bijlagen die geopend zijn: het pad uit de database en de inhoud van het bestand (base64)
  * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
  * POST /__store        de versie uit de Microsoft Store nabootsen: body {"on":true} en eventueel "readOnly";
  *                      geeft terug wat er gebeurde (toestemming voor lokaal lezen, "Opnieuw proberen")
  * POST /__datafolder   body {"pick":{"name","kind"}} = de map die het keuzevenster "teruggeeft" (kind: leeg, vol of
  *                      compleet; null = annuleren), {"custom":true} = de app werkt uit een zelf gekozen map,
  *                      {"oldStandard":true} = in de standaardmap staat nog een administratie; geeft wat er bevestigd is
+ * POST /__scanner      bonnenscanner: body {"folder": "..."} = de map die "Map kiezen…" oplevert; geeft de tekst van
+ *                      de laatst getoonde QR-code terug, zodat de test zich als telefoon kan melden
  * alles anders         bestanden uit dist/renderer
  */
 const http = require('node:http');
@@ -26,6 +29,7 @@ const { openDatabase } = require(path.join(ROOT, 'main/db/database.js'));
 const { createServices, MemorySecretStore } = require(path.join(ROOT, 'main/services.js'));
 const { createApi } = require(path.join(ROOT, 'main/main/api.js'));
 const { wipeDatabase } = require(path.join(ROOT, 'main/main/reset.js'));
+const { deleteAttachment, resolveAttachmentPath, saveAttachment } = require(path.join(ROOT, 'main/main/attachments.js'));
 const { seedDemo } = require(path.join(ROOT, 'main/demo/demo.js'));
 const { Administrations, readAdministrationFile } = require(path.join(ROOT, 'main/main/administrations.js'));
 const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js'));
@@ -34,6 +38,7 @@ const { ExchangeService, sanitizeForExchange } = require(path.join(ROOT, 'main/e
 const { generateOfficeKeys } = require(path.join(ROOT, 'main/exchange/crypto.js'));
 const { folderAccess } = require(path.join(ROOT, 'main/main/statement-files.js'));
 const { markComplete, planSwitch, sharedDataDir } = require(path.join(ROOT, 'main/main/data-dir.js'));
+const { Bonnenscanner } = require(path.join(ROOT, 'main/scanner/scanner.js'));
 const Database = require('better-sqlite3');
 /** het kantoor op deze "computer" (in de app: kantoor.json in de gegevensmap) */
 let officeProfile = null;
@@ -44,10 +49,20 @@ const secretsFor = (dbFile) => {
   return secretStores.get(dbFile);
 };
 
+/**
+ * Bonnenscanner: het echte ontvangstpunt, in de test alleen op 127.0.0.1 (zonder mDNS). `scannerPlatform`
+ * doet alsof de app op Windows draait (uitleg over de firewall); `pickedFolder` is wat het keuzevenster geeft.
+ */
+let scanner = null;
+let lastPairing = null;
+let pickedFolder = null;
+let scannerPlatform = 'linux';
+
 /** zoals de app: de huidige administratie sluiten en een andere openen */
 function openAdmin(key) {
   const admins = new Administrations(dir);
   admins.select(key);
+  void scanner?.stop();
   db.close();
   file = path.join(admins.dirFor(key), 'boekhouding.sqlite');
   init(false);
@@ -134,12 +149,12 @@ function completeFolder(p) {
 }
 const planFolder = (chosen, copyToStandard) => planSwitch({ home: folders.home, current: dir, chosen, copyToStandard });
 
+/** zoals de app: bijlagen in de map van de open administratie, met het relatieve pad in de database */
 async function storeFile(name, data) {
-  const p = path.join(dir, 'bijlagen', `${Date.now()}-${name.replace(/[^\w.-]+/g, '_')}`);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, Buffer.from(data));
-  return p;
+  return saveAttachment(path.dirname(file), name, data);
 }
+/** de bijlagen die de test "opende" (in de app: met het programma van de computer) */
+let openedAttachments = [];
 
 function init(fresh) {
   if (fresh) {
@@ -160,13 +175,33 @@ function init(fresh) {
     secrets: secretsFor(file),
     fetch: async () => { throw new Error('geen netwerk in e2e-tests'); },
     storeFile,
+    removeFile: (p) => deleteAttachment(path.dirname(file), p),
     statementFiles: folderAccess,
     // alleen voor een test van het abonnement; standaard staan licenties uit ('' = uit, ook nu de app een echte sleutel heeft)
     licensePublicKey: licensing?.publicKey ?? process.env.E2E_LICENSE_PUBLIC_KEY ?? '',
   });
   let smtpPassword = null;
+  scanner = new Bonnenscanner({
+    db,
+    secrets: secretsFor(file),
+    intake: services.intake,
+    settings: services.settings,
+    spoolDir: path.join(path.dirname(file), 'bonnenscanner'),
+    protectedDirs: [dir],
+    interfaces: () => [{ address: '127.0.0.1', netmask: '255.0.0.0' }],
+    platform: scannerPlatform,
+  });
+  const pair = scanner.pair.bind(scanner);
+  scanner.pair = async () => {
+    const p = await pair();
+    lastPairing = p.payload;
+    return p;
+  };
+  const current = scanner;
+  void current.start();
   api = createApi(services, {
     appVersion: () => '0.0.0-e2e',
+    scanner: { service: () => current, pickFolder: async () => pickedFolder },
     licenseApi: licensing ? fakeLicenseApi() : undefined,
     exchange: {
       bundle: () => createBackupBundle(db, path.dirname(file), (copy) => {
@@ -253,9 +288,14 @@ function init(fresh) {
       return p;
     },
     storeAttachment: storeFile,
-    readAttachment: (p) => fs.readFileSync(p),
+    readAttachment: (p) => fs.readFileSync(resolveAttachmentPath(path.dirname(file), p)),
     reconfigureLocalAi() {},
-    async openPath() {},
+    // zoals de app: alleen een bijlage van de open administratie, en het bestand moet er staan
+    async openPath(p) {
+      const target = resolveAttachmentPath(path.dirname(file), p);
+      if (!fs.existsSync(target)) throw new Error('Het bestand is niet gevonden');
+      openedAttachments.push({ stored: p, content: fs.readFileSync(target).toString('base64') });
+    },
     async openExternal() {},
     setSmtpPassword: (pw) => { smtpPassword = pw || null; },
     hasSmtpPassword: () => smtpPassword !== null,
@@ -283,6 +323,7 @@ function init(fresh) {
       get consent() { return store.on ? { runtimeVersion: 'b0000', given: () => store.consent, give: () => { store.consent = true; } } : undefined; },
     },
     async resetData(withDemo) {
+      await current.stop();
       const backup = await wipeDatabase(db, file, path.join(dir, 'backups'));
       init(false);
       if (withDemo) seedDemo(services);
@@ -313,14 +354,20 @@ http
         updateInstalled = false;
         restoreCalls = [];
         store = noStore();
+        openedAttachments = [];
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         resetFolders();
+        await scanner?.stop();
+        lastPairing = null;
+        pickedFolder = null;
+        scannerPlatform = (body && JSON.parse(body).scannerPlatform) || 'linux';
         init(true);
         return res.end('{"ok":true}');
       }
       if (req.url === '/__sent') return res.end(JSON.stringify({ ok: sent }));
       if (req.url === '/__downloads') return res.end(JSON.stringify({ ok: downloadsDir() }));
       if (req.url === '/__restore') return res.end(JSON.stringify({ ok: restoreCalls }));
+      if (req.url === '/__opened') return res.end(JSON.stringify({ ok: openedAttachments }));
       if (req.url === '/__pay') {
         const a = licensing?.accounts.get(licensing.lastStarted);
         if (a) a.paid = true;
@@ -341,6 +388,10 @@ http
           if (input.pick?.kind === 'vol') fs.writeFileSync(path.join(folders.pick, 'vakantie.jpg'), 'foto');
         }
         return res.end(JSON.stringify({ ok: { applied: folders.applied, root: folders.root } }));
+      }
+      if (req.url === '/__scanner') {
+        if (body && 'folder' in JSON.parse(body)) pickedFolder = JSON.parse(body).folder;
+        return res.end(JSON.stringify({ ok: { payload: lastPairing } }));
       }
       if (req.url === '/__update') {
         if (body) updateStatus = { ...updateStatus, ...JSON.parse(body) };

@@ -62,8 +62,9 @@ geteste installer in de bevinding.
    ☐ geslaagd ☐ niet geslaagd — bevinding: ______________________________
 
 5. Open één van de bijlagen (bijvoorbeeld een bon bij Aankopen of de PDF van een verkoopfactuur).
-   Het bestand opent gewoon in de juiste kijker: de bijlagepaden zijn tijdens de migratie naar de
-   nieuwe map bijgewerkt.
+   Het bestand opent gewoon in de juiste kijker: de bijlagepaden staan relatief aan de map van de
+   administratie (paden uit een oudere versie zet de app om zodra hij de administratie opent), dus ze
+   kloppen ook in de nieuwe map.
 
    Resultaat: een bijlage opent
    ☐ geslaagd ☐ niet geslaagd — bevinding: ______________________________

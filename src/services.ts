@@ -51,7 +51,7 @@ export interface ServiceDeps {
   mailerFactory: () => Promise<Mailer>;
   secrets: SecretStore;
   fetch: FetchLike;
-  /** slaat een bijlage/document op en geeft het pad terug */
+  /** slaat een bijlage/document op en geeft het pad terug zoals het in de database komt: relatief aan de map van de administratie */
   storeFile: (name: string, data: Uint8Array) => Promise<string>;
   /** haalt een net bewaard bestand weer weg als het document toch niet vastgelegd kon worden (geen los bestand achterlaten) */
   removeFile?: (path: string) => void;

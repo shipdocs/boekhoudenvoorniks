@@ -9,11 +9,12 @@ import { AssistantCard } from './Assistant';
 import { AdministrationsSettings } from './Administrations';
 import { DataFolderSettings } from './DataFolder';
 import { OfficeSettings } from './Exchange';
+import { ScannerSettings } from './Scanner';
 import { businessEffect } from '../../shared/business-share';
 import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 import { ONLINE_HELP } from '../../shared/online-help';
 
-type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
+type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'scanner' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
 
 const TABS: [Tab, string][] = [
   ['bedrijf', 'Je bedrijf'],
@@ -22,6 +23,7 @@ const TABS: [Tab, string][] = [
   ['btw', 'Btw'],
   ['categorieen', 'Categorieën'],
   ['koppelingen', 'Koppelingen'],
+  ['scanner', 'Telefoon & bonnenmap'],
   ['ai', 'Automatisch & herkenning'],
   ['backup', 'Back-up, demo & updates'],
   ['administraties', 'Administraties'],
@@ -272,6 +274,7 @@ export function SettingsScreen() {
       )}
 
       {tab === 'koppelingen' && <Integrations />}
+      {tab === 'scanner' && <ScannerSettings />}
       {tab === 'ai' && section(
         <>
           <Field label="Hoe automatisch?" hint="wat de app zelf mag afhandelen">

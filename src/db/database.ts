@@ -1,14 +1,34 @@
 import Database from 'better-sqlite3';
 import { migrations } from './migrations';
+import { relativizeAttachmentPaths } from './attachment-paths';
 
 export type Db = Database.Database;
 
-export function openDatabase(filename: string): Db {
+export function openDatabase(filename: string, log: (message: string) => void = console.warn): Db {
   const db = new Database(filename);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   migrate(db);
+  relativizeAttachments(db, log);
   return db;
+}
+
+/**
+ * Bijlagepaden uit een oudere versie (absoluut) omzetten naar relatieve paden. Dat gebeurt bij elke
+ * keer openen en niet in een migratie: een migratie draait één keer, terwijl een oudere versie van de
+ * app die deze administratie daarna nog opent, weer absolute paden schrijft. Is er niets om te zetten,
+ * dan wordt er niets geschreven. Lukt het niet, dan gaat de administratie toch open: de oude paden
+ * werken nog zolang de map niet verhuist, en de volgende keer openen probeert het opnieuw.
+ */
+function relativizeAttachments(db: Db, log: (message: string) => void): void {
+  try {
+    const report = relativizeAttachmentPaths(db);
+    if (report.converted > 0) log(`${report.converted} bijlagepad(en) omgezet naar een pad binnen de map van de administratie`);
+    // niet omzetten en niet weggooien: het pad blijft in de database staan, zodat het bestand terug te vinden is
+    for (const kept of report.kept) log(`Bijlagepad buiten de map bijlagen blijft staan zoals het is (${kept.table} ${kept.id}): ${kept.path}`);
+  } catch (e) {
+    log(`Bijlagepaden omzetten is niet gelukt: ${(e as Error).message}`);
+  }
 }
 
 /**

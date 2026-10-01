@@ -6,7 +6,10 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../src/db/database';
 import { createServices, MemorySecretStore } from '../src/services';
+import { isStoredAttachmentPath } from '../src/db/attachment-paths';
+import { resolveAttachmentPath } from '../src/main/attachments';
 import { rebaseAttachmentPaths } from '../src/main/backup';
+import { administrationOnDisk } from './helpers';
 import {
   CHOICE_FILE,
   DataDirError,
@@ -46,7 +49,10 @@ function machine() {
   return { root, home, appData, env: { home, appData }, shared: sharedDataDir(home), oldNew: join(appData, 'boekhoudenvoorniks'), oldOld: join(appData, 'gratis-boekhouden') };
 }
 
-/** Een echte administratie met een aankoop (bijlage) en een ingelezen document, in `dir`. */
+/**
+ * Een echte administratie met een aankoop (bijlage) en een ingelezen document, in `dir`. De bijlagepaden
+ * staan er absoluut in, zoals een versie t/m 0.7.6 ze opsloeg.
+ */
 async function administration(dir: string, label: string): Promise<void> {
   mkdirSync(join(dir, 'bijlagen', '2026'), { recursive: true });
   const s = createServices(openDatabase(join(dir, 'boekhouding.sqlite')), {
@@ -110,6 +116,19 @@ function attachmentPaths(dbFile: string): string[] {
   } finally {
     db.close();
   }
+}
+
+/**
+ * De bestanden van alle bijlagen van de administratie in `adminDir`, zoals de app ze vindt: de
+ * administratie openen (paden uit een oudere versie worden dan relatief) en elk opgeslagen pad opzoeken.
+ */
+function openedAttachments(adminDir: string): string[] {
+  const dbFile = join(adminDir, 'boekhouding.sqlite');
+  openDatabase(dbFile, () => undefined).close();
+  return attachmentPaths(dbFile).map((stored) => {
+    expect(isStoredAttachmentPath(stored)).toBe(true);
+    return resolveAttachmentPath(adminDir, stored);
+  });
 }
 
 /** Alle tekstwaarden in alle tabellen die met `prefix` beginnen. */
@@ -263,8 +282,8 @@ describe('overzetten naar de gedeelde map', () => {
     expect(outcome.renamedSource).toBe(`${source}.gemigreerd-${STAMP}`);
     expect(outcome.movedAside).toBeNull();
     expect(outcome.databases).toEqual([
-      { administration: '', rebased: 2, missing: 0 },
-      { administration: 'administraties/klant', rebased: 2, missing: 0 },
+      { administration: '', missing: 0 },
+      { administration: 'administraties/klant', missing: 0 },
     ]);
     expect(progress.at(-1)).toBe(1);
 
@@ -283,11 +302,13 @@ describe('overzetten naar de gedeelde map', () => {
       const db = new Database(join(admin, 'boekhouding.sqlite'), { readonly: true });
       expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
       db.close();
-      const paths = attachmentPaths(join(admin, 'boekhouding.sqlite'));
-      expect(paths).toHaveLength(2);
-      for (const p of paths) {
-        expect(p.startsWith(join(admin, 'bijlagen') + sep)).toBe(true);
-        expect(existsSync(p)).toBe(true);
+      // het overzetten zelf herschrijft geen paden: in de kopie staat wat er in de bron stond
+      expect(attachmentPaths(join(admin, 'boekhouding.sqlite'))).toEqual(attachmentPaths(join(admin.replace(m.shared, outcome.renamedSource!), 'boekhouding.sqlite')));
+      const files = openedAttachments(admin);
+      expect(files).toHaveLength(2);
+      for (const file of files) {
+        expect(file.startsWith(join(admin, 'bijlagen') + sep)).toBe(true);
+        expect(existsSync(file)).toBe(true);
       }
       // guard: nergens in de database staat nog een pad naar de oude map
       expect(textValuesStartingWith(join(admin, 'boekhouding.sqlite'), m.appData)).toEqual([]);
@@ -297,6 +318,30 @@ describe('overzetten naar de gedeelde map', () => {
     expect(existsSync(join(m.shared, MARKER))).toBe(true);
     expect(resolveDataDir(m.env)).toEqual({ kind: 'gedeeld', dir: m.shared });
     expect(resolveForMcp(m.env)).toBe(m.shared);
+  });
+
+  it('paden die al relatief zijn gaan ongewijzigd mee, en ook bij het openen daarna wordt er niets herschreven', async () => {
+    const m = machine();
+    const admins = [
+      { rel: '', stored: await administrationOnDisk(m.oldNew, 'a'), label: 'a' },
+      { rel: join('administraties', 'klant'), stored: await administrationOnDisk(join(m.oldNew, 'administraties', 'klant'), 'klant'), label: 'klant' },
+    ];
+    const outcome = await migrateToSharedDir({ source: m.oldNew, target: m.shared, now: NOW });
+    expect(outcome.status).toBe('gemigreerd');
+
+    for (const { rel, stored, label } of admins) {
+      const admin = join(m.shared, rel);
+      const dbFile = join(admin, 'boekhouding.sqlite');
+      expect(attachmentPaths(dbFile).sort()).toEqual([stored.bon, stored.scan].sort());
+      const log: string[] = [];
+      openDatabase(dbFile, (message) => log.push(message)).close();
+      expect(log).toEqual([]);
+      expect(attachmentPaths(dbFile).sort()).toEqual([stored.bon, stored.scan].sort());
+      // elke bijlage opent vanuit de nieuwe map
+      expect(readFileSync(resolveAttachmentPath(admin, stored.bon), 'utf8')).toBe(`bewijs ${label}`);
+      expect(readFileSync(resolveAttachmentPath(admin, stored.scan), 'utf8')).toBe(`scan ${label}`);
+      expect(resolveAttachmentPath(admin, stored.bon).startsWith(join(admin, 'bijlagen') + sep)).toBe(true);
+    }
   });
 
   it('neemt een database mee die nog open is (wijzigingen in de WAL)', async () => {
@@ -331,7 +376,7 @@ describe('overzetten naar de gedeelde map', () => {
     expect(retry.status).toBe('gemigreerd');
     if (retry.status !== 'gemigreerd') return;
     expect(snapshot(retry.renamedSource!)).toEqual(before);
-    for (const p of attachmentPaths(join(m.shared, 'boekhouding.sqlite'))) expect(existsSync(p)).toBe(true);
+    for (const file of openedAttachments(m.shared)) expect(existsSync(file)).toBe(true);
     // wat een halve poging al had neergezet, is opzij gezet en niet weggegooid
     if (failAt === 'plaatsen') expect(existsSync(join(retry.movedAside!, 'boekhouding.sqlite'))).toBe(true);
     else expect(retry.movedAside).toBeNull();
@@ -413,7 +458,7 @@ describe('overzetten naar de gedeelde map', () => {
     ).rejects.toThrow('crash na marker');
     expect(snapshot(m.oldNew)).toEqual(before);
     expect(resolveDataDir(m.env)).toEqual({ kind: 'gedeeld', dir: m.shared });
-    for (const p of attachmentPaths(join(m.shared, 'boekhouding.sqlite'))) expect(existsSync(p)).toBe(true);
+    for (const file of openedAttachments(m.shared)) expect(existsSync(file)).toBe(true);
   });
 
   it('de bron hernoemen lukt niet: de migratie is toch klaar, met een waarschuwing', async () => {
@@ -526,7 +571,7 @@ describe('sleutel van de opgeslagen wachtwoorden (Local State)', () => {
   });
 });
 
-describe('bijlagepaden herschrijven', () => {
+describe('bijlagepaden uit een oudere versie relatief maken (oude back-ups)', () => {
   it('Windows-paden, paden van vóór de naamswijziging en ander hoofdlettergebruik; nog een keer draaien verandert niets', async () => {
     const m = machine();
     await administration(m.oldNew, 'a');
@@ -543,14 +588,18 @@ describe('bijlagepaden herschrijven', () => {
     db.close();
 
     const root = join(m.oldNew, 'bijlagen');
-    const first = rebaseAttachmentPaths(dbFile, root);
-    expect(first).toEqual({ rebased: 4, missing: 1 });
+    const first = rebaseAttachmentPaths(dbFile, m.oldNew);
+    // ook de aankoop en de scan van de administratie zelf stonden er absoluut in
+    expect(first).toEqual({ rebased: 6, missing: 1 });
     const paths = attachmentPaths(dbFile);
-    expect(paths.filter((p) => p === join(root, '2026', 'bon-a.pdf'))).toHaveLength(4); // de aankoop en drie varianten
-    expect(paths).toContain(join(root, '2026', 'weg.pdf'));
-    for (const p of paths) expect(p.startsWith(root + sep)).toBe(true);
+    expect(paths.filter((p) => p === 'bijlagen/2026/bon-a.pdf')).toHaveLength(4); // de aankoop en drie varianten
+    expect(paths).toContain('bijlagen/2026/weg.pdf');
+    for (const p of paths) {
+      expect(isStoredAttachmentPath(p)).toBe(true);
+      expect(resolveAttachmentPath(m.oldNew, p).startsWith(root + sep)).toBe(true);
+    }
 
-    expect(rebaseAttachmentPaths(dbFile, root)).toEqual({ rebased: 0, missing: 1 });
+    expect(rebaseAttachmentPaths(dbFile, m.oldNew)).toEqual({ rebased: 0, missing: 1 });
     expect(attachmentPaths(dbFile)).toEqual(paths);
   });
 
@@ -562,7 +611,7 @@ describe('bijlagepaden herschrijven', () => {
     db.prepare(`UPDATE purchase_invoices SET attachment_path = '/elders/bon.pdf'`).run();
     db.prepare(`UPDATE documents SET file_path = '/x/bijlagen/../../geheim.txt'`).run();
     db.close();
-    expect(rebaseAttachmentPaths(dbFile, join(m.oldNew, 'bijlagen'))).toEqual({ rebased: 0, missing: 0 });
+    expect(rebaseAttachmentPaths(dbFile, m.oldNew)).toEqual({ rebased: 0, missing: 0 });
     expect(attachmentPaths(dbFile).sort()).toEqual(['/elders/bon.pdf', '/x/bijlagen/../../geheim.txt']);
   });
 
@@ -574,10 +623,9 @@ describe('bijlagepaden herschrijven', () => {
     db.exec(`CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, attachment_path TEXT)`);
     db.prepare(`INSERT INTO purchase_invoices (attachment_path) VALUES (?)`).run('/home/piet/.config/gratis-boekhouden/bijlagen/2026/bon.pdf');
     db.close();
-    const root = join(m.oldNew, 'bijlagen');
-    expect(rebaseAttachmentPaths(dbFile, root)).toEqual({ rebased: 1, missing: 1 });
+    expect(rebaseAttachmentPaths(dbFile, m.oldNew)).toEqual({ rebased: 1, missing: 1 });
     const check = new Database(dbFile, { readonly: true });
-    expect(check.prepare(`SELECT attachment_path AS p FROM purchase_invoices`).pluck().get()).toBe(join(root, '2026', 'bon.pdf'));
+    expect(check.prepare(`SELECT attachment_path AS p FROM purchase_invoices`).pluck().get()).toBe('bijlagen/2026/bon.pdf');
     check.close();
   });
 
@@ -589,10 +637,9 @@ describe('bijlagepaden herschrijven', () => {
     db.exec(`CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, attachment_path TEXT)`);
     db.prepare(`INSERT INTO purchase_invoices (attachment_path) VALUES (?)`).run('C:\\Users\\İpek\\AppData\\Roaming\\boekhoudenvoorniks\\Bijlagen\\2026\\bon.pdf');
     db.close();
-    const root = join(m.oldNew, 'bijlagen');
-    rebaseAttachmentPaths(dbFile, root);
+    rebaseAttachmentPaths(dbFile, m.oldNew);
     const check = new Database(dbFile, { readonly: true });
-    expect(check.prepare(`SELECT attachment_path AS p FROM purchase_invoices`).pluck().get()).toBe(join(root, '2026', 'bon.pdf'));
+    expect(check.prepare(`SELECT attachment_path AS p FROM purchase_invoices`).pluck().get()).toBe('bijlagen/2026/bon.pdf');
     check.close();
   });
 });

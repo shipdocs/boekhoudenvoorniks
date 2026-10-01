@@ -8,6 +8,7 @@ import { createServices, MemorySecretStore } from '../src/services';
 import { createApi, type HostContext } from '../src/main/api';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { createBackupBundle, extractBundle } from '../src/main/backup';
+import { resolveAttachmentPath } from '../src/main/attachments';
 import { generateOfficeKeys, readHeader } from '../src/exchange/crypto';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../src/exchange/exchange';
 
@@ -99,8 +100,10 @@ describe('uitwisseling met de boekhouder: de hele cyclus', () => {
     expect(o.db.prepare(`SELECT 1 FROM settings WHERE key = 'licenseManagementKey'`).get()).toBeUndefined();
     expect(o.s.settings.get().smtp.host).toBe('');
     const bon = (o.db.prepare('SELECT attachment_path AS p FROM purchase_invoices WHERE journal_entry_id = ?').get(c.purchaseEntry) as { p: string }).p;
-    expect(bon.startsWith(o.dir)).toBe(true);
-    expect(readFileSync(bon, 'utf8')).toBe('%PDF-1.4 gamma');
+    // het pad is relatief aan de map van de administratie, dus het klopt ook in de kopie bij de boekhouder
+    expect(bon).toBe('bijlagen/2026/gamma.pdf');
+    expect(resolveAttachmentPath(o.dir, bon).startsWith(o.dir)).toBe(true);
+    expect(readFileSync(resolveAttachmentPath(o.dir, bon), 'utf8')).toBe('%PDF-1.4 gamma');
     // de oktoberaankoop van de klant zit er niet in: die kwam na de export
     expect(o.s.ledger.balance('WKprInkMat')).toBe(20000);
 
