@@ -3,7 +3,8 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFi
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setup } from './helpers';
-import { makeJpeg } from './fixtures/jpeg';
+import { makeJpeg, makeJpegWithGps } from './fixtures/jpeg';
+import { PHONE_SCANNER } from '../src/shared/phone-scanner';
 import { makePdf } from './pdf';
 import { Bonnenscanner } from '../src/scanner/scanner';
 import { folderAccess } from '../src/main/statement-files';
@@ -369,6 +370,29 @@ describe('bonnenmap (#48)', () => {
     expect(t.s.statementFolder.config()).toMatchObject({ enabled: true, path: t.folder });
     t.s.statementFolder.disable();
     expect(t.scanner.folder()).toBeNull();
+  });
+
+  it('een foto met GPS uit de bonnenmap blijft zoals hij is: het is je eigen bestand, de app verandert er niets aan', async () => {
+    // de bonnenmap werkt terwijl telefoon koppelen uit staat
+    expect(PHONE_SCANNER.available).toBe(false);
+    const t = start();
+    const stored: Buffer[] = [];
+    const add = t.s.intake.add.bind(t.s.intake);
+    t.s.intake.add = async (name, data, ...rest) => {
+      stored.push(Buffer.from(data));
+      return add(name, data, ...rest);
+    };
+    const photo = makeJpegWithGps('eigen foto');
+    await t.scanner.setFolder(t.folder);
+    writeFileSync(join(t.folder, 'bon.jpg'), photo);
+    await t.settle();
+    // de bijlage is het bestand zelf (zoals bij slepen in de app), en het bestand in verwerkt/ ook
+    expect(stored[0]!.equals(photo)).toBe(true);
+    expect(readFileSync(join(t.folder, 'verwerkt', 'bon.jpg')).equals(photo)).toBe(true);
+    // de positie komt alleen in de database als locatie aan staat (#32)
+    expect(t.db.prepare('SELECT gps_lat, gps_lon FROM documents').all()).toEqual([{ gps_lat: null, gps_lon: null }]);
+    // en dezelfde foto met de hand toevoegen is dan ook gewoon hetzelfde bestand
+    expect((await t.s.intake.add('bon.jpg', photo)).already_present).toBe(true);
   });
 
   it('in de demo kijkt de app niet in de bonnenmap', async () => {

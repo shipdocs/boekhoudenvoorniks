@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
@@ -12,6 +12,10 @@ import { makeJpeg } from './fixtures/jpeg';
 import { createApi, type HostContext } from '../src/main/api';
 import { sanitizeForExchange } from '../src/exchange/exchange';
 import { Bonnenscanner, type ScannerDeps } from '../src/scanner/scanner';
+import { PHONE_SCANNER } from '../src/shared/phone-scanner';
+import { stripJpegGps } from '../src/scanner/strip-gps';
+import { makeJpegWithGps as makeMinimalGpsJpeg, readJpegGps } from '../src/intake/exif';
+import { makeJpegWithGps, GPS_POSITION } from './fixtures/jpeg';
 import { PAIRING_TTL_MS } from '../src/scanner/pairing';
 import { jpegInfo, jpegsToPdf } from '../src/scanner/jpeg-pdf';
 import { isPrivateIpv4, localInterfaces, sameSubnet } from '../src/scanner/network';
@@ -25,7 +29,13 @@ const LOOPBACK = [{ address: '127.0.0.1', netmask: '255.0.0.0' }];
 
 const open: Bonnenscanner[] = [];
 const dirs: string[] = [];
+// Telefoon koppelen staat in de app nog uit (tot de Android-app er is, #49). Deze tests zetten het zelf
+// aan; "telefoon koppelen staat uit" onderaan test de app zoals hij nu is.
+beforeEach(() => {
+  PHONE_SCANNER.available = true;
+});
 afterEach(async () => {
+  PHONE_SCANNER.available = false;
   for (const s of open.splice(0)) await s.stop();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
@@ -988,5 +998,194 @@ describe('bonnenscanner: alleen het lokale netwerk, vindbaar via mDNS', () => {
     expect(decoded.answers).toHaveLength(1);
     expect(decoded.additionals).toHaveLength(3);
     expect(packet.toString('latin1')).not.toMatch(/Piet|Stukadoor/);
+  });
+});
+
+describe('telefoon koppelen staat uit tot de Android-app er is (zoals de app nu is)', () => {
+  beforeEach(() => {
+    PHONE_SCANNER.available = false;
+  });
+
+  it('koppelen wordt geweigerd, ook via de api; er gaat niets luisteren en er wordt niets bekendgemaakt', async () => {
+    const t = start();
+    await t.scanner.start();
+    await expect(t.scanner.pair()).rejects.toThrow(/kan nog niet/);
+    const api = createApi(t.s, { scanner: { service: () => t.scanner, pickFolder: async () => null } } as unknown as HostContext);
+    await expect(api.scanner.pair()).rejects.toThrow(/kan nog niet/);
+    expect(api.app.meta().phoneScanner).toBe(false);
+    expect(t.scanner.status()).toMatchObject({ phoneAvailable: false, running: false, port: null, devices: [] });
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_devices').get()).toEqual({ n: 0 });
+    expect(t.advertised.every((ads) => ads.length === 0)).toBe(true);
+  });
+
+  it('ook met een telefoon in de database luistert er niets', async () => {
+    const t = start();
+    PHONE_SCANNER.available = true;
+    const p = await pair(t);
+    expect((await p.hallo()).status).toBe(200);
+    const port = t.scanner.status().port!;
+    expect(await listening(port)).toBe(true);
+    PHONE_SCANNER.available = false;
+    await t.scanner.refresh();
+    expect(t.scanner.status()).toMatchObject({ running: false, port: null });
+    expect(await listening(port)).toBe(false);
+    expect(t.advertised.at(-1)).toEqual([]);
+    await expect(p.hallo()).rejects.toThrow();
+    // en bij een nieuwe start van de app ook niet
+    await t.scanner.stop();
+    const next = new Bonnenscanner({ db: t.db, secrets: t.secrets, intake: t.s.intake, settings: t.s.settings, spoolDir: t.spoolDir, interfaces: () => LOOPBACK, now: () => t.clock.now });
+    open.push(next);
+    await next.start();
+    expect(next.status().running).toBe(false);
+    expect(await listening(port)).toBe(false);
+  });
+});
+
+describe('bonnenscanner: de plek van de foto (GPS) gaat eruit als locatie uit staat', () => {
+  /** alles vanaf de eerste kwantisatietabel: het beeld zelf, zonder de gegevens over de foto */
+  const image = (jpeg: Buffer) => jpeg.subarray(jpeg.indexOf(Buffer.from([0xff, 0xdb])));
+  /** de breedtegraad zoals hij in de EXIF staat (52/1, 5/1, 2652/100) */
+  const LAT = Buffer.from('340000000100000005000000010000005c0a000064000000', 'hex');
+
+  it('de GPS-gegevens en het XMP-blok met de positie zijn weg; beeld, draairichting en merk blijven', () => {
+    const original = makeJpegWithGps();
+    const gps = readJpegGps(original)!;
+    expect(gps.lat).toBeCloseTo(GPS_POSITION.lat, 6);
+    expect(gps.lon).toBeCloseTo(GPS_POSITION.lon, 6);
+    expect(original.includes(LAT)).toBe(true);
+    expect(original.includes('exif:GPSLatitude')).toBe(true);
+
+    const stripped = stripJpegGps(original);
+    expect(readJpegGps(stripped)).toBeNull();
+    expect(stripped.includes(LAT)).toBe(false);
+    expect(stripped.includes('GPS')).toBe(false);
+    // de GPS-datum is weg, de datum van de foto blijft
+    expect(original.toString('latin1').split('2026:10:01')).toHaveLength(3);
+    expect(stripped.toString('latin1').split('2026:10:01')).toHaveLength(2);
+    expect(stripped.includes('2026:10:01 10:00:00')).toBe(true);
+    expect(stripped.includes('Testtelefoon')).toBe(true);
+    // nog steeds dezelfde JPEG: zelfde afmetingen en draairichting, en het beeld byte voor byte gelijk
+    expect(jpegInfo(stripped)).toEqual(jpegInfo(original));
+    expect(jpegInfo(stripped)).toMatchObject({ width: 48, height: 72, orientation: 6 });
+    expect(image(stripped).equals(image(original))).toBe(true);
+    // het origineel is niet aangeraakt, en nog een keer strippen verandert niets meer
+    expect(readJpegGps(original)).not.toBeNull();
+    expect(stripJpegGps(stripped).equals(stripped)).toBe(true);
+    // een foto zonder positie blijft precies zoals hij is
+    expect(stripJpegGps(makeJpeg('zonder')).equals(makeJpeg('zonder'))).toBe(true);
+    // ook met de andere bytevolgorde (big-endian), zoals de testfoto van #32
+    const big = Buffer.from(makeMinimalGpsJpeg(52.0907, 5.1214));
+    expect(readJpegGps(big)).not.toBeNull();
+    expect(readJpegGps(stripJpegGps(big))).toBeNull();
+  });
+
+  it('kapotte EXIF breekt niets: het beeld blijft, een onleesbaar blok gaat in zijn geheel weg', () => {
+    const original = makeJpegWithGps();
+    const exifAt = original.indexOf('Exif\0\0', 0, 'latin1');
+    const tiff = exifAt + 6;
+    const broken: [string, (b: Buffer) => void][] = [
+      ['geen TIFF-kop', (b) => b.write('XX', tiff, 'latin1')],
+      ['hoofdmap buiten het blok', (b) => b.writeUInt32LE(0xfffffff0, tiff + 4)],
+      ['veel te veel regels', (b) => b.writeUInt16LE(0xffff, tiff + 8)],
+      ['GPS-verwijzing buiten het blok', (b) => b.writeUInt32LE(0x7fffffff, tiff + 8 + 2 + 3 * 12 + 8)],
+      ['GPS-map met te veel regels', (b) => b.writeUInt16LE(0xffff, tiff + b.readUInt32LE(tiff + 8 + 2 + 3 * 12 + 8))],
+      ['waarde van een GPS-regel buiten het blok', (b) => b.writeUInt32LE(0x7ffffff0, tiff + b.readUInt32LE(tiff + 8 + 2 + 3 * 12 + 8) + 2 + 2 * 12 + 8)],
+      ['GPS-verwijzing wijst naar de hoofdmap zelf', (b) => b.writeUInt32LE(8, tiff + 8 + 2 + 3 * 12 + 8)],
+    ];
+    for (const [what, damage] of broken) {
+      const b = Buffer.from(original);
+      damage(b);
+      const out = stripJpegGps(b);
+      expect(image(out).equals(image(original)), what).toBe(true);
+      expect(jpegInfo(out), what).toMatchObject({ width: 48, height: 72 });
+      expect(out.includes(LAT), what).toBe(false);
+      expect(readJpegGps(out), what).toBeNull();
+    }
+    // afgebroken midden in de EXIF, en willekeurige beschadigingen: nooit een fout
+    for (let cut = 4; cut < 400; cut += 7) expect(() => stripJpegGps(original.subarray(0, cut))).not.toThrow();
+    let seed = 48;
+    const random = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const end = original.indexOf(Buffer.from([0xff, 0xdb]));
+    for (let i = 0; i < 2000; i++) {
+      const b = Buffer.from(original);
+      for (let n = 0; n < 1 + Math.floor(random() * 4); n++) b[2 + Math.floor(random() * (end - 2))] = Math.floor(random() * 256);
+      expect(() => stripJpegGps(b)).not.toThrow();
+    }
+  });
+
+  it('een bon van de telefoon: zonder toestemming staat er geen positie in het bewaarde bestand, in de wachtrij of in de database', async () => {
+    const t = start();
+    const p = await pair(t);
+    const stored: Buffer[] = [];
+    const add = t.s.intake.add.bind(t.s.intake);
+    let hold = true;
+    t.s.intake.add = async (name, data, ...rest) => {
+      if (hold) throw new Error('nog niet');
+      stored.push(Buffer.from(data));
+      return add(name, data, ...rest);
+    };
+    const photo = makeJpegWithGps('zonder toestemming');
+    const id = randomUUID();
+    expect((await p.bon({ id }, [photo])).json).toMatchObject({ ok: true, al: false });
+    await t.scanner.processSpool();
+    const spooled = readFileSync(join(t.spoolDir, `${id}.bon`));
+    expect(spooled.includes(LAT) || spooled.includes('GPS')).toBe(false);
+    // nog een keer sturen (met de positie er nog in) is dezelfde bon, geen botsing
+    expect((await p.bon({ id }, [photo])).json).toMatchObject({ ok: true, al: true });
+    hold = false;
+    await t.scanner.processSpool();
+    expect(stored).toHaveLength(1);
+    expect(readJpegGps(stored[0]!)).toBeNull();
+    expect(stored[0]!.includes(LAT) || stored[0]!.includes('GPS')).toBe(false);
+    expect(jpegInfo(stored[0]!)).toMatchObject({ width: 48, height: 72, orientation: 6 });
+    expect(image(stored[0]!).equals(image(photo))).toBe(true);
+    expect(t.documents()).toMatchObject([{ mime_type: 'image/jpeg', gps_lat: null, gps_lon: null }]);
+  });
+
+  it('met toestemming blijft de positie zoals nu: in het bestand en bij het document', async () => {
+    const t = start();
+    t.s.settings.update({ jobLocation: true });
+    const p = await pair(t);
+    const stored: Buffer[] = [];
+    const add = t.s.intake.add.bind(t.s.intake);
+    t.s.intake.add = async (name, data, ...rest) => {
+      stored.push(Buffer.from(data));
+      return add(name, data, ...rest);
+    };
+    const photo = makeJpegWithGps('met toestemming');
+    const id = randomUUID();
+    expect((await p.bon({ id }, [photo])).status).toBe(200);
+    await t.scanner.processSpool();
+    expect(stored[0]!.equals(photo)).toBe(true);
+    const doc = t.documents()[0]!;
+    expect(doc.gps_lat).toBeCloseTo(GPS_POSITION.lat, 6);
+    expect(doc.gps_lon).toBeCloseTo(GPS_POSITION.lon, 6);
+    // dezelfde bon nog een keer nadat locatie is uitgezet: nog steeds dezelfde bon
+    t.s.settings.update({ jobLocation: false });
+    expect((await p.bon({ id }, [photo])).json).toMatchObject({ ok: true, al: true });
+  });
+
+  it('een bon van meerdere foto\'s: ook in de PDF staat zonder toestemming geen positie', async () => {
+    const t = start();
+    const p = await pair(t);
+    const stored: Buffer[] = [];
+    const add = t.s.intake.add.bind(t.s.intake);
+    t.s.intake.add = async (name, data, ...rest) => {
+      stored.push(Buffer.from(data));
+      return add(name, data, ...rest);
+    };
+    const photos = [makeJpegWithGps('boven'), makeJpegWithGps('onder')];
+    expect((await p.bon({}, photos)).status).toBe(200);
+    await t.scanner.processSpool();
+    expect(t.documents()).toMatchObject([{ mime_type: 'application/pdf', gps_lat: null }]);
+    expect(stored[0]!.includes(LAT) || stored[0]!.includes('GPS')).toBe(false);
+    // de pagina's staan er nog steeds gekanteld in zoals de foto zegt, en de PDF is te openen
+    expect(stored[0]!.includes('/Rotate 90')).toBe(true);
+    expect((await extractPdf(new Uint8Array(stored[0]!))).pageSizes).toHaveLength(2);
+    // met toestemming gaan de foto's ongewijzigd de PDF in
+    t.s.settings.update({ jobLocation: true });
+    expect((await p.bon({}, [makeJpegWithGps('boven 2'), makeJpegWithGps('onder 2')])).status).toBe(200);
+    await t.scanner.processSpool();
+    expect(stored[1]!.includes(LAT)).toBe(true);
   });
 });
