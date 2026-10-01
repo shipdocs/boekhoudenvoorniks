@@ -3,6 +3,8 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpat
 import { copyFile, mkdir } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { rebaseAttachmentPaths } from './backup';
+import { isPathInside } from './path-security';
+import { defaultSyncContext, detectSyncService, type SyncContext } from './sync-folders';
 
 /** Mapnaam van de gegevens vóór de naamswijziging naar BoekhoudenVoorNiks. */
 export const OLD_DATA_DIR_NAME = 'gratis-boekhouden';
@@ -17,6 +19,8 @@ export const MIGRATION_LOCK = '.migratie-bezig';
 export const CHOICE_FILE = '.migratie-keuze';
 /** Tijdelijke Chromium-map voor de sessie waarin alleen de keuzevraag gesteld wordt. */
 export const CHOICE_SESSION = '.keuze-sessie';
+/** Verzoek uit Instellingen om van gegevensmap te wisselen; de volgende start voert het uit. */
+export const SWITCH_REQUEST = '.map-wissel';
 export const POINTER_NAME = '.boekhoudenvoorniks.json';
 const POINTER_VERSION = 1;
 const DB_FILE = 'boekhouding.sqlite';
@@ -90,12 +94,19 @@ function isLiveSidecar(name: string): boolean {
   return name === `${DB_FILE}-wal` || name === `${DB_FILE}-shm`;
 }
 
+/**
+ * Wat bij het wisselen van gegevensmap in de bron blijft: de boekhouding van de map zelf (marker, slot,
+ * keuze, verzoek), wat eerder opzij is gezet, en wat Chromium in de standaardmap bijhoudt.
+ */
+const STAYS = (name: string): boolean =>
+  [MARKER, MIGRATION_LOCK, CHOICE_FILE, CHOICE_SESSION, SWITCH_REQUEST, 'declarative_performance_observer.db', 'declarative_performance_observer.db-journal'].includes(name) || name.startsWith('.onbekend-');
+
 /** Alle gewone bestanden die meegaan, relatief aan de bron (met `/`). */
-function dataFiles(source: string): { rel: string; size: number }[] {
+function dataFiles(source: string, stays: (name: string) => boolean = () => false): { rel: string; size: number }[] {
   const out: { rel: string; size: number }[] = [];
   const walk = (dir: string, prefix: string): void => {
     for (const item of readdirSync(dir, { withFileTypes: true })) {
-      if (prefix === '' && (CHROMIUM.has(item.name) || item.name.startsWith('.org.chromium.') || item.name === STAGING)) continue;
+      if (prefix === '' && (CHROMIUM.has(item.name) || item.name.startsWith('.org.chromium.') || item.name === STAGING || stays(item.name))) continue;
       const rel = prefix ? `${prefix}/${item.name}` : item.name;
       const file = join(dir, item.name);
       if (item.isDirectory()) walk(file, rel);
@@ -158,7 +169,7 @@ export function readPointer(home: string): string | null {
   return real;
 }
 
-/** Legt een zelf gekozen gegevensmap vast (de mapkiezer in de app komt later, #185). */
+/** Legt een zelf gekozen gegevensmap vast; alleen een map met een complete administratie. */
 export function writePointer(home: string, dataDir: string): string {
   if (!isAbsolute(dataDir)) throw new DataDirError('Kies een volledige map');
   let real: string;
@@ -173,6 +184,11 @@ export function writePointer(home: string, dataDir: string): string {
   writeFileSync(temp, `${JSON.stringify({ version: POINTER_VERSION, dataDir: real }, null, 2)}\n`, { mode: 0o600 });
   renameSync(temp, file);
   return real;
+}
+
+/** Terug naar de standaardmap: zonder verwijzing geldt die weer (zie `resolveDataDir`). */
+export function clearPointer(home: string): void {
+  rmSync(pointerFile(home), { force: true });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -225,6 +241,16 @@ export function markComplete(dir: string, note = 'nieuw'): void {
 }
 
 /**
+ * De map van Chromium (`userData`): altijd de standaardmap, ook als de gegevens in een zelf gekozen map
+ * staan. Daar staat `Local State` met de sleutel van de opgeslagen wachtwoorden; omdat die map bij het
+ * wisselen van gegevensmap dezelfde blijft, blijven de wachtwoorden leesbaar. Alleen voor de keuzevraag
+ * tussen twee oude mappen krijgt Chromium een wegwerpmap.
+ */
+export function chromiumDir(resolution: DataDirResolution, home: string): string {
+  return resolution.kind === 'keuze' ? join(sharedDataDir(home), CHOICE_SESSION) : sharedDataDir(home);
+}
+
+/**
  * De sleutel van de opgeslagen wachtwoorden (Chromiums `Local State`) overnemen vóór Chromium start.
  * Alleen als het doel nog niet compleet is en nog geen eigen sleutel heeft; een bestaande wordt
  * nooit overschreven.
@@ -264,6 +290,8 @@ export interface MigrationOptions {
   /** tests: wordt ná elke stap aangeroepen en mag gooien om een crash op dat punt na te bootsen */
   afterStep?: (step: MigrationStep) => void;
   log?: (message: string) => void;
+  /** wisselen van gegevensmap: de bron is zelf een gegevensmap en blijft onder zijn eigen naam staan */
+  keepSource?: boolean;
 }
 
 export type MigrationOutcome =
@@ -325,7 +353,8 @@ async function copyDatabase(from: string, to: string): Promise<void> {
  * onaangeroerd tot de marker er staat. Volgorde: ruimte controleren → kopie in `.staging-migratie`
  * (databases via de back-up-API) → `integrity_check` → bijlagepaden herschrijven → op hun plek zetten
  * → marker → pas dan de bron hernoemen. Gaat er iets mis, dan is er niets veranderd en probeert de
- * volgende start het opnieuw.
+ * volgende start het opnieuw. Dezelfde route kopieert bij het wisselen van gegevensmap (`keepSource`,
+ * zie `switchDataDir`); de bron wordt dan niet hernoemd.
  */
 export async function migrateToSharedDir(options: MigrationOptions): Promise<MigrationOutcome> {
   const { source, target } = options;
@@ -339,7 +368,7 @@ export async function migrateToSharedDir(options: MigrationOptions): Promise<Mig
   let markerWritten = false;
   try {
     cleanMigrationLeftovers(target);
-    const files = dataFiles(source);
+    const files = dataFiles(source, options.keepSource ? STAYS : undefined);
     const total = files.reduce((sum, f) => sum + f.size, 0);
     const free = (options.freeSpace ?? defaultFreeSpace)(target);
     if (free < total * 1.2) {
@@ -382,15 +411,20 @@ export async function migrateToSharedDir(options: MigrationOptions): Promise<Mig
     step('paden');
 
     let movedAside: string | null = null;
+    const aside = (name: string): void => {
+      movedAside ??= freeName(join(target, `.onbekend-${stamp(now())}`));
+      mkdirSync(movedAside, { recursive: true });
+      renameSync(join(target, name), join(movedAside, name));
+    };
+    // Staat er in het doel al een complete administratie (terug naar de standaardmap), dan gaat die in
+    // zijn geheel opzij, de marker eerst: valt het hierna stil, dan geldt het doel niet als compleet.
+    if (hasMarker(target)) for (const name of [MARKER, ...readdirSync(target).filter(OWN)]) aside(name);
     for (const name of readdirSync(staging)) {
-      const destination = join(target, name);
-      if (existsSync(destination)) {
+      if (existsSync(join(target, name))) {
         if (!OWN(name)) continue; // van Chromium of onbekend: wat er al staat, blijft
-        movedAside ??= freeName(join(target, `.onbekend-${stamp(now())}`));
-        mkdirSync(movedAside, { recursive: true });
-        renameSync(destination, join(movedAside, name));
+        aside(name);
       }
-      renameSync(join(staging, name), destination);
+      renameSync(join(staging, name), join(target, name));
     }
     step('plaatsen');
 
@@ -402,6 +436,7 @@ export async function migrateToSharedDir(options: MigrationOptions): Promise<Mig
 
     let renamedSource: string | null = null;
     let warning: string | null = null;
+    if (options.keepSource) return { status: 'gemigreerd', databases, renamedSource, movedAside, warning };
     try {
       options.afterStep?.('hernoemen');
       renamedSource = freeName(`${source}.gemigreerd-${stamp(now())}`);
@@ -422,4 +457,214 @@ export async function migrateToSharedDir(options: MigrationOptions): Promise<Mig
     if (e instanceof Stopped) return { status: 'gestopt', reason: 'Het overzetten is gestopt.' };
     return { status: 'mislukt', reason: (e as Error).message };
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Wisselen van gegevensmap (Instellingen)
+
+export type SwitchAction = 'kopieren' | 'openen';
+
+/** Wat er met een gekozen map zou gebeuren; `problem` = deze map kan niet, en waarom. */
+export interface SwitchPlan {
+  /** de gekozen map (het echte pad) */
+  dir: string;
+  /** `kopieren`: de huidige gegevens gaan erheen; `openen`: er staat al een complete administratie */
+  action: SwitchAction;
+  problem: string | null;
+  /** de synchronisatiedienst die deze map bijhoudt (alleen een waarschuwing), of null */
+  sync: string | null;
+  /** de complete administratie die er al staat: wordt geopend, of gaat in de standaardmap opzij */
+  existing: { lastModified: number; size: number; administrationCount: number } | null;
+  /** de gekozen map is de standaardmap */
+  standard: boolean;
+}
+
+export interface SwitchPlanInput {
+  home: string;
+  /** de map waaruit de app nu werkt */
+  current: string;
+  chosen: string;
+  /** "Terug naar de standaardmap": de huidige gegevens gaan mee, ook als daar al een administratie staat */
+  copyToStandard?: boolean;
+  freeSpace?: (dir: string) => number;
+  /** tests: een eigen computer voor het herkennen van synchronisatiediensten */
+  sync?: SyncContext;
+}
+
+/** Resten van een eigen afgebroken poging, en wat het besturingssysteem zelf in een map zet. */
+const IGNORED_IN_EMPTY = [STAGING, MIGRATION_LOCK, '.DS_Store', 'Thumbs.db', 'desktop.ini'];
+
+function sameDir(a: string, b: string): boolean {
+  const real = (dir: string): string => {
+    try {
+      return realpathSync(dir);
+    } catch {
+      return dir;
+    }
+  };
+  return process.platform === 'win32' ? real(a).toLowerCase() === real(b).toLowerCase() : real(a) === real(b);
+}
+
+function canWrite(dir: string): boolean {
+  const probe = join(dir, `.schrijfproef-${process.pid}`);
+  try {
+    writeFileSync(probe, '');
+    rmSync(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Beoordeelt een gekozen map: er staat een complete administratie (openen), hij is leeg (de huidige
+ * gegevens gaan erheen), of hij kan niet. De standaardmap kan altijd: wat er nog staat, gaat opzij.
+ * Laat niets achter op schijf.
+ */
+export function planSwitch(input: SwitchPlanInput): SwitchPlan {
+  const plan: SwitchPlan = { dir: input.chosen, action: 'kopieren', problem: null, sync: null, existing: null, standard: false };
+  const refuse = (problem: string): SwitchPlan => ({ ...plan, problem });
+  if (!isAbsolute(input.chosen)) return refuse('Kies een volledige map.');
+  try {
+    plan.dir = realpathSync(input.chosen);
+    if (!statSync(plan.dir).isDirectory()) return refuse(`${plan.dir} is geen map.`);
+  } catch {
+    // de standaardmap mag nog ontbreken: het kopiëren maakt hem aan
+    if (!sameDir(input.chosen, sharedDataDir(input.home)) || existsSync(input.chosen)) return refuse(`De map ${input.chosen} is niet bereikbaar.`);
+  }
+  plan.standard = sameDir(plan.dir, sharedDataDir(input.home));
+  if (sameDir(plan.dir, input.current)) return refuse('Dit is de map die je nu al gebruikt.');
+  plan.sync = detectSyncService(plan.dir, input.sync ?? defaultSyncContext(input.home));
+  const complete = hasData(plan.dir) && hasMarker(plan.dir);
+  if (complete) {
+    const { lastModified, size, administrationCount } = describeOldFolder(plan.dir);
+    plan.existing = { lastModified, size, administrationCount };
+  }
+  if (complete && !(plan.standard && input.copyToStandard)) plan.action = 'openen';
+  else if (isPathInside(input.current, plan.dir)) return refuse('Deze map staat in je huidige gegevensmap. Kies een map daarbuiten.');
+  else if (!plan.standard) {
+    if (hasData(plan.dir)) return refuse(`In ${plan.dir} staat een administratie die niet compleet is (het bestand ${MARKER} ontbreekt). De app opent hem daarom niet. Kies een lege map; dan zet de app je huidige gegevens erin.`);
+    if (readdirSync(plan.dir).some((name) => !IGNORED_IN_EMPTY.includes(name))) {
+      return refuse(`In ${plan.dir} staan al andere bestanden. Kies een lege map (je kunt in het keuzevenster een nieuwe map maken) of een map waarin al een administratie van BoekhoudenVoorNiks staat.`);
+    }
+  }
+  if (existsSync(plan.dir) && !canWrite(plan.dir)) return refuse(`De app mag niet schrijven in ${plan.dir}. Kies een andere map.`);
+  if (plan.action === 'kopieren') {
+    const needed = dataFiles(input.current, STAYS).reduce((sum, f) => sum + f.size, 0) * 1.2;
+    const free = (input.freeSpace ?? defaultFreeSpace)(plan.dir);
+    if (free < needed) return refuse(`Op de schijf van ${plan.dir} is te weinig ruimte: er is ${Math.ceil(needed / 1e6)} MB nodig en er is ${Math.floor(free / 1e6)} MB vrij.`);
+  }
+  return plan;
+}
+
+/** Legt het verzoek vast; de app start daarna opnieuw en voert het uit vóór er een database open is. */
+export function writeSwitchRequest(home: string, target: string, action: SwitchAction): void {
+  const dir = sharedDataDir(home);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, SWITCH_REQUEST), `${JSON.stringify({ version: 1, target, action })}\n`);
+}
+
+/**
+ * Het verzoek om te wisselen, als dat er ligt. Het bestand gaat meteen weg: een poging die halverwege
+ * crasht wordt niet bij elke start herhaald, de gebruiker kiest dan opnieuw.
+ */
+export function takeSwitchRequest(home: string): { target: string; action: SwitchAction } | null {
+  const file = join(sharedDataDir(home), SWITCH_REQUEST);
+  if (!existsSync(file)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { version?: unknown; target?: unknown; action?: unknown };
+    if (parsed.version !== 1 || typeof parsed.target !== 'string' || (parsed.action !== 'kopieren' && parsed.action !== 'openen')) return null;
+    return { target: parsed.target, action: parsed.action };
+  } catch {
+    return null;
+  } finally {
+    rmSync(file, { force: true });
+  }
+}
+
+export type SwitchStep = Exclude<MigrationStep, 'hernoemen'> | 'pointer';
+/** De stappen bij kopiëren naar een lege map; bij openen alleen `controle`, `paden` en `pointer`. */
+export const SWITCH_STEPS: SwitchStep[] = ['ruimte', 'slot', 'kopie', 'controle', 'paden', 'plaatsen', 'marker', 'pointer'];
+
+export interface SwitchOptions {
+  home: string;
+  /** de map waaruit de app nu werkt; die blijft staan zoals hij is */
+  source: string;
+  target: string;
+  /** wat de gebruiker bevestigde; is de map intussen veranderd, dan gebeurt er niets */
+  action: SwitchAction;
+  onProgress?: (done: number, total: number) => void;
+  shouldStop?: () => boolean;
+  now?: () => Date;
+  freeSpace?: (dir: string) => number;
+  /** tests: wordt ná elke stap aangeroepen en mag gooien om een crash op dat punt na te bootsen */
+  afterStep?: (step: SwitchStep) => void;
+  log?: (message: string) => void;
+}
+
+export type SwitchOutcome =
+  | { status: 'gewisseld'; dir: string; action: SwitchAction; databases: DatabaseReport[]; movedAside: string | null }
+  | { status: 'geweigerd' | 'gestopt' | 'geen-ruimte' | 'mislukt'; reason: string };
+
+/**
+ * Wisselt van gegevensmap. Naar een lege map: de huidige gegevens gaan erheen langs de route van het
+ * overzetten (kopie in staging → `integrity_check` → bijlagepaden → op hun plek → marker). Naar een map
+ * met een complete administratie: controleren en de bijlagepaden naar die map laten wijzen. De
+ * verwijzing (pointer) wordt als allerlaatste geschreven, pas als de nieuwe map compleet is; tot dan
+ * werken de app en de koppeling vanuit de huidige map, en die wordt nooit gewist of hernoemd.
+ */
+export async function switchDataDir(options: SwitchOptions): Promise<SwitchOutcome> {
+  const { home, source } = options;
+  const log = options.log ?? (() => undefined);
+  const plan = planSwitch({ home, current: source, chosen: options.target, copyToStandard: options.action === 'kopieren', freeSpace: options.freeSpace });
+  if (plan.problem) return { status: 'geweigerd', reason: plan.problem };
+  if (plan.action !== options.action) return { status: 'geweigerd', reason: `De map ${plan.dir} is veranderd sinds je hem koos. Kies hem opnieuw in Instellingen.` };
+
+  let databases: DatabaseReport[];
+  let movedAside: string | null = null;
+  if (plan.action === 'openen') {
+    try {
+      const admins = administrationDirs(plan.dir);
+      for (const admin of admins) {
+        const result = integrity(join(plan.dir, ...admin.split('/').filter(Boolean), DB_FILE));
+        if (result !== 'ok') return { status: 'mislukt', reason: `De administratie in ${plan.dir} is beschadigd (${result}). De app opent hem daarom niet.` };
+      }
+      options.afterStep?.('controle');
+      // de map kan van een andere plek komen (een andere computer, met de hand gekopieerd)
+      databases = admins.map((admin) => {
+        const parts = admin.split('/').filter(Boolean);
+        const report = rebaseAttachmentPaths(join(plan.dir, ...parts, DB_FILE), join(plan.dir, ...parts, 'bijlagen'));
+        if (report.missing > 0) log(`${report.missing} bijlage(n) van ${admin || 'de eerste administratie'} ontbreken op schijf`);
+        return { administration: admin, ...report };
+      });
+      options.afterStep?.('paden');
+    } catch (e) {
+      return { status: 'mislukt', reason: (e as Error).message };
+    }
+  } else {
+    const outcome = await migrateToSharedDir({
+      source,
+      target: plan.dir,
+      keepSource: true,
+      onProgress: options.onProgress,
+      shouldStop: options.shouldStop,
+      now: options.now,
+      freeSpace: options.freeSpace,
+      log,
+      afterStep: (step) => {
+        if (step !== 'hernoemen') options.afterStep?.(step);
+      },
+    });
+    if (outcome.status !== 'gemigreerd') return outcome;
+    ({ databases, movedAside } = outcome);
+  }
+
+  try {
+    if (plan.standard) clearPointer(home);
+    else writePointer(home, plan.dir);
+  } catch (e) {
+    return { status: 'mislukt', reason: `De keuze voor ${plan.dir} kon niet vastgelegd worden (${(e as Error).message}).` };
+  }
+  options.afterStep?.('pointer');
+  return { status: 'gewisseld', dir: plan.dir, action: plan.action, databases, movedAside };
 }
