@@ -144,12 +144,6 @@ async function main() {
   const keyBefore = encryptedKey(oldNew);
   check('de vorige versie heeft een sleutel voor de opgeslagen wachtwoorden (Local State)', keyBefore !== null);
 
-  // De koppeling in de vorige versie als vergelijking: antwoordt die hier niet op `initialize`, dan
-  // ligt een uitblijvend antwoord straks niet aan de nieuwe versie.
-  const mcpBefore = await startMcp();
-  const answeredBefore = mcpBefore.code === 0 && mcpBefore.out.includes('"result"');
-  console.log(`Koppeling in de vorige versie: exit ${mcpBefore.code}, ${answeredBefore ? 'antwoordt op initialize' : `geen antwoord op initialize (${mcpBefore.err.trim() || 'geen foutmelding'})`}`);
-
   // --- 1. Upgrade en eerste start (één oude map met gegevens)
   install(newInstaller);
   check(`de nieuwe versie (${newVersion}) staat over de oude installatie heen`, productVersion(installedExe()).startsWith(newVersion), productVersion(installedExe()));
@@ -169,10 +163,7 @@ async function main() {
   check('de sleutel is na de tweede start nog steeds dezelfde', encryptedKey(shared) === keyBefore);
 
   let mcp = await startMcp();
-  // exit 0 zonder foutmelding = de koppeling vond de administratie en opende hem (de oude map bestaat niet meer)
-  check('de koppeling (--mcp) opent de administratie in de gedeelde map', mcp.code === 0 && mcp.err.trim() === '', `exit ${mcp.code}: ${mcp.err}`);
-  if (answeredBefore) check('de koppeling antwoordt op initialize, net als in de vorige versie', mcp.out.includes('"result"'), mcp.out);
-  else console.log(`LET OP: de koppeling antwoordde in de vorige versie al niet op initialize via een pijp; nu ${mcp.out.includes('"result"') ? 'wel' : 'ook niet'}.`);
+  check('de koppeling (--mcp) leest de gedeelde map en antwoordt op initialize', mcp.code === 0 && mcp.out.includes('"result"'), `exit ${mcp.code}: ${mcp.err || mcp.out}`);
 
   // --- 3. Ongeldige verwijzing: de koppeling weigert en maakt niets aan
   writeFileSync(pointer, JSON.stringify({ version: 1, dataDir: 'C:\\bestaat\\niet' }));
