@@ -5,11 +5,11 @@
 //    pakketversie die met 0 begint, en het vierde getal moet 0 zijn. Zolang de app 0.x heet, krijgt het
 //    pakket daarom een eerste getal dat één hoger is: app 0.7.6 → pakket 1.7.6.0, app 1.0.0 → 2.0.0.0.
 //    Zo blijft elke nieuwe versie hoger dan de vorige. De app zelf toont gewoon zijn eigen versie.
-// 2. `node scripts/store-manifest.cjs [pakket.appx]` (in CI, op Windows) haalt het manifest uit het
+// 2. `node scripts/store-manifest.cjs [pakket.appx]` (in CI) haalt het manifest uit het
 //    gebouwde pakket en controleert de vaste identiteit uit Partner Center, de versie en de alias.
-const { execFileSync } = require('node:child_process');
 const { readdirSync, readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
+const { inflateRawSync } = require('node:zlib');
 
 /** De identiteit die Partner Center heeft toegekend (issue #172); mag nooit wijzigen. */
 const IDENTITY = {
@@ -59,6 +59,27 @@ function manifestProblems(xml, appVersion) {
   return problems;
 }
 
+/**
+ * AppxManifest.xml uit een pakket lezen. Een appx is een zip (ZIP64, met de groottes achter de gegevens);
+ * daarom zoeken we het bestand zelf op in plaats van via de inhoudsopgave te lopen.
+ */
+function readManifest(appx) {
+  const name = Buffer.from('AppxManifest.xml');
+  for (let at = appx.indexOf(name); at !== -1; at = appx.indexOf(name, at + 1)) {
+    const header = at - 30;
+    // "PK\3\4", met op 26 de lengte van de naam en op 28 die van het extra veld
+    if (header < 0 || appx.readUInt32LE(header) !== 0x04034b50 || appx.readUInt16LE(header + 26) !== name.length) continue;
+    const data = appx.subarray(at + name.length + appx.readUInt16LE(header + 28));
+    const method = appx.readUInt16LE(header + 8);
+    if (method !== 0 && method !== 8) break;
+    // inflateRawSync stopt aan het eind van het gecomprimeerde blok; wat erna komt telt niet mee
+    const text = (method === 8 ? inflateRawSync(data) : data).toString('utf8');
+    const end = text.indexOf('</Package>');
+    if (end !== -1) return text.slice(0, end + '</Package>'.length);
+  }
+  throw new Error('AppxManifest.xml niet gevonden in het pakket');
+}
+
 /** De hook van electron-builder: het pad van het zojuist gemaakte AppxManifest.xml. */
 async function appxManifestCreated(manifestPath) {
   const { version } = require('../package.json');
@@ -66,7 +87,7 @@ async function appxManifestCreated(manifestPath) {
   console.log(`  • Store-pakket: versie ${storeVersion(version)} (app ${version})`);
 }
 
-module.exports = { appxManifestCreated, storeVersion, withStoreVersion, manifestProblems, IDENTITY, ALIAS };
+module.exports = { appxManifestCreated, storeVersion, withStoreVersion, manifestProblems, readManifest, IDENTITY, ALIAS };
 
 if (require.main === module) {
   const release = join(__dirname, '..', 'release');
@@ -75,9 +96,7 @@ if (require.main === module) {
     console.error('Geen .appx gevonden in release/');
     process.exit(1);
   }
-  // een appx is een zip; de tar van Windows zelf (bsdtar) leest die, die van Git Bash niet
-  const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'bsdtar';
-  const xml = execFileSync(tar, ['-xOf', appx, 'AppxManifest.xml'], { encoding: 'utf8' });
+  const xml = readManifest(readFileSync(appx));
   const problems = manifestProblems(xml, require('../package.json').version);
   console.log(/<Identity\b[^>]*>/.exec(xml)?.[0].replace(/\s+/g, ' ') ?? '(geen Identity)');
   if (problems.length > 0) {
