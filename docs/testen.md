@@ -24,6 +24,13 @@ Node-versie voordat Vitest start.
 | Browserflows zonder nieuwe build | `npm run e2e:only` | Alleen Playwright |
 | Productiebuild | `npm run build` | Main-process en renderer |
 
+## Wat draait waar
+
+- **Lokaal, vóór een pull request**: `npm test`, `npm run typecheck` en, als je schermen raakt, `npm run e2e`. De browsertests draaien alleen lokaal; op GitHub deden ze hetzelfde en kostten ze vooral wachttijd.
+- **Op GitHub bij een pull request**: alleen de snelle Linux-controles (unit-tests met build, de rooktest van de verpakte app en de website-Worker).
+- **Op GitHub na het mergen naar `main`**: de Windows-controles, waar lokaal geen vervanger voor is: de hele unit-suite op Windows en de upgrade-test met de echte installers. Kijk na een merge of die groen zijn voordat je een release maakt.
+- **Bij een release**: de Release-workflow draait de tests op Linux en Windows nog een keer en publiceert alleen als beide slagen.
+
 Gebruik Node 22 ook als de systeemversie ouder is. Met de lokale nvm-installatie kan dat bijvoorbeeld
 zo:
 
