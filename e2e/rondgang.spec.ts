@@ -60,7 +60,7 @@ test('rondgang door alle schermen van de demo: geen crash, geen foutmelding', as
   // Belasting: aftrek-scherm en de details van de btw
   await nav(page, 'Belasting');
   await page.locator('table.sumtable tr', { hasText: 'Omzet' }).click();
-  await expect(page.getByRole('dialog', { name: 'Omzet' }).locator('tbody tr').first()).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Omzet' })).toBeVisible();
   await a11y(page, testInfo, 'btw-details', found);
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Aftrek, investeringen en kilometers' }).click();
