@@ -3,69 +3,78 @@ import worker, { download } from '../workers/site/src/index';
 
 /** De vaste downloadadressen van de website (/download/...): doorsturen naar het bestand van de nieuwste release. */
 
-const BASE = 'https://github.com/shipdocs/boekhoudenvoorniks/releases/download/v1.0.0';
-const release = {
-  draft: false,
-  prerelease: false,
-  assets: [
-    { name: 'BoekhoudenVoorNiks-1.0.0.AppImage', browser_download_url: `${BASE}/BoekhoudenVoorNiks-1.0.0.AppImage` },
-    { name: 'BoekhoudenVoorNiks-Setup-1.0.0.exe', browser_download_url: `${BASE}/BoekhoudenVoorNiks-Setup-1.0.0.exe` },
-    { name: 'BoekhoudenVoorNiks-Setup-1.0.0.exe.blockmap', browser_download_url: `${BASE}/BoekhoudenVoorNiks-Setup-1.0.0.exe.blockmap` },
-    { name: 'gratis-boekhouden_1.0.0_amd64.deb', browser_download_url: `${BASE}/gratis-boekhouden_1.0.0_amd64.deb` },
-    { name: 'latest.yml', browser_download_url: `${BASE}/latest.yml` },
-    { name: 'SHA256SUMS-Windows.txt', browser_download_url: `${BASE}/SHA256SUMS-Windows.txt` },
-    { name: 'SHA256SUMS-Linux.txt', browser_download_url: `${BASE}/SHA256SUMS-Linux.txt` },
-  ],
-};
-const ok = (body: unknown): typeof fetch => (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+const PAGE = 'https://github.com/shipdocs/boekhoudenvoorniks/releases/latest';
+const TAG = 'https://github.com/shipdocs/boekhoudenvoorniks/releases/download';
+const yml = (version: string) => `version: ${version}\nfiles:\n  - url: BoekhoudenVoorNiks-Setup-${version}.exe\n    sha512: abc\npath: BoekhoudenVoorNiks-Setup-${version}.exe\n`;
+const ok = (text: string): typeof fetch => (async () => new Response(text, { status: 200 })) as unknown as typeof fetch;
+const failing = (status = 500): typeof fetch => (async () => new Response('nee', { status })) as unknown as typeof fetch;
+const broken: typeof fetch = (async () => { throw new Error('geen netwerk'); }) as unknown as typeof fetch;
+
+/** Een heel eenvoudige Cache, zoals Cloudflare die aanbiedt. */
+function fakeCache(): Cache {
+  const data = new Map<string, string>();
+  return {
+    match: async (req: Request) => (data.has(req.url) ? new Response(data.get(req.url)) : undefined),
+    put: async (req: Request, res: Response) => void data.set(req.url, await res.text()),
+  } as unknown as Cache;
+}
 
 describe('downloadadressen op de website', () => {
   it.each([
-    ['windows', 'BoekhoudenVoorNiks-Setup-1.0.0.exe'],
-    ['appimage', 'BoekhoudenVoorNiks-1.0.0.AppImage'],
-    ['deb', 'gratis-boekhouden_1.0.0_amd64.deb'],
-    ['sha256-windows', 'SHA256SUMS-Windows.txt'],
-    ['sha256-linux', 'SHA256SUMS-Linux.txt'],
-  ])('/download/%s stuurt naar %s, niet naar het blockmap-bestand of de updater', async (kind, file) => {
-    const res = await download(kind, ok(release));
+    ['windows', 'BoekhoudenVoorNiks-Setup-1.0.1.exe'],
+    ['appimage', 'BoekhoudenVoorNiks-1.0.1.AppImage'],
+    ['deb', 'gratis-boekhouden_1.0.1_amd64.deb'],
+  ])('/download/%s stuurt naar %s van de nieuwste versie', async (kind, file) => {
+    const res = await download(kind, ok(yml('1.0.1')), null);
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe(`${BASE}/${file}`);
+    expect(res.headers.get('location')).toBe(`${TAG}/v1.0.1/${file}`);
     expect(res.headers.get('x-robots-tag')).toBe('noindex');
   });
 
+  it('de controlegetallen hebben een vaste naam en vragen niets op', async () => {
+    const res = await download('sha256-windows', broken, null);
+    expect(res.headers.get('location')).toBe(`${PAGE}/download/SHA256SUMS-Windows.txt`);
+    expect((await download('sha256-linux', broken, null)).headers.get('location')).toBe(`${PAGE}/download/SHA256SUMS-Linux.txt`);
+  });
+
   it('een nieuwe versie hoeft niets op de website te veranderen', async () => {
-    const next = { ...release, assets: release.assets.map((a) => ({ ...a, name: a.name.replace('1.0.0', '1.2.0'), browser_download_url: a.browser_download_url.replace(/1\.0\.0/g, '1.2.0') })) };
-    expect((await download('windows', ok(next))).headers.get('location')).toContain('BoekhoudenVoorNiks-Setup-1.2.0.exe');
+    expect((await download('windows', ok(yml('1.2.0')), null)).headers.get('location')).toBe(`${TAG}/v1.2.0/BoekhoudenVoorNiks-Setup-1.2.0.exe`);
   });
 
-  it('GitHub onbereikbaar, een concept of een vooruitgeschoven release: de releasepagina als noodgreep', async () => {
-    const page = 'https://github.com/shipdocs/boekhoudenvoorniks/releases/latest';
-    const failing = (async () => new Response('nee', { status: 500 })) as unknown as typeof fetch;
-    const broken = (async () => { throw new Error('geen netwerk'); }) as unknown as typeof fetch;
-    expect((await download('windows', failing)).headers.get('location')).toBe(page);
-    expect((await download('windows', broken)).headers.get('location')).toBe(page);
-    expect((await download('windows', ok({ ...release, draft: true }))).headers.get('location')).toBe(page);
-    expect((await download('windows', ok({ ...release, prerelease: true }))).headers.get('location')).toBe(page);
+  it('vraagt GitHub niet bij elk bezoek: tien minuten onthouden, en bij een storing de laatste bekende versie', async () => {
+    const store = fakeCache();
+    let calls = 0;
+    const counting = (async () => (calls++, new Response(yml('1.0.1')))) as unknown as typeof fetch;
+    await download('windows', counting, store);
+    await download('appimage', counting, store);
+    await download('deb', counting, store);
+    expect(calls).toBe(1);
+    // de "tien minuten" zijn voorbij (alleen de korte kopie weg), GitHub doet even niet mee: de laatste bekende versie
+    const short = new Map<string, string>();
+    const withExpiry = { match: async (r: Request) => (r.url.includes('laatste-bekende') ? await store.match(r) : undefined), put: async () => undefined } as unknown as Cache;
+    void short;
+    expect((await download('windows', failing(403), withExpiry)).headers.get('location')).toBe(`${TAG}/v1.0.1/BoekhoudenVoorNiks-Setup-1.0.1.exe`);
   });
 
-  it('stuurt nooit naar een adres buiten de releases van dit project', async () => {
-    const evil = { ...release, assets: [{ name: 'BoekhoudenVoorNiks-Setup-9.9.9.exe', browser_download_url: 'https://example.com/virus.exe' }] };
-    expect((await download('windows', ok(evil))).headers.get('location')).toBe('https://github.com/shipdocs/boekhoudenvoorniks/releases/latest');
+  it('GitHub onbereikbaar of een vreemd antwoord, en niets onthouden: de releasepagina als noodgreep', async () => {
+    for (const fetcher of [failing(500), failing(403), broken, ok('geen versie hier'), ok('version: ../../kwaad\n'), ok('version: 1.0\n')]) {
+      expect((await download('windows', fetcher, null)).headers.get('location')).toBe(PAGE);
+    }
   });
 
   it('een onbekende download geeft 404', async () => {
-    expect((await download('../../etc/passwd', ok(release))).status).toBe(404);
-    expect((await download('mac', ok(release))).status).toBe(404);
+    expect((await download('../../etc/passwd', ok(yml('1.0.1')), null)).status).toBe(404);
+    expect((await download('mac', ok(yml('1.0.1')), null)).status).toBe(404);
   });
 
   it('de Worker zelf: /download/windows verwijst door en /download gaat naar de downloadpagina', async () => {
     const env = { ASSETS: { fetch: async () => new Response('pagina') } };
     const real = globalThis.fetch;
-    globalThis.fetch = ok(release);
+    globalThis.fetch = ok(yml('1.0.1'));
     try {
       const res = await worker.fetch(new Request('https://boekhoudenvoorniks.nl/download/windows'), env);
       expect(res.status).toBe(302);
-      expect(res.headers.get('location')).toBe(`${BASE}/BoekhoudenVoorNiks-Setup-1.0.0.exe`);
+      expect(res.headers.get('location')).toBe(`${TAG}/v1.0.1/BoekhoudenVoorNiks-Setup-1.0.1.exe`);
     } finally {
       globalThis.fetch = real;
     }
