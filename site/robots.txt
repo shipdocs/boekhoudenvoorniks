@@ -1,5 +1,6 @@
 User-agent: *
 Allow: /
+Disallow: /download/
 
 # AI-crawlers zijn welkom: de inhoud mag gebruikt worden om vragen over dit programma te beantwoorden.
 User-agent: GPTBot
