@@ -254,14 +254,16 @@ export class PurchaseService {
 
   /**
    * Draait een (nog onbetaalde) inkoop terug, bv. na "Klopt niet" op een automatische verwerking.
-   * De journaalpost krijgt een tegenboeking; het document gaat terug naar controle.
+   * De journaalpost krijgt een tegenboeking; het document gaat terug naar controle en is nergens meer aan gekoppeld.
    */
   cancel(id: number, date: IsoDate): void {
     tx(this.db, () => {
       const p = this.get(id);
       if (p.amount_paid !== 0) throw new ValidationError('Maak eerst de betaling van deze aankoop ongedaan');
       if (p.journal_entry_id) this.ledger.reverse(p.journal_entry_id, date, `Teruggedraaid: ${p.description}`);
-      this.db.prepare(`UPDATE documents SET purchase_invoice_id = NULL, status = 'controle' WHERE purchase_invoice_id = ?`).run(id);
+      // de bon hoort nergens meer bij (#179); een kopie blijft een kopie van het document dat terug naar controle gaat
+      this.db.prepare('DELETE FROM document_links WHERE purchase_invoice_id = ?').run(id);
+      this.db.prepare(`UPDATE documents SET purchase_invoice_id = NULL, status = CASE WHEN duplicate_of_document_id IS NOT NULL THEN 'genegeerd' ELSE 'controle' END WHERE purchase_invoice_id = ?`).run(id);
       this.db.prepare('DELETE FROM purchase_invoices WHERE id = ?').run(id);
     });
   }

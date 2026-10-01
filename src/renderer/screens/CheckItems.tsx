@@ -1,8 +1,9 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { api } from '../api';
 import { Button, Euro, readAsBytes, useAction, useApp } from '../ui';
 import type { CheckItem } from '../../btw/checks';
-import type { IntakeDocument } from '../../intake/intake';
+import type { IntakeDocument, UploadResult } from '../../intake/intake';
+import { UploadBlocked } from './UploadOutcome';
 import { diffDays, formatDateNl } from '../../shared/dates';
 import { formatEuro } from '../../shared/money';
 
@@ -31,6 +32,7 @@ export function CheckItems({ items, onOpen, onChanged }: { items: CheckItem[]; o
   const { run, busy } = useAction();
   const input = useRef<HTMLInputElement>(null);
   const target = useRef<CheckItem | null>(null);
+  const [blocked, setBlocked] = useState<{ result: UploadResult; item: CheckItem } | null>(null);
   const open = (i: CheckItem) => {
     onOpen?.();
     if (i.kind === 'bank') go({ screen: 'categorie', id: i.id });
@@ -44,8 +46,10 @@ export function CheckItems({ items, onOpen, onChanged }: { items: CheckItem[]; o
     const bytes = await readAsBytes(file);
     const doc = await run(() => (item.kind === 'bank' ? api.documents.addEvidence(file.name, bytes, item.id) : api.documents.addPurchaseEvidence(file.name, bytes, item.id)));
     if (!doc) return;
+    // stond het bestand er al in, of hoort dezelfde bon al bij iets anders: niets gekoppeld (#179)
+    if (doc.already_present || doc.blocked) return setBlocked({ result: doc, item });
     const warning = mismatch(item, doc);
-    toast(warning ?? 'Bon gekoppeld ✓', warning ? 'error' : undefined);
+    toast(warning ?? 'Bewijs gekoppeld — niet opnieuw geboekt ✓', warning ? 'error' : undefined);
     await onChanged?.();
   };
   return (
@@ -55,6 +59,7 @@ export function CheckItems({ items, onOpen, onChanged }: { items: CheckItem[]; o
         e.target.value = '';
         if (f) void addEvidence(f);
       }} />
+      {blocked && <UploadBlocked result={blocked.result} target={{ kind: blocked.item.kind === 'bank' ? 'bank' : 'aankoop', id: blocked.item.id }} onClose={() => setBlocked(null)} onChanged={onChanged} />}
       <table className="list"><tbody>
         {items.map((i) => (
           <tr key={`${i.kind}-${i.id}`}>

@@ -191,7 +191,7 @@ export class RecurringService {
       const age = diffDays(t.transaction_date, asOf);
       if (age < INVOICE_GRACE_DAYS || age > 120) return false;
       if (t.matched_purchase_invoice_id) return false;
-      const doc = this.db.prepare(`SELECT 1 FROM documents WHERE classification LIKE ? LIMIT 1`).get(`%banktransactie #${t.id}"%`);
+      const doc = this.db.prepare('SELECT 1 FROM document_links WHERE bank_transaction_id = ? LIMIT 1').get(t.id);
       return !doc;
     });
   }

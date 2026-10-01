@@ -260,6 +260,8 @@ De pc controleert in deze volgorde: pad, methode, te veel mislukte pogingen, `Co
   wordt alleen het `id` als naam gebruikt, na controle dat het een UUID is, en alleen voor het
   tijdelijke bestand in de wachtrij van de app.
 - Er wordt nooit vanzelf geboekt: de bon wacht op controle, net als een bon uit de mail.
+- Komt precies dezelfde foto nog eens binnen onder een ander `id`, dan komt er geen tweede document: de
+  telefoon krijgt gewoon `ok: true`, en op de pc staat op Vandaag dat de bon er al in stond.
 - `betaalwijze` wordt het voorstel bij "Hoe betaald?": `pin` en `later` → zakelijke rekening (de
   betaling volgt via de bank), `contant` → contant, `prive` → met privégeld.
 - `notitie` staat bij het document.

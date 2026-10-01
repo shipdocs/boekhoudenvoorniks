@@ -1,6 +1,7 @@
 import { access, lstat, mkdir, readdir, readFile, rename } from 'node:fs/promises';
 import { extname, join, parse } from 'node:path';
 import { isUbl } from '../intake/ubl';
+import { detectFormat } from '../import/detect';
 
 export interface FolderWatchOptions {
   /** de gekozen bonnenmap, of null als er geen gekozen is (of als hij niet meer aan de regels voldoet) */
@@ -67,6 +68,8 @@ export class ReceiptFolderWatch {
   private readonly skipped = new Map<string, { key: string; reason: string }>();
   /** staat al in de inbox, maar verplaatsen lukte nog niet (bv. nog vast bij het synchronisatieprogramma) */
   private readonly toMove = new Map<string, string>();
+  /** geen bon en ook geen probleem (een bankafschrift): niet steeds opnieuw lezen */
+  private readonly ignored = new Map<string, string>();
   private processed = 0;
   private reachable = false;
   private recent: FolderStatus['recent'] = [];
@@ -97,6 +100,7 @@ export class ReceiptFolderWatch {
     this.seen.clear();
     this.skipped.clear();
     this.toMove.clear();
+    this.ignored.clear();
     this.recent = [];
     this.processed = 0;
     this.reachable = false;
@@ -143,7 +147,7 @@ export class ReceiptFolderWatch {
       return;
     }
     const present = new Set(names);
-    for (const map of [this.seen, this.skipped, this.toMove]) for (const name of [...map.keys()]) if (!present.has(name)) map.delete(name);
+    for (const map of [this.seen, this.skipped, this.toMove, this.ignored]) for (const name of [...map.keys()]) if (!present.has(name)) map.delete(name);
 
     for (const name of names) {
       const kind = TYPES[extname(name).toLowerCase()];
@@ -167,7 +171,7 @@ export class ReceiptFolderWatch {
         }
         continue;
       }
-      if (this.skipped.get(name)?.key === key) continue;
+      if (this.skipped.get(name)?.key === key || this.ignored.get(name) === key) continue;
       const prev = this.seen.get(name);
       if (!prev || prev.key !== key) {
         this.skipped.delete(name);
@@ -196,6 +200,8 @@ export class ReceiptFolderWatch {
     }
     // tijdens het lezen toch nog gegroeid: de volgende rondgang opnieuw
     if (data.length !== size) return void this.seen.delete(name);
+    // een bankafschrift (CAMT) is geen bon: stil laten liggen, daar is "Afschriften vanzelf inlezen" voor
+    if (kind === 'xml' && detectFormat(name, data.subarray(0, 4096).toString('utf8')) === 'camt') return void this.ignored.set(name, key);
     const problem = contentProblem(kind, data);
     if (problem) return skip(problem);
     let duplicate: boolean;
