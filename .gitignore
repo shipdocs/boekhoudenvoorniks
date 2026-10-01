@@ -9,3 +9,4 @@ e2e-results/
 e2e-report/
 .wrangler/
 .dev.vars
+.ouroboros/artifacts/artifacts.db
