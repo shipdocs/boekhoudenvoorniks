@@ -1,0 +1,22 @@
+name: Diagnose koppeling Windows (#191, tijdelijk)
+on:
+  push:
+    branches: [claude/mcp-windows-191]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.7.6 --repo ${{ github.repository }} --pattern "BoekhoudenVoorNiks-Setup-0.7.6.exe" --dir "$env:RUNNER_TEMP"
+          Start-Process -FilePath "$env:RUNNER_TEMP\BoekhoudenVoorNiks-Setup-0.7.6.exe" -ArgumentList '/S' -Wait
+          node scripts/mcp-diagnose-windows.cjs
