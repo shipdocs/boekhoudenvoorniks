@@ -30,6 +30,8 @@ import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
 import type { PollResult } from '../mail/mail-intake';
 import { isPathInside } from './path-security';
+import { folderAccess } from './statement-files';
+import { StatementWatch } from './statement-watch';
 import { CHOICE_SESSION, chromiumDir, handOverLocalState, markComplete, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type SwitchPlan } from './data-dir';
 import { chooseOldFolder, migrateWithProgress, switchWithProgress } from './data-dir-app';
 import { Administrations, readAdministrationFile } from './administrations';
@@ -268,6 +270,20 @@ async function backgroundMail(): Promise<void> {
   }
 }
 
+/**
+ * Afschriften uit de downloadmap (#184): alleen als de gebruiker het aanzette, en alleen in de map die hij
+ * koos. Er gaat niets vanzelf de boeken in: op Vandaag komt de vraag "Inlezen?". Niet in de kopie bij de
+ * boekhouder en niet in de koppeling voor Claude Code/Codex (die start dit proces niet op).
+ */
+const statementWatch = new StatementWatch({
+  folder() {
+    const cfg = services.statementFolder.config();
+    return cfg.enabled && cfg.path && !services.settings.officeCopy() ? cfg.path : null;
+  },
+  scan: () => services.statementFolder.scan(),
+  onFound: (found) => emit('statement-found', { found }),
+});
+
 const ALLOWED_ATTACHMENTS = ['.pdf', '.jpg', '.jpeg', '.png', '.heic', '.webp', '.xml'];
 
 async function storeAttachment(name: string, data: Uint8Array): Promise<string> {
@@ -369,6 +385,7 @@ function initServices(): void {
     fetch: localFetch,
     storeFile: storeAttachment,
     removeFile: removeAttachment,
+    statementFiles: folderAccess,
   });
   localOcr = new LocalOcrRuntime(join(rootDir(), 'ocr'), {
     fetch: (url, init) => fetch(url, init) as never,
@@ -402,6 +419,14 @@ function initServices(): void {
     readAttachment(path) {
       if (!isPathInside(join(dataDir(), 'bijlagen'), path)) throw new Error('Alleen bijlagen van de administratie');
       return readFileSync(path);
+    },
+    statementFolder: {
+      defaultPath: () => app.getPath('downloads'),
+      async choose(current) {
+        const r = await dialog.showOpenDialog(mainWindow!, { title: 'Map met gedownloade afschriften', properties: ['openDirectory'], ...(current && existsSync(current) ? { defaultPath: current } : {}) });
+        return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+      },
+      reconfigure: () => statementWatch.start(),
     },
     async openPath(path) {
       if (!isPathInside(join(dataDir(), 'bijlagen'), path)) throw new Error('Alleen bijlagen van de administratie kunnen geopend worden');
@@ -618,6 +643,8 @@ function initServices(): void {
       reconfigure: () => updates?.configure(),
     },
   });
+  // ook na het wisselen van administratie: elke administratie heeft haar eigen instelling
+  if (!SMOKE_TEST) statementWatch.start();
 }
 
 function registerIpc(): void {
@@ -990,6 +1017,7 @@ if (MCP_MODE) {
   });
 
   app.on('will-quit', () => {
+    statementWatch.stop();
     localOcr?.stop();
     try {
       db?.close();

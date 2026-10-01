@@ -4,9 +4,10 @@ import { createServices, MemorySecretStore } from '../src/services';
 import type { Mailer, MailMessage } from '../src/documents/sending';
 import type { FetchLike } from '../src/integrations/types';
 import type { OcrProvider } from '../src/intake/ocr';
+import type { FolderAccess } from '../src/import/statement-folder';
 
-export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mailer; licensePublicKey?: string } = {}) {
-  const db = new Database(':memory:');
+export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mailer; licensePublicKey?: string; /** een bestaande database (bv. opgebouwd in een oudere vorm) */ db?: Database.Database; /** lezen in de map met gedownloade afschriften */ statementFiles?: FolderAccess } = {}) {
+  const db = opts.db ?? new Database(':memory:');
   db.pragma('foreign_keys = ON');
   migrate(db);
   const sent: MailMessage[] = [];
@@ -31,6 +32,7 @@ export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mai
     },
     removeFile: (path) => void removed.push(path),
     ocr: opts.ocr ?? null,
+    statementFiles: opts.statementFiles ?? null,
     // licenties standaard uit in tests (de app heeft sinds 0.7.0 een echte sleutel); aan met een eigen testsleutel
     licensePublicKey: opts.licensePublicKey ?? '',
   });

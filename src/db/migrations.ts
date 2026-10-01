@@ -877,7 +877,80 @@ export const migrations: string[] = [
     PRIMARY KEY (proposed_by, model)
   );
   `,
-  /* 25: bewijs als echte koppeling, afgewezen voorstellen en meldingen over dubbele documenten (#179) */ `
+  /* 25: betrouwbaar inlezen (#184): een betaling die er al staat, komt er niet nog een keer in */ `
+  -- De id die de bank zelf aan een betaling gaf (CAMT, MT940). Tot nu toe zat die alleen in dedup_hash.
+  -- Betalingen die al waren ingelezen hebben hem niet (NULL) en tellen als "zonder bank-id"; hun
+  -- dedup_hash blijft zoals hij was, zodat hetzelfde afschrift opnieuw inlezen niets dubbel geeft.
+  ALTER TABLE bank_transactions ADD COLUMN bank_id TEXT;
+  CREATE INDEX idx_bank_transactions_amount ON bank_transactions(bank_account_id, amount, transaction_date);
+  -- Het soort afschrift van een import: de bron, en bij CSV ook de indeling (kolommen en toewijzing).
+  -- Twee afschriften van hetzelfde soort geven dezelfde betaling dezelfde hash; bij een ander soort
+  -- zoekt de app de betaling op bedrag, tegenrekening en datum. Oude imports: NULL (soort onbekend).
+  ALTER TABLE import_batches ADD COLUMN kind TEXT;
+
+  -- Regels uit een afschrift die niet zijn toegevoegd omdat dezelfde betaling er al stond uit een ander
+  -- soort afschrift (andere hash, zelfde betaling). matched_transaction_id is de betaling die er al stond
+  -- (de tegenhanger): die telt per soort afschrift maar voor één overgeslagen regel. Met "Toch toevoegen"
+  -- komt de regel er alsnog in (added_transaction_id) en is de tegenhanger weer vrij.
+  CREATE TABLE import_skipped (
+    id INTEGER PRIMARY KEY,
+    batch_id INTEGER NOT NULL REFERENCES import_batches(id),
+    bank_account_id INTEGER NOT NULL REFERENCES bank_accounts(id),
+    transaction_date TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    counter_iban TEXT,
+    counter_name TEXT,
+    description TEXT NOT NULL DEFAULT '',
+    reference TEXT,
+    source TEXT NOT NULL,
+    bank_id TEXT,
+    dedup_hash TEXT NOT NULL UNIQUE,
+    matched_transaction_id INTEGER NOT NULL REFERENCES bank_transactions(id),
+    added_transaction_id INTEGER REFERENCES bank_transactions(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_import_skipped_matched ON import_skipped(matched_transaction_id);
+  CREATE INDEX idx_import_skipped_batch ON import_skipped(batch_id);
+
+  -- Welke dagen een import besloeg staat sinds migratie 4 in import_batch_accounts. Mocht er van een
+  -- oude import toch geen regel zijn, dan alsnog uit de betalingen zelf (bestaande regels blijven staan).
+  INSERT OR IGNORE INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates)
+    SELECT import_batch_id, bank_account_id, MIN(transaction_date), MAX(transaction_date), COUNT(*), COUNT(*), 0
+    FROM bank_transactions WHERE import_batch_id IS NOT NULL GROUP BY import_batch_id, bank_account_id;
+  `,
+  /* 26: afschriften uit de downloadmap (#184): de app ziet een gedownload afschrift en vraagt "Inlezen?" */ `
+  -- Welk bestand een import was (hash van de inhoud). Een afschrift dat al is ingelezen, bijvoorbeeld door
+  -- het in de app te slepen, vraagt de app niet nog een keer. Oude imports: NULL.
+  ALTER TABLE import_batches ADD COLUMN content_hash TEXT;
+
+  -- Bestanden in de map die de gebruiker koos (standaard uit; de map zelf staat in settings onder
+  -- 'statementFolder'). file_key is een hash van map, naam, grootte en wijzigingstijd: zo leest de app niet
+  -- elke keer alles opnieuw. Van een bestand dat geen afschrift van deze administratie is ('geen'),
+  -- bewaren we alleen die hash: geen naam en geen inhoud. De app verplaatst of verwijdert nooit iets.
+  CREATE TABLE statement_files (
+    id INTEGER PRIMARY KEY,
+    file_key TEXT NOT NULL UNIQUE,
+    -- geen = geen afschrift van deze administratie; gevonden = de app vraagt "Inlezen?"; ingelezen;
+    -- afgewezen = drie keer "Niet nu"; dubbel = zelfde inhoud als een ander bestand
+    status TEXT NOT NULL CHECK (status IN ('geen','gevonden','ingelezen','afgewezen','dubbel')),
+    -- staat het bestand er nog? (bijgewerkt bij elke keer kijken)
+    present INTEGER NOT NULL DEFAULT 1,
+    filename TEXT,
+    content_hash TEXT,
+    source TEXT,
+    -- de namen van de rekeningen in het afschrift, voor de vraag op Vandaag
+    accounts TEXT,
+    period_from TEXT,
+    period_to TEXT,
+    transactions INTEGER,
+    -- hoe vaak "Niet nu", en vanaf welke dag de app het weer vraagt
+    declined INTEGER NOT NULL DEFAULT 0,
+    ask_from TEXT,
+    import_batch_id INTEGER REFERENCES import_batches(id),
+    seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_statement_files_status ON statement_files(status);
+  /* 27: bewijs als echte koppeling, afgewezen voorstellen en meldingen over dubbele documenten (#179) */ `
   -- Eén document hoort bij precies één aankoop of bankbetaling; een aankoop of betaling mag meer
   -- bestanden hebben, waarvan er precies één het hoofdbewijsstuk is. Dit is de enige bron voor
   -- "welke bon hoort waarbij": de uitlegtekst bij een document wordt daar nooit meer voor gelezen.
