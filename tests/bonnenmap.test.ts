@@ -253,6 +253,9 @@ describe('bonnenmap (#48)', () => {
     expect(seconds).toBeLessThan(10);
     // en niet te gretig: de grootte moest eerst een paar seconden gelijk blijven
     expect(seconds).toBeGreaterThan(3);
+    // het verplaatsen komt net na het document in de inbox: daar even op wachten
+    const moved = join(t.folder, 'verwerkt', 'bon.jpg');
+    for (let i = 0; i < 50 && !existsSync(moved); i++) await new Promise((r) => setTimeout(r, 100));
     expect(t.files(join(t.folder, 'verwerkt'))).toEqual(['bon.jpg']);
   });
 
