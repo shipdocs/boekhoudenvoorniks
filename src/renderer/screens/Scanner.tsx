@@ -15,8 +15,9 @@ function when(iso: string | null): string {
 }
 
 /**
- * Instellingen → Telefoon & bonnenmap (#48): een telefoon koppelen met een QR-code, en een map
- * waaruit bonnen vanzelf de inbox in gaan. Beide staan standaard uit.
+ * Instellingen → Bonnenmap (#48): een map waaruit bonnen vanzelf de inbox in gaan. Zodra telefoon
+ * koppelen beschikbaar is (shared/phone-scanner.ts, #49) heet het tabblad "Telefoon & bonnenmap" en
+ * staat hier ook de kaart om een telefoon te koppelen met een QR-code. Alles staat standaard uit.
  */
 export function ScannerSettings() {
   const status = useLoad(() => api.scanner.status());
@@ -29,11 +30,11 @@ export function ScannerSettings() {
   const st = status.data;
   if (status.error) return <div className="notice bad">{status.error}</div>;
   if (st === undefined) return null;
-  if (st === null) return <div className="card">Een telefoon koppelen en de bonnenmap werken alleen in de app zelf.</div>;
+  if (st === null) return <div className="card">De bonnenmap werkt alleen in de app zelf.</div>;
   return (
     <>
       {st.blocked && <div className="notice warn">{st.blocked}</div>}
-      <PhoneCard st={st} reload={status.reload} />
+      {st.phoneAvailable && <PhoneCard st={st} reload={status.reload} />}
       <FolderCard st={st} reload={status.reload} />
     </>
   );
@@ -58,7 +59,6 @@ function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) 
         Met de scanner-app op je Android-telefoon maak je onderweg een foto van een bon. Ben je thuis op de wifi, dan staat hij vanzelf bij Aankopen &amp; bonnetjes.
         De foto gaat versleuteld van je telefoon rechtstreeks naar deze computer: niet via internet en niet via een cloud.
       </p>
-      <p className="small muted" style={{ margin: 0 }}>De scanner-app voor Android is nog in de maak. Tot die er is, kun je de bonnenmap hieronder gebruiken.</p>
 
       {paired.length > 0 && (
         <table className="list small">
@@ -196,7 +196,7 @@ function FolderCard({ st, reload }: { st: Status; reload: () => Promise<void> })
   const { run, busy } = useAction();
   const f = st.folder;
   return (
-    <div className="card grid" style={{ marginTop: 14 }}>
+    <div className="card grid" style={{ marginTop: st.phoneAvailable ? 14 : 0 }}>
       <h3 style={{ margin: 0 }}>Bonnenmap</h3>
       <p className="small muted" style={{ margin: 0 }}>
         Kies een map op deze computer, bijvoorbeeld een map die Syncthing of Google Drive gelijk houdt met je telefoon. Nieuwe bestanden in die map (jpg, png, pdf en e-facturen in xml) komen vanzelf bij Aankopen &amp; bonnetjes en wachten daar op je controle.
