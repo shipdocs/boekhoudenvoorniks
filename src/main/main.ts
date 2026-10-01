@@ -30,8 +30,8 @@ import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
 import type { PollResult } from '../mail/mail-intake';
 import { isPathInside } from './path-security';
-import { CHOICE_SESSION, handOverLocalState, markComplete, resolveDataDir, resolveForMcp, sharedDataDir, writeChoice, type DataDirResolution } from './data-dir';
-import { chooseOldFolder, migrateWithProgress } from './data-dir-app';
+import { CHOICE_SESSION, chromiumDir, handOverLocalState, markComplete, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type SwitchPlan } from './data-dir';
+import { chooseOldFolder, migrateWithProgress, switchWithProgress } from './data-dir-app';
 import { Administrations, readAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
 import { generateOfficeKeys } from '../exchange/crypto';
@@ -60,11 +60,18 @@ const DATA_ENV = process.env.BOEKHOUDENVOORNIKS_DATA ?? process.env.GRATIS_BOEKH
  */
 let dataRoot: string | null = null;
 
+/** De map die in Instellingen gekozen is als nieuwe gegevensmap, tot de gebruiker bevestigt. */
+let folderPlan: SwitchPlan | null = null;
+
 /** Map met alle administraties (en het gedeelde OCR-model). */
 function rootDir(): string {
   const dir = DATA_ENV ?? dataRoot ?? app.getPath('userData');
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function planFolder(chosen: string, copyToStandard = false): SwitchPlan {
+  return planSwitch({ home: app.getPath('home'), current: rootDir(), chosen, copyToStandard });
 }
 
 function administrations(): Administrations {
@@ -565,6 +572,34 @@ function initServices(): void {
         return key;
       },
     },
+    // met een eigen map uit de omgeving (tests, rooktest) valt er niets te kiezen
+    dataFolder: DATA_ENV
+      ? undefined
+      : {
+          info: () => {
+            const standard = sharedDataDir(app.getPath('home'));
+            return { dir: rootDir(), standard, isStandard: sameDir(rootDir(), standard) };
+          },
+          async choose() {
+            const r = await dialog.showOpenDialog(mainWindow!, { title: 'Kies de map voor je gegevens', buttonLabel: 'Deze map kiezen', defaultPath: app.getPath('home'), properties: ['openDirectory', 'createDirectory'] });
+            if (r.canceled || !r.filePaths[0]) return null;
+            return (folderPlan = planFolder(r.filePaths[0]));
+          },
+          chooseStandard: () => (folderPlan = planFolder(sharedDataDir(app.getPath('home')), true)),
+          async apply() {
+            if (!folderPlan) throw new Error('Kies eerst een map');
+            // opnieuw beoordelen: de renderer geeft geen pad door, en de map kan intussen veranderd zijn
+            const plan = planFolder(folderPlan.dir, folderPlan.standard && folderPlan.action === 'kopieren');
+            if (plan.problem) throw new Error(plan.problem);
+            if (plan.action !== folderPlan.action) throw new Error('De map is veranderd sinds je hem koos. Kies hem opnieuw.');
+            // het wisselen zelf gebeurt bij de volgende start, vóór er een database open is (zie switchFolderIfAsked)
+            writeSwitchRequest(app.getPath('home'), plan.dir, plan.action);
+            localOcr.stop();
+            db.close();
+            app.relaunch();
+            app.exit(0);
+          },
+        },
     appVersion: () => app.getVersion(),
     localOcr: {
       status: () => localOcr.status(),
@@ -767,19 +802,20 @@ if (!DATA_ENV) {
       app.setPath('userData', join(app.getPath('temp'), 'boekhoudenvoorniks-fout'));
     } else if (resolution.kind === 'keuze') {
       // alleen de keuzevraag: Chromium krijgt een wegwerpmap, zodat de gedeelde map nog geen eigen sleutel krijgt
-      app.setPath('userData', join(shared, CHOICE_SESSION));
+      app.setPath('userData', chromiumDir(resolution, env.home));
     } else {
       rmSync(join(shared, CHOICE_SESSION), { recursive: true, force: true });
       // de sleutel van de opgeslagen wachtwoorden moet er staan vóór Chromium start
       if (resolution.kind === 'oud') handOverLocalState(resolution.dir, shared);
-      app.setPath('userData', shared);
+      // ook bij een zelf gekozen gegevensmap blijft Chromium in de gedeelde map: daar staat de sleutel
+      app.setPath('userData', chromiumDir(resolution, env.home));
       dataRoot = resolution.dir;
     }
   }
 }
 const gotLock = MCP_MODE ? false : app.requestSingleInstanceLock();
 let preparing = true;
-let dataDirNotice: { type: 'info' | 'warning'; message: string; detail: string } | null = null;
+const dataDirNotices: { type: 'info' | 'warning'; message: string; detail: string }[] = [];
 
 /**
  * Na het opstarten, vóór er een database open is: de gegevensmap in orde maken. Onwaar = de app
@@ -803,8 +839,13 @@ async function prepareDataDir(): Promise<boolean> {
     return false;
   }
   if (resolution.kind === 'nieuw') markComplete(resolution.dir);
-  if (resolution.kind !== 'oud') return true;
-  const { dir: source, target } = resolution;
+  if (resolution.kind === 'oud') await moveOldFolder(resolution.dir, resolution.target);
+  await switchFolderIfAsked();
+  return true;
+}
+
+/** De oude map in AppData overzetten naar de gedeelde map; lukt dat niet, dan werkt de app verder vanuit de oude. */
+async function moveOldFolder(source: string, target: string): Promise<void> {
   let outcome: Awaited<ReturnType<typeof migrateWithProgress>>;
   try {
     outcome = await migrateWithProgress(source, target, !SMOKE_TEST);
@@ -816,7 +857,7 @@ async function prepareDataDir(): Promise<boolean> {
   if (outcome.status === 'gemigreerd') {
     dataRoot = target;
     console.log(`Gegevens overgezet van ${source} naar ${target}`);
-    dataDirNotice = {
+    dataDirNotices.push({
       type: 'info',
       message: 'Je gegevens staan nu in een vaste map',
       detail:
@@ -824,23 +865,75 @@ async function prepareDataDir(): Promise<boolean> {
         (outcome.renamedSource ? `De oude map is bewaard als ${outcome.renamedSource}.` : (outcome.warning ?? `De oude map ${source} is blijven staan.`)) +
         (outcome.movedAside ? `\n\nIn de nieuwe map stond al iets; dat is bewaard in ${outcome.movedAside}.` : '') +
         '\n\nGebruik je de koppeling met Claude Code of Codex? Start dat programma dan opnieuw, zodat het de nieuwe map leest.',
-    };
+    });
   } else {
     console.error(`Gegevens overzetten niet gelukt (${outcome.status}): ${outcome.reason}`);
-    dataDirNotice = {
+    dataDirNotices.push({
       type: 'warning',
       message: 'Je gegevens zijn nog niet overgezet',
       detail: `${outcome.status === 'mislukt' ? `Het overzetten naar ${target} lukte niet (${outcome.reason}).` : outcome.reason}\n\nEr is niets veranderd: je werkt gewoon verder vanuit ${source}. Bij de volgende start probeert de app het opnieuw.`,
-    };
+    });
   }
-  return true;
 }
 
-/** Eén melding na het overzetten (of als dat niet lukte); houdt de app niet tegen. */
-function showDataDirNotice(): void {
-  if (!dataDirNotice || !mainWindow) return;
-  void dialog.showMessageBox(mainWindow, { ...dataDirNotice, title: 'BoekhoudenVoorNiks', buttons: ['OK'] });
-  dataDirNotice = null;
+/**
+ * In Instellingen is een andere gegevensmap gekozen: nu wisselen, vóór er een database open is. De
+ * verwijzing wordt pas geschreven als de nieuwe map compleet is; lukt het niet, dan is er niets
+ * veranderd en werkt de app verder vanuit de huidige map. Chromium blijft in de gedeelde map, dus de
+ * sleutel van de opgeslagen wachtwoorden is dezelfde en de app hoeft niet nog een keer te starten.
+ */
+async function switchFolderIfAsked(): Promise<void> {
+  if (SMOKE_TEST) return;
+  const home = app.getPath('home');
+  const request = takeSwitchRequest(home);
+  if (!request) return;
+  const source = rootDir();
+  const standard = sharedDataDir(home);
+  let outcome: Awaited<ReturnType<typeof switchWithProgress>>;
+  try {
+    outcome = await switchWithProgress(home, source, request, true);
+  } catch (e) {
+    // de verwijzing is het laatste wat geschreven wordt: wat `resolveDataDir` nu zegt, is waar
+    console.error('Afronden van het wisselen van gegevensmap mislukt', e);
+    outcome = { status: 'mislukt', reason: (e as Error).message };
+    try {
+      const now = resolveDataDir({ home, appData: app.getPath('appData') });
+      if ((now.kind === 'pointer' || now.kind === 'gedeeld') && sameDir(now.dir, request.target)) outcome = { status: 'gewisseld', dir: now.dir, action: request.action, databases: [], movedAside: null };
+    } catch (again) {
+      console.error(again);
+    }
+  }
+  if (outcome.status !== 'gewisseld') {
+    console.error(`Gegevensmap wisselen niet gelukt (${outcome.status}): ${outcome.reason}`);
+    dataDirNotices.push({
+      type: 'warning',
+      message: 'Je gegevensmap is niet gewijzigd',
+      detail: `${outcome.status === 'mislukt' ? `Het wisselen naar ${request.target} lukte niet (${outcome.reason}).` : outcome.reason}\n\nEr is niets veranderd: je werkt gewoon verder vanuit ${source}. Wil je het opnieuw proberen, kies de map dan opnieuw bij Instellingen > Administraties.`,
+    });
+    return;
+  }
+  dataRoot = outcome.dir;
+  console.log(`Gegevensmap gewisseld van ${source} naar ${outcome.dir} (${outcome.action})`);
+  const toStandard = sameDir(outcome.dir, standard);
+  dataDirNotices.push({
+    type: 'info',
+    message: outcome.action === 'kopieren' ? 'Je gegevens staan nu in de map die je koos' : 'Je werkt nu met de administratie in de map die je koos',
+    detail:
+      (outcome.action === 'kopieren'
+        ? `Je administratie staat voortaan in ${outcome.dir}.\n\nDe map ${source} is blijven staan; er is niets gewist. De app gebruikt die map niet meer, dus wat je vanaf nu invoert komt daar niet in.`
+        : `De app opent voortaan de administratie in ${outcome.dir}.\n\nJe vorige gegevens zijn niet meegegaan: die staan nog in ${source}. Komt deze map van een andere computer, dan moet je opgeslagen wachtwoorden (bijvoorbeeld van je e-mail) opnieuw invullen.`) +
+      (toStandard ? '' : `\n\nLaat de map ${standard} staan, ook als hij leeg lijkt: de app bewaart daar de sleutel van je opgeslagen wachtwoorden.`) +
+      (outcome.movedAside ? `\n\nIn de map stond nog een oudere administratie; die is bewaard in ${outcome.movedAside}.` : '') +
+      '\n\nGebruik je de koppeling met Claude Code of Codex? Start dat programma dan opnieuw, zodat het de nieuwe map leest.',
+  });
+}
+
+/** De meldingen na het overzetten of wisselen (of als dat niet lukte), na elkaar; houdt de app niet tegen. */
+async function showDataDirNotice(): Promise<void> {
+  for (const notice of dataDirNotices.splice(0)) {
+    if (!mainWindow) return;
+    await dialog.showMessageBox(mainWindow, { ...notice, title: 'BoekhoudenVoorNiks', buttons: ['OK'] });
+  }
 }
 if (MCP_MODE) {
   app.dock?.hide();
@@ -875,7 +968,7 @@ if (MCP_MODE) {
     createWindow();
     preparing = false;
     if (SMOKE_TEST) return;
-    showDataDirNotice();
+    void showDataDirNotice();
     setTimeout(() => void backgroundTasks(), 10_000);
     setTimeout(() => void migrateMcp(), 20_000);
     setInterval(() => void backgroundTasks(), SIX_HOURS);
