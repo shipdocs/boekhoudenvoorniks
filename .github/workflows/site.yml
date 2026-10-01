@@ -39,6 +39,10 @@ jobs:
         if: env.CLOUDFLARE_API_TOKEN != ''
         working-directory: workers/site
         run: npx wrangler deploy
+      - name: IndexNow (Bing, Yandex)
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        continue-on-error: true
+        run: node scripts/indexnow.cjs
       - name: Geen secrets
         if: env.CLOUDFLARE_API_TOKEN == ''
         run: echo "CLOUDFLARE_API_TOKEN ontbreekt; de site is niet gedeployd (doe het met de hand)."
