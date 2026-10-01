@@ -69,6 +69,8 @@ Wat de pc via mDNS bekendmaakt, alleen zolang het ontvangstpunt aan staat:
 | A | het IPv4-adres van de pc op dat netwerk |
 
 `<8 hex>` zijn de eerste vier bytes van het pc-ID. Er staat geen computernaam of bedrijfsnaam in.
+De pc antwoordt alleen op vragen uit hetzelfde netwerk, en altijd op het groepsadres (multicast),
+nooit rechtstreeks naar de vrager. Gebruik dus gewone mDNS (bij Android: `NsdManager`).
 
 De telefoon gebruikt alleen de dienst waarvan `id` gelijk is aan het pc-ID uit de QR-code, en bewaart
 het gevonden adres en de poort voor de volgende keer. Staat er op de pc een andere administratie open,
@@ -89,7 +91,9 @@ binnenkomen. Op een gastnetwerk dat apparaten van elkaar scheidt werkt het dus n
 - Er zijn geen CORS-kopregels en `OPTIONS` wordt geweigerd. Een webpagina (of een WebView met `fetch`)
   kan het ontvangstpunt dus niet gebruiken: verstuur met de HTTP-functies van het toestel zelf
   (bij Capacitor: de native HTTP-plug-in).
-- Eén bericht per verbinding is genoeg; de pc sluit de verbinding na het antwoord.
+- Eén bericht per verbinding; de pc sluit de verbinding na het antwoord. Stuur de berichten na elkaar:
+  van één adres leest de pc één verzoek tegelijk in (een tweede krijgt `te-druk`).
+- Komt er tien seconden niets over een verbinding, dan verbreekt de pc hem.
 - Wacht tot 30 seconden op een antwoord. De pc antwoordt zodra de bon op schijf staat; het uitlezen
   van de bon gebeurt daarna en houdt het antwoord niet op.
 
@@ -166,7 +170,7 @@ Geen foto's. Antwoord:
 |---|---|---|
 | `soort` | ja | `"bon"` |
 | `tijd` | ja | het moment van **versturen** (niet van fotograferen), in milliseconden |
-| `id` | ja | eigen ID van de telefoon voor deze bon: een UUID (`8-4-4-4-12` hexadecimale tekens). Hetzelfde ID bij elke nieuwe poging |
+| `id` | ja | eigen ID van de telefoon voor deze bon: een UUID (`8-4-4-4-12` hexadecimale tekens), in kleine letters. Hetzelfde ID bij elke nieuwe poging. (Hoofdletters neemt de pc aan, maar hij rekent met kleine letters en geeft het `id` zo terug.) |
 | `betaalwijze` | ja | `"pin"`, `"contant"`, `"prive"` of `"later"` |
 | `notitie` | nee | vrije tekst. Hooguit 1000 tekens; wat langer is, kapt de pc af. Regeleinden mogen |
 | `locatie` | nee | `{"lat": -90…90, "lon": -180…180}`. Alleen meesturen als de gebruiker locatie op de telefoon heeft aangezet |
@@ -177,7 +181,11 @@ Eisen aan de foto's:
 - Alleen **JPEG**. De pc controleert de inhoud (begin `FF D8`, een geldige kop met afmetingen, 8 bits
   per kanaal, grijs of kleur). Iets anders weigert hij met `ongeldig`, de hele bon.
 - Alle foto's samen hooguit 19 MiB (19.922.944 bytes).
-- De EXIF-oriëntatie (1, 3, 6, 8) wordt gevolgd; laat de foto verder zoals de camera hem maakte.
+- De pc bewaart de foto zoals hij binnenkomt; hij past de bytes niet aan. Bij een bon van meerdere
+  foto's (die samen één PDF worden) draait hij de pagina volgens de EXIF-oriëntatie 1, 3, 6 of 8;
+  gespiegelde standen (2, 4, 5, 7) kent hij niet. Stuur bij voorkeur foto's die al rechtop staan.
+- Zet **geen GPS-gegevens in de EXIF** van de foto, tenzij de gebruiker locatie op de telefoon heeft
+  aangezet. De pc haalt ze er niet uit: wat in het bestand zit, staat daarna bij de bijlagen.
 
 Antwoord:
 
@@ -226,8 +234,8 @@ namaken; de telefoon gooit er daarom **nooit** een bon of de koppeling om weg.
 | 411 | `lengte` | nee | geen `Content-Length`, of chunked | – |
 | 413 | `te-groot` | nee | body groter dan 20 MiB | – |
 | 415 | `verkeerd-type` | nee | verkeerde `Content-Type` | – |
-| 429 | `te-druk` | nee | te veel mislukte pogingen vanaf dit adres (20 per minuut) | een minuut wachten |
-| 503 | `te-druk` | nee | er lopen al drie verzoeken | even wachten en opnieuw |
+| 429 | `te-druk` | nee | te veel mislukte of afgebroken pogingen vanaf dit adres (20 per minuut) | een minuut wachten |
+| 503 | `te-druk` | nee | er wordt al een verzoek van dit adres ingelezen, of drie in totaal | even wachten en opnieuw |
 | 500 | `opslaan-mislukt` | nee | onverwachte fout op de pc | bon bewaren, later opnieuw |
 
 De pc controleert in deze volgorde: pad, methode, te veel mislukte pogingen, `Content-Type`,
@@ -239,7 +247,8 @@ De pc controleert in deze volgorde: pad, methode, te veel mislukte pogingen, `Co
   ook (geen verbinding, time-out, foutcode): de bon blijft in de wachtrij van de telefoon.
 - Dezelfde bon nog een keer sturen is altijd veilig: op het `id` herkent de pc hem en antwoordt
   `ok: true, al: true`. Er komt geen tweede document in de inbox.
-- De inhoud onder één `id` ligt vast vanaf de eerste poging: betaalwijze, notitie, locatie en foto's.
+- De inhoud onder één `id` ligt vast vanaf de eerste poging: betaalwijze, notitie en foto's (daarop
+  vergelijkt de pc; anders is het `id-botst`).
   Verandert de gebruiker daarna nog iets, gebruik dan een nieuw `id`. (Een bon met precies dezelfde
   foto herkent de pc dan nog aan de hash van het bestand.)
 - De telefoon ruimt een bon alleen op na een **versleuteld** antwoord met `ok: true` en het eigen `id`.
@@ -247,14 +256,16 @@ De pc controleert in deze volgorde: pad, methode, te veel mislukte pogingen, `Co
 ## Wat de pc met een bon doet
 
 - Eén foto wordt één document (jpg) in de inbox bij *Aankopen & bonnetjes*; meerdere foto's worden
-  samen één PDF met een pagina per foto. De bestandsnaam maakt de pc zelf; niets uit het bericht komt
-  in een bestandsnaam.
+  samen één PDF met een pagina per foto. De naam van het document maakt de pc zelf. Uit het bericht
+  wordt alleen het `id` als naam gebruikt, na controle dat het een UUID is, en alleen voor het
+  tijdelijke bestand in de wachtrij van de app.
 - Er wordt nooit vanzelf geboekt: de bon wacht op controle, net als een bon uit de mail.
 - `betaalwijze` wordt het voorstel bij "Hoe betaald?": `pin` en `later` → zakelijke rekening (de
   betaling volgt via de bank), `contant` → contant, `prive` → met privégeld.
 - `notitie` staat bij het document.
 - `locatie` wordt alleen bewaard als op de pc *Gebruik de locatie van foto's om bonnen aan klussen te
-  koppelen* aan staat (#32). Anders gooit de pc hem weg.
+  koppelen* aan staat (#32). Anders gooit de pc het veld weg, ook uit de wachtrij. (GPS-gegevens in de
+  foto zelf blijven in het bestand staan; zie de eisen aan de foto's.)
 
 ## Uitgewerkt voorbeeld
 
@@ -330,7 +341,10 @@ async function verstuur(koppeling, json: object, fotos: Uint8Array[] = []) {
   for (const f of fotos) { inhoud.set(f, plek); plek += f.length; }
 
   const cijfer = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce, additionalData: kop }, sleutel, inhoud));
-  const body = new Uint8Array([...kop, ...nonce, ...cijfer]); // de tag zit al achter de cijfertekst
+  const body = new Uint8Array(34 + cijfer.length); // kop (22) | nonce (12) | cijfertekst met de tag erachter
+  body.set(kop, 0);
+  body.set(nonce, 22);
+  body.set(cijfer, 34);
 
   const antwoord = await nativePost(`http://${adres}:${poort}/v1/bericht`, 'application/vnd.boekhoudenvoorniks.scanner', body);
   if (antwoord.contentType !== 'application/vnd.boekhoudenvoorniks.scanner') return { vertrouwd: false, ...JSON.parse(antwoord.tekst) };

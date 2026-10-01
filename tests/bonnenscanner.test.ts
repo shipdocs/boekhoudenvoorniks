@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -672,6 +672,65 @@ describe('bonnenscanner: ontvangen via wifi (#48)', () => {
     expect(readdirSync(t.spoolDir)).toEqual([]);
   });
 
+  it('een bon in de wachtrij zonder regel in de database (stroomuitval, teruggezette back-up) gaat alsnog de inbox in', async () => {
+    const t = start();
+    const p = await pair(t);
+    let block = true;
+    const add = t.s.intake.add.bind(t.s.intake);
+    t.s.intake.add = async (...args) => {
+      if (block) throw new Error('nog niet');
+      return add(...args);
+    };
+    const id = randomUUID();
+    expect((await p.bon({ id, notitie: 'bijna kwijt' })).json).toMatchObject({ ok: true });
+    await t.scanner.stop();
+    // de regel is weg, het bestand staat er nog; daarnaast een half geschreven bestand en iets onleesbaars
+    t.db.prepare('DELETE FROM scanner_documents').run();
+    writeFileSync(join(t.spoolDir, `${randomUUID()}.bon.tmp`), 'half');
+    const broken = `${randomUUID()}.bon`;
+    writeFileSync(join(t.spoolDir, broken), 'geen bericht');
+    block = false;
+    const next = new Bonnenscanner({ db: t.db, secrets: t.secrets, intake: t.s.intake, settings: t.s.settings, spoolDir: t.spoolDir, interfaces: () => LOOPBACK, now: () => t.clock.now });
+    open.push(next);
+    await next.start();
+    await next.processSpool();
+    expect(t.documents()).toMatchObject([{ note: 'bijna kwijt' }]);
+    // de telefoon die het nog een keer stuurt, krijgt "hadden we al"
+    expect((await p.bon({ id, notitie: 'bijna kwijt' })).json).toMatchObject({ ok: true, al: true });
+    // het halve bestand is weg; het onleesbare blijft staan (er wordt niets weggegooid dat een bon kan zijn)
+    expect(readdirSync(t.spoolDir)).toEqual([broken]);
+  });
+
+  it('stoppen terwijl het starten nog loopt laat niets draaien', async () => {
+    const t = start();
+    const starting = t.scanner.start();
+    await t.scanner.stop();
+    await starting;
+    expect((t.scanner as unknown as { timer: unknown }).timer).toBeNull();
+    expect(t.scanner.status().running).toBe(false);
+  });
+
+  it('een verbinding die blijft hangen houdt het ontvangstpunt niet bezet', async () => {
+    const t = start();
+    const p = await pair(t);
+    const { hostname, port } = new URL(p.url);
+    // geldige kop, 50 bytes aangekondigd, 49 gestuurd, en dan niets meer
+    const stalled = connect({ host: hostname, port: Number(port) });
+    await new Promise((resolve) => stalled.once('connect', resolve));
+    stalled.write(`POST ${ENDPOINT_PATH} HTTP/1.1\r\nHost: x\r\nContent-Type: ${CONTENT_TYPE}\r\nContent-Length: 50\r\n\r\n`);
+    stalled.write(Buffer.alloc(49, 1));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // van één adres wordt één verzoek tegelijk ingelezen
+    expect(await p.hallo()).toMatchObject({ status: 503, json: { fout: 'te-druk' } });
+    // de hangende verbinding wordt na tien seconden zonder gegevens door de pc verbroken
+    const closed = await new Promise<boolean>((resolve) => {
+      stalled.once('close', () => resolve(true));
+      setTimeout(() => resolve(false), 14_000);
+    });
+    expect(closed).toBe(true);
+    expect((await p.hallo()).status).toBe(200);
+  });
+
   it('lukt het in de inbox zetten niet, dan blijft de bon bewaard en wordt hij gemeld', async () => {
     const t = start();
     const p = await pair(t);
@@ -740,7 +799,10 @@ describe('bonnenscanner: protocol (docs/bonnenscanner-protocol.md)', () => {
         plek += f.length;
       }
       const cijfer = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce, additionalData: kop }, sleutel, inhoud));
-      const body = new Uint8Array([...kop, ...nonce, ...cijfer]);
+      const body = new Uint8Array(34 + cijfer.length);
+      body.set(kop, 0);
+      body.set(nonce, 22);
+      body.set(cijfer, 34);
       const res = await fetch(`http://${k.adressen[0]}:${k.poort}/v1/bericht`, { method: 'POST', headers: { 'content-type': type }, body });
       if (res.headers.get('content-type') !== type) return { vertrouwd: false, ...((await res.json()) as object) };
       const r = new Uint8Array(await res.arrayBuffer());
@@ -818,6 +880,11 @@ describe('bonnenscanner: alleen het lokale netwerk, vindbaar via mDNS', () => {
       proton0: [nic('10.2.0.2', '255.255.255.255')],
       tun0: [nic('10.8.0.2')],
       'vEthernet (WSL)': [nic('172.29.0.1', '255.255.240.0')],
+      podman0: [nic('10.88.0.1', '255.255.0.0')],
+      bridge100: [nic('192.168.64.1')],
+      'ZeroTier One [abc]': [nic('10.147.17.5')],
+      'Thuis-VPN': [nic('10.6.0.2')],
+      'OpenVPN TAP-Windows6': [nic('10.8.1.6')],
       wg0: [nic('10.9.0.1', '255.255.255.255')],
     });
     expect(found).toEqual([{ address: '192.168.1.35', netmask: '255.255.255.0' }, { address: '10.0.0.12', netmask: '255.0.0.0' }]);
@@ -841,7 +908,7 @@ describe('bonnenscanner: alleen het lokale netwerk, vindbaar via mDNS', () => {
     expect(t.advertised.at(-1)).toEqual([]);
     const p = await pair(t);
     const pc = t.scanner.pairing.pcId();
-    expect(t.advertised.at(-1)).toEqual([{ pcId: pc, port: Number(new URL(p.url).port), address: '127.0.0.1' }]);
+    expect(t.advertised.at(-1)).toEqual([{ pcId: pc, port: Number(new URL(p.url).port), address: '127.0.0.1', netmask: '255.0.0.0' }]);
     for (const d of t.scanner.status().devices) await t.scanner.unpair(d.id);
     expect(t.advertised.at(-1)).toEqual([]);
   });
@@ -850,7 +917,7 @@ describe('bonnenscanner: alleen het lokale netwerk, vindbaar via mDNS', () => {
   // testomgeving is multicast er vaak niet. Draaien: BVN_TEST_MDNS=127.0.0.1 npx vitest run tests/bonnenscanner.test.ts
   it.skipIf(!process.env.BVN_TEST_MDNS)('live: een andere mDNS-socket vindt het ontvangstpunt en ziet het weer verdwijnen', async () => {
     const address = process.env.BVN_TEST_MDNS!;
-    const ad = { pcId: 'oKGio6SlpqeoqaqrrK2urw', port: 51234, address };
+    const ad = { pcId: 'oKGio6SlpqeoqaqrrK2urw', port: 51234, address, netmask: '255.0.0.0' };
     const advertiser = new MdnsAdvertiser();
     const client = makeMdns({ interface: address, bind: '0.0.0.0', reuseAddr: true });
     const seen: string[] = [];
@@ -885,7 +952,7 @@ describe('bonnenscanner: alleen het lokale netwerk, vindbaar via mDNS', () => {
     current = [{ address: '127.0.0.2', netmask: '255.0.0.0' }];
     await t.scanner.refresh();
     expect(t.scanner.status()).toMatchObject({ running: true, port, addresses: ['127.0.0.2'] });
-    expect(t.advertised.at(-1)).toEqual([{ pcId: t.scanner.pairing.pcId(), port, address: '127.0.0.2' }]);
+    expect(t.advertised.at(-1)).toEqual([{ pcId: t.scanner.pairing.pcId(), port, address: '127.0.0.2', netmask: '255.0.0.0' }]);
     // op het oude adres luistert niets meer; op het nieuwe werkt dezelfde koppeling
     await expect(p.hallo()).rejects.toThrow();
     const moved = phone({ pc: t.scanner.pairing.pcId(), apparaat: p.deviceId.toString('base64url'), sleutel: p.key.toString('base64url'), poort: port, adressen: ['127.0.0.2'] }, t.clock);
@@ -893,7 +960,7 @@ describe('bonnenscanner: alleen het lokale netwerk, vindbaar via mDNS', () => {
   });
 
   it('antwoordt op de vraag naar _gratisboekhouden._tcp met poort, pc-ID en adres, en zegt verder niets', () => {
-    const ad = { pcId: 'oKGio6SlpqeoqaqrrK2urw', port: 51234, address: '192.168.1.35' };
+    const ad = { pcId: 'oKGio6SlpqeoqaqrrK2urw', port: 51234, address: '192.168.1.35', netmask: '255.255.255.0' };
     const { instance, host } = mdnsNames(ad.pcId);
     expect(instance).toBe('BoekhoudenVoorNiks-a0a1a2a3._gratisboekhouden._tcp.local');
     const browse = mdnsAnswer([{ name: '_gratisboekhouden._tcp.local', type: 'PTR' }], ad)!;

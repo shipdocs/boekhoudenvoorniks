@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { realpathSync, statSync } from 'node:fs';
+import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, parse } from 'node:path';
 import type { Db } from '../db/database';
@@ -29,6 +29,8 @@ export interface ScannerDeps {
   /** mappen van de app zelf: daar mag de bonnenmap niet in liggen */
   protectedDirs?: string[];
   homeDir?: string;
+  /** mappen die als geheel te breed zijn om te bewaken (Documenten, Downloads, Bureaublad, …) */
+  broadDirs?: string[];
   interfaces?: () => LocalInterface[];
   peerAllowed?: (remote: string, local: LocalInterface) => boolean;
   /** mDNS; ontbreekt in tests */
@@ -71,6 +73,8 @@ export interface PairingStart {
 const PAID_WITH: Record<PaymentMethod, PaidWith> = { pin: 'bank', contant: 'kas', prive: 'prive', later: 'later' };
 const REFRESH_MS = 15_000;
 const FOLDER_KEY = 'receiptFolder';
+/** de gewone mappen in een thuismap: als geheel te breed, een submap ervan mag wel */
+const COMMON_FOLDERS = ['Desktop', 'Documents', 'Downloads', 'Pictures', 'OneDrive', 'Dropbox', 'Google Drive', 'Bureaublad', 'Documenten', 'Afbeeldingen'];
 
 const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
 
@@ -89,6 +93,7 @@ export class Bonnenscanner {
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
   private draining: Promise<void> = Promise.resolve();
+  private inboxQueue: Promise<unknown> = Promise.resolve();
   private readonly log: (message: string) => void;
 
   constructor(private readonly deps: ScannerDeps) {
@@ -107,12 +112,14 @@ export class Bonnenscanner {
       log: this.log,
     });
     this.watch = new ReceiptFolderWatch({
-      folder: () => (this.blocked() ? null : this.folder()),
+      folder: () => this.watchedFolder(),
+      configured: () => (this.blocked() ? null : this.folder()),
       add: async (name, data) => {
-        const known = this.deps.db.prepare('SELECT id FROM documents WHERE sha256 = ?').get(sha256(data)) as { id: number } | undefined;
-        // net als bonnen uit de mail: nooit vanzelf boeken, altijd eerst laten controleren
-        const doc = await this.deps.intake.add(safeFileName(name), data, today(), { autoConfirm: false });
-        return { documentId: doc.id, duplicate: Boolean(known) };
+        return this.toInbox(async () => {
+          const known = this.deps.db.prepare('SELECT id FROM documents WHERE sha256 = ?').get(sha256(data)) as { id: number } | undefined;
+          const doc = await this.addToInbox(safeFileName(name), data);
+          return { documentId: doc.id, duplicate: Boolean(known) };
+        });
       },
       now: deps.now,
       pollMs: deps.folderPollMs,
@@ -131,13 +138,21 @@ export class Bonnenscanner {
 
   async start(): Promise<void> {
     this.stopped = false;
-    this.spool.cleanup();
-    // wat eerder niet lukte, bij elke start nog een keer proberen
-    this.deps.db.prepare(`UPDATE scanner_documents SET state = 'wacht', attempts = 0 WHERE state = 'mislukt'`).run();
+    this.spool.recover();
     await this.refresh();
+    // intussen gestopt (bv. meteen een andere administratie geopend): niets meer aanzetten
+    if (this.stopped) return;
     this.watch.start();
     void this.processSpool();
-    this.timer = setInterval(() => void this.refresh(), REFRESH_MS);
+    this.timer = setInterval(() => {
+      void this.refresh();
+      // een bon die net niet lukte (bv. schijf even vol): om de zoveel tijd opnieuw, een paar keer
+      try {
+        if (this.spool.waiting().length > 0) void this.processSpool();
+      } catch {
+        /* de administratie gaat net dicht */
+      }
+    }, REFRESH_MS);
     this.timer.unref();
   }
 
@@ -159,7 +174,7 @@ export class Bonnenscanner {
     await this.receiver.sync();
     if (this.stopped) return;
     const port = this.receiver.port;
-    this.deps.advertiser?.update(port ? this.receiver.addresses.map((address) => ({ pcId: this.pairing.pcId(), port, address })) : []);
+    this.deps.advertiser?.update(port ? this.receiver.interfaces.map((i) => ({ pcId: this.pairing.pcId(), port, address: i.address, netmask: i.netmask })) : []);
   }
 
   status(): ScannerStatus {
@@ -231,34 +246,62 @@ export class Bonnenscanner {
   }
 
   /**
-   * De bonnenmap kiezen (of met null: uitzetten). Het pad komt uit het keuzevenster van het
-   * besturingssysteem, niet uit het scherm. De app verplaatst bestanden uit deze map, dus een map die
-   * te breed is (je hele thuismap, de schijf zelf) of van de app zelf, wordt geweigerd.
+   * Mag dit de bonnenmap zijn? Geeft het echte pad terug, of gooit met de reden. De app verplaatst
+   * bestanden uit deze map, dus een map die te breed is (de schijf, je thuismap, je hele map Documenten
+   * of Downloads) of van de app zelf, wordt geweigerd.
    */
-  setFolder(path: string | null): FolderStatus {
+  private async checkFolder(path: string): Promise<string> {
+    if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Kies een map op deze computer');
+    let real: string;
+    try {
+      real = await realpath(path);
+      if (!(await stat(real)).isDirectory()) throw new Error('geen map');
+    } catch {
+      throw new Error('Deze map bestaat niet (meer). Kies een andere map.');
+    }
+    const home = await realOr(this.deps.homeDir ?? homedir());
+    // "in of gelijk aan": een denkbeeldig bestand in de map ligt dan echt onder de andere map
+    const within = (root: string, candidate: string) => isPathInside(root, join(candidate, 'x'));
+    const broad = [...COMMON_FOLDERS.map((name) => join(home, name)), ...(await Promise.all((this.deps.broadDirs ?? []).map(realOr)))];
+    if (real === parse(real).root || within(real, home) || broad.some((b) => within(real, b))) {
+      throw new Error('Deze map is te groot om te bewaken: alles wat erin staat zou als bon binnenkomen. Maak een aparte map voor je bonnen, bijvoorbeeld "Bonnen" in je documenten.');
+    }
+    for (const own of this.deps.protectedDirs ?? []) {
+      if (within(await realOr(own), real)) throw new Error('Dit is een map van BoekhoudenVoorNiks zelf. Kies een aparte map voor je bonnen.');
+    }
+    return real;
+  }
+
+  /**
+   * De map waar de rondgang in kijkt: de gekozen map, mits die nog steeds aan de regels voldoet en nog
+   * dezelfde map is (bv. niet intussen een snelkoppeling naar elders, of overgenomen uit een back-up
+   * van een andere computer).
+   */
+  private async watchedFolder(): Promise<string | null> {
+    const chosen = this.blocked() ? null : this.folder();
+    if (!chosen) return null;
+    try {
+      return (await this.checkFolder(chosen)) === chosen ? chosen : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * De bonnenmap kiezen (of met null: uitzetten). Het pad komt uit het keuzevenster van het
+   * besturingssysteem, niet uit het scherm.
+   */
+  async setFolder(path: string | null): Promise<FolderStatus> {
     if (path === null) {
       this.deps.db.prepare('DELETE FROM settings WHERE key = ?').run(FOLDER_KEY);
     } else {
       const blocked = this.blocked();
       if (blocked) throw new Error(blocked);
-      if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Kies een map op deze computer');
-      let real: string;
-      try {
-        real = realpathSync(path);
-        if (!statSync(real).isDirectory()) throw new Error('geen map');
-      } catch {
-        throw new Error('Deze map bestaat niet (meer). Kies een andere map.');
-      }
-      // "in of gelijk aan": een denkbeeldig bestand in de map ligt dan echt onder de andere map
-      const within = (root: string, candidate: string) => isPathInside(realOr(root), join(realOr(candidate), 'x'));
-      if (real === parse(real).root || within(real, this.deps.homeDir ?? homedir())) throw new Error('Deze map is te groot om te bewaken. Kies een aparte map voor je bonnen, bijvoorbeeld "Bonnen" in je documenten.');
-      for (const own of this.deps.protectedDirs ?? []) {
-        if (within(own, real)) throw new Error('Dit is een map van BoekhoudenVoorNiks zelf. Kies een aparte map voor je bonnen.');
-      }
+      const real = await this.checkFolder(path);
       this.deps.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(FOLDER_KEY, JSON.stringify(real));
     }
     this.watch.reset();
-    void this.watch.scan();
+    await this.watch.scan();
     return this.watch.status();
   }
 
@@ -280,11 +323,11 @@ export class Bonnenscanner {
       if (this.stopped) return;
       try {
         const msg = this.spool.read(row.id);
-        // de naam is van de app zelf: niets uit het bericht komt in een bestandsnaam
+        // de naam van het document maakt de app zelf, niet de telefoon
         const one = msg.fotos.length === 1;
         const data = one ? msg.fotos[0]! : jpegsToPdf(msg.fotos);
         const name = `bon-telefoon-${row.received_at.slice(0, 10)}-${sha256(data).slice(0, 8)}.${one ? 'jpg' : 'pdf'}`;
-        const doc = await this.deps.intake.add(name, data, today(), { autoConfirm: false });
+        const doc = await this.toInbox(() => this.addToInbox(name, data));
         if (this.stopped) return;
         this.applyHints(doc.id, msg);
         this.spool.done(row.id, doc.id);
@@ -295,6 +338,21 @@ export class Bonnenscanner {
         this.spool.fail(row.id, (e as Error).message);
       }
     }
+  }
+
+  /** Net als bonnen uit de mail: nooit vanzelf boeken, altijd eerst laten controleren. */
+  private addToInbox(name: string, data: Uint8Array) {
+    return this.deps.intake.add(name, data, today(), { autoConfirm: false });
+  }
+
+  /**
+   * Eén bestand tegelijk naar de inbox. De inbox kijkt eerst of hij het bestand al heeft en voegt het
+   * daarna pas toe; komt dezelfde bon tegelijk via de telefoon en de bonnenmap, dan mag dat niet botsen.
+   */
+  private toInbox<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.inboxQueue.then(work, work);
+    this.inboxQueue = run.catch(() => undefined);
+    return run;
   }
 
   /**
@@ -318,12 +376,8 @@ function safeFileName(name: string): string {
   return `${clean}${ext.toLowerCase()}`;
 }
 
-function realOr(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
+function realOr(path: string): Promise<string> {
+  return realpath(path).catch(() => path);
 }
 
 export function scannerSpoolDir(dataDir: string): string {

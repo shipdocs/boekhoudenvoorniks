@@ -378,6 +378,13 @@ function initServices(): void {
     spoolDir: scannerSpoolDir(dataDir()),
     protectedDirs: [rootDir(), app.getPath('userData')],
     homeDir: app.getPath('home'),
+    broadDirs: (['desktop', 'documents', 'downloads', 'pictures'] as const).flatMap((name) => {
+      try {
+        return [app.getPath(name)];
+      } catch {
+        return [];
+      }
+    }),
     advertiser: new MdnsAdvertiser((message) => console.error(message)),
     // er kwam een bon binnen (telefoon of bonnenmap): het tellertje op Vandaag bijwerken
     onChange: () => emit('auto-processed', { scanner: true }),

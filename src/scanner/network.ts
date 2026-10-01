@@ -38,11 +38,16 @@ export function sameSubnet(remote: string, local: LocalInterface): boolean {
 }
 
 /** Virtuele netwerken (Docker, virtuele machines, VPN): daar zit geen telefoon op. */
-const VIRTUAL = /^(docker|br-|virbr|veth|vmnet|vboxnet|tun|tap|wg|zt|tailscale|proton|utun|ppp)|vethernet|virtualbox|vmware|hyper-v|wsl|loopback|bluetooth/i;
+const VIRTUAL =
+  /^(docker|podman|br-|virbr|lxdbr|lxcbr|incusbr|cni|flannel|veth|vmnet|vboxnet|bridge\d|tun|tap|wg|zt|tailscale|proton|utun|ppp|ipsec)|vethernet|virtualbox|vmware|hyper-v|wsl|loopback|bluetooth|vpn|wireguard|zerotier|tailscale|openvpn|tap-windows|tunnel/i;
 
 /**
  * De adressen waarop het ontvangstpunt luistert: alleen IPv4, alleen privé-adressen, geen virtuele
  * netwerken en geen VPN. Het waarschijnlijkste thuisnetwerk (192.168.x.x) eerst.
+ *
+ * Virtuele netwerken herkennen we aan de naam van de adapter; dat is een vuistregel, geen garantie. Een
+ * VPN-adapter met een onbekende naam en een privé-adres telt als gewoon netwerk. Ook daar doet het
+ * ontvangstpunt niets zonder de sleutel van een gekoppelde telefoon.
  */
 export function localInterfaces(all: ReturnType<typeof networkInterfaces> = networkInterfaces()): LocalInterface[] {
   const out: LocalInterface[] = [];

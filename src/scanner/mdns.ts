@@ -1,6 +1,7 @@
 import makeMdns from 'multicast-dns';
 import type { MulticastDNS } from 'multicast-dns';
 import type { Answer, Question } from 'dns-packet';
+import { sameSubnet } from './network';
 import { MDNS_SERVICE, PROTOCOL_VERSION, fromBase64Url, DEVICE_ID_BYTES } from './protocol';
 
 /** Wat er op het lokale netwerk bekendgemaakt wordt: waar het ontvangstpunt te vinden is, verder niets. */
@@ -9,6 +10,8 @@ export interface Advertisement {
   port: number;
   /** het adres van deze computer op dit netwerk */
   address: string;
+  /** het netmasker erbij: alleen vragen uit dit netwerk krijgen antwoord */
+  netmask: string;
 }
 
 export interface Advertiser {
@@ -17,6 +20,7 @@ export interface Advertiser {
   stop(): void;
 }
 
+const RETRY_MS = 5 * 60 * 1000;
 const SERVICE = `${MDNS_SERVICE}.local`;
 const DIRECTORY = '_services._dns-sd._udp.local';
 
@@ -71,9 +75,15 @@ export function mdnsAnswer(questions: Pick<Question, 'name' | 'type'>[], ad: Adv
  * herstart van de router geen probleem is. Per netwerkadres een eigen socket: het antwoord op een
  * netwerk noemt alleen het adres op dát netwerk. Lukt mDNS niet (poort 5353 bezet of geblokkeerd),
  * dan werkt het ontvangen via de adressen uit de QR-code gewoon door.
+ *
+ * Alleen vragen uit het eigen netwerk krijgen antwoord, en altijd op het groepsadres van dat netwerk
+ * (nooit rechtstreeks naar een afzender): zo is het ontvangstpunt van buiten dat netwerk niet uit te
+ * vragen en niet te misbruiken om verkeer naar een ander te sturen.
  */
 export class MdnsAdvertiser implements Advertiser {
   private readonly active = new Map<string, { mdns: MulticastDNS; ad: Advertisement }>();
+  /** lukte mDNS op een adres niet, dan pas na een tijd opnieuw proberen (niet bij elke ronde) */
+  private readonly retryAfter = new Map<string, number>();
 
   constructor(private readonly log: (message: string) => void = () => undefined) {}
 
@@ -81,7 +91,7 @@ export class MdnsAdvertiser implements Advertiser {
     const key = (ad: Advertisement) => `${ad.address}|${ad.port}|${ad.pcId}`;
     const wanted = new Map(ads.map((ad) => [key(ad), ad]));
     for (const k of [...this.active.keys()]) if (!wanted.has(k)) this.close(k);
-    for (const [k, ad] of wanted) if (!this.active.has(k)) this.open(k, ad);
+    for (const [k, ad] of wanted) if (!this.active.has(k) && (this.retryAfter.get(k) ?? 0) <= Date.now()) this.open(k, ad);
   }
 
   stop(): void {
@@ -99,15 +109,15 @@ export class MdnsAdvertiser implements Advertiser {
     this.active.set(k, { mdns, ad });
     mdns.on('error', (e: Error) => {
       this.log(`mDNS werkt niet op ${ad.address}: ${e.message}`);
-      this.close(k);
+      this.retryAfter.set(k, Date.now() + RETRY_MS);
+      this.active.delete(k);
+      mdns.destroy();
     });
     mdns.on('warning', () => undefined);
     mdns.on('query', (query: { questions: Question[] }, rinfo: { address: string; port: number }) => {
+      if (!sameSubnet(rinfo.address, ad)) return;
       const answer = mdnsAnswer(query.questions ?? [], ad);
-      if (!answer) return;
-      // gewone mDNS-vragen (poort 5353) krijgen antwoord op het groepsadres; andere rechtstreeks
-      if (rinfo.port === 5353) mdns.respond(answer);
-      else mdns.respond(answer, { address: rinfo.address, port: rinfo.port });
+      if (answer) mdns.respond(answer);
     });
     const announce = () => {
       if (this.active.get(k)?.mdns !== mdns) return;
