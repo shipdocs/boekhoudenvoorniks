@@ -1,9 +1,16 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 0.7.6 — je gegevens in een vaste map buiten de app
+
+### Verbeterd
+- **Je administratie staat voortaan in een vaste map**: `BoekhoudenVoorNiks` in je thuismap (op Windows `C:\Users\<jij>\BoekhoudenVoorNiks`). Daar blijft hij staan als je de app verwijdert of opnieuw installeert. Bij de eerste start van deze versie zet de app je gegevens over door ze te kopiëren en te controleren; je ziet de voortgang en kunt stoppen. De oude map wordt nooit gewist, maar bewaard onder een naam die eindigt op `.gemigreerd-<datum>`. Lukt het overzetten niet (bijvoorbeeld door te weinig ruimte), dan verandert er niets en probeert de app het bij de volgende start opnieuw.
+- **Twee oude mappen? Jij kiest**: staat er zowel een map van vóór als van na de naamswijziging met een administratie, dan vraagt de app welke je wilt gebruiken, met de datum van de laatste wijziging erbij. De app start daarna één keer opnieuw.
+- **Opgeslagen wachtwoorden gaan mee**: het wachtwoord van je e-mail en andere koppelingen blijft na het overzetten werken.
+- **Koppeling met Claude Code of Codex**: leest dezelfde map als de app. Start dat programma na het overzetten één keer opnieuw.
 
 ### Opgelost
-- **Bijlagen na de naamswijziging weer te openen**: bijlagepaden die nog naar de oude map `gratis-boekhouden` wezen, worden bij het starten omgezet naar de huidige gegevensmap (voor alle administraties). Er verandert niets aan de bestanden zelf.
+- **Bijlagen na de naamswijziging weer te openen**: bijlagepaden die nog naar de oude map `gratis-boekhouden` wezen, worden bij het overzetten omgezet naar de nieuwe gegevensmap (voor alle administraties). Er verandert niets aan de bestanden zelf.
+- **Oude losse databaseback-up terugzetten**: de bijlagen die er al staan zijn daarna weer te openen; ook een back-up uit een heel oude versie gaat goed.
 
 ## 0.7.5 — bekende leveranciers voorgesteld, eenvoudiger uitleg online hulp
 
