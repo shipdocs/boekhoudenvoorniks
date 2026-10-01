@@ -95,3 +95,68 @@ jobs:
       - run: npx electron-builder --linux --dir --publish never
       - name: Rooktest verpakte app
         run: BOEKHOUDENVOORNIKS_SMOKE_TEST=1 BOEKHOUDENVOORNIKS_DATA="$RUNNER_TEMP/smoke" timeout 120 xvfb-run -a release/linux-unpacked/boekhoudenvoorniks --no-sandbox
+      # Een installatie van vóór de gedeelde gegevensmap nabootsen: de verpakte app zet de oude map over
+      # naar ~/BoekhoudenVoorNiks en start daarna gewoon vanuit de nieuwe map.
+      - name: Rooktest overzetten van de gegevensmap
+        run: |
+          app() { BOEKHOUDENVOORNIKS_SMOKE_TEST=1 timeout 120 xvfb-run -a release/linux-unpacked/boekhoudenvoorniks --no-sandbox; }
+          old="$HOME/.config/boekhoudenvoorniks"
+          BOEKHOUDENVOORNIKS_DATA="$old" app
+          test -f "$old/boekhouding.sqlite"
+          app
+          test -f "$HOME/BoekhoudenVoorNiks/migratie-klaar"
+          test -f "$HOME/BoekhoudenVoorNiks/boekhouding.sqlite"
+          test ! -e "$old"
+          ls -d "$old".gemigreerd-*
+          app
+
+  # Hetzelfde op Windows, met de echte installer erbij: die is als artefact te downloaden om een
+  # upgrade met de hand te proberen (docs/handmatige-test-datamap-windows.md). Er wordt niets gepubliceerd.
+  package-smoke-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx electron-builder --win --publish never
+      - name: Rooktest verpakte app en overzetten van de gegevensmap
+        shell: pwsh
+        run: |
+          function Start-App([string]$data) {
+            $env:BOEKHOUDENVOORNIKS_SMOKE_TEST = '1'
+            if ($data) { $env:BOEKHOUDENVOORNIKS_DATA = $data } else { Remove-Item Env:BOEKHOUDENVOORNIKS_DATA -ErrorAction SilentlyContinue }
+            $p = Start-Process -FilePath "release\win-unpacked\BoekhoudenVoorNiks.exe" -PassThru -NoNewWindow
+            $null = $p.Handle  # nodig zodat ExitCode na afloop beschikbaar is
+            try {
+              Wait-Process -Id $p.Id -Timeout 120 -ErrorAction Stop
+            } catch {
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              throw 'Rooktest mislukt: de app sloot niet binnen 120 seconden af'
+            }
+            $p.WaitForExit()
+            if ($p.ExitCode -ne 0) { throw "Rooktest mislukt (exit $($p.ExitCode))" }
+          }
+          function Assert-Path([string]$path) { if (-not (Test-Path $path)) { throw "Ontbreekt: $path" } }
+
+          Start-App "$env:RUNNER_TEMP\smoke"
+
+          $old = "$env:APPDATA\boekhoudenvoorniks"
+          $shared = "$env:USERPROFILE\BoekhoudenVoorNiks"
+          Start-App $old
+          Assert-Path "$old\boekhouding.sqlite"
+          Start-App ''
+          Assert-Path "$shared\migratie-klaar"
+          Assert-Path "$shared\boekhouding.sqlite"
+          if (Test-Path $old) { throw "De oude map staat er nog: $old" }
+          Assert-Path "$old.gemigreerd-*"
+          Start-App ''
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release/*.exe
+          retention-days: 7
