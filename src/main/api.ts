@@ -45,6 +45,7 @@ import { formatDateNl, today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 import type { PollResult } from '../mail/mail-intake';
 import type { UpdateStatus } from './updates';
+import type { SwitchPlan } from './data-dir';
 import type { FxApplyInput } from '../fx/repair';
 import { ExchangeService, type OfficeProfile } from '../exchange/exchange';
 import { checkCode, openOfficeKey, sealOfficeKey } from '../exchange/crypto';
@@ -97,6 +98,17 @@ export interface HostContext {
     list(): { key: string; name: string; officeCopy: { office: string; exchange: number; endDate: string } | null; id: string | null; current: boolean }[];
     open(key: string): Promise<void>;
     create(name: string): Promise<string>;
+  };
+  /** een andere gegevensmap kiezen (alleen in de app zelf, en niet met een eigen map uit de omgeving) */
+  dataFolder?: {
+    /** waar de gegevens nu staan, en wat de standaardmap is */
+    info(): { dir: string; standard: string; isStandard: boolean };
+    /** het keuzevenster voor een map; geeft wat er met die map zou gebeuren, of null bij annuleren */
+    choose(): Promise<SwitchPlan | null>;
+    /** "Terug naar de standaardmap": de huidige gegevens gaan mee */
+    chooseStandard(): SwitchPlan;
+    /** de laatst gekozen map in gebruik nemen; de app start daarvoor opnieuw */
+    apply(): Promise<void>;
   };
   appVersion(): string;
   checkForUpdates(): Promise<string>;
@@ -384,6 +396,10 @@ export function createApi(s: Services, host: HostContext) {
     s.license.requireActive(today());
   };
 
+  const dataFolder = () => {
+    if (!host.dataFolder) throw new Error('De gegevensmap wijzigen kan alleen in de app zelf');
+    return host.dataFolder;
+  };
   const admins = () => {
     if (!host.administrations) throw new Error('Meerdere administraties kan alleen in de app zelf');
     return host.administrations;
@@ -547,6 +563,13 @@ export function createApi(s: Services, host: HostContext) {
       list: () => (host.administrations ? host.administrations.list() : []),
       open: (key: string) => admins().open(String(key)),
       create: (name: string) => admins().create(String(name)),
+    },
+    /** de map met alle administraties: waar hij staat, en een andere kiezen */
+    dataFolder: {
+      info: () => host.dataFolder?.info() ?? null,
+      choose: () => dataFolder().choose(),
+      chooseStandard: () => dataFolder().chooseStandard(),
+      apply: () => dataFolder().apply(),
     },
     app: {
       version: () => host.appVersion(),
@@ -729,6 +752,8 @@ export function createApi(s: Services, host: HostContext) {
       addPurchaseEvidence: (name: string, data: Uint8Array, purchaseId: number) => s.intake.addPurchaseEvidence(name, data, purchaseId),
       list: (status?: 'nieuw' | 'controle' | 'verwerkt' | 'genegeerd') => s.intake.list(status),
       get: (id: number) => s.intake.get(id),
+      /** De bon openen om te controleren; ontbrak de koers van een vreemde munt, dan nu nog een keer proberen. */
+      open: (id: number) => s.intake.retryRate(Number(id)),
       confirm: (id: number, c: Confirmation) => s.intake.confirm(id, c),
       ignore: (id: number) => s.intake.ignore(id),
       markDuplicate: (id: number, match: { documentId: number | null; purchaseId: number | null }) => s.intake.markDuplicate(id, match),

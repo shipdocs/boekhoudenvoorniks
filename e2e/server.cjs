@@ -7,6 +7,9 @@
  * POST /__reset        lege administratie (nieuwe map), voor elke test; body {"licenses":true} = licenties aan,
  *                      met een nagebootste licentie-Worker (echte Ed25519-handtekening, eigen sleutelpaar)
  * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
+ * POST /__datafolder   body {"pick":{"name","kind"}} = de map die het keuzevenster "teruggeeft" (kind: leeg, vol of
+ *                      compleet; null = annuleren), {"custom":true} = de app werkt uit een zelf gekozen map,
+ *                      {"oldStandard":true} = in de standaardmap staat nog een administratie; geeft wat er bevestigd is
  * alles anders         bestanden uit dist/renderer
  */
 const http = require('node:http');
@@ -26,6 +29,7 @@ const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js')
 const { createBackupBundle, extractBundle } = require(path.join(ROOT, 'main/main/backup.js'));
 const { ExchangeService, sanitizeForExchange } = require(path.join(ROOT, 'main/exchange/exchange.js'));
 const { generateOfficeKeys } = require(path.join(ROOT, 'main/exchange/crypto.js'));
+const { markComplete, planSwitch, sharedDataDir } = require(path.join(ROOT, 'main/main/data-dir.js'));
 const Database = require('better-sqlite3');
 /** het kantoor op deze "computer" (in de app: kantoor.json in de gegevensmap) */
 let officeProfile = null;
@@ -103,6 +107,25 @@ let updateInstalled = false;
 /** aanroepen van "Back-up terugzetten" (in de test annuleert de gebruiker het keuzevenster) */
 let restoreCalls = [];
 
+/**
+ * Gegevensmap wijzigen: de echte beoordeling van de gekozen map (planSwitch), op echte mappen in een
+ * nagebootste thuismap. Alleen het keuzevenster en de herstart van de app zijn vervangen.
+ */
+let folders = null;
+function resetFolders() {
+  if (folders) fs.rmSync(folders.root, { recursive: true, force: true });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gb-e2e-mappen-'));
+  folders = { root, home: path.join(root, 'home'), custom: false, pick: null, plan: null, applied: null };
+  fs.mkdirSync(folders.home);
+}
+/** een map met een complete (lege) administratie */
+function completeFolder(p) {
+  fs.mkdirSync(p, { recursive: true });
+  openDatabase(path.join(p, 'boekhouding.sqlite')).close();
+  markComplete(p);
+}
+const planFolder = (chosen, copyToStandard) => planSwitch({ home: folders.home, current: dir, chosen, copyToStandard });
+
 async function storeFile(name, data) {
   const p = path.join(dir, 'bijlagen', `${Date.now()}-${name.replace(/[^\w.-]+/g, '_')}`);
   fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -140,8 +163,9 @@ function init(fresh) {
         try { sanitizeForExchange(d); } finally { d.close(); }
       }),
       office: () => officeProfile,
-      saveOffice({ office, email, keys }) {
-        officeProfile = { office, email, ...(keys ?? officeProfile ?? generateOfficeKeys()) };
+      // zoals saveOffice in src/main/main.ts: `newKey` = bewust een nieuwe kantoorsleutel
+      saveOffice({ office, email, newKey, keys }) {
+        officeProfile = { office, email, ...(keys ?? (newKey ? null : officeProfile) ?? generateOfficeKeys()) };
         officeProfile.office = office;
         officeProfile.email = email;
         return officeProfile;
@@ -185,6 +209,17 @@ function init(fresh) {
         return key;
       },
     },
+    dataFolder: {
+      info: () => ({ dir, standard: folders.custom ? sharedDataDir(folders.home) : dir, isStandard: !folders.custom }),
+      async choose() { return folders.pick ? (folders.plan = planFolder(folders.pick)) : null; },
+      chooseStandard: () => (folders.plan = planFolder(sharedDataDir(folders.home), true)),
+      // zoals de app: opnieuw beoordelen, het verzoek vastleggen; de herstart blijft hier achterwege
+      async apply() {
+        const plan = planFolder(folders.plan.dir, folders.plan.standard && folders.plan.action === 'kopieren');
+        if (plan.problem) throw new Error(plan.problem);
+        folders.applied = { target: plan.dir, action: plan.action };
+      },
+    },
     async checkForUpdates() { return 'Je hebt de nieuwste versie.'; },
     // echt wegschrijven: de tests lezen bv. een uitnodiging of export terug
     async saveFile(name, content) {
@@ -225,6 +260,7 @@ function init(fresh) {
     },
   });
 }
+resetFolders();
 init(true);
 
 /** Uint8Array/Buffer over JSON: { __bytes: base64 } */
@@ -247,6 +283,7 @@ http
         updateInstalled = false;
         restoreCalls = [];
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
+        resetFolders();
         init(true);
         return res.end('{"ok":true}');
       }
@@ -256,6 +293,18 @@ http
         const a = licensing?.accounts.get(licensing.lastStarted);
         if (a) a.paid = true;
         return res.end(JSON.stringify({ ok: licensing ? [...licensing.accounts.values()].map(({ managementKey: _k, ...rest }) => rest) : null }));
+      }
+      if (req.url === '/__datafolder') {
+        const input = body ? JSON.parse(body) : {};
+        if (input.custom !== undefined) folders.custom = !!input.custom;
+        if (input.oldStandard) completeFolder(sharedDataDir(folders.home));
+        if (input.pick !== undefined) {
+          folders.pick = input.pick ? path.join(folders.root, input.pick.name) : null;
+          if (input.pick?.kind === 'compleet') completeFolder(folders.pick);
+          else if (input.pick) fs.mkdirSync(folders.pick, { recursive: true });
+          if (input.pick?.kind === 'vol') fs.writeFileSync(path.join(folders.pick, 'vakantie.jpg'), 'foto');
+        }
+        return res.end(JSON.stringify({ ok: { applied: folders.applied, root: folders.root } }));
       }
       if (req.url === '/__update') {
         if (body) updateStatus = { ...updateStatus, ...JSON.parse(body) };
@@ -290,5 +339,6 @@ http
 process.on('exit', () => {
   try { db?.close(); } catch { /* al dicht */ }
   if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  if (folders) fs.rmSync(folders.root, { recursive: true, force: true });
 });
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));
