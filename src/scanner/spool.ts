@@ -3,6 +3,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, rea
 import { join } from 'node:path';
 import type { Db } from '../db/database';
 import { encodeFrame, parseFrame, type ReceiptMessage } from './protocol';
+import { stripJpegGps } from './strip-gps';
 
 export interface SpoolRow {
   id: string;
@@ -35,12 +36,14 @@ export class ReceiptSpool {
 
   /**
    * Vingerafdruk van de inhoud: dezelfde bon nog eens is goed, een ándere bon onder hetzelfde ID niet.
-   * De locatie telt niet mee: die staat niet altijd in de wachtrij (alleen met toestemming).
+   * De locatie telt niet mee, ook niet die in de foto zelf (EXIF): die staat niet altijd in de wachtrij
+   * (alleen met toestemming), en met of zonder is het dezelfde bon.
    */
   static hash(msg: ReceiptMessage): string {
     const h = createHash('sha256');
-    h.update(JSON.stringify([msg.betaalwijze, msg.notitie, msg.fotos.map((f) => f.length)]));
-    for (const f of msg.fotos) h.update(f);
+    const fotos = msg.fotos.map(stripJpegGps);
+    h.update(JSON.stringify([msg.betaalwijze, msg.notitie, fotos.map((f) => f.length)]));
+    for (const f of fotos) h.update(f);
     return h.digest('hex');
   }
 
@@ -59,15 +62,17 @@ export class ReceiptSpool {
    * ID, zelfde inhoud); 'botst' = dit ID is al gebruikt voor een andere bon.
    *
    * Op schijf komt alleen wat gecontroleerd is (de velden die de app kent, niet het ruwe bericht), en
-   * de locatie alleen als de gebruiker daar toestemming voor gaf (#32).
+   * de locatie alleen als de gebruiker daar toestemming voor gaf (#32): zonder toestemming gaat ook de
+   * positie uit de foto's zelf (EXIF).
    */
   accept(msg: ReceiptMessage, deviceId: string, opts: { keepLocation: boolean }): 'nieuw' | 'al' | 'botst' {
     const hash = ReceiptSpool.hash(msg);
     const existing = this.row(msg.id);
     if (existing) return existing.content_hash === hash ? 'al' : 'botst';
+    const fotos = opts.keepLocation ? msg.fotos : msg.fotos.map(stripJpegGps);
     const frame = encodeFrame(
-      { soort: 'bon', tijd: msg.tijd, id: msg.id, betaalwijze: msg.betaalwijze, notitie: msg.notitie, locatie: opts.keepLocation ? msg.locatie : null, fotos: msg.fotos.map((f) => ({ grootte: f.length })) },
-      msg.fotos,
+      { soort: 'bon', tijd: msg.tijd, id: msg.id, betaalwijze: msg.betaalwijze, notitie: msg.notitie, locatie: opts.keepLocation ? msg.locatie : null, fotos: fotos.map((f) => ({ grootte: f.length })) },
+      fotos,
     );
     mkdirSync(this.dir, { recursive: true });
     const target = this.file(msg.id);
