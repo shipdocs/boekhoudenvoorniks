@@ -357,6 +357,7 @@ describe('afschriften uit de downloadmap', () => {
     expect(t.rows()).toHaveLength(1);
     const copy = new Database(':memory:');
     copy.exec(`CREATE TABLE secrets (k); CREATE TABLE integrations (enabled, config); CREATE TABLE settings (key, value); CREATE TABLE statement_files (id);
+      CREATE TABLE scanner_devices (id); CREATE TABLE scanner_nonces (id); CREATE TABLE scanner_documents (id);
       INSERT INTO settings VALUES ('statementFolder', '{"enabled":true,"path":"/home/piet/Downloads"}'), ('company', '{}'); INSERT INTO statement_files VALUES (1);`);
     sanitizeForExchange(copy);
     expect(copy.prepare('SELECT key FROM settings').all()).toEqual([{ key: 'company' }]);
