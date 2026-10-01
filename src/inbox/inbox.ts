@@ -1,3 +1,4 @@
+import { paidWithNote, proposedPaidWith } from '../shared/paid-with';
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
@@ -154,12 +155,12 @@ function proposalNote(c: Classification): string {
  * Vingerafdruk van alles wat "Ja" bij een bon zal boeken. Zo kan een opnieuw gelezen document niet
  * stil met een andere leverancier, datum, bedrag of factuurnummer worden bevestigd vanuit een oude taak.
  */
-export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classification' | 'bank_match'>): string | undefined {
+export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classification' | 'bank_match' | 'proposed_paid_with'>): string | undefined {
   const c = d.classification;
   const r = d.result;
   return c && r
     ? JSON.stringify([
-        2,
+        3,
         r.supplier?.value ?? null,
         r.invoiceDate?.value ?? null,
         r.total?.value ?? null,
@@ -168,6 +169,7 @@ export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classificat
         c.vatCode,
         c.business,
         d.bank_match?.id ?? null,
+        proposedPaidWith(d),
       ])
     : undefined;
 }
@@ -599,7 +601,7 @@ export class InboxService {
         kind: 'document-review',
         icon: '📷',
         title: `${name}${d.result?.total ? ' ' + formatEuro(d.result.total.value) : ''}`,
-        question: bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}. Alles klopt?` : 'Even controleren?',
+        question: bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}.${paidWithNote(d)}${d.note ? ` Notitie: "${d.note.replace(/\s+/g, ' ').slice(0, 120)}".` : ''} Alles klopt?` : 'Even controleren?',
         amount: d.result?.total?.value,
         actions: bad?.field === 'duplicate'
           ? [{ id: 'dubbel', label: 'Ja, zelfde', primary: true }, { id: 'open', label: 'Nee, bekijken' }]
