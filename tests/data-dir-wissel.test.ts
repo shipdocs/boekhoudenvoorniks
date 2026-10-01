@@ -12,6 +12,7 @@ import {
   MARKER,
   markComplete,
   MIGRATION_LOCK,
+  MOVED_NOTE,
   planSwitch,
   pointerFile,
   resolveDataDir,
@@ -121,14 +122,18 @@ async function standardFolder(m: ReturnType<typeof machine>, label = 'a'): Promi
   markComplete(m.shared);
 }
 
-/** Inhoud van een map als pad → hash (zonder de WAL-bestanden van SQLite). */
+/**
+ * Inhoud van een map als pad → hash (zonder de WAL-bestanden van SQLite). Het eigen bestandje van de app
+ * in de standaardmap dat zegt waar de gegevens heen zijn (`MOVED_NOTE`) telt hier niet mee; dat wordt
+ * getest in tests/data-dir-verhuisd.test.ts.
+ */
 function snapshot(dir: string): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (d: string): void => {
     for (const item of readdirSync(d, { withFileTypes: true })) {
       const file = join(d, item.name);
       if (item.isDirectory()) walk(file);
-      else if (!/-(wal|shm)$/.test(item.name)) out[relative(dir, file).split(sep).join('/')] = createHash('sha256').update(readFileSync(file)).digest('hex');
+      else if (!/-(wal|shm)$/.test(item.name) && !(d === dir && item.name === MOVED_NOTE)) out[relative(dir, file).split(sep).join('/')] = createHash('sha256').update(readFileSync(file)).digest('hex');
     }
   };
   walk(dir);
@@ -206,7 +211,7 @@ function expectAttachmentsOpen(dir: string, elsewhere: string): void {
 /** De map die de app opent. */
 function openDir(m: ReturnType<typeof machine>): string {
   const resolution = resolveDataDir(m.env);
-  if (resolution.kind === 'keuze') throw new Error('er is nog geen map gekozen');
+  if (resolution.kind === 'keuze' || resolution.kind === 'verhuisd') throw new Error('er is nog geen map gekozen');
   return resolution.dir;
 }
 
