@@ -107,6 +107,18 @@ describe('bijlagepaden na het verplaatsen van de map', () => {
     expect(read(root).doc).toBe(join(root, 'bijlagen', '1', 'a.pdf'));
   });
 
+  it('werkt een oude database zonder documents-tabel toch bij voor de tabellen die er zijn', () => {
+    const root = mkdtempSync(join(tmpdir(), 'gb-rebase-'));
+    const db = new Database(join(root, 'boekhouding.sqlite'));
+    db.exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, attachment_path TEXT)');
+    db.prepare('INSERT INTO purchase_invoices (attachment_path) VALUES (?)').run('/oud/bijlagen/2025/x.pdf');
+    db.close();
+    expect(rebaseDataDirAttachments(root)).toEqual([]);
+    const check = new Database(join(root, 'boekhouding.sqlite'), { readonly: true });
+    expect((check.prepare('SELECT attachment_path AS p FROM purchase_invoices').get() as { p: string }).p).toBe(join(root, 'bijlagen', '2025', 'x.pdf'));
+    check.close();
+  });
+
   it('doet niets zonder administratie', () => {
     expect(rebaseDataDirAttachments(mkdtempSync(join(tmpdir(), 'gb-rebase-')))).toEqual([]);
   });
