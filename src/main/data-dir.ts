@@ -56,10 +56,13 @@ export function rebaseDataDirAttachments(dataDir: string): string[] {
   const failed: string[] = [];
   const targets: { name: string; dir: string }[] = [{ name: '(hoofdadministratie)', dir: dataDir }];
   const sub = join(dataDir, 'administraties');
-  if (existsSync(sub)) {
+  try {
     for (const entry of readdirSync(sub, { withFileTypes: true })) {
       if (entry.isDirectory()) targets.push({ name: entry.name, dir: join(sub, entry.name) });
     }
+  } catch (e) {
+    // geen map (geen extra administraties) is normaal; een onleesbare map mag het starten niet tegenhouden
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') failed.push('administraties');
   }
   for (const { name, dir } of targets) {
     const database = join(dir, 'boekhouding.sqlite');

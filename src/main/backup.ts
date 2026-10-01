@@ -144,6 +144,8 @@ export function rebaseAttachmentPaths(database: string, attachmentsRoot: string)
   const db = new Database(database);
   try {
     const update = (table: string, column: string): void => {
+      // oudere databases hebben nog niet alle tabellen (die komen met een latere migratie)
+      if (!db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table)) return;
       const rows = db.prepare(`SELECT id, ${column} AS path FROM ${table} WHERE ${column} IS NOT NULL`).all() as { id: number; path: string }[];
       const statement = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
       for (const row of rows) {
