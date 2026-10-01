@@ -18,7 +18,8 @@ afterEach(async () => {
 
 const tmp = (prefix: string) => {
   // het echte pad (op macOS en Windows wijst de tijdelijke map via een omweg)
-  const d = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  // .native: op Windows geeft alleen die de lange naam terug (C:\Users\RUNNER~1 → runneradmin), net als de app
+  const d = realpathSync.native(mkdtempSync(join(tmpdir(), prefix)));
   dirs.push(d);
   return d;
 };
