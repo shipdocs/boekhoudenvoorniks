@@ -139,8 +139,22 @@ export function validateBackup(file: string): void {
   }
 }
 
-function rebaseAttachmentPaths(database: string, attachmentsRoot: string): void {
+export interface RebaseReport {
+  /** rijen waarvan het pad veranderde */
+  rebased: number;
+  /** rijen waarvan het bestand niet (meer) op schijf staat */
+  missing: number;
+}
+
+/**
+ * Laat de opgeslagen bijlagepaden wijzen naar `attachmentsRoot`, waar de administratie ook vandaan komt:
+ * een andere computer, de map van vóór de naamswijziging of een Windows-pad met backslashes. Alles na
+ * de laatste `/bijlagen/` blijft; nog een keer draaien verandert niets. Ontbrekende bestanden worden
+ * alleen geteld. `existsRoot` is de map waarin de bestanden nu staan, als dat (nog) een andere is.
+ */
+export function rebaseAttachmentPaths(database: string, attachmentsRoot: string, existsRoot = attachmentsRoot): RebaseReport {
   const db = new Database(database);
+  const report: RebaseReport = { rebased: 0, missing: 0 };
   try {
     const update = (table: string, column: string): void => {
       const rows = db.prepare(`SELECT id, ${column} AS path FROM ${table} WHERE ${column} IS NOT NULL`).all() as { id: number; path: string }[];
@@ -148,10 +162,17 @@ function rebaseAttachmentPaths(database: string, attachmentsRoot: string): void 
       for (const row of rows) {
         const normalized = row.path.replace(/\\/g, '/');
         const marker = '/bijlagen/';
-        const index = normalized.lastIndexOf(marker);
+        // Windows-paden zijn hoofdletterongevoelig: ook `\Bijlagen\` is onze map
+        const index = normalized.toLowerCase().lastIndexOf(marker);
         if (index < 0) continue;
         const rel = normalized.slice(index + marker.length);
-        if (safeBundlePath(rel)) statement.run(join(attachmentsRoot, ...rel.split('/')), row.id);
+        if (!safeBundlePath(rel)) continue;
+        const rebased = join(attachmentsRoot, ...rel.split('/'));
+        if (rebased !== row.path) {
+          statement.run(rebased, row.id);
+          report.rebased++;
+        }
+        if (!existsSync(join(existsRoot, ...rel.split('/')))) report.missing++;
       }
     };
     db.transaction(() => {
@@ -161,6 +182,7 @@ function rebaseAttachmentPaths(database: string, attachmentsRoot: string): void 
   } finally {
     db.close();
   }
+  return report;
 }
 
 /** Herstelt een complete back-up en bewaart de vervangen database en bijlagen ernaast. */
@@ -223,10 +245,12 @@ export function extractBundle(data: Buffer, dir: string): void {
   rebaseAttachmentPaths(target, join(dir, 'bijlagen'));
 }
 
-/** Alleen voor oude .sqlite-back-ups zonder bijlagen. */
+/** Alleen voor oude .sqlite-back-ups zonder bijlagen; de bijlagen op schijf blijven en de paden wijzen er weer naar. */
 export function restoreLegacyDatabase(file: string, target: string): void {
   validateBackup(file);
   copyFileSync(target, `${target}.voor-herstel`);
   copyFileSync(file, target);
   for (const suffix of ['-wal', '-shm']) if (existsSync(target + suffix)) unlinkSync(target + suffix);
+  const report = rebaseAttachmentPaths(target, join(dirname(target), 'bijlagen'));
+  if (report.missing > 0) console.warn(`Na het terugzetten ontbreken ${report.missing} bijlage(n) op schijf`);
 }
