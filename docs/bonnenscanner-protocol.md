@@ -7,6 +7,11 @@ de code van de desktop te lezen. De uitvoerbare versie staat in `src/scanner/pro
 
 Protocolversie: **1**.
 
+**Stand:** de kant van de pc is gebouwd en getest, maar staat in de app nog uit tot de scanner-app er is.
+De schakelaar is `PHONE_SCANNER` in `src/shared/phone-scanner.ts`; #49 zet hem aan. Zolang hij uit
+staat is er in Instellingen niets van koppelen te zien, weigert de app te koppelen en luistert er
+niets. De bonnenmap (onderaan dit document) werkt wel.
+
 ## In het kort
 
 ```text
@@ -181,11 +186,14 @@ Eisen aan de foto's:
 - Alleen **JPEG**. De pc controleert de inhoud (begin `FF D8`, een geldige kop met afmetingen, 8 bits
   per kanaal, grijs of kleur). Iets anders weigert hij met `ongeldig`, de hele bon.
 - Alle foto's samen hooguit 19 MiB (19.922.944 bytes).
-- De pc bewaart de foto zoals hij binnenkomt; hij past de bytes niet aan. Bij een bon van meerdere
-  foto's (die samen één PDF worden) draait hij de pagina volgens de EXIF-oriëntatie 1, 3, 6 of 8;
-  gespiegelde standen (2, 4, 5, 7) kent hij niet. Stuur bij voorkeur foto's die al rechtop staan.
+- De pc comprimeert de foto niet opnieuw: het beeld blijft byte voor byte gelijk. Bij een bon van
+  meerdere foto's (die samen één PDF worden) draait hij de pagina volgens de EXIF-oriëntatie 1, 3, 6 of
+  8; gespiegelde standen (2, 4, 5, 7) kent hij niet. Stuur bij voorkeur foto's die al rechtop staan.
 - Zet **geen GPS-gegevens in de EXIF** van de foto, tenzij de gebruiker locatie op de telefoon heeft
-  aangezet. De pc haalt ze er niet uit: wat in het bestand zit, staat daarna bij de bijlagen.
+  aangezet. Staat locatie op de pc uit (#32), dan haalt de pc de positie er zelf ook uit voordat hij
+  de foto bewaart: de GPS-map in de EXIF en een XMP-blok met een positie. De andere EXIF-gegevens
+  (zoals de draairichting) blijven staan. Een EXIF-blok dat niet te lezen is, gaat in zijn geheel weg.
+  Een positie in een merkeigen veld (MakerNote) of plaatsnamen in IPTC herkent de pc niet: laat die weg.
 
 Antwoord:
 
@@ -248,7 +256,7 @@ De pc controleert in deze volgorde: pad, methode, te veel mislukte pogingen, `Co
 - Dezelfde bon nog een keer sturen is altijd veilig: op het `id` herkent de pc hem en antwoordt
   `ok: true, al: true`. Er komt geen tweede document in de inbox.
 - De inhoud onder één `id` ligt vast vanaf de eerste poging: betaalwijze, notitie en foto's (daarop
-  vergelijkt de pc; anders is het `id-botst`).
+  vergelijkt de pc; anders is het `id-botst`). De positie telt daarbij niet mee, ook niet die in de foto.
   Verandert de gebruiker daarna nog iets, gebruik dan een nieuw `id`. (Een bon met precies dezelfde
   foto herkent de pc dan nog aan de hash van het bestand.)
 - De telefoon ruimt een bon alleen op na een **versleuteld** antwoord met `ok: true` en het eigen `id`.
@@ -266,8 +274,8 @@ De pc controleert in deze volgorde: pad, methode, te veel mislukte pogingen, `Co
   betaling volgt via de bank), `contant` → contant, `prive` → met privégeld.
 - `notitie` staat bij het document.
 - `locatie` wordt alleen bewaard als op de pc *Gebruik de locatie van foto's om bonnen aan klussen te
-  koppelen* aan staat (#32). Anders gooit de pc het veld weg, ook uit de wachtrij. (GPS-gegevens in de
-  foto zelf blijven in het bestand staan; zie de eisen aan de foto's.)
+  koppelen* aan staat (#32). Anders gooit de pc het veld weg, ook uit de wachtrij, en haalt hij ook de
+  GPS-gegevens uit de foto's zelf (zie de eisen aan de foto's), ook als ze samen een PDF worden.
 
 ## Uitgewerkt voorbeeld
 
@@ -405,3 +413,6 @@ bonnenmap*. Daar is geen protocol voor nodig, wel deze afspraken:
   wordt het `naam (2).jpg`. De pc verwijdert of overschrijft nooit iets.
 - Hetzelfde bestand twee keer (zelfde inhoud) geeft één document: de pc herkent het aan de hash.
 - Betaalwijze, notitie en locatie gaan langs deze weg niet mee.
+- Een bestand uit de bonnenmap verandert de pc niet: het is een eigen bestand van de gebruiker, net als
+  een bestand dat hij in de app sleept. Wat erin staat (ook een positie in de EXIF) blijft dus staan, in
+  de map `verwerkt` en bij de bijlagen. In de database komt de positie alleen met locatie aan (#32).
