@@ -2,6 +2,9 @@
 
 ## Nog niet uitgebracht
 
+### Verbeterd
+- **Bon bij "weet ik nog niet" meteen indelen**: in het venster dat laat zien wat er nog bij "weet ik nog niet" staat (op Vandaag en bij Belasting) heeft een bon nu een knop *Indelen*. Je hoeft hem niet meer bij Aankopen op te zoeken.
+
 ### Opgelost
 - **Koppeling met Claude Code of Codex op Windows**: de koppeling startte wel, maar las de vragen van Claude Code of Codex niet en gaf dus nooit antwoord. Op Windows werkt hij nu net als op Linux.
 

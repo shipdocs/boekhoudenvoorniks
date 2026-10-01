@@ -598,7 +598,7 @@ function warrantyText(from: string, months: number): string {
 }
 
 /** Een aankoop van "weet ik nog niet" alsnog indelen: categorie en btw; de btw-aftrek komt er dan bij. */
-function ResolveQuestionModal({ purchase, onClose, onDone }: { purchase: { id: number; label: string }; onClose: () => void; onDone: () => void | Promise<void> }) {
+export function ResolveQuestionModal({ purchase, onClose, onDone }: { purchase: { id: number; label: string }; onClose: () => void; onDone: () => void | Promise<void> }) {
   const { meta } = useApp();
   const { run, busy } = useAction();
   const [category, setCategory] = useState('overig');
