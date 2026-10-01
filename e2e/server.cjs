@@ -7,6 +7,7 @@
  * POST /__reset        lege administratie (nieuwe map), voor elke test; body {"licenses":true} = licenties aan,
  *                      met een nagebootste licentie-Worker (echte Ed25519-handtekening, eigen sleutelpaar)
  * POST /__downloads    de map die in de test de Downloads-map is (leeg aangemaakt per test); de test zet er bestanden in
+ * POST /__opened       de bijlagen die geopend zijn: het pad uit de database en de inhoud van het bestand (base64)
  * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
  * POST /__datafolder   body {"pick":{"name","kind"}} = de map die het keuzevenster "teruggeeft" (kind: leeg, vol of
  *                      compleet; null = annuleren), {"custom":true} = de app werkt uit een zelf gekozen map,
@@ -26,6 +27,7 @@ const { openDatabase } = require(path.join(ROOT, 'main/db/database.js'));
 const { createServices, MemorySecretStore } = require(path.join(ROOT, 'main/services.js'));
 const { createApi } = require(path.join(ROOT, 'main/main/api.js'));
 const { wipeDatabase } = require(path.join(ROOT, 'main/main/reset.js'));
+const { deleteAttachment, resolveAttachmentPath, saveAttachment } = require(path.join(ROOT, 'main/main/attachments.js'));
 const { seedDemo } = require(path.join(ROOT, 'main/demo/demo.js'));
 const { Administrations, readAdministrationFile } = require(path.join(ROOT, 'main/main/administrations.js'));
 const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js'));
@@ -142,12 +144,12 @@ function completeFolder(p) {
 }
 const planFolder = (chosen, copyToStandard) => planSwitch({ home: folders.home, current: dir, chosen, copyToStandard });
 
+/** zoals de app: bijlagen in de map van de open administratie, met het relatieve pad in de database */
 async function storeFile(name, data) {
-  const p = path.join(dir, 'bijlagen', `${Date.now()}-${name.replace(/[^\w.-]+/g, '_')}`);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, Buffer.from(data));
-  return p;
+  return saveAttachment(path.dirname(file), name, data);
 }
+/** de bijlagen die de test "opende" (in de app: met het programma van de computer) */
+let openedAttachments = [];
 
 function init(fresh) {
   if (fresh) {
@@ -168,6 +170,7 @@ function init(fresh) {
     secrets: secretsFor(file),
     fetch: async () => { throw new Error('geen netwerk in e2e-tests'); },
     storeFile,
+    removeFile: (p) => deleteAttachment(path.dirname(file), p),
     statementFiles: folderAccess,
     // alleen voor een test van het abonnement; standaard staan licenties uit ('' = uit, ook nu de app een echte sleutel heeft)
     licensePublicKey: licensing?.publicKey ?? process.env.E2E_LICENSE_PUBLIC_KEY ?? '',
@@ -277,9 +280,14 @@ function init(fresh) {
       return p;
     },
     storeAttachment: storeFile,
-    readAttachment: (p) => fs.readFileSync(p),
+    readAttachment: (p) => fs.readFileSync(resolveAttachmentPath(path.dirname(file), p)),
     reconfigureLocalAi() {},
-    async openPath() {},
+    // zoals de app: alleen een bijlage van de open administratie, en het bestand moet er staan
+    async openPath(p) {
+      const target = resolveAttachmentPath(path.dirname(file), p);
+      if (!fs.existsSync(target)) throw new Error('Het bestand is niet gevonden');
+      openedAttachments.push({ stored: p, content: fs.readFileSync(target).toString('base64') });
+    },
     async openExternal() {},
     setSmtpPassword: (pw) => { smtpPassword = pw || null; },
     hasSmtpPassword: () => smtpPassword !== null,
@@ -331,6 +339,7 @@ http
         updateStatus = { state: 'uit', version: null, notes: null, percent: null, error: null };
         updateInstalled = false;
         restoreCalls = [];
+        openedAttachments = [];
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         resetFolders();
         await scanner?.stop();
@@ -343,6 +352,7 @@ http
       if (req.url === '/__sent') return res.end(JSON.stringify({ ok: sent }));
       if (req.url === '/__downloads') return res.end(JSON.stringify({ ok: downloadsDir() }));
       if (req.url === '/__restore') return res.end(JSON.stringify({ ok: restoreCalls }));
+      if (req.url === '/__opened') return res.end(JSON.stringify({ ok: openedAttachments }));
       if (req.url === '/__pay') {
         const a = licensing?.accounts.get(licensing.lastStarted);
         if (a) a.paid = true;

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, extname, join, resolve, sep } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
@@ -29,7 +29,7 @@ import { Updates } from './updates';
 import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
 import type { PollResult } from '../mail/mail-intake';
-import { isPathInside } from './path-security';
+import { deleteAttachment, resolveAttachmentPath, saveAttachment } from './attachments';
 import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
 import { CHOICE_SESSION, chromiumDir, handOverLocalState, markComplete, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type SwitchPlan } from './data-dir';
@@ -290,27 +290,14 @@ const statementWatch = new StatementWatch({
   onFound: (found) => emit('statement-found', { found }),
 });
 
-const ALLOWED_ATTACHMENTS = ['.pdf', '.jpg', '.jpeg', '.png', '.heic', '.webp', '.xml'];
-
+/** Bewaart een bijlage bij de open administratie; het pad dat terugkomt is relatief aan de map van die administratie. */
 async function storeAttachment(name: string, data: Uint8Array): Promise<string> {
-  const year = new Date().getFullYear();
-  const dir = join(dataDir(), 'bijlagen', String(year));
-  mkdirSync(dir, { recursive: true });
-  const ext = extname(name).toLowerCase();
-  if (!ALLOWED_ATTACHMENTS.includes(ext)) throw new Error('Alleen PDF, e-factuur (XML) of foto (jpg, png, heic, webp) als bijlage');
-  if (data.byteLength > 20 * 1024 * 1024) throw new Error('Bijlage is te groot (max 20 MB)');
-  const target = join(dir, `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}-${basename(name).replace(/[^\w.-]+/g, '_')}`);
-  writeFileSync(target, Buffer.from(data));
-  return target;
+  return saveAttachment(dataDir(), name, data);
 }
 
 /** Een net bewaarde bijlage weer weghalen (alleen binnen de bijlagenmap); mislukt dat, dan blijft hij staan. */
 function removeAttachment(path: string): void {
-  try {
-    if (resolve(path).startsWith(resolve(join(dataDir(), 'bijlagen')) + sep) && existsSync(path)) unlinkSync(path);
-  } catch {
-    // niet erg: het bestand staat dan los in de map, er verwijst niets naar
-  }
+  deleteAttachment(dataDir(), path);
 }
 
 const localFetch: FetchLike = (url, init) => fetch(url, init);
@@ -451,8 +438,7 @@ function initServices(): void {
       throw new Error(`Toevoegen lukte niet. Gebruik de opdracht hieronder in een terminal.${out.trim() ? ` (${out.trim().slice(0, 200)})` : ''}`);
     },
     readAttachment(path) {
-      if (!isPathInside(join(dataDir(), 'bijlagen'), path)) throw new Error('Alleen bijlagen van de administratie');
-      return readFileSync(path);
+      return readFileSync(resolveAttachmentPath(dataDir(), path));
     },
     statementFolder: {
       defaultPath: () => app.getPath('downloads'),
@@ -463,8 +449,7 @@ function initServices(): void {
       reconfigure: () => statementWatch.start(),
     },
     async openPath(path) {
-      if (!isPathInside(join(dataDir(), 'bijlagen'), path)) throw new Error('Alleen bijlagen van de administratie kunnen geopend worden');
-      const err = await shell.openPath(path);
+      const err = await shell.openPath(resolveAttachmentPath(dataDir(), path));
       if (err) throw new Error(err);
     },
     async openExternal(url) {
