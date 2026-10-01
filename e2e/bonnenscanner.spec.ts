@@ -4,14 +4,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import jsQR from 'jsqr';
 import type { APIRequestContext, Page } from '@playwright/test';
-import { test, expect, onboard, nav } from './fixtures';
+import { test, expect, onboard, nav, call } from './fixtures';
 import { makeJpeg } from '../tests/fixtures/jpeg';
 import { CONTENT_TYPE, ENDPOINT_PATH, decodePairing, encodeFrame, openResponse, sealRequest, type PairingPayload } from '../src/scanner/protocol';
 
-async function openScannerSettings(page: Page) {
+/**
+ * Telefoon koppelen staat in de app nog uit (shared/phone-scanner.ts, tot de Android-app er is). De
+ * tests van het koppelen zetten het zelf aan; zonder `phone` is het scherm zoals een gebruiker het nu ziet.
+ */
+async function openScannerSettings(page: Page, phone = false) {
   await nav(page, 'Instellingen');
-  await page.locator('main .chips').first().getByRole('button', { name: 'Telefoon & bonnenmap' }).click();
-  await expect(page.getByRole('heading', { name: 'Telefoon koppelen' })).toBeVisible();
+  await page.locator('main .chips').first().getByRole('button', { name: phone ? 'Telefoon & bonnenmap' : 'Bonnenmap', exact: true }).click();
+  await expect(page.getByRole('heading', { name: phone ? 'Telefoon koppelen' : 'Bonnenmap' })).toBeVisible();
 }
 
 /** De QR-code op het scherm lezen, zoals de camera van de telefoon dat doet. */
@@ -52,8 +56,9 @@ async function lastPayload(request: APIRequestContext): Promise<string> {
 }
 
 test('telefoon koppelen met de QR-code, een bon ontvangen en weer ontkoppelen', async ({ page, request }) => {
+  await request.post('/__reset', { data: { phoneScanner: true } });
   await onboard(page);
-  await openScannerSettings(page);
+  await openScannerSettings(page, true);
   await expect(page.getByText('Ontvangen staat uit: er is geen telefoon gekoppeld.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Telefoon koppelen' }).click();
@@ -92,7 +97,7 @@ test('telefoon koppelen met de QR-code, een bon ontvangen en weer ontkoppelen', 
   await expect(page.locator('label.field', { hasText: 'Hoe betaald?' }).locator('.chips button.selected')).toHaveText('Contant');
 
   // ontkoppelen: de sleutel is ingetrokken en er luistert niets meer
-  await openScannerSettings(page);
+  await openScannerSettings(page, true);
   page.once('dialog', (d) => void d.accept());
   await page.locator('table.list tbody tr', { hasText: 'Pixel van Piet' }).getByRole('button', { name: 'Ontkoppelen' }).click();
   await expect(page.getByText('Ontvangen staat uit: er is geen telefoon gekoppeld.')).toBeVisible();
@@ -101,8 +106,9 @@ test('telefoon koppelen met de QR-code, een bon ontvangen en weer ontkoppelen', 
 });
 
 test('de QR-code sluiten zonder te scannen zet het ontvangen weer uit', async ({ page, request }) => {
+  await request.post('/__reset', { data: { phoneScanner: true } });
   await onboard(page);
-  await openScannerSettings(page);
+  await openScannerSettings(page, true);
   await page.getByRole('button', { name: 'Telefoon koppelen' }).click();
   const dlg = page.getByRole('dialog', { name: 'Telefoon koppelen' });
   await expect(dlg.getByAltText('QR-code om je telefoon te koppelen')).toBeVisible();
@@ -115,9 +121,9 @@ test('de QR-code sluiten zonder te scannen zet het ontvangen weer uit', async ({
 });
 
 test('Windows: de eerste keer uitleg over de melding van de firewall', async ({ page, request }) => {
-  await request.post('/__reset', { data: { scannerPlatform: 'win32' } });
+  await request.post('/__reset', { data: { scannerPlatform: 'win32', phoneScanner: true } });
   await onboard(page);
-  await openScannerSettings(page);
+  await openScannerSettings(page, true);
   await page.getByRole('button', { name: 'Telefoon koppelen' }).click();
   const hint = page.getByRole('dialog', { name: 'Eerst even dit' });
   await expect(hint.getByText('Klik op "Toestaan" bij de melding van Windows.')).toBeVisible();
@@ -164,7 +170,24 @@ test('bonnenmap: een bestand in de map staat binnen 10 seconden in de inbox en g
   }
 });
 
-test('in de demo is koppelen en de bonnenmap uitgeschakeld, met uitleg', async ({ page }) => {
+test('zoals de app nu is: alleen de bonnenmap, telefoon koppelen is nergens te vinden en de api weigert het', async ({ page }) => {
+  await onboard(page);
+  await nav(page, 'Instellingen');
+  await expect(page.locator('main .chips').first().getByRole('button', { name: /[Tt]elefoon/ })).toHaveCount(0);
+  await openScannerSettings(page);
+  await expect(page.getByText('Er is geen bonnenmap gekozen.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Map kiezen…' })).toBeEnabled();
+  await expect(page.getByRole('heading', { name: 'Telefoon koppelen' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Telefoon koppelen' })).toHaveCount(0);
+  await expect(page.locator('main')).not.toContainText(/QR|koppelen|Ontvangen staat/);
+  // ook rechtstreeks via de api: koppelen wordt geweigerd en er gaat niets luisteren
+  await expect(call(page, 'scanner.pair')).rejects.toThrow(/kan nog niet/);
+  const status = await call<{ running: boolean; port: number | null; phoneAvailable: boolean; devices: unknown[] }>(page, 'scanner.status');
+  expect(status).toMatchObject({ running: false, port: null, phoneAvailable: false, devices: [] });
+});
+
+test('in de demo is koppelen en de bonnenmap uitgeschakeld, met uitleg', async ({ page, request }) => {
+  await request.post('/__reset', { data: { phoneScanner: true } });
   await page.goto('/');
   await page.getByRole('button', { name: /Bekijk de demo/ }).click();
   await expect(page.getByText('Je bekijkt de demo.')).toBeVisible();
@@ -173,7 +196,7 @@ test('in de demo is koppelen en de bonnenmap uitgeschakeld, met uitleg', async (
     for (const cb of await terms.locator('input[type=checkbox]').all()) await cb.check();
     await terms.getByRole('button', { name: 'Akkoord' }).click();
   }
-  await openScannerSettings(page);
+  await openScannerSettings(page, true);
   await expect(page.getByText('In de demo kun je geen telefoon koppelen en geen bonnenmap gebruiken.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Telefoon koppelen' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Map kiezen…' })).toBeDisabled();

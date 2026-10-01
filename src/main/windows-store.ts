@@ -110,6 +110,22 @@ export function storeFolderProblem(chosen: string, appData: string, platform: No
   return 'Kies een map buiten AppData. Wat de versie uit de Microsoft Store daar neerzet, verdwijnt als je de app verwijdert.';
 }
 
+/**
+ * De gegevensmap waaruit de Store-versie werkt ligt onder AppData. Dat kan alleen een map zijn die eerder
+ * (in de gewone versie) zelf gekozen is: via de verwijzing, of teruggevonden na de vraag "Waar staat je
+ * administratie?". De app opent hem, maar waarschuwt bij elke start tot de gegevens ergens anders staan.
+ */
+export function storeAppDataNotice(dir: string, appData: string, platform: NodeJS.Platform = process.platform): StartNotice | null {
+  if (storeFolderProblem(dir, appData, platform) === null) return null;
+  return {
+    type: 'warning',
+    message: 'Je gegevens staan op een plek die niet veilig is voor deze versie',
+    detail:
+      `Je administratie staat in ${dir}. Wat de versie uit de Microsoft Store in een map onder AppData opslaat, komt in een eigen kopie terecht, en die verdwijnt als je de app verwijdert.\n\n` +
+      'Zet je gegevens daarom in een andere map: Instellingen → Administraties → Waar je gegevens staan. Maak eerst een back-up (Instellingen → Back-up).',
+  };
+}
+
 export type StoreMigrationChoice = 'opnieuw' | 'kiezen' | 'bekijken' | 'afsluiten';
 
 export interface StoreMigrationFailure {

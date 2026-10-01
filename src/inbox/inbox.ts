@@ -8,7 +8,8 @@ import type { MatchingEngine } from '../import/matching';
 import type { InvoiceService } from '../documents/invoices';
 import type { QuoteService } from '../documents/quotes';
 import type { JobService } from '../jobs/jobs';
-import { EVIDENCE_QUESTION, type IntakeDocument, type IntakeService } from '../intake/intake';
+import { EVIDENCE_QUESTION, OWN_INVOICE_NOTE, type IntakeDocument, type IntakeService } from '../intake/intake';
+import type { OwnCompanyPayments } from '../documents/own-company';
 import { ALREADY_PRESENT, VIEW_EXISTING } from '../shared/document-outcome';
 import { PROPOSED_BY_LABEL, type Classification } from '../intake/classify';
 import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
@@ -54,6 +55,7 @@ export type TaskKind =
   | 'vat-due'
   | 'bank-stale'
   | 'bank-balance'
+  | 'bank-double'
   | 'bank-statement'
   | 'bank-locked'
   | 'exchange-conflict'
@@ -63,6 +65,7 @@ export type TaskKind =
   | 'purchase-due'
   | 'bank-pot'
   | 'bank-own'
+  | 'bank-own-company'
   | 'bank-refund'
   | 'customer-overpaid'
   | 'job-link'
@@ -109,7 +112,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
+  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
     proposal?: string;
     /** waar de vraag "dezelfde aankoop?" of "alleen als bewijs?" over gaat (#179); is dat intussen iets anders, dan gebeurt er niets */
@@ -182,6 +185,13 @@ export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classificat
     : undefined;
 }
 
+/** De twee keuzes bij iets van je eigen bedrijf (#205): nooit gewone kosten met btw-aftrek. */
+const ownCompanyActions = (): TaskAction[] => [{ id: 'prive', label: 'Privé' }, { id: 'vraag', label: 'Weet ik nog niet: vraag mijn boekhouder' }, { id: 'open', label: 'Bekijken' }];
+const OWN_HINTS = {
+  prive: 'Geen kosten en geen btw: het telt als privé. De factuur blijft bewaard.',
+  vraag: 'Staat apart op "weet ik nog niet", zonder btw-aftrek. Het komt terug als controle vóór je btw-aangifte en staat in het pakket voor je boekhouder.',
+};
+
 export class InboxService {
   constructor(
     private readonly db: Db,
@@ -201,6 +211,12 @@ export class InboxService {
     private readonly investments?: InvestmentCheck,
     private readonly mail?: MailIntakeService,
   ) {}
+
+  /** betalingen aan je eigen bedrijf en de factuur die erbij hoort (#205) */
+  private own: OwnCompanyPayments | null = null;
+  setOwnCompany(own: OwnCompanyPayments): void {
+    this.own = own;
+  }
 
   private booked: BookedPayments | null = null;
   setBookedPayments(booked: BookedPayments): void {
@@ -275,6 +291,7 @@ export class InboxService {
       if (t.amount >= 0 || !t.counter_name) continue;
       if (firstOpen && t.transaction_date < firstOpen) continue; // vergrendelde periode: niet boeken
       if (this.bank.ownTransferTarget(t)) continue; // eigen overboeking: nooit als kosten
+      if (this.own?.isOwnPayment(t)) continue; // betaling aan je eigen bedrijf (#205): nooit vanzelf, altijd de vraag
       const rule = this.memory.get(t.counter_name);
       if (!this.memory.isAutomatic(rule)) continue;
       // privéauto: tanken en parkeren nooit automatisch als zakelijke kosten
@@ -402,6 +419,8 @@ export class InboxService {
     // in de kopie bij de boekhouder zijn de vragen van de klant niet aan hem; zijn werk staat in de balk
     if (this.settings.officeCopy()) return [];
     const tasks: Task[] = [];
+    /** facturen van het eigen bedrijf die samen met hun betaling één taak zijn */
+    const ownDocuments = new Set<number>();
     const s = this.settings.get();
     if (!s.onboardingDone || !s.company.name) {
       tasks.push({ key: 'setup', kind: 'setup', icon: '👋', title: 'Maak je bedrijf compleet', question: 'We hebben nog een paar gegevens nodig voor je facturen.', actions: [{ id: 'open', label: 'Afronden', primary: true }], ref: {} });
@@ -480,6 +499,31 @@ export class InboxService {
             ref: { bankTransactionId: t.id },
           });
         }
+        continue;
+      }
+      // betaling aan je eigen bedrijf (#205), bv. een abonnement op je eigen dienst: één vraag voor de
+      // betaling en de factuur samen, met alleen privé of "weet ik nog niet" als keuze
+      const ownMatch = this.own?.match(t);
+      if (ownMatch) {
+        const doc = ownMatch.document;
+        if (doc) ownDocuments.add(doc.id);
+        const paid = `Op ${formatDateNl(t.transaction_date)} is ${formatEuro(-t.amount)} van je rekening naar ${who} gegaan`;
+        tasks.push({
+          key: `bank-${t.id}`,
+          kind: 'bank-own-company',
+          icon: '🏠',
+          title: doc || ownMatch.purchase ? `Factuur van je eigen bedrijf: ${formatEuro(-t.amount)}` : `${formatEuro(-t.amount)} betaald aan je eigen bedrijf`,
+          question: doc
+            ? `${OWN_INVOICE_NOTE} ${paid}: de betaling ervan. Kies wat het was; de factuur en de betaling gaan samen mee.`
+            : ownMatch.purchase
+              ? `${paid}: je eigen bedrijf. De factuur daarvan (${formatDateNl(ownMatch.purchase.invoice_date)}) staat al op "weet ik nog niet". Kies wat het was; de betaling en de factuur gaan samen mee.`
+              : `${paid}: dat is je eigen bedrijf, geen eigen rekening. Bijvoorbeeld een betaling voor je eigen dienst. Dat is geen gewone aankoop. Kies wat het was${ownMatch.settledDocumentId ? '; de factuur die je al op privé zette, komt erbij' : '; komt de factuur later binnen, dan hoort die hierbij'}.`,
+          amount: t.amount,
+          actions: ownCompanyActions(),
+          why: doc ? `Omdat ${this.intake.ownIssue(doc)!.suggestion.signals.join(', ')}, en de betaling hetzelfde bedrag heeft en naar je eigen bedrijfsnaam ging.` : 'Omdat de naam op het afschrift je eigen bedrijfsnaam is.',
+          priority: 2,
+          ref: { bankTransactionId: t.id, documentId: doc?.id, purchaseId: ownMatch.purchase?.id },
+        });
         continue;
       }
       const suggestions = this.matching.suggest(t);
@@ -645,6 +689,22 @@ export class InboxService {
       });
     }
 
+    // een verzamelbetaling die er twee keer in staat: als één regel en als losse deelposten (#184)
+    for (const d of this.bank.batchDoubles()) {
+      const size = formatEuro(Math.abs(d.total));
+      tasks.push({
+        key: `bank-double-${d.lineId}-${d.firstPartId}`,
+        kind: 'bank-double',
+        icon: '⚠️',
+        title: `${d.accountName}: ${size} staat er waarschijnlijk twee keer in`,
+        question: `Op ${formatDateNl(d.line.date)} staat één regel van ${size}, en op ${formatDateNl(d.parts[0]!.date)} staan ${d.parts.length} deelposten die samen ook ${size} zijn. Dat is waarschijnlijk hetzelfde geld, uit twee soorten afschrift. Bekijk ze naast elkaar en haal één kant eruit.`,
+        amount: Math.abs(d.total),
+        priority: 1,
+        actions: [{ id: 'bekijken', label: 'Bekijken', primary: true }],
+        ref: { bankAccountId: d.bankAccountId, doubleLineId: d.lineId, doublePartId: d.firstPartId },
+      });
+    }
+
     // Klopt het saldo met het laatste afschrift? (#184) Tijdens het overstappen doet de overstap-hulp dat zelf.
     if (!(s.switchover.mode === 'overstapper' && s.switchover.status !== 'klaar')) {
       for (const a of this.bank.listAccounts()) {
@@ -674,9 +734,13 @@ export class InboxService {
     }
 
     for (const d of this.intake.list('controle')) {
+      // de factuur van je eigen bedrijf staat al samen met zijn betaling in de lijst
+      if (ownDocuments.has(d.id)) continue;
       // eerst de vraag of de bon bij iets hoort dat er al staat (#179): niets koppelen of boeken zonder antwoord
       const pending = this.intake.pending(d);
-      const bad = pending ? d.issues.find((i) => i.field === pending.kind) : d.issues.find((i) => i.severity === 'fout');
+      // factuur van je eigen bedrijf (#205): bij zeker de twee keuzes, bij waarschijnlijk eerst bekijken
+      const own = pending ? null : this.intake.ownIssue(d);
+      const bad = pending ? d.issues.find((i) => i.field === pending.kind) : own ?? d.issues.find((i) => i.severity === 'fout');
       const name = d.result?.supplier?.value ?? d.original_name;
       const paid = pending?.kind === 'evidence' && pending.target ? `Op ${formatDateNl(pending.target.date)} is ${formatEuro(pending.target.amount)} betaald aan ${pending.target.supplier}. ` : '';
       tasks.push({
@@ -684,13 +748,14 @@ export class InboxService {
         kind: 'document-review',
         icon: '📷',
         title: `${name}${d.result?.total ? ' ' + formatEuro(d.result.total.value) : ''}`,
-        question: pending?.kind === 'evidence' ? `${paid}${EVIDENCE_QUESTION}` : bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}.${paidWithNote(d)}${d.note ? ` Notitie: "${d.note.replace(/\s+/g, ' ').slice(0, 120)}".` : ''} Alles klopt?` : 'Even controleren?',
+        question: pending?.kind === 'evidence' ? `${paid}${EVIDENCE_QUESTION}` : own?.suggestion.level === 'zeker' ? `${own.message} Kies wat het was.` : bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}.${paidWithNote(d)}${d.note ? ` Notitie: "${d.note.replace(/\s+/g, ' ').slice(0, 120)}".` : ''} Alles klopt?` : 'Even controleren?',
         amount: d.result?.total?.value,
         actions: pending
           ? [{ id: pending.kind === 'evidence' ? 'bewijs' : 'dubbel', label: pending.kind === 'evidence' ? 'Ja, alleen als bewijs' : 'Ja, dezelfde aankoop', primary: true }, { id: 'nee', label: 'Nee, andere aankoop' }, { id: 'open', label: 'Bekijken' }]
+          : own?.suggestion.level === 'zeker' && d.result?.total && d.result.invoiceDate ? ownCompanyActions()
           : bad ? [{ id: 'open', label: 'Bekijken', primary: true }] : [{ id: 'klopt', label: 'Ja', primary: true }, { id: 'open', label: 'Aanpassen' }],
         group: bad ? undefined : { key: 'document-klopt', label: 'Alle bonnetjes bevestigen' },
-        why: d.classification ? `Omdat ${d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(', ')}.` : undefined,
+        why: own ? `Omdat ${own.suggestion.signals.join(', ')}.` : d.classification ? `Omdat ${d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(', ')}.` : undefined,
         ref: { documentId: d.id, categoryKey: d.classification?.business === false ? undefined : d.classification?.categoryKey, proposal: documentProposal(d), candidate: pending?.candidate },
       });
     }
@@ -1095,6 +1160,10 @@ export class InboxService {
       'document-review:bewijs': 'De bon wordt bij de betaling bewaard. Er komt geen nieuwe kosten- of btw-boeking bij.',
       'document-review:nee': 'Dit voorstel vervalt. Je controleert de bon daarna zoals een nieuwe aankoop.',
       'document-notice:klaar': 'De melding verdwijnt. Het document blijft bewaard.',
+      'document-review:prive': OWN_HINTS.prive,
+      'document-review:vraag': OWN_HINTS.vraag,
+      'bank-own-company:prive': OWN_HINTS.prive,
+      'bank-own-company:vraag': OWN_HINTS.vraag,
       'document-review:open': 'Je ziet de bon en past aan wat niet klopt.',
       'quote-expired:akkoord': 'Er komt een klus bij voor deze offerte; als het werk klaar is maak je de factuur.',
       'quote-expired:afgewezen': 'De offerte gaat naar afgewezen. In je boekhouding verandert niets.',
@@ -1115,6 +1184,7 @@ export class InboxService {
       'recurring-invoice:geen': 'De app vraagt voor deze betaling niet meer om een factuur.',
       'bank-statement:inlezen': 'De app leest het afschrift in, net als wanneer je het bij Bank in de app sleept. Wat er al staat, slaat hij over.',
       'bank-statement:niet-nu': 'De app vraagt het morgen opnieuw, en na drie keer niet meer voor dit bestand. Het bestand blijft staan waar het staat.',
+      'bank-double:bekijken': 'Je ziet de ene regel en de deelposten naast elkaar en kiest welke kant blijft. De andere kant haalt de app uit je boekhouding; die blijft bewaard en is terug te zetten.',
       'bank-balance:bekijken': 'Je ziet de overgeslagen betaling naast de betaling die er al stond, en kunt hem alsnog toevoegen.',
       'bank-balance:open': 'Lees het afschrift in van de dagen die nog ontbreken. Wat er al staat, slaat de app over.',
       'bank-balance:negeren': 'Er verandert niets in je boekhouding. De app vraagt er pas weer naar als het verschil verandert.',
@@ -1195,8 +1265,8 @@ export class InboxService {
     const status = this.bank.importStatus();
     const bankUpdatedTo = status.map((st) => st.coverageTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
-      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') },
-      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement'].includes(k)) },
+      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') && !kinds.has('bank-double') },
+      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement', 'bank-double'].includes(k)) },
       { label: 'Alle bonnetjes verwerkt', ok: !kinds.has('document-review') },
       { label: 'Geen facturen te laat', ok: !kinds.has('invoice-overdue') },
       { label: 'Btw-aangifte op tijd', ok: !kinds.has('vat-due') },

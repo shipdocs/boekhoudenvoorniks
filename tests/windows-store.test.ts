@@ -10,7 +10,8 @@ import { XMLValidator } from 'fast-xml-parser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDatabase, openReadonly } from '../src/db/database';
 import { createApi, type HostContext } from '../src/main/api';
-import { MARKER, markComplete, migrateToSharedDir, planSwitch, readPointer, resolveDataDir, sharedDataDir, switchDataDir, type MigrationOutcome } from '../src/main/data-dir';
+import { clearPointer, MARKER, markComplete, MCP_MOVED_PENDING, migrateToSharedDir, planSwitch, readMovedNote, readPointer, resolveDataDir, resolveForMcp, sharedDataDir, switchDataDir, type MigrationOutcome } from '../src/main/data-dir';
+import { resolveAttachmentPath, saveAttachment } from '../src/main/attachments';
 import { Updates, type UpdateStatus } from '../src/main/updates';
 import {
   DOWNLOAD_URL,
@@ -23,6 +24,7 @@ import {
   STORE_ALIAS,
   STORE_UPDATE_TEXT,
   storeAliasPath,
+  storeAppDataNotice,
   storeFallbackHint,
   storeFirstStartNotice,
   storeFolderProblem,
@@ -33,15 +35,14 @@ import {
 import { GLM_OCR, STORE_LLAMA_CPP, type OcrModel, type PinnedRuntime } from '../src/ocr-runtime/manifest';
 import { LocalOcrRuntime, type DownloadFetch } from '../src/ocr-runtime/runtime';
 import { createZip } from '../src/shared/zip';
+import { createServices, MemorySecretStore } from '../src/services';
 import { setup } from './helpers';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(__dirname, '..');
-const pkg = require('../package.json') as { name: string; version: string; description: string; build: { productName: string; win: { target: string[] }; appx: Record<string, unknown>; appxManifestCreated: string } };
+const pkg = require('../package.json') as { name: string; version: string; description: string; build: { productName: string; win: { target: string[] }; appx: Record<string, unknown>; appxManifestCreated?: string } };
 const storeManifest = require('../scripts/store-manifest.cjs') as {
-  appxManifestCreated(path: string): Promise<void>;
-  storeVersion(version: string): string;
-  withStoreVersion(xml: string, version: string): string;
+  packageVersion(version: string): string;
   manifestProblems(xml: string, version: string): string[];
   readManifest(appx: Buffer): string;
   IDENTITY: { name: string; publisher: string; publisherDisplayName: string };
@@ -137,12 +138,12 @@ describe('updates', () => {
 // ---------------------------------------------------------------------------------------------
 
 describe('koppeling met Claude Code/Codex (--mcp)', () => {
-  const packaged = { isPackaged: true, execPath: 'C:\\Program Files\\WindowsApps\\ShipDocs.BoekhoudenVoorNiks_1.7.6.0_x64__xxc75kaw9g27y\\app\\BoekhoudenVoorNiks.exe', appPath: 'C:\\app' };
+  const packaged = { isPackaged: true, execPath: 'C:\\Program Files\\WindowsApps\\ShipDocs.BoekhoudenVoorNiks_1.0.0.0_x64__xxc75kaw9g27y\\app\\BoekhoudenVoorNiks.exe', appPath: 'C:\\app' };
 
   it('Store-versie: de alias, niet het pad met het versienummer erin', () => {
     const cmd = mcpCommand({ ...packaged, store: true, localAppData: 'C:\\Users\\Piet\\AppData\\Local' });
     expect(cmd).toEqual({ command: 'C:\\Users\\Piet\\AppData\\Local\\Microsoft\\WindowsApps\\boekhoudenvoorniks.exe', args: ['--mcp'] });
-    expect(cmd.command).not.toContain('1.7.6.0');
+    expect(cmd.command).not.toContain('1.0.0.0');
     // zonder %LOCALAPPDATA%: de kale naam (WindowsApps staat op het zoekpad)
     expect(mcpCommand({ ...packaged, store: true, localAppData: undefined }).command).toBe(STORE_ALIAS);
     expect(storeAliasPath(null)).toBe('boekhoudenvoorniks.exe');
@@ -476,6 +477,15 @@ describe('Store-versie: het overzetten van de gegevens lukt niet', () => {
     expect(existsSync(join(m.source, 'boekhouding.sqlite'))).toBe(true);
     expect(readPointer(m.home)).toBe(own);
     expect(resolveDataDir({ home: m.home, appData: m.appData })).toEqual({ kind: 'pointer', dir: own });
+
+    // De keuze laat ook het spoor in de standaardmap achter. Raakt de verwijzing weg, dan opent de
+    // Store-versie niet stil de oude map in AppData (die er nog staat): eerst de vraag waar de administratie staat.
+    expect(readMovedNote(m.home)?.to).toBe(own);
+    clearPointer(m.home);
+    const lost = resolveDataDir({ home: m.home, appData: m.appData });
+    expect(lost).toMatchObject({ kind: 'verhuisd', moved: { to: own }, fallback: { kind: 'oud', dir: m.source, target: m.target } });
+    expect('dir' in lost).toBe(false);
+    expect(() => resolveForMcp({ home: m.home, appData: m.appData })).toThrow(MCP_MOVED_PENDING);
   });
 
   it('een map onder AppData kan niet: wat de Store-versie daar neerzet, verdwijnt bij verwijderen', async () => {
@@ -587,6 +597,33 @@ describe('Store-versie: het overzetten van de gegevens lukt niet', () => {
     }
   });
 
+  it('alleen-lezen met bijlagepaden uit een oudere versie: niets wordt omgezet, bijlagen in dezelfde map openen, die uit een andere map niet', async () => {
+    const dir = tempDir();
+    const elsewhere = join(tempDir(), 'gratis-boekhouden');
+    const db = openDatabase(join(dir, 'boekhouding.sqlite'));
+    const stored = saveAttachment(dir, 'bon.pdf', Buffer.from('%PDF bon'), new Date(2026, 8, 20));
+    const services = createServices(db, { pdf: async () => Buffer.from(''), mailerFactory: async () => { throw new Error('geen mail'); }, secrets: new MemorySecretStore(), fetch: async () => { throw new Error('geen netwerk'); }, storeFile: async () => stored });
+    for (const description of ['zelfde map', 'andere map']) services.purchases.create({ invoiceDate: '2026-09-20', description, attachmentPath: stored, lines: [{ account: 'WBedAlkOvr', netAmount: 1000, vatCode: 'geen', vatAmount: 0 }] });
+    // zoals een oudere versie ze schreef: volledige paden, één binnen deze map en één in een map van vroeger
+    const absolute = join(dir, ...stored.split('/'));
+    const foreign = join(elsewhere, 'bijlagen', '2026', 'oud.pdf');
+    db.prepare(`UPDATE purchase_invoices SET attachment_path = ? WHERE description = 'zelfde map'`).run(absolute);
+    db.prepare(`UPDATE purchase_invoices SET attachment_path = ? WHERE description = 'andere map'`).run(foreign);
+    db.close();
+
+    const ro = openReadonly(join(dir, 'boekhouding.sqlite'));
+    const paths = (ro.prepare('SELECT attachment_path FROM purchase_invoices ORDER BY id').all() as { attachment_path: string }[]).map((r) => r.attachment_path);
+    ro.close();
+    // alleen-lezen zet niets om (dat kan pas als de administratie gewoon open gaat)
+    expect(paths).toEqual([absolute, foreign]);
+    expect(readFileSync(resolveAttachmentPath(dir, paths[0]!)).toString()).toBe('%PDF bon');
+    expect(() => resolveAttachmentPath(dir, paths[1]!)).toThrow('Alleen bijlagen van de administratie kunnen geopend worden');
+    // pas als de administratie gewoon open gaat (na het overzetten) worden beide paden relatief
+    const rw = openDatabase(join(dir, 'boekhouding.sqlite'), () => undefined);
+    expect((rw.prepare('SELECT attachment_path FROM purchase_invoices ORDER BY id').all() as { attachment_path: string }[]).map((r) => r.attachment_path)).toEqual([stored, 'bijlagen/2026/oud.pdf']);
+    rw.close();
+  });
+
   it('het scherm weet dat de administratie alleen te bekijken is en kan het overzetten opnieuw starten', () => {
     const { s } = setup();
     let retried = 0;
@@ -598,6 +635,18 @@ describe('Store-versie: het overzetten van de gegevens lukt niet', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+
+describe('Store-versie met de gegevens in een eerder zelf gekozen map', () => {
+  it('waarschuwt als die map onder AppData ligt (verwijzing of teruggevonden map), anders niet', () => {
+    const appData = 'C:\\Users\\Piet\\AppData\\Roaming';
+    const notice = storeAppDataNotice('C:\\Users\\Piet\\AppData\\Local\\MijnBoekhouding', appData, 'win32');
+    expect(notice).toMatchObject({ type: 'warning' });
+    expect(notice?.detail).toMatch(/verdwijnt als je de app verwijdert/);
+    expect(notice?.detail).toMatch(/Waar je gegevens staan/);
+    expect(storeAppDataNotice('C:\\Users\\Piet\\BoekhoudenVoorNiks', appData, 'win32')).toBeNull();
+    expect(storeAppDataNotice('D:\\Administratie', appData, 'win32')).toBeNull();
+  });
+});
 
 describe('eerste start van de Store-versie', () => {
   it('meldt één keer dat een oude installatie van de website weg moet of bijgewerkt moet worden', () => {
@@ -668,13 +717,14 @@ describe('het Store-pakket (appx/MSIX)', () => {
     }
   });
 
-  it('pakketversie: het eerste getal één hoger (de Store weigert 0.x), het vierde 0', () => {
-    expect(storeManifest.storeVersion('0.7.6')).toBe('1.7.6.0');
-    expect(storeManifest.storeVersion('0.10.0')).toBe('1.10.0.0');
-    expect(storeManifest.storeVersion('1.0.0')).toBe('2.0.0.0');
-    expect(() => storeManifest.storeVersion('0.8.0-beta.1')).toThrow(/drie getallen/);
-    expect(storeManifest.withStoreVersion(`<Identity Name="x" Version="0.7.6.0" />`, '0.7.6')).toBe(`<Identity Name="x" Version="1.7.6.0" />`);
-    expect(() => storeManifest.withStoreVersion(`<Identity Name="x" Version="9.9.9.0" />`, '0.7.6')).toThrow(/niet precies één keer/);
+  it('pakketversie: gelijk aan de appversie met een vierde 0; de Store weigert een versie die met 0 begint', () => {
+    expect(storeManifest.packageVersion('1.0.0')).toBe('1.0.0.0');
+    expect(storeManifest.packageVersion('1.10.2')).toBe('1.10.2.0');
+    expect(() => storeManifest.packageVersion('0.7.6')).toThrow(/met 0 begint/);
+    expect(() => storeManifest.packageVersion('1.1.0-beta.1')).toThrow(/drie getallen/);
+    // de appversie zelf voldoet, en er is geen stap meer die het manifest na het bouwen aanpast
+    expect(storeManifest.packageVersion(pkg.version)).toBe(`${pkg.version}.0`);
+    expect(pkg.build.appxManifestCreated).toBeUndefined();
   });
 
   it('het manifest zoals electron-builder het maakt: identiteit, taal, alias en geldige XML', async () => {
@@ -701,14 +751,8 @@ describe('het Store-pakket (appx/MSIX)', () => {
     };
     const out = join(tempDir(), 'AppxManifest.xml');
     await target.writeManifest(out, Arch.x64, String(pkg.build.appx.publisher), readdirSync(join(ROOT, 'build', 'appx')));
-    const raw = readFileSync(out, 'utf8');
-    expect(raw).toContain(`Version="${pkg.version}.0"`);
-    expect(storeManifest.manifestProblems(raw, pkg.version)).toEqual([`Identity Version is ${storeManifest.storeVersion(pkg.version)}`]);
-
-    // de hook uit package.json zet de pakketversie erin
-    expect(pkg.build.appxManifestCreated).toBe('./scripts/store-manifest.cjs');
-    await storeManifest.appxManifestCreated(out);
     const xml = readFileSync(out, 'utf8');
+    expect(xml).toContain(`Version="${pkg.version}.0"`);
     expect(XMLValidator.validate(xml)).toBe(true);
     expect(storeManifest.manifestProblems(xml, pkg.version)).toEqual([]);
     expect(xml).toContain(`<Identity Name="ShipDocs.BoekhoudenVoorNiks"`);
@@ -721,6 +765,7 @@ describe('het Store-pakket (appx/MSIX)', () => {
     expect(xml).not.toMatch(/\$\{/);
     // een afwijking wordt gemeld
     expect(storeManifest.manifestProblems(xml.replace('ShipDocs.BoekhoudenVoorNiks', 'ShipDocs.Anders'), pkg.version)).toEqual(['Identity Name is ShipDocs.BoekhoudenVoorNiks']);
+    expect(storeManifest.manifestProblems(xml.replace(`Version="${pkg.version}.0"`, 'Version="9.9.9.0"'), pkg.version)).toEqual([`Identity Version is ${pkg.version}.0`]);
     expect(storeManifest.manifestProblems(xml.replace(/<uap3:Extension[\s\S]*<\/uap3:Extension>/, ''), pkg.version)).toEqual(['de App Execution Alias staat erin', 'de alias start hetzelfde programma als de app']);
 
     // de controle in CI leest het manifest terug uit het pakket (een zip)

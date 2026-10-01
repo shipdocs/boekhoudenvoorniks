@@ -55,6 +55,7 @@ import { storeFallbackHint } from './windows-store';
 import { proposedPaidWith } from '../shared/paid-with';
 import QRCode from 'qrcode';
 import type { Bonnenscanner } from '../scanner/scanner';
+import { PHONE_SCANNER } from '../shared/phone-scanner';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -312,6 +313,17 @@ export function createApi(s: Services, host: HostContext) {
         await s.intake.decide(r.documentId!, actionId === 'nee' ? 'nee' : 'ja', r.candidate);
         return;
       }
+      case 'document-review:prive':
+      case 'document-review:vraag':
+        // factuur van je eigen bedrijf (#205): privé of "weet ik nog niet"; ontbreekt er iets, dan eerst de bon openen
+        if (!s.intake.settleOwn(r.documentId!, actionId === 'prive' ? 'prive' : 'vraag')) return { navigate: { screen: 'document', id: r.documentId } };
+        return;
+      case 'bank-own-company:prive':
+      case 'bank-own-company:vraag':
+        s.ownCompany.settle(r.bankTransactionId!, actionId === 'prive' ? 'prive' : 'vraag');
+        return;
+      case 'bank-own-company:open':
+        return r.documentId ? { navigate: { screen: 'document', id: r.documentId } } : { navigate: { screen: 'betaling', id: r.bankTransactionId } };
       case 'document-notice:klaar':
         s.intake.dismissNotice(r.noticeId!);
         return;
@@ -428,6 +440,9 @@ export function createApi(s: Services, host: HostContext) {
       case 'bank-balance:negeren':
         s.inbox.ignoreBalance(r.bankAccountId!);
         return;
+      case 'bank-double:bekijken':
+        // op het bankscherm: de ene regel en de deelposten naast elkaar
+        return { navigate: { screen: 'bank', extra: { double: { lineId: r.doubleLineId, firstPartId: r.doublePartId } } } };
       case 'bank-balance:bekijken':
         // op het bankscherm: de overgeslagen regels van deze rekening, met "Toch toevoegen"
         return { navigate: { screen: 'bank', extra: { skippedFor: r.bankAccountId } } };
@@ -445,6 +460,7 @@ export function createApi(s: Services, host: HostContext) {
           'vat-due': ['belasting', r.periodKey],
           'bank-stale': ['bank', undefined],
           'bank-balance': ['bank', undefined],
+          'bank-double': ['bank', undefined],
           'bank-statement': ['bank', undefined],
           'bank-locked': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
@@ -698,6 +714,8 @@ export function createApi(s: Services, host: HostContext) {
         trades: TRADES,
         vatPortalUrl: PORTAL_URL,
         vatSuppletieUrl: SUPPLETIE_URL,
+        /** telefoon koppelen voor de bonnenscanner is beschikbaar (nu nog niet: shared/phone-scanner.ts) */
+        phoneScanner: PHONE_SCANNER.available,
       }),
     },
     onboarding: {
@@ -759,12 +777,15 @@ export function createApi(s: Services, host: HostContext) {
       },
     },
     /**
-     * Bonnenscanner (#48): telefoon koppelen met een QR-code en de bonnenmap. De sleutel van een
-     * telefoon komt alleen als QR-code naar het scherm, en alleen op het moment van koppelen.
+     * Bonnenscanner (#48): de bonnenmap, en (zodra PHONE_SCANNER aan staat) telefoon koppelen met een
+     * QR-code. De sleutel van een telefoon komt alleen als QR-code naar het scherm, en alleen op het
+     * moment van koppelen.
      */
     scanner: {
       status: () => (host.scanner ? host.scanner.service().status() : null),
       pair: async () => {
+        // tot de Android-app er is (#49) weigert de api te koppelen: het ontvangstpunt en mDNS starten dan nooit
+        if (!PHONE_SCANNER.available) throw new ValidationError('Een telefoon koppelen kan nog niet: de scanner-app voor Android is er nog niet.');
         const p = await scanner().pair();
         const svg = await QRCode.toString(p.payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
         return { deviceId: p.deviceId, expiresAt: p.expiresAt, addresses: p.addresses, port: p.port, svg };
@@ -894,6 +915,11 @@ export function createApi(s: Services, host: HostContext) {
       decide: (id: number, answer: 'ja' | 'nee' | 'later', candidate?: string) => {
         if (answer !== 'ja' && answer !== 'nee' && answer !== 'later') throw new ValidationError('Kies ja, nee of later');
         return s.intake.decide(Number(id), answer, candidate === undefined ? undefined : String(candidate));
+      },
+      /** "Is dit een factuur van je eigen bedrijf?" (#205): ja, of nee ("toch een gewone aankoop"). Er wordt niets geboekt. */
+      decideOwn: (id: number, answer: 'ja' | 'nee') => {
+        if (answer !== 'ja' && answer !== 'nee') throw new ValidationError('Kies ja of nee');
+        return s.intake.decideOwn(Number(id), answer);
       },
       /** Het voorstel dat op een keuze wacht, met wat ernaast gelegd kan worden (het andere document, of de aankoop of betaling). */
       pending: (id: number) => s.intake.pending(s.intake.get(id)),
@@ -1074,7 +1100,21 @@ export function createApi(s: Services, host: HostContext) {
       importReview: (filter: { batchId?: number; bankAccountId?: number }) => ({
         skipped: s.bank.skippedRows({ batchId: filter?.batchId, bankAccountId: filter?.bankAccountId }),
         added: filter?.batchId ? s.bank.addedInKnownPeriod(filter.batchId) : [],
+        // wat als dubbel uit de boekhouding is gehaald (per rekening), om terug te zetten
+        removed: filter?.bankAccountId ? s.bank.removedDuplicates(filter.bankAccountId) : [],
       }),
+      /** verzamelbetalingen die er twee keer in staan: als één regel en als losse deelposten */
+      doubles: () => s.bank.batchDoubles(),
+      /** één kant uit de boekhouding halen ('regel' of 'deelposten'); wat al verwerkt is, gaat er niet uit */
+      resolveDouble: (lineId: number, firstPartId: number, remove: 'regel' | 'deelposten') => s.bank.resolveDouble(lineId, firstPartId, remove),
+      /** "het zijn twee verschillende betalingen": niet meer melden */
+      dismissDouble: (lineId: number, firstPartId: number) => s.bank.dismissDouble(lineId, firstPartId),
+      /** terugzetten wat als dubbel uit de boekhouding was gehaald */
+      restoreDuplicate: (txId: number) => {
+        s.bank.restoreDuplicate(txId);
+        const auto = s.inbox.autoProcess();
+        return { autoMatched: auto.matched + auto.booked };
+      },
       /** "Toch toevoegen": een overgeslagen regel was wel een eigen betaling */
       addSkipped: (skippedId: number) => {
         const id = s.bank.addSkipped(skippedId);
@@ -1104,6 +1144,13 @@ export function createApi(s: Services, host: HostContext) {
         }
         return null;
       },
+      /** Is dit een betaling aan je eigen bedrijf (#205), en hoort er een factuur bij? null = nee. */
+      ownCompany: (txId: number) => {
+        const m = s.ownCompany.match(s.bank.get(Number(txId)));
+        return m ? { documentId: m.document?.id ?? null, purchaseId: m.purchase?.id ?? null, settledDocumentId: m.settledDocumentId } : null;
+      },
+      /** De keuze bij een betaling aan je eigen bedrijf: privé of "weet ik nog niet", voor de betaling en de factuur samen. */
+      settleOwnCompany: (txId: number, choice: 'prive' | 'vraag') => s.ownCompany.settle(Number(txId), choice),
       matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(txId, invoiceId),
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(txId, purchaseId),
       book: (txId: number, input: BookToAccountInput) => s.bank.bookToAccount(txId, input),
