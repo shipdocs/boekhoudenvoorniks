@@ -58,10 +58,17 @@ test('bon "weet ik nog niet": apart gezet, en later indelen bij Aankopen', async
   const date = page.locator('input[type=date]').first();
   if (!(await date.inputValue())) await date.fill('2026-09-10');
   await page.getByRole('button', { name: 'Klopt, verwerken' }).click();
+  // de melding zegt wat er gebeurd is, niet het algemene "verwerkt" (#179)
+  await expect(page.locator('.toasts').getByText('Nieuwe aankoop geboekt ✓')).toBeVisible();
 
   await expect(page.getByRole('heading', { name: 'Aankopen', exact: true })).toBeVisible();
   const row = page.locator('tr', { has: page.locator('.pill', { hasText: 'nog uitzoeken' }) });
   await expect(row).toBeVisible();
+  // vanaf de aankoop naar de bon: daar staat de uitkomst en waar hij bij hoort
+  await row.getByRole('button', { name: 'Bon bekijken' }).click();
+  await expect(page.getByTestId('uitkomst')).toHaveText('Nieuwe aankoop geboekt');
+  await expect(page.getByTestId('koppeling').getByText(/Hoort bij de aankoop bij Rare Winkel Zoveel/)).toBeVisible();
+  await page.getByTestId('koppeling').getByRole('button', { name: 'Naar de aankoop' }).click();
   await row.getByRole('button', { name: 'Indelen' }).click();
   const dialog = page.getByRole('dialog', { name: /Indelen:/ });
   await dialog.locator('.chips button', { hasText: /^Materiaal$/ }).click();

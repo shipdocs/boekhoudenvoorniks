@@ -2,7 +2,22 @@
 
 ## Nog niet uitgebracht
 
+### Nieuw
+- **Dezelfde bon twee keer toevoegen kan niet meer ongemerkt**: voeg je precies hetzelfde bestand nog een keer toe, dan zegt de app *Dit document stond er al in* en kun je met *Bestaand document bekijken* het document openen dat er al was. Er komt niets bij en er verandert niets. Dat geldt overal: bij Aankopen & bonnetjes, bij *Bon toevoegen* bij een aankoop of betaling, en bij bijlagen uit je mail (dan staat de melding op Vandaag).
+- **Eerst vragen, dan pas koppelen**: was de betaling van een bon al rechtstreeks als kosten geboekt, dan koppelde de app de bon stil als bewijs. Nu vraagt hij het: *Deze betaling is al geboekt. Wil je deze bon alleen als bewijsstuk koppelen?* Ja: alleen het bewijs komt erbij, er komt geen nieuwe kosten- of btw-boeking. Nee: de bon controleer je als een nieuwe aankoop. Later: er verandert niets.
+- **Mogelijk dubbel: beide naast elkaar**: lijkt een bon op iets dat er al staat, dan zie je de nieuwe bon en de bestaande naast elkaar (of, als er geen bon bij zit, leverancier, datum, bedrag en nummer van de aankoop). Je kiest *Ja, dezelfde aankoop*, *Nee, andere aankoop* of *Later*. Zolang je niet gekozen hebt, wordt de bon niet geboekt. Zeg je nee, dan stelt de app dezelfde aankoop niet opnieuw voor, tenzij leverancier, datum, bedrag of nummer van de bon verandert.
+- **Koppeling ongedaan maken**: een bon die als bewijs of als kopie ergens bij hoort, kun je daar weer afhalen. Hij gaat terug naar *Nog controleren*; de aankoop of de geboekte betaling zelf (kosten, btw en boeking) blijft precies zoals hij is. Een bon die al ergens bij hoort kun je pas bij iets anders zetten nadat je dat gedaan hebt.
+
+### Verbeterd
+- **Je ziet wat er met een bon gebeurd is**: in plaats van "Verwerkt" staat er bij een bon nu *Nieuwe aankoop geboekt*, *Bewijs gekoppeld — niet opnieuw geboekt*, *Dubbel document — niet geboekt* of *Nog controleren*. Na het toevoegen staat dat ook per bestand onder het sleepvak.
+- **Zeker dezelfde factuur: beide bestanden blijven bewaard**: komt dezelfde factuur nog een keer binnen als ander bestand (zelfde leverancier, bedrag en nummer, en geen andere datum), dan wordt er niets opnieuw geboekt en blijven beide bestanden bij de aankoop bewaard. Het best leesbare bestand is het hoofdbewijsstuk: een PDF gaat voor een losse e-factuur (XML), die wel bewaard blijft. Een creditnota wordt nooit vanzelf met een factuur samengevoegd, en bij een andere datum of een slecht gelezen nummer vraagt de app het.
+- **Van bon naar aankoop of betaling en terug**: bij een bon staat waar hij bij hoort, met welke bestanden er nog meer bij horen; bij een betaling op de bank staat de bon; zoeken vindt beide kanten op.
+- **Pakket voor je boekhouder**: per aankoop of betaling gaat alleen het hoofdbewijsstuk mee. De andere bestanden blijven in de app.
+- **Bijlagen uit je mail**: de mail gaat pas naar de map *Verwerkt* als elke bijlage bewaard en beoordeeld is.
+
 ### Opgelost
+- **Bon bij een bankbetaling stond alleen als tekst vast**: welke bon bij welke betaling hoorde, stond in de uitleg bij de bon. Dat is nu een echte koppeling. Bestaande bonnen worden bij het bijwerken omgezet als de betaling er nog is en nog zo geboekt staat. Is dat niet zeker, dan koppelt de app niets en komt de bon met uitleg bij *Nog controleren*. Aan je boekhouding verandert daarbij niets.
+- **Twee keer hetzelfde bestand tegelijk slepen**: gaf soms een foutmelding of een los bestand in de bijlagenmap. Het wordt nu één document.
 - **Koppeling met Claude Code of Codex op Windows**: de koppeling startte wel, maar las de vragen van Claude Code of Codex niet en gaf dus nooit antwoord. Op Windows werkt hij nu net als op Linux.
 
 ## 0.7.6 — je gegevens in een vaste map buiten de app

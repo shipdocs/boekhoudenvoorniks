@@ -6,7 +6,7 @@ import { saleVatText, type PurchaseVatCode, type SalesVatCode } from '../../shar
 import { referenceIn } from '../../shared/references';
 import { InvestmentHint, investmentInfo } from './Purchases';
 import { CategoryChips } from './Categories';
-import { PaymentDetails } from './PaymentDetails';
+import { PaymentDetails, PaymentEvidence } from './PaymentDetails';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
 
 /** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
@@ -430,8 +430,9 @@ export function CategorizeTransaction({ id }: { id: number }) {
       <p className="sub">{t.counter_name ?? 'Onbekend'} · <DateNl date={t.transaction_date} /> · {t.description.length > 120 ? `${t.description.slice(0, 120)}…` : t.description}</p>
       <details className="small" style={{ marginBottom: 12 }}>
         <summary>Alle gegevens van deze betaling en eerdere betalingen {t.amount < 0 ? 'aan' : 'van'} {t.counter_name ?? 'deze partij'}</summary>
-        <PaymentDetails txId={t.id} />
+        <PaymentDetails txId={t.id} evidence={false} />
       </details>
+      <PaymentEvidence txId={t.id} />
 
       {t.status !== 'nieuw' ? (
         <div className="card">
