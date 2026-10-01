@@ -104,4 +104,44 @@ describe('vreemde valuta (#74)', () => {
     expect(doc.result?.total).toBeNull();
     expect(doc.issues.some((i) => /in dollars/.test(i.message))).toBe(true);
   });
+
+  it('koers ontbrak bij binnenkomst: bij het openen van de bon nog een keer proberen (#177)', async () => {
+    let online = false;
+    const calls: string[] = [];
+    const fetch = (async (url: string) => {
+      calls.push(url);
+      if (!online) throw new Error('geen internet');
+      return { ok: true, status: 200, json: async () => ({}), text: async () => CSV };
+    }) as FetchLike;
+    const { s } = setup({ fetch });
+    const doc = await s.intake.add('invoice.pdf', makePdf(INVOICE), '2026-05-08');
+    expect(doc.result?.total).toBeNull();
+
+    // nog steeds geen internet: er verandert niets
+    expect((await s.intake.retryRate(doc.id, '2026-05-08')).result?.foreign?.rate).toBeNull();
+
+    online = true;
+    const again = await s.intake.retryRate(doc.id, '2026-05-08');
+    expect(again.result?.foreign).toMatchObject({ currency: 'USD', total: 9000, rate: 1.08, rateDate: '2026-05-05', source: 'ecb' });
+    expect(again.result?.total?.value).toBe(8333);
+    expect(again.issues.some((i) => /kon niet opgehaald/.test(i.message))).toBe(false);
+    // nooit vanzelf geboekt: de gebruiker kijkt er eerst naar
+    expect(again.status).not.toBe('verwerkt');
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    // een bon die al een bedrag in euro's heeft blijft zoals hij is
+    const before = calls.length;
+    expect((await s.intake.retryRate(doc.id, '2026-05-08')).result?.total?.value).toBe(8333);
+    expect(calls).toHaveLength(before);
+  });
+
+  it('datum in de toekomst gelezen: omrekenen met de koers van nu, niet vastlopen (#177)', async () => {
+    const fetch = ecb();
+    const { s } = setup({ fetch });
+    const future = `${new Date().getFullYear() + 1}`;
+    await s.intake.add('invoice.pdf', makePdf(INVOICE.map((l) => l.replace('May 6, 2026', `May 6, ${future}`))), '2026-05-08', { autoConfirm: false });
+    // de koers wordt voor vandaag gevraagd, niet voor een dag die nog moet komen
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).not.toContain(`endPeriod=${future}`);
+    expect(fetch.calls[0]).toContain(`endPeriod=${new Date().getFullYear()}`);
+  });
 });

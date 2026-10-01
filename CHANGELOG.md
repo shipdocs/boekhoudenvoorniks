@@ -2,13 +2,23 @@
 
 ## Nog niet uitgebracht
 
+### Nieuw
+- **Zelf kiezen waar je gegevens staan** (Instellingen → Administraties → *Waar je gegevens staan*): wil je je administratie op een andere schijf of in een andere map, kies dan een lege map. De app start opnieuw, kopieert je administraties, bijlagen en back-ups erheen en controleert de kopie voordat hij hem gebruikt; je ziet de voortgang en kunt stoppen. De map die je gebruikte blijft staan, er wordt niets gewist. Lukt het niet (bijvoorbeeld door te weinig ruimte), dan verandert er niets en werk je verder vanuit de oude map.
+- **Een map met een administratie openen**: kies je een map waarin al een complete administratie van BoekhoudenVoorNiks staat, dan opent de app die; je huidige gegevens gaan dan niet mee en blijven staan. Een map met andere bestanden, of met een administratie die niet compleet is, wordt geweigerd met een duidelijke melding. De app opent nooit stil een lege administratie.
+- **Waarschuwing bij OneDrive, Dropbox, iCloud en Google Drive**: zo'n dienst kopieert bestanden terwijl de app ermee werkt, en daar kan je administratie van beschadigen. De app waarschuwt als je zo'n map kiest; je kunt hem dan toch gebruiken, maar alleen als je dat bewust aanvinkt.
+- **Terug naar de standaardmap**: met één knop gaan je gegevens terug naar `BoekhoudenVoorNiks` in je thuismap. Wat daar nog stond, wordt bewaard in een aparte map.
+- **Opgeslagen wachtwoorden blijven werken** na het wisselen (e-mail en andere koppelingen), en de koppeling met Claude Code of Codex leest dezelfde map als de app; start dat programma na het wisselen één keer opnieuw. Laat de standaardmap staan, ook als je een andere map gebruikt: de app bewaart daar de sleutel van je opgeslagen wachtwoorden.
+
 ### Verbeterd
+- **Bon bij "weet ik nog niet" meteen indelen**: in het venster dat laat zien wat er nog bij "weet ik nog niet" staat (op Vandaag en bij Belasting) heeft een bon nu een knop *Indelen*. Je hoeft hem niet meer bij Aankopen op te zoeken.
 - **Wisselen van soort bankafschrift geeft geen dubbele betalingen meer**: lees je eerst een CSV in en daarna een CAMT.053 of MT940 over dezelfde dagen (of andersom, of een CSV met andere kolommen), dan herkent de app dezelfde betaling aan rekening, bedrag, tegenrekening en datum (hooguit drie werkdagen verschil, zoals bij een kaartbetaling van vrijdag die op maandag wordt geboekt). Na het inlezen zie je hoeveel betalingen nieuw zijn, hoeveel er al stonden en uit welk afschrift. Met *Bekijken* staat elke overgeslagen regel naast de betaling die er al stond; waren het toch twee betalingen, dan kies je *Toch toevoegen*. Een betaling die in je eerdere afschrift ontbrak, komt er gewoon bij. Wat je al had ingelezen en verwerkt, blijft zoals het was.
 - **Klopt het saldo?** Staat er een beginsaldo in de app en heeft je afschrift een eindsaldo (CAMT.053, MT940, Revolut), dan vergelijkt de app die twee. Klopt het niet, dan staat het op Vandaag: wat de bank zegt, wat de app heeft en hoe groot het verschil is, met de overgeslagen betaling van dat bedrag als die er is. Je leest het ontbrekende afschrift in, of zegt dat het klopt.
 
 ### Opgelost
-- **Deelposten van een verzamelboeking in CAMT.053**: van een boeking met meerdere deelposten (bijvoorbeeld een batch met betalingen) kwam alleen de eerste erin; de rest telde als "al bekend". Nu komen ze er allemaal in. Lees je het oude afschrift opnieuw in, dan komen alleen de ontbrekende deelposten erbij.
+- **Bonnen lezen op deze computer weer te installeren**: het installeren van de ingebouwde herkenning eindigde met "Geen passende runtime gevonden", omdat het onderdeel dat de app daarvoor downloadt (llama.cpp) zijn releases anders is gaan aanbieden. Wie het al geïnstalleerd had, merkte er niets van.
+- **Bon in dollars of een andere munt alsnog omgerekend**: kon de koers bij het binnenkomen van de bon niet opgehaald worden, dan probeert de app het opnieuw zodra je de bon opent. Een datum die per ongeluk in de toekomst is gelezen (bijvoorbeeld een Amerikaanse datum) houdt het omrekenen niet meer tegen.
 - **Koppeling met Claude Code of Codex op Windows**: de koppeling startte wel, maar las de vragen van Claude Code of Codex niet en gaf dus nooit antwoord. Op Windows werkt hij nu net als op Linux.
+- **Deelposten van een verzamelboeking in CAMT.053**: van een boeking met meerdere deelposten (bijvoorbeeld een batch met betalingen) kwam alleen de eerste erin; de rest telde als "al bekend". Nu komen ze er allemaal in. Lees je het oude afschrift opnieuw in, dan komen alleen de ontbrekende deelposten erbij.
 
 ## 0.7.6 — je gegevens in een vaste map buiten de app
 
