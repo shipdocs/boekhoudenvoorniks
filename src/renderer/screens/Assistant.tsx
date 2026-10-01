@@ -58,6 +58,7 @@ export function AssistantCard() {
         <p className="small" style={{ marginTop: 10 }}>Nog niet gevonden: gebruik hierboven "Zoek op deze computer", of stel het zelf in met een opdracht in de terminal:</p>
       )}
       {found && <p className="small muted">Daarna: open een nieuwe terminal, start <code>claude</code> of <code>codex</code> en stel je vraag.</p>}
+      {i.storeNote && <p className="small muted">{i.storeNote}</p>}
       {(manual || !found) && (
         <div className="small" style={{ marginTop: 8 }}>
           <p style={{ margin: '4px 0' }}>Claude Code, in een terminal:</p>

@@ -1,5 +1,18 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Techniek
+- **Pakket voor de Microsoft Store (in voorbereiding, nog niet in de Store)**: de app kan nu ook als Store-pakket (MSIX/appx) gebouwd worden, in een eigen job die het pakket alleen als artefact bewaart; het komt nooit bij de GitHub-release. Voor de gewone Windows-versie (`Setup.exe`) en voor Linux verandert er niets. In de Store-versie gaat een aantal dingen anders:
+  - **Updates** komen via de Store; de app zoekt of downloadt zelf niets, en Instellingen legt dat uit.
+  - **Bonnen lezen op deze computer** staat standaard uit. Aanzetten kan pas nadat je er uitdrukkelijk ja op zegt; de app downloadt dan altijd dezelfde, gecontroleerde versie van het leesprogramma (llama.cpp b11146) en start het niet als het bestand afwijkt.
+  - **Koppeling met Claude Code of Codex** gebruikt een vaste naam (`boekhoudenvoorniks.exe`) die bij een update niet verandert.
+  - **Lukt het overzetten van je gegevens niet**, dan werkt de app niet verder in de oude map: je kiest opnieuw proberen, zelf een map kiezen, of je administratie alleen bekijken. Een zelf gekozen map wordt net zo beoordeeld als bij Instellingen → Administraties → *Waar je gegevens staan* (een lege map, met een waarschuwing bij OneDrive, Dropbox, iCloud en Google Drive); een map onder AppData kan in de Store-versie niet.
+  - **Bij de eerste start** staat er dat je een oude installatie van de website moet verwijderen of bijwerken.
+  - Werkt het lezen van bonnen of de koppeling niet, dan verwijst de melding naar de gewone Windows-versie op GitHub.
+  - Het pakket heeft hetzelfde versienummer als de app (app 1.0.0 → pakket 1.0.0.0).
+  - Staan je gegevens in een map onder AppData (een eerder zelf gekozen map), dan waarschuwt de Store-versie bij het starten: wat hij daar neerzet, verdwijnt als je de app verwijdert.
+
 ## 1.0.0 — geen dubbele bonnen of betalingen meer, je gegevens waar jij wilt
 
 Versie 1.0: de app is de afgelopen maanden uitgegroeid tot een complete administratie. Deze versie maakt het inlezen van bonnen en bankafschriften betrouwbaarder en laat je zelf kiezen waar je gegevens staan.

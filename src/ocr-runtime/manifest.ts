@@ -59,6 +59,32 @@ export const LLAMA_CPP = {
   approxSize: 30_000_000,
 };
 
+/** Een vaste build van llama.cpp: precies dit bestand, en precies deze `llama-server.exe` erin. */
+export interface PinnedRuntime {
+  /** de release van llama.cpp */
+  tag: string;
+  archive: ModelFile;
+  /** sha256 van `llama-server.exe` uit dat archief; wordt ook vóór elke start gecontroleerd */
+  serverSha256: string;
+}
+
+/**
+ * De versie uit de Microsoft Store haalt niet "de nieuwste" runtime op, maar altijd deze ene build
+ * (Store-beleid 10.2.2: wat de app na toestemming downloadt en uitvoert, ligt vast en staat in de
+ * Store-beschrijving). b11146 is de build achter de stabiele release v0.5.0 van llama.cpp. Een andere
+ * build: tag, bestand, grootte en beide controlegetallen hier samen aanpassen.
+ */
+export const STORE_LLAMA_CPP: PinnedRuntime = {
+  tag: 'b11146',
+  archive: {
+    name: 'llama-b11146-bin-win-cpu-x64.zip',
+    url: 'https://github.com/ggml-org/llama.cpp/releases/download/b11146/llama-b11146-bin-win-cpu-x64.zip',
+    size: 18_560_055,
+    sha256: '14cf1303ca9ac3abd94816850532f9f9a69ac66fbaca3776fc6f9061c2fac1d1',
+  },
+  serverSha256: '7b886298b688509ced3e92b420edd57dd3d665da72c1fc207d7a537be5870352',
+};
+
 /** Welk release-bestand van llama.cpp bij dit platform hoort (CPU-build), of null als we het niet ondersteunen. */
 export function llamaAssetPattern(platform: string, arch: string): RegExp | null {
   if (platform === 'win32' && arch === 'x64') return /-bin-win-cpu-x64\.zip$/;

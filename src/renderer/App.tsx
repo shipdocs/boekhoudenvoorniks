@@ -22,6 +22,7 @@ import { DemoBanner } from './screens/Reset';
 import { CurrentAdministration, OfficeCopyBanner } from './screens/Administrations';
 import { Logo } from './Logo';
 import { UpdateBanner } from './screens/UpdateBanner';
+import { ReadOnlyBanner } from './screens/ReadOnlyBanner';
 
 const DocumentReview = lazy(() => import('./screens/DocumentReview').then((module) => ({ default: module.DocumentReview })));
 const SettingsScreen = lazy(() => import('./screens/Settings').then((module) => ({ default: module.SettingsScreen })));
@@ -164,6 +165,7 @@ export function App() {
           {settings.demoMode && route.screen !== 'welkom' && <DemoBanner />}
           {route.screen !== 'welkom' && <OfficeCopyBanner />}
           {route.screen !== 'welkom' && <UpdateBanner />}
+          <ReadOnlyBanner />
           <Suspense fallback={<div className="card">Laden…</div>}>{screen}</Suspense>
         </main>
       </div>

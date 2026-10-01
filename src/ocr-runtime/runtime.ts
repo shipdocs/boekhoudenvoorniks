@@ -5,7 +5,7 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { cpus } from 'node:os';
 import { promisify } from 'node:util';
-import { GLM_OCR, LLAMA_CPP, llamaAssetPattern, type ModelFile, type OcrModel } from './manifest';
+import { GLM_OCR, LLAMA_CPP, llamaAssetPattern, type ModelFile, type OcrModel, type PinnedRuntime } from './manifest';
 import { LlamaCppOcrProvider } from '../intake/ocr-llamacpp';
 import type { OcrOutput, OcrProvider } from '../intake/ocr';
 
@@ -61,7 +61,30 @@ export interface RuntimeDeps {
   model?: OcrModel;
   /** hoe lang zonder bonnen voordat de server stopt */
   idleMs?: number;
+  /**
+   * De versie uit de Microsoft Store: alleen deze vaste build van de runtime, en pas na toestemming
+   * van de gebruiker (`giveConsent`). Zonder dit veld: de nieuwste release, zoals altijd.
+   */
+  pinned?: PinnedRuntime;
+  /** zin achter een foutmelding (in de Store-versie: het kan wel met de gewone Windows-versie) */
+  failureHint?: string;
 }
+
+/** Vastgelegde toestemming (alleen in de Store-versie): voor welke build, en wanneer. */
+interface Consent {
+  version: 1;
+  llamaTag: string;
+  serverSha256: string;
+  at: string;
+}
+
+/** De vaste build in de vorm van een release van GitHub, zodat hij dezelfde weg volgt als een opgezochte. */
+function pinnedRelease(pinned: PinnedRuntime): { release: LlamaRelease; asset: LlamaRelease['assets'][number] } {
+  const asset = { name: pinned.archive.name, size: pinned.archive.size, browser_download_url: pinned.archive.url, digest: `sha256:${pinned.archive.sha256}` };
+  return { release: { tag_name: pinned.tag, assets: [asset] }, asset };
+}
+
+const NO_CONSENT = 'Geef eerst toestemming om het programma voor het lezen van bonnen te downloaden en te starten.';
 
 const run = promisify(execFile);
 
@@ -126,6 +149,8 @@ export class LocalOcrRuntime {
     try {
       const i = JSON.parse(readFileSync(p, 'utf8')) as Installed;
       if (i.model !== this.model.id || !existsSync(i.serverPath) || !i.files.every((f) => existsSync(join(this.dir, 'models', f)))) return null;
+      // Store-versie: een runtime van een andere build (bv. eerder gedownload door de gewone versie) telt niet
+      if (this.deps.pinned && (i.llamaTag !== this.deps.pinned.tag || !this.hasConsent())) return null;
       return i;
     } catch {
       return null;
@@ -134,6 +159,36 @@ export class LocalOcrRuntime {
 
   isInstalled(): boolean {
     return this.installed() !== null;
+  }
+
+  private consentFile(): string {
+    return join(this.dir, 'toestemming.json');
+  }
+
+  /** Is er toestemming voor precies deze vaste build? Zonder vaste build (de gewone versie) is die niet nodig. */
+  hasConsent(): boolean {
+    const pinned = this.deps.pinned;
+    if (!pinned) return true;
+    try {
+      const c = JSON.parse(readFileSync(this.consentFile(), 'utf8')) as Consent;
+      return c.llamaTag === pinned.tag && c.serverSha256 === pinned.serverSha256;
+    } catch {
+      return false;
+    }
+  }
+
+  /** De gebruiker zei ja tegen downloaden en starten van deze build. Verwijderen (`uninstall`) trekt het weer in. */
+  giveConsent(now: Date = new Date()): void {
+    const pinned = this.deps.pinned;
+    if (!pinned) return;
+    mkdirSync(this.dir, { recursive: true });
+    const consent: Consent = { version: 1, llamaTag: pinned.tag, serverSha256: pinned.serverSha256, at: now.toISOString() };
+    writeFileSync(this.consentFile(), JSON.stringify(consent, null, 2));
+    if (this.status_.state === 'niet-geinstalleerd' && this.installed()) this.status_ = { ...this.status_, state: 'geinstalleerd', llamaVersion: pinned.tag };
+  }
+
+  private withHint(message: string): string {
+    return this.deps.failureHint ? `${message} ${this.deps.failureHint}` : message;
   }
 
   status(): RuntimeStatus {
@@ -151,12 +206,16 @@ export class LocalOcrRuntime {
     const platform = this.deps.platform ?? process.platform;
     const arch = this.deps.arch ?? process.arch;
     const pattern = llamaAssetPattern(platform, arch);
+    const pinned = this.deps.pinned;
+    // zonder toestemming gebeurt er niets, ook geen voorbereiding
+    if (pinned && !this.hasConsent()) throw new Error(NO_CONSENT);
     this.status_ = { ...this.status_, state: 'downloaden', error: null, progress: { done: 0, total: 0, file: 'voorbereiden' } };
     try {
       if (!pattern) throw new Error(`De ingebouwde herkenning is (nog) niet beschikbaar voor ${platform}/${arch}.`);
+      if (pinned && !pattern.test(pinned.archive.name)) throw new Error(`De ingebouwde herkenning is in deze versie (nog) niet beschikbaar voor ${platform}/${arch}.`);
       mkdirSync(join(this.dir, 'models'), { recursive: true });
-      // 1. welke llama.cpp-build
-      const { release, asset } = await this.findRelease(pattern);
+      // 1. welke llama.cpp-build (Store-versie: altijd de vaste build, er wordt niets opgezocht)
+      const { release, asset } = pinned ? pinnedRelease(pinned) : await this.findRelease(pattern);
       const sha = asset.digest?.startsWith('sha256:') ? asset.digest.slice(7) : null;
       if (!sha) throw new Error('De runtime heeft geen controlegetal; downloaden afgebroken.');
       const downloads: (ModelFile & { target: string })[] = [
@@ -177,14 +236,19 @@ export class LocalOcrRuntime {
       await (this.deps.extract ?? defaultExtract)(downloads[0]!.target, dest);
       const serverPath = findFile(dest, ['llama-server', 'llama-server.exe']);
       if (!serverPath) throw new Error('llama-server niet gevonden in de download.');
+      if (pinned && (await sha256File(serverPath)) !== pinned.serverSha256) {
+        rmSync(dest, { recursive: true, force: true });
+        throw new Error('llama-server is niet het programma dat bij deze versie hoort (controlegetal klopt niet); het wordt niet gebruikt.');
+      }
       if (platform !== 'win32') chmodSync(serverPath, 0o755);
       rmSync(join(this.dir, 'downloads'), { recursive: true, force: true });
       const installed: Installed = { version: 1, llamaTag: release.tag_name, serverPath, model: this.model.id, files: this.model.files.map((f) => f.name) };
       writeFileSync(join(this.dir, 'installed.json'), JSON.stringify(installed, null, 2));
       this.status_ = { state: 'geinstalleerd', progress: null, error: null, llamaVersion: release.tag_name, model: this.model.label };
     } catch (e) {
-      this.status_ = { ...this.status_, state: 'fout', progress: null, error: (e as Error).message };
-      throw e;
+      const message = this.withHint((e as Error).message);
+      this.status_ = { ...this.status_, state: 'fout', progress: null, error: message };
+      throw this.deps.failureHint ? new Error(message) : e;
     }
   }
 
@@ -273,6 +337,11 @@ export class LocalOcrRuntime {
   private async start(): Promise<string> {
     const inst = this.installed();
     if (!inst) throw new Error('De ingebouwde herkenning is nog niet geïnstalleerd (Instellingen → Slimme herkenning).');
+    // Store-versie: alleen precies het programma waarvoor toestemming is gegeven wordt gestart
+    if (this.deps.pinned && (await sha256File(inst.serverPath)) !== this.deps.pinned.serverSha256) {
+      this.status_ = { ...this.status_, state: 'fout', error: this.withHint('llama-server is gewijzigd sinds het downloaden (controlegetal klopt niet) en wordt niet gestart. Verwijder de herkenning en installeer hem opnieuw.') };
+      throw new Error(this.status_.error!);
+    }
     this.status_.state = 'starten';
     const port = await freePort();
     const [model, mmproj] = inst.files.map((f) => join(this.dir, 'models', f));
@@ -290,7 +359,7 @@ export class LocalOcrRuntime {
     const deadline = Date.now() + 180_000;
     while (Date.now() < deadline) {
       if (child.exitCode !== null) {
-        this.status_ = { ...this.status_, state: 'fout', error: `De herkenning stopte onverwacht. ${stderr.split('\n').filter(Boolean).slice(-2).join(' ')}` };
+        this.status_ = { ...this.status_, state: 'fout', error: this.withHint(`De herkenning stopte onverwacht. ${stderr.split('\n').filter(Boolean).slice(-2).join(' ')}`) };
         throw new Error(this.status_.error!);
       }
       try {
@@ -306,7 +375,7 @@ export class LocalOcrRuntime {
       await new Promise((r) => setTimeout(r, 500));
     }
     this.stop();
-    throw new Error('De herkenning start niet (time-out).');
+    throw new Error(this.withHint('De herkenning start niet (time-out).'));
   }
 
   stop(): void {

@@ -22,7 +22,8 @@ jobs:
       - run: npm run build
 
   # De gegevensmap en het overzetten ervan (tests/data-dir.test.ts) gedragen zich op Windows anders:
-  # bestandssloten, schijfletters en backslashes. Daarom draaien die tests ook daar.
+  # bestandssloten, schijfletters en backslashes. Daarom draaien die tests ook daar, samen met die van de
+  # Store-versie (tests/windows-store.test.ts: zelf een map kiezen, alleen-lezen openen, het manifest).
   data-dir-windows:
     # alleen na het mergen (push naar main): voor Windows is er lokaal geen vervanger, maar bij elke
     # pull request is het niet nodig. De Release-workflow draait de tests op Windows ook nog zelf.
@@ -141,4 +142,30 @@ jobs:
         with:
           name: windows-installer
           path: release/*.exe
+          retention-days: 7
+
+  # De versie voor de Microsoft Store (MSIX/appx, #181): een eigen job, los van de NSIS-installer hierboven.
+  # Het pakket is niet ondertekend (dat doet de Store na certificering) en wordt nergens gepubliceerd; het
+  # is alleen als artefact te downloaden, voor de proef op Windows (#182) en het uploaden naar Partner Center.
+  package-store-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Store-pakket bouwen
+        run: npx electron-builder --win appx --publish never --x64
+      # De vaste identiteit uit Partner Center, de pakketversie en de alias voor de koppeling (--mcp)
+      - name: Manifest in het pakket controleren
+        run: node scripts/store-manifest.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store-pakket
+          path: release/*.appx
+          if-no-files-found: error
           retention-days: 7
