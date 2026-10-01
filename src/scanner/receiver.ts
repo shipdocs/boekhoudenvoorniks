@@ -13,6 +13,8 @@ export interface ReceiverOptions {
   /** mag deze afzender? Standaard: alleen uit hetzelfde netwerk als het adres waarop hij binnenkomt. */
   peerAllowed?: (remote: string, local: LocalInterface) => boolean;
   now?: () => number;
+  /** mag de locatie van een bon bewaard worden? (opt-in van #32; standaard niet) */
+  keepLocation?: () => boolean;
   /** een bon is veilig opgeslagen en kan naar de inbox */
   onStored?: () => void;
   /** een telefoon heeft zich gemeld (gekoppeld, of laatst gezien bijgewerkt) */
@@ -266,7 +268,7 @@ export class ScannerReceiver {
     if (msg.fotos.some((f) => !jpegInfo(f))) return reply(400, { ok: false, fout: 'ongeldig' });
     let outcome: 'nieuw' | 'al' | 'botst';
     try {
-      outcome = this.opts.spool.accept(msg, deviceId, plaintext);
+      outcome = this.opts.spool.accept(msg, deviceId, { keepLocation: this.opts.keepLocation?.() ?? false });
     } catch (e) {
       // niet opgeslagen: geen bevestiging, de telefoon bewaart de bon en probeert het later opnieuw
       this.opts.log?.(`Bon van de telefoon opslaan mislukt: ${(e as Error).message}`);
