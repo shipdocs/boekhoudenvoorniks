@@ -27,7 +27,9 @@ function knownFromText(known: { from: string; to: string }[]): string {
   return known.length === 1 ? ` (uit je afschrift van ${formatDateNl(known[0]!.from)} t/m ${formatDateNl(known[0]!.to)})` : ' (uit eerdere afschriften)';
 }
 
-export function Bank({ focus, skippedFor, imported }: { focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult }) {
+type BatchDouble = Awaited<ReturnType<typeof api.bank.doubles>>[number];
+
+export function Bank({ focus, skippedFor, imported, double }: { /** vanaf Vandaag: dit dubbele bedrag meteen laten zien */ double?: { lineId: number; firstPartId: number }; focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult }) {
   const { go, toast, settings, refreshBadge } = useApp();
   const { run } = useAction();
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
@@ -41,6 +43,10 @@ export function Bank({ focus, skippedFor, imported }: { focus?: number; /** reke
   const txs = useLoad(() => api.bank.transactions({ ...(view === 'hulp' ? { status: 'nieuw' as const } : {}), ...(query ? { search: query } : {}) }), [view, query]);
   const accounts = useLoad(() => api.bank.accounts());
   const status = useLoad(() => api.bank.importStatus());
+  // verzamelbetalingen die er twee keer in staan (één regel én losse deelposten)
+  const doubles = useLoad(() => api.bank.doubles());
+  const [showDouble, setShowDouble] = useState<{ lineId: number; firstPartId: number } | null>(double ?? null);
+  const openDouble = showDouble ? (doubles.data ?? []).find((d) => d.lineId === showDouble.lineId && d.firstPartId === showDouble.firstPartId) : undefined;
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
   const [last, setLast] = useState<ImportResult | null>(imported ?? null);
   // de regels die zijn overgeslagen omdat de betaling er al stond: van één import of van één rekening
@@ -63,7 +69,7 @@ export function Bank({ focus, skippedFor, imported }: { focus?: number; /** reke
     const r = await run(() => api.bank.importFile(filename, content, m));
     if (!r) return;
     setLast(r);
-    await status.reload();
+    await Promise.all([status.reload(), doubles.reload()]);
     if (r.warnings.length) toast(`${r.warnings.length} ${r.warnings.length === 1 ? 'regel kon' : 'regels konden'} we niet lezen (bv. ${r.warnings[0]!.charAt(0).toLowerCase()}${r.warnings[0]!.slice(1)})`, 'error');
     await txs.reload();
   };
@@ -99,6 +105,15 @@ export function Bank({ focus, skippedFor, imported }: { focus?: number; /** reke
           {help > 0 ? `Bij ${help} hebben we je hulp nodig.` : 'Alles is verwerkt ✓'}
         </div>
       )}
+
+      {(doubles.data ?? []).map((d) => (
+        <div key={`${d.lineId}-${d.firstPartId}`} className="notice warn row between" style={{ marginTop: 14 }}>
+          <span>
+            ⚠️ <strong><Euro cents={Math.abs(d.total)} /> staat er waarschijnlijk twee keer in</strong> ({d.accountName}): één keer als één regel op <DateNl date={d.line.date} /> en één keer als {d.parts.length} deelposten op <DateNl date={d.parts[0]!.date} />.
+          </span>
+          <Button small kind="primary" onClick={() => setShowDouble({ lineId: d.lineId, firstPartId: d.firstPartId })}>Bekijken en oplossen</Button>
+        </div>
+      ))}
 
       <div className="row" style={{ margin: '20px 0 12px', gap: 12 }}>
         <div className="chips">
@@ -177,7 +192,8 @@ export function Bank({ focus, skippedFor, imported }: { focus?: number; /** reke
 
       <StatementFolderCard />
 
-      {review && <ImportReview {...review} onClose={() => setReview(null)} onChanged={async () => { await Promise.all([txs.reload(), status.reload()]); refreshBadge(); }} />}
+      {review && <ImportReview {...review} onClose={() => setReview(null)} onChanged={async () => { await Promise.all([txs.reload(), status.reload(), doubles.reload()]); refreshBadge(); }} />}
+      {openDouble && <DoubleDialog double={openDouble} onClose={() => setShowDouble(null)} onChanged={async () => { setShowDouble(null); await Promise.all([txs.reload(), status.reload(), doubles.reload()]); refreshBadge(); }} />}
       {mapping && <CsvMappingDialog {...mapping} onClose={() => setMapping(null)} onConfirm={async (m) => { const x = mapping; setMapping(null); await doImport(x.filename, x.content, m); }} />}
       {opening && <OpeningBalance accountId={opening.id} name={opening.name} onClose={() => setOpening(null)} />}
       {editing && <AccountDialog account={editing === 'nieuw' ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await Promise.all([status.reload(), accounts.reload()]); }} />}
@@ -237,10 +253,11 @@ function ImportReview({ batchId, bankAccountId, onClose, onChanged }: { batchId?
   const data = useLoad(() => api.bank.importReview({ batchId, bankAccountId }), [batchId, bankAccountId]);
   const skipped = data.data?.skipped ?? [];
   const added = data.data?.added ?? [];
+  const removed = data.data?.removed ?? [];
   return (
     <Modal title="Betalingen die er al stonden" wide onClose={onClose}>
       <ErrorBox error={data.error} />
-      {data.data && skipped.length === 0 && added.length === 0 && <p className="muted">Er is niets overgeslagen.</p>}
+      {data.data && skipped.length === 0 && added.length === 0 && removed.length === 0 && <p className="muted">Er is niets overgeslagen.</p>}
       {skipped.length > 0 && (
         <>
           <p className="muted small">Deze regels uit je afschrift zijn niet toegevoegd, omdat dezelfde betaling er al stond uit een eerder afschrift. Waren het toch twee verschillende betalingen? Kies dan <strong>Toch toevoegen</strong>.</p>
@@ -256,12 +273,14 @@ function ImportReview({ batchId, bankAccountId, onClose, onChanged }: { batchId?
                     <DateNl date={k.existing.date} /> · {k.existing.counterName ?? '—'}
                     <div className="small muted">{k.existing.description}</div>
                     {k.existing.filename && <div className="small muted">uit {k.existing.filename}</div>}
+                    {k.batch?.kind === 'deelpost' && <div className="small muted">Deelpost van een verzamelbetaling van <Euro cents={Math.abs(k.batch.total)} />: dat bedrag stond er al als één regel.</div>}
+                    {k.batch?.kind === 'totaal' && <div className="small muted">en {k.batch.parts - 1} andere {k.batch.parts - 1 === 1 ? 'deelpost' : 'deelposten'}: samen <Euro cents={Math.abs(k.batch.total)} />, hetzelfde bedrag als deze ene regel.</div>}
                   </td>
                   <td className="num" style={{ whiteSpace: 'nowrap' }}>
                     {k.added ? <span className="muted small">toegevoegd ✓</span> : (
                       <Button small disabled={busy} onClick={async () => {
                         if ((await run(() => api.bank.addSkipped(k.id), 'Betaling toegevoegd')) !== undefined) await Promise.all([data.reload(), onChanged()]);
-                      }}>Toch toevoegen</Button>
+                      }}>{k.batch?.kind === 'deelpost' && k.batch.parts > 1 ? `Toch toevoegen (alle ${k.batch.parts} deelposten)` : 'Toch toevoegen'}</Button>
                     )}
                   </td>
                 </tr>
@@ -287,7 +306,92 @@ function ImportReview({ batchId, bankAccountId, onClose, onChanged }: { batchId?
           </table>
         </>
       )}
+      {removed.length > 0 && (
+        <>
+          <h3>Uit je boekhouding gehaald omdat het bedrag er dubbel in stond</h3>
+          <p className="muted small">Deze betalingen tellen niet meer mee. Waren het toch twee verschillende betalingen? Kies dan <strong>Terugzetten</strong>; wat tegelijk is weggehaald, komt samen terug.</p>
+          <table className="list">
+            <thead><tr><th>Datum</th><th>Wie en wat</th><th className="num">Bedrag</th><th>Wat bleef</th><th><span className="sr-only">Acties</span></th></tr></thead>
+            <tbody>
+              {removed.map((t) => (
+                <tr key={t.id}>
+                  <td><DateNl date={t.date} /></td>
+                  <td>{t.counterName ?? '—'}<div className="small muted">{t.description}</div></td>
+                  <td className="num"><Euro cents={t.amount} sign /></td>
+                  <td><DateNl date={t.kept.date} /> · {t.kept.counterName ?? '—'}<div className="small muted">{t.kept.description}</div></td>
+                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                    <Button small disabled={busy} onClick={async () => {
+                      if ((await run(() => api.bank.restoreDuplicate(t.id), 'Teruggezet')) !== undefined) await Promise.all([data.reload(), onChanged()]);
+                    }}>Terugzetten</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
       <div className="row end" style={{ marginTop: 14 }}><Button onClick={onClose}>Sluiten</Button></div>
+    </Modal>
+  );
+}
+
+const STATUS_TEXT = { nieuw: 'nog niet verwerkt', gematcht: 'al verwerkt', genegeerd: 'genegeerd' } as const;
+
+/**
+ * Een verzamelbetaling die er twee keer in staat: de ene regel (CSV, MT940) naast de deelposten (CAMT),
+ * met hun som. Eén kant gaat uit de boekhouding; die blijft bewaard en is terug te zetten. Wat al verwerkt
+ * is, haalt de app er niet zelf uit: dan de andere kant kiezen, of eerst de verwerking ongedaan maken.
+ */
+function DoubleDialog({ double: d, onClose, onChanged }: { double: BatchDouble; onClose: () => void; onChanged: () => Promise<void> }) {
+  const { go } = useApp();
+  const { run, busy } = useAction();
+  const size = Math.abs(d.total);
+  const act = async (fn: () => Promise<unknown>, done: string) => {
+    if ((await run(async () => { await fn(); return true; }, done)) !== undefined) await onChanged();
+  };
+  const side = (rows: BatchDouble['parts']) => (
+    <table className="list small">
+      <tbody>
+        {rows.map((t) => (
+          <tr key={t.id}>
+            <td><DateNl date={t.date} /></td>
+            <td>
+              {t.counterName ?? '—'}
+              <div className="muted">{t.description}</div>
+              <div className="muted">{STATUS_TEXT[t.status]}{t.filename ? ` · uit ${t.filename}` : ''}{t.status === 'gematcht' && <> · <button className="linklike" onClick={() => go({ screen: 'categorie', id: t.id })}>openen</button></>}</div>
+            </td>
+            <td className="num"><Euro cents={t.amount} sign /></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+  // de kant die eruit kan; liefst de ene regel, want de deelposten zeggen per betaling aan wie het was
+  const primary = d.canRemoveLine ? 'regel' : d.canRemoveParts ? 'deelposten' : null;
+  return (
+    <Modal title="Dit bedrag staat er waarschijnlijk twee keer in" wide onClose={onClose}>
+      <p>
+        Een verzamelbetaling staat in het ene soort afschrift als één regel en in het andere als losse deelposten. Beide staan nu in de app ({d.accountName}), dus <strong><Euro cents={size} /> telt dubbel</strong>. Kies welke kant blijft. De andere kant haalt de app uit je boekhouding; die blijft bewaard en kun je altijd terugzetten.
+      </p>
+      <div className="grid cols-2">
+        <div>
+          <h3>Eén regel</h3>
+          {side([d.line])}
+          <p className="small"><strong>Totaal <Euro cents={d.line.amount} sign /></strong></p>
+        </div>
+        <div>
+          <h3>{d.parts.length} deelposten</h3>
+          {side(d.parts)}
+          <p className="small"><strong>Samen <Euro cents={d.parts.reduce((n, p) => n + p.amount, 0)} sign /></strong></p>
+        </div>
+      </div>
+      {!d.canRemoveLine && <p className="small">De ene regel is al verwerkt. Die haalt de app er niet zomaar uit: {d.canRemoveParts ? 'haal de deelposten eruit, of' : ''} maak eerst die verwerking ongedaan (open de regel en kies <strong>Ongedaan maken</strong>).</p>}
+      {!d.canRemoveParts && <p className="small">Een of meer deelposten zijn al verwerkt. Die haalt de app er niet zomaar uit: {d.canRemoveLine ? 'haal de ene regel eruit, of' : ''} maak eerst die verwerking ongedaan (open de deelpost en kies <strong>Ongedaan maken</strong>).</p>}
+      <div className="row end" style={{ marginTop: 14, flexWrap: 'wrap' }}>
+        <Button disabled={busy} onClick={() => void act(() => api.bank.dismissDouble(d.lineId, d.firstPartId), 'Goed, de app meldt dit niet meer')}>Nee, dit zijn twee verschillende betalingen</Button>
+        <Button kind={primary === 'deelposten' ? 'primary' : undefined} disabled={busy || !d.canRemoveParts} onClick={() => void act(() => api.bank.resolveDouble(d.lineId, d.firstPartId, 'deelposten'), 'Opgelost: de deelposten zijn uit je boekhouding gehaald')}>De ene regel houden</Button>
+        <Button kind={primary === 'regel' ? 'primary' : undefined} disabled={busy || !d.canRemoveLine} onClick={() => void act(() => api.bank.resolveDouble(d.lineId, d.firstPartId, 'regel'), 'Opgelost: de ene regel is uit je boekhouding gehaald')}>De deelposten houden</Button>
+      </div>
     </Modal>
   );
 }
