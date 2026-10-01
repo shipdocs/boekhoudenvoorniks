@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import path, { join, relative, sep } from 'node:path';
 import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openDatabase } from '../src/db/database';
 import { createServices, MemorySecretStore } from '../src/services';
 import {
@@ -30,6 +30,10 @@ import { detectSyncService, type SyncContext } from '../src/main/sync-folders';
 import { isStoredAttachmentPath } from '../src/db/attachment-paths';
 import { resolveAttachmentPath } from '../src/main/attachments';
 import { administrationOnDisk } from './helpers';
+
+// Elke test bouwt twee complete gegevensmappen (vier databases met alle migraties). Op een trage
+// Windows-runner duurt dat soms langer dan de gewone 30 seconden; dat is geen fout in de code.
+vi.setConfig({ testTimeout: 120_000 });
 
 const NOW = () => new Date(2026, 9, 1, 12, 34, 56);
 const STAMP = '20261001-123456';
