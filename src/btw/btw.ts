@@ -128,6 +128,8 @@ export interface VatDetailLine {
   counterparty: string | null;
   /** bewijsstuk van de aankoop (foto/PDF), als dat er is */
   attachmentPath: string | null;
+  /** bij accountLines: deze aankoop staat nog bij "weet ik nog niet" en is meteen in te delen */
+  question?: boolean;
 }
 
 export class VatService {
@@ -324,18 +326,25 @@ export class VatService {
          ORDER BY e.entry_date, e.id`,
       )
       .all(account.id, to, to, to) as { id: number; entry_date: string; description: string; source: string; source_ref: string | null; net: number }[];
-    const lines: VatDetailLine[] = rows.map((r) => ({
-      entryId: r.id,
-      date: r.entry_date,
-      description: r.description,
-      source: r.source,
-      reversed: false,
-      reversal: false,
-      omzet: 0,
-      btw: 0,
-      amount: r.net,
-      ...this.origin(r.id, r.source_ref),
-    }));
+    const isQuestion = this.db.prepare(
+      `SELECT 1 FROM purchase_invoice_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.purchase_invoice_id = ? AND a.rgs_code = ?`,
+    );
+    const lines: VatDetailLine[] = rows.map((r) => {
+      const origin = this.origin(r.id, r.source_ref);
+      return {
+        entryId: r.id,
+        date: r.entry_date,
+        description: r.description,
+        source: r.source,
+        reversed: false,
+        reversal: false,
+        omzet: 0,
+        btw: 0,
+        amount: r.net,
+        ...origin,
+        ...(origin.purchaseId !== null && isQuestion.get(origin.purchaseId, ACCOUNTS.vraagposten) !== undefined ? { question: true } : {}),
+      };
+    });
     return { account: rgs, name: account.name, lines, total: lines.reduce((s, l) => s + (l.amount ?? 0), 0) };
   }
 
