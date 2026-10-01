@@ -451,6 +451,63 @@ describe('verhuizen vraagt geen herschrijving', () => {
   });
 });
 
+describe('bonnen bij een aankoop (koppelingen, #179): het hoofdbewijsstuk en de andere bestanden', () => {
+  /** Een aankoop met twee bonnen erbij; geeft de map en het nummer van de aankoop. */
+  async function purchaseWithTwoFiles(): Promise<{ dir: string; purchaseId: number }> {
+    const dir = tempDir();
+    const s = servicesAt(dir);
+    const { api } = apiAt(dir, s);
+    const purchase = api.purchases.create({ invoiceDate: '2026-09-21', description: 'Materiaal', lines: [{ account: 'WBedAlkOvr', netAmount: 2000, vatCode: 'geen', vatAmount: 0 }] });
+    await api.documents.addPurchaseEvidence('foto-1.jpg', Buffer.from('eerste foto'), purchase.id);
+    await api.documents.addPurchaseEvidence('foto-2.jpg', Buffer.from('tweede foto'), purchase.id);
+    s.db.close();
+    return { dir, purchaseId: purchase.id };
+  }
+
+  async function expectFilesOpen(dir: string, purchaseId: number): Promise<void> {
+    const s = servicesAt(dir);
+    const { api, opened, saved } = apiAt(dir, s);
+    const files = api.documents.forTarget('aankoop', purchaseId);
+    expect(files.map((f) => [f.original_name, f.is_primary])).toEqual([['foto-1.jpg', true], ['foto-2.jpg', false]]);
+    for (const f of files) {
+      expect(isStoredAttachmentPath(f.file_path)).toBe(true);
+      expect(Buffer.from(api.documents.file(f.document_id).base64, 'base64').toString()).toBe(f.original_name === 'foto-1.jpg' ? 'eerste foto' : 'tweede foto');
+    }
+    // de bijlage van de aankoop is het hoofdbewijsstuk, en dat gaat mee in het pakket
+    expect(s.purchases.get(purchaseId).attachment_path).toBe(files[0]!.file_path);
+    await api.app.openAttachment(s.purchases.get(purchaseId).attachment_path!);
+    expect(opened).toEqual(['eerste foto']);
+    await api.exports.accountantPackage(2026);
+    const zip = unzip(saved[0]!.content);
+    expect([...zip.keys()].filter((f) => f.startsWith('documenten/inkoop/')).map((f) => zip.get(f)!.toString())).toEqual(['eerste foto']);
+
+    // koppeling ongedaan maken: de andere bon wordt de bijlage; daarna heeft de aankoop er geen meer
+    await api.documents.unlink(files[0]!.document_id);
+    expect(s.purchases.get(purchaseId).attachment_path).toBe(files[1]!.file_path);
+    await api.app.openAttachment(s.purchases.get(purchaseId).attachment_path!);
+    expect(opened).toEqual(['eerste foto', 'tweede foto']);
+    await api.documents.unlink(files[1]!.document_id);
+    expect(s.purchases.get(purchaseId).attachment_path).toBeNull();
+    s.db.close();
+  }
+
+  it('nieuw toegevoegd: elk bestand opent via het relatieve pad', async () => {
+    const { dir, purchaseId } = await purchaseWithTwoFiles();
+    await expectFilesOpen(dir, purchaseId);
+  });
+
+  it('uit een oudere versie (absolute paden, in een andere map): na het openen klopt alles nog, ook het loskoppelen', async () => {
+    const { dir, purchaseId } = await purchaseWithTwoFiles();
+    // zoals 0.7.6 het opsloeg, op een Windows-computer
+    const old = new Database(join(dir, 'boekhouding.sqlite'));
+    const absolute = `'C:\\Users\\Piet\\BoekhoudenVoorNiks\\' || replace(%s, '/', '\\')`;
+    old.exec(`UPDATE documents SET file_path = ${absolute.replace('%s', 'file_path')}; UPDATE purchase_invoices SET attachment_path = ${absolute.replace('%s', 'attachment_path')} WHERE attachment_path IS NOT NULL`);
+    expect(old.prepare('SELECT file_path FROM documents ORDER BY id').pluck().get()).toMatch(/^C:\\Users\\Piet\\BoekhoudenVoorNiks\\bijlagen\\\d{4}\\/);
+    old.close();
+    await expectFilesOpen(dir, purchaseId);
+  });
+});
+
 describe('pakket voor de boekhouder en wissen gebruiken de juiste bestanden', () => {
   it('pakket: bonnen met een relatief pad en met een pad uit een oudere versie komen erin; een ontbrekend bestand wordt gemeld', async () => {
     const dir = tempDir();
