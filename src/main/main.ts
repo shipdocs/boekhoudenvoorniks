@@ -32,8 +32,8 @@ import type { PollResult } from '../mail/mail-intake';
 import { deleteAttachment, resolveAttachmentPath, saveAttachment } from './attachments';
 import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
-import { CHOICE_SESSION, chromiumDir, handOverLocalState, markComplete, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type SwitchPlan } from './data-dir';
-import { chooseOldFolder, migrateWithProgress, switchWithProgress } from './data-dir-app';
+import { CHOICE_SESSION, chromiumDir, forgetMoved, handOverLocalState, markComplete, noteMoved, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type SwitchPlan } from './data-dir';
+import { chooseAfterMove, chooseOldFolder, migrateWithProgress, switchWithProgress } from './data-dir-app';
 import { Administrations, readAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
 import { generateOfficeKeys } from '../exchange/crypto';
@@ -858,7 +858,8 @@ if (!DATA_ENV) {
       if (resolution.kind === 'oud') handOverLocalState(resolution.dir, shared);
       // ook bij een zelf gekozen gegevensmap blijft Chromium in de gedeelde map: daar staat de sleutel
       app.setPath('userData', chromiumDir(resolution, env.home));
-      dataRoot = resolution.dir;
+      // verhuisd zonder verwijzing: er is nog geen gegevensmap, de gebruiker kiest eerst (zie prepareDataDir)
+      if (resolution.kind !== 'verhuisd') dataRoot = resolution.dir;
     }
   }
 }
@@ -868,7 +869,8 @@ const dataDirNotices: { type: 'info' | 'warning'; message: string; detail: strin
 
 /**
  * Na het opstarten, vóór er een database open is: de gegevensmap in orde maken. Onwaar = de app
- * sluit (fout getoond, of de keuze tussen twee oude mappen is gemaakt of geannuleerd).
+ * sluit (fout getoond, of de keuze tussen twee oude mappen is gemaakt of geannuleerd, of er is niet
+ * gekozen waar de verplaatste administratie staat).
  */
 async function prepareDataDir(): Promise<boolean> {
   if (DATA_ENV) return true;
@@ -886,6 +888,35 @@ async function prepareDataDir(): Promise<boolean> {
     }
     app.exit(SMOKE_TEST ? 1 : 0);
     return false;
+  }
+  if (resolution.kind === 'verhuisd') {
+    // De gegevens zijn verplaatst en de verwijzing is weg: niets stil openen, de gebruiker kiest. Chromium
+    // staat al in de gedeelde map (met de sleutel), dus na de keuze kan de app meteen verder.
+    const home = app.getPath('home');
+    const answer = SMOKE_TEST ? null : await chooseAfterMove(resolution, home);
+    if (answer && answer !== 'ouder') resolution = { kind: 'pointer', dir: answer.dir };
+    else if (answer === 'ouder' && resolution.fallback.kind === 'gedeeld') {
+      forgetMoved(home);
+      console.log(`Verder met de oudere kopie in ${resolution.fallback.dir}; de verplaatste map ${resolution.moved.to} wordt niet meer gebruikt`);
+      resolution = resolution.fallback;
+    } else {
+      if (answer === 'ouder') {
+        // geen complete standaardmap: opnieuw starten, zodat de gewone volgorde (oude map, sleutel) vanaf het begin loopt
+        forgetMoved(home);
+        app.relaunch();
+      }
+      app.exit(SMOKE_TEST ? 1 : 0);
+      return false;
+    }
+    dataRoot = resolution.dir;
+  }
+  if (resolution.kind === 'pointer') {
+    // ook voor wie al wisselde vóór de app dit bijhield: in de standaardmap vastleggen waar de gegevens staan
+    try {
+      noteMoved(app.getPath('home'), resolution.dir);
+    } catch (e) {
+      console.error('Vastleggen waar de gegevens staan lukte niet', e);
+    }
   }
   if (resolution.kind === 'nieuw') markComplete(resolution.dir);
   if (resolution.kind === 'oud') await moveOldFolder(resolution.dir, resolution.target);
