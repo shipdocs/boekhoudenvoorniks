@@ -31,6 +31,8 @@ import type { InvestmentCheck } from '../tax/investment-check';
 import type { MailIntakeService } from '../mail/mail-intake';
 import type { BookedPayments } from '../documents/booked-payment';
 import type { FxRepair } from '../fx/repair';
+import type { StatementFolder } from '../import/statement-folder';
+import { statementHelp } from '../shared/bank-statement-help';
 
 
 export type TaskKind =
@@ -49,6 +51,7 @@ export type TaskKind =
   | 'vat-due'
   | 'bank-stale'
   | 'bank-balance'
+  | 'bank-statement'
   | 'bank-locked'
   | 'exchange-conflict'
   | 'vat-suppletie'
@@ -103,7 +106,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
+  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
     proposal?: string };
 }
@@ -196,6 +199,11 @@ export class InboxService {
   private booked: BookedPayments | null = null;
   setBookedPayments(booked: BookedPayments): void {
     this.booked = booked;
+  }
+
+  private statements: StatementFolder | null = null;
+  setStatementFolder(statements: StatementFolder): void {
+    this.statements = statements;
   }
 
   private fxRepair: FxRepair | null = null;
@@ -600,6 +608,7 @@ export class InboxService {
     }
 
     if (s.onboardingDone && s.profile.hasBusinessAccount) {
+      const watching = this.statements?.available && this.statements.config().enabled;
       for (const st of this.bank.importStatus()) {
         const days = st.coverageTo ? diffDays(st.coverageTo, asOf) : null;
         if (days !== null && days < BANK_STALE_DAYS) continue;
@@ -608,11 +617,26 @@ export class InboxService {
           kind: 'bank-stale',
           icon: '🏦',
           title: st.coverageTo ? `${st.name}: bank bijgewerkt tot ${formatDateNl(st.coverageTo)}` : `${st.name}: nog geen bankafschrift ingelezen`,
-          question: st.coverageTo ? `Dat is ${days} dagen geleden. Download een nieuw afschrift bij je bank en sleep het in de app. Dan zoeken we uit wat bij welke factuur hoort.` : 'Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes.',
+          question: st.coverageTo
+            ? `Dat is ${days} dagen geleden. Download een nieuw afschrift bij je bank${watching ? ': de app ziet het in je downloadmap en vraagt of hij het mag inlezen' : ' en sleep het in de app'}. Dan zoeken we uit wat bij welke factuur hoort. ${statementHelp(st.iban)}`
+            : `Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes. ${statementHelp(st.iban)}`,
           actions: [{ id: 'open', label: 'Afschrift inlezen', primary: true }],
           ref: { bankAccountId: st.bankAccountId },
         });
       }
+    }
+
+    // een afschrift in de downloadmap (#184): niets gaat vanzelf de boeken in, de gebruiker zegt "Inlezen"
+    for (const f of this.statements?.pending(asOf) ?? []) {
+      tasks.push({
+        key: `bank-statement-${f.id}`,
+        kind: 'bank-statement',
+        icon: '📥',
+        title: `Nieuw afschrift gevonden: ${f.accounts}, ${f.from === f.to ? formatDateNl(f.from) : `${formatDateNl(f.from)} t/m ${formatDateNl(f.to)}`}`,
+        question: `${f.filename} staat in je downloadmap, met ${f.transactions === 1 ? '1 betaling' : `${f.transactions} betalingen`}. Inlezen?`,
+        actions: [{ id: 'inlezen', label: 'Inlezen', primary: true }, { id: 'niet-nu', label: 'Niet nu' }],
+        ref: { statementId: f.id },
+      });
     }
 
     // Klopt het saldo met het laatste afschrift? (#184) Tijdens het overstappen doet de overstap-hulp dat zelf.
@@ -1063,6 +1087,8 @@ export class InboxService {
       'job-link:algemeen': 'Hoort niet bij een klus: gewone bedrijfskosten.',
       'mail-online:bon': 'De mail wordt als bon bewaard; je controleert hem daarna.',
       'recurring-invoice:geen': 'De app vraagt voor deze betaling niet meer om een factuur.',
+      'bank-statement:inlezen': 'De app leest het afschrift in, net als wanneer je het bij Bank in de app sleept. Wat er al staat, slaat hij over.',
+      'bank-statement:niet-nu': 'De app vraagt het morgen opnieuw, en na drie keer niet meer voor dit bestand. Het bestand blijft staan waar het staat.',
       'bank-balance:bekijken': 'Je ziet de overgeslagen betaling naast de betaling die er al stond, en kunt hem alsnog toevoegen.',
       'bank-balance:open': 'Lees het afschrift in van de dagen die nog ontbreken. Wat er al staat, slaat de app over.',
       'bank-balance:negeren': 'Er verandert niets in je boekhouding. De app vraagt er pas weer naar als het verschil verandert.',
@@ -1143,8 +1169,8 @@ export class InboxService {
     const status = this.bank.importStatus();
     const bankUpdatedTo = status.map((st) => st.coverageTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
-      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') },
-      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && k !== 'bank-stale' && k !== 'bank-balance') },
+      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') },
+      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement'].includes(k)) },
       { label: 'Alle bonnetjes verwerkt', ok: !kinds.has('document-review') },
       { label: 'Geen facturen te laat', ok: !kinds.has('invoice-overdue') },
       { label: 'Btw-aangifte op tijd', ok: !kinds.has('vat-due') },

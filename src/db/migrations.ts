@@ -918,4 +918,37 @@ export const migrations: string[] = [
     SELECT import_batch_id, bank_account_id, MIN(transaction_date), MAX(transaction_date), COUNT(*), COUNT(*), 0
     FROM bank_transactions WHERE import_batch_id IS NOT NULL GROUP BY import_batch_id, bank_account_id;
   `,
+  /* 26: afschriften uit de downloadmap (#184): de app ziet een gedownload afschrift en vraagt "Inlezen?" */ `
+  -- Welk bestand een import was (hash van de inhoud). Een afschrift dat al is ingelezen, bijvoorbeeld door
+  -- het in de app te slepen, vraagt de app niet nog een keer. Oude imports: NULL.
+  ALTER TABLE import_batches ADD COLUMN content_hash TEXT;
+
+  -- Bestanden in de map die de gebruiker koos (standaard uit; de map zelf staat in settings onder
+  -- 'statementFolder'). file_key is een hash van map, naam, grootte en wijzigingstijd: zo leest de app niet
+  -- elke keer alles opnieuw. Van een bestand dat geen afschrift van deze administratie is ('geen'),
+  -- bewaren we alleen die hash: geen naam en geen inhoud. De app verplaatst of verwijdert nooit iets.
+  CREATE TABLE statement_files (
+    id INTEGER PRIMARY KEY,
+    file_key TEXT NOT NULL UNIQUE,
+    -- geen = geen afschrift van deze administratie; gevonden = de app vraagt "Inlezen?"; ingelezen;
+    -- afgewezen = drie keer "Niet nu"; dubbel = zelfde inhoud als een ander bestand
+    status TEXT NOT NULL CHECK (status IN ('geen','gevonden','ingelezen','afgewezen','dubbel')),
+    -- staat het bestand er nog? (bijgewerkt bij elke keer kijken)
+    present INTEGER NOT NULL DEFAULT 1,
+    filename TEXT,
+    content_hash TEXT,
+    source TEXT,
+    -- de namen van de rekeningen in het afschrift, voor de vraag op Vandaag
+    accounts TEXT,
+    period_from TEXT,
+    period_to TEXT,
+    transactions INTEGER,
+    -- hoe vaak "Niet nu", en vanaf welke dag de app het weer vraagt
+    declined INTEGER NOT NULL DEFAULT 0,
+    ask_from TEXT,
+    import_batch_id INTEGER REFERENCES import_batches(id),
+    seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_statement_files_status ON statement_files(status);
+  `,
 ];

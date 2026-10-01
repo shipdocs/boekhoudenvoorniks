@@ -444,13 +444,13 @@ export class BankService {
    * - stap 2 geldt ook hooguit 3 werkdagen vóór of na een eerder afschrift van een ander soort (alleen
    *   tegen betalingen van dat andere soort): daar verschuift de datum over de rand van de periode.
    */
-  import(result: ParseResult, opts: { filename?: string; bankAccountId?: number } = {}): Omit<ImportSummary, 'autoMatched'> {
+  import(result: ParseResult, opts: { filename?: string; bankAccountId?: number; /** hash van de inhoud van het bestand, om hetzelfde afschrift in de downloadmap te herkennen */ contentHash?: string } = {}): Omit<ImportSummary, 'autoMatched'> {
     return tx(this.db, () => {
       // alleen betalingen van vóór deze import kunnen een tegenhanger zijn
       const lastBefore = (this.db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM bank_transactions').get() as { id: number }).id;
       // het soort afschrift: de bron, en bij CSV ook de indeling
       const kind = result.layout ? `${result.source}:${result.layout}` : result.source;
-      const batch = this.db.prepare('INSERT INTO import_batches (filename, source, kind) VALUES (?, ?, ?)').run(opts.filename ?? null, result.source, kind);
+      const batch = this.db.prepare('INSERT INTO import_batches (filename, source, kind, content_hash) VALUES (?, ?, ?, ?)').run(opts.filename ?? null, result.source, kind, opts.contentHash ?? null);
       const batchId = Number(batch.lastInsertRowid);
       const insert = this.db.prepare(
         `INSERT OR IGNORE INTO bank_transactions (bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, import_batch_id, dedup_hash, bank_id)
