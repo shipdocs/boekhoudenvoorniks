@@ -694,7 +694,11 @@ export function createApi(s: Services, host: HostContext) {
       dueReminders: () => s.sender.dueReminders().map((i) => ({ id: i.id, number: i.number, relation_name: i.relation_name, open_amount: i.open_amount, reminder_count: i.reminder_count })),
     },
     home: {
-      get: () => s.inbox.home(),
+      /** eerst: bonnen met een oude tekstkoppeling die nog opnieuw bekeken moeten worden (#179), zodat hun vraag hier staat */
+      get: async () => {
+        await s.intake.reassessMigrated();
+        return s.inbox.home();
+      },
       /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
       act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
         const result = await doAct(task, actionId, payload);
@@ -732,10 +736,19 @@ export function createApi(s: Services, host: HostContext) {
       addEvidence: (name: string, data: Uint8Array, bankTransactionId: number) => s.intake.addEvidence(name, data, bankTransactionId),
       /** "Bon toevoegen" bij een aankoop zonder bon */
       addPurchaseEvidence: (name: string, data: Uint8Array, purchaseId: number) => s.intake.addPurchaseEvidence(name, data, purchaseId),
-      list: (status?: 'nieuw' | 'controle' | 'verwerkt' | 'genegeerd') => s.intake.list(status),
+      list: async (status?: 'nieuw' | 'controle' | 'verwerkt' | 'genegeerd') => {
+        await s.intake.reassessMigrated();
+        return s.intake.list(status);
+      },
       get: (id: number) => s.intake.get(id),
-      /** De bon openen om te controleren; ontbrak de koers van een vreemde munt, dan nu nog een keer proberen. */
-      open: (id: number) => s.intake.retryRate(Number(id)),
+      /**
+       * De bon openen om te controleren; ontbrak de koers van een vreemde munt, dan nu nog een keer proberen.
+       * Een bon met een oude tekstkoppeling wordt eerst opnieuw bekeken (#179).
+       */
+      open: async (id: number) => {
+        await s.intake.reassessMigrated();
+        return s.intake.retryRate(Number(id));
+      },
       confirm: (id: number, c: Confirmation) => s.intake.confirm(id, c),
       ignore: (id: number) => s.intake.ignore(id),
       /** Het antwoord op "dezelfde aankoop?" of "alleen als bewijs koppelen?" (#179): ja, nee of later. */

@@ -233,6 +233,9 @@ export function documentFingerprint(r: DocumentResult | null): string {
 const candidateOf = (m: Pick<DuplicateMatch, 'documentId' | 'purchaseId' | 'bankTransactionId'>): string =>
   m.purchaseId ? `aankoop:${m.purchaseId}` : m.bankTransactionId ? `bank:${m.bankTransactionId}` : `document:${m.documentId}`;
 
+/** Melding bij een bon die bij het bijwerken van zijn oude tekstkoppeling af is gehaald (zie de migratie). */
+const MIGRATION_ISSUE = 'evidence-migration';
+
 const DUPLICATE_NOTE: Issue = { field: 'duplicate', severity: 'waarschuwing', message: 'Dubbel: dit document hadden we al. Niet opnieuw geboekt.' };
 
 /**
@@ -322,7 +325,7 @@ export class IntakeService {
     result.foreign = { ...result.foreign, rate: fx.rate, rateDate: fx.date, source: 'ecb' };
     this.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(result), id);
     // de melding "koers kon niet opgehaald worden" vervalt; de rest opnieuw beoordelen, nooit zelf boeken
-    return this.evaluate(id, [], asOf, { autoConfirm: false });
+    return this.evaluate(id, this.carriedIssues(this.get(id)), asOf, { autoConfirm: false });
   }
 
   /** EXTRACTIE: wat staat er op het document? */
@@ -605,7 +608,76 @@ export class IntakeService {
 
   /** Meldingen die bij het bestand zelf horen (niet uitgelezen, geen koers) en bij opnieuw beoordelen blijven staan. */
   private carriedIssues(doc: IntakeDocument): Issue[] {
-    return doc.issues.filter((i) => i.field === 'document' || i.field === 'evidence-migration' || (i.field === 'total' && !!doc.result?.foreign && doc.result.foreign.rate === null));
+    return doc.issues.filter((i) => i.field === 'document' || i.field === MIGRATION_ISSUE || (i.field === 'total' && !!doc.result?.foreign && doc.result.foreign.rate === null));
+  }
+
+  /**
+   * Staat deze bon op controle omdat zijn oude tekstkoppeling ("bewijsstuk bij banktransactie #...")
+   * niet zeker om te zetten was, en is hij daarna nog niet opnieuw beoordeeld? Dan is hij nog niet te boeken.
+   */
+  awaitsReassessment(doc: Pick<IntakeDocument, 'id' | 'issues'>): boolean {
+    if (!doc.issues.some((i) => i.field === MIGRATION_ISSUE)) return false;
+    return !!this.db.prepare(`SELECT 1 FROM document_link_migration WHERE document_id = ? AND result IN ('onzeker','conflict') AND reassessed_at IS NULL`).get(doc.id);
+  }
+
+  private reassessing: Promise<number> | null = null;
+
+  /**
+   * Bonnen die bij het bijwerken van hun oude tekstkoppeling af zijn gehaald, alsnog beoordelen zoals
+   * een bon die net binnenkomt (#179): hoort hij bij een betaling die al als kosten geboekt is, of bij
+   * een aankoop die er al staat, dan komt daar de gewone vraag over. Er wordt hier nooit iets geboekt of
+   * gekoppeld, ook een zekere kopie niet. Elke bon één keer; mislukt het, dan de volgende keer opnieuw.
+   * Wordt aangeroepen bij het openen van Vandaag, de bonnenlijst en een bon. Geeft terug hoeveel er beoordeeld zijn.
+   */
+  reassessMigrated(asOf: IsoDate = today()): Promise<number> {
+    this.reassessing ??= (async () => {
+      const rows = this.db
+        .prepare(
+          `SELECT m.document_id AS id FROM document_link_migration m JOIN documents d ON d.id = m.document_id
+            WHERE m.reassessed_at IS NULL AND m.result IN ('onzeker','conflict') AND d.status IN ('nieuw','controle') ORDER BY m.document_id`,
+        )
+        .all() as { id: number }[];
+      let n = 0;
+      for (const { id } of rows) {
+        const doc = this.get(id);
+        if (!this.awaitsReassessment(doc)) continue;
+        // welke betalingen noemde de oude tekst? Alleen bewaard om er een vraag over te kunnen stellen
+        const named = [...new Set((doc.classification?.reasons ?? []).map((r) => /^bewijsstuk bij banktransactie #(\d+)$/.exec(String(r))?.[1]).filter((x): x is string => !!x).map(Number))];
+        this.db.prepare('UPDATE document_link_migration SET named_payments = ? WHERE document_id = ? AND named_payments IS NULL').run(JSON.stringify(named), id);
+        try {
+          await this.evaluate(id, this.carriedIssues(doc), asOf, { autoConfirm: false, ask: true });
+        } catch {
+          continue; // bv. de herkenning is even niet bereikbaar: de bon blijft niet te boeken tot het lukt
+        }
+        this.db.prepare(`UPDATE document_link_migration SET reassessed_at = datetime('now') WHERE document_id = ?`).run(id);
+        n++;
+      }
+      return n;
+    })().finally(() => {
+      this.reassessing = null;
+    });
+    return this.reassessing;
+  }
+
+  /**
+   * De betalingen die de oude tekst bij deze bon noemde en die er nu nog toe doen: nog rechtstreeks als
+   * kosten geboekt (dan is de bon hooguit bewijs), of intussen de betaling van een aankoop (dan staat
+   * die aankoop er al). Dit is nooit een koppeling: het levert alleen een vraag op.
+   */
+  private legacyHints(id: number): { payments: BankTransaction[]; purchases: number[] } {
+    const row = this.db.prepare('SELECT named_payments FROM document_link_migration WHERE document_id = ?').get(id) as { named_payments: string | null } | undefined;
+    const out = { payments: [] as BankTransaction[], purchases: [] as number[] };
+    for (const bankId of row?.named_payments ? (JSON.parse(row.named_payments) as number[]) : []) {
+      const t = this.db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(bankId) as BankTransaction | undefined;
+      if (!t || t.status !== 'gematcht' || t.matched_invoice_id) continue;
+      if (t.matched_purchase_invoice_id) out.purchases.push(t.matched_purchase_invoice_id);
+      else if (
+        this.db
+          .prepare(`SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = ? AND a.category = 'kosten'`)
+          .get(t.matched_journal_entry_id)
+      ) out.payments.push(t);
+    }
+    return out;
   }
 
   /** Het voorstel dat bij dit document op een keuze wacht, of null. */
@@ -670,6 +742,11 @@ export class IntakeService {
   async evaluate(id: number, extraIssues: Issue[] = [], asOf: IsoDate = today(), opts: { autoConfirm?: boolean; ask?: boolean } = {}): Promise<IntakeDocument> {
     const doc = this.get(id);
     const result = doc.result ?? emptyResult();
+    // Een bon die bij het bijwerken van zijn oude tekstkoppeling af is gehaald: die melding blijft staan
+    // tot hij ergens bij hoort of geboekt is, en de betalingen die de tekst noemde tellen mee als vraag.
+    const migrated = doc.issues.find((i) => i.field === MIGRATION_ISSUE);
+    if (migrated && !extraIssues.some((i) => i.field === MIGRATION_ISSUE)) extraIssues = [...extraIssues, migrated];
+    const legacy = migrated ? this.legacyHints(id) : null;
     // Eerst: hebben we dit al? Hetzelfde document komt vaak twee keer binnen (mail + foto, PDF + e-factuur).
     let duplicate = this.findDuplicate(id, result);
     if (duplicate?.strength === 'zeker' && !opts.ask) {
@@ -683,7 +760,8 @@ export class IntakeService {
         return this.get(id);
       }
     }
-    const alreadyBooked = this.findBookedBankTransaction(result, this.rejected(id, result));
+    const rejected = this.rejected(id, result);
+    const alreadyBooked = this.findBookedBankTransaction(result, rejected) ?? legacy?.payments.find((t) => !rejected.has(`bank:${t.id}`)) ?? null;
     if (alreadyBooked) {
       // De betaling is al rechtstreeks als kosten geboekt (bv. automatisch herkende leverancier): het
       // document is dan hooguit het bewijsstuk. Nooit stil koppelen en nooit nog een keer boeken: eerst vragen.
@@ -702,6 +780,13 @@ export class IntakeService {
     const issues = [...extraIssues, ...validateDocument(result, asOf)];
     if (duplicate) {
       issues.push({ field: 'duplicate', severity: 'fout', message: `Lijkt op ${duplicate.label}. Is dit dezelfde aankoop?`, suggestion: duplicate });
+    } else {
+      // de betaling waar deze bon vroeger bij stond, hoort intussen bij een aankoop: die aankoop is er dus al
+      const purchase = legacy?.purchases.map((p) => this.links.describe({ kind: 'aankoop', id: p })).find((p) => p && !rejected.has(`aankoop:${p.id}`));
+      if (purchase) {
+        const match: DuplicateMatch = { strength: 'mogelijk', documentId: this.links.forTarget({ kind: 'aankoop', id: purchase.id })[0]?.document_id ?? null, purchaseId: purchase.id, label: purchase.label, reason: 'nummer' };
+        issues.push({ field: 'duplicate', severity: 'fout', message: `De betaling waar deze bon bij stond, hoort nu bij ${purchase.label}. Is dit dezelfde aankoop?`, suggestion: match });
+      }
     }
     // van vóór de instapdatum: hoort bij de vorige administratie, niet als nieuwe (open) aankoop
     const start = this.startDate();
@@ -926,6 +1011,8 @@ export class IntakeService {
     const doc = this.get(id);
     if (doc.status === 'verwerkt' || doc.link) throw new ValidationError('Dit bonnetje is al verwerkt');
     if (doc.status === 'genegeerd' && doc.duplicate_of_document_id !== null) throw new ValidationError('Dit is een kopie van een bon die er al in staat. Verwerk die andere bon, of kies eerst "Toch geen kopie".');
+    // stond als bewijs bij een betaling (oude tekstkoppeling) en is nog niet opnieuw bekeken: eerst kijken of hij al ergens bij hoort
+    if (this.awaitsReassessment(doc)) throw new ValidationError('Deze bon stond eerder als bewijs bij een betaling. Open hem eerst: dan kijkt de app of hij bij iets hoort dat er al staat.');
     // eerst de vraag beantwoorden ("dezelfde aankoop?", "alleen als bewijs?"): anders staat het zo dubbel
     if (this.pending(doc)) throw new ValidationError('Kies eerst of deze bon bij iets hoort dat er al staat. Daarna kun je hem verwerken.');
     if (!c.supplier?.trim()) throw new ValidationError('Vul de winkel of leverancier in');
