@@ -565,4 +565,34 @@ describe('bijlagepaden herschrijven', () => {
     expect(rebaseAttachmentPaths(dbFile, join(m.oldNew, 'bijlagen'))).toEqual({ rebased: 0, missing: 0 });
     expect(attachmentPaths(dbFile).sort()).toEqual(['/elders/bon.pdf', '/x/bijlagen/../../geheim.txt']);
   });
+
+  it('een oudere database zonder documententabel: de aankopen worden omgezet, er gaat niets mis', () => {
+    const m = machine();
+    mkdirSync(m.oldNew, { recursive: true });
+    const dbFile = join(m.oldNew, 'oud.sqlite');
+    const db = new Database(dbFile);
+    db.exec(`CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, attachment_path TEXT)`);
+    db.prepare(`INSERT INTO purchase_invoices (attachment_path) VALUES (?)`).run('/home/piet/.config/gratis-boekhouden/bijlagen/2026/bon.pdf');
+    db.close();
+    const root = join(m.oldNew, 'bijlagen');
+    expect(rebaseAttachmentPaths(dbFile, root)).toEqual({ rebased: 1, missing: 1 });
+    const check = new Database(dbFile, { readonly: true });
+    expect(check.prepare(`SELECT attachment_path AS p FROM purchase_invoices`).pluck().get()).toBe(join(root, '2026', 'bon.pdf'));
+    check.close();
+  });
+
+  it('een teken dat in kleine letters langer wordt (İ) vóór de bijlagenmap verschuift het pad niet', () => {
+    const m = machine();
+    mkdirSync(m.oldNew, { recursive: true });
+    const dbFile = join(m.oldNew, 'oud.sqlite');
+    const db = new Database(dbFile);
+    db.exec(`CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, attachment_path TEXT)`);
+    db.prepare(`INSERT INTO purchase_invoices (attachment_path) VALUES (?)`).run('C:\\Users\\İpek\\AppData\\Roaming\\boekhoudenvoorniks\\Bijlagen\\2026\\bon.pdf');
+    db.close();
+    const root = join(m.oldNew, 'bijlagen');
+    rebaseAttachmentPaths(dbFile, root);
+    const check = new Database(dbFile, { readonly: true });
+    expect(check.prepare(`SELECT attachment_path AS p FROM purchase_invoices`).pluck().get()).toBe(join(root, '2026', 'bon.pdf'));
+    check.close();
+  });
 });

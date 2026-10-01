@@ -157,15 +157,17 @@ export function rebaseAttachmentPaths(database: string, attachmentsRoot: string,
   const report: RebaseReport = { rebased: 0, missing: 0 };
   try {
     const update = (table: string, column: string): void => {
+      // oudere databases hebben nog niet alle tabellen (die komen met een latere migratie)
+      if (!db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table)) return;
       const rows = db.prepare(`SELECT id, ${column} AS path FROM ${table} WHERE ${column} IS NOT NULL`).all() as { id: number; path: string }[];
       const statement = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
       for (const row of rows) {
         const normalized = row.path.replace(/\\/g, '/');
-        const marker = '/bijlagen/';
-        // Windows-paden zijn hoofdletterongevoelig: ook `\Bijlagen\` is onze map
-        const index = normalized.toLowerCase().lastIndexOf(marker);
-        if (index < 0) continue;
-        const rel = normalized.slice(index + marker.length);
+        // Windows-paden zijn hoofdletterongevoelig: ook `\Bijlagen\` is onze map. Zoeken in het pad zelf,
+        // niet in een kopie in kleine letters: die kan bij sommige tekens langer zijn dan het origineel.
+        const last = [...normalized.matchAll(/\/bijlagen\//gi)].at(-1);
+        if (!last) continue;
+        const rel = normalized.slice(last.index + last[0].length);
         if (!safeBundlePath(rel)) continue;
         const rebased = join(attachmentsRoot, ...rel.split('/'));
         if (rebased !== row.path) {
