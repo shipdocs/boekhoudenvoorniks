@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import Papa from 'papaparse';
 import { parseEuro } from '../shared/money';
 import { isIsoDate } from '../shared/dates';
@@ -276,5 +277,7 @@ export function parseCsv(text: string, mapping: CsvMapping): ParseResult {
     warnings,
     ...(last ? { balances: [{ ownIban: transactions[0]?.ownIban ?? null, date: last.date, amount: last.amount }] } : {}),
     ...(mapping.bank ? { bank: mapping.bank } : {}),
+    // dezelfde kolommen met dezelfde toewijzing lezen dezelfde betaling altijd hetzelfde
+    layout: createHash('sha256').update(`${headerSignature((parsed.meta.fields ?? []).filter(Boolean))}\n${JSON.stringify(Object.entries(mapping).sort(([a], [b]) => a.localeCompare(b)))}`).digest('hex').slice(0, 16),
   };
 }

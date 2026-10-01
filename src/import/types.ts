@@ -24,6 +24,8 @@ export interface StatementBalance {
   ownIban: string | null;
   date: IsoDate;
   amount: Cents;
+  /** alleen bij een saldo dat niet in euro's is (CAMT, MT940): dat bewaren we niet, de saldocontrole rekent in euro's */
+  currency?: string;
 }
 
 export interface ParseResult {
@@ -34,4 +36,9 @@ export interface ParseResult {
   balances?: StatementBalance[];
   /** naam van de bank als het bestand geen eigen IBAN heeft (bv. Revolut): dan de rekening met die naam */
   bank?: string;
+  /**
+   * De indeling binnen de bron (CSV: kolommen en toewijzing). Bron en indeling samen zijn het soort
+   * afschrift: binnen één soort heeft dezelfde betaling altijd dezelfde hash.
+   */
+  layout?: string;
 }

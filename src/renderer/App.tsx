@@ -113,7 +113,7 @@ export function App() {
       case 'categorie': return <CategorizeTransaction id={route.id as number} key={String(route.id)} />;
       case 'klanten': return <Customers />;
       case 'klant': return <CustomerDetail id={route.id as number | undefined} key={String(route.id ?? 'new')} />;
-      case 'bank': return <Bank focus={route.id as number | undefined} />;
+      case 'bank': return <Bank focus={route.id as number | undefined} skippedFor={route.extra?.skippedFor as number | undefined} />;
       case 'belasting': return <Tax periodKey={route.id as string | undefined} key={String(route.id ?? '')} />;
       case 'aangifte': return <TaxYear />;
       case 'overzicht': return <Overview />;
