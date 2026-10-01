@@ -378,8 +378,12 @@ export class IntakeService {
     return { ...doc, already_present: true, blocked, linkable: !!requested && !doc.link && doc.status !== 'verwerkt' && doc.duplicate_of_document_id === null };
   }
 
-  /** Leest het bestand, bewaart het en legt het document vast (nog niet beoordeeld). */
-  private async ingest(filename: string, data: Uint8Array, sha: string): Promise<{ id: number; issues: Issue[] }> {
+  /**
+   * Leest het bestand, bewaart het en legt het document vast (nog niet beoordeeld). `existed`: het
+   * document kwam er intussen langs een andere weg al in; dan is dat het document en blijft er geen
+   * tweede bestand staan.
+   */
+  private async ingest(filename: string, data: Uint8Array, sha: string): Promise<{ id: number; issues: Issue[]; existed: boolean }> {
     const mime = mimeFor(filename);
     // eerst lezen, dan pas bewaren: kan het bestand niet (bv. geen e-factuur), dan blijft er geen los bestand achter
     const { result, source, issues: extracted } = await this.extract(filename, data);
@@ -393,14 +397,16 @@ export class IntakeService {
     } catch (e) {
       // niet vastgelegd: dan hoort het bestand ook niet te blijven staan
       this.removeFile?.(path);
-      throw e;
+      const existing = this.bySha(sha);
+      if (existing === null) throw e;
+      return { id: existing, issues: [], existed: true };
     }
     // Locatie alleen na expliciete toestemming (#32), en alleen in de lokale database
     if (this.locationEnabled() && mime === 'image/jpeg') {
       const gps = readJpegGps(data);
       if (gps) this.db.prepare('UPDATE documents SET gps_lat = ?, gps_lon = ? WHERE id = ?').run(gps.lat, gps.lon, id);
     }
-    return { id, issues };
+    return { id, issues, existed: false };
   }
 
   /** Voegt een document toe en verwerkt het zo ver als verantwoord is. */
@@ -408,7 +414,8 @@ export class IntakeService {
     return this.exclusive(data, async (sha) => {
       const existing = this.bySha(sha);
       if (existing !== null) return this.alreadyPresent(existing, null);
-      const { id, issues } = await this.ingest(filename, data, sha);
+      const { id, issues, existed } = await this.ingest(filename, data, sha);
+      if (existed) return this.alreadyPresent(id, null);
       await this.evaluate(id, issues, asOf, opts);
       return { ...this.get(id), already_present: false, blocked: null, linkable: false };
     });
@@ -438,7 +445,8 @@ export class IntakeService {
     return this.exclusive(data, async (sha) => {
       const existing = this.bySha(sha);
       if (existing !== null) return this.alreadyPresent(existing, requested);
-      const { id } = await this.ingest(filename, data, sha);
+      const { id, existed } = await this.ingest(filename, data, sha);
+      if (existed) return this.alreadyPresent(id, requested);
       const duplicate = this.findDuplicate(id, this.get(id).result ?? emptyResult());
       const certain = duplicate?.strength === 'zeker' ? duplicate : null;
       const elsewhere = certain ? this.targetOf(certain) : null;

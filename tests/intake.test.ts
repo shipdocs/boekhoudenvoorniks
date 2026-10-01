@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { setup } from './helpers';
+import { createHash } from 'node:crypto';
+import { financialSnapshot, setup } from './helpers';
 import { makePdf } from './pdf';
 import { parseDocumentText } from '../src/intake/text-parser';
 import { validateDocument } from '../src/intake/validation';
@@ -10,6 +11,7 @@ import { supplierKey } from '../src/intake/supplier-memory';
 import { extractPdf } from '../src/intake/pdf-text';
 import type { OcrProvider } from '../src/intake/ocr';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
+import { compareDuplicate } from '../src/intake/intake';
 
 const bon = [
   'TOOLSTATION AMSTERDAM',
@@ -123,6 +125,11 @@ describe('documentinbox', () => {
     const state = { lines: [] as string[] };
     const provider: OcrProvider = { id: 'test', label: 'Test OCR', available: async () => true, recognize: async () => ({ items: items(state.lines) }) };
     return { state, provider };
+  };
+  /** Een andere bon "voor de camera": de volgende foto wordt zo gelezen. */
+  const setOcr = (s: ReturnType<typeof setup>['s'], lines: string[]) => {
+    s.intake.setOcrProvider(ocr(lines));
+    return s;
   };
   const confirmBouwmaat = (s: ReturnType<typeof setup>['s'], id: number, date: string) =>
     s.intake.confirm(id, { supplier: 'Bouwmaat', date, total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
@@ -253,5 +260,329 @@ describe('documentinbox', () => {
     const d = await s.intake.add('foto.jpg', new Uint8Array([5]), '2026-09-25');
     expect(d.confidence).toBe('LOW');
     expect(d.issues[0]!.message).toMatch(/nog niet uitgelezen/);
+  });
+
+  // ---- #179: dubbele bonnen expliciet blokkeren en bewijs veilig koppelen ----
+
+  /** Een betaling die rechtstreeks als kosten geboekt is (zonder aankoop). */
+  const bookedPayment = (s: ReturnType<typeof setup>['s'], amount: number, date: string, counterName = 'BOUWMAAT UTRECHT') => {
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date, amount: -amount, description: `Pin ${counterName} ${date}`, counterName }] });
+    const t = s.bank.list({ status: 'nieuw' })[0]!;
+    s.bank.bookToAccount(t.id, { account: ACCOUNTS.inkoopMaterialen, vatCode: 'hoog' });
+    return s.bank.get(t.id);
+  };
+
+  it('exact hetzelfde bestand: op elke route geweigerd, met het bestaande document erbij; er verandert niets (#179)', async () => {
+    const { state, provider } = varOcr();
+    const ctx = setup({ ocr: provider });
+    const { s, db } = ctx;
+    state.lines = bouwmaat(10, '121,00', 'F-2026-001');
+    const foto = await s.intake.add('foto.jpg', new Uint8Array([1]), '2026-09-25');
+    expect(foto).toMatchObject({ already_present: false, blocked: null, outcome: 'controle' });
+    const done = confirmBouwmaat(s, foto.id, '2026-09-10');
+    expect(done).toMatchObject({ outcome: 'nieuwe-aankoop', link: { target: { kind: 'aankoop' }, origin: 'geboekt', is_primary: true } });
+    const purchase = s.purchases.list()[0]!;
+    const payment = bookedPayment(s, 5000, '2026-09-20', 'GAMMA');
+    const other = s.purchases.create({ invoiceDate: '2026-09-02', description: 'Verf', lines: [{ account: ACCOUNTS.inkoopMaterialen, netAmount: 3000, vatCode: 'hoog' }] });
+
+    const before = financialSnapshot(ctx, { evidence: true });
+    // gewoon nog een keer toevoegen
+    const again = await s.intake.add('foto-kopie.jpg', new Uint8Array([1]), '2026-09-26');
+    expect(again).toMatchObject({ id: foto.id, already_present: true, blocked: null, outcome: 'nieuwe-aankoop', original_name: 'foto.jpg' });
+    // "Bon toevoegen" bij dezelfde aankoop: stond er al in
+    expect(await s.intake.addPurchaseEvidence('foto.jpg', new Uint8Array([1]), purchase.id)).toMatchObject({ id: foto.id, already_present: true, blocked: null, linkable: false });
+    // "Bon toevoegen" bij een andere aankoop of bij een betaling: geweigerd, met het bestaande en het gevraagde doel
+    expect(await s.intake.addPurchaseEvidence('foto.jpg', new Uint8Array([1]), other.id)).toMatchObject({
+      id: foto.id, already_present: true, blocked: { existing: { kind: 'aankoop', id: purchase.id, amount: 12100 }, requested: { kind: 'aankoop', id: other.id } },
+    });
+    expect(await s.intake.addEvidence('foto.jpg', new Uint8Array([1]), payment.id)).toMatchObject({
+      id: foto.id, already_present: true, blocked: { existing: { kind: 'aankoop', id: purchase.id }, requested: { kind: 'bank', id: payment.id, amount: 5000 } },
+    });
+    expect(financialSnapshot(ctx, { evidence: true })).toEqual(before);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM documents').get()).toEqual({ n: 1 });
+    // één bestand bewaard, niets achtergebleven en niets weggehaald
+    expect(ctx.stored).toHaveLength(1);
+    expect(ctx.removed).toEqual([]);
+  });
+
+  it('hetzelfde bestand tegelijk (ook via verschillende routes): één document en één bestand, zonder fout (#179)', async () => {
+    const ctx = setup({ ocr: ocr(bouwmaat(10, '121,00', 'F-2026-001')) });
+    const { s, db } = ctx;
+    const payment = bookedPayment(s, 5000, '2026-09-20', 'GAMMA');
+    const before = financialSnapshot(ctx);
+    const data = new Uint8Array([7]);
+    const results = await Promise.all([
+      s.intake.add('a.jpg', data, '2026-09-25'),
+      s.intake.add('b.jpg', data, '2026-09-25', { autoConfirm: false }),
+      s.intake.addEvidence('c.jpg', data, payment.id),
+      s.intake.add('d.jpg', data, '2026-09-25'),
+    ]);
+    expect(new Set(results.map((r) => r.id)).size).toBe(1);
+    expect(results.map((r) => r.already_present)).toEqual([false, true, true, true]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM documents').get()).toEqual({ n: 1 });
+    expect(ctx.stored).toHaveLength(1);
+    expect(ctx.removed).toEqual([]);
+    // de tweede, derde en vierde keer deden niets: geen koppeling aan de betaling, geen aankoop, geen boeking
+    expect(db.prepare('SELECT COUNT(*) AS n FROM document_links').get()).toEqual({ n: 0 });
+    expect(s.intake.get(results[0]!.id).status).toBe('controle');
+    expect(financialSnapshot(ctx)).toEqual(before);
+  });
+
+  it('kwam hetzelfde bestand er intussen langs een andere weg in: geen fout en geen los bestand (#179)', async () => {
+    const ctx = setup({ ocr: ocr(bouwmaat(10)) });
+    const { s, db } = ctx;
+    // een ander proces was net eerder met hetzelfde bestand
+    const sha = createHash('sha256').update(new Uint8Array([9])).digest('hex');
+    const original = db.prepare.bind(db);
+    let raced = false;
+    db.prepare = ((sql: string) => {
+      if (!raced && sql.startsWith('INSERT INTO documents')) {
+        raced = true;
+        original(`INSERT INTO documents (file_path, original_name, mime_type, sha256) VALUES ('/elders/x.jpg', 'x.jpg', 'image/jpeg', ?)`).run(sha);
+      }
+      return original(sql);
+    }) as typeof db.prepare;
+    const r = await s.intake.add('x.jpg', new Uint8Array([9]), '2026-09-25');
+    expect(r).toMatchObject({ already_present: true, file_path: '/elders/x.jpg' });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM documents').get()).toEqual({ n: 1 });
+    expect(ctx.removed).toEqual(ctx.stored);
+    // en een e-factuur die er geen is, wordt niet eerst bewaard
+    await expect(s.intake.add('geen-factuur.xml', new TextEncoder().encode('<x/>'), '2026-09-25')).rejects.toThrow(/geen e-factuur/);
+    expect(ctx.stored).toHaveLength(1);
+  });
+
+  it('zeker dubbel: beide bestanden bewaard, niets opnieuw geboekt, de leesbare PDF is het hoofdbewijsstuk en de losse e-factuur blijft als gegevensbron (#179)', async () => {
+    const ctx = setup();
+    const { s } = ctx;
+    const xml = readFileSync(join(__dirname, 'fixtures', 'ubl-invoice.xml'));
+    const pdfLines = ['Bouwmaat Nederland B.V.', 'Factuurnummer: 2026018472', 'Factuurdatum 23-09-2026', 'Knauf Goldband 100,00', 'BTW 21% 100,00 21,00', 'Totaal 121,00'];
+    // 1. eerst de e-factuur geboekt, daarna dezelfde factuur als PDF
+    const ubl = await s.intake.add('factuur.xml', xml, '2026-09-25', { autoConfirm: false });
+    s.intake.confirm(ubl.id, { supplier: 'Bouwmaat', date: '2026-09-23', total: 12100, invoiceNumber: '2026018472', categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    const purchase = s.purchases.list()[0]!;
+    expect(purchase.document_id).toBe(ubl.id);
+    const before = financialSnapshot(ctx);
+    const pdf = await s.intake.add('factuur.pdf', makePdf(pdfLines), '2026-09-26');
+    expect(pdf).toMatchObject({ already_present: false, status: 'genegeerd', outcome: 'dubbel', duplicate_of_document_id: ubl.id, link: { target: { kind: 'aankoop', id: purchase.id }, origin: 'dubbel', is_primary: true } });
+    expect(financialSnapshot(ctx)).toEqual(before);
+    // beide bestanden horen bij de aankoop; de PDF is de bijlage, de e-factuur blijft bewaard met zijn gegevens
+    expect(s.intake.links.forTarget({ kind: 'aankoop', id: purchase.id }).map((f) => [f.document_id, f.is_primary, f.origin])).toEqual([[pdf.id, true, 'dubbel'], [ubl.id, false, 'geboekt']]);
+    expect(s.purchases.get(purchase.id)).toMatchObject({ document_id: pdf.id, attachment_path: pdf.file_path });
+    expect(s.intake.get(ubl.id)).toMatchObject({ outcome: 'nieuwe-aankoop', status: 'verwerkt', result: { invoiceNumber: { value: '2026018472', source: 'ubl' } } });
+    expect(ctx.stored).toHaveLength(2);
+    // nog een foto van dezelfde factuur: komt erbij, de PDF blijft het hoofdbewijsstuk (vaste volgorde)
+    const foto = await setOcr(s, [...pdfLines]).intake.add('foto.jpg', new Uint8Array([3]), '2026-09-27');
+    expect(foto).toMatchObject({ outcome: 'dubbel', link: { is_primary: false } });
+    expect(s.purchases.get(purchase.id).document_id).toBe(pdf.id);
+    expect(financialSnapshot(ctx)).toEqual(before);
+    expect(s.purchases.list()).toHaveLength(1);
+  });
+
+  it('zeker dubbel van een bon die nog niet geboekt is: de app gaat verder met de best gelezen, en bij het boeken horen beide erbij (#179)', async () => {
+    const ctx = setup();
+    const { s } = ctx;
+    const pdfLines = ['Bouwmaat Nederland B.V.', 'Factuurnummer: 2026018472', 'Factuurdatum 23-09-2026', 'Knauf Goldband 100,00', 'BTW 21% 100,00 21,00', 'Totaal 121,00'];
+    const pdf = await s.intake.add('factuur.pdf', makePdf(pdfLines), '2026-09-25', { autoConfirm: false });
+    expect(pdf.status).toBe('controle');
+    const ubl = await s.intake.add('factuur.xml', readFileSync(join(__dirname, 'fixtures', 'ubl-invoice.xml')), '2026-09-25', { autoConfirm: false });
+    // de e-factuur is het best gelezen: daarmee controleer je; de PDF wacht als kopie
+    expect(ubl.status).toBe('controle');
+    expect(s.intake.get(pdf.id)).toMatchObject({ status: 'genegeerd', outcome: 'dubbel', duplicate_of_document_id: ubl.id, link: null });
+    // de kopie zelf boeken kan niet
+    expect(() => s.intake.confirm(pdf.id, { supplier: 'Bouwmaat', date: '2026-09-23', total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' })).toThrow(/kopie/);
+    s.intake.confirm(ubl.id, { supplier: 'Bouwmaat', date: '2026-09-23', total: 12100, invoiceNumber: '2026018472', categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    const purchase = s.purchases.list()[0]!;
+    expect(s.purchases.list()).toHaveLength(1);
+    expect(s.ledger.balance('WKprInkMat')).toBe(10000);
+    expect(s.intake.get(pdf.id)).toMatchObject({ outcome: 'dubbel', link: { target: { kind: 'aankoop', id: purchase.id }, is_primary: true } });
+    expect(s.intake.get(ubl.id)).toMatchObject({ outcome: 'nieuwe-aankoop', link: { is_primary: false } });
+    expect(purchase.attachment_path).toBe(pdf.file_path);
+  });
+
+  it('wanneer is het zeker dubbel? Alleen met hetzelfde betrouwbare nummer, zonder andere datum, van dezelfde soort (#179)', () => {
+    const base = { number: 'f2026001', reliable: true, date: '2026-09-10', credit: false };
+    expect(compareDuplicate(base, { ...base })).toEqual({ strength: 'zeker' });
+    expect(compareDuplicate(base, { ...base, date: null })).toEqual({ strength: 'zeker' });
+    expect(compareDuplicate(base, { ...base, date: '2026-09-11' })).toEqual({ strength: 'mogelijk', reason: 'datum' });
+    expect(compareDuplicate(base, { ...base, reliable: false })).toEqual({ strength: 'mogelijk', reason: 'nummer' });
+    expect(compareDuplicate(base, { ...base, credit: true })).toEqual({ strength: 'mogelijk', reason: 'soort' });
+    // zonder nummer: alleen rond dezelfde datum, en dan nooit zeker
+    expect(compareDuplicate(base, { ...base, number: null })).toEqual({ strength: 'mogelijk', reason: 'nummer' });
+    expect(compareDuplicate({ ...base, number: null }, { ...base, number: null, date: '2026-09-13', credit: true })).toEqual({ strength: 'mogelijk', reason: 'soort' });
+    expect(compareDuplicate(base, { ...base, number: null, date: '2026-09-20' })).toBeNull();
+    // twee verschillende nummers: twee facturen
+    expect(compareDuplicate(base, { ...base, number: 'f2026002' })).toBeNull();
+  });
+
+  it('andere datum, geen betrouwbaar nummer of creditnota naast factuur: nooit vanzelf samengevoegd, altijd een vraag (#179)', async () => {
+    const { state, provider } = varOcr();
+    const ctx = setup({ ocr: provider });
+    const { s } = ctx;
+    state.lines = bouwmaat(10, '121,00', 'F-2026-001');
+    const foto = await s.intake.add('foto.jpg', new Uint8Array([1]), '2026-09-25');
+    s.intake.confirm(foto.id, { supplier: 'Bouwmaat', date: '2026-09-10', total: 12100, invoiceNumber: 'F-2026-001', categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    const purchase = s.purchases.list()[0]!;
+    const before = financialSnapshot(ctx);
+    const cases: [string, Uint8Array, string][] = [
+      ['andere datum', makePdf(bouwmaat(11, '121,00', 'F2026001')), 'datum'],
+      ['creditnota', makePdf(['Creditnota', ...bouwmaat(10, '121,00', 'F2026001')]), 'soort'],
+      ['geen nummer', makePdf(bouwmaat(10)), 'nummer'],
+    ];
+    for (const [name, data, reason] of cases) {
+      const d = await s.intake.add(`${name}.pdf`, data, '2026-09-26');
+      expect(d, name).toMatchObject({ status: 'controle', outcome: 'controle', link: null, duplicate_of_document_id: null });
+      expect(d.issues.find((i) => i.field === 'duplicate'), name).toMatchObject({ severity: 'fout', suggestion: { strength: 'mogelijk', reason, purchaseId: purchase.id } });
+      expect(s.intake.pending(d), name).toMatchObject({ kind: 'duplicate', candidate: `aankoop:${purchase.id}`, target: { supplier: 'Bouwmaat', date: '2026-09-10', amount: 12100, reference: 'F-2026-001' } });
+      // even uit de weg voor de volgende
+      s.intake.ignore(d.id);
+    }
+    // slecht gelezen nummer (foto, onscherp): telt niet als betrouwbaar
+    state.lines = bouwmaat(10, '121,00', 'F-2026-001');
+    const vaag: OcrProvider = { id: 'vaag', label: 'Vaag', available: async () => true, recognize: async () => ({ items: items(state.lines).map((i) => ({ ...i, confidence: 0.8 })) }) };
+    s.intake.setOcrProvider(vaag);
+    const onscherp = await s.intake.add('onscherp.jpg', new Uint8Array([5]), '2026-09-26');
+    expect(onscherp.issues.find((i) => i.field === 'duplicate')?.suggestion).toMatchObject({ strength: 'mogelijk', reason: 'nummer' });
+    expect(financialSnapshot(ctx)).toEqual(before);
+    expect(s.purchases.list()).toHaveLength(1);
+  });
+
+  it('mogelijk dubbel: Later verandert niets, Nee gaat verder als nieuwe aankoop, Ja bewaart beide zonder te boeken (#179)', async () => {
+    const { state, provider } = varOcr();
+    const ctx = setup({ ocr: provider });
+    const { s, db } = ctx;
+    s.settings.update({ onboardingDone: true });
+    state.lines = bouwmaat(10);
+    const a = await s.intake.add('a.jpg', new Uint8Array([1]), '2026-09-25');
+    confirmBouwmaat(s, a.id, '2026-09-10');
+    const purchase = s.purchases.list()[0]!;
+    state.lines = bouwmaat(11);
+    const b = await s.intake.add('b.jpg', new Uint8Array([2]), '2026-09-25');
+    const candidate = `aankoop:${purchase.id}`;
+    expect(s.intake.pending(b)).toMatchObject({ kind: 'duplicate', candidate, documentId: a.id });
+    // niet te boeken zolang de vraag openstaat
+    expect(() => confirmBouwmaat(s, b.id, '2026-09-11')).toThrow(/Kies eerst/);
+
+    // Later: er verandert helemaal niets
+    const before = financialSnapshot(ctx, { evidence: true });
+    await s.intake.decide(b.id, 'later');
+    expect(financialSnapshot(ctx, { evidence: true })).toEqual(before);
+    expect(s.inbox.tasks('2026-09-25').find((t) => t.ref.documentId === b.id)).toMatchObject({ ref: { candidate }, actions: [{ id: 'dubbel', label: 'Ja, dezelfde aankoop' }, { id: 'nee', label: 'Nee, andere aankoop' }, { id: 'open' }] });
+
+    // een verouderd voorstel (de taak toonde iets anders) wordt niet uitgevoerd
+    await expect(s.intake.decide(b.id, 'ja', 'aankoop:999')).rejects.toThrow(/intussen veranderd/);
+
+    // Nee: het voorstel vervalt, de bon blijft ongekoppeld op controle en de gewone controle gaat verder
+    const fin = financialSnapshot(ctx);
+    const nee = await s.intake.decide(b.id, 'nee', candidate);
+    expect(nee).toMatchObject({ status: 'controle', link: null, duplicate_of_document_id: null });
+    expect(nee.issues.some((i) => i.field === 'duplicate')).toBe(false);
+    expect(s.intake.pending(nee)).toBeNull();
+    expect(nee.classification).toMatchObject({ categoryKey: 'materiaal' });
+    expect(financialSnapshot(ctx)).toEqual(fin);
+    // dezelfde kandidaat komt niet meteen terug
+    expect(s.intake.pending(await s.intake.evaluate(b.id, [], '2026-09-26', { autoConfirm: false }))).toBeNull();
+    // verandert de bon (hier: het bedrag opnieuw gelezen, zelfde uitkomst maar andere datum), dan geldt de afwijzing niet meer
+    const changed = { ...nee.result!, invoiceDate: { ...nee.result!.invoiceDate!, value: '2026-09-12' } };
+    db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(changed), b.id);
+    expect(s.intake.pending(await s.intake.evaluate(b.id, [], '2026-09-26', { autoConfirm: false }))).toMatchObject({ candidate });
+    expect(financialSnapshot(ctx)).toEqual(fin);
+    // nu wél verder als nieuwe aankoop: dat is de keuze van de gebruiker
+    await s.intake.decide(b.id, 'nee', candidate);
+    expect(confirmBouwmaat(s, b.id, '2026-09-12')).toMatchObject({ outcome: 'nieuwe-aankoop' });
+    expect(s.ledger.balance('WKprInkMat')).toBe(20000);
+
+    // Ja: beide bestanden bewaard, niets opnieuw geboekt
+    state.lines = bouwmaat(9);
+    const c = await s.intake.add('c.jpg', new Uint8Array([3]), '2026-09-25');
+    const proposed = s.intake.pending(c)!;
+    const fin2 = financialSnapshot(ctx);
+    const ja = await s.intake.decide(c.id, 'ja', proposed.candidate);
+    expect(ja).toMatchObject({ status: 'genegeerd', outcome: 'dubbel', link: { origin: 'dubbel', provenance: 'gebruiker', is_primary: false } });
+    expect(financialSnapshot(ctx)).toEqual(fin2);
+    expect(s.ledger.balance('WKprInkMat')).toBe(20000);
+    expect(ctx.stored).toHaveLength(3);
+  });
+
+  it('een afwijzing geldt voor die ene kandidaat: de volgende wordt gewoon voorgesteld (#179)', async () => {
+    const { state, provider } = varOcr();
+    const { s } = setup({ ocr: provider });
+    for (const [i, day] of [[1, 10], [2, 12]] as const) {
+      state.lines = bouwmaat(day, '121,00', `F-${i}`);
+      const d = await s.intake.add(`bon${i}.jpg`, new Uint8Array([i]), '2026-09-25');
+      s.intake.confirm(d.id, { supplier: 'Bouwmaat', date: `2026-09-${day}`, total: 12100, invoiceNumber: `F-${i}`, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    }
+    const [second, first] = s.purchases.list();
+    state.lines = bouwmaat(11);
+    const d = await s.intake.add('los.jpg', new Uint8Array([3]), '2026-09-25');
+    expect(s.intake.pending(d)?.candidate).toBe(`aankoop:${first!.id}`);
+    const after = await s.intake.decide(d.id, 'nee');
+    expect(s.intake.pending(after)?.candidate).toBe(`aankoop:${second!.id}`);
+    expect(s.intake.pending(await s.intake.decide(d.id, 'nee'))).toBeNull();
+  });
+
+  it('bon bij een betaling die al als kosten geboekt is: nooit stil koppelen; Ja koppelt alleen het bewijs, Nee en Later laten alles staan (#179)', async () => {
+    const ctx = setup({ ocr: ocr(bouwmaat(23)) });
+    const { s } = ctx;
+    s.settings.update({ onboardingDone: true, autopilot: 'maximaal' });
+    const payment = bookedPayment(s, 12100, '2026-09-23');
+    const before = financialSnapshot(ctx);
+    const d = await s.intake.add('bon.jpg', new Uint8Array([1]), '2026-09-25');
+    // er is niets gekoppeld en niets geboekt: de bon wacht op een antwoord
+    expect(d).toMatchObject({ status: 'controle', outcome: 'controle', link: null, purchase_invoice_id: null });
+    expect(d.issues).toEqual([expect.objectContaining({ field: 'evidence', severity: 'fout', message: 'Deze betaling is al geboekt. Wil je deze bon alleen als bewijsstuk koppelen?' })]);
+    const candidate = `bank:${payment.id}`;
+    expect(s.intake.pending(d)).toMatchObject({ kind: 'evidence', candidate, target: { kind: 'bank', amount: 12100, date: '2026-09-23', supplier: 'BOUWMAAT UTRECHT' } });
+    const task = s.inbox.tasks('2026-09-25').find((t) => t.ref.documentId === d.id)!;
+    expect(task.question).toMatch(/Deze betaling is al geboekt\. Wil je deze bon alleen als bewijsstuk koppelen\?$/);
+    expect(task.actions.map((x) => [x.id, x.label])).toEqual([['bewijs', 'Ja, alleen als bewijs'], ['nee', 'Nee, andere aankoop'], ['open', 'Bekijken']]);
+    expect(task.actions[0]!.hint).toMatch(/geen nieuwe kosten- of btw-boeking/);
+    expect(() => confirmBouwmaat(s, d.id, '2026-09-23')).toThrow(/Kies eerst/);
+    expect(financialSnapshot(ctx)).toEqual(before);
+
+    // Later
+    const untouched = financialSnapshot(ctx, { evidence: true });
+    await s.intake.decide(d.id, 'later');
+    expect(financialSnapshot(ctx, { evidence: true })).toEqual(untouched);
+
+    // Nee: alleen deze betaling is afgewezen; de gewone controle gaat verder en er is nog steeds niets geboekt
+    const nee = await s.intake.decide(d.id, 'nee', candidate);
+    expect(nee).toMatchObject({ status: 'controle', link: null });
+    expect(s.intake.pending(nee)).toBeNull();
+    expect(nee.classification).toMatchObject({ categoryKey: 'materiaal' });
+    expect(financialSnapshot(ctx)).toEqual(before);
+    expect(s.intake.pending(await s.intake.evaluate(d.id, [], '2026-09-26'))).toBeNull();
+
+    // een tweede bon bij dezelfde betaling: Ja koppelt alleen het bewijs
+    s.intake.ignore(d.id);
+    const e = await setOcr(s, bouwmaat(23)).intake.add('bon2.jpg', new Uint8Array([2]), '2026-09-25');
+    expect(s.intake.pending(e)?.candidate).toBe(candidate);
+    const ja = await s.intake.decide(e.id, 'ja', candidate);
+    expect(ja).toMatchObject({ status: 'verwerkt', outcome: 'bewijs-gekoppeld', issues: [], link: { target: { kind: 'bank', id: payment.id }, origin: 'bewijs', provenance: 'gebruiker', is_primary: true } });
+    expect(financialSnapshot(ctx)).toEqual(before);
+    expect(s.purchases.list()).toHaveLength(0);
+  });
+
+  it('koppeling ongedaan maken: de bon gaat terug naar controle, de geboekte betaling blijft precies zoals hij is (#179)', async () => {
+    const ctx = setup({ ocr: ocr(bouwmaat(23)) });
+    const { s } = ctx;
+    const payment = bookedPayment(s, 12100, '2026-09-23');
+    const d = await s.intake.add('bon.jpg', new Uint8Array([1]), '2026-09-25');
+    await s.intake.decide(d.id, 'ja');
+    const before = financialSnapshot(ctx);
+    const loose = await s.intake.unlink(d.id, '2026-09-26');
+    expect(loose).toMatchObject({ status: 'controle', outcome: 'controle', link: null });
+    // niet meteen opnieuw voorgesteld, en ook niet vanzelf opnieuw gekoppeld of geboekt
+    expect(s.intake.pending(loose)).toBeNull();
+    expect(financialSnapshot(ctx)).toEqual(before);
+    expect(s.bank.get(payment.id)).toMatchObject({ status: 'gematcht', matched_journal_entry_id: payment.matched_journal_entry_id });
+    expect(s.intake.links.forTarget({ kind: 'bank', id: payment.id })).toEqual([]);
+    await expect(s.intake.unlink(d.id)).rejects.toThrow(/nergens aan gekoppeld/);
+
+    // een bon waaruit de aankoop geboekt is, maak je niet los: dan zou hij zo dubbel geboekt kunnen worden
+    const g = await setOcr(s, bouwmaat(2, '60,50')).intake.add('gamma.jpg', new Uint8Array([2]), '2026-09-25');
+    s.intake.confirm(g.id, { supplier: 'Bouwmaat', date: '2026-09-02', total: 6050, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    const fin = financialSnapshot(ctx, { evidence: true });
+    await expect(s.intake.unlink(g.id)).rejects.toThrow(/Weghalen/);
+    expect(financialSnapshot(ctx, { evidence: true })).toEqual(fin);
   });
 });
