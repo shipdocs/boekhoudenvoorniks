@@ -22,6 +22,7 @@ const oldNew = join(APPDATA, 'boekhoudenvoorniks');
 const oldOld = join(APPDATA, 'gratis-boekhouden');
 const shared = join(HOME, 'BoekhoudenVoorNiks');
 const pointer = join(HOME, '.boekhoudenvoorniks.json');
+const STORED_ATTACHMENT = 'bijlagen/2026/bon.pdf';
 
 let checks = 0;
 function check(what, ok, detail = '') {
@@ -157,7 +158,8 @@ async function main() {
   check('de inhoud van de oude map is er nog', existsSync(join(kept, 'boekhouding.sqlite')) && readFileSync(join(kept, 'bijlagen', '2026', 'bon.pdf'), 'utf8') === 'bon van de upgrade-test');
   const movedAttachment = join(shared, 'bijlagen', '2026', 'bon.pdf');
   check('de bijlage staat in de gedeelde map', existsSync(movedAttachment) && readFileSync(movedAttachment, 'utf8') === 'bon van de upgrade-test');
-  check('het bijlagepad in de database wijst naar de gedeelde map', documentPaths(join(shared, 'boekhouding.sqlite')).join() === movedAttachment, documentPaths(join(shared, 'boekhouding.sqlite')).join());
+  // sinds #186 staat het pad relatief aan de map van de administratie in de database
+  check('het bijlagepad in de database is relatief aan de gedeelde map', documentPaths(join(shared, 'boekhouding.sqlite')).join() === STORED_ATTACHMENT, documentPaths(join(shared, 'boekhouding.sqlite')).join());
   check('de sleutel van de opgeslagen wachtwoorden is dezelfde gebleven', encryptedKey(shared) === keyBefore);
   check('tweede start slaagt', startApp() === 0);
   check('de sleutel is na de tweede start nog steeds dezelfde', encryptedKey(shared) === keyBefore);
@@ -190,7 +192,7 @@ async function main() {
   check('na de keuze zet de app de gekozen map over', startApp() === 0 && existsSync(join(shared, 'migratie-klaar')));
   check('de gekozen map is bewaard als .gemigreerd-<tijd>', !existsSync(oldOld) && migrated(APPDATA, 'gratis-boekhouden').length === 1);
   check('de niet gekozen map is onaangeroerd', snapshot(oldNew) === beforeNew);
-  check('bijlagepad uit de map van vóór de naamswijziging wijst naar de gedeelde map', documentPaths(join(shared, 'boekhouding.sqlite')).join() === movedAttachment);
+  check('bijlagepad uit de map van vóór de naamswijziging is relatief aan de gedeelde map', documentPaths(join(shared, 'boekhouding.sqlite')).join() === STORED_ATTACHMENT && existsSync(movedAttachment), documentPaths(join(shared, 'boekhouding.sqlite')).join());
   check('de sleutel van de gekozen map is overgenomen', encryptedKey(shared) === keyBefore);
   check('de keuze is opgeruimd', !existsSync(join(shared, '.migratie-keuze')));
 

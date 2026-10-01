@@ -32,6 +32,7 @@ import { toEuro } from '../fx/fx';
 import { CURRENCY_NAMES, formatForeign, withinFx } from '../shared/currency';
 import { EvidenceLinks, sameTarget, targetKey, type DocumentLink, type LinkOrigin, type LinkProvenance, type LinkTarget, type TargetInfo } from '../documents/evidence-links';
 import type { DocumentOutcome } from '../shared/document-outcome';
+import type { PaidWith } from '../shared/paid-with';
 
 
 export interface IntakeDocument {
@@ -50,6 +51,10 @@ export interface IntakeDocument {
   decisions: Decision[] | null;
   /** dit document is een kopie van een eerder document (#31) */
   duplicate_of_document_id: number | null;
+  /** notitie die op de telefoon bij de bon is getypt (bonnenscanner, #48) */
+  note: string | null;
+  /** betaalwijze die op de telefoon is gekozen: het voorstel bij het bevestigen (#48) */
+  proposed_paid_with: PaidWith | null;
   created_at: string;
   bank_match: BankTransaction | null;
   /** de aankoop of bankbetaling waar dit document bij hoort (#179); null = nergens aan gekoppeld */
@@ -108,7 +113,7 @@ export interface Confirmation {
   vatCode: PurchaseVatCode;
   /** false = privé-uitgave: niet in de zakelijke boekhouding */
   business: boolean;
-  paidWith: 'bank' | 'kas' | 'prive' | 'later';
+  paidWith: PaidWith;
   jobId?: number | null;
   /** bon splitsen over categorieën (#23); bedragen incl. btw, som = totaal. 'prive' = niet zakelijk. */
   splits?: { categoryKey: string; gross: Cents; vatRate?: number }[] | null;

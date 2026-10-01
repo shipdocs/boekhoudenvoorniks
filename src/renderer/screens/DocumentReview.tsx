@@ -13,6 +13,7 @@ import { formatDateNl } from '../../shared/dates';
 import type { IntakeDocument, PendingProposal } from '../../intake/intake';
 import { DOCUMENT_OUTCOME_LABEL } from '../../shared/document-outcome';
 import { TargetDetails } from './UploadOutcome';
+import { proposedPaidWith } from '../../shared/paid-with';
 
 // pdf.js gebruikt Map.getOrInsertComputed, dat oudere Chromium-versies (bv. die van de e2e-tests) nog niet kennen
 for (const proto of [Map.prototype, WeakMap.prototype] as unknown as Record<string, unknown>[]) {
@@ -171,7 +172,8 @@ export function DocumentReview({ id }: { id: number }) {
       vatCode: (d.classification?.vatCode ?? 'hoog') as PurchaseVatCode,
       business: d.classification?.business ?? true,
       businessPct: null,
-      paidWith: d.bank_match ? 'bank' : 'later',
+      // de betaalwijze die op de telefoon is gekozen (bonnenscanner) is het voorstel
+      paidWith: proposedPaidWith(d),
       jobId: null,
       splits: null,
     });
@@ -240,6 +242,7 @@ export function DocumentReview({ id }: { id: number }) {
               );
             })}
           </div>
+          {d.note && <div className="notice small" style={{ whiteSpace: 'pre-wrap' }}><strong>Notitie van je telefoon:</strong> {d.note}</div>}
           {r?.foreign && <ForeignNotice foreign={r.foreign} euro={form.total ?? r.total?.value ?? null} />}
           {/* nog niet uitgelezen (geen herkenning): hier kiezen hoe de app bonnen mag lezen */}
           {unread && <ReaderChoice context="bon" onDone={async () => { setForm(null); await doc.reload(); }} />}

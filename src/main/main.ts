@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, extname, join, resolve, sep } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, openReadonly, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
@@ -30,7 +30,7 @@ import { Updates } from './updates';
 import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
 import type { PollResult } from '../mail/mail-intake';
-import { isPathInside } from './path-security';
+import { deleteAttachment, resolveAttachmentPath, saveAttachment } from './attachments';
 import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
 import { CHOICE_SESSION, chromiumDir, handOverLocalState, markComplete, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type MigrationOutcome, type SwitchAction, type SwitchOutcome, type SwitchPlan } from './data-dir';
@@ -43,6 +43,8 @@ import { generateOfficeKeys } from '../exchange/crypto';
 import { LICENSE_API_URL } from '../license/license';
 import { today } from '../shared/dates';
 import Database from 'better-sqlite3';
+import { Bonnenscanner, scannerSpoolDir } from '../scanner/scanner';
+import { MdnsAdvertiser } from '../scanner/mdns';
 
 const SMTP_SECRET = 'smtp:password';
 const IMAP_SECRET = 'imap:password';
@@ -55,6 +57,8 @@ let services: Services;
 let api: Api;
 let secrets: SafeStorageSecretStore;
 let localOcr: LocalOcrRuntime;
+/** Bonnenscanner (#48) van de open administratie: ontvangstpunt, mDNS en bonnenmap. */
+let scanner: Bonnenscanner | null = null;
 
 /** De versie uit de Microsoft Store (MSIX); in de gewone Windows-versie en op Linux altijd onwaar. */
 const STORE = isWindowsStore();
@@ -213,6 +217,8 @@ async function openAdministration(key: string): Promise<void> {
     console.error('Back-up vóór wisselen mislukt', e);
   }
   localOcr.stop();
+  // eerst het ontvangstpunt en de bonnenmap stil: die horen bij de administratie die nu dichtgaat
+  await scanner?.stop();
   db.close();
   admins.select(key);
   backupBeforeUpgrade();
@@ -301,28 +307,15 @@ const statementWatch = new StatementWatch({
   onFound: (found) => emit('statement-found', { found }),
 });
 
-const ALLOWED_ATTACHMENTS = ['.pdf', '.jpg', '.jpeg', '.png', '.heic', '.webp', '.xml'];
-
+/** Bewaart een bijlage bij de open administratie; het pad dat terugkomt is relatief aan de map van die administratie. */
 async function storeAttachment(name: string, data: Uint8Array): Promise<string> {
   assertWritable();
-  const year = new Date().getFullYear();
-  const dir = join(dataDir(), 'bijlagen', String(year));
-  mkdirSync(dir, { recursive: true });
-  const ext = extname(name).toLowerCase();
-  if (!ALLOWED_ATTACHMENTS.includes(ext)) throw new Error('Alleen PDF, e-factuur (XML) of foto (jpg, png, heic, webp) als bijlage');
-  if (data.byteLength > 20 * 1024 * 1024) throw new Error('Bijlage is te groot (max 20 MB)');
-  const target = join(dir, `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}-${basename(name).replace(/[^\w.-]+/g, '_')}`);
-  writeFileSync(target, Buffer.from(data));
-  return target;
+  return saveAttachment(dataDir(), name, data);
 }
 
 /** Een net bewaarde bijlage weer weghalen (alleen binnen de bijlagenmap); mislukt dat, dan blijft hij staan. */
 function removeAttachment(path: string): void {
-  try {
-    if (resolve(path).startsWith(resolve(join(dataDir(), 'bijlagen')) + sep) && existsSync(path)) unlinkSync(path);
-  } catch {
-    // niet erg: het bestand staat dan los in de map, er verwijst niets naar
-  }
+  deleteAttachment(dataDir(), path);
 }
 
 const localFetch: FetchLike = (url, init) => fetch(url, init);
@@ -411,6 +404,27 @@ function initServices(): void {
     ...(STORE ? { pinned: STORE_LLAMA_CPP, failureHint: storeFallbackHint('het lezen van bonnen op deze computer') } : {}),
   });
   configureLocalAi();
+  scanner = new Bonnenscanner({
+    db,
+    secrets,
+    intake: services.intake,
+    settings: services.settings,
+    spoolDir: scannerSpoolDir(dataDir()),
+    protectedDirs: [rootDir(), app.getPath('userData')],
+    homeDir: app.getPath('home'),
+    broadDirs: (['desktop', 'documents', 'downloads', 'pictures'] as const).flatMap((name) => {
+      try {
+        return [app.getPath(name)];
+      } catch {
+        return [];
+      }
+    }),
+    advertiser: new MdnsAdvertiser((message) => console.error(message)),
+    // er kwam een bon binnen (telefoon of bonnenmap): het tellertje op Vandaag bijwerken
+    onChange: () => emit('auto-processed', { scanner: true }),
+    log: (message) => console.error(message),
+  });
+  if (!SMOKE_TEST) void scanner.start().catch((e) => console.error('Bonnenscanner starten mislukt', e));
   api = createApi(services, {
     async saveFile(defaultName, content, filters) {
       const result = await dialog.showSaveDialog(mainWindow!, { defaultPath: join(app.getPath('documents'), defaultName), filters });
@@ -427,6 +441,13 @@ function initServices(): void {
       return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
     },
     checkCli,
+    scanner: {
+      service: () => scanner!,
+      pickFolder: async () => {
+        const r = await dialog.showOpenDialog(mainWindow!, { title: 'Kies je bonnenmap', properties: ['openDirectory', 'createDirectory'] });
+        return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+      },
+    },
     openLoginTerminal: (kind, path) => openLoginTerminal(kind, path),
     mcpCommand,
     connectMcp: async (kind, cli) => {
@@ -437,8 +458,7 @@ function initServices(): void {
       throw new Error(`Toevoegen lukte niet. Gebruik de opdracht hieronder in een terminal.${out.trim() ? ` (${out.trim().slice(0, 200)})` : ''}${STORE ? ` ${storeFallbackHint('de koppeling')}` : ''}`);
     },
     readAttachment(path) {
-      if (!isPathInside(join(dataDir(), 'bijlagen'), path)) throw new Error('Alleen bijlagen van de administratie');
-      return readFileSync(path);
+      return readFileSync(resolveAttachmentPath(dataDir(), path));
     },
     statementFolder: {
       defaultPath: () => app.getPath('downloads'),
@@ -449,8 +469,7 @@ function initServices(): void {
       reconfigure: () => statementWatch.start(),
     },
     async openPath(path) {
-      if (!isPathInside(join(dataDir(), 'bijlagen'), path)) throw new Error('Alleen bijlagen van de administratie kunnen geopend worden');
-      const err = await shell.openPath(path);
+      const err = await shell.openPath(resolveAttachmentPath(dataDir(), path));
       if (err) throw new Error(err);
     },
     async openExternal(url) {
@@ -554,6 +573,7 @@ function initServices(): void {
         });
         if (confirm.response !== 1) return false;
         await dailyBackup(db, join(dataDir(), 'backups'), dataDir());
+        await scanner?.stop();
         db.close();
         if (complete) restoreCompleteBackup(backupData, dbPath(), dataDir());
         else restoreLegacyDatabase(decrypted!, dbPath());
@@ -567,6 +587,7 @@ function initServices(): void {
     async resetData(withDemo) {
       assertWritable();
       localOcr.stop();
+      await scanner?.stop();
       const backup = await wipeDatabase(db, dbPath(), join(dataDir(), 'backups'), join(dataDir(), 'bijlagen'));
       // nieuwe, lege database met verse services; de IPC-handler gebruikt daarna vanzelf de nieuwe api
       initServices();
@@ -645,6 +666,7 @@ function initServices(): void {
             // het wisselen zelf gebeurt bij de volgende start, vóór er een database open is (zie switchFolderIfAsked)
             writeSwitchRequest(app.getPath('home'), plan.dir, plan.action);
             localOcr.stop();
+            await scanner?.stop();
             db.close();
             app.relaunch();
             app.exit(0);
@@ -1132,6 +1154,7 @@ if (MCP_MODE) {
   app.on('will-quit', () => {
     statementWatch.stop();
     localOcr?.stop();
+    void scanner?.stop();
     try {
       db?.close();
     } catch {

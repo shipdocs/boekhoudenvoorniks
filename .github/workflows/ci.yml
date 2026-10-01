@@ -36,7 +36,7 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - run: npm run rebuild:node
-      - run: npx vitest run tests/data-dir.test.ts tests/data-dir-wissel.test.ts tests/backup.test.ts tests/path-security.test.ts tests/windows-store.test.ts
+      - run: npx vitest run tests/data-dir.test.ts tests/data-dir-wissel.test.ts tests/backup.test.ts tests/path-security.test.ts tests/bijlagepaden.test.ts tests/windows-store.test.ts
 
   # Website-Worker (workers/site): eigen package met wrangler. Bundelen met een dry-run (geen account
   # nodig, er wordt niets gedeployd). De licentie- en assistent-Worker staan in de privé-repo
