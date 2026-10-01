@@ -79,6 +79,11 @@ export interface DocumentResult {
     source: 'ecb' | 'bank' | null;
   };
   pageSizes?: { width: number; height: number }[];
+  /**
+   * Factuur van het eigen bedrijf (#205): verkoper en koper zijn hetzelfde bedrijf. null = bekeken en
+   * niet zo; ontbreekt = gelezen met een oudere versie (dan kijkt de app alsnog bij het beoordelen).
+   */
+  ownCompany?: { level: 'zeker' | 'waarschijnlijk'; signals: string[] } | null;
 }
 
 /** Tekstfragment met positie, zoals een PDF-parser of OCR-engine het oplevert. */
