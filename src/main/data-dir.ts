@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
-import { rebaseAttachmentPaths } from './backup';
+import { missingAttachments } from './backup';
 import { isPathInside } from './path-security';
 import { defaultSyncContext, detectSyncService, type SyncContext } from './sync-folders';
 
@@ -267,15 +267,29 @@ export function handOverLocalState(source: string, target: string): boolean {
 // ---------------------------------------------------------------------------------------------
 // Overzetten
 
+/** `paden`: nagaan of de bijlagen er staan (zie `attachmentReports`); de paden zelf veranderen niet. */
 export type MigrationStep = 'ruimte' | 'slot' | 'kopie' | 'controle' | 'paden' | 'plaatsen' | 'marker' | 'hernoemen';
 export const MIGRATION_STEPS: MigrationStep[] = ['ruimte', 'slot', 'kopie', 'controle', 'paden', 'plaatsen', 'marker', 'hernoemen'];
 
 export interface DatabaseReport {
   /** '' = de eerste administratie, anders `administraties/<sleutel>` */
   administration: string;
-  rebased: number;
   /** bijlagen waarvan het bestand ontbreekt (alleen gemeld) */
   missing: number;
+}
+
+/**
+ * Bijlagepaden zijn relatief aan de map van de administratie en gaan dus vanzelf mee: er wordt niets
+ * herschreven. (Paden uit een oudere versie zet de app om zodra hij de administratie opent.) Hier
+ * alleen melden welke bijlagen in `root` ontbreken.
+ */
+function attachmentReports(root: string, admins: string[], log: (message: string) => void): DatabaseReport[] {
+  return admins.map((admin) => {
+    const dir = join(root, ...admin.split('/').filter(Boolean));
+    const missing = missingAttachments(join(dir, DB_FILE), dir);
+    if (missing > 0) log(`${missing} bijlage(n) van ${admin || 'de eerste administratie'} ontbreken op schijf`);
+    return { administration: admin, missing };
+  });
 }
 
 export interface MigrationOptions {
@@ -351,7 +365,7 @@ async function copyDatabase(from: string, to: string): Promise<void> {
 /**
  * Zet de gegevens over van de oude map naar de gedeelde map, altijd door te kopiëren: de bron blijft
  * onaangeroerd tot de marker er staat. Volgorde: ruimte controleren → kopie in `.staging-migratie`
- * (databases via de back-up-API) → `integrity_check` → bijlagepaden herschrijven → op hun plek zetten
+ * (databases via de back-up-API) → `integrity_check` → bijlagen controleren → op hun plek zetten
  * → marker → pas dan de bron hernoemen. Gaat er iets mis, dan is er niets veranderd en probeert de
  * volgende start het opnieuw. Dezelfde route kopieert bij het wisselen van gegevensmap (`keepSource`,
  * zie `switchDataDir`); de bron wordt dan niet hernoemd.
@@ -401,13 +415,7 @@ export async function migrateToSharedDir(options: MigrationOptions): Promise<Mig
     }
     step('controle');
 
-    const databases: DatabaseReport[] = admins.map((admin) => {
-      const parts = admin.split('/').filter(Boolean);
-      // de paden wijzen naar waar de bijlagen straks staan; het bestaan controleren we in de kopie
-      const report = rebaseAttachmentPaths(join(staging, ...parts, DB_FILE), join(target, ...parts, 'bijlagen'), join(staging, ...parts, 'bijlagen'));
-      if (report.missing > 0) log(`${report.missing} bijlage(n) van ${admin || 'de eerste administratie'} ontbreken op schijf`);
-      return { administration: admin, ...report };
-    });
+    const databases = attachmentReports(staging, admins, log);
     step('paden');
 
     let movedAside: string | null = null;
@@ -609,8 +617,8 @@ export type SwitchOutcome =
 
 /**
  * Wisselt van gegevensmap. Naar een lege map: de huidige gegevens gaan erheen langs de route van het
- * overzetten (kopie in staging → `integrity_check` → bijlagepaden → op hun plek → marker). Naar een map
- * met een complete administratie: controleren en de bijlagepaden naar die map laten wijzen. De
+ * overzetten (kopie in staging → `integrity_check` → bijlagen controleren → op hun plek → marker). Naar
+ * een map met een complete administratie: de database en de bijlagen controleren. De
  * verwijzing (pointer) wordt als allerlaatste geschreven, pas als de nieuwe map compleet is; tot dan
  * werken de app en de koppeling vanuit de huidige map, en die wordt nooit gewist of hernoemd.
  */
@@ -632,12 +640,7 @@ export async function switchDataDir(options: SwitchOptions): Promise<SwitchOutco
       }
       options.afterStep?.('controle');
       // de map kan van een andere plek komen (een andere computer, met de hand gekopieerd)
-      databases = admins.map((admin) => {
-        const parts = admin.split('/').filter(Boolean);
-        const report = rebaseAttachmentPaths(join(plan.dir, ...parts, DB_FILE), join(plan.dir, ...parts, 'bijlagen'));
-        if (report.missing > 0) log(`${report.missing} bijlage(n) van ${admin || 'de eerste administratie'} ontbreken op schijf`);
-        return { administration: admin, ...report };
-      });
+      databases = attachmentReports(plan.dir, admins, log);
       options.afterStep?.('paden');
     } catch (e) {
       return { status: 'mislukt', reason: (e as Error).message };

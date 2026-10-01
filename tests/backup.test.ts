@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { openDatabase } from '../src/db/database';
 import { createServices, MemorySecretStore } from '../src/services';
 import Database from 'better-sqlite3';
-import { backupDatabase, createBackupBundle, isBackupBundle, readBackupBundle, restoreCompleteBackup, restoreLegacyDatabase, validateCompleteBackup } from '../src/main/backup';
+import { backupDatabase, createBackupBundle, extractBundle, isBackupBundle, readBackupBundle, rebaseAttachmentPaths, restoreCompleteBackup, restoreLegacyDatabase, validateCompleteBackup } from '../src/main/backup';
 import { decryptBackup, encryptBackup } from '../src/main/encrypted-backup';
+import { resolveAttachmentPath } from '../src/main/attachments';
+import { administrationOnDisk } from './helpers';
 
 function services(file: string) {
   return createServices(openDatabase(file), {
@@ -22,7 +24,7 @@ describe('complete back-up', () => {
   let dir = '';
   afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
-  it('neemt bijlagen mee, controleert ze en herstelt paden op de nieuwe locatie', async () => {
+  it('back-up uit een oudere versie (absolute paden): neemt bijlagen mee, controleert ze en de bijlagen openen op de nieuwe locatie', async () => {
     dir = mkdtempSync(join(tmpdir(), 'gb-backup-test-'));
     const sourceRoot = join(dir, 'bron');
     const sourceDb = join(sourceRoot, 'boekhouding.sqlite');
@@ -48,8 +50,9 @@ describe('complete back-up', () => {
 
     const restored = services(targetDb);
     const purchase = restored.purchases.list()[0]!;
-    expect(purchase.attachment_path).toBe(join(targetRoot, 'bijlagen', '2026', 'bon.pdf'));
-    expect(readFileSync(purchase.attachment_path!, 'utf8')).toBe('bewijsstuk');
+    expect(purchase.attachment_path).toBe('bijlagen/2026/bon.pdf');
+    expect(resolveAttachmentPath(targetRoot, purchase.attachment_path!)).toBe(join(targetRoot, 'bijlagen', '2026', 'bon.pdf'));
+    expect(readFileSync(resolveAttachmentPath(targetRoot, purchase.attachment_path!), 'utf8')).toBe('bewijsstuk');
     expect(existsSync(`${targetDb}.voor-herstel`)).toBe(true);
     restored.db.close();
   });
@@ -90,8 +93,8 @@ describe('complete back-up', () => {
     const bundle = decryptBackup(encrypted, 'een-lang-wachtwoord');
     expect(isBackupBundle(bundle)).toBe(true);
     restoreCompleteBackup(bundle, targetDb, targetRoot);
-    expect(attachmentPath(targetDb)).toBe(join(targetRoot, 'bijlagen', '2026', 'bon.pdf'));
-    expect(readFileSync(attachmentPath(targetDb), 'utf8')).toBe('bewijsstuk');
+    expect(attachmentPath(targetDb)).toBe('bijlagen/2026/bon.pdf');
+    expect(readFileSync(resolveAttachmentPath(targetRoot, attachmentPath(targetDb)), 'utf8')).toBe('bewijsstuk');
   });
 
   it('oude losse databaseback-up: de paden wijzen na terugzetten naar de bijlagen die er al staan', async () => {
@@ -106,9 +109,56 @@ describe('complete back-up', () => {
     mkdirSync(join(targetRoot, 'bijlagen', '2026'), { recursive: true });
     writeFileSync(join(targetRoot, 'bijlagen', '2026', 'bon.pdf'), 'staat er al');
     restoreLegacyDatabase(legacy, targetDb);
-    expect(attachmentPath(targetDb)).toBe(join(targetRoot, 'bijlagen', '2026', 'bon.pdf'));
-    expect(readFileSync(attachmentPath(targetDb), 'utf8')).toBe('staat er al');
+    expect(attachmentPath(targetDb)).toBe('bijlagen/2026/bon.pdf');
+    expect(readFileSync(resolveAttachmentPath(targetRoot, attachmentPath(targetDb)), 'utf8')).toBe('staat er al');
     expect(existsSync(`${targetDb}.voor-herstel`)).toBe(true);
+  });
+
+  it('back-up van deze versie (relatieve paden): terugzetten in een andere map herschrijft niets en de bijlagen openen', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'gb-backup-test-'));
+    const sourceRoot = join(dir, 'bron');
+    const stored = await administrationOnDisk(sourceRoot, 'a');
+    const source = services(join(sourceRoot, 'boekhouding.sqlite'));
+    const bundle = await createBackupBundle(source.db, sourceRoot);
+    source.db.close();
+    const databaseInBackup = readBackupBundle(bundle).get('boekhouding.sqlite')!;
+
+    const targetRoot = join(dir, 'een heel andere map', 'doel');
+    const targetDb = emptyTarget(targetRoot);
+    restoreCompleteBackup(bundle, targetDb, targetRoot);
+
+    // de database is byte voor byte die uit de back-up: er is geen pad herschreven
+    expect(readFileSync(targetDb).equals(databaseInBackup)).toBe(true);
+    expect(rebaseAttachmentPaths(targetDb, targetRoot)).toEqual({ rebased: 0, missing: 0 });
+    const restored = services(targetDb);
+    expect(restored.purchases.list()[0]!.attachment_path).toBe(stored.bon);
+    expect(restored.intake.list()[0]!.file_path).toBe(stored.scan);
+    restored.db.close();
+    expect(readFileSync(resolveAttachmentPath(targetRoot, stored.bon), 'utf8')).toBe('bewijs a');
+    expect(readFileSync(resolveAttachmentPath(targetRoot, stored.scan), 'utf8')).toBe('scan a');
+    // en niet uit de map waar de back-up gemaakt is
+    expect(resolveAttachmentPath(targetRoot, stored.bon).startsWith(targetRoot)).toBe(true);
+  });
+
+  it('export voor de boekhouder uitpakken als nieuwe administratie: relatieve paden blijven, absolute uit een oudere versie worden relatief', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'gb-backup-test-'));
+    const stored = await administrationOnDisk(join(dir, 'nieuw'), 'a');
+    const fresh = services(join(dir, 'nieuw', 'boekhouding.sqlite'));
+    const freshBundle = await createBackupBundle(fresh.db, join(dir, 'nieuw'));
+    fresh.db.close();
+    const old = await foreignSource(join(dir, 'oud'));
+    const oldBundle = await createBackupBundle(old.db, join(dir, 'oud'));
+    old.db.close();
+
+    const copyOfFresh = join(dir, 'kantoor', 'administraties', 'klant-a');
+    extractBundle(freshBundle, copyOfFresh);
+    expect(readFileSync(join(copyOfFresh, 'boekhouding.sqlite')).equals(readBackupBundle(freshBundle).get('boekhouding.sqlite')!)).toBe(true);
+    expect(readFileSync(resolveAttachmentPath(copyOfFresh, stored.bon), 'utf8')).toBe('bewijs a');
+
+    const copyOfOld = join(dir, 'kantoor', 'administraties', 'klant-b');
+    extractBundle(oldBundle, copyOfOld);
+    expect(attachmentPath(join(copyOfOld, 'boekhouding.sqlite'))).toBe('bijlagen/2026/bon.pdf');
+    expect(readFileSync(resolveAttachmentPath(copyOfOld, 'bijlagen/2026/bon.pdf'), 'utf8')).toBe('bewijsstuk');
   });
 
   it('weigert een beschadigd pakket', async () => {

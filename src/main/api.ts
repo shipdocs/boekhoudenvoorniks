@@ -56,9 +56,12 @@ import { countryCode } from '../shared/vat';
 
 export interface HostContext {
   saveFile(defaultName: string, content: Buffer | string, filters: { name: string; extensions: string[] }[]): Promise<string | null>;
+  /** bewaart een bijlage bij de open administratie; geeft het pad zoals het in de database komt (`bijlagen/2026/…`) */
   storeAttachment(name: string, data: Uint8Array): Promise<string>;
+  /** `path` is het opgeslagen bijlagepad; alleen bestanden in de bijlagenmap van de open administratie */
   readAttachment(path: string): Buffer;
   reconfigureLocalAi(): void;
+  /** opent een bijlage; `path` is het opgeslagen bijlagepad, net als bij `readAttachment` */
   openPath(path: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   setSmtpPassword(password: string): void;
