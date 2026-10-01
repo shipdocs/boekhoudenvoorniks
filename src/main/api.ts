@@ -288,6 +288,17 @@ export function createApi(s: Services, host: HostContext) {
         await s.intake.decide(r.documentId!, actionId === 'nee' ? 'nee' : 'ja', r.candidate);
         return;
       }
+      case 'document-review:prive':
+      case 'document-review:vraag':
+        // factuur van je eigen bedrijf (#205): privé of "weet ik nog niet"; ontbreekt er iets, dan eerst de bon openen
+        if (!s.intake.settleOwn(r.documentId!, actionId === 'prive' ? 'prive' : 'vraag')) return { navigate: { screen: 'document', id: r.documentId } };
+        return;
+      case 'bank-own-company:prive':
+      case 'bank-own-company:vraag':
+        s.ownCompany.settle(r.bankTransactionId!, actionId === 'prive' ? 'prive' : 'vraag');
+        return;
+      case 'bank-own-company:open':
+        return r.documentId ? { navigate: { screen: 'document', id: r.documentId } } : { navigate: { screen: 'betaling', id: r.bankTransactionId } };
       case 'document-notice:klaar':
         s.intake.dismissNotice(r.noticeId!);
         return;
@@ -868,6 +879,11 @@ export function createApi(s: Services, host: HostContext) {
         if (answer !== 'ja' && answer !== 'nee' && answer !== 'later') throw new ValidationError('Kies ja, nee of later');
         return s.intake.decide(Number(id), answer, candidate === undefined ? undefined : String(candidate));
       },
+      /** "Is dit een factuur van je eigen bedrijf?" (#205): ja, of nee ("toch een gewone aankoop"). Er wordt niets geboekt. */
+      decideOwn: (id: number, answer: 'ja' | 'nee') => {
+        if (answer !== 'ja' && answer !== 'nee') throw new ValidationError('Kies ja of nee');
+        return s.intake.decideOwn(Number(id), answer);
+      },
       /** Het voorstel dat op een keuze wacht, met wat ernaast gelegd kan worden (het andere document, of de aankoop of betaling). */
       pending: (id: number) => s.intake.pending(s.intake.get(id)),
       /** Waar een document bij hoort, en welke bestanden daar nog meer bij horen (het hoofdbewijsstuk eerst). */
@@ -1077,6 +1093,13 @@ export function createApi(s: Services, host: HostContext) {
         }
         return null;
       },
+      /** Is dit een betaling aan je eigen bedrijf (#205), en hoort er een factuur bij? null = nee. */
+      ownCompany: (txId: number) => {
+        const m = s.ownCompany.match(s.bank.get(Number(txId)));
+        return m ? { documentId: m.document?.id ?? null, purchaseId: m.purchase?.id ?? null, settledDocumentId: m.settledDocumentId } : null;
+      },
+      /** De keuze bij een betaling aan je eigen bedrijf: privé of "weet ik nog niet", voor de betaling en de factuur samen. */
+      settleOwnCompany: (txId: number, choice: 'prive' | 'vraag') => s.ownCompany.settle(Number(txId), choice),
       matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(txId, invoiceId),
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(txId, purchaseId),
       book: (txId: number, input: BookToAccountInput) => s.bank.bookToAccount(txId, input),
