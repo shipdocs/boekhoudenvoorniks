@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Downloaden voor Windows en Linux | BoekhoudenVoorNiks</title>
+  <meta name="description" content="Download BoekhoudenVoorNiks gratis voor Windows (Microsoft Store of installer) en Linux (AppImage of .deb). Werkt offline, je administratie blijft op je eigen computer.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/downloaden.html">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="nl_NL">
+  <meta property="og:site_name" content="BoekhoudenVoorNiks">
+  <meta property="og:url" content="https://boekhoudenvoorniks.nl/downloaden.html">
+  <meta property="og:title" content="Gratis downloaden: BoekhoudenVoorNiks voor Windows en Linux">
+  <meta property="og:description" content="Gratis boekhouden voor zzp'ers en vakmensen. Download voor Windows (Microsoft Store of installer) of Linux (AppImage, .deb).">
+  <meta property="og:image" content="https://boekhoudenvoorniks.nl/img/vandaag.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://boekhoudenvoorniks.nl/" },
+        { "@type": "ListItem", "position": 2, "name": "Downloaden", "item": "https://boekhoudenvoorniks.nl/downloaden.html" }
+      ]
+    }
+  ]
+}
+  </script>
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="./"><picture><source srcset="img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href="./#functies">Functies</a>
+        <a href="./#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="stukadoors.html">Stukadoors</a>
+            <a href="schilders.html">Schilders</a>
+            <a href="webdevelopers.html">Webdevelopers</a>
+            <a href="boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="waarom.html">Waarom</a>
+        <a href="wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="downloaden.html">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script>
+  (function () {
+    var top = document.querySelector('.top'), button = top.querySelector('.menu-button');
+    button.addEventListener('click', function () {
+      var open = top.classList.toggle('open');
+      button.setAttribute('aria-expanded', String(open));
+    });
+    top.querySelectorAll('details.sub').forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (!d.open) return;
+        top.querySelectorAll('details.sub[open]').forEach(function (o) { if (o !== d) o.open = false; });
+      });
+    });
+    function closeAll() {
+      var focused = document.activeElement, wasInside = top.contains(focused);
+      top.querySelectorAll('details.sub[open]').forEach(function (o) {
+        o.open = false;
+        if (o.contains(focused)) { o.querySelector('summary').focus(); wasInside = false; }
+      });
+      if (!top.classList.contains('open')) return;
+      top.classList.remove('open');
+      button.setAttribute('aria-expanded', 'false');
+      // de focus nooit achterlaten op een verborgen link
+      if (wasInside && focused !== button) button.focus();
+    }
+    document.addEventListener('click', function (e) { if (!top.contains(e.target)) closeAll(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
+  })();
+  </script>
+
+  <main class="wrap notes dl">
+    <p class="eyebrow">Gratis downloaden</p>
+    <h1>Download BoekhoudenVoorNiks voor Windows of Linux</h1>
+    <p class="lead">Installeren, vijf vragen beantwoorden, eerste factuur maken. Gratis, zonder account, werkt offline en je administratie blijft op je eigen computer.</p>
+
+    <div class="dl-grid">
+      <section class="card dl-card">
+        <h2>Windows</h2>
+        <p class="muted">Windows 10 of 11, 64-bit</p>
+        <!-- Microsoft Store: haal het kenmerk "hidden" weg zodra de Store-versie openbaar is -->
+        <div class="dl-store" hidden>
+          <a href="https://apps.microsoft.com/detail/9NZ4D5JNN5BM?hl=nl-nl&amp;gl=NL"><img src="img/microsoft-store-nl.svg" width="200" height="55" alt="Downloaden via Microsoft Store"></a>
+          <p class="fine">Aanbevolen: geen Windows-waarschuwing en nieuwe versies komen vanzelf via de Store.</p>
+        </div>
+        <a class="btn" href="download/windows" rel="nofollow">Download voor Windows (.exe)</a>
+        <p class="fine">Windows kan de melding "Windows heeft uw pc beveiligd" tonen, omdat de installer nog niet met een betaald certificaat is ondertekend. Klik op <strong>Meer informatie</strong> en dan op <strong>Toch uitvoeren</strong>. Controlegetal: <a href="download/sha256-windows" rel="nofollow">SHA-256</a>.</p>
+      </section>
+      <section class="card dl-card">
+        <h2>Linux</h2>
+        <p class="muted">64-bit (x86_64)</p>
+        <div class="dl-buttons">
+          <a class="btn" href="download/appimage" rel="nofollow">Download AppImage</a>
+          <a class="btn ghost" href="download/deb" rel="nofollow">Download .deb</a>
+        </div>
+        <p class="fine">De AppImage werkt op de meeste distributies: geef het bestand rechten om uit te voeren (rechtsklik, Eigenschappen) en dubbelklik erop. De .deb is voor Debian, Ubuntu en Mint. Controlegetal: <a href="download/sha256-linux" rel="nofollow">SHA-256</a>.</p>
+      </section>
+    </div>
+    <p class="fine">Een versie voor Mac is er nog niet.</p>
+
+    <figure class="shot" style="margin: 28px 0 8px"><picture><source srcset="img/vandaag.webp" type="image/webp"><img src="img/vandaag.png" width="1280" height="840" alt="Het startscherm Vandaag: geld op de bank, nog te ontvangen, btw apart houden en wat er nog moet gebeuren" loading="lazy"></picture></figure>
+
+    <h2>Na het installeren</h2>
+    <ul class="checks">
+      <li><strong>Eerste start</strong><br><span class="muted">Beantwoord een paar vragen over je bedrijf. Daarna zie je op Vandaag wat er moet gebeuren. Wil je eerst rondkijken? Kies <em>Bekijk de demo</em>.</span></li>
+      <li><strong>Je gegevens staan in een eigen map</strong><br><span class="muted">In de map <code>BoekhoudenVoorNiks</code> in je gebruikersmap, ook als je het programma verwijdert. Je kunt in Instellingen een andere map kiezen. Het programma maakt elke dag een back-up.</span></li>
+      <li><strong>Nieuwe versies</strong><br><span class="muted">Het programma meldt zelf als er een nieuwe versie is. Voordat hij een nieuwe versie gebruikt, maakt hij eerst een kopie van je administratie.</span></li>
+    </ul>
+
+    <h2>Veilig downloaden</h2>
+    <p>Download alleen van deze website (of uit de Microsoft Store). Wil je zeker weten dat het bestand niet is aangepast, vergelijk dan het SHA-256-controlegetal. In PowerShell: <code>Get-FileHash .\BoekhoudenVoorNiks-Setup-….exe</code>. De broncode is openbaar: <a href="https://github.com/shipdocs/boekhoudenvoorniks">BoekhoudenVoorNiks op GitHub</a>.</p>
+    <p class="fine">Wat er per versie veranderd is, staat bij <a href="wijzigingen.html">Wat is er nieuw</a>. Controleer je btw-aangifte altijd zelf; zie de <a href="voorwaarden.html">voorwaarden</a>.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="./#functies">Functies</a></li>
+          <li><a href="./#prijzen">Prijzen</a></li>
+          <li><a href="./#overstappen">Overstappen</a></li>
+          <li><a href="btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="zonder-abonnement.html">Zonder abonnement, offline</a></li>
+          <li><a href="./#vragen">Veelgestelde vragen</a></li>
+          <li><a href="wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="starters.html">Starters</a></li>
+          <li><a href="stukadoors.html">Stukadoors</a></li>
+          <li><a href="schilders.html">Schilders</a></li>
+          <li><a href="webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="waarom.html">Waarom we dit maakten</a></li>
+          <li><a href="downloaden.html" aria-current="page">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks">Vragen en feedback: mail ons</a></li>
+          <li><a href="voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a></p>
+  </footer>
+</body>
+</html>

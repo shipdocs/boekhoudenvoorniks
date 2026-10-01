@@ -34,7 +34,7 @@ Belangrijke feiten:
 - [Voor boekhouders](https://boekhoudenvoorniks.nl/boekhouders.html): pakket voor de boekhouder en uitwisseling
 - [Waarom we dit maakten](https://boekhoudenvoorniks.nl/waarom.html): in één week gebouwd met AI, bewust lokaal en zonder cloud
 - [Wat is er nieuw](https://boekhoudenvoorniks.nl/wijzigingen.html): release notes per versie
-- [Downloads](https://github.com/shipdocs/boekhoudenvoorniks/releases/latest): installers voor Windows en Linux
+- [Downloads](https://boekhoudenvoorniks.nl/downloaden.html): installers voor Windows en Linux (AppImage en .deb)
 - [Uitgebreide beschrijving voor LLM's](https://boekhoudenvoorniks.nl/llms-full.txt)
 - [Gebruiksvoorwaarden en disclaimer](https://boekhoudenvoorniks.nl/voorwaarden.html)
 - [Privacyverklaring](https://boekhoudenvoorniks.nl/privacy.html)
