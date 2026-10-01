@@ -34,6 +34,7 @@ import {
 } from '../src/main/windows-store';
 import { GLM_OCR, STORE_LLAMA_CPP, type OcrModel, type PinnedRuntime } from '../src/ocr-runtime/manifest';
 import { LocalOcrRuntime, type DownloadFetch } from '../src/ocr-runtime/runtime';
+import { createZip } from '../src/shared/zip';
 import { setup } from './helpers';
 
 const require = createRequire(import.meta.url);
@@ -44,6 +45,7 @@ const storeManifest = require('../scripts/store-manifest.cjs') as {
   storeVersion(version: string): string;
   withStoreVersion(xml: string, version: string): string;
   manifestProblems(xml: string, version: string): string[];
+  readManifest(appx: Buffer): string;
   IDENTITY: { name: string; publisher: string; publisherDisplayName: string };
   ALIAS: string;
 };
@@ -710,5 +712,10 @@ describe('het Store-pakket (appx/MSIX)', () => {
     // een afwijking wordt gemeld
     expect(storeManifest.manifestProblems(xml.replace('ShipDocs.BoekhoudenVoorNiks', 'ShipDocs.Anders'), pkg.version)).toEqual(['Identity Name is ShipDocs.BoekhoudenVoorNiks']);
     expect(storeManifest.manifestProblems(xml.replace(/<uap3:Extension[\s\S]*<\/uap3:Extension>/, ''), pkg.version)).toEqual(['de App Execution Alias staat erin', 'de alias start hetzelfde programma als de app']);
+
+    // de controle in CI leest het manifest terug uit het pakket (een zip)
+    const appx = Buffer.from(createZip([{ path: 'app/AppxManifest.xml.oud', data: '<Package>oud</Package>' }, { path: 'AppxManifest.xml', data: xml }, { path: '[Content_Types].xml', data: '<Types/>' }]));
+    expect(storeManifest.manifestProblems(storeManifest.readManifest(appx), pkg.version)).toEqual([]);
+    expect(() => storeManifest.readManifest(Buffer.from('geen pakket'))).toThrow(/niet gevonden/);
   });
 });
