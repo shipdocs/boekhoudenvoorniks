@@ -13,10 +13,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download v0.7.6 --repo ${{ github.repository }} --pattern "BoekhoudenVoorNiks-Setup-0.7.6.exe" --dir "$env:RUNNER_TEMP"
-          Start-Process -FilePath "$env:RUNNER_TEMP\BoekhoudenVoorNiks-Setup-0.7.6.exe" -ArgumentList '/S' -Wait
-          node scripts/mcp-diagnose-windows.cjs
+          cache: npm
+      - run: npm ci
+      - run: node scripts/mcp-probe/run.cjs
