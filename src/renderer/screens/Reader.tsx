@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { Button, ErrorBox, useAction, useApp, useLoad } from '../ui';
+import { Button, ErrorBox, Modal, useAction, useApp, useLoad } from '../ui';
 
 type Choice = 'lokaal' | 'claude-code' | 'codex' | 'zelf';
 
@@ -18,6 +18,7 @@ export function ReaderChoice({ context, onDone, onToolsChanged }: { context: 'bo
   const opts = useLoad(() => api.reader.options());
   const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [askConsent, setAskConsent] = useState(false);
   const o = opts.data;
   const downloading = o?.local.state === 'downloaden';
 
@@ -62,8 +63,11 @@ export function ReaderChoice({ context, onDone, onToolsChanged }: { context: 'bo
 
   if (!o) return <ErrorBox error={opts.error} />;
 
-  const choose = async (c: Choice) => {
-    const ok = await run(() => api.reader.choose(c));
+  const choose = async (c: Choice, consent = false) => {
+    // versie uit de Microsoft Store: eerst uitdrukkelijk ja zeggen tegen het downloaden en starten
+    if (c === 'lokaal' && o.local.consentNeeded && !consent) return setAskConsent(true);
+    setAskConsent(false);
+    const ok = await run(() => api.reader.choose(c, consent));
     if (ok === undefined) return;
     await reloadSettings();
     await opts.reload();
@@ -137,10 +141,34 @@ export function ReaderChoice({ context, onDone, onToolsChanged }: { context: 'bo
       )}
       {reading && <p className="small">Bezig met lezen… dit kan een halve minuut per bon duren.</p>}
       {error && <div className="notice warn small">{error}</div>}
+      {askConsent && <LocalOcrConsent downloadSize={o.local.downloadSize} runtimeVersion={o.local.runtimeVersion} onCancel={() => setAskConsent(false)} onAgree={() => void choose('lokaal', true)} />}
       <p className="small muted" style={{ marginTop: 8 }}>
         Wat de app leest is een voorstel. Twijfel je over btw of belasting, laat het dan controleren door je boekhouder.
       </p>
     </div>
+  );
+}
+
+/**
+ * Versie uit de Microsoft Store: bonnen lezen op deze computer staat uit tot je hier ja zegt. De app
+ * downloadt en start dan één vaste, gecontroleerde versie van het leesprogramma.
+ */
+export function LocalOcrConsent({ downloadSize, runtimeVersion, onAgree, onCancel }: { downloadSize: number; runtimeVersion: string | null; onAgree: () => void; onCancel: () => void }) {
+  return (
+    <Modal title="Bonnen lezen op deze computer" onClose={onCancel}>
+      <p>Om foto's van bonnen te lezen downloadt de app een extra programma en een leesmodel van internet (samen ± {mb(downloadSize)}) en start dat programma op deze computer:</p>
+      <ul>
+        <li><strong>llama-server</strong> van llama.cpp{runtimeVersion ? `, versie ${runtimeVersion}` : ''} (van github.com/ggml-org/llama.cpp)</li>
+        <li><strong>GLM-OCR</strong>, het leesmodel (van huggingface.co)</li>
+      </ul>
+      <p className="small muted">
+        Het is altijd precies deze versie. De app controleert elk bestand en gebruikt het niet als het afwijkt. Het programma draait alleen op je eigen computer en je bonnen gaan nergens naartoe. Je kunt het later met één klik weer verwijderen.
+      </p>
+      <div className="row end" style={{ marginTop: 14 }}>
+        <Button onClick={onCancel}>Annuleren</Button>
+        <Button kind="primary" onClick={onAgree}>Ja, downloaden en gebruiken</Button>
+      </div>
+    </Modal>
   );
 }
 

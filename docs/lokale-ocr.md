@@ -19,6 +19,24 @@ staat de knop **Slimme herkenning installeren**. Daarna downloadt de app:
 - Een bestand met een verkeerd controlegetal wordt weggegooid en niet gebruikt.
 - Alles komt in de gegevensmap van de app (`ocr/`). Via **Verwijderen** is het in één klik weer weg.
 
+## Versie uit de Microsoft Store
+
+In de versie uit de Microsoft Store staat de ingebouwde herkenning standaard uit. Aanzetten kan pas
+nadat de gebruiker er in een eigen venster uitdrukkelijk ja op zegt (Store-beleid 10.2.2: wat de app
+downloadt en uitvoert, ligt vast en staat in de Store-beschrijving). Daarna geldt:
+
+- De app haalt niet "de nieuwste" llama.cpp op, maar altijd één vaste build: `STORE_LLAMA_CPP` in
+  `src/ocr-runtime/manifest.ts` (tag, bestand, grootte, sha256 van het zip-bestand en sha256 van
+  `llama-server.exe`).
+- `llama-server.exe` wordt na het uitpakken en vóór elke start tegen dat controlegetal gehouden; wijkt
+  het af, dan start het niet.
+- Een runtime die de gewone versie eerder in dezelfde gegevensmap zette, telt niet: eerst toestemming,
+  dan de vaste build.
+- De toestemming staat in `ocr/toestemming.json` en geldt voor die ene build. **Verwijderen** haalt hem weg.
+- Lukt het niet, dan verwijst de foutmelding naar de gewone Windows-versie op GitHub.
+
+De gewone Windows-versie en Linux werken zoals hierboven beschreven.
+
 ## Draaien
 
 De server start pas bij de eerste foto en stopt na 10 minuten zonder foto's. Zo gebruikt hij geen
