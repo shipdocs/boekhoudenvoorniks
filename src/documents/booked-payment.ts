@@ -58,19 +58,17 @@ export class BookedPayments {
    * Maakt de aankoop ongedaan ten gunste van de al geboekte betaling: een betaling met privégeld of
    * contant wordt teruggedraaid, de aankoop vervalt, de bon wordt het bewijsstuk.
    */
-  merge(purchaseId: number, bankTransactionId: number, date: IsoDate): void {
+  merge(purchaseId: number, bankTransactionId: number, date: IsoDate, provenance: 'gebruiker' | 'automatisch' = 'gebruiker'): void {
     tx(this.db, () => {
-      const p = this.purchases.get(purchaseId);
+      this.purchases.get(purchaseId);
       const t = this.db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(bankTransactionId) as BankTransaction | undefined;
       if (!t || t.status !== 'gematcht' || t.matched_purchase_invoice_id || t.matched_invoice_id) throw new ValidationError('Deze betaling is intussen anders verwerkt. Kijk het opnieuw na.');
       if (this.db.prepare('SELECT 1 FROM bank_transactions WHERE matched_purchase_invoice_id = ?').get(purchaseId)) throw new ValidationError('Deze aankoop is al aan een betaling op de bank gekoppeld');
       for (const e of this.elsewherePayments(purchaseId)) this.purchases.undoPayment(purchaseId, e.amount, e.id, date);
+      // alle bestanden van de aankoop (ook kopieën) gaan mee naar de betaling
+      const files = this.intake.links.forTarget({ kind: 'aankoop', id: purchaseId });
       this.purchases.cancel(purchaseId, date);
-      if (p.document_id) {
-        this.db
-          .prepare(`UPDATE documents SET status = 'verwerkt', confidence = 'HIGH', issues = '[]', classification = ? WHERE id = ?`)
-          .run(JSON.stringify({ categoryKey: 'overig', vatCode: 'hoog', business: true, confidence: 1, source: 'geheugen', reasons: [`bewijsstuk bij banktransactie #${t.id}`], automatic: true }), p.document_id);
-      }
+      this.intake.moveToBank(files, t.id, provenance);
     });
   }
 
@@ -110,7 +108,7 @@ export class BookedPayments {
     for (const { purchase: p, bankTransaction: t } of this.candidates().filter((c) => c.certain)) {
       try {
         tx(this.db, () => {
-          const fix = this.resolve(p.id, t.id, date);
+          const fix = this.resolve(p.id, t.id, date, 'automatisch');
           const explanation = explain([{ type: 'bankbetaling', label: `dezelfde betaling van ${formatEuro(-t.amount)} op ${formatDateNl(t.transaction_date)} al als kosten geboekt was`, value: 0.97 }]);
           logAutomation(this.db, {
             kind: 'dubbel-weg',
@@ -129,11 +127,11 @@ export class BookedPayments {
   }
 
   /** "Ja, dubbel": samenvoegen, en deze leverancier niet meer voortaan privé. */
-  resolve(purchaseId: number, bankTransactionId: number, date: IsoDate): BookedPaymentFix {
+  resolve(purchaseId: number, bankTransactionId: number, date: IsoDate, provenance: 'gebruiker' | 'automatisch' = 'gebruiker'): BookedPaymentFix {
     return tx(this.db, () => {
       const p = this.purchases.get(purchaseId);
       const t = this.db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(bankTransactionId) as BankTransaction;
-      this.merge(purchaseId, bankTransactionId, date);
+      this.merge(purchaseId, bankTransactionId, date, provenance);
       if (p.relation_id !== null) this.relations.setPaidWith(p.relation_id, null);
       return { purchaseId, bankTransactionId, supplier: p.relation_name ?? p.description, amount: -t.amount, date: t.transaction_date };
     });

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { setup } from './helpers';
+import { financialSnapshot, setup } from './helpers';
+import { makePdf } from './pdf';
 import { migrate } from '../src/db/database';
 import { migrations } from '../src/db/migrations';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
@@ -136,5 +137,39 @@ describe('gebeurtenissen als bron van waarheid (#19)', () => {
     const payload = JSON.parse((db.prepare('SELECT payload FROM events WHERE id = 1').get() as { payload: string }).payload);
     expect(payload.lines).toHaveLength(3);
     expect(db.prepare('SELECT kind, ref_id FROM event_evidence WHERE event_id = 1').all()).toEqual([{ kind: 'bank', ref_id: 7 }]);
+  });
+
+  it('bewijs koppelen, een voorstel afwijzen en ontkoppelen maken geen gebeurtenis en veranderen er geen (#179)', async () => {
+    const ctx = scenario();
+    const { s, db, shell } = ctx;
+    const stored = () => ({
+      events: db.prepare('SELECT * FROM events ORDER BY id').all(),
+      evidence: db.prepare('SELECT * FROM event_evidence ORDER BY id').all(),
+      entries: db.prepare('SELECT * FROM journal_entries ORDER BY id').all(),
+      lines: db.prepare('SELECT * FROM journal_lines ORDER BY id').all(),
+    });
+    const before = stored();
+    const fin = financialSnapshot(ctx);
+    const event = s.events.forEntry(s.bank.get(shell.id).matched_journal_entry_id!)!;
+    const recompiled = JSON.stringify(compile({ type: event.type, payload: event.payload } as never));
+
+    // de bon van Shell: de app stelt voor hem als bewijs te koppelen; eerst Nee, dan (bij een tweede bon) Ja
+    const bon = (extra: string) => makePdf(['Shell', 'Datum 20-07-2026', 'Diesel 50,00', 'BTW 21% 50,00 10,50', 'Totaal 60,50', extra]);
+    const a = await s.intake.add('shell.pdf', bon('a'), '2026-07-22', { autoConfirm: false });
+    expect(s.intake.pending(a)).toMatchObject({ kind: 'evidence', candidate: `bank:${shell.id}` });
+    await s.intake.decide(a.id, 'later');
+    await s.intake.decide(a.id, 'nee');
+    expect(stored()).toEqual(before);
+    s.intake.ignore(a.id);
+    const b = await s.intake.add('shell-2.pdf', bon('b'), '2026-07-22', { autoConfirm: false });
+    expect((await s.intake.decide(b.id, 'ja')).outcome).toBe('bewijs-gekoppeld');
+    expect(stored()).toEqual(before);
+    await s.intake.unlink(b.id, '2026-07-23');
+    expect(stored()).toEqual(before);
+    expect(financialSnapshot(ctx)).toEqual(fin);
+    // de gebeurtenis achter de betaling is dezelfde en compileert naar dezelfde boeking
+    const same = s.events.forEntry(s.bank.get(shell.id).matched_journal_entry_id!)!;
+    expect(same).toEqual(event);
+    expect(JSON.stringify(compile({ type: same.type, payload: same.payload } as never))).toBe(recompiled);
   });
 });

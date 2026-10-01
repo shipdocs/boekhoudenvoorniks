@@ -4,6 +4,8 @@ import { parseEuro, type Cents } from '../shared/money';
 import { addMonths, diffDays, today, type IsoDate } from '../shared/dates';
 import type { BookedInfo, BookingInfo } from './booked-info';
 import { ACCOUNTS } from '../core-ledger/accounts';
+import { EvidenceLinks, type LinkTarget } from '../documents/evidence-links';
+import { DOCUMENT_OUTCOME_LABEL } from '../shared/document-outcome';
 
 /**
  * Eén zoekbalk (#26) over documenten, factuur- en inkoopregels, relaties, betalingen, klussen en
@@ -83,7 +85,12 @@ export function parseQuery(input: string): { match: string | null; filters: Sear
 }
 
 export class SearchService {
-  constructor(private readonly db: Db) {}
+  constructor(private readonly db: Db) {
+    this.evidence = new EvidenceLinks(db);
+  }
+
+  /** welke bon bij welke aankoop of betaling hoort: dezelfde koppeling als de rest van de app (#179) */
+  private readonly evidence: EvidenceLinks;
 
   private booked: BookedInfo | null = null;
   setBookedInfo(booked: BookedInfo): void {
@@ -138,11 +145,22 @@ export class SearchService {
   private linksFor(hit: SearchHit): { key: string; links: SearchGroup['links']; jobId: number | null } {
     const one = <T>(sql: string, ...p: unknown[]) => this.db.prepare(sql).get(...p) as T | undefined;
     const links: SearchGroup['links'] = [];
+    // de bonnen bij een aankoop of betaling: het hoofdbewijsstuk eerst, daarna de andere bestanden
+    const evidenceLinks = (target: LinkTarget) => {
+      for (const f of this.evidence.forTarget(target)) links.push({ kind: 'document', id: f.document_id, label: f.is_primary ? 'bon/factuur' : `ook bewaard: ${f.original_name}` });
+    };
+    const bankLinks = (bid: number, b: { matched_journal_entry_id: number | null } | undefined) => {
+      links.push({ kind: 'bank', id: bid, label: 'betaling' });
+      if (b?.matched_journal_entry_id) links.push({ kind: 'boeking', id: b.matched_journal_entry_id, label: `boeking #${b.matched_journal_entry_id}` });
+      evidenceLinks({ kind: 'bank', id: bid });
+      const ev = b?.matched_journal_entry_id ? one<{ job_id: number | null }>('SELECT ev.job_id FROM journal_entries e JOIN events ev ON ev.id = e.event_id WHERE e.id = ?', b.matched_journal_entry_id) : undefined;
+      return ev?.job_id ?? null;
+    };
     const purchaseLinks = (pid: number) => {
       const p = one<{ id: number; document_id: number | null; journal_entry_id: number | null; job_id: number | null; description: string }>('SELECT id, document_id, journal_entry_id, job_id, description FROM purchase_invoices WHERE id = ?', pid);
       if (!p) return null;
       links.push({ kind: 'inkoop', id: p.id, label: p.description });
-      if (p.document_id) links.push({ kind: 'document', id: p.document_id, label: 'bon/factuur' });
+      evidenceLinks({ kind: 'aankoop', id: p.id });
       if (p.journal_entry_id) links.push({ kind: 'boeking', id: p.journal_entry_id, label: `boeking #${p.journal_entry_id}` });
       for (const b of this.db.prepare('SELECT id, transaction_date FROM bank_transactions WHERE matched_purchase_invoice_id = ?').all(pid) as { id: number; transaction_date: string }[]) {
         links.push({ kind: 'bank', id: b.id, label: `betaling ${b.transaction_date}` });
@@ -165,8 +183,13 @@ export class SearchService {
       case 'inkoop':
         return { key: `inkoop:${hit.id}`, jobId: purchaseLinks(hit.id), links };
       case 'document': {
-        const d = one<{ purchase_invoice_id: number | null }>('SELECT purchase_invoice_id FROM documents WHERE id = ?', hit.id);
-        if (d?.purchase_invoice_id) return { key: `inkoop:${d.purchase_invoice_id}`, jobId: purchaseLinks(d.purchase_invoice_id), links };
+        const target = this.evidence.forDocument(hit.id)?.target;
+        if (target?.kind === 'aankoop') return { key: `inkoop:${target.id}`, jobId: purchaseLinks(target.id), links };
+        if (target?.kind === 'bank') {
+          // bewijs bij een betaling die rechtstreeks geboekt is: de bon hoort bij die betaling
+          const b = one<{ matched_journal_entry_id: number | null }>('SELECT matched_journal_entry_id FROM bank_transactions WHERE id = ?', target.id);
+          return { key: `bank:${target.id}`, jobId: bankLinks(target.id, b), links };
+        }
         links.push({ kind: 'document', id: hit.id, label: 'bon/factuur' });
         return { key: `document:${hit.id}`, jobId: null, links };
       }
@@ -174,10 +197,7 @@ export class SearchService {
         const b = one<{ matched_invoice_id: number | null; matched_purchase_invoice_id: number | null; matched_journal_entry_id: number | null }>('SELECT matched_invoice_id, matched_purchase_invoice_id, matched_journal_entry_id FROM bank_transactions WHERE id = ?', hit.id);
         if (b?.matched_purchase_invoice_id) return { key: `inkoop:${b.matched_purchase_invoice_id}`, jobId: purchaseLinks(b.matched_purchase_invoice_id), links };
         if (b?.matched_invoice_id) return { key: `factuur:${b.matched_invoice_id}`, jobId: invoiceLinks(b.matched_invoice_id), links };
-        links.push({ kind: 'bank', id: hit.id, label: 'betaling' });
-        if (b?.matched_journal_entry_id) links.push({ kind: 'boeking', id: b.matched_journal_entry_id, label: `boeking #${b.matched_journal_entry_id}` });
-        const ev = b?.matched_journal_entry_id ? one<{ job_id: number | null }>('SELECT ev.job_id FROM journal_entries e JOIN events ev ON ev.id = e.event_id WHERE e.id = ?', b.matched_journal_entry_id) : undefined;
-        return { key: `bank:${hit.id}`, jobId: ev?.job_id ?? null, links };
+        return { key: `bank:${hit.id}`, jobId: bankLinks(hit.id, b), links };
       }
       case 'factuur':
         return { key: `factuur:${hit.id}`, jobId: invoiceLinks(hit.id), links };
@@ -202,7 +222,7 @@ export class SearchService {
       case 'bank': {
         const t = one<{ status: string; bank_account_id: number; counter_name: string | null; matched_journal_entry_id: number | null; matched_purchase_invoice_id: number | null; matched_invoice_id: number | null }>('SELECT * FROM bank_transactions WHERE id = ?', id);
         if (!t) return null;
-        const evidence = !!one(`SELECT 1 FROM documents WHERE classification LIKE ?`, `%banktransactie #${id}"%`);
+        const evidence = this.evidence.forTarget({ kind: 'bank', id }).length > 0;
         const automatic = !!one(`SELECT 1 FROM automation_log WHERE ref_id = ? AND kind IN ('bank-auto', 'bank-match', 'bank-own') AND status = 'auto'`, id);
         return {
           status: t.status === 'nieuw' ? 'Nog niet verwerkt' : t.status === 'genegeerd' ? 'Genegeerd' : 'Verwerkt',
@@ -228,7 +248,7 @@ export class SearchService {
           paidVia: bank ? bankName(bank.bank_account_id) : elsewhere ? (elsewhere.rgs_code === ACCOUNTS.kas ? 'contant' : 'privé betaald') : null,
           counterparty: p.relation_id ? one<{ name: string }>('SELECT name FROM relations WHERE id = ?', p.relation_id)?.name ?? null : null,
           booking: this.booked?.entry(p.journal_entry_id) ?? null,
-          evidence: !!(p.attachment_path || p.document_id),
+          evidence: !!(p.attachment_path || p.document_id) || this.evidence.forTarget({ kind: 'aankoop', id }).length > 0,
           automatic: false,
         };
       }
@@ -247,10 +267,10 @@ export class SearchService {
         };
       }
       case 'document': {
-        const d = one<{ status: string }>('SELECT status FROM documents WHERE id = ?', id);
+        const d = one<{ id: number; status: string; duplicate_of_document_id: number | null; purchase_invoice_id: number | null; issues: string }>('SELECT id, status, duplicate_of_document_id, purchase_invoice_id, issues FROM documents WHERE id = ?', id);
         if (!d) return null;
-        const status = d.status === 'controle' ? 'Nog controleren' : d.status === 'genegeerd' ? 'Privé of dubbel (niet geboekt)' : d.status === 'verwerkt' ? 'Bewijsstuk bij een betaling' : d.status;
-        return { status, attention: d.status === 'controle', paidVia: null, counterparty: null, booking: null, evidence: true, automatic: false };
+        const status = DOCUMENT_OUTCOME_LABEL[this.evidence.outcome({ ...d, issues: JSON.parse(d.issues) as { field: string }[] })];
+        return { status, attention: d.status === 'controle' || d.status === 'nieuw', paidVia: null, counterparty: null, booking: null, evidence: true, automatic: false };
       }
       default:
         return null;
