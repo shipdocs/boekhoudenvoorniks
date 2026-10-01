@@ -932,11 +932,16 @@ export const migrations: string[] = [
   );
 
   -- Wat er met elke oude tekstkoppeling ("bewijsstuk bij banktransactie #...") gebeurd is.
+  -- Een bon die hierdoor op controle komt, beoordeelt de app daarna opnieuw (IntakeService.reassessMigrated):
+  -- named_payments = de betalingen die de oude tekst noemde (alleen om een vraag te kunnen stellen, nooit
+  -- als koppeling); reassessed_at = wanneer dat gebeurd is. Tot dan is de bon niet te boeken.
   CREATE TABLE IF NOT EXISTS document_link_migration (
     document_id INTEGER PRIMARY KEY REFERENCES documents(id),
     result TEXT NOT NULL CHECK (result IN ('gemigreerd','onzeker','conflict')),
     bank_transaction_id INTEGER,
     detail TEXT NOT NULL,
+    named_payments TEXT,
+    reassessed_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 

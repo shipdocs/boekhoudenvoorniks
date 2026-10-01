@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { migrate } from '../src/db/database';
 import { migrations } from '../src/db/migrations';
 import { createServices, MemorySecretStore } from '../src/services';
+import { createApi, type HostContext } from '../src/main/api';
 
 describe('migraties', () => {
   it('vult de importperiodes aan voor afschriften die vóór migratie 4 zijn ingelezen', () => {
@@ -53,12 +54,15 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
     // KPN was geboekt en is daarna teruggedraaid: de betaling staat weer open
     s.bank.bookToAccount(kpn!.id, { account: 'WBedKanTel', vatCode: 'hoog' });
     s.bank.unmatch(kpn!.id, '2026-07-09');
-    const doc = (name: string, status: string, classification: string | null, extra: { mime?: string; source?: string; purchase?: number | null; copyOf?: number | null } = {}) =>
-      Number(db.prepare(`INSERT INTO documents (file_path, original_name, mime_type, sha256, status, extraction_source, classification, purchase_invoice_id, duplicate_of_document_id, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'HIGH')`)
-        .run(`/tmp/${name}`, name, extra.mime ?? 'application/pdf', name, status, extra.source ?? 'pdf-text', classification, extra.purchase ?? null, extra.copyOf ?? null).lastInsertRowid);
+    const doc = (name: string, status: string, classification: string | null, extra: { mime?: string; source?: string; purchase?: number | null; copyOf?: number | null; result?: unknown } = {}) =>
+      Number(db.prepare(`INSERT INTO documents (file_path, original_name, mime_type, sha256, status, extraction_source, classification, purchase_invoice_id, duplicate_of_document_id, confidence, result) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'HIGH', ?)`)
+        .run(`/tmp/${name}`, name, extra.mime ?? 'application/pdf', name, status, extra.source ?? 'pdf-text', classification, extra.purchase ?? null, extra.copyOf ?? null, extra.result ? JSON.stringify(extra.result) : null).lastInsertRowid);
+    const f = <T>(value: T) => ({ value, confidence: 1, source: 'pdf-text' });
+    /** zoals gelezen van de factuur van Gamma: zelfde leverancier, bedrag, nummer en datum als de aankoop */
+    const gammaInvoice = { documentType: f('purchase_invoice'), supplier: f('Gamma'), supplierVatNumber: null, supplierIban: null, invoiceNumber: f('G-2026-7'), invoiceDate: f('2026-07-10'), dueDate: null, currency: f('EUR'), subtotal: null, vat: f([]), total: f(24200), lineDescriptions: [], reverseCharge: false, rawText: '' };
     // een aankoop uit een bon, met een kopie; de betaling van Gamma hoort bij die aankoop
     const geboekt = doc('gamma.jpg', 'verwerkt', null, { mime: 'image/jpeg', source: 'ocr:test' });
-    const purchase = s.purchases.create({ relationId: s.relations.findOrCreateSupplier('Gamma').id, invoiceDate: '2026-07-10', description: 'Materiaal — Gamma', attachmentPath: '/tmp/gamma.jpg', documentId: geboekt, lines: [{ account: 'WKprInkMat', netAmount: 20000, vatCode: 'hoog' }] });
+    const purchase = s.purchases.create({ relationId: s.relations.findOrCreateSupplier('Gamma').id, supplierReference: 'G-2026-7', invoiceDate: '2026-07-10', description: 'Materiaal — Gamma', attachmentPath: '/tmp/gamma.jpg', documentId: geboekt, lines: [{ account: 'WKprInkMat', netAmount: 20000, vatCode: 'hoog' }] });
     db.prepare('UPDATE documents SET purchase_invoice_id = ? WHERE id = ?').run(purchase.id, geboekt);
     s.bank.matchPurchase(gamma!.id, purchase.id);
     const ids = {
@@ -71,6 +75,8 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
       teruggedraaid: doc('kpn.pdf', 'verwerkt', reasons([`bewijsstuk bij banktransactie #${kpn!.id}`])),
       bijAankoop: doc('gamma-betaling.pdf', 'verwerkt', reasons([`bewijsstuk bij banktransactie #${gamma!.id}`])),
       twee: doc('twee.pdf', 'verwerkt', reasons([`bewijsstuk bij banktransactie #${transip!.id}`, `bewijsstuk bij banktransactie #${kpn!.id}`])),
+      // zeker dezelfde factuur als de aankoop van Gamma, maar de genoemde betaling bestaat niet meer
+      zekereKopie: doc('gamma-factuur.pdf', 'verwerkt', reasons(['bewijsstuk bij banktransactie #998']), { result: gammaInvoice }),
       alWeggelegd: doc('weggelegd.pdf', 'genegeerd', reasons([`bewijsstuk bij banktransactie #${transip!.id}`])),
       kapot: doc('kapot.pdf', 'verwerkt', '{geen json'),
       gewoon: doc('los.pdf', 'controle', reasons(['je Gamma eerder als materiaal hebt bevestigd'])),
@@ -104,11 +110,12 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
       [ids.teruggedraaid]: ['onzeker', 'de betaling is niet (meer) geboekt'],
       [ids.bijAankoop]: ['conflict', 'de betaling hoort intussen bij een aankoop of factuur'],
       [ids.twee]: ['conflict', 'er worden meerdere betalingen genoemd'],
+      [ids.zekereKopie]: ['onzeker', 'de betaling bestaat niet meer'],
       [ids.alWeggelegd]: ['onzeker', 'de bon stond niet (meer) op verwerkt'],
     });
 
     const after = new Map((db.prepare('SELECT * FROM documents ORDER BY id').all() as { id: number; status: string; issues: string }[]).map((d) => [d.id, d]));
-    const review = [ids.onleesbaar, ids.weg, ids.teruggedraaid, ids.bijAankoop, ids.twee];
+    const review = [ids.onleesbaar, ids.weg, ids.teruggedraaid, ids.bijAankoop, ids.twee, ids.zekereKopie];
     for (const d of documentsBefore) {
       if (review.includes(d.id)) {
         // onzeker of tegenstrijdig: nergens aan gekoppeld, op controle, met uitleg; verder ongewijzigd
@@ -126,6 +133,87 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
     expect(s.search.infoFor(`bank:${transip.id}`)?.evidence).toBe(true);
     expect(s.intake.get(ids.goed2)).toMatchObject({ outcome: 'bewijs-gekoppeld', link: { target: { kind: 'bank', id: transip.id }, is_primary: true } });
     expect(s.intake.get(ids.kopie).outcome).toBe('dubbel');
+  });
+
+  it('een bon die zo op controle kwam wordt opnieuw beoordeeld: eerst de vraag, tot dan niet te boeken; de boekhouding blijft gelijk', async () => {
+    const { db, s, ids, transip, purchase } = oldAdministration();
+    const fin = () => ({ ...dump(db, tables), balances: s.ledger.balances(), vat: s.vat.calculate('2026-Q3') });
+    const before = fin();
+    migrate(db);
+    // 'twee' noemde twee betalingen (daarom niet omgezet); die van TransIP staat nog gewoon als kosten geboekt
+    const asPurchase = { supplier: 'TransIP', date: '2026-07-08', total: 15423, categoryKey: 'software', vatCode: 'hoog' as const, business: true, paidWith: 'later' as const };
+    const gamma = { ...asPurchase, supplier: 'Gamma', date: '2026-07-10', total: 24200, categoryKey: 'materiaal' };
+    // direct na het bijwerken is hij nog niet opnieuw bekeken: boeken als nieuwe aankoop kan niet
+    for (const id of [ids.twee, ids.bijAankoop, ids.weg]) expect(() => s.intake.confirm(id, asPurchase)).toThrow(/stond eerder als bewijs bij een betaling/);
+    expect(fin()).toEqual(before);
+
+    // opnieuw beoordelen (gebeurt bij het openen van Vandaag, de bonnenlijst of de bon): niets geboekt, niets gekoppeld
+    const linksAfterMigration = dump(db, ['document_links']);
+    expect(await s.intake.reassessMigrated('2026-07-20')).toBe(6);
+    expect(fin()).toEqual(before);
+    expect(dump(db, ['document_links'])).toEqual(linksAfterMigration);
+
+    // de betaling staat al als kosten geboekt: de gewone vraag, en boeken blijft geweigerd tot er een antwoord is
+    const twee = s.intake.get(ids.twee);
+    expect(twee).toMatchObject({ status: 'controle', outcome: 'controle', link: null, purchase_invoice_id: null });
+    expect(twee.issues.map((i) => [i.field, i.severity])).toEqual([['evidence-migration', 'fout'], ['evidence', 'fout']]);
+    expect(twee.issues[1]!.message).toBe('Deze betaling is al geboekt. Wil je deze bon alleen als bewijsstuk koppelen?');
+    expect(s.intake.pending(twee)).toMatchObject({ kind: 'evidence', candidate: `bank:${transip.id}`, target: { kind: 'bank', supplier: 'TRANSIP B.V.', amount: 15423 } });
+    expect(() => s.intake.confirm(ids.twee, asPurchase)).toThrow(/Kies eerst/);
+    // de betaling van Gamma hoort intussen bij een aankoop: die aankoop staat er dus al
+    const bijAankoop = s.intake.get(ids.bijAankoop);
+    expect(s.intake.pending(bijAankoop)).toMatchObject({ kind: 'duplicate', candidate: `aankoop:${purchase.id}`, target: { kind: 'aankoop', supplier: 'Gamma', amount: 24200 } });
+    expect(bijAankoop.issues.find((i) => i.field === 'duplicate')?.message).toMatch(/hoort nu bij de aankoop bij Gamma.*Is dit dezelfde aankoop\?/);
+    expect(() => s.intake.confirm(ids.bijAankoop, gamma)).toThrow(/Kies eerst/);
+    // zeker dezelfde factuur als een aankoop die er al staat: bij een nieuwe bon zou de app die vanzelf als kopie
+    // erbij leggen; hier gebeurt niets vanzelf, het is een vraag
+    const kopie = s.intake.get(ids.zekereKopie);
+    expect(kopie).toMatchObject({ status: 'controle', link: null, duplicate_of_document_id: null });
+    expect(kopie.issues.find((i) => i.field === 'duplicate')?.suggestion).toMatchObject({ strength: 'zeker', purchaseId: purchase.id });
+    expect(() => s.intake.confirm(ids.zekereKopie, gamma)).toThrow(/Kies eerst/);
+    // op Vandaag staat de vraag met ja en nee, geen knop om te boeken
+    s.settings.update({ onboardingDone: true });
+    const tasks = s.inbox.tasks('2026-07-20');
+    expect(tasks.find((t) => t.ref.documentId === ids.twee)!.actions.map((a) => a.id)).toEqual(['bewijs', 'nee', 'open']);
+    expect(tasks.find((t) => t.ref.documentId === ids.bijAankoop)!.actions.map((a) => a.id)).toEqual(['dubbel', 'nee', 'open']);
+    // geen betaling meer om naar te vragen (weg, onleesbaar, teruggedraaid): gewone controle, met de uitleg erbij
+    for (const id of [ids.weg, ids.onleesbaar, ids.teruggedraaid]) {
+      const d = s.intake.get(id);
+      expect(s.intake.pending(d)).toBeNull();
+      expect(s.intake.awaitsReassessment(d)).toBe(false);
+      expect(d.issues.some((i) => i.field === 'evidence-migration')).toBe(true);
+    }
+
+    // nog een keer beoordelen doet niets meer
+    const state = ['documents', 'document_links', 'document_link_migration', 'document_proposal_rejections'];
+    const once = dump(db, state);
+    expect(await s.intake.reassessMigrated('2026-07-21')).toBe(0);
+    await s.intake.decide(ids.twee, 'later');
+    expect(dump(db, state)).toEqual(once);
+
+    // Ja: alleen het bewijs komt bij de betaling; Nee: de vraag is weg en komt niet terug. De boekhouding blijft gelijk.
+    expect(await s.intake.decide(ids.twee, 'ja')).toMatchObject({ status: 'verwerkt', outcome: 'bewijs-gekoppeld', issues: [], link: { target: { kind: 'bank', id: transip.id }, origin: 'bewijs', provenance: 'gebruiker' } });
+    const nee = await s.intake.decide(ids.bijAankoop, 'nee');
+    expect(nee).toMatchObject({ status: 'controle', link: null });
+    expect(s.intake.pending(nee)).toBeNull();
+    expect(s.intake.pending(await s.intake.evaluate(ids.bijAankoop, [], '2026-07-22', { autoConfirm: false }))).toBeNull();
+    expect(fin()).toEqual(before);
+    expect(s.purchases.list()).toHaveLength(1);
+  });
+
+  it('het opnieuw beoordelen gebeurt vanzelf bij het openen van de bon, de bonnenlijst en Vandaag', async () => {
+    for (const via of ['open', 'list', 'home'] as const) {
+      const { db, s, ids, transip } = oldAdministration();
+      migrate(db);
+      s.settings.update({ onboardingDone: true });
+      const api = createApi(s, { appVersion: () => '0.0.0', hasSmtpPassword: () => false } as unknown as HostContext);
+      expect(s.intake.awaitsReassessment(s.intake.get(ids.twee))).toBe(true);
+      if (via === 'open') expect(s.intake.pending(await api.documents.open(ids.twee))).toMatchObject({ kind: 'evidence', candidate: `bank:${transip.id}` });
+      else if (via === 'list') expect((await api.documents.list('controle')).find((d) => d.id === ids.twee)!.issues.map((i) => i.field)).toContain('evidence');
+      else expect((await api.home.get()).tasks.find((t) => t.ref.documentId === ids.twee)!.actions[0]).toMatchObject({ id: 'bewijs', label: 'Ja, alleen als bewijs' });
+      expect(s.intake.awaitsReassessment(s.intake.get(ids.twee)), via).toBe(false);
+      expect(db.prepare('SELECT COUNT(*) AS n FROM purchase_invoices').get()).toEqual({ n: 1 });
+    }
   });
 
   it('is veilig om nog een keer te draaien: er verandert dan niets meer', () => {

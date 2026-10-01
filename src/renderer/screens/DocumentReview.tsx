@@ -145,13 +145,16 @@ function extractionSourceLabel(source: string | null): string {
 export function DocumentReview({ id }: { id: number }) {
   const { go, meta, settings, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
-  const doc = useLoad(() => api.documents.open(id), [id]);
+  // openen kan de bon opnieuw beoordelen (koers, oude tekstkoppeling): daarna pas kijken welke vraag er openstaat (#179)
+  const view = useLoad(async () => {
+    const opened = await api.documents.open(id);
+    return { doc: opened, pending: await api.documents.pending(id) };
+  }, [id]);
+  const doc = { data: view.data?.doc, error: view.error, reload: view.reload };
   const jobs = useLoad(() => api.jobs.list({ active: true }));
   const jobSuggestion = useLoad(() => api.jobs.suggestForDocument(id), [id]);
   const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
-  // de vraag die eerst een antwoord nodig heeft: "dezelfde aankoop?" of "alleen als bewijs koppelen?" (#179)
-  const pending = useLoad(() => api.documents.pending(id), [id]);
   const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; businessPct: number | null; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
 
   const d = doc.data;
@@ -201,11 +204,12 @@ export function DocumentReview({ id }: { id: number }) {
   // wat je in het veld ziet, is wat er geboekt wordt
   const showVat = form.business && !form.splits && (form.vatCode === 'hoog' || form.vatCode === 'laag');
   const activeField = fields.find((f) => f.key === active)?.field ?? (active?.startsWith('line-') ? r?.lines?.[Number(active.slice(5))] ?? null : null);
-  const proposal = d.status === 'controle' ? pending.data ?? null : null;
+  // de vraag die eerst een antwoord nodig heeft: "dezelfde aankoop?" of "alleen als bewijs koppelen?"
+  const proposal = d.status === 'controle' ? view.data?.pending ?? null : null;
   // na een keuze opnieuw laden: het formulier begint dan weer met wat de app nu voorstelt
   const refresh = async () => {
     setForm(null);
-    await Promise.all([doc.reload(), pending.reload()]);
+    await view.reload();
   };
 
   return (
@@ -281,7 +285,7 @@ export function DocumentReview({ id }: { id: number }) {
           {d.bank_match && <div className="notice good">✓ Betaling gevonden op de bank: {formatDateNl(d.bank_match.transaction_date)} · <Euro cents={d.bank_match.amount} /></div>}
           {d.classification && <p className="small muted">{d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(' · ')}</p>}
 
-          {d.status !== 'verwerkt' && !d.link && d.outcome !== 'dubbel' && !proposal && !pending.loading && (
+          {d.status !== 'verwerkt' && !d.link && d.outcome !== 'dubbel' && !proposal && (
             // minmax: het formulier blijft binnen de kaart, hoe breed de keuzeknoppen of het datumveld ook zijn
             <div className="card grid" style={{ marginTop: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
               <div className="grid cols-2">
