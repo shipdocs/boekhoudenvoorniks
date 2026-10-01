@@ -6,6 +6,7 @@
 - **Bon bij "weet ik nog niet" meteen indelen**: in het venster dat laat zien wat er nog bij "weet ik nog niet" staat (op Vandaag en bij Belasting) heeft een bon nu een knop *Indelen*. Je hoeft hem niet meer bij Aankopen op te zoeken.
 
 ### Opgelost
+- **Bonnen lezen op deze computer weer te installeren**: het installeren van de ingebouwde herkenning eindigde met "Geen passende runtime gevonden", omdat het onderdeel dat de app daarvoor downloadt (llama.cpp) zijn releases anders is gaan aanbieden. Wie het al geïnstalleerd had, merkte er niets van.
 - **Bon in dollars of een andere munt alsnog omgerekend**: kon de koers bij het binnenkomen van de bon niet opgehaald worden, dan probeert de app het opnieuw zodra je de bon opent. Een datum die per ongeluk in de toekomst is gelezen (bijvoorbeeld een Amerikaanse datum) houdt het omrekenen niet meer tegen.
 - **Koppeling met Claude Code of Codex op Windows**: de koppeling startte wel, maar las de vragen van Claude Code of Codex niet en gaf dus nooit antwoord. Op Windows werkt hij nu net als op Linux.
 
