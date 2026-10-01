@@ -209,6 +209,9 @@ export function DocumentReview({ id }: { id: number }) {
   // de vraag die eerst een antwoord nodig heeft: "dezelfde aankoop?" of "alleen als bewijs koppelen?"
   const proposal = d.status === 'controle' ? view.data?.pending ?? null : null;
   // na een keuze opnieuw laden: het formulier begint dan weer met wat de app nu voorstelt
+  // factuur van je eigen bedrijf (#205): alleen privé of "weet ik nog niet"; bij twijfel eerst de vraag
+  const ownIssue = !proposal && d.status === 'controle' ? d.issues.find((i) => i.field === 'own-company') : undefined;
+  const own = ownIssue ? (ownIssue.suggestion as { level: 'zeker' | 'waarschijnlijk'; signals: string[] }) : null;
   const refresh = async () => {
     setForm(null);
     await view.reload();
@@ -246,11 +249,28 @@ export function DocumentReview({ id }: { id: number }) {
           {r?.foreign && <ForeignNotice foreign={r.foreign} euro={form.total ?? r.total?.value ?? null} />}
           {/* nog niet uitgelezen (geen herkenning): hier kiezen hoe de app bonnen mag lezen */}
           {unread && <ReaderChoice context="bon" onDone={async () => { setForm(null); await doc.reload(); }} />}
-          {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document') && !(proposal && i.field === proposal.kind)).map((i) => (
+          {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document') && !(proposal && i.field === proposal.kind) && !(own && i.field === 'own-company')).map((i) => (
             <div key={i.field + i.message} className="notice warn">{i.message}</div>
           ))}
           {proposal && <ProposalChoice doc={d} proposal={proposal} question={d.issues.find((i) => i.field === proposal.kind)?.message ?? ''} onDone={refresh} />}
           <LinkedTo doc={d} onChanged={refresh} />
+          {own && (
+            <div className="notice warn" role="note" data-testid="eigen-bedrijf">
+              <strong>{own.level === 'zeker' ? 'Dit is een factuur van je eigen bedrijf' : 'Is dit een factuur van je eigen bedrijf?'}</strong>
+              <div className="small" style={{ marginTop: 4 }}>
+                {own.level === 'zeker'
+                  ? 'Verkoper en koper zijn hetzelfde bedrijf, bijvoorbeeld bij een abonnement op je eigen dienst. Dat is geen gewone aankoop: de app boekt hem niet als kosten en trekt de btw niet af. Kies hieronder Privé of Weet ik nog niet.'
+                  : 'Verkoper en koper lijken hetzelfde bedrijf. Een factuur van jezelf is geen gewone aankoop: die boek je niet als kosten met btw-aftrek.'}
+              </div>
+              <div className="small muted" style={{ marginTop: 4 }}>Waarom? Omdat {own.signals.join(', ')}.</div>
+              {own.level === 'waarschijnlijk' && (
+                <div className="row" style={{ marginTop: 8 }}>
+                  <Button small kind="primary" disabled={busy} onClick={async () => { if (await run(() => api.documents.decideOwn(d.id, 'ja'))) await refresh(); }}>Ja, van mijn eigen bedrijf</Button>
+                  <Button small disabled={busy} onClick={async () => { if (await run(() => api.documents.decideOwn(d.id, 'nee'))) await refresh(); }}>Nee, een gewone aankoop</Button>
+                </div>
+              )}
+            </div>
+          )}
           {d.status === 'controle' && (d.decisions ?? []).some((x) => !x.field && !x.ok) && (
             <div className="notice small">
               Hier twijfelen we nog over: {(d.decisions ?? []).filter((x) => !x.field && !x.ok).map((x) => `${x.label.toLowerCase()} (${x.value})`).join(', ')}. Kies hieronder wat klopt.
@@ -288,7 +308,7 @@ export function DocumentReview({ id }: { id: number }) {
           {d.bank_match && <div className="notice good">✓ Betaling gevonden op de bank: {formatDateNl(d.bank_match.transaction_date)} · <Euro cents={d.bank_match.amount} /></div>}
           {d.classification && <p className="small muted">{d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(' · ')}</p>}
 
-          {d.status !== 'verwerkt' && !d.link && d.outcome !== 'dubbel' && !proposal && (
+          {d.status !== 'verwerkt' && !d.link && d.outcome !== 'dubbel' && !proposal && own?.level !== 'waarschijnlijk' && (
             // minmax: het formulier blijft binnen de kaart, hoe breed de keuzeknoppen of het datumveld ook zijn
             <div className="card grid" style={{ marginTop: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
               <div className="grid cols-2">
@@ -299,6 +319,34 @@ export function DocumentReview({ id }: { id: number }) {
                 <Field label={r?.foreign ? "Totaal in euro's (incl. btw)" : 'Totaal (incl. btw)'}><MoneyInput value={form.total} onChange={(v) => setForm({ ...form, total: v })} /></Field>
                 <Field label="Factuur- of bonnummer" hint="mag leeg"><input value={form.invoiceNumber} maxLength={60} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} /></Field>
               </div>
+              {own ? (
+                <>
+                  <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
+                    <li><strong>Privé:</strong> komt niet in je boekhouding als kosten{d.bank_match ? '; de betaling op de bank telt als privé-opname' : ''}.</li>
+                    <li><strong>Weet ik nog niet:</strong> staat apart op vraagposten, zonder btw-aftrek{d.bank_match ? ', met de betaling eraan gekoppeld' : ''}. Je boekhouder zoekt het uit.</li>
+                  </ul>
+                  <div className="row end">
+                    <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
+                    {(['prive', 'vraag'] as const).map((choice) => (
+                      <Button key={choice} disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
+                        const res = await run(
+                          () => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: choice === 'vraag' ? 'onbekend' : 'overig', vatCode: 'geen', business: choice === 'vraag', paidWith: d.bank_match ? 'bank' : 'later' }),
+                          choice === 'vraag' ? 'Apart gezet op "weet ik nog niet" ✓' : 'Privé — niet geboekt ✓',
+                        );
+                        if (res) go({ screen: 'aankopen' });
+                      }}>{choice === 'vraag' ? 'Weet ik nog niet: vraag mijn boekhouder' : 'Privé'}</Button>
+                    ))}
+                  </div>
+                  <p className="small muted" style={{ margin: 0, textAlign: 'right' }}>
+                    Geen factuur van je eigen bedrijf?{' '}
+                    <button className="linklike small" disabled={busy} onClick={async () => {
+                      if (!confirm('Is dit echt een gewone aankoop bij een ander bedrijf? Dan controleer je hem daarna zoals elke bon, met kosten en btw.')) return;
+                      if (await run(() => api.documents.decideOwn(d.id, 'nee'))) await refresh();
+                    }}>Toch een gewone aankoop</button>
+                  </p>
+                </>
+              ) : (
+              <>
               <Field label="Was dit zakelijk?">
                 <div className="chips">
                   <button className={form.business ? 'selected' : ''} onClick={() => setForm({ ...form, business: true })}>Zakelijk</button>
@@ -363,6 +411,8 @@ export function DocumentReview({ id }: { id: number }) {
                   }
                 }}>Klopt, verwerken</Button>
               </div>
+              </>
+              )}
             </div>
           )}
         </div>
