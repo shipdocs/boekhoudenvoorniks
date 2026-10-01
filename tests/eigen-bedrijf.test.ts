@@ -241,6 +241,24 @@ describe('factuur en betaling van je eigen bedrijf: één keuze, nooit vanzelf (
     });
   }
 
+  it('factuur al op privé gezet toen de betaling er nog niet was: bij de betaling komt de factuur er als bewijs bij', async () => {
+    const ctx = world();
+    const { s } = ctx;
+    const before = financialSnapshot(ctx, { vatPeriods: ['2026-Q3', '2026-Q4'] });
+    const d = await s.intake.add('factuur.pdf', pdf, '2026-09-30');
+    // privé zonder betaling: er wordt niets geboekt, de factuur blijft bewaard
+    expect(s.intake.settleOwn(d.id, 'prive')).toMatchObject({ status: 'genegeerd', outcome: 'niet-geboekt' });
+    expect(financialSnapshot(ctx, { vatPeriods: ['2026-Q3', '2026-Q4'] })).toEqual(before);
+    const t = payment(s);
+    const [task] = tasksFor(s);
+    expect(task).toMatchObject({ kind: 'bank-own-company', ref: { bankTransactionId: t.id } });
+    expect(task!.question).toMatch(/de factuur die je al op privé zette, komt erbij\.$/);
+    s.ownCompany.settle(t.id, 'prive');
+    expect(s.ledger.balance(ACCOUNTS.priveOpnamen)).toBe(1089);
+    expect(s.purchases.list()).toEqual([]);
+    expect(s.intake.get(d.id)).toMatchObject({ outcome: 'bewijs-gekoppeld', link: { target: { kind: 'bank', id: t.id } } });
+  });
+
   it('bestaande gegevens: een open "nog uitzoeken"-aankoop bij je eigen bedrijf naast een losse betaling wordt een vraag; wat al geboekt is blijft staan', async () => {
     const ctx = world();
     const { s } = ctx;
