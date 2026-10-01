@@ -423,7 +423,7 @@ export class SwitchoverService {
       const o = this.bank.openingBalance(a.id);
       const opening = o.date === date ? o.amount : o.date === null && confirmed.has(a.id) ? 0 : null;
       const sumSince = (to: IsoDate) =>
-        (this.db.prepare('SELECT COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE bank_account_id = ? AND transaction_date >= ? AND transaction_date <= ?').get(a.id, date, to) as { s: number }).s;
+        (this.db.prepare('SELECT COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE bank_account_id = ? AND duplicate_of IS NULL AND transaction_date >= ? AND transaction_date <= ?').get(a.id, date, to) as { s: number }).s;
       // eindsaldo uit een afschrift (het laatste op of na D)
       const closing = this.db
         .prepare('SELECT closing_balance AS amount, closing_date AS date FROM import_batch_accounts WHERE bank_account_id = ? AND closing_date >= ? AND closing_balance IS NOT NULL ORDER BY closing_date DESC, batch_id DESC LIMIT 1')

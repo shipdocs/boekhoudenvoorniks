@@ -75,6 +75,8 @@ export function parseCamt053(xml: string): ParseResult {
           bankId = ownRef && ownRef !== entryRef && !used.has(ownRef) ? ownRef : first ? `${first}#${i + 1}` : null;
         }
         if (bankId) used.add(bankId);
+        // deelposten van één boeking horen bij elkaar: samen zijn ze het bedrag van de boeking
+        const batchRef = splits.length > 1 ? entryRef || [...used][0] || '' : '';
         transactions.push({
           date,
           amount: isDebit ? -Math.abs(amount) : Math.abs(amount),
@@ -84,6 +86,7 @@ export function parseCamt053(xml: string): ParseResult {
           reference: structured || (e2e && e2e !== 'NOTPROVIDED' ? e2e : null),
           ownIban: ownIban ? normalizeIban(ownIban) : null,
           bankId,
+          ...(batchRef ? { batch: { ref: batchRef, total: isDebit ? -Math.abs(entryAmount) : Math.abs(entryAmount) } } : {}),
         });
       }
     }
