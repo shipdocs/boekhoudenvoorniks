@@ -180,7 +180,7 @@ export function createApi(s: Services, host: HostContext) {
   };
 
   /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
-  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
+  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
     const r = task.ref;
     switch (`${task.kind}:${actionId}`) {
       case 'bank-invoice:klopt':
@@ -339,6 +339,12 @@ export function createApi(s: Services, host: HostContext) {
       case 'quote-expired:afgewezen':
         s.quotes.setStatus(r.quoteId!, 'afgewezen');
         return;
+      case 'bank-balance:negeren':
+        s.inbox.ignoreBalance(r.bankAccountId!);
+        return;
+      case 'bank-balance:bekijken':
+        // op het bankscherm: de overgeslagen regels van deze rekening, met "Toch toevoegen"
+        return { navigate: { screen: 'bank', extra: { skippedFor: r.bankAccountId } } };
       default: {
         const screens: Partial<Record<Task['kind'], [string, number | string | undefined]>> = {
           setup: ['welkom', undefined],
@@ -352,6 +358,7 @@ export function createApi(s: Services, host: HostContext) {
           'quote-expired': ['offerte', r.quoteId],
           'vat-due': ['belasting', r.periodKey],
           'bank-stale': ['bank', undefined],
+          'bank-balance': ['bank', undefined],
           'bank-locked': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
           'exchange-conflict': r.invoiceId ? ['factuur', r.invoiceId] : ['aankopen', r.purchaseId],
@@ -707,7 +714,7 @@ export function createApi(s: Services, host: HostContext) {
     home: {
       get: () => s.inbox.home(),
       /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
-      act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string } } | void> => {
+      act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
         const result = await doAct(task, actionId, payload);
         if (!result?.navigate) s.inbox.recordUserAction(task, actionId);
         return result;
@@ -893,6 +900,20 @@ export function createApi(s: Services, host: HostContext) {
         const summary = s.bank.import(parsed, { filename, bankAccountId });
         const auto = s.inbox.autoProcess();
         return { ...summary, autoMatched: auto.matched + auto.booked };
+      },
+      /**
+       * Na het inlezen (per import) of bij een saldo dat niet klopt (per rekening): de regels die zijn
+       * overgeslagen omdat de betaling er al stond, en wat nieuw was in dagen die al waren ingelezen.
+       */
+      importReview: (filter: { batchId?: number; bankAccountId?: number }) => ({
+        skipped: s.bank.skippedRows({ batchId: filter?.batchId, bankAccountId: filter?.bankAccountId }),
+        added: filter?.batchId ? s.bank.addedInKnownPeriod(filter.batchId) : [],
+      }),
+      /** "Toch toevoegen": een overgeslagen regel was wel een eigen betaling */
+      addSkipped: (skippedId: number) => {
+        const id = s.bank.addSkipped(skippedId);
+        const auto = s.inbox.autoProcess();
+        return { id, autoMatched: auto.matched + auto.booked };
       },
       /** betalingen, met "waar staat dit op?" en de naam van de rekening */
       transactions: (filter?: { status?: 'nieuw' | 'gematcht' | 'genegeerd'; search?: string }) => {

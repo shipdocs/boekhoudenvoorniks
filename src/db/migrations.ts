@@ -877,4 +877,45 @@ export const migrations: string[] = [
     PRIMARY KEY (proposed_by, model)
   );
   `,
+  /* 25: betrouwbaar inlezen (#184): een betaling die er al staat, komt er niet nog een keer in */ `
+  -- De id die de bank zelf aan een betaling gaf (CAMT, MT940). Tot nu toe zat die alleen in dedup_hash.
+  -- Betalingen die al waren ingelezen hebben hem niet (NULL) en tellen als "zonder bank-id"; hun
+  -- dedup_hash blijft zoals hij was, zodat hetzelfde afschrift opnieuw inlezen niets dubbel geeft.
+  ALTER TABLE bank_transactions ADD COLUMN bank_id TEXT;
+  CREATE INDEX idx_bank_transactions_amount ON bank_transactions(bank_account_id, amount, transaction_date);
+  -- Het soort afschrift van een import: de bron, en bij CSV ook de indeling (kolommen en toewijzing).
+  -- Twee afschriften van hetzelfde soort geven dezelfde betaling dezelfde hash; bij een ander soort
+  -- zoekt de app de betaling op bedrag, tegenrekening en datum. Oude imports: NULL (soort onbekend).
+  ALTER TABLE import_batches ADD COLUMN kind TEXT;
+
+  -- Regels uit een afschrift die niet zijn toegevoegd omdat dezelfde betaling er al stond uit een ander
+  -- soort afschrift (andere hash, zelfde betaling). matched_transaction_id is de betaling die er al stond
+  -- (de tegenhanger): die telt per soort afschrift maar voor één overgeslagen regel. Met "Toch toevoegen"
+  -- komt de regel er alsnog in (added_transaction_id) en is de tegenhanger weer vrij.
+  CREATE TABLE import_skipped (
+    id INTEGER PRIMARY KEY,
+    batch_id INTEGER NOT NULL REFERENCES import_batches(id),
+    bank_account_id INTEGER NOT NULL REFERENCES bank_accounts(id),
+    transaction_date TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    counter_iban TEXT,
+    counter_name TEXT,
+    description TEXT NOT NULL DEFAULT '',
+    reference TEXT,
+    source TEXT NOT NULL,
+    bank_id TEXT,
+    dedup_hash TEXT NOT NULL UNIQUE,
+    matched_transaction_id INTEGER NOT NULL REFERENCES bank_transactions(id),
+    added_transaction_id INTEGER REFERENCES bank_transactions(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_import_skipped_matched ON import_skipped(matched_transaction_id);
+  CREATE INDEX idx_import_skipped_batch ON import_skipped(batch_id);
+
+  -- Welke dagen een import besloeg staat sinds migratie 4 in import_batch_accounts. Mocht er van een
+  -- oude import toch geen regel zijn, dan alsnog uit de betalingen zelf (bestaande regels blijven staan).
+  INSERT OR IGNORE INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates)
+    SELECT import_batch_id, bank_account_id, MIN(transaction_date), MAX(transaction_date), COUNT(*), COUNT(*), 0
+    FROM bank_transactions WHERE import_batch_id IS NOT NULL GROUP BY import_batch_id, bank_account_id;
+  `,
 ];

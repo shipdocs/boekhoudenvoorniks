@@ -12,7 +12,7 @@ import type { EventService } from '../core-ledger/events';
 import type { RelationsService } from '../relations/relations';
 import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, customerVatSituation, isPurchaseVatCode, isSalesVatCode, suggestedSalesVat, vatNumberMatchesCountry, type SalesVatCode } from '../shared/vat';
 import { roundHalfAwayFromZero, type Cents } from '../shared/money';
-import { today, type IsoDate } from '../shared/dates';
+import { addDays, diffDays, today, workdaysBetween, type IsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
 import { korActive } from '../settings/settings';
 import type { NormalizedTransaction, ParseResult } from './types';
@@ -40,6 +40,8 @@ export interface BankTransaction {
   reference: string | null;
   source: string;
   import_batch_id: number | null;
+  /** de id die de bank zelf gaf; null bij een afschrift zonder id's en bij alles van vóór deze kolom */
+  bank_id: string | null;
   status: 'nieuw' | 'gematcht' | 'genegeerd';
   matched_journal_entry_id: number | null;
   matched_invoice_id: number | null;
@@ -56,6 +58,8 @@ export interface BankImportStatus {
   coverageFrom: string | null;
   coverageTo: string | null;
   totalTransactions: number;
+  /** regels die bij het inlezen zijn overgeslagen omdat de betaling er al stond (en niet alsnog toegevoegd) */
+  skipped: number;
 }
 
 export interface ImportSummary {
@@ -63,9 +67,50 @@ export interface ImportSummary {
   /** per bankrekening de periode die het afschrift besloeg */
   periods: { bankAccountId: number; from: string; to: string }[];
   imported: number;
+  /** stonden er al: dezelfde regel opnieuw, of dezelfde betaling uit een ander soort afschrift */
   duplicates: number;
+  /** daarvan niet toegevoegd omdat dezelfde betaling er al stond uit een ander soort afschrift; te bekijken en alsnog toe te voegen */
+  skipped: number;
+  /** van de nieuwe: in dagen die een eerder afschrift al besloeg (dat afschrift miste ze waarschijnlijk) */
+  addedInKnownPeriod: number;
+  /** de periodes van de eerdere afschriften waar de betalingen die er al stonden uit kwamen */
+  knownFrom: { from: string; to: string }[];
   warnings: string[];
   autoMatched: number;
+}
+
+/** Hooguit zoveel werkdagen mag de datum van dezelfde betaling in twee soorten afschrift verschillen. */
+export const SAME_PAYMENT_WORKDAYS = 3;
+
+/** Een regel uit een afschrift die niet is toegevoegd omdat de betaling er al stond, met die betaling ernaast. */
+export interface SkippedRow {
+  id: number;
+  batchId: number;
+  bankAccountId: number;
+  accountName: string;
+  date: IsoDate;
+  amount: Cents;
+  counterName: string | null;
+  counterIban: string | null;
+  description: string;
+  source: string;
+  /** de betaling die er al stond */
+  existing: { id: number; date: IsoDate; counterName: string | null; description: string; source: string; filename: string | null };
+  /** alsnog toegevoegd met "Toch toevoegen" */
+  added: boolean;
+}
+
+/** Vergelijking van het laatste eindsaldo van de bank met wat de app heeft, vanaf het beginsaldo. */
+export interface BalanceCheck {
+  bankAccountId: number;
+  /** de dag van het eindsaldo */
+  date: IsoDate;
+  bank: Cents;
+  app: Cents;
+  /** bank − app: positief = er mist geld dat binnenkwam (of een afschrijving staat dubbel) */
+  difference: Cents;
+  /** een overgeslagen regel van precies dit bedrag: de eerste kandidaat */
+  candidate: { skippedId: number; date: IsoDate; amount: Cents; counterName: string | null; description: string } | null;
 }
 
 export interface BookToAccountInput {
@@ -383,19 +428,87 @@ export class BankService {
     return createHash('sha256').update(basis).digest('hex');
   }
 
+  /**
+   * Leest een afschrift in. Een betaling die er al staat, komt er niet nog een keer in (#184):
+   * 1. zelfde hash als een bestaande betaling of een eerder overgeslagen regel: overslaan;
+   * 2. valt de datum in dagen die een eerder afschrift al besloeg, dan zoeken we de tegenhanger (zelfde
+   *    rekening en bedrag, zelfde tegenrekening als beide er een hebben, hooguit 3 werkdagen ertussen).
+   *    Gevonden: niet toevoegen, wel bewaren in import_skipped. Niet gevonden: toevoegen, want dan miste
+   *    het eerdere afschrift hem waarschijnlijk;
+   * 3. daarbuiten: gewoon toevoegen.
+   * Elke bestaande betaling telt per soort afschrift maar één keer als tegenhanger, zodat twee echte
+   * gelijke betalingen er allebei in blijven en een derde soort afschrift dezelfde betaling toch herkent.
+   * Het soort afschrift is de bron plus, bij CSV, de indeling. Daarbij:
+   * - betalingen uit hetzelfde soort afschrift zijn geen tegenhanger: daar beslist de hash, zoals altijd
+   *   (twee keer hetzelfde soort met een dag overlap blijft dus werken zoals het deed);
+   * - stap 2 geldt ook hooguit 3 werkdagen vóór of na een eerder afschrift van een ander soort (alleen
+   *   tegen betalingen van dat andere soort): daar verschuift de datum over de rand van de periode.
+   */
   import(result: ParseResult, opts: { filename?: string; bankAccountId?: number } = {}): Omit<ImportSummary, 'autoMatched'> {
     return tx(this.db, () => {
-      const batch = this.db.prepare('INSERT INTO import_batches (filename, source) VALUES (?, ?)').run(opts.filename ?? null, result.source);
+      // alleen betalingen van vóór deze import kunnen een tegenhanger zijn
+      const lastBefore = (this.db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM bank_transactions').get() as { id: number }).id;
+      // het soort afschrift: de bron, en bij CSV ook de indeling
+      const kind = result.layout ? `${result.source}:${result.layout}` : result.source;
+      const batch = this.db.prepare('INSERT INTO import_batches (filename, source, kind) VALUES (?, ?, ?)').run(opts.filename ?? null, result.source, kind);
       const batchId = Number(batch.lastInsertRowid);
       const insert = this.db.prepare(
-        `INSERT OR IGNORE INTO bank_transactions (bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, import_batch_id, dedup_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO bank_transactions (bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, import_batch_id, dedup_hash, bank_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const byHash = this.db.prepare('SELECT id, bank_id, import_batch_id AS batch, bank_account_id AS account, amount, transaction_date AS date FROM bank_transactions WHERE dedup_hash = ?');
+      const skippedByHash = this.db.prepare(
+        `SELECT k.matched_transaction_id AS matched, t.import_batch_id AS batch, t.bank_account_id AS account, k.amount, k.transaction_date AS date
+         FROM import_skipped k JOIN bank_transactions t ON t.id = k.matched_transaction_id WHERE k.dedup_hash = ?`,
+      );
+      // een import met alleen een saldo (geen betalingen) besloeg geen dagen
+      const inKnownPeriod = this.db.prepare('SELECT 1 FROM import_batch_accounts WHERE bank_account_id = ? AND batch_id <> ? AND transactions > 0 AND period_from <= ? AND period_to >= ? LIMIT 1');
+      // eerdere afschriften van een ander soort rond deze dag (van een oude import is alleen de bron bekend)
+      const nearOtherKind = this.db.prepare(
+        `SELECT s.period_from AS "from", s.period_to AS "to" FROM import_batch_accounts s JOIN import_batches b ON b.id = s.batch_id
+         WHERE s.bank_account_id = ? AND s.batch_id <> ? AND (CASE WHEN b.kind IS NULL THEN b.source <> ? ELSE b.kind <> ? END) AND s.period_from <= ? AND s.period_to >= ?`,
+      );
+      // kandidaten voor de tegenhanger, met het soort afschrift waar ze uit kwamen
+      const candidates = this.db.prepare(
+        `SELECT c.id, c.transaction_date AS date, c.counter_iban AS iban, c.source, c.bank_id AS bankId, c.import_batch_id AS batch, b.kind
+         FROM bank_transactions c LEFT JOIN import_batches b ON b.id = c.import_batch_id
+         WHERE c.bank_account_id = ? AND c.amount = ? AND c.id <= ? AND c.transaction_date BETWEEN ? AND ?`,
+      );
+      // Wie al tegenhanger is van een overgeslagen regel uit dit soort afschrift, blijft dat, ook in latere
+      // imports: een nieuwe regel uit hetzelfde soort is dan een andere betaling. Een ander soort afschrift
+      // mag dezelfde betaling wel weer als tegenhanger vinden (het is daar dezelfde betaling).
+      const occupied = this.db.prepare(
+        `SELECT 1 FROM import_skipped k JOIN import_batches b ON b.id = k.batch_id
+         WHERE k.matched_transaction_id = ? AND k.added_transaction_id IS NULL AND COALESCE(b.kind, b.source) = ? LIMIT 1`,
+      );
+      const insertSkipped = this.db.prepare(
+        `INSERT INTO import_skipped (batch_id, bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, bank_id, dedup_hash, matched_transaction_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const seen = new Map<string, number>();
+      /** de regels van dit bestand per hash, met bedrag en datum */
+      const hashesInFile = new Map<string, { amount: Cents; date: IsoDate }>();
+      // Dezelfde id van de bank is alleen dezelfde betaling als ook het bedrag gelijk is en de datum hooguit
+      // een paar werkdagen scheelt. Anders hergebruikte de bank de id voor een andere betaling.
+      const samePayment = (a: { amount: Cents; date: IsoDate }, b: { amount: Cents; date: IsoDate }) => a.amount === b.amount && workdaysBetween(a.date, b.date) <= SAME_PAYMENT_WORKDAYS;
+      /** betalingen die in deze import al terugkwamen (stap 1) of al als tegenhanger dienen (stap 2) */
+      const taken = new Set<number>();
+      /** de eerdere imports (per rekening) waar de betalingen die er al stonden uit kwamen */
+      const knownBatches = new Set<string>();
+      const known = (batch: number | null, account: number) => {
+        if (batch !== null) knownBatches.add(`${batch}|${account}`);
+      };
+      /** per eerdere import (en rekening): de betalingen die in dit bestand met dezelfde hash terugkwamen */
+      const returned = new Map<string, Set<number>>();
       let imported = 0;
       let duplicates = 0;
+      let skipped = 0;
+      let addedInKnownPeriod = 0;
       let byBank: BankAccount | undefined;
       const perAccount = new Map<number, { from: string; to: string; transactions: number; imported: number; duplicates: number }>();
+      const pending: { t: NormalizedTransaction; account: BankAccount; hash: string; bankId: string | null }[] = [];
+
+      // stap 1 voor alle regels eerst: wat via zijn hash terugkomt, kan daarna geen tegenhanger meer zijn
       for (const t of result.transactions) {
         const account = opts.bankAccountId ? this.getAccount(opts.bankAccountId) : !t.ownIban && result.bank ? (byBank ??= this.accountForBank(result.bank)) : this.accountForIban(t.ownIban);
         const stat = perAccount.get(account.id) ?? { from: t.date, to: t.date, transactions: 0, imported: 0, duplicates: 0 };
@@ -406,17 +519,125 @@ export class BankService {
         const key = [account.id, t.date, t.amount, t.counterIban, t.description].join('|');
         const occurrence = (seen.get(key) ?? 0) + 1;
         seen.set(key, occurrence);
-        const hash = BankService.hash(t, account.iban, occurrence);
-        const r = insert.run(account.id, t.date, t.amount, t.counterIban ?? null, t.counterName ?? null, t.description ?? '', t.reference ?? null, result.source, batchId, hash);
-        if (r.changes > 0) (imported++, stat.imported++);
-        else (duplicates++, stat.duplicates++);
+        type Known = { id: number; bank_id: string | null; batch: number | null; account: number; amount: Cents; date: IsoDate };
+        type Skipped = { matched: number; batch: number | null; account: number; amount: Cents; date: IsoDate };
+        let bankId = t.bankId || null;
+        let hash = BankService.hash({ ...t, bankId }, account.iban, occurrence);
+        let existing = byHash.get(hash) as Known | undefined;
+        let again = existing ? undefined : (skippedByHash.get(hash) as Skipped | undefined);
+        // De id van de bank wijst naar een andere betaling (ander bedrag, of dagen later): de bank hergebruikt
+        // die id, dus hij zegt hier niets. Deze regel telt dan als een regel zonder id (hash op de inhoud);
+        // anders zou hij stil wegvallen als "al bekend".
+        const sameId = bankId ? (existing ?? again ?? hashesInFile.get(hash)) : undefined;
+        if (sameId && !samePayment(sameId, t)) {
+          bankId = null;
+          hash = BankService.hash({ ...t, bankId: null }, account.iban, occurrence);
+          existing = byHash.get(hash) as Known | undefined;
+          again = existing ? undefined : (skippedByHash.get(hash) as Skipped | undefined);
+        }
+        // Ingelezen toen de rekening nog geen rekeningnummer had: de hash is toen zonder dat nummer gemaakt.
+        if (!existing && !again && account.iban) {
+          const old = byHash.get(BankService.hash({ ...t, bankId }, null, occurrence)) as Known | undefined;
+          if (old && old.account === account.id) existing = old;
+        }
+        if (existing) {
+          taken.add(existing.id);
+          known(existing.batch, existing.account);
+          if (existing.batch !== null) returned.set(`${existing.batch}|${existing.account}`, (returned.get(`${existing.batch}|${existing.account}`) ?? new Set()).add(existing.id));
+          // de hash bewijst dat dit dezelfde id van de bank is: bij een oude regel alsnog vastleggen
+          if (bankId && !existing.bank_id) this.db.prepare('UPDATE bank_transactions SET bank_id = ? WHERE id = ? AND bank_id IS NULL').run(bankId, existing.id);
+        } else if (again) {
+          // eerder overgeslagen: weer tegen dezelfde tegenhanger
+          known(again.batch, again.account);
+        }
+        if (existing || again || hashesInFile.has(hash)) {
+          duplicates++;
+          stat.duplicates++;
+          continue;
+        }
+        hashesInFile.set(hash, { amount: t.amount, date: t.date });
+        pending.push({ t, account, hash, bankId });
+      }
+
+      // Van een import van vóór #184 is het soort afschrift niet vastgelegd. Die is "hetzelfde soort" als
+      // alles wat hij had in de dagen van dit bestand met dezelfde hash terugkwam. Dan zou dezelfde betaling
+      // ook dezelfde hash hebben: een regel met een andere hash is een andere betaling, en de rest van die
+      // import (de dagen ervoor) is geen tegenhanger. Zo blijft twee keer hetzelfde soort afschrift met een
+      // dag overlap werken zoals het altijd deed.
+      const sameKind = new Set<string>();
+      const inWindow = this.db.prepare('SELECT id FROM bank_transactions WHERE import_batch_id = ? AND bank_account_id = ? AND transaction_date BETWEEN ? AND ?');
+      for (const [key, ids] of returned) {
+        const [b, a] = key.split('|').map(Number) as [number, number];
+        const window = perAccount.get(a);
+        if (window && (inWindow.all(b, a, window.from, window.to) as { id: number }[]).every((r) => ids.has(r.id))) sameKind.add(key);
+      }
+
+      // stap 2: voor elke regel in dagen die een eerder afschrift al besloeg, de mogelijke tegenhangers
+      const pairs: { row: number; id: number; batch: number | null; workdays: number; days: number; otherIban: number }[] = [];
+      const overlaps: boolean[] = [];
+      for (const [row, { t, account, bankId }] of pending.entries()) {
+        const overlap = Boolean(inKnownPeriod.get(account.id, batchId, t.date, t.date));
+        overlaps.push(overlap);
+        // Net buiten een eerder afschrift van een ander soort: dezelfde betaling kan daar een andere datum
+        // hebben (kaartbetaling van vrijdag, geboekt op maandag). Dan alleen vergelijken met dat andere soort.
+        const edge = !overlap && (nearOtherKind.all(account.id, batchId, result.source, kind, addDays(t.date, 7), addDays(t.date, -7)) as { from: IsoDate; to: IsoDate }[])
+          .some((p) => (t.date > p.to ? workdaysBetween(p.to, t.date) : workdaysBetween(t.date, p.from)) <= SAME_PAYMENT_WORKDAYS);
+        if (!overlap && !edge) continue;
+        const iban = t.counterIban ? normalizeIban(t.counterIban) : null;
+        for (const c of candidates.all(account.id, t.amount, lastBefore, addDays(t.date, -7), addDays(t.date, 7)) as { id: number; date: IsoDate; iban: string | null; source: string; bankId: string | null; batch: number | null; kind: string | null }[]) {
+          if (taken.has(c.id)) continue;
+          // uit hetzelfde soort afschrift: daar beslist de hash (stap 1), en die was anders
+          if (c.kind === kind || (c.batch !== null && sameKind.has(`${c.batch}|${account.id}`))) continue;
+          // CAMT, MT940 en de koppeling hebben geen indelingen: een oude import uit dezelfde bron is hetzelfde soort
+          if (c.kind === null && c.source === result.source && result.source !== 'csv') continue;
+          if (!overlap && c.kind === null && c.source === result.source) continue;
+          if (occupied.get(c.id, kind)) continue;
+          // allebei een tegenrekening: dan moet die gelijk zijn
+          if (iban && c.iban && normalizeIban(c.iban) !== iban) continue;
+          // twee verschillende id's uit dezelfde bron zijn per definitie twee betalingen
+          if (bankId && c.bankId && c.source === result.source) continue;
+          const workdays = workdaysBetween(c.date, t.date);
+          if (workdays > SAME_PAYMENT_WORKDAYS) continue;
+          pairs.push({ row, id: c.id, batch: c.batch, workdays, days: Math.abs(diffDays(c.date, t.date)), otherIban: iban && c.iban ? 0 : 1 });
+        }
+      }
+      // Eerst wie dezelfde tegenrekening heeft, dan de dichtstbijzijnde datum, over alle regels heen: zo krijgt
+      // elke regel zijn eigen tegenhanger en niet die van een andere betaling van hetzelfde bedrag een dag later.
+      pairs.sort((x, y) => x.otherIban - y.otherIban || x.workdays - y.workdays || x.days - y.days || x.row - y.row || x.id - y.id);
+      const counterpart = new Map<number, { id: number; batch: number | null }>();
+      for (const p of pairs) {
+        if (counterpart.has(p.row) || taken.has(p.id)) continue;
+        counterpart.set(p.row, { id: p.id, batch: p.batch });
+        taken.add(p.id);
+      }
+      for (const [row, { t, account, hash, bankId }] of pending.entries()) {
+        const stat = perAccount.get(account.id)!;
+        const match = counterpart.get(row);
+        if (match) {
+          // stond er al: niet toevoegen, wel bewaren met de tegenhanger erbij
+          insertSkipped.run(batchId, account.id, t.date, t.amount, t.counterIban ?? null, t.counterName ?? null, t.description ?? '', t.reference ?? null, result.source, bankId, hash, match.id);
+          known(match.batch, account.id);
+          duplicates++;
+          skipped++;
+          stat.duplicates++;
+          continue;
+        }
+        // geen tegenhanger (dan miste het eerdere afschrift hem waarschijnlijk), of nieuwe dagen (stap 3)
+        const r = insert.run(account.id, t.date, t.amount, t.counterIban ?? null, t.counterName ?? null, t.description ?? '', t.reference ?? null, result.source, batchId, hash, bankId);
+        if (r.changes > 0) {
+          imported++;
+          stat.imported++;
+          if (overlaps[row]) addedInKnownPeriod++;
+        } else (duplicates++, stat.duplicates++);
       }
       // eindsaldo volgens het afschrift (het laatste per rekening), om later te controleren of er iets ontbreekt
       const closing = new Map<number, { date: IsoDate; amount: Cents }>();
       for (const b of result.balances ?? []) {
+        // de saldocontrole rekent in euro's: een saldo in een andere valuta bewaren we niet
+        if (b.currency && b.currency !== 'EUR') continue;
         const account = opts.bankAccountId ? this.getAccount(opts.bankAccountId) : !b.ownIban && result.bank ? (byBank ??= this.accountForBank(result.bank)) : this.accountForIban(b.ownIban);
-        const known = closing.get(account.id);
-        if (!known || b.date >= known.date) closing.set(account.id, { date: b.date, amount: b.amount });
+        const prev = closing.get(account.id);
+        if (!prev || b.date >= prev.date) closing.set(account.id, { date: b.date, amount: b.amount });
         // een afschrift zonder betalingen (alleen een saldo) telt ook: dat saldo is juist nuttig
         if (!perAccount.has(account.id)) perAccount.set(account.id, { from: b.date, to: b.date, transactions: 0, imported: 0, duplicates: 0 });
       }
@@ -429,8 +650,130 @@ export class BankService {
       }
       this.db.prepare('UPDATE import_batches SET imported_count = ?, duplicate_count = ? WHERE id = ?').run(imported, duplicates, batchId);
       const periods = [...perAccount].map(([bankAccountId, s]) => ({ bankAccountId, from: s.from, to: s.to }));
-      return { batchId, periods, imported, duplicates, warnings: result.warnings };
+      const period = this.db.prepare('SELECT period_from AS "from", period_to AS "to" FROM import_batch_accounts WHERE batch_id = ? AND bank_account_id = ?');
+      const knownFrom = [...knownBatches]
+        .map((k) => period.get(...k.split('|').map(Number)) as { from: string; to: string } | undefined)
+        .filter((p): p is { from: string; to: string } => !!p)
+        .sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+      return { batchId, periods, imported, duplicates, skipped, addedInKnownPeriod, knownFrom, warnings: result.warnings };
     });
+  }
+
+  /**
+   * De regels die bij het inlezen zijn overgeslagen omdat de betaling er al stond, met die betaling
+   * ernaast. Per import (na het inlezen) of per rekening (bij een saldo dat niet klopt).
+   */
+  skippedRows(filter: { batchId?: number; bankAccountId?: number } = {}): SkippedRow[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (filter.batchId) (where.push('k.batch_id = ?'), params.push(filter.batchId));
+    if (filter.bankAccountId) (where.push('k.bank_account_id = ?'), params.push(filter.bankAccountId));
+    const rows = this.db
+      .prepare(
+        `SELECT k.*, a.name AS account_name, t.transaction_date AS e_date, t.counter_name AS e_name, t.description AS e_description, t.source AS e_source, b.filename AS e_filename
+         FROM import_skipped k
+         JOIN bank_accounts a ON a.id = k.bank_account_id
+         JOIN bank_transactions t ON t.id = k.matched_transaction_id
+         LEFT JOIN import_batches b ON b.id = t.import_batch_id
+         ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY k.transaction_date DESC, k.id DESC LIMIT 500`,
+      )
+      .all(...params) as (Record<string, unknown> & { id: number })[];
+    return rows.map((r) => ({
+      id: r.id,
+      batchId: r.batch_id as number,
+      bankAccountId: r.bank_account_id as number,
+      accountName: r.account_name as string,
+      date: r.transaction_date as IsoDate,
+      amount: r.amount as Cents,
+      counterName: r.counter_name as string | null,
+      counterIban: r.counter_iban as string | null,
+      description: r.description as string,
+      source: r.source as string,
+      existing: { id: r.matched_transaction_id as number, date: r.e_date as IsoDate, counterName: r.e_name as string | null, description: r.e_description as string, source: r.e_source as string, filename: r.e_filename as string | null },
+      added: r.added_transaction_id !== null,
+    }));
+  }
+
+  /** De betalingen uit deze import die nieuw waren in dagen die een eerder afschrift al besloeg. */
+  addedInKnownPeriod(batchId: number): BankTransaction[] {
+    return this.db
+      .prepare(
+        `SELECT t.* FROM bank_transactions t
+         WHERE t.import_batch_id = ? AND EXISTS (
+           SELECT 1 FROM import_batch_accounts s WHERE s.bank_account_id = t.bank_account_id AND s.batch_id < t.import_batch_id
+             AND s.period_from <= t.transaction_date AND s.period_to >= t.transaction_date)
+           AND NOT EXISTS (SELECT 1 FROM import_skipped k WHERE k.added_transaction_id = t.id)
+         ORDER BY t.transaction_date DESC, t.id DESC`,
+      )
+      .all(batchId) as BankTransaction[];
+  }
+
+  /**
+   * "Toch toevoegen": een overgeslagen regel was wel een eigen betaling. Hij komt er alsnog in, met de
+   * hash die hij bij het inlezen had (opnieuw inlezen geeft hem dus niet dubbel); de betaling die er al
+   * stond is daarna weer vrij als tegenhanger.
+   */
+  addSkipped(skippedId: number): number {
+    const k = this.db.prepare('SELECT * FROM import_skipped WHERE id = ?').get(skippedId) as
+      | { id: number; batch_id: number; bank_account_id: number; transaction_date: IsoDate; amount: Cents; counter_iban: string | null; counter_name: string | null; description: string; reference: string | null; source: string; bank_id: string | null; dedup_hash: string; added_transaction_id: number | null }
+      | undefined;
+    if (!k) throw new ValidationError('Deze regel bestaat niet (meer)');
+    if (k.added_transaction_id) throw new ValidationError('Deze betaling is al toegevoegd');
+    return tx(this.db, () => {
+      const id = Number(
+        this.db
+          .prepare(
+            `INSERT INTO bank_transactions (bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, import_batch_id, dedup_hash, bank_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(k.bank_account_id, k.transaction_date, k.amount, k.counter_iban, k.counter_name, k.description, k.reference, k.source, k.batch_id, k.dedup_hash, k.bank_id).lastInsertRowid,
+      );
+      this.db.prepare('UPDATE import_skipped SET added_transaction_id = ? WHERE id = ?').run(id, k.id);
+      // de tellingen van die import kloppen daarna weer met wat er in staat
+      this.db.prepare('UPDATE import_batches SET imported_count = imported_count + 1, duplicate_count = duplicate_count - 1 WHERE id = ?').run(k.batch_id);
+      this.db.prepare('UPDATE import_batch_accounts SET imported = imported + 1, duplicates = duplicates - 1 WHERE batch_id = ? AND bank_account_id = ?').run(k.batch_id, k.bank_account_id);
+      return id;
+    });
+  }
+
+  /**
+   * Klopt het saldo? Het laatste eindsaldo uit een afschrift tegenover het beginsaldo plus alle
+   * betalingen vanaf de datum van het beginsaldo t/m de saldodatum, met elke status (ook een
+   * overgeslagen privébetaling ging van de rekening af). Niet `statementBalance`: die telt alles, zonder
+   * datumgrens. Zonder beginsaldo of zonder eindsaldo valt er niets te vergelijken (null).
+   * `zeroOpeningDate`: de rekening begon op die dag bevestigd met € 0 (dan staat er geen beginsaldo geboekt).
+   */
+  balanceCheck(bankAccountId: number, zeroOpeningDate: IsoDate | null = null): BalanceCheck | null {
+    const booked = this.openingBalance(bankAccountId);
+    const opening = booked.date ? { amount: booked.amount, date: booked.date } : zeroOpeningDate ? { amount: 0, date: zeroOpeningDate } : null;
+    if (!opening) return null;
+    const closing = this.db
+      .prepare('SELECT closing_balance AS amount, closing_date AS date, batch_id AS batch FROM import_batch_accounts WHERE bank_account_id = ? AND closing_balance IS NOT NULL AND closing_date >= ? ORDER BY closing_date DESC, batch_id DESC LIMIT 1')
+      .get(bankAccountId, opening.date) as { amount: Cents; date: IsoDate; batch: number } | undefined;
+    if (!closing) return null;
+    // Het saldo hoort bij de datums van dát afschrift. Stond een betaling er al uit een ander soort afschrift
+    // (met een dag verschil), dan telt de datum die het afschrift met het saldo eraan gaf.
+    const sum = (this.db
+      .prepare(
+        `SELECT COALESCE(SUM(t.amount), 0) AS s FROM bank_transactions t
+         LEFT JOIN import_skipped k ON k.matched_transaction_id = t.id AND k.batch_id = ? AND k.added_transaction_id IS NULL
+         WHERE t.bank_account_id = ? AND COALESCE(k.transaction_date, t.transaction_date) >= ? AND COALESCE(k.transaction_date, t.transaction_date) <= ?`,
+      )
+      .get(closing.batch, bankAccountId, opening.date, closing.date) as { s: number }).s;
+    const app = opening.amount + sum;
+    const difference = closing.amount - app;
+    // Kandidaat: een overgeslagen regel van precies het verschil, waarvan de betaling die er al stond wél is
+    // meegeteld. (Is die niet meegeteld, dan verklaart een datumverschil het en zou toevoegen hem dubbel maken.)
+    const candidate = difference === 0 ? undefined : (this.db
+      .prepare(
+        `SELECT k.id AS skippedId, k.transaction_date AS date, k.amount, k.counter_name AS counterName, k.description FROM import_skipped k
+         JOIN bank_transactions t ON t.id = k.matched_transaction_id
+         WHERE k.bank_account_id = ? AND k.added_transaction_id IS NULL AND k.amount = ? AND k.transaction_date >= ? AND k.transaction_date <= ?
+           AND t.transaction_date >= ? AND t.transaction_date <= ?
+         ORDER BY k.transaction_date DESC, k.id DESC LIMIT 1`,
+      )
+      .get(bankAccountId, difference, opening.date, closing.date, opening.date, closing.date) as BalanceCheck['candidate'] | undefined);
+    return { bankAccountId, date: closing.date, bank: closing.amount, app, difference, candidate: candidate ?? null };
   }
 
   /**
@@ -459,6 +802,7 @@ export class BankService {
         coverageFrom: coverage.f,
         coverageTo: coverage.t,
         totalTransactions: coverage.n,
+        skipped: (this.db.prepare('SELECT COUNT(*) AS n FROM import_skipped WHERE bank_account_id = ? AND added_transaction_id IS NULL').get(a.id) as { n: number }).n,
       };
     });
   }
