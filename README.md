@@ -145,7 +145,9 @@ automatisering volgde in v0.2.0, aftrekposten, de demo en teksten in gewone taal
 voor de boekhouder in 0.6.15, en de uitwisseling met de boekhouder met het abonnement in 0.7 (zie
 [CHANGELOG.md](CHANGELOG.md)). De licentieserver (Mollie) staat sinds 30 september 2026 live. De online
 hulp bij categorievoorstellen is sinds 0.7.4 beschikbaar voor abonnees, standaard uit
-([docs/jev-assistent.md](docs/jev-assistent.md); evaluatie in issue #168). Openstaand werk staat als issue in GitHub,
+([docs/jev-assistent.md](docs/jev-assistent.md); evaluatie in issue #168). Versie 1.0.0 (oktober 2026) bracht de
+gedeelde gegevensmap met een eigen mapkeuze, het blokkeren van dubbele bonnen en het inlezen van
+bankafschriften zonder dubbele betalingen. Openstaand werk staat als issue in GitHub,
 met labels voor prioriteit en omvang; milestones gebruiken we niet.
 
 Het rekeningschema gebruikt de officiële RGS-referentiecodes (taxonomie-release 20251210, `src/core-ledger/rgs-codes.json`).
