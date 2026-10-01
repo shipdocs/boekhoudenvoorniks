@@ -308,14 +308,16 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
         <div className="grid">
           <p><strong>{name}</strong> · <Euro cents={p.open_amount} /> · <DateNl date={p.invoice_date} /></p>
           <div className="notice warn">
-            Op <strong>{b.account}</strong> staat op {formatDateNl(b.date)} al <strong><Euro cents={b.amount} /></strong> aan {b.counterName ?? name}, geboekt als kosten. Is dat dezelfde betaling?
+            Op <strong>{b.account}</strong> staat op {formatDateNl(b.date)} al <strong><Euro cents={b.amount} /></strong> aan {b.counterName ?? name}, {b.booking === 'vraag' ? 'verwerkt als "weet ik nog niet"' : 'geboekt als kosten'}. Is dat dezelfde betaling?
           </div>
-          <p className="small muted">Ja: de aankoop vervalt en de bon wordt het bewijsstuk bij die betaling, zodat de kosten en de btw niet twee keer tellen.</p>
+          <p className="small muted">{b.booking === 'vraag'
+            ? 'Ja: de betaling wordt aan deze aankoop gekoppeld; die staat daarna als betaald. De losse post op "weet ik nog niet" vervalt.'
+            : 'Ja: de aankoop vervalt en de bon wordt het bewijsstuk bij die betaling, zodat de kosten en de btw niet twee keer tellen.'}</p>
         </div>
         <div className="row end" style={{ marginTop: 16 }}>
           <Button onClick={() => setSeparate(true)}>Nee, apart betaald</Button>
           <Button kind="primary" disabled={busy} onClick={async () => {
-            const r = await run(() => api.purchases.mergeWithBooked(p.id, b.bankTransactionId), 'De bon hoort nu bij die betaling ✓');
+            const r = await run(() => api.purchases.mergeWithBooked(p.id, b.bankTransactionId), b.booking === 'vraag' ? 'De betaling hoort nu bij deze aankoop ✓' : 'De bon hoort nu bij die betaling ✓');
             if (r) await onDone();
           }}>Ja, dezelfde betaling</Button>
         </div>

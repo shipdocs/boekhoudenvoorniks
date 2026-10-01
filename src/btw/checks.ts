@@ -5,6 +5,7 @@ import { formatEuro, type Cents } from '../shared/money';
 import type { IsoDate, Period } from '../shared/dates';
 import type { CarPrivateUse } from './car';
 import { EU_B2C_THRESHOLD, EU_COUNTRIES, countryCode } from '../shared/vat';
+import { BankPurchaseMatcher, purchaseSupplierName, type PurchaseProbe } from '../documents/bank-purchase-match';
 
 /**
  * Controles vóór de btw-aangifte (#20): alles wat de aangifte fout kan maken. Blokkerende
@@ -108,28 +109,26 @@ export function runVatChecks(
        FROM documents WHERE status = 'controle' AND issues LIKE '%"field":"duplicate"%' AND json_extract(result, '$.invoiceDate.value') BETWEEN ? AND ?`,
     )
     .all(start, end) as { id: number; date: IsoDate; label: string; total: number | null }[];
-  const dupPurchases = db
-    .prepare(
-      `SELECT a.id AS a, b.id AS b, b.invoice_date AS date, b.total AS total, (SELECT name FROM relations WHERE id = b.relation_id) AS label FROM purchase_invoices a JOIN purchase_invoices b
-         ON a.id < b.id AND a.relation_id = b.relation_id AND a.total = b.total
-        AND ABS(julianday(a.invoice_date) - julianday(b.invoice_date)) <= 3
-        AND (a.supplier_reference IS NULL OR b.supplier_reference IS NULL OR a.supplier_reference = b.supplier_reference)
-       WHERE b.invoice_date BETWEEN ? AND ?`,
-    )
-    .all(start, end) as { a: number; b: number; date: IsoDate; total: number; label: string | null }[];
-  const dups = dupDocs.length + dupPurchases.length;
+  // twee aankopen die dezelfde lijken, en een aankoop waarvan de betaling ook los op de bank geboekt is (#221)
+  const doubles = new BankPurchaseMatcher(db).doubles(start, end);
+  const dups = dupDocs.length + doubles.purchases.length + doubles.bank.length;
   if (dups > 0) {
+    const supplier = (p: PurchaseProbe) => purchaseSupplierName(p) ?? 'Aankoop';
     found.push({
       key: 'dubbel',
       blocking: true,
       title: `${dups} mogelijk dubbele ${dups === 1 ? 'aankoop' : 'aankopen'}`,
-      detail: 'Zelfde leverancier en bedrag rond dezelfde datum. Controleer of je niet twee keer btw terugvraagt.',
+      detail: 'Zelfde leverancier en bedrag rond dezelfde datum, of een betaling die ook los als kosten of op "weet ik nog niet" staat. Controleer of je kosten en btw niet twee keer telt.',
       count: dups,
-      fingerprint: [...dupDocs.map((d) => `d${d.id}`), ...dupPurchases.map((p) => `p${p.a}-${p.b}`)].join(','),
+      fingerprint: [...dupDocs.map((d) => `d${d.id}`), ...doubles.purchases.map((p) => `p${p.a.id}-${p.b.id}`), ...doubles.bank.map((x) => `b${x.transaction.id}-p${x.purchase.id}`)].join(','),
       screen: 'aankopen',
       items: [
         ...dupDocs.map((d) => ({ kind: 'document' as const, id: d.id, date: d.date, label: `Bon ${d.label}`, amount: d.total === null ? null : -d.total })),
-        ...dupPurchases.flatMap((p) => [p.a, p.b].map((id) => ({ kind: 'aankoop' as const, id, date: p.date, label: `${p.label ?? 'Aankoop'} (mogelijk dubbel)`, amount: -p.total }))),
+        ...doubles.purchases.flatMap(({ a, b }) => [a, b].map((p) => ({ kind: 'aankoop' as const, id: p.id, date: p.invoice_date, label: `${supplier(p)} (mogelijk dubbel)`, amount: -p.total }))),
+        ...doubles.bank.flatMap(({ purchase: p, transaction: t }) => [
+          { kind: 'bank' as const, id: t.id, date: t.transaction_date, label: `${t.counter_name ?? t.description} (betaling, los geboekt)`, amount: t.amount },
+          { kind: 'aankoop' as const, id: p.id, date: p.invoice_date, label: `${supplier(p)} (mogelijk dezelfde betaling)`, amount: -p.total },
+        ]),
       ],
     });
   }

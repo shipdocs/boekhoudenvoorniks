@@ -44,6 +44,7 @@ import { MailIntakeService } from './mail/mail-intake';
 import { FxService } from './fx/fx';
 import { FxRepair } from './fx/repair';
 import { BookedPayments } from './documents/booked-payment';
+import { BankPurchaseMatcher } from './documents/bank-purchase-match';
 import { OwnCompanyPayments } from './documents/own-company';
 import { BookedInfo } from './search/booked-info';
 
@@ -88,7 +89,9 @@ export function createServices(db: Db, deps: ServiceDeps) {
   };
   const sender = new DocumentSender(db, settings, invoices, quotes, deps.pdf, mailerFactory);
   const bank = new BankService(db, ledger, invoices, purchases, relations, events);
-  const matching = new MatchingEngine(bank, invoices, purchases, relations);
+  // een betaling en een aankoop waarvan de gebruiker zei dat ze niet bij elkaar horen, stelt de app niet opnieuw voor
+  const purchaseMatcher = new BankPurchaseMatcher(db);
+  const matching = new MatchingEngine(bank, invoices, purchases, relations, (pair) => purchaseMatcher.rejected(pair));
   const vat = new VatService(db, ledger, settings);
   const dashboard = new DashboardService(db, ledger, invoices, bank, vat);
   const periods = new PeriodCloseService(db, ledger, bank);
@@ -132,8 +135,8 @@ export function createServices(db: Db, deps: ServiceDeps) {
   // vreemde valuta in wat er al stond (#74): bonnen en aankopen van vóór 0.3.9 omrekenen
   const fxRepair = new FxRepair(db, fx, intake, purchases, bank);
   inbox.setFxRepair(fxRepair);
-  // aankoop dubbel met een betaling die al als kosten geboekt is (bv. via een gemengde rekening)
-  const bookedPayments = new BookedPayments(db, purchases, intake, relations);
+  // aankoop en afschrijving die dezelfde uitgave zijn (bv. de betaling al als kosten geboekt via een gemengde rekening)
+  const bookedPayments = new BookedPayments(db, purchases, intake, relations, bank);
   quick.setBookedPayments(bookedPayments);
   inbox.setBookedPayments(bookedPayments);
   inbox.setOwnCompany(ownCompany);

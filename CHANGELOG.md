@@ -1,5 +1,9 @@
 # Wijzigingen
 
+## Volgende versie
+
+- Een betaling die bij een aankoop hoort die er al staat, boekt de app niet meer vanzelf als losse kosten, ook niet als het bedrag door de koers iets anders is. Je krijgt eerst de vraag of ze bij elkaar horen (#221).
+
 ## 1.0.1 — klaar voor de Microsoft Store
 
 Voor de gewone Windows-versie (`Setup.exe`) en Linux verandert er in deze versie niets; het is de eerste versie die ook als Store-pakket is gebouwd.

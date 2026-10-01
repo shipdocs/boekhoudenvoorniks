@@ -34,6 +34,7 @@ import { EvidenceLinks, sameTarget, targetKey, type DocumentLink, type LinkOrigi
 import type { DocumentOutcome } from '../shared/document-outcome';
 import { detectOwnInvoice, sameCompanyName, OWN_COMPANY_CANDIDATE, OWN_COMPANY_ISSUE, type OwnIdentity, type OwnInvoice } from './own-company';
 import type { PaidWith } from '../shared/paid-with';
+import { BankPurchaseMatcher, BANK_DAYS_BEFORE, SURE_DAYS, dateFits, probeOfDocument, sameSupplierName } from '../documents/bank-purchase-match';
 
 
 export interface IntakeDocument {
@@ -274,10 +275,13 @@ export class IntakeService {
     private readonly ownVatNumber: () => string = () => '',
   ) {
     this.links = new EvidenceLinks(db);
+    this.matcher = new BankPurchaseMatcher(db);
   }
 
   /** de koppeling tussen een document en de aankoop of bankbetaling waar het bij hoort (#179) */
   readonly links: EvidenceLinks;
+  /** de gedeelde vergelijking van een betaling met een aankoop of bon (#221) */
+  private readonly matcher: BankPurchaseMatcher;
   /** per bestand één toevoeging tegelijk (zie exclusive) */
   private readonly busy = new Map<string, Promise<unknown>>();
   /** een bewaard bestand weer weghalen als het document toch niet vastgelegd kon worden */
@@ -1025,7 +1029,11 @@ export class IntakeService {
     return this.get(id);
   }
 
-  /** Zoekt een onverwerkte banktransactie met hetzelfde bedrag rond dezelfde datum. */
+  /**
+   * Zoekt een onverwerkte banktransactie met hetzelfde bedrag rond dezelfde datum: tot tien dagen ervoor of
+   * erna. Past de naam of het rekeningnummer van de leverancier, dan mag de betaling tot twintig dagen na
+   * de bon liggen (hetzelfde venster als overal waar de app een betaling en een aankoop vergelijkt).
+   */
   findBankMatch(result: DocumentResult): BankTransaction | null {
     if (!result.total) return null;
     const foreign = Boolean(result.foreign);
@@ -1035,14 +1043,15 @@ export class IntakeService {
     const scored = candidates
       .map((t) => {
         let score = 1;
+        const nameMatch = Boolean(result.supplier && t.counter_name && sameSupplierName(result.supplier.value, t.counter_name));
+        const ibanMatch = Boolean(result.supplierIban && t.counter_iban === result.supplierIban.value);
         if (date) {
           const d = Math.abs(diffDays(date, t.transaction_date));
-          if (d > 10) return null;
-          score += d <= 3 ? 2 : 1;
+          if (nameMatch || ibanMatch ? !dateFits({ invoice_date: date, due_date: null }, t.transaction_date) : d > BANK_DAYS_BEFORE) return null;
+          score += d <= SURE_DAYS ? 2 : 1;
         }
-        const nameMatch = Boolean(result.supplier && t.counter_name && supplierKey(t.counter_name).split(' ')[0] === supplierKey(result.supplier.value).split(' ')[0]);
         if (nameMatch) score += 3;
-        if (result.supplierIban && t.counter_iban === result.supplierIban.value) score += 3;
+        if (ibanMatch) score += 3;
         // bij een omgerekend bedrag alleen met de naam van de winkel, of als het bedrag heel dicht bij ligt
         if (foreign && !nameMatch && Math.abs(-t.amount - result.total!.value) > Math.round(result.total!.value * 0.02)) return null;
         return { t, score };
@@ -1055,53 +1064,15 @@ export class IntakeService {
   }
 
   /**
-   * Een al (zonder document) verwerkte banktransactie met exact dit bedrag en datum ±3 dagen.
-   * Vreemde munt (#74): de bank rekende een eigen koers, dus ongeveer dit bedrag, tot 7 dagen later
-   * en alleen met de naam van de leverancier. Is er rond die datum (10 dagen vóór tot 20 dagen na) nog
-   * een vergelijkbare afschrijving van die leverancier, dan is het te onzeker: dan niets aannemen.
+   * Een al (zonder document) als kosten geboekte afschrijving die bij deze bon hoort: bedrag, leverancier en
+   * datum passen (de gedeelde vergelijking; in een andere munt mag het bedrag binnen de koers afwijken). In
+   * euro's ook zonder naam: precies dit bedrag binnen een paar dagen. Passen er twee, dan is het te
+   * onzeker: dan niets aannemen.
    */
   findBookedBankTransaction(result: DocumentResult, rejected: Set<string> = new Set()): BankTransaction | null {
-    if (!result.total || !result.invoiceDate) return null;
+    const probe = probeOfDocument(result);
     // een betaling waarbij deze bon is afgewezen ("Nee, andere aankoop") stellen we niet opnieuw voor
-    const open = (t: BankTransaction) => !rejected.has(`bank:${t.id}`);
-    if (result.foreign) {
-      const supplier = result.supplier ? supplierKey(result.supplier.value) : '';
-      if (!supplier) return null;
-      // "Eleven Labs Inc." op de factuur, "Elevenlabs" op de bank; "fireworks.ai" en "Fireworks AI"
-      const compact = (k: string) => k.replace(/\s+/g, '');
-      const same = (name: string) => {
-        const k = supplierKey(name);
-        const [a, b] = [compact(supplier), compact(k)];
-        return k.split(' ')[0] === supplier.split(' ')[0] || (Math.min(a.length, b.length) >= 4 && (a.startsWith(b) || b.startsWith(a)));
-      };
-      const rows = (
-        this.db
-          .prepare(
-            `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount < 0 AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
-               AND julianday(transaction_date) - julianday(?) BETWEEN -10 AND 20
-               AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.bank_transaction_id = bank_transactions.id)
-               -- alleen als kosten geboekt: niet een privé-opname of eigen overboeking met toevallig hetzelfde bedrag
-               AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
-                            WHERE l.journal_entry_id = bank_transactions.matched_journal_entry_id AND a.category = 'kosten')`,
-          )
-          .all(result.invoiceDate.value) as BankTransaction[]
-      ).filter((t) => open(t) && withinFx(-t.amount, result.total!.value) && !!t.counter_name && same(t.counter_name));
-      // een factuur in dollars wordt vaak pas later met de kaart betaald (bv. 1 aug gefactureerd, 14 aug betaald);
-      // een abonnement komt maar eens per maand langs, dus binnen 20 dagen is het deze betaling
-      const days = (t: BankTransaction) => diffDays(result.invoiceDate!.value, t.transaction_date);
-      return rows.length === 1 && days(rows[0]!) >= -3 && days(rows[0]!) <= 20 ? rows[0]! : null;
-    }
-    const rows = (this.db
-      .prepare(
-        `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount = ? AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
-           AND ABS(julianday(transaction_date) - julianday(?)) <= 3
-           AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.bank_transaction_id = bank_transactions.id)
-               -- alleen als kosten geboekt: niet een privé-opname of eigen overboeking met toevallig hetzelfde bedrag
-               AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
-                            WHERE l.journal_entry_id = bank_transactions.matched_journal_entry_id AND a.category = 'kosten')`,
-      )
-      .all(-result.total.value, result.invoiceDate.value) as BankTransaction[]).filter(open);
-    return rows.length === 1 ? rows[0]! : null;
+    return probe ? this.matcher.bookedFor(probe, 'open', { skip: (t) => rejected.has(`bank:${t.id}`) }) : null;
   }
 
   /**

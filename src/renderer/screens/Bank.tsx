@@ -8,6 +8,8 @@ import { InvestmentHint, investmentInfo } from './Purchases';
 import { CategoryChips } from './Categories';
 import { PaymentDetails, PaymentEvidence } from './PaymentDetails';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
+import { formatEuro } from '../../shared/money';
+import { formatForeign } from '../../shared/currency';
 
 /** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
 function formatDateTime(sqlite: string): string {
@@ -623,6 +625,15 @@ function SaleForm({ txId, amount, description, busy, onBook }: { txId: number; a
   );
 }
 
+type PurchaseCandidate = NonNullable<Awaited<ReturnType<typeof api.bank.purchaseQuestion>>>['candidates'][number];
+
+/** "Aankoop bij Printhuis van 3 september 2026, € 48,40, nog niet betaald": een aankoop die bij een betaling kan horen. */
+function purchaseCandidateText(c: PurchaseCandidate): string {
+  const amount = `${formatEuro(c.total)}${c.currency && c.foreignTotal !== null ? ` (${formatForeign(c.foreignTotal, c.currency)})` : ''}`;
+  const paid = c.state === 'elders' ? (c.via === 'kas' ? 'contant betaald' : c.via === 'prive' ? 'betaald met privégeld' : 'betaald met privégeld of contant') : c.open !== c.total ? `nog ${formatEuro(c.open)} te betalen` : 'nog niet betaald';
+  return `Aankoop ${c.supplier ? `bij ${c.supplier}` : `"${c.description}"`} van ${formatDateNl(c.date)}, ${amount}, ${paid}${c.question ? ', staat op "weet ik nog niet"' : ''}`;
+}
+
 export function CategorizeTransaction({ id }: { id: number }) {
   const { go, meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
@@ -640,6 +651,8 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const previousSale = useLoad(() => api.bank.previousSale(id), [id]);
   // betaling aan je eigen bedrijf (#205): geen gewone aankoop, en de factuur ervan gaat in dezelfde keuze mee
   const ownCompany = useLoad(() => api.bank.ownCompany(id), [id]);
+  // een aankoop die er al staat en bij deze afschrijving past (#221): eerst die vraag, anders tellen de kosten dubbel
+  const purchaseQuestion = useLoad(() => api.bank.purchaseQuestion(id), [id]);
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
   const done = async (p: Promise<unknown>, investment?: string) => {
@@ -652,6 +665,11 @@ export function CategorizeTransaction({ id }: { id: number }) {
   /** categorie gekozen: bij een investering daarna uitleg tonen (met de gekozen btw) */
   const inv = (categoryKey: string, vatCode: string) => (categoryKey === 'investering' ? vatCode : undefined);
   const invoices = [...(overdue.data ?? []), ...(openInvoices.data ?? [])];
+  const linked = t.status === 'nieuw' ? purchaseQuestion.data ?? null : null;
+  // past er een aankoop sterk bij, dan eerst "Ja" of "Nee, iets anders": tot dan geen andere keuzes
+  const mustAnswer = Boolean(linked?.strong);
+  // voorstellen die al in de kaart hierboven staan, niet nog een keer onder "Hoort dit hierbij?"
+  const proposals = (suggestions.data ?? []).filter((s) => s.kind !== 'rekening' && !(s.kind === 'inkoop' && linked?.candidates.some((c) => c.purchaseId === s.purchaseId)));
   return (
     <div className="page-narrow">
       <div className="row between">
@@ -676,6 +694,33 @@ export function CategorizeTransaction({ id }: { id: number }) {
             <Button small disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'prive'))}>Privé</Button>
             <Button small disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'vraag'))}>Weet ik nog niet: vraag mijn boekhouder</Button>
             <span className="small muted">Was het toch iets anders? Kies dat dan hieronder.</span>
+          </div>
+        </div>
+      )}
+      {linked && (
+        <div className="notice warn" role="note" data-testid="aankoop-bij-betaling">
+          <strong>Hoort deze betaling bij een aankoop die er al staat?</strong>
+          {linked.candidates.map((c) => (
+            <div key={c.purchaseId} style={{ marginTop: 8 }}>
+              <div className="small">{purchaseCandidateText(c)}</div>
+              {c.amountFit === 'ongeveer' ? (
+                <div className="small muted">Het bedrag is anders dan deze betaling (<Euro cents={-t.amount} />). Klopt het bedrag van de aankoop niet? Pas dat eerst aan bij Aankopen; daarna kun je hem hier koppelen.</div>
+              ) : (
+                <div className="row" style={{ marginTop: 4 }}>
+                  <Button small kind={linked.oneClick ? 'primary' : undefined} disabled={busy} onClick={() => void done(api.bank.linkPurchase(t.id, c.purchaseId))}>Ja, dit is de betaling van die aankoop</Button>
+                </div>
+              )}
+            </div>
+          ))}
+          <div className="small" style={{ marginTop: 8 }}>
+            {linked.strong ? 'Kies je een soort kosten, dan tellen de kosten en de btw twee keer. ' : ''}Bij "Ja" wordt de betaling aan de aankoop gekoppeld; er komt geen tweede kostenpost bij.
+            {linked.candidates.some((c) => c.state === 'elders') ? ' De betaling met privégeld of contant die bij de aankoop stond, wordt teruggedraaid.' : ''}
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <Button small disabled={busy} onClick={async () => {
+              // op deze pagina blijven: daarna deel je de betaling zelf in
+              if ((await run(async () => { await api.bank.rejectPurchases(t.id); return true; })) !== undefined) await Promise.all([purchaseQuestion.reload(), suggestions.reload()]);
+            }}>Nee, iets anders</Button>
           </div>
         </div>
       )}
@@ -710,11 +755,11 @@ export function CategorizeTransaction({ id }: { id: number }) {
               <Button kind="primary" disabled={busy} onClick={() => void done(api.bank.bookOwnTransfer(t.id))}>Klopt, verwerk als overboeking</Button>
             </div>
           )}
-          {(suggestions.data ?? []).filter((s) => s.kind !== 'rekening').length > 0 && (
+          {!mustAnswer && proposals.length > 0 && (
             <>
               <h2>Hoort dit hierbij?</h2>
               <div className="choice">
-                {suggestions.data!.filter((s) => s.kind !== 'rekening').map((s) => (
+                {proposals.map((s) => (
                   <button key={s.label} disabled={busy} onClick={() => void done(s.kind === 'factuur' ? api.bank.matchInvoice(t.id, s.invoiceId) : s.kind === 'inkoop' ? api.bank.matchPurchase(t.id, s.purchaseId) : Promise.resolve())}>
                     {s.label}
                     <div className="hint">{s.reasons.join(' · ')}</div>
@@ -724,7 +769,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
             </>
           )}
 
-          {t.amount > 0 ? (
+          {mustAnswer ? null : t.amount > 0 ? (
             <>
               {previousSale.data && (
                 <div className="card">

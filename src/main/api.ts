@@ -53,6 +53,7 @@ import type { LicenseBilling } from '../license/license';
 import { countryCode } from '../shared/vat';
 import { storeFallbackHint } from './windows-store';
 import { proposedPaidWith } from '../shared/paid-with';
+import { dueOf, purchaseSupplierName } from '../documents/bank-purchase-match';
 import QRCode from 'qrcode';
 import type { Bonnenscanner } from '../scanner/scanner';
 import { PHONE_SCANNER } from '../shared/phone-scanner';
@@ -257,6 +258,11 @@ export function createApi(s: Services, host: HostContext) {
       case 'bank-purchase:klopt':
         s.bank.matchPurchase(r.bankTransactionId!, r.purchaseId!);
         return;
+      case 'bank-purchase:nee':
+        // "Nee": deze aankoop (en wat er verder bij paste) komt niet meer bij deze betaling terug; daarna zelf indelen
+        s.bookedPayments.matcher.rejectAll(s.bank.get(r.bankTransactionId!));
+        if (r.purchaseId) s.bookedPayments.matcher.reject({ purchaseId: r.purchaseId, bankTransactionId: r.bankTransactionId! });
+        return { navigate: { screen: 'betaling', id: r.bankTransactionId } };
       case 'vat-due:ingediend':
         s.vat.markSubmitted(r.periodKey!, { alreadyFiled: true });
         return;
@@ -994,12 +1000,15 @@ export function createApi(s: Services, host: HostContext) {
         s.purchases.cancel(id, p.invoice_date);
         for (const documentId of new Set([...files, ...(p.document_id ? [p.document_id] : [])])) s.db.prepare(`UPDATE documents SET status = 'genegeerd' WHERE id = ?`).run(documentId);
       },
-      /** Staat de betaling van deze aankoop al als kosten op een van je rekeningen? (dan is hij dubbel) */
+      /** Staat de betaling van deze aankoop al los op een van je rekeningen, als kosten of op "weet ik nog niet"? (dan is hij dubbel) */
       bookedPayment: (id: number) => {
         const t = s.bookedPayments.find(s.purchases.get(id));
-        return t ? { bankTransactionId: t.id, date: t.transaction_date, amount: -t.amount, counterName: t.counter_name, account: s.bank.getAccount(t.bank_account_id).name } : null;
+        return t ? { bankTransactionId: t.id, date: t.transaction_date, amount: -t.amount, counterName: t.counter_name, account: s.bank.getAccount(t.bank_account_id).name, booking: s.bookedPayments.matcher.bookingOf(t) } : null;
       },
-      /** "Ja, dezelfde betaling": de aankoop vervalt, de bon wordt het bewijsstuk bij die betaling. */
+      /**
+       * "Ja, dezelfde betaling". Stond de betaling als kosten: de aankoop vervalt, de bon wordt het bewijsstuk
+       * bij die betaling. Stond hij op "weet ik nog niet": de betaling wordt aan de aankoop gekoppeld.
+       */
       mergeWithBooked: (id: number, bankTransactionId: number) => s.bookedPayments.resolve(id, bankTransactionId, s.purchases.get(id).invoice_date),
     },
     /** Vreemde valuta in wat er al stond (#74): nakijken en omrekenen. */
@@ -1153,7 +1162,43 @@ export function createApi(s: Services, host: HostContext) {
       settleOwnCompany: (txId: number, choice: 'prive' | 'vraag') => s.ownCompany.settle(Number(txId), choice),
       matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(txId, invoiceId),
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(txId, purchaseId),
-      book: (txId: number, input: BookToAccountInput) => s.bank.bookToAccount(txId, input),
+      /** zelf indelen; past er een aankoop sterk bij die er al staat, dan eerst die vraag beantwoorden */
+      book: (txId: number, input: BookToAccountInput) => s.inbox.bookBank(txId, input),
+      /**
+       * Hoort deze afschrijving bij een aankoop die er al staat (#221)? De aankopen die erbij passen, voor de
+       * kaart op het bankscherm. `strong`: eerst kiezen, daarna pas iets anders; `oneClick`: precies één
+       * aankoop en het bedrag klopt. null = er past niets bij.
+       */
+      purchaseQuestion: (txId: number) => {
+        const t = s.bank.get(Number(txId));
+        const q = t.status === 'nieuw' ? s.bookedPayments.matcher.question(t) : null;
+        if (!q) return null;
+        return {
+          strong: q.strong,
+          oneClick: q.kind !== 'kijken',
+          candidates: [q.fit, ...q.others].map((f) => ({
+            purchaseId: f.purchase.id,
+            state: f.state,
+            via: f.via,
+            supplier: purchaseSupplierName(f.purchase),
+            description: f.purchase.description,
+            date: f.purchase.invoice_date,
+            total: f.purchase.total,
+            open: dueOf(f.purchase, f.state),
+            currency: f.purchase.currency,
+            foreignTotal: f.purchase.foreign_total,
+            question: f.purchase.question,
+            amountFit: f.amount,
+          })),
+        };
+      },
+      /** "Ja, dit is de betaling van die aankoop": koppelen zonder tweede kostenpost (Crediteuren aan Bank). */
+      linkPurchase: (txId: number, purchaseId: number) => {
+        const t = s.bank.get(Number(txId));
+        return s.bookedPayments.resolve(Number(purchaseId), t.id, t.transaction_date);
+      },
+      /** "Nee, iets anders": de aankopen die nu bij deze betaling passen, stelt de app er niet meer bij voor. */
+      rejectPurchases: (txId: number) => s.bookedPayments.matcher.rejectAll(s.bank.get(Number(txId))),
       salesVatSuggestion: (txId: number) => s.bank.salesVatSuggestion(txId),
       /** verkoop via een ander systeem (Mollie, webshop, kassa, pin, contant) */
       bookSale: (txId: number, input: SaleInput) => s.bank.bookSale(txId, input),
