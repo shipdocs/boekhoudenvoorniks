@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { basename, extname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
@@ -275,6 +275,15 @@ async function storeAttachment(name: string, data: Uint8Array): Promise<string> 
   return target;
 }
 
+/** Een net bewaarde bijlage weer weghalen (alleen binnen de bijlagenmap); mislukt dat, dan blijft hij staan. */
+function removeAttachment(path: string): void {
+  try {
+    if (resolve(path).startsWith(resolve(join(dataDir(), 'bijlagen')) + sep) && existsSync(path)) unlinkSync(path);
+  } catch {
+    // niet erg: het bestand staat dan los in de map, er verwijst niets naar
+  }
+}
+
 const localFetch: FetchLike = (url, init) => fetch(url, init);
 
 /** Lokale OCR/LLM volgens de instellingen (alleen localhost). */
@@ -352,6 +361,7 @@ function initServices(): void {
     secrets,
     fetch: localFetch,
     storeFile: storeAttachment,
+    removeFile: removeAttachment,
   });
   localOcr = new LocalOcrRuntime(join(rootDir(), 'ocr'), {
     fetch: (url, init) => fetch(url, init) as never,

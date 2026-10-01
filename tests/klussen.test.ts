@@ -75,6 +75,9 @@ describe('klussen als dossier (#32)', () => {
     // aan: eerste bon aan de badkamer koppelen legt de kluslocatie vast
     s.settings.update({ jobLocation: true });
     const d1 = await s.intake.add('b.jpg', makeJpegWithGps(52.0908, 5.1215), '2026-09-25');
+    // zelfde winkel, bedrag en datum als de eerste foto: de app vraagt eerst of het dezelfde aankoop is (#179)
+    expect(() => s.intake.confirm(d1.id, { supplier: 'Bouwmaat', date: '2026-09-12', total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' })).toThrow(/Kies eerst/);
+    await s.intake.decide(d1.id, 'nee');
     s.intake.confirm(d1.id, { supplier: 'Bouwmaat', date: '2026-09-12', total: 12100, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas', jobId: badkamer.id });
     expect(s.jobs.get(badkamer.id).lat).not.toBeNull();
     // volgende foto vlakbij → badkamer bovenaan, met de reden

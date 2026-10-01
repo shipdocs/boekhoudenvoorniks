@@ -9,10 +9,15 @@ import { formatDateNl } from '../../shared/dates';
 import type { FxCandidate } from '../../fx/repair';
 import { CategoryChips } from './Categories';
 import type { PurchaseInvoice } from '../../documents/purchases';
+import type { UploadResult } from '../../intake/intake';
+import { VIEW_EXISTING } from '../../shared/document-outcome';
+import { uploadOutcomeText } from './UploadOutcome';
 
 export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const { go, toast } = useApp();
   const { run } = useAction();
+  // wat er met de net toegevoegde bestanden gebeurd is: geboekt, alleen bewijs, dubbel, of nog controleren (#179)
+  const [added, setAdded] = useState<{ name: string; result: UploadResult }[]>([]);
   const docs = useLoad(() => api.documents.list('controle'));
   const purchases = useLoad(() => api.purchases.list());
   // zoeken op leverancier, omschrijving of bedrag ("19,36")
@@ -36,8 +41,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
     const d = await run(() => api.documents.add(file.name, bytes));
     setUploading((n) => n - 1);
     if (!d) return;
-    if (d.status === 'verwerkt') toast(`${d.result?.supplier?.value ?? file.name} ✓ automatisch verwerkt`);
-    else if (d.status === 'genegeerd') toast('Dit document hadden we al');
+    setAdded((list) => [{ name: file.name, result: d }, ...list].slice(0, 20));
     await docs.reload();
     await purchases.reload();
   };
@@ -58,6 +62,25 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
         <div className="small">Foto, PDF of e-factuur (XML) — of klik om te kiezen</div>
         {uploading > 0 && <div className="small" style={{ marginTop: 8 }}>Bezig met lezen… ({uploading})</div>}
       </DropZone>
+
+      {added.length > 0 && (
+        <div className="card" style={{ padding: 0, marginTop: 12 }} data-testid="toegevoegd">
+          <div className="task group-head">
+            <div className="grow small"><strong>Net toegevoegd</strong></div>
+            <Button small kind="ghost" onClick={() => setAdded([])}>Sluiten</Button>
+          </div>
+          {added.map(({ name, result: r }, i) => (
+            <div className="task" key={`${r.id}-${i}`}>
+              <div className="icon" aria-hidden>{r.already_present || r.outcome === 'dubbel' ? '📎' : r.outcome === 'controle' ? '📷' : '✓'}</div>
+              <div className="grow">
+                <div className="title">{r.result?.supplier?.value ?? name} {r.result?.total && <Euro cents={r.result.total.value} />}</div>
+                <div className="q">{uploadOutcomeText(r)}{r.already_present ? ' Er is niets opnieuw geboekt.' : ''}</div>
+              </div>
+              <Button small onClick={() => go({ screen: 'document', id: r.id })}>{r.already_present ? VIEW_EXISTING : 'Bekijken'}</Button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {(docs.data ?? []).length > 0 && (
         <>
@@ -112,6 +135,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                 <td className="num"><Euro cents={p.total} />{p.business_amount !== null && <div className="small muted">zakelijk <Euro cents={p.business_amount} /></div>}{p.currency && p.foreign_total !== null && <div className="small muted">{formatForeign(p.foreign_total, p.currency)}</div>}</td>
                 <td onClick={(e) => e.stopPropagation()}>
                   <span className="row">
+                    {p.document_id !== null && <Button small kind="ghost" title="De bon of factuur bij deze aankoop, met de andere bestanden die erbij horen" ariaLabel="Bon bekijken" onClick={() => go({ screen: 'document', id: p.document_id! })}>Bon</Button>}
                     {p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}
                     {p.status === 'open' && p.open_amount > 0 && <Button small kind="ghost" title="Al betaald, maar niet van je zakelijke rekening (bv. privé of contant)" onClick={() => setPaidElsewhere(p)}>Al betaald</Button>}
                     {p.status === 'open' && p.amount_paid === 0 && <Button small kind="ghost" title="Hoort deze aankoop hier niet (bv. per ongeluk toegevoegd, of van vóór je instapdatum)? Dan haal je hem weg; de bon blijft bewaard." ariaLabel="Aankoop weghalen" onClick={async () => {

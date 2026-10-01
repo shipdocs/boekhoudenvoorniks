@@ -1,5 +1,5 @@
 import { api } from '../api';
-import { Button, ErrorBox, Euro, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, useApp, useLoad } from '../ui';
 import { formatDateNl } from '../../shared/dates';
 
 /**
@@ -8,6 +8,9 @@ import { formatDateNl } from '../../shared/dates';
  */
 export function PaymentDetails({ txId, proposal }: { txId: number; proposal?: { invoiceId?: number; purchaseId?: number } }) {
   const { data, error } = useLoad(() => api.bank.details(txId), [txId]);
+  const { go } = useApp();
+  // de bonnen die als bewijs bij deze betaling horen (#179): het hoofdbewijsstuk eerst
+  const evidence = useLoad(() => api.documents.forTarget('bank', txId), [txId]);
   const linked = useLoad(async () => (proposal && (proposal.invoiceId || proposal.purchaseId) ? api.bank.proposal(proposal) : null), [proposal?.invoiceId, proposal?.purchaseId]);
   const t = data?.transaction;
   if (!t || !data) return <ErrorBox error={error} />;
@@ -36,6 +39,20 @@ export function PaymentDetails({ txId, proposal }: { txId: number; proposal?: { 
             )}
           </tbody></table>
           {p.attachmentPath && <Button small onClick={() => void api.app.openAttachment(p.attachmentPath!)}>Bon of factuur openen</Button>}
+        </>
+      )}
+
+      {(evidence.data ?? []).length > 0 && (
+        <>
+          <h3>Bon of factuur bij deze betaling</h3>
+          <table className="list"><tbody>
+            {evidence.data!.map((f) => (
+              <tr key={f.document_id}>
+                <td>{f.original_name}{evidence.data!.length > 1 && f.is_primary ? <span className="muted"> · hoofdbewijsstuk</span> : null}</td>
+                <td style={{ textAlign: 'right' }}><Button small onClick={() => go({ screen: 'document', id: f.document_id })}>Bon bekijken</Button></td>
+              </tr>
+            ))}
+          </tbody></table>
         </>
       )}
 

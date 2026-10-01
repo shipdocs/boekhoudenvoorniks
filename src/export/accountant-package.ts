@@ -339,21 +339,31 @@ export class AccountantPackage {
     const purchases = this.db
       .prepare(
         `SELECT p.id, p.supplier_reference AS reference, p.invoice_date AS date, p.total, p.description, p.journal_entry_id AS entryId, r.name AS relation,
-                COALESCE(p.attachment_path, d.file_path) AS path
+                -- alleen het hoofdbewijsstuk (#179); andere bestanden van dezelfde aankoop blijven in de app
+                COALESCE((SELECT h.file_path FROM document_links k JOIN documents h ON h.id = k.document_id WHERE k.purchase_invoice_id = p.id AND k.is_primary = 1),
+                         p.attachment_path, d.file_path) AS path
          FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id LEFT JOIN documents d ON d.id = p.document_id
          WHERE p.invoice_date BETWEEN ? AND ? ORDER BY p.invoice_date, p.id`,
       )
       .all(from, to) as { id: number; reference: string | null; date: string; total: number; description: string; entryId: number | null; relation: string | null; path: string | null }[];
-    // bonnen die als bewijs aan een bankboeking hangen (zonder aparte inkoopfactuur)
+    // bonnen die als bewijs aan een bankboeking hangen (zonder aparte inkoopfactuur): het hoofdbewijsstuk
+    // van de betaling (#179), en de bon van een teruggedraaide aankoop die nergens meer bij hoort
     const receipts = this.db
       .prepare(
-        `SELECT DISTINCT d.id, d.file_path AS path, d.original_name AS name, j.id AS entryId, j.entry_date AS date, j.description
-         FROM documents d JOIN event_evidence ev ON ev.kind = 'document' AND ev.ref_id = d.id
-         JOIN journal_entries j ON j.event_id = ev.event_id
-         WHERE j.entry_date BETWEEN ? AND ? AND d.purchase_invoice_id IS NULL AND j.reverses_entry_id IS NULL
-         ORDER BY j.entry_date, j.id`,
+        `SELECT d.id, d.file_path AS path, d.original_name AS name, j.id AS entryId, j.entry_date AS date, j.description
+           FROM document_links k JOIN documents d ON d.id = k.document_id
+           JOIN bank_transactions b ON b.id = k.bank_transaction_id
+           JOIN journal_entries j ON j.id = b.matched_journal_entry_id
+          WHERE k.is_primary = 1 AND j.entry_date BETWEEN ? AND ?
+         UNION
+         SELECT d.id, d.file_path, d.original_name, j.id, j.entry_date, j.description
+           FROM documents d JOIN event_evidence ev ON ev.kind = 'document' AND ev.ref_id = d.id
+           JOIN journal_entries j ON j.event_id = ev.event_id
+          WHERE j.entry_date BETWEEN ? AND ? AND d.purchase_invoice_id IS NULL AND j.reverses_entry_id IS NULL
+            AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.document_id = d.id)
+          ORDER BY 5, 4`,
       )
-      .all(from, to) as { id: number; path: string; name: string; entryId: number; date: string; description: string }[];
+      .all(from, to, from, to) as { id: number; path: string; name: string; entryId: number; date: string; description: string }[];
     return { sales, purchases, receipts };
   }
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useLoad } from '../ui';
 import { BusinessShareField, CategoryChoice, InvestmentHint, SupplierInput, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
 import type { PurchaseVatCode } from '../../shared/vat';
@@ -10,6 +10,9 @@ import { ReaderChoice } from './Reader';
 import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
 import type { DocumentResult } from '../../intake/types';
 import { formatDateNl } from '../../shared/dates';
+import type { IntakeDocument, PendingProposal } from '../../intake/intake';
+import { DOCUMENT_OUTCOME_LABEL } from '../../shared/document-outcome';
+import { TargetDetails } from './UploadOutcome';
 
 // pdf.js gebruikt Map.getOrInsertComputed, dat oudere Chromium-versies (bv. die van de e2e-tests) nog niet kennen
 for (const proto of [Map.prototype, WeakMap.prototype] as unknown as Record<string, unknown>[]) {
@@ -147,8 +150,8 @@ export function DocumentReview({ id }: { id: number }) {
   const jobSuggestion = useLoad(() => api.jobs.suggestForDocument(id), [id]);
   const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
-  // mogelijk dubbel: de andere bon ernaast bekijken
-  const [compare, setCompare] = useState<number | null>(null);
+  // de vraag die eerst een antwoord nodig heeft: "dezelfde aankoop?" of "alleen als bewijs koppelen?" (#179)
+  const pending = useLoad(() => api.documents.pending(id), [id]);
   const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; businessPct: number | null; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
 
   const d = doc.data;
@@ -198,13 +201,19 @@ export function DocumentReview({ id }: { id: number }) {
   // wat je in het veld ziet, is wat er geboekt wordt
   const showVat = form.business && !form.splits && (form.vatCode === 'hoog' || form.vatCode === 'laag');
   const activeField = fields.find((f) => f.key === active)?.field ?? (active?.startsWith('line-') ? r?.lines?.[Number(active.slice(5))] ?? null : null);
+  const proposal = d.status === 'controle' ? pending.data ?? null : null;
+  // na een keuze opnieuw laden: het formulier begint dan weer met wat de app nu voorstelt
+  const refresh = async () => {
+    setForm(null);
+    await Promise.all([doc.reload(), pending.reload()]);
+  };
 
   return (
     <div className="page">
       <div className="row between">
         <div>
           <h1>{form.supplier || d.original_name}</h1>
-          <p className="sub">{d.duplicate_of_document_id || (d.status === 'genegeerd' && d.issues.some((i) => i.field === 'duplicate')) ? 'Dubbel document — niet opnieuw geboekt' : d.status === 'verwerkt' ? '✓ Verwerkt' : d.confidence === 'LOW' ? 'We weten het niet zeker — kijk even mee.' : 'Klopt alles?'}</p>
+          <p className="sub" data-testid="uitkomst">{d.outcome !== 'controle' ? DOCUMENT_OUTCOME_LABEL[d.outcome] : proposal ? 'Nog controleren' : d.confidence === 'LOW' ? 'We weten het niet zeker — kijk even mee.' : 'Klopt alles?'}</p>
           <p className="small muted">{extractionSourceLabel(d.extraction_source)}</p>
         </div>
         <Button kind="ghost" onClick={() => go({ screen: 'aankopen' })}>← Aankopen</Button>
@@ -230,28 +239,11 @@ export function DocumentReview({ id }: { id: number }) {
           {r?.foreign && <ForeignNotice foreign={r.foreign} euro={form.total ?? r.total?.value ?? null} />}
           {/* nog niet uitgelezen (geen herkenning): hier kiezen hoe de app bonnen mag lezen */}
           {unread && <ReaderChoice context="bon" onDone={async () => { setForm(null); await doc.reload(); }} />}
-          {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document')).map((i) => (
-            <div key={i.field + i.message} className="notice warn">
-              {i.message}
-              {i.field === 'duplicate' && d.status === 'controle' && (
-                <div className="row" style={{ marginTop: 8 }}>
-                  <Button small disabled={busy} onClick={async () => {
-                    const done = await run(() => api.documents.markDuplicate(d.id, i.suggestion as { documentId: number | null; purchaseId: number | null }), 'Dubbel document weggelegd');
-                    if (done) go({ screen: 'aankopen' });
-                  }}>Ja, zelfde aankoop</Button>
-                  {(i.suggestion as { documentId: number | null } | undefined)?.documentId && (
-                    <Button small kind="ghost" onClick={() => setCompare((i.suggestion as { documentId: number }).documentId)}>Bekijk de andere</Button>
-                  )}
-                  <span className="small muted">Anders: controleer de gegevens hieronder en verwerk het gewoon.</span>
-                </div>
-              )}
-            </div>
+          {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document') && !(proposal && i.field === proposal.kind)).map((i) => (
+            <div key={i.field + i.message} className="notice warn">{i.message}</div>
           ))}
-          {compare !== null && (
-            <Modal title="De bon die hierop lijkt" wide onClose={() => setCompare(null)}>
-              <OtherDocument id={compare} />
-            </Modal>
-          )}
+          {proposal && <ProposalChoice doc={d} proposal={proposal} question={d.issues.find((i) => i.field === proposal.kind)?.message ?? ''} onDone={refresh} />}
+          <LinkedTo doc={d} onChanged={refresh} />
           {d.status === 'controle' && (d.decisions ?? []).some((x) => !x.field && !x.ok) && (
             <div className="notice small">
               Hier twijfelen we nog over: {(d.decisions ?? []).filter((x) => !x.field && !x.ok).map((x) => `${x.label.toLowerCase()} (${x.value})`).join(', ')}. Kies hieronder wat klopt.
@@ -289,7 +281,7 @@ export function DocumentReview({ id }: { id: number }) {
           {d.bank_match && <div className="notice good">✓ Betaling gevonden op de bank: {formatDateNl(d.bank_match.transaction_date)} · <Euro cents={d.bank_match.amount} /></div>}
           {d.classification && <p className="small muted">{d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(' · ')}</p>}
 
-          {d.status !== 'verwerkt' && (
+          {d.status !== 'verwerkt' && !d.link && d.outcome !== 'dubbel' && !proposal && !pending.loading && (
             // minmax: het formulier blijft binnen de kaart, hoe breed de keuzeknoppen of het datumveld ook zijn
             <div className="card grid" style={{ marginTop: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
               <div className="grid cols-2">
@@ -357,7 +349,7 @@ export function DocumentReview({ id }: { id: number }) {
                 <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
                 <Button kind="primary" disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
                   const isInvestment = form.business && !form.splits && form.categoryKey === 'investering';
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : 'Verwerkt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
                   if (res) {
                     go({ screen: 'aankopen' });
                     if (isInvestment) showInvestmentSaved(investmentInfo(form.total!, form.vatCode, true));
@@ -390,21 +382,128 @@ function ForeignNotice({ foreign, euro }: { foreign: NonNullable<DocumentResult[
 }
 
 /**
- * Een bon of factuur bekijken vanaf Vandaag, voordat je "Ja, klopt" of "Ja, zelfde" kiest. Bij een
- * mogelijk dubbel document staat het andere ernaast.
+ * De vraag die eerst een antwoord nodig heeft (#179), met wat er al staat ernaast: het andere document,
+ * of (als daar geen document bij is) de aankoop of betaling zelf. Ja: de bon komt erbij als bewijs of
+ * kopie en er wordt niets geboekt. Nee: het voorstel vervalt en je controleert de bon als nieuwe
+ * aankoop. Later: er verandert niets.
+ */
+function ProposalChoice({ doc: d, proposal, question, onDone }: { doc: IntakeDocument; proposal: PendingProposal; question: string; onDone: () => Promise<void> }) {
+  const { go } = useApp();
+  const { run, busy } = useAction();
+  const evidence = proposal.kind === 'evidence';
+  const r = d.result;
+  return (
+    <div className="card" style={{ marginTop: 12 }} data-testid="voorstel">
+      <strong>{question}</strong>
+      <p className="small" style={{ margin: '6px 0 10px' }}>
+        {evidence
+          ? 'De kosten en de btw van deze betaling staan al in je boekhouding. Kies je "Ja", dan wordt de bon alleen bij die betaling bewaard: er komt geen nieuwe kosten- of btw-boeking bij.'
+          : 'Kies je "Ja", dan blijven beide bestanden bewaard en wordt het best leesbare het bewijs. Er wordt niets opnieuw geboekt.'}
+      </p>
+      <div className="grid cols-2">
+        <div>
+          <h3 style={{ marginTop: 0 }}>Deze bon</h3>
+          <table className="list details"><tbody>
+            <tr><th>Winkel / leverancier</th><td>{r?.supplier?.value ?? d.original_name}</td></tr>
+            <tr><th>Datum</th><td>{r?.invoiceDate?.value ? formatDateNl(r.invoiceDate.value) : '?'}</td></tr>
+            <tr><th>Bedrag</th><td>{r?.total ? <Euro cents={r.total.value} /> : '?'}</td></tr>
+            <tr><th>Factuur- of bonnummer</th><td>{r?.invoiceNumber?.value ?? '—'}</td></tr>
+          </tbody></table>
+        </div>
+        <div>
+          <h3 style={{ marginTop: 0 }}>{evidence ? 'De betaling die al geboekt is' : 'Wat er al staat'}</h3>
+          {proposal.target && <TargetDetails target={proposal.target} />}
+          {proposal.documentId && <OtherDocument id={proposal.documentId} compact={!!proposal.target} />}
+        </div>
+      </div>
+      <div className="row end" style={{ marginTop: 12 }}>
+        <Button disabled={busy} onClick={() => go({ screen: 'aankopen' })}>Later</Button>
+        <Button disabled={busy} onClick={async () => {
+          if (await run(() => api.documents.decide(d.id, 'nee', proposal.candidate), 'Dit voorstel is weg. Controleer de bon hieronder.')) await onDone();
+        }}>Nee, andere aankoop</Button>
+        <Button kind="primary" disabled={busy} onClick={async () => {
+          if (await run(() => api.documents.decide(d.id, 'ja', proposal.candidate), evidence ? 'Bewijs gekoppeld — niet opnieuw geboekt ✓' : 'Dubbel document — niet geboekt ✓')) await onDone();
+        }}>{evidence ? 'Ja, alleen als bewijs' : 'Ja, dezelfde aankoop'}</Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Waar deze bon bij hoort (een aankoop of een bankbetaling), welke bestanden daar nog meer bij horen
+ * en welke het hoofdbewijsstuk is. "Koppeling ongedaan maken" zet de bon terug naar "Nog controleren";
+ * de aankoop of betaling zelf blijft precies zoals hij is.
+ */
+function LinkedTo({ doc: d, onChanged }: { doc: IntakeDocument; onChanged: () => Promise<void> }) {
+  const { go } = useApp();
+  const { run, busy } = useAction();
+  const linked = useLoad(() => api.documents.linked(d.id), [d.id, d.link?.id]);
+  const l = linked.data;
+  if (!d.link && d.outcome === 'dubbel' && d.duplicate_of_document_id !== null) {
+    // kopie van een document dat zelf nog niet geboekt is
+    return (
+      <div className="card" style={{ marginTop: 12 }} data-testid="koppeling">
+        <strong>Dit is een kopie van een bon die er al in staat</strong>
+        <p className="small" style={{ margin: '6px 0' }}>Beide bestanden zijn bewaard. Deze kopie wordt niet geboekt; de andere bon controleer je zoals altijd.</p>
+        <div className="row" style={{ marginTop: 8 }}>
+          <Button small onClick={() => go({ screen: 'document', id: d.duplicate_of_document_id! })}>Bekijk de andere bon</Button>
+          <Button small kind="ghost" disabled={busy} onClick={async () => {
+            if (await run(() => api.documents.unlink(d.id), 'De bon staat weer bij "Nog controleren".')) await onChanged();
+          }}>Toch geen kopie</Button>
+        </div>
+      </div>
+    );
+  }
+  if (!d.link || !l?.target) return null;
+  const others = l.files.filter((f) => f.document_id !== d.id);
+  return (
+    <div className="card" style={{ marginTop: 12 }} data-testid="koppeling">
+      <strong>Hoort bij {l.target.label}</strong>
+      <p className="small" style={{ margin: '6px 0' }}>
+        {d.link.is_primary ? 'Dit bestand is het hoofdbewijsstuk: het gaat mee in het pakket voor je boekhouder.' : 'Dit bestand is bewaard als extra bewijs. Een ander bestand is het hoofdbewijsstuk.'}
+      </p>
+      {others.length > 0 && (
+        <table className="list small"><tbody>
+          {others.map((f) => (
+            <tr key={f.document_id}>
+              <td>{f.original_name}{f.is_primary ? ' · hoofdbewijsstuk' : ''}</td>
+              <td style={{ textAlign: 'right' }}><Button small kind="ghost" onClick={() => go({ screen: 'document', id: f.document_id })}>Bekijken</Button></td>
+            </tr>
+          ))}
+        </tbody></table>
+      )}
+      <div className="row" style={{ marginTop: 8 }}>
+        <Button small onClick={() => go(l.target!.kind === 'aankoop' ? { screen: 'aankopen' } : { screen: 'categorie', id: l.target!.id })}>{l.target.kind === 'aankoop' ? 'Naar de aankoop' : 'Naar de betaling'}</Button>
+        {d.link.origin === 'geboekt' ? (
+          <span className="small muted">De aankoop is uit deze bon geboekt. Klopt hij niet? Haal de aankoop dan weg bij Aankopen.</span>
+        ) : (
+          <Button small kind="ghost" disabled={busy} onClick={async () => {
+            if (!confirm('Koppeling ongedaan maken? De bon gaat terug naar "Nog controleren". Aan de aankoop of betaling zelf verandert niets: de kosten, de btw en de boeking blijven staan.')) return;
+            if (await run(() => api.documents.unlink(d.id), 'Koppeling ongedaan gemaakt. De bon staat bij "Nog controleren".')) await onChanged();
+          }}>Koppeling ongedaan maken</Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Een bon of factuur bekijken vanaf Vandaag, voordat je "Ja, klopt" of "Ja, dezelfde aankoop" kiest. Bij
+ * een voorstel staat ernaast wat er al is: het andere document, of de aankoop of betaling.
  */
 export function DocumentPreview({ id }: { id: number }) {
   const { meta } = useApp();
   const doc = useLoad(() => api.documents.get(id), [id]);
+  const pending = useLoad(() => api.documents.pending(id), [id]);
   const d = doc.data;
   if (!d) return <ErrorBox error={doc.error} />;
   const r = d.result;
-  const dup = d.issues.find((i) => i.field === 'duplicate')?.suggestion as { documentId: number | null; purchaseId: number | null } | undefined;
+  const dup = pending.data ?? null;
   const category = d.classification ? meta.expenseCategories.find((c) => c.key === d.classification!.categoryKey)?.label : null;
   return (
-    <div className="grid" style={{ gridTemplateColumns: dup?.documentId ? '1fr 1fr' : '1fr', gap: 12 }}>
+    <div className="grid" style={{ gridTemplateColumns: dup ? '1fr 1fr' : '1fr', gap: 12 }}>
       <div>
-        {dup?.documentId && <h3 style={{ marginTop: 0 }}>Deze</h3>}
+        {dup && <h3 style={{ marginTop: 0 }}>Deze</h3>}
         <table className="list details"><tbody>
           <tr><th>Winkel / leverancier</th><td>{r?.supplier?.value ?? d.original_name}</td></tr>
           <tr><th>Datum</th><td>{r?.invoiceDate?.value ? formatDateNl(r.invoiceDate.value) : '?'}</td></tr>
@@ -417,17 +516,19 @@ export function DocumentPreview({ id }: { id: number }) {
           <DocumentView id={d.id} mime={d.mime_type} highlight={null} pageSizes={r?.pageSizes} />
         </div>
       </div>
-      {dup?.documentId && (
+      {dup && (
         <div>
-          <h3 style={{ marginTop: 0 }}>Lijkt op</h3>
-          <OtherDocument id={dup.documentId} />
+          <h3 style={{ marginTop: 0 }}>{dup.kind === 'evidence' ? 'De betaling die al geboekt is' : 'Lijkt op'}</h3>
+          {dup.target && <TargetDetails target={dup.target} />}
+          {dup.documentId && <OtherDocument id={dup.documentId} compact={!!dup.target} />}
         </div>
       )}
     </div>
   );
 }
 
-function OtherDocument({ id }: { id: number }) {
+/** Het document dat er al is; `compact`: de gegevens van de aankoop of betaling staan er al boven. */
+function OtherDocument({ id, compact }: { id: number; compact?: boolean }) {
   const doc = useLoad(() => api.documents.get(id), [id]);
   const d = doc.data;
   if (!d) return <ErrorBox error={doc.error} />;
@@ -435,9 +536,9 @@ function OtherDocument({ id }: { id: number }) {
   return (
     <>
       <table className="list details"><tbody>
-        <tr><th>Winkel / leverancier</th><td>{r?.supplier?.value ?? d.original_name}</td></tr>
-        <tr><th>Datum</th><td>{r?.invoiceDate?.value ? formatDateNl(r.invoiceDate.value) : '?'}</td></tr>
-        <tr><th>Bedrag</th><td>{r?.total ? <Euro cents={r.total.value} /> : '?'}</td></tr>
+        {!compact && <tr><th>Winkel / leverancier</th><td>{r?.supplier?.value ?? d.original_name}</td></tr>}
+        {!compact && <tr><th>Datum</th><td>{r?.invoiceDate?.value ? formatDateNl(r.invoiceDate.value) : '?'}</td></tr>}
+        {!compact && <tr><th>Bedrag</th><td>{r?.total ? <Euro cents={r.total.value} /> : '?'}</td></tr>}
         <tr><th>Bestand</th><td>{d.original_name}</td></tr>
       </tbody></table>
       <div style={{ maxHeight: 420, overflow: 'auto', marginTop: 8 }}>

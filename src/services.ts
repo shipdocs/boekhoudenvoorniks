@@ -52,6 +52,8 @@ export interface ServiceDeps {
   fetch: FetchLike;
   /** slaat een bijlage/document op en geeft het pad terug */
   storeFile: (name: string, data: Uint8Array) => Promise<string>;
+  /** haalt een net bewaard bestand weer weg als het document toch niet vastgelegd kon worden (geen los bestand achterlaten) */
+  removeFile?: (path: string) => void;
   ocr?: OcrProvider | null;
   llm?: LlmClassifier | null;
   /** publieke sleutel voor licenties (tests); standaard die van de licentie-Worker */
@@ -101,6 +103,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const fx = new FxService(db, deps.fetch);
   const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, categories, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse, () => settings.get().company.vatNumber);
   intake.setFx(fx);
+  intake.setFileRemover(deps.removeFile ?? null);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);
   // "waar staat dit op?" bij zoekresultaten en in de lijsten
