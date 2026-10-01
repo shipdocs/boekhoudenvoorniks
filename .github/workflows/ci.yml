@@ -110,8 +110,9 @@ jobs:
           ls -d "$old".gemigreerd-*
           app
 
-  # Hetzelfde op Windows, met de echte installer erbij: die is als artefact te downloaden om een
-  # upgrade met de hand te proberen (docs/handmatige-test-datamap-windows.md). Er wordt niets gepubliceerd.
+  # Op Windows met de echte installers: een upgrade vanaf de vorige release (scripts/upgrade-test-windows.cjs).
+  # De nieuwe installer is als artefact te downloaden om de upgrade ook met de hand te proberen
+  # (docs/handmatige-test-datamap-windows.md). Er wordt niets gepubliceerd.
   package-smoke-windows:
     runs-on: windows-latest
     timeout-minutes: 30
@@ -124,37 +125,32 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx electron-builder --win --publish never
-      - name: Rooktest verpakte app en overzetten van de gegevensmap
+      - name: Rooktest verpakte app
         shell: pwsh
         run: |
-          function Start-App([string]$data) {
-            $env:BOEKHOUDENVOORNIKS_SMOKE_TEST = '1'
-            if ($data) { $env:BOEKHOUDENVOORNIKS_DATA = $data } else { Remove-Item Env:BOEKHOUDENVOORNIKS_DATA -ErrorAction SilentlyContinue }
-            $p = Start-Process -FilePath "release\win-unpacked\BoekhoudenVoorNiks.exe" -PassThru -NoNewWindow
-            $null = $p.Handle  # nodig zodat ExitCode na afloop beschikbaar is
-            try {
-              Wait-Process -Id $p.Id -Timeout 120 -ErrorAction Stop
-            } catch {
-              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-              throw 'Rooktest mislukt: de app sloot niet binnen 120 seconden af'
-            }
-            $p.WaitForExit()
-            if ($p.ExitCode -ne 0) { throw "Rooktest mislukt (exit $($p.ExitCode))" }
+          $env:BOEKHOUDENVOORNIKS_SMOKE_TEST = '1'
+          $env:BOEKHOUDENVOORNIKS_DATA = "$env:RUNNER_TEMP\smoke"
+          $p = Start-Process -FilePath "release\win-unpacked\BoekhoudenVoorNiks.exe" -PassThru -NoNewWindow
+          $null = $p.Handle  # nodig zodat ExitCode na afloop beschikbaar is
+          try {
+            Wait-Process -Id $p.Id -Timeout 120 -ErrorAction Stop
+          } catch {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            throw 'Rooktest mislukt: de app sloot niet binnen 120 seconden af'
           }
-          function Assert-Path([string]$path) { if (-not (Test-Path $path)) { throw "Ontbreekt: $path" } }
-
-          Start-App "$env:RUNNER_TEMP\smoke"
-
-          $old = "$env:APPDATA\boekhoudenvoorniks"
-          $shared = "$env:USERPROFILE\BoekhoudenVoorNiks"
-          Start-App $old
-          Assert-Path "$old\boekhouding.sqlite"
-          Start-App ''
-          Assert-Path "$shared\migratie-klaar"
-          Assert-Path "$shared\boekhouding.sqlite"
-          if (Test-Path $old) { throw "De oude map staat er nog: $old" }
-          Assert-Path "$old.gemigreerd-*"
-          Start-App ''
+          $p.WaitForExit()
+          if ($p.ExitCode -ne 0) { throw "Rooktest mislukt (exit $($p.ExitCode))" }
+      # De echte upgrade: 0.7.5 (de laatste release met de gegevens in AppData) installeren, een
+      # administratie laten aanmaken, de nieuwe installer eroverheen en het overzetten controleren.
+      - name: Upgrade-test vanaf 0.7.5 met de NSIS-installers
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.7.5 --repo ${{ github.repository }} --pattern "BoekhoudenVoorNiks-Setup-0.7.5.exe" --dir "$env:RUNNER_TEMP"
+          $new = (Get-ChildItem release -Filter "*Setup*.exe" | Select-Object -First 1).FullName
+          $version = node -p "require('./package.json').version"
+          node scripts/upgrade-test-windows.cjs "$env:RUNNER_TEMP\BoekhoudenVoorNiks-Setup-0.7.5.exe" "$new" $version
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
