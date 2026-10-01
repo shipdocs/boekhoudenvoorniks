@@ -7,6 +7,8 @@
  * POST /__reset        lege administratie (nieuwe map), voor elke test; body {"licenses":true} = licenties aan,
  *                      met een nagebootste licentie-Worker (echte Ed25519-handtekening, eigen sleutelpaar)
  * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
+ * POST /__store        de versie uit de Microsoft Store nabootsen: body {"on":true} en eventueel "readOnly";
+ *                      geeft terug wat er gebeurde (toestemming voor lokaal lezen, "Opnieuw proberen")
  * alles anders         bestanden uit dist/renderer
  */
 const http = require('node:http');
@@ -102,6 +104,9 @@ let updateStatus = { state: 'uit', version: null, notes: null, percent: null, er
 let updateInstalled = false;
 /** aanroepen van "Back-up terugzetten" (in de test annuleert de gebruiker het keuzevenster) */
 let restoreCalls = [];
+/** nagebootste versie uit de Microsoft Store (POST /__store) */
+const noStore = () => ({ on: false, readOnly: false, consent: false, installs: 0, retried: false });
+let store = noStore();
 
 async function storeFile(name, data) {
   const p = path.join(dir, 'bijlagen', `${Date.now()}-${name.replace(/[^\w.-]+/g, '_')}`);
@@ -186,6 +191,9 @@ function init(fresh) {
       },
     },
     async checkForUpdates() { return 'Je hebt de nieuwste versie.'; },
+    get windowsStore() { return store.on; },
+    readOnly: () => store.readOnly,
+    retryDataMove() { store.retried = true; },
     // echt wegschrijven: de tests lezen bv. een uitnodiging of export terug
     async saveFile(name, content) {
       const p = path.join(dir, 'bewaard', name);
@@ -216,7 +224,13 @@ function init(fresh) {
     checkCli: async () => 'Claude Code werkt ✓',
     openLoginTerminal: async () => 'Claude Code is geopend in een terminal.',
     mcpCommand: () => ({ command: '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', args: ['--mcp'] }),
-    localOcr: { status: () => ({ state: 'niet-geinstalleerd' }), install: () => ({ state: 'niet-geinstalleerd' }), uninstall: async () => ({ state: 'niet-geinstalleerd' }) },
+    localOcr: {
+      status: () => ({ state: 'niet-geinstalleerd' }),
+      install: () => { store.installs++; return { state: 'niet-geinstalleerd' }; },
+      uninstall: async () => ({ state: 'niet-geinstalleerd' }),
+      // zoals de app: alleen in de Store-versie is toestemming nodig
+      get consent() { return store.on ? { runtimeVersion: 'b0000', given: () => store.consent, give: () => { store.consent = true; } } : undefined; },
+    },
     async resetData(withDemo) {
       const backup = await wipeDatabase(db, file, path.join(dir, 'backups'));
       init(false);
@@ -246,6 +260,7 @@ http
         updateStatus = { state: 'uit', version: null, notes: null, percent: null, error: null };
         updateInstalled = false;
         restoreCalls = [];
+        store = noStore();
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         init(true);
         return res.end('{"ok":true}');
@@ -256,6 +271,10 @@ http
         const a = licensing?.accounts.get(licensing.lastStarted);
         if (a) a.paid = true;
         return res.end(JSON.stringify({ ok: licensing ? [...licensing.accounts.values()].map(({ managementKey: _k, ...rest }) => rest) : null }));
+      }
+      if (req.url === '/__store') {
+        if (body) store = { ...store, ...JSON.parse(body) };
+        return res.end(JSON.stringify({ ok: store }));
       }
       if (req.url === '/__update') {
         if (body) updateStatus = { ...updateStatus, ...JSON.parse(body) };

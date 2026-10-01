@@ -9,6 +9,16 @@
 - **Bon in dollars of een andere munt alsnog omgerekend**: kon de koers bij het binnenkomen van de bon niet opgehaald worden, dan probeert de app het opnieuw zodra je de bon opent. Een datum die per ongeluk in de toekomst is gelezen (bijvoorbeeld een Amerikaanse datum) houdt het omrekenen niet meer tegen.
 - **Koppeling met Claude Code of Codex op Windows**: de koppeling startte wel, maar las de vragen van Claude Code of Codex niet en gaf dus nooit antwoord. Op Windows werkt hij nu net als op Linux.
 
+### Techniek
+- **Pakket voor de Microsoft Store (in voorbereiding, nog niet in de Store)**: de app kan nu ook als Store-pakket (MSIX/appx) gebouwd worden, in een eigen job die het pakket alleen als artefact bewaart; het komt nooit bij de GitHub-release. Voor de gewone Windows-versie (`Setup.exe`) en voor Linux verandert er niets. In de Store-versie gaat een aantal dingen anders:
+  - **Updates** komen via de Store; de app zoekt of downloadt zelf niets, en Instellingen legt dat uit.
+  - **Bonnen lezen op deze computer** staat standaard uit. Aanzetten kan pas nadat je er uitdrukkelijk ja op zegt; de app downloadt dan altijd dezelfde, gecontroleerde versie van het leesprogramma (llama.cpp b11146) en start het niet als het bestand afwijkt.
+  - **Koppeling met Claude Code of Codex** gebruikt een vaste naam (`boekhoudenvoorniks.exe`) die bij een update niet verandert.
+  - **Lukt het overzetten van je gegevens niet**, dan werkt de app niet verder in de oude map: je kiest opnieuw proberen, zelf een map kiezen, of je administratie alleen bekijken. Kies je een map die met OneDrive, Dropbox, Google Drive of iCloud gesynchroniseerd wordt, dan waarschuwt de app eerst.
+  - **Bij de eerste start** staat er dat je een oude installatie van de website moet verwijderen of bijwerken.
+  - Werkt het lezen van bonnen of de koppeling niet, dan verwijst de melding naar de gewone Windows-versie op GitHub.
+  - Het pakket krijgt een eigen versienummer waarvan het eerste getal één hoger is (app 0.7.6 → pakket 1.7.6.0), omdat de Store geen versie accepteert die met 0 begint.
+
 ## 0.7.6 — je gegevens in een vaste map buiten de app
 
 ### Verbeterd
