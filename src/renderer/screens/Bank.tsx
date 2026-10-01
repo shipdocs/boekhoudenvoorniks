@@ -534,6 +534,8 @@ export function CategorizeTransaction({ id }: { id: number }) {
   // potjes zonder eigen rekeningnummer (bv. Knab): daar komt geen afschrift van, dus hier kiezen
   const pots = useLoad(() => api.bank.accounts().then((list) => list.filter((a) => a.is_pot)));
   const previousSale = useLoad(() => api.bank.previousSale(id), [id]);
+  // betaling aan je eigen bedrijf (#205): geen gewone aankoop, en de factuur ervan gaat in dezelfde keuze mee
+  const ownCompany = useLoad(() => api.bank.ownCompany(id), [id]);
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
   const done = async (p: Promise<unknown>, investment?: string) => {
@@ -559,6 +561,20 @@ export function CategorizeTransaction({ id }: { id: number }) {
       </details>
       <PaymentEvidence txId={t.id} />
 
+      {t.status === 'nieuw' && ownCompany.data && (
+        <div className="notice warn" role="note" data-testid="eigen-bedrijf">
+          <strong>Dit is een betaling aan je eigen bedrijf</strong>
+          <div className="small" style={{ marginTop: 4 }}>
+            De naam op het afschrift is je eigen bedrijfsnaam, maar het is geen overboeking naar een eigen rekening. Bijvoorbeeld een betaling voor je eigen dienst. Dat is geen gewone aankoop: geen kosten en geen btw-aftrek.{' '}
+            {ownCompany.data.documentId || ownCompany.data.purchaseId ? 'De factuur van je eigen bedrijf met hetzelfde bedrag gaat in dezelfde keuze mee.' : 'Komt de factuur later binnen, dan hoort die hierbij.'}
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <Button small disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'prive'))}>Privé</Button>
+            <Button small disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'vraag'))}>Weet ik nog niet: vraag mijn boekhouder</Button>
+            <span className="small muted">Was het toch iets anders? Kies dat dan hieronder.</span>
+          </div>
+        </div>
+      )}
       {t.status !== 'nieuw' ? (
         <div className="card">
           <StatusPill status={t.status} />

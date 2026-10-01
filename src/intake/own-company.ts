@@ -41,7 +41,7 @@ export function sameCompanyName(a: string | null | undefined, b: string | null |
  * landcode maar is langer of heeft letters na de eerste twee cijfers; dat telt niet mee.
  */
 export function vatNumbers(text: string): string[] {
-  const re = /\b(?:NL[ .]?\d{9}[ .]?B[ .]?\d{2}|(?:AT|BE|BG|CY|CZ|DE|DK|EE|EL|ES|FI|FR|HR|HU|IE|IT|LT|LU|LV|MT|PL|PT|RO|SE|SI|SK|GB|XI)[ .]?[A-Z]{0,2}\d(?:[ .]?\d){6,10}[A-Z]{0,2})(?![ .]?\d)(?![0-9A-Z])/g;
+  const re = /\b(?:NL[ .]?\d(?:[ .]?\d){8}[ .]?B[ .]?\d{2}|(?:AT|BE|BG|CY|CZ|DE|DK|EE|EL|ES|FI|FR|HR|HU|IE|IT|LT|LU|LV|MT|PL|PT|RO|SE|SI|SK|GB|XI)[ .]?[A-Z]{0,2}\d(?:[ .]?\d){6,10}[A-Z]{0,2})(?![ .]?\d)(?![0-9A-Z])/g;
   return [...text.toUpperCase().matchAll(re)].map((m) => compact(m[0]));
 }
 
