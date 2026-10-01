@@ -92,16 +92,16 @@ geteste installer in de bevinding.
    `%APPDATA%\gratis-boekhouden` elk een `boekhouding.sqlite` bevatten (bijvoorbeeld door de eerder
    hernoemde map terug te hernoemen en er een kopie van een oude `gratis-boekhouden`-map naast te
    zetten). Verwijder vervolgens tijdelijk `%USERPROFILE%\BoekhoudenVoorNiks` (of in ieder geval
-   `migratie-klaar` en `migratie-keuze.json` daarin), zodat de migratie opnieuw kan starten.
+   `migratie-klaar` en `.migratie-keuze` daarin), zodat de migratie opnieuw kan starten.
 2. Start de app. Er komt géén automatische keuze: een dialoog toont beide mappen met per map de
    laatste wijziging, de grootte en het aantal administraties.
 3. Sluit de dialoog zonder te kiezen. De app stopt dan. Controleer: beide oude mappen zijn
-   onaangetast (zelfde bestanden, zelfde tijden en groottes), er is geen `migratie-keuze.json`, geen
+   onaangetast (zelfde bestanden, zelfde tijden en groottes), er is geen `.migratie-keuze`, geen
    `migratie-klaar`, en er is geen *Local State* in de wortel van
    `%USERPROFILE%\BoekhoudenVoorNiks` (uiterlijk een map `.keuze-sessie` mag blijven staan; die
    wordt bij de volgende start gewist).
 4. Start opnieuw en kies nu één van de twee mappen in de dialoog. De app zet de keuze weg in
-   `migratie-keuze.json` in de gedeelde map en herstartt één keer; daarna verloopt de gewone
+   `.migratie-keuze` in de gedeelde map en herstart één keer; daarna verloopt de gewone
    migratie vanuit de gekozen map.
 5. Controleer na afloop: de gekozen map heet `<naam>.gemigreerd-<tijdstip>`; de níet-gekozen map
    heeft nog gewoon zijn oude naam en is onaangetast. Die map wordt nooit hernoemd of verwijderd.
@@ -113,13 +113,15 @@ geteste installer in de bevinding.
 ### 3. Losse controles (aanbevolen)
 
 - `--mcp` vóór de eerste start van de app: op een schone Windows-gebruiker (geen gegevens, geen
-  `migratie-klaar`) geeft de koppeling de melding *"Open de app eerst om je gegevens over te
-  zetten"* en stopt met een foutmelding; er wordt niets aangemaakt.
+  `migratie-klaar`) geeft de koppeling de melding *"Er is nog geen administratie. Open
+  BoekhoudenVoorNiks eerst één keer."* en stopt met een foutmelding; er wordt niets aangemaakt. (Met
+  beide oude mappen en nog geen keuze is de melding *"Open de app eerst om je gegevens over te
+  zetten"*.)
   ☐ geslaagd ☐ niet geslaagd — bevinding: ______________________________
-- Ongeldige verwijzing: zet in `%USERPROFILE%\BoekhoudenVoorNiks\datamap.json` een pad naar een
-  niet-bestaande map. Zowel de app (blokkerende foutdialoog die het pad noemt) als `--mcp`
+- Ongeldige verwijzing: maak `%USERPROFILE%\.boekhoudenvoorniks.json` met de inhoud
+  `{"version": 1, "dataDir": "C:\\bestaat\\niet"}`. Zowel de app (blokkerende foutdialoog die het pad noemt) als `--mcp`
   (foutmelding, exitcode ongelijk aan nul) weigeren dan; er wordt geen lege administratie
-  aangemaakt. Herstel daarna het bestand.
+  aangemaakt. Verwijder daarna het bestand weer.
   ☐ geslaagd ☐ niet geslaagd — bevinding: ______________________________
 
 ## Aftekening

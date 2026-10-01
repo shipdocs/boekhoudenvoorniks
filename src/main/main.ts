@@ -30,7 +30,8 @@ import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
 import type { PollResult } from '../mail/mail-intake';
 import { isPathInside } from './path-security';
-import { DATA_DIR_NAME, migrateDataDir, OLD_DATA_DIR_NAME } from './data-dir';
+import { CHOICE_SESSION, handOverLocalState, markComplete, resolveDataDir, resolveForMcp, sharedDataDir, writeChoice, type DataDirResolution } from './data-dir';
+import { chooseOldFolder, migrateWithProgress } from './data-dir-app';
 import { Administrations, readAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
 import { generateOfficeKeys } from '../exchange/crypto';
@@ -53,9 +54,15 @@ let localOcr: LocalOcrRuntime;
 /** Eigen gegevensmap (tests, rooktest); GRATIS_BOEKHOUDEN_DATA is de naam van vóór de naamswijziging. */
 const DATA_ENV = process.env.BOEKHOUDENVOORNIKS_DATA ?? process.env.GRATIS_BOEKHOUDEN_DATA;
 
+/**
+ * Waar de gegevens staan als dat niet de map van Chromium (`userData`) is: de oude map in AppData
+ * zolang er nog niet is overgezet, of een zelf gekozen map. Zie `resolveDataDir`.
+ */
+let dataRoot: string | null = null;
+
 /** Map met alle administraties (en het gedeelde OCR-model). */
 function rootDir(): string {
-  const dir = DATA_ENV ?? app.getPath('userData');
+  const dir = DATA_ENV ?? dataRoot ?? app.getPath('userData');
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -720,27 +727,114 @@ app.commandLine.appendSwitch('lang', 'nl');
 // de app zelf kan gewoon tegelijk open zijn.
 const MCP_MODE = process.argv.includes('--mcp');
 
-// Gegevensmap: sinds de naamswijziging "boekhoudenvoorniks" in plaats van "gratis-boekhouden". De interne appnaam
-// (package.json "name") blijft gratis-boekhouden: daaraan hangen de Linux-sleutelhanger van de geheimen
-// en de updates over de bestaande installatie. De oude map wordt één keer overgezet, vóór er iets open is.
+// Gegevensmap: de gedeelde map in de thuismap (buiten AppData, zodat verwijderen van de app de
+// administratie nooit wist). De interne appnaam (package.json "name") blijft gratis-boekhouden: daaraan
+// hangen de Linux-sleutelhanger van de geheimen en de updates over de bestaande installatie.
+// Chromium (en dus het enkele-instantie-slot) staat vanaf het begin in de gedeelde map; de gegevens
+// uit de oude map in AppData worden na het opstarten overgezet (zie prepareDataDir).
+let resolution: DataDirResolution | null = null;
+let resolutionError: Error | null = null;
 if (!DATA_ENV) {
-  const appData = app.getPath('appData');
-  const oldDir = join(appData, OLD_DATA_DIR_NAME);
-  const newDir = join(appData, DATA_DIR_NAME);
+  const env = { home: app.getPath('home'), appData: app.getPath('appData') };
+  const shared = sharedDataDir(env.home);
   if (MCP_MODE) {
-    // de koppeling verplaatst niets (de app kan open zijn); nog niet overgezet → lees de oude map
-    const notYet = !existsSync(join(newDir, 'boekhouding.sqlite')) && existsSync(join(oldDir, 'boekhouding.sqlite'));
-    app.setPath('userData', notYet ? oldDir : newDir);
+    // de koppeling zet niets over en maakt de gedeelde map nooit zelf aan
+    try {
+      dataRoot = resolveForMcp(env);
+      app.setPath('userData', existsSync(shared) ? shared : dataRoot);
+    } catch (e) {
+      process.stderr.write(`BoekhoudenVoorNiks (koppeling): ${(e as Error).message}\n`);
+      app.exit(1);
+    }
   } else {
-    const result = migrateDataDir(oldDir, newDir);
-    if (result !== 'geen' && result !== 'overgeslagen') console.log(`Gegevens ${result} van ${oldDir} naar ${newDir}`);
-    app.setPath('userData', newDir);
+    try {
+      resolution = resolveDataDir(env);
+    } catch (e) {
+      resolutionError = e as Error;
+    }
+    if (!resolution) {
+      // niets aanmaken op de plek van de gegevens; de fout komt zodra er een venster kan
+      app.setPath('userData', join(app.getPath('temp'), 'boekhoudenvoorniks-fout'));
+    } else if (resolution.kind === 'keuze') {
+      // alleen de keuzevraag: Chromium krijgt een wegwerpmap, zodat de gedeelde map nog geen eigen sleutel krijgt
+      app.setPath('userData', join(shared, CHOICE_SESSION));
+    } else {
+      rmSync(join(shared, CHOICE_SESSION), { recursive: true, force: true });
+      // de sleutel van de opgeslagen wachtwoorden moet er staan vóór Chromium start
+      if (resolution.kind === 'oud') handOverLocalState(resolution.dir, shared);
+      app.setPath('userData', shared);
+      dataRoot = resolution.dir;
+    }
   }
 }
 const gotLock = MCP_MODE ? false : app.requestSingleInstanceLock();
+let preparing = true;
+let dataDirNotice: { type: 'info' | 'warning'; message: string; detail: string } | null = null;
+
+/**
+ * Na het opstarten, vóór er een database open is: de gegevensmap in orde maken. Onwaar = de app
+ * sluit (fout getoond, of de keuze tussen twee oude mappen is gemaakt of geannuleerd).
+ */
+async function prepareDataDir(): Promise<boolean> {
+  if (DATA_ENV) return true;
+  if (!resolution) {
+    dialog.showErrorBox('BoekhoudenVoorNiks kan je gegevens niet openen', resolutionError?.message ?? 'Onbekende fout');
+    app.exit(1);
+    return false;
+  }
+  if (resolution.kind === 'keuze') {
+    const chosen = SMOKE_TEST ? null : await chooseOldFolder(resolution.candidates);
+    if (chosen) {
+      // de keuze onthouden en opnieuw starten: dan staat de sleutel van de gekozen map er vóór Chromium start
+      writeChoice(resolution.target, chosen.dir);
+      app.relaunch();
+    }
+    app.exit(SMOKE_TEST ? 1 : 0);
+    return false;
+  }
+  if (resolution.kind === 'nieuw') markComplete(resolution.dir);
+  if (resolution.kind !== 'oud') return true;
+  const { dir: source, target } = resolution;
+  let outcome: Awaited<ReturnType<typeof migrateWithProgress>>;
+  try {
+    outcome = await migrateWithProgress(source, target, !SMOKE_TEST);
+  } catch (e) {
+    // de marker staat er al: de gedeelde map is compleet, alleen de afronding ging mis
+    console.error('Afronden van het overzetten mislukt', e);
+    outcome = { status: 'gemigreerd', databases: [], renamedSource: null, movedAside: null, warning: null };
+  }
+  if (outcome.status === 'gemigreerd') {
+    dataRoot = target;
+    console.log(`Gegevens overgezet van ${source} naar ${target}`);
+    dataDirNotice = {
+      type: 'info',
+      message: 'Je gegevens staan nu in een vaste map',
+      detail:
+        `Je administratie staat voortaan in ${target}. Daar blijft hij ook staan als je de app verwijdert of opnieuw installeert.\n\n` +
+        (outcome.renamedSource ? `De oude map is bewaard als ${outcome.renamedSource}.` : (outcome.warning ?? `De oude map ${source} is blijven staan.`)) +
+        (outcome.movedAside ? `\n\nIn de nieuwe map stond al iets; dat is bewaard in ${outcome.movedAside}.` : '') +
+        '\n\nGebruik je de koppeling met Claude Code of Codex? Start dat programma dan opnieuw, zodat het de nieuwe map leest.',
+    };
+  } else {
+    console.error(`Gegevens overzetten niet gelukt (${outcome.status}): ${outcome.reason}`);
+    dataDirNotice = {
+      type: 'warning',
+      message: 'Je gegevens zijn nog niet overgezet',
+      detail: `${outcome.status === 'mislukt' ? `Het overzetten naar ${target} lukte niet (${outcome.reason}).` : outcome.reason}\n\nEr is niets veranderd: je werkt gewoon verder vanuit ${source}. Bij de volgende start probeert de app het opnieuw.`,
+    };
+  }
+  return true;
+}
+
+/** Eén melding na het overzetten (of als dat niet lukte); houdt de app niet tegen. */
+function showDataDirNotice(): void {
+  if (!dataDirNotice || !mainWindow) return;
+  void dialog.showMessageBox(mainWindow, { ...dataDirNotice, title: 'BoekhoudenVoorNiks', buttons: ['OK'] });
+  dataDirNotice = null;
+}
 if (MCP_MODE) {
   app.dock?.hide();
-  startMcp(dbPath(), app.getVersion()).then(
+  if (DATA_ENV || dataRoot) startMcp(dbPath(), app.getVersion()).then(
     () => app.exit(0),
     (e) => {
       process.stderr.write(`BoekhoudenVoorNiks (koppeling): ${(e as Error).message}\n`);
@@ -759,7 +853,8 @@ if (MCP_MODE) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    if (!(await prepareDataDir())) return;
     if (!SMOKE_TEST) backupBeforeUpgrade();
     // De renderer gebruikt geen browserrechten; wijs onverwachte camera-, locatie- en
     // notificatieverzoeken daarom standaard af.
@@ -768,7 +863,9 @@ if (MCP_MODE) {
     initServices();
     registerIpc();
     createWindow();
+    preparing = false;
     if (SMOKE_TEST) return;
+    showDataDirNotice();
     setTimeout(() => void backgroundTasks(), 10_000);
     setTimeout(() => void migrateMcp(), 20_000);
     setInterval(() => void backgroundTasks(), SIX_HOURS);
@@ -784,6 +881,8 @@ if (MCP_MODE) {
   });
 
   app.on('window-all-closed', () => {
+    // het voortgangsvenster van het overzetten sluit vóór het hoofdvenster er is
+    if (preparing) return;
     if (process.platform !== 'darwin') app.quit();
   });
 
