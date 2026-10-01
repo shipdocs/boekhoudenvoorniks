@@ -25,7 +25,7 @@ const { openDatabase } = require(path.join(ROOT, 'main/db/database.js'));
 const { createServices, MemorySecretStore } = require(path.join(ROOT, 'main/services.js'));
 const { createApi } = require(path.join(ROOT, 'main/main/api.js'));
 const { wipeDatabase } = require(path.join(ROOT, 'main/main/reset.js'));
-const { resolveAttachmentPath, saveAttachment } = require(path.join(ROOT, 'main/main/attachments.js'));
+const { deleteAttachment, resolveAttachmentPath, saveAttachment } = require(path.join(ROOT, 'main/main/attachments.js'));
 const { seedDemo } = require(path.join(ROOT, 'main/demo/demo.js'));
 const { Administrations, readAdministrationFile } = require(path.join(ROOT, 'main/main/administrations.js'));
 const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js'));
@@ -157,6 +157,7 @@ function init(fresh) {
     secrets: secretsFor(file),
     fetch: async () => { throw new Error('geen netwerk in e2e-tests'); },
     storeFile,
+    removeFile: (p) => deleteAttachment(path.dirname(file), p),
     statementFiles: folderAccess,
     // alleen voor een test van het abonnement; standaard staan licenties uit ('' = uit, ook nu de app een echte sleutel heeft)
     licensePublicKey: licensing?.publicKey ?? process.env.E2E_LICENSE_PUBLIC_KEY ?? '',

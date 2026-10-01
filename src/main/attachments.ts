@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ATTACHMENTS_DIR, isStoredAttachmentPath } from '../db/attachment-paths';
@@ -38,4 +38,17 @@ export function resolveAttachmentPath(adminDir: string, stored: string, platform
   }
   if (file === null || !isPathInside(root, file, platform)) throw new Error('Alleen bijlagen van de administratie kunnen geopend worden');
   return file;
+}
+
+/**
+ * Haalt een net bewaarde bijlage weer weg, alleen binnen `bijlagen/` van de administratie. Lukt dat niet,
+ * dan blijft hij staan: het bestand staat dan los in de map, er verwijst niets naar.
+ */
+export function deleteAttachment(adminDir: string, stored: string): void {
+  try {
+    const file = resolveAttachmentPath(adminDir, stored);
+    if (existsSync(file)) unlinkSync(file);
+  } catch {
+    // buiten de bijlagenmap, of niet te verwijderen: niets doen
+  }
 }
