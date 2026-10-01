@@ -87,7 +87,8 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
   it('zet alleen ondubbelzinnige tekstkoppelingen om; de rest komt op controle; de boekhouding blijft gelijk', () => {
     const { db, s, ids, transip, purchase } = oldAdministration();
     const before = { ...dump(db, tables), balances: s.ledger.balances(), vat: s.vat.calculate('2026-Q3') };
-    const documentsBefore = db.prepare('SELECT * FROM documents ORDER BY id').all() as { id: number }[];
+    // een latere migratie (bonnenscanner, #48) geeft elk document twee lege kolommen erbij; verder moet alles gelijk blijven
+    const documentsBefore = (db.prepare('SELECT * FROM documents ORDER BY id').all() as { id: number }[]).map((d) => ({ ...d, note: null, proposed_paid_with: null }));
     migrate(db);
     expect(db.pragma('user_version', { simple: true })).toBe(migrations.length);
     // journaal, gebeurtenissen, aankopen (ook hun bijlage), bank en btw: niets veranderd

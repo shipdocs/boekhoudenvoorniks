@@ -51,6 +51,9 @@ import { ExchangeService, type OfficeProfile } from '../exchange/exchange';
 import { checkCode, openOfficeKey, sealOfficeKey } from '../exchange/crypto';
 import type { LicenseBilling } from '../license/license';
 import { countryCode } from '../shared/vat';
+import { proposedPaidWith } from '../shared/paid-with';
+import QRCode from 'qrcode';
+import type { Bonnenscanner } from '../scanner/scanner';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -129,6 +132,12 @@ export interface HostContext {
     fetchNow(): Promise<PollResult>;
     /** "Toch als bon bewaren": de tekst van een mail die bleef liggen als PDF-bon */
     saveAsReceipt(id: number): Promise<unknown>;
+  };
+  /** bonnenscanner (#48): telefoons koppelen, ontvangstpunt en bonnenmap; ontbreekt buiten de app (bv. de koppeling met --mcp) */
+  scanner?: {
+    service(): Bonnenscanner;
+    /** de gebruiker wijst zelf een map aan in het venster van het besturingssysteem */
+    pickFolder(): Promise<string | null>;
   };
   /** afschriften uit de downloadmap (#184); ontbreekt buiten Electron */
   statementFolder?: {
@@ -262,7 +271,8 @@ export function createApi(s: Services, host: HostContext) {
           categoryKey: d.classification.categoryKey,
           vatCode: d.classification.vatCode,
           business: d.classification.business,
-          paidWith: d.bank_match ? 'bank' : 'later',
+          // de betaalwijze van de telefoon (contant, privé) is het voorstel; anders de bank of later
+          paidWith: proposedPaidWith(d),
         });
         return;
       }
@@ -453,6 +463,11 @@ export function createApi(s: Services, host: HostContext) {
   const admins = () => {
     if (!host.administrations) throw new Error('Meerdere administraties kan alleen in de app zelf');
     return host.administrations;
+  };
+
+  const scanner = () => {
+    if (!host.scanner) throw new Error('De bonnenscanner werkt alleen in de app zelf');
+    return host.scanner.service();
   };
 
   return {
@@ -711,6 +726,32 @@ export function createApi(s: Services, host: HostContext) {
       saveAsReceipt: (id: number) => {
         if (!host.mail) throw new Error('Mail ophalen kan alleen in de app');
         return host.mail.saveAsReceipt(id);
+      },
+    },
+    /**
+     * Bonnenscanner (#48): telefoon koppelen met een QR-code en de bonnenmap. De sleutel van een
+     * telefoon komt alleen als QR-code naar het scherm, en alleen op het moment van koppelen.
+     */
+    scanner: {
+      status: () => (host.scanner ? host.scanner.service().status() : null),
+      pair: async () => {
+        const p = await scanner().pair();
+        const svg = await QRCode.toString(p.payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
+        return { deviceId: p.deviceId, expiresAt: p.expiresAt, addresses: p.addresses, port: p.port, svg };
+      },
+      cancelPairing: (deviceId: string) => scanner().cancelPairing(String(deviceId)),
+      unpair: (deviceId: string) => scanner().unpair(String(deviceId)),
+      firewallSeen: () => scanner().firewallSeen(),
+      /** de map komt uit het keuzevenster, nooit als tekst uit het scherm */
+      chooseFolder: async () => {
+        scanner();
+        const dir = await host.scanner!.pickFolder();
+        return dir ? scanner().setFolder(dir) : null;
+      },
+      clearFolder: () => scanner().setFolder(null),
+      scanFolder: async () => {
+        await scanner().scanFolder();
+        return scanner().status().folder;
       },
     },
     relations: {
