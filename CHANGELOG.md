@@ -8,7 +8,8 @@
   - **Bonnen lezen op deze computer** staat standaard uit. Aanzetten kan pas nadat je er uitdrukkelijk ja op zegt; de app downloadt dan altijd dezelfde, gecontroleerde versie van het leesprogramma (llama.cpp b11146) en start het niet als het bestand afwijkt.
   - **Koppeling met Claude Code of Codex** gebruikt een vaste naam (`boekhoudenvoorniks.exe`) die bij een update niet verandert.
   - **Lukt het overzetten van je gegevens niet**, dan werkt de app niet verder in de oude map: je kiest opnieuw proberen, zelf een map kiezen, of je administratie alleen bekijken. Een zelf gekozen map wordt net zo beoordeeld als bij Instellingen → Administraties → *Waar je gegevens staan* (een lege map, met een waarschuwing bij OneDrive, Dropbox, iCloud en Google Drive); een map onder AppData kan in de Store-versie niet.
-  - **Bij de eerste start** staat er dat je een oude installatie van de website moet verwijderen of bijwerken.
+  - **Staat er een oude installatie van de website naast**, dan vraagt de app bij het starten of die weg mag, met een knop die het verwijderprogramma van die versie opent (Windows vraagt zelf om toestemming). Er wordt nooit vanzelf iets verwijderd en je administratie blijft staan. Met *Niet meer vragen* is het afgedaan. Staat er niets naast, dan komt er geen melding.
+  - **De oude map in AppData wordt niet meer hernoemd** (dat mag een Store-app niet); hij blijft staan onder zijn eigen naam, met een duidelijke uitleg.
   - Werkt het lezen van bonnen of de koppeling niet, dan verwijst de melding naar de gewone Windows-versie op GitHub.
   - Het pakket heeft hetzelfde versienummer als de app (app 1.0.0 → pakket 1.0.0.0).
   - Staan je gegevens in een map onder AppData (een eerder zelf gekozen map), dan waarschuwt de Store-versie bij het starten: wat hij daar neerzet, verdwijnt als je de app verwijdert.

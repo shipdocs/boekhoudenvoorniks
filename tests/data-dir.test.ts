@@ -269,6 +269,24 @@ describe('pointer naar een zelf gekozen map', () => {
 });
 
 describe('overzetten naar de gedeelde map', () => {
+  it('keepSource: de oude map blijft onder zijn eigen naam staan (de Store-versie mag hem niet hernoemen)', async () => {
+    const m = machine();
+    const source = join(m.appData, 'boekhoudenvoorniks');
+    await oldFolder(source);
+    const before = snapshot(source);
+    const outcome = await migrateToSharedDir({ source, target: m.shared, now: NOW, keepSource: true });
+    expect(outcome.status).toBe('gemigreerd');
+    if (outcome.status !== 'gemigreerd') return;
+    expect(outcome.renamedSource).toBeNull();
+    expect(outcome.warning).toBeNull();
+    // de bron is onaangeroerd, en de kopie is compleet met marker
+    expect(snapshot(source)).toEqual(before);
+    expect(existsSync(join(m.shared, MARKER))).toBe(true);
+    expect(existsSync(join(m.shared, 'boekhouding.sqlite'))).toBe(true);
+    // een volgende start zet niet nog een keer over
+    expect(resolveDataDir(m.env)).toEqual({ kind: 'gedeeld', dir: m.shared });
+  });
+
   it.each(['boekhoudenvoorniks', 'gratis-boekhouden'])('zet alles over uit %s; de oude map blijft bewaard', async (name) => {
     const m = machine();
     const source = join(m.appData, name);
