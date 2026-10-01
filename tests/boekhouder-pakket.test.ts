@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { XMLParser } from 'fast-xml-parser';
 import { describe, expect, it } from 'vitest';
-import { setup } from './helpers';
+import { financialSnapshot, setup } from './helpers';
+import { makePdf } from './pdf';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { createZip } from '../src/shared/zip';
 import { createXlsx } from '../src/shared/xlsx';
@@ -235,6 +236,51 @@ describe('pakket voor mijn boekhouder', () => {
     const file = join(dir, 'a.xaf');
     writeFileSync(file, unzip(r.zip).get('auditfile-2026-xaf32.xaf')!);
     execFileSync('xmllint', ['--noout', '--schema', join(__dirname, 'fixtures', 'XmlAuditfileFinancieel3.2.xsd'), file], { stdio: 'pipe' });
+  });
+});
+
+describe('pakket: alleen het hoofdbewijsstuk (#179)', () => {
+  const BOUWMAAT = ['Bouwmaat Nederland B.V.', 'Factuurnummer: 2026018472', 'Factuurdatum 23-09-2026', 'Knauf Goldband 100,00', 'BTW 21% 100,00 21,00', 'Totaal 121,00'];
+  const TRANSIP = ['TransIP BV', 'Factuurnummer F0000.2607.0000.1394', 'Factuurdatum 01-07-2026', 'Hosting 127,46', 'BTW 21% 127,46 26,77', 'Totaal 154,23'];
+
+  it('van elke aankoop en betaling gaat één leesbaar bestand mee; de andere bestanden blijven in de app', async () => {
+    const ctx = setup();
+    const { s } = ctx;
+    // aankoop uit een losse e-factuur, daarna dezelfde factuur als PDF en als foto-PDF
+    const xml = await s.intake.add('factuur.xml', readFileSync(join(__dirname, 'fixtures', 'ubl-invoice.xml')), '2026-09-25', { autoConfirm: false });
+    s.intake.confirm(xml.id, { supplier: 'Bouwmaat', date: '2026-09-23', total: 12100, invoiceNumber: '2026018472', categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    const pdf = await s.intake.add('factuur.pdf', makePdf(BOUWMAAT), '2026-09-26');
+    const pdf2 = await s.intake.add('factuur-nogmaals.pdf', makePdf([...BOUWMAAT, 'Kopie']), '2026-09-27');
+    // betaling rechtstreeks als kosten geboekt, met twee bestanden als bewijs
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-07-08', amount: -15423, description: 'Incasso', counterName: 'TRANSIP B.V.' }] });
+    const t = s.bank.list()[0]!;
+    s.bank.bookToAccount(t.id, { account: 'WBedKanSof', vatCode: 'hoog' });
+    const bon = await s.intake.addEvidence('transip.pdf', makePdf(TRANSIP), t.id);
+    const bon2 = await s.intake.addEvidence('transip-2.pdf', makePdf([...TRANSIP, 'Kopie']), t.id);
+    // een bon die nog op controle wacht gaat niet mee
+    const los = await s.intake.add('los.pdf', makePdf(['Praxis', 'Datum 02-09-2026', 'Totaal 20,00']), '2026-09-27', { autoConfirm: false });
+
+    const before = financialSnapshot(ctx, { evidence: true });
+    const read: string[] = [];
+    const r = await s.accountantPackage.build(2026, { softwareVersion: '9.9.9', readAttachment: (p) => { read.push(p); return Buffer.from(`inhoud van ${p}`); } });
+    const files = unzip(r.zip);
+    const purchases = [...files.keys()].filter((f) => f.startsWith('documenten/inkoop/'));
+    const receipts = [...files.keys()].filter((f) => f.startsWith('documenten/bonnen/'));
+    expect(purchases).toHaveLength(1);
+    expect(files.get(purchases[0]!)!.toString()).toBe(`inhoud van ${pdf.file_path}`);
+    expect(purchases[0]).toMatch(/\.pdf$/);
+    expect(receipts).toHaveLength(1);
+    expect(files.get(receipts[0]!)!.toString()).toBe(`inhoud van ${bon.file_path}`);
+    // de losse e-factuur, de kopieën en de bon op controle zijn niet eens gelezen
+    expect(read.sort()).toEqual([pdf.file_path, bon.file_path].sort());
+    for (const d of [xml, pdf2, bon2, los]) expect(s.intake.get(d.id).file_path).toBe(d.file_path);
+    // het bewijs van de betaling staat in het journaal bij de boeking van die betaling
+    const entry = s.bank.get(t.id).matched_journal_entry_id!;
+    const journal = csv(files.get('journaalposten.csv')!);
+    expect(journal.filter((x) => Number(x[0]) === entry).every((x) => x[14] === receipts[0])).toBe(true);
+    expect(r.summary.checks.find((c) => c.label === 'Bij elke inkoop zit een bon of factuur')?.ok).toBe(true);
+    // het pakket maken verandert niets
+    expect(financialSnapshot(ctx, { evidence: true })).toEqual(before);
   });
 });
 

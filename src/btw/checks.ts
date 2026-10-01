@@ -71,7 +71,8 @@ export function runVatChecks(
   const noEvidencePurchases = db
     .prepare(
       `SELECT p.id, p.total, p.invoice_date AS date, COALESCE(r.name, p.description) AS label FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id
-       WHERE p.invoice_date BETWEEN ? AND ? AND p.total >= ? AND p.attachment_path IS NULL AND p.document_id IS NULL`,
+       WHERE p.invoice_date BETWEEN ? AND ? AND p.total >= ? AND p.attachment_path IS NULL AND p.document_id IS NULL
+         AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.purchase_invoice_id = p.id)`,
     )
     .all(start, end, EVIDENCE_THRESHOLD) as { id: number; total: number; date: IsoDate; label: string }[];
   const noEvidenceBank = db
@@ -81,7 +82,7 @@ export function runVatChecks(
          AND b.amount <= ? AND b.transaction_date BETWEEN ? AND ?
          AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
                      WHERE l.journal_entry_id = b.matched_journal_entry_id AND a.category = 'kosten')
-         AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.classification LIKE '%banktransactie #' || b.id || '"%')`,
+         AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.bank_transaction_id = b.id)`,
     )
     .all(-EVIDENCE_THRESHOLD, start, end) as { id: number; amount: number; date: IsoDate; label: string; hint: string | null }[];
   const missing = noEvidencePurchases.length + noEvidenceBank.length;

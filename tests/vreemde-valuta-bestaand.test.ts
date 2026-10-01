@@ -196,7 +196,10 @@ describe('vreemde valuta in bestaande gegevens (#74)', () => {
     debit(s, 8312);
     s.bank.bookToAccount(s.bank.list({ status: 'nieuw' })[0]!.id, { account: 'WBedKanSof', vatCode: 'buiten-eu' });
     const doc = await s.intake.add('invoice.pdf', makePdf(INVOICE), '2026-05-08');
-    expect(doc.status).toBe('verwerkt');
+    // niet vanzelf boeken en ook niet stil koppelen (#179): de app vraagt of de bon alleen bewijs is
+    expect(doc.status).toBe('controle');
+    expect(s.intake.pending(doc)?.kind).toBe('evidence');
+    expect((await s.intake.decide(doc.id, 'ja')).outcome).toBe('bewijs-gekoppeld');
     expect(s.purchases.list()).toHaveLength(0);
     expect(s.ledger.balance('WBedKanSof')).toBe(8312);
   });
