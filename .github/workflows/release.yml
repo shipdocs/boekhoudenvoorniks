@@ -7,6 +7,8 @@ name: Release
 # electron-builder zet alles eerst in een concept-release; pas als Linux én Windows klaar zijn, maakt de
 # job `publish` hem openbaar (en daarmee bij handmatig starten ook de tag `v<versie uit package.json>`).
 # Zo ziet de updater in de app nooit een release waar latest.yml of latest-linux.yml nog ontbreekt.
+# De job `store` bouwt daarnaast het pakket voor de Microsoft Store (MSIX/appx). Dat gaat nooit naar de
+# GitHub-release: het blijft een artefact van deze workflow en wordt met de hand naar Partner Center geüpload.
 on:
   push:
     tags: ['v*']
@@ -106,6 +108,33 @@ jobs:
           gh release edit "$RELEASE_TAG" --notes-file notes.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Het pakket voor de Microsoft Store (#181), met hetzelfde versienummer als de release. Bewust een eigen
+  # job zonder schrijfrechten en zonder token: `build` publiceert alles wat hij bouwt, en een losse MSIX mag
+  # nooit op GitHub komen (buiten de Store ondertekent Microsoft hem niet). De release wacht hier niet op.
+  store:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Store-pakket bouwen
+        run: npx electron-builder --win appx --publish never --x64
+      - name: Manifest in het pakket controleren
+        run: node scripts/store-manifest.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store-pakket
+          path: release/*.appx
+          if-no-files-found: error
+          retention-days: 90
 
   publish:
     needs: build
