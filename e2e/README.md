@@ -26,7 +26,9 @@ Bij een fout staan een schermafbeelding en een trace in `e2e-results/`
 `bonnenscanner.spec.ts` gebruikt het echte ontvangstpunt van de bonnenscanner (op de testserver alleen op
 127.0.0.1, zonder mDNS): de test leest de QR-code van het scherm en meldt zich als telefoon met echte,
 versleutelde verzoeken. "Map kiezen…" krijgt de map die de test via `POST /__scanner` opgeeft, en met
-`POST /__reset {"scannerPlatform":"win32"}` doet de server alsof de app op Windows draait.
+`POST /__reset {"scannerPlatform":"win32"}` doet de server alsof de app op Windows draait. Telefoon koppelen
+staat in de app nog uit (`src/shared/phone-scanner.ts`); de tests van het koppelen zetten het zelf aan met
+`POST /__reset {"phoneScanner":true}`, en één test controleert de app zoals hij nu is (alleen de bonnenmap).
 
 De E2E-tests bewijzen de bediening in de echte schermen. De aparte
 [proefadministratie](../tests/proefadministratie/README.md) controleert aanvullend dat één vaste set

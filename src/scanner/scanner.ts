@@ -17,6 +17,8 @@ import { ScannerPairing, type ScannerDevice } from './pairing';
 import { encodePairing, type PaymentMethod, type ReceiptMessage } from './protocol';
 import { ScannerReceiver } from './receiver';
 import { ReceiptSpool } from './spool';
+import { stripJpegGps } from './strip-gps';
+import { PHONE_SCANNER } from '../shared/phone-scanner';
 
 export interface ScannerDeps {
   db: Db;
@@ -54,6 +56,8 @@ export interface ScannerStatus {
   devices: ScannerDevice[];
   /** op Windows: de uitleg over de melding van de firewall is nog niet getoond */
   firewallHint: boolean;
+  /** telefoon koppelen is beschikbaar (zie shared/phone-scanner.ts); anders alleen de bonnenmap */
+  phoneAvailable: boolean;
   /** bonnen van de telefoon die nog naar de inbox moeten */
   waiting: number;
   /** bonnen die niet in de inbox gezet konden worden; ze blijven bewaard op deze plek */
@@ -103,7 +107,8 @@ export class Bonnenscanner {
     this.receiver = new ScannerReceiver({
       pairing: this.pairing,
       spool: this.spool,
-      interfaces: () => (this.blocked() ? [] : (deps.interfaces ?? localInterfaces)()),
+      // zolang koppelen uit staat (PHONE_SCANNER) luistert er nooit iets, ook niet met een telefoon in de database
+      interfaces: () => (this.blocked() || !PHONE_SCANNER.available ? [] : (deps.interfaces ?? localInterfaces)()),
       peerAllowed: deps.peerAllowed,
       now: deps.now,
       keepLocation: () => deps.settings.get().jobLocation,
@@ -127,7 +132,7 @@ export class Bonnenscanner {
 
   /** In de demo en in de kopie bij de boekhouder komt er niets binnen. */
   blocked(): string | null {
-    if (this.deps.settings.get().demoMode) return 'In de demo kun je geen telefoon koppelen en geen bonnenmap gebruiken. Wis de demo om echt te beginnen.';
+    if (this.deps.settings.get().demoMode) return `In de demo kun je ${PHONE_SCANNER.available ? 'geen telefoon koppelen en ' : ''}geen bonnenmap gebruiken. Wis de demo om echt te beginnen.`;
     const copy = this.deps.settings.officeCopy();
     if (copy) return `Dit is de kopie voor ${copy.office}: bonnen komen binnen in de administratie van de klant zelf.`;
     return null;
@@ -185,6 +190,7 @@ export class Bonnenscanner {
       addresses: this.receiver.addresses,
       devices,
       firewallHint: (this.deps.platform ?? process.platform) === 'win32' && !this.pairing.firewallSeen(),
+      phoneAvailable: PHONE_SCANNER.available,
       waiting: this.spool.waiting().length,
       failed: this.spool.failed().map((r) => ({ id: r.id, path: this.spool.pathOf(r.id), error: r.error })),
       folder: this.watch.status(),
@@ -202,6 +208,7 @@ export class Bonnenscanner {
    * (als er verder geen telefoon gekoppeld is).
    */
   async pair(): Promise<PairingStart> {
+    if (!PHONE_SCANNER.available) throw new Error('Een telefoon koppelen kan nog niet: de scanner-app voor Android is er nog niet.');
     const blocked = this.blocked();
     if (blocked) throw new Error(blocked);
     const { deviceId, key, expiresAt } = this.pairing.begin();
@@ -321,8 +328,10 @@ export class Bonnenscanner {
       try {
         const msg = this.spool.read(row.id);
         // de naam van het document maakt de app zelf, niet de telefoon
-        const one = msg.fotos.length === 1;
-        const data = one ? msg.fotos[0]! : jpegsToPdf(msg.fotos);
+        // zonder toestemming voor locatie (#32) blijft er geen positie in de foto's achter, ook niet in de PDF
+        const fotos = this.deps.settings.get().jobLocation ? msg.fotos : msg.fotos.map(stripJpegGps);
+        const one = fotos.length === 1;
+        const data = one ? fotos[0]! : jpegsToPdf(fotos);
         const name = `bon-telefoon-${row.received_at.slice(0, 10)}-${sha256(data).slice(0, 8)}.${one ? 'jpg' : 'pdf'}`;
         const doc = await this.toInbox(() => this.addToInbox(name, data, 'telefoon', name));
         if (this.stopped) return;
