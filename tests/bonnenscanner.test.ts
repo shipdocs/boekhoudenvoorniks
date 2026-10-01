@@ -838,7 +838,8 @@ describe('bonnenscanner: protocol (docs/bonnenscanner-protocol.md)', () => {
   });
 
   it('de voorbeelden in het document zijn geldig en gelijk aan wat hier getest wordt', () => {
-    const doc = readFileSync(join(__dirname, '..', 'docs', 'bonnenscanner-protocol.md'), 'utf8');
+    // op Windows kan het bestand met \r\n uitgecheckt zijn
+    const doc = readFileSync(join(__dirname, '..', 'docs', 'bonnenscanner-protocol.md'), 'utf8').replace(/\r\n/g, '\n');
     const blocks = [...doc.matchAll(/```(json|text)\n([\s\S]*?)```/g)].map((m) => ({ lang: m[1]!, body: m[2]!.trim() }));
     const examples = blocks.filter((b) => b.lang === 'json').map((b) => JSON.parse(b.body) as Record<string, unknown>);
     // de QR-code
