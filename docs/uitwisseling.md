@@ -212,7 +212,8 @@ Bestandsnamen bevatten geen klantnaam: `gb-<eerste 8 tekens administratie-ID>-17
 ### Inhoud
 
 - **Export:** de complete back-upbundel (`createBackupBundle`, dus database en bijlagen) plus K, de
-  einddatum en de koppelgegevens. Dus ook wat de klant na de einddatum al geboekt had: de boekhouder
+  einddatum en de koppelgegevens. De bijlagepaden in de database zijn relatief aan de map van de
+  administratie (`bijlagen/2026/…`), dus ze kloppen ook in de kopie bij de boekhouder. Dus ook wat de klant na de einddatum al geboekt had: de boekhouder
   ziet dat (handig voor bv. betalingen na balansdatum bij dubieuze debiteuren), maar zijn handelingen
   moeten t/m de einddatum blijven, en hij kan geen post van na de einddatum terugdraaien. Het scherm zegt
   dat zo tegen de klant (besluit 4). **Zonder de tabel `secrets`** en zonder instellingen voor

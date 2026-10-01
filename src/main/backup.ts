@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
 import type { Db } from '../db/database';
+import { relativeAttachmentPath, relativizeAttachmentPaths, storedAttachmentPaths } from '../db/attachment-paths';
 
 const BUNDLE_MAGIC = Buffer.from('GBBUNDLE');
 const BUNDLE_VERSION = 1;
@@ -146,45 +147,43 @@ export interface RebaseReport {
   missing: number;
 }
 
-/**
- * Laat de opgeslagen bijlagepaden wijzen naar `attachmentsRoot`, waar de administratie ook vandaan komt:
- * een andere computer, de map van vóór de naamswijziging of een Windows-pad met backslashes. Alles na
- * de laatste `/bijlagen/` blijft; nog een keer draaien verandert niets. Ontbrekende bestanden worden
- * alleen geteld. `existsRoot` is de map waarin de bestanden nu staan, als dat (nog) een andere is.
- */
-export function rebaseAttachmentPaths(database: string, attachmentsRoot: string, existsRoot = attachmentsRoot): RebaseReport {
-  const db = new Database(database);
-  const report: RebaseReport = { rebased: 0, missing: 0 };
+/** Hoeveel bijlagen van deze database staan niet in `adminDir` (de map van de administratie)? */
+function countMissing(db: Database.Database, adminDir: string): number {
+  let missing = 0;
+  for (const { path } of storedAttachmentPaths(db)) {
+    // ook voor een database uit een oudere versie: het bestand hoort op dezelfde plek binnen de map
+    const rel = relativeAttachmentPath(path);
+    if (rel && !existsSync(join(adminDir, ...rel.split('/')))) missing++;
+  }
+  return missing;
+}
+
+/** Telt de bijlagen waarvan het bestand ontbreekt, zonder iets aan de database te veranderen. */
+export function missingAttachments(database: string, adminDir: string): number {
+  const db = new Database(database, { readonly: true, fileMustExist: true });
   try {
-    const update = (table: string, column: string): void => {
-      // oudere databases hebben nog niet alle tabellen (die komen met een latere migratie)
-      if (!db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table)) return;
-      const rows = db.prepare(`SELECT id, ${column} AS path FROM ${table} WHERE ${column} IS NOT NULL`).all() as { id: number; path: string }[];
-      const statement = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
-      for (const row of rows) {
-        const normalized = row.path.replace(/\\/g, '/');
-        // Windows-paden zijn hoofdletterongevoelig: ook `\Bijlagen\` is onze map. Zoeken in het pad zelf,
-        // niet in een kopie in kleine letters: die kan bij sommige tekens langer zijn dan het origineel.
-        const last = [...normalized.matchAll(/\/bijlagen\//gi)].at(-1);
-        if (!last) continue;
-        const rel = normalized.slice(last.index + last[0].length);
-        if (!safeBundlePath(rel)) continue;
-        const rebased = join(attachmentsRoot, ...rel.split('/'));
-        if (rebased !== row.path) {
-          statement.run(rebased, row.id);
-          report.rebased++;
-        }
-        if (!existsSync(join(existsRoot, ...rel.split('/')))) report.missing++;
-      }
-    };
-    db.transaction(() => {
-      update('documents', 'file_path');
-      update('purchase_invoices', 'attachment_path');
-    })();
+    return countMissing(db, adminDir);
   } finally {
     db.close();
   }
-  return report;
+}
+
+/**
+ * Alleen nog nodig voor een back-up of export uit een oudere versie: daarin staan de bijlagepaden
+ * absoluut (van een andere computer, de map van vóór de naamswijziging of een Windows-pad met
+ * backslashes). Die worden hier relatief aan de map van de administratie, zoals de app ze nu opslaat;
+ * alles na de laatste `/bijlagen/` blijft. Paden die al relatief zijn, blijven zoals ze zijn: nog een
+ * keer draaien verandert niets. Ontbrekende bestanden worden alleen geteld. `adminDir` is de map van
+ * de administratie, waarin `bijlagen/` nu staat.
+ */
+export function rebaseAttachmentPaths(database: string, adminDir: string): RebaseReport {
+  const db = new Database(database);
+  try {
+    const { converted } = relativizeAttachmentPaths(db);
+    return { rebased: converted, missing: countMissing(db, adminDir) };
+  } finally {
+    db.close();
+  }
 }
 
 /** Herstelt een complete back-up en bewaart de vervangen database en bijlagen ernaast. */
@@ -218,7 +217,7 @@ export function restoreCompleteBackup(data: Buffer, target: string, dataRoot: st
     if (existsSync(stagedAttachments)) renameSync(stagedAttachments, attachments);
     else mkdirSync(attachments, { recursive: true });
     newAttachmentsInstalled = true;
-    rebaseAttachmentPaths(target, attachments);
+    rebaseAttachmentPaths(target, dataRoot);
   } catch (error) {
     if (existsSync(`${target}.voor-herstel`)) copyFileSync(`${target}.voor-herstel`, target);
     if (newAttachmentsInstalled && existsSync(attachments)) rmSync(attachments, { recursive: true, force: true });
@@ -244,15 +243,15 @@ export function extractBundle(data: Buffer, dir: string): void {
   }
   validateBackup(target);
   mkdirSync(join(dir, 'bijlagen'), { recursive: true });
-  rebaseAttachmentPaths(target, join(dir, 'bijlagen'));
+  rebaseAttachmentPaths(target, dir);
 }
 
-/** Alleen voor oude .sqlite-back-ups zonder bijlagen; de bijlagen op schijf blijven en de paden wijzen er weer naar. */
+/** Alleen voor oude .sqlite-back-ups zonder bijlagen; de bijlagen op schijf blijven en de paden worden relatief aan de map van de administratie. */
 export function restoreLegacyDatabase(file: string, target: string): void {
   validateBackup(file);
   copyFileSync(target, `${target}.voor-herstel`);
   copyFileSync(file, target);
   for (const suffix of ['-wal', '-shm']) if (existsSync(target + suffix)) unlinkSync(target + suffix);
-  const report = rebaseAttachmentPaths(target, join(dirname(target), 'bijlagen'));
+  const report = rebaseAttachmentPaths(target, dirname(target));
   if (report.missing > 0) console.warn(`Na het terugzetten ontbreken ${report.missing} bijlage(n) op schijf`);
 }
