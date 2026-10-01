@@ -2,7 +2,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import type { BankService, BankTransaction } from '../import/bank';
+import type { BalanceCheck, BankService, BankTransaction } from '../import/bank';
 import type { MatchingEngine } from '../import/matching';
 import type { InvoiceService } from '../documents/invoices';
 import type { QuoteService } from '../documents/quotes';
@@ -48,6 +48,7 @@ export type TaskKind =
   | 'quote-expired'
   | 'vat-due'
   | 'bank-stale'
+  | 'bank-balance'
   | 'bank-locked'
   | 'exchange-conflict'
   | 'vat-suppletie'
@@ -211,6 +212,29 @@ export class InboxService {
 
   private isSkipped(key: string): boolean {
     return !!this.db.prepare(`SELECT 1 FROM task_skips WHERE task_key = ? AND fingerprint = 'x'`).get(key);
+  }
+
+  /**
+   * Het saldo volgens het laatste afschrift klopt niet met wat de app heeft (#184), en de gebruiker heeft
+   * dit verschil niet eerder goedgevonden. Per saldodatum één keer; een verschil dat "klopt" is gezegd,
+   * komt bij een later afschrift niet terug zolang het precies even groot blijft.
+   */
+  balanceMismatch(bankAccountId: number): (BalanceCheck & { key: string }) | null {
+    const sw = this.settings.get().switchover;
+    // bij het overstappen bevestigd dat de rekening met € 0 begon: dan staat er geen beginsaldo geboekt
+    const zeroFrom = sw.date && sw.bankConfirmed.includes(bankAccountId) ? sw.date : null;
+    const check = this.bank.balanceCheck(bankAccountId, zeroFrom);
+    if (!check || check.difference === 0) return null;
+    const key = `bank-balance-${bankAccountId}-${check.date}`;
+    if (this.isSkipped(key)) return null;
+    const accepted = this.db.prepare(`SELECT 1 FROM task_skips WHERE task_key LIKE ? AND reason = ?`).get(`bank-balance-${bankAccountId}-%`, `verschil ${check.difference}`);
+    return accepted ? null : { ...check, key };
+  }
+
+  /** "Dit klopt, negeren" bij een saldo dat niet klopt: het verschil van nu is goed zo. */
+  ignoreBalance(bankAccountId: number): void {
+    const check = this.balanceMismatch(bankAccountId);
+    if (check) this.skipTask(check.key, `verschil ${check.difference}`);
   }
 
   /**
@@ -587,6 +611,34 @@ export class InboxService {
           question: st.coverageTo ? `Dat is ${days} dagen geleden. Download een nieuw afschrift bij je bank en sleep het in de app. Dan zoeken we uit wat bij welke factuur hoort.` : 'Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes.',
           actions: [{ id: 'open', label: 'Afschrift inlezen', primary: true }],
           ref: { bankAccountId: st.bankAccountId },
+        });
+      }
+    }
+
+    // Klopt het saldo met het laatste afschrift? (#184) Tijdens het overstappen doet de overstap-hulp dat zelf.
+    if (!(s.switchover.mode === 'overstapper' && s.switchover.status !== 'klaar')) {
+      for (const a of this.bank.listAccounts()) {
+        const check = this.balanceMismatch(a.id);
+        if (!check) continue;
+        const size = formatEuro(Math.abs(check.difference));
+        const c = check.candidate;
+        tasks.push({
+          key: check.key,
+          kind: 'bank-balance',
+          icon: '⚖️',
+          title: `${a.name}: het saldo klopt niet`,
+          question:
+            `Volgens je bank stond er op ${formatDateNl(check.date)} ${formatEuro(check.bank)}, volgens de app ${formatEuro(check.app)}. ` +
+            (c
+              ? `Bij het inlezen is een betaling van ${size} op ${formatDateNl(c.date)} overgeslagen, omdat hij er al leek te staan. Bekijk of dat klopt.`
+              : check.difference > 0
+                ? `Er mist waarschijnlijk een betaling van ${size}.`
+                : `Er mist waarschijnlijk een afschrijving van ${size}, of er staat een betaling dubbel in.`),
+          amount: Math.abs(check.difference),
+          actions: c
+            ? [{ id: 'bekijken', label: 'Bekijken', primary: true }, { id: 'open', label: 'Afschrift inlezen' }, { id: 'negeren', label: 'Dit klopt, negeren' }]
+            : [{ id: 'open', label: 'Afschrift inlezen', primary: true }, { id: 'negeren', label: 'Dit klopt, negeren' }],
+          ref: { bankAccountId: a.id },
         });
       }
     }
@@ -1011,6 +1063,9 @@ export class InboxService {
       'job-link:algemeen': 'Hoort niet bij een klus: gewone bedrijfskosten.',
       'mail-online:bon': 'De mail wordt als bon bewaard; je controleert hem daarna.',
       'recurring-invoice:geen': 'De app vraagt voor deze betaling niet meer om een factuur.',
+      'bank-balance:bekijken': 'Je ziet de overgeslagen betaling naast de betaling die er al stond, en kunt hem alsnog toevoegen.',
+      'bank-balance:open': 'Lees het afschrift in van de dagen die nog ontbreken. Wat er al staat, slaat de app over.',
+      'bank-balance:negeren': 'Er verandert niets in je boekhouding. De app vraagt er pas weer naar als het verschil verandert.',
     };
     for (const a of t.actions) a.hint ??= hints[`${t.kind}:${a.id}`];
   }
@@ -1088,8 +1143,8 @@ export class InboxService {
     const status = this.bank.importStatus();
     const bankUpdatedTo = status.map((st) => st.coverageTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
-      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') },
-      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && k !== 'bank-stale') },
+      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') },
+      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && k !== 'bank-stale' && k !== 'bank-balance') },
       { label: 'Alle bonnetjes verwerkt', ok: !kinds.has('document-review') },
       { label: 'Geen facturen te laat', ok: !kinds.has('invoice-overdue') },
       { label: 'Btw-aangifte op tijd', ok: !kinds.has('vat-due') },

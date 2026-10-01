@@ -37,6 +37,20 @@ export function diffDays(from: IsoDate, to: IsoDate): number {
   return Math.round((b - a) / 86_400_000);
 }
 
+/**
+ * Aantal werkdagen (maandag t/m vrijdag) tussen twee datums, ongeacht de volgorde: vrijdag → maandag is 1.
+ * Feestdagen tellen als werkdag: de marge wordt daar hooguit iets krapper van, nooit ruimer.
+ */
+export function workdaysBetween(a: IsoDate, b: IsoDate): number {
+  const [from, to] = a <= b ? [a, b] : [b, a];
+  let n = 0;
+  for (let d = addDays(from, 1); d <= to; d = addDays(d, 1)) {
+    const day = new Date(`${d}T00:00:00Z`).getUTCDay();
+    if (day !== 0 && day !== 6) n++;
+  }
+  return n;
+}
+
 export type PeriodType = 'maand' | 'kwartaal' | 'jaar';
 
 export interface Period {

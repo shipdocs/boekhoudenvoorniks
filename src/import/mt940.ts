@@ -53,7 +53,7 @@ export async function parseMt940(data: Buffer | ArrayBuffer): Promise<ParseResul
     const close = st.closingBalance;
     if (close?.date && Number.isFinite(close.value)) {
       const cents = Math.round(Math.abs(close.value) * 100);
-      balances.push({ ownIban: ownIban && /^[A-Z]{2}\d{2}/.test(ownIban) ? ownIban : null, date: toIso(close.date), amount: close.isCredit ? cents : -cents });
+      balances.push({ ownIban: ownIban && /^[A-Z]{2}\d{2}/.test(ownIban) ? ownIban : null, date: toIso(close.date), amount: close.isCredit ? cents : -cents, ...(close.currency && close.currency.toUpperCase() !== 'EUR' ? { currency: close.currency.toUpperCase() } : {}) });
     }
     for (const t of st.transactions) {
       const info = parseField86(t.description ?? '');
