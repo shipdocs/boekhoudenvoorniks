@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, ErrorBox, Euro, Modal, useAction, useApp, useLoad } from '../ui';
+import { formatDateNl } from '../../shared/dates';
+import { ResolveQuestionModal } from './Purchases';
 
 const SOURCE: Record<string, string> = {
   factuur: 'factuur',
@@ -19,6 +22,7 @@ export function CheckLines({ account, upTo, title, hint, onClose }: { account: s
   const { run } = useAction();
   const d = useLoad(() => api.vat.accountLines(account, upTo), [account, upTo]);
   const lines = d.data?.lines ?? [];
+  const [resolving, setResolving] = useState<{ id: number; label: string } | null>(null);
   const open = (l: (typeof lines)[number]) => {
     // een bon openen kan met dit venster nog open; naar een ander scherm gaan sluit het
     if (!(l.purchaseId && l.attachmentPath && !l.bankTransactionId && !l.invoiceId)) onClose();
@@ -47,6 +51,13 @@ export function CheckLines({ account, upTo, title, hint, onClose }: { account: s
                 <td className="num"><Euro cents={l.amount ?? 0} /></td>
                 <td>
                   {l.bankTransactionId ? <Button small kind="primary" onClick={() => open(l)}>Opnieuw indelen</Button>
+                    : l.question && l.purchaseId ? (
+                      // een bon bij "weet ik nog niet": hier meteen indelen, zonder hem bij Aankopen op te zoeken
+                      <span className="row">
+                        <Button small kind="primary" onClick={() => setResolving({ id: l.purchaseId!, label: `${l.counterparty ?? l.description} ${formatDateNl(l.date)}` })}>Indelen</Button>
+                        {l.attachmentPath && <Button small onClick={() => open(l)}>Bekijken</Button>}
+                      </span>
+                    )
                     : (l.invoiceId || l.purchaseId) ? <Button small onClick={() => open(l)}>Bekijken</Button> : null}
                 </td>
               </tr>
@@ -57,6 +68,7 @@ export function CheckLines({ account, upTo, title, hint, onClose }: { account: s
           </tfoot>
         </table>
       )}
+      {resolving && <ResolveQuestionModal purchase={resolving} onClose={() => setResolving(null)} onDone={async () => { setResolving(null); await d.reload(); }} />}
     </Modal>
   );
 }
