@@ -53,6 +53,8 @@ export const LLAMA_CPP = {
   license: 'MIT',
   licenseUrl: 'https://github.com/ggml-org/llama.cpp/blob/master/LICENSE',
   releaseApi: 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest',
+  /** een release bij zijn naam (tag); zie `findRelease` in runtime.ts */
+  releaseByTagApi: 'https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/',
   /** ongeveer, voor de melding vooraf (de precieze grootte volgt uit de release) */
   approxSize: 30_000_000,
 };
