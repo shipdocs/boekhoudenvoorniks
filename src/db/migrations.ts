@@ -950,6 +950,7 @@ export const migrations: string[] = [
     seen_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX idx_statement_files_status ON statement_files(status);
+  `,
   /* 27: bewijs als echte koppeling, afgewezen voorstellen en meldingen over dubbele documenten (#179) */ `
   -- Eén document hoort bij precies één aankoop of bankbetaling; een aankoop of betaling mag meer
   -- bestanden hebben, waarvan er precies één het hoofdbewijsstuk is. Dit is de enige bron voor
