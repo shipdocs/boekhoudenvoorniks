@@ -46,6 +46,11 @@ export type DownloadFetch = (url: string, init?: { headers?: Record<string, stri
   json(): Promise<unknown>;
 }>;
 
+interface LlamaRelease {
+  tag_name: string;
+  assets: { name: string; size: number; browser_download_url: string; digest?: string | null }[];
+}
+
 export interface RuntimeDeps {
   fetch: DownloadFetch;
   /** pakt een zip/tar.gz uit */
@@ -151,11 +156,7 @@ export class LocalOcrRuntime {
       if (!pattern) throw new Error(`De ingebouwde herkenning is (nog) niet beschikbaar voor ${platform}/${arch}.`);
       mkdirSync(join(this.dir, 'models'), { recursive: true });
       // 1. welke llama.cpp-build
-      const rel = await this.deps.fetch(LLAMA_CPP.releaseApi, { headers: { Accept: 'application/vnd.github+json' } });
-      if (!rel.ok) throw new Error(`Kon de runtime niet vinden (HTTP ${rel.status})`);
-      const release = (await rel.json()) as { tag_name: string; assets: { name: string; size: number; browser_download_url: string; digest?: string | null }[] };
-      const asset = release.assets.find((a) => pattern.test(a.name));
-      if (!asset) throw new Error('Geen passende runtime gevonden voor dit systeem.');
+      const { release, asset } = await this.findRelease(pattern);
       const sha = asset.digest?.startsWith('sha256:') ? asset.digest.slice(7) : null;
       if (!sha) throw new Error('De runtime heeft geen controlegetal; downloaden afgebroken.');
       const downloads: (ModelFile & { target: string })[] = [
@@ -188,6 +189,35 @@ export class LocalOcrRuntime {
   }
 
   /** Download met hervatten (Range) en sha256-controle. */
+  /**
+   * De llama.cpp-build om te downloaden. De laatste release bevat de bestanden zelf, of (sinds
+   * llama.cpp versienummers gebruikt) alleen `nightly-tag.txt` met de naam van de build die erbij hoort;
+   * die build halen we dan op.
+   */
+  private async findRelease(pattern: RegExp): Promise<{ release: LlamaRelease; asset: LlamaRelease['assets'][number] }> {
+    const get = async (url: string): Promise<LlamaRelease> => {
+      const res = await this.deps.fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
+      if (!res.ok) throw new Error(`Kon de runtime niet vinden (HTTP ${res.status})`);
+      return (await res.json()) as LlamaRelease;
+    };
+    let release = await get(LLAMA_CPP.releaseApi);
+    let asset = release.assets.find((a) => pattern.test(a.name));
+    const pointer = asset ? undefined : release.assets.find((a) => a.name === 'nightly-tag.txt');
+    if (pointer) {
+      const res = await this.deps.fetch(pointer.browser_download_url);
+      if (!res.ok || !res.body) throw new Error(`Kon de runtime niet vinden (HTTP ${res.status})`);
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of res.body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+      const tag = Buffer.concat(chunks).toString('utf8').trim();
+      // de naam komt in een adres: alleen een gewone buildnaam (bv. b11146)
+      if (!/^[A-Za-z0-9._-]{1,40}$/.test(tag)) throw new Error('Geen passende runtime gevonden voor dit systeem.');
+      release = await get(`${LLAMA_CPP.releaseByTagApi}${tag}`);
+      asset = release.assets.find((a) => pattern.test(a.name));
+    }
+    if (!asset) throw new Error('Geen passende runtime gevonden voor dit systeem.');
+    return { release, asset };
+  }
+
   private async download(f: ModelFile & { target: string }, onBytes: (n: number) => void): Promise<void> {
     if (existsSync(f.target) && statSync(f.target).size === f.size) {
       // al aanwezig: alleen gebruiken als het controlegetal klopt, anders opnieuw downloaden
