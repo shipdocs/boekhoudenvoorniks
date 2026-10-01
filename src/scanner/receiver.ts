@@ -33,14 +33,17 @@ const FAILURE_WINDOW_MS = 60_000;
  *   op de privé-adressen van deze computer, en neemt alleen verbindingen aan uit datzelfde netwerk.
  * - Het doet niets met een verzoek dat niet met de sleutel van een gekoppelde telefoon te ontsleutelen
  *   is, en geeft nooit iets uit de administratie terug: alleen "ontvangen" of een foutcode.
- * - Alles wat binnenkomt is invoer van buiten: begrensd in grootte, op type gecontroleerd, en geen
- *   enkel veld uit het verzoek wordt een bestandsnaam.
+ * - Alles wat binnenkomt is invoer van buiten: begrensd in grootte en op type gecontroleerd. De naam van
+ *   het document maakt de app zelf; alleen het ID van de bon wordt (na controle dat het een UUID is) de
+ *   naam van het tijdelijke bestand in de wachtrij.
  */
 export class ScannerReceiver {
   private readonly servers = new Map<string, Server>();
+  private readonly netmasks = new Map<string, string>();
   private currentPort: number | null = null;
   private queue: Promise<void> = Promise.resolve();
-  private inflight = 0;
+  /** adressen waarvan nu een verzoek wordt ingelezen */
+  private readonly inflight = new Set<string>();
   private readonly failures = new Map<string, { count: number; resetAt: number }>();
   private readonly now: () => number;
 
@@ -59,6 +62,11 @@ export class ScannerReceiver {
 
   get addresses(): string[] {
     return [...this.servers.keys()];
+  }
+
+  /** De adressen waarop nu geluisterd wordt, met hun netmasker. */
+  get interfaces(): LocalInterface[] {
+    return this.addresses.map((address) => ({ address, netmask: this.netmasks.get(address) ?? '255.255.255.255' }));
   }
 
   /**
@@ -104,6 +112,7 @@ export class ScannerReceiver {
       if (port !== this.opts.pairing.port()) this.opts.pairing.setPort(port);
       this.currentPort = port;
       this.servers.set(iface.address, server);
+      this.netmasks.set(iface.address, iface.netmask);
     }
     if (this.servers.size === 0) this.failures.clear();
   }
@@ -123,6 +132,10 @@ export class ScannerReceiver {
       if (!allowed(normalizeRemote(socket.remoteAddress), iface)) socket.destroy();
     });
     server.on('clientError', (_e, socket) => socket.destroy());
+    // een fout van het besturingssysteem bij het aannemen van verbindingen mag de app niet laten vallen
+    server.on('error', (e) => this.opts.log?.(`Ontvangstpunt op ${iface.address}: ${e.message}`));
+    // een verbinding waar tien seconden niets over komt, wordt verbroken (houdt geen plek bezet)
+    server.timeout = 10_000;
     server.headersTimeout = 10_000;
     server.requestTimeout = 120_000;
     server.keepAliveTimeout = 5_000;
@@ -196,7 +209,12 @@ export class ScannerReceiver {
           checked = true;
           const head = readHeader(Buffer.concat(chunks, total), DIRECTION.request);
           if (!head) return finish('ongeldig');
-          if (!this.opts.pairing.key(toBase64Url(head.deviceId))) return finish('niet-gekoppeld');
+          try {
+            if (!this.opts.pairing.key(toBase64Url(head.deviceId))) return finish('niet-gekoppeld');
+          } catch {
+            // de administratie gaat net dicht
+            return finish('ongeldig');
+          }
         }
       });
       req.on('end', () => finish(total === length ? Buffer.concat(chunks, total) : 'ongeldig'));
@@ -216,17 +234,19 @@ export class ScannerReceiver {
     const length = Number(rawLength);
     if (length > LIMITS.maxBodyBytes) return this.plain(req, res, 413, 'te-groot');
     if (length < HEADER_BYTES + TAG_BYTES) return this.plain(req, res, 400, 'ongeldig');
-    if (this.inflight >= MAX_INFLIGHT) return this.plain(req, res, 503, 'te-druk');
+    // hooguit drie tegelijk, en van één adres één: een telefoon stuurt zijn bonnen na elkaar
+    if (this.inflight.size >= MAX_INFLIGHT || this.inflight.has(remote)) return this.plain(req, res, 503, 'te-druk');
 
-    this.inflight++;
+    this.inflight.add(remote);
     let body: Buffer | ErrorCode;
     try {
       body = await this.readBody(req, length);
     } finally {
-      this.inflight--;
+      this.inflight.delete(remote);
     }
     if (typeof body === 'string') {
-      if (body === 'niet-gekoppeld') this.fail(remote);
+      // ook een afgebroken of ongeldig verzoek telt mee voor "te veel mislukte pogingen"
+      this.fail(remote);
       return this.plain(req, res, body === 'niet-gekoppeld' ? 401 : 400, body);
     }
 

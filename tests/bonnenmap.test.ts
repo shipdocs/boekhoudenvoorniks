@@ -22,7 +22,7 @@ const tmp = (prefix: string) => {
 };
 
 /** Een administratie met een bonnenmap; de klok is van de test, zodat "een paar seconden" niet echt hoeft te duren. */
-function start(opts: { realClock?: boolean } = {}) {
+function start(opts: { realClock?: boolean; homeDir?: string; broadDirs?: string[] } = {}) {
   const t = setup();
   const folder = tmp('bvn-bonnen-');
   const data = tmp('bvn-gegevens-');
@@ -35,6 +35,8 @@ function start(opts: { realClock?: boolean } = {}) {
     spoolDir: join(data, 'bonnenscanner'),
     protectedDirs: [data],
     interfaces: () => [],
+    homeDir: opts.homeDir,
+    broadDirs: opts.broadDirs,
     now: opts.realClock ? undefined : () => clock.now,
   });
   open.push(scanner);
@@ -62,7 +64,7 @@ describe('bonnenmap (#48)', () => {
 
   it('nieuwe bestanden (jpg, png, pdf, xml) gaan de inbox in en worden verplaatst naar verwerkt/', async () => {
     const t = start();
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     writeFileSync(join(t.folder, 'tankbon.jpg'), makeJpeg('tank'));
     writeFileSync(join(t.folder, 'Scan 12.JPEG'), makeJpeg('scan'));
     writeFileSync(join(t.folder, 'schermafdruk.png'), Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(40, 1)]));
@@ -82,7 +84,7 @@ describe('bonnenmap (#48)', () => {
 
   it('een bestand dat nog geschreven wordt, wordt pas opgepakt als de grootte een paar seconden gelijk blijft', async () => {
     const t = start();
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     const file = join(t.folder, 'grote-scan.jpg');
     const jpeg = makeJpeg('groot');
     writeFileSync(file, jpeg.subarray(0, 100));
@@ -107,7 +109,7 @@ describe('bonnenmap (#48)', () => {
 
   it('een leeg bestand (door het synchronisatieprogramma alvast aangemaakt) blijft liggen tot er iets in staat', async () => {
     const t = start();
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     writeFileSync(join(t.folder, 'bon.jpg'), '');
     await t.settle();
     await t.settle();
@@ -120,7 +122,7 @@ describe('bonnenmap (#48)', () => {
 
   it('dubbele bestanden worden herkend via de hash: één document, beide bestanden naar verwerkt/', async () => {
     const t = start();
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     writeFileSync(join(t.folder, 'bon.jpg'), makeJpeg('zelfde'));
     await t.settle();
     // dezelfde foto onder een andere naam, en later nog eens onder dezelfde naam
@@ -137,7 +139,7 @@ describe('bonnenmap (#48)', () => {
 
   it('een ander bestand met dezelfde naam als een eerder verwerkt bestand overschrijft niets', async () => {
     const t = start();
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     writeFileSync(join(t.folder, 'IMG_0001.jpg'), makeJpeg('maandag'));
     await t.settle();
     writeFileSync(join(t.folder, 'IMG_0001.jpg'), makeJpeg('dinsdag'));
@@ -151,7 +153,7 @@ describe('bonnenmap (#48)', () => {
     const t = start();
     const elsewhere = tmp('bvn-elders-');
     writeFileSync(join(elsewhere, 'geheim.pdf'), makePdf(['niet van de bonnenmap']));
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     writeFileSync(join(t.folder, 'notities.txt'), 'boodschappen');
     writeFileSync(join(t.folder, 'urenlijst.xlsx'), 'PK');
     writeFileSync(join(t.folder, 'foto.heic'), 'heic');
@@ -179,7 +181,7 @@ describe('bonnenmap (#48)', () => {
 
   it('een bestand dat niet is wat de naam zegt blijft liggen, met de reden erbij', async () => {
     const t = start();
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     writeFileSync(join(t.folder, 'programma.pdf'), 'MZ\x90\x00 dit is geen pdf');
     writeFileSync(join(t.folder, 'tekst.jpg'), 'gewoon tekst');
     writeFileSync(join(t.folder, 'instellingen.xml'), '<?xml version="1.0"?><config><a>1</a></config>');
@@ -204,7 +206,7 @@ describe('bonnenmap (#48)', () => {
 
   it('er wordt nooit iets verwijderd: elk bestand staat na afloop in de map of in verwerkt/', async () => {
     const t = start();
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     const names = ['a.jpg', 'b.jpg', 'c.pdf', 'd.xml', 'e.txt', 'kapot.pdf'];
     writeFileSync(join(t.folder, 'a.jpg'), makeJpeg('a'));
     writeFileSync(join(t.folder, 'b.jpg'), makeJpeg('a'));
@@ -225,7 +227,7 @@ describe('bonnenmap (#48)', () => {
       calls++;
       throw new Error('schijf vol');
     };
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     writeFileSync(join(t.folder, 'bon.jpg'), makeJpeg());
     for (let i = 0; i < 4; i++) await t.settle();
     expect(calls).toBe(1);
@@ -235,7 +237,7 @@ describe('bonnenmap (#48)', () => {
 
   it('een bestand in de bonnenmap staat binnen 10 seconden in de inbox (echte klok)', async () => {
     const t = start({ realClock: true });
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     await t.scanner.start();
     const started = Date.now();
     writeFileSync(join(t.folder, 'bon.jpg'), makeJpeg('op tijd'));
@@ -250,44 +252,100 @@ describe('bonnenmap (#48)', () => {
 
   it('de map kiezen: geen map die te breed is of van de app zelf, en uitzetten kan altijd', async () => {
     const t = start();
-    expect(() => t.scanner.setFolder(homedir())).toThrow(/te groot/);
-    expect(() => t.scanner.setFolder(dirname(homedir()))).toThrow(/te groot/);
-    expect(() => t.scanner.setFolder('/')).toThrow(/te groot/);
-    expect(() => t.scanner.setFolder(t.data)).toThrow(/van BoekhoudenVoorNiks zelf/);
+    await expect(t.scanner.setFolder(homedir())).rejects.toThrow(/te groot/);
+    await expect(t.scanner.setFolder(dirname(homedir()))).rejects.toThrow(/te groot/);
+    await expect(t.scanner.setFolder('/')).rejects.toThrow(/te groot/);
+    await expect(t.scanner.setFolder(t.data)).rejects.toThrow(/van BoekhoudenVoorNiks zelf/);
     mkdirSync(join(t.data, 'bijlagen'));
-    expect(() => t.scanner.setFolder(join(t.data, 'bijlagen'))).toThrow(/van BoekhoudenVoorNiks zelf/);
-    expect(() => t.scanner.setFolder(join(t.folder, 'bestaat-niet'))).toThrow(/bestaat niet/);
-    expect(() => t.scanner.setFolder('bonnen')).toThrow(/op deze computer/);
+    await expect(t.scanner.setFolder(join(t.data, 'bijlagen'))).rejects.toThrow(/van BoekhoudenVoorNiks zelf/);
+    await expect(t.scanner.setFolder(join(t.folder, 'bestaat-niet'))).rejects.toThrow(/bestaat niet/);
+    await expect(t.scanner.setFolder('bonnen')).rejects.toThrow(/op deze computer/);
     writeFileSync(join(t.folder, 'bestand.txt'), 'x');
-    expect(() => t.scanner.setFolder(join(t.folder, 'bestand.txt'))).toThrow(/bestaat niet/);
+    await expect(t.scanner.setFolder(join(t.folder, 'bestand.txt'))).rejects.toThrow(/bestaat niet/);
     expect(t.scanner.folder()).toBeNull();
-    expect(t.scanner.setFolder(t.folder).folder).toBe(t.folder);
+    expect((await t.scanner.setFolder(t.folder)).folder).toBe(t.folder);
     // de map staat niet tussen de gewone instellingen die het scherm kan aanpassen
     t.s.settings.update({ receiptFolder: '/etc' } as never);
     expect(t.scanner.folder()).toBe(t.folder);
-    t.scanner.setFolder(null);
+    await t.scanner.setFolder(null);
     expect(t.scanner.folder()).toBeNull();
     writeFileSync(join(t.folder, 'bon.jpg'), makeJpeg());
     await t.settle();
     expect(t.documents()).toHaveLength(0);
   });
 
+  it('je hele map Documenten of Downloads kan geen bonnenmap zijn, een submap ervan wel', async () => {
+    const home = tmp('bvn-thuis-');
+    for (const name of ['Documents', 'Downloads', 'Foto']) mkdirSync(join(home, name));
+    mkdirSync(join(home, 'Documents', 'Bonnen'));
+    const t = start({ homeDir: home, broadDirs: [join(home, 'Foto')] });
+    for (const name of ['Documents', 'Downloads', 'Foto']) await expect(t.scanner.setFolder(join(home, name))).rejects.toThrow(/te groot/);
+    await expect(t.scanner.setFolder(home)).rejects.toThrow(/te groot/);
+    expect((await t.scanner.setFolder(join(home, 'Documents', 'Bonnen'))).folder).toBe(join(home, 'Documents', 'Bonnen'));
+  });
+
+  it('de gekozen map wordt bij elke rondgang opnieuw gecontroleerd: wordt hij een snelkoppeling naar elders, dan stopt de app', async () => {
+    const t = start();
+    const elsewhere = tmp('bvn-elders-');
+    writeFileSync(join(elsewhere, 'privefoto.jpg'), makeJpeg('niet van de bonnenmap'));
+    const chosen = join(t.folder, 'bonnen');
+    mkdirSync(chosen);
+    await t.scanner.setFolder(chosen);
+    rmSync(chosen, { recursive: true });
+    try {
+      symlinkSync(elsewhere, chosen, 'dir');
+    } catch {
+      return; // Windows zonder het recht om snelkoppelingen te maken
+    }
+    await t.settle();
+    await t.settle();
+    expect(t.documents()).toHaveLength(0);
+    expect(readdirSync(elsewhere)).toEqual(['privefoto.jpg']);
+    expect(t.scanner.status().folder).toMatchObject({ folder: chosen, reachable: false });
+    // ook een map uit de instellingen die nooit gekozen had mogen worden (bv. uit een back-up van een andere pc)
+    t.db.prepare(`UPDATE settings SET value = ? WHERE key = 'receiptFolder'`).run(JSON.stringify(t.data));
+    writeFileSync(join(t.data, 'iets.jpg'), makeJpeg('in de map van de app'));
+    await t.settle();
+    expect(t.documents()).toHaveLength(0);
+    expect(existsSync(join(t.data, 'iets.jpg'))).toBe(true);
+  });
+
+  it('lukt verplaatsen naar verwerkt/ nog niet, dan probeert de app het opnieuw zonder de bon dubbel in te lezen', async () => {
+    const t = start();
+    await t.scanner.setFolder(t.folder);
+    // op de plek van de map `verwerkt` staat een bestand: verplaatsen kan niet
+    writeFileSync(join(t.folder, 'verwerkt'), 'in de weg');
+    writeFileSync(join(t.folder, 'bon.jpg'), makeJpeg('wacht op verplaatsen'));
+    await t.settle();
+    await t.settle();
+    expect(t.documents()).toHaveLength(1);
+    expect(t.files()).toEqual(['bon.jpg', 'verwerkt']);
+    expect(t.scanner.status().folder).toMatchObject({ processed: 1, problems: [{ name: 'bon.jpg', reason: 'staat in de inbox, maar kon nog niet naar de map verwerkt verplaatst worden' }] });
+    // het obstakel is weg: bij de volgende rondgang gaat hij alsnog
+    rmSync(join(t.folder, 'verwerkt'));
+    await t.settle();
+    expect(t.files()).toEqual(['verwerkt']);
+    expect(t.files(join(t.folder, 'verwerkt'))).toEqual(['bon.jpg']);
+    expect(t.documents()).toHaveLength(1);
+    expect(t.scanner.status().folder).toMatchObject({ processed: 1, problems: [] });
+  });
+
   it('in de demo kijkt de app niet in de bonnenmap', async () => {
     const t = start();
-    t.scanner.setFolder(t.folder);
+    await t.scanner.setFolder(t.folder);
     t.s.settings.update({ demoMode: true });
     writeFileSync(join(t.folder, 'bon.jpg'), makeJpeg());
     await t.settle();
     expect(t.documents()).toHaveLength(0);
     expect(t.files()).toEqual(['bon.jpg']);
-    expect(() => t.scanner.setFolder(t.folder)).toThrow(/demo/);
+    await expect(t.scanner.setFolder(t.folder)).rejects.toThrow(/demo/);
   });
 
   it('is de map even niet bereikbaar (bv. een losgekoppelde schijf), dan gaat het later vanzelf verder', async () => {
     const t = start();
     const gone = join(t.folder, 'schijf');
     mkdirSync(gone);
-    t.scanner.setFolder(gone);
+    await t.scanner.setFolder(gone);
     rmSync(gone, { recursive: true });
     await t.settle();
     expect(t.scanner.status().folder).toMatchObject({ folder: gone, reachable: false });

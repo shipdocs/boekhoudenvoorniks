@@ -94,6 +94,7 @@ function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) 
             ? 'Ontvangen staat nu uit: deze computer zit niet op een thuis- of kantoornetwerk.'
             : 'Ontvangen staat uit: er is geen telefoon gekoppeld.'}
       </p>
+      {st.waiting > 0 && <p className="small muted" style={{ margin: 0 }}>{st.waiting === 1 ? 'Eén bon van je telefoon wordt' : `${st.waiting} bonnen van je telefoon worden`} nog in de inbox gezet.</p>}
       {st.failed.length > 0 && (
         <div className="notice warn small">
           {st.failed.length === 1 ? 'Eén bon van je telefoon kon' : `${st.failed.length} bonnen van je telefoon konden`} niet in de inbox gezet worden. Ze zijn bewaard in {st.failed[0]!.path.replace(/[\\/][^\\/]+$/, '')}; de app probeert het opnieuw als je hem de volgende keer start.

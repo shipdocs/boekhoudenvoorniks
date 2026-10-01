@@ -33,10 +33,13 @@ export class ReceiptSpool {
     private readonly dir: string,
   ) {}
 
-  /** Vingerafdruk van de inhoud: dezelfde bon nog eens is goed, een ándere bon onder hetzelfde ID niet. */
+  /**
+   * Vingerafdruk van de inhoud: dezelfde bon nog eens is goed, een ándere bon onder hetzelfde ID niet.
+   * De locatie telt niet mee: die staat niet altijd in de wachtrij (alleen met toestemming).
+   */
   static hash(msg: ReceiptMessage): string {
     const h = createHash('sha256');
-    h.update(JSON.stringify([msg.betaalwijze, msg.notitie, msg.locatie, msg.fotos.map((f) => f.length)]));
+    h.update(JSON.stringify([msg.betaalwijze, msg.notitie, msg.fotos.map((f) => f.length)]));
     for (const f of msg.fotos) h.update(f);
     return h.digest('hex');
   }
@@ -77,13 +80,28 @@ export class ReceiptSpool {
       closeSync(fd);
     }
     renameSync(tmp, target);
+    syncDirectory(this.dir);
     try {
-      this.db.prepare('INSERT INTO scanner_documents (id, device_id, content_hash) VALUES (?, ?, ?)').run(msg.id, deviceId, hash);
+      this.insert(msg.id, deviceId, hash);
     } catch (e) {
       unlinkSync(target);
       throw e;
     }
     return 'nieuw';
+  }
+
+  /**
+   * De regel in de database, meteen naar schijf: de app schrijft normaal niet bij elke wijziging door
+   * (WAL), maar na deze regel krijgt de telefoon de bevestiging en ruimt hij de bon op.
+   */
+  private insert(id: string, deviceId: string, hash: string): void {
+    const before = this.db.pragma('synchronous', { simple: true }) as number;
+    this.db.pragma('synchronous = FULL');
+    try {
+      this.db.prepare('INSERT INTO scanner_documents (id, device_id, content_hash) VALUES (?, ?, ?)').run(id, deviceId, hash);
+    } finally {
+      this.db.pragma(`synchronous = ${before}`);
+    }
   }
 
   /** Bonnen die nog naar de inbox moeten, oudste eerst. */
@@ -124,20 +142,59 @@ export class ReceiptSpool {
   }
 
   /**
-   * Bij het opstarten: half geschreven bestanden en bestanden zonder regel in de database weg (de
-   * telefoon kreeg daar nooit een bevestiging van en stuurt ze opnieuw).
+   * Bij het opstarten de wachtrij op orde brengen. Er wordt geen bon weggegooid:
+   * - een bestand zonder regel in de database (stroomuitval vlak na het ontvangen, of een teruggezette
+   *   back-up) krijgt opnieuw een regel en gaat alsnog naar de inbox; was hij daar al, dan herkent de
+   *   inbox hem aan de hash;
+   * - een bon die eerder niet lukte, wordt nog een keer geprobeerd;
+   * - weg mogen alleen half geschreven bestanden (daar is nooit een bevestiging voor gegeven) en de
+   *   kopie van een bon die al in de inbox staat.
    */
-  cleanup(): void {
-    if (!existsSync(this.dir)) return;
-    for (const name of readdirSync(this.dir)) {
-      const id = name.endsWith(SUFFIX) ? name.slice(0, -SUFFIX.length) : null;
-      if (id && ID.test(id) && this.row(id)) continue;
-      if (!name.endsWith(SUFFIX) && !name.endsWith(`${SUFFIX}.tmp`)) continue;
-      try {
-        unlinkSync(join(this.dir, name));
-      } catch {
-        /* blijft staan; volgende keer */
+  recover(): void {
+    if (existsSync(this.dir)) {
+      for (const name of readdirSync(this.dir)) {
+        const path = join(this.dir, name);
+        if (name.endsWith(`${SUFFIX}.tmp`)) {
+          tryUnlink(path);
+          continue;
+        }
+        const id = name.endsWith(SUFFIX) ? name.slice(0, -SUFFIX.length) : null;
+        if (!id || !ID.test(id)) continue;
+        const row = this.row(id);
+        if (row?.state === 'verwerkt') tryUnlink(path);
+        else if (!row) {
+          try {
+            this.insert(id, '', ReceiptSpool.hash(this.read(id)));
+          } catch {
+            /* niet te lezen: laten staan, niet weggooien */
+          }
+        }
       }
     }
+    for (const row of this.failed()) {
+      if (existsSync(this.file(row.id))) this.db.prepare(`UPDATE scanner_documents SET state = 'wacht', attempts = 0 WHERE id = ?`).run(row.id);
+    }
+  }
+}
+
+function tryUnlink(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    /* blijft staan; volgende keer */
+  }
+}
+
+/** De nieuwe naam in de map ook naar schijf (waar het besturingssysteem dat toelaat; op Windows niet nodig). */
+function syncDirectory(dir: string): void {
+  try {
+    const fd = openSync(dir, 'r');
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    /* niet ondersteund */
   }
 }

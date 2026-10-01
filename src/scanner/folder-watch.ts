@@ -1,10 +1,12 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync } from 'node:fs';
+import { access, lstat, mkdir, readdir, readFile, rename } from 'node:fs/promises';
 import { extname, join, parse } from 'node:path';
 import { isUbl } from '../intake/ubl';
 
 export interface FolderWatchOptions {
-  /** de gekozen bonnenmap, of null als er geen gekozen is */
-  folder: () => string | null;
+  /** de gekozen bonnenmap, of null als er geen gekozen is (of als hij niet meer aan de regels voldoet) */
+  folder: () => Promise<string | null>;
+  /** de gekozen map voor de status, zonder controle */
+  configured: () => string | null;
   /** zet een bestand in de inbox; `duplicate` = dit bestand hadden we al (zelfde hash) */
   add: (name: string, data: Uint8Array) => Promise<{ documentId: number; duplicate: boolean }>;
   now?: () => number;
@@ -54,7 +56,8 @@ function isTemporary(name: string): boolean {
  * een paar seconden gelijk is. Alleen bestanden direct in de map; submappen en snelkoppelingen niet.
  *
  * Bewust een rustige rondgang om de paar seconden in plaats van meldingen van het besturingssysteem:
- * die werken niet betrouwbaar op gesynchroniseerde mappen en netwerkschijven.
+ * die werken niet betrouwbaar op gesynchroniseerde mappen en netwerkschijven. Alle bestandstoegang
+ * gaat buiten de hoofdlus om: een netwerkschijf die niet reageert, laat de app niet hangen.
  */
 export class ReceiptFolderWatch {
   private timer: NodeJS.Timeout | null = null;
@@ -62,6 +65,8 @@ export class ReceiptFolderWatch {
   private queued: Promise<void> | null = null;
   private readonly seen = new Map<string, { key: string; since: number }>();
   private readonly skipped = new Map<string, { key: string; reason: string }>();
+  /** staat al in de inbox, maar verplaatsen lukte nog niet (bv. nog vast bij het synchronisatieprogramma) */
+  private readonly toMove = new Map<string, string>();
   private processed = 0;
   private reachable = false;
   private recent: FolderStatus['recent'] = [];
@@ -91,13 +96,14 @@ export class ReceiptFolderWatch {
   reset(): void {
     this.seen.clear();
     this.skipped.clear();
+    this.toMove.clear();
     this.recent = [];
     this.processed = 0;
     this.reachable = false;
   }
 
   status(): FolderStatus {
-    const folder = this.opts.folder();
+    const folder = this.opts.configured();
     return { folder, reachable: folder !== null && this.reachable, processed: this.processed, recent: this.recent.slice(0, 10), problems: [...this.skipped].map(([name, s]) => ({ name, reason: s.reason })).slice(0, 20) };
   }
 
@@ -122,19 +128,22 @@ export class ReceiptFolderWatch {
   }
 
   private async scanOnce(): Promise<void> {
-    const dir = this.opts.folder();
-    if (!dir) return;
+    const dir = await this.opts.folder();
+    if (!dir) {
+      this.reachable = false;
+      return;
+    }
     let names: string[];
     try {
       // alleen gewone bestanden: geen mappen (ook `verwerkt/` niet) en geen snelkoppelingen
-      names = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name);
+      names = (await readdir(dir, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name);
       this.reachable = true;
     } catch {
       this.reachable = false;
       return;
     }
     const present = new Set(names);
-    for (const map of [this.seen, this.skipped]) for (const name of [...map.keys()]) if (!present.has(name)) map.delete(name);
+    for (const map of [this.seen, this.skipped, this.toMove]) for (const name of [...map.keys()]) if (!present.has(name)) map.delete(name);
 
     for (const name of names) {
       const kind = TYPES[extname(name).toLowerCase()];
@@ -143,17 +152,26 @@ export class ReceiptFolderWatch {
       let size: number;
       let key: string;
       try {
-        const st = lstatSync(path);
+        const st = await lstat(path);
         if (!st.isFile()) continue;
         size = st.size;
         key = `${st.size}:${st.mtimeMs}`;
       } catch {
         continue; // intussen weg
       }
+      if (this.toMove.get(name) === key) {
+        // staat al in de inbox: alleen het verplaatsen nog een keer proberen
+        if (await this.move(dir, name)) {
+          this.toMove.delete(name);
+          this.skipped.delete(name);
+        }
+        continue;
+      }
       if (this.skipped.get(name)?.key === key) continue;
       const prev = this.seen.get(name);
       if (!prev || prev.key !== key) {
         this.skipped.delete(name);
+        this.toMove.delete(name);
         this.seen.set(name, { key, since: this.now() });
         continue;
       }
@@ -172,7 +190,7 @@ export class ReceiptFolderWatch {
     const skip = (reason: string) => void this.skipped.set(name, { key, reason });
     let data: Buffer;
     try {
-      data = readFileSync(path);
+      data = await readFile(path);
     } catch {
       return skip('kon niet gelezen worden');
     }
@@ -190,22 +208,32 @@ export class ReceiptFolderWatch {
     this.recent.unshift({ name, at: new Date(this.now()).toISOString(), duplicate });
     this.recent = this.recent.slice(0, 10);
     this.seen.delete(name);
-    try {
-      const target = join(dir, PROCESSED_DIR);
-      mkdirSync(target, { recursive: true });
-      renameSync(path, freeName(target, name));
-    } catch {
-      // staat wel in de inbox; blijft hij liggen, dan herkent de app hem aan de hash en komt hij er niet dubbel in
-      skip(`staat in de inbox, maar kon niet naar de map ${PROCESSED_DIR} verplaatst worden`);
+    if (!(await this.move(dir, name))) {
+      // staat wel in de inbox; elke rondgang proberen we het verplaatsen opnieuw
+      this.toMove.set(name, key);
+      skip(`staat in de inbox, maar kon nog niet naar de map ${PROCESSED_DIR} verplaatst worden`);
     }
     this.opts.onProcessed?.();
+  }
+
+  /** Naar `verwerkt/`, onder een naam die daar nog niet bestaat. Onwaar als het (nu) niet lukt. */
+  private async move(dir: string, name: string): Promise<boolean> {
+    try {
+      const target = join(dir, PROCESSED_DIR);
+      await mkdir(target, { recursive: true });
+      await rename(join(dir, name), await freeName(target, name));
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
 /** Een naam in `dir` die nog niet bestaat: bon.jpg, bon (2).jpg, bon (3).jpg, … Nooit overschrijven. */
-function freeName(dir: string, name: string): string {
+async function freeName(dir: string, name: string): Promise<string> {
   const { name: base, ext } = parse(name);
+  const exists = (path: string) => access(path).then(() => true, () => false);
   let candidate = join(dir, name);
-  for (let i = 2; existsSync(candidate); i++) candidate = join(dir, `${base} (${i})${ext}`);
+  for (let i = 2; await exists(candidate); i++) candidate = join(dir, `${base} (${i})${ext}`);
   return candidate;
 }
