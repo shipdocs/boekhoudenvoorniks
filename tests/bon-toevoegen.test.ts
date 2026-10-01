@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { financialSnapshot, setup } from './helpers';
 import { makePdf } from './pdf';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
+import { primaryRank } from '../src/documents/evidence-links';
 
 const TRANSIP_2607 = ['TransIP BV', 'Factuurnummer F0000.2607.0000.1394', 'Factuurdatum 01-07-2026', 'Hosting 127,46', 'BTW 21% 127,46 26,77', 'Totaal 154,23'];
 const TRANSIP_2507 = ['TransIP BV', 'Factuurnummer F0000.2507.0000.1458', 'Factuurdatum 01-07-2025', 'Hosting 119,95', 'BTW 21% 119,95 25,19', 'Totaal 145,14'];
@@ -40,6 +41,18 @@ describe('bon bij een betaling of aankoop zonder bon', () => {
 });
 
 describe('bewijs is een echte koppeling (#179)', () => {
+  it('hoofdbewijsstuk: PDF met e-factuur erin, dan PDF met tekst, gescande PDF, foto, en als laatste een losse e-factuur', () => {
+    const files = [
+      { name: 'los.xml', mime_type: 'application/xml', extraction_source: 'ubl' },
+      { name: 'foto.jpg', mime_type: 'image/jpeg', extraction_source: 'ocr:test' },
+      { name: 'scan.pdf', mime_type: 'application/pdf', extraction_source: 'ocr:test' },
+      { name: 'tekst.pdf', mime_type: 'application/pdf', extraction_source: 'pdf-text' },
+      { name: 'pdf-met-ubl.pdf', mime_type: 'application/pdf', extraction_source: 'ubl' },
+      { name: 'ongelezen.png', mime_type: 'image/png', extraction_source: 'geen' },
+    ];
+    expect([...files].sort((a, b) => primaryRank(b) - primaryRank(a)).map((f) => f.name)).toEqual(['pdf-met-ubl.pdf', 'tekst.pdf', 'scan.pdf', 'foto.jpg', 'ongelezen.png', 'los.xml']);
+  });
+
   const GAMMA = ['Gamma', 'Factuurnummer: G-2026-55', 'Datum 01-08-2026', 'Verf 200,00', 'BTW 21% 200,00 42,00', 'Totaal 242,00'];
 
   /** Een betaling die rechtstreeks als kosten geboekt is, en een aankoop zonder bon. */
