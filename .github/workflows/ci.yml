@@ -24,6 +24,9 @@ jobs:
   # De gegevensmap en het overzetten ervan (tests/data-dir.test.ts) gedragen zich op Windows anders:
   # bestandssloten, schijfletters en backslashes. Daarom draaien die tests ook daar.
   data-dir-windows:
+    # alleen na het mergen (push naar main): voor Windows is er lokaal geen vervanger, maar bij elke
+    # pull request is het niet nodig. De Release-workflow draait de tests op Windows ook nog zelf.
+    if: github.event_name == 'push'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,30 +60,8 @@ jobs:
       - run: npm ci
       - run: npm run check
 
-  # End-to-end: de echte schermen in Chromium, met de echte services (zie e2e/ en playwright.config.ts).
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-      - run: npx playwright install --with-deps chromium
-      - run: npm run e2e
-      - name: Rapport bewaren bij een fout
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-rapport
-          path: |
-            e2e-report/
-            e2e-results/
-          retention-days: 7
+  # De browsertests (e2e) draaien niet hier maar lokaal vóór een pull request (`npm run e2e`): ze doen op
+  # GitHub hetzelfde als op de eigen computer en kostten vooral wachttijd. Zie docs/testen.md.
 
   # Verpakt de app en start hem echt: vangt ontbrekende runtime-afhankelijkheden in het installatiepakket.
   package-smoke:
@@ -116,6 +97,9 @@ jobs:
   # De nieuwe installer is als artefact te downloaden om de upgrade ook met de hand te proberen
   # (docs/handmatige-test-datamap-windows.md). Er wordt niets gepubliceerd.
   package-smoke-windows:
+    # alleen na het mergen (push naar main): voor Windows is er lokaal geen vervanger, maar bij elke
+    # pull request is het niet nodig. De Release-workflow draait de tests op Windows ook nog zelf.
+    if: github.event_name == 'push'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
