@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { simpleParser } from 'mailparser';
 import { attachmentsOf, mailText, unpack } from '../src/mail/imap-source';
-import { receiptHtml } from '../src/mail/mail-intake';
+import { receiptHtml, type MailMessage, type MailSource } from '../src/mail/mail-intake';
+import { financialSnapshot, setup } from './helpers';
+import { makePdf } from './pdf';
 
 const pdf = Buffer.from('%PDF-1.4\nfactuur\n%%EOF').toString('base64');
 
@@ -75,5 +77,27 @@ describe('doorgestuurde mail', () => {
     expect(text.indexOf('Total: € 1,99')).toBeLessThan(80);
     // ook als de tekst ongeschoond binnenkomt
     expect(receiptHtml({ fromName: '', fromAddress: 'a@b.nl', subject: 'x', date: '2026-09-27', text: parsed.text! })).not.toContain('\u200c');
+  });
+
+  it('een doorgestuurde factuur die er al in staat: melding op Vandaag, niets opnieuw geboekt (#179)', async () => {
+    const ctx = setup();
+    const { s } = ctx;
+    s.settings.update({ onboardingDone: true, mailIn: { enabled: true, host: 'imap.example.nl', port: 993, secure: true, user: 'administratie@piet.nl', folder: 'INBOX', extraFolders: [], processedFolder: 'Verwerkt', since: '' } });
+    const factuur = makePdf(['Knab', 'Factuurnummer: K-202609', 'Factuurdatum 01-09-2026', 'Totaal 12,10']);
+    const forwarded = raw.replace(pdf, Buffer.from(factuur).toString('base64'));
+    const eerder = await s.intake.add('knab.pdf', factuur, '2026-09-02', { autoConfirm: false });
+    s.intake.confirm(eerder.id, { supplier: 'Knab', date: '2026-09-01', total: 1210, invoiceNumber: 'K-202609', categoryKey: 'overig', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    const before = financialSnapshot(ctx, { evidence: true });
+
+    const parsed = await simpleParser(forwarded);
+    const message: MailMessage = { uid: 1, messageId: '<buiten@piet.nl>', fromAddress: 'info@piet.nl', fromName: 'Piet', subject: 'Fwd: factuur Knab', date: '2026-09-03', text: '', attachments: await attachmentsOf(parsed.attachments as never) };
+    const moved: number[] = [];
+    const box: MailSource = { open: async () => ({ uidValidity: '1' }), list: async (after) => (after < 1 ? [1] : []), fetch: async () => message, move: async (uid) => void moved.push(uid) };
+    expect(await s.mail.poll(box, '2026-09-03')).toMatchObject({ documents: 1, errors: 0 });
+    expect(financialSnapshot(ctx, { evidence: true })).toEqual(before);
+    expect(moved).toEqual([1]);
+    expect(s.inbox.tasks('2026-09-03').filter((t) => t.kind === 'document-notice')).toEqual([
+      expect.objectContaining({ title: 'Dit document stond er al in.', ref: expect.objectContaining({ documentId: eerder.id }) }),
+    ]);
   });
 });
