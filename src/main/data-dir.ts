@@ -419,7 +419,7 @@ export async function migrateToSharedDir(options: MigrationOptions): Promise<Mig
     } catch {
       /* de volgende start ruimt op */
     }
-    if (e instanceof Stopped) return { status: 'gestopt', reason: 'Het overzetten is gestopt. Je werkt verder vanuit de oude map; bij de volgende start probeert de app het opnieuw.' };
+    if (e instanceof Stopped) return { status: 'gestopt', reason: 'Het overzetten is gestopt.' };
     return { status: 'mislukt', reason: (e as Error).message };
   }
 }
