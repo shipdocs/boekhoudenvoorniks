@@ -2,6 +2,13 @@
 
 ## Nog niet uitgebracht
 
+### Nieuw
+- **Zelf kiezen waar je gegevens staan** (Instellingen → Administraties → *Waar je gegevens staan*): wil je je administratie op een andere schijf of in een andere map, kies dan een lege map. De app start opnieuw, kopieert je administraties, bijlagen en back-ups erheen en controleert de kopie voordat hij hem gebruikt; je ziet de voortgang en kunt stoppen. De map die je gebruikte blijft staan, er wordt niets gewist. Lukt het niet (bijvoorbeeld door te weinig ruimte), dan verandert er niets en werk je verder vanuit de oude map.
+- **Een map met een administratie openen**: kies je een map waarin al een complete administratie van BoekhoudenVoorNiks staat, dan opent de app die; je huidige gegevens gaan dan niet mee en blijven staan. Een map met andere bestanden, of met een administratie die niet compleet is, wordt geweigerd met een duidelijke melding. De app opent nooit stil een lege administratie.
+- **Waarschuwing bij OneDrive, Dropbox, iCloud en Google Drive**: zo'n dienst kopieert bestanden terwijl de app ermee werkt, en daar kan je administratie van beschadigen. De app waarschuwt als je zo'n map kiest; je kunt hem dan toch gebruiken, maar alleen als je dat bewust aanvinkt.
+- **Terug naar de standaardmap**: met één knop gaan je gegevens terug naar `BoekhoudenVoorNiks` in je thuismap. Wat daar nog stond, wordt bewaard in een aparte map.
+- **Opgeslagen wachtwoorden blijven werken** na het wisselen (e-mail en andere koppelingen), en de koppeling met Claude Code of Codex leest dezelfde map als de app; start dat programma na het wisselen één keer opnieuw. Laat de standaardmap staan, ook als je een andere map gebruikt: de app bewaart daar de sleutel van je opgeslagen wachtwoorden.
+
 ### Verbeterd
 - **Bon bij "weet ik nog niet" meteen indelen**: in het venster dat laat zien wat er nog bij "weet ik nog niet" staat (op Vandaag en bij Belasting) heeft een bon nu een knop *Indelen*. Je hoeft hem niet meer bij Aankopen op te zoeken.
 
