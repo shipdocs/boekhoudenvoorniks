@@ -173,3 +173,14 @@ section { padding: 56px 0; }
   .top, .foot-links { display: none; }
   .foot { border-top: 0; padding-top: 12px; }
 }
+
+/* downloadpagina */
+.dl-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 28px 0 12px; }
+.dl-card { display: flex; flex-direction: column; gap: 10px; }
+.dl-card h2 { margin: 0; }
+.dl-card .btn { align-self: flex-start; }
+.dl-card .dl-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+.dl-store[hidden] { display: none; }
+.dl-store img { display: block; height: auto; }
+.dl-store .fine { margin: 6px 0 14px; }
+@media (max-width: 720px) { .dl-grid { grid-template-columns: 1fr; } }
