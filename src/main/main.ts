@@ -621,6 +621,7 @@ function initServices(): void {
             // het wisselen zelf gebeurt bij de volgende start, vóór er een database open is (zie switchFolderIfAsked)
             writeSwitchRequest(app.getPath('home'), plan.dir, plan.action);
             localOcr.stop();
+            await scanner?.stop();
             db.close();
             app.relaunch();
             app.exit(0);
