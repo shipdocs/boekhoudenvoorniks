@@ -28,6 +28,8 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
   const index = migrations.findIndex((m) => m.includes('CREATE TABLE IF NOT EXISTS document_links'));
   const tables = ['journal_entries', 'journal_lines', 'events', 'event_evidence', 'purchase_invoices', 'purchase_invoice_lines', 'bank_transactions', 'vat_periods'];
   const dump = (db: Database.Database, names: string[]) => Object.fromEntries(names.map((t) => [t, db.prepare(`SELECT * FROM ${t} ORDER BY 1, 2`).all()]));
+  // een latere migratie (verzamelbetalingen, #184) geeft elke bankregel drie lege kolommen erbij; verder moet alles gelijk blijven
+  const withLaterColumns = <T extends Record<string, unknown>>(snap: T): T => ({ ...snap, bank_transactions: (snap.bank_transactions as object[]).map((r) => ({ ...r, batch_ref: null, batch_total: null, duplicate_of: null })) });
   const reasons = (text: string[]) => JSON.stringify({ categoryKey: 'overig', vatCode: 'hoog', business: true, confidence: 1, source: 'geheugen', reasons: text, automatic: true });
 
   /** Een administratie zoals vóór de migratie: bonnen bij betalingen staan alleen als tekst in de uitleg. */
@@ -44,11 +46,14 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
       storeFile: async (name) => `/tmp/${name}`,
       licensePublicKey: '',
     });
-    s.bank.import({ source: 'csv', warnings: [], transactions: [
-      { date: '2026-07-08', amount: -15423, description: 'TransIP', counterName: 'TRANSIP B.V.' },
-      { date: '2026-07-09', amount: -6100, description: 'KPN', counterName: 'KPN' },
-      { date: '2026-07-10', amount: -24200, description: 'Gamma', counterName: 'GAMMA' },
-    ] });
+    // de betalingen zoals de app ze toen wegschreef (het inlezen van nu kent kolommen die er toen nog niet waren)
+    const account = s.bank.listAccounts()[0]!.id;
+    db.prepare(`INSERT INTO import_batches (id, source, kind, imported_count) VALUES (1, 'csv', 'csv', 3)`).run();
+    db.prepare(`INSERT INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates) VALUES (1, ?, '2026-07-08', '2026-07-10', 3, 3, 0)`).run(account);
+    const row = db.prepare(`INSERT INTO bank_transactions (bank_account_id, transaction_date, amount, counter_name, description, source, import_batch_id, dedup_hash) VALUES (?, ?, ?, ?, ?, 'csv', 1, ?)`);
+    row.run(account, '2026-07-08', -15423, 'TRANSIP B.V.', 'TransIP', 'oud-1');
+    row.run(account, '2026-07-09', -6100, 'KPN', 'KPN', 'oud-2');
+    row.run(account, '2026-07-10', -24200, 'GAMMA', 'Gamma', 'oud-3');
     const [transip, kpn, gamma] = s.bank.list().sort((a, b) => a.transaction_date.localeCompare(b.transaction_date));
     s.bank.bookToAccount(transip!.id, { account: 'WBedKanSof', vatCode: 'hoog' });
     // KPN was geboekt en is daarna teruggedraaid: de betaling staat weer open
@@ -86,7 +91,7 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
 
   it('zet alleen ondubbelzinnige tekstkoppelingen om; de rest komt op controle; de boekhouding blijft gelijk', () => {
     const { db, s, ids, transip, purchase } = oldAdministration();
-    const before = { ...dump(db, tables), balances: s.ledger.balances(), vat: s.vat.calculate('2026-Q3') };
+    const before = withLaterColumns({ ...dump(db, tables), balances: s.ledger.balances(), vat: s.vat.calculate('2026-Q3') });
     // een latere migratie (bonnenscanner, #48) geeft elk document twee lege kolommen erbij; verder moet alles gelijk blijven
     const documentsBefore = (db.prepare('SELECT * FROM documents ORDER BY id').all() as { id: number }[]).map((d) => ({ ...d, note: null, proposed_paid_with: null }));
     migrate(db);
@@ -139,7 +144,7 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
   it('een bon die zo op controle kwam wordt opnieuw beoordeeld: eerst de vraag, tot dan niet te boeken; de boekhouding blijft gelijk', async () => {
     const { db, s, ids, transip, purchase } = oldAdministration();
     const fin = () => ({ ...dump(db, tables), balances: s.ledger.balances(), vat: s.vat.calculate('2026-Q3') });
-    const before = fin();
+    const before = withLaterColumns(fin());
     migrate(db);
     // 'twee' noemde twee betalingen (daarom niet omgezet); die van TransIP staat nog gewoon als kosten geboekt
     const asPurchase = { supplier: 'TransIP', date: '2026-07-08', total: 15423, categoryKey: 'software', vatCode: 'hoog' as const, business: true, paidWith: 'later' as const };

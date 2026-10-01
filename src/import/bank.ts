@@ -42,6 +42,11 @@ export interface BankTransaction {
   import_batch_id: number | null;
   /** de id die de bank zelf gaf; null bij een afschrift zonder id's en bij alles van vóór deze kolom */
   bank_id: string | null;
+  /** deelpost van een verzamelboeking (CAMT): de id van die boeking en haar totaal */
+  batch_ref: string | null;
+  batch_total: Cents | null;
+  /** uit de boekhouding gehaald omdat dit bedrag er dubbel in stond: de betaling die bleef */
+  duplicate_of: number | null;
   status: 'nieuw' | 'gematcht' | 'genegeerd';
   matched_journal_entry_id: number | null;
   matched_invoice_id: number | null;
@@ -58,7 +63,7 @@ export interface BankImportStatus {
   coverageFrom: string | null;
   coverageTo: string | null;
   totalTransactions: number;
-  /** regels die bij het inlezen zijn overgeslagen omdat de betaling er al stond (en niet alsnog toegevoegd) */
+  /** regels die zijn overgeslagen omdat de betaling er al stond (en niet alsnog toegevoegd), of die als dubbel uit de boekhouding zijn gehaald */
   skipped: number;
 }
 
@@ -82,6 +87,47 @@ export interface ImportSummary {
 /** Hooguit zoveel werkdagen mag de datum van dezelfde betaling in twee soorten afschrift verschillen. */
 export const SAME_PAYMENT_WORKDAYS = 3;
 
+/** Zoveel werkdagen mogen één regel en de deelposten van hetzelfde bedrag uit elkaar liggen voor de melding "staat er twee keer in". */
+export const BATCH_WARN_WORKDAYS = 5;
+
+/** Eén kant van een bedrag dat er twee keer in staat: een betaling zoals hij in de boeken staat. */
+export interface DoubleSide {
+  id: number;
+  date: IsoDate;
+  amount: Cents;
+  counterName: string | null;
+  description: string;
+  status: BankTransaction['status'];
+  filename: string | null;
+}
+
+/**
+ * Een verzamelbetaling die er twee keer in staat: als één regel (CSV, MT940) én als losse deelposten (CAMT).
+ * Eén kant moet eruit; wat al verwerkt is, haalt de app er niet zelf uit.
+ */
+export interface BatchDouble {
+  /** de ene regel en de eerste deelpost: samen de sleutel van deze melding */
+  lineId: number;
+  firstPartId: number;
+  bankAccountId: number;
+  accountName: string;
+  total: Cents;
+  line: DoubleSide;
+  parts: DoubleSide[];
+  /** de ene regel is nog niet verwerkt, dus die mag eruit */
+  canRemoveLine: boolean;
+  /** geen van de deelposten is verwerkt, dus die mogen eruit */
+  canRemoveParts: boolean;
+}
+
+/** Een betaling die uit de boekhouding is gehaald omdat het bedrag er dubbel in stond; terug te zetten. */
+export interface RemovedDuplicate extends DoubleSide {
+  bankAccountId: number;
+  accountName: string;
+  /** de betaling die bleef */
+  kept: { id: number; date: IsoDate; counterName: string | null; description: string };
+}
+
 /** Een regel uit een afschrift die niet is toegevoegd omdat de betaling er al stond, met die betaling ernaast. */
 export interface SkippedRow {
   id: number;
@@ -95,7 +141,13 @@ export interface SkippedRow {
   description: string;
   source: string;
   /** de betaling die er al stond */
-  existing: { id: number; date: IsoDate; counterName: string | null; description: string; source: string; filename: string | null };
+  existing: { id: number; date: IsoDate; amount: Cents; counterName: string | null; description: string; source: string; filename: string | null };
+  /**
+   * Verzamelbetaling: 'deelpost' = deze deelpost is overgeslagen omdat het totaal er al als één regel stond
+   * (Toch toevoegen voegt alle deelposten toe); 'totaal' = deze ene regel is overgeslagen omdat de deelposten
+   * er al stonden (`parts` deelposten, samen dit bedrag).
+   */
+  batch: { kind: 'deelpost' | 'totaal'; parts: number; total: Cents } | null;
   /** alsnog toegevoegd met "Toch toevoegen" */
   added: boolean;
 }
@@ -453,10 +505,10 @@ export class BankService {
       const batch = this.db.prepare('INSERT INTO import_batches (filename, source, kind, content_hash) VALUES (?, ?, ?, ?)').run(opts.filename ?? null, result.source, kind, opts.contentHash ?? null);
       const batchId = Number(batch.lastInsertRowid);
       const insert = this.db.prepare(
-        `INSERT OR IGNORE INTO bank_transactions (bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, import_batch_id, dedup_hash, bank_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO bank_transactions (bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, import_batch_id, dedup_hash, bank_id, batch_ref, batch_total)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
-      const byHash = this.db.prepare('SELECT id, bank_id, import_batch_id AS batch, bank_account_id AS account, amount, transaction_date AS date FROM bank_transactions WHERE dedup_hash = ?');
+      const byHash = this.db.prepare('SELECT id, bank_id, batch_ref, import_batch_id AS batch, bank_account_id AS account, amount, transaction_date AS date FROM bank_transactions WHERE dedup_hash = ?');
       const skippedByHash = this.db.prepare(
         `SELECT k.matched_transaction_id AS matched, t.import_batch_id AS batch, t.bank_account_id AS account, k.amount, k.transaction_date AS date
          FROM import_skipped k JOIN bank_transactions t ON t.id = k.matched_transaction_id WHERE k.dedup_hash = ?`,
@@ -470,9 +522,17 @@ export class BankService {
       );
       // kandidaten voor de tegenhanger, met het soort afschrift waar ze uit kwamen
       const candidates = this.db.prepare(
-        `SELECT c.id, c.transaction_date AS date, c.counter_iban AS iban, c.source, c.bank_id AS bankId, c.import_batch_id AS batch, b.kind
+        `SELECT c.id, c.transaction_date AS date, c.counter_iban AS iban, c.source, c.bank_id AS bankId, c.import_batch_id AS batch, b.kind, c.batch_ref AS batchRef, c.duplicate_of AS removed
          FROM bank_transactions c LEFT JOIN import_batches b ON b.id = c.import_batch_id
          WHERE c.bank_account_id = ? AND c.amount = ? AND c.id <= ? AND c.transaction_date BETWEEN ? AND ?`,
+      );
+      // Verzamelboekingen die al als losse deelposten in de boeken staan (compleet: samen het totaal van de
+      // boeking), met dit totaal. Een regel met dat bedrag uit een ander soort afschrift is hetzelfde geld.
+      const groupsWithTotal = this.db.prepare(
+        `SELECT g.batch_ref AS ref, g.transaction_date AS date, MIN(g.id) AS first, group_concat(g.id) AS ids, MIN(g.source) AS source, MIN(g.import_batch_id) AS batch, MIN(b.kind) AS kind
+         FROM bank_transactions g LEFT JOIN import_batches b ON b.id = g.import_batch_id
+         WHERE g.bank_account_id = ? AND g.batch_total = ? AND g.batch_ref IS NOT NULL AND g.duplicate_of IS NULL AND g.id <= ? AND g.transaction_date BETWEEN ? AND ?
+         GROUP BY g.batch_ref, g.transaction_date HAVING SUM(g.amount) = g.batch_total AND COUNT(*) >= 2`,
       );
       // Wie al tegenhanger is van een overgeslagen regel uit dit soort afschrift, blijft dat, ook in latere
       // imports: een nieuwe regel uit hetzelfde soort is dan een andere betaling. Een ander soort afschrift
@@ -482,8 +542,8 @@ export class BankService {
          WHERE k.matched_transaction_id = ? AND k.added_transaction_id IS NULL AND COALESCE(b.kind, b.source) = ? LIMIT 1`,
       );
       const insertSkipped = this.db.prepare(
-        `INSERT INTO import_skipped (batch_id, bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, bank_id, dedup_hash, matched_transaction_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO import_skipped (batch_id, bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, bank_id, dedup_hash, matched_transaction_id, batch_ref, batch_total)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const seen = new Map<string, number>();
       /** de regels van dit bestand per hash, met bedrag en datum */
@@ -519,7 +579,7 @@ export class BankService {
         const key = [account.id, t.date, t.amount, t.counterIban, t.description].join('|');
         const occurrence = (seen.get(key) ?? 0) + 1;
         seen.set(key, occurrence);
-        type Known = { id: number; bank_id: string | null; batch: number | null; account: number; amount: Cents; date: IsoDate };
+        type Known = { id: number; bank_id: string | null; batch_ref: string | null; batch: number | null; account: number; amount: Cents; date: IsoDate };
         type Skipped = { matched: number; batch: number | null; account: number; amount: Cents; date: IsoDate };
         let bankId = t.bankId || null;
         let hash = BankService.hash({ ...t, bankId }, account.iban, occurrence);
@@ -546,6 +606,8 @@ export class BankService {
           if (existing.batch !== null) returned.set(`${existing.batch}|${existing.account}`, (returned.get(`${existing.batch}|${existing.account}`) ?? new Set()).add(existing.id));
           // de hash bewijst dat dit dezelfde id van de bank is: bij een oude regel alsnog vastleggen
           if (bankId && !existing.bank_id) this.db.prepare('UPDATE bank_transactions SET bank_id = ? WHERE id = ? AND bank_id IS NULL').run(bankId, existing.id);
+          // net zo: van welke verzamelboeking deze deelpost er een is (stond er nog niet bij een oude regel)
+          if (t.batch && bankId && !existing.batch_ref) this.db.prepare('UPDATE bank_transactions SET batch_ref = ?, batch_total = ? WHERE id = ? AND batch_ref IS NULL').run(t.batch.ref, t.batch.total, existing.id);
         } else if (again) {
           // eerder overgeslagen: weer tegen dezelfde tegenhanger
           known(again.batch, again.account);
@@ -572,26 +634,63 @@ export class BankService {
         if (window && (inWindow.all(b, a, window.from, window.to) as { id: number }[]).every((r) => ids.has(r.id))) sameKind.add(key);
       }
 
+      // Valt deze dag in dagen die een eerder afschrift al besloeg (stap 2), of net buiten een eerder afschrift
+      // van een ander soort? Daar kan dezelfde betaling een andere datum hebben (kaartbetaling van vrijdag,
+      // geboekt op maandag); dan vergelijken we alleen met dat andere soort.
+      const scope = (account: BankAccount, date: IsoDate): { overlap: boolean; edge: boolean } => {
+        const overlap = Boolean(inKnownPeriod.get(account.id, batchId, date, date));
+        const edge = !overlap && (nearOtherKind.all(account.id, batchId, result.source, kind, addDays(date, 7), addDays(date, -7)) as { from: IsoDate; to: IsoDate }[])
+          .some((p) => (date > p.to ? workdaysBetween(p.to, date) : workdaysBetween(date, p.from)) <= SAME_PAYMENT_WORKDAYS);
+        return { overlap, edge };
+      };
+      /** Kan een bestaande betaling (of verzamelboeking) uit dit soort afschrift de tegenhanger zijn? */
+      const otherKind = (c: { id: number; source: string; batch: number | null; kind: string | null }, account: BankAccount, overlap: boolean): boolean => {
+        // uit hetzelfde soort afschrift: daar beslist de hash (stap 1), en die was anders
+        if (c.kind === kind || (c.batch !== null && sameKind.has(`${c.batch}|${account.id}`))) return false;
+        // CAMT, MT940 en de koppeling hebben geen indelingen: een oude import uit dezelfde bron is hetzelfde soort
+        if (c.kind === null && c.source === result.source && result.source !== 'csv') return false;
+        if (!overlap && c.kind === null && c.source === result.source) return false;
+        return !occupied.get(c.id, kind);
+      };
+      type Candidate = { id: number; date: IsoDate; iban: string | null; source: string; bankId: string | null; batch: number | null; kind: string | null; batchRef: string | null; removed: number | null };
+      const counterpart = new Map<number, { id: number; batch: number | null }>();
+      const overlaps: boolean[] = pending.map(() => false);
+
+      // Een verzamelboeking in dit bestand (CAMT: losse deelposten) waarvan het totaal er al als één regel staat
+      // uit een ander soort afschrift: dat is hetzelfde geld. De regel die er staat blijft staan; de deelposten
+      // komen er niet naast, wel in import_skipped (samen terug te zetten met "Toch toevoegen").
+      const batches = new Map<string, number[]>();
+      for (const [row, { t, account }] of pending.entries()) {
+        if (t.batch) batches.set(`${account.id}|${t.batch.ref}|${t.date}`, [...(batches.get(`${account.id}|${t.batch.ref}|${t.date}`) ?? []), row]);
+      }
+      for (const rows of batches.values()) {
+        const { t, account, bankId } = pending[rows[0]!]!;
+        const total = t.batch!.total;
+        // alleen een complete boeking: alle deelposten nieuw, samen precies het totaal
+        if (rows.length < 2 || rows.reduce((n, r) => n + pending[r]!.t.amount, 0) !== total) continue;
+        const { overlap, edge } = scope(account, t.date);
+        if (!overlap && !edge) continue;
+        const line = (candidates.all(account.id, total, lastBefore, addDays(t.date, -7), addDays(t.date, 7)) as Candidate[])
+          // (een regel die zelf al als dubbel uit de boekhouding is gehaald, staat niet voor dit geld)
+          .filter((c) => !taken.has(c.id) && !c.batchRef && !c.removed && otherKind(c, account, overlap) && !(bankId && c.bankId && c.source === result.source))
+          .map((c) => ({ ...c, workdays: workdaysBetween(c.date, t.date), days: Math.abs(diffDays(c.date, t.date)) }))
+          .filter((c) => c.workdays <= SAME_PAYMENT_WORKDAYS)
+          .sort((x, y) => x.workdays - y.workdays || x.days - y.days || x.id - y.id)[0];
+        if (!line) continue;
+        taken.add(line.id);
+        for (const r of rows) counterpart.set(r, { id: line.id, batch: line.batch });
+      }
+
       // stap 2: voor elke regel in dagen die een eerder afschrift al besloeg, de mogelijke tegenhangers
       const pairs: { row: number; id: number; batch: number | null; workdays: number; days: number; otherIban: number }[] = [];
-      const overlaps: boolean[] = [];
       for (const [row, { t, account, bankId }] of pending.entries()) {
-        const overlap = Boolean(inKnownPeriod.get(account.id, batchId, t.date, t.date));
-        overlaps.push(overlap);
-        // Net buiten een eerder afschrift van een ander soort: dezelfde betaling kan daar een andere datum
-        // hebben (kaartbetaling van vrijdag, geboekt op maandag). Dan alleen vergelijken met dat andere soort.
-        const edge = !overlap && (nearOtherKind.all(account.id, batchId, result.source, kind, addDays(t.date, 7), addDays(t.date, -7)) as { from: IsoDate; to: IsoDate }[])
-          .some((p) => (t.date > p.to ? workdaysBetween(p.to, t.date) : workdaysBetween(t.date, p.from)) <= SAME_PAYMENT_WORKDAYS);
+        if (counterpart.has(row)) continue;
+        const { overlap, edge } = scope(account, t.date);
+        overlaps[row] = overlap;
         if (!overlap && !edge) continue;
         const iban = t.counterIban ? normalizeIban(t.counterIban) : null;
-        for (const c of candidates.all(account.id, t.amount, lastBefore, addDays(t.date, -7), addDays(t.date, 7)) as { id: number; date: IsoDate; iban: string | null; source: string; bankId: string | null; batch: number | null; kind: string | null }[]) {
-          if (taken.has(c.id)) continue;
-          // uit hetzelfde soort afschrift: daar beslist de hash (stap 1), en die was anders
-          if (c.kind === kind || (c.batch !== null && sameKind.has(`${c.batch}|${account.id}`))) continue;
-          // CAMT, MT940 en de koppeling hebben geen indelingen: een oude import uit dezelfde bron is hetzelfde soort
-          if (c.kind === null && c.source === result.source && result.source !== 'csv') continue;
-          if (!overlap && c.kind === null && c.source === result.source) continue;
-          if (occupied.get(c.id, kind)) continue;
+        for (const c of candidates.all(account.id, t.amount, lastBefore, addDays(t.date, -7), addDays(t.date, 7)) as Candidate[]) {
+          if (taken.has(c.id) || !otherKind(c, account, overlap)) continue;
           // allebei een tegenrekening: dan moet die gelijk zijn
           if (iban && c.iban && normalizeIban(c.iban) !== iban) continue;
           // twee verschillende id's uit dezelfde bron zijn per definitie twee betalingen
@@ -604,18 +703,33 @@ export class BankService {
       // Eerst wie dezelfde tegenrekening heeft, dan de dichtstbijzijnde datum, over alle regels heen: zo krijgt
       // elke regel zijn eigen tegenhanger en niet die van een andere betaling van hetzelfde bedrag een dag later.
       pairs.sort((x, y) => x.otherIban - y.otherIban || x.workdays - y.workdays || x.days - y.days || x.row - y.row || x.id - y.id);
-      const counterpart = new Map<number, { id: number; batch: number | null }>();
       for (const p of pairs) {
         if (counterpart.has(p.row) || taken.has(p.id)) continue;
         counterpart.set(p.row, { id: p.id, batch: p.batch });
         taken.add(p.id);
+      }
+
+      // Andersom: één regel in dit bestand (CSV, MT940) met het totaal van een verzamelboeking waarvan de
+      // deelposten er al compleet staan uit een ander soort afschrift. De deelposten blijven staan; de regel
+      // komt er niet naast en staat in import_skipped tegenover de eerste deelpost.
+      for (const [row, { t, account }] of pending.entries()) {
+        if (counterpart.has(row) || t.batch) continue;
+        const { overlap, edge } = scope(account, t.date);
+        if (!overlap && !edge) continue;
+        const group = (groupsWithTotal.all(account.id, t.amount, lastBefore, addDays(t.date, -7), addDays(t.date, 7)) as { ref: string; date: IsoDate; first: number; ids: string; source: string; batch: number | null; kind: string | null }[])
+          .map((g) => ({ ...g, members: g.ids.split(',').map(Number), workdays: workdaysBetween(g.date, t.date), days: Math.abs(diffDays(g.date, t.date)) }))
+          .filter((g) => g.workdays <= SAME_PAYMENT_WORKDAYS && g.members.every((id) => !taken.has(id)) && otherKind({ id: g.first, source: g.source, batch: g.batch, kind: g.kind }, account, overlap))
+          .sort((x, y) => x.workdays - y.workdays || x.days - y.days || x.first - y.first)[0];
+        if (!group) continue;
+        for (const id of group.members) taken.add(id);
+        counterpart.set(row, { id: group.first, batch: group.batch });
       }
       for (const [row, { t, account, hash, bankId }] of pending.entries()) {
         const stat = perAccount.get(account.id)!;
         const match = counterpart.get(row);
         if (match) {
           // stond er al: niet toevoegen, wel bewaren met de tegenhanger erbij
-          insertSkipped.run(batchId, account.id, t.date, t.amount, t.counterIban ?? null, t.counterName ?? null, t.description ?? '', t.reference ?? null, result.source, bankId, hash, match.id);
+          insertSkipped.run(batchId, account.id, t.date, t.amount, t.counterIban ?? null, t.counterName ?? null, t.description ?? '', t.reference ?? null, result.source, bankId, hash, match.id, t.batch?.ref ?? null, t.batch?.total ?? null);
           known(match.batch, account.id);
           duplicates++;
           skipped++;
@@ -623,7 +737,7 @@ export class BankService {
           continue;
         }
         // geen tegenhanger (dan miste het eerdere afschrift hem waarschijnlijk), of nieuwe dagen (stap 3)
-        const r = insert.run(account.id, t.date, t.amount, t.counterIban ?? null, t.counterName ?? null, t.description ?? '', t.reference ?? null, result.source, batchId, hash, bankId);
+        const r = insert.run(account.id, t.date, t.amount, t.counterIban ?? null, t.counterName ?? null, t.description ?? '', t.reference ?? null, result.source, batchId, hash, bankId, t.batch?.ref ?? null, t.batch?.total ?? null);
         if (r.changes > 0) {
           imported++;
           stat.imported++;
@@ -670,7 +784,10 @@ export class BankService {
     if (filter.bankAccountId) (where.push('k.bank_account_id = ?'), params.push(filter.bankAccountId));
     const rows = this.db
       .prepare(
-        `SELECT k.*, a.name AS account_name, t.transaction_date AS e_date, t.counter_name AS e_name, t.description AS e_description, t.source AS e_source, b.filename AS e_filename
+        `SELECT k.*, a.name AS account_name, t.transaction_date AS e_date, t.amount AS e_amount, t.counter_name AS e_name, t.description AS e_description, t.source AS e_source, b.filename AS e_filename,
+                t.batch_ref AS e_batch_ref, t.batch_total AS e_batch_total,
+                (SELECT COUNT(*) FROM import_skipped x WHERE x.batch_id = k.batch_id AND x.bank_account_id = k.bank_account_id AND x.batch_ref = k.batch_ref AND x.matched_transaction_id = k.matched_transaction_id) AS k_parts,
+                (SELECT COUNT(*) FROM bank_transactions x WHERE x.bank_account_id = t.bank_account_id AND x.batch_ref = t.batch_ref AND x.transaction_date = t.transaction_date AND x.duplicate_of IS NULL) AS e_parts
          FROM import_skipped k
          JOIN bank_accounts a ON a.id = k.bank_account_id
          JOIN bank_transactions t ON t.id = k.matched_transaction_id
@@ -689,8 +806,14 @@ export class BankService {
       counterIban: r.counter_iban as string | null,
       description: r.description as string,
       source: r.source as string,
-      existing: { id: r.matched_transaction_id as number, date: r.e_date as IsoDate, counterName: r.e_name as string | null, description: r.e_description as string, source: r.e_source as string, filename: r.e_filename as string | null },
+      existing: { id: r.matched_transaction_id as number, date: r.e_date as IsoDate, amount: r.e_amount as Cents, counterName: r.e_name as string | null, description: r.e_description as string, source: r.e_source as string, filename: r.e_filename as string | null },
       added: r.added_transaction_id !== null,
+      batch:
+        r.batch_ref !== null && r.batch_total === r.e_amount
+          ? { kind: 'deelpost' as const, parts: r.k_parts as number, total: r.batch_total as Cents }
+          : r.batch_ref === null && r.e_batch_ref !== null && r.e_batch_total === r.amount && r.e_amount !== r.amount
+            ? { kind: 'totaal' as const, parts: r.e_parts as number, total: r.amount as Cents }
+            : null,
     }));
   }
 
@@ -714,25 +837,157 @@ export class BankService {
    * stond is daarna weer vrij als tegenhanger.
    */
   addSkipped(skippedId: number): number {
-    const k = this.db.prepare('SELECT * FROM import_skipped WHERE id = ?').get(skippedId) as
-      | { id: number; batch_id: number; bank_account_id: number; transaction_date: IsoDate; amount: Cents; counter_iban: string | null; counter_name: string | null; description: string; reference: string | null; source: string; bank_id: string | null; dedup_hash: string; added_transaction_id: number | null }
-      | undefined;
+    type Row = { id: number; batch_id: number; bank_account_id: number; transaction_date: IsoDate; amount: Cents; counter_iban: string | null; counter_name: string | null; description: string; reference: string | null; source: string; bank_id: string | null; dedup_hash: string; added_transaction_id: number | null; matched_transaction_id: number; batch_ref: string | null; batch_total: Cents | null };
+    const k = this.db.prepare('SELECT * FROM import_skipped WHERE id = ?').get(skippedId) as Row | undefined;
     if (!k) throw new ValidationError('Deze regel bestaat niet (meer)');
     if (k.added_transaction_id) throw new ValidationError('Deze betaling is al toegevoegd');
+    // Deelposten van een verzamelboeking die samen zijn overgeslagen tegen één regel met het totaal: ze komen
+    // er ook samen in, anders staat er een deel van het bedrag naast het hele bedrag.
+    const whole = k.batch_ref !== null && (this.db.prepare('SELECT amount FROM bank_transactions WHERE id = ?').get(k.matched_transaction_id) as { amount: Cents }).amount === k.batch_total;
+    const rows = whole
+      ? (this.db
+          .prepare('SELECT * FROM import_skipped WHERE batch_id = ? AND bank_account_id = ? AND batch_ref = ? AND matched_transaction_id = ? AND added_transaction_id IS NULL ORDER BY id')
+          .all(k.batch_id, k.bank_account_id, k.batch_ref, k.matched_transaction_id) as Row[])
+      : [k];
     return tx(this.db, () => {
-      const id = Number(
-        this.db
-          .prepare(
-            `INSERT INTO bank_transactions (bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, import_batch_id, dedup_hash, bank_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(k.bank_account_id, k.transaction_date, k.amount, k.counter_iban, k.counter_name, k.description, k.reference, k.source, k.batch_id, k.dedup_hash, k.bank_id).lastInsertRowid,
-      );
-      this.db.prepare('UPDATE import_skipped SET added_transaction_id = ? WHERE id = ?').run(id, k.id);
-      // de tellingen van die import kloppen daarna weer met wat er in staat
-      this.db.prepare('UPDATE import_batches SET imported_count = imported_count + 1, duplicate_count = duplicate_count - 1 WHERE id = ?').run(k.batch_id);
-      this.db.prepare('UPDATE import_batch_accounts SET imported = imported + 1, duplicates = duplicates - 1 WHERE batch_id = ? AND bank_account_id = ?').run(k.batch_id, k.bank_account_id);
-      return id;
+      let first = 0;
+      for (const r of rows) {
+        const id = Number(
+          this.db
+            .prepare(
+              `INSERT INTO bank_transactions (bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, import_batch_id, dedup_hash, bank_id, batch_ref, batch_total)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(r.bank_account_id, r.transaction_date, r.amount, r.counter_iban, r.counter_name, r.description, r.reference, r.source, r.batch_id, r.dedup_hash, r.bank_id, r.batch_ref, r.batch_total).lastInsertRowid,
+        );
+        if (r.id === k.id) first = id;
+        this.db.prepare('UPDATE import_skipped SET added_transaction_id = ? WHERE id = ?').run(id, r.id);
+        // de tellingen van die import kloppen daarna weer met wat er in staat
+        this.db.prepare('UPDATE import_batches SET imported_count = imported_count + 1, duplicate_count = duplicate_count - 1 WHERE id = ?').run(r.batch_id);
+        this.db.prepare('UPDATE import_batch_accounts SET imported = imported + 1, duplicates = duplicates - 1 WHERE batch_id = ? AND bank_account_id = ?').run(r.batch_id, r.bank_account_id);
+      }
+      return first;
+    });
+  }
+
+  // ---------- verzamelbetaling die er twee keer in staat ----------
+
+  /**
+   * Verzamelbetalingen die er twee keer in staan: als één regel met het totaal (CSV, MT940) én als losse
+   * deelposten (CAMT), op dezelfde rekening en hooguit een paar werkdagen uit elkaar. Bij het inlezen
+   * voorkomt de app dit waar het zeker is; dit vindt wat er toch in kwam, ook uit eerdere versies.
+   * Wat de gebruiker "twee verschillende betalingen" noemde, komt niet terug.
+   */
+  batchDoubles(bankAccountId?: number): BatchDouble[] {
+    const groups = this.db
+      .prepare(
+        `SELECT g.bank_account_id AS account, a.name AS accountName, g.batch_ref AS ref, g.batch_total AS total, g.transaction_date AS date, MIN(g.id) AS first, MIN(g.source) AS source
+         FROM bank_transactions g JOIN bank_accounts a ON a.id = g.bank_account_id
+         WHERE g.batch_ref IS NOT NULL AND g.duplicate_of IS NULL ${bankAccountId ? 'AND g.bank_account_id = ?' : ''}
+         GROUP BY g.bank_account_id, g.batch_ref, g.transaction_date HAVING SUM(g.amount) = g.batch_total AND COUNT(*) >= 2
+         ORDER BY g.transaction_date DESC, first DESC`,
+      )
+      .all(...(bankAccountId ? [bankAccountId] : [])) as { account: number; accountName: string; ref: string; total: Cents; date: IsoDate; first: number; source: string }[];
+    const side = `t.id, t.transaction_date AS date, t.amount, t.counter_name AS counterName, t.description, t.status, b.filename`;
+    const lines = this.db.prepare(
+      `SELECT ${side}, t.source FROM bank_transactions t LEFT JOIN import_batches b ON b.id = t.import_batch_id
+       WHERE t.bank_account_id = ? AND t.amount = ? AND t.batch_ref IS NULL AND t.duplicate_of IS NULL AND t.source <> ? AND t.transaction_date BETWEEN ? AND ?`,
+    );
+    const parts = this.db.prepare(
+      `SELECT ${side} FROM bank_transactions t LEFT JOIN import_batches b ON b.id = t.import_batch_id
+       WHERE t.bank_account_id = ? AND t.batch_ref = ? AND t.transaction_date = ? AND t.duplicate_of IS NULL ORDER BY t.id`,
+    );
+    const dismissed = this.db.prepare(`SELECT 1 FROM task_skips WHERE task_key = ?`);
+    const used = new Set<number>();
+    const doubles: BatchDouble[] = [];
+    for (const g of groups) {
+      const line = (lines.all(g.account, g.total, g.source, addDays(g.date, -10), addDays(g.date, 10)) as (DoubleSide & { source: string })[])
+        .filter((l) => !used.has(l.id) && !dismissed.get(BankService.doubleKey(l.id, g.first)))
+        .map((l) => ({ ...l, workdays: workdaysBetween(l.date, g.date), days: Math.abs(diffDays(l.date, g.date)) }))
+        .filter((l) => l.workdays <= BATCH_WARN_WORKDAYS)
+        .sort((x, y) => x.workdays - y.workdays || x.days - y.days || x.id - y.id)[0];
+      if (!line) continue;
+      used.add(line.id);
+      const members = parts.all(g.account, g.ref, g.date) as DoubleSide[];
+      doubles.push({
+        lineId: line.id,
+        firstPartId: g.first,
+        bankAccountId: g.account,
+        accountName: g.accountName,
+        total: g.total,
+        line: { id: line.id, date: line.date, amount: line.amount, counterName: line.counterName, description: line.description, status: line.status, filename: line.filename },
+        parts: members,
+        canRemoveLine: line.status !== 'gematcht',
+        canRemoveParts: members.every((m) => m.status !== 'gematcht'),
+      });
+    }
+    return doubles;
+  }
+
+  private static doubleKey(lineId: number, firstPartId: number): string {
+    return `bank-double-${lineId}-${firstPartId}`;
+  }
+
+  private findDouble(lineId: number, firstPartId: number): BatchDouble {
+    const d = this.batchDoubles().find((x) => x.lineId === lineId && x.firstPartId === firstPartId);
+    if (!d) throw new ValidationError('Dit staat er niet (meer) dubbel in');
+    return d;
+  }
+
+  /**
+   * Eén kant van een dubbel bedrag uit de boekhouding halen: 'regel' = de ene regel met het totaal,
+   * 'deelposten' = de losse deelposten. De betalingen blijven bestaan (status 'genegeerd', met de betaling
+   * die blijft erbij), tellen niet meer mee in het saldo en zijn terug te zetten. Wat al verwerkt is, haalt
+   * de app er niet uit: eerst die verwerking ongedaan maken, of de andere kant kiezen.
+   */
+  resolveDouble(lineId: number, firstPartId: number, remove: 'regel' | 'deelposten'): void {
+    const d = this.findDouble(lineId, firstPartId);
+    if (remove !== 'regel' && remove !== 'deelposten') throw new ValidationError('Kies welke kant eruit gaat');
+    if (remove === 'regel' && !d.canRemoveLine) throw new ValidationError('De ene regel is al verwerkt. Maak die verwerking eerst ongedaan (open de betaling en kies "Ongedaan maken"), of haal de deelposten eruit.');
+    if (remove === 'deelposten' && !d.canRemoveParts) throw new ValidationError('Een of meer deelposten zijn al verwerkt. Maak die verwerking eerst ongedaan (open de betaling en kies "Ongedaan maken"), of haal de ene regel eruit.');
+    const out = remove === 'regel' ? [d.line.id] : d.parts.map((p) => p.id);
+    const kept = remove === 'regel' ? d.firstPartId : d.line.id;
+    tx(this.db, () => {
+      for (const id of out) {
+        const r = this.db.prepare(`UPDATE bank_transactions SET status = 'genegeerd', duplicate_of = ? WHERE id = ? AND status <> 'gematcht'`).run(kept, id);
+        if (r.changes !== 1) throw new ValidationError('Deze betaling is intussen verwerkt. Bekijk het opnieuw.');
+      }
+    });
+  }
+
+  /** "Het zijn twee verschillende betalingen": de melding voor dit paar komt niet meer terug. */
+  dismissDouble(lineId: number, firstPartId: number): void {
+    this.findDouble(lineId, firstPartId);
+    this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'twee betalingen') ON CONFLICT(task_key) DO NOTHING`).run(BankService.doubleKey(lineId, firstPartId));
+  }
+
+  /** Wat uit de boekhouding is gehaald omdat het bedrag er dubbel in stond, met de betaling die bleef. */
+  removedDuplicates(bankAccountId?: number): RemovedDuplicate[] {
+    return (this.db
+      .prepare(
+        `SELECT t.id, t.transaction_date AS date, t.amount, t.counter_name AS counterName, t.description, t.status, b.filename, t.bank_account_id AS bankAccountId, a.name AS accountName,
+                k.id AS k_id, k.transaction_date AS k_date, k.counter_name AS k_name, k.description AS k_description
+         FROM bank_transactions t JOIN bank_accounts a ON a.id = t.bank_account_id JOIN bank_transactions k ON k.id = t.duplicate_of
+         LEFT JOIN import_batches b ON b.id = t.import_batch_id
+         WHERE t.duplicate_of IS NOT NULL ${bankAccountId ? 'AND t.bank_account_id = ?' : ''} ORDER BY t.transaction_date DESC, t.id DESC LIMIT 500`,
+      )
+      .all(...(bankAccountId ? [bankAccountId] : [])) as (Omit<RemovedDuplicate, 'kept'> & { k_id: number; k_date: IsoDate; k_name: string | null; k_description: string })[])
+      .map(({ k_id, k_date, k_name, k_description, ...t }) => ({ ...t, kept: { id: k_id, date: k_date, counterName: k_name, description: k_description } }));
+  }
+
+  /**
+   * Terugzetten wat als dubbel uit de boekhouding was gehaald: het waren toch twee betalingen. Alles wat
+   * tegelijk voor dezelfde betaling is weggehaald (alle deelposten) komt samen terug, als nog te verwerken.
+   */
+  restoreDuplicate(txId: number): void {
+    const t = this.get(txId);
+    if (!t.duplicate_of) throw new ValidationError('Deze betaling is niet als dubbel uit je boekhouding gehaald');
+    tx(this.db, () => {
+      // de melding hoort bij de regel en de eerste deelpost: zoek welke van de twee kanten dit was
+      const siblings = this.db.prepare('SELECT id, batch_ref FROM bank_transactions WHERE duplicate_of = ? ORDER BY id').all(t.duplicate_of) as { id: number; batch_ref: string | null }[];
+      this.db.prepare(`UPDATE bank_transactions SET status = 'nieuw', duplicate_of = NULL WHERE duplicate_of = ?`).run(t.duplicate_of);
+      const [lineId, firstPartId] = siblings[0]!.batch_ref ? [t.duplicate_of!, siblings[0]!.id] : [siblings[0]!.id, t.duplicate_of!];
+      this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'teruggezet') ON CONFLICT(task_key) DO NOTHING`).run(BankService.doubleKey(lineId, firstPartId));
     });
   }
 
@@ -755,9 +1010,12 @@ export class BankService {
     // (met een dag verschil), dan telt de datum die het afschrift met het saldo eraan gaf.
     const sum = (this.db
       .prepare(
-        `SELECT COALESCE(SUM(t.amount), 0) AS s FROM bank_transactions t
-         LEFT JOIN import_skipped k ON k.matched_transaction_id = t.id AND k.batch_id = ? AND k.added_transaction_id IS NULL
-         WHERE t.bank_account_id = ? AND COALESCE(k.transaction_date, t.transaction_date) >= ? AND COALESCE(k.transaction_date, t.transaction_date) <= ?`,
+        // (een betaling kan tegenover meer overgeslagen regels staan, bv. alle deelposten van een verzamelboeking:
+        // hij telt één keer. Wat als dubbel uit de boekhouding is gehaald, telt niet.)
+        `SELECT COALESCE(SUM(amount), 0) AS s FROM (
+           SELECT t.amount, COALESCE((SELECT MIN(k.transaction_date) FROM import_skipped k WHERE k.matched_transaction_id = t.id AND k.batch_id = ? AND k.added_transaction_id IS NULL), t.transaction_date) AS date
+           FROM bank_transactions t WHERE t.bank_account_id = ? AND t.duplicate_of IS NULL)
+         WHERE date >= ? AND date <= ?`,
       )
       .get(closing.batch, bankAccountId, opening.date, closing.date) as { s: number }).s;
     const app = opening.amount + sum;
@@ -802,7 +1060,9 @@ export class BankService {
         coverageFrom: coverage.f,
         coverageTo: coverage.t,
         totalTransactions: coverage.n,
-        skipped: (this.db.prepare('SELECT COUNT(*) AS n FROM import_skipped WHERE bank_account_id = ? AND added_transaction_id IS NULL').get(a.id) as { n: number }).n,
+        skipped:
+          (this.db.prepare('SELECT COUNT(*) AS n FROM import_skipped WHERE bank_account_id = ? AND added_transaction_id IS NULL').get(a.id) as { n: number }).n +
+          (this.db.prepare('SELECT COUNT(*) AS n FROM bank_transactions WHERE bank_account_id = ? AND duplicate_of IS NOT NULL').get(a.id) as { n: number }).n,
       };
     });
   }
@@ -869,6 +1129,7 @@ export class BankService {
 
   private assertOpen(t: BankTransaction): void {
     if (t.status === 'gematcht') throw new ValidationError('Deze betaling is al verwerkt');
+    if (t.duplicate_of) throw new ValidationError('Deze regel is uit je boekhouding gehaald omdat het bedrag er dubbel in stond. Zet hem eerst terug: open hem en kies "Ongedaan maken".');
   }
 
   // ---------- verwerken ----------
@@ -1087,6 +1348,8 @@ export class BankService {
    */
   unmatch(txId: number, date: IsoDate = today()): void {
     const t = this.get(txId);
+    // als dubbel uit de boekhouding gehaald: terugzetten, samen met wat er tegelijk uit ging
+    if (t.duplicate_of) return this.restoreDuplicate(txId);
     const shared = this.sharedWith(t);
     tx(this.db, () => {
       if (t.status === 'gematcht' && t.matched_journal_entry_id) {
@@ -1126,7 +1389,7 @@ export class BankService {
   /** Saldo volgens de (geïmporteerde) bankafschriften, los van de boekhouding. */
   statementBalance(bankAccountId?: number): Cents {
     const row = this.db
-      .prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM bank_transactions ${bankAccountId ? 'WHERE bank_account_id = ?' : ''}`)
+      .prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE duplicate_of IS NULL ${bankAccountId ? 'AND bank_account_id = ?' : ''}`)
       .get(...(bankAccountId ? [bankAccountId] : [])) as { s: number };
     return row.s;
   }
