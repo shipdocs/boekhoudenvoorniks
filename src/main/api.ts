@@ -416,6 +416,9 @@ export function createApi(s: Services, host: HostContext) {
       case 'bank-balance:negeren':
         s.inbox.ignoreBalance(r.bankAccountId!);
         return;
+      case 'bank-double:bekijken':
+        // op het bankscherm: de ene regel en de deelposten naast elkaar
+        return { navigate: { screen: 'bank', extra: { double: { lineId: r.doubleLineId, firstPartId: r.doublePartId } } } };
       case 'bank-balance:bekijken':
         // op het bankscherm: de overgeslagen regels van deze rekening, met "Toch toevoegen"
         return { navigate: { screen: 'bank', extra: { skippedFor: r.bankAccountId } } };
@@ -433,6 +436,7 @@ export function createApi(s: Services, host: HostContext) {
           'vat-due': ['belasting', r.periodKey],
           'bank-stale': ['bank', undefined],
           'bank-balance': ['bank', undefined],
+          'bank-double': ['bank', undefined],
           'bank-statement': ['bank', undefined],
           'bank-locked': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
@@ -1069,7 +1073,21 @@ export function createApi(s: Services, host: HostContext) {
       importReview: (filter: { batchId?: number; bankAccountId?: number }) => ({
         skipped: s.bank.skippedRows({ batchId: filter?.batchId, bankAccountId: filter?.bankAccountId }),
         added: filter?.batchId ? s.bank.addedInKnownPeriod(filter.batchId) : [],
+        // wat als dubbel uit de boekhouding is gehaald (per rekening), om terug te zetten
+        removed: filter?.bankAccountId ? s.bank.removedDuplicates(filter.bankAccountId) : [],
       }),
+      /** verzamelbetalingen die er twee keer in staan: als één regel en als losse deelposten */
+      doubles: () => s.bank.batchDoubles(),
+      /** één kant uit de boekhouding halen ('regel' of 'deelposten'); wat al verwerkt is, gaat er niet uit */
+      resolveDouble: (lineId: number, firstPartId: number, remove: 'regel' | 'deelposten') => s.bank.resolveDouble(lineId, firstPartId, remove),
+      /** "het zijn twee verschillende betalingen": niet meer melden */
+      dismissDouble: (lineId: number, firstPartId: number) => s.bank.dismissDouble(lineId, firstPartId),
+      /** terugzetten wat als dubbel uit de boekhouding was gehaald */
+      restoreDuplicate: (txId: number) => {
+        s.bank.restoreDuplicate(txId);
+        const auto = s.inbox.autoProcess();
+        return { autoMatched: auto.matched + auto.booked };
+      },
       /** "Toch toevoegen": een overgeslagen regel was wel een eigen betaling */
       addSkipped: (skippedId: number) => {
         const id = s.bank.addSkipped(skippedId);

@@ -1148,4 +1148,40 @@ export const migrations: string[] = [
   ALTER TABLE documents ADD COLUMN note TEXT;
   ALTER TABLE documents ADD COLUMN proposed_paid_with TEXT CHECK (proposed_paid_with IN ('bank','kas','prive','later'));
   `,
+  /* 29: verzamelbetaling als één regel én als deelposten (#184): hetzelfde geld telt maar één keer */ `
+  -- Een verzamelboeking staat in CAMT als losse deelposten en in CSV of MT940 als één regel met het totaal.
+  -- batch_ref en batch_total zeggen welke deelposten bij één boeking horen en wat die boeking in totaal was.
+  ALTER TABLE bank_transactions ADD COLUMN batch_ref TEXT;
+  ALTER TABLE bank_transactions ADD COLUMN batch_total INTEGER;
+  ALTER TABLE import_skipped ADD COLUMN batch_ref TEXT;
+  ALTER TABLE import_skipped ADD COLUMN batch_total INTEGER;
+  -- Stond zo'n bedrag er toch twee keer in, dan haalt de gebruiker één kant uit de boekhouding. Die regel
+  -- blijft bestaan (status 'genegeerd', met hier de betaling die blijft), telt niet meer mee in het saldo
+  -- volgens de afschriften en is terug te zetten. Er wordt nooit een betaling verwijderd.
+  ALTER TABLE bank_transactions ADD COLUMN duplicate_of INTEGER REFERENCES bank_transactions(id);
+  CREATE INDEX idx_bank_transactions_batch ON bank_transactions(bank_account_id, batch_ref);
+
+  -- Deelposten die al waren ingelezen: herkenbaar aan de id van de boeking met een volgnummer (REF, REF#2, …)
+  -- binnen één import, rekening en dag. Het totaal is de som van die deelposten, ook de overgeslagen.
+  -- (Deelposten met een eigen id van de bank krijgen dit pas als hun afschrift opnieuw wordt ingelezen.)
+  CREATE TEMP TABLE batch_members AS
+    SELECT 't' AS tbl, id, import_batch_id AS b, bank_account_id AS a, transaction_date AS d, amount, bank_id, CASE WHEN rtrim(bank_id, '0123456789') <> bank_id AND substr(rtrim(bank_id, '0123456789'), -1) = '#' THEN substr(rtrim(bank_id, '0123456789'), 1, length(rtrim(bank_id, '0123456789')) - 1) ELSE bank_id END AS gk
+    FROM bank_transactions WHERE source = 'camt' AND bank_id IS NOT NULL AND import_batch_id IS NOT NULL
+    UNION ALL
+    SELECT 'k', id, batch_id, bank_account_id, transaction_date, amount, bank_id, CASE WHEN rtrim(bank_id, '0123456789') <> bank_id AND substr(rtrim(bank_id, '0123456789'), -1) = '#' THEN substr(rtrim(bank_id, '0123456789'), 1, length(rtrim(bank_id, '0123456789')) - 1) ELSE bank_id END
+    FROM import_skipped WHERE source = 'camt' AND bank_id IS NOT NULL AND added_transaction_id IS NULL;
+  CREATE TEMP TABLE batch_groups AS
+    SELECT b, a, d, gk, SUM(amount) AS total FROM batch_members
+    GROUP BY b, a, d, gk HAVING COUNT(*) >= 2 AND SUM(bank_id <> gk) >= 1 AND SUM(bank_id = gk) = 1;
+  UPDATE bank_transactions SET
+    batch_ref = (SELECT g.gk FROM batch_members m JOIN batch_groups g ON g.b = m.b AND g.a = m.a AND g.d = m.d AND g.gk = m.gk WHERE m.tbl = 't' AND m.id = bank_transactions.id),
+    batch_total = (SELECT g.total FROM batch_members m JOIN batch_groups g ON g.b = m.b AND g.a = m.a AND g.d = m.d AND g.gk = m.gk WHERE m.tbl = 't' AND m.id = bank_transactions.id)
+    WHERE id IN (SELECT m.id FROM batch_members m JOIN batch_groups g ON g.b = m.b AND g.a = m.a AND g.d = m.d AND g.gk = m.gk WHERE m.tbl = 't');
+  UPDATE import_skipped SET
+    batch_ref = (SELECT g.gk FROM batch_members m JOIN batch_groups g ON g.b = m.b AND g.a = m.a AND g.d = m.d AND g.gk = m.gk WHERE m.tbl = 'k' AND m.id = import_skipped.id),
+    batch_total = (SELECT g.total FROM batch_members m JOIN batch_groups g ON g.b = m.b AND g.a = m.a AND g.d = m.d AND g.gk = m.gk WHERE m.tbl = 'k' AND m.id = import_skipped.id)
+    WHERE id IN (SELECT m.id FROM batch_members m JOIN batch_groups g ON g.b = m.b AND g.a = m.a AND g.d = m.d AND g.gk = m.gk WHERE m.tbl = 'k');
+  DROP TABLE batch_groups;
+  DROP TABLE batch_members;
+  `,
 ];
