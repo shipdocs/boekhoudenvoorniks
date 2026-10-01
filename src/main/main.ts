@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { openDatabase, type Db } from '../db/database';
+import { openDatabase, openReadonly, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
 import { createServices, type Services } from '../services';
 import { SettingsService } from '../settings/settings';
@@ -25,6 +25,7 @@ import { JevClassifier } from '../intake/llm-jev';
 import { ONLINE_HELP } from '../shared/online-help';
 import type { FetchLike } from '../integrations/types';
 import { ImapSource } from '../mail/imap-source';
+import { autoUpdater } from 'electron-updater';
 import { Updates } from './updates';
 import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
@@ -32,8 +33,10 @@ import type { PollResult } from '../mail/mail-intake';
 import { deleteAttachment, resolveAttachmentPath, saveAttachment } from './attachments';
 import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
-import { CHOICE_SESSION, chromiumDir, forgetMoved, handOverLocalState, markComplete, noteMoved, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type SwitchPlan } from './data-dir';
-import { chooseAfterMove, chooseOldFolder, migrateWithProgress, switchWithProgress } from './data-dir-app';
+import { CHOICE_SESSION, chromiumDir, forgetMoved, handOverLocalState, markComplete, noteMoved, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type MigrationOutcome, type SwitchAction, type SwitchOutcome, type SwitchPlan } from './data-dir';
+import { chooseAfterFailedMigration, chooseAfterMove, chooseOldFolder, confirmSyncFolder, migrateWithProgress, pickDataFolder, refuseDataFolder, switchWithProgress } from './data-dir-app';
+import { isWindowsStore, mcpCommand as mcpCommandFor, migrateForStore, READ_ONLY_MESSAGE, readOnlyError, storeFallbackHint, storeAppDataNotice, storeFirstStartNotice, storeFolderProblem, type StartNotice } from './windows-store';
+import { STORE_LLAMA_CPP } from '../ocr-runtime/manifest';
 import { Administrations, readAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
 import { generateOfficeKeys } from '../exchange/crypto';
@@ -57,6 +60,19 @@ let localOcr: LocalOcrRuntime;
 /** Bonnenscanner (#48) van de open administratie: ontvangstpunt, mDNS en bonnenmap. */
 let scanner: Bonnenscanner | null = null;
 
+/** De versie uit de Microsoft Store (MSIX); in de gewone Windows-versie en op Linux altijd onwaar. */
+const STORE = isWindowsStore();
+
+/**
+ * Alleen in de Store-versie: het overzetten lukte niet en de gebruiker koos "Alleen bekijken". De oude
+ * map is dan alleen-lezen geopend; de app schrijft er niets in.
+ */
+let readOnly = false;
+
+function assertWritable(): void {
+  if (readOnly) throw new Error(READ_ONLY_MESSAGE);
+}
+
 /** Eigen gegevensmap (tests, rooktest); GRATIS_BOEKHOUDEN_DATA is de naam van vóór de naamswijziging. */
 const DATA_ENV = process.env.BOEKHOUDENVOORNIKS_DATA ?? process.env.GRATIS_BOEKHOUDEN_DATA;
 
@@ -77,7 +93,10 @@ function rootDir(): string {
 }
 
 function planFolder(chosen: string, copyToStandard = false): SwitchPlan {
-  return planSwitch({ home: app.getPath('home'), current: rootDir(), chosen, copyToStandard });
+  const plan = planSwitch({ home: app.getPath('home'), current: rootDir(), chosen, copyToStandard });
+  // Store-versie: een map onder AppData is geen vaste plek (zie storeFolderProblem)
+  const blocked = STORE ? storeFolderProblem(chosen, app.getPath('appData')) : null;
+  return blocked ? { ...plan, problem: blocked } : plan;
 }
 
 function administrations(): Administrations {
@@ -121,6 +140,7 @@ function readOffice(): OfficeProfile | null {
  * `keys`: de sleutel van een collega overnemen (gedeelde kantoorsleutel).
  */
 function saveOffice(input: { office: string; email: string; newKey?: boolean; keys?: { publicKey: string; privateKey: string } }): OfficeProfile {
+  assertWritable();
   if (!input.office.trim()) throw new Error('Vul de naam van je kantoor in');
   if (!secrets.available) throw new Error('Veilige opslag is niet beschikbaar op dit systeem (geen sleutelhanger gevonden); de sleutel van je kantoor kan niet veilig bewaard worden');
   const state = officeState();
@@ -133,6 +153,7 @@ function saveOffice(input: { office: string; email: string; newKey?: boolean; ke
 
 /** Export van een klant: uitpakken als nieuwe administratie (de kopie), klaarzetten en openen. */
 async function openClientExport(data: Uint8Array): Promise<{ company: string; exchange: number; endDate: string }> {
+  assertWritable();
   const profile = readOffice();
   if (!profile) throw new Error('Vul eerst de naam van je kantoor in (Instellingen > Administraties)');
   const opened = ExchangeService.openExport(profile, data, app.getVersion());
@@ -184,6 +205,7 @@ async function postLicense<T>(path: string, body: unknown, managementKey?: strin
 
 /** Andere administratie openen: de huidige netjes sluiten, de andere openen en het venster verversen. */
 async function openAdministration(key: string): Promise<void> {
+  assertWritable();
   const admins = administrations();
   if (key === admins.current()) return;
   // eerst controleren of hij bestaat (gooit ook bij een ongeldige sleutel), vóór we iets sluiten
@@ -233,14 +255,9 @@ async function migrateMcp(): Promise<void> {
   }
 }
 
-/**
- * Hoe Claude Code/Codex de koppeling start. Een AppImage draait steeds vanaf een andere tijdelijke
- * plek; dan het AppImage-bestand zelf. Tijdens ontwikkelen: electron met de app-map.
- */
+/** Hoe Claude Code/Codex de koppeling start; zie `mcpCommand` in windows-store.ts. */
 function mcpCommand(): { command: string; args: string[] } {
-  if (process.env.APPIMAGE) return { command: process.env.APPIMAGE, args: ['--mcp'] };
-  if (!app.isPackaged) return { command: process.execPath, args: [app.getAppPath(), '--mcp'] };
-  return { command: process.execPath, args: ['--mcp'] };
+  return mcpCommandFor({ store: STORE, localAppData: process.env.LOCALAPPDATA, appImage: process.env.APPIMAGE, isPackaged: app.isPackaged, execPath: process.execPath, appPath: app.getAppPath() });
 }
 
 function emit(event: string, payload: unknown): void {
@@ -292,11 +309,13 @@ const statementWatch = new StatementWatch({
 
 /** Bewaart een bijlage bij de open administratie; het pad dat terugkomt is relatief aan de map van die administratie. */
 async function storeAttachment(name: string, data: Uint8Array): Promise<string> {
+  assertWritable();
   return saveAttachment(dataDir(), name, data);
 }
 
 /** Een net bewaarde bijlage weer weghalen (alleen binnen de bijlagenmap); mislukt dat, dan blijft hij staan. */
 function removeAttachment(path: string): void {
+  if (readOnly) return;
   deleteAttachment(dataDir(), path);
 }
 
@@ -369,7 +388,7 @@ function backupBeforeUpgrade(): void {
 let updates: Updates | null = null;
 
 function initServices(): void {
-  db = openDatabase(dbPath());
+  db = readOnly ? openReadonly(dbPath()) : openDatabase(dbPath());
   secrets = new SafeStorageSecretStore(db);
   services = createServices(db, {
     pdf: renderPdf,
@@ -382,6 +401,8 @@ function initServices(): void {
   });
   localOcr = new LocalOcrRuntime(join(rootDir(), 'ocr'), {
     fetch: (url, init) => fetch(url, init) as never,
+    // Store-versie: alleen de vaste build, pas na toestemming, en bij een fout een verwijzing naar de gewone versie
+    ...(STORE ? { pinned: STORE_LLAMA_CPP, failureHint: storeFallbackHint('het lezen van bonnen op deze computer') } : {}),
   });
   configureLocalAi();
   scanner = new Bonnenscanner({
@@ -404,7 +425,8 @@ function initServices(): void {
     onChange: () => emit('auto-processed', { scanner: true }),
     log: (message) => console.error(message),
   });
-  if (!SMOKE_TEST) void scanner.start().catch((e) => console.error('Bonnenscanner starten mislukt', e));
+  // alleen bekijken: de bonnenmap wordt niet bijgehouden en er komt niets binnen
+  if (!SMOKE_TEST && !readOnly) void scanner.start().catch((e) => console.error('Bonnenscanner starten mislukt', e));
   api = createApi(services, {
     async saveFile(defaultName, content, filters) {
       const result = await dialog.showSaveDialog(mainWindow!, { defaultPath: join(app.getPath('documents'), defaultName), filters });
@@ -435,7 +457,7 @@ function initServices(): void {
       const out = `${r.stdout}\n${r.stderr}`;
       if (r.code === 0) return 'Toegevoegd ✓';
       if (/already exists|bestaat al/i.test(out)) return 'Stond er al in ✓';
-      throw new Error(`Toevoegen lukte niet. Gebruik de opdracht hieronder in een terminal.${out.trim() ? ` (${out.trim().slice(0, 200)})` : ''}`);
+      throw new Error(`Toevoegen lukte niet. Gebruik de opdracht hieronder in een terminal.${out.trim() ? ` (${out.trim().slice(0, 200)})` : ''}${STORE ? ` ${storeFallbackHint('de koppeling')}` : ''}`);
     },
     readAttachment(path) {
       return readFileSync(resolveAttachmentPath(dataDir(), path));
@@ -446,7 +468,9 @@ function initServices(): void {
         const r = await dialog.showOpenDialog(mainWindow!, { title: 'Map met gedownloade afschriften', properties: ['openDirectory'], ...(current && existsSync(current) ? { defaultPath: current } : {}) });
         return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
       },
-      reconfigure: () => statementWatch.start(),
+      reconfigure: () => {
+        if (!readOnly) statementWatch.start();
+      },
     },
     async openPath(path) {
       const err = await shell.openPath(resolveAttachmentPath(dataDir(), path));
@@ -485,6 +509,7 @@ function initServices(): void {
       },
     },
     async safetyBackup(label) {
+      assertWritable();
       const dir = join(dataDir(), 'backups');
       mkdirSync(dir, { recursive: true });
       const target = join(dir, `${label.replace(/[^\w.-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.gbbackup`);
@@ -510,6 +535,7 @@ function initServices(): void {
       return result.filePath;
     },
     async restoreBackup(password) {
+      assertWritable();
       // begin in de map met de automatische back-ups van elke dag, als die er is
       const backups = join(dataDir(), 'backups');
       const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile'], filters: [{ name: 'Back-up', extensions: ['sqlite', 'gbbackup'] }], ...(existsSync(backups) ? { defaultPath: backups } : {}) });
@@ -563,6 +589,7 @@ function initServices(): void {
       return true;
     },
     async resetData(withDemo) {
+      assertWritable();
       localOcr.stop();
       await scanner?.stop();
       const backup = await wipeDatabase(db, dbPath(), join(dataDir(), 'backups'), join(dataDir(), 'bijlagen'));
@@ -604,6 +631,7 @@ function initServices(): void {
       list: () => administrations().list(readAdministrationFile),
       open: (key) => openAdministration(key),
       async create(name) {
+        assertWritable();
         if (!name.trim()) throw new Error('Geef de administratie een naam');
         const key = administrations().create(name.trim());
         // de database aanmaken (migraties) met de naam van het bedrijf, daarna openen
@@ -633,6 +661,7 @@ function initServices(): void {
           },
           chooseStandard: () => (folderPlan = planFolder(sharedDataDir(app.getPath('home')), true)),
           async apply() {
+            assertWritable();
             if (!folderPlan) throw new Error('Kies eerst een map');
             // opnieuw beoordelen: de renderer geeft geen pad door, en de map kan intussen veranderd zijn
             const plan = planFolder(folderPlan.dir, folderPlan.standard && folderPlan.action === 'kopieren');
@@ -648,13 +677,21 @@ function initServices(): void {
           },
         },
     appVersion: () => app.getVersion(),
+    windowsStore: STORE,
+    readOnly: () => readOnly,
+    retryDataMove() {
+      app.relaunch();
+      app.exit(0);
+    },
     localOcr: {
       status: () => localOcr.status(),
       install: () => {
+        assertWritable();
         const st = localOcr.startInstall();
         return st;
       },
       uninstall: () => localOcr.uninstall(),
+      ...(STORE ? { consent: { runtimeVersion: STORE_LLAMA_CPP.tag, given: () => localOcr.hasConsent(), give: () => (assertWritable(), localOcr.giveConsent()) } } : {}),
     },
     async checkForUpdates() {
       return updates ? updates.checkNow() : 'Updates zijn alleen beschikbaar in de geïnstalleerde versie';
@@ -666,7 +703,7 @@ function initServices(): void {
     },
   });
   // ook na het wisselen van administratie: elke administratie heeft haar eigen instelling
-  if (!SMOKE_TEST) statementWatch.start();
+  if (!SMOKE_TEST && !readOnly) statementWatch.start();
 }
 
 function registerIpc(): void {
@@ -680,6 +717,9 @@ function registerIpc(): void {
     try {
       return await (handler as (...a: unknown[]) => unknown)(...args);
     } catch (e) {
+      // de oude map is alleen-lezen open (Store-versie, overzetten mislukt): uitleg in plaats van de fout van SQLite
+      const readOnlyProblem = readOnly ? readOnlyError(e) : null;
+      if (readOnlyProblem) throw readOnlyProblem;
       // interne boekhoudfouten (journaal, grootboek, gebeurtenissen) zijn vaktaal: niet zo aan de gebruiker tonen
       if (e instanceof LedgerError || /journaalpost|grootboekrekening|tegenboeking|debet|gebeurtenis/i.test(String((e as Error)?.message))) {
         console.error(`Fout in ${method}`, e);
@@ -865,7 +905,18 @@ if (!DATA_ENV) {
 }
 const gotLock = MCP_MODE ? false : app.requestSingleInstanceLock();
 let preparing = true;
-const dataDirNotices: { type: 'info' | 'warning'; message: string; detail: string }[] = [];
+const dataDirNotices: StartNotice[] = [];
+
+/** Waarom de administratie in `root` niet alleen-lezen te openen is, of null als dat kan. */
+function viewProblem(root: string): string | null {
+  try {
+    const admins = new Administrations(root);
+    openReadonly(join(admins.dirFor(admins.current()), 'boekhouding.sqlite')).close();
+    return null;
+  } catch (e) {
+    return /andere versie/.test((e as Error).message) ? 'de administratie is van een oudere versie van de app en moet eerst overgezet worden.' : (e as Error).message;
+  }
+}
 
 /**
  * Na het opstarten, vóór er een database open is: de gegevensmap in orde maken. Onwaar = de app
@@ -919,33 +970,46 @@ async function prepareDataDir(): Promise<boolean> {
     }
   }
   if (resolution.kind === 'nieuw') markComplete(resolution.dir);
-  if (resolution.kind === 'oud') await moveOldFolder(resolution.dir, resolution.target);
-  await switchFolderIfAsked();
+  if (resolution.kind === 'oud') {
+    // Store-versie: na een mislukte poging werkt de app niet door in de oude map (zie moveOldFolderForStore)
+    if (!STORE) await moveOldFolder(resolution.dir, resolution.target);
+    else if (!(await moveOldFolderForStore(resolution.dir, resolution.target))) return false;
+  }
+  // alleen bekijken: er wordt niets gewisseld
+  if (!readOnly) await switchFolderIfAsked();
   return true;
+}
+
+/** Het overzetten zelf; een fout ná de marker telt als gelukt (alleen de afronding ging mis). */
+async function migrateOldFolder(source: string, target: string): Promise<MigrationOutcome> {
+  try {
+    return await migrateWithProgress(source, target, !SMOKE_TEST);
+  } catch (e) {
+    // de marker staat er al: de gedeelde map is compleet, alleen de afronding ging mis
+    console.error('Afronden van het overzetten mislukt', e);
+    return { status: 'gemigreerd', databases: [], renamedSource: null, movedAside: null, warning: null };
+  }
+}
+
+function movedNotice(source: string, target: string, outcome: Extract<MigrationOutcome, { status: 'gemigreerd' }>): StartNotice {
+  return {
+    type: 'info',
+    message: 'Je gegevens staan nu in een vaste map',
+    detail:
+      `Je administratie staat voortaan in ${target}. Daar blijft hij ook staan als je de app verwijdert of opnieuw installeert.\n\n` +
+      (outcome.renamedSource ? `De oude map is bewaard als ${outcome.renamedSource}.` : (outcome.warning ?? `De oude map ${source} is blijven staan.`)) +
+      (outcome.movedAside ? `\n\nIn de nieuwe map stond al iets; dat is bewaard in ${outcome.movedAside}.` : '') +
+      '\n\nGebruik je de koppeling met Claude Code of Codex? Start dat programma dan opnieuw, zodat het de nieuwe map leest.',
+  };
 }
 
 /** De oude map in AppData overzetten naar de gedeelde map; lukt dat niet, dan werkt de app verder vanuit de oude. */
 async function moveOldFolder(source: string, target: string): Promise<void> {
-  let outcome: Awaited<ReturnType<typeof migrateWithProgress>>;
-  try {
-    outcome = await migrateWithProgress(source, target, !SMOKE_TEST);
-  } catch (e) {
-    // de marker staat er al: de gedeelde map is compleet, alleen de afronding ging mis
-    console.error('Afronden van het overzetten mislukt', e);
-    outcome = { status: 'gemigreerd', databases: [], renamedSource: null, movedAside: null, warning: null };
-  }
+  const outcome = await migrateOldFolder(source, target);
   if (outcome.status === 'gemigreerd') {
     dataRoot = target;
     console.log(`Gegevens overgezet van ${source} naar ${target}`);
-    dataDirNotices.push({
-      type: 'info',
-      message: 'Je gegevens staan nu in een vaste map',
-      detail:
-        `Je administratie staat voortaan in ${target}. Daar blijft hij ook staan als je de app verwijdert of opnieuw installeert.\n\n` +
-        (outcome.renamedSource ? `De oude map is bewaard als ${outcome.renamedSource}.` : (outcome.warning ?? `De oude map ${source} is blijven staan.`)) +
-        (outcome.movedAside ? `\n\nIn de nieuwe map stond al iets; dat is bewaard in ${outcome.movedAside}.` : '') +
-        '\n\nGebruik je de koppeling met Claude Code of Codex? Start dat programma dan opnieuw, zodat het de nieuwe map leest.',
-    });
+    dataDirNotices.push(movedNotice(source, target, outcome));
   } else {
     console.error(`Gegevens overzetten niet gelukt (${outcome.status}): ${outcome.reason}`);
     dataDirNotices.push({
@@ -954,6 +1018,43 @@ async function moveOldFolder(source: string, target: string): Promise<void> {
       detail: `${outcome.status === 'mislukt' ? `Het overzetten naar ${target} lukte niet (${outcome.reason}).` : outcome.reason}\n\nEr is niets veranderd: je werkt gewoon verder vanuit ${source}. Bij de volgende start probeert de app het opnieuw.`,
     });
   }
+}
+
+/**
+ * Store-versie: lukt het overzetten niet, dan werkt de app niet verder in de oude map (wat een
+ * Store-app in AppData schrijft, verdwijnt bij verwijderen). De gebruiker kiest: opnieuw, een eigen map,
+ * of alleen bekijken. Een eigen map gaat langs dezelfde weg als in Instellingen (`planSwitch`,
+ * `switchDataDir`). Onwaar = de app sluit. Zie `migrateForStore`.
+ */
+async function moveOldFolderForStore(source: string, target: string): Promise<boolean> {
+  const home = app.getPath('home');
+  const result = await migrateForStore({
+    source,
+    target,
+    appData: app.getPath('appData'),
+    migrate: migrateOldFolder,
+    plan: (chosen) => planSwitch({ home, current: source, chosen }),
+    switchTo: (chosen) => switchFolder(home, source, { target: chosen, action: 'kopieren' }),
+    viewProblem: () => viewProblem(source),
+    // de rooktest kan niets kiezen: een mislukte poging is daar gewoon een fout
+    choose: async (failure) => (SMOKE_TEST ? 'afsluiten' : chooseAfterFailedMigration(failure)),
+    pickFolder: () => pickDataFolder(home),
+    refuse: refuseDataFolder,
+    confirmSyncFolder,
+  });
+  if (result.kind === 'afsluiten') {
+    app.exit(SMOKE_TEST ? 1 : 0);
+    return false;
+  }
+  if (result.kind === 'alleen-lezen') {
+    console.error(`Gegevens overzetten niet gelukt (${result.reason}); de oude map ${source} is alleen-lezen geopend`);
+    readOnly = true;
+    return true;
+  }
+  dataRoot = result.dir;
+  console.log(`Gegevens overgezet van ${source} naar ${result.dir}`);
+  dataDirNotices.push(result.kind === 'gekozen' ? switchedNotice(source, result.outcome) : movedNotice(source, result.dir, result.outcome));
+  return true;
 }
 
 /**
@@ -968,21 +1069,7 @@ async function switchFolderIfAsked(): Promise<void> {
   const request = takeSwitchRequest(home);
   if (!request) return;
   const source = rootDir();
-  const standard = sharedDataDir(home);
-  let outcome: Awaited<ReturnType<typeof switchWithProgress>>;
-  try {
-    outcome = await switchWithProgress(home, source, request, true);
-  } catch (e) {
-    // de verwijzing is het laatste wat geschreven wordt: wat `resolveDataDir` nu zegt, is waar
-    console.error('Afronden van het wisselen van gegevensmap mislukt', e);
-    outcome = { status: 'mislukt', reason: (e as Error).message };
-    try {
-      const now = resolveDataDir({ home, appData: app.getPath('appData') });
-      if ((now.kind === 'pointer' || now.kind === 'gedeeld') && sameDir(now.dir, request.target)) outcome = { status: 'gewisseld', dir: now.dir, action: request.action, databases: [], movedAside: null };
-    } catch (again) {
-      console.error(again);
-    }
-  }
+  const outcome = await switchFolder(home, source, request);
   if (outcome.status !== 'gewisseld') {
     console.error(`Gegevensmap wisselen niet gelukt (${outcome.status}): ${outcome.reason}`);
     dataDirNotices.push({
@@ -994,8 +1081,30 @@ async function switchFolderIfAsked(): Promise<void> {
   }
   dataRoot = outcome.dir;
   console.log(`Gegevensmap gewisseld van ${source} naar ${outcome.dir} (${outcome.action})`);
+  dataDirNotices.push(switchedNotice(source, outcome));
+}
+
+/** Het wisselen zelf, met voortgangsvenster; een fout ná het schrijven van de verwijzing telt als gelukt. */
+async function switchFolder(home: string, source: string, request: { target: string; action: SwitchAction }): Promise<SwitchOutcome> {
+  try {
+    return await switchWithProgress(home, source, request, true);
+  } catch (e) {
+    // de verwijzing is het laatste wat geschreven wordt: wat `resolveDataDir` nu zegt, is waar
+    console.error('Afronden van het wisselen van gegevensmap mislukt', e);
+    try {
+      const now = resolveDataDir({ home, appData: app.getPath('appData') });
+      if ((now.kind === 'pointer' || now.kind === 'gedeeld') && sameDir(now.dir, request.target)) return { status: 'gewisseld', dir: now.dir, action: request.action, databases: [], movedAside: null };
+    } catch (again) {
+      console.error(again);
+    }
+    return { status: 'mislukt', reason: (e as Error).message };
+  }
+}
+
+function switchedNotice(source: string, outcome: Extract<SwitchOutcome, { status: 'gewisseld' }>): StartNotice {
+  const standard = sharedDataDir(app.getPath('home'));
   const toStandard = sameDir(outcome.dir, standard);
-  dataDirNotices.push({
+  return {
     type: 'info',
     message: outcome.action === 'kopieren' ? 'Je gegevens staan nu in de map die je koos' : 'Je werkt nu met de administratie in de map die je koos',
     detail:
@@ -1005,7 +1114,7 @@ async function switchFolderIfAsked(): Promise<void> {
       (toStandard ? '' : `\n\nLaat de map ${standard} staan, ook als hij leeg lijkt: de app bewaart daar de sleutel van je opgeslagen wachtwoorden.`) +
       (outcome.movedAside ? `\n\nIn de map stond nog een oudere administratie; die is bewaard in ${outcome.movedAside}.` : '') +
       '\n\nGebruik je de koppeling met Claude Code of Codex? Start dat programma dan opnieuw, zodat het de nieuwe map leest.',
-  });
+  };
 }
 
 /** De meldingen na het overzetten of wisselen (of als dat niet lukte), na elkaar; houdt de app niet tegen. */
@@ -1038,7 +1147,7 @@ if (MCP_MODE) {
 
   app.whenReady().then(async () => {
     if (!(await prepareDataDir())) return;
-    if (!SMOKE_TEST) backupBeforeUpgrade();
+    if (!SMOKE_TEST && !readOnly) backupBeforeUpgrade();
     // De renderer gebruikt geen browserrechten; wijs onverwachte camera-, locatie- en
     // notificatieverzoeken daarom standaard af.
     session.defaultSession.setPermissionCheckHandler(() => false);
@@ -1048,15 +1157,26 @@ if (MCP_MODE) {
     createWindow();
     preparing = false;
     if (SMOKE_TEST) return;
+    if (STORE && !DATA_ENV) {
+      const first = storeFirstStartNotice(app.getPath('userData'));
+      if (first) dataDirNotices.push(first);
+      // een eerder zelf gekozen map onder AppData (verwijzing, of teruggevonden na "Waar staat je administratie?")
+      const risky = readOnly ? null : storeAppDataNotice(rootDir(), app.getPath('appData'));
+      if (risky) dataDirNotices.push(risky);
+    }
     void showDataDirNotice();
-    setTimeout(() => void backgroundTasks(), 10_000);
-    setTimeout(() => void migrateMcp(), 20_000);
-    setInterval(() => void backgroundTasks(), SIX_HOURS);
-    // inkomende post: kort na het opstarten en daarna elk kwartier
-    setTimeout(() => void backgroundMail(), 30_000);
-    setInterval(() => void backgroundMail(), FIFTEEN_MINUTES);
-    // automatisch bijwerken (standaard aan; uit te zetten in Instellingen)
-    updates = new Updates((status) => emit('update', status), () => services.settings.get().autoUpdate);
+    // alleen bekijken: geen back-ups, post of automatisch verwerken in de oude map
+    if (!readOnly) {
+      setTimeout(() => void backgroundTasks(), 10_000);
+      setTimeout(() => void migrateMcp(), 20_000);
+      setInterval(() => void backgroundTasks(), SIX_HOURS);
+      // inkomende post: kort na het opstarten en daarna elk kwartier
+      setTimeout(() => void backgroundMail(), 30_000);
+      setInterval(() => void backgroundMail(), FIFTEEN_MINUTES);
+    }
+    // automatisch bijwerken (standaard aan; uit te zetten in Instellingen). In de Store-versie doet dit niets:
+    // de Store werkt de app bij en electron-updater wordt nooit aangeroepen.
+    updates = new Updates((status) => emit('update', status), () => services.settings.get().autoUpdate, { isPackaged: app.isPackaged, version: () => app.getVersion(), store: STORE, updater: () => autoUpdater });
     updates.configure();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -1,0 +1,11 @@
+
+        <!--
+          App Execution Alias: een vaste naam waarmee Claude Code en Codex de koppeling starten
+          (boekhoudenvoorniks.exe, met de optie voor de koppeling). Het programma zelf staat in een map met het versienummer
+          erin en verhuist dus bij elke update; de alias niet. De naam staat ook in src/main/windows-store.ts.
+        -->
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="app\BoekhoudenVoorNiks.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="boekhoudenvoorniks.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>

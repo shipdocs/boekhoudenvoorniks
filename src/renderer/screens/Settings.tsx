@@ -4,7 +4,7 @@ import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, us
 import type { AppSettings } from '../../settings/settings';
 import { ResetCard } from './Reset';
 import { CategoriesDialog } from './Categories';
-import { ReaderChoice } from './Reader';
+import { LocalOcrConsent, ReaderChoice } from './Reader';
 import { AssistantCard } from './Assistant';
 import { AdministrationsSettings } from './Administrations';
 import { DataFolderSettings } from './DataFolder';
@@ -559,6 +559,7 @@ function BackupSettings() {
   const { run, busy } = useAction();
   const { settings, reloadSettings } = useApp();
   const version = useLoad(() => api.app.version());
+  const distribution = useLoad(() => api.app.distribution());
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   const [restorePw, setRestorePw] = useState('');
@@ -578,6 +579,15 @@ function BackupSettings() {
         <Button disabled={busy || pw.length < 10 || pw !== pw2} onClick={async () => { const r = await run(() => api.app.exportEncrypted(pw), 'Versleutelde kopie opgeslagen'); if (r) { setPw(''); setPw2(''); } }}>Versleutelde kopie maken</Button>
       </div>
       <h3>Updates</h3>
+      {distribution.data?.store ? (
+        <>
+          <p className="small muted">Je hebt de versie uit de Microsoft Store. Nieuwe versies komen vanzelf via de Store; je hoeft hier niets voor te doen. Je administratie blijft daarbij gewoon staan.</p>
+          <div className="row">
+            <span className="muted">Versie {version.data}</span>
+          </div>
+        </>
+      ) : (
+      <>
       <label className="row">
         <input type="checkbox" checked={settings.autoUpdate} disabled={busy} onChange={async (e) => {
           const autoUpdate = e.target.checked;
@@ -594,6 +604,8 @@ function BackupSettings() {
         <span className="muted">Versie {version.data}</span>
         <Button disabled={busy} onClick={async () => { const r = await run(() => api.app.checkForUpdates()); if (r) alert(r); }}>Zoek naar updates</Button>
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -606,6 +618,7 @@ function LocalOcr({ engine }: { engine: string }) {
   const status = useLoad(() => api.localOcr.status());
   const st = status.data;
   const downloading = st?.state === 'downloaden';
+  const [askConsent, setAskConsent] = useState(false);
   // tijdens het downloaden de voortgang volgen; klaar = direct in gebruik nemen
   useEffect(() => {
     if (!downloading) return;
@@ -644,9 +657,27 @@ function LocalOcr({ engine }: { engine: string }) {
           <p className="small">Lees foto's van bonnen automatisch uit. Eenmalig downloaden (± {mb(info.data.downloadSize)}); daarna werkt het zonder internet en blijven je documenten op deze computer.</p>
           <p className="small muted">{info.data.requirements}</p>
           {st.state === 'fout' && <div className="notice warn small">{st.error}</div>}
-          <Button kind="primary" disabled={busy} onClick={async () => { await run(() => api.localOcr.install()); await status.reload(); }}>
+          <Button kind="primary" disabled={busy} onClick={async () => {
+            // versie uit de Microsoft Store: eerst uitdrukkelijk ja zeggen tegen het downloaden en starten
+            if (info.data?.consentNeeded) return setAskConsent(true);
+            await run(() => api.localOcr.install());
+            await status.reload();
+          }}>
             {st.state === 'fout' ? 'Opnieuw proberen' : 'Slimme herkenning installeren'}
           </Button>
+          {askConsent && (
+            <LocalOcrConsent
+              downloadSize={info.data.downloadSize}
+              runtimeVersion={info.data.runtimeVersion}
+              onCancel={() => setAskConsent(false)}
+              onAgree={async () => {
+                setAskConsent(false);
+                await run(() => api.localOcr.install(true));
+                await info.reload();
+                await status.reload();
+              }}
+            />
+          )}
         </>
       )}
       {downloading && (

@@ -1,5 +1,6 @@
 import { BrowserWindow, dialog } from 'electron';
 import { inspectMoved, migrateToSharedDir, movedQuestion, resumeMoved, switchDataDir, type DataDirResolution, type MigrationOutcome, type OldFolderInfo, type SwitchAction, type SwitchOutcome } from './data-dir';
+import type { StoreMigrationChoice, StoreMigrationFailure } from './windows-store';
 
 function megabytes(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1e6))} MB`;
@@ -152,4 +153,57 @@ export function switchWithProgress(home: string, source: string, request: { targ
     showWindow && request.action === 'kopieren',
     (hooks) => switchDataDir({ home, source, ...request, log: (message) => console.log(message), ...hooks }),
   );
+}
+
+/**
+ * Store-versie, het overzetten lukte niet: opnieuw proberen, zelf een map kiezen, of de oude map
+ * alleen bekijken. Het venster sluiten = afsluiten; er verandert dan niets.
+ */
+export async function chooseAfterFailedMigration(failure: StoreMigrationFailure): Promise<StoreMigrationChoice> {
+  const choices: [string, StoreMigrationChoice][] = [
+    ['Opnieuw proberen', 'opnieuw'],
+    ['Zelf een map kiezen…', 'kiezen'],
+    ...(failure.viewProblem === null ? ([['Alleen bekijken', 'bekijken']] as [string, StoreMigrationChoice][]) : []),
+    ['Afsluiten', 'afsluiten'],
+  ];
+  const result = await dialog.showMessageBox({
+    type: 'warning',
+    title: 'BoekhoudenVoorNiks',
+    message: 'Je gegevens zijn nog niet overgezet',
+    detail:
+      `${failure.status === 'mislukt' ? `Het overzetten naar ${failure.target} lukte niet (${failure.reason}).` : failure.reason}\n\n` +
+      `Er is niets veranderd: je administratie staat nog in ${failure.source}. De versie uit de Microsoft Store kan daar niet in werken, want wat hij daar opslaat verdwijnt als je de app verwijdert.\n\n` +
+      'Probeer het opnieuw, of kies zelf een map (bijvoorbeeld op een schijf met meer ruimte). ' +
+      (failure.viewProblem === null ? 'Je kunt je administratie ook alleen bekijken; wijzigen kan dan niet.' : `Alleen bekijken kan nu niet: ${failure.viewProblem}`),
+    buttons: choices.map(([label]) => label),
+    cancelId: choices.length - 1,
+    defaultId: 0,
+    noLink: true,
+  });
+  return choices[result.response]?.[1] ?? 'afsluiten';
+}
+
+/** De mapkiezer voor een zelf gekozen gegevensmap; null = geannuleerd. */
+export async function pickDataFolder(defaultPath: string): Promise<string | null> {
+  const result = await dialog.showOpenDialog({ title: 'Kies een map voor je administratie', defaultPath, properties: ['openDirectory', 'createDirectory'] });
+  return result.canceled || !result.filePaths[0] ? null : result.filePaths[0];
+}
+
+export async function refuseDataFolder(reason: string): Promise<void> {
+  await dialog.showMessageBox({ type: 'warning', title: 'BoekhoudenVoorNiks', message: 'Deze map kan niet', detail: reason, buttons: ['OK'] });
+}
+
+/** De gekozen map wordt bijgehouden door een synchronisatiedienst: dezelfde waarschuwing als in Instellingen. Waar = toch gebruiken. */
+export async function confirmSyncFolder(dir: string, service: string): Promise<boolean> {
+  const result = await dialog.showMessageBox({
+    type: 'warning',
+    title: 'BoekhoudenVoorNiks',
+    message: `Let op: deze map wordt bijgehouden door ${service}`,
+    detail: `De map ${dir} wordt bijgehouden door ${service}. Zo'n dienst kopieert bestanden terwijl de app ermee werkt, en daar kan je administratie van beschadigen.\n\nKies liever een map die niet wordt gesynchroniseerd.`,
+    buttons: ['Andere map kiezen', 'Toch gebruiken'],
+    cancelId: 0,
+    defaultId: 0,
+    noLink: true,
+  });
+  return result.response === 1;
 }

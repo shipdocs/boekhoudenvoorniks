@@ -51,6 +51,7 @@ import { ExchangeService, type OfficeProfile } from '../exchange/exchange';
 import { checkCode, openOfficeKey, sealOfficeKey } from '../exchange/crypto';
 import type { LicenseBilling } from '../license/license';
 import { countryCode } from '../shared/vat';
+import { storeFallbackHint } from './windows-store';
 import { proposedPaidWith } from '../shared/paid-with';
 import QRCode from 'qrcode';
 import type { Bonnenscanner } from '../scanner/scanner';
@@ -119,6 +120,12 @@ export interface HostContext {
   };
   appVersion(): string;
   checkForUpdates(): Promise<string>;
+  /** de versie uit de Microsoft Store (`process.windowsStore`); ontbreekt in elke andere versie */
+  windowsStore?: boolean;
+  /** de oude gegevensmap is alleen-lezen geopend omdat het overzetten niet lukte (alleen in de Store-versie) */
+  readOnly?(): boolean;
+  /** de app opnieuw starten om het overzetten nog eens te proberen */
+  retryDataMove?(): void;
   /** Administratie wissen (met veiligheidskopie bij echte gegevens) en eventueel de demo erin zetten. */
   resetData(withDemo: boolean): Promise<{ backup: string | null }>;
   /** automatisch bijwerken; ontbreekt buiten Electron */
@@ -171,6 +178,15 @@ export interface HostContext {
     status(): RuntimeStatus;
     install(): RuntimeStatus;
     uninstall(): Promise<RuntimeStatus>;
+    /**
+     * Alleen in de Store-versie: de herkenning staat uit tot de gebruiker toestemming geeft voor het
+     * downloaden en starten van precies deze build van de runtime.
+     */
+    consent?: {
+      runtimeVersion: string;
+      given(): boolean;
+      give(): void;
+    };
   };
 }
 
@@ -179,6 +195,14 @@ export interface HostContext {
  * Alle argumenten komen uit de renderer en worden door de services zelf gevalideerd.
  */
 export function createApi(s: Services, host: HostContext) {
+  /** Store-versie: lokale herkenning mag pas na toestemming; `agreed` = de gebruiker zei zojuist ja. */
+  const requireOcrConsent = (agreed: unknown): void => {
+    const consent = host.localOcr.consent;
+    if (!consent || consent.given()) return;
+    if (agreed !== true) throw new ValidationError('Geef eerst toestemming om het programma voor het lezen van bonnen te downloaden en te starten.');
+    consent.give();
+  };
+  const ocrConsentNeeded = (): boolean => Boolean(host.localOcr.consent && !host.localOcr.consent.given());
   const linkTarget = (kind: string, id: number): LinkTarget => {
     if (kind !== 'aankoop' && kind !== 'bank') throw new ValidationError('Kies een aankoop of een betaling');
     return { kind, id: Number(id) };
@@ -660,6 +684,9 @@ export function createApi(s: Services, host: HostContext) {
       administrationId: () => s.settings.administrationId(),
       officeCopy: () => s.settings.officeCopy(),
       checkForUpdates: () => host.checkForUpdates(),
+      /** uit de Microsoft Store of niet, en of de administratie nu alleen te bekijken is */
+      distribution: () => ({ store: host.windowsStore === true, readOnly: host.readOnly?.() ?? false }),
+      retryDataMove: () => host.retryDataMove?.(),
       openExternal: (url: string) => host.openExternal(url),
       openAttachment: (path: string) => host.openPath(path),
       backup: () => host.backupNow(),
@@ -1268,18 +1295,21 @@ export function createApi(s: Services, host: HostContext) {
       options: () => {
         const { ocr } = s.settings.get();
         const local = host.localOcr.status();
+        // Store-versie zonder toestemming: lokaal lezen staat uit, ook als het in de instellingen nog aan stond
+        const consentNeeded = ocrConsentNeeded();
         return {
-          current: ocr.engine === 'ingebouwd' || ocr.engine === 'claude-code' || ocr.engine === 'codex' ? ocr.engine : ocr.url ? 'eigen' : 'geen',
+          current: ocr.engine === 'ingebouwd' ? (consentNeeded ? 'geen' : 'ingebouwd') : ocr.engine === 'claude-code' || ocr.engine === 'codex' ? ocr.engine : ocr.url ? 'eigen' : 'geen',
           asked: ocr.askedReader,
-          local: { state: local.state, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS },
+          local: { state: local.state, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS, consentNeeded, runtimeVersion: host.localOcr.consent?.runtimeVersion ?? null },
           claudeCode: storedCli('claude-code'),
           codex: storedCli('codex'),
           searched: ocr.assistantsSearched,
           unread: s.intake.unread().length,
         };
       },
-      choose: (choice: string) => {
+      choose: (choice: string, consent?: boolean) => {
         if (!['lokaal', 'claude-code', 'codex', 'zelf'].includes(choice)) throw new Error('Onbekende keuze');
+        if (choice === 'lokaal') requireOcrConsent(consent);
         const ocr = s.settings.get().ocr;
         if (choice === 'claude-code' || choice === 'codex') {
           if (!storedCli(choice)) throw new Error(`${choice === 'codex' ? 'Codex' : 'Claude Code'} is (nog) niet gevonden. Klik eerst op "Zoek op deze computer" of "Kies zelf".`);
@@ -1315,7 +1345,7 @@ export function createApi(s: Services, host: HostContext) {
     assistant: {
       info: () => {
         const cmd = host.mcpCommand?.() ?? null;
-        return { command: cmd, claudeCode: storedCli('claude-code'), codex: storedCli('codex'), searched: s.settings.get().ocr.assistantsSearched };
+        return { command: cmd, claudeCode: storedCli('claude-code'), codex: storedCli('codex'), searched: s.settings.get().ocr.assistantsSearched, storeNote: host.windowsStore ? storeFallbackHint('de koppeling') : null };
       },
       connect: async (kind: string) => {
         if (kind !== 'claude-code' && kind !== 'codex') throw new Error('Onbekend programma');
@@ -1327,8 +1357,11 @@ export function createApi(s: Services, host: HostContext) {
     },
     localOcr: {
       status: () => host.localOcr.status(),
-      info: () => ({ model: GLM_OCR.label, modelLicense: GLM_OCR.license, modelLicenseUrl: GLM_OCR.licenseUrl, runtime: LLAMA_CPP.label, runtimeLicense: LLAMA_CPP.license, runtimeLicenseUrl: LLAMA_CPP.licenseUrl, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS }),
-      install: () => host.localOcr.install(),
+      info: () => ({ model: GLM_OCR.label, modelLicense: GLM_OCR.license, modelLicenseUrl: GLM_OCR.licenseUrl, runtime: LLAMA_CPP.label, runtimeLicense: LLAMA_CPP.license, runtimeLicenseUrl: LLAMA_CPP.licenseUrl, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS, consentNeeded: ocrConsentNeeded(), runtimeVersion: host.localOcr.consent?.runtimeVersion ?? null }),
+      install: (consent?: boolean) => {
+        requireOcrConsent(consent);
+        return host.localOcr.install();
+      },
       uninstall: async () => {
         const st = await host.localOcr.uninstall();
         if (s.settings.get().ocr.engine === 'ingebouwd') s.settings.update({ ocr: { ...s.settings.get().ocr, engine: 'glm-ocr' } });
@@ -1336,6 +1369,7 @@ export function createApi(s: Services, host: HostContext) {
         return st;
       },
       use: () => {
+        requireOcrConsent(false);
         s.settings.update({ ocr: { ...s.settings.get().ocr, engine: 'ingebouwd', url: '' } });
         host.reconfigureLocalAi();
         return s.settings.get();

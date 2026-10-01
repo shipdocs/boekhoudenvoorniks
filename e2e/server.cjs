@@ -9,6 +9,8 @@
  * POST /__downloads    de map die in de test de Downloads-map is (leeg aangemaakt per test); de test zet er bestanden in
  * POST /__opened       de bijlagen die geopend zijn: het pad uit de database en de inhoud van het bestand (base64)
  * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
+ * POST /__store        de versie uit de Microsoft Store nabootsen: body {"on":true} en eventueel "readOnly";
+ *                      geeft terug wat er gebeurde (toestemming voor lokaal lezen, "Opnieuw proberen")
  * POST /__datafolder   body {"pick":{"name","kind"}} = de map die het keuzevenster "teruggeeft" (kind: leeg, vol of
  *                      compleet; null = annuleren), {"custom":true} = de app werkt uit een zelf gekozen map,
  *                      {"oldStandard":true} = in de standaardmap staat nog een administratie; geeft wat er bevestigd is
@@ -125,6 +127,9 @@ let updateStatus = { state: 'uit', version: null, notes: null, percent: null, er
 let updateInstalled = false;
 /** aanroepen van "Back-up terugzetten" (in de test annuleert de gebruiker het keuzevenster) */
 let restoreCalls = [];
+/** nagebootste versie uit de Microsoft Store (POST /__store) */
+const noStore = () => ({ on: false, readOnly: false, consent: false, installs: 0, retried: false });
+let store = noStore();
 
 const downloadsDir = () => path.join(dir, 'Downloads');
 /**
@@ -274,6 +279,9 @@ function init(fresh) {
       },
     },
     async checkForUpdates() { return 'Je hebt de nieuwste versie.'; },
+    get windowsStore() { return store.on; },
+    readOnly: () => store.readOnly,
+    retryDataMove() { store.retried = true; },
     // echt wegschrijven: de tests lezen bv. een uitnodiging of export terug
     async saveFile(name, content) {
       const p = path.join(dir, 'bewaard', name);
@@ -309,7 +317,13 @@ function init(fresh) {
     checkCli: async () => 'Claude Code werkt ✓',
     openLoginTerminal: async () => 'Claude Code is geopend in een terminal.',
     mcpCommand: () => ({ command: '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', args: ['--mcp'] }),
-    localOcr: { status: () => ({ state: 'niet-geinstalleerd' }), install: () => ({ state: 'niet-geinstalleerd' }), uninstall: async () => ({ state: 'niet-geinstalleerd' }) },
+    localOcr: {
+      status: () => ({ state: 'niet-geinstalleerd' }),
+      install: () => { store.installs++; return { state: 'niet-geinstalleerd' }; },
+      uninstall: async () => ({ state: 'niet-geinstalleerd' }),
+      // zoals de app: alleen in de Store-versie is toestemming nodig
+      get consent() { return store.on ? { runtimeVersion: 'b0000', given: () => store.consent, give: () => { store.consent = true; } } : undefined; },
+    },
     async resetData(withDemo) {
       await current.stop();
       const backup = await wipeDatabase(db, file, path.join(dir, 'backups'));
@@ -341,6 +355,7 @@ http
         updateStatus = { state: 'uit', version: null, notes: null, percent: null, error: null };
         updateInstalled = false;
         restoreCalls = [];
+        store = noStore();
         openedAttachments = [];
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         resetFolders();
@@ -361,6 +376,10 @@ http
         const a = licensing?.accounts.get(licensing.lastStarted);
         if (a) a.paid = true;
         return res.end(JSON.stringify({ ok: licensing ? [...licensing.accounts.values()].map(({ managementKey: _k, ...rest }) => rest) : null }));
+      }
+      if (req.url === '/__store') {
+        if (body) store = { ...store, ...JSON.parse(body) };
+        return res.end(JSON.stringify({ ok: store }));
       }
       if (req.url === '/__datafolder') {
         const input = body ? JSON.parse(body) : {};

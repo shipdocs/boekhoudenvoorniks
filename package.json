@@ -21,6 +21,7 @@
     "dist": "npm run build && electron-builder --linux --win",
     "dist:linux": "npm run build && electron-builder --linux",
     "dist:win": "npm run build && electron-builder --win",
+    "dist:store": "npm run build && electron-builder --win appx --publish never --x64",
     "benchmark:ocr": "npm run build:main && node dist/main/tools/ocr-benchmark.js",
     "leveranciers:nsi": "npm run build:main && node dist/main/tools/leveranciers-nsi.js",
     "voorwaarden:pdf": "node scripts/voorwaarden-pdf.cjs",
@@ -81,6 +82,22 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "BoekhoudenVoorNiks"
+    },
+    "appx": {
+      "identityName": "ShipDocs.BoekhoudenVoorNiks",
+      "publisher": "CN=B884F2A1-35F1-4BD8-9EB7-F2746D9FB427",
+      "publisherDisplayName": "ShipDocs",
+      "applicationId": "BoekhoudenVoorNiks",
+      "displayName": "BoekhoudenVoorNiks",
+      "languages": [
+        "nl-NL"
+      ],
+      "backgroundColor": "#f6f7f9",
+      "minVersion": "10.0.18362.0",
+      "maxVersionTested": "10.0.26100.0",
+      "customManifestPath": "appxmanifest.xml",
+      "customExtensionsPath": "build/appx-extensions.xml",
+      "artifactName": "BoekhoudenVoorNiks-Store-${version}-${arch}.${ext}"
     }
   },
   "dependencies": {
