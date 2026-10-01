@@ -35,7 +35,10 @@ describe('bon op "weet ik nog niet"', () => {
     // in de lijst als "nog uitzoeken", en indelen
     const p = api.purchases.list().find((x) => x.relation_name === 'Rare Winkel Zoveel')!;
     expect(p.question).toBe(true);
+    // de controle "weet ik nog niet" wijst de bon aan als meteen in te delen (#188)
+    expect(api.vat.accountLines(ACCOUNTS.vraagposten).lines).toMatchObject([{ purchaseId: p.id, question: true, amount: 12100 }]);
     api.purchases.resolveQuestion(p.id, 'materiaal', 'hoog');
+    expect(api.vat.accountLines(ACCOUNTS.vraagposten).lines).toEqual([]);
     expect(s.ledger.balance(ACCOUNTS.vraagposten)).toBe(0);
     expect(s.ledger.balance(ACCOUNTS.btwVoorbelasting)).toBe(2100);
     expect(s.ledger.balance('WKprInkMat')).toBe(10000);
