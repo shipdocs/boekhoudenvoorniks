@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { migrateDataDir } from '../src/main/data-dir';
+import Database from 'better-sqlite3';
+import { migrateDataDir, rebaseDataDirAttachments } from '../src/main/data-dir';
 
 function dirs() {
   const root = mkdtempSync(join(tmpdir(), 'gb-datadir-'));
@@ -56,5 +57,57 @@ describe('gegevensmap na de naamswijziging', () => {
     mkdirSync(oldDir);
     expect(migrateDataDir(oldDir, newDir)).toBe('geen');
     expect(existsSync(newDir)).toBe(false);
+  });
+});
+
+describe('bijlagepaden na het verplaatsen van de map', () => {
+  function admin(dir: string, paths: { doc: string; purchase: string }) {
+    mkdirSync(dir, { recursive: true });
+    const db = new Database(join(dir, 'boekhouding.sqlite'));
+    db.exec('CREATE TABLE documents (id INTEGER PRIMARY KEY, file_path TEXT NOT NULL); CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, attachment_path TEXT)');
+    db.prepare('INSERT INTO documents (file_path) VALUES (?)').run(paths.doc);
+    db.prepare('INSERT INTO purchase_invoices (attachment_path) VALUES (?)').run(paths.purchase);
+    db.prepare('INSERT INTO purchase_invoices (attachment_path) VALUES (NULL)').run();
+    db.close();
+  }
+  function read(dir: string) {
+    const db = new Database(join(dir, 'boekhouding.sqlite'), { readonly: true });
+    const doc = (db.prepare('SELECT file_path AS p FROM documents').get() as { p: string }).p;
+    const purchase = (db.prepare('SELECT attachment_path AS p FROM purchase_invoices WHERE id = 1').get() as { p: string }).p;
+    db.close();
+    return { doc, purchase };
+  }
+
+  it('zet paden van de oude map (ook met backslashes) om voor hoofd- en extra administraties', () => {
+    const root = mkdtempSync(join(tmpdir(), 'gb-rebase-'));
+    admin(root, { doc: '/home/x/.config/gratis-boekhouden/bijlagen/2025/bon.pdf', purchase: 'C:\\Users\\x\\AppData\\Roaming\\gratis-boekhouden\\bijlagen\\2025\\f.pdf' });
+    const sub = join(root, 'administraties', 'bv');
+    admin(sub, { doc: '/oud/administraties/bv/bijlagen/2024/a.pdf', purchase: '/oud/administraties/bv/bijlagen/2024/b.pdf' });
+    expect(rebaseDataDirAttachments(root)).toEqual([]);
+    expect(read(root)).toEqual({ doc: join(root, 'bijlagen', '2025', 'bon.pdf'), purchase: join(root, 'bijlagen', '2025', 'f.pdf') });
+    expect(read(sub)).toEqual({ doc: join(sub, 'bijlagen', '2024', 'a.pdf'), purchase: join(sub, 'bijlagen', '2024', 'b.pdf') });
+  });
+
+  it('is idempotent en laat paden zonder bijlagenmap met rust', () => {
+    const root = mkdtempSync(join(tmpdir(), 'gb-rebase-'));
+    admin(root, { doc: '/ergens/anders/bon.pdf', purchase: '/oud/bijlagen/2025/x.pdf' });
+    rebaseDataDirAttachments(root);
+    const first = read(root);
+    rebaseDataDirAttachments(root);
+    expect(read(root)).toEqual(first);
+    expect(first.doc).toBe('/ergens/anders/bon.pdf');
+  });
+
+  it('slaat een kapotte database over en meldt hem, zonder de rest te blokkeren', () => {
+    const root = mkdtempSync(join(tmpdir(), 'gb-rebase-'));
+    admin(root, { doc: '/oud/bijlagen/1/a.pdf', purchase: '/oud/bijlagen/1/b.pdf' });
+    mkdirSync(join(root, 'administraties', 'kapot'), { recursive: true });
+    writeFileSync(join(root, 'administraties', 'kapot', 'boekhouding.sqlite'), 'geen database');
+    expect(rebaseDataDirAttachments(root)).toEqual(['kapot']);
+    expect(read(root).doc).toBe(join(root, 'bijlagen', '1', 'a.pdf'));
+  });
+
+  it('doet niets zonder administratie', () => {
+    expect(rebaseDataDirAttachments(mkdtempSync(join(tmpdir(), 'gb-rebase-')))).toEqual([]);
   });
 });

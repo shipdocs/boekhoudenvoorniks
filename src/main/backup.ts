@@ -139,7 +139,8 @@ export function validateBackup(file: string): void {
   }
 }
 
-function rebaseAttachmentPaths(database: string, attachmentsRoot: string): void {
+/** Zet de bijlagepaden in een database om naar `attachmentsRoot`; herhalen verandert niets meer. */
+export function rebaseAttachmentPaths(database: string, attachmentsRoot: string): void {
   const db = new Database(database);
   try {
     const update = (table: string, column: string): void => {

@@ -30,7 +30,7 @@ import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
 import type { PollResult } from '../mail/mail-intake';
 import { isPathInside } from './path-security';
-import { DATA_DIR_NAME, migrateDataDir, OLD_DATA_DIR_NAME } from './data-dir';
+import { DATA_DIR_NAME, migrateDataDir, OLD_DATA_DIR_NAME, rebaseDataDirAttachments } from './data-dir';
 import { Administrations, readAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
 import { generateOfficeKeys } from '../exchange/crypto';
@@ -734,6 +734,9 @@ if (!DATA_ENV) {
   } else {
     const result = migrateDataDir(oldDir, newDir);
     if (result !== 'geen' && result !== 'overgeslagen') console.log(`Gegevens ${result} van ${oldDir} naar ${newDir}`);
+    // ook bij een eerdere verhuizing: bijlagepaden die nog naar de oude map wijzen weer goed zetten
+    const failed = rebaseDataDirAttachments(newDir);
+    if (failed.length > 0) console.error(`Bijlagepaden niet omgezet voor: ${failed.join(', ')}`);
     app.setPath('userData', newDir);
   }
 }
