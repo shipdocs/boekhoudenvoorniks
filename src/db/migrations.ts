@@ -877,4 +877,39 @@ export const migrations: string[] = [
     PRIMARY KEY (proposed_by, model)
   );
   `,
+  /* 25: bonnenscanner (#48): gekoppelde telefoons, ontvangen bonnen, en notitie en betaalwijze bij een document */ `
+  -- Gekoppelde telefoons. De sleutel staat hier niet: die zit versleuteld in 'secrets' (scanner:key:<id>).
+  -- expires_at (ms) alleen zolang de telefoon de QR-code nog niet gescand heeft.
+  CREATE TABLE scanner_devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at INTEGER,
+    paired_at TEXT,
+    last_seen_at TEXT
+  );
+  -- Nonces van berichten binnen het tijdvenster: een bericht kan niet nog een keer ingestuurd worden,
+  -- ook niet na opnieuw starten van de app.
+  CREATE TABLE scanner_nonces (
+    device_id TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    seen_at INTEGER NOT NULL,
+    PRIMARY KEY (device_id, nonce)
+  );
+  -- Bonnen van de telefoon, op het ID dat de telefoon eraan gaf: twee keer versturen geeft één document.
+  -- 'wacht' = veilig opgeslagen in de wachtrij, nog niet in de inbox.
+  CREATE TABLE scanner_documents (
+    id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'wacht' CHECK (state IN ('wacht','verwerkt','mislukt')),
+    document_id INTEGER REFERENCES documents(id),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    received_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Wat de telefoon erbij vertelde: een notitie, en hoe er betaald is (het voorstel bij het bevestigen).
+  ALTER TABLE documents ADD COLUMN note TEXT;
+  ALTER TABLE documents ADD COLUMN proposed_paid_with TEXT CHECK (proposed_paid_with IN ('bank','kas','prive','later'));
+  `,
 ];

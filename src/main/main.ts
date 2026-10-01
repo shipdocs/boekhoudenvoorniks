@@ -38,6 +38,8 @@ import { generateOfficeKeys } from '../exchange/crypto';
 import { LICENSE_API_URL } from '../license/license';
 import { today } from '../shared/dates';
 import Database from 'better-sqlite3';
+import { Bonnenscanner, scannerSpoolDir } from '../scanner/scanner';
+import { MdnsAdvertiser } from '../scanner/mdns';
 
 const SMTP_SECRET = 'smtp:password';
 const IMAP_SECRET = 'imap:password';
@@ -50,6 +52,8 @@ let services: Services;
 let api: Api;
 let secrets: SafeStorageSecretStore;
 let localOcr: LocalOcrRuntime;
+/** Bonnenscanner (#48) van de open administratie: ontvangstpunt, mDNS en bonnenmap. */
+let scanner: Bonnenscanner | null = null;
 
 /** Eigen gegevensmap (tests, rooktest); GRATIS_BOEKHOUDEN_DATA is de naam van vóór de naamswijziging. */
 const DATA_ENV = process.env.BOEKHOUDENVOORNIKS_DATA ?? process.env.GRATIS_BOEKHOUDEN_DATA;
@@ -189,6 +193,8 @@ async function openAdministration(key: string): Promise<void> {
     console.error('Back-up vóór wisselen mislukt', e);
   }
   localOcr.stop();
+  // eerst het ontvangstpunt en de bonnenmap stil: die horen bij de administratie die nu dichtgaat
+  await scanner?.stop();
   db.close();
   admins.select(key);
   backupBeforeUpgrade();
@@ -364,6 +370,20 @@ function initServices(): void {
     fetch: (url, init) => fetch(url, init) as never,
   });
   configureLocalAi();
+  scanner = new Bonnenscanner({
+    db,
+    secrets,
+    intake: services.intake,
+    settings: services.settings,
+    spoolDir: scannerSpoolDir(dataDir()),
+    protectedDirs: [rootDir(), app.getPath('userData')],
+    homeDir: app.getPath('home'),
+    advertiser: new MdnsAdvertiser((message) => console.error(message)),
+    // er kwam een bon binnen (telefoon of bonnenmap): het tellertje op Vandaag bijwerken
+    onChange: () => emit('auto-processed', { scanner: true }),
+    log: (message) => console.error(message),
+  });
+  if (!SMOKE_TEST) void scanner.start().catch((e) => console.error('Bonnenscanner starten mislukt', e));
   api = createApi(services, {
     async saveFile(defaultName, content, filters) {
       const result = await dialog.showSaveDialog(mainWindow!, { defaultPath: join(app.getPath('documents'), defaultName), filters });
@@ -380,6 +400,13 @@ function initServices(): void {
       return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
     },
     checkCli,
+    scanner: {
+      service: () => scanner!,
+      pickFolder: async () => {
+        const r = await dialog.showOpenDialog(mainWindow!, { title: 'Kies je bonnenmap', properties: ['openDirectory', 'createDirectory'] });
+        return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+      },
+    },
     openLoginTerminal: (kind, path) => openLoginTerminal(kind, path),
     mcpCommand,
     connectMcp: async (kind, cli) => {
@@ -497,6 +524,7 @@ function initServices(): void {
         });
         if (confirm.response !== 1) return false;
         await dailyBackup(db, join(dataDir(), 'backups'), dataDir());
+        await scanner?.stop();
         db.close();
         if (complete) restoreCompleteBackup(backupData, dbPath(), dataDir());
         else restoreLegacyDatabase(decrypted!, dbPath());
@@ -509,6 +537,7 @@ function initServices(): void {
     },
     async resetData(withDemo) {
       localOcr.stop();
+      await scanner?.stop();
       const backup = await wipeDatabase(db, dbPath(), join(dataDir(), 'backups'), join(dataDir(), 'bijlagen'));
       // nieuwe, lege database met verse services; de IPC-handler gebruikt daarna vanzelf de nieuwe api
       initServices();
@@ -981,6 +1010,7 @@ if (MCP_MODE) {
 
   app.on('will-quit', () => {
     localOcr?.stop();
+    void scanner?.stop();
     try {
       db?.close();
     } catch {

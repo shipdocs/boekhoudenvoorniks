@@ -10,6 +10,8 @@
  * POST /__datafolder   body {"pick":{"name","kind"}} = de map die het keuzevenster "teruggeeft" (kind: leeg, vol of
  *                      compleet; null = annuleren), {"custom":true} = de app werkt uit een zelf gekozen map,
  *                      {"oldStandard":true} = in de standaardmap staat nog een administratie; geeft wat er bevestigd is
+ * POST /__scanner      bonnenscanner: body {"folder": "..."} = de map die "Map kiezen…" oplevert; geeft de tekst van
+ *                      de laatst getoonde QR-code terug, zodat de test zich als telefoon kan melden
  * alles anders         bestanden uit dist/renderer
  */
 const http = require('node:http');
@@ -30,6 +32,7 @@ const { createBackupBundle, extractBundle } = require(path.join(ROOT, 'main/main
 const { ExchangeService, sanitizeForExchange } = require(path.join(ROOT, 'main/exchange/exchange.js'));
 const { generateOfficeKeys } = require(path.join(ROOT, 'main/exchange/crypto.js'));
 const { markComplete, planSwitch, sharedDataDir } = require(path.join(ROOT, 'main/main/data-dir.js'));
+const { Bonnenscanner } = require(path.join(ROOT, 'main/scanner/scanner.js'));
 const Database = require('better-sqlite3');
 /** het kantoor op deze "computer" (in de app: kantoor.json in de gegevensmap) */
 let officeProfile = null;
@@ -40,10 +43,20 @@ const secretsFor = (dbFile) => {
   return secretStores.get(dbFile);
 };
 
+/**
+ * Bonnenscanner: het echte ontvangstpunt, in de test alleen op 127.0.0.1 (zonder mDNS). `scannerPlatform`
+ * doet alsof de app op Windows draait (uitleg over de firewall); `pickedFolder` is wat het keuzevenster geeft.
+ */
+let scanner = null;
+let lastPairing = null;
+let pickedFolder = null;
+let scannerPlatform = 'linux';
+
 /** zoals de app: de huidige administratie sluiten en een andere openen */
 function openAdmin(key) {
   const admins = new Administrations(dir);
   admins.select(key);
+  void scanner?.stop();
   db.close();
   file = path.join(admins.dirFor(key), 'boekhouding.sqlite');
   init(false);
@@ -154,8 +167,27 @@ function init(fresh) {
     licensePublicKey: licensing?.publicKey ?? process.env.E2E_LICENSE_PUBLIC_KEY ?? '',
   });
   let smtpPassword = null;
+  scanner = new Bonnenscanner({
+    db,
+    secrets: secretsFor(file),
+    intake: services.intake,
+    settings: services.settings,
+    spoolDir: path.join(path.dirname(file), 'bonnenscanner'),
+    protectedDirs: [dir],
+    interfaces: () => [{ address: '127.0.0.1', netmask: '255.0.0.0' }],
+    platform: scannerPlatform,
+  });
+  const pair = scanner.pair.bind(scanner);
+  scanner.pair = async () => {
+    const p = await pair();
+    lastPairing = p.payload;
+    return p;
+  };
+  const current = scanner;
+  void current.start();
   api = createApi(services, {
     appVersion: () => '0.0.0-e2e',
+    scanner: { service: () => current, pickFolder: async () => pickedFolder },
     licenseApi: licensing ? fakeLicenseApi() : undefined,
     exchange: {
       bundle: () => createBackupBundle(db, path.dirname(file), (copy) => {
@@ -252,6 +284,7 @@ function init(fresh) {
     mcpCommand: () => ({ command: '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', args: ['--mcp'] }),
     localOcr: { status: () => ({ state: 'niet-geinstalleerd' }), install: () => ({ state: 'niet-geinstalleerd' }), uninstall: async () => ({ state: 'niet-geinstalleerd' }) },
     async resetData(withDemo) {
+      await current.stop();
       const backup = await wipeDatabase(db, file, path.join(dir, 'backups'));
       init(false);
       if (withDemo) seedDemo(services);
@@ -283,6 +316,10 @@ http
         restoreCalls = [];
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         resetFolders();
+        await scanner?.stop();
+        lastPairing = null;
+        pickedFolder = null;
+        scannerPlatform = (body && JSON.parse(body).scannerPlatform) || 'linux';
         init(true);
         return res.end('{"ok":true}');
       }
@@ -304,6 +341,10 @@ http
           if (input.pick?.kind === 'vol') fs.writeFileSync(path.join(folders.pick, 'vakantie.jpg'), 'foto');
         }
         return res.end(JSON.stringify({ ok: { applied: folders.applied, root: folders.root } }));
+      }
+      if (req.url === '/__scanner') {
+        if (body && 'folder' in JSON.parse(body)) pickedFolder = JSON.parse(body).folder;
+        return res.end(JSON.stringify({ ok: { payload: lastPairing } }));
       }
       if (req.url === '/__update') {
         if (body) updateStatus = { ...updateStatus, ...JSON.parse(body) };
