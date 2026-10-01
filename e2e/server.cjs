@@ -12,6 +12,7 @@
  * POST /__datafolder   body {"pick":{"name","kind"}} = de map die het keuzevenster "teruggeeft" (kind: leeg, vol of
  *                      compleet; null = annuleren), {"custom":true} = de app werkt uit een zelf gekozen map,
  *                      {"oldStandard":true} = in de standaardmap staat nog een administratie; geeft wat er bevestigd is
+ *                      {"phoneScanner":true} = telefoon koppelen aan (staat standaard uit, zoals in de app)
  * POST /__scanner      bonnenscanner: body {"folder": "..."} = de map die "Map kiezen…" oplevert; geeft de tekst van
  *                      de laatst getoonde QR-code terug, zodat de test zich als telefoon kan melden
  * alles anders         bestanden uit dist/renderer
@@ -37,6 +38,7 @@ const { generateOfficeKeys } = require(path.join(ROOT, 'main/exchange/crypto.js'
 const { folderAccess } = require(path.join(ROOT, 'main/main/statement-files.js'));
 const { markComplete, planSwitch, sharedDataDir } = require(path.join(ROOT, 'main/main/data-dir.js'));
 const { Bonnenscanner } = require(path.join(ROOT, 'main/scanner/scanner.js'));
+const { PHONE_SCANNER } = require(path.join(ROOT, 'main/shared/phone-scanner.js'));
 const Database = require('better-sqlite3');
 /** het kantoor op deze "computer" (in de app: kantoor.json in de gegevensmap) */
 let officeProfile = null;
@@ -346,6 +348,8 @@ http
         lastPairing = null;
         pickedFolder = null;
         scannerPlatform = (body && JSON.parse(body).scannerPlatform) || 'linux';
+        // telefoon koppelen staat uit (zoals in de app) tot een test het zelf aanzet: {"phoneScanner":true}
+        PHONE_SCANNER.available = Boolean(body && JSON.parse(body).phoneScanner);
         init(true);
         return res.end('{"ok":true}');
       }
