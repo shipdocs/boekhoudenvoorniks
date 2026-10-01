@@ -163,6 +163,7 @@ describe('JEV in de documentstroom', () => {
     expect(w.s.memory.get('Pennenwinkel De Vulpen')).toMatchObject({ category_key: 'kantoor', confirmations: 1 });
     expect(w.stats()).toEqual([{ proposed_by: 'jev', model: 'jev-1.13.0', accepted: 1, corrected: 0 }]);
     // wat de gebruiker deed staat in het logboek, met wie het voorstel deed
+    w.s.db.prepare(`UPDATE automation_log SET created_at = '2026-09-20 12:00:00'`).run(); // het logboek noteert het echte moment; deze test speelt in september 2026
     expect(w.s.inbox.month('2026-09', '2026-09-30').byUser[0]!.reason).toContain('online hulp');
 
     const d2 = await w.add('pen2.jpg', pennenwinkel(10));
@@ -188,6 +189,7 @@ describe('JEV in de documentstroom', () => {
     w.s.intake.confirm(d.id, { supplier: 'Pennenwinkel De Vulpen', date: '2026-09-03', total: 1815, categoryKey: 'overig', vatCode: 'hoog', business: true, paidWith: 'kas' });
     expect(w.s.memory.get('Pennenwinkel De Vulpen')).toMatchObject({ category_key: 'overig' });
     expect(w.stats()).toEqual([{ proposed_by: 'jev', model: 'jev-1.13.0', accepted: 0, corrected: 1 }]);
+    w.s.db.prepare(`UPDATE automation_log SET created_at = '2026-09-20 12:00:00'`).run(); // het logboek noteert het echte moment; deze test speelt in september 2026
     expect(w.s.inbox.month('2026-09', '2026-09-30').byUser[0]).toMatchObject({ summary: expect.stringContaining('aangepast'), reason: expect.stringContaining('jij koos overig') });
 
     const d2 = await w.add('pen2.jpg', pennenwinkel(10));
