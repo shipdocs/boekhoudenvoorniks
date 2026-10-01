@@ -1,3 +1,4 @@
+import { paidWithNote, proposedPaidWith } from '../shared/paid-with';
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
@@ -162,12 +163,12 @@ function proposalNote(c: Classification): string {
  * Vingerafdruk van alles wat "Ja" bij een bon zal boeken. Zo kan een opnieuw gelezen document niet
  * stil met een andere leverancier, datum, bedrag of factuurnummer worden bevestigd vanuit een oude taak.
  */
-export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classification' | 'bank_match'>): string | undefined {
+export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classification' | 'bank_match' | 'proposed_paid_with'>): string | undefined {
   const c = d.classification;
   const r = d.result;
   return c && r
     ? JSON.stringify([
-        2,
+        3,
         r.supplier?.value ?? null,
         r.invoiceDate?.value ?? null,
         r.total?.value ?? null,
@@ -176,6 +177,7 @@ export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classificat
         c.vatCode,
         c.business,
         d.bank_match?.id ?? null,
+        proposedPaidWith(d),
       ])
     : undefined;
 }
@@ -682,7 +684,7 @@ export class InboxService {
         kind: 'document-review',
         icon: '📷',
         title: `${name}${d.result?.total ? ' ' + formatEuro(d.result.total.value) : ''}`,
-        question: pending?.kind === 'evidence' ? `${paid}${EVIDENCE_QUESTION}` : bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}. Alles klopt?` : 'Even controleren?',
+        question: pending?.kind === 'evidence' ? `${paid}${EVIDENCE_QUESTION}` : bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}.${paidWithNote(d)}${d.note ? ` Notitie: "${d.note.replace(/\s+/g, ' ').slice(0, 120)}".` : ''} Alles klopt?` : 'Even controleren?',
         amount: d.result?.total?.value,
         actions: pending
           ? [{ id: pending.kind === 'evidence' ? 'bewijs' : 'dubbel', label: pending.kind === 'evidence' ? 'Ja, alleen als bewijs' : 'Ja, dezelfde aankoop', primary: true }, { id: 'nee', label: 'Nee, andere aankoop' }, { id: 'open', label: 'Bekijken' }]
@@ -693,14 +695,14 @@ export class InboxService {
       });
     }
 
-    // zonder jou binnengekomen (e-mail) en het stond er al in: laten zien, er is niets opnieuw geboekt
+    // zonder jou binnengekomen (e-mail, telefoon, bonnenmap) en het stond er al in: laten zien, er is niets opnieuw geboekt
     for (const n of this.intake.notices()) {
       tasks.push({
         key: `doc-notice-${n.id}`,
         kind: 'document-notice',
         icon: '📎',
         title: ALREADY_PRESENT,
-        question: `"${n.original_name}" kwam binnen per e-mail${n.sender ? ` van ${n.sender}` : ''}${n.kind === 'dubbel' ? ', maar dezelfde bon of factuur staat al in de app. Beide bestanden zijn bewaard' : ', maar precies dit bestand staat al in de app'}. Er is niets opnieuw geboekt.`,
+        question: `${n.source === 'telefoon' ? 'Een bon kwam binnen van je telefoon' : n.source === 'bonnenmap' ? `"${n.original_name}" kwam binnen via je bonnenmap` : `"${n.original_name}" kwam binnen per e-mail${n.sender ? ` van ${n.sender}` : ''}`}${n.kind === 'dubbel' ? ', maar dezelfde bon of factuur staat al in de app. Beide bestanden zijn bewaard' : ', maar precies dit bestand staat al in de app'}. Er is niets opnieuw geboekt.`,
         actions: [{ id: 'open', label: VIEW_EXISTING, primary: true }, { id: 'klaar', label: 'Gezien' }],
         priority: 3,
         ref: { noticeId: n.id, documentId: n.existing_document_id ?? undefined, purchaseId: n.existing_document_id ? undefined : n.purchase_invoice_id ?? undefined },

@@ -20,10 +20,11 @@ export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mai
       return { messageId: `<test-${sent.length}@local>` };
     },
   };
+  const secrets = new MemorySecretStore();
   const s = createServices(db, {
     pdf: async (html) => Buffer.from(`PDF:${html.length}`),
     mailerFactory: async () => opts.mailer ?? mailer,
-    secrets: new MemorySecretStore(),
+    secrets,
     fetch: opts.fetch ?? (async () => { throw new Error('geen netwerk in tests'); }),
     storeFile: async (name) => {
       const path = `/tmp/test-bijlagen/${stored.length + 1}-${name}`;
@@ -54,7 +55,7 @@ export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mai
   });
   const klant = s.relations.create({ name: 'Familie Jansen', email: 'jansen@example.nl', address: 'Dorpsstraat 5', postcode: '3511 AA', city: 'Utrecht', iban: 'NL44RABO0123456789' });
   const aannemer = s.relations.create({ name: 'Bouwbedrijf De Vries BV', email: 'info@devries.example', address: 'Industrieweg 9', postcode: '3500 BB', city: 'Utrecht', vat_number: 'NL999999999B01' });
-  return { db, s, sent, klant, aannemer, stored, removed };
+  return { db, s, sent, klant, aannemer, stored, removed, secrets };
 }
 
 /**
