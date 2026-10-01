@@ -357,6 +357,8 @@ describe('bonnenscanner: ontvangen via wifi (#48)', () => {
     await t.scanner.processSpool();
     expect(t.documents()).toHaveLength(1);
     expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual({ n: 1 });
+    // een nieuwe poging van dezelfde bon is geen "dubbel document": geen melding op Vandaag
+    expect(t.s.intake.notices()).toEqual([]);
   });
 
   it('dezelfde foto onder een nieuw ID (bv. na opnieuw koppelen) komt er ook maar één keer in: de hash', async () => {
@@ -369,6 +371,11 @@ describe('bonnenscanner: ontvangen via wifi (#48)', () => {
     await t.scanner.processSpool();
     expect(t.documents()).toHaveLength(1);
     expect(t.documents()[0]!.note).toBe('eerste');
+    // de telefoon is netjes bevestigd en de wachtrij is leeg; op Vandaag staat dat de bon er al in stond (#179)
+    expect(t.db.prepare(`SELECT state, document_id FROM scanner_documents ORDER BY rowid`).all()).toEqual([{ state: 'verwerkt', document_id: t.documents()[0]!.id }, { state: 'verwerkt', document_id: t.documents()[0]!.id }]);
+    expect(readdirSync(t.spoolDir)).toEqual([]);
+    expect(t.s.intake.notices()).toMatchObject([{ kind: 'stond-er-al', source: 'telefoon', existing_document_id: t.documents()[0]!.id }]);
+    expect(t.s.inbox.home().tasks.find((x) => x.kind === 'document-notice')!.question).toContain('Een bon kwam binnen van je telefoon, maar precies dit bestand staat al in de app');
   });
 
   it('een ander document onder een al gebruikt ID wordt geweigerd', async () => {

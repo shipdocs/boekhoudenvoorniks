@@ -42,8 +42,11 @@ describe('omzet zonder factuur in de app (Mollie, webshop, contant)', () => {
 });
 
 describe('voorstel: welke klant hoort bij de betaler', () => {
+  // elk een eigen bedrag: twee losse afschriften met hetzelfde bedrag op dezelfde dag zonder rekeningnummer
+  // telt de app als dezelfde betaling (#184)
+  let n = 0;
   function tx(s: ReturnType<typeof setup>['s'], counterName: string, counterIban?: string) {
-    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-08-12', amount: 50000, description: `betaling ${counterName}`, counterIban, counterName }] });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-08-12', amount: 50000 + n++, description: `betaling ${counterName}`, counterIban, counterName }] });
     return s.bank.list({ status: 'nieuw' }).find((t) => t.counter_name === counterName)!;
   }
 

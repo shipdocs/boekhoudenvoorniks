@@ -6,7 +6,7 @@ import { saleVatText, type PurchaseVatCode, type SalesVatCode } from '../../shar
 import { referenceIn } from '../../shared/references';
 import { InvestmentHint, investmentInfo } from './Purchases';
 import { CategoryChips } from './Categories';
-import { PaymentDetails } from './PaymentDetails';
+import { PaymentDetails, PaymentEvidence } from './PaymentDetails';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
 
 /** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
@@ -19,8 +19,16 @@ function staleDays(date: string): number {
   return diffDays(date, today());
 }
 
-export function Bank({ focus }: { focus?: number }) {
-  const { go, toast, settings } = useApp();
+export type ImportResult = Awaited<ReturnType<typeof api.bank.importFile>>;
+
+/** "12 stonden er al (uit je afschrift van 1 t/m 15 september)": uit welk eerder afschrift, als dat er één is. */
+function knownFromText(known: { from: string; to: string }[]): string {
+  if (known.length === 0) return '';
+  return known.length === 1 ? ` (uit je afschrift van ${formatDateNl(known[0]!.from)} t/m ${formatDateNl(known[0]!.to)})` : ' (uit eerdere afschriften)';
+}
+
+export function Bank({ focus, skippedFor, imported }: { focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult }) {
+  const { go, toast, settings, refreshBadge } = useApp();
   const { run } = useAction();
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
   // zoeken in naam, omschrijving en rekeningnummer; vertraagd zodat niet elke toets een zoekopdracht is
@@ -34,7 +42,9 @@ export function Bank({ focus }: { focus?: number }) {
   const accounts = useLoad(() => api.bank.accounts());
   const status = useLoad(() => api.bank.importStatus());
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
-  const [last, setLast] = useState<{ imported: number; duplicates: number; autoMatched: number; periods: { from: string; to: string }[] } | null>(null);
+  const [last, setLast] = useState<ImportResult | null>(imported ?? null);
+  // de regels die zijn overgeslagen omdat de betaling er al stond: van één import of van één rekening
+  const [review, setReview] = useState<{ batchId?: number; bankAccountId?: number } | null>(skippedFor ? { bankAccountId: skippedFor } : null);
   const [opening, setOpening] = useState<{ id: number; name: string } | null>(null);
   const [editing, setEditing] = useState<{ id: number; name: string; iban: string | null; isPot: boolean } | 'nieuw' | null>(null);
 
@@ -81,7 +91,11 @@ export function Bank({ focus }: { focus?: number }) {
       {last && (
         <div className="notice good" style={{ marginTop: 14 }}>
           {last.periods.length > 0 && <>Afschrift van <DateNl date={last.periods.map((p) => p.from).sort()[0]} /> t/m <DateNl date={last.periods.map((p) => p.to).sort().at(-1)} />: </>}
-          {last.imported + last.duplicates} betalingen gecontroleerd{last.duplicates ? ` (${last.duplicates} hadden we al)` : ''}. {last.autoMatched} automatisch verwerkt.{' '}
+          {last.imported === 0 ? 'Geen nieuwe betalingen' : last.imported === 1 ? '1 nieuwe betaling' : `${last.imported} nieuwe betalingen`}.{' '}
+          {last.duplicates > 0 && <>{last.duplicates === 1 ? '1 stond er al' : `${last.duplicates} stonden er al`}{knownFromText(last.knownFrom)}.{' '}</>}
+          {last.addedInKnownPeriod > 0 && <>{last.addedInKnownPeriod} toegevoegd in een periode die al was ingelezen.{' '}</>}
+          {(last.skipped > 0 || last.addedInKnownPeriod > 0) && <><button className="linklike" onClick={() => setReview({ batchId: last.batchId })}>Bekijken</button>{' '}</>}
+          {last.autoMatched} automatisch verwerkt.{' '}
           {help > 0 ? `Bij ${help} hebben we je hulp nodig.` : 'Alles is verwerkt ✓'}
         </div>
       )}
@@ -148,7 +162,8 @@ export function Bank({ focus }: { focus?: number }) {
                 <div className="small muted">{st.iban ?? 'IBAN nog onbekend'}</div>
               </td>
               <td>{st.lastImport ? <>{formatDateTime(st.lastImport.at)}<div className="small muted">{st.lastImport.filename ?? st.lastImport.source.toUpperCase()}</div></> : <span className="muted">nog nooit</span>}</td>
-              <td>{st.lastImport ? <><DateNl date={st.lastImport.from} /> t/m <DateNl date={st.lastImport.to} /><div className="small muted">{st.lastImport.transactions} betalingen, {st.lastImport.imported} nieuw</div></> : '—'}</td>
+              <td>{st.lastImport ? <><DateNl date={st.lastImport.from} /> t/m <DateNl date={st.lastImport.to} /><div className="small muted">{st.lastImport.transactions} betalingen, {st.lastImport.imported} nieuw</div></> : '—'}
+                {st.skipped > 0 && <div className="small"><button className="linklike" onClick={() => setReview({ bankAccountId: st.bankAccountId })}>{st.skipped === 1 ? '1 regel stond er al' : `${st.skipped} regels stonden er al`}: bekijken</button></div>}</td>
               <td>{st.coverageTo ? <><DateNl date={st.coverageTo} />{staleDays(st.coverageTo) >= 14 && <div><span className="pill warn">{staleDays(st.coverageTo)} dagen geleden</span></div>}</> : '—'}</td>
               <td className="num" style={{ whiteSpace: 'nowrap' }}>
                 <Button small kind="ghost" onClick={() => setEditing({ id: st.bankAccountId, name: st.name, iban: st.iban, isPot: Boolean(accounts.data?.find((a) => a.id === st.bankAccountId)?.is_pot) })}>Wijzigen</Button>
@@ -160,10 +175,120 @@ export function Bank({ focus }: { focus?: number }) {
       </table>
       <p className="small muted">Een nieuwe rekening komt er ook vanzelf bij als je een afschrift inleest met een rekeningnummer dat de app nog niet kent. Automatisch ophalen bij je bank komt later.</p>
 
+      <StatementFolderCard />
+
+      {review && <ImportReview {...review} onClose={() => setReview(null)} onChanged={async () => { await Promise.all([txs.reload(), status.reload()]); refreshBadge(); }} />}
       {mapping && <CsvMappingDialog {...mapping} onClose={() => setMapping(null)} onConfirm={async (m) => { const x = mapping; setMapping(null); await doImport(x.filename, x.content, m); }} />}
       {opening && <OpeningBalance accountId={opening.id} name={opening.name} onClose={() => setOpening(null)} />}
       {editing && <AccountDialog account={editing === 'nieuw' ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await Promise.all([status.reload(), accounts.reload()]); }} />}
     </div>
+  );
+}
+
+/**
+ * Afschriften vanzelf inlezen (#184): de app kijkt in een map (standaard Downloads) naar nieuwe
+ * afschriften en vraagt op Vandaag "Inlezen?". Standaard uit; de gebruiker zet het zelf aan.
+ */
+function StatementFolderCard() {
+  const { toast, refreshBadge } = useApp();
+  const { run, busy } = useAction();
+  const state = useLoad(() => api.bank.statementFolder());
+  const st = state.data;
+  if (!st?.available) return null;
+  const set = async (enabled: boolean, path: string) => {
+    const r = await run(() => api.bank.setStatementFolder(enabled, path));
+    if (!r) return;
+    await state.reload();
+    refreshBadge();
+    if (enabled) toast(r.found > 0 ? `${r.found === 1 ? '1 afschrift' : `${r.found} afschriften`} gevonden. De vraag "Inlezen?" staat op Vandaag.` : 'De app let nu op deze map.');
+  };
+  const choose = async () => {
+    const path = await run(() => api.bank.chooseStatementFolder());
+    if (path) await set(st.enabled, path);
+  };
+  return (
+    <div className="card" style={{ marginTop: 24 }}>
+      <h2 style={{ marginTop: 0 }}>Afschriften vanzelf inlezen</h2>
+      <label className="row">
+        <input type="checkbox" checked={st.enabled} disabled={busy} onChange={(e) => void set(e.target.checked, st.path)} /> Kijk in deze map naar nieuwe afschriften
+      </label>
+      <div className="row" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+        <code style={{ overflowWrap: 'anywhere' }}>{st.path}</code>
+        <Button small disabled={busy} onClick={() => void choose()}>Andere map kiezen</Button>
+      </div>
+      <p className="small muted">
+        Download je afschrift bij je bank zoals je gewend bent. Staat dit aan, dan ziet de app het bestand in deze map en vraagt op Vandaag: "Inlezen?". Er gaat niets vanzelf je boekhouding in.
+        {!st.enabled && ' Bij het aanzetten kijkt de app ook naar afschriften van de afgelopen 14 dagen.'}
+      </p>
+      <p className="small muted">
+        Alles gebeurt op je eigen computer; er gaat niets naar buiten. De app opent in deze map alleen bestanden die eindigen op .xml, .sta, .940, .txt of .csv, om te zien of het een afschrift van een van je rekeningen is. Van andere bestanden onthoudt hij alleen dat het geen afschrift is. De app verplaatst of verwijdert nooit iets in deze map.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Wat er bij het inlezen niet is toegevoegd omdat de betaling er al stond, met die betaling ernaast.
+ * Waren het toch twee betalingen, dan komt de regel er met "Toch toevoegen" alsnog in. Er verdwijnt dus niets stil.
+ */
+function ImportReview({ batchId, bankAccountId, onClose, onChanged }: { batchId?: number; bankAccountId?: number; onClose: () => void; onChanged: () => Promise<void> }) {
+  const { go } = useApp();
+  const { run, busy } = useAction();
+  const data = useLoad(() => api.bank.importReview({ batchId, bankAccountId }), [batchId, bankAccountId]);
+  const skipped = data.data?.skipped ?? [];
+  const added = data.data?.added ?? [];
+  return (
+    <Modal title="Betalingen die er al stonden" wide onClose={onClose}>
+      <ErrorBox error={data.error} />
+      {data.data && skipped.length === 0 && added.length === 0 && <p className="muted">Er is niets overgeslagen.</p>}
+      {skipped.length > 0 && (
+        <>
+          <p className="muted small">Deze regels uit je afschrift zijn niet toegevoegd, omdat dezelfde betaling er al stond uit een eerder afschrift. Waren het toch twee verschillende betalingen? Kies dan <strong>Toch toevoegen</strong>.</p>
+          <table className="list">
+            <thead><tr><th>Datum</th><th>Wie en wat</th><th className="num">Bedrag</th><th>Stond er al als</th><th><span className="sr-only">Acties</span></th></tr></thead>
+            <tbody>
+              {skipped.map((k) => (
+                <tr key={k.id}>
+                  <td><DateNl date={k.date} /></td>
+                  <td>{k.counterName ?? '—'}<div className="small muted">{k.description}</div></td>
+                  <td className="num"><Euro cents={k.amount} sign /></td>
+                  <td>
+                    <DateNl date={k.existing.date} /> · {k.existing.counterName ?? '—'}
+                    <div className="small muted">{k.existing.description}</div>
+                    {k.existing.filename && <div className="small muted">uit {k.existing.filename}</div>}
+                  </td>
+                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                    {k.added ? <span className="muted small">toegevoegd ✓</span> : (
+                      <Button small disabled={busy} onClick={async () => {
+                        if ((await run(() => api.bank.addSkipped(k.id), 'Betaling toegevoegd')) !== undefined) await Promise.all([data.reload(), onChanged()]);
+                      }}>Toch toevoegen</Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      {added.length > 0 && (
+        <>
+          <h3>Nieuw in een periode die al was ingelezen</h3>
+          <p className="muted small">Deze betalingen stonden niet in je eerdere afschrift en zijn toegevoegd. Staat er toch een dubbel in? Open hem en kies onderaan <strong>Negeren</strong>.</p>
+          <table className="list">
+            <tbody>
+              {added.map((t) => (
+                <tr key={t.id} className="clickable" onClick={() => go({ screen: 'categorie', id: t.id })}>
+                  <td><DateNl date={t.transaction_date} /></td>
+                  <td>{t.counter_name ?? '—'}<div className="small muted">{t.description}</div></td>
+                  <td className="num"><Euro cents={t.amount} sign /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      <div className="row end" style={{ marginTop: 14 }}><Button onClick={onClose}>Sluiten</Button></div>
+    </Modal>
   );
 }
 
@@ -430,8 +555,9 @@ export function CategorizeTransaction({ id }: { id: number }) {
       <p className="sub">{t.counter_name ?? 'Onbekend'} · <DateNl date={t.transaction_date} /> · {t.description.length > 120 ? `${t.description.slice(0, 120)}…` : t.description}</p>
       <details className="small" style={{ marginBottom: 12 }}>
         <summary>Alle gegevens van deze betaling en eerdere betalingen {t.amount < 0 ? 'aan' : 'van'} {t.counter_name ?? 'deze partij'}</summary>
-        <PaymentDetails txId={t.id} />
+        <PaymentDetails txId={t.id} evidence={false} />
       </details>
+      <PaymentEvidence txId={t.id} />
 
       {t.status !== 'nieuw' ? (
         <div className="card">

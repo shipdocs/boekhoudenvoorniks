@@ -22,7 +22,7 @@ export interface ScannerDeps {
   db: Db;
   /** dezelfde versleutelde opslag als voor het SMTP-wachtwoord */
   secrets: SecretStore;
-  intake: Pick<IntakeService, 'add'>;
+  intake: Pick<IntakeService, 'add' | 'notify'>;
   settings: SettingsService;
   /** map van de open administratie waarin ontvangen bonnen wachten tot ze in de inbox staan */
   spoolDir: string;
@@ -115,11 +115,8 @@ export class Bonnenscanner {
       folder: () => this.watchedFolder(),
       configured: () => (this.blocked() ? null : this.folder()),
       add: async (name, data) => {
-        return this.toInbox(async () => {
-          const known = this.deps.db.prepare('SELECT id FROM documents WHERE sha256 = ?').get(sha256(data)) as { id: number } | undefined;
-          const doc = await this.addToInbox(safeFileName(name), data);
-          return { documentId: doc.id, duplicate: Boolean(known) };
-        });
+        const doc = await this.toInbox(() => this.addToInbox(safeFileName(name), data, 'bonnenmap', name));
+        return { documentId: doc.id, duplicate: doc.already_present };
       },
       now: deps.now,
       pollMs: deps.folderPollMs,
@@ -327,7 +324,7 @@ export class Bonnenscanner {
         const one = msg.fotos.length === 1;
         const data = one ? msg.fotos[0]! : jpegsToPdf(msg.fotos);
         const name = `bon-telefoon-${row.received_at.slice(0, 10)}-${sha256(data).slice(0, 8)}.${one ? 'jpg' : 'pdf'}`;
-        const doc = await this.toInbox(() => this.addToInbox(name, data));
+        const doc = await this.toInbox(() => this.addToInbox(name, data, 'telefoon', name));
         if (this.stopped) return;
         this.applyHints(doc.id, msg);
         this.spool.done(row.id, doc.id);
@@ -340,14 +337,23 @@ export class Bonnenscanner {
     }
   }
 
-  /** Net als bonnen uit de mail: nooit vanzelf boeken, altijd eerst laten controleren. */
-  private addToInbox(name: string, data: Uint8Array) {
-    return this.deps.intake.add(name, data, today(), { autoConfirm: false });
+  /**
+   * Net als bonnen uit de mail: nooit vanzelf boeken, altijd eerst laten controleren. Stond precies dit
+   * bestand er al in, of is het dezelfde bon als een eerdere (#179), dan komt er geen tweede aankoop;
+   * de gebruiker krijgt daar een melding van op Vandaag, want hij was er niet bij toen het binnenkwam.
+   */
+  private async addToInbox(name: string, data: Uint8Array, source: 'telefoon' | 'bonnenmap', shownName: string) {
+    const doc = await this.deps.intake.add(name, data, today(), { autoConfirm: false });
+    const purchaseId = doc.link?.target.kind === 'aankoop' ? doc.link.target.id : null;
+    if (doc.already_present) this.deps.intake.notify({ kind: 'stond-er-al', originalName: shownName, source, existingDocumentId: doc.id, purchaseId });
+    else if (doc.outcome === 'dubbel') this.deps.intake.notify({ kind: 'dubbel', originalName: shownName, source, existingDocumentId: doc.duplicate_of_document_id ?? doc.id, purchaseId });
+    return doc;
   }
 
   /**
-   * Eén bestand tegelijk naar de inbox. De inbox kijkt eerst of hij het bestand al heeft en voegt het
-   * daarna pas toe; komt dezelfde bon tegelijk via de telefoon en de bonnenmap, dan mag dat niet botsen.
+   * Eén bestand tegelijk naar de inbox: telefoon en bonnenmap zitten elkaar zo niet in de weg (de inbox
+   * zelf laat hetzelfde bestand ook al niet twee keer tegelijk toe), en de tekstherkenning krijgt de
+   * bonnen na elkaar.
    */
   private toInbox<T>(work: () => Promise<T>): Promise<T> {
     const run = this.inboxQueue.then(work, work);

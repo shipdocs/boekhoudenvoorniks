@@ -1,12 +1,12 @@
 import { api } from '../api';
-import { Button, ErrorBox, Euro, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, useApp, useLoad } from '../ui';
 import { formatDateNl } from '../../shared/dates';
 
 /**
  * Alles wat de bank over een betaling gaf, plus eerdere betalingen aan of van dezelfde partij en hoe je
  * die verwerkte. Zo kun je een vraag van de app ("zakelijk of privé?", "waar is dit geld voor?") beantwoorden.
  */
-export function PaymentDetails({ txId, proposal }: { txId: number; proposal?: { invoiceId?: number; purchaseId?: number } }) {
+export function PaymentDetails({ txId, proposal, evidence = true }: { txId: number; proposal?: { invoiceId?: number; purchaseId?: number }; evidence?: boolean }) {
   const { data, error } = useLoad(() => api.bank.details(txId), [txId]);
   const linked = useLoad(async () => (proposal && (proposal.invoiceId || proposal.purchaseId) ? api.bank.proposal(proposal) : null), [proposal?.invoiceId, proposal?.purchaseId]);
   const t = data?.transaction;
@@ -39,6 +39,8 @@ export function PaymentDetails({ txId, proposal }: { txId: number; proposal?: { 
         </>
       )}
 
+      {evidence && <PaymentEvidence txId={txId} />}
+
       <h3>Eerder {t.amount < 0 ? 'aan' : 'van'} {t.counter_name ?? 'deze partij'}</h3>
       {data.history.length === 0 ? (
         <p className="muted small">Geen eerdere betalingen gevonden.</p>
@@ -54,5 +56,25 @@ export function PaymentDetails({ txId, proposal }: { txId: number; proposal?: { 
         </tbody></table>
       )}
     </div>
+  );
+}
+
+/** De bonnen die als bewijs bij een betaling horen (#179), het hoofdbewijsstuk eerst; niets als er geen is. */
+export function PaymentEvidence({ txId }: { txId: number }) {
+  const { go } = useApp();
+  const files = useLoad(() => api.documents.forTarget('bank', txId), [txId]);
+  if ((files.data ?? []).length === 0) return null;
+  return (
+    <>
+      <h3>Bon of factuur bij deze betaling</h3>
+      <table className="list"><tbody>
+        {files.data!.map((f) => (
+          <tr key={f.document_id}>
+            <td>{f.original_name}{files.data!.length > 1 && f.is_primary ? <span className="muted"> · hoofdbewijsstuk</span> : null}</td>
+            <td style={{ textAlign: 'right' }}><Button small onClick={() => go({ screen: 'document', id: f.document_id })}>Bon bekijken</Button></td>
+          </tr>
+        ))}
+      </tbody></table>
+    </>
   );
 }

@@ -6,6 +6,7 @@ import { setup } from './helpers';
 import { makeJpeg } from './fixtures/jpeg';
 import { makePdf } from './pdf';
 import { Bonnenscanner } from '../src/scanner/scanner';
+import { folderAccess } from '../src/main/statement-files';
 
 const open: Bonnenscanner[] = [];
 const dirs: string[] = [];
@@ -23,7 +24,7 @@ const tmp = (prefix: string) => {
 
 /** Een administratie met een bonnenmap; de klok is van de test, zodat "een paar seconden" niet echt hoeft te duren. */
 function start(opts: { realClock?: boolean; homeDir?: string; broadDirs?: string[] } = {}) {
-  const t = setup();
+  const t = setup({ statementFiles: folderAccess });
   const folder = tmp('bvn-bonnen-');
   const data = tmp('bvn-gegevens-');
   const clock = { now: Date.now() };
@@ -135,6 +136,11 @@ describe('bonnenmap (#48)', () => {
     // niets overschreven: de tweede bon.jpg kreeg een eigen naam
     expect(t.files(join(t.folder, 'verwerkt'))).toEqual(['bon (2).jpg', 'bon kopie.jpg', 'bon.jpg']);
     expect(t.scanner.status().folder.recent.map((r) => r.duplicate)).toEqual([true, true, false]);
+    // je was er niet bij toen ze binnenkwamen: op Vandaag staat dat ze er al in stonden (#179), niets is geboekt
+    expect(t.s.intake.notices().map((n) => [n.kind, n.source, n.original_name])).toEqual([['stond-er-al', 'bonnenmap', 'bon kopie.jpg'], ['stond-er-al', 'bonnenmap', 'bon.jpg']]);
+    const notice = t.s.inbox.home().tasks.find((x) => x.kind === 'document-notice')!;
+    expect(notice.question).toContain('"bon kopie.jpg" kwam binnen via je bonnenmap, maar precies dit bestand staat al in de app');
+    expect(t.s.purchases.list()).toHaveLength(0);
   });
 
   it('een ander bestand met dezelfde naam als een eerder verwerkt bestand overschrijft niets', async () => {
@@ -328,6 +334,38 @@ describe('bonnenmap (#48)', () => {
     expect(t.files(join(t.folder, 'verwerkt'))).toEqual(['bon.jpg']);
     expect(t.documents()).toHaveLength(1);
     expect(t.scanner.status().folder).toMatchObject({ processed: 1, problems: [] });
+  });
+
+  it('bonnenmap en "Afschriften vanzelf inlezen" op dezelfde map: elk pakt alleen het zijne', async () => {
+    const t = start();
+    t.s.bank.updateAccount(t.s.bank.listAccounts()[0]!.id, { name: 'Knab zakelijk', iban: 'NL91ABNA0417164300' });
+    const camt = `<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02"><BkToCstmrStmt><Stmt><Id>1</Id><Acct><Id><IBAN>NL91ABNA0417164300</IBAN></Id></Acct>
+      <Ntry><Amt Ccy="EUR">15.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><Dt>${new Date().toISOString().slice(0, 10)}</Dt></BookgDt><AcctSvcrRef>S1</AcctSvcrRef>
+      <NtryDtls><TxDtls><RltdPties><Cdtr><Nm>KPN</Nm></Cdtr></RltdPties><RmtInf><Ustrd>betaling KPN</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry></Stmt></BkToCstmrStmt></Document>`;
+    writeFileSync(join(t.folder, 'afschrift.xml'), camt);
+    writeFileSync(join(t.folder, 'e-factuur.xml'), ubl());
+    writeFileSync(join(t.folder, 'factuur.pdf'), makePdf(['Bouwmaat Utrecht', 'Totaal 121,00']));
+    writeFileSync(join(t.folder, 'bon.jpg'), makeJpeg('zelfde map'));
+    await t.scanner.setFolder(t.folder);
+    t.s.statementFolder.enable(t.folder);
+    const later = () => new Date(Date.now() + 60_000);
+    // eerst kijkt de afschriftenmap, dan de bonnenmap, dan de afschriftenmap nog een keer
+    expect((await t.s.statementFolder.scan(later())).found).toBe(1);
+    await t.settle();
+    await t.s.statementFolder.scan(later());
+    // de bonnen zijn opgehaald en verplaatst; het afschrift ligt er nog en is geen "probleem" van de bonnenmap
+    expect(t.documents().map((d) => d.original_name).sort()).toEqual(['bon.jpg', 'e-factuur.xml', 'factuur.pdf']);
+    expect(t.files()).toEqual(['afschrift.xml', 'verwerkt']);
+    expect(t.scanner.status().folder.problems).toEqual([]);
+    // en de app vraagt alleen over het afschrift "Inlezen?"; een bon is geen afschrift, ook niet in verwerkt/
+    const found = t.db.prepare(`SELECT filename FROM statement_files WHERE status = 'gevonden' AND present = 1`).all();
+    expect(found).toEqual([{ filename: 'afschrift.xml' }]);
+    expect(t.s.bank.list({}).length).toBe(0);
+    // de twee instellingen staan los van elkaar
+    await t.scanner.setFolder(null);
+    expect(t.s.statementFolder.config()).toMatchObject({ enabled: true, path: t.folder });
+    t.s.statementFolder.disable();
+    expect(t.scanner.folder()).toBeNull();
   });
 
   it('in de demo kijkt de app niet in de bonnenmap', async () => {
