@@ -494,7 +494,8 @@ export interface SwitchPlanInput {
 /** Resten van een eigen afgebroken poging, en wat het besturingssysteem zelf in een map zet. */
 const IGNORED_IN_EMPTY = [STAGING, MIGRATION_LOCK, '.DS_Store', 'Thumbs.db', 'desktop.ini'];
 
-function sameDir(a: string, b: string): boolean {
+/** Dezelfde map, ook via een omweg (snelkoppeling) of op Windows met andere hoofdletters. */
+export function sameDir(a: string, b: string): boolean {
   const real = (dir: string): string => {
     try {
       return realpathSync(dir);
