@@ -29,7 +29,7 @@ import { Updates } from './updates';
 import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
 import type { PollResult } from '../mail/mail-intake';
-import { resolveAttachmentPath, saveAttachment } from './attachments';
+import { deleteAttachment, resolveAttachmentPath, saveAttachment } from './attachments';
 import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
 import { CHOICE_SESSION, chromiumDir, handOverLocalState, markComplete, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type SwitchPlan } from './data-dir';
@@ -291,12 +291,7 @@ async function storeAttachment(name: string, data: Uint8Array): Promise<string> 
 
 /** Een net bewaarde bijlage weer weghalen (alleen binnen de bijlagenmap); mislukt dat, dan blijft hij staan. */
 function removeAttachment(path: string): void {
-  try {
-    const file = resolveAttachmentPath(dataDir(), path);
-    if (existsSync(file)) unlinkSync(file);
-  } catch {
-    // niet erg: het bestand staat dan los in de map, er verwijst niets naar
-  }
+  deleteAttachment(dataDir(), path);
 }
 
 const localFetch: FetchLike = (url, init) => fetch(url, init);

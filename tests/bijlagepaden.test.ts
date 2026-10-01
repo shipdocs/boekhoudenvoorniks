@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
@@ -8,7 +8,7 @@ import { openDatabase, openReadonly } from '../src/db/database';
 import { isStoredAttachmentPath, relativeAttachmentPath, relativizeAttachmentPaths } from '../src/db/attachment-paths';
 import { createServices, MemorySecretStore } from '../src/services';
 import { createApi, type HostContext } from '../src/main/api';
-import { resolveAttachmentPath, saveAttachment } from '../src/main/attachments';
+import { deleteAttachment, resolveAttachmentPath, saveAttachment } from '../src/main/attachments';
 import { wipeDatabase } from '../src/main/reset';
 import { seedDemo } from '../src/demo/demo';
 import { administrationOnDisk } from './helpers';
@@ -33,6 +33,7 @@ function servicesAt(dir: string, log: (message: string) => void = () => undefine
     secrets: new MemorySecretStore(),
     fetch: async () => { throw new Error('geen netwerk in tests'); },
     storeFile: async (name, data) => saveAttachment(dir, name, data),
+    removeFile: (path) => deleteAttachment(dir, path),
     licensePublicKey: '',
   });
 }
@@ -227,6 +228,31 @@ describe('nieuwe bijlagen worden relatief opgeslagen', () => {
     expect(resolveAttachmentPath(dir, stored)).toBe(join(dir, ...stored.split('/')));
     expect(() => saveAttachment(dir, 'virus.exe', Buffer.from('x'))).toThrow(/Alleen PDF/);
     expect(() => saveAttachment(dir, 'groot.pdf', new Uint8Array(20 * 1024 * 1024 + 1))).toThrow(/te groot/);
+  });
+
+  it('een net bewaarde bijlage weer weghalen: alleen het bestand in de bijlagenmap, nooit iets daarbuiten', () => {
+    const dir = tempDir();
+    const stored = saveAttachment(dir, 'bon.pdf', Buffer.from('bewijs'));
+    const file = resolveAttachmentPath(dir, stored);
+    writeFileSync(join(dir, 'boekhouding.sqlite'), 'de administratie');
+    for (const outside of ['bijlagen/../boekhouding.sqlite', join(dir, 'boekhouding.sqlite'), '../' + stored, 'boekhouding.sqlite']) deleteAttachment(dir, outside);
+    expect(readFileSync(join(dir, 'boekhouding.sqlite'), 'utf8')).toBe('de administratie');
+    expect(existsSync(file)).toBe(true);
+    deleteAttachment(dir, stored);
+    expect(existsSync(file)).toBe(false);
+    // nog een keer: het bestand is er niet meer, dat is geen fout
+    expect(() => deleteAttachment(dir, stored)).not.toThrow();
+  });
+
+  it('een document dat niet vastgelegd kon worden laat geen los bestand achter', async () => {
+    const dir = tempDir();
+    const s = servicesAt(dir);
+    // de database weigert het document (hier nagebootst): het net bewaarde bestand gaat weer weg
+    s.db.exec(`CREATE TRIGGER test_weigeren BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT, 'niet vastgelegd'); END`);
+    await expect(s.intake.add('scan.jpg', Buffer.from('scan'), '2026-09-21')).rejects.toThrow(/niet vastgelegd/);
+    const year = join(dir, 'bijlagen', String(new Date().getFullYear()));
+    expect(existsSync(year) ? readdirSync(year) : []).toEqual([]);
+    s.db.close();
   });
 
   it('een ingelezen document, een bon bij een aankoop en een bon achteraf: overal het relatieve pad', async () => {
