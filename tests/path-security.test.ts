@@ -10,4 +10,13 @@ describe('bijlagepad', () => {
     expect(isPathInside(root, join('/tmp', 'administratie', 'bijlagen-oud', 'bon.pdf'))).toBe(false);
     expect(isPathInside(root, join(root, '..', 'boekhouding.sqlite'))).toBe(false);
   });
+
+  it('telt op Windows hoofdlettergebruik niet mee, elders wel', () => {
+    const root = 'C:\\Users\\Piet\\BoekhoudenVoorNiks\\bijlagen';
+    expect(isPathInside(root, 'c:\\users\\piet\\boekhoudenvoorniks\\Bijlagen\\2026\\bon.pdf', 'win32')).toBe(true);
+    expect(isPathInside(root, 'C:\\Users\\Piet\\BoekhoudenVoorNiks\\bijlagen-oud\\bon.pdf', 'win32')).toBe(false);
+    expect(isPathInside(root, 'C:\\Users\\Piet\\BoekhoudenVoorNiks\\bijlagen\\..\\boekhouding.sqlite', 'win32')).toBe(false);
+    expect(isPathInside(root, 'D:\\Users\\Piet\\BoekhoudenVoorNiks\\bijlagen\\bon.pdf', 'win32')).toBe(false);
+    expect(isPathInside('/home/piet/BoekhoudenVoorNiks/bijlagen', '/home/piet/boekhoudenvoorniks/bijlagen/bon.pdf', 'linux')).toBe(false);
+  });
 });
