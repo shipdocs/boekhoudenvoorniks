@@ -83,7 +83,7 @@ const CHROMIUM = new Set([
   'Trust Tokens', 'Trust Tokens-journal', 'TransportSecurity', 'VideoDecodeStats', 'WebStorage', 'lockfile', 'SingletonLock', 'SingletonCookie', 'SingletonSocket',
 ]);
 /** Wat van ons is: staat dit al in het doel zonder marker, dan gaat het opzij (nooit weg). */
-const OWN = (name: string): boolean => name.startsWith(DB_FILE) || ['administraties', 'administratie.json', 'bijlagen', 'backups', 'ocr', 'kantoor.json', 'versie.txt'].includes(name);
+const OWN = (name: string): boolean => name.startsWith(DB_FILE) || ['administraties', 'administratie.json', 'bijlagen', 'backups', 'bonnenscanner', 'ocr', 'kantoor.json', 'versie.txt'].includes(name);
 
 /** Een administratie zelf (kan open zijn): gaat via de back-up-API; de WAL-bestanden ernaast gaan niet los mee. */
 function isLiveDatabase(name: string): boolean {
