@@ -188,8 +188,8 @@ export interface DuplicateMatch {
   /** het bestaande document is het bewijs bij deze bankbetaling */
   bankTransactionId?: number | null;
   label: string;
-  /** waarom het niet zeker is */
-  reason?: 'datum' | 'nummer' | 'soort';
+  /** waarom het niet zeker is; bedrag = zelfde nummer maar een ander bedrag, leverancier = de naam is net anders geschreven */
+  reason?: 'datum' | 'nummer' | 'soort' | 'bedrag' | 'leverancier';
 }
 
 /** Wat er van een document of aankoop nodig is om te zien of het hetzelfde is. */
@@ -223,7 +223,7 @@ function probeOf(r: DocumentResult): DuplicateProbe {
   const number = r.invoiceNumber?.value ? normalizeInvoiceNumber(r.invoiceNumber.value) : '';
   return {
     number: number || null,
-    reliable: number.length >= 3 && (r.invoiceNumber?.confidence ?? 0) >= RELIABLE_NUMBER_CONFIDENCE,
+    reliable: number.length >= MIN_NUMBER_LENGTH && (r.invoiceNumber?.confidence ?? 0) >= RELIABLE_NUMBER_CONFIDENCE,
     date: r.invoiceDate?.value ?? null,
     credit: r.documentType?.value === 'credit_note' || (r.total?.value ?? 0) < 0,
   };
@@ -241,6 +241,26 @@ export function documentFingerprint(r: DocumentResult | null): string {
     r?.invoiceNumber?.value ? normalizeInvoiceNumber(r.invoiceNumber.value) : null,
   ]);
 }
+
+/** Wat de dubbel-controle nodig heeft van een bon die binnenkomt of een aankoop die met de hand wordt ingevoerd. */
+interface DuplicateSubject {
+  supplier: string;
+  total: Cents;
+  /** het bedrag in de vreemde munt van het document (#74), of null */
+  foreign: { currency: string; total: Cents } | null;
+  probe: DuplicateProbe;
+}
+
+/** Een aankoop die met de hand wordt ingevoerd, zonder document (#224). */
+export interface ManualPurchase {
+  supplier: string;
+  total: Cents;
+  date: IsoDate;
+  number?: string | null;
+}
+
+/** Een nummer zegt pas iets vanaf drie tekens: een korter nummer komt bij de volgende bon zo weer terug. */
+const MIN_NUMBER_LENGTH = 3;
 
 const candidateOf = (m: Pick<DuplicateMatch, 'documentId' | 'purchaseId' | 'bankTransactionId'>): string =>
   m.purchaseId ? `aankoop:${m.purchaseId}` : m.bankTransactionId ? `bank:${m.bankTransactionId}` : `document:${m.documentId}`;
@@ -958,36 +978,76 @@ export class IntakeService {
   }
 
   /**
-   * Zoekt of dit document al eerder binnenkwam of al geboekt is: zelfde leverancier en zelfde bedrag,
-   * en dan compareDuplicate (zeker of mogelijk). Een voorstel dat voor dit document is afgewezen, komt
-   * niet terug zolang leverancier, datum, bedrag en nummer gelijk blijven.
+   * Zoekt of dit document al eerder binnenkwam of al geboekt is. Een voorstel dat voor dit document is
+   * afgewezen, komt niet terug zolang leverancier, datum, bedrag en nummer gelijk blijven.
    */
   findDuplicate(id: number, result: DocumentResult): DuplicateMatch | null {
     if (!result.total || !result.supplier) return null;
-    const key = supplierKey(result.supplier.value);
+    const subject: DuplicateSubject = { supplier: result.supplier.value, total: result.total.value, foreign: result.foreign ?? null, probe: probeOf(result) };
+    return this.duplicateOf(subject, id, this.rejected(id, result));
+  }
+
+  /**
+   * Staat er al een aankoop of een bon die lijkt op wat de gebruiker met de hand invoert (#224)? Het
+   * ingetypte nummer telt als betrouwbaar. Er wordt hier niets vastgelegd: het is alleen de vraag vooraf.
+   */
+  findDuplicateOfManual(entry: ManualPurchase): DuplicateMatch | null {
+    if (!entry.supplier.trim() || !entry.total) return null;
+    const number = entry.number ? normalizeInvoiceNumber(entry.number) : '';
+    const probe: DuplicateProbe = { number: number || null, reliable: number.length >= MIN_NUMBER_LENGTH, date: entry.date, credit: entry.total < 0 };
+    return this.duplicateOf({ supplier: entry.supplier, total: entry.total, foreign: null, probe }, null, new Set());
+  }
+
+  /**
+   * De dubbel-controle zelf. Dezelfde leverancier (ook net anders geschreven: "Pakketreus EU" en
+   * "Pakketreus") en dan:
+   *  - hetzelfde bedrag: compareDuplicate (zeker of mogelijk);
+   *  - een andere munt aan één kant en het bedrag binnen de koersmarge (`withinFx`): hooguit mogelijk;
+   *  - een ander bedrag maar hetzelfde nummer (minstens drie tekens): mogelijk, want een bon en de factuur
+   *    van dezelfde aankoop verschillen soms een paar cent (koers, afronding) (#224).
+   * Zeker is het alleen bij precies dezelfde leverancier en precies hetzelfde bedrag; al het andere is een vraag.
+   */
+  private duplicateOf(subject: DuplicateSubject, id: number | null, rejected: Set<string>): DuplicateMatch | null {
+    const key = supplierKey(subject.supplier);
     if (!key) return null;
-    const probe = probeOf(result);
-    const total = result.total.value;
-    const rejected = this.rejected(id, result);
+    const { probe, total, foreign } = subject;
+    const supplierFit = (name: string | null | undefined): 'gelijk' | 'variant' | null =>
+      !name ? null : supplierKey(name) === key ? 'gelijk' : sameSupplierName(name, subject.supplier) ? 'variant' : null;
     // vreemde munt (#74): ook hetzelfde bedrag in die munt, en een oudere boeking waarin dat bedrag als euro's staat
-    const foreign = result.foreign ?? null;
+    const amountFit = (other: { total: Cents; currency: string | null; foreignTotal: Cents | null }): 'gelijk' | 'koers' | null => {
+      if (other.total === total) return 'gelijk';
+      const otherForeign = !!other.currency && other.currency !== 'EUR';
+      if (foreign && (otherForeign ? other.currency === foreign.currency && other.foreignTotal === foreign.total : other.total === foreign.total)) return 'gelijk';
+      // één kant in een andere munt: de bank of de kaart rekende een eigen koers. Staan beide in dezelfde
+      // vreemde munt, dan zijn de bedragen in die munt te vergelijken en is een ander bedrag een andere aankoop.
+      const sameCurrency = !!foreign && otherForeign && other.currency === foreign.currency;
+      return (foreign || otherForeign) && !sameCurrency && withinFx(other.total, total) ? 'koers' : null;
+    };
+    const compare = (supplier: 'gelijk' | 'variant', amount: 'gelijk' | 'koers' | null, other: DuplicateProbe): Pick<DuplicateMatch, 'strength' | 'reason'> | null => {
+      if (!amount) {
+        // een ander bedrag: alleen hetzelfde nummer is dan nog een reden om het te vragen
+        if (!probe.number || probe.number.length < MIN_NUMBER_LENGTH || probe.number !== other.number) return null;
+        return { strength: 'mogelijk', reason: probe.credit !== other.credit ? 'soort' : 'bedrag' };
+      }
+      const found = compareDuplicate(probe, other);
+      if (found?.strength !== 'zeker') return found;
+      if (amount === 'koers') return { strength: 'mogelijk', reason: 'bedrag' };
+      return supplier === 'variant' ? { strength: 'mogelijk', reason: 'leverancier' } : found;
+    };
 
     const purchases = this.db
       .prepare(
-        `SELECT p.id, p.supplier_reference, p.invoice_date, p.total, r.name AS supplier,
+        `SELECT p.id, p.supplier_reference, p.invoice_date, p.total, p.currency, p.foreign_total, r.name AS supplier,
                 (SELECT k.document_id FROM document_links k WHERE k.purchase_invoice_id = p.id AND k.is_primary = 1) AS document_id
-         FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id
-         WHERE p.total = ? OR (? IS NOT NULL AND ((p.currency = ? AND p.foreign_total = ?) OR (p.currency IS NULL AND p.total = ?)))`,
+         FROM purchase_invoices p JOIN relations r ON r.id = p.relation_id ORDER BY p.id`,
       )
-      .all(total, foreign?.currency ?? null, foreign?.currency ?? null, foreign?.total ?? null, foreign?.total ?? null) as { id: number; supplier_reference: string | null; invoice_date: string; total: number; document_id: number | null; supplier: string | null }[];
-    const sameAmount = (r: DocumentResult) =>
-      r.total!.value === total || (!!foreign && (r.foreign ? r.foreign.currency === foreign.currency && r.foreign.total === foreign.total : r.total!.value === foreign.total));
+      .all() as { id: number; supplier_reference: string | null; invoice_date: string; total: number; currency: string | null; foreign_total: number | null; document_id: number | null; supplier: string }[];
     const docs = this.db
       .prepare(
         `SELECT d.id, d.result, k.purchase_invoice_id, k.bank_transaction_id FROM documents d LEFT JOIN document_links k ON k.document_id = d.id
-          WHERE d.id <> ? AND d.status IN ('nieuw','controle','verwerkt') AND d.result IS NOT NULL AND d.duplicate_of_document_id IS NOT ? ORDER BY d.id`,
+          WHERE d.id IS NOT ? AND d.status IN ('nieuw','controle','verwerkt') AND d.result IS NOT NULL AND (? IS NULL OR d.duplicate_of_document_id IS NOT ?) ORDER BY d.id`,
       )
-      .all(id, id) as { id: number; result: string; purchase_invoice_id: number | null; bank_transaction_id: number | null }[];
+      .all(id, id, id) as { id: number; result: string; purchase_invoice_id: number | null; bank_transaction_id: number | null }[];
 
     let weak: DuplicateMatch | null = null;
     const consider = (found: ReturnType<typeof compareDuplicate>, match: Omit<DuplicateMatch, 'strength' | 'reason'>): DuplicateMatch | null => {
@@ -997,18 +1057,22 @@ export class IntakeService {
       return null;
     };
     for (const p of purchases) {
-      if (!p.supplier || supplierKey(p.supplier) !== key) continue;
+      const supplier = supplierFit(p.supplier);
+      if (!supplier) continue;
       const number = p.supplier_reference ? normalizeInvoiceNumber(p.supplier_reference) : '';
       // een bevestigde aankoop: het nummer is nagekeken, of het document waar het uit komt telt hieronder mee
-      const other: DuplicateProbe = { number: number || null, reliable: number.length >= 3, date: p.invoice_date, credit: p.total < 0 };
-      const certain = consider(compareDuplicate(probe, other), { documentId: p.document_id, purchaseId: p.id, label: `de aankoop bij ${p.supplier} van ${formatDateNl(p.invoice_date)}` });
+      const other: DuplicateProbe = { number: number || null, reliable: number.length >= MIN_NUMBER_LENGTH, date: p.invoice_date, credit: p.total < 0 };
+      const found = compare(supplier, amountFit({ total: p.total, currency: p.currency, foreignTotal: p.foreign_total }), other);
+      const certain = consider(found, { documentId: p.document_id, purchaseId: p.id, label: `de aankoop bij ${p.supplier} van ${formatDateNl(p.invoice_date)}` });
       if (certain) return certain;
     }
     for (const d of docs) {
       const r = JSON.parse(d.result) as DocumentResult;
-      if (!r.total || !sameAmount(r) || !r.supplier || supplierKey(r.supplier.value) !== key) continue;
-      const label = `het document van ${r.supplier.value}${r.invoiceDate ? ` van ${formatDateNl(r.invoiceDate.value)}` : ''}`;
-      const certain = consider(compareDuplicate(probe, probeOf(r)), { documentId: d.id, purchaseId: d.purchase_invoice_id, bankTransactionId: d.bank_transaction_id, label });
+      const supplier = r.total ? supplierFit(r.supplier?.value) : null;
+      if (!r.total || !supplier) continue;
+      const label = `het document van ${r.supplier!.value}${r.invoiceDate ? ` van ${formatDateNl(r.invoiceDate.value)}` : ''}`;
+      const found = compare(supplier, amountFit({ total: r.total.value, currency: r.foreign?.currency ?? null, foreignTotal: r.foreign?.total ?? null }), probeOf(r));
+      const certain = consider(found, { documentId: d.id, purchaseId: d.purchase_invoice_id, bankTransactionId: d.bank_transaction_id, label });
       if (certain) return certain;
     }
     return weak;

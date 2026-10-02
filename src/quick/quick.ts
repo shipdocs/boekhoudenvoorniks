@@ -13,6 +13,7 @@ import { assertIsoDate, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
 import type { BookedPayments } from '../documents/booked-payment';
+import type { DuplicateMatch, ManualPurchase } from '../intake/intake';
 
 export type PaidWith = 'bank' | 'kas' | 'prive';
 
@@ -30,7 +31,13 @@ export interface ExpenseInput {
   jobId?: number | null;
   /** zakelijk deel in procenten (1–100); weglaten = wat eerder voor deze leverancier gold, anders 100 */
   businessPct?: number;
+  /** "Toch toevoegen": de gebruiker zag dat er al een aankoop of bon staat die erop lijkt (#224) */
+  allowDuplicate?: boolean;
 }
+
+/** De melding bij handmatige invoer naast een aankoop of bon die er al staat (#224). */
+export const duplicateEntryMessage = (match: Pick<DuplicateMatch, 'label'>): string =>
+  `Lijkt op ${match.label}. Staat deze aankoop er al in? Kijk het eerst na; is het een andere aankoop, kies dan "Toch toevoegen".`;
 
 export interface CashSaleInput {
   date: IsoDate;
@@ -59,13 +66,33 @@ export class QuickActions {
     this.booked = booked;
   }
 
-  /** Bonnetje / inkoopfactuur. Bij 'bank' blijft hij open tot de bankimport hem koppelt. */
+  private duplicates: ((entry: ManualPurchase) => DuplicateMatch | null) | null = null;
+  /** de dubbel-controle van de bonnen, ook voor wat met de hand wordt ingevoerd (#224) */
+  setDuplicateCheck(check: (entry: ManualPurchase) => DuplicateMatch | null): void {
+    this.duplicates = check;
+  }
+
+  /**
+   * Staat er al een aankoop of bon die lijkt op wat je met de hand invoert (#224)? Zelfde leverancier met
+   * hetzelfde bedrag rond dezelfde datum, of met hetzelfde nummer. Zonder leverancier valt er niets te vergelijken.
+   */
+  duplicateOf(input: Pick<ExpenseInput, 'date' | 'supplierName' | 'supplierReference' | 'grossAmount'>): DuplicateMatch | null {
+    if (!this.duplicates || !input.supplierName?.trim()) return null;
+    return this.duplicates({ supplier: input.supplierName, total: input.grossAmount, date: input.date, number: input.supplierReference ?? null });
+  }
+
+  /**
+   * Bonnetje / inkoopfactuur. Bij 'bank' blijft hij open tot de bankimport hem koppelt. Lijkt hij op een
+   * aankoop of bon die er al staat, dan komt er niets bij tot de gebruiker "Toch toevoegen" kiest (`allowDuplicate`).
+   */
   recordExpense(input: ExpenseInput): PurchaseInvoice {
     assertIsoDate(input.date);
     const category = this.categories.find(input.categoryKey);
     if (!category) throw new ValidationError('Kies waar de aankoop voor was');
     if (!isPurchaseVatCode(input.vatCode)) throw new ValidationError('Kies of er btw op de bon stond');
     if (!Number.isSafeInteger(input.grossAmount) || input.grossAmount === 0) throw new ValidationError('Vul een bedrag in');
+    const duplicate = input.allowDuplicate ? null : this.duplicateOf(input);
+    if (duplicate) throw new ValidationError(duplicateEntryMessage(duplicate));
     const { net, vat } = splitGross(input.grossAmount, PURCHASE_VAT_RATES[input.vatCode].percentage, isReverseCharge(input.vatCode));
     return tx(this.db, () => {
       const relationId = input.supplierName?.trim() ? this.relations.findOrCreateSupplier(input.supplierName).id : null;

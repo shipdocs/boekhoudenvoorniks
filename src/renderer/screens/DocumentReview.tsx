@@ -14,6 +14,7 @@ import type { IntakeDocument, PendingProposal } from '../../intake/intake';
 import { DOCUMENT_OUTCOME_LABEL } from '../../shared/document-outcome';
 import { TargetDetails } from './UploadOutcome';
 import { paidWithNote, proposedPaidWith } from '../../shared/paid-with';
+import { futureDateIssue } from '../../intake/validation';
 
 // pdf.js gebruikt Map.getOrInsertComputed, dat oudere Chromium-versies (bv. die van de e2e-tests) nog niet kennen
 for (const proto of [Map.prototype, WeakMap.prototype] as unknown as Record<string, unknown>[]) {
@@ -212,6 +213,9 @@ export function DocumentReview({ id }: { id: number }) {
   // factuur van je eigen bedrijf (#205): alleen privé of "weet ik nog niet"; bij twijfel eerst de vraag
   const ownIssue = !proposal && d.status === 'controle' ? d.issues.find((i) => i.field === 'own-company') : undefined;
   const own = ownIssue ? (ownIssue.suggestion as { level: 'zeker' | 'waarschijnlijk'; signals: string[] }) : null;
+  // de datum is in de toekomst gelezen (#224): de waarschuwing blijft staan tot de datum is aangepast
+  const futureIssue = d.status === 'controle' ? futureDateIssue(d.issues) : null;
+  const futureDate = futureIssue && form.date === (r?.invoiceDate?.value ?? '') ? futureIssue : null;
   const refresh = async () => {
     setForm(null);
     await view.reload();
@@ -252,6 +256,7 @@ export function DocumentReview({ id }: { id: number }) {
           {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document') && !(proposal && i.field === proposal.kind) && !(own && i.field === 'own-company')).map((i) => (
             <div key={i.field + i.message} className="notice warn">{i.message}</div>
           ))}
+          {futureDate && <div className="notice warn" data-testid="datum-toekomst">{futureDate.message}</div>}
           {proposal && <ProposalChoice doc={d} proposal={proposal} question={d.issues.find((i) => i.field === proposal.kind)?.message ?? ''} onDone={refresh} />}
           <LinkedTo doc={d} onChanged={refresh} />
           {own && (
