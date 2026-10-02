@@ -7,7 +7,8 @@ import { formatDateNl, today, type IsoDate } from '../shared/dates';
 import { formatEuro } from '../shared/money';
 import { withinFx } from '../shared/currency';
 import { THRESHOLDS, thresholdFor, type AutopilotLevel } from '../automation/decisions';
-import { mentionsNumber, mentionsReference, supplierNameFit, type Pair } from '../documents/bank-purchase-match';
+import { dateFits, mentionsNumber, mentionsReference, sameIban, supplierNameFit, type Pair } from '../documents/bank-purchase-match';
+import { paymentProviderIn } from '../shared/payment-providers';
 
 export type Suggestion =
   | { kind: 'factuur'; invoiceId: number; label: string; score: number; reasons: string[] }
@@ -85,21 +86,36 @@ export class MatchingEngine {
         else if (nameSimilar(t.counter_name, inv.relation_name)) (score += 15, reasons.push('naam lijkt op klant'));
         if (score >= 40) out.push({ kind: 'factuur', invoiceId: inv.id, label: `Terugbetaling credit ${inv.number} — ${inv.relation_name} · ${formatEuro(-inv.open_amount)}`, score, reasons });
       }
-      for (const p of openPurchases ?? this.purchases.listOpen()) {
-        const reasons: string[] = [];
-        let score = 0;
-        if (p.open_amount === -t.amount) (score += 50, reasons.push('bedrag klopt'));
-        // andere munt (#74): de bank rekende een eigen koers, dus ongeveer hetzelfde bedrag
-        else if (p.currency && p.currency !== 'EUR' && withinFx(-t.amount, p.open_amount)) (score += 40, reasons.push(`bedrag klopt ongeveer (${p.currency}, andere koers)`));
-        if (p.supplier_reference && mentionsReference(text, p.supplier_reference)) (score += 60, reasons.push('factuurnummer staat in de omschrijving'));
-        if (supplierNameFit(t, p) === 'ja') (score += 20, reasons.push('naam van de leverancier'));
-        if (score < 50) continue;
-        if (this.rejected({ purchaseId: p.id, bankTransactionId: t.id })) {
-          if (!opts.withRejected) continue;
-          reasons.push('je koos eerder "Nee"');
-        }
-        out.push({ kind: 'inkoop', purchaseId: p.id, label: `Aankoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''} · ${formatEuro(p.open_amount)} open, ${formatDateNl(p.invoice_date)}`, score, reasons });
+    }
+    // Een afschrijving bij een open aankoop; geld dat binnenkomt bij een open creditnota van een leverancier
+    // (#227): dat is geen omzet, het sluit de creditnota af.
+    const refund = t.amount > 0;
+    for (const p of openPurchases ?? this.purchases.listOpen()) {
+      if (refund ? p.open_amount >= 0 : p.open_amount <= 0) continue;
+      const reasons: string[] = [];
+      let score = 0;
+      if (p.open_amount === -t.amount) (score += 50, reasons.push(refund ? 'terugbetaald bedrag klopt' : 'bedrag klopt'));
+      // andere munt (#74): de bank rekende een eigen koers, dus ongeveer hetzelfde bedrag
+      else if (p.currency && p.currency !== 'EUR' && withinFx(-t.amount, p.open_amount)) (score += 40, reasons.push(`bedrag klopt ongeveer (${p.currency}, andere koers)`));
+      const amountFits = score > 0;
+      if (p.supplier_reference && mentionsReference(text, p.supplier_reference)) (score += 60, reasons.push(refund ? 'nummer van de creditnota staat in de omschrijving' : 'factuurnummer staat in de omschrijving'));
+      // Het rekeningnummer van de factuur (anders dat van de leverancier) telt zoals bij een klant, maar alleen
+      // naast het bedrag en rond de datum van de aankoop. Daarbuiten weegt het als de naam: een oude open
+      // aankoop met toevallig hetzelfde bedrag blijft een vraag.
+      const sameAccount = Boolean(t.counter_iban) && sameIban(t.counter_iban, p.payee_iban ?? (p.relation_id ? this.relations.get(p.relation_id).iban : null));
+      if (sameAccount && amountFits && dateFits(p, t.transaction_date)) (score += 50, reasons.push('rekeningnummer van de leverancier'));
+      else if (sameAccount || supplierNameFit(t, p) === 'ja') (score += 20, reasons.push(sameAccount ? 'rekeningnummer van de leverancier' : 'naam van de leverancier'));
+      // geld dat binnenkomt met alleen hetzelfde bedrag als een creditnota is te weinig: dat kan net zo goed
+      // van een klant zijn
+      if (score < (refund ? 60 : 50)) continue;
+      if (this.rejected({ purchaseId: p.id, bankTransactionId: t.id })) {
+        if (!opts.withRejected) continue;
+        reasons.push('je koos eerder "Nee"');
       }
+      const label = refund
+        ? `Creditnota ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''} · ${formatEuro(-p.open_amount)} terug te krijgen, ${formatDateNl(p.invoice_date)}`
+        : `Aankoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''} · ${formatEuro(p.open_amount)} open, ${formatDateNl(p.invoice_date)}`;
+      out.push({ kind: 'inkoop', purchaseId: p.id, label, score, reasons });
     }
 
     const previous = this.bank.previousBooking(t);
@@ -107,9 +123,8 @@ export class MatchingEngine {
     if (/belastingdienst/i.test(t.counter_name ?? '') || /omzetbelasting|btw/i.test(t.description)) {
       out.push({ kind: 'rekening', account: ACCOUNTS.btwAfrekening, vatCode: null, label: 'Btw betaald aan / terug van de Belastingdienst', score: 40, reasons: ['Belastingdienst'] });
     }
-    if (/mollie|stripe/i.test(`${t.counter_name ?? ''} ${t.description}`) && t.amount > 0) {
-      out.push({ kind: 'rekening', account: ACCOUNTS.kruisposten, vatCode: null, label: 'Uitbetaling betaalprovider', score: 60, reasons: ['uitbetaling Mollie/Stripe'] });
-    }
+    const provider = t.amount > 0 ? paymentProviderIn(`${t.counter_name ?? ''} ${t.description}`) : null;
+    if (provider) out.push({ kind: 'rekening', account: ACCOUNTS.kruisposten, vatCode: null, label: 'Uitbetaling betaalprovider', score: 60, reasons: [`uitbetaling ${provider}`] });
     if (/kosten.*(rekening|betaalpakket)|abonnementskosten|bankkosten|pakketkosten/i.test(t.description)) {
       out.push({ kind: 'rekening', account: ACCOUNTS.bankkosten, vatCode: 'geen', label: 'Bankkosten', score: 40, reasons: ['lijkt op bankkosten'] });
     }

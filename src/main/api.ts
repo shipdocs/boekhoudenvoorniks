@@ -23,7 +23,7 @@ import { buildVatXbrl } from '../btw/xbrl';
 import { PORTAL_URL, SUPPLETIE_URL } from '../btw/btw';
 import { decisionStats } from '../inbox/automation-log';
 import { purchasePaymentQr } from '../documents/epc-qr';
-import { supplierKey } from '../intake/supplier-memory';
+import { autoAfterConfirmations, supplierKey } from '../intake/supplier-memory';
 import { tx } from '../db/database';
 import { hasRealData } from './reset';
 import { duplicateEntryMessage, type ExpenseInput, type CashSaleInput } from '../quick/quick';
@@ -413,7 +413,7 @@ export function createApi(s: Services, host: HostContext) {
         s.bank.bookOwnTransfer(r.bankTransactionId!);
         return;
       case 'recurring-confirm:ja':
-        s.recurring.confirm(r.seriesId!);
+        s.recurring.confirm(r.seriesId!, { autoAfter: autoAfterConfirmations(s.settings.get().autopilot) });
         s.inbox.autoProcess();
         return;
       case 'recurring-confirm:nee':

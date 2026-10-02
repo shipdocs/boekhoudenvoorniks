@@ -4,7 +4,7 @@ import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { PURCHASE_VAT_RATES, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
 import { assertIsoDate, type IsoDate } from '../shared/dates';
-import { assertCents, roundHalfAwayFromZero, type Cents } from '../shared/money';
+import { assertCents, formatEuro, roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
 import { korActive } from '../settings/settings';
 
@@ -198,7 +198,7 @@ export class PurchaseService {
       const { entryId } = this.events.replace(event.id, { type: 'inkoop', payload }, reason);
       this.db
         .prepare('UPDATE purchase_invoices SET journal_entry_id = ?, subtotal = ?, vat_total = ?, total = ?, status = ? WHERE id = ?')
-        .run(entryId, booking.net, booking.payable - booking.net, booking.payable, p.amount_paid >= booking.payable ? 'betaald' : 'open', id);
+        .run(entryId, booking.net, booking.payable - booking.net, booking.payable, paidStatus(booking.payable, p.amount_paid), id);
       this.db.prepare('DELETE FROM purchase_invoice_lines WHERE purchase_invoice_id = ?').run(id);
       const insertLine = this.db.prepare('INSERT INTO purchase_invoice_lines (purchase_invoice_id, account_id, description, net_amount, vat_code, vat_amount) VALUES (?, ?, ?, ?, ?, ?)');
       for (const l of lines) insertLine.run(id, this.ledger.getAccount(l.account).id, l.description ?? null, l.netAmount, l.vatCode, purchaseVat(l));
@@ -209,6 +209,7 @@ export class PurchaseService {
   /**
    * settleFx: aankoop in een andere munt (#74) waarvan de bank een iets ander bedrag afschreef dan
    * geschat. Dan is de aankoop helemaal betaald en gaat het verschil naar "Koersverschillen".
+   * Bij een creditnota (bedrag onder nul) is de betaling het geld dat terugkomt: ook onder nul.
    */
   registerPayment(id: number, payment: { amount: Cents; date: IsoDate; moneyAccount?: string; bankTransactionId?: number | null; settleFx?: boolean }): PurchaseInvoice {
     assertCents(payment.amount);
@@ -216,6 +217,7 @@ export class PurchaseService {
     return tx(this.db, () => {
       const p = this.get(id);
       const settled = payment.settleFx && p.currency ? p.open_amount : payment.amount;
+      this.assertNotOverpaid(p, settled);
       const diff = settled - payment.amount; // positief: minder betaald dan geschat (winst), negatief: meer (verlies)
       const entryId = this.ledger.post({
         date: payment.date,
@@ -229,7 +231,7 @@ export class PurchaseService {
         ].filter((l): l is NonNullable<typeof l> => l !== null),
       });
       const paid = p.amount_paid + settled;
-      this.db.prepare('UPDATE purchase_invoices SET amount_paid = ?, status = ? WHERE id = ?').run(paid, paid >= p.total ? 'betaald' : 'open', id);
+      this.db.prepare('UPDATE purchase_invoices SET amount_paid = ?, status = ? WHERE id = ?').run(paid, paidStatus(p.total, paid), id);
       if (payment.bankTransactionId) {
         this.db
           .prepare(`UPDATE bank_transactions SET status = 'gematcht', matched_journal_entry_id = ?, matched_purchase_invoice_id = ? WHERE id = ?`)
@@ -237,6 +239,35 @@ export class PurchaseService {
       }
       return this.get(id);
     });
+  }
+
+  /**
+   * Nooit meer betalen dan er open staat (#221, #227): dat geeft een vordering op de leverancier die er
+   * niet is. Er kan ook niet meer terugkomen dan er betaald is. Bij een creditnota is het andersom: daar
+   * komt geld op terug, hooguit het bedrag ervan. Geldt voor elke betaling: bank, contant en privé.
+   */
+  private assertNotOverpaid(p: PurchaseInvoice, settled: Cents): void {
+    if (settled === 0) return;
+    const credit = p.total < 0;
+    const paid = p.amount_paid + settled;
+    // de andere kant op (geld terug op een aankoop, een betaling op een creditnota): hooguit wat er al op stond
+    if (settled > 0 === credit) {
+      if (credit ? paid <= 0 : paid >= 0) return;
+      throw new ValidationError(
+        credit
+          ? 'Dit is een creditnota: daar komt geld op terug, er gaat geen betaling heen.'
+          : p.amount_paid === 0
+            ? 'Bij deze aankoop is nog niets betaald: er kan geen geld op terugkomen. Kreeg je geld terug van de leverancier? Voer dan de creditnota in, of kies "Geld terug van een aankoop".'
+            : `Bij deze aankoop is ${formatEuro(p.amount_paid)} betaald: er kan niet meer op terugkomen.`,
+      );
+    }
+    if (credit ? paid >= p.total : paid <= p.total) return;
+    if (p.open_amount === 0) throw new ValidationError(credit ? 'Deze creditnota is al afgehandeld' : 'Deze aankoop staat al op betaald');
+    throw new ValidationError(
+      credit
+        ? `Dit bedrag is hoger dan wat er bij deze creditnota nog open staat (${formatEuro(-p.open_amount)}).`
+        : `Deze betaling is hoger dan wat er bij deze aankoop nog open staat (${formatEuro(p.open_amount)}). Klopt het bedrag van de aankoop niet? Pas dat eerst aan bij Aankopen.`,
+    );
   }
 
   undoPayment(id: number, amount: Cents, journalEntryId: number, date: IsoDate): PurchaseInvoice {
@@ -247,8 +278,8 @@ export class PurchaseService {
         .get(journalEntryId, ACCOUNTS.crediteuren) as { s: number };
       this.ledger.reverse(journalEntryId, date);
       const p = this.get(id);
-      const paid = p.amount_paid - (booked.s > 0 ? booked.s : amount);
-      this.db.prepare('UPDATE purchase_invoices SET amount_paid = ?, status = ? WHERE id = ?').run(paid, paid >= p.total ? 'betaald' : 'open', id);
+      const paid = p.amount_paid - (booked.s !== 0 ? booked.s : amount);
+      this.db.prepare('UPDATE purchase_invoices SET amount_paid = ?, status = ? WHERE id = ?').run(paid, paidStatus(p.total, paid), id);
       return this.get(id);
     });
   }
@@ -313,6 +344,11 @@ export class PurchaseService {
   listOpen(): PurchaseInvoice[] {
     return this.list({ status: 'open' });
   }
+}
+
+/** Betaald als er niets meer open staat; bij een creditnota (bedrag onder nul) telt wat er terugkwam. */
+function paidStatus(total: Cents, paid: Cents): 'open' | 'betaald' {
+  return (total < 0 ? paid <= total : paid >= total) ? 'betaald' : 'open';
 }
 
 /**
