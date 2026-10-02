@@ -188,8 +188,17 @@ export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classificat
     : undefined;
 }
 
-/** De twee keuzes bij iets van je eigen bedrijf (#205): nooit gewone kosten met btw-aftrek. */
-const ownCompanyActions = (): TaskAction[] => [{ id: 'prive', label: 'Privé' }, { id: 'vraag', label: 'Weet ik nog niet: vraag mijn boekhouder' }, { id: 'open', label: 'Bekijken' }];
+/**
+ * De twee keuzes bij iets van je eigen bedrijf (#205): nooit gewone kosten met btw-aftrek. Bij een betaling
+ * aan je eigen bedrijfsnaam is Privé de voorgestelde keuze (#230); bij alleen een factuur is er geen voorkeur.
+ */
+const ownCompanyActions = (primaryPrive = false): TaskAction[] => [
+  { id: 'prive', label: 'Privé', ...(primaryPrive ? { primary: true } : {}) },
+  { id: 'vraag', label: 'Weet ik nog niet: vraag mijn boekhouder' },
+  { id: 'open', label: 'Bekijken' },
+];
+/** Waarom de app bij een betaling aan je eigen bedrijf Privé voorstelt. */
+const OWN_PRIVATE_WHY = 'Je betaalt dan jezelf: geen kosten en geen btw terug. Daarom stelt de app Privé voor. Bij "weet ik nog niet" blijft het open staan en houdt het je btw-aangifte tegen.';
 const OWN_HINTS = {
   prive: 'Geen kosten en geen btw: het telt als privé. De factuur blijft bewaard.',
   vraag: 'Staat apart op "weet ik nog niet", zonder btw-aftrek. Het komt terug als controle vóór je btw-aangifte en staat in het pakket voor je boekhouder.',
@@ -398,24 +407,42 @@ export class InboxService {
   }
 
   /**
-   * Mag de gebruiker deze afschrijving zelf indelen? Past er een aankoop sterk bij die er al staat, dan
-   * eerst de vraag beantwoorden ("Ja" of "Nee, iets anders"): anders staan de kosten er twee keer in.
+   * Mag de gebruiker deze afschrijving zelf indelen, op de rekening `account`? Past er een aankoop sterk bij
+   * die er al staat, dan eerst de vraag beantwoorden ("Ja" of "Nee, iets anders"): anders staan de kosten er
+   * twee keer in. Een betaling aan je eigen bedrijf (#230) gaat via de gewone indeling dezelfde weg als via
+   * de vraag op Vandaag: privé of "weet ik nog niet" neemt de factuur mee (`gedaan`: er is niets meer te
+   * boeken). Iets anders kan alleen als er geen factuur van je eigen bedrijf bij hoort.
    */
-  private guardBank(t: BankTransaction): void {
-    if (t.amount < 0) this.matcher.assertAnswered(t);
+  private guardBank(t: BankTransaction, account: string | undefined): 'door' | 'gedaan' {
+    if (t.amount >= 0) return 'door';
+    if (this.own?.isOwnPayment(t)) {
+      const choice = account === ACCOUNTS.vraagposten ? 'vraag' : account === ACCOUNTS.priveOpnamen ? 'prive' : null;
+      if (choice) {
+        this.own.settle(t.id, choice);
+        return 'gedaan';
+      }
+      const m = this.own.match(t);
+      if (m?.document || m?.purchase) throw new ValidationError('Bij deze betaling hoort een factuur van je eigen bedrijf. Kies "Privé" of "Weet ik nog niet": de factuur gaat dan mee.');
+    }
+    this.matcher.assertAnswered(t);
+    return 'door';
   }
 
-  /** Een betaling zelf op een rekening boeken (kosten, privé, "weet ik nog niet", …), na de controle hierboven. */
-  bookBank(bankTransactionId: number, input: BookToAccountInput): number {
-    this.guardBank(this.bank.get(bankTransactionId));
+  /**
+   * Een betaling zelf op een rekening boeken (kosten, privé, "weet ik nog niet", …), na de controle
+   * hierboven. null: de betaling is samen met de factuur van je eigen bedrijf afgehandeld.
+   */
+  bookBank(bankTransactionId: number, input: BookToAccountInput): number | null {
+    if (this.guardBank(this.bank.get(bankTransactionId), input.account) === 'gedaan') return null;
     return this.bank.bookToAccount(bankTransactionId, input);
   }
 
   /** De gebruiker beantwoordt een vraag uit de inbox. */
   answerBank(bankTransactionId: number, answer: { business: boolean; categoryKey?: string; vatCode?: string; businessPct?: number }): void {
     const t = this.bank.get(bankTransactionId);
-    this.guardBank(t);
     const category = answer.categoryKey ?? 'overig';
+    // betaling aan je eigen bedrijf, privé: al afgehandeld met de factuur erbij; je eigen bedrijf wordt niet onthouden
+    if (this.guardBank(t, answer.business ? this.categories.find(category)?.account : ACCOUNTS.priveOpnamen) === 'gedaan') return;
     const vatCode = answer.vatCode ?? this.categories.find(category)?.defaultVat ?? 'hoog';
     this.bookCategory(t, category, vatCode, answer.business, true, answer.businessPct);
   }
@@ -535,7 +562,8 @@ export class InboxService {
         continue;
       }
       // betaling aan je eigen bedrijf (#205), bv. een abonnement op je eigen dienst: één vraag voor de
-      // betaling en de factuur samen, met alleen privé of "weet ik nog niet" als keuze
+      // betaling en de factuur samen, met alleen privé of "weet ik nog niet" als keuze. Privé is het
+      // voorstel (#230): je betaalt jezelf, en "weet ik nog niet" houdt de btw-aangifte tegen.
       const ownMatch = this.own?.match(t);
       if (ownMatch) {
         const doc = ownMatch.document;
@@ -546,14 +574,15 @@ export class InboxService {
           kind: 'bank-own-company',
           icon: '🏠',
           title: doc || ownMatch.purchase ? `Factuur van je eigen bedrijf: ${formatEuro(-t.amount)}` : `${formatEuro(-t.amount)} betaald aan je eigen bedrijf`,
-          question: doc
-            ? `${OWN_INVOICE_NOTE} ${paid}: de betaling ervan. Kies wat het was; de factuur en de betaling gaan samen mee.`
-            : ownMatch.purchase
-              ? `${paid}: je eigen bedrijf. De factuur daarvan (${formatDateNl(ownMatch.purchase.invoice_date)}) staat al op "weet ik nog niet". Kies wat het was; de betaling en de factuur gaan samen mee.`
-              : `${paid}: dat is je eigen bedrijf, geen eigen rekening. Bijvoorbeeld een betaling voor je eigen dienst. Dat is geen gewone aankoop. Kies wat het was${ownMatch.settledDocumentId ? '; de factuur die je al op privé zette, komt erbij' : '; komt de factuur later binnen, dan hoort die hierbij'}.`,
+          question:
+            (doc
+              ? `${OWN_INVOICE_NOTE} ${paid}: de betaling ervan. Kies wat het was; de factuur en de betaling gaan samen mee.`
+              : ownMatch.purchase
+                ? `${paid}: je eigen bedrijf. De factuur daarvan (${formatDateNl(ownMatch.purchase.invoice_date)}) staat al op "weet ik nog niet". Kies wat het was; de betaling en de factuur gaan samen mee.`
+                : `${paid}: dat is je eigen bedrijf, geen eigen rekening. Bijvoorbeeld een betaling voor je eigen dienst. Dat is geen gewone aankoop. Kies wat het was${ownMatch.settledDocumentId ? '; de factuur die je al op privé zette, komt erbij' : '; komt de factuur later binnen, dan hoort die hierbij'}.`) + ' Meestal is dit privé.',
           amount: t.amount,
-          actions: ownCompanyActions(),
-          why: doc ? `Omdat ${this.intake.ownIssue(doc)!.suggestion.signals.join(', ')}, en de betaling hetzelfde bedrag heeft en naar je eigen bedrijfsnaam ging.` : 'Omdat de naam op het afschrift je eigen bedrijfsnaam is.',
+          actions: ownCompanyActions(true),
+          why: `${doc ? `Omdat ${this.intake.ownIssue(doc)!.suggestion.signals.join(', ')}, en de betaling hetzelfde bedrag heeft en naar je eigen bedrijfsnaam ging.` : 'Omdat de naam op het afschrift je eigen bedrijfsnaam is.'} ${OWN_PRIVATE_WHY}`,
           priority: 2,
           ref: { bankTransactionId: t.id, documentId: doc?.id, purchaseId: ownMatch.purchase?.id },
         });

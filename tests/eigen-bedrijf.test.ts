@@ -7,7 +7,9 @@ import { parseDocumentText } from '../src/intake/text-parser';
 import { parseUbl } from '../src/intake/ubl';
 import { detectOwnInvoice, vatNumbers, type OwnIdentity } from '../src/intake/own-company';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
+import { createApi, type HostContext } from '../src/main/api';
 import { formatEuro } from '../src/shared/money';
+import { ValidationError } from '../src/shared/validation';
 
 /** Het bedrijf uit tests/helpers.ts. */
 const OWN: OwnIdentity = { name: 'Stukadoorsbedrijf Piet', vatNumber: 'NL123456789B01', kvkNumber: '12345678', ibans: ['NL91ABNA0417164300'] };
@@ -154,7 +156,7 @@ describe('factuur en betaling van je eigen bedrijf: één keuze, nooit vanzelf (
       const tasks = tasksFor(s);
       expect(tasks).toHaveLength(1);
       expect(tasks[0]).toMatchObject({ kind: 'bank-own-company', title: `Factuur van je eigen bedrijf: ${euro}`, ref: { bankTransactionId: t.id, documentId: d.id } });
-      expect(tasks[0]!.question).toMatch(/^Dit is een factuur van je eigen bedrijf.*Op 1 oktober 2026 is .{1,3}10,89 van je rekening naar STUKADOORSBEDRIJF PIET gegaan: de betaling ervan\. Kies wat het was; de factuur en de betaling gaan samen mee\.$/);
+      expect(tasks[0]!.question).toMatch(/^Dit is een factuur van je eigen bedrijf.*Op 1 oktober 2026 is .{1,3}10,89 van je rekening naar STUKADOORSBEDRIJF PIET gegaan: de betaling ervan\. Kies wat het was; de factuur en de betaling gaan samen mee\. Meestal is dit privé\.$/);
       expect(tasks[0]!.actions.map((a) => [a.id, a.label])).toEqual(CHOICES);
       expect(s.intake.get(d.id).bank_match?.id).toBe(t.id);
 
@@ -188,7 +190,7 @@ describe('factuur en betaling van je eigen bedrijf: één keuze, nooit vanzelf (
       const tasks = tasksFor(s);
       expect(tasks).toHaveLength(1);
       expect(tasks[0]).toMatchObject({ kind: 'bank-own-company', title: `${euro} betaald aan je eigen bedrijf`, ref: { bankTransactionId: t.id } });
-      expect(tasks[0]!.question).toBe(`Op 30 september 2026 is ${euro} van je rekening naar STUKADOORSBEDRIJF PIET gegaan: dat is je eigen bedrijf, geen eigen rekening. Bijvoorbeeld een betaling voor je eigen dienst. Dat is geen gewone aankoop. Kies wat het was; komt de factuur later binnen, dan hoort die hierbij.`);
+      expect(tasks[0]!.question).toBe(`Op 30 september 2026 is ${euro} van je rekening naar STUKADOORSBEDRIJF PIET gegaan: dat is je eigen bedrijf, geen eigen rekening. Bijvoorbeeld een betaling voor je eigen dienst. Dat is geen gewone aankoop. Kies wat het was; komt de factuur later binnen, dan hoort die hierbij. Meestal is dit privé.`);
       expect(tasks[0]!.actions.map((a) => [a.id, a.label])).toEqual(CHOICES);
       expect({ ...financialSnapshot(ctx, { vatPeriods: ['2026-Q4'] }), bank_transactions: [] }).toEqual(before);
 
@@ -222,7 +224,7 @@ describe('factuur en betaling van je eigen bedrijf: één keuze, nooit vanzelf (
       const tasks = tasksFor(s);
       expect(tasks).toHaveLength(1);
       expect(tasks[0]).toMatchObject({ kind: 'bank-own-company', ref: { bankTransactionId: t.id, purchaseId: purchase.id } });
-      expect(tasks[0]!.question).toMatch(/De factuur daarvan \(30 september 2026\) staat al op "weet ik nog niet"\. Kies wat het was; de betaling en de factuur gaan samen mee\.$/);
+      expect(tasks[0]!.question).toMatch(/De factuur daarvan \(30 september 2026\) staat al op "weet ik nog niet"\. Kies wat het was; de betaling en de factuur gaan samen mee\. Meestal is dit privé\.$/);
       expect({ ...financialSnapshot(ctx, { vatPeriods: ['2026-Q3', '2026-Q4'] }), bank_transactions: [] }).toEqual({ ...before, bank_transactions: [] });
 
       s.ownCompany.settle(t.id, choice);
@@ -252,7 +254,7 @@ describe('factuur en betaling van je eigen bedrijf: één keuze, nooit vanzelf (
     const t = payment(s);
     const [task] = tasksFor(s);
     expect(task).toMatchObject({ kind: 'bank-own-company', ref: { bankTransactionId: t.id } });
-    expect(task!.question).toMatch(/de factuur die je al op privé zette, komt erbij\.$/);
+    expect(task!.question).toMatch(/de factuur die je al op privé zette, komt erbij\. Meestal is dit privé\.$/);
     s.ownCompany.settle(t.id, 'prive');
     expect(s.ledger.balance(ACCOUNTS.priveOpnamen)).toBe(1089);
     expect(s.purchases.list()).toEqual([]);
@@ -318,5 +320,166 @@ describe('factuur en betaling van je eigen bedrijf: één keuze, nooit vanzelf (
     expect(s.ownCompany.match(t)).toBeNull();
     expect(tasksFor(s).map((x) => x.kind)).toEqual(['bank-own']);
     void spaar;
+  });
+});
+
+describe('betaling aan je eigen bedrijf via de gewone bankindeling: Privé voorgesteld, de factuur gaat mee (#230)', () => {
+  const pdf = makePdf(EIGEN_FACTUUR);
+  const world = () => {
+    const ctx = setup();
+    ctx.s.settings.update({ onboardingDone: true, autopilot: 'maximaal' });
+    const api = createApi(ctx.s, { appVersion: () => '0.0.0', hasSmtpPassword: () => false } as unknown as HostContext);
+    return { ...ctx, api };
+  };
+  type S = ReturnType<typeof setup>['s'];
+  /** De afschrijving: je eigen bedrijfsnaam als tegenpartij, geen eigen rekening. */
+  const payment = (s: S, date = '2026-10-01') => {
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date, amount: -1089, description: 'KalkPlanner abonnement via Mollie', counterName: 'STUKADOORSBEDRIJF PIET' }] });
+    s.inbox.autoProcess(date);
+    return s.bank.list().find((t) => t.amount === -1089)!;
+  };
+  const tasksFor = (s: S) => s.inbox.tasks('2026-10-02').filter((t) => t.kind === 'document-review' || t.kind === 'purchase-double' || (t.kind.startsWith('bank-') && t.kind !== 'bank-stale'));
+  /** De knoppen onderaan het bankscherm: "Nee, dit was privé" en een soort kosten. */
+  const answer = (api: ReturnType<typeof world>['api'], txId: number, actionId: 'prive' | 'zakelijk', payload?: { categoryKey: string; vatCode: string }) =>
+    api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: txId } }, actionId, payload);
+  const VAT = { vatPeriods: ['2026-Q3', '2026-Q4'] };
+  const WHY = 'Je betaalt dan jezelf: geen kosten en geen btw terug. Daarom stelt de app Privé voor. Bij "weet ik nog niet" blijft het open staan en houdt het je btw-aangifte tegen.';
+  const T7 = 'Bij deze betaling hoort een factuur van je eigen bedrijf. Kies "Privé" of "Weet ik nog niet": de factuur gaat dan mee.';
+
+  it('de vraag bij de betaling stelt Privé voor en zegt waarom; bij alleen de factuur is er geen voorkeur', async () => {
+    const { s } = world();
+    payment(s, '2026-09-30');
+    const [task] = tasksFor(s);
+    expect(task).toMatchObject({ kind: 'bank-own-company', why: `Omdat de naam op het afschrift je eigen bedrijfsnaam is. ${WHY}` });
+    expect(task!.actions.map((a) => [a.id, a.primary ?? false])).toEqual([['prive', true], ['vraag', false], ['open', false]]);
+    expect(task!.question).toMatch(/komt de factuur later binnen, dan hoort die hierbij\. Meestal is dit privé\.$/);
+    expect(task!.group).toBeUndefined(); // nooit in "alles bevestigen"
+
+    // met de factuur erbij: dezelfde voorkeur, en de reden noemt ook waaraan de factuur herkend is
+    const both = world();
+    await both.s.intake.add('factuur.pdf', pdf, '2026-09-30');
+    payment(both.s);
+    const [paid] = tasksFor(both.s);
+    expect(paid!.actions.map((a) => [a.id, a.primary ?? false])).toEqual([['prive', true], ['vraag', false], ['open', false]]);
+    expect(paid!.question).toMatch(/de factuur en de betaling gaan samen mee\. Meestal is dit privé\.$/);
+    expect(paid!.why).toMatch(new RegExp(`^Omdat .*je eigen KvK-nummer staat erop.*, en de betaling hetzelfde bedrag heeft en naar je eigen bedrijfsnaam ging\\. ${WHY.replace(/[.?]/g, '\\$&')}$`));
+
+    // alleen de factuur, nog geen betaling: de twee keuzes zonder voorkeur
+    const alone = world();
+    await alone.s.intake.add('factuur.pdf', pdf, '2026-09-30');
+    const [doc] = tasksFor(alone.s);
+    expect(doc).toMatchObject({ kind: 'document-review' });
+    expect(doc!.actions.map((a) => [a.id, a.primary ?? false])).toEqual([['prive', false], ['vraag', false], ['open', false]]);
+  });
+
+  it('"weet ik nog niet" via de gewone indeling, terwijl de factuur daar al staat: de betaling sluit de aankoop af, geen tweede post', async () => {
+    const { s, api } = world();
+    const d = await s.intake.add('factuur.pdf', pdf, '2026-09-30');
+    s.intake.settleOwn(d.id, 'vraag');
+    const purchase = s.purchases.list()[0]!;
+    const t = payment(s);
+    // op het bankscherm staat alleen de melding over je eigen bedrijf, niet ook nog "hoort dit bij een aankoop?"
+    expect(api.bank.ownCompany(t.id)).toMatchObject({ purchaseId: purchase.id });
+    expect(api.bank.purchaseQuestion(t.id)).toBeNull();
+    // de gewone knop "Weet ik nog niet" onderaan: de betaling hoort bij de factuur die er al staat
+    expect(api.bank.book(t.id, { account: ACCOUNTS.vraagposten })).toBeNull();
+    expect(s.bank.get(t.id)).toMatchObject({ status: 'gematcht', matched_purchase_invoice_id: purchase.id });
+    expect(s.purchases.get(purchase.id)).toMatchObject({ status: 'betaald', open_amount: 0 });
+    expect(s.ledger.balance(ACCOUNTS.vraagposten)).toBe(1089);
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.bank)).toBe(-1089);
+    expect(tasksFor(s)).toEqual([]);
+    expect(s.memory.get('Stukadoorsbedrijf Piet')).toBeNull();
+  });
+
+  it('"Nee, dit was privé" via de gewone indeling, terwijl de factuur op "weet ik nog niet" staat: de aankoop vervalt, de factuur wordt het bewijs', async () => {
+    const { s, api } = world();
+    const d = await s.intake.add('factuur.pdf', pdf, '2026-09-30');
+    s.intake.settleOwn(d.id, 'vraag');
+    const t = payment(s);
+    await answer(api, t.id, 'prive');
+    expect(s.bank.get(t.id)).toMatchObject({ status: 'gematcht', matched_purchase_invoice_id: null });
+    expect(s.purchases.list()).toEqual([]);
+    expect(s.ledger.balance(ACCOUNTS.vraagposten)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.priveOpnamen)).toBe(1089);
+    expect(s.ledger.balance(ACCOUNTS.btwVoorbelasting)).toBe(0);
+    expect(s.intake.get(d.id)).toMatchObject({ outcome: 'bewijs-gekoppeld', link: { target: { kind: 'bank', id: t.id } } });
+    expect(tasksFor(s)).toEqual([]);
+    // je eigen bedrijf is geen leverancier om te onthouden
+    expect(s.memory.get('Stukadoorsbedrijf Piet')).toBeNull();
+  });
+
+  for (const choice of ['vraag', 'prive'] as const) {
+    it(`de factuur wacht nog op een keuze: de gewone indeling neemt hem mee (${choice})`, async () => {
+      const { s, api } = world();
+      const d = await s.intake.add('factuur.pdf', pdf, '2026-09-30');
+      const t = payment(s);
+      if (choice === 'vraag') expect(api.bank.book(t.id, { account: ACCOUNTS.vraagposten })).toBeNull();
+      else await answer(api, t.id, 'prive');
+      expect(s.bank.get(t.id).status).toBe('gematcht');
+      expect(tasksFor(s)).toEqual([]);
+      expect(s.ledger.balance(ACCOUNTS.btwVoorbelasting)).toBe(0);
+      expect(s.memory.get('Stukadoorsbedrijf Piet')).toBeNull();
+      if (choice === 'vraag') {
+        // de factuur op Vraagposten met de betaling eraan: één open vraag, niet twee
+        expect(s.purchases.list()).toEqual([expect.objectContaining({ total: 1089, vat_total: 0, status: 'betaald' })]);
+        expect(s.bank.get(t.id).matched_purchase_invoice_id).toBe(s.purchases.list()[0]!.id);
+        expect(s.ledger.balance(ACCOUNTS.vraagposten)).toBe(1089);
+        expect(s.intake.get(d.id)).toMatchObject({ outcome: 'nieuwe-aankoop' });
+      } else {
+        expect(s.purchases.list()).toEqual([]);
+        expect(s.ledger.balance(ACCOUNTS.priveOpnamen)).toBe(1089);
+        expect(s.ledger.balance(ACCOUNTS.vraagposten)).toBe(0);
+        expect(s.intake.get(d.id)).toMatchObject({ outcome: 'bewijs-gekoppeld', link: { target: { kind: 'bank', id: t.id } } });
+      }
+    });
+  }
+
+  it('zonder factuur privé via de gewone indeling; de factuur komt later en wordt alleen het bewijs erbij', async () => {
+    const ctx = world();
+    const { s, api } = ctx;
+    const t = payment(s, '2026-09-30');
+    await answer(api, t.id, 'prive');
+    expect(s.bank.get(t.id).status).toBe('gematcht');
+    expect(s.ledger.balance(ACCOUNTS.priveOpnamen)).toBe(1089);
+    expect(s.memory.get('Stukadoorsbedrijf Piet')).toBeNull();
+    const settled = financialSnapshot(ctx, VAT);
+    const d = await s.intake.add('factuur.pdf', pdf, '2026-10-02');
+    expect(s.intake.pending(d)).toMatchObject({ kind: 'evidence', candidate: `bank:${t.id}` });
+    expect(await s.intake.decide(d.id, 'ja')).toMatchObject({ outcome: 'bewijs-gekoppeld', link: { target: { kind: 'bank', id: t.id } } });
+    expect(financialSnapshot(ctx, VAT)).toEqual(settled);
+    expect(tasksFor(s)).toEqual([]);
+  });
+
+  it('een soort kosten kiezen terwijl er een factuur van je eigen bedrijf bij hoort kan niet; zonder factuur wel', async () => {
+    const ctx = world();
+    const { s, api } = ctx;
+    // de factuur wacht nog op een keuze
+    await s.intake.add('factuur.pdf', pdf, '2026-09-30');
+    const t = payment(s);
+    const before = financialSnapshot(ctx, VAT);
+    await expect(answer(api, t.id, 'zakelijk', { categoryKey: 'software', vatCode: 'hoog' })).rejects.toThrow(T7);
+    expect(() => api.bank.book(t.id, { account: 'WBedKanSof', vatCode: 'hoog' })).toThrow(T7);
+    expect(financialSnapshot(ctx, VAT)).toEqual(before);
+    expect(s.memory.get('Stukadoorsbedrijf Piet')).toBeNull();
+
+    // de factuur staat al op "weet ik nog niet"
+    const second = world();
+    const d = await second.s.intake.add('factuur.pdf', pdf, '2026-09-30');
+    second.s.intake.settleOwn(d.id, 'vraag');
+    const u = payment(second.s);
+    const open = financialSnapshot(second, VAT);
+    expect(() => second.s.inbox.answerBank(u.id, { business: true, categoryKey: 'software', vatCode: 'hoog' })).toThrow(ValidationError);
+    expect(() => second.api.bank.book(u.id, { account: 'WBedKanSof', vatCode: 'hoog' })).toThrow(T7);
+    expect(financialSnapshot(second, VAT)).toEqual(open);
+
+    // zonder factuur: een bewuste keuze, het scherm biedt hem aan
+    const third = world();
+    const v = payment(third.s);
+    await answer(third.api, v.id, 'zakelijk', { categoryKey: 'software', vatCode: 'hoog' });
+    expect(third.s.bank.get(v.id).status).toBe('gematcht');
+    expect(third.s.ledger.balance('WBedKanSof')).toBe(900);
+    expect(third.s.ledger.balance(ACCOUNTS.btwVoorbelasting)).toBe(189);
   });
 });
