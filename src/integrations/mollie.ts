@@ -1,4 +1,4 @@
-import { parseEuro } from '../shared/money';
+import { parseEuro, roundHalfAwayFromZero } from '../shared/money';
 import { getJson } from './http';
 import type { ExternalOrder, ExternalPayout, FetchLike, IntegrationDefinition } from './types';
 
@@ -100,12 +100,19 @@ interface MollieSalesInvoice {
   currency: string;
   recipient: MollieSalesInvoiceRecipient;
   lines: MollieSalesInvoiceLine[];
+  /** 'exclusive' (standaard bij Mollie) of 'inclusive': of unitPrice exclusief of inclusief btw is */
+  vatMode?: string;
   issuedAt: string | null;
   paidAt: string | null;
   createdAt: string;
 }
 
 export function mapMollieSalesInvoice(inv: MollieSalesInvoice): ExternalOrder {
+  const mode = inv.vatMode ?? 'exclusive';
+  if (mode !== 'exclusive' && mode !== 'inclusive') {
+    // niet raden: een verkeerd bedrag zou in de btw-aangifte terechtkomen
+    throw new Error(`Factuur ${inv.invoiceNumber ?? inv.id} heeft een onbekende btw-instelling (${mode}); controleer deze factuur in Mollie`);
+  }
   const r = inv.recipient;
   const name = r.type === 'business' ? r.organizationName || r.email || 'Klant' : [r.givenName, r.familyName].filter(Boolean).join(' ') || r.email || 'Klant';
   return {
@@ -121,7 +128,12 @@ export function mapMollieSalesInvoice(inv: MollieSalesInvoice): ExternalOrder {
       country: r.country,
       vatNumber: r.type === 'business' ? (r.vatNumber ?? null) : null,
     },
-    lines: inv.lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPriceExVat: parseEuro(l.unitPrice.value), vatPercentage: Math.round(parseFloat(l.vatRate)) })),
+    lines: inv.lines.map((l) => {
+      const vatPercentage = Math.round(parseFloat(l.vatRate));
+      const price = parseEuro(l.unitPrice.value);
+      const unitPriceExVat = mode === 'inclusive' ? roundHalfAwayFromZero((price * 100) / (100 + vatPercentage)) : price;
+      return { description: l.description, quantity: l.quantity, unitPriceExVat, vatPercentage };
+    }),
     paid: inv.status === 'paid',
     currency: inv.currency,
   };
