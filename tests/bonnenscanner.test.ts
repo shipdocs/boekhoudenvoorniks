@@ -190,6 +190,7 @@ describe('bonnenscanner: koppelen (#48)', () => {
   it('zonder veilige opslag wordt er niet gekoppeld', async () => {
     const t = start({
       secrets: {
+        available: false,
         get: () => null,
         set: () => {
           throw new Error('Veilige opslag is niet beschikbaar op dit systeem (geen sleutelhanger gevonden)');

@@ -168,6 +168,9 @@ export type Services = ReturnType<typeof createServices>;
 
 export class MemorySecretStore implements SecretStore {
   private readonly map = new Map<string, string>();
+  get available() {
+    return true;
+  }
   get(key: string) {
     return this.map.get(key) ?? null;
   }
