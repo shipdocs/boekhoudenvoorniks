@@ -25,7 +25,7 @@ describe('uitleg in de schermen', () => {
     const rendered = text(renderToStaticMarkup(createElement(BankPaidExplanation, { status: { name: 'Knab zakelijk', completeTo: '2026-09-28' }, asOf: '2026-10-02' })));
     expect(rendered).toContain('Knab zakelijk is bijgewerkt t/m 28 september 2026 (4 dagen geleden)');
     expect(rendered).toContain('Laat de rekening open');
-    expect(rendered).toContain('koppelt de app hem automatisch');
+    expect(rendered).toContain('koppelt de app hem of vraagt de app of ze bij elkaar horen');
   });
 
   it('legt ook uit wat er gebeurt als nog geen compleet afschrift is ingelezen (#178)', () => {
