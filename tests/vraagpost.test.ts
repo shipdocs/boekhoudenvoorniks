@@ -141,6 +141,54 @@ describe('betaling van een aankoop die op "weet ik nog niet" staat (#223)', () =
     expect(doubles(s)).toEqual([]); // het antwoord geldt ook voor de vraag "staat deze aankoop dubbel?"
   });
 
+  it('de betaling liep via een betaaldienst met een andere naam: ook dan niet zomaar een tweede keer op "weet ik nog niet"', async () => {
+    const ctx = world();
+    const { s, api } = ctx;
+    const p = question(s);
+    /** Dezelfde betaling, een week later afgeschreven door de betaaldienst: de naam van de winkel staat er niet op. */
+    const viaService = (x: S) => {
+      x.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-10', amount: -4840, description: 'order 991', counterName: 'Stichting Betaaldienst' }] });
+      return x.bank.list().find((t) => t.amount === -4840)!;
+    };
+    const t = viaService(s);
+    // de app vraagt het wel, maar houdt de andere keuzes niet tegen: de naam past niet
+    expect(bankTasks(s, t.id)).toMatchObject([{ kind: 'bank-purchase', ref: { purchaseId: p.id } }]);
+    expect(api.bank.purchaseQuestion(t.id)).toMatchObject({ strong: false, oneClick: true, candidates: [{ purchaseId: p.id, state: 'open', question: true, amountFit: 'gelijk' }] });
+    // behalve "weet ik nog niet": dan staat hetzelfde bedrag daar twee keer, en blijft de aankoop als schuld open
+    const before = financialSnapshot(ctx);
+    expect(() => api.bank.book(t.id, { account: ACCOUNTS.vraagposten, vatCode: 'geen' })).toThrow(
+      `Deze betaling kan bij de aankoop bij Printhuis van 3 september 2026 (${formatEuro(4840)}) horen, en die staat ook op "weet ik nog niet". Kies eerst "Ja" of "Nee, iets anders"; anders staat het bedrag er twee keer.`,
+    );
+    expect(financialSnapshot(ctx)).toEqual(before);
+    // "Ja": de betaling sluit de aankoop af, het bedrag staat één keer op "weet ik nog niet"
+    api.bank.linkPurchase(t.id, p.id);
+    expect(s.purchases.get(p.id)).toMatchObject({ status: 'betaald', open_amount: 0 });
+    expect(s.ledger.balance(ACCOUNTS.vraagposten)).toBe(4840);
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.bank)).toBe(-4840);
+
+    // "Nee, iets anders": een andere uitgave; daarna kan de betaling zelf op "weet ik nog niet"
+    const second = world();
+    const q = question(second.s);
+    const u = viaService(second.s);
+    second.api.bank.rejectPurchases(u.id);
+    expect(second.api.bank.book(u.id, { account: ACCOUNTS.vraagposten, vatCode: 'geen' })).toEqual(expect.any(Number));
+    expect(second.s.purchases.get(q.id).status).toBe('open');
+    expect(second.s.ledger.balance(ACCOUNTS.vraagposten)).toBe(2 * 4840);
+
+    // een soort kosten kiezen kan zonder antwoord: je weet wat het was, en de vraag staat erbij
+    const third = world();
+    question(third.s);
+    const v = viaService(third.s);
+    expect(third.api.bank.book(v.id, { account: 'WKprInkMat', vatCode: 'hoog' })).toEqual(expect.any(Number));
+    // een aankoop met dit bedrag die niet op "weet ik nog niet" staat, of ver van de datum: geen blokkade
+    const fourth = world();
+    fourth.s.purchases.create({ relationId: fourth.s.relations.findOrCreateSupplier('Printhuis').id, invoiceDate: '2026-09-03', description: 'Materiaal — Printhuis', lines: [{ account: 'WKprInkMat', netAmount: 4000, vatCode: 'hoog', vatAmount: 840 }] });
+    fourth.s.purchases.create({ relationId: fourth.s.relations.findOrCreateSupplier('Kantoorhal').id, invoiceDate: '2026-06-03', description: 'Nog uitzoeken — Kantoorhal', lines: [{ account: ACCOUNTS.vraagposten, netAmount: 4840, vatCode: 'geen' }] });
+    const w = viaService(fourth.s);
+    expect(fourth.api.bank.book(w.id, { account: ACCOUNTS.vraagposten, vatCode: 'geen' })).toEqual(expect.any(Number));
+  });
+
   it('bestaande gegevens (allebei al op "weet ik nog niet"): gemeld vóór de btw-aangifte en een vraag; "ja" koppelt de betaling en haalt de losse post weg', async () => {
     const ctx = world();
     const { s, api } = ctx;
