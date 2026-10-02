@@ -169,7 +169,7 @@ function proposalNote(c: Classification): string {
  * Vingerafdruk van alles wat "Ja" bij een bon zal boeken. Zo kan een opnieuw gelezen document niet
  * stil met een andere leverancier, datum, bedrag of factuurnummer worden bevestigd vanuit een oude taak.
  */
-export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classification' | 'bank_match' | 'proposed_paid_with'>): string | undefined {
+export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classification' | 'bank_match' | 'bank_match_strong' | 'proposed_paid_with'>): string | undefined {
   const c = d.classification;
   const r = d.result;
   return c && r
@@ -197,6 +197,8 @@ const ownCompanyActions = (primaryPrive = false): TaskAction[] => [
   { id: 'vraag', label: 'Weet ik nog niet: vraag mijn boekhouder' },
   { id: 'open', label: 'Bekijken' },
 ];
+/** Hoe een aankoop buiten de bank om betaald is, in woorden (null = deels privé, deels contant). */
+const paidElsewhere = (via: 'prive' | 'kas' | null): string => (via === 'kas' ? 'contant betaald' : via === 'prive' ? 'betaald met privégeld' : 'betaald met privégeld of contant');
 /** Waarom de app bij een betaling aan je eigen bedrijf Privé voorstelt. */
 const OWN_PRIVATE_WHY = 'Je betaalt dan jezelf: geen kosten en geen btw terug. Daarom stelt de app Privé voor. Bij "weet ik nog niet" blijft het open staan en houdt het je btw-aangifte tegen.';
 const OWN_HINTS = {
@@ -1226,7 +1228,7 @@ export class InboxService {
    * De vraag bij een afschrijving waar een aankoop bij past die er al staat (#221). Eén aankoop en het
    * bedrag klopt: met één klik koppelen (Crediteuren aan Bank, geen tweede kostenpost). Meer aankopen of een
    * bedrag dat net niet klopt: bekijken op het bankscherm en daar kiezen. Eén aankoop die al op privé of
-   * contant betaald staat, is een eigen vraag (`paidElsewhereTask`).
+   * contant betaald staat en precies past, is een eigen vraag (`paidElsewhereTask`).
    */
   private purchaseTask(t: BankTransaction, q: PaymentQuestion, who: string, contested = false): Task {
     const p = q.fit.purchase;
@@ -1257,6 +1259,9 @@ export class InboxService {
       const at = name && all.every((f) => purchaseSupplierName(f.purchase) === name) ? ` bij ${name}` : '';
       const of = all.every((f) => dueOf(f.purchase, f.state) === due) ? ` van ${formatEuro(due)}` : '';
       question = `Er staan ${all.length} ${all.every((f) => f.state === 'open') ? 'open ' : ''}aankopen${at}${of}${at || of ? '' : ' die bij deze betaling passen'}. Bij welke hoort deze betaling?`;
+    } else if (q.fit.state === 'elders') {
+      // staat al op privé of contant betaald en het bedrag is net anders: geen "Ja" met één klik, wel de vraag
+      question = `${describePurchase(p).replace(/^de/, 'De')} (${formatEuro(due)}) staat op ${paidElsewhere(q.fit.via)}. Deze betaling is ${paid}. Is dat dezelfde betaling?`;
     } else {
       const open = `Er staat nog een open aankoop ${name ? `bij ${name}` : `"${p.description}"`} van ${formatDateNl(p.invoice_date)} van ${formatEuro(due)}.`;
       question = contested ? `${open} Er zijn meer betalingen die daarbij passen. Is het deze?` : `${open} Deze betaling is ${paid}. Hoort die erbij?`;
@@ -1284,7 +1289,7 @@ export class InboxService {
     const name = purchaseSupplierName(p) ?? p.description;
     // staat de leverancier op "voortaan privé" (of contant)? Dat gaat bij "ja" uit
     const always = p.relation_id !== null ? (this.db.prepare('SELECT paid_with FROM relations WHERE id = ?').get(p.relation_id) as { paid_with: 'prive' | 'kas' | null } | undefined)?.paid_with ?? null : null;
-    const how = via === 'kas' ? 'contant betaald' : via === 'prive' ? 'betaald met privégeld' : 'betaald met privégeld of contant';
+    const how = paidElsewhere(via);
     const undone = via === 'kas' ? 'de contante betaling' : via === 'prive' ? 'de betaling met privégeld' : 'de betaling met privégeld of contant';
     return {
       key: `bank-${t.id}`,

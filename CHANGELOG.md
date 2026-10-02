@@ -3,7 +3,7 @@
 ## Volgende versie
 
 - Een betaling die bij een aankoop hoort die er al staat, boekt de app niet meer vanzelf als losse kosten, ook niet als het bedrag door de koers iets anders is. Je krijgt eerst de vraag of ze bij elkaar horen (#221).
-- Staat een aankoop op privé of contant betaald en komt de afschrijving daarna toch op je rekening binnen, dan vraagt de app eerst of het dezelfde betaling is (#222).
+- Staat een aankoop op privé of contant betaald en komt de afschrijving daarna toch op je rekening binnen, dan vraagt de app eerst of het dezelfde betaling is, ook als het bedrag een paar cent afwijkt (#222).
 - Een betaling die je op "weet ik nog niet" zet terwijl de aankoop daar al staat, sluit de aankoop af in plaats van er een tweede post bij te zetten (#223).
 - Bij een betaling aan je eigen bedrijf stelt de app Privé voor, ook als je hem via de gewone bankindeling verwerkt (#230).
 

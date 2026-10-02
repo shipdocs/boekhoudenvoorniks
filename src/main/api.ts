@@ -260,6 +260,7 @@ export function createApi(s: Services, host: HostContext) {
         return;
       case 'bank-purchase-paid:ja': {
         // de afschrijving betaalt de aankoop; de privé- of kasbetaling gaat terug op de datum van de afschrijving
+        // (of op haar eigen datum, als de afschrijving daarvóór ligt)
         const t = s.bank.get(r.bankTransactionId!);
         s.bookedPayments.resolve(r.purchaseId!, t.id, t.transaction_date);
         return;
