@@ -1,0 +1,25 @@
+{
+  "_comment": "Geanonimiseerd JSON:API-voorbeeld van één Ponto-transactie (#244): verzonnen id's, geen echte rekeningnummers, geen echte namen. Gebruikt door tests en het probe-script.",
+  "data": {
+    "id": "8b1f0c2e-0000-4000-8000-000000000001",
+    "type": "transaction",
+    "attributes": {
+      "transactionType": "SEPA Credit Transfer",
+      "executionDate": "2026-03-17T09:24:00.000Z",
+      "valueDate": "2026-03-17",
+      "amount": "246.75",
+      "currency": "EUR",
+      "remittanceInformationType": "structured",
+      "remittanceInformation": "Factuur 2026-0042",
+      "structuredRemittanceInformation": {
+        "creditorReference": "+++042/2026/00042+++"
+      },
+      "endToEndId": "E2E-2026-0042",
+      "counterpartName": "Voorbeeldklant B.V.",
+      "counterpartReference": "NL02ABNA0123456789",
+      "mandateReference": null,
+      "bankTransactionCode": "PMNT-IRCT"
+    },
+    "links": { "self": "https://api.myponto.com/transactions/8b1f0c2e-0000-4000-8000-000000000001" }
+  }
+}
