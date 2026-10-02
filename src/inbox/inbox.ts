@@ -69,6 +69,7 @@ export type TaskKind =
   | 'supplier-auto'
   | 'vat-check'
   | 'purchase-due'
+  | 'purchase-awaiting-bank'
   | 'bank-pot'
   | 'bank-own'
   | 'bank-own-company'
@@ -275,6 +276,23 @@ export class InboxService {
     this.db
       .prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', ?) ON CONFLICT(task_key) DO UPDATE SET reason = excluded.reason`)
       .run(key, reason);
+  }
+
+  /**
+   * Open aankopen waarvan je zei dat ze al via je bank betaald zijn en waarvan het afschrift nog niet tot die dag
+   * compleet is (#239): aankoop-id naar de naam van de rekening. Is het afschrift compleet en staat de betaling er niet
+   * in, dan komt de aankoop hier niet meer in en telt hij weer als gewoon open. Een aankoop die intussen betaald is, telt niet meer mee.
+   */
+  awaitingBank(purchases: { id: number; status: string; expected_on_bank_account_id: number | null; expected_on_bank_since: string | null }[]): Map<number, string> {
+    const marked = purchases.filter((p) => p.status === 'open' && p.expected_on_bank_account_id !== null && p.expected_on_bank_since !== null);
+    if (marked.length === 0) return new Map();
+    const status = new Map(this.bank.importStatus().map((st) => [st.bankAccountId, st] as const));
+    const out = new Map<number, string>();
+    for (const p of marked) {
+      const st = status.get(p.expected_on_bank_account_id!);
+      if (st && (st.completeTo ?? '') < p.expected_on_bank_since!) out.set(p.id, st.name);
+    }
+    return out;
   }
 
   private isSkipped(key: string): boolean {
@@ -1251,7 +1269,26 @@ export class InboxService {
     }
 
     // Rekeningen die binnenkort betaald moeten worden (#25)
+    // "Al betaald, via je bank" (#239): zolang het afschrift van die rekening nog niet tot de dag van aangeven
+    // compleet is, is er niets te betalen maar te wachten. Staat de betaling er na een compleet afschrift nog
+    // niet in, dan vervalt de markering en telt de aankoop weer als gewoon open.
+    const waitingFor = this.awaitingBank(this.purchases.listOpen());
     for (const p of this.purchases.listOpen().filter((x) => x.due_date && x.due_date <= addDays(asOf, PAY_REMINDER_DAYS) && x.open_amount > 0)) {
+      const account = waitingFor.get(p.id);
+      if (account !== undefined) {
+        tasks.push({
+          key: `pay-${p.id}-bank`,
+          kind: 'purchase-awaiting-bank',
+          icon: '🏦',
+          title: `${p.relation_name ?? p.description}: ${formatEuro(p.open_amount)} wacht op het afschrift van ${account}`,
+          question: `Je zei dat dit al via ${account} betaald is. Zodra je het afschrift inleest, koppelt de app de betaling of vraagt hij of ze bij elkaar horen.`,
+          amount: -p.open_amount,
+          actions: [{ id: 'bekijken', label: 'Bekijken', primary: true }, { id: 'niet', label: 'Toch niet via de bank betaald' }],
+          priority: 3,
+          ref: { purchaseId: p.id },
+        });
+        continue;
+      }
       tasks.push({
         key: `pay-${p.id}`,
         kind: 'purchase-due',

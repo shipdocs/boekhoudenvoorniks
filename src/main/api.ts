@@ -479,6 +479,11 @@ export function createApi(s: Services, host: HostContext) {
       case 'bank-statement:niet-nu':
         s.statementFolder.notNow(r.statementId!);
         return;
+      case 'purchase-awaiting-bank:bekijken':
+        return { navigate: { screen: 'aankopen', id: r.purchaseId } };
+      case 'purchase-awaiting-bank:niet':
+        s.purchases.clearExpectedOnBank(r.purchaseId!);
+        return;
       case 'bank-balance:negeren':
         s.inbox.ignoreBalance(r.bankAccountId!);
         return;
@@ -511,6 +516,7 @@ export function createApi(s: Services, host: HostContext) {
           'bank-statement': ['bank', undefined],
           'bank-locked': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
+          'purchase-awaiting-bank': ['aankopen', r.purchaseId],
           'exchange-conflict': r.invoiceId ? ['factuur', r.invoiceId] : ['aankopen', r.purchaseId],
           'fx-repair': ['aankopen', undefined],
           'recurring-invoice': ['bewijs', r.bankTransactionId],
@@ -997,8 +1003,10 @@ export function createApi(s: Services, host: HostContext) {
     },
     purchases: {
       /** met hoe hij betaald is: de bankrekening, "privé betaald" of "contant" */
-      list: (filter?: { status?: 'open' | 'betaald' }) =>
-        s.purchases.list(filter).map((p) => {
+      list: (filter?: { status?: 'open' | 'betaald' }) => {
+        const list = s.purchases.list(filter);
+        const waiting = s.inbox.awaitingBank(list);
+        return list.map((p) => {
           // gemengd gebruik: welk deel is zakelijk, en wat blijft er dan aan kosten en btw-aftrek over
           const ev = p.journal_entry_id ? s.purchases.eventFor(p.journal_entry_id) : null;
           const pct = ev?.businessPct ?? 100;
@@ -1012,8 +1020,11 @@ export function createApi(s: Services, host: HostContext) {
             business_amount: eff && pct < 100 ? eff.kosten + eff.btw : null,
             /** staat nog bij "weet ik nog niet" (Vraagposten): nog indelen */
             question: s.purchases.isQuestion(p.id),
+            /** "al via je bank betaald" en het afschrift van die rekening is nog niet compleet: de naam van de rekening (#239) */
+            waiting_for_bank: waiting.get(p.id) ?? null,
           };
-        }),
+        });
+      },
       /** Een aankoop van "weet ik nog niet" alsnog indelen (categorie en btw); de btw-aftrek komt er dan bij. */
       resolveQuestion: (id: number, categoryKey: string, vatCode: string) => {
         const category = s.categories.find(String(categoryKey));
@@ -1049,6 +1060,9 @@ export function createApi(s: Services, host: HostContext) {
       paymentQr: (id: number, confirmNewIban = false) => purchasePaymentQr(s.purchases, id, confirmNewIban),
       /** Niet van de zakelijke rekening betaald maar privé of contant; `always`: voortaan bij deze leverancier. */
       paidWith: (id: number, via: 'prive' | 'kas', opts?: { always?: boolean; separate?: boolean }) => s.quick.payPurchaseWith(id, via, opts),
+      /** "Al betaald, via je bank" (#239): onthouden, niets boeken */
+      expectOnBank: (id: number, bankAccountId: number) => s.purchases.expectOnBank(id, bankAccountId, today()),
+      clearExpectedOnBank: (id: number) => s.purchases.clearExpectedOnBank(id),
       /** Een aankoop weghalen die er niet hoort (bv. per ongeluk toegevoegd); alleen zonder betaling. De bon blijft bewaard. */
       remove: (id: number) => {
         const p = s.purchases.get(id);
