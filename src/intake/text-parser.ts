@@ -4,6 +4,7 @@ import { isValidIban, normalizeIban } from '../shared/validation';
 import type { LineItem, DocumentResult, ExtractionSource, Field, TextItem, VatLine } from './types';
 import { KNOWN_SUPPLIERS } from './suppliers';
 import { detectCurrency } from '../shared/currency';
+import { isPaymentProvider } from '../shared/payment-providers';
 
 /**
  * Haalt factuur-/bongegevens uit platte tekst met posities (PDF-tekstlaag of OCR-regels).
@@ -111,8 +112,6 @@ function parseDateText(text: string, opts: { loose?: boolean } = {}): string | n
 /** "(Includes VAT of € 1,73)", "incl. btw € 1,73" */
 const INCL_VAT = /\b(?:includes|including|incl\.?|inclusief|inkl\.?)\s*(?:vat|btw|mwst|tax)\s*(?:of|van|von)?\s*:?\s*([€$£]?\s*\d[\d.,]*\d)/i;
 
-/** Betaaldiensten: staan vaak op een factuur ("paid via Stripe"), maar zijn niet de leverancier. */
-const PAYMENT_PROVIDERS = new Set(['Stripe', 'PayPal', 'Mollie', 'Adyen']);
 const VIA_LINE = /\b(?:paid|betaald|bezahlt)\s+(?:via|with|met|mit)\b|\b(?:processed|powered|provided)\s+by\b/i;
 /** "Cloudflare, Inc. @cloudflare Bill to": links de verkoper, rechts het kopje van de klant */
 const BILL_TO = /^(.*?)\s*\b(?:bill(?:ed)?\s+to|invoice\s+to|factuur\s+aan|rechnung\s+an)\b/i;
@@ -172,7 +171,8 @@ export function parseDocumentText(items: TextItem[], source: ExtractionSource): 
     if (VIA_LINE.test(line.text)) continue;
     const known = KNOWN_SUPPLIERS.find((s) => s.pattern.test(line.text));
     if (!known) continue;
-    if (PAYMENT_PROVIDERS.has(known.name)) {
+    // een betaaldienst (lijst in shared/payment-providers) is niet de leverancier, hooguit als er niets anders staat
+    if (isPaymentProvider(known.name)) {
       provider ??= field(known.name, line, 0.6);
       continue;
     }

@@ -19,6 +19,7 @@ import { korActive } from '../settings/settings';
 import type { NormalizedTransaction, ParseResult } from './types';
 import { referenceIn } from '../shared/references';
 import { withinFx } from '../shared/currency';
+import { paymentProviderIn } from '../shared/payment-providers';
 
 export interface BankAccount {
   id: number;
@@ -1400,11 +1401,9 @@ export class BankService {
     const p = this.purchases.get(purchaseId);
     const settleFx = Boolean(p.currency && p.currency !== 'EUR' && -t.amount !== p.open_amount && withinFx(-t.amount, p.open_amount));
     // nooit meer betalen dan er open staat (#221): een aankoop die intussen betaald is, krijgt er geen tweede
-    // betaling bij; dat zou een vordering op de leverancier geven die er niet is
-    if (p.status !== 'open' || p.open_amount === 0) throw new ValidationError('Deze aankoop staat al op betaald');
-    if (!settleFx && -t.amount > 0 === p.open_amount > 0 && Math.abs(t.amount) > Math.abs(p.open_amount)) {
-      throw new ValidationError(`Deze betaling is hoger dan wat er bij deze aankoop nog open staat (${formatEuro(p.open_amount)}). Klopt het bedrag van de aankoop niet? Pas dat eerst aan bij Aankopen.`);
-    }
+    // betaling bij; dat zou een vordering op de leverancier geven die er niet is. Het bedrag zelf bewaakt
+    // `registerPayment` (#227), voor elke betaling
+    if (p.status !== 'open' || p.open_amount === 0) throw new ValidationError(p.total < 0 ? 'Deze creditnota is al afgehandeld' : 'Deze aankoop staat al op betaald');
     this.purchases.registerPayment(purchaseId, { amount: -t.amount, date: t.transaction_date, moneyAccount: account.rgs_code, bankTransactionId: txId, settleFx });
   }
 
@@ -1454,10 +1453,32 @@ export class BankService {
 
   /**
    * De laatste keer dat geld van deze betaler (zelfde IBAN, of zonder IBAN dezelfde naam) als
-   * verkoop is verwerkt. Alleen boekingen die nog gelden (niet teruggedraaid).
+   * verkoop is verwerkt. Alleen boekingen die nog gelden (niet teruggedraaid). Geen voorstel als dit geld de
+   * uitbetaling kan zijn van verkopen die al in de app staan (`awaitedPayout`).
    */
   previousSale(txId: number): PreviousSale | null {
     const t = this.get(txId);
+    const sale = this.lastSale(t);
+    return sale && !this.awaitedPayout(t, sale) ? sale : null;
+  }
+
+  /**
+   * Geld van een betaaldienst (de naam staat op het afschrift, of de vorige verkoop van deze betaler ging
+   * via zo'n dienst) terwijl er verkopen op de tussenrekening wachten: een koppeling boekte die omzet al.
+   * Dan is dit waarschijnlijk de uitbetaling daarvan en geen nieuwe verkoop (#227): "net als vorige keer"
+   * zou de omzet twee keer tellen. Geeft de naam van de betaaldienst, of null.
+   */
+  awaitedPayout(t: BankTransaction, sale: PreviousSale | null = this.lastSale(t)): string | null {
+    if (t.amount <= 0) return null;
+    const provider = paymentProviderIn(`${t.counter_name ?? ''} ${t.description}`) ?? paymentProviderIn(sale?.channel);
+    if (!provider) return null;
+    if (this.ledger.balance(ACCOUNTS.tussenrekeningPsp) > 0) return provider;
+    // las de koppeling ook de uitbetaling al in, dan staat het geld "onderweg" tot het op de bank binnen is
+    const synced = this.db.prepare(`SELECT 1 FROM journal_entries WHERE source = 'integratie' LIMIT 1`).get();
+    return synced && this.ledger.balance(ACCOUNTS.kruisposten) > 0 ? provider : null;
+  }
+
+  private lastSale(t: BankTransaction): PreviousSale | null {
     if (t.amount <= 0 || (!t.counter_iban && !t.counter_name)) return null;
     const rows = this.db
       .prepare(

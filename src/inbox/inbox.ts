@@ -13,7 +13,7 @@ import type { OwnCompanyPayments } from '../documents/own-company';
 import { ALREADY_PRESENT, VIEW_EXISTING } from '../shared/document-outcome';
 import { PROPOSED_BY_LABEL, type Classification } from '../intake/classify';
 import { futureDateIssue } from '../intake/validation';
-import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
+import { autoAfterConfirmations, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
 import type { PurchaseService } from '../documents/purchases';
 import type { RecurringService } from '../import/recurring';
 import { normalizeIban, ValidationError } from '../shared/validation';
@@ -34,7 +34,7 @@ import { explain } from '../automation/explain';
 import type { InvestmentCheck } from '../tax/investment-check';
 import type { MailIntakeService } from '../mail/mail-intake';
 import type { BookedPayments } from '../documents/booked-payment';
-import { BankPurchaseMatcher, describePurchase, dueOf, mentionsReference, pairKey, purchaseSupplierName, supplierNameFit, type PaymentQuestion, type PurchaseIndex } from '../documents/bank-purchase-match';
+import { BankPurchaseMatcher, describePurchase, dueOf, mentionsReference, pairKey, purchaseSupplierName, sameIban, supplierNameFit, type PaymentQuestion, type PurchaseIndex } from '../documents/bank-purchase-match';
 import { formatForeign } from '../shared/currency';
 import type { FxRepair } from '../fx/repair';
 import type { StatementFolder } from '../import/statement-folder';
@@ -625,7 +625,9 @@ export class InboxService {
         tasks.push(q.kind === 'elders' ? this.paidElsewhereTask(t, q, who) : this.purchaseTask(t, q, who));
         continue;
       }
-      if (inv && inv.kind === 'factuur' && inv.score >= 50) {
+      // geld terug bij een open creditnota van een leverancier (#227) gaat voor als die beter past dan een factuur
+      const refund = t.amount > 0 && pur && pur.score >= 50 && !(inv && inv.score >= pur.score) ? pur : null;
+      if (!refund && inv && inv.kind === 'factuur' && inv.score >= 50) {
         tasks.push({
           key: `bank-${t.id}`,
           kind: 'bank-invoice',
@@ -641,14 +643,24 @@ export class InboxService {
         continue;
       }
       if (pur && pur.kind === 'inkoop' && pur.score >= 50) {
+        // geld dat binnenkomt bij een open creditnota van een leverancier (#227)
+        const back = t.amount > 0 ? this.purchases.get(pur.purchaseId) : null;
+        const from = back ? purchaseSupplierName(back) : null;
         tasks.push({
           key: `bank-${t.id}`,
           kind: 'bank-purchase',
           icon: '🧾',
-          title: `${formatEuro(-t.amount)} betaald aan ${who}`,
-          question: `Hoort dit bij ${pur.label.replace(/^(Inkoop|Aankoop) /, '')}?`,
+          title: back ? `${formatEuro(t.amount)} ontvangen van ${who}` : `${formatEuro(-t.amount)} betaald aan ${who}`,
+          question: back
+            ? `Is dit het geld terug van de creditnota ${from ? `van ${from}` : `"${back.description}"`} van ${formatDateNl(back.invoice_date)} (${formatEuro(-back.open_amount)})? Geld terug van een leverancier is geen omzet.`
+            : `Hoort dit bij ${pur.label.replace(/^(Inkoop|Aankoop) /, '')}?`,
           amount: t.amount,
-          actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'nee', label: 'Nee' }],
+          actions: back
+            ? [
+                { id: 'klopt', label: 'Klopt', primary: true, hint: 'Het geld wordt aan de creditnota gekoppeld; die is daarna afgehandeld. Geen omzet: de kosten zijn bij de creditnota al verlaagd.' },
+                { id: 'nee', label: 'Nee', hint: 'De app vraagt dit niet meer. Je kiest daarna zelf waar het geld voor was.' },
+              ]
+            : [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'nee', label: 'Nee' }],
           group: { key: 'bank-purchase', label: 'Alle betalingen koppelen' },
           why: `Omdat ${pur.reasons.join(', ')}.`,
           ref: { bankTransactionId: t.id, purchaseId: pur.purchaseId },
@@ -672,12 +684,16 @@ export class InboxService {
         continue;
       }
       if (t.amount > 0) {
+        // geld van een betaaldienst terwijl er verkopen op hun uitbetaling wachten (#227): geen "weer een verkoop"
+        const payout = this.bank.awaitedPayout(t);
         tasks.push({
           key: `bank-${t.id}`,
           kind: 'bank-income',
           icon: '💶',
           title: `${formatEuro(t.amount)} ontvangen van ${who}`,
-          question: 'Waar is dit geld voor?',
+          question: payout
+            ? `Waar is dit geld voor? Er staan verkopen in de app waarvan het geld nog niet binnen is. Is dit de uitbetaling daarvan door ${payout}, dan is het geen nieuwe verkoop: anders telt de omzet twee keer.`
+            : 'Waar is dit geld voor?',
           amount: t.amount,
           actions: [{ id: 'open', label: 'Uitzoeken', primary: true }],
           ref: { bankTransactionId: t.id },
@@ -1162,7 +1178,7 @@ export class InboxService {
         }
       }
     }
-    const askAfter = s.autopilot === 'voorzichtig' ? Number.POSITIVE_INFINITY : s.autopilot === 'maximaal' ? 2 : ASK_AUTO_AFTER_CONFIRMATIONS;
+    const askAfter = autoAfterConfirmations(s.autopilot);
     for (const rule of Number.isFinite(askAfter) ? this.memory.pendingApprovals(askAfter) : []) {
       const label = rule.business ? this.categories.label(rule.category_key) : 'privé';
       tasks.push({
@@ -1284,7 +1300,7 @@ export class InboxService {
     if (q.kind === 'open' && !contested) {
       const amounts = [formatEuro(p.total), p.currency && p.foreign_total !== null ? formatForeign(p.foreign_total, p.currency) : null, p.amount_paid > 0 ? `nog ${formatEuro(due)} open` : null].filter(Boolean).join(', ');
       const number = mentionsReference(`${t.description} ${t.reference ?? ''}`, p.supplier_reference);
-      const reasons = [q.fit.amount === 'gelijk' ? 'het bedrag klopt' : 'het bedrag klopt op de koers na', supplierNameFit(t, p) === 'ja' ? 'de naam van de leverancier past' : null, number ? 'het factuurnummer in de omschrijving staat' : null];
+      const reasons = [q.fit.amount === 'gelijk' ? 'het bedrag klopt' : 'het bedrag klopt op de koers na', supplierNameFit(t, p) === 'ja' ? 'de naam van de leverancier past' : null, sameIban(t.counter_iban, p.payee_iban) ? 'het rekeningnummer van de leverancier klopt' : null, number ? 'het factuurnummer in de omschrijving staat' : null];
       return {
         ...base,
         question:

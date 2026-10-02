@@ -5,7 +5,7 @@ import { ACCOUNTS } from '../core-ledger/accounts';
 import { withinFx } from '../shared/currency';
 import { addDays, diffDays, formatDateNl, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
-import { ValidationError } from '../shared/validation';
+import { normalizeIban, ValidationError } from '../shared/validation';
 import { supplierKey } from '../intake/supplier-memory';
 
 /**
@@ -61,6 +61,8 @@ export interface PurchaseProbe {
   is_opening: number;
   /** (een deel van) de aankoop staat op "weet ik nog niet" */
   question: boolean;
+  /** het rekeningnummer op de factuur, anders dat van de leverancier (#227) */
+  payee_iban?: string | null;
 }
 
 /** open = nog (deels) te betalen; elders = betaald met privégeld of contant (niet via de bank). */
@@ -69,7 +71,7 @@ export type PurchaseState = 'open' | 'elders';
 export type AmountFit = 'gelijk' | 'koers' | 'ongeveer';
 /** onbekend = de aankoop heeft geen naam, of de bank noemt geen tegenpartij. */
 export type SupplierFit = 'ja' | 'onbekend' | 'nee';
-export type Debit = Pick<BankTransaction, 'amount' | 'transaction_date' | 'counter_name' | 'description' | 'reference'>;
+export type Debit = Pick<BankTransaction, 'amount' | 'transaction_date' | 'counter_name' | 'description' | 'reference'> & { counter_iban?: string | null };
 
 export interface Fit {
   amount: AmountFit;
@@ -197,9 +199,18 @@ export function supplierNameFit(t: Pick<Debit, 'counter_name' | 'description'>, 
   return t.counter_name?.trim() ? 'nee' : 'onbekend';
 }
 
-/** Past de leverancier? Het factuurnummer in de omschrijving of het kenmerk van de bank is ook genoeg. */
-export function supplierFit(t: Debit, p: Pick<PurchaseProbe, 'relation_name' | 'description' | 'supplier_reference'>): SupplierFit {
+/** Hetzelfde rekeningnummer, hoe het ook geschreven is (spaties, kleine letters); zonder nummer: nee. */
+export function sameIban(a: string | null | undefined, b: string | null | undefined): boolean {
+  return Boolean(a && b) && normalizeIban(a!) === normalizeIban(b!);
+}
+
+/**
+ * Past de leverancier? Het factuurnummer in de omschrijving of het kenmerk van de bank is ook genoeg, net
+ * als het rekeningnummer van de factuur (#227): dan doet de naam op het afschrift er niet toe.
+ */
+export function supplierFit(t: Debit, p: Pick<PurchaseProbe, 'relation_name' | 'description' | 'supplier_reference' | 'payee_iban'>): SupplierFit {
   if (mentionsReference(`${t.description} ${t.reference ?? ''}`, p.supplier_reference)) return 'ja';
+  if (sameIban(t.counter_iban, p.payee_iban)) return 'ja';
   return supplierNameFit(t, p);
 }
 
@@ -280,6 +291,7 @@ export function probeOfDocument(r: DocumentResult): PurchaseProbe | null {
     supplier_reference: r.invoiceNumber?.value ?? null,
     is_opening: 0,
     question: false,
+    payee_iban: r.supplierIban?.value ?? null,
   };
 }
 
@@ -298,6 +310,7 @@ export function isDoubleCandidate(e: PurchaseEntry): boolean {
 }
 
 const PROBE_COLUMNS = `p.id, p.relation_id, r.name AS relation_name, p.description, p.invoice_date, p.due_date, p.total, p.amount_paid, p.currency, p.foreign_total, p.status, p.supplier_reference, p.is_opening,
+       COALESCE(p.payee_iban, r.iban) AS payee_iban,
        EXISTS (SELECT 1 FROM purchase_invoice_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.purchase_invoice_id = p.id AND a.rgs_code = @vraag) AS question,
        EXISTS (SELECT 1 FROM bank_transactions b WHERE b.matched_purchase_invoice_id = p.id) AS banked`;
 
