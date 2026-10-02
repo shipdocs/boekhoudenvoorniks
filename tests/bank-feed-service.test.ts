@@ -100,7 +100,8 @@ describe('status (#246)', () => {
     expect(st.accounts[0]!.iban).toBe('NL91ABNA0417164300');
     expect(st.accounts[0]!.balance).toBe(123456);
     expect(st.accounts[0]!.gap).toBeNull();
-    expect(st.accounts[0]!.lastOkAt).not.toBeNull();
+    // Een verbindingstest is nog geen financiële ophaalronde; #253 zet dit pas na succes.
+    expect(st.accounts[0]!.lastOkAt).toBeNull();
     expect(st.accounts[0]!.lastErrorKind).toBeNull();
   });
 
@@ -253,6 +254,23 @@ describe('saveLinks valideert tegen het laatste expliciete testresultaat (#246 r
     expect(() => h.feed.saveLinks(CREDS, [link, { ...link }])).toThrow(/één keer/);
   });
 
+  it('een mislukte hertest maakt een ouder geslaagd testresultaat ongeldig', async () => {
+    await h.feed.test(CREDS);
+    h.scope = 'ai pi';
+    await expect(h.feed.test(CREDS)).rejects.toThrow(/pi/);
+    expect(() => h.feed.saveLinks(CREDS, [{ pontoId: 'acc-1', bankAccountId: 'nieuw' }])).toThrow(/Test eerst/);
+  });
+
+  it('bewaart geen andere credentials dan de credentials die bij het testresultaat horen', async () => {
+    await h.feed.test(CREDS);
+    expect(() => h.feed.saveLinks(
+      { clientId: 'andere-client', clientSecret: 'ander-geheim' },
+      [{ pontoId: 'acc-1', bankAccountId: 'nieuw' }],
+    )).toThrow(/opnieuw/);
+    expect(h.secrets.get(BANK_FEED_SECRET_KEYS.clientId)).toBeNull();
+    expect(h.secrets.get(BANK_FEED_SECRET_KEYS.clientSecret)).toBeNull();
+  });
+
   it('zonder eerder testresultaat wordt elke koppeling geweigerd, ook met bestaande credentials', () => {
     h.secrets.set(BANK_FEED_SECRET_KEYS.clientId, 'client-id-1234');
     h.secrets.set(BANK_FEED_SECRET_KEYS.clientSecret, 'geheim-wachtwoord');
@@ -284,6 +302,58 @@ describe('saveLinks valideert tegen het laatste expliciete testresultaat (#246 r
     h.secrets.delete(BANK_FEED_SECRET_KEYS.clientId);
     h.secrets.delete(BANK_FEED_SECRET_KEYS.clientSecret);
     expect(() => h.feed.saveLinks(null, [])).toThrow(/veilige opslag|eerst/);
+  });
+
+  it('weigert onbruikbare rekeningen en ongeldige runtime-keuzes vóór opslag', async () => {
+    h.fake = [account({ currency: 'USD' })];
+    await h.feed.test(CREDS);
+    expect(() => h.feed.saveLinks(CREDS, [{ pontoId: 'acc-1', bankAccountId: 'nieuw' }])).toThrow(/niet bruikbaar/);
+    expect(() => h.feed.saveLinks(CREDS, [{ pontoId: 'acc-1', bankAccountId: 'anders' as never }])).toThrow(/Onbekende bankrekening/);
+    expect(h.secrets.get(BANK_FEED_SECRET_KEYS.clientId)).toBeNull();
+    expect(h.s.db.prepare('SELECT COUNT(*) AS n FROM bank_feed_accounts').get()).toEqual({ n: 0 });
+
+    // "Niet gebruiken" is juist wel een geldige, blijvende keuze voor zo'n rekening.
+    h.feed.saveLinks(CREDS, [{ pontoId: 'acc-1', bankAccountId: null }]);
+    expect(h.feed.status().accounts[0]).toMatchObject({ status: 'niet-gebruiken', bankAccountId: null });
+  });
+});
+
+describe('rekeningkeuzes en verse accountmetadata', () => {
+  it('zet een bestaande actieve koppeling echt op niet-gebruiken en kan haar weer activeren', async () => {
+    const bestaand = h.s.bank.addAccount('Bedrijfsrekening', 'NL91ABNA0417164300');
+    await h.feed.test(CREDS);
+    h.feed.saveLinks(CREDS, [{ pontoId: 'acc-1', bankAccountId: bestaand.id }]);
+    expect(h.feed.status().accounts[0]).toMatchObject({ status: 'actief', bankAccountId: bestaand.id });
+
+    h.feed.saveLinks(CREDS, [{ pontoId: 'acc-1', bankAccountId: null }]);
+    expect(h.feed.status().accounts[0]).toMatchObject({ status: 'niet-gebruiken', bankAccountId: null });
+
+    h.feed.saveLinks(CREDS, [{ pontoId: 'acc-1', bankAccountId: bestaand.id }]);
+    expect(h.feed.status().accounts[0]).toMatchObject({ status: 'actief', bankAccountId: bestaand.id });
+  });
+
+  it('ververst nieuwe niet-lege saldo- en syncmetadata maar bewaart bekende waarden bij null', async () => {
+    const bestaand = h.s.bank.addAccount('Bedrijfsrekening', 'NL91ABNA0417164300');
+    await h.feed.test(CREDS);
+    h.feed.saveLinks(CREDS, [{ pontoId: 'acc-1', bankAccountId: bestaand.id }]);
+
+    h.fake = [account({ balance: 222222, balanceAt: '2026-03-18T08:00:00.000Z', detailsSynchronizedAt: '2026-03-18T08:00:00.000Z' })];
+    await h.feed.test(CREDS);
+    h.feed.saveLinks(null, [{ pontoId: 'acc-1', bankAccountId: bestaand.id }]);
+    expect(h.feed.status().accounts[0]).toMatchObject({
+      balance: 222222,
+      balanceAt: '2026-03-18T08:00:00.000Z',
+      detailsSynchronizedAt: '2026-03-18T08:00:00.000Z',
+    });
+
+    h.fake = [account({ balance: null, balanceAt: null, detailsSynchronizedAt: null })];
+    await h.feed.test(CREDS);
+    h.feed.saveLinks(null, [{ pontoId: 'acc-1', bankAccountId: bestaand.id }]);
+    expect(h.feed.status().accounts[0]).toMatchObject({
+      balance: 222222,
+      balanceAt: '2026-03-18T08:00:00.000Z',
+      detailsSynchronizedAt: '2026-03-18T08:00:00.000Z',
+    });
   });
 });
 
