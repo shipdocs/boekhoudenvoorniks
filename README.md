@@ -122,7 +122,7 @@ synthetische set staat in [`docs/ocr-benchmark.md`](docs/ocr-benchmark.md).
 
 ## Installeren
 
-Download het programma op [boekhoudenvoorniks.nl/downloaden.html](https://boekhoudenvoorniks.nl/downloaden.html): `Setup.exe` voor Windows, AppImage of `.deb` voor Linux. Voor Windows staat het programma ook in de [Microsoft Store](https://apps.microsoft.com/detail/9NZ4D5JNN5BM?hl=nl-nl&gl=NL); die versie kan een versie achterlopen. De bestanden staan ook bij de [laatste release](https://github.com/shipdocs/boekhoudenvoorniks/releases/latest) op GitHub.
+Download het programma op [boekhoudenvoorniks.nl/downloaden.html](https://boekhoudenvoorniks.nl/downloaden.html): `Setup.exe` voor Windows, AppImage of `.deb` voor Linux. Voor Windows staat het programma ook in de [Microsoft Store](https://apps.microsoft.com/detail/9NZ4D5JNN5BM?hl=nl-nl&gl=NL). De bestanden staan ook bij de [laatste release](https://github.com/shipdocs/boekhoudenvoorniks/releases/latest) op GitHub.
 
 Op **Windows** kan SmartScreen melden dat "Windows uw pc heeft beveiligd". Dat komt doordat de installer (nog) niet met een betaald certificaat ondertekend is. Download de installer alleen van de [GitHub-release](https://github.com/shipdocs/boekhoudenvoorniks/releases) en controleer eventueel het controlegetal:
 
