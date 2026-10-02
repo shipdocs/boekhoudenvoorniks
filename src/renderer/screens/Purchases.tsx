@@ -130,7 +130,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                   {p.business_pct < 100 && <div className="small"><strong>{p.business_pct}% zakelijk</strong>, {100 - p.business_pct}% privé</div>}
                   {p.warranty_months ? <div className="small muted">🛡️ {warrantyText(p.invoice_date, p.warranty_months)}</div> : null}
                 </td>
-                <td><StatusPill status={p.status} />{p.paid_via && <div className="small muted">{p.paid_via}</div>}</td>
+                <td><StatusPill status={p.status} />{p.paid_via && <div className="small muted">{p.paid_via}</div>}{p.waiting_for_bank && <div className="small muted">Wacht op afschrift van {p.waiting_for_bank}</div>}</td>
                 <td className="num"><Euro cents={p.vat_deductible} />{p.business_pct < 100 && <div className="small muted">van <Euro cents={p.vat_total} /></div>}</td>
                 <td className="num"><Euro cents={p.total} />{p.business_amount !== null && <div className="small muted">zakelijk <Euro cents={p.business_amount} /></div>}{p.currency && p.foreign_total !== null && <div className="small muted">{formatForeign(p.foreign_total, p.currency)}</div>}</td>
                 <td onClick={(e) => e.stopPropagation()}>
@@ -389,7 +389,9 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
         <Button onClick={onClose}>Annuleren</Button>
         <Button kind="primary" disabled={busy} onClick={async () => {
           if (via === 'bank') {
-            toast('De rekening blijft open. Na je volgende bankafschrift koppelt de app de betaling, of vraagt de app of ze bij elkaar horen ✓');
+            if (bankAccountId === null) return;
+            if ((await run(() => api.purchases.expectOnBank(p.id, bankAccountId))) === undefined) return;
+            toast('Onthouden ✓ De rekening blijft open. Na je volgende bankafschrift koppelt de app de betaling, of vraagt de app of ze bij elkaar horen');
             await onDone();
             return;
           }
