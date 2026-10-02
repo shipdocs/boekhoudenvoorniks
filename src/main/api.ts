@@ -457,6 +457,9 @@ export function createApi(s: Services, host: HostContext) {
       case 'bank-double:bekijken':
         // op het bankscherm: de ene regel en de deelposten naast elkaar
         return { navigate: { screen: 'bank', extra: { double: { lineId: r.doubleLineId, firstPartId: r.doublePartId } } } };
+      case 'bank-same:bekijken':
+        // op het bankscherm: de twee regels naast elkaar
+        return { navigate: { screen: 'bank', extra: { same: { firstId: r.sameFirstId, secondId: r.sameSecondId } } } };
       case 'bank-balance:bekijken':
         // op het bankscherm: de overgeslagen regels van deze rekening, met "Toch toevoegen"
         return { navigate: { screen: 'bank', extra: { skippedFor: r.bankAccountId } } };
@@ -476,6 +479,7 @@ export function createApi(s: Services, host: HostContext) {
           'bank-stale': ['bank', undefined],
           'bank-balance': ['bank', undefined],
           'bank-double': ['bank', undefined],
+          'bank-same': ['bank', undefined],
           'bank-statement': ['bank', undefined],
           'bank-locked': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
@@ -1148,6 +1152,14 @@ export function createApi(s: Services, host: HostContext) {
       resolveDouble: (lineId: number, firstPartId: number, remove: 'regel' | 'deelposten') => s.bank.resolveDouble(lineId, firstPartId, remove),
       /** "het zijn twee verschillende betalingen": niet meer melden */
       dismissDouble: (lineId: number, firstPartId: number) => s.bank.dismissDouble(lineId, firstPartId),
+      /** twee losse regels die dezelfde betaling lijken, uit verschillende imports (#225) */
+      sameDoubles: () => s.bank.paymentDoubles(),
+      /** "dezelfde betaling": `removeId` gaat uit de boekhouding, `keepId` blijft; wat al verwerkt is, gaat er niet uit */
+      resolveSame: (keepId: number, removeId: number) => s.bank.resolvePaymentDouble(Number(keepId), Number(removeId)),
+      /** "het zijn twee verschillende betalingen": niet meer melden */
+      dismissSame: (firstId: number, secondId: number) => s.bank.dismissPaymentDouble(Number(firstId), Number(secondId)),
+      /** bij "Negeren": de betalingen waar deze regel een dubbel van kan zijn (zelfde rekening en bedrag, een paar werkdagen ertussen) */
+      duplicateCandidates: (txId: number) => s.bank.duplicateCandidates(Number(txId)),
       /** terugzetten wat als dubbel uit de boekhouding was gehaald */
       restoreDuplicate: (txId: number) => {
         s.bank.restoreDuplicate(txId);
@@ -1245,7 +1257,8 @@ export function createApi(s: Services, host: HostContext) {
       previousSale: (txId: number) => s.bank.previousSale(txId),
       repeatSale: (txId: number) => s.bank.repeatSale(txId),
       saleChannels: () => s.bank.saleChannels(),
-      ignore: (txId: number) => s.bank.ignore(txId),
+      /** negeren; met `duplicateOf` als dubbele regel van die betaling: dan telt hij ook in het saldo niet mee (#225) */
+      ignore: (txId: number, duplicateOf?: number | null) => s.bank.ignore(txId, duplicateOf),
       /** Andere categorie voor een al geboekte betaling: tegenboeking + nieuwe boeking (#19), en leren. */
       reclassify: (txId: number, categoryKey: string, vatCode: string, businessPct?: number) => {
         const category = s.categories.find(categoryKey);
