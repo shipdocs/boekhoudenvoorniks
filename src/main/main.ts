@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { openDatabase, openReadonly, type Db } from '../db/database';
+import { assertDatabaseFileNotNewer, NewerDatabaseError, openDatabase, openReadonly, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
 import { createServices, type Services } from '../services';
 import { SettingsService } from '../settings/settings';
@@ -35,7 +35,7 @@ import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
 import { CHOICE_SESSION, chromiumDir, forgetMoved, handOverLocalState, markComplete, noteMoved, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type MigrationOutcome, type SwitchAction, type SwitchOutcome, type SwitchPlan } from './data-dir';
 import { chooseAfterFailedMigration, chooseAfterMove, chooseOldFolder, confirmSyncFolder, migrateWithProgress, pickDataFolder, refuseDataFolder, switchWithProgress } from './data-dir-app';
-import { isWindowsStore, mcpCommand as mcpCommandFor, migrateForStore, READ_ONLY_MESSAGE, readOnlyError, storeFallbackHint, storeAppDataNotice, findOldInstall, oldInstallPrompt, OLD_INSTALL_IGNORE_FLAG, storeFolderProblem, type StartNotice } from './windows-store';
+import { DOWNLOAD_URL, isWindowsStore, mcpCommand as mcpCommandFor, migrateForStore, READ_ONLY_MESSAGE, readOnlyError, storeFallbackHint, storeAppDataNotice, findOldInstall, oldInstallPrompt, OLD_INSTALL_IGNORE_FLAG, storeFolderProblem, type StartNotice } from './windows-store';
 import { STORE_LLAMA_CPP } from '../ocr-runtime/manifest';
 import { Administrations, readAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
@@ -209,7 +209,9 @@ async function openAdministration(key: string): Promise<void> {
   const admins = administrations();
   if (key === admins.current()) return;
   // eerst controleren of hij bestaat (gooit ook bij een ongeldige sleutel), vóór we iets sluiten
-  if (!existsSync(join(admins.dirFor(key), 'boekhouding.sqlite')) && key !== '') throw new Error('Deze administratie bestaat niet (meer)');
+  const nextFile = join(admins.dirFor(key), 'boekhouding.sqlite');
+  if (!existsSync(nextFile) && key !== '') throw new Error('Deze administratie bestaat niet (meer)');
+  if (existsSync(nextFile)) assertDatabaseFileNotNewer(nextFile);
   const current = dataDir();
   try {
     await dailyBackup(db, join(current, 'backups'), current);
@@ -228,6 +230,68 @@ async function openAdministration(key: string): Promise<void> {
 
 function dbPath(): string {
   return join(dataDir(), 'boekhouding.sqlite');
+}
+
+/**
+ * Stop vóór back-ups, WAL of migraties als de gekozen administratie van een nieuwere app is.
+ * De gebruiker kan bijwerken of een andere administratie kiezen; geen database wordt geopend om te schrijven.
+ */
+async function ensureSupportedAdministration(root = rootDir()): Promise<boolean> {
+  const admins = new Administrations(root);
+  const file = join(admins.dirFor(admins.current()), 'boekhouding.sqlite');
+  if (!existsSync(file)) return true;
+  try {
+    assertDatabaseFileNotNewer(file);
+    return true;
+  } catch (e) {
+    if (!(e instanceof NewerDatabaseError)) throw e;
+  }
+  const alternatives = admins.list(readAdministrationFile).filter((a) => !a.current);
+  const chooseOther = alternatives.length > 0;
+  const buttons = ['Programma bijwerken', ...(chooseOther ? ['Andere administratie kiezen'] : []), 'Afsluiten'];
+  const result = await dialog.showMessageBox({
+    type: 'warning',
+    title: 'BoekhoudenVoorNiks',
+    message: 'Deze administratie is gemaakt met een nieuwere versie',
+    detail: 'Werk het programma eerst bij. De administratie is niet gewijzigd of gemigreerd.',
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+    noLink: true,
+  });
+  if (result.response === 0) {
+    try {
+      await shell.openExternal(STORE ? 'ms-windows-store://downloadsandupdates' : DOWNLOAD_URL);
+    } catch (e) {
+      dialog.showErrorBox('Bijwerken openen lukte niet', STORE ? 'Open Microsoft Store en kies Bibliotheek → Updates ophalen.' : `${(e as Error).message}\n\nDownload de nieuwste versie via ${DOWNLOAD_URL}`);
+    }
+  } else if (chooseOther && result.response === 1) {
+    const picked = await dialog.showMessageBox({
+      type: 'question',
+      title: 'BoekhoudenVoorNiks',
+      message: 'Welke andere administratie wil je openen?',
+      detail: 'De administratie van de nieuwere versie blijft ongewijzigd.',
+      buttons: [...alternatives.map((a) => a.name), 'Annuleren'],
+      defaultId: alternatives.length,
+      cancelId: alternatives.length,
+      noLink: true,
+    });
+    const selected = alternatives[picked.response];
+    if (selected) {
+      const selectedFile = join(admins.dirFor(selected.key), 'boekhouding.sqlite');
+      try {
+        assertDatabaseFileNotNewer(selectedFile);
+        admins.select(selected.key);
+        app.relaunch();
+      } catch (e) {
+        if (!(e instanceof NewerDatabaseError)) throw e;
+        dialog.showErrorBox('Ook deze administratie is nieuwer', e.message);
+      }
+    }
+  }
+  // Ook na annuleren niet alsnog de ongeschikte administratie openen.
+  app.exit(0);
+  return false;
 }
 
 /** Koppeling (opnieuw) toevoegen onder de huidige naam; een koppeling onder de oude naam gaat eerst weg. */
@@ -971,6 +1035,9 @@ async function prepareDataDir(): Promise<boolean> {
   }
   if (resolution.kind === 'nieuw') markComplete(resolution.dir);
   if (resolution.kind === 'oud') {
+    // Vóór het overzetten controleren: ook de Store-route mag een database van een nieuwere app
+    // niet openen, checkpointen of migreren. Een andere administratie kiezen start veilig opnieuw.
+    if (!(await ensureSupportedAdministration(resolution.dir))) return false;
     // Store-versie: na een mislukte poging werkt de app niet door in de oude map (zie moveOldFolderForStore)
     if (!STORE) await moveOldFolder(resolution.dir, resolution.target);
     else if (!(await moveOldFolderForStore(resolution.dir, resolution.target))) return false;
@@ -1176,6 +1243,7 @@ if (MCP_MODE) {
 
   app.whenReady().then(async () => {
     if (!(await prepareDataDir())) return;
+    if (!(await ensureSupportedAdministration())) return;
     if (!SMOKE_TEST && !readOnly) backupBeforeUpgrade();
     // De renderer gebruikt geen browserrechten; wijs onverwachte camera-, locatie- en
     // notificatieverzoeken daarom standaard af.

@@ -1,17 +1,17 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useLoad, type InvestmentSavedInfo } from '../ui';
-import { today } from '../../shared/dates';
+import { diffDays, formatDateNl, today } from '../../shared/dates';
 import type { PurchaseVatCode } from '../../shared/vat';
 import { mightBeInvestment, netAmount } from '../../shared/investment';
 import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
-import { formatDateNl } from '../../shared/dates';
 import type { FxCandidate } from '../../fx/repair';
 import { CategoryChips } from './Categories';
 import type { PurchaseInvoice } from '../../documents/purchases';
 import type { UploadResult } from '../../intake/intake';
 import { VIEW_EXISTING } from '../../shared/document-outcome';
 import { uploadOutcomeText } from './UploadOutcome';
+import type { BankImportStatus } from '../../import/bank';
 
 export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const { go, toast } = useApp();
@@ -137,7 +137,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                   <span className="row">
                     {p.document_id !== null && <Button small kind="ghost" title="De bon of factuur bij deze aankoop, met de andere bestanden die erbij horen" ariaLabel="Bon bekijken" onClick={() => go({ screen: 'document', id: p.document_id! })}>Bon</Button>}
                     {p.status === 'open' && p.open_amount > 0 && <Button small onClick={() => setPay(p.id)}>Betaal</Button>}
-                    {p.status === 'open' && p.open_amount > 0 && <Button small kind="ghost" title="Al betaald, maar niet van je zakelijke rekening (bv. privé of contant)" onClick={() => setPaidElsewhere(p)}>Al betaald</Button>}
+                    {p.status === 'open' && p.open_amount > 0 && <Button small kind="ghost" title="Al betaald via je bank, privé of contant" onClick={() => setPaidElsewhere(p)}>Al betaald</Button>}
                     {p.status === 'open' && p.amount_paid === 0 && <Button small kind="ghost" title="Hoort deze aankoop hier niet (bv. per ongeluk toegevoegd, of van vóór je instapdatum)? Dan haal je hem weg; de bon blijft bewaard." ariaLabel="Aankoop weghalen" onClick={async () => {
                       if (!confirm(`Aankoop ${p.relation_name ?? p.description} van ${formatDateNl(p.invoice_date)} weghalen? De kosten en de btw gaan eruit; de bon blijft bewaard.`)) return;
                       if ((await run(async () => { await api.purchases.remove(p.id); return true; }, 'Aankoop weggehaald ✓')) !== undefined) await purchases.reload();
@@ -288,21 +288,39 @@ function ForeignModal({ purchaseId, fromDocument, onClose, onDone }: { purchaseI
 }
 
 /**
- * Al betaald, maar niet van de zakelijke rekening: van je privérekening, via je telefoonrekening of
- * contant. Privé wordt Crediteuren aan Privé-stortingen; de kosten en de btw blijven gewoon staan.
+ * Al betaald: een zakelijke bankbetaling blijft open tot de afschriftimport hem koppelt. Privé of
+ * contant boekt wel meteen; privé wordt Crediteuren aan Privé-stortingen.
  */
+export function BankPaidExplanation({ status, asOf = today() }: { status: Pick<BankImportStatus, 'name' | 'completeTo'>; asOf?: string }) {
+  if (!status.completeTo) {
+    return <p className="small muted">Voor {status.name} is nog geen compleet bankafschrift ingelezen. Laat de rekening open; na het inlezen koppelt de app de betaling automatisch.</p>;
+  }
+  const days = Math.max(0, diffDays(status.completeTo, asOf));
+  return (
+    <p className="small muted">
+      {status.name} is bijgewerkt t/m {formatDateNl(status.completeTo)}{days === 0 ? ' (vandaag)' : ` (${days} ${days === 1 ? 'dag' : 'dagen'} geleden)`}. Laat de rekening open; zodra de betaling in een volgend afschrift staat, koppelt de app hem automatisch.
+    </p>
+  );
+}
+
 function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase: PurchaseInvoice; others: number; onClose: () => void; onDone: () => Promise<void> }) {
   const { toast } = useApp();
   const { run, busy } = useAction();
-  const [via, setVia] = useState<'prive' | 'kas'>('prive');
+  const [via, setVia] = useState<'prive' | 'kas' | 'bank'>('prive');
+  const [bankAccountId, setBankAccountId] = useState<number | null>(null);
   const [always, setAlways] = useState(false);
   // "Nee, apart betaald" bij een afschrijving die nog niet verwerkt is: die hoort niet bij deze aankoop
   const [separate, setSeparate] = useState(false);
   // staat dezelfde betaling al op een van je rekeningen (geboekt als kosten, of nog niet verwerkt)? Dan eerst vragen (anders dubbel)
   const booked = useLoad(() => api.purchases.bookedPayment(p.id), [p.id]);
+  const bank = useLoad(async () => {
+    const [accounts, statuses] = await Promise.all([api.bank.accounts(), api.bank.importStatus()]);
+    const real = new Set(accounts.filter((a) => !a.is_pot).map((a) => a.id));
+    return statuses.filter((s) => real.has(s.bankAccountId));
+  });
   const name = p.relation_name ?? p.description;
   const b = booked.data;
-  if (booked.loading) return <Modal title="Al betaald" onClose={onClose}><p className="small muted">Even kijken op je rekeningen…</p></Modal>;
+  if (booked.loading || bank.loading) return <Modal title="Al betaald" onClose={onClose}><p className="small muted">Even kijken op je rekeningen…</p></Modal>;
   if (b) {
     // de afschrijving is nog niet verwerkt (#222): "ja" koppelt hem aan deze aankoop
     const pending = b.status === 'nieuw';
@@ -350,10 +368,17 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
           <div className="chips">
             <button className={via === 'prive' ? 'selected' : ''} onClick={() => setVia('prive')}>Met privégeld</button>
             <button className={via === 'kas' ? 'selected' : ''} onClick={() => setVia('kas')}>Contant uit de zaak</button>
+            {(bank.data ?? []).map((account) => (
+              <button key={account.bankAccountId} className={via === 'bank' && bankAccountId === account.bankAccountId ? 'selected' : ''} onClick={() => { setVia('bank'); setBankAccountId(account.bankAccountId); }}>
+                Via {account.name}
+              </button>
+            ))}
           </div>
         </Field>
         {via === 'prive' && <p className="small muted">Bv. van je privérekening of via je telefoonrekening. De kosten en de btw die je terugkrijgt blijven gewoon staan; het bedrag telt als geld dat je privé in de zaak stopt.</p>}
-        {p.relation_id !== null && (
+        <ErrorBox error={bank.error} />
+        {via === 'bank' && <BankPaidExplanation status={(bank.data ?? []).find((account) => account.bankAccountId === bankAccountId)!} />}
+        {via !== 'bank' && p.relation_id !== null && (
           <label className="row small">
             <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} />
             Voortaan altijd zo bij {name}{others > 0 && <> (ook de {others === 1 ? 'andere open rekening' : `${others} andere open rekeningen`})</>}
@@ -363,6 +388,11 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
         <Button kind="primary" disabled={busy} onClick={async () => {
+          if (via === 'bank') {
+            toast('De rekening blijft open. Na je volgende bankafschrift koppelt de app de betaling automatisch ✓');
+            await onDone();
+            return;
+          }
           const r = await run(() => api.purchases.paidWith(p.id, via, { always, ...(separate ? { separate } : {}) }));
           if (!r) return;
           toast(r.paid.length === 1 ? 'Op betaald gezet ✓' : `${r.paid.length} rekeningen op betaald gezet ✓`);
@@ -370,7 +400,7 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
             toast(`${r.skipped.length === 1 ? 'Eén rekening bleef' : `${r.skipped.length} rekeningen bleven`} open: die betaling staat mogelijk al op je rekening. Daarom gaat ${name} ook niet op "voortaan privé". Kijk bij "Al betaald" op die rekening.`);
           }
           await onDone();
-        }}>Op betaald zetten</Button>
+        }}>{via === 'bank' ? 'Open laten voor bankimport' : 'Op betaald zetten'}</Button>
       </div>
     </Modal>
   );

@@ -502,13 +502,10 @@ function integrity(file: string): string {
 
 /** Consistente kopie van een database die mogelijk nog open is (bv. door de koppeling, alleen-lezen). */
 async function copyDatabase(from: string, to: string): Promise<void> {
-  const db = new Database(from, { fileMustExist: true });
+  // De bron kan van een nieuwere app zijn. Open hem daarom strikt alleen-lezen en laat de
+  // back-up-API de WAL meenemen; een checkpoint zou de bron juist wijzigen (#236).
+  const db = new Database(from, { readonly: true, fileMustExist: true });
   try {
-    try {
-      db.pragma('wal_checkpoint(TRUNCATE)');
-    } catch {
-      /* een lezer houdt de WAL vast: de back-up-API neemt hem dan zelf mee */
-    }
     await db.backup(to);
   } finally {
     db.close();

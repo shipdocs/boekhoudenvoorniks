@@ -6,6 +6,7 @@ import { VAT_DISCLAIMER } from '../../shared/legal';
 import { AccountantNotice } from './TaxYear';
 import { CheckLines } from './CheckLines';
 import { CheckItems } from './CheckItems';
+import { formatEuro } from '../../shared/money';
 
 /** Eén regel uitleg per vak van de btw-aangifte (de officiële naam staat ervoor). */
 const RUBRIEK_UITLEG: Record<string, string> = {
@@ -22,6 +23,23 @@ const RUBRIEK_UITLEG: Record<string, string> = {
   '5b': 'btw die je terugkrijgt over je aankopen',
   '5g': 'wat je betaalt of terugkrijgt',
 };
+
+const wholeEuro = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+const vatBalance = (cents: number, whole = false): string => `${whole ? wholeEuro.format(Math.abs(cents) / 100) : formatEuro(Math.abs(cents))} ${cents < 0 ? 'terug' : 'te betalen'}`;
+
+/** Compacte, dynamische uitleg: het centsaldo wordt niet rechtstreeks afgerond (#232). */
+export function VatRoundingExplanation({ cents, wholeEuros }: { cents: number; wholeEuros: number }) {
+  const declarationCents = wholeEuros * 100;
+  if (cents === declarationCents) return null;
+  return (
+    <details className="notice small" style={{ marginTop: 12 }}>
+      <summary>Waarom wordt {vatBalance(cents)} in de aangifte {vatBalance(declarationCents, true)}?</summary>
+      <p style={{ marginBottom: 0 }}>
+        Voor de btw-aangifte worden de bedragen per vak afgerond op hele euro's, in jouw voordeel. Daarna berekent de aangifte het totaal. Het bedrag van {vatBalance(cents)} wordt dus niet rechtstreeks afgerond naar {vatBalance(declarationCents, true)}.
+      </p>
+    </details>
+  );
+}
 
 export function Tax({ periodKey }: { periodKey?: string }) {
   const { settings, meta, toast, go } = useApp();
@@ -100,6 +118,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                 ))}
               </tbody>
             </table>
+            <VatRoundingExplanation cents={r.summary.teBetalen} wholeEuros={r.summary.teBetalenEuro} />
             {r.corrections.some((c) => !c.suppletie) && (
               <p className="muted small">Iets geboekt in een periode die je al had aangegeven? Dan telt het hier mee. Tot € 1.000 mag dat in de volgende aangifte.</p>
             )}

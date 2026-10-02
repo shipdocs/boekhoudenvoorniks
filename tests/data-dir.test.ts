@@ -5,6 +5,7 @@ import { join, relative, sep } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../src/db/database';
+import { migrations } from '../src/db/migrations';
 import { createServices, MemorySecretStore } from '../src/services';
 import { isStoredAttachmentPath } from '../src/db/attachment-paths';
 import { resolveAttachmentPath } from '../src/main/attachments';
@@ -269,6 +270,25 @@ describe('pointer naar een zelf gekozen map', () => {
 });
 
 describe('overzetten naar de gedeelde map', () => {
+  it('kopieert ook een administratie van een nieuwere app zonder de brondatabase te wijzigen (#236)', async () => {
+    const m = machine();
+    const source = join(m.appData, 'boekhoudenvoorniks');
+    mkdirSync(source, { recursive: true });
+    const file = join(source, 'boekhouding.sqlite');
+    const db = openDatabase(file);
+    db.pragma(`user_version = ${migrations.length + 1}`);
+    db.close();
+    const before = readFileSync(file);
+
+    const outcome = await migrateToSharedDir({ source, target: m.shared, now: NOW, keepSource: true });
+
+    expect(outcome.status).toBe('gemigreerd');
+    expect(readFileSync(file)).toEqual(before);
+    const copied = new Database(join(m.shared, 'boekhouding.sqlite'), { readonly: true });
+    expect(copied.pragma('user_version', { simple: true })).toBe(migrations.length + 1);
+    copied.close();
+  });
+
   it('keepSource: de oude map blijft onder zijn eigen naam staan (de Store-versie mag hem niet hernoemen)', async () => {
     const m = machine();
     const source = join(m.appData, 'boekhoudenvoorniks');
