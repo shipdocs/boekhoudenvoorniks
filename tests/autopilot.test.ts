@@ -187,8 +187,8 @@ describe('controles vóór de btw-aangifte (#20)', () => {
     s.relations.update(aannemer.id, { vat_number: '' });
     // kas negatief (contant betaald zonder kas)
     s.quick.recordExpense({ date: '2026-07-12', supplierName: 'Gamma', description: 'Verf', categoryKey: 'materiaal', grossAmount: 12100, vatCode: 'hoog', paidWith: 'kas' });
-    // dubbele aankoop zonder bewijs
-    for (let i = 0; i < 2; i++) s.quick.recordExpense({ date: '2026-07-20', supplierName: 'Hornbach', description: 'Steiger', categoryKey: 'gereedschap', grossAmount: 60500, vatCode: 'hoog', paidWith: 'bank' });
+    // dubbele aankoop zonder bewijs: de tweede keer vraagt de app het eerst (#224), de gebruiker kiest "Toch toevoegen"
+    for (let i = 0; i < 2; i++) s.quick.recordExpense({ date: '2026-07-20', supplierName: 'Hornbach', description: 'Steiger', categoryKey: 'gereedschap', grossAmount: 60500, vatCode: 'hoog', paidWith: 'bank', allowDuplicate: i > 0 });
     // onverwerkte bank + vraagpost
     s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-08-01', amount: -2000, description: 'iets' }, { date: '2026-08-02', amount: -3000, description: 'weet ik niet' }] });
     const vraag = s.bank.list({ status: 'nieuw' }).find((t) => t.amount === -3000)!;

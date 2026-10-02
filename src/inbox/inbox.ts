@@ -12,6 +12,7 @@ import { EVIDENCE_QUESTION, OWN_INVOICE_NOTE, type IntakeDocument, type IntakeSe
 import type { OwnCompanyPayments } from '../documents/own-company';
 import { ALREADY_PRESENT, VIEW_EXISTING } from '../shared/document-outcome';
 import { PROPOSED_BY_LABEL, type Classification } from '../intake/classify';
+import { futureDateIssue } from '../intake/validation';
 import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
 import type { PurchaseService } from '../documents/purchases';
 import type { RecurringService } from '../import/recurring';
@@ -822,7 +823,8 @@ export class InboxService {
       const pending = this.intake.pending(d);
       // factuur van je eigen bedrijf (#205): bij zeker de twee keuzes, bij waarschijnlijk eerst bekijken
       const own = pending ? null : this.intake.ownIssue(d);
-      const bad = pending ? d.issues.find((i) => i.field === pending.kind) : own ?? d.issues.find((i) => i.severity === 'fout');
+      // een datum in de toekomst (#224) is verkeerd gelezen: eerst bekijken, niet met één klik boeken
+      const bad = pending ? d.issues.find((i) => i.field === pending.kind) : own ?? d.issues.find((i) => i.severity === 'fout') ?? futureDateIssue(d.issues) ?? undefined;
       const name = d.result?.supplier?.value ?? d.original_name;
       const paid = pending?.kind === 'evidence' && pending.target ? `Op ${formatDateNl(pending.target.date)} is ${formatEuro(pending.target.amount)} betaald aan ${pending.target.supplier}. ` : '';
       tasks.push({

@@ -6,6 +6,7 @@
 - Staat een aankoop op privé of contant betaald en komt de afschrijving daarna toch op je rekening binnen, dan vraagt de app eerst of het dezelfde betaling is, ook als het bedrag een paar cent afwijkt (#222).
 - Staat een aankoop op "weet ik nog niet" en komt de betaling binnen, dan vraagt de app eerst of ze bij elkaar horen. Bij "Ja" sluit de betaling de aankoop af en komt er geen tweede post bij (#223).
 - Bij een betaling aan je eigen bedrijf stelt de app Privé voor, ook als je hem via de gewone bankindeling verwerkt. Staat er al een aankoop die erbij past, dan vraagt de app eerst of ze bij elkaar horen (#230).
+- Een bon en de factuur van dezelfde aankoop worden niet meer twee aankopen als het bedrag een paar cent verschilt of de leverancier net anders geschreven is: bij hetzelfde nummer vraagt de app eerst of het dezelfde aankoop is. Dat gebeurt nu ook als je een aankoop met de hand invoert, en bij een bon met een datum in de toekomst krijg je een waarschuwing (#224).
 
 ## 1.0.1 — klaar voor de Microsoft Store
 

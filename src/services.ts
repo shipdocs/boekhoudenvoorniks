@@ -110,6 +110,8 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const fx = new FxService(db, deps.fetch);
   const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, categories, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse, () => settings.get().company.vatNumber);
   intake.setFx(fx);
+  // handmatige invoer naast een aankoop of bon die er al staat: dezelfde dubbel-controle als bij een bon (#224)
+  quick.setDuplicateCheck((entry) => intake.findDuplicateOfManual(entry));
   intake.setFileRemover(deps.removeFile ?? null);
   // je eigen bedrijf, om een factuur van jezelf en de betaling ervan te herkennen (#205)
   const ownIdentity = () => {

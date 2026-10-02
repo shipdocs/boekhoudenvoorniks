@@ -1,5 +1,13 @@
 import type { DocumentResult, Issue } from './types';
-import { isIsoDate, today, diffDays } from '../shared/dates';
+import { formatDateNl, isIsoDate, today, diffDays } from '../shared/dates';
+
+/** Kenmerk van de waarschuwing "de datum ligt in de toekomst": zo vinden Vandaag en het controlescherm hem terug. */
+export const FUTURE_DATE = 'toekomst';
+
+/** De waarschuwing dat de gelezen datum in de toekomst ligt, of null. */
+export function futureDateIssue(issues: Issue[]): Issue | null {
+  return issues.find((i) => i.field === 'invoiceDate' && i.suggestion === FUTURE_DATE) ?? null;
+}
 
 /**
  * Controleert of een document intern consistent is. OCR-resultaten worden nooit blind vertrouwd:
@@ -17,7 +25,19 @@ export function validateDocument(doc: DocumentResult, asOf: string = today()): I
   else if (!isIsoDate(doc.invoiceDate.value)) issues.push({ field: 'invoiceDate', severity: 'fout', message: 'De datum is ongeldig.' });
   else {
     const age = diffDays(doc.invoiceDate.value, asOf);
-    if (age < -1) issues.push({ field: 'invoiceDate', severity: 'waarschuwing', message: 'De datum ligt in de toekomst.' });
+    // een bon is van een betaling die al gedaan is: een datum in de toekomst is dan verkeerd gelezen (#224)
+    if (age < -1) {
+      const receipt = doc.documentType?.value === 'receipt';
+      const date = formatDateNl(doc.invoiceDate.value);
+      issues.push({
+        field: 'invoiceDate',
+        severity: 'waarschuwing',
+        message: receipt
+          ? `Op deze bon staat ${date} als datum, en dat ligt in de toekomst. Waarschijnlijk is de datum verkeerd gelezen: kijk hem na.`
+          : `De datum (${date}) ligt in de toekomst. Kijk na of hij goed gelezen is.`,
+        suggestion: FUTURE_DATE,
+      });
+    }
     if (age > 400) issues.push({ field: 'invoiceDate', severity: 'waarschuwing', message: 'Dit document is ouder dan een jaar.' });
   }
   if (!doc.supplier) issues.push({ field: 'supplier', severity: 'waarschuwing', message: 'We weten niet van welke winkel of leverancier dit is.' });

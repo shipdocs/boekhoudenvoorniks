@@ -12,7 +12,7 @@ import type { QuoteInput, QuoteStatus } from '../documents/quotes';
 import type { DocumentTemplate, TemplateType } from '../documents/templates';
 import { renderDocumentHtml, FONTS } from '../documents/templates';
 import type { SendOptions } from '../documents/sending';
-import { purchaseVat, type PurchaseInvoiceInput } from '../documents/purchases';
+import { expenseLines, purchaseVat, type PurchaseInvoiceInput } from '../documents/purchases';
 import { businessEffect } from '../shared/business-share';
 import type { BookToAccountInput, SaleInput } from '../import/bank';
 import { previewCsv, headerSignature, type CsvMapping } from '../import/csv';
@@ -26,7 +26,7 @@ import { purchasePaymentQr } from '../documents/epc-qr';
 import { supplierKey } from '../intake/supplier-memory';
 import { tx } from '../db/database';
 import { hasRealData } from './reset';
-import type { ExpenseInput, CashSaleInput } from '../quick/quick';
+import { duplicateEntryMessage, type ExpenseInput, type CashSaleInput } from '../quick/quick';
 import { OTHER_DESTINATIONS } from '../shared/categories';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES } from '../shared/vat';
 import { ACCOUNTS, type AccountCategory } from '../core-ledger/accounts';
@@ -990,8 +990,20 @@ export function createApi(s: Services, host: HostContext) {
         if (remember && p.relation_name) s.businessShare.set(p.relation_name, pct);
         return s.purchases.setBusinessPct(id, pct);
       },
-      create: (input: PurchaseInvoiceInput) => s.purchases.create(input),
+      /**
+       * Lijkt de aankoop op een aankoop of bon die er al staat (#224)? Dan komt er niets bij tot de gebruiker
+       * "Toch toevoegen" kiest (`allowDuplicate`).
+       */
+      create: (input: PurchaseInvoiceInput, opts?: { allowDuplicate?: boolean }) => {
+        const supplier = input.relationId ? s.relations.get(input.relationId).name : null;
+        const duplicate = opts?.allowDuplicate || !supplier || !Array.isArray(input.lines) ? null
+          : s.quick.duplicateOf({ date: input.invoiceDate, supplierName: supplier, supplierReference: input.supplierReference, grossAmount: expenseLines(input.lines, ACCOUNTS.crediteuren, null).payable });
+        if (duplicate) throw new ValidationError(duplicateEntryMessage(duplicate));
+        return s.purchases.create(input);
+      },
       recordExpense: (input: ExpenseInput) => s.quick.recordExpense(input),
+      /** De vraag vóór het opslaan van een handmatige aankoop: staat hij er al? null = niets gevonden. */
+      duplicateOf: (input: Pick<ExpenseInput, 'date' | 'supplierName' | 'supplierReference' | 'grossAmount'>) => s.quick.duplicateOf(input),
       attach: (name: string, data: Uint8Array) => host.storeAttachment(name, data),
       /**
        * Betaal-QR (EPC) voor een open inkoop (#25). Ander IBAN dan eerder bij deze leverancier:

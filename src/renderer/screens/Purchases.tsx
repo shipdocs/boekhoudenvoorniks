@@ -425,6 +425,22 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
   const [paidWith, setPaidWith] = useState<'bank' | 'kas' | 'prive'>('bank');
   const [jobId, setJobId] = useState<number | null>(null);
   const [businessPct, setBusinessPct] = useState<number | null>(null);
+  // lijkt op een aankoop of bon die er al staat (#224): eerst de vraag, pas na "Toch toevoegen" opslaan
+  const entry = `${supplier.trim()}|${date}|${amount}`;
+  const [duplicate, setDuplicate] = useState<{ entry: string; label: string } | null>(null);
+  const shown = duplicate?.entry === entry ? duplicate : null;
+  const save = async () => {
+    if (!shown) {
+      const found = await run(() => api.purchases.duplicateOf({ date, supplierName: supplier || null, grossAmount: amount! }));
+      if (found === undefined) return;
+      if (found) return setDuplicate({ entry, label: found.label });
+    }
+    const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, paidWith, jobId, allowDuplicate: !!shown, ...(businessPct !== null ? { businessPct } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
+    if (r) {
+      onDone();
+      if (category === 'investering') showInvestmentSaved(investmentInfo(amount!, vat));
+    }
+  };
   return (
     <Modal title="Aankoop toevoegen" onClose={onClose}>
       <div className="grid">
@@ -457,15 +473,15 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
           </Field>
         )}
       </div>
+      {shown && (
+        <div className="notice warn" role="alert" data-testid="mogelijk-dubbel" style={{ marginTop: 16 }}>
+          <strong>Staat deze aankoop er al in?</strong>
+          <div className="small" style={{ marginTop: 4 }}>Lijkt op {shown.label}. Kijk het eerst na bij Aankopen & bonnetjes. Is dit een andere aankoop, kies dan “Toch toevoegen”.</div>
+        </div>
+      )}
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
-        <Button kind="primary" disabled={busy || !amount} onClick={async () => {
-          const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, paidWith, jobId, ...(businessPct !== null ? { businessPct } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
-          if (r) {
-            onDone();
-            if (category === 'investering') showInvestmentSaved(investmentInfo(amount!, vat));
-          }
-        }}>Opslaan</Button>
+        <Button kind="primary" disabled={busy || !amount} onClick={save}>{shown ? 'Toch toevoegen' : 'Opslaan'}</Button>
       </div>
     </Modal>
   );
