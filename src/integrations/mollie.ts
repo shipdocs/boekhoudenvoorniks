@@ -79,6 +79,8 @@ interface MollieSalesInvoiceRecipient {
   givenName?: string;
   familyName?: string;
   organizationName?: string;
+  /** KvK-nummer (alleen bij een bedrijf) */
+  organizationNumber?: string | null;
   vatNumber?: string | null;
   email: string | null;
   streetAndNumber: string | null;
@@ -120,6 +122,7 @@ export function mapMollieSalesInvoice(inv: MollieSalesInvoice): ExternalOrder {
       city: r.city,
       country: r.country,
       vatNumber: r.type === 'business' ? (r.vatNumber ?? null) : null,
+      kvkNumber: r.type === 'business' ? (r.organizationNumber ?? null) : null,
     },
     lines: inv.lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPriceExVat: parseEuro(l.unitPrice.value), vatPercentage: Math.round(parseFloat(l.vatRate)) })),
     paid: inv.status === 'paid',

@@ -461,8 +461,9 @@ describe('na de review: creditnota\'s uit een eerdere versie', () => {
     db.prepare(`UPDATE purchase_invoices SET status = 'betaald' WHERE id IN (?, ?)`).run(credit.id, part.id);
     const index = migrations.findIndex((m) => m.includes(`SET status = 'open' WHERE total < 0`));
     expect(index).toBeGreaterThan(0);
-    db.pragma(`user_version = ${index}`);
     const before = financialSnapshot({ db, s });
+    // alleen deze migratie nog een keer: wat er daarna bij kwam (nieuwe tabellen) staat al in de database
+    db.exec(migrations[index]!);
     const after = setup({ db }).s;
     expect(db.pragma('user_version', { simple: true })).toBe(migrations.length);
     expect(after.purchases.get(credit.id)).toMatchObject({ status: 'open', open_amount: -5000 });

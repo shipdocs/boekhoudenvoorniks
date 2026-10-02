@@ -35,7 +35,7 @@ export interface ExternalOrder {
   externalId: string;
   number: string;
   date: string;
-  customer: { name: string; email: string | null; address: string | null; postcode: string | null; city: string | null; country: string | null; vatNumber: string | null };
+  customer: { name: string; email: string | null; address: string | null; postcode: string | null; city: string | null; country: string | null; vatNumber: string | null; kvkNumber?: string | null };
   lines: { description: string; quantity: number; unitPriceExVat: Cents; vatPercentage: number }[];
   paid: boolean;
   currency: string;

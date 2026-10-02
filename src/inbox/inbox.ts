@@ -10,6 +10,7 @@ import type { QuoteService } from '../documents/quotes';
 import type { JobService } from '../jobs/jobs';
 import { EVIDENCE_QUESTION, OWN_INVOICE_NOTE, type IntakeDocument, type IntakeService } from '../intake/intake';
 import type { OwnCompanyPayments } from '../documents/own-company';
+import type { IntegrationService } from '../integrations/integrations';
 import { ALREADY_PRESENT, VIEW_EXISTING } from '../shared/document-outcome';
 import { PROPOSED_BY_LABEL, type Classification } from '../intake/classify';
 import { futureDateIssue } from '../intake/validation';
@@ -82,7 +83,8 @@ export type TaskKind =
   | 'fx-repair'
   | 'purchase-double'
   | 'mail-online'
-  | 'mail-customer';
+  | 'mail-customer'
+  | 'sale-own-company';
 
 export interface TaskAction {
   id: string;
@@ -117,7 +119,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; sameFirstId?: number; sameSecondId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
+  ref: { relationId?: number; questionId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; sameFirstId?: number; sameSecondId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
     proposal?: string;
     /** waar de vraag "dezelfde aankoop?" of "alleen als bewijs?" over gaat (#179); is dat intussen iets anders, dan gebeurt er niets */
@@ -240,6 +242,12 @@ export class InboxService {
   private own: OwnCompanyPayments | null = null;
   setOwnCompany(own: OwnCompanyPayments): void {
     this.own = own;
+  }
+
+  /** verkopen uit een koppeling die op een keuze wachten (#231) */
+  private integrations: IntegrationService | null = null;
+  setIntegrations(integrations: IntegrationService): void {
+    this.integrations = integrations;
   }
 
   private booked: BookedPayments | null = null;
@@ -978,6 +986,23 @@ export class InboxService {
       }
     }
 
+    // verkoop uit een koppeling aan je eigen bedrijf (#231), bv. een proefabonnement op je eigen dienst:
+    // er is nog niets geboekt. Geen omzet is het voorstel: je verkoopt aan jezelf.
+    for (const q of this.integrations?.questions() ?? []) {
+      tasks.push({
+        key: `sale-own-company-${q.id}`,
+        kind: 'sale-own-company',
+        icon: '🏠',
+        title: `Verkoop aan je eigen bedrijf: ${formatEuro(q.total)}`,
+        question: `${q.label} gaf een betaalde verkoop door van ${formatEuro(q.total)} aan ${q.order.customer.name} (${q.order.number}, ${formatDateNl(q.order.date)}). Dat lijkt je eigen bedrijf, bijvoorbeeld een proefabonnement op je eigen dienst. Aan jezelf verkopen is geen omzet, dus de app heeft nog niets geboekt. Kies wat het was.`,
+        amount: q.total,
+        actions: [{ id: 'neutraal', label: 'Geen omzet', primary: true }, { id: 'verkoop', label: 'Toch een echte verkoop' }],
+        why: `Omdat ${q.signals.join(', ')}.`,
+        priority: 2,
+        ref: { questionId: q.id },
+      });
+    }
+
     for (const o of this.invoices.overpaidCustomers()) {
       const key = `customer-overpaid-${o.relationId}-${o.amount}`;
       if (this.isSkipped(key)) continue;
@@ -1461,6 +1486,8 @@ export class InboxService {
       'vat-check:open': 'Je gaat naar de plek waar je het oplost.',
       'vat-check:overslaan': 'De controle verdwijnt; de aangifte gaat door zoals het nu is.',
       'customer-overpaid:klopt': 'Het te veel betaalde blijft als tegoed van de klant staan.',
+      'sale-own-company:neutraal': 'Geen factuur, geen omzet en geen btw. Het geld dat de betaaldienst hiervoor uitbetaalt, telt als privé-storting.',
+      'sale-own-company:verkoop': 'Wordt een gewone betaalde factuur: telt mee als omzet, met btw.',
       'job-link:ja': 'De kosten tellen mee bij deze klus.',
       'job-link:algemeen': 'Hoort niet bij een klus: gewone bedrijfskosten.',
       'mail-online:bon': 'De mail wordt als bon bewaard; je controleert hem daarna.',
