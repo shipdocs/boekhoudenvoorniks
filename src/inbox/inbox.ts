@@ -411,7 +411,8 @@ export class InboxService {
   /**
    * Mag de gebruiker deze afschrijving zelf indelen, op de rekening `account`? Past er een aankoop sterk bij
    * die er al staat, dan eerst de vraag beantwoorden ("Ja" of "Nee, iets anders"): anders staan de kosten er
-   * twee keer in. Een betaling aan je eigen bedrijf (#230) gaat via de gewone indeling dezelfde weg als via
+   * twee keer in. Naar "weet ik nog niet" ook niet naast een aankoop met dit bedrag die daar al staat (#223).
+   * Een betaling aan je eigen bedrijf (#230) gaat via de gewone indeling dezelfde weg als via
    * de vraag op Vandaag: privé of "weet ik nog niet" neemt de factuur mee (`gedaan`: er is niets meer te
    * boeken). Iets anders kan alleen als er geen factuur van je eigen bedrijf bij hoort.
    */
@@ -426,7 +427,7 @@ export class InboxService {
       const m = this.own.match(t);
       if (m?.document || m?.purchase) throw new ValidationError('Bij deze betaling hoort een factuur van je eigen bedrijf. Kies "Privé" of "Weet ik nog niet": de factuur gaat dan mee.');
     }
-    this.matcher.assertAnswered(t);
+    this.matcher.assertAnswered(t, account);
     return 'door';
   }
 

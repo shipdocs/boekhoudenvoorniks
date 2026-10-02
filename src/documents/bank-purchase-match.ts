@@ -441,13 +441,23 @@ export class BankPurchaseMatcher {
     return this.question(t, index) !== null;
   }
 
-  /** Bij zelf indelen: past er een aankoop sterk bij, dan eerst "Ja" of "Nee, iets anders". */
-  assertAnswered(t: BankTransaction): void {
+  /**
+   * Bij zelf indelen: past er een aankoop sterk bij, dan eerst "Ja" of "Nee, iets anders". Gaat de betaling
+   * naar "weet ik nog niet" (`account`), dan ook bij een aankoop die zwakker past (een andere naam op het
+   * afschrift, zoals bij een betaaldienst) maar zelf ook op "weet ik nog niet" staat, met dit bedrag rond
+   * deze datum: anders staat hetzelfde bedrag daar twee keer en blijft de aankoop als schuld open (#223).
+   */
+  assertAnswered(t: BankTransaction, account?: string): void {
     if (t.status !== 'nieuw') return;
     const q = this.question(t);
-    if (!q?.strong) return;
-    const p = q.fit.purchase;
-    throw new ValidationError(`Deze betaling lijkt bij ${describePurchase(p)} (${formatEuro(p.total)}) te horen. Kies eerst "Ja" of "Nee, iets anders"; anders tellen de kosten twee keer.`);
+    if (!q) return;
+    if (q.strong) {
+      const p = q.fit.purchase;
+      throw new ValidationError(`Deze betaling lijkt bij ${describePurchase(p)} (${formatEuro(p.total)}) te horen. Kies eerst "Ja" of "Nee, iets anders"; anders tellen de kosten twee keer.`);
+    }
+    if (account !== ACCOUNTS.vraagposten) return;
+    const twice = [q.fit, ...q.others].find((f) => f.purchase.question && f.amount !== 'ongeveer' && f.inWindow)?.purchase;
+    if (twice) throw new ValidationError(`Deze betaling kan bij ${describePurchase(twice)} (${formatEuro(twice.total)}) horen, en die staat ook op "weet ik nog niet". Kies eerst "Ja" of "Nee, iets anders"; anders staat het bedrag er twee keer.`);
   }
 
   /**
