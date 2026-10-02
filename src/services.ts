@@ -47,6 +47,8 @@ import { BookedPayments } from './documents/booked-payment';
 import { BankPurchaseMatcher } from './documents/bank-purchase-match';
 import { OwnCompanyPayments } from './documents/own-company';
 import { BookedInfo } from './search/booked-info';
+import { BankFeedService } from './bankfeed/bankfeed';
+import { PontoClient } from './integrations/ponto';
 
 export interface ServiceDeps {
   pdf: PdfRenderer;
@@ -153,6 +155,15 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const checklist = new ChecklistService(db, settings);
   const switchover = new SwitchoverService(db, ledger, settings, relations, bank, vat);
   const xafImport = new XafImportService(db, settings, relations, bank, switchover);
+  // Ponto-bankfeed (WP4A, #246): alleen de basis; de ophaalronde komt in #253. Netwerk gaat via
+  // dezelfde fetch als de koppelingen (niets in de demo of de kopie bij de boekhouder).
+  const bankFeed = new BankFeedService({
+    db,
+    secrets: deps.secrets,
+    bank,
+    settings,
+    client: (creds) => new PontoClient(integrationFetch, creds),
+  });
 
   // alleen-lezen (koppeling voor Claude Code/Codex): niets aanvullen, de app deed dat al bij het openen
   if (!db.readonly) {
@@ -161,7 +172,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, ownCompany, statementFolder, periods, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview };
+  return { db, ownCompany, statementFolder, periods, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed };
 }
 
 export type Services = ReturnType<typeof createServices>;
