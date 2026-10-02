@@ -1,5 +1,9 @@
 # Wijzigingen
 
+## Volgende versie
+
+- **Al betaald, via je bank: de app onthoudt het nu.** Kies je bij een aankoop "Via <je zakelijke rekening>", dan blijft de aankoop open, maar Vandaag zegt niet meer dat hij te laat betaald is zolang het afschrift van die rekening nog niet tot die dag is ingelezen: je ziet "wacht op het afschrift van …". Lees je het afschrift in en komt de betaling erin, dan koppelt de app hem (of vraagt hij of ze bij elkaar horen). Staat hij er na een compleet afschrift niet in, dan telt de aankoop weer als gewoon open. Er wordt niets geboekt, dus ook niets dubbel (#239).
+
 ## 1.1.1 — een oudere versie opent geen administratie van een nieuwere versie meer
 
 Deze versie beschermt je administratie: opent een oudere versie van het programma een administratie die met een nieuwere versie is gemaakt, dan stopt hij eerst en wijzigt hij niets.
