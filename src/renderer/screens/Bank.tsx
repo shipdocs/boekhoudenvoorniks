@@ -683,7 +683,8 @@ export function CategorizeTransaction({ id }: { id: number }) {
       </details>
       <PaymentEvidence txId={t.id} />
 
-      {t.status === 'nieuw' && ownCompany.data && (
+      {/* past er een andere aankoop sterk bij, dan eerst die vraag hieronder; daarna pas privé of "weet ik nog niet" */}
+      {t.status === 'nieuw' && ownCompany.data && !mustAnswer && (
         <div className="notice warn" role="note" data-testid="eigen-bedrijf">
           <strong>Dit is een betaling aan je eigen bedrijf</strong>
           <div className="small" style={{ marginTop: 4 }}>
@@ -728,7 +729,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
           <div className="row" style={{ marginTop: 8 }}>
             <Button small disabled={busy} onClick={async () => {
               // op deze pagina blijven: daarna deel je de betaling zelf in
-              if ((await run(async () => { await api.bank.rejectPurchases(t.id); return true; })) !== undefined) await Promise.all([purchaseQuestion.reload(), suggestions.reload()]);
+              if ((await run(async () => { await api.bank.rejectPurchases(t.id); return true; })) !== undefined) await Promise.all([purchaseQuestion.reload(), suggestions.reload(), ownCompany.reload()]);
             }}>Nee, iets anders</Button>
           </div>
         </div>
