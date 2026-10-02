@@ -688,12 +688,17 @@ export function CategorizeTransaction({ id }: { id: number }) {
           <strong>Dit is een betaling aan je eigen bedrijf</strong>
           <div className="small" style={{ marginTop: 4 }}>
             De naam op het afschrift is je eigen bedrijfsnaam, maar het is geen overboeking naar een eigen rekening. Bijvoorbeeld een betaling voor je eigen dienst. Dat is geen gewone aankoop: geen kosten en geen btw-aftrek.{' '}
-            {ownCompany.data.documentId || ownCompany.data.purchaseId ? 'De factuur van je eigen bedrijf met hetzelfde bedrag gaat in dezelfde keuze mee.' : 'Komt de factuur later binnen, dan hoort die hierbij.'}
+            {ownCompany.data.documentId || ownCompany.data.purchaseId ? 'De factuur van je eigen bedrijf met hetzelfde bedrag gaat in dezelfde keuze mee.' : 'Komt de factuur later binnen, dan hoort die hierbij.'}{' '}
+            Meestal is dit privé: je betaalt jezelf. Bij "weet ik nog niet" blijft het open staan en houdt het je btw-aangifte tegen.
           </div>
           <div className="row" style={{ marginTop: 8 }}>
-            <Button small disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'prive'))}>Privé</Button>
+            <Button small kind="primary" disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'prive'))}>Privé</Button>
             <Button small disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'vraag'))}>Weet ik nog niet: vraag mijn boekhouder</Button>
-            <span className="small muted">Was het toch iets anders? Kies dat dan hieronder.</span>
+            <span className="small muted">
+              {ownCompany.data.documentId || ownCompany.data.purchaseId
+                ? 'Kies je hieronder "Nee, dit was privé" of "Weet ik nog niet", dan gaat de factuur ook mee. Een soort kosten kan niet zolang die factuur erbij hoort.'
+                : 'Was het toch iets anders? Kies dat dan hieronder.'}
+            </span>
           </div>
         </div>
       )}
@@ -707,7 +712,8 @@ export function CategorizeTransaction({ id }: { id: number }) {
                 <div className="small muted">Het bedrag is anders dan deze betaling (<Euro cents={-t.amount} />). Klopt het bedrag van de aankoop niet? Pas dat eerst aan bij Aankopen; daarna kun je hem hier koppelen.</div>
               ) : (
                 <div className="row" style={{ marginTop: 4 }}>
-                  <Button small kind={linked.oneClick ? 'primary' : undefined} disabled={busy} onClick={() => void done(api.bank.linkPurchase(t.id, c.purchaseId))}>Ja, dit is de betaling van die aankoop</Button>
+                  {/* contant betaald staat niet op de bank: het kunnen net zo goed twee aankopen zijn, dus geen voorgestelde keuze */}
+                  <Button small kind={linked.oneClick && !(c.state === 'elders' && c.via !== 'prive') ? 'primary' : undefined} disabled={busy} onClick={() => void done(api.bank.linkPurchase(t.id, c.purchaseId))}>Ja, dit is de betaling van die aankoop</Button>
                 </div>
               )}
             </div>

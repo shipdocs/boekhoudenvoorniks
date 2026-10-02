@@ -1180,7 +1180,10 @@ export function createApi(s: Services, host: HostContext) {
       settleOwnCompany: (txId: number, choice: 'prive' | 'vraag') => s.ownCompany.settle(Number(txId), choice),
       matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(txId, invoiceId),
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(txId, purchaseId),
-      /** zelf indelen; past er een aankoop sterk bij die er al staat, dan eerst die vraag beantwoorden */
+      /**
+       * Zelf indelen; past er een aankoop sterk bij die er al staat, dan eerst die vraag beantwoorden. Een
+       * betaling aan je eigen bedrijf op privé of "weet ik nog niet" gaat samen met de factuur ervan (dan null).
+       */
       book: (txId: number, input: BookToAccountInput) => s.inbox.bookBank(txId, input),
       /**
        * Hoort deze afschrijving bij een aankoop die er al staat (#221)? De aankopen die erbij passen, voor de
@@ -1191,10 +1194,14 @@ export function createApi(s: Services, host: HostContext) {
         const t = s.bank.get(Number(txId));
         const q = t.status === 'nieuw' ? s.bookedPayments.matcher.question(t) : null;
         if (!q) return null;
+        // de factuur van je eigen bedrijf die al bij deze betaling hoort, staat in de melding daarover (#230): niet nog een keer hier
+        const ownPurchase = s.ownCompany.match(t)?.purchase?.id ?? null;
+        const fits = [q.fit, ...q.others].filter((f) => f.purchase.id !== ownPurchase);
+        if (fits.length === 0) return null;
         return {
           strong: q.strong,
           oneClick: q.kind !== 'kijken',
-          candidates: [q.fit, ...q.others].map((f) => ({
+          candidates: fits.map((f) => ({
             purchaseId: f.purchase.id,
             state: f.state,
             via: f.via,
