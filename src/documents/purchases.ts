@@ -13,6 +13,7 @@ export { expenseLines, purchaseVat } from '../core-ledger/rules';
 import { businessPct, expenseLines, purchaseVat, type InkoopPayload, type PurchaseLineInput } from '../core-ledger/rules';
 import { businessShareFor, setBusinessShare } from '../intake/business-share';
 import type { EventService, Evidence } from '../core-ledger/events';
+import { forgetRejections } from './bank-purchase-match';
 
 export interface PurchaseInvoiceInput {
   relationId?: number | null;
@@ -265,6 +266,8 @@ export class PurchaseService {
       this.db.prepare('DELETE FROM document_links WHERE purchase_invoice_id = ?').run(id);
       this.db.prepare(`UPDATE documents SET purchase_invoice_id = NULL, status = CASE WHEN duplicate_of_document_id IS NOT NULL THEN 'genegeerd' ELSE 'controle' END WHERE purchase_invoice_id = ?`).run(id);
       this.db.prepare('DELETE FROM purchase_invoices WHERE id = ?').run(id);
+      // het nummer van deze aankoop komt terug bij een volgende: die mag het "nee" van deze niet erven (#221)
+      forgetRejections(this.db, id);
     });
   }
 

@@ -31,6 +31,7 @@ export interface BookedPaymentFix {
 }
 
 const STALE = 'Deze betaling is intussen anders verwerkt. Kijk het opnieuw na.';
+const TAKEN = 'Bij deze betaling hoort al een andere aankoop of een bon. Eén betaling kan niet bij twee aankopen horen.';
 
 /**
  * Een aankoop en een afschrijving die dezelfde uitgave zijn, maar niet aan elkaar hangen. Bijvoorbeeld een
@@ -58,15 +59,16 @@ export class BookedPayments {
     return e && isDoubleCandidate(e) ? this.matcher.bookedFor(e.probe, e.state, { question: true }) : null;
   }
 
-  /** Afschrijvingen die nog niet verwerkt zijn en bij deze aankoop passen, de dichtstbijzijnde datum eerst. */
-  findPending(p: PurchaseInvoice): BankTransaction[] {
-    const e = this.matcher.entry(p.id);
-    return e ? this.matcher.transactionsFor(e.probe, e.state, 'nieuw') : [];
+  /** "Nee, apart betaald": deze afschrijving is niet de betaling van deze aankoop. Het paar komt nergens meer terug. */
+  reject(purchaseId: number, bankTransactionId: number): void {
+    this.purchases.get(purchaseId);
+    this.matcher.reject({ purchaseId, bankTransactionId });
   }
 
   /**
    * Maakt de aankoop ongedaan ten gunste van de al geboekte betaling: een betaling met privégeld of
-   * contant wordt teruggedraaid, de aankoop vervalt, de bon wordt het bewijsstuk.
+   * contant wordt teruggedraaid, de aankoop vervalt, de bon wordt het bewijsstuk. Eén betaling is één
+   * uitgave: hoort er al een bon of een andere aankoop bij, dan niet nog een.
    */
   merge(purchaseId: number, bankTransactionId: number, date: IsoDate, provenance: 'gebruiker' | 'automatisch' = 'gebruiker'): void {
     tx(this.db, () => {
@@ -74,11 +76,13 @@ export class BookedPayments {
       const t = this.db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(bankTransactionId) as BankTransaction | undefined;
       if (!t || t.status !== 'gematcht' || t.matched_purchase_invoice_id || t.matched_invoice_id) throw new ValidationError(STALE);
       if (this.db.prepare('SELECT 1 FROM bank_transactions WHERE matched_purchase_invoice_id = ?').get(purchaseId)) throw new ValidationError('Deze aankoop is al aan een betaling op de bank gekoppeld');
+      if (this.intake.links.forTarget({ kind: 'bank', id: t.id }).length > 0 || this.matcher.merged(t)) throw new ValidationError(TAKEN);
       for (const e of this.matcher.elsewherePayments(purchaseId)) this.purchases.undoPayment(purchaseId, e.amount, e.id, date);
       // alle bestanden van de aankoop (ook kopieën) gaan mee naar de betaling
       const files = this.intake.links.forTarget({ kind: 'aankoop', id: purchaseId });
       this.purchases.cancel(purchaseId, date);
       this.intake.moveToBank(files, t.id, provenance);
+      this.matcher.markMerged(t);
     });
   }
 
@@ -107,12 +111,16 @@ export class BookedPayments {
       const certain = e.state === 'elders' && paidWith === 'prive' && e.via === 'prive' && match.strong && match.sure && booking === 'kosten' && days >= -SURE_DAYS && days <= (foreign ? BANK_DAYS_AFTER : SURE_DAYS);
       out.push({ purchase, bankTransaction, certain, state: e.state, booking });
     }
-    return out;
+    // twee aankopen bij dezelfde afschrijving: hooguit één ervan is die betaling, dus geen van beide vanzelf
+    const perDebit = new Map<number, number>();
+    for (const c of out) perDebit.set(c.bankTransaction.id, (perDebit.get(c.bankTransaction.id) ?? 0) + 1);
+    return out.map((c) => (perDebit.get(c.bankTransaction.id)! > 1 ? { ...c, certain: false } : c));
   }
 
   /**
    * Herstelt vanzelf wat zeker dubbel staat (zie candidates); de rest wordt een vraag in Vandaag.
    * "Voortaan privé" gaat uit: deze leverancier betaal je van een eigen rekening. In het logboek.
+   * Per afschrijving hooguit één aankoop: `candidates` maakt er dan geen zeker, en `merge` weigert een tweede.
    */
   repair(date: IsoDate): BookedPaymentFix[] {
     const fixes: BookedPaymentFix[] = [];

@@ -1066,13 +1066,18 @@ export class IntakeService {
   /**
    * Een al (zonder document) als kosten geboekte afschrijving die bij deze bon hoort: bedrag, leverancier en
    * datum passen (de gedeelde vergelijking; in een andere munt mag het bedrag binnen de koers afwijken). In
-   * euro's ook zonder naam: precies dit bedrag binnen een paar dagen. Passen er twee, dan is het te
-   * onzeker: dan niets aannemen.
+   * euro's ook zonder naam: precies dit bedrag binnen een paar dagen. Passen er meer van dezelfde
+   * leverancier (elke week hetzelfde bedrag), dan de dichtstbijzijnde: de gebruiker krijgt het als vraag.
+   * Met `sure` alleen als er maar één past (voor wat zonder vraag verder gaat). Bij een creditnota: de
+   * terugbetaling die al geboekt is. Met `forPurchase` (de bon is al een aankoop) telt een betaling waar al
+   * een andere aankoop mee is samengevoegd niet mee; voor een losse bon wel, want die betaling heeft nog geen bon.
    */
-  findBookedBankTransaction(result: DocumentResult, rejected: Set<string> = new Set()): BankTransaction | null {
+  findBookedBankTransaction(result: DocumentResult, rejected: Set<string> = new Set(), opts: { sure?: boolean; forPurchase?: boolean } = {}): BankTransaction | null {
     const probe = probeOfDocument(result);
+    if (!probe) return null;
     // een betaling waarbij deze bon is afgewezen ("Nee, andere aankoop") stellen we niet opnieuw voor
-    return probe ? this.matcher.bookedFor(probe, 'open', { skip: (t) => rejected.has(`bank:${t.id}`) }) : null;
+    const match = this.matcher.bookedMatch(probe, 'open', { skip: (t) => rejected.has(`bank:${t.id}`), merged: !opts.forPurchase });
+    return match && (match.sure || !opts.sure) ? match.transaction : null;
   }
 
   /**

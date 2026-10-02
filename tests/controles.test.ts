@@ -284,7 +284,7 @@ describe('controle "dubbel": aankopen onderling en een aankoop tegenover een los
     booked('2026-08-15', 1500, 'WOLKENDIENST', ACCOUNTS.priveOpnamen); // privé-opname: telt niet
     const check = dubbel()!;
     expect(check).toMatchObject({ blocking: true, count: 1, fingerprint: `b${t.id}-p${p.id}`, items: [{ kind: 'bank', id: t.id, amount: -1500 }, { kind: 'aankoop', id: p.id, amount: -1500 }] });
-    expect(check.detail).toBe('Zelfde leverancier en bedrag rond dezelfde datum, of een betaling die ook los als kosten of op "weet ik nog niet" staat. Controleer of je kosten en btw niet twee keer telt.');
+    expect(check.detail).toBe('Zelfde leverancier en bedrag rond dezelfde datum, of een betaling die ook los als kosten of op "weet ik nog niet" staat. Controleer of je kosten en btw niet twee keer telt. Op Vandaag staat bij zo\'n betaling de vraag "staat deze aankoop dubbel?"; daar kies je ja of nee.');
     // de betaling telt in het tijdvak waarin hij is afgeschreven
     expect(dubbel('2026-Q2')).toBeUndefined();
     // gekoppeld aan de aankoop: niet meer dubbel

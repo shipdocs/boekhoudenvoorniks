@@ -129,6 +129,21 @@ describe('vreemde valuta in bestaande gegevens (#74)', () => {
     expect(s.fxRepair.pendingDocuments()).toEqual([]);
   });
 
+  it('dezelfde afschrijving kan maar bij één aankoop "al geboekt" zijn: de tweede aankoop blijft staan (#221)', () => {
+    const { s } = setup({ fetch: ecb });
+    debit(s, 8312);
+    const t = s.bank.list({ status: 'nieuw' })[0]!;
+    s.bank.bookToAccount(t.id, { account: 'WBedKanSof', vatCode: 'buiten-eu' });
+    const buy = (date: string) => s.purchases.create({ relationId: s.relations.findOrCreateSupplier('Anthropic').id, invoiceDate: date, description: 'Software — Anthropic', lines: [{ account: 'WBedKanSof', netAmount: 9000, vatCode: 'buiten-eu' }] });
+    const a = buy('2026-05-06');
+    const b = buy('2026-05-08');
+    const input = { currency: 'USD', foreignTotal: 9000, euroTotal: 8312, alreadyBookedBankTransactionId: t.id };
+    expect(s.fxRepair.apply(a.id, input).kind).toBe('dubbel');
+    expect(() => s.fxRepair.apply(b.id, input)).toThrow('Bij deze betaling hoort al een andere aankoop. Eén betaling kan niet bij twee aankopen horen.');
+    expect(s.purchases.list().map((p) => p.id)).toEqual([b.id]);
+    expect(s.ledger.balance('WBedKanSof')).toBe(8312 + 9000);
+  });
+
   it('nog geen betaling: ECB-koers; komt de betaling later, dan een klein koersverschil', async () => {
     const { s } = setup({ fetch: ecb });
     const pid = await oldPurchase(s);

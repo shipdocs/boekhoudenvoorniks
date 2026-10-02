@@ -33,6 +33,17 @@ export interface Pair {
 /** De sleutel van de vraag "staat deze aankoop dubbel?"; een "nee" op dit paar staat zo in `task_skips`. */
 export const pairKey = (p: Pair): string => `dubbel-${p.purchaseId}-${p.bankTransactionId}`;
 
+/** Bewijs bij de boeking van een afschrijving waar een aankoop mee is samengevoegd (zie `markMerged`). */
+const MERGED_NOTE = 'samengevoegd';
+
+/**
+ * Een aankoop gaat weg: wat de gebruiker over die aankoop afwees, gaat mee. Het nummer van een aankoop
+ * wordt in de database opnieuw gebruikt; anders zou de volgende aankoop het "nee" van de vorige erven.
+ */
+export function forgetRejections(db: Db, purchaseId: number): void {
+  db.prepare(`DELETE FROM task_skips WHERE task_key LIKE ?`).run(`dubbel-${purchaseId}-%`);
+}
+
 /** Wat de vergelijking van een aankoop nodig heeft. */
 export interface PurchaseProbe {
   id: number;
@@ -106,7 +117,7 @@ function compact(s: string | null | undefined): string {
   return (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-/** Staat dit (factuur)nummer in de tekst van de bank? */
+/** Staat dit (factuur)nummer in de tekst van de bank? Voor een eigen factuurnummer; ruim, over leestekens heen. */
 export function mentionsNumber(haystack: string, number: string | null): boolean {
   if (!number) return false;
   const n = compact(number);
@@ -118,6 +129,28 @@ export function mentionsNumber(haystack: string, number: string | null): boolean
   const year = /(\d{4})/.exec(number)?.[1];
   if (seq && seq.length >= 2 && year) return new RegExp(`${year}\\D{0,3}0*${seq}(?!\\d)`).test(haystack.toLowerCase());
   return false;
+}
+
+/**
+ * Staat het nummer van de bon of factuur van een leverancier in de tekst van de bank? Strenger dan bij een
+ * eigen factuurnummer, want hier hangt aan of een betaling en een aankoop bij elkaar horen. Het nummer
+ * moet er als los nummer staan: niet samengetrokken over leestekens heen ("14:21" is niet bon "1421") en
+ * niet midden in een langer nummer. Alleen cijfers telt pas vanaf vijf: een kort bonnummer staat te vaak
+ * toevallig in een omschrijving (een tijd, een pasnummer).
+ */
+export function mentionsReference(haystack: string, number: string | null): boolean {
+  if (!number) return false;
+  const parts = number.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const n = parts.join('');
+  if (n.length < 3 || (/^\d+$/.test(n) && n.length < 5)) return false;
+  const text = haystack.toLowerCase();
+  // ervoor en erna geen teken van dezelfde soort: "NR2026-0042" telt, "12026-0042" en "2026-00421" niet
+  const edge = (c: string) => (/\d/.test(c) ? '\\d' : '[a-z]');
+  if (new RegExp(`(?<!${edge(n[0]!)})${parts.join('[^a-z0-9]{0,2}')}(?!${edge(n[n.length - 1]!)})`).test(text)) return true;
+  // "2026-42" bij "2026-0042": ook het volgnummer zonder voorloopnullen, achter het jaar
+  const seq = /(\d+)$/.exec(number)?.[1]?.replace(/^0+/, '');
+  const year = /(\d{4})/.exec(number)?.[1];
+  return Boolean(seq && seq.length >= 2 && year && new RegExp(`(?<!\\d)${year}\\D{0,3}0*${seq}(?!\\d)`).test(text));
 }
 
 /** De naam van de leverancier: de relatie, anders het deel na " — " in de omschrijving ("Software — Wolkendienst"). */
@@ -149,15 +182,15 @@ export function sameSupplierName(a: string, b: string): boolean {
 
 /**
  * Alleen op de naam. Een afschrift van een kaart of betaaldienst zet de winkel vaak achter een
- * voorvoegsel of in de omschrijving ("Card Payment: Printhuis"): dan telt het eerste woord van de naam
- * (minstens vijf letters) als het als heel woord in de tekst van de bank staat.
+ * voorvoegsel of in de omschrijving ("Card Payment: Printhuis", "PAYPAL *MIRO"): dan telt het eerste woord
+ * van de naam (minstens vier letters) als het als heel woord in de tekst van de bank staat.
  */
 export function supplierNameFit(t: Pick<Debit, 'counter_name' | 'description'>, p: Pick<PurchaseProbe, 'relation_name' | 'description'>): SupplierFit {
   const name = purchaseSupplierName(p);
   if (!name) return 'onbekend';
   if (t.counter_name && sameSupplierName(name, t.counter_name)) return 'ja';
   const first = supplierKey(name).split(' ')[0] ?? '';
-  if (first.length >= 5 && !STOP_WORDS.has(first)) {
+  if (first.length >= 4 && !STOP_WORDS.has(first)) {
     const words = `${t.counter_name ?? ''} ${t.description}`.toLowerCase().split(/[^a-z]+/);
     if (words.includes(first)) return 'ja';
   }
@@ -166,7 +199,7 @@ export function supplierNameFit(t: Pick<Debit, 'counter_name' | 'description'>, 
 
 /** Past de leverancier? Het factuurnummer in de omschrijving of het kenmerk van de bank is ook genoeg. */
 export function supplierFit(t: Debit, p: Pick<PurchaseProbe, 'relation_name' | 'description' | 'supplier_reference'>): SupplierFit {
-  if (mentionsNumber(`${t.description} ${t.reference ?? ''}`, p.supplier_reference)) return 'ja';
+  if (mentionsReference(`${t.description} ${t.reference ?? ''}`, p.supplier_reference)) return 'ja';
   return supplierNameFit(t, p);
 }
 
@@ -211,14 +244,16 @@ export function fitOf(t: Debit, p: PurchaseProbe, state: PurchaseState): Fit | n
   const amount = amountFit(-t.amount, dueOf(p, state), p.currency);
   if (!amount) return null;
   const supplier = supplierFit(t, p);
-  const inWindow = mentionsNumber(`${t.description} ${t.reference ?? ''}`, p.supplier_reference) || dateFits(p, t.transaction_date);
+  const inWindow = mentionsReference(`${t.description} ${t.reference ?? ''}`, p.supplier_reference) || dateFits(p, t.transaction_date);
   const base = { amount, supplier, inWindow, days: diffDays(p.invoice_date, t.transaction_date) };
   if (amount !== 'ongeveer' && supplier === 'ja' && inWindow) return { ...base, strength: 'sterk' };
   if (state !== 'open') return null;
   const weak =
     amount === 'gelijk' || // zoals het altijd al was: nooit vanzelf kosten boeken naast een open aankoop met dit bedrag
     (amount === 'koers' && supplier === 'ja') || // de datum is verkeerd gelezen, of het is veel later betaald
-    (amount === 'koers' && supplier === 'onbekend' && inWindow) ||
+    // binnen de koers en rond de datum, ook met een andere naam op het afschrift (een betaaldienst): liever
+    // een vraag te veel dan de betaling vanzelf als losse kosten naast de aankoop
+    (amount === 'koers' && inWindow) ||
     (amount === 'ongeveer' && supplier === 'ja' && inWindow);
   return weak ? { ...base, strength: 'zwak' } : null;
 }
@@ -262,10 +297,23 @@ const PROBE_COLUMNS = `p.id, p.relation_id, r.name AS relation_name, p.descripti
        EXISTS (SELECT 1 FROM purchase_invoice_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.purchase_invoice_id = p.id AND a.rgs_code = @vraag) AS question,
        EXISTS (SELECT 1 FROM bank_transactions b WHERE b.matched_purchase_invoice_id = p.id) AS banked`;
 
+/** Een afschrijving waar al een aankoop mee is samengevoegd: dat staat als bewijs bij de boeking ervan. */
+const MERGED_SQL = `SELECT 1 FROM journal_entries je JOIN event_evidence ev ON ev.event_id = je.event_id WHERE je.id = bank_transactions.matched_journal_entry_id AND ev.kind = 'inkoop' AND ev.note = '${MERGED_NOTE}'`;
+
 type ProbeRow = Omit<PurchaseProbe, 'question'> & { question: number; banked: number };
 type ElsewherePayment = { id: number; amount: Cents; via: 'prive' | 'kas' };
-/** `question`: ook wat op "weet ik nog niet" staat; `skip`: betalingen die niet meedoen; `pool`/`rejected`: al geladen, bij een lus over veel aankopen. */
-type BookedOptions = { question?: boolean; skip?: (t: BankTransaction) => boolean; pool?: BankTransaction[]; rejected?: Set<string> };
+/**
+ * `question`: ook wat op "weet ik nog niet" staat; `skip`: betalingen die niet meedoen; `pool`/`rejected`:
+ * al geladen, bij een lus over veel aankopen; `merged`: ook een betaling waar al een aankoop mee is
+ * samengevoegd (voor een losse bon: die betaling heeft nog geen bon).
+ */
+type BookedOptions = { question?: boolean; skip?: (t: BankTransaction) => boolean; pool?: BankTransaction[]; rejected?: Set<string>; merged?: boolean };
+/** `strong`: bedrag, leverancier en datum passen; `sure`: er is geen andere die ook past (alleen dan mag er iets vanzelf). */
+export interface BookedMatch {
+  transaction: BankTransaction;
+  strong: boolean;
+  sure: boolean;
+}
 
 const closest = <T extends { days: number }>(a: T, b: T) => Math.abs(a.days) - Math.abs(b.days);
 
@@ -401,19 +449,37 @@ export class BankPurchaseMatcher {
   /**
    * Afschrijvingen die los geboekt zijn als kosten, zonder factuur, aankoop of bon eraan (zoals een
    * abonnement dat de app vanzelf verwerkte). Met `question` ook wat op "weet ik nog niet" staat. Een
-   * privé-opname, een eigen overboeking en een genegeerde of dubbele regel tellen niet.
+   * privé-opname, een eigen overboeking en een genegeerde of dubbele regel tellen niet. Een betaling waar
+   * al een aankoop mee is samengevoegd ook niet (één betaling is één uitgave), behalve met `merged`.
    */
-  bookedDebits(opts: { question?: boolean; from?: IsoDate; to?: IsoDate } = {}): BankTransaction[] {
+  bookedDebits(opts: { question?: boolean; from?: IsoDate; to?: IsoDate; merged?: boolean } = {}): BankTransaction[] {
     return this.db
       .prepare(
         `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount < 0 AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
            ${opts.from ? 'AND transaction_date >= @from' : ''} ${opts.to ? 'AND transaction_date <= @to' : ''}
            AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.bank_transaction_id = bank_transactions.id)
+           ${opts.merged ? '' : `AND NOT EXISTS (${MERGED_SQL})`}
            AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
                         WHERE l.journal_entry_id = bank_transactions.matched_journal_entry_id AND (a.category = 'kosten' OR a.rgs_code = @vraag))
          ORDER BY id`,
       )
       .all({ vraag: opts.question ? ACCOUNTS.vraagposten : '', ...(opts.from ? { from: opts.from } : {}), ...(opts.to ? { to: opts.to } : {}) }) as BankTransaction[];
+  }
+
+  /** Is met deze los geboekte afschrijving al een aankoop samengevoegd? Dan kan er geen tweede bij. */
+  merged(t: Pick<BankTransaction, 'id'>): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM bank_transactions WHERE id = ? AND EXISTS (${MERGED_SQL})`).get(t.id);
+  }
+
+  /**
+   * Legt vast dat een aankoop is samengevoegd met deze afschrijving (de aankoop verviel, de betaling bleef
+   * staan). Het staat als bewijs bij de boeking van de betaling: het gaat mee als de gebruiker een andere
+   * categorie kiest, en vervalt als hij de verwerking ongedaan maakt.
+   */
+  markMerged(t: Pick<BankTransaction, 'matched_journal_entry_id'>): void {
+    this.db
+      .prepare(`INSERT INTO event_evidence (event_id, kind, ref_id, note) SELECT event_id, 'inkoop', NULL, ? FROM journal_entries WHERE id = ? AND event_id IS NOT NULL`)
+      .run(MERGED_NOTE, t.matched_journal_entry_id);
   }
 
   /** Waar een los geboekte afschrijving op staat: kosten, "weet ik nog niet", of iets anders (null). */
@@ -428,41 +494,50 @@ export class BankPurchaseMatcher {
     return row.kosten ? 'kosten' : row.vraag ? 'vraag' : null;
   }
 
-  private newDebits(): BankTransaction[] {
-    return this.db.prepare(`SELECT * FROM bank_transactions WHERE status = 'nieuw' AND amount < 0 AND duplicate_of IS NULL ORDER BY id`).all() as BankTransaction[];
-  }
-
   /**
-   * Afschrijvingen die sterk bij deze aankoop passen, de dichtstbijzijnde datum eerst: nieuwe (nog niet
-   * verwerkt), of al los geboekt. `pool`: de afschrijvingen om in te zoeken, als die al geladen zijn.
+   * De al los geboekte afschrijving die bij deze aankoop (of bon) hoort. Precies één sterke: die. Passen er
+   * meer (elke week hetzelfde bedrag bij dezelfde winkel): de dichtstbijzijnde, als vraag. Geen sterke, in
+   * euro's: precies één met hetzelfde bedrag binnen een paar dagen, ook zonder naam (zoals een
+   * pinbetaling); twee is twijfel, dan niets. `sure`: de enige die past; alleen dan mag er iets vanzelf.
    */
-  transactionsFor(p: PurchaseProbe, state: PurchaseState, which: 'nieuw' | 'geboekt', opts: { question?: boolean; pool?: BankTransaction[]; rejected?: Set<string> } = {}): BankTransaction[] {
-    const rows = opts.pool ?? (which === 'nieuw' ? this.newDebits() : this.bookedDebits({ question: opts.question }));
-    const rejected = opts.rejected ?? this.rejections();
-    return rows
-      .map((t) => ({ t, fit: fitOf(t, p, state) }))
-      .filter((x): x is { t: BankTransaction; fit: Fit } => x.fit?.strength === 'sterk' && !rejected.has(pairKey({ purchaseId: p.id, bankTransactionId: x.t.id })))
-      .sort((a, b) => closest(a.fit, b.fit) || a.t.id - b.t.id)
-      .map((x) => x.t);
-  }
-
-  /**
-   * De al los geboekte afschrijving die bij deze aankoop (of bon) hoort. Precies één sterke: die. Anders,
-   * in euro's: precies één met hetzelfde bedrag binnen een paar dagen, ook zonder naam (zoals een
-   * pinbetaling). Twee die passen is twijfel: dan niets. `sure`: ook de enige binnen die paar dagen (in
-   * een andere munt: de enige sterke); alleen dan mag er iets vanzelf.
-   */
-  bookedMatch(p: PurchaseProbe, state: PurchaseState, opts: BookedOptions = {}): { transaction: BankTransaction; strong: boolean; sure: boolean } | null {
+  bookedMatch(p: PurchaseProbe, state: PurchaseState, opts: BookedOptions = {}): BookedMatch | null {
+    if (p.total < 0) return this.bookedRefund(p, opts);
     const rejected = opts.rejected ?? this.rejections();
     // zonder factuurnummer kan alleen een betaling binnen het venster passen: dan niet alle betalingen ophalen
-    const rows = (opts.pool ?? this.bookedDebits({ question: opts.question, ...(p.supplier_reference ? {} : paymentWindow(p)) })).filter((t) => !opts.skip?.(t) && !rejected.has(pairKey({ purchaseId: p.id, bankTransactionId: t.id })));
-    const strong = rows.filter((t) => fitOf(t, p, state)?.strength === 'sterk');
-    if (strong.length > 1) return null;
+    const rows = (opts.pool ?? this.bookedDebits({ question: opts.question, merged: opts.merged, ...(p.supplier_reference ? {} : paymentWindow(p)) })).filter((t) => !opts.skip?.(t) && !rejected.has(pairKey({ purchaseId: p.id, bankTransactionId: t.id })));
+    const strong = rows
+      .map((t) => ({ t, fit: fitOf(t, p, state) }))
+      .filter((x): x is { t: BankTransaction; fit: Fit } => x.fit?.strength === 'sterk')
+      .sort((a, b) => closest(a.fit, b.fit) || a.t.id - b.t.id)
+      .map((x) => x.t);
+    // meer die passen: nooit zeker, maar wel een vraag (over de dichtstbijzijnde); na "nee" komt de volgende
+    if (strong.length > 1) return { transaction: strong[0]!, strong: true, sure: false };
     const foreign = Boolean(p.currency && p.currency !== 'EUR');
     const due = dueOf(p, state);
     const near = foreign ? [] : rows.filter((t) => -t.amount === due && Math.abs(diffDays(p.invoice_date, t.transaction_date)) <= SURE_DAYS);
     if (strong.length === 1) return { transaction: strong[0]!, strong: true, sure: foreign || (near.length === 1 && near[0]!.id === strong[0]!.id) };
     return near.length === 1 ? { transaction: near[0]!, strong: false, sure: true } : null;
+  }
+
+  /**
+   * Bij een creditnota: de terugbetaling die al los op een kostenrekening geboekt is, met precies dat
+   * bedrag binnen een paar dagen en zonder bon eraan. Twee die passen is twijfel: dan niets.
+   */
+  private bookedRefund(p: PurchaseProbe, opts: BookedOptions): BookedMatch | null {
+    const rejected = opts.rejected ?? this.rejections();
+    const rows = (
+      this.db
+        .prepare(
+          `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount = @amount AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
+             AND transaction_date BETWEEN @from AND @to
+             AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.bank_transaction_id = bank_transactions.id)
+             AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+                          WHERE l.journal_entry_id = bank_transactions.matched_journal_entry_id AND a.category = 'kosten')
+           ORDER BY id`,
+        )
+        .all({ amount: -p.total, from: addDays(p.invoice_date, -SURE_DAYS), to: addDays(p.invoice_date, SURE_DAYS) }) as BankTransaction[]
+    ).filter((t) => !opts.skip?.(t) && !rejected.has(pairKey({ purchaseId: p.id, bankTransactionId: t.id })));
+    return rows.length === 1 ? { transaction: rows[0]!, strong: false, sure: false } : null;
   }
 
   /** Alleen de afschrijving uit `bookedMatch`, of null. */

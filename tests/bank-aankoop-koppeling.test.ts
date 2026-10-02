@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { financialSnapshot, setup } from './helpers';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { createApi, type HostContext } from '../src/main/api';
-import { amountFit, dateFits, fitOf, sameSupplierName, supplierFit, type Debit, type PurchaseProbe } from '../src/documents/bank-purchase-match';
+import { amountFit, dateFits, fitOf, mentionsReference, sameSupplierName, supplierFit, type Debit, type PurchaseProbe } from '../src/documents/bank-purchase-match';
 import type { DocumentResult } from '../src/intake/types';
 import type { OcrProvider } from '../src/intake/ocr';
 import { ValidationError } from '../src/shared/validation';
@@ -103,7 +103,9 @@ describe('de regels van de vergelijking', () => {
     expect(fitOf(line({}), probe({}), 'open')).toMatchObject({ amount: 'gelijk', supplier: 'ja', strength: 'sterk' });
     expect(fitOf(line({ amount: -1596 }), probe({ currency: 'USD' }), 'open')).toMatchObject({ amount: 'koers', strength: 'sterk' });
     expect(fitOf(line({ counter_name: 'Betaaldienst Snelpay', description: 'order 12' }), probe({}), 'open')).toMatchObject({ supplier: 'nee', strength: 'zwak' });
-    expect(fitOf(line({ amount: -1596, counter_name: 'Betaaldienst Snelpay', description: 'order 12' }), probe({ currency: 'USD' }), 'open')).toBeNull();
+    // binnen de koers, rond de datum, maar een andere naam (een betaaldienst): genoeg om het te vragen
+    expect(fitOf(line({ amount: -1596, counter_name: 'Betaaldienst Snelpay', description: 'order 12' }), probe({ currency: 'USD' }), 'open')).toMatchObject({ amount: 'koers', supplier: 'nee', strength: 'zwak' });
+    expect(fitOf(line({ amount: -1596, counter_name: 'Betaaldienst Snelpay', description: 'order 12', transaction_date: '2026-09-25' }), probe({ currency: 'USD' }), 'open')).toBeNull();
     expect(fitOf(line({ amount: -1596, counter_name: null, description: 'kaartbetaling' }), probe({ currency: 'USD' }), 'open')).toMatchObject({ supplier: 'onbekend', strength: 'zwak' });
     expect(fitOf(line({ amount: -1596 }), probe({}), 'open')).toMatchObject({ amount: 'ongeveer', strength: 'zwak' });
     // al privé of contant betaald: alleen als alles past
@@ -234,7 +236,7 @@ describe('de vraag bij een nieuwe afschrijving', () => {
     expect(status(s, t.id)).toBe('nieuw');
   });
 
-  it('"Nee": het paar komt niet meer terug, ook niet als voorstel, en daarna mag de leveranciersregel boeken', async () => {
+  it('"Nee": de app vraagt het niet meer en koppelt het paar niet vanzelf; daarna mag de leveranciersregel boeken', async () => {
     const { s, api } = world();
     autoRule(s, 'WOLKENDIENST');
     const p = buy(s, 'Wolkendienst Inc.', '2026-09-01', 1500);
@@ -402,5 +404,298 @@ describe('een bon tegenover een nog niet verwerkte afschrijving (findBankMatch)'
     expect(s.intake.findBankMatch(bon('2026-09-08', null))?.id).toBe(t.id);
     expect(s.intake.findBankMatch(bon('2026-09-28', null))?.id).toBe(t.id);
     expect(s.intake.findBankMatch(bon('2026-09-29', 'Printhuis'))).toBeNull(); // meer dan tien dagen vóór de bon betaald
+  });
+});
+
+/** Een afschrijving die al los geboekt is (zoals de leveranciersregel deed), zonder aankoop of bon eraan. */
+const booked = (s: S, date: string, amount: number, counterName: string, opts: { account?: string; description?: string } = {}) => {
+  const t = debit(s, date, amount, counterName, opts.description);
+  s.bank.bookToAccount(t.id, { account: opts.account ?? SOFTWARE, vatCode: 'geen' });
+  return s.bank.get(t.id);
+};
+
+/** Een gelezen bon, zoals hij uit het inlezen komt. */
+const receipt = (supplier: string, date: string, total: number, invoiceNumber: string | null = null): DocumentResult =>
+  ({
+    total: { value: total, confidence: 1, source: 'handmatig' },
+    invoiceDate: { value: date, confidence: 1, source: 'handmatig' },
+    supplier: { value: supplier, confidence: 1, source: 'handmatig' },
+    invoiceNumber: invoiceNumber ? { value: invoiceNumber, confidence: 1, source: 'handmatig' } : null,
+    supplierIban: null,
+  }) as unknown as DocumentResult;
+
+const doubleTasks = (s: S) => s.inbox.tasks('2026-09-28').filter((x) => x.kind === 'purchase-double');
+
+describe('meer betalingen of meer aankopen die bij elkaar passen', () => {
+  it('elke week hetzelfde bedrag, beide al als kosten geboekt: de bon hoort bij de betaling van die dag en de app vraagt het', () => {
+    const { s } = world();
+    booked(s, '2026-09-01', 980, 'Spoorkaartjes');
+    const second = booked(s, '2026-09-08', 980, 'Spoorkaartjes');
+    expect(s.intake.findBookedBankTransaction(receipt('Spoorkaartjes', '2026-09-08', 980))?.id).toBe(second.id);
+    // als aankoop ingevoerd: de vraag "staat deze aankoop dubbel?", nooit vanzelf
+    const p = buy(s, 'Spoorkaartjes', '2026-09-08', 980);
+    expect(s.bookedPayments.find(s.purchases.get(p.id))?.id).toBe(second.id);
+    expect(s.bookedPayments.candidates()).toMatchObject([{ purchase: { id: p.id }, bankTransaction: { id: second.id }, certain: false }]);
+    expect(doubleTasks(s)).toMatchObject([{ ref: { purchaseId: p.id, bankTransactionId: second.id } }]);
+  });
+
+  it('twee betalingen die bij één open aankoop passen: de vraag gaat over de dichtstbijzijnde; na "nee" over de andere', async () => {
+    const { s, api } = world();
+    const near = booked(s, '2026-08-03', 1500, 'WOLKENDIENST');
+    const far = booked(s, '2026-08-17', 1500, 'WOLKENDIENST');
+    const p = buy(s, 'Wolkendienst Inc.', '2026-08-01', 1500);
+    const check = () => s.vat.checks('2026-Q3').find((c) => c.key === 'dubbel');
+    expect(check()).toMatchObject({ count: 2 });
+    expect(check()!.detail).toContain('Op Vandaag staat bij zo\'n betaling de vraag "staat deze aankoop dubbel?"');
+    expect(api.purchases.bookedPayment(p.id)).toMatchObject({ bankTransactionId: near.id });
+    expect(doubleTasks(s)).toMatchObject([{ ref: { purchaseId: p.id, bankTransactionId: near.id } }]);
+    await api.home.act(doubleTasks(s)[0]!, 'nee');
+    expect(doubleTasks(s)).toMatchObject([{ ref: { purchaseId: p.id, bankTransactionId: far.id } }]);
+    await api.home.act(doubleTasks(s)[0]!, 'nee');
+    expect(doubleTasks(s)).toEqual([]);
+    expect(check()).toBeUndefined();
+  });
+
+  it('voortaan altijd privé bij de ene aankoop: de andere, waarvan de betaling al op de bank staat, blijft open', () => {
+    const { s } = world();
+    booked(s, '2026-09-03', 5000, 'Advertentiehuis');
+    const second = booked(s, '2026-09-10', 5000, 'Advertentiehuis');
+    const a = buy(s, 'Advertentiehuis', '2026-09-03', 5000);
+    const b = buy(s, 'Advertentiehuis', '2026-09-10', 5000);
+    const r = s.quick.payPurchaseWith(a.id, 'prive', { always: true });
+    expect(r.skipped.map((x) => x.id)).toEqual([b.id]);
+    expect(s.purchases.get(b.id).status).toBe('open');
+    expect(s.relations.get(a.relation_id!).paid_with).toBeNull();
+    expect(s.bookedPayments.candidates().map((c) => [c.purchase.id, c.bankTransaction.id, c.certain])).toContainEqual([b.id, second.id, false]);
+  });
+
+  it('twee nieuwe betalingen die bij dezelfde open aankoop passen: geen van beide met één klik, en niet in "alle koppelen"', () => {
+    const { s } = world();
+    const p = buy(s, 'Wolkendienst', '2026-09-01', 1000);
+    const august = debit(s, '2026-08-25', 1000, 'Wolkendienst');
+    const september = debit(s, '2026-09-05', 1000, 'Wolkendienst');
+    for (const t of [august, september]) {
+      const [task] = bankTasks(s, t.id);
+      expect(task).toMatchObject({ kind: 'bank-purchase', ref: { bankTransactionId: t.id, purchaseId: p.id } });
+      expect(task!.actions.map((a) => a.id)).toEqual(['open', 'nee']);
+      expect(task!.group).toBeUndefined();
+      expect(task!.question).toBe(`Er staat nog een open aankoop bij Wolkendienst van 1 september 2026 van ${formatEuro(1000)}. Er zijn meer betalingen die daarbij passen. Is het deze?`);
+    }
+  });
+
+  it('een aankoop die intussen betaald is, kan niet nog een keer betaald worden: "Klopt" op een oude vraag boekt niets', async () => {
+    const ctx = world();
+    const { s, api } = ctx;
+    const p = buy(s, 'Wolkendienst', '2026-09-01', 1000);
+    const first = debit(s, '2026-09-05', 1000, 'Wolkendienst');
+    const [task] = bankTasks(s, first.id);
+    expect(task!.actions.map((a) => a.id)).toEqual(['klopt', 'nee']);
+    const second = debit(s, '2026-09-06', 1000, 'Wolkendienst', 'Wolkendienst nog een keer');
+    s.bank.matchPurchase(second.id, p.id);
+    const before = financialSnapshot(ctx);
+    await expect(api.home.act(task!, 'klopt')).rejects.toThrow('Deze aankoop staat al op betaald');
+    expect(() => api.bank.matchPurchase(first.id, p.id)).toThrow(ValidationError);
+    expect(financialSnapshot(ctx)).toEqual(before);
+    expect(s.purchases.get(p.id)).toMatchObject({ amount_paid: 1000, status: 'betaald' });
+    // meer betalen dan er open staat kan ook niet; een deel betalen wel
+    const q = buy(s, 'Printhuis', '2026-09-01', 4000);
+    const tooMuch = debit(s, '2026-09-02', 5000, 'Printhuis');
+    expect(() => s.bank.matchPurchase(tooMuch.id, q.id)).toThrow(`Deze betaling is hoger dan wat er bij deze aankoop nog open staat (${formatEuro(4000)}).`);
+    const part = debit(s, '2026-09-03', 1500, 'Printhuis');
+    s.bank.matchPurchase(part.id, q.id);
+    expect(s.purchases.get(q.id)).toMatchObject({ amount_paid: 1500, status: 'open' });
+  });
+});
+
+describe('een andere naam op het afschrift', () => {
+  it('aankoop in dollars, de afschrijving binnen de koers van een betaaldienst: niet vanzelf geboekt, wel de vraag', () => {
+    const { s } = world();
+    autoRule(s, 'PAYPRO GLOBAL');
+    const p = buyUsd(s, 'Wolkendienst Inc.', '2026-08-01');
+    const t = debit(s, '2026-08-02', 1596, 'PAYPRO GLOBAL', 'PAYPRO*WOLK 4421');
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    expect(status(s, t.id)).toBe('nieuw');
+    expect(s.ledger.balance(SOFTWARE)).toBe(1577);
+    const [task] = bankTasks(s, t.id);
+    expect(task).toMatchObject({ kind: 'bank-purchase', ref: { purchaseId: p.id } });
+    expect(task!.actions.map((a) => a.id)).toEqual(['klopt', 'nee']);
+    expect(task!.group).toBeUndefined();
+    // ver buiten het venster en een andere naam: dat is toeval
+    const later = debit(s, '2026-09-25', 1596, 'PAYPRO GLOBAL', 'PAYPRO*IETS 9');
+    expect(s.bookedPayments.matcher.question(later)).toBeNull();
+  });
+
+  it('een korte naam achter een voorvoegsel van de kaart of betaaldienst ("Card Payment: Miro")', () => {
+    const miro = { relation_name: 'Miro', description: 'Software — Miro', supplier_reference: null };
+    expect(supplierFit(line({ counter_name: 'Card Payment: Miro', description: 'kaartbetaling' }), miro)).toBe('ja');
+    expect(supplierFit(line({ counter_name: 'PAYPAL *MIRO', description: 'PAYPAL' }), miro)).toBe('ja');
+    expect(supplierFit(line({ counter_name: 'Card Payment: Mirox', description: 'kaartbetaling' }), miro)).toBe('nee');
+    // drie letters is te kort om als los woord iets te zeggen
+    expect(supplierFit(line({ counter_name: 'Snelpay Kassa', description: 'BEA pas 012' }), { relation_name: 'Pas Reform', description: '', supplier_reference: null })).toBe('nee');
+    const { s } = world();
+    const p = buyUsd(s, 'Miro', '2026-08-01');
+    const t = debit(s, '2026-08-03', 1596, 'Card Payment: Miro');
+    const [task] = bankTasks(s, t.id);
+    expect(task).toMatchObject({ kind: 'bank-purchase', ref: { purchaseId: p.id }, group: { key: 'bank-purchase' } });
+    expect(task!.why).toBe('Omdat het bedrag klopt op de koers na, de naam van de leverancier past.');
+  });
+
+  it('alleen het bedrag is gelijk (andere naam, datum ver weg): wel de vraag, maar niet in "alle koppelen"', () => {
+    const { s } = world();
+    const p = buy(s, 'Printhuis', '2026-03-03', 5000);
+    const t = debit(s, '2026-09-10', 5000, 'Tankstation Zuid');
+    const [task] = bankTasks(s, t.id);
+    expect(task).toMatchObject({ kind: 'bank-purchase', ref: { purchaseId: p.id } });
+    expect(task!.actions.map((a) => a.id)).toEqual(['klopt', 'nee']);
+    expect(task!.question).toContain('De datums liggen ver uit elkaar; kijk of het klopt.');
+    expect(task!.group).toBeUndefined();
+  });
+
+  it('een terugbetaling aan een klant met een open creditfactuur gaat vóór een aankoop waarvan alleen het bedrag gelijk is', () => {
+    const { s, klant } = world();
+    const original = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-01', lines: [{ description: 'Stucwerk', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
+    s.invoices.registerPayment(original.id, { amount: original.total!, date: '2026-09-03' });
+    const credit = s.invoices.finalize(s.invoices.createCreditNote(original.id).id);
+    buy(s, 'Printhuis', '2026-03-01', 12100);
+    const t = debit(s, '2026-09-20', 12100, klant.name, 'terugbetaling');
+    expect(bankTasks(s, t.id)).toMatchObject([{ kind: 'bank-invoice', ref: { bankTransactionId: t.id, invoiceId: credit.id } }]);
+    // past de aankoop sterk (zelfde leverancier, bedrag en datum), dan eerst die vraag
+    const strong = buy(s, 'Kantoorhal', '2026-09-19', 12100);
+    const u = debit(s, '2026-09-21', 12100, 'Kantoorhal');
+    expect(bankTasks(s, u.id)).toMatchObject([{ kind: 'bank-purchase', ref: { purchaseId: strong.id } }]);
+  });
+});
+
+describe('het nummer van de bon in de omschrijving van de bank', () => {
+  it('telt alleen als los nummer, niet samengetrokken over leestekens heen; alleen cijfers vanaf vijf', () => {
+    expect(mentionsReference('BEA pas 012 02.03.26/14:21 UTRECHT', '1421')).toBe(false);
+    expect(mentionsReference('pinbetaling 1421 UTRECHT', '1421')).toBe(false);
+    expect(mentionsReference('pinbetaling 14213 UTRECHT', '14213')).toBe(true);
+    expect(mentionsReference('pinbetaling 914213 UTRECHT', '14213')).toBe(false);
+    expect(mentionsReference('pinbetaling 142137 UTRECHT', '14213')).toBe(false);
+    expect(mentionsReference('Factuur PH-2026-0042', 'PH-2026-0042')).toBe(true);
+    expect(mentionsReference('FACTUUR PH 2026 0042 PRINTHUIS', 'PH-2026-0042')).toBe(true);
+    expect(mentionsReference('KENMERK PH20260042', 'PH-2026-0042')).toBe(true);
+    expect(mentionsReference('NR2026-0042', '2026-0042')).toBe(true);
+    expect(mentionsReference('factuur 42 van 2026', '2026-0042')).toBe(false);
+    expect(mentionsReference('betreft 2026-42', '2026-0042')).toBe(true);
+    expect(mentionsReference('PH-2026-00421', 'PH-2026-0042')).toBe(false);
+    expect(mentionsReference('wat dan ook', null)).toBe(false);
+  });
+
+  it('een bonnummer dat toevallig in een oude omschrijving staat: de bewijsvraag wijst naar de betaling van die dag', () => {
+    const { s } = world();
+    booked(s, '2026-03-02', 1250, 'Parkeergarage Centrum', { description: 'BEA pas 012 02.03.26/14:21 UTRECHT' });
+    const bakery = booked(s, '2026-09-10', 1250, 'CCV*ZONNEBROOD');
+    expect(s.intake.findBookedBankTransaction(receipt('Bakkerij De Zon', '2026-09-10', 1250, '1421'))?.id).toBe(bakery.id);
+  });
+});
+
+describe('creditnota en een terugbetaling die al geboekt is', () => {
+  it('de creditnota hoort als bewijs bij de terugbetaling; twee terugbetalingen is twijfel', () => {
+    const { s } = world();
+    const refund = (date: string) => {
+      s.bank.import({ source: 'csv', warnings: [], transactions: [{ date, amount: 5000, description: 'Terugbetaling Kantoorhal', counterName: 'Kantoorhal' }] });
+      const t = s.bank.list().find((x) => x.transaction_date === date && x.amount === 5000)!;
+      s.bank.bookToAccount(t.id, { account: SOFTWARE, vatCode: 'geen' });
+      return t;
+    };
+    const t = refund('2026-09-02');
+    expect(s.ledger.balance(SOFTWARE)).toBe(-5000);
+    const creditnota = receipt('Kantoorhal', '2026-09-01', -5000);
+    expect(s.intake.findBookedBankTransaction(creditnota)?.id).toBe(t.id);
+    expect(s.intake.findBookedBankTransaction(creditnota, new Set([`bank:${t.id}`]))).toBeNull();
+    expect(s.intake.findBookedBankTransaction(receipt('Kantoorhal', '2026-09-10', -5000))).toBeNull(); // meer dan drie dagen
+    refund('2026-09-03');
+    expect(s.intake.findBookedBankTransaction(creditnota)).toBeNull();
+  });
+});
+
+describe('"nee" op een paar', () => {
+  it('"Nee" op Vandaag: de app vraagt en koppelt niet meer vanzelf, maar bij de betaling zelf kun je de aankoop nog kiezen', async () => {
+    const { s, api } = world();
+    const p = buy(s, 'Wolkendienst Inc.', '2026-09-01', 1500);
+    const t = debit(s, '2026-09-03', 1500, 'WOLKENDIENST');
+    await api.home.act(bankTasks(s, t.id)[0]!, 'nee');
+    expect(api.bank.purchaseQuestion(t.id)).toBeNull();
+    expect(s.matching.autoMatch('2026-09-28').matched).toBe(0);
+    const again = api.bank.suggestions(t.id).find((x) => x.kind === 'inkoop');
+    expect(again).toMatchObject({ purchaseId: p.id });
+    expect(again!.reasons).toContain('je koos eerder "Nee"');
+    api.bank.matchPurchase(t.id, p.id);
+    expect(s.purchases.get(p.id)).toMatchObject({ status: 'betaald', open_amount: 0 });
+    expect(s.ledger.balance(SOFTWARE)).toBe(1500);
+  });
+
+  it('de aankoop weggehaald en opnieuw ingevoerd (hetzelfde nummer in de database): het "nee" geldt niet voor de nieuwe', async () => {
+    const { s, api } = world();
+    autoRule(s, 'WOLKENDIENST');
+    const p = buy(s, 'Wolkendienst Inc.', '2026-09-01', 1500);
+    const t = debit(s, '2026-09-03', 1500, 'WOLKENDIENST');
+    await api.home.act(bankTasks(s, t.id)[0]!, 'nee');
+    api.purchases.remove(p.id);
+    const again = buy(s, 'Wolkendienst Inc.', '2026-09-01', 1500);
+    expect(again.id).toBe(p.id);
+    expect(s.bookedPayments.matcher.question(s.bank.get(t.id))).toMatchObject({ strong: true });
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    expect(s.ledger.balance(SOFTWARE)).toBe(1500);
+  });
+
+  it('"Nee, twee aankopen", de aankoop weggehaald en opnieuw ingevoerd: de vraag en de controle komen terug', async () => {
+    const { s, api } = world();
+    const t = booked(s, '2026-09-03', 1500, 'WOLKENDIENST');
+    const p = buy(s, 'Wolkendienst Inc.', '2026-09-01', 1500);
+    await api.home.act(doubleTasks(s)[0]!, 'nee');
+    expect(s.bookedPayments.candidates()).toEqual([]);
+    api.purchases.remove(p.id);
+    const again = buy(s, 'Wolkendienst Inc.', '2026-09-01', 1500);
+    expect(again.id).toBe(p.id);
+    expect(s.bookedPayments.candidates()).toMatchObject([{ purchase: { id: again.id }, bankTransaction: { id: t.id } }]);
+    expect(s.vat.checks('2026-Q3').find((c) => c.key === 'dubbel')).toMatchObject({ count: 1 });
+  });
+
+  it('"Nee, apart betaald" in het venster "Al betaald": het paar komt niet terug, ook niet met "voortaan altijd zo"', () => {
+    const { s, api } = world();
+    const t = booked(s, '2026-09-02', 1000, 'Kantoorhal');
+    const p = buy(s, 'Kantoorhal', '2026-09-01', 1000);
+    expect(api.purchases.bookedPayment(p.id)).toMatchObject({ bankTransactionId: t.id });
+    api.purchases.rejectBooked(p.id, t.id);
+    expect(api.purchases.bookedPayment(p.id)).toBeNull();
+    s.quick.payPurchaseWith(p.id, 'prive', { always: true });
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+    expect(s.ledger.balance(SOFTWARE)).toBe(2000);
+    expect(s.bookedPayments.candidates()).toEqual([]);
+    expect(doubleTasks(s)).toEqual([]);
+  });
+});
+
+describe('een al geboekte betaling anders indelen', () => {
+  it('terwijl er een aankoop bij lijkt te horen: eerst de vraag "staat deze aankoop dubbel?"; na "nee" kan het', async () => {
+    const ctx = world();
+    const { s, api } = ctx;
+    const t = booked(s, '2026-09-03', 1500, 'WOLKENDIENST', { account: ACCOUNTS.vraagposten });
+    buy(s, 'Wolkendienst Inc.', '2026-09-01', 1500);
+    const before = financialSnapshot(ctx);
+    expect(() => api.bank.reclassify(t.id, 'software', 'geen')).toThrow('Deze betaling lijkt bij de aankoop bij Wolkendienst Inc. van 1 september 2026 te horen. Beantwoord eerst de vraag "staat deze aankoop dubbel?" op Vandaag; anders tellen de kosten twee keer.');
+    expect(financialSnapshot(ctx)).toEqual(before);
+    await api.home.act(doubleTasks(s)[0]!, 'nee');
+    api.bank.reclassify(t.id, 'software', 'geen');
+    expect(s.ledger.balance(SOFTWARE)).toBe(3000);
+  });
+});
+
+describe('de tekst bij "Bekijken"', () => {
+  it('het bedrag is net anders: de hint belooft geen keuze die er niet is', () => {
+    const { s } = world();
+    buy(s, 'Printhuis', '2026-09-03', 4840);
+    const t = debit(s, '2026-09-04', 4790, 'Printhuis');
+    const [task] = bankTasks(s, t.id);
+    expect(task!.actions.find((a) => a.id === 'open')!.hint).toBe('Het bedrag is anders dan dat van de aankoop; je ziet wat je kunt doen. Er wordt nog niets geboekt.');
+    // twee aankopen om uit te kiezen: daar valt wel iets te kiezen
+    buy(s, 'Bouwmarkt De Hamer', '2026-09-01', 2000);
+    buy(s, 'Bouwmarkt De Hamer', '2026-09-02', 2000);
+    const u = debit(s, '2026-09-03', 2000, 'Bouwmarkt De Hamer');
+    expect(bankTasks(s, u.id)[0]!.actions.find((a) => a.id === 'open')!.hint).toBe('Je ziet de betaling naast de aankoop die erbij kan horen, en kiest daar. Er wordt nog niets geboekt.');
   });
 });

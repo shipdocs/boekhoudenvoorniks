@@ -298,11 +298,10 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
   const [always, setAlways] = useState(false);
   // staat dezelfde betaling al als kosten op een van je rekeningen? Dan eerst vragen (anders dubbel)
   const booked = useLoad(() => api.purchases.bookedPayment(p.id), [p.id]);
-  const [separate, setSeparate] = useState(false);
   const name = p.relation_name ?? p.description;
   const b = booked.data;
   if (booked.loading) return <Modal title="Al betaald" onClose={onClose}><p className="small muted">Even kijken op je rekeningen…</p></Modal>;
-  if (b && !separate) {
+  if (b) {
     return (
       <Modal title="Al betaald" onClose={onClose}>
         <div className="grid">
@@ -315,7 +314,11 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
             : 'Ja: de aankoop vervalt en de bon wordt het bewijsstuk bij die betaling, zodat de kosten en de btw niet twee keer tellen.'}</p>
         </div>
         <div className="row end" style={{ marginTop: 16 }}>
-          <Button onClick={() => setSeparate(true)}>Nee, apart betaald</Button>
+          <Button disabled={busy} onClick={async () => {
+            // onthouden dat dit een andere uitgave is: de app vraagt het niet meer en voegt de twee nooit vanzelf samen.
+            // Past er nog een betaling bij, dan komt die vraag hierna.
+            if ((await run(async () => { await api.purchases.rejectBooked(p.id, b.bankTransactionId); return true; })) !== undefined) await booked.reload();
+          }}>Nee, apart betaald</Button>
           <Button kind="primary" disabled={busy} onClick={async () => {
             const r = await run(() => api.purchases.mergeWithBooked(p.id, b.bankTransactionId), b.booking === 'vraag' ? 'De betaling hoort nu bij deze aankoop ✓' : 'De bon hoort nu bij die betaling ✓');
             if (r) await onDone();
