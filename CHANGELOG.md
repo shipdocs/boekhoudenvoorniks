@@ -1,5 +1,16 @@
 # Wijzigingen
 
+## 1.1.1 — een oudere versie opent geen administratie van een nieuwere versie meer
+
+Deze versie beschermt je administratie: opent een oudere versie van het programma een administratie die met een nieuwere versie is gemaakt, dan stopt hij eerst en wijzigt hij niets.
+
+### Nieuw
+- **Een administratie van een nieuwere versie wordt niet meer stil geopend**: de app meldt dat de administratie met een nieuwere versie is gemaakt en laat je kiezen: het programma bijwerken, een andere administratie openen of afsluiten. De administratie zelf blijft ongewijzigd, ook bij het overzetten naar de Store-versie en bij wisselen van administratie. Dit werkt in deze versie en nieuwer; oudere versies kunnen dit niet meer leren.
+- **Al betaald, via je bank**: bij een aankoop die je al van je zakelijke rekening betaalde, kies je nu die rekening. De aankoop blijft open tot je het afschrift inleest en je ziet tot wanneer elk afschrift compleet is. Zo wordt de betaling nooit dubbel geboekt.
+
+### Verbeterd
+- **Btw: waarom wijkt het bedrag af?** Verschilt het bedrag in de samenvatting van het vak "te betalen of terug te vragen" in de aangifte, dan legt de app uit dat de bedragen per vak op hele euro's worden afgerond, in jouw voordeel, en dus niet het totaal.
+
 ## 1.1.0 — bank en bonnen horen bij elkaar: geen dubbele kosten meer
 
 Deze versie zorgt dat een betaling op je bank en de bon of factuur ervan niet meer los van elkaar in je boeken komen. Past iets bij elkaar, dan vraagt de app het eerst.
