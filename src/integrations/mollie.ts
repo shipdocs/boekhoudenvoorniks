@@ -1,5 +1,6 @@
 import { parseEuro } from '../shared/money';
 import { getJson } from './http';
+import { linesFromInclusive, linesTotal, linesTotalWithVat } from './prices';
 import type { ExternalOrder, ExternalPayout, FetchLike, IntegrationDefinition } from './types';
 
 export const MOLLIE: IntegrationDefinition = {
@@ -100,15 +101,35 @@ interface MollieSalesInvoice {
   status: string;
   invoiceNumber: string | null;
   currency: string;
+  /**
+   * 'exclusive' (de standaard bij Mollie): de btw komt boven op de prijs per regel. 'inclusive': de prijs per
+   * regel is al inclusief btw.
+   */
+  vatMode?: string | null;
   recipient: MollieSalesInvoiceRecipient;
   lines: MollieSalesInvoiceLine[];
+  /** het totaal inclusief btw, zoals Mollie het uitrekende (na kortingen) */
+  totalAmount?: MollieAmount | null;
   issuedAt: string | null;
   paidAt: string | null;
   createdAt: string;
 }
 
+/**
+ * `vatMode` zegt of de prijs per regel inclusief of exclusief btw is (#228). Inclusief: terugrekenen naar
+ * exclusief btw, zodat het totaal blijft wat de klant betaalde. Een waarde die de app niet kent: niet raden;
+ * de regels gaan mee zoals Mollie ze gaf en de gebruiker krijgt de vraag (`pricesUnknown`). Dat geldt ook als
+ * Mollie niets opgeeft (dan geldt de standaard, exclusief) terwijl het totaal alleen bij prijzen inclusief btw
+ * past. Het totaal van Mollie gaat mee ter controle: kortingen leest de app niet, en dan past het totaal niet
+ * bij de regels.
+ */
 export function mapMollieSalesInvoice(inv: MollieSalesInvoice): ExternalOrder {
   const r = inv.recipient;
+  const lines = inv.lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPriceExVat: parseEuro(l.unitPrice.value), vatPercentage: Math.round(parseFloat(l.vatRate)) }));
+  const stated = inv.totalAmount ? parseEuro(inv.totalAmount.value) : undefined;
+  const contradicted = !inv.vatMode && stated !== undefined && stated === linesTotal(lines) && Math.abs(linesTotalWithVat(lines) - stated) > lines.length;
+  const mode = contradicted ? 'niet opgegeven' : inv.vatMode || 'exclusive';
+  const total = stated ?? (mode === 'inclusive' ? linesTotal(lines) : undefined);
   const name = r.type === 'business' ? r.organizationName || r.email || 'Klant' : [r.givenName, r.familyName].filter(Boolean).join(' ') || r.email || 'Klant';
   return {
     externalId: inv.id,
@@ -124,18 +145,23 @@ export function mapMollieSalesInvoice(inv: MollieSalesInvoice): ExternalOrder {
       vatNumber: r.type === 'business' ? (r.vatNumber ?? null) : null,
       kvkNumber: r.type === 'business' ? (r.organizationNumber ?? null) : null,
     },
-    lines: inv.lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPriceExVat: parseEuro(l.unitPrice.value), vatPercentage: Math.round(parseFloat(l.vatRate)) })),
+    lines: mode === 'inclusive' ? linesFromInclusive(lines) : lines,
     paid: inv.status === 'paid',
     currency: inv.currency,
+    ...(total !== undefined ? { total } : {}),
+    ...(mode === 'inclusive' || mode === 'exclusive' ? {} : { pricesUnknown: String(mode) }),
   };
 }
 
 /**
  * Mollie sorteert nieuwste eerst (zoals bij settlements): stopt zodra een al bekende factuur
  * langskomt. De lijst kent geen datum- of statusfilter, dus overige statussen worden hier al geknipt.
+ * `wanted`: facturen die in de app zijn teruggedraaid en opnieuw bekeken moeten worden (#228); die staan
+ * verder terug, dus de app leest door tot hij ze heeft gehad.
  */
-export async function fetchMollieSalesInvoices(fetchImpl: FetchLike, cfg: { apiKey: string }, knownIds: Set<string>): Promise<ExternalOrder[]> {
+export async function fetchMollieSalesInvoices(fetchImpl: FetchLike, cfg: { apiKey: string }, knownIds: Set<string>, wanted: Set<string> = new Set()): Promise<ExternalOrder[]> {
   const out: ExternalOrder[] = [];
+  const pending = new Set(wanted);
   let url: string | null = 'https://api.mollie.com/v2/sales-invoices?limit=50';
   for (let i = 0; url && i < 20; i++) {
     const page: { _embedded: { invoices: MollieSalesInvoice[] }; _links: { next: { href: string } | null } } = await getJson(fetchImpl, url, { Authorization: `Bearer ${cfg.apiKey}` });
@@ -145,9 +171,10 @@ export async function fetchMollieSalesInvoices(fetchImpl: FetchLike, cfg: { apiK
         reachedKnown = true;
         continue;
       }
+      pending.delete(inv.id);
       if (inv.status === 'paid') out.push(mapMollieSalesInvoice(inv));
     }
-    url = reachedKnown ? null : page._links.next?.href ?? null;
+    url = reachedKnown && pending.size === 0 ? null : page._links.next?.href ?? null;
   }
   return out;
 }

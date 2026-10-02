@@ -36,6 +36,7 @@ import type { LinkTarget } from '../documents/evidence-links';
 import type { JobStatus } from '../jobs/jobs';
 import type { LineInput } from '../documents/totals';
 import { documentProposal, type Task } from '../inbox/inbox';
+import type { SaleAnswer } from '../integrations/integrations';
 import { ONLINE_HELP } from '../shared/online-help';
 import type { OpeningInput, SectionKey } from '../onboarding/switchover';
 import type { XafApplyChoices } from '../onboarding/xaf-import';
@@ -410,8 +411,13 @@ export function createApi(s: Services, host: HostContext) {
         return;
       case 'sale-own-company:neutraal':
       case 'sale-own-company:verkoop':
-        // verkoop aan je eigen bedrijf uit een koppeling (#231): geen omzet, of toch een gewone factuur
-        s.integrations.answerQuestion(r.questionId!, actionId === 'neutraal' ? 'neutraal' : 'verkoop');
+      case 'sale-vat-mode:inclusief':
+      case 'sale-vat-mode:exclusief':
+      case 'sale-reread:opnieuw':
+      case 'sale-reread:niet':
+        // verkoop uit een koppeling die op een keuze wacht: aan je eigen bedrijf (#231), prijzen met of zonder
+        // btw, of een teruggedraaide factuur opnieuw inlezen (#228). Past het antwoord niet meer bij de vraag, dan een melding
+        s.integrations.answerQuestion(r.questionId!, actionId as SaleAnswer);
         return;
       case 'bank-pot:klopt':
       case 'bank-own:klopt':

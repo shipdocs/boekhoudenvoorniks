@@ -30,7 +30,7 @@ export interface IntegrationDefinition {
   fields: ConfigField[];
 }
 
-/** Een webshop-order, genormaliseerd. Bedragen in centen, exclusief BTW per regel. */
+/** Een webshop-order, genormaliseerd. Bedragen in centen, exclusief BTW per regel (tenzij `pricesUnknown`). */
 export interface ExternalOrder {
   externalId: string;
   number: string;
@@ -39,6 +39,16 @@ export interface ExternalOrder {
   lines: { description: string; quantity: number; unitPriceExVat: Cents; vatPercentage: number }[];
   paid: boolean;
   currency: string;
+  /**
+   * Wat de klant betaalde, inclusief btw, als de bron dat zelf opgeeft. De factuur in de app moet daarop
+   * uitkomen: een cent verschil door afronden boekt de app als afrondingsverschil, bij meer raadt hij niet (#228).
+   */
+  total?: Cents;
+  /**
+   * De bron zegt op een onbekende manier of de prijzen inclusief of exclusief btw zijn (hier: wat hij opgaf).
+   * De regels staan er dan in zoals de bron ze gaf en de app boekt niets voordat de gebruiker het zegt (#228).
+   */
+  pricesUnknown?: string;
 }
 
 /** Een uitbetaling van een betaalprovider naar de bank. */

@@ -84,7 +84,9 @@ export type TaskKind =
   | 'purchase-double'
   | 'mail-online'
   | 'mail-customer'
-  | 'sale-own-company';
+  | 'sale-own-company'
+  | 'sale-vat-mode'
+  | 'sale-reread';
 
 export interface TaskAction {
   id: string;
@@ -986,21 +988,51 @@ export class InboxService {
       }
     }
 
-    // verkoop uit een koppeling aan je eigen bedrijf (#231), bv. een proefabonnement op je eigen dienst:
-    // er is nog niets geboekt. Geen omzet is het voorstel: je verkoopt aan jezelf.
+    // verkopen uit een koppeling die op een keuze wachten: er is nog niets geboekt
     for (const q of this.integrations?.questions() ?? []) {
-      tasks.push({
-        key: `sale-own-company-${q.id}`,
-        kind: 'sale-own-company',
-        icon: '🏠',
-        title: `Verkoop aan je eigen bedrijf: ${formatEuro(q.total)}`,
-        question: `${q.label} gaf een betaalde verkoop door van ${formatEuro(q.total)} aan ${q.order.customer.name} (${q.order.number}, ${formatDateNl(q.order.date)}). Dat lijkt je eigen bedrijf, bijvoorbeeld een proefabonnement op je eigen dienst. Aan jezelf verkopen is geen omzet, dus de app heeft nog niets geboekt. Kies wat het was.`,
-        amount: q.total,
-        actions: [{ id: 'neutraal', label: 'Geen omzet', primary: true }, { id: 'verkoop', label: 'Toch een echte verkoop' }],
-        why: `Omdat ${q.signals.join(', ')}.`,
-        priority: 2,
-        ref: { questionId: q.id },
-      });
+      const sale = `aan ${q.order.customer.name} (${q.order.number}, ${formatDateNl(q.order.date)})`;
+      if (q.reason === 'opnieuw') {
+        // een teruggedraaide factuur die de app nu anders leest (#228), bv. doordat de prijzen inclusief btw waren.
+        // Niet vanzelf: de gebruiker kan hem intussen zelf opnieuw gemaakt hebben.
+        tasks.push({
+          key: `sale-reread-${q.id}`,
+          kind: 'sale-reread',
+          icon: '🔁',
+          title: 'Teruggedraaide factuur opnieuw inlezen?',
+          question: `Factuur ${q.previous?.number ?? q.order.number}${q.previous ? ` (${formatEuro(q.previous.total)})` : ''} ${sale} kwam uit ${q.label} en heb je teruggedraaid. De app leest hem nu anders: ${q.signals.join(' en ')}. Zal de app hem opnieuw inlezen? Heb je hem zelf al opnieuw gemaakt, kies dan "Nee": anders telt de omzet dubbel.`,
+          amount: q.total ?? undefined,
+          actions: [{ id: 'opnieuw', label: 'Ja, opnieuw inlezen', primary: true }, { id: 'niet', label: 'Nee, laat zo' }],
+          priority: 2,
+          ref: { questionId: q.id },
+        });
+      } else if (q.reason === 'btw') {
+        // de bron zegt op een onbekende manier hoe de btw berekend is (#228): niet raden
+        tasks.push({
+          key: `sale-vat-mode-${q.id}`,
+          kind: 'sale-vat-mode',
+          icon: '🧾',
+          title: `${q.label}: prijzen met of zonder btw?`,
+          question: `${q.label} gaf een betaalde factuur door ${sale}, maar de app herkent niet hoe de btw daarop berekend is ("${(q.order.pricesUnknown ?? '').slice(0, 40)}"). Daarom is er nog niets geboekt. Kijk op de factuur: zijn de prijzen per regel inclusief btw, dan is het totaal ${formatEuro(q.totals!.inclusief)}; zijn ze exclusief btw, dan is het ${formatEuro(q.totals!.exclusief)}.${q.order.total !== undefined ? ` Er is ${formatEuro(q.order.total)} betaald.` : ''}`,
+          actions: [{ id: 'inclusief', label: 'Prijzen zijn inclusief btw' }, { id: 'exclusief', label: 'Prijzen zijn exclusief btw' }],
+          priority: 2,
+          ref: { questionId: q.id },
+        });
+      } else {
+        // verkoop aan je eigen bedrijf (#231), bv. een proefabonnement op je eigen dienst. Geen omzet is het
+        // voorstel: je verkoopt aan jezelf.
+        tasks.push({
+          key: `sale-own-company-${q.id}`,
+          kind: 'sale-own-company',
+          icon: '🏠',
+          title: `Verkoop aan je eigen bedrijf: ${formatEuro(q.total ?? 0)}`,
+          question: `${q.label} gaf een betaalde verkoop door van ${formatEuro(q.total ?? 0)} ${sale}. Dat lijkt je eigen bedrijf, bijvoorbeeld een proefabonnement op je eigen dienst. Aan jezelf verkopen is geen omzet, dus de app heeft nog niets geboekt. Kies wat het was.`,
+          amount: q.total ?? undefined,
+          actions: [{ id: 'neutraal', label: 'Geen omzet', primary: true }, { id: 'verkoop', label: 'Toch een echte verkoop' }],
+          why: `Omdat ${q.signals.join(', ')}.`,
+          priority: 2,
+          ref: { questionId: q.id },
+        });
+      }
     }
 
     for (const o of this.invoices.overpaidCustomers()) {
@@ -1488,6 +1520,10 @@ export class InboxService {
       'customer-overpaid:klopt': 'Het te veel betaalde blijft als tegoed van de klant staan.',
       'sale-own-company:neutraal': 'Geen factuur, geen omzet en geen btw. Het geld dat de betaaldienst hiervoor uitbetaalt, telt als privé-storting.',
       'sale-own-company:verkoop': 'Wordt een gewone betaalde factuur: telt mee als omzet, met btw.',
+      'sale-vat-mode:inclusief': 'De app rekent de btw uit de prijzen terug: het totaal van de regels is wat de klant betaalde.',
+      'sale-vat-mode:exclusief': 'De btw komt boven op de prijzen van de regels.',
+      'sale-reread:opnieuw': 'De factuur komt er opnieuw in zoals de app hem nu leest. De teruggedraaide factuur en de creditfactuur blijven staan; de betaling van toen gaat weer van de betaaldienst af.',
+      'sale-reread:niet': 'Er verandert niets. De app vraagt het niet meer.',
       'job-link:ja': 'De kosten tellen mee bij deze klus.',
       'job-link:algemeen': 'Hoort niet bij een klus: gewone bedrijfskosten.',
       'mail-online:bon': 'De mail wordt als bon bewaard; je controleert hem daarna.',
