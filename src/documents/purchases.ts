@@ -64,6 +64,9 @@ export interface PurchaseInvoice {
   fx_rate: number | null;
   /** 1 = uit de vorige administratie (overstap): alleen het openstaande bedrag */
   is_opening: number;
+  /** "Al betaald, via je bank" (#239): de rekening en de dag waarop dat is aangegeven; nog niets geboekt */
+  expected_on_bank_account_id: number | null;
+  expected_on_bank_since: IsoDate | null;
   open_amount: Cents;
 }
 
@@ -268,6 +271,23 @@ export class PurchaseService {
         ? `Dit bedrag is hoger dan wat er bij deze creditnota nog open staat (${formatEuro(-p.open_amount)}).`
         : `Deze betaling is hoger dan wat er bij deze aankoop nog open staat (${formatEuro(p.open_amount)}). Klopt het bedrag van de aankoop niet? Pas dat eerst aan bij Aankopen.`,
     );
+  }
+
+  /**
+   * "Al betaald, via je bank" (#239): onthoudt dat deze open aankoop al van die rekening betaald is, zonder iets
+   * te boeken. De afschriftimport koppelt de betaling later (of vraagt of ze bij elkaar horen).
+   */
+  expectOnBank(id: number, bankAccountId: number, since: IsoDate): PurchaseInvoice {
+    assertIsoDate(since);
+    const p = this.get(id);
+    if (p.status !== 'open' || p.open_amount <= 0) throw new ValidationError('Deze rekening staat al op betaald');
+    this.db.prepare('UPDATE purchase_invoices SET expected_on_bank_account_id = ?, expected_on_bank_since = ? WHERE id = ?').run(bankAccountId, since, id);
+    return this.get(id);
+  }
+
+  /** De markering "via bank betaald" weghalen: de aankoop telt weer als gewoon open. */
+  clearExpectedOnBank(id: number): void {
+    this.db.prepare('UPDATE purchase_invoices SET expected_on_bank_account_id = NULL, expected_on_bank_since = NULL WHERE id = ?').run(id);
   }
 
   undoPayment(id: number, amount: Cents, journalEntryId: number, date: IsoDate): PurchaseInvoice {

@@ -1210,4 +1210,11 @@ export const migrations: string[] = [
     UNIQUE (source, external_id)
   );
   `,
+  /* 32: aankoop waarvan je zegt dat hij al van je bankrekening betaald is (#239) */ `
+  -- "Al betaald, via <rekening>": er wordt niets geboekt, de aankoop blijft open tot de afschriftimport de
+  -- betaling koppelt. Dit onthoudt alleen welke rekening en sinds wanneer, zodat Vandaag niet blijft zeggen
+  -- dat de aankoop te laat betaald is zolang het afschrift ontbreekt.
+  ALTER TABLE purchase_invoices ADD COLUMN expected_on_bank_account_id INTEGER REFERENCES bank_accounts(id);
+  ALTER TABLE purchase_invoices ADD COLUMN expected_on_bank_since TEXT;
+  `,
 ];

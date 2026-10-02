@@ -51,7 +51,12 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
   const tables = ['journal_entries', 'journal_lines', 'events', 'event_evidence', 'purchase_invoices', 'purchase_invoice_lines', 'bank_transactions', 'vat_periods'];
   const dump = (db: Database.Database, names: string[]) => Object.fromEntries(names.map((t) => [t, db.prepare(`SELECT * FROM ${t} ORDER BY 1, 2`).all()]));
   // een latere migratie (verzamelbetalingen, #184) geeft elke bankregel drie lege kolommen erbij; verder moet alles gelijk blijven
-  const withLaterColumns = <T extends Record<string, unknown>>(snap: T): T => ({ ...snap, bank_transactions: (snap.bank_transactions as object[]).map((r) => ({ ...r, batch_ref: null, batch_total: null, duplicate_of: null })) });
+  // en een latere (#239) twee lege kolommen bij elke aankoop: "al via je bank betaald"
+  const withLaterColumns = <T extends Record<string, unknown>>(snap: T): T => ({
+    ...snap,
+    bank_transactions: (snap.bank_transactions as object[]).map((r) => ({ ...r, batch_ref: null, batch_total: null, duplicate_of: null })),
+    purchase_invoices: (snap.purchase_invoices as object[]).map((r) => ({ ...r, expected_on_bank_account_id: null, expected_on_bank_since: null })),
+  });
   const reasons = (text: string[]) => JSON.stringify({ categoryKey: 'overig', vatCode: 'hoog', business: true, confidence: 1, source: 'geheugen', reasons: text, automatic: true });
 
   /** Een administratie zoals vóór de migratie: bonnen bij betalingen staan alleen als tekst in de uitleg. */
