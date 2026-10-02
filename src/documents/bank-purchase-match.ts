@@ -235,9 +235,10 @@ export function dueOf(p: Pick<PurchaseProbe, 'total' | 'amount_paid'>, state: Pu
 
 /**
  * Een afschrijving tegenover een aankoop: hoe goed passen bedrag, leverancier en datum? null = past niet.
- * Een aankoop die al privé of contant betaald is, telt alleen mee als alles past; een open aankoop ook bij
- * minder (zie `Fit.strength`). Staat het factuurnummer in de omschrijving, dan telt de datum als passend:
- * dat vangt een verkeerd gelezen datum op de bon.
+ * Een aankoop die al privé of contant betaald is, telt alleen mee als leverancier en datum passen (het
+ * bedrag mag in euro's een klein beetje afwijken: dat is zwak, een vraag); een open aankoop ook bij minder
+ * (zie `Fit.strength`). Staat het factuurnummer in de omschrijving, dan telt de datum als passend: dat
+ * vangt een verkeerd gelezen datum op de bon.
  */
 export function fitOf(t: Debit, p: PurchaseProbe, state: PurchaseState): Fit | null {
   if (t.amount >= 0 || p.total <= 0) return null;
@@ -247,14 +248,17 @@ export function fitOf(t: Debit, p: PurchaseProbe, state: PurchaseState): Fit | n
   const inWindow = mentionsReference(`${t.description} ${t.reference ?? ''}`, p.supplier_reference) || dateFits(p, t.transaction_date);
   const base = { amount, supplier, inWindow, days: diffDays(p.invoice_date, t.transaction_date) };
   if (amount !== 'ongeveer' && supplier === 'ja' && inWindow) return { ...base, strength: 'sterk' };
-  if (state !== 'open') return null;
+  // dezelfde leverancier rond de datum, het bedrag in euro's net anders (met de hand ingevoerd, de bank rekende
+  // een eigen koers): ook naast een aankoop die al privé of contant betaald staat niet vanzelf als kosten (#222)
+  const near = amount === 'ongeveer' && supplier === 'ja' && inWindow;
+  if (state !== 'open') return near ? { ...base, strength: 'zwak' } : null;
   const weak =
     amount === 'gelijk' || // zoals het altijd al was: nooit vanzelf kosten boeken naast een open aankoop met dit bedrag
     (amount === 'koers' && supplier === 'ja') || // de datum is verkeerd gelezen, of het is veel later betaald
     // binnen de koers en rond de datum, ook met een andere naam op het afschrift (een betaaldienst): liever
     // een vraag te veel dan de betaling vanzelf als losse kosten naast de aankoop
     (amount === 'koers' && inWindow) ||
-    (amount === 'ongeveer' && supplier === 'ja' && inWindow);
+    near;
   return weak ? { ...base, strength: 'zwak' } : null;
 }
 
@@ -301,7 +305,7 @@ const PROBE_COLUMNS = `p.id, p.relation_id, r.name AS relation_name, p.descripti
 const MERGED_SQL = `SELECT 1 FROM journal_entries je JOIN event_evidence ev ON ev.event_id = je.event_id WHERE je.id = bank_transactions.matched_journal_entry_id AND ev.kind = 'inkoop' AND ev.note = '${MERGED_NOTE}'`;
 
 type ProbeRow = Omit<PurchaseProbe, 'question'> & { question: number; banked: number };
-type ElsewherePayment = { id: number; amount: Cents; via: 'prive' | 'kas' };
+type ElsewherePayment = { id: number; amount: Cents; via: 'prive' | 'kas'; date: IsoDate };
 /**
  * `question`: ook wat op "weet ik nog niet" staat; `skip`: betalingen die niet meedoen; `pool`/`rejected`:
  * al geladen, bij een lus over veel aankopen; `merged`: ook een betaling waar al een aankoop mee is
@@ -329,7 +333,7 @@ export class BankPurchaseMatcher {
   private elsewhere(purchaseId?: number): Map<number, ElsewherePayment[]> {
     const rows = this.db
       .prepare(
-        `SELECT e.source_ref, e.id, SUM(l.debit) AS amount,
+        `SELECT e.source_ref, e.id, e.entry_date AS date, SUM(l.debit) AS amount,
                 CASE WHEN EXISTS (SELECT 1 FROM journal_lines k JOIN chart_of_accounts c ON c.id = k.account_id WHERE k.journal_entry_id = e.id AND c.rgs_code = @kas) THEN 'kas' ELSE 'prive' END AS via
            FROM journal_entries e
            JOIN journal_lines l ON l.journal_entry_id = e.id JOIN chart_of_accounts a ON a.id = l.account_id

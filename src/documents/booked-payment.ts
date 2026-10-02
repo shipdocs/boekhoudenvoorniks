@@ -179,7 +179,9 @@ export class BookedPayments {
       if (!e || t.amount >= 0 || t.duplicate_of || t.matched_invoice_id || t.matched_purchase_invoice_id || (t.status !== 'nieuw' && booking !== 'vraag')) throw new ValidationError(STALE);
       if (fits !== 'gelijk' && fits !== 'koers') throw new ValidationError('Het bedrag van deze betaling is anders dan dat van de aankoop. Klopt het bedrag van de aankoop niet? Pas dat eerst aan; daarna kun je de betaling koppelen.');
       if (e.state === 'elders') {
-        for (const paid of this.matcher.elsewherePayments(purchaseId)) this.purchases.undoPayment(purchaseId, paid.amount, paid.id, t.transaction_date);
+        // terug op de datum van de afschrijving, maar nooit vóór de betaling die teruggaat: is de factuur van
+        // later dan de afschrijving, dan staat de tegenboeking anders in een eerdere periode dan de boeking zelf
+        for (const paid of this.matcher.elsewherePayments(purchaseId)) this.purchases.undoPayment(purchaseId, paid.amount, paid.id, paid.date > t.transaction_date ? paid.date : t.transaction_date);
         if (p.relation_id !== null) this.relations.setPaidWith(p.relation_id, null);
       }
       // stond de afschrijving los op "weet ik nog niet": die post vervalt, de aankoop blijft zoals hij was

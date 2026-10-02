@@ -34,7 +34,7 @@ import { EvidenceLinks, sameTarget, targetKey, type DocumentLink, type LinkOrigi
 import type { DocumentOutcome } from '../shared/document-outcome';
 import { detectOwnInvoice, sameCompanyName, OWN_COMPANY_CANDIDATE, OWN_COMPANY_ISSUE, type OwnIdentity, type OwnInvoice } from './own-company';
 import type { PaidWith } from '../shared/paid-with';
-import { BankPurchaseMatcher, BANK_DAYS_BEFORE, SURE_DAYS, dateFits, probeOfDocument, sameSupplierName } from '../documents/bank-purchase-match';
+import { BankPurchaseMatcher, BANK_DAYS_BEFORE, SURE_DAYS, dateFits, fitOf, probeOfDocument, sameSupplierName } from '../documents/bank-purchase-match';
 
 
 export interface IntakeDocument {
@@ -59,6 +59,11 @@ export interface IntakeDocument {
   proposed_paid_with: PaidWith | null;
   created_at: string;
   bank_match: BankTransaction | null;
+  /**
+   * Past die betaling ook op leverancier en datum, niet alleen op het bedrag (de gedeelde vergelijking, #221)?
+   * Alleen dan wijkt de betaalwijze van de telefoon ervoor (#222): de aankoop blijft open tot de vraag bij de betaling.
+   */
+  bank_match_strong: boolean;
   /** de aankoop of bankbetaling waar dit document bij hoort (#179); null = nergens aan gekoppeld */
   link: DocumentLink | null;
   /** wat er met het document gebeurd is: geboekt, alleen bewijs, dubbel, of nog controleren */
@@ -125,7 +130,7 @@ export interface Confirmation {
   businessPct?: number;
 }
 
-type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'decisions' | 'link' | 'outcome'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
+type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'bank_match_strong' | 'decisions' | 'link' | 'outcome'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
 
 const MIME: Record<string, string> = { pdf: 'application/pdf', xml: 'application/xml', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
 
@@ -1154,8 +1159,8 @@ export class IntakeService {
       if (bankTx && c.paidWith === 'bank') this.bank.matchPurchase(bankTx.id, purchase.id);
       else {
         // niet op de zakelijke rekening gevonden: leverancier die je altijd privé/contant betaalt → meteen betaald.
-        // Staat er toch een afschrijving die erbij past op een eigen rekening te wachten (#222), dan blijft de
-        // aankoop open: bij die betaling vraagt de app of ze bij elkaar horen.
+        // Staat er toch een afschrijving die erbij past (bedrag, leverancier en datum) op een eigen rekening te
+        // wachten (#222), dan blijft de aankoop open: bij die betaling vraagt de app of ze bij elkaar horen.
         const usual = c.paidWith === 'later' && relation.paid_with && !this.awaitsDebit(purchase.id) ? relation.paid_with : null;
         const paidWith = c.paidWith === 'later' ? usual : c.paidWith === 'bank' ? null : c.paidWith;
         if (paidWith) this.purchases.registerPayment(purchase.id, { amount: purchase.total, date: c.date, moneyAccount: paidWith === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen });
@@ -1258,13 +1263,17 @@ export class IntakeService {
     const result = row.result ? (JSON.parse(row.result) as DocumentResult) : null;
     const issues = JSON.parse(row.issues) as Issue[];
     const link = this.links.forDocument(id);
+    const bankMatch = row.status === 'verwerkt' || !result ? null : (issues.some((i) => i.field === OWN_COMPANY_ISSUE) ? this.findOwnPayment(result) : null) ?? this.findBankMatch(result);
+    const probe = bankMatch && result ? probeOfDocument(result) : null;
     return {
       ...row,
       result,
       classification: row.classification ? JSON.parse(row.classification) : null,
       issues,
       decisions: row.decisions ? (JSON.parse(row.decisions) as Decision[]) : null,
-      bank_match: row.status === 'verwerkt' || !result ? null : (issues.some((i) => i.field === OWN_COMPANY_ISSUE) ? this.findOwnPayment(result) : null) ?? this.findBankMatch(result),
+      bank_match: bankMatch,
+      // dezelfde maatstaf als `awaitsDebit` bij het boeken: bedrag, leverancier en datum
+      bank_match_strong: Boolean(bankMatch && probe && fitOf(bankMatch, probe, 'open')?.strength === 'sterk'),
       link,
       outcome: this.links.outcome({ ...row, issues }, link),
     };

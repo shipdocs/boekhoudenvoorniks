@@ -722,7 +722,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
             {linked.strong ? 'Kies je een soort kosten, dan tellen de kosten en de btw twee keer. ' : ''}
             {/* alleen als er een "Ja" te kiezen is: bij een bedrag dat net anders is, staat er geen knop */}
             {linked.candidates.some((c) => c.amountFit !== 'ongeveer') && 'Bij "Ja" wordt de betaling aan de aankoop gekoppeld; er komt geen tweede kostenpost bij.'}
-            {linked.candidates.some((c) => c.state === 'elders') ? ' De betaling met privégeld of contant die bij de aankoop stond, wordt teruggedraaid.' : ''}
+            {linked.candidates.some((c) => c.state === 'elders' && c.amountFit !== 'ongeveer') ? ' De betaling met privégeld of contant die bij de aankoop stond, wordt teruggedraaid.' : ''}
             {linked.candidates.every((c) => c.amountFit === 'ongeveer') && 'Hoort de betaling er niet bij, kies dan "Nee, iets anders"; daarna deel je hem zelf in.'}
           </div>
           <div className="row" style={{ marginTop: 8 }}>

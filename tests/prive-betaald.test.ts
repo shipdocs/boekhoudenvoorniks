@@ -5,6 +5,7 @@ import { createApi, type HostContext } from '../src/main/api';
 import { paidWithNote, proposedPaidWith } from '../src/shared/paid-with';
 import { formatEuro } from '../src/shared/money';
 import { ValidationError } from '../src/shared/validation';
+import type { OcrProvider } from '../src/intake/ocr';
 
 type S = ReturnType<typeof setup>['s'];
 
@@ -326,6 +327,45 @@ describe('privé of contant betaald, en daarna staat de afschrijving toch op je 
     expect(software(s)).toBe(1666);
   });
 
+  it('in euro\'s privé betaald en de afschrijving is een paar cent anders, met de leveranciersregel aan: niet vanzelf als kosten, wel een vraag', async () => {
+    const ctx = world();
+    const { s, api } = ctx;
+    autoRule(s, 'WOLKENDIENST');
+    // met de hand in euro's ingevoerd (geen vreemde munt), terwijl de bank later een eigen koers rekende
+    const p = order(s, 'Wolkendienst', '2026-09-01', 1577);
+    s.quick.payPurchaseWith(p.id, 'prive', { always: true });
+    const t = debit(s, '2026-09-03', 1596, 'WOLKENDIENST');
+    const before = financialSnapshot(ctx);
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    expect(financialSnapshot(ctx)).toEqual(before);
+    expect(s.bank.get(t.id).status).toBe('nieuw');
+    expect(software(s)).toBe(1577);
+    const tasks = bankTasks(s, t.id);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ kind: 'bank-purchase', ref: { bankTransactionId: t.id, purchaseId: p.id } });
+    expect(tasks[0]!.question).toBe(`De aankoop bij Wolkendienst van 1 september 2026 (${formatEuro(1577)}) staat op betaald met privégeld. Deze betaling is ${formatEuro(1596)}. Is dat dezelfde betaling?`);
+    expect(tasks[0]!.actions.map((a) => [a.id, a.primary ?? false])).toEqual([['open', true], ['nee', false]]);
+    expect(tasks[0]!.group).toBeUndefined();
+    // op het bankscherm staat de aankoop erbij, zonder "Ja": het bedrag is anders
+    expect(api.bank.purchaseQuestion(t.id)).toMatchObject({ strong: false, oneClick: false, candidates: [{ purchaseId: p.id, state: 'elders', via: 'prive', amountFit: 'ongeveer' }] });
+    expect(() => api.bank.linkPurchase(t.id, p.id)).toThrow(/Het bedrag van deze betaling is anders dan dat van de aankoop/);
+    expect(financialSnapshot(ctx)).toEqual(before);
+    // "Nee, iets anders": een andere uitgave; daarna geldt de leveranciersregel weer
+    await api.home.act(tasks[0]!, 'nee');
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 1 });
+    expect(software(s)).toBe(1577 + 1596);
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+
+    // een andere leverancier met bijna dat bedrag, of ver buiten de datum: geen vraag
+    const other = world();
+    const q = order(other.s, 'Wolkendienst', '2026-09-01', 1577);
+    other.s.quick.payPurchaseWith(q.id, 'prive');
+    const elders = debit(other.s, '2026-09-03', 1596, 'Printhuis');
+    const laat = debit(other.s, '2026-11-20', 1596, 'WOLKENDIENST');
+    expect(other.api.bank.purchaseQuestion(elders.id)).toBeNull();
+    expect(other.api.bank.purchaseQuestion(laat.id)).toBeNull();
+  });
+
   it('contant betaald en hetzelfde bedrag gepind: de vraag zonder voorkeur; "ja" draait de kasbetaling terug', async () => {
     const { s, api } = world();
     const p = order(s, 'Bouwmarkt De Hamer', '2026-09-10', 4840);
@@ -344,6 +384,34 @@ describe('privé of contant betaald, en daarna staat de afschrijving toch op je 
     expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
     expect(s.bank.get(t.id).matched_purchase_invoice_id).toBe(p.id);
     expect(s.ledger.balance('WBedKanSof')).toBe(4840);
+  });
+
+  it('de afschrijving staat vóór de privébetaling (in december van je rekening, de factuur is van januari): de privébetaling gaat terug op haar eigen datum', async () => {
+    const { s, api } = world();
+    const p = order(s, 'Wolkendienst', '2027-01-02', 1500);
+    s.quick.payPurchaseWith(p.id, 'prive');
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen, { to: '2026-12-31' })).toBe(0);
+    const t = debit(s, '2026-12-28', 1500, 'WOLKENDIENST');
+    const [task] = bankTasks(s, t.id);
+    expect(task).toMatchObject({ kind: 'bank-purchase-paid', ref: { purchaseId: p.id } });
+    await api.home.act(task!, 'ja');
+    // per 31 december: betaald van je rekening, de factuur komt nog (vooruitbetaald); niets op privé
+    expect(s.ledger.balance(ACCOUNTS.bank, { to: '2026-12-31' })).toBe(-1500);
+    expect(s.ledger.balance(ACCOUNTS.crediteuren, { to: '2026-12-31' })).toBe(1500);
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen, { to: '2026-12-31' })).toBe(0);
+    // en daarna loopt het glad
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    expect(s.ledger.balance('WBedKanSof')).toBe(1500);
+    expect(s.purchases.get(p.id)).toMatchObject({ status: 'betaald', open_amount: 0 });
+
+    // een afschrijving ná de privébetaling: de tegenboeking staat op de datum van de afschrijving, zoals het was
+    const q = order(s, 'Printhuis', '2026-09-01', 4840);
+    s.quick.payPurchaseWith(q.id, 'prive');
+    const u = debit(s, '2026-09-03', 4840, 'Printhuis');
+    api.bank.linkPurchase(u.id, q.id);
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen, { to: '2026-09-02' })).toBe(-4840);
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen, { to: '2026-09-03' })).toBe(0);
   });
 
   it('"Nee, iets anders": de aankoop blijft betaald, de vraag komt niet terug en je deelt de betaling zelf in', async () => {
@@ -461,19 +529,96 @@ describe('privé of contant betaald, en daarna staat de afschrijving toch op je 
     expect(bankTasks(s, t.id).map((x) => x.kind)).toEqual(['bank-purchase-paid']);
   });
 
-  it('het voorstel "Hoe betaald?": contant of privé van de telefoon, maar er staat een afschrijving van dat bedrag: de aankoop blijft open', () => {
+  it('het voorstel "Hoe betaald?": contant of privé van de telefoon, maar er staat een afschrijving die erbij past (bedrag, leverancier en datum): de aankoop blijft open', () => {
     const match = { id: 7 };
-    expect(proposedPaidWith({ proposed_paid_with: 'prive', bank_match: match })).toBe('later');
-    expect(proposedPaidWith({ proposed_paid_with: 'kas', bank_match: match })).toBe('later');
+    const fits = { bank_match: match, bank_match_strong: true };
+    // alleen het bedrag past (een andere naam op het afschrift): de keuze van de telefoon blijft staan
+    const amountOnly = { bank_match: match, bank_match_strong: false };
+    expect(proposedPaidWith({ proposed_paid_with: 'prive', ...fits })).toBe('later');
+    expect(proposedPaidWith({ proposed_paid_with: 'kas', ...fits })).toBe('later');
+    expect(proposedPaidWith({ proposed_paid_with: 'prive', ...amountOnly })).toBe('prive');
+    expect(proposedPaidWith({ proposed_paid_with: 'kas', ...amountOnly })).toBe('kas');
+    expect(proposedPaidWith({ proposed_paid_with: 'kas', bank_match: match })).toBe('kas');
     expect(proposedPaidWith({ proposed_paid_with: 'prive', bank_match: null })).toBe('prive');
     expect(proposedPaidWith({ proposed_paid_with: 'kas' })).toBe('kas');
-    expect(proposedPaidWith({ proposed_paid_with: 'bank', bank_match: match })).toBe('bank');
-    expect(proposedPaidWith({ proposed_paid_with: null, bank_match: match })).toBe('bank');
+    expect(proposedPaidWith({ proposed_paid_with: 'bank', ...fits })).toBe('bank');
+    expect(proposedPaidWith({ proposed_paid_with: null, ...fits })).toBe('bank');
+    expect(proposedPaidWith({ proposed_paid_with: null, ...amountOnly })).toBe('bank');
     expect(proposedPaidWith({ proposed_paid_with: 'later', bank_match: null })).toBe('later');
     expect(paidWithNote({ proposed_paid_with: 'kas', bank_match: null })).toBe(' Contant betaald.');
     expect(paidWithNote({ proposed_paid_with: 'prive' })).toBe(' Met privégeld betaald.');
-    expect(paidWithNote({ proposed_paid_with: 'kas', bank_match: match })).toBe(' Op je telefoon koos je contant, maar op je rekening staat ook een afschrijving van dit bedrag. De aankoop blijft open; bij de betaling vraagt de app of die erbij hoort.');
-    expect(paidWithNote({ proposed_paid_with: 'prive', bank_match: match })).toBe(' Op je telefoon koos je privégeld, maar op je rekening staat ook een afschrijving van dit bedrag. De aankoop blijft open; bij de betaling vraagt de app of die erbij hoort.');
-    expect(paidWithNote({ proposed_paid_with: 'bank', bank_match: match })).toBe('');
+    expect(paidWithNote({ proposed_paid_with: 'kas', ...amountOnly })).toBe(' Contant betaald.');
+    expect(paidWithNote({ proposed_paid_with: 'prive', ...amountOnly })).toBe(' Met privégeld betaald.');
+    expect(paidWithNote({ proposed_paid_with: 'kas', ...fits })).toBe(' Op je telefoon koos je contant, maar op je rekening staat ook een afschrijving van dit bedrag. De aankoop blijft open; bij de betaling vraagt de app of die erbij hoort.');
+    expect(paidWithNote({ proposed_paid_with: 'prive', ...fits })).toBe(' Op je telefoon koos je privégeld, maar op je rekening staat ook een afschrijving van dit bedrag. De aankoop blijft open; bij de betaling vraagt de app of die erbij hoort.');
+    expect(paidWithNote({ proposed_paid_with: 'bank', ...fits })).toBe('');
+  });
+
+  describe('een bon van de telefoon met "contant" of "privé", en een afschrijving van hetzelfde bedrag op je rekening', () => {
+    const lines = ['Bouwmarkt De Hamer', 'Datum: 05-09-2026', 'Schroeven 16,53', 'BTW 21% 16,53 3,47', 'Totaal 20,00'];
+    const ocr: OcrProvider = { id: 'test', label: 'Test OCR', available: async () => true, recognize: async () => ({ items: lines.map((text, i) => ({ text, page: 1, bbox: [10, 20 + i * 20, 300, 34 + i * 20] as [number, number, number, number], confidence: 0.97 })) }) };
+    /** De bon van € 20,00 van 5 september, met de betaalwijze die op de telefoon is gekozen; de afschrijving staat er al. */
+    const scanned = async (phone: 'kas' | 'prive', counterName: string, usual: 'kas' | 'prive' | null = null) => {
+      const ctx = setup({ ocr });
+      const { s } = ctx;
+      s.settings.update({ onboardingDone: true });
+      const api = createApi(s, { appVersion: () => '0.0.0', hasSmtpPassword: () => false } as unknown as HostContext);
+      if (usual) s.relations.setPaidWith(s.relations.findOrCreateSupplier('Bouwmarkt De Hamer').id, usual);
+      const t = debit(s, '2026-09-08', 2000, counterName);
+      const added = await s.intake.add('bon.jpg', new Uint8Array([7]), '2026-09-05');
+      s.db.prepare('UPDATE documents SET proposed_paid_with = ? WHERE id = ?').run(phone, added.id);
+      const review = () => s.inbox.tasks('2026-09-28').find((x) => x.kind === 'document-review' && x.ref.documentId === added.id)!;
+      return { ...ctx, api, t, d: s.intake.get(added.id), review };
+    };
+
+    it('de afschrijving is van een andere tegenpartij: de keuze van de telefoon geldt, de bon is meteen contant betaald', async () => {
+      const { s, api, t, d, review } = await scanned('kas', 'Parkeergarage Centrum');
+      // de app vindt de afschrijving op het bedrag, maar de naam past niet
+      expect(d).toMatchObject({ status: 'controle', bank_match: { id: t.id }, bank_match_strong: false, proposed_paid_with: 'kas' });
+      expect(proposedPaidWith(d)).toBe('kas');
+      expect(review().question).toContain(' Contant betaald. ');
+      expect(review().question).not.toContain('blijft open');
+      await api.home.act(review(), 'klopt');
+      const p = s.purchases.get(s.intake.get(d.id).purchase_invoice_id!);
+      expect(p).toMatchObject({ status: 'betaald', open_amount: 0 });
+      expect(s.ledger.balance(ACCOUNTS.kas)).toBe(-2000);
+      expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+      // de parkeerbetaling is een andere uitgave: geen vraag over de bon, en hij staat nog gewoon te wachten
+      expect(s.bank.get(t.id).status).toBe('nieuw');
+      expect(api.bank.purchaseQuestion(t.id)).toBeNull();
+      expect(bankTasks(s, t.id).map((x) => x.kind)).toEqual(['bank-business']);
+    });
+
+    for (const [phone, account, note] of [['kas', ACCOUNTS.kas, ' Contant betaald. '], ['prive', ACCOUNTS.priveStortingen, ' Met privégeld betaald. ']] as const) {
+      it(`de leverancier staat op "voortaan ${phone === 'kas' ? 'contant' : 'privé'}" en de afschrijving heeft de naam van een betaalautomaat: voorstel, melding en boeking zeggen hetzelfde`, async () => {
+        const { s, api, t, d, review } = await scanned(phone, 'CCV*KIOSK 12', phone);
+        expect(d).toMatchObject({ bank_match: { id: t.id }, bank_match_strong: false });
+        expect(proposedPaidWith(d)).toBe(phone);
+        // geen belofte dat de aankoop open blijft: hij wordt betaald zoals op de telefoon gekozen
+        expect(review().question).toContain(note);
+        expect(review().question).not.toContain('blijft open');
+        await api.home.act(review(), 'klopt');
+        expect(s.purchases.get(s.intake.get(d.id).purchase_invoice_id!)).toMatchObject({ status: 'betaald', open_amount: 0 });
+        expect(s.ledger.balance(account)).toBe(-2000);
+        expect(s.bank.get(t.id).status).toBe('nieuw');
+      });
+    }
+
+    it('de afschrijving is van dezelfde leverancier: de aankoop blijft open en bij de betaling komt de vraag', async () => {
+      const { s, api, t, d, review } = await scanned('kas', 'BOUWMARKT DE HAMER');
+      expect(d).toMatchObject({ bank_match: { id: t.id }, bank_match_strong: true });
+      expect(proposedPaidWith(d)).toBe('later');
+      expect(review().question).toContain(' Op je telefoon koos je contant, maar op je rekening staat ook een afschrijving van dit bedrag. De aankoop blijft open; bij de betaling vraagt de app of die erbij hoort. ');
+      await api.home.act(review(), 'klopt');
+      const p = s.purchases.get(s.intake.get(d.id).purchase_invoice_id!);
+      expect(p).toMatchObject({ status: 'open', open_amount: 2000 });
+      expect(s.ledger.balance(ACCOUNTS.kas)).toBe(0);
+      const [task] = bankTasks(s, t.id);
+      expect(task).toMatchObject({ kind: 'bank-purchase', ref: { purchaseId: p.id } });
+      await api.home.act(task!, 'klopt');
+      expect(s.purchases.get(p.id)).toMatchObject({ status: 'betaald', open_amount: 0 });
+      expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+      expect(s.ledger.balance(ACCOUNTS.bank)).toBe(-2000);
+    });
   });
 });

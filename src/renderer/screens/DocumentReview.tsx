@@ -13,7 +13,7 @@ import { formatDateNl } from '../../shared/dates';
 import type { IntakeDocument, PendingProposal } from '../../intake/intake';
 import { DOCUMENT_OUTCOME_LABEL } from '../../shared/document-outcome';
 import { TargetDetails } from './UploadOutcome';
-import { proposedPaidWith } from '../../shared/paid-with';
+import { paidWithNote, proposedPaidWith } from '../../shared/paid-with';
 
 // pdf.js gebruikt Map.getOrInsertComputed, dat oudere Chromium-versies (bv. die van de e2e-tests) nog niet kennen
 for (const proto of [Map.prototype, WeakMap.prototype] as unknown as Record<string, unknown>[]) {
@@ -385,10 +385,14 @@ export function DocumentReview({ id }: { id: number }) {
                   {!form.splits && form.categoryKey !== 'onbekend' && <BusinessShareField supplier={form.supplier} value={form.businessPct} onChange={(v) => setForm({ ...form, businessPct: v })} />}
                   <Field label="Hoe betaald?">
                     <div className="chips">
-                      <button className={form.paidWith === 'bank' || form.paidWith === 'later' ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: d.bank_match ? 'bank' : 'later' })}>Zakelijke rekening</button>
+                      {/* "later" naast een gevonden betaling (de telefoon zei contant of privé, #222): nog niets gekozen, de aankoop blijft open */}
+                      <button className={form.paidWith === 'bank' || (form.paidWith === 'later' && !d.bank_match) ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: d.bank_match ? 'bank' : 'later' })}>Zakelijke rekening</button>
                       <button className={form.paidWith === 'kas' ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: 'kas' })}>Contant</button>
                       <button className={form.paidWith === 'prive' ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: 'prive' })}>Met privégeld</button>
                     </div>
+                    {form.paidWith === 'later' && d.bank_match && paidWithNote(d) && (
+                      <div className="small muted">{paidWithNote(d).trim()} Weet je het zeker? Kies dan hierboven zelf hoe je betaalde.</div>
+                    )}
                   </Field>
                   {(jobs.data ?? []).length > 0 && (
                     <Field label="Voor een klus?" hint="optioneel">
