@@ -422,8 +422,10 @@ export class InboxService {
    * de vraag op Vandaag: privé of "weet ik nog niet" neemt de factuur mee (`gedaan`: er is niets meer te
    * boeken). Iets anders kan alleen als er geen factuur van je eigen bedrijf bij hoort. Ook hier gaat de
    * vraag bij een andere aankoop die sterk past voor (`mustAnswer`).
+   * Een regel die waarschijnlijk dezelfde betaling is als een regel die er al staat (#225): eerst dat antwoord.
    */
   private guardBank(t: BankTransaction, account: string | undefined): 'door' | 'gedaan' {
+    this.bank.assertNotHeld(t);
     if (t.amount >= 0) return 'door';
     const m = this.own?.match(t);
     if (m && !m.mustAnswer) {
@@ -514,7 +516,12 @@ export class InboxService {
     const index = this.matcher.index();
     // vragen "hoort dit bij de aankoop …?" die met één klik te beantwoorden zijn, om na de ronde te vergelijken
     const oneClick: { at: number; t: BankTransaction; q: PaymentQuestion; who: string }[] = [];
+    // Waarschijnlijk dezelfde betaling als een regel die er al staat (#225): daarvoor is de melding "staat er
+    // twee keer in" de enige vraag. Geen eigen taak met één klik en niet in een groep, anders staat hij er zo dubbel in.
+    const doubles = this.bank.paymentDoubles();
+    const held = this.bank.heldAsDouble(doubles);
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
+      if (held.has(t.id)) continue;
       if (firstOpen && t.transaction_date < firstOpen) {
         locked[this.ledger.periodLockFor(t.transaction_date)?.kind ?? 'afgesloten']++;
         continue;
@@ -794,7 +801,7 @@ export class InboxService {
     }
 
     // twee losse regels die dezelfde betaling lijken, uit verschillende imports (#225)
-    for (const d of this.bank.paymentDoubles()) {
+    for (const d of doubles) {
       const size = formatEuro(Math.abs(d.amount));
       const who = (x: { counterName: string | null; description: string }) => `"${(x.counterName || x.description || 'zonder naam').replace(/\s+/g, ' ').slice(0, 60)}"`;
       const processed = [d.first, d.second].filter((x) => x.status === 'gematcht').length;
@@ -805,7 +812,7 @@ export class InboxService {
         icon: '⚠️',
         title: `${d.accountName}: ${size} staat er waarschijnlijk twee keer in`,
         question:
-          `Op ${formatDateNl(d.first.date)} staan twee regels van ${size} die dezelfde betaling lijken: ${who(d.first)} en ${who(d.second)}. Dat komt waarschijnlijk doordat dezelfde betaling uit twee afschriften is ingelezen. ` +
+          `Op ${formatDateNl(d.first.date)}${d.second.date === d.first.date ? '' : ` en ${formatDateNl(d.second.date)}`} staan twee regels van ${size} die dezelfde betaling lijken: ${who(d.first)} en ${who(d.second)}. Dat komt waarschijnlijk doordat dezelfde betaling uit twee afschriften is ingelezen${d.second.date === d.first.date ? '' : ' (het ene heeft de dag van de betaling, het andere de dag dat de bank hem boekte)'}. ` +
           (processed === 2 ? 'Beide zijn al verwerkt, dus het bedrag telt dubbel. ' : ignored ? 'Eén ervan is genegeerd, maar telt nog wel mee in de saldocontrole. ' : '') +
           'Bekijk ze naast elkaar en haal er één uit.',
         amount: Math.abs(d.amount),

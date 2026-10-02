@@ -1102,12 +1102,18 @@ export class IntakeService {
    * Zoekt een onverwerkte banktransactie met hetzelfde bedrag rond dezelfde datum: tot tien dagen ervoor of
    * erna. Past de naam of het rekeningnummer van de leverancier, dan mag de betaling tot twintig dagen na
    * de bon liggen (hetzelfde venster als overal waar de app een betaling en een aankoop vergelijkt).
+   * Een regel die als waarschijnlijke dubbel wordt vastgehouden, telt niet mee.
    */
   findBankMatch(result: DocumentResult): BankTransaction | null {
     if (!result.total) return null;
     const foreign = Boolean(result.foreign);
     // vreemde munt: de bank rekende een eigen koers, dus ongeveer hetzelfde bedrag
-    const candidates = this.bank.list({ status: 'nieuw', limit: 2000 }).filter((t) => (foreign ? t.amount < 0 && withinFx(-t.amount, result.total!.value) : t.amount === -result.total!.value));
+    const amountFits = this.bank.list({ status: 'nieuw', limit: 2000 }).filter((t) => (foreign ? t.amount < 0 && withinFx(-t.amount, result.total!.value) : t.amount === -result.total!.value));
+    if (amountFits.length === 0) return null;
+    // een regel die waarschijnlijk dezelfde betaling is als een regel die er al staat (#225), is geen kandidaat:
+    // eerst het antwoord bij die melding
+    const held = this.bank.heldAsDouble();
+    const candidates = amountFits.filter((t) => !held.has(t.id));
     const date = result.invoiceDate?.value;
     const scored = candidates
       .map((t) => {

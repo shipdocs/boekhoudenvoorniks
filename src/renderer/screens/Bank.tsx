@@ -125,7 +125,7 @@ export function Bank({ focus, skippedFor, imported, double, same }: { /** vanaf 
       {(sames.data ?? []).map((d) => (
         <div key={`${d.firstId}-${d.secondId}`} className="notice warn row between" style={{ marginTop: 14 }} data-testid="zelfde-betaling">
           <span>
-            ⚠️ <strong><Euro cents={Math.abs(d.amount)} /> staat er waarschijnlijk twee keer in</strong> ({d.accountName}): twee regels op <DateNl date={d.first.date} /> die dezelfde betaling lijken, uit verschillende afschriften.
+            ⚠️ <strong><Euro cents={Math.abs(d.amount)} /> staat er waarschijnlijk twee keer in</strong> ({d.accountName}): twee regels op <DateNl date={d.first.date} />{d.second.date !== d.first.date && <> en <DateNl date={d.second.date} /></>} die dezelfde betaling lijken, uit verschillende afschriften.
           </span>
           <Button small kind="primary" onClick={() => setShowSame({ firstId: d.firstId, secondId: d.secondId })}>Bekijken en oplossen</Button>
         </div>
@@ -442,8 +442,11 @@ function SameDialog({ double: d, onClose, onChanged }: { double: PaymentDouble; 
   );
   const canRemoveFirst = d.first.status !== 'gematcht';
   const canRemoveSecond = d.second.status !== 'gematcht';
-  // liefst de regel die er later bij kwam eruit; is die al verwerkt en de eerste niet, dan de eerste
-  const primary = canRemoveSecond ? 'tweede' : canRemoveFirst ? 'eerste' : null;
+  // Is precies één van de twee genegeerd, dan gaat die eruit: de andere is de betaling die in je boekhouding hoort.
+  // Anders liefst de regel die er later bij kwam; is die al verwerkt en de eerste niet, dan de eerste.
+  const ignoredFirst = d.first.status === 'genegeerd';
+  const ignoredSecond = d.second.status === 'genegeerd';
+  const primary = ignoredFirst !== ignoredSecond ? (ignoredFirst ? 'eerste' : 'tweede') : canRemoveSecond ? 'tweede' : canRemoveFirst ? 'eerste' : null;
   return (
     <Modal title="Deze betaling staat er waarschijnlijk twee keer in" wide onClose={onClose}>
       <p>
@@ -460,6 +463,7 @@ function SameDialog({ double: d, onClose, onChanged }: { double: PaymentDouble; 
         </div>
       </div>
       {!canRemoveFirst && !canRemoveSecond && <p className="small">Beide regels zijn al verwerkt. Die haalt de app er niet zomaar uit: open de regel die er dubbel in staat, kies <strong>Ongedaan maken</strong> en kom daarna hier terug.</p>}
+      {(ignoredFirst || ignoredSecond) && <p className="small" data-testid="genegeerd-blijft">{ignoredFirst && ignoredSecond ? 'Beide regels zijn genegeerd' : ignoredFirst ? 'De regel die er al stond is genegeerd' : 'De regel die er later bij kwam is genegeerd'}. Houd je een genegeerde regel, dan komt die terug bij je nog te verwerken betalingen: anders staat deze betaling nergens in je boekhouding.</p>}
       {canRemoveFirst !== canRemoveSecond && <p className="small">{canRemoveFirst ? 'De regel die er later bij kwam' : 'De regel die er al stond'} is al verwerkt. Die haalt de app er niet zomaar uit: haal de andere eruit, of maak eerst die verwerking ongedaan (open de regel en kies <strong>Ongedaan maken</strong>).</p>}
       <div className="row end" style={{ marginTop: 14, flexWrap: 'wrap' }}>
         <Button disabled={busy} onClick={() => void act(() => api.bank.dismissSame(d.firstId, d.secondId), 'Goed, de app meldt dit niet meer')}>Nee, dit zijn twee verschillende betalingen</Button>
@@ -726,8 +730,18 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const purchaseQuestion = useLoad(() => api.bank.purchaseQuestion(id), [id]);
   // bij "Negeren": de betalingen waar deze regel een dubbel van kan zijn (#225); null = nog niet gevraagd
   const [doubleOf, setDoubleOf] = useState<Awaited<ReturnType<typeof api.bank.duplicateCandidates>> | null>(null);
+  // waarschijnlijk dezelfde betaling als een regel die er al staat (#225): eerst die vraag, daarna pas indelen
+  const sames = useLoad(() => api.bank.sameDoubles());
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
+  const held = t.status === 'nieuw' ? (sames.data ?? []).find((d) => (d.secondId === t.id && d.second.status === 'nieuw') || (d.firstId === t.id && d.second.status !== 'nieuw')) : undefined;
+  /** de betalingen waar deze regel een dubbel van kan zijn; kiezen koppelt hem daaraan */
+  const doubleChoices = (candidates: NonNullable<typeof doubleOf>) => candidates.map((c) => (
+    <button key={c.id} disabled={busy} onClick={() => void done(api.bank.ignore(t.id, c.id))}>
+      Ja, dubbel van <DateNl date={c.transaction_date} /> · {c.counter_name ?? 'Onbekend'}
+      <div className="hint">{c.description.length > 90 ? `${c.description.slice(0, 90)}…` : c.description} · {STATUS_TEXT[c.status]}{c.status === 'genegeerd' ? ': die komt terug bij je nog te verwerken betalingen' : ''}</div>
+    </button>
+  ));
   const done = async (p: Promise<unknown>, investment?: string) => {
     // ook acties die niets teruggeven (bv. ongedaan maken) tellen als gelukt als ze niet falen
     if ((await run(async () => { await p; return true; }, investment ? undefined : 'Verwerkt ✓')) !== undefined) {
@@ -756,6 +770,14 @@ export function CategorizeTransaction({ id }: { id: number }) {
       </details>
       <PaymentEvidence txId={t.id} />
 
+      {held && (
+        <div className="notice warn row between" role="note" data-testid="vastgehouden-dubbel">
+          <span>
+            <strong>Deze regel staat er waarschijnlijk twee keer in.</strong> Op <DateNl date={(held.firstId === t.id ? held.second : held.first).date} /> staat dezelfde betaling uit een ander afschrift. Kies eerst of het dezelfde betaling is; daarna kun je hem indelen.
+          </span>
+          <Button small kind="primary" onClick={() => go({ screen: 'bank', extra: { same: { firstId: held.firstId, secondId: held.secondId } } })}>Bekijken en oplossen</Button>
+        </div>
+      )}
       {/* past er een andere aankoop sterk bij, dan eerst die vraag hieronder; daarna pas privé of "weet ik nog niet" */}
       {t.status === 'nieuw' && ownCompany.data && !mustAnswer && (
         <div className="notice warn" role="note" data-testid="eigen-bedrijf">
@@ -815,13 +837,34 @@ export function CategorizeTransaction({ id }: { id: number }) {
             <Button disabled={busy} onClick={async () => {
               // op deze pagina blijven: daarna meteen opnieuw indelen
               if ((await run(async () => { await api.bank.unmatch(t.id); return true; }, 'Teruggedraaid. Kies nu wat het wel was.')) !== undefined) {
-                await Promise.all([txs.reload(), suggestions.reload(), own.reload()]);
+                setDoubleOf(null);
+                await Promise.all([txs.reload(), suggestions.reload(), own.reload(), sames.reload()]);
               }
             }}>Ongedaan maken</Button>
             {t.status === 'gematcht' && !t.matched_invoice_id && !t.matched_purchase_invoice_id && t.amount < 0 && (
               <Button onClick={() => setRecat(!recat)}>Andere categorie</Button>
             )}
+            {/* eerder genegeerd zonder koppeling: alsnog zeggen van welke betaling dit een dubbele regel is (#225) */}
+            {t.status === 'genegeerd' && !t.duplicate_of && (
+              <Button disabled={busy} onClick={async () => {
+                const found = await run(() => api.bank.duplicateCandidates(t.id));
+                if (found !== undefined) setDoubleOf(found);
+              }}>Dit is een dubbele regel van…</Button>
+            )}
           </div>
+          {t.status === 'genegeerd' && !t.duplicate_of && doubleOf && (
+            <div className="notice" role="note" data-testid="genegeerd-dubbel" style={{ marginTop: 12 }}>
+              {doubleOf.length === 0 ? (
+                <span className="small">Er staat geen andere betaling van hetzelfde bedrag op deze rekening binnen een paar werkdagen.</span>
+              ) : (
+                <>
+                  <strong>Van welke betaling is dit een dubbele regel?</strong>
+                  <div className="small" style={{ marginTop: 4 }}>Een genegeerde regel telt nog mee in de saldocontrole. Koppel je hem aan de betaling waar hij een dubbel van is, dan telt hij daar niet meer in mee. Je kunt hem altijd terugzetten.</div>
+                  <div className="choice" style={{ marginTop: 8 }}>{doubleChoices(doubleOf)}</div>
+                </>
+              )}
+            </div>
+          )}
           {recat && (
             <div style={{ marginTop: 12 }}>
               <CategoryPicker txId={t.id} amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode, businessPct) => void done(api.bank.reclassify(t.id, categoryKey, vatCode, businessPct), inv(categoryKey, vatCode))} />
@@ -962,12 +1005,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
               <strong>Staat deze betaling er al in?</strong>
               <div className="small" style={{ marginTop: 4 }}>Is dit een dubbele regel, kies dan van welke betaling. De app koppelt hem daaraan: hij telt dan niet mee in je boekhouding en ook niet in de saldocontrole, en je kunt hem altijd terugzetten.</div>
               <div className="choice" style={{ marginTop: 8 }}>
-                {doubleOf.map((c) => (
-                  <button key={c.id} disabled={busy} onClick={() => void done(api.bank.ignore(t.id, c.id))}>
-                    Ja, dubbel van <DateNl date={c.transaction_date} /> · {c.counter_name ?? 'Onbekend'}
-                    <div className="hint">{c.description.length > 90 ? `${c.description.slice(0, 90)}…` : c.description} · {STATUS_TEXT[c.status]}</div>
-                  </button>
-                ))}
+                {doubleChoices(doubleOf)}
                 <button disabled={busy} onClick={() => void done(api.bank.ignore(t.id))}>
                   Nee, alleen negeren
                   <div className="hint">Het geld ging wel van je rekening, maar hoort niet in je boekhouding</div>
