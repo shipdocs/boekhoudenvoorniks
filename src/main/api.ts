@@ -58,6 +58,7 @@ import { dueOf, purchaseSupplierName } from '../documents/bank-purchase-match';
 import QRCode from 'qrcode';
 import type { Bonnenscanner } from '../scanner/scanner';
 import { PHONE_SCANNER } from '../shared/phone-scanner';
+import { BANK_FEED } from '../shared/bank-feed';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
@@ -769,6 +770,8 @@ export function createApi(s: Services, host: HostContext) {
         vatSuppletieUrl: SUPPLETIE_URL,
         /** telefoon koppelen voor de bonnenscanner is beschikbaar (nu nog niet: shared/phone-scanner.ts) */
         phoneScanner: PHONE_SCANNER.available,
+        /** Ponto-bankfeed beschikbaar (nu nog niet: shared/bank-feed.ts, #243); het scherm ziet alleen deze vlag */
+        bankFeed: BANK_FEED.available,
       }),
     },
     onboarding: {

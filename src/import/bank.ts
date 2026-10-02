@@ -301,11 +301,12 @@ export class BankService {
     this.db.prepare('UPDATE bank_accounts SET name = ?, iban = ?, is_pot = ? WHERE id = ?').run(name, nextIban, pot, id);
   }
 
-  /** Kan deze rekening weg? Alleen als er niets op staat: geen afschriften, geen boekingen, saldo 0. */
+  /** Kan deze rekening weg? Alleen als er niets op staat: geen koppeling, geen afschriften, geen boekingen, saldo 0. */
   removable(id: number): { ok: boolean; reason: string | null } {
     const account = this.getAccount(id);
     if (this.listAccounts().length === 1) return { ok: false, reason: 'Je hebt minstens één rekening nodig' };
     if (account.rgs_code === ACCOUNTS.bank) return { ok: false, reason: 'Dit is je hoofdrekening; die kan niet weg' };
+    if (this.db.prepare('SELECT 1 FROM bank_feed_accounts WHERE bank_account_id = ? AND status <> \'weg\'').get(id)) return { ok: false, reason: 'Deze rekening is gekoppeld aan Ponto' };
     if (this.db.prepare('SELECT 1 FROM bank_transactions WHERE bank_account_id = ?').get(id)) return { ok: false, reason: 'Er zijn afschriften van deze rekening ingelezen' };
     const used = this.db
       .prepare(

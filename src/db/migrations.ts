@@ -1217,4 +1217,39 @@ export const migrations: string[] = [
   ALTER TABLE purchase_invoices ADD COLUMN expected_on_bank_account_id INTEGER REFERENCES bank_accounts(id);
   ALTER TABLE purchase_invoices ADD COLUMN expected_on_bank_since TEXT;
   `,
+  /* 33: Ponto-bankfeed: gekoppelde rekeningen (WP1, #243) */ `
+  -- Een bankrekening die via Ponto aan de bank hangt, zodra de koppeling er is. Nu is de tabel alleen het
+  -- fundament (de vlag staat nog uit, #243): hij heeft nog geen rijen en er is nog geen netwerkcode.
+  -- Per provider hooguit één koppeling per externe rekening (UNIQUE). Saldo's en bevindingen van de
+  -- synchronisatie in centen en tekst; credentials horen hier niet (die staan in de veilige opslag).
+  CREATE TABLE bank_feed_accounts (
+    id INTEGER PRIMARY KEY,
+    provider TEXT NOT NULL DEFAULT 'ponto',
+    external_id TEXT NOT NULL,
+    bank_account_id INTEGER REFERENCES bank_accounts(id),
+    iban TEXT,
+    name TEXT,
+    holder TEXT,
+    status TEXT NOT NULL DEFAULT 'actief'
+      CHECK (status IN ('actief','niet-gebruiken','weg')),
+    link_from TEXT,
+    transactions_synchronized_at TEXT,
+    details_synchronized_at TEXT,
+    covered_to TEXT,
+    expires_at TEXT,
+    balance INTEGER,
+    balance_at TEXT,
+    balance_diff INTEGER,
+    balance_diff_rounds INTEGER NOT NULL DEFAULT 0,
+    gap_from TEXT,
+    gap_to TEXT,
+    last_round_at TEXT,
+    last_ok_at TEXT,
+    last_error TEXT,
+    last_error_kind TEXT,
+    manual_sync_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (provider, external_id)
+  );
+  `,
 ];
