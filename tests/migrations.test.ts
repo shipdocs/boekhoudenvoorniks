@@ -1,11 +1,33 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { migrate } from '../src/db/database';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { migrate, NEWER_DATABASE_MESSAGE, openDatabase } from '../src/db/database';
 import { migrations } from '../src/db/migrations';
 import { createServices, MemorySecretStore } from '../src/services';
 import { createApi, type HostContext } from '../src/main/api';
 
 describe('migraties', () => {
+  it('opent een database van een nieuwere app niet en wijzigt geen enkel byte', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'gb-nieuwere-db-')), 'boekhouding.sqlite');
+    const newer = openDatabase(file);
+    newer.pragma(`user_version = ${migrations.length + 1}`);
+    newer.close();
+    const before = readFileSync(file);
+
+    expect(() => openDatabase(file)).toThrow(NEWER_DATABASE_MESSAGE);
+    expect(readFileSync(file)).toEqual(before);
+  });
+
+  it('migrate weigert een hogere user_version voordat een migratie draait', () => {
+    const db = new Database(':memory:');
+    db.pragma(`user_version = ${migrations.length + 7}`);
+    expect(() => migrate(db)).toThrow(NEWER_DATABASE_MESSAGE);
+    expect(db.pragma('user_version', { simple: true })).toBe(migrations.length + 7);
+    db.close();
+  });
+
   it('vult de importperiodes aan voor afschriften die vóór migratie 4 zijn ingelezen', () => {
     const db = new Database(':memory:');
     for (const m of migrations.slice(0, 3)) db.exec(m);

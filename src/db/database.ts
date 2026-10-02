@@ -1,16 +1,56 @@
 import Database from 'better-sqlite3';
+import { existsSync } from 'node:fs';
 import { migrations } from './migrations';
 import { relativizeAttachmentPaths } from './attachment-paths';
 
 export type Db = Database.Database;
 
+export const NEWER_DATABASE_MESSAGE = 'Deze administratie is gemaakt met een nieuwere versie. Werk het programma eerst bij.';
+
+/** Herkenbaar voor het hoofdproces: deze fout vraagt om bijwerken of een andere administratie. */
+export class NewerDatabaseError extends Error {
+  constructor(
+    readonly databaseVersion: number,
+    readonly appVersion: number = migrations.length,
+  ) {
+    super(NEWER_DATABASE_MESSAGE);
+    this.name = 'NewerDatabaseError';
+  }
+}
+
+/** Alleen lezen; nodig om vóór iedere migratie of andere schrijfactie veilig te kunnen stoppen. */
+export function assertDatabaseNotNewer(db: Db): void {
+  const version = db.pragma('user_version', { simple: true }) as number;
+  if (version > migrations.length) throw new NewerDatabaseError(version);
+}
+
+/** Controleert een bestaand databasebestand zonder journal, migratie of andere schrijfactie. */
+export function assertDatabaseFileNotNewer(filename: string): void {
+  const db = new Database(filename, { readonly: true, fileMustExist: true });
+  try {
+    assertDatabaseNotNewer(db);
+  } finally {
+    db.close();
+  }
+}
+
 export function openDatabase(filename: string, log: (message: string) => void = console.warn): Db {
+  // Een bestaande database eerst via een read-only verbinding beoordelen. Zo kan zelfs het openen
+  // van een database in WAL-modus geen sidecar of checkpoint veroorzaken als hij te nieuw is.
+  if (filename !== ':memory:' && existsSync(filename)) assertDatabaseFileNotNewer(filename);
   const db = new Database(filename);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  migrate(db);
-  relativizeAttachments(db, log);
-  return db;
+  try {
+    // Eerst de schema-versie: WAL, migraties en bijlagecorrecties kunnen allemaal schrijven.
+    assertDatabaseNotNewer(db);
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+    migrate(db);
+    relativizeAttachments(db, log);
+    return db;
+  } catch (e) {
+    db.close();
+    throw e;
+  }
 }
 
 /**
@@ -46,6 +86,7 @@ export function openReadonly(filename: string): Db {
 }
 
 export function migrate(db: Db): void {
+  assertDatabaseNotNewer(db);
   const current = db.pragma('user_version', { simple: true }) as number;
   for (let i = current; i < migrations.length; i++) {
     const sql = migrations[i]!;
