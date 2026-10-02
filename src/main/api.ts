@@ -410,6 +410,8 @@ export function createApi(s: Services, host: HostContext) {
         s.inbox.skipTask(task.key, 'klopt zo');
         return;
       case 'sale-own-company:neutraal':
+      case 'sale-own-company:neutraal-bank':
+      case 'sale-own-company:neutraal-betaaldienst':
       case 'sale-own-company:verkoop':
       case 'sale-vat-mode:inclusief':
       case 'sale-vat-mode:exclusief':
@@ -417,7 +419,8 @@ export function createApi(s: Services, host: HostContext) {
       case 'sale-reread:niet':
         // verkoop uit een koppeling die op een keuze wacht: aan je eigen bedrijf (#231), prijzen met of zonder
         // btw, of een teruggedraaide factuur opnieuw inlezen (#228). Past het antwoord niet meer bij de vraag, dan een melding
-        s.integrations.answerQuestion(r.questionId!, actionId as SaleAnswer);
+        // bij "dit is het geld op de bank" gaat de bankregel mee die de gebruiker zag: is dat intussen een andere, dan gebeurt er niets
+        s.integrations.answerQuestion(r.questionId!, actionId as SaleAnswer, actionId === 'neutraal-bank' ? r.bankTransactionId : undefined);
         return;
       case 'bank-pot:klopt':
       case 'bank-own:klopt':

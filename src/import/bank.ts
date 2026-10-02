@@ -1490,13 +1490,15 @@ export class BankService {
    * Geld van een betaaldienst (de naam staat op het afschrift, of de vorige verkoop van deze betaler ging
    * via zo'n dienst) terwijl er verkopen op de tussenrekening wachten: een koppeling boekte die omzet al.
    * Dan is dit waarschijnlijk de uitbetaling daarvan en geen nieuwe verkoop (#227): "net als vorige keer"
-   * zou de omzet twee keer tellen. Geeft de naam van de betaaldienst, of null.
+   * zou de omzet twee keer tellen. Hetzelfde als een verkoop uit een koppeling nog op een keuze van de
+   * gebruiker wacht (#231): dan staat er nog niets op de tussenrekening, maar het geld is wel van die verkoop.
+   * Geeft de naam van de betaaldienst, of null.
    */
   awaitedPayout(t: BankTransaction, sale: PreviousSale | null = this.lastSale(t)): string | null {
     if (t.amount <= 0) return null;
     const provider = paymentProviderIn(`${t.counter_name ?? ''} ${t.description}`) ?? paymentProviderIn(sale?.channel);
     if (!provider) return null;
-    if (this.ledger.balance(ACCOUNTS.tussenrekeningPsp) > 0) return provider;
+    if (this.ledger.balance(ACCOUNTS.tussenrekeningPsp) > 0 || this.salesWaiting()) return provider;
     // las de koppeling ook de uitbetaling al in, dan staat het geld "onderweg" tot het op de bank binnen is
     const synced = this.db.prepare(`SELECT 1 FROM journal_entries WHERE source = 'integratie' LIMIT 1`).get();
     return synced && this.ledger.balance(ACCOUNTS.kruisposten) > 0 ? provider : null;
@@ -1521,6 +1523,12 @@ export class BankService {
       return { vatCode: p.vatCode, channel: p.channel ?? null, relationId: p.relationId, date: r.date };
     }
     return null;
+  }
+
+  /** Wacht er een verkoop uit een koppeling op een keuze van de gebruiker (#231)? Dan is daar nog niets voor geboekt. */
+  private salesWaiting: () => boolean = () => false;
+  setSalesWaiting(waiting: () => boolean): void {
+    this.salesWaiting = waiting;
   }
 
   /** Net als vorige keer: zelfde btw, systeem en klant; het nummer uit de omschrijving van de bank. */

@@ -5,6 +5,7 @@ import { signedLine } from '../core-ledger/ledger';
 import { ACCOUNTS, REVERSE_CHARGE_ACCOUNTS } from '../core-ledger/accounts';
 import { PURCHASE_VAT_RATES } from '../shared/vat';
 import { formatEuro, roundHalfAwayFromZero } from '../shared/money';
+import { diffDays } from '../shared/dates';
 import { NON_DEDUCTIBLE_VAT } from '../core-ledger/rules';
 import { korActive } from '../settings/settings';
 import type { InvoiceService } from '../documents/invoices';
@@ -12,7 +13,7 @@ import type { RelationsService } from '../relations/relations';
 import type { SalesVatCode } from '../shared/vat';
 import type { BankService } from '../import/bank';
 import { computeTotals } from '../documents/totals';
-import { detectOwnCustomer, type OwnIdentity } from '../intake/own-company';
+import { detectOwnCustomer, sameCompanyName, type OwnIdentity } from '../intake/own-company';
 import { ValidationError } from '../shared/validation';
 import type { Cents } from '../shared/money';
 import { WOOCOMMERCE, fetchWooOrders } from './woocommerce';
@@ -80,9 +81,36 @@ function withPrices(order: ExternalOrder, mode: 'inclusief' | 'exclusief'): Exte
  * de prijzen inclusief btw zijn (#228), 'eigen-bedrijf' = de klant is je eigen bedrijf (#231).
  */
 export type SaleReason = 'opnieuw' | 'btw' | 'eigen-bedrijf';
-/** De antwoorden, per vraag: opnieuw inlezen of niet, prijzen inclusief of exclusief btw, geen omzet of toch een gewone verkoop. */
-export type SaleAnswer = 'opnieuw' | 'niet' | 'inclusief' | 'exclusief' | 'neutraal' | 'verkoop';
-const ANSWERS: Record<SaleReason, SaleAnswer[]> = { opnieuw: ['opnieuw', 'niet'], btw: ['inclusief', 'exclusief'], 'eigen-bedrijf': ['neutraal', 'verkoop'] };
+/**
+ * De antwoorden, per vraag: opnieuw inlezen of niet, prijzen inclusief of exclusief btw, geen omzet of toch een
+ * gewone verkoop. Bij "geen omzet" met geld op de bank dat de betaling kan zijn, zegt de gebruiker erbij of dat
+ * dit geld is ('neutraal-bank') of dat het nog van de betaaldienst komt ('neutraal-betaaldienst').
+ */
+export type SaleAnswer = 'opnieuw' | 'niet' | 'inclusief' | 'exclusief' | 'neutraal' | 'neutraal-bank' | 'neutraal-betaaldienst' | 'verkoop';
+type NeutralAnswer = Extract<SaleAnswer, `neutraal${string}`>;
+const ANSWERS: Record<SaleReason, SaleAnswer[]> = { opnieuw: ['opnieuw', 'niet'], btw: ['inclusief', 'exclusief'], 'eigen-bedrijf': ['neutraal', 'neutraal-bank', 'neutraal-betaaldienst', 'verkoop'] };
+
+/**
+ * Een vraag is open zolang er geen antwoord is, en opnieuw als de boeking van "geen omzet" is teruggedraaid
+ * (#231): zo is een verkeerde klik te herstellen en komt de keuze terug.
+ */
+const OPEN_QUESTION = `(answer IS NULL OR (answer LIKE 'neutraal%' AND journal_entry_id IN (SELECT id FROM journal_entries WHERE status = 'teruggedraaid')))`;
+
+/** Zoveel dagen mag geld op de bank van de datum van de order af liggen om er zonder vraag bij te horen. */
+const BANK_WINDOW_DAYS = 10;
+
+/** Een bankregel die de betaling van een order kan zijn. */
+interface BankCandidate {
+  id: number;
+  transaction_date: string;
+  counter_name: string | null;
+  counter_iban: string | null;
+  description: string | null;
+  reference: string | null;
+  status: string;
+  matched_journal_entry_id: number | null;
+  rgs_code: string;
+}
 
 /** Een verkoop uit een koppeling die nog niet geboekt is: eerst de keuze van de gebruiker (#228, #231). */
 export interface SaleQuestion {
@@ -100,6 +128,11 @@ export interface SaleQuestion {
   previous: { number: string; total: Cents } | null;
   /** waarom de app het vraagt, in gewone woorden */
   signals: string[];
+  /**
+   * bij 'eigen-bedrijf': geld op de bank dat de betaling van deze verkoop kan zijn. `sure`: het ordernummer staat
+   * erbij, dus "geen omzet" gaat over die bankregel; anders kiest de gebruiker zelf of dat dit geld is.
+   */
+  bank: { id: number; date: string; counterName: string | null; description: string | null; sure: boolean } | null;
 }
 
 /**
@@ -392,9 +425,14 @@ export class IntegrationService {
     });
   }
 
+  /** Wacht er een verkoop uit een koppeling op een keuze? Dan is er voor die verkoop nog niets geboekt. */
+  hasQuestions(): boolean {
+    return Boolean(this.db.prepare(`SELECT 1 FROM integration_questions WHERE ${OPEN_QUESTION} LIMIT 1`).get());
+  }
+
   /** Verkopen die op een keuze wachten (#228, #231), oudste eerst. Er is voor deze orders nog niets geboekt. */
   questions(): SaleQuestion[] {
-    const rows = this.db.prepare('SELECT id, source, external_id, reason, order_data, signals FROM integration_questions WHERE answer IS NULL ORDER BY id').all() as { id: number; source: string; external_id: string; reason: SaleReason; order_data: string; signals: string }[];
+    const rows = this.db.prepare(`SELECT id, source, external_id, reason, order_data, signals FROM integration_questions WHERE ${OPEN_QUESTION} ORDER BY id`).all() as { id: number; source: string; external_id: string; reason: SaleReason; order_data: string; signals: string }[];
     return rows.map((r) => {
       const order = JSON.parse(r.order_data) as ExternalOrder;
       const previous = r.reason === 'opnieuw' ? ((this.db.prepare('SELECT number, total FROM invoices WHERE external_source = ? AND external_id = ?').get(r.source, r.external_id) as { number: string; total: Cents } | undefined) ?? null) : null;
@@ -408,6 +446,7 @@ export class IntegrationService {
         totals: r.reason === 'btw' ? { inclusief: linesTotal(order.lines), exclusief: invoiceTotal(order) } : null,
         previous,
         signals: JSON.parse(r.signals) as string[],
+        bank: r.reason === 'eigen-bedrijf' ? this.neutralBank(order) : null,
       };
     });
   }
@@ -420,20 +459,23 @@ export class IntegrationService {
    *  - 'verkoop' / 'neutraal' (#231), bij een verkoop aan je eigen bedrijf. 'verkoop': toch een gewone betaalde
    *    factuur, met omzet en btw. 'neutraal': geen factuur, geen omzet en geen btw; het geld dat de betaaldienst
    *    ervoor uitbetaalt telt als privé-storting. Dat staat op de tussenrekening, net als bij een gewone
-   *    verkoop, zodat de uitbetaling daarna aansluit. Staat het geld al op de bank (het ordernummer in de
-   *    omschrijving), dan gaat die bankregel naar privé-stortingen.
+   *    verkoop, zodat de uitbetaling daarna aansluit. Staat het geld al op de bank met het ordernummer erbij,
+   *    dan gaat die bankregel naar privé-stortingen. Staat er geld op de bank dat de betaling kan zijn maar
+   *    waar de app niet zeker van is, dan zegt de gebruiker het erbij: 'neutraal-bank' (dit is het geld;
+   *    `bankTransactionId` is de bankregel die hij zag) of 'neutraal-betaaldienst' (het komt nog van de
+   *    betaaldienst). Wordt de boeking later teruggedraaid, dan komt de vraag terug.
    */
-  answerQuestion(id: number, answer: SaleAnswer): void {
+  answerQuestion(id: number, answer: SaleAnswer, bankTransactionId?: number): void {
     tx(this.db, () => {
-      const row = this.db.prepare('SELECT source, reason, order_data, answer FROM integration_questions WHERE id = ?').get(Number(id)) as { source: string; reason: SaleReason; order_data: string; answer: string | null } | undefined;
+      const row = this.db.prepare(`SELECT source, reason, order_data, answer, ${OPEN_QUESTION} AS open FROM integration_questions WHERE id = ?`).get(Number(id)) as { source: string; reason: SaleReason; order_data: string; answer: string | null; open: number } | undefined;
       if (!row) throw new ValidationError('Deze vraag bestaat niet (meer)');
-      if (row.answer) throw new ValidationError('Deze vraag is al beantwoord. Kijk het opnieuw na.');
+      if (!row.open) throw new ValidationError('Deze vraag is al beantwoord. Kijk het opnieuw na.');
       if (!ANSWERS[row.reason]?.includes(answer)) throw new ValidationError('Deze vraag is intussen veranderd. Kijk het opnieuw na.');
       const done = (entryId: number | null = null) =>
         void this.db.prepare(`UPDATE integration_questions SET answer = ?, journal_entry_id = ?, answered_at = datetime('now') WHERE id = ?`).run(answer, entryId, Number(id));
       let order = JSON.parse(row.order_data) as ExternalOrder;
       if (answer === 'niet') return done();
-      if (answer === 'neutraal') return done(this.bookNeutral(row.source, order));
+      if (answer === 'neutraal' || answer === 'neutraal-bank' || answer === 'neutraal-betaaldienst') return done(this.bookNeutral(row.source, order, answer, bankTransactionId));
       if (answer === 'verkoop') {
         this.bookOrder(row.source, order, []);
         return done();
@@ -444,14 +486,32 @@ export class IntegrationService {
     });
   }
 
-  /** De verkoop aan je eigen bedrijf zonder omzet en btw: het geld telt als privé-storting. */
-  private bookNeutral(source: string, order: ExternalOrder): number {
+  /**
+   * De verkoop aan je eigen bedrijf zonder omzet en btw: het geld telt als privé-storting. Via de bankregel als
+   * die de betaling is (zeker, of omdat de gebruiker dat zegt), anders via de tussenrekening van de betaaldienst.
+   * Nooit stil via de tussenrekening als er geld op de bank staat dat de betaling kan zijn: dan bleef die
+   * bankregel open staan en kwam het geld er een tweede keer in.
+   */
+  private bookNeutral(source: string, order: ExternalOrder, answer: NeutralAnswer, bankTransactionId?: number): number {
     const total = paidTotal(order);
     const description = `Verkoop aan je eigen bedrijf (${order.number}): geen omzet`;
-    const found = this.bankPaymentFor(order, total);
-    // alleen op het ordernummer: je eigen naam op het afschrift is net zo goed een overboeking tussen eigen rekeningen
-    const bank = found?.by === 'nummer' ? found.row : null;
+    const found = this.neutralBankRow(order);
+    let bank: BankCandidate | null = null;
+    if (answer === 'neutraal') {
+      if (found && !found.sure) {
+        throw new ValidationError(`Op je bank staat ${formatEuro(total)}${found.row.counter_name ? ` van ${found.row.counter_name}` : ''} (${found.row.transaction_date}) dat de betaling van deze verkoop kan zijn. Kijk het opnieuw na en kies of dat dit geld is.`);
+      }
+      bank = found?.row ?? null;
+    } else if (answer === 'neutraal-bank') {
+      if (!found || (bankTransactionId !== undefined && Number(bankTransactionId) !== found.row.id)) throw new ValidationError('De betaling op je bank is intussen veranderd. Kijk het opnieuw na.');
+      bank = found.row;
+    }
     if (bank?.status === 'gematcht') {
+      // zelf al als privé-storting ingedeeld: dan is er niets meer te boeken
+      const asPrivate = this.db
+        .prepare('SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = ? AND a.rgs_code = ?')
+        .get(bank.matched_journal_entry_id, ACCOUNTS.priveStortingen);
+      if (asPrivate && bank.matched_journal_entry_id) return bank.matched_journal_entry_id;
       throw new ValidationError(`De bankbetaling van ${formatEuro(total)} (${bank.transaction_date}) is al geboekt. Zet die boeking eerst terug op 'nieuw' en kies daarna opnieuw.`);
     }
     if (bank && this.bank) return this.bank.bookToAccount(bank.id, { account: ACCOUNTS.priveStortingen, description });
@@ -462,6 +522,58 @@ export class IntegrationService {
       sourceRef: `eigen-verkoop:${source}:${order.externalId}`,
       lines: [signedLine(ACCOUNTS.tussenrekeningPsp, total)!, signedLine(ACCOUNTS.priveStortingen, -total)!],
     });
+  }
+
+  /** Bankregels met precies dit bedrag die nog niet aan een factuur of aankoop hangen, oudste eerst. */
+  private bankRows(total: number): BankCandidate[] {
+    return this.db
+      .prepare(
+        `SELECT t.id, t.transaction_date, t.counter_name, t.counter_iban, t.description, t.reference, t.status, t.matched_journal_entry_id, a.rgs_code
+         FROM bank_transactions t JOIN bank_accounts b ON b.id = t.bank_account_id JOIN chart_of_accounts a ON a.id = b.account_id
+         WHERE t.amount = ? AND t.matched_invoice_id IS NULL AND t.matched_purchase_invoice_id IS NULL AND t.status != 'genegeerd' AND t.duplicate_of IS NULL
+         ORDER BY t.transaction_date, t.id`,
+      )
+      .all(total) as BankCandidate[];
+  }
+
+  /**
+   * Geld op de bank dat de betaling van een verkoop aan je eigen bedrijf kan zijn (#231). "Geen omzet" maakt
+   * van zo'n bankregel een privé-storting zonder dat er een factuur aan hangt, dus de app is hier strenger
+   * dan bij een gewone order. Zeker (`sure`) alleen als het ordernummer als heel woord in de omschrijving
+   * staat, het nummer lang genoeg is om geen toeval te zijn, de betaling binnen tien dagen van de order ligt,
+   * er maar één zo'n regel is en het geld niet van een andere klant komt. Anders is het een kandidaat waar de
+   * gebruiker zelf over beslist: het nummer staat er wel in maar de rest klopt niet, of het is geld van de
+   * klant zelf binnen tien dagen. Een nummer dat alleen in een langer nummer zit ("77" in "2026-0177"), telt niet.
+   */
+  private neutralBankRow(order: ExternalOrder): { row: BankCandidate; sure: boolean } | null {
+    const rows = this.bankRows(paidTotal(order));
+    const number = String(order.number).trim();
+    const word = number ? new RegExp(`(^|[^\\w-])${number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\w-]|$)`, 'i') : null;
+    const near = (r: BankCandidate) => Math.abs(diffDays(order.date, r.transaction_date)) <= BANK_WINDOW_DAYS;
+    const byNumber = rows.filter((r) => word?.test(`${r.description ?? ''} ${r.reference ?? ''}`));
+    const only = byNumber.length === 1 ? byNumber[0]! : null;
+    if (only && number.replace(/[^a-z0-9]/gi, '').length >= 4 && near(only) && !this.fromOtherCustomer(only)) return { row: only, sure: true };
+    const name = order.customer.name.trim().toLowerCase();
+    const byName = rows.filter((r) => name && (r.counter_name ?? '').trim().toLowerCase() === name && near(r));
+    const candidates = [...byNumber, ...byName];
+    // liever een bankregel die nog niet verwerkt is
+    const row = candidates.find((r) => r.status !== 'gematcht') ?? candidates[0];
+    return row ? { row, sure: false } : null;
+  }
+
+  private neutralBank(order: ExternalOrder): SaleQuestion['bank'] {
+    const found = this.neutralBankRow(order);
+    return found ? { id: found.row.id, date: found.row.transaction_date, counterName: found.row.counter_name, description: found.row.description, sure: found.sure } : null;
+  }
+
+  /** Komt dit geld van een klant die in de app staat (rekeningnummer of naam) en die niet je eigen bedrijf is? */
+  private fromOtherCustomer(r: BankCandidate): boolean {
+    const own = this.ownIdentity();
+    if (own && sameCompanyName(r.counter_name, own.name)) return false;
+    const byIban = r.counter_iban ? this.relations.findByIban(r.counter_iban) : undefined;
+    if (byIban && byIban.type !== 'leverancier') return true;
+    const name = (r.counter_name ?? '').trim();
+    return Boolean(name && this.db.prepare(`SELECT 1 FROM relations WHERE archived = 0 AND type != 'leverancier' AND lower(trim(name)) = lower(?)`).get(name));
   }
 
   /**
