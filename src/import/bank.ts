@@ -13,7 +13,7 @@ import type { EventService } from '../core-ledger/events';
 import type { RelationsService } from '../relations/relations';
 import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, customerVatSituation, isPurchaseVatCode, isSalesVatCode, suggestedSalesVat, vatNumberMatchesCountry, type SalesVatCode } from '../shared/vat';
 import { formatEuro, roundHalfAwayFromZero, type Cents } from '../shared/money';
-import { addDays, diffDays, formatDateNl, today, workdaysBetween, type IsoDate } from '../shared/dates';
+import { addDays, diffDays, formatDateNl, isIsoDate, today, workdaysBetween, type IsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
 import { korActive } from '../settings/settings';
 import type { NormalizedTransaction, ParseResult } from './types';
@@ -513,6 +513,22 @@ export class BankService {
   }
 
   /**
+   * Het moment van inlezen uit een feed (#245): exact SQLite-UTC ("YYYY-MM-DD HH:MM:SS"), een geldige
+   * kalenderdatum, en hooguit vijf minuten in de toekomst (een kleine klokkwijking van de bron mag).
+   */
+  private static checkImportedAt(value: string): string {
+    const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(value);
+    if (!m) throw new ValidationError('Het moment van inlezen moet als "YYYY-MM-DD HH:MM:SS" in UTC worden doorgegeven');
+    const moment = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])));
+    if (moment.getUTCFullYear() !== Number(m[1]) || moment.getUTCMonth() !== Number(m[2]) - 1 || moment.getUTCDate() !== Number(m[3])
+      || moment.getUTCHours() !== Number(m[4]) || moment.getUTCMinutes() !== Number(m[5]) || moment.getUTCSeconds() !== Number(m[6])) {
+      throw new ValidationError('Het moment van inlezen is geen geldige datum en tijd');
+    }
+    if (moment.getTime() > Date.now() + 5 * 60_000) throw new ValidationError('Het moment van inlezen mag hooguit vijf minuten in de toekomst liggen');
+    return value;
+  }
+
+  /**
    * Leest een afschrift in. Een betaling die er al staat, komt er niet nog een keer in (#184):
    * 1. zelfde hash als een bestaande betaling of een eerder overgeslagen regel: overslaan;
    * 2. valt de datum in dagen die een eerder afschrift al besloeg, dan zoeken we de tegenhanger (zelfde
@@ -528,13 +544,35 @@ export class BankService {
    * - stap 2 geldt ook hooguit 3 werkdagen vóór of na een eerder afschrift van een ander soort (alleen
    *   tegen betalingen van dat andere soort): daar verschuift de datum over de rand van de periode.
    */
-  import(result: ParseResult, opts: { filename?: string; bankAccountId?: number; /** hash van de inhoud van het bestand, om hetzelfde afschrift in de downloadmap te herkennen */ contentHash?: string } = {}): Omit<ImportSummary, 'autoMatched'> {
+  import(
+    result: ParseResult,
+    opts: {
+      filename?: string;
+      bankAccountId?: number;
+      /** hash van de inhoud van het bestand, om hetzelfde afschrift in de downloadmap te herkennen */
+      contentHash?: string;
+      /** moment van inlezen volgens de bron, als SQLite-UTC "YYYY-MM-DD HH:MM:SS" (#245); standaard nu */
+      importedAt?: string;
+      /** door de bron bewezen periode van deze ronde, vast te leggen ook zonder transacties (#245); vereist bankAccountId */
+      period?: { from: IsoDate; to: IsoDate };
+    } = {},
+  ): Omit<ImportSummary, 'autoMatched'> {
+    // nieuwe opties (#245): valideren vóór de transactie; zonder beide is het gedrag onveranderd
+    const importedAt = opts.importedAt !== undefined ? BankService.checkImportedAt(opts.importedAt) : null;
+    if (opts.period) {
+      if (!opts.bankAccountId) throw new ValidationError('Een expliciete periode hoort bij een bankrekening');
+      this.getAccount(opts.bankAccountId);
+      if (!isIsoDate(opts.period.from) || !isIsoDate(opts.period.to)) throw new ValidationError('Vul geldige datums in voor de periode');
+      if (opts.period.from > opts.period.to) throw new ValidationError('Het begin van de periode mag niet na het einde liggen');
+    }
     return tx(this.db, () => {
       // alleen betalingen van vóór deze import kunnen een tegenhanger zijn
       const lastBefore = (this.db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM bank_transactions').get() as { id: number }).id;
       // het soort afschrift: de bron, en bij CSV ook de indeling
       const kind = result.layout ? `${result.source}:${result.layout}` : result.source;
-      const batch = this.db.prepare('INSERT INTO import_batches (filename, source, kind, content_hash) VALUES (?, ?, ?, ?)').run(opts.filename ?? null, result.source, kind, opts.contentHash ?? null);
+      const batch = importedAt !== null
+        ? this.db.prepare('INSERT INTO import_batches (filename, source, kind, content_hash, imported_at) VALUES (?, ?, ?, ?, ?)').run(opts.filename ?? null, result.source, kind, opts.contentHash ?? null, importedAt)
+        : this.db.prepare('INSERT INTO import_batches (filename, source, kind, content_hash) VALUES (?, ?, ?, ?)').run(opts.filename ?? null, result.source, kind, opts.contentHash ?? null);
       const batchId = Number(batch.lastInsertRowid);
       const insert = this.db.prepare(
         `INSERT OR IGNORE INTO bank_transactions (bank_account_id, transaction_date, amount, counter_iban, counter_name, description, reference, source, import_batch_id, dedup_hash, bank_id, batch_ref, batch_total)
@@ -797,6 +835,19 @@ export class BankService {
         // een afschrift zonder betalingen (alleen een saldo) telt ook: dat saldo is juist nuttig
         if (!perAccount.has(account.id)) perAccount.set(account.id, { from: b.date, to: b.date, transactions: 0, imported: 0, duplicates: 0 });
       }
+      // Met een expliciete periode (#245) levert de aanroeper de bewezen dekking: altijd één rij, ook bij nul
+      // transacties (de tellers zijn dan nul en er is geen eindsaldo). Bestaat er al een rij voor de rekening
+      // (transacties of alleen een saldo), dan breidt de bewezen periode die uit. Zonder periode maakt een
+      // lege import geen rij.
+      if (opts.period && opts.bankAccountId) {
+        const stat = perAccount.get(opts.bankAccountId);
+        if (stat) {
+          if (opts.period.from < stat.from) stat.from = opts.period.from;
+          if (opts.period.to > stat.to) stat.to = opts.period.to;
+        } else {
+          perAccount.set(opts.bankAccountId, { from: opts.period.from, to: opts.period.to, transactions: 0, imported: 0, duplicates: 0 });
+        }
+      }
       const insertStat = this.db.prepare(
         'INSERT INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates, closing_balance, closing_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       );
@@ -859,14 +910,14 @@ export class BankService {
     }));
   }
 
-  /** De betalingen uit deze import die nieuw waren in dagen die een eerder afschrift al besloeg. */
+  /** De betalingen uit deze import die nieuw waren in dagen die een eerder afschrift al besloeg; rijen zonder transacties dekken niets (#245). */
   addedInKnownPeriod(batchId: number): BankTransaction[] {
     return this.db
       .prepare(
         `SELECT t.* FROM bank_transactions t
          WHERE t.import_batch_id = ? AND EXISTS (
            SELECT 1 FROM import_batch_accounts s WHERE s.bank_account_id = t.bank_account_id AND s.batch_id < t.import_batch_id
-             AND s.period_from <= t.transaction_date AND s.period_to >= t.transaction_date)
+             AND s.transactions > 0 AND s.period_from <= t.transaction_date AND s.period_to >= t.transaction_date)
            AND NOT EXISTS (SELECT 1 FROM import_skipped k WHERE k.added_transaction_id = t.id)
          ORDER BY t.transaction_date DESC, t.id DESC`,
       )

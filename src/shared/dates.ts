@@ -1,3 +1,5 @@
+import { ValidationError } from './validation';
+
 /** Datums worden opgeslagen als ISO 'YYYY-MM-DD' strings (lokale kalenderdatum, geen tijdzone). */
 export type IsoDate = string;
 
@@ -23,6 +25,28 @@ export function toIsoDate(d: Date): IsoDate {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+/**
+ * Zet een ISO-moment met Z of tijdzone-offset om naar UTC in SQLite-formaat ("YYYY-MM-DD HH:MM:SS"),
+ * zoals SQLite `datetime('now')` schrijft. Een ander formaat of een ongeldige datum geeft een
+ * ValidationError.
+ */
+export function toSqliteUtc(iso: string): string {
+  const value = iso.trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|[+-]\d{2}:?\d{2})$/.exec(value);
+  if (!m) throw new ValidationError('Vul een geldig tijdstip in als ISO-moment met Z of tijdzone-offset');
+  const [, jaar, maand, dag, uur, minuut, seconde = '0', zone = 'Z'] = m;
+  const zoneUur = zone === 'Z' ? 0 : Number(zone.slice(1, 3));
+  const zoneMinuut = zone === 'Z' ? 0 : Number(zone.slice(-2));
+  // Date.UTC loopt bij te grote delen gewoon door (30 februari, 25 uur): alleen echte onderdelen gaan door
+  const check = new Date(Date.UTC(Number(jaar), Number(maand) - 1, Number(dag), Number(uur), Number(minuut), Number(seconde)));
+  if (check.getUTCFullYear() !== Number(jaar) || check.getUTCMonth() !== Number(maand) - 1 || check.getUTCDate() !== Number(dag)
+    || check.getUTCHours() !== Number(uur) || check.getUTCMinutes() !== Number(minuut) || check.getUTCSeconds() !== Number(seconde)
+    || zoneUur > 23 || zoneMinuut > 59) {
+    throw new ValidationError('Vul een geldig tijdstip in als ISO-moment met Z of tijdzone-offset');
+  }
+  return new Date(value).toISOString().slice(0, 19).replace('T', ' ');
 }
 
 export function addDays(date: IsoDate, days: number): IsoDate {
