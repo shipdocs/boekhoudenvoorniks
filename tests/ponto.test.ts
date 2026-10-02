@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { PontoClient, PontoError, PONTO_BASE_URL, mapPontoTransaction } from '../src/integrations/ponto';
 import type { FetchLike } from '../src/integrations/types';
@@ -28,11 +29,18 @@ function textResponse(status: number, text: string): FakeResponse {
   return { ok: status >= 200 && status < 300, status, json: async () => JSON.parse(text), text: async () => text };
 }
 
-/** Nep-fetch: sleutel is "METHODE pad-eindigt-met"; niet gevonden → 404. Alle aanroepen worden genoteerd. */
+/** Nep-fetch: sleutel is "METHODE pad-eindigt-met" op de verwachte origin; niet gevonden → 404. */
 function routeFetch(map: Record<string, Responder>, calls: RecordedCall[] = []): FetchLike {
   return async (url, init) => {
     const method = init?.method ?? 'GET';
     calls.push({ url: String(url), init });
+    let parsed: URL;
+    try {
+      parsed = new URL(String(url));
+    } catch {
+      return jsonResponse(404, { error: 'ongeldige URL in de nep-server' });
+    }
+    if (parsed.origin !== CLIENT) return jsonResponse(404, { error: 'verkeerde origin in de nep-server' });
     for (const [key, respond] of Object.entries(map)) {
       const space = key.indexOf(' ');
       const keyMethod = key.slice(0, space);
@@ -55,26 +63,32 @@ const accountResource = (over: Record<string, unknown> = {}, metaOver: Record<st
     referenceType: 'IBAN',
     reference: 'NL91ABNA0417164300',
     description: 'Zakelijke rekening',
+    holderName: 'Voorbeeld Holding B.V.',
     currency: 'EUR',
+    currentBalance: '1234.56',
+    currentBalanceReferenceDate: '2026-03-17T08:00:00.000Z',
+    authorizationExpirationExpectedAt: '2026-04-17T00:00:00.000Z',
     ...over,
   },
   meta: {
-    account: {
-      reference: 'NL91ABNA0417164300',
-      referenceType: 'IBAN',
-      holder: 'Voorbeeld Holding B.V.',
-      currency: 'EUR',
-      availability: 'AVAILABLE',
-      detailsSynchronizedAt: '2026-03-17T08:00:00.000Z',
-      expiresAt: '2026-04-17',
-      ...metaOver,
+    availability: 'available',
+    synchronizedAt: '2026-03-17T08:00:00.000Z',
+    latestSynchronization: {
+      id: 'sync-details-1',
+      type: 'synchronization',
+      attributes: { status: 'success', subtype: 'accountDetails', errors: [] },
     },
+    ...metaOver,
   },
 });
 
 const TX_META = {
   synchronizedAt: '2026-03-17T08:05:00.000Z',
-  latestSynchronization: { id: 'sync-9', status: 'success', subtype: 'accountTransactions', errors: [] },
+  latestSynchronization: {
+    id: 'sync-9',
+    type: 'synchronization',
+    attributes: { status: 'success', subtype: 'accountTransactions', errors: [] },
+  },
 };
 
 const tx = (id: string, attrs: Record<string, unknown>): Record<string, unknown> => ({ id, type: 'transaction', attributes: attrs });
@@ -263,14 +277,14 @@ describe('Ponto', () => {
         id: 'acc-1',
         iban: 'NL91ABNA0417164300',
         referenceType: 'IBAN',
-        name: '',
+        name: 'Zakelijke rekening',
         holder: 'Voorbeeld Holding B.V.',
         currency: 'EUR',
         subtype: null,
         deprecated: false,
-        availability: 'AVAILABLE',
-        balance: null,
-        balanceAt: null,
+        availability: 'available',
+        balance: 123456,
+        balanceAt: '2026-03-17T08:00:00.000Z',
         detailsSynchronizedAt: '2026-03-17T08:00:00.000Z', // uit de account-meta, niet het account
         expiresAt: '2026-04-17',
       }]);
@@ -427,11 +441,11 @@ describe('Ponto', () => {
       expect(noMetaRead.synchronizedAt).toBeNull();
       expect(noMetaRead.latestSynchronization).toBeNull();
       expect(noMetaRead.transactions).toHaveLength(1); // de regels zelf blijven bruikbaar
-      const errorSync = makeClient(routeFetch({ ...base, [`GET ${ACCOUNT_PATH}/transactions`]: () => jsonResponse(200, txPage([tx('tx-1', baseTx())], undefined, { synchronizedAt: '2026-03-17T08:05:00.000Z', latestSynchronization: { id: 'sync-8', status: 'error', subtype: 'accountTransactions', errors: ['inloggen bij de bank mislukt'] } })) }));
+      const errorSync = makeClient(routeFetch({ ...base, [`GET ${ACCOUNT_PATH}/transactions`]: () => jsonResponse(200, txPage([tx('tx-1', baseTx())], undefined, { synchronizedAt: '2026-03-17T08:05:00.000Z', latestSynchronization: { id: 'sync-8', type: 'synchronization', attributes: { status: 'error', subtype: 'accountTransactions', errors: ['inloggen bij de bank mislukt'] } } })) }));
       const errorRead = await errorSync.transactions('acc-1');
       expect(errorRead.complete).toBe(false);
       expect(errorRead.latestSynchronization).toEqual({ id: 'sync-8', status: 'error', subtype: 'accountTransactions', errors: ['inloggen bij de bank mislukt'] });
-      const malformed = makeClient(routeFetch({ ...base, [`GET ${ACCOUNT_PATH}/transactions`]: () => jsonResponse(200, txPage([tx('tx-1', baseTx())], undefined, { synchronizedAt: '2026-03-17T08:05:00.000Z', latestSynchronization: { id: 'sync-7', status: 'running' } })) }));
+      const malformed = makeClient(routeFetch({ ...base, [`GET ${ACCOUNT_PATH}/transactions`]: () => jsonResponse(200, txPage([tx('tx-1', baseTx())], undefined, { synchronizedAt: '2026-03-17T08:05:00.000Z', latestSynchronization: { id: 'sync-7', type: 'synchronization', attributes: { status: 'running', subtype: 'accountTransactions' } } })) }));
       const malformedRead = await malformed.transactions('acc-1');
       expect(malformedRead.complete).toBe(false);
       expect(malformedRead.latestSynchronization).toBeNull();
@@ -501,6 +515,19 @@ describe('Ponto', () => {
       expect(read.transactions).toHaveLength(1);
     });
 
+    it('telt een misvormde regel zonder valuta niet als buitenlandse transactie', async () => {
+      const client = makeClient(routeFetch({
+        'POST /oauth2/token': tokenOk(),
+        [`GET ${ACCOUNT_PATH}/transactions`]: () => jsonResponse(200, txPage([
+          tx('tx-1', baseTx({ currency: undefined })),
+          tx('tx-2', baseTx({ currency: 'USD' })),
+        ])),
+      }));
+      const read = await client.transactions('acc-1');
+      expect(read.transactions).toHaveLength(0);
+      expect(read.skippedForeign).toBe(1);
+    });
+
     it('leest verder als de eigen rekening (voor het eigen IBAN) niet leesbaar is', async () => {
       const client = makeClient(routeFetch({
         'POST /oauth2/token': tokenOk(),
@@ -522,7 +549,7 @@ describe('Ponto', () => {
         amount: 24675,
         counterIban: 'NL02ABNA0123456789',
         counterName: 'Voorbeeldklant B.V.',
-        description: 'Factuur 2026-0042',
+        description: 'Voorbeeldklant B.V.',
         reference: '+++042/2026/00042+++',
         ownIban: 'NL91ABNA0417164300',
         bankId: '8b1f0c2e-0000-4000-8000-000000000001',
@@ -537,8 +564,9 @@ describe('Ponto', () => {
     });
 
     it('kiest gestructureerde remittance als reference, anders endToEndId behalve NOTPROVIDED', () => {
-      const structured = tx('t', baseTx({ remittanceInformationType: 'structured', structuredRemittanceInformation: { creditorReference: '+++042/2026/00042+++' } }));
+      const structured = tx('t', baseTx({ remittanceInformationType: 'structured', remittanceInformation: '+++042/2026/00042+++' }));
       expect(mapPontoTransaction(structured, null)?.reference).toBe('+++042/2026/00042+++');
+      expect(mapPontoTransaction(structured, null)?.description).toBe('Kiosk De Waag');
       expect(mapPontoTransaction(tx('t', baseTx({ endToEndId: 'NOTPROVIDED' })), null)?.reference).toBeNull();
       expect(mapPontoTransaction(tx('t', baseTx({ endToEndId: undefined })), null)?.reference).toBeNull();
     });
@@ -588,7 +616,7 @@ describe('Ponto', () => {
       const call = calls.find((c) => c.url.endsWith('/synchronizations'))!;
       expect(call.init?.method).toBe('POST');
       expect(JSON.parse(call.init?.body ?? '{}')).toEqual({
-        data: { type: 'synchronization', attributes: { resourceType: 'account', resourceId: 'acc-1', subtype: 'accountTransactions', customerIp: '198.51.100.7' } },
+        data: { type: 'synchronization', attributes: { resourceType: 'account', resourceId: 'acc-1', subtype: 'accountTransactions', customerIpAddress: '198.51.100.7' } },
       });
       expect(call.init?.headers?.Authorization).toBe('Bearer fake-token');
     });
@@ -614,16 +642,17 @@ describe('Ponto', () => {
 
   describe('probe-script', () => {
     interface ProbeSync { id: string | null; subtype: string; status: string; errors: string[] }
+    interface ProbeDetails { synchronizedAt: string | null }
     const probe = createRequire(import.meta.url)('../scripts/ponto-probe.cjs') as {
       maskIban(iban: unknown): string;
       maskIbansInText(text: unknown): string;
       nullFields(account: Record<string, unknown>): string[];
-      formatSync(label: string, sync: ProbeSync | null): string[];
+      formatSync(label: string, sync: ProbeSync | ProbeDetails | null): string[];
       formatRead(entry: { read: unknown; error?: string | null }): string[];
       buildReport(input: {
         scope: string;
         accounts: Record<string, unknown>[];
-        syncs: { details: ProbeSync | null; transactions: ProbeSync | null }[];
+        syncs: { details: ProbeDetails | null; transactions: ProbeSync | null }[];
         reads: { read: unknown; error?: string | null }[];
         fixtureExample?: string | null;
       }): string;
@@ -640,6 +669,7 @@ describe('Ponto', () => {
       expect(masked).not.toContain('NL91ABNA0417164300');
       expect(masked).toContain('…6789');
       expect(masked).toContain('…4300');
+      expect(probe.maskIbansInText('fout op nl91abna0417164300 en NL91 ABNA 0417 1643 00')).toBe('fout op …4300 en …4300');
     });
 
     it('noemt de null-velden van een rekening', () => {
@@ -650,6 +680,7 @@ describe('Ponto', () => {
     it('printt synchronisatiemetadata en leesresultaten zonder geheimen', () => {
       const sync: ProbeSync = { id: 'sync-1', subtype: 'accountTransactions', status: 'success', errors: [] };
       expect(probe.formatSync('Synchronisatie transacties', sync)).toEqual(['Synchronisatie transacties: id=sync-1 status=success subtype=accountTransactions errors=geen']);
+      expect(probe.formatSync('Synchronisatie accountDetails', { synchronizedAt: '2026-03-17T08:00:00.000Z' })).toEqual(['Synchronisatie accountDetails: synchronizedAt=2026-03-17T08:00:00.000Z']);
       expect(probe.formatSync('Synchronisatie accountDetails', null)).toEqual(['Synchronisatie accountDetails: niet beschikbaar']);
       const failed = probe.formatRead({ read: null, error: 'Ponto: inloggegevens geweigerd (fout 401)' });
       expect(failed[0]).toContain('mislukt');
@@ -682,7 +713,7 @@ describe('Ponto', () => {
           subtype: null,
         }],
         syncs: [
-          { details: { id: 'sync-1', subtype: 'accountDetails', status: 'success', errors: [] }, transactions: { id: 'sync-2', subtype: 'accountTransactions', status: 'error', errors: ['inloggen bij de bank mislukt'] } },
+          { details: { synchronizedAt: '2026-03-17T08:00:00.000Z' }, transactions: { id: 'sync-2', subtype: 'accountTransactions', status: 'error', errors: ['IBAN NL91ABNA0417164300 geweigerd'] } },
         ],
         reads: [{
           read: {
@@ -705,7 +736,8 @@ describe('Ponto', () => {
       expect(report).not.toContain('fake-token');
       expect(report).toContain('accountDetails'); // metadata apart per subtype
       expect(report).toContain('accountTransactions');
-      expect(report).toContain('inloggen bij de bank mislukt');
+      expect(report).toContain('1 fout(en), inhoud niet getoond');
+      expect(report).not.toContain('geweigerd');
       expect(report).toContain('Null-velden');
       expect(report).toContain('geen conclusie'); // geen dekkingsconclusie uit de eerste datum
     });
@@ -720,6 +752,13 @@ describe('Ponto', () => {
       });
       expect(report).toContain('mislukt');
       expect(report).toContain('niet beschikbaar');
+    });
+
+    it('start vanuit de read-only probe nooit een handmatige synchronisatie', () => {
+      const source = readFileSync(new URL('../scripts/ponto-probe.cjs', import.meta.url), 'utf8');
+      expect(source).not.toContain('.startSynchronization(');
+      expect(source).not.toContain('PONTO_CUSTOMER_IP');
+      expect(source).not.toContain("|| '127.0.0.1'");
     });
 
     it('heeft een geldig geanonimiseerd fixture dat mapt', () => {
