@@ -30,7 +30,9 @@ function maskIban(iban) {
 
 /** Maskt IBAN-achtige reeksen in vrije tekst (bijv. het fixturevoorbeeld). */
 function maskIbansInText(text) {
-  return String(text).replace(/\b[A-Z]{2}\d{2}[A-Z0-9]{1,30}\b/g, (m) => `…${m.slice(-4)}`);
+  return String(text)
+    .replace(/\b[A-Z]{2}\d{2}(?:\s+[A-Z0-9]{2,4}){3,8}\b/gi, (m) => `…${m.replace(/\s+/g, '').slice(-4).toUpperCase()}`)
+    .replace(/\b[A-Z]{2}\d{2}[A-Z0-9]{1,30}\b/gi, (m) => `…${m.slice(-4).toUpperCase()}`);
 }
 
 /** Velden van de rekening die null (of onbruikbaar) zijn. */
@@ -56,8 +58,11 @@ function formatAccount(account) {
 /** Synchronisatiemetadata, per subtype apart. */
 function formatSync(label, sync) {
   if (sync === null) return [`${label}: niet beschikbaar`];
-  const errors = sync.errors.length === 0 ? 'geen' : sync.errors.join(' | ');
-  return [`${label}: id=${sync.id} status=${sync.status} subtype=${sync.subtype} errors=${errors}`];
+  if (Object.hasOwn(sync, 'synchronizedAt')) {
+    return [`${label}: synchronizedAt=${sync.synchronizedAt ?? 'null'}`];
+  }
+  const errorSummary = sync.errors.length === 0 ? 'geen' : `${sync.errors.length} fout(en), inhoud niet getoond`;
+  return [`${label}: id=${sync.id} status=${sync.status} subtype=${sync.subtype} errors=${errorSummary}`];
 }
 
 function formatRead(entry) {
@@ -72,7 +77,7 @@ function formatRead(entry) {
   const latest = read.latestSynchronization;
   const latestText = latest === null
     ? 'null'
-    : `id=${latest.id} status=${latest.status} subtype=${latest.subtype} errors=${latest.errors.length === 0 ? 'geen' : latest.errors.join(' | ')}`;
+    : `id=${latest.id} status=${latest.status} subtype=${latest.subtype} errors=${latest.errors.length === 0 ? 'geen' : `${latest.errors.length} fout(en), inhoud niet getoond`}`;
   lines.push(`  latestSynchronization: ${latestText}`);
   return lines;
 }
@@ -92,33 +97,7 @@ function buildReport(input) {
     lines.push('Voorbeeld (geanonimiseerd fixture):');
     for (const line of maskIbansInText(input.fixtureExample).split('\n')) lines.push(`  ${line}`);
   }
-  return lines.join('\n');
-}
-
-/** Pollt een synchronisatie tot 'success' of 'error'; null als die binnen de wachttijd niet komt. */
-async function pollSynchronization(client, id, { attempts = 15, delayMs = 2000 } = {}) {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const sync = await client.synchronization(id);
-    if (sync.status === 'success' || sync.status === 'error') return sync;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-  return null;
-}
-
-/** Start één synchronisatie en wacht op het eindresultaat; fouten blijven veilig en compact. */
-async function syncMetadata(client, accountId, subtype, customerIp) {
-  try {
-    const started = await client.startSynchronization(accountId, subtype, customerIp);
-    const finished = await pollSynchronization(client, started.id);
-    return {
-      id: started.id,
-      subtype,
-      status: finished === null ? 'niet voltooid binnen de wachttijd' : finished.status,
-      errors: finished === null ? [] : finished.errors,
-    };
-  } catch (error) {
-    return { id: null, subtype, status: 'mislukt', errors: [error instanceof Error && error.name === 'PontoError' ? error.message : 'onverwachte fout (geen details)'] };
-  }
+  return maskIbansInText(lines.join('\n'));
 }
 
 function fixtureExample() {
@@ -147,17 +126,12 @@ async function main() {
     console.error('De Ponto-client is niet gebouwd; draai eerst: npm run build:main');
     return 1;
   }
-  const customerIp = process.env.PONTO_CUSTOMER_IP || '127.0.0.1';
   const client = new PontoClient((url, init) => fetch(url, init), { clientId, clientSecret });
   try {
     const { accounts, scope } = await client.accounts();
     const syncs = [];
     const reads = [];
     for (const account of accounts) {
-      syncs.push({
-        details: await syncMetadata(client, account.id, 'accountDetails', customerIp),
-        transactions: await syncMetadata(client, account.id, 'accountTransactions', customerIp),
-      });
       let read = null;
       let error = null;
       try {
@@ -166,6 +140,10 @@ async function main() {
         error = readError instanceof Error && readError.name === 'PontoError' ? readError.message : 'onverwachte fout (geen details)';
       }
       reads.push({ read, error });
+      syncs.push({
+        details: { synchronizedAt: account.detailsSynchronizedAt },
+        transactions: read === null ? null : read.latestSynchronization,
+      });
     }
     console.log(buildReport({ scope, accounts, syncs, reads, fixtureExample: fixtureExample() }));
     return 0;

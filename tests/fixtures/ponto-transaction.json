@@ -10,10 +10,7 @@
       "amount": "246.75",
       "currency": "EUR",
       "remittanceInformationType": "structured",
-      "remittanceInformation": "Factuur 2026-0042",
-      "structuredRemittanceInformation": {
-        "creditorReference": "+++042/2026/00042+++"
-      },
+      "remittanceInformation": "+++042/2026/00042+++",
       "endToEndId": "E2E-2026-0042",
       "counterpartName": "Voorbeeldklant B.V.",
       "counterpartReference": "NL02ABNA0123456789",

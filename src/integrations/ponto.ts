@@ -191,10 +191,13 @@ export function mapPontoTransaction(raw: unknown, ownIban: string | null): Norma
   if (amount === null) return null;
   const counterName = pickString('counterpartName', attributes);
   const counterIban = firstIban(attributes.counterpartReference, attributes.counterpartIban, attributes.counterpartAccount);
-  const remittanceType = pickString('remittanceInformationType', attributes);
-  const structured = remittanceType === 'structured' ? structuredRemittance(attributes.structuredRemittanceInformation) : null;
+  const remittanceType = pickString('remittanceInformationType', attributes)?.toLowerCase() ?? null;
+  const remittance = pickString('remittanceInformation', attributes);
+  const structured = remittanceType === 'structured'
+    ? structuredRemittance(attributes.structuredRemittanceInformation) ?? remittance
+    : null;
   const reference = structured ?? endToEndReference(attributes.endToEndId);
-  const description = pickString('remittanceInformation', attributes) ?? counterName ?? '';
+  const description = remittanceType === 'structured' ? counterName ?? '' : remittance ?? counterName ?? '';
   return {
     date,
     amount,
@@ -225,27 +228,37 @@ function mapPontoAccount(raw: unknown): PontoAccount | null {
     id,
     iban: referenceType === 'IBAN' ? firstIban(attributes.reference, accountMeta.reference) : null,
     referenceType,
-    name: pickString('name', attributes, accountMeta) ?? pickString('naturalName', attributes, accountMeta) ?? '',
-    holder: pickString('holder', attributes, accountMeta) ?? pickString('holderName', accountMeta),
+    name: pickString('description', attributes, accountMeta)
+      ?? pickString('name', attributes, accountMeta)
+      ?? pickString('naturalName', attributes, accountMeta)
+      ?? '',
+    holder: pickString('holderName', attributes, accountMeta) ?? pickString('holder', attributes, accountMeta),
     currency: pickString('currency', attributes, accountMeta) ?? '',
     subtype: pickString('subtype', attributes, accountMeta),
     deprecated: attributes.deprecated === true || attributes.deprecated === 'true' || accountMeta.deprecated === true || accountMeta.deprecated === 'true',
     availability: pickString('availability', attributes, accountMeta),
-    balance: amountToCents(attributes.balance) ?? amountToCents(accountMeta.balance),
-    balanceAt: pickString('balanceAt', attributes, accountMeta),
-    detailsSynchronizedAt: pickString('detailsSynchronizedAt', accountMeta),
-    expiresAt: calendarDate(pickString('expiresAt', accountMeta)),
+    balance: amountToCents(attributes.currentBalance)
+      ?? amountToCents(accountMeta.currentBalance)
+      ?? amountToCents(attributes.balance)
+      ?? amountToCents(accountMeta.balance),
+    balanceAt: pickString('currentBalanceReferenceDate', attributes, accountMeta)
+      ?? pickString('balanceAt', attributes, accountMeta),
+    detailsSynchronizedAt: pickString('synchronizedAt', accountMeta)
+      ?? pickString('detailsSynchronizedAt', accountMeta),
+    expiresAt: calendarDate(pickString('authorizationExpirationExpectedAt', attributes, accountMeta)
+      ?? pickString('expiresAt', accountMeta)),
   };
 }
 
 /** Leest `meta.latestSynchronization` defensief; null bij afwezig of onbruikbaar. */
 function parseLatestSynchronization(value: unknown): LatestSync | null {
   if (!isRecord(value)) return null;
+  const attributes = isRecord(value.attributes) ? value.attributes : value;
   const id = pickString('id', value);
-  const subtype = pickString('subtype', value);
+  const subtype = pickString('subtype', attributes);
   if (id === null || subtype === null) return null;
-  if (value.status !== 'success' && value.status !== 'error') return null;
-  return { id, status: value.status, subtype, errors: errorList(value.errors) };
+  if (attributes.status !== 'success' && attributes.status !== 'error') return null;
+  return { id, status: attributes.status, subtype, errors: errorList(attributes.errors) };
 }
 
 /**
@@ -392,10 +405,11 @@ export class PontoClient {
       for (const entry of json.data) {
         const attributes = isRecord(entry) && isRecord(entry.attributes) ? entry.attributes : null;
         const currency = attributes === null ? null : pickString('currency', attributes)?.toUpperCase() ?? null;
-        if (currency !== 'EUR') {
+        if (currency !== null && currency !== 'EUR') {
           skippedForeign += 1;
           continue;
         }
+        if (currency === null) continue;
         const mapped = mapPontoTransaction(entry, ownIban);
         if (mapped === null) continue;
         if (since !== null && mapped.date < since) continue;
@@ -436,7 +450,7 @@ export class PontoClient {
       body: JSON.stringify({
         data: {
           type: 'synchronization',
-          attributes: { resourceType: 'account', resourceId: accountId, subtype, customerIp },
+          attributes: { resourceType: 'account', resourceId: accountId, subtype, customerIpAddress: customerIp },
         },
       }),
     }, 'synchronisatie starten');
