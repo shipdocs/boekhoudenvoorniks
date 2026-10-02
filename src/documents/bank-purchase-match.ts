@@ -466,6 +466,28 @@ export class BankPurchaseMatcher {
       .all({ vraag: opts.question ? ACCOUNTS.vraagposten : '', ...(opts.from ? { from: opts.from } : {}), ...(opts.to ? { to: opts.to } : {}) }) as BankTransaction[];
   }
 
+  /**
+   * De afschrijvingen die sterk bij deze aankoop passen (bedrag, leverancier en datum), de dichtstbijzijnde
+   * eerst: nog niet verwerkt (`nieuw`), of al los geboekt als kosten (`geboekt`; met `question` ook op
+   * "weet ik nog niet"). Afgewezen paren en dubbele regels van de bank tellen niet mee.
+   */
+  transactionsFor(p: PurchaseProbe, state: PurchaseState, which: 'nieuw' | 'geboekt', opts: { question?: boolean } = {}): BankTransaction[] {
+    // zonder factuurnummer kan alleen een betaling binnen het venster passen: dan niet alle betalingen ophalen
+    const window = p.supplier_reference ? null : paymentWindow(p);
+    const rows =
+      which === 'geboekt'
+        ? this.bookedDebits({ question: opts.question, ...(window ?? {}) })
+        : (this.db
+            .prepare(`SELECT * FROM bank_transactions WHERE status = 'nieuw' AND amount < 0 AND duplicate_of IS NULL ${window ? 'AND transaction_date BETWEEN @from AND @to' : ''} ORDER BY id`)
+            .all(window ?? {}) as BankTransaction[]);
+    const rejected = this.rejections();
+    return rows
+      .map((t) => ({ t, fit: fitOf(t, p, state) }))
+      .filter((x): x is { t: BankTransaction; fit: Fit } => x.fit?.strength === 'sterk' && !rejected.has(pairKey({ purchaseId: p.id, bankTransactionId: x.t.id })))
+      .sort((a, b) => closest(a.fit, b.fit) || a.t.id - b.t.id)
+      .map((x) => x.t);
+  }
+
   /** Is met deze los geboekte afschrijving al een aankoop samengevoegd? Dan kan er geen tweede bij. */
   merged(t: Pick<BankTransaction, 'id'>): boolean {
     return !!this.db.prepare(`SELECT 1 FROM bank_transactions WHERE id = ? AND EXISTS (${MERGED_SQL})`).get(t.id);

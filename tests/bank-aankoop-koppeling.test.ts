@@ -347,9 +347,10 @@ describe('"Ja, dezelfde betaling": wat er geboekt wordt', () => {
     const t = debit(s, '2026-09-03', 1500, 'WOLKENDIENST');
     expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
     const [task] = bankTasks(s, t.id);
-    expect(task).toMatchObject({ kind: 'bank-purchase', ref: { bankTransactionId: t.id, purchaseId: p.id } });
-    expect(task!.actions.map((a) => a.id)).toEqual(['open', 'nee']);
-    expect(task!.question).toBe(`De aankoop bij Wolkendienst Inc. van 1 september 2026 (${formatEuro(1500)}) staat op betaald met privégeld. Is dit dezelfde betaling? Verwerk je deze betaling als zakelijk, dan tellen de kosten en de btw twee keer.`);
+    // een eigen vraag (#222): "ja" op Vandaag, of kiezen op het bankscherm
+    expect(task).toMatchObject({ kind: 'bank-purchase-paid', ref: { bankTransactionId: t.id, purchaseId: p.id } });
+    expect(task!.actions.map((a) => a.id)).toEqual(['ja', 'nee', 'open']);
+    expect(task!.question).toBe(`De aankoop bij Wolkendienst Inc. van 1 september 2026 (${formatEuro(1500)}) staat op betaald met privégeld. Op Zakelijke rekening staat op 3 september 2026 ${formatEuro(1500)} aan WOLKENDIENST, nog niet verwerkt. Is dat dezelfde betaling?`);
     const before = financialSnapshot(ctx);
     expect(() => s.inbox.answerBank(t.id, { business: true, categoryKey: 'software', vatCode: 'geen' })).toThrow(ValidationError);
     expect(financialSnapshot(ctx)).toEqual(before);

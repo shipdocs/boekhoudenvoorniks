@@ -296,33 +296,48 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
   const { run, busy } = useAction();
   const [via, setVia] = useState<'prive' | 'kas'>('prive');
   const [always, setAlways] = useState(false);
-  // staat dezelfde betaling al als kosten op een van je rekeningen? Dan eerst vragen (anders dubbel)
+  // "Nee, apart betaald" bij een afschrijving die nog niet verwerkt is: die hoort niet bij deze aankoop
+  const [separate, setSeparate] = useState(false);
+  // staat dezelfde betaling al op een van je rekeningen (geboekt als kosten, of nog niet verwerkt)? Dan eerst vragen (anders dubbel)
   const booked = useLoad(() => api.purchases.bookedPayment(p.id), [p.id]);
   const name = p.relation_name ?? p.description;
   const b = booked.data;
   if (booked.loading) return <Modal title="Al betaald" onClose={onClose}><p className="small muted">Even kijken op je rekeningen…</p></Modal>;
   if (b) {
+    // de afschrijving is nog niet verwerkt (#222): "ja" koppelt hem aan deze aankoop
+    const pending = b.status === 'nieuw';
     return (
       <Modal title="Al betaald" onClose={onClose}>
         <div className="grid">
           <p><strong>{name}</strong> · <Euro cents={p.open_amount} /> · <DateNl date={p.invoice_date} /></p>
-          <div className="notice warn">
-            Op <strong>{b.account}</strong> staat op {formatDateNl(b.date)} al <strong><Euro cents={b.amount} /></strong> aan {b.counterName ?? name}, {b.booking === 'vraag' ? 'verwerkt als "weet ik nog niet"' : 'geboekt als kosten'}. Is dat dezelfde betaling?
-          </div>
-          <p className="small muted">{b.booking === 'vraag'
-            ? 'Ja: de betaling wordt aan deze aankoop gekoppeld; die staat daarna als betaald. De losse post op "weet ik nog niet" vervalt.'
-            : 'Ja: de aankoop vervalt en de bon wordt het bewijsstuk bij die betaling, zodat de kosten en de btw niet twee keer tellen.'}</p>
+          {pending ? (
+            <div className="notice warn" data-testid="afschrijving-wacht">
+              Op <strong>{b.account}</strong> staat op {formatDateNl(b.date)} een afschrijving van <strong><Euro cents={b.amount} /></strong> aan {b.counterName ?? name} die je nog niet hebt verwerkt. Is dat de betaling van deze aankoop?
+            </div>
+          ) : (
+            <div className="notice warn">
+              Op <strong>{b.account}</strong> staat op {formatDateNl(b.date)} al <strong><Euro cents={b.amount} /></strong> aan {b.counterName ?? name}, {b.booking === 'vraag' ? 'verwerkt als "weet ik nog niet"' : 'geboekt als kosten'}. Is dat dezelfde betaling?
+            </div>
+          )}
+          <p className="small muted">{pending
+            ? 'Ja: de betaling wordt aan deze aankoop gekoppeld; die staat daarna als betaald. Er komt geen tweede kostenpost bij. Nee: je kiest daarna hoe je de aankoop wel betaald hebt, en de afschrijving deel je los in.'
+            : b.booking === 'vraag'
+              ? 'Ja: de betaling wordt aan deze aankoop gekoppeld; die staat daarna als betaald. De losse post op "weet ik nog niet" vervalt.'
+              : 'Ja: de aankoop vervalt en de bon wordt het bewijsstuk bij die betaling, zodat de kosten en de btw niet twee keer tellen.'}</p>
         </div>
         <div className="row end" style={{ marginTop: 16 }}>
           <Button disabled={busy} onClick={async () => {
             // onthouden dat dit een andere uitgave is: de app vraagt het niet meer en voegt de twee nooit vanzelf samen.
             // Past er nog een betaling bij, dan komt die vraag hierna.
-            if ((await run(async () => { await api.purchases.rejectBooked(p.id, b.bankTransactionId); return true; })) !== undefined) await booked.reload();
+            if ((await run(async () => { await api.purchases.rejectBooked(p.id, b.bankTransactionId); return true; })) !== undefined) {
+              if (pending) setSeparate(true);
+              await booked.reload();
+            }
           }}>Nee, apart betaald</Button>
           <Button kind="primary" disabled={busy} onClick={async () => {
-            const r = await run(() => api.purchases.mergeWithBooked(p.id, b.bankTransactionId), b.booking === 'vraag' ? 'De betaling hoort nu bij deze aankoop ✓' : 'De bon hoort nu bij die betaling ✓');
+            const r = await run(() => api.purchases.mergeWithBooked(p.id, b.bankTransactionId), pending || b.booking === 'vraag' ? 'De betaling hoort nu bij deze aankoop ✓' : 'De bon hoort nu bij die betaling ✓');
             if (r) await onDone();
-          }}>Ja, dezelfde betaling</Button>
+          }}>{pending ? 'Ja, dat is hem' : 'Ja, dezelfde betaling'}</Button>
         </div>
       </Modal>
     );
@@ -348,7 +363,7 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
         <Button kind="primary" disabled={busy} onClick={async () => {
-          const r = await run(() => api.purchases.paidWith(p.id, via, { always }));
+          const r = await run(() => api.purchases.paidWith(p.id, via, { always, ...(separate ? { separate } : {}) }));
           if (!r) return;
           toast(r.paid.length === 1 ? 'Op betaald gezet ✓' : `${r.paid.length} rekeningen op betaald gezet ✓`);
           if (r.skipped.length > 0) {

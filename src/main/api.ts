@@ -258,7 +258,14 @@ export function createApi(s: Services, host: HostContext) {
       case 'bank-purchase:klopt':
         s.bank.matchPurchase(r.bankTransactionId!, r.purchaseId!);
         return;
+      case 'bank-purchase-paid:ja': {
+        // de afschrijving betaalt de aankoop; de privé- of kasbetaling gaat terug op de datum van de afschrijving
+        const t = s.bank.get(r.bankTransactionId!);
+        s.bookedPayments.resolve(r.purchaseId!, t.id, t.transaction_date);
+        return;
+      }
       case 'bank-purchase:nee':
+      case 'bank-purchase-paid:nee':
         // "Nee": deze aankoop (en wat er verder bij paste) komt niet meer bij deze betaling terug; daarna zelf indelen
         s.bookedPayments.matcher.rejectAll(s.bank.get(r.bankTransactionId!));
         if (r.purchaseId) s.bookedPayments.matcher.reject({ purchaseId: r.purchaseId, bankTransactionId: r.bankTransactionId! });
@@ -458,6 +465,7 @@ export function createApi(s: Services, host: HostContext) {
           // rechtstreeks naar het scherm waar je de betaling indeelt (niet de banklijst)
           'bank-invoice': ['betaling', r.bankTransactionId],
           'bank-purchase': ['betaling', r.bankTransactionId],
+          'bank-purchase-paid': ['betaling', r.bankTransactionId],
           'bank-income': ['betaling', r.bankTransactionId],
           'document-review': ['document', r.documentId],
           'invoice-overdue': ['factuur', r.invoiceId],
@@ -990,7 +998,7 @@ export function createApi(s: Services, host: HostContext) {
        */
       paymentQr: (id: number, confirmNewIban = false) => purchasePaymentQr(s.purchases, id, confirmNewIban),
       /** Niet van de zakelijke rekening betaald maar privé of contant; `always`: voortaan bij deze leverancier. */
-      paidWith: (id: number, via: 'prive' | 'kas', opts?: { always?: boolean }) => s.quick.payPurchaseWith(id, via, opts),
+      paidWith: (id: number, via: 'prive' | 'kas', opts?: { always?: boolean; separate?: boolean }) => s.quick.payPurchaseWith(id, via, opts),
       /** Een aankoop weghalen die er niet hoort (bv. per ongeluk toegevoegd); alleen zonder betaling. De bon blijft bewaard. */
       remove: (id: number) => {
         const p = s.purchases.get(id);
@@ -1000,14 +1008,21 @@ export function createApi(s: Services, host: HostContext) {
         s.purchases.cancel(id, p.invoice_date);
         for (const documentId of new Set([...files, ...(p.document_id ? [p.document_id] : [])])) s.db.prepare(`UPDATE documents SET status = 'genegeerd' WHERE id = ?`).run(documentId);
       },
-      /** Staat de betaling van deze aankoop al los op een van je rekeningen, als kosten of op "weet ik nog niet"? (dan is hij dubbel) */
+      /**
+       * Staat de betaling van deze aankoop al op een van je rekeningen? `geboekt`: los verwerkt, als kosten of op
+       * "weet ik nog niet" (dan staat hij dubbel); `nieuw`: nog niet verwerkt (#222). null = niets gevonden.
+       */
       bookedPayment: (id: number) => {
-        const t = s.bookedPayments.find(s.purchases.get(id));
-        return t ? { bankTransactionId: t.id, date: t.transaction_date, amount: -t.amount, counterName: t.counter_name, account: s.bank.getAccount(t.bank_account_id).name, booking: s.bookedPayments.matcher.bookingOf(t) } : null;
+        const p = s.purchases.get(id);
+        const t = s.bookedPayments.find(p) ?? s.bookedPayments.findPending(p)[0] ?? null;
+        if (!t) return null;
+        const status: 'geboekt' | 'nieuw' = t.status === 'nieuw' ? 'nieuw' : 'geboekt';
+        return { bankTransactionId: t.id, date: t.transaction_date, amount: -t.amount, counterName: t.counter_name, account: s.bank.getAccount(t.bank_account_id).name, status, booking: s.bookedPayments.matcher.bookingOf(t) };
       },
       /**
        * "Ja, dezelfde betaling". Stond de betaling als kosten: de aankoop vervalt, de bon wordt het bewijsstuk
-       * bij die betaling. Stond hij op "weet ik nog niet": de betaling wordt aan de aankoop gekoppeld.
+       * bij die betaling. Stond hij op "weet ik nog niet", of was hij nog niet verwerkt: de betaling wordt aan
+       * de aankoop gekoppeld.
        */
       mergeWithBooked: (id: number, bankTransactionId: number) => s.bookedPayments.resolve(id, bankTransactionId, s.purchases.get(id).invoice_date),
       /** "Nee, apart betaald": die betaling is een andere uitgave. De app vraagt het niet meer en voegt de twee nooit vanzelf samen. */

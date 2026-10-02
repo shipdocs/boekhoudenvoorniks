@@ -59,6 +59,16 @@ export class BookedPayments {
     return e && isDoubleCandidate(e) ? this.matcher.bookedFor(e.probe, e.state, { question: true }) : null;
   }
 
+  /**
+   * Afschrijvingen die nog niet verwerkt zijn en bij deze aankoop passen (bedrag, leverancier en datum), de
+   * dichtstbijzijnde eerst (#222). Zet je de aankoop op privé of contant betaald, dan eerst vragen of dit de
+   * betaling is: anders wordt die afschrijving straks los als kosten verwerkt.
+   */
+  findPending(p: PurchaseInvoice): BankTransaction[] {
+    const e = this.matcher.entry(p.id);
+    return e ? this.matcher.transactionsFor(e.probe, e.state, 'nieuw') : [];
+  }
+
   /** "Nee, apart betaald": deze afschrijving is niet de betaling van deze aankoop. Het paar komt nergens meer terug. */
   reject(purchaseId: number, bankTransactionId: number): void {
     this.purchases.get(purchaseId);
