@@ -73,12 +73,35 @@
     <p class="lead">Per versie wat er is toegevoegd, verbeterd en opgelost. De app werkt zichzelf bij; bij de eerste start van een nieuwe versie maakt hij eerst een kopie van je administratie.</p>
 
     <nav class="toc" aria-label="Versies">
-      <a href="#v1.0.1">1.0.1</a><a href="#v1.0.0">1.0.0</a><a href="#v0.7.6">0.7.6</a><a href="#v0.7.5">0.7.5</a><a href="#v0.7.4">0.7.4</a><a href="#v0.7.3">0.7.3</a><a href="#v0.7.2">0.7.2</a><a href="#v0.7.1">0.7.1</a><a href="#v0.7.0">0.7.0</a><a href="#v0.6.15">0.6.15</a><a href="#v0.6.14">0.6.14</a><a href="#v0.6.13">0.6.13</a><a href="#v0.6.12">0.6.12</a><a href="#v0.6.11">0.6.11</a><a href="#v0.6.10">0.6.10</a><a href="#v0.6.9">0.6.9</a><a href="#v0.6.8">0.6.8</a><a href="#v0.6.7">0.6.7</a><a href="#v0.6.6">0.6.6</a><a href="#v0.6.5">0.6.5</a><a href="#v0.6.4">0.6.4</a><a href="#v0.6.3">0.6.3</a><a href="#v0.6.2">0.6.2</a><a href="#v0.6.1">0.6.1</a><a href="#v0.6.0">0.6.0</a><a href="#v0.5.0">0.5.0</a><a href="#v0.4.0">0.4.0</a><a href="#v0.3">0.3.x</a><a href="#v0.2.0">0.2.0</a><a href="#v0.1.0">0.1.0</a>
+      <a href="#v1.1.0">1.1.0</a><a href="#v1.0.1">1.0.1</a><a href="#v1.0.0">1.0.0</a><a href="#v0.7.6">0.7.6</a><a href="#v0.7.5">0.7.5</a><a href="#v0.7.4">0.7.4</a><a href="#v0.7.3">0.7.3</a><a href="#v0.7.2">0.7.2</a><a href="#v0.7.1">0.7.1</a><a href="#v0.7.0">0.7.0</a><a href="#v0.6.15">0.6.15</a><a href="#v0.6.14">0.6.14</a><a href="#v0.6.13">0.6.13</a><a href="#v0.6.12">0.6.12</a><a href="#v0.6.11">0.6.11</a><a href="#v0.6.10">0.6.10</a><a href="#v0.6.9">0.6.9</a><a href="#v0.6.8">0.6.8</a><a href="#v0.6.7">0.6.7</a><a href="#v0.6.6">0.6.6</a><a href="#v0.6.5">0.6.5</a><a href="#v0.6.4">0.6.4</a><a href="#v0.6.3">0.6.3</a><a href="#v0.6.2">0.6.2</a><a href="#v0.6.1">0.6.1</a><a href="#v0.6.0">0.6.0</a><a href="#v0.5.0">0.5.0</a><a href="#v0.4.0">0.4.0</a><a href="#v0.3">0.3.x</a><a href="#v0.2.0">0.2.0</a><a href="#v0.1.0">0.1.0</a>
     </nav>
+
+    <article id="v1.1.0" class="release">
+      <header>
+        <h2>1.1.0 <span class="tag latest">Nieuwste versie</span></h2>
+        <p class="meta"><time datetime="2026-10-02">2 oktober 2026</time> · <a href="https://github.com/shipdocs/boekhoudenvoorniks/releases/tag/v1.1.0">Downloads en controlegetallen</a></p>
+        <p class="summary">Bank en bonnen horen bij elkaar: geen dubbele kosten meer. Past een betaling bij een bon of factuur, dan vraagt de app het eerst. De versie in de Microsoft Store is nog niet bijgewerkt naar 1.1.0.</p>
+      </header>
+      <h3><span class="tag new">Nieuw</span></h3>
+      <ul>
+        <li><strong>Een betaling en de aankoop ervan komen niet meer los in je boeken</strong>: staat de aankoop er al, dan boekt de app de betaling niet meer vanzelf als losse kosten, ook niet als het bedrag door de koers iets anders is. Je krijgt eerst de vraag of ze bij elkaar horen.</li>
+        <li><strong>Privé of contant betaald, en toch een afschrijving</strong>: komt de betaling daarna op je rekening binnen, dan vraagt de app of het dezelfde betaling is.</li>
+        <li><strong>Betaling aan je eigen bedrijf</strong>: de app stelt Privé voor. Een verkoop aan je eigen bedrijf via een koppeling, zoals een proefabonnement op je eigen dienst, wordt niet meer vanzelf omzet.</li>
+        <li><strong>"Bank bijgewerkt t/m"</strong> telt een dag pas mee als je het afschrift ná die dag hebt ingelezen, en een betaling van vandaag verwerkt de app pas een dag later vanzelf.</li>
+      </ul>
+      <h3><span class="tag improved">Verbeterd</span></h3>
+      <ul>
+        <li><strong>Dubbele bonnen</strong>: een bon en de factuur van dezelfde aankoop worden niet meer twee aankopen als het bedrag een paar cent verschilt of de leverancier net anders geschreven is.</li>
+        <li><strong>Dubbele bankregels</strong>: dezelfde betaling uit twee afschriften die hem net anders opschrijven komt er niet meer twee keer in, en het saldo klopt weer met je afschrift.</li>
+        <li><strong>Mollie Facturen</strong>: een factuur met prijzen inclusief btw kwam te hoog binnen; de app leest nu of de prijzen inclusief of exclusief btw zijn.</li>
+        <li><strong>Geld terug van een leverancier</strong> hoort bij de creditnota en telt niet als omzet. Ook PayPal, Adyen, SumUp en Klarna worden als betaaldienst herkend.</li>
+        <li><strong>Doorgestuurde mail</strong>: stuur je een factuurmail nog eens door terwijl de factuur er al in staat, dan komt er geen tweede bon en geen melding.</li>
+      </ul>
+    </article>
 
     <article id="v1.0.1" class="release">
       <header>
-        <h2>1.0.1 <span class="tag latest">Nieuwste versie</span></h2>
+        <h2>1.0.1</h2>
         <p class="meta"><time datetime="2026-10-02">2 oktober 2026</time> · <a href="https://github.com/shipdocs/boekhoudenvoorniks/releases/tag/v1.0.1">Downloads en controlegetallen</a></p>
         <p class="summary">Klaar voor de Microsoft Store. Voor de gewone Windows-versie en Linux verandert er niets.</p>
       </header>
