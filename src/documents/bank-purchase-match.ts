@@ -109,6 +109,19 @@ export interface PaymentQuestion {
   others: PurchaseFit[];
 }
 
+/**
+ * Geld dat binnenkomt tegenover een open creditnota van een leverancier (#227). `strong`: het bedrag is wat
+ * er nog terug moet komen en de leverancier past (naam, nummer of rekeningnummer); dan eerst "Ja" of "Nee".
+ */
+export interface CreditFit {
+  purchase: PurchaseProbe;
+  /** wat er nog terug moet komen (boven nul) */
+  open: Cents;
+  sameAmount: boolean;
+  sameSupplier: boolean;
+  strong: boolean;
+}
+
 /** Alle aankopen die mee kunnen doen en de afgewezen paren: één keer laden per ronde. */
 export interface PurchaseIndex {
   purchases: PurchaseEntry[];
@@ -455,13 +468,68 @@ export class BankPurchaseMatcher {
   }
 
   /**
+   * Mag de app deze afschrijving vanzelf aan deze open aankoop koppelen? Alleen als de aankoop sterk past en
+   * er niets anders is dat ook past: geen andere aankoop bij deze betaling (open, of op privé of contant
+   * betaald gezet), en geen andere onverwerkte afschrijving met dit bedrag aan deze leverancier (`pool`).
+   * Staat het factuurnummer in de omschrijving, dan telt alleen wat dat nummer ook noemt: een nummer wijst
+   * één aankoop aan, een naam of rekeningnummer niet.
+   */
+  sure(t: BankTransaction, purchaseId: number, index: PurchaseIndex, pool: BankTransaction[]): boolean {
+    const strong = this.forTransaction(t, index).filter((f) => f.strength === 'sterk');
+    const own = strong.find((f) => f.purchase.id === purchaseId);
+    if (!own || own.state !== 'open') return false;
+    const numbered = (x: BankTransaction, p: PurchaseProbe) => mentionsReference(`${x.description} ${x.reference ?? ''}`, p.supplier_reference);
+    const byNumber = numbered(t, own.purchase);
+    if (strong.some((f) => f !== own && (!byNumber || numbered(t, f.purchase)))) return false;
+    return !pool.some((x) => {
+      if (x.id === t.id || x.status !== 'nieuw' || index.rejected.has(pairKey({ purchaseId, bankTransactionId: x.id }))) return false;
+      const fit = fitOf(x, own.purchase, 'open');
+      return !!fit && fit.amount !== 'ongeveer' && fit.supplier === 'ja' && (!byNumber || numbered(x, own.purchase));
+    });
+  }
+
+  /**
+   * De open creditnota's van leveranciers bij geld dat binnenkomt (#227): alle, om uit te kiezen op het scherm
+   * van de betaling; wat sterk past eerst. Een creditnota waar de gebruiker bij dit geld "Nee" op zei, past
+   * niet meer sterk (hij blijft wel te kiezen).
+   */
+  creditsFor(t: BankTransaction): CreditFit[] {
+    if (t.amount <= 0) return [];
+    const rows = this.db
+      .prepare(`SELECT ${PROBE_COLUMNS} FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id WHERE p.total < 0 AND p.status = 'open' AND p.amount_paid > p.total ORDER BY p.invoice_date, p.id`)
+      .all({ vraag: ACCOUNTS.vraagposten }) as ProbeRow[];
+    const rejected = this.rejections();
+    return rows
+      .map(({ banked: _banked, question, ...rest }): CreditFit => {
+        const purchase: PurchaseProbe = { ...rest, question: Boolean(question) };
+        const open = purchase.amount_paid - purchase.total;
+        // in een andere munt rekent de bank een eigen koers: dan ook binnen de koersmarge
+        const sameAmount = t.amount === open || Boolean(purchase.currency && purchase.currency !== 'EUR' && withinFx(t.amount, open));
+        const sameSupplier = supplierFit(t, purchase) === 'ja';
+        return { purchase, open, sameAmount, sameSupplier, strong: sameAmount && sameSupplier && !rejected.has(pairKey({ purchaseId: purchase.id, bankTransactionId: t.id })) };
+      })
+      .sort((a, b) => Number(b.strong) - Number(a.strong));
+  }
+
+  /**
    * Bij zelf indelen: past er een aankoop sterk bij, dan eerst "Ja" of "Nee, iets anders". Gaat de betaling
    * naar "weet ik nog niet" (`account`), dan ook bij een aankoop die zwakker past (een andere naam op het
    * afschrift, zoals bij een betaaldienst) maar zelf ook op "weet ik nog niet" staat, met dit bedrag rond
    * deze datum: anders staat hetzelfde bedrag daar twee keer en blijft de aankoop als schuld open (#223).
+   * Geld dat binnenkomt en sterk bij een open creditnota van een leverancier past (#227): ook eerst die vraag,
+   * anders wordt het omzet, of gaan de kosten een tweede keer omlaag, terwijl de creditnota open blijft.
    */
   assertAnswered(t: BankTransaction, account?: string): void {
     if (t.status !== 'nieuw') return;
+    if (t.amount > 0) {
+      const credit = this.creditsFor(t).find((c) => c.strong);
+      if (!credit) return;
+      const p = credit.purchase;
+      const name = purchaseSupplierName(p);
+      throw new ValidationError(
+        `Dit geld lijkt het geld terug van de creditnota ${name ? `van ${name}` : `"${p.description}"`} van ${formatDateNl(p.invoice_date)} (${formatEuro(credit.open)}). Kies eerst "Ja" of "Nee, iets anders": geld terug van een leverancier is geen omzet, en de kosten zijn bij de creditnota al verlaagd.`,
+      );
+    }
     const q = this.question(t);
     if (!q) return;
     if (q.strong) {
@@ -604,9 +672,13 @@ export class BankPurchaseMatcher {
     this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'nee') ON CONFLICT(task_key) DO UPDATE SET reason = excluded.reason`).run(pairKey(pair));
   }
 
-  /** "Nee, iets anders" bij een afschrijving: alle aankopen die er nu bij passen, komen er niet meer bij terug. */
+  /**
+   * "Nee, iets anders" bij een afschrijving: alle aankopen die er nu bij passen, komen er niet meer bij terug.
+   * Bij geld dat binnenkomt: de creditnota's die er sterk bij passen.
+   */
   rejectAll(t: BankTransaction): void {
     for (const f of this.forTransaction(t)) this.reject({ purchaseId: f.purchase.id, bankTransactionId: t.id });
+    for (const c of this.creditsFor(t)) if (c.strong) this.reject({ purchaseId: c.purchase.id, bankTransactionId: t.id });
   }
 
   /**

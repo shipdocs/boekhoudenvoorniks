@@ -1,6 +1,6 @@
 import type { Db } from '../db/database';
 import type { BankTransaction } from './bank';
-import type { SupplierMemory } from '../intake/supplier-memory';
+import type { SupplierMemory, SupplierRule } from '../intake/supplier-memory';
 import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey } from '../intake/supplier-memory';
 import { addDays, addMonths, diffDays, today, type IsoDate } from '../shared/dates';
 import { normalizeIban, ValidationError } from '../shared/validation';
@@ -132,11 +132,25 @@ export class RecurringService {
    * betaling een vraag, en komt de vraag "voortaan automatisch?" zodra de drempel gehaald is.
    */
   confirm(id: number, opts: { expectsInvoice?: boolean; autoAfter?: number } = {}): RecurringSeries {
-    const s = this.get(id);
+    const rule = this.willAutomate(id, opts.autoAfter);
     this.db.prepare(`UPDATE recurring_series SET status = 'actief', expects_invoice = COALESCE(?, expects_invoice) WHERE id = ?`).run(opts.expectsInvoice === undefined ? null : opts.expectsInvoice ? 1 : 0, id);
-    const rule = this.memory.get(s.counter_name);
-    if (rule && rule.auto_approved === 0 && rule.corrections === 0 && rule.confirmations >= (opts.autoAfter ?? ASK_AUTO_AFTER_CONFIRMATIONS)) this.memory.setAutomatic(rule.supplier_key, true);
+    if (rule) this.memory.setAutomatic(rule.supplier_key, true);
     return this.get(id);
+  }
+
+  /**
+   * Gaat met "Ja, vaste last" ook vanzelf boeken aan voor deze leverancier? Geeft dan de regel (categorie en
+   * hoe vaak bevestigd), anders null. De vraag op Vandaag zegt het erbij, vóór de gebruiker kiest.
+   */
+  willAutomate(id: number, autoAfter: number = ASK_AUTO_AFTER_CONFIRMATIONS): SupplierRule | null {
+    const rule = this.memory.get(this.get(id).counter_name);
+    return rule && rule.auto_approved === 0 && rule.corrections === 0 && rule.confirmations >= autoAfter ? rule : null;
+  }
+
+  /** Hoort deze afschrijving bij een vaste last die de gebruiker bevestigd heeft? */
+  confirmedFor(t: Pick<BankTransaction, 'counter_iban' | 'counter_name'>): boolean {
+    const key = counterKey(t);
+    return key !== null && !!this.db.prepare(`SELECT 1 FROM recurring_series WHERE counter_key = ? AND status = 'actief'`).get(key);
   }
 
   setStatus(id: number, status: 'afgewezen' | 'gestopt' | 'actief'): RecurringSeries {

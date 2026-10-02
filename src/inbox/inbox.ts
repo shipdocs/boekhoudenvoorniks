@@ -3,7 +3,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import type { BalanceCheck, BankService, BankTransaction, BookToAccountInput } from '../import/bank';
+import type { BalanceCheck, BankService, BankTransaction, BookToAccountInput, SaleInput } from '../import/bank';
 import type { MatchingEngine } from '../import/matching';
 import type { InvoiceService } from '../documents/invoices';
 import type { QuoteService } from '../documents/quotes';
@@ -340,8 +340,11 @@ export class InboxService {
         tx(this.db, () => {
           this.bookCategory(t, rule!.category_key, rule!.vat_code, Boolean(rule!.business), false);
           const label = rule!.business ? this.categories.label(rule!.category_key) : 'privé';
+          // bij een bevestigde vaste last kan vanzelf boeken door "Ja, vaste last" zijn aangegaan: dan heeft de
+          // gebruiker dát bevestigd, en niet apart gezegd dat het automatisch mag
+          const how = this.recurring.confirmedFor(t) ? 'dit als vaste last hebt bevestigd' : 'hebt gezegd dat dit voortaan automatisch mag';
           const explanation = explain([
-            { type: 'leveranciersregel', label: `je ${rule!.confirmations}× ${rule!.display_name} als ${label} hebt bevestigd en hebt gezegd dat dit voortaan automatisch mag`, value: 0.97 },
+            { type: 'leveranciersregel', label: `je ${rule!.confirmations}× ${rule!.display_name} als ${label} hebt bevestigd en ${how}`, value: 0.97 },
           ]);
           logAutomation(this.db, {
             kind: 'bank-auto',
@@ -429,10 +432,14 @@ export class InboxService {
    * boeken). Iets anders kan alleen als er geen factuur van je eigen bedrijf bij hoort. Ook hier gaat de
    * vraag bij een andere aankoop die sterk past voor (`mustAnswer`).
    * Een regel die waarschijnlijk dezelfde betaling is als een regel die er al staat (#225): eerst dat antwoord.
+   * Geld dat binnenkomt en sterk bij een open creditnota van een leverancier past (#227): ook eerst die vraag.
    */
   private guardBank(t: BankTransaction, account: string | undefined): 'door' | 'gedaan' {
     this.bank.assertNotHeld(t);
-    if (t.amount >= 0) return 'door';
+    if (t.amount >= 0) {
+      this.matcher.assertAnswered(t);
+      return 'door';
+    }
     const m = this.own?.match(t);
     if (m && !m.mustAnswer) {
       const choice = account === ACCOUNTS.vraagposten ? 'vraag' : account === ACCOUNTS.priveOpnamen ? 'prive' : null;
@@ -453,6 +460,27 @@ export class InboxService {
   bookBank(bankTransactionId: number, input: BookToAccountInput): number | null {
     if (this.guardBank(this.bank.get(bankTransactionId), input.account) === 'gedaan') return null;
     return this.bank.bookToAccount(bankTransactionId, input);
+  }
+
+  /**
+   * Geld dat binnenkomt als verkoop boeken ("Verkoop via een ander systeem", of net als vorige keer met
+   * `input` leeg), na dezelfde controle: niet naast een open creditnota die er sterk bij past.
+   */
+  bookSale(bankTransactionId: number, input?: SaleInput): number {
+    this.guardBank(this.bank.get(bankTransactionId), undefined);
+    return input ? this.bank.bookSale(bankTransactionId, input) : this.bank.repeatSale(bankTransactionId);
+  }
+
+  /**
+   * De uitbetaling van een betaaldienst (#227): de verkopen staan al in de app, dus dit geld is geen nieuwe
+   * verkoop. Het komt op "onderweg" (kruisposten), waar de uitbetaling volgens de koppeling tegenover staat.
+   */
+  bookPayout(bankTransactionId: number): number {
+    const t = this.bank.get(bankTransactionId);
+    const provider = this.bank.awaitedPayout(t);
+    if (!provider) throw new ValidationError('Er staan geen verkopen in de app waarvan het geld nog niet binnen is. Kies "Verkoop via een ander systeem" als dit geld van een klant is.');
+    this.guardBank(t, ACCOUNTS.kruisposten);
+    return this.bank.bookToAccount(bankTransactionId, { account: ACCOUNTS.kruisposten, description: `Uitbetaling ${provider}` });
   }
 
   /** De gebruiker beantwoordt een vraag uit de inbox. */
@@ -1051,13 +1079,18 @@ export class InboxService {
       const label = `${formatEuro(series.amount)} per ${series.interval}`;
       if (series.status === 'voorgesteld') {
         const seen = this.recurring.state(series, asOf).payments.slice(-4).reverse();
+        // gaat met "Ja" ook vanzelf boeken aan (de leverancier is al vaak genoeg hetzelfde ingedeeld), dan zegt de knop dat
+        const auto = this.recurring.willAutomate(series.id, autoAfterConfirmations(s.autopilot));
+        const autoHint = auto
+          ? `De app let voortaan op of de factuur en de betaling elke keer binnenkomen, en boekt betalingen aan ${auto.display_name} voortaan zelf als ${auto.business ? this.categories.label(auto.category_key) : 'privé'}: zo heb je ze al ${auto.confirmations} keer ingedeeld. Je ziet ze bij "Automatisch gedaan" en kunt ze altijd terugdraaien.`
+          : undefined;
         tasks.push({
           key: `recurring-${series.id}`,
           kind: 'recurring-confirm',
           icon: '🔁',
           title: `${series.counter_name} lijkt een vaste last`,
           question: `Ongeveer ${label}. Als vaste last letten we erop dat de factuur en de betaling elke keer binnenkomen.`,
-          actions: [{ id: 'ja', label: 'Ja, vaste last', primary: true }, { id: 'nee', label: 'Nee' }],
+          actions: [{ id: 'ja', label: 'Ja, vaste last', primary: true, ...(autoHint ? { hint: autoHint } : {}) }, { id: 'nee', label: 'Nee' }],
           priority: 3,
           why: seen.length ? `Omdat we deze betalingen zagen: ${seen.map((p) => `${formatDateNl(p.transaction_date)} ${formatEuro(Math.abs(p.amount))}`).join(', ')}.` : undefined,
           ref: { seriesId: series.id },

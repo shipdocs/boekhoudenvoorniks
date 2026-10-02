@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { setup } from './helpers';
+import { financialSnapshot, setup } from './helpers';
+import { migrations } from '../src/db/migrations';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { createApi, type HostContext } from '../src/main/api';
 import { supplierFit } from '../src/documents/bank-purchase-match';
@@ -132,7 +133,7 @@ describe('betaaldiensten: één lijst', () => {
   });
 
   it('staan de verkopen al in de app (via de koppeling), dan geen "weer een verkoop" met één klik bij de uitbetaling', () => {
-    const { s } = world();
+    const { s, api } = world();
     const payout = (date: string, amount: number) => line(s, date, amount, 'Stichting Mollie Payments', { description: `Uitbetaling ${date}`, counterIban: 'NL13DEUT0265262461' });
     const first = payout('2026-08-12', 50000);
     s.bank.bookSale(first.id, { vatCode: 'hoog', channel: 'Mollie' });
@@ -160,8 +161,8 @@ describe('betaaldiensten: één lijst', () => {
     expect(s.ledger.balance(ACCOUNTS.kruisposten)).toBe(11800);
     expect(s.bank.previousSale(third.id)).toBeNull();
     expect(s.bank.awaitedPayout(s.bank.get(third.id))).toBe('Mollie');
-    // is de uitbetaling binnen en verrekend, dan wacht er niets meer
-    s.bank.bookToAccount(line(s, '2026-09-13', 11800, 'Stichting Mollie Payments', { description: 'Uitbetaling 2026-09-13', counterIban: 'NL13DEUT0265262461' }).id, { account: ACCOUNTS.kruisposten });
+    // is de uitbetaling binnen en verrekend (de keuze "uitbetaling" op het scherm van de betaling), dan wacht er niets meer
+    api.bank.bookPayout(line(s, '2026-09-13', 11800, 'Stichting Mollie Payments', { description: 'Uitbetaling 2026-09-13', counterIban: 'NL13DEUT0265262461' }).id);
     expect(s.ledger.balance(ACCOUNTS.kruisposten)).toBe(0);
     expect(s.bank.awaitedPayout(s.bank.get(third.id))).toBeNull();
   });
@@ -303,5 +304,219 @@ describe('een vaste last gaat pas vanzelf na dezelfde drempel als elders', () =>
     expect(max.memory.get('Belhuis BV')!.auto_approved).toBe(0);
     max.recurring.confirm(d.id, { autoAfter: autoAfterConfirmations('maximaal') });
     expect(max.memory.get('Belhuis BV')!.auto_approved).toBe(1);
+  });
+});
+
+describe('na de review: vanzelf koppelen alleen als er niets anders bij past', () => {
+  const X = 'NL44RABO0123456789';
+
+  it('een aankoop die op privé betaald staat en een open aankoop met hetzelfde bedrag en rekeningnummer: een vraag, niets vanzelf', () => {
+    const { s } = world();
+    const paid = buy(s, 'Wolkendienst', '2026-09-18', 2500, { payeeIban: X });
+    s.quick.payPurchaseWith(paid.id, 'prive');
+    const open = buy(s, 'Wolkendienst', '2026-09-20', 2500, { payeeIban: X });
+    const t = line(s, '2026-09-21', -2500, 'Wolkendienst', { counterIban: X });
+    // de gedeelde vergelijking ziet twee aankopen die sterk passen: de gebruiker kiest
+    expect(s.bookedPayments.matcher.question(t)).toMatchObject({ kind: 'kijken', strong: true });
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    expect(s.bank.get(t.id).status).toBe('nieuw');
+    expect(s.purchases.get(open.id).status).toBe('open');
+    const [task] = bankTasks(s, t.id);
+    expect(task).toMatchObject({ kind: 'bank-purchase' });
+    expect(task!.question).toContain('Er staan 2 aankopen bij Wolkendienst');
+    expect(task!.actions.map((a) => a.id)).toEqual(['open', 'nee']);
+  });
+
+  it('twee afschrijvingen die bij dezelfde open aankoop passen: geen van beide vanzelf', () => {
+    const { s } = world();
+    const p = buy(s, 'Wolkendienst', '2026-09-01', 2500, { payeeIban: X });
+    // een abonnement per maand: de factuur van augustus ontbreekt, welke betaling hoort bij die van september?
+    const august = line(s, '2026-08-28', -2500, 'Wolkendienst', { counterIban: X });
+    const september = line(s, '2026-09-27', -2500, 'Wolkendienst', { counterIban: X });
+    expect(s.inbox.autoProcess('2026-10-05')).toEqual({ matched: 0, booked: 0 });
+    expect(s.purchases.get(p.id).status).toBe('open');
+    expect([august, september].map((t) => s.bank.get(t.id).status)).toEqual(['nieuw', 'nieuw']);
+    const tasks = s.inbox.tasks('2026-10-05');
+    for (const t of [august, september]) expect(tasks.find((x) => x.ref.bankTransactionId === t.id)).toMatchObject({ kind: 'bank-purchase', ref: { purchaseId: p.id } });
+    // zegt de gebruiker bij de ene "Nee", dan is de andere de enige en koppelt de app hem alsnog zelf
+    s.bookedPayments.matcher.reject({ purchaseId: p.id, bankTransactionId: september.id });
+    s.inbox.answerBank(september.id, { business: true, categoryKey: 'software', vatCode: 'geen' });
+    expect(s.inbox.autoProcess('2026-10-05').matched).toBe(1);
+    expect(s.bank.get(august.id).matched_purchase_invoice_id).toBe(p.id);
+  });
+
+  it('het factuurnummer in de omschrijving wijst één aankoop en één betaling aan: dat gaat nog steeds vanzelf', () => {
+    const { s } = world();
+    const paid = buy(s, 'Wolkendienst', '2026-09-18', 2500, { reference: 'WD-2026-0911' });
+    s.quick.payPurchaseWith(paid.id, 'prive');
+    const open = buy(s, 'Wolkendienst', '2026-09-20', 2500, { reference: 'WD-2026-0912' });
+    const other = line(s, '2026-09-19', -2500, 'Wolkendienst', { description: 'abonnement' });
+    const t = line(s, '2026-09-21', -2500, 'Wolkendienst', { description: 'factuur WD-2026-0912' });
+    expect(s.inbox.autoProcess('2026-09-28').matched).toBe(1);
+    expect(s.bank.get(t.id).matched_purchase_invoice_id).toBe(open.id);
+    expect(s.bank.get(other.id).status).toBe('nieuw');
+  });
+});
+
+describe('na de review: geld terug bij een open creditnota op het scherm van de betaling', () => {
+  it('een terugbetaling met een andere naam is op het bankscherm aan de creditnota te koppelen', () => {
+    const { s, api } = world();
+    const credit = buy(s, 'Kantoorhal', '2026-09-01', -5000);
+    const t = line(s, '2026-09-05', 5000, 'Stichting Derdengelden Betaalhuis', { description: 'Refund order 88412' });
+    // alleen het bedrag past: geen vraag op Vandaag en niets vanzelf
+    expect(bankTasks(s, t.id)).toMatchObject([{ kind: 'bank-income' }]);
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    // op het scherm van de betaling staat de creditnota wel als keuze
+    expect(api.bank.creditNotes(t.id)).toEqual([{ purchaseId: credit.id, supplier: 'Kantoorhal', description: 'Software — Kantoorhal', date: '2026-09-01', open: 5000, sameAmount: true, sameSupplier: false, strong: false }]);
+    api.bank.matchPurchase(t.id, credit.id);
+    expect(s.purchases.get(credit.id)).toMatchObject({ status: 'betaald', open_amount: 0 });
+    // de kosten zijn één keer verlaagd (door de creditnota), en er staat niets meer open bij de leverancier
+    expect(s.ledger.balance(SOFTWARE)).toBe(-5000);
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    expect(revenue(s)).toBe(0);
+    expect(api.bank.creditNotes(t.id)).toEqual([]);
+  });
+
+  it('een deel terug van de leverancier zelf: via het scherm te koppelen, de creditnota blijft open voor de rest', () => {
+    const { s, api } = world();
+    const credit = buy(s, 'Kantoorhal', '2026-09-01', -5000);
+    const t = line(s, '2026-09-05', 4850, 'Kantoorhal', { description: 'Terugbetaling' });
+    expect(bankTasks(s, t.id)).toMatchObject([{ kind: 'bank-income' }]);
+    expect(api.bank.creditNotes(t.id)).toMatchObject([{ purchaseId: credit.id, open: 5000, sameAmount: false, sameSupplier: true, strong: false }]);
+    api.bank.matchPurchase(t.id, credit.id);
+    expect(s.purchases.get(credit.id)).toMatchObject({ status: 'open', open_amount: -150 });
+    // een afschrijving heeft geen creditnota's om uit te kiezen
+    expect(api.bank.creditNotes(line(s, '2026-09-06', -150, 'Kantoorhal').id)).toEqual([]);
+  });
+
+  it('past de creditnota sterk (bedrag en leverancier), dan eerst "Ja" of "Nee" voordat het omzet of een refund kan worden', async () => {
+    const { s, api } = world();
+    const credit = buy(s, 'Kantoorhal', '2026-09-01', -5000);
+    const t = line(s, '2026-09-05', 5000, 'Kantoorhal', { description: 'Terugbetaling' });
+    expect(api.bank.creditNotes(t.id)).toMatchObject([{ purchaseId: credit.id, strong: true }]);
+    const refused = /lijkt het geld terug van de creditnota van Kantoorhal van 1 september 2026 .* Kies eerst "Ja" of "Nee, iets anders"/;
+    expect(() => api.bank.bookSale(t.id, { vatCode: 'hoog' })).toThrow(refused);
+    expect(() => api.bank.book(t.id, { account: ACCOUNTS.omzetHoog, vatCode: 'hoog' })).toThrow(refused);
+    // "Geld terug van een aankoop (refund)" op het bankscherm: de kosten zouden een tweede keer omlaag gaan
+    const pick = { key: '', kind: 'bank-business' as const, icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } };
+    await expect(api.home.act(pick, 'zakelijk', { categoryKey: 'software', vatCode: 'geen' })).rejects.toThrow(refused);
+    await expect(api.home.act(pick, 'prive')).rejects.toThrow(refused);
+    expect(s.bank.get(t.id).status).toBe('nieuw');
+    expect(revenue(s)).toBe(0);
+    // "Nee, iets anders": daarna deelt de gebruiker het geld zelf in
+    api.bank.rejectPurchases(t.id);
+    expect(api.bank.creditNotes(t.id)).toMatchObject([{ purchaseId: credit.id, strong: false }]);
+    api.bank.bookSale(t.id, { vatCode: 'hoog' });
+    expect(s.bank.get(t.id).status).toBe('gematcht');
+    expect(s.purchases.get(credit.id).status).toBe('open');
+  });
+
+  it('"Ja" bij een sterk passende creditnota koppelt het geld zonder omzet', () => {
+    const { s, api } = world();
+    const credit = buy(s, 'Kantoorhal', '2026-09-01', -5000, { payeeIban: IBAN });
+    // een andere naam op het afschrift, maar het rekeningnummer van de creditnota
+    const t = line(s, '2026-09-05', 5000, 'Stichting Derdengelden Betaalhuis', { counterIban: IBAN });
+    expect(api.bank.creditNotes(t.id)).toMatchObject([{ purchaseId: credit.id, sameSupplier: true, strong: true }]);
+    api.bank.matchPurchase(t.id, credit.id);
+    expect(s.purchases.get(credit.id).status).toBe('betaald');
+    expect(revenue(s)).toBe(0);
+  });
+});
+
+describe('na de review: de uitbetaling van een betaaldienst op het scherm van de betaling', () => {
+  it('wachten er verkopen op hun geld, dan is er de keuze "uitbetaling": geen nieuwe verkoop', () => {
+    const { s, api } = world();
+    const payout = (date: string, amount: number) => line(s, date, amount, 'Stichting Mollie Payments', { description: `Uitbetaling ${date}`, counterIban: 'NL13DEUT0265262461' });
+    // zonder verkopen in de app is geld van een betaaldienst gewoon een verkoop via een ander systeem
+    const loose = payout('2026-09-01', 30000);
+    expect(api.bank.awaitedPayout(loose.id)).toBeNull();
+    expect(() => api.bank.bookPayout(loose.id)).toThrow(/geen verkopen/);
+    api.bank.bookSale(loose.id, { vatCode: 'hoog', channel: 'Mollie' });
+    const before = revenue(s);
+    s.integrations.importOrders('webshop', [{ externalId: 'o-1', number: '1001', date: '2026-09-10', paid: true, currency: 'EUR', customer: { name: 'Familie Bakker', email: 'bakker@example.nl', address: 'Molenweg 2', postcode: '3511 AA', city: 'Utrecht', country: 'NL', vatNumber: null }, lines: [{ description: 'Workshop', quantity: 1, unitPriceExVat: 10000, vatPercentage: 21 }] }]);
+    s.integrations.importPayouts('mollie', [{ externalId: 'po-1', date: '2026-09-12', amount: 11800, gross: 12100, feesNet: 248, feesVat: 52, currency: 'EUR', reference: 'Uitbetaling 2026-09-12' }]);
+    const t = payout('2026-09-12', 11800);
+    expect(api.bank.awaitedPayout(t.id)).toBe('Mollie');
+    api.bank.bookPayout(t.id);
+    expect(s.bank.get(t.id).status).toBe('gematcht');
+    // het geld dat onderweg was is binnen: geen tweede keer omzet
+    expect(s.ledger.balance(ACCOUNTS.kruisposten)).toBe(0);
+    expect(revenue(s)).toBe(before + -10000);
+    // een afschrijving aan een betaaldienst is geen uitbetaling
+    expect(api.bank.awaitedPayout(line(s, '2026-09-20', -1500, 'Stichting Mollie Payments').id)).toBeNull();
+  });
+});
+
+describe('na de review: creditnota\'s uit een eerdere versie', () => {
+  it('een creditnota die na een aanpassing op "betaald" kwam te staan terwijl er niets terugkwam, staat weer open', () => {
+    const { db, s } = world();
+    const credit = buy(s, 'Kantoorhal', '2026-09-01', -5000);
+    const part = buy(s, 'Printhuis', '2026-09-01', -8000);
+    s.purchases.registerPayment(part.id, { amount: -3000, date: '2026-09-02' });
+    const done = buy(s, 'Belhuis', '2026-09-01', -2000);
+    s.purchases.registerPayment(done.id, { amount: -2000, date: '2026-09-02' });
+    const purchase = buy(s, 'Wolkendienst', '2026-09-01', 4000);
+    s.purchases.registerPayment(purchase.id, { amount: 4000, date: '2026-09-02', moneyAccount: ACCOUNTS.kas });
+    // zo schreef de vorige versie het weg: bij een bedrag onder nul was "betaald >= totaal" altijd waar
+    db.prepare(`UPDATE purchase_invoices SET status = 'betaald' WHERE id IN (?, ?)`).run(credit.id, part.id);
+    const index = migrations.findIndex((m) => m.includes(`SET status = 'open' WHERE total < 0`));
+    expect(index).toBeGreaterThan(0);
+    db.pragma(`user_version = ${index}`);
+    const before = financialSnapshot({ db, s });
+    const after = setup({ db }).s;
+    expect(db.pragma('user_version', { simple: true })).toBe(migrations.length);
+    expect(after.purchases.get(credit.id)).toMatchObject({ status: 'open', open_amount: -5000 });
+    expect(after.purchases.get(part.id)).toMatchObject({ status: 'open', open_amount: -5000 });
+    // wat echt afgehandeld is, blijft zo; de boekingen veranderen niet
+    expect(after.purchases.get(done.id).status).toBe('betaald');
+    expect(after.purchases.get(purchase.id).status).toBe('betaald');
+    const snapshot = financialSnapshot({ db, s: after });
+    expect({ ...snapshot, purchase_invoices: null }).toEqual({ ...before, purchase_invoices: null });
+    // de terugbetaling vindt de creditnota nu wel
+    after.settings.update({ onboardingDone: true });
+    const t = line(after, '2026-09-05', 5000, 'Kantoorhal', { description: 'Terugbetaling' });
+    expect(bankTasks(after, t.id)).toMatchObject([{ kind: 'bank-purchase', ref: { purchaseId: credit.id } }]);
+  });
+});
+
+describe('na de review: de uitleg bij "Ja, vaste last" zegt wat er gebeurt', () => {
+  const months = ['2026-06-03', '2026-07-03', '2026-08-03'];
+  const series = (s: S, confirmations: number) => {
+    for (let i = 0; i < confirmations; i++) s.memory.learn('Belhuis BV', { categoryKey: 'telefoon', vatCode: 'hoog', business: true });
+    for (const d of months) line(s, d, -6050, 'Belhuis BV', { description: 'Abonnement', counterIban: 'NL44RABO0123456789' });
+    s.inbox.autoProcess('2026-08-05');
+    return s.inbox.tasks('2026-08-05').find((t) => t.kind === 'recurring-confirm')!;
+  };
+
+  it('gaat vanzelf boeken aan, dan staat dat in de uitleg en in het logboek', async () => {
+    const { s, api } = world();
+    const task = series(s, 3);
+    const hint = task.actions.find((a) => a.id === 'ja')!.hint!;
+    expect(hint).toBe('De app let voortaan op of de factuur en de betaling elke keer binnenkomen, en boekt betalingen aan Belhuis BV voortaan zelf als telefoon & internet: zo heb je ze al 3 keer ingedeeld. Je ziet ze bij "Automatisch gedaan" en kunt ze altijd terugdraaien.');
+    await api.home.act(task, 'ja');
+    expect(s.bank.list({ status: 'nieuw' })).toHaveLength(0);
+    const log = s.inbox.home('2026-08-05').automated.filter((a) => a.kind === 'bank-auto');
+    expect(log).toHaveLength(3);
+    for (const entry of log) {
+      expect(entry.reason).toContain('als vaste last hebt bevestigd');
+      expect(entry.reason).not.toContain('automatisch mag');
+    }
+  });
+
+  it('blijft boeken een vraag, dan wordt er niets extra geboekt', async () => {
+    const { s, api } = world();
+    const task = series(s, 1);
+    expect(task.actions.find((a) => a.id === 'ja')!.hint).toBe('De app let voortaan op of de factuur en de betaling elke keer binnenkomen. Er wordt niets extra geboekt.');
+    await api.home.act(task, 'ja');
+    expect(s.bank.list({ status: 'nieuw' })).toHaveLength(3);
+  });
+
+  it('zei de gebruiker zelf "voortaan automatisch", dan staat dat in het logboek', () => {
+    const { s } = world();
+    for (let i = 0; i < 3; i++) s.memory.learn('Belhuis BV', { categoryKey: 'telefoon', vatCode: 'hoog', business: true });
+    s.memory.setAutomatic(s.memory.get('Belhuis BV')!.supplier_key, true);
+    line(s, '2026-08-03', -6050, 'Belhuis BV', { description: 'Abonnement' });
+    expect(s.inbox.autoProcess('2026-08-05').booked).toBe(1);
+    expect(s.inbox.home('2026-08-05').automated.find((a) => a.kind === 'bank-auto')!.reason).toContain('hebt gezegd dat dit voortaan automatisch mag');
   });
 });

@@ -729,6 +729,10 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const ownCompany = useLoad(() => api.bank.ownCompany(id), [id]);
   // een aankoop die er al staat en bij deze afschrijving past (#221): eerst die vraag, anders tellen de kosten dubbel
   const purchaseQuestion = useLoad(() => api.bank.purchaseQuestion(id), [id]);
+  // geld dat binnenkomt: de open creditnota's van leveranciers waar het bij kan horen (#227)
+  const creditNotes = useLoad(() => api.bank.creditNotes(id), [id]);
+  // geld van een betaaldienst terwijl er verkopen in de app op hun geld wachten (#227): de naam van die dienst
+  const payout = useLoad(() => api.bank.awaitedPayout(id), [id]);
   // bij "Negeren": de betalingen waar deze regel een dubbel van kan zijn (#225); null = nog niet gevraagd
   const [doubleOf, setDoubleOf] = useState<Awaited<ReturnType<typeof api.bank.duplicateCandidates>> | null>(null);
   // waarschijnlijk dezelfde betaling als een regel die er al staat (#225): eerst die vraag, daarna pas indelen
@@ -754,10 +758,14 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const inv = (categoryKey: string, vatCode: string) => (categoryKey === 'investering' ? vatCode : undefined);
   const invoices = [...(overdue.data ?? []), ...(openInvoices.data ?? [])];
   const linked = t.status === 'nieuw' ? purchaseQuestion.data ?? null : null;
-  // past er een aankoop sterk bij, dan eerst "Ja" of "Nee, iets anders": tot dan geen andere keuzes
-  const mustAnswer = Boolean(linked?.strong);
+  const credits = t.status === 'nieuw' && t.amount > 0 ? creditNotes.data ?? [] : [];
+  // een creditnota van een leverancier met dit bedrag: geld terug daarvan is geen omzet (#227)
+  const strongCredits = credits.filter((c) => c.strong);
+  // past er een aankoop of creditnota sterk bij, dan eerst "Ja" of "Nee, iets anders": tot dan geen andere keuzes
+  const mustAnswer = Boolean(linked?.strong) || strongCredits.length > 0;
   // voorstellen die al in de kaart hierboven staan, niet nog een keer onder "Hoort dit hierbij?"
   const proposals = (suggestions.data ?? []).filter((s) => s.kind !== 'rekening' && !(s.kind === 'inkoop' && linked?.candidates.some((c) => c.purchaseId === s.purchaseId)));
+  const creditText = (c: (typeof credits)[number]) => `Creditnota ${c.supplier ? `van ${c.supplier}` : `"${c.description}"`} van ${formatDateNl(c.date)}, nog ${formatEuro(c.open)} terug te krijgen`;
   return (
     <div className="page-narrow">
       <div className="row between">
@@ -830,6 +838,28 @@ export function CategorizeTransaction({ id }: { id: number }) {
           </div>
         </div>
       )}
+      {strongCredits.length > 0 && (
+        <div className="notice warn" role="note" data-testid="creditnota-bij-geld">
+          <strong>Is dit het geld terug van een creditnota die er al staat?</strong>
+          {strongCredits.map((c) => (
+            <div key={c.purchaseId} style={{ marginTop: 8 }}>
+              <div className="small">{creditText(c)}</div>
+              <div className="row" style={{ marginTop: 4 }}>
+                <Button small kind={strongCredits.length === 1 ? 'primary' : undefined} disabled={busy} onClick={() => void done(api.bank.matchPurchase(t.id, c.purchaseId))}>Ja, dit is het geld terug van die creditnota</Button>
+              </div>
+            </div>
+          ))}
+          <div className="small" style={{ marginTop: 8 }}>
+            Geld terug van een leverancier is geen omzet. Bij "Ja" wordt het geld aan de creditnota gekoppeld; de kosten zijn bij de creditnota al verlaagd en gaan niet nog een keer omlaag.
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <Button small disabled={busy} onClick={async () => {
+              // op deze pagina blijven: daarna deel je het geld zelf in
+              if ((await run(async () => { await api.bank.rejectPurchases(t.id); return true; })) !== undefined) await Promise.all([creditNotes.reload(), suggestions.reload()]);
+            }}>Nee, iets anders</Button>
+          </div>
+        </div>
+      )}
       {t.status !== 'nieuw' ? (
         <div className="card">
           <StatusPill status={t.status} />
@@ -839,7 +869,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
               // op deze pagina blijven: daarna meteen opnieuw indelen
               if ((await run(async () => { await api.bank.unmatch(t.id); return true; }, 'Teruggedraaid. Kies nu wat het wel was.')) !== undefined) {
                 setDoubleOf(null);
-                await Promise.all([txs.reload(), suggestions.reload(), own.reload(), sames.reload()]);
+                await Promise.all([txs.reload(), suggestions.reload(), own.reload(), sames.reload(), creditNotes.reload(), payout.reload()]);
               }
             }}>Ongedaan maken</Button>
             {t.status === 'gematcht' && !t.matched_invoice_id && !t.matched_purchase_invoice_id && t.amount < 0 && (
@@ -898,6 +928,17 @@ export function CategorizeTransaction({ id }: { id: number }) {
 
           {mustAnswer ? null : t.amount > 0 ? (
             <>
+              {payout.data && (
+                <div className="notice warn" role="note" data-testid="uitbetaling-betaaldienst">
+                  <strong>Is dit de uitbetaling van {payout.data}?</strong>
+                  <div className="small" style={{ marginTop: 4 }}>
+                    Er staan verkopen in de app waarvan het geld nog niet binnen is. Is dit de uitbetaling daarvan, dan is het geen nieuwe verkoop: kies je "Verkoop via een ander systeem", dan telt de omzet twee keer.
+                  </div>
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <Button small kind="primary" disabled={busy} onClick={() => void done(api.bank.bookPayout(t.id))}>Uitbetaling van {payout.data}: geen nieuwe verkoop</Button>
+                  </div>
+                </div>
+              )}
               {previousSale.data && (
                 <div className="card">
                   <strong>Weer een verkoop{previousSale.data.channel ? ` via ${previousSale.data.channel}` : ''}?</strong>
@@ -914,6 +955,14 @@ export function CategorizeTransaction({ id }: { id: number }) {
                   </select>
                 </Field>
               )}
+              {credits.length > 0 && (
+                <Field label="Geld terug bij een creditnota van een leverancier">
+                  <select defaultValue="" onChange={(e) => e.target.value && void done(api.bank.matchPurchase(t.id, Number(e.target.value)))}>
+                    <option value="">Kies de creditnota…</option>
+                    {credits.map((c) => <option key={c.purchaseId} value={c.purchaseId}>{c.supplier ?? c.description} — {formatDateNl(c.date)} — {(c.open / 100).toFixed(2).replace('.', ',')}</option>)}
+                  </select>
+                </Field>
+              )}
               <div className="choice" style={{ marginTop: 12 }}>
                 {(pots.data ?? []).filter((p) => p.id !== t.bank_account_id).map((p) => (
                   <button key={`pot-${p.id}`} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: p.rgs_code, description: `Uit potje ${p.name}` }))}>
@@ -927,6 +976,12 @@ export function CategorizeTransaction({ id }: { id: number }) {
                 </button>
                 {refund && (
                   <div className="card flat">
+                    {/* staat de creditnota er al, dan zijn de kosten daar al verlaagd: niet nog een keer */}
+                    {credits.some((c) => c.sameAmount || c.sameSupplier) && (
+                      <p className="small" role="note" data-testid="refund-creditnota">
+                        <strong>Let op:</strong> er staat een open creditnota {credits.some((c) => c.sameAmount) ? 'met dit bedrag' : 'van deze leverancier'}. Hoort dit geld daarbij, kies hem dan hierboven bij "Geld terug bij een creditnota van een leverancier": de kosten zijn bij de creditnota al verlaagd.
+                      </p>
+                    )}
                     <CategoryPicker
                       incoming
                       amount={Math.abs(t.amount)}
