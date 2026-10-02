@@ -1194,7 +1194,8 @@ export const migrations: string[] = [
   -- Een verkoop uit een webshop of Mollie Facturen die de app niet vanzelf als omzet boekt, bv. een verkoop
   -- aan je eigen bedrijf: de order zoals hij binnenkwam, waarom hij wacht en wat de gebruiker koos.
   -- Zolang answer leeg is, is er niets geboekt. De regel blijft daarna staan: zo komt de order niet opnieuw binnen.
-  -- reason: 'eigen-bedrijf'. answer: 'neutraal' (geen omzet en geen btw) of 'verkoop' (gewone factuur).
+  -- reason: 'eigen-bedrijf' (#231), 'btw' of 'opnieuw' (#228). answer: het laatste antwoord, bv. 'neutraal'
+  -- (geen omzet en geen btw), 'verkoop' (gewone factuur) of 'niet' (een teruggedraaide factuur niet opnieuw inlezen).
   CREATE TABLE integration_questions (
     id INTEGER PRIMARY KEY,
     source TEXT NOT NULL,
