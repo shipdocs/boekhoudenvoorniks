@@ -186,6 +186,28 @@ describe('test() bewaart niets en weigert pi (#246 regel 5)', () => {
     await expect(h.feed.test({ clientId: 'x', clientSecret: '' })).rejects.toThrow(/Client ID/);
     expect(h.clientCalls).toBe(0);
   });
+
+  it('laat bij overlappende tests alleen het laatst gestarte resultaat bewaarbaar worden', async () => {
+    let releaseFirst!: (accounts: PontoAccount[]) => void;
+    const firstResult = new Promise<PontoAccount[]>((resolve) => { releaseFirst = resolve; });
+    let call = 0;
+    (h.feed as unknown as { makeClient: unknown }).makeClient = () => ({
+      accounts: async () => {
+        call += 1;
+        return { accounts: call === 1 ? await firstResult : [account({ id: 'acc-nieuwste' })], scope: 'ai' };
+      },
+    });
+
+    const ouder = h.feed.test(CREDS);
+    const nieuwste = h.feed.test(CREDS);
+    await expect(nieuwste).resolves.toMatchObject({ accounts: [{ pontoId: 'acc-nieuwste' }] });
+    releaseFirst([account({ id: 'acc-ouder' })]);
+    await expect(ouder).rejects.toThrow(/nieuwere verbindingstest/);
+
+    expect(() => h.feed.saveLinks(CREDS, [{ pontoId: 'acc-ouder', bankAccountId: null }])).toThrow(/Onbekende Ponto-rekening/);
+    h.feed.saveLinks(CREDS, [{ pontoId: 'acc-nieuwste', bankAccountId: null }]);
+    expect(h.feed.status().accounts[0]!.pontoId).toBe('acc-nieuwste');
+  });
 });
 
 describe('bruikbaarheid en IBAN-suggestie (#246 regel 5 en 6)', () => {
