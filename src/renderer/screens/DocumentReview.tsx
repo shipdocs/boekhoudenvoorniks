@@ -158,6 +158,8 @@ export function DocumentReview({ id }: { id: number }) {
   const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
   const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; businessPct: number | null; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
+  // de verbeterde gegevens lijken op een aankoop of bon die er al staat (#224): eerst de vraag, pas na "Toch boeken" verwerken
+  const [duplicate, setDuplicate] = useState<{ entry: string; lead: string } | null>(null);
 
   const d = doc.data;
   useEffect(() => {
@@ -220,6 +222,9 @@ export function DocumentReview({ id }: { id: number }) {
     setForm(null);
     await view.reload();
   };
+  // de vraag geldt voor de gegevens zoals ze er toen stonden; verandert de gebruiker iets, dan kijkt de app opnieuw
+  const entry = `${form.supplier.trim()}|${form.date}|${form.total}|${form.invoiceNumber.trim()}|${form.business}`;
+  const shownDuplicate = duplicate?.entry === entry ? duplicate : null;
 
   return (
     <div className="page">
@@ -409,16 +414,27 @@ export function DocumentReview({ id }: { id: number }) {
                   )}
                 </>
               )}
+              {shownDuplicate && (
+                <div className="notice warn" role="alert" data-testid="mogelijk-dubbel" style={{ marginBottom: 12 }}>
+                  <strong>Staat deze aankoop er al in?</strong>
+                  <div className="small" style={{ marginTop: 4 }}>{shownDuplicate.lead} Kijk het eerst na bij Aankopen & bonnetjes. Is dit een andere aankoop, kies dan “Toch boeken”. Is het dezelfde, kies dan “Negeren”.</div>
+                </div>
+              )}
               <div className="row end">
                 <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
                 <Button kind="primary" disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
+                  if (!shownDuplicate) {
+                    const found = await run(() => api.documents.duplicateOf(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, business: form.business }));
+                    if (found === undefined) return;
+                    if (found) return setDuplicate({ entry, lead: `Lijkt op ${found.label}.${found.detail ? ` ${found.detail}` : ''}` });
+                  }
                   const isInvestment = form.business && !form.splits && form.categoryKey === 'investering';
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, allowDuplicate: !!shownDuplicate, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
                   if (res) {
                     go({ screen: 'aankopen' });
                     if (isInvestment) showInvestmentSaved(investmentInfo(form.total!, form.vatCode, true));
                   }
-                }}>Klopt, verwerken</Button>
+                }}>{shownDuplicate ? 'Toch boeken' : 'Klopt, verwerken'}</Button>
               </div>
               </>
               )}

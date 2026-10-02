@@ -217,4 +217,97 @@ describe('dubbel-detectie van bonnen (#224)', () => {
     expect(task.actions.map((a) => a.id)).toEqual(['open']);
     expect(task.group).toBeUndefined();
   });
+
+  it('een nummer dat bij deze leverancier op elke factuur staat is geen factuurnummer: hooguit één keer de vraag, met beide bedragen erbij', async () => {
+    const { state, provider } = varOcr();
+    const { s } = setup({ ocr: provider });
+    // elke maand een ander bedrag; de app leest steeds het klantnummer als factuurnummer
+    const maand = async (n: number, datum: string, totaal: string) => {
+      state.lines = factuur('Stroomhuis', 'KL-778812', datum, totaal);
+      return s.intake.add(`maand-${n}.jpg`, new Uint8Array([n]), '2026-09-25', { autoConfirm: false });
+    };
+    const juni = await maand(6, '20-06-2026', '38,10');
+    expect(voorstel(juni)).toBeUndefined();
+    boek(s, juni.id, 'Stroomhuis', '2026-06-20', 3810, 'KL-778812');
+
+    // de eerste keer dat het nummer terugkomt: de vraag, en die noemt beide bedragen
+    const juli = await maand(7, '20-07-2026', '41,25');
+    expect(voorstel(juli)).toMatchObject({ strength: 'mogelijk', reason: 'bedrag' });
+    expect(juli.issues.find((i) => i.field === 'duplicate')!.message).toMatch(/Lijkt op de aankoop bij Stroomhuis van 20 juni 2026\..*38,10.*41,25.*Is dit dezelfde aankoop\?/);
+    expect(s.intake.pending(await s.intake.decide(juli.id, 'nee'))).toBeNull();
+    boek(s, juli.id, 'Stroomhuis', '2026-07-20', 4125, 'KL-778812');
+
+    // daarna staat het nummer bij twee aankopen van deze leverancier: het is geen factuurnummer, dus geen vraag meer
+    const augustus = await maand(8, '20-08-2026', '39,80');
+    expect(voorstel(augustus)).toBeUndefined();
+    expect(s.intake.pending(augustus)).toBeNull();
+    boek(s, augustus.id, 'Stroomhuis', '2026-08-20', 3980, 'KL-778812');
+    expect(voorstel(await maand(9, '20-09-2026', '40,00'))).toBeUndefined();
+    expect(s.purchases.list()).toHaveLength(3);
+    // ook met de hand ingevoerd geen vraag, en de melding noemt bij één eerdere aankoop wel de bedragen
+    expect(s.quick.duplicateOf({ date: '2026-10-20', supplierName: 'Stroomhuis', supplierReference: 'KL-778812', grossAmount: 4210 })).toBeNull();
+    // hetzelfde bedrag als een eerdere maand blijft een vraag, zoals het was
+    expect(s.quick.duplicateOf({ date: '2026-10-20', supplierName: 'Stroomhuis', supplierReference: 'KL-778812', grossAmount: 3980 })).toMatchObject({ strength: 'mogelijk' });
+  });
+
+  it('handmatige invoer met hetzelfde nummer en een ander bedrag: de melding noemt beide bedragen', async () => {
+    const { state, provider } = varOcr();
+    const { s } = setup({ ocr: provider });
+    state.lines = factuur('Wolkendienst', 'WD-2026-0042', '20-09-2026', '15,77');
+    boek(s, (await s.intake.add('a.jpg', new Uint8Array([1]), '2026-09-25', { autoConfirm: false })).id, 'Wolkendienst', '2026-09-20', 1577, 'WD-2026-0042');
+    expect(() => s.quick.recordExpense({ date: '2026-09-22', supplierName: 'Wolkendienst', supplierReference: 'WD-2026-0042', description: 'Abonnement', categoryKey: 'software', grossAmount: 1596, vatCode: 'geen', paidWith: 'bank' })).toThrow(/Lijkt op de aankoop bij Wolkendienst.*15,77.*15,96.*Toch toevoegen/);
+  });
+
+  it('op het controlescherm het nummer of de leverancier verbeterd: de vraag komt alsnog, en pas na "Toch boeken" een tweede aankoop', async () => {
+    const { state, provider } = varOcr();
+    const ctx = setup({ ocr: provider });
+    const { s } = ctx;
+    const api = createApi(s, { appVersion: () => '0.0.0', hasSmtpPassword: () => false } as unknown as HostContext);
+    state.lines = factuur('Wolkendienst', 'WD-2026-0042', '20-09-2026', '15,77');
+    boek(s, (await s.intake.add('factuur.jpg', new Uint8Array([1]), '2026-09-25', { autoConfirm: false })).id, 'Wolkendienst', '2026-09-20', 1577, 'WD-2026-0042');
+    const aankoop = s.purchases.list()[0]!;
+    const voor = financialSnapshot(ctx);
+
+    // de bon van de betaling is zonder nummer gelezen, met een ander bedrag en ruim een week later: terecht geen vraag
+    state.lines = bon('Wolkendienst', null, '29-09-2026', '15,96');
+    const doc = await s.intake.add('bon.jpg', new Uint8Array([2]), '2026-09-30', { autoConfirm: false });
+    expect(voorstel(doc)).toBeUndefined();
+    expect(s.intake.pending(doc)).toBeNull();
+    const invoer = { supplier: 'Wolkendienst', date: '2026-09-29', total: 1596, invoiceNumber: null as string | null, categoryKey: 'software', vatCode: 'geen' as const, business: true, paidWith: 'later' as const };
+    // zoals gelezen: niets te vragen
+    expect(api.documents.duplicateOf(doc.id, invoer)).toBeNull();
+    // de gebruiker typt het nummer erbij
+    expect(api.documents.duplicateOf(doc.id, { ...invoer, invoiceNumber: 'WD-2026-0042' })).toMatchObject({ strength: 'mogelijk', reason: 'bedrag', purchaseId: aankoop.id });
+    expect(() => api.documents.confirm(doc.id, { ...invoer, invoiceNumber: 'WD-2026-0042' })).toThrow(/Lijkt op de aankoop bij Wolkendienst.*15,77.*15,96.*Toch boeken/);
+    // of verbetert het bedrag en de datum naar die van de factuur
+    expect(() => api.documents.confirm(doc.id, { ...invoer, date: '2026-09-21', total: 1577 })).toThrow(/Lijkt op de aankoop bij Wolkendienst/);
+    expect(financialSnapshot(ctx).purchase_invoices).toEqual(voor.purchase_invoices);
+    expect(s.intake.get(doc.id).status).toBe('controle');
+    // privé komt niet in de boekhouding: daar valt niets dubbel te boeken
+    expect(api.documents.duplicateOf(doc.id, { ...invoer, invoiceNumber: 'WD-2026-0042', business: false })).toBeNull();
+
+    // een verkeerd gelezen leverancier: de gebruiker verbetert de naam
+    state.lines = bon('Wo1kendlenst', 'WD-2026-0042', '20-09-2026', '15,77');
+    const scheef = await s.intake.add('scheef.jpg', new Uint8Array([3]), '2026-09-30', { autoConfirm: false });
+    expect(voorstel(scheef)).toBeUndefined();
+    expect(() => api.documents.confirm(scheef.id, { ...invoer, date: '2026-09-20', total: 1577, invoiceNumber: 'WD-2026-0042' })).toThrow(/Lijkt op/);
+
+    // de gebruiker heeft gekeken en kiest "Toch boeken"
+    api.documents.confirm(doc.id, { ...invoer, invoiceNumber: 'WD-2026-0042', allowDuplicate: true });
+    expect(s.purchases.list()).toHaveLength(2);
+  });
+
+  it('een voorstel waar al "Nee" op is gezegd komt bij het verwerken niet terug, ook niet als de datum is verbeterd', async () => {
+    const { state, provider } = varOcr();
+    const { s } = setup({ ocr: provider });
+    state.lines = factuur('Wolkendienst', 'WD-2026-0042', '20-09-2026', '15,77');
+    boek(s, (await s.intake.add('a.jpg', new Uint8Array([1]), '2026-09-25', { autoConfirm: false })).id, 'Wolkendienst', '2026-09-20', 1577, 'WD-2026-0042');
+    state.lines = bon('Wolkendienst', 'WD-2026-0042', '10-12-2026', '15,96');
+    const tweede = await s.intake.add('b.jpg', new Uint8Array([2]), '2026-09-25', { autoConfirm: false });
+    expect(voorstel(tweede)).toMatchObject({ reason: 'bedrag' });
+    await s.intake.decide(tweede.id, 'nee');
+    // de verkeerd gelezen datum verbeterd: de vraag is al beantwoord
+    boek(s, tweede.id, 'Wolkendienst', '2026-09-22', 1596, 'WD-2026-0042');
+    expect(s.purchases.list()).toHaveLength(2);
+  });
 });

@@ -128,6 +128,8 @@ export interface Confirmation {
   vatAmount?: Cents | null;
   /** zakelijk deel in procenten (1–100); weglaten = wat eerder voor deze leverancier gold, anders 100 */
   businessPct?: number;
+  /** "Toch boeken": de gebruiker zag dat er al een aankoop of bon staat die lijkt op wat hij hier heeft verbeterd (#224) */
+  allowDuplicate?: boolean;
 }
 
 type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'bank_match_strong' | 'decisions' | 'link' | 'outcome'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
@@ -190,7 +192,12 @@ export interface DuplicateMatch {
   label: string;
   /** waarom het niet zeker is; bedrag = zelfde nummer maar een ander bedrag, leverancier = de naam is net anders geschreven */
   reason?: 'datum' | 'nummer' | 'soort' | 'bedrag' | 'leverancier';
+  /** bij een ander bedrag: beide bedragen in een zin, voor in de vraag */
+  detail?: string;
 }
+
+/** De vraag bij een mogelijke kopie: waar hij op lijkt, en bij een ander bedrag welke bedragen het zijn. */
+export const duplicateLead = (match: Pick<DuplicateMatch, 'label' | 'detail'>): string => `Lijkt op ${match.label}.${match.detail ? ` ${match.detail}` : ''}`;
 
 /** Wat er van een document of aankoop nodig is om te zien of het hetzelfde is. */
 export interface DuplicateProbe {
@@ -909,7 +916,7 @@ export class IntakeService {
     }
     const issues = [...extraIssues, ...validateDocument(result, asOf)];
     if (duplicate) {
-      issues.push({ field: 'duplicate', severity: 'fout', message: `Lijkt op ${duplicate.label}. Is dit dezelfde aankoop?`, suggestion: duplicate });
+      issues.push({ field: 'duplicate', severity: 'fout', message: `${duplicateLead(duplicate)} Is dit dezelfde aankoop?`, suggestion: duplicate });
     } else {
       // de betaling waar deze bon vroeger bij stond, hoort intussen bij een aankoop: die aankoop is er dus al
       const purchase = legacy?.purchases.map((p) => this.links.describe({ kind: 'aankoop', id: p })).find((p) => p && !rejected.has(`aankoop:${p.id}`));
@@ -1004,7 +1011,9 @@ export class IntakeService {
    *  - hetzelfde bedrag: compareDuplicate (zeker of mogelijk);
    *  - een andere munt aan één kant en het bedrag binnen de koersmarge (`withinFx`): hooguit mogelijk;
    *  - een ander bedrag maar hetzelfde nummer (minstens drie tekens): mogelijk, want een bon en de factuur
-   *    van dezelfde aankoop verschillen soms een paar cent (koers, afronding) (#224).
+   *    van dezelfde aankoop verschillen soms een paar cent (koers, afronding) (#224). Niet als dat nummer bij
+   *    deze leverancier al bij meer dan één aankoop staat: dan is het geen factuurnummer maar een klant- of
+   *    contractnummer, en zou elke nieuwe factuur de vraag krijgen tegen elke eerdere.
    * Zeker is het alleen bij precies dezelfde leverancier en precies hetzelfde bedrag; al het andere is een vraag.
    */
   private duplicateOf(subject: DuplicateSubject, id: number | null, rejected: Set<string>): DuplicateMatch | null {
@@ -1025,8 +1034,9 @@ export class IntakeService {
     };
     const compare = (supplier: 'gelijk' | 'variant', amount: 'gelijk' | 'koers' | null, other: DuplicateProbe): Pick<DuplicateMatch, 'strength' | 'reason'> | null => {
       if (!amount) {
-        // een ander bedrag: alleen hetzelfde nummer is dan nog een reden om het te vragen
-        if (!probe.number || probe.number.length < MIN_NUMBER_LENGTH || probe.number !== other.number) return null;
+        // een ander bedrag: alleen hetzelfde nummer is dan nog een reden om het te vragen, en alleen als dat
+        // nummer bij deze leverancier niet vaker voorkomt
+        if (!probe.number || probe.number.length < MIN_NUMBER_LENGTH || probe.number !== other.number || sameNumber.size > 1) return null;
         return { strength: 'mogelijk', reason: probe.credit !== other.credit ? 'soort' : 'bedrag' };
       }
       const found = compareDuplicate(probe, other);
@@ -1049,31 +1059,35 @@ export class IntakeService {
       )
       .all(id, id, id) as { id: number; result: string; purchase_invoice_id: number | null; bank_transaction_id: number | null }[];
 
-    let weak: DuplicateMatch | null = null;
-    const consider = (found: ReturnType<typeof compareDuplicate>, match: Omit<DuplicateMatch, 'strength' | 'reason'>): DuplicateMatch | null => {
-      if (!found || rejected.has(candidateOf(match))) return null;
-      if (found.strength === 'zeker') return { ...match, ...found };
-      weak ??= { ...match, ...found };
-      return null;
-    };
+    // alles van deze leverancier wat er al staat: eerst de aankopen, dan de documenten
+    type Candidate = { supplier: 'gelijk' | 'variant'; total: Cents; currency: string | null; foreignTotal: Cents | null; other: DuplicateProbe; match: Omit<DuplicateMatch, 'strength' | 'reason'> };
+    const candidates: Candidate[] = [];
     for (const p of purchases) {
       const supplier = supplierFit(p.supplier);
       if (!supplier) continue;
       const number = p.supplier_reference ? normalizeInvoiceNumber(p.supplier_reference) : '';
       // een bevestigde aankoop: het nummer is nagekeken, of het document waar het uit komt telt hieronder mee
       const other: DuplicateProbe = { number: number || null, reliable: number.length >= MIN_NUMBER_LENGTH, date: p.invoice_date, credit: p.total < 0 };
-      const found = compare(supplier, amountFit({ total: p.total, currency: p.currency, foreignTotal: p.foreign_total }), other);
-      const certain = consider(found, { documentId: p.document_id, purchaseId: p.id, label: `de aankoop bij ${p.supplier} van ${formatDateNl(p.invoice_date)}` });
-      if (certain) return certain;
+      candidates.push({ supplier, total: p.total, currency: p.currency, foreignTotal: p.foreign_total, other, match: { documentId: p.document_id, purchaseId: p.id, label: `de aankoop bij ${p.supplier} van ${formatDateNl(p.invoice_date)}` } });
     }
     for (const d of docs) {
       const r = JSON.parse(d.result) as DocumentResult;
       const supplier = r.total ? supplierFit(r.supplier?.value) : null;
       if (!r.total || !supplier) continue;
       const label = `het document van ${r.supplier!.value}${r.invoiceDate ? ` van ${formatDateNl(r.invoiceDate.value)}` : ''}`;
-      const found = compare(supplier, amountFit({ total: r.total.value, currency: r.foreign?.currency ?? null, foreignTotal: r.foreign?.total ?? null }), probeOf(r));
-      const certain = consider(found, { documentId: d.id, purchaseId: d.purchase_invoice_id, bankTransactionId: d.bank_transaction_id, label });
-      if (certain) return certain;
+      candidates.push({ supplier, total: r.total.value, currency: r.foreign?.currency ?? null, foreignTotal: r.foreign?.total ?? null, other: probeOf(r), match: { documentId: d.id, purchaseId: d.purchase_invoice_id, bankTransactionId: d.bank_transaction_id, label } });
+    }
+    // Bij hoeveel aankopen van deze leverancier staat dit nummer al? Alleen wat geboekt is telt: een bon die nog
+    // op controle wacht kan zelf de kopie zijn.
+    const sameNumber = new Set(candidates.filter((c) => c.match.purchaseId && !!probe.number && c.other.number === probe.number).map((c) => c.match.purchaseId));
+
+    let weak: DuplicateMatch | null = null;
+    for (const c of candidates) {
+      const found = compare(c.supplier, amountFit(c), c.other);
+      if (!found || rejected.has(candidateOf(c.match))) continue;
+      if (found.strength === 'zeker') return { ...c.match, ...found };
+      // een ander bedrag: beide bedragen erbij, zodat te zien is of het dezelfde aankoop kan zijn
+      weak ??= { ...c.match, ...found, ...(found.reason === 'bedrag' && c.total !== total ? { detail: `Het nummer is hetzelfde, het bedrag niet: daar ${formatEuro(c.total)}, hier ${formatEuro(total)}.` } : {}) };
     }
     return weak;
   }
@@ -1162,6 +1176,25 @@ export class IntakeService {
   }
 
   /**
+   * De gebruiker verbeterde op het controlescherm de leverancier, het nummer, het bedrag of de datum (#224):
+   * staat er met die gegevens al een aankoop of bon die erop lijkt? Bij het inlezen is alleen vergeleken met
+   * wat toen gelezen was. Het ingevulde nummer telt als betrouwbaar, zoals bij handmatige invoer. Een voorstel
+   * waar bij deze bon al "Nee" op is gezegd, komt niet terug. null = niets gevonden, er is niets veranderd, of
+   * de bon is privé (dan wordt er geen aankoop geboekt). Er wordt hier niets vastgelegd.
+   */
+  duplicateOfConfirmation(id: number, c: Pick<Confirmation, 'supplier' | 'date' | 'total' | 'invoiceNumber' | 'business'>): DuplicateMatch | null {
+    if (!c.business || !c.supplier?.trim() || !c.total) return null;
+    const doc = this.get(id);
+    const number = c.invoiceNumber ? normalizeInvoiceNumber(c.invoiceNumber) : '';
+    if (JSON.stringify([supplierKey(c.supplier), c.date, c.total, number || null]) === documentFingerprint(doc.result)) return null;
+    const read = doc.result;
+    const probe: DuplicateProbe = { number: number || null, reliable: number.length >= MIN_NUMBER_LENGTH, date: c.date, credit: c.total < 0 || read?.documentType?.value === 'credit_note' };
+    // het bedrag in de vreemde munt geldt alleen nog als het bedrag in euro's niet is aangepast
+    const foreign = read?.foreign && read.total?.value === c.total ? read.foreign : null;
+    return this.duplicateOf({ supplier: c.supplier, total: c.total, foreign, probe }, id, read ? this.rejected(id, read) : new Set());
+  }
+
+  /**
    * BOEKHOUDING (deterministisch): verwerkt het document met de (bevestigde) gegevens.
    * Leert de leverancier alleen als de gebruiker zelf bevestigde.
    */
@@ -1181,6 +1214,9 @@ export class IntakeService {
     if (this.pending(doc)) throw new ValidationError('Kies eerst of deze bon bij iets hoort dat er al staat. Daarna kun je hem verwerken.');
     if (!c.supplier?.trim()) throw new ValidationError('Vul de winkel of leverancier in');
     if (!Number.isSafeInteger(c.total) || c.total === 0) throw new ValidationError('Vul het totaalbedrag in');
+    // de leverancier, het nummer, het bedrag of de datum verbeterd: staat de aankoop er met die gegevens al? (#224)
+    const again = ownInvoice || c.allowDuplicate ? null : this.duplicateOfConfirmation(id, c);
+    if (again) throw new ValidationError(`${duplicateLead(again)} Staat deze aankoop er al in? Kijk het eerst na; is het een andere aankoop, kies dan "Toch boeken".`);
     // "Weet ik nog niet (vraag mijn boekhouder)": apart op Vraagposten, zonder btw-aftrek en zonder iets te
     // leren; de btw-controle en het pakket voor de boekhouder melden hem tot hij is ingedeeld
     if (c.categoryKey === QUESTION_CATEGORY) c = { ...c, vatCode: 'geen', vatAmount: null, splits: null, business: true, businessPct: undefined };

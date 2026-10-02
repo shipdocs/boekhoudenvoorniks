@@ -36,8 +36,8 @@ export interface ExpenseInput {
 }
 
 /** De melding bij handmatige invoer naast een aankoop of bon die er al staat (#224). */
-export const duplicateEntryMessage = (match: Pick<DuplicateMatch, 'label'>): string =>
-  `Lijkt op ${match.label}. Staat deze aankoop er al in? Kijk het eerst na; is het een andere aankoop, kies dan "Toch toevoegen".`;
+export const duplicateEntryMessage = (match: Pick<DuplicateMatch, 'label' | 'detail'>): string =>
+  `Lijkt op ${match.label}.${match.detail ? ` ${match.detail}` : ''} Staat deze aankoop er al in? Kijk het eerst na; is het een andere aankoop, kies dan "Toch toevoegen".`;
 
 export interface CashSaleInput {
   date: IsoDate;
