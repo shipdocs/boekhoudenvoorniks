@@ -1,5 +1,6 @@
 import { sameBankName } from '../shared/bank-name';
 import { createHash } from 'node:crypto';
+import { sameCounterparty, sameTextVariant } from './same-payment';
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
@@ -118,6 +119,21 @@ export interface BatchDouble {
   canRemoveLine: boolean;
   /** geen van de deelposten is verwerkt, dus die mogen eruit */
   canRemoveParts: boolean;
+}
+
+/**
+ * Twee losse regels die dezelfde betaling lijken (#225): dezelfde rekening, dag en bedrag en bijna dezelfde
+ * tegenpartij, uit verschillende imports. Eén van de twee moet eruit; wat al verwerkt is, haalt de app er niet zelf uit.
+ */
+export interface PaymentDouble {
+  /** de regel die er het eerst stond en de regel die er later bij kwam: samen de sleutel van deze melding */
+  firstId: number;
+  secondId: number;
+  bankAccountId: number;
+  accountName: string;
+  amount: Cents;
+  first: DoubleSide;
+  second: DoubleSide;
 }
 
 /** Een betaling die uit de boekhouding is gehaald omdat het bedrag er dubbel in stond; terug te zetten. */
@@ -522,7 +538,7 @@ export class BankService {
       );
       // kandidaten voor de tegenhanger, met het soort afschrift waar ze uit kwamen
       const candidates = this.db.prepare(
-        `SELECT c.id, c.transaction_date AS date, c.counter_iban AS iban, c.source, c.bank_id AS bankId, c.import_batch_id AS batch, b.kind, c.batch_ref AS batchRef, c.duplicate_of AS removed
+        `SELECT c.id, c.transaction_date AS date, c.counter_iban AS iban, c.counter_name AS name, c.description, c.source, c.bank_id AS bankId, c.import_batch_id AS batch, b.kind, c.batch_ref AS batchRef, c.duplicate_of AS removed
          FROM bank_transactions c LEFT JOIN import_batches b ON b.id = c.import_batch_id
          WHERE c.bank_account_id = ? AND c.amount = ? AND c.id <= ? AND c.transaction_date BETWEEN ? AND ?`,
       );
@@ -643,16 +659,18 @@ export class BankService {
           .some((p) => (date > p.to ? workdaysBetween(p.to, date) : workdaysBetween(date, p.from)) <= SAME_PAYMENT_WORKDAYS);
         return { overlap, edge };
       };
-      /** Kan een bestaande betaling (of verzamelboeking) uit dit soort afschrift de tegenhanger zijn? */
-      const otherKind = (c: { id: number; source: string; batch: number | null; kind: string | null }, account: BankAccount, overlap: boolean): boolean => {
-        // uit hetzelfde soort afschrift: daar beslist de hash (stap 1), en die was anders
-        if (c.kind === kind || (c.batch !== null && sameKind.has(`${c.batch}|${account.id}`))) return false;
+      /** Komt een bestaande betaling (of verzamelboeking) uit hetzelfde soort afschrift als dit bestand? */
+      const fromSameKind = (c: { source: string; batch: number | null; kind: string | null }, account: BankAccount, overlap: boolean): boolean => {
+        if (c.kind === kind || (c.batch !== null && sameKind.has(`${c.batch}|${account.id}`))) return true;
         // CAMT, MT940 en de koppeling hebben geen indelingen: een oude import uit dezelfde bron is hetzelfde soort
-        if (c.kind === null && c.source === result.source && result.source !== 'csv') return false;
-        if (!overlap && c.kind === null && c.source === result.source) return false;
-        return !occupied.get(c.id, kind);
+        if (c.kind === null && c.source === result.source && result.source !== 'csv') return true;
+        return !overlap && c.kind === null && c.source === result.source;
       };
-      type Candidate = { id: number; date: IsoDate; iban: string | null; source: string; bankId: string | null; batch: number | null; kind: string | null; batchRef: string | null; removed: number | null };
+      /** Kan een bestaande betaling (of verzamelboeking) uit een ander soort afschrift de tegenhanger zijn? */
+      const otherKind = (c: { id: number; source: string; batch: number | null; kind: string | null }, account: BankAccount, overlap: boolean): boolean =>
+        // uit hetzelfde soort afschrift: daar beslist de hash (stap 1), en die was anders
+        !fromSameKind(c, account, overlap) && !occupied.get(c.id, kind);
+      type Candidate = { id: number; date: IsoDate; iban: string | null; name: string | null; description: string; source: string; bankId: string | null; batch: number | null; kind: string | null; batchRef: string | null; removed: number | null };
       const counterpart = new Map<number, { id: number; batch: number | null }>();
       const overlaps: boolean[] = pending.map(() => false);
 
@@ -682,27 +700,35 @@ export class BankService {
       }
 
       // stap 2: voor elke regel in dagen die een eerder afschrift al besloeg, de mogelijke tegenhangers
-      const pairs: { row: number; id: number; batch: number | null; workdays: number; days: number; otherIban: number }[] = [];
+      const pairs: { row: number; id: number; batch: number | null; workdays: number; days: number; otherIban: number; otherParty: number }[] = [];
       for (const [row, { t, account, bankId }] of pending.entries()) {
         if (counterpart.has(row)) continue;
         const { overlap, edge } = scope(account, t.date);
         overlaps[row] = overlap;
         if (!overlap && !edge) continue;
         const iban = t.counterIban ? normalizeIban(t.counterIban) : null;
+        const party = { counter_iban: t.counterIban ?? null, counter_name: t.counterName ?? null, description: t.description ?? '' };
         for (const c of candidates.all(account.id, t.amount, lastBefore, addDays(t.date, -7), addDays(t.date, 7)) as Candidate[]) {
-          if (taken.has(c.id) || !otherKind(c, account, overlap)) continue;
+          if (taken.has(c.id)) continue;
+          const other = { counter_iban: c.iban, counter_name: c.name, description: c.description };
+          if (fromSameKind(c, account, overlap)) {
+            // Hetzelfde soort afschrift: daar beslist de hash. Alleen als dezelfde regel anders is opgeschreven
+            // ("Card Payment: Printhuis" tegenover "Printhuis", #225), op dezelfde dag, is het dezelfde betaling.
+            if (c.date !== t.date || c.batchRef || c.removed || !sameTextVariant(other, party) || occupied.get(c.id, kind)) continue;
+          } else if (!otherKind(c, account, overlap)) continue;
           // allebei een tegenrekening: dan moet die gelijk zijn
           if (iban && c.iban && normalizeIban(c.iban) !== iban) continue;
           // twee verschillende id's uit dezelfde bron zijn per definitie twee betalingen
           if (bankId && c.bankId && c.source === result.source) continue;
           const workdays = workdaysBetween(c.date, t.date);
           if (workdays > SAME_PAYMENT_WORKDAYS) continue;
-          pairs.push({ row, id: c.id, batch: c.batch, workdays, days: Math.abs(diffDays(c.date, t.date)), otherIban: iban && c.iban ? 0 : 1 });
+          pairs.push({ row, id: c.id, batch: c.batch, workdays, days: Math.abs(diffDays(c.date, t.date)), otherIban: iban && c.iban ? 0 : 1, otherParty: sameCounterparty(other, party) ? 0 : 1 });
         }
       }
       // Eerst wie dezelfde tegenrekening heeft, dan de dichtstbijzijnde datum, over alle regels heen: zo krijgt
       // elke regel zijn eigen tegenhanger en niet die van een andere betaling van hetzelfde bedrag een dag later.
-      pairs.sort((x, y) => x.otherIban - y.otherIban || x.workdays - y.workdays || x.days - y.days || x.row - y.row || x.id - y.id);
+      // Zijn er dan nog meer kandidaten (twee winkels, zelfde bedrag, zelfde dag), dan die met dezelfde tegenpartij.
+      pairs.sort((x, y) => x.otherIban - y.otherIban || x.workdays - y.workdays || x.days - y.days || x.otherParty - y.otherParty || x.row - y.row || x.id - y.id);
       for (const p of pairs) {
         if (counterpart.has(p.row) || taken.has(p.id)) continue;
         counterpart.set(p.row, { id: p.id, batch: p.batch });
@@ -961,6 +987,137 @@ export class BankService {
     this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'twee betalingen') ON CONFLICT(task_key) DO NOTHING`).run(BankService.doubleKey(lineId, firstPartId));
   }
 
+  // ---------- dezelfde betaling in twee losse regels ----------
+
+  private static sameKey(a: number, b: number): string {
+    return `bank-same-${Math.min(a, b)}-${Math.max(a, b)}`;
+  }
+
+  /**
+   * Twee losse regels die dezelfde betaling lijken (#225): dezelfde rekening, dezelfde dag, hetzelfde bedrag
+   * en bijna dezelfde tegenpartij, uit verschillende imports. Bij het inlezen voorkomt de app dit waar het
+   * zeker is; dit vindt wat er toch in kwam, ook uit eerdere versies en ook als beide al verwerkt zijn.
+   * Geen dubbel:
+   * - twee regels uit dezelfde bron met elk een eigen id van de bank, of met letterlijk dezelfde tekst uit
+   *   hetzelfde soort afschrift (daar besliste de hash: twee keer koffie op één dag);
+   * - een regel waarvan de tegenhanger uit die andere import al is overgeslagen, of die de gebruiker met
+   *   "Toch toevoegen" naast de andere zette;
+   * - wat de gebruiker "twee verschillende betalingen" noemde of terugzette.
+   */
+  paymentDoubles(bankAccountId?: number): PaymentDouble[] {
+    const groups = this.db
+      .prepare(
+        `SELECT t.bank_account_id AS account, t.amount, t.transaction_date AS date FROM bank_transactions t
+         WHERE t.duplicate_of IS NULL AND t.batch_ref IS NULL ${bankAccountId ? 'AND t.bank_account_id = ?' : ''}
+         GROUP BY t.bank_account_id, t.amount, t.transaction_date HAVING COUNT(DISTINCT t.import_batch_id) >= 2
+         ORDER BY t.transaction_date DESC, MIN(t.id) DESC`,
+      )
+      .all(...(bankAccountId ? [bankAccountId] : [])) as { account: number; amount: Cents; date: IsoDate }[];
+    if (groups.length === 0) return [];
+    type Row = DoubleSide & { counter_iban: string | null; counter_name: string | null; source: string; bankId: string | null; batch: number | null; kind: string | null; accountName: string };
+    const members = this.db.prepare(
+      `SELECT t.id, t.transaction_date AS date, t.amount, t.counter_name AS counterName, t.description, t.status, b.filename,
+              t.counter_iban, t.counter_name, t.source, t.bank_id AS bankId, t.import_batch_id AS batch, b.kind, a.name AS accountName
+       FROM bank_transactions t JOIN bank_accounts a ON a.id = t.bank_account_id LEFT JOIN import_batches b ON b.id = t.import_batch_id
+       WHERE t.bank_account_id = ? AND t.amount = ? AND t.transaction_date = ? AND t.duplicate_of IS NULL AND t.batch_ref IS NULL ORDER BY t.id`,
+    );
+    const dismissed = this.db.prepare(`SELECT 1 FROM task_skips WHERE task_key = ?`);
+    // de tegenhanger uit de import van de ander is al overgeslagen, of de gebruiker voegde hem bewust toe
+    const settled = this.db.prepare(`SELECT 1 FROM import_skipped k WHERE k.matched_transaction_id = ? AND (k.added_transaction_id = ? OR (k.added_transaction_id IS NULL AND k.batch_id = ?)) LIMIT 1`);
+    const looksSame = (a: Row, b: Row): boolean => {
+      if (a.batch === null || b.batch === null || a.batch === b.batch) return false;
+      const sameSource = a.source === b.source;
+      if (sameSource && a.bankId && b.bankId) return false;
+      if (settled.get(a.id, b.id, b.batch) || settled.get(b.id, a.id, a.batch)) return false;
+      // hetzelfde soort afschrift (of een oude import waarvan het soort niet is vastgelegd): alleen anders opgeschreven
+      if (sameSource && (a.kind === b.kind || a.kind === null || b.kind === null)) return sameTextVariant(a, b);
+      return sameCounterparty(a, b);
+    };
+    const side = (r: Row): DoubleSide => ({ id: r.id, date: r.date, amount: r.amount, counterName: r.counterName, description: r.description, status: r.status, filename: r.filename });
+    const doubles: PaymentDouble[] = [];
+    for (const g of groups) {
+      const rows = members.all(g.account, g.amount, g.date) as Row[];
+      const used = new Set<number>();
+      for (const [i, a] of rows.entries()) {
+        if (used.has(a.id)) continue;
+        const b = rows.slice(i + 1).find((x) => !used.has(x.id) && looksSame(a, x) && !dismissed.get(BankService.sameKey(a.id, x.id)));
+        if (!b) continue;
+        used.add(a.id).add(b.id);
+        doubles.push({ firstId: a.id, secondId: b.id, bankAccountId: g.account, accountName: a.accountName, amount: g.amount, first: side(a), second: side(b) });
+      }
+    }
+    return doubles;
+  }
+
+  /**
+   * De regels die de app niet vanzelf verwerkt omdat ze waarschijnlijk dezelfde betaling zijn als een regel
+   * die er al staat: van zo'n paar de regel die nog niet verwerkt is (zijn beide nog open, dan de tweede).
+   * Zo komt dezelfde betaling niet twee keer vanzelf in de boeken; de gebruiker beslist bij de melding.
+   */
+  heldAsDouble(): Set<number> {
+    const held = new Set<number>();
+    for (const d of this.paymentDoubles()) {
+      if (d.second.status === 'nieuw') held.add(d.secondId);
+      else if (d.first.status === 'nieuw') held.add(d.firstId);
+    }
+    return held;
+  }
+
+  private findPaymentDouble(a: number, b: number): PaymentDouble {
+    const d = this.paymentDoubles().find((x) => x.firstId === Math.min(a, b) && x.secondId === Math.max(a, b));
+    if (!d) throw new ValidationError('Dit staat er niet (meer) dubbel in');
+    return d;
+  }
+
+  /**
+   * "Dit is dezelfde betaling": `removeId` gaat uit de boekhouding, `keepId` blijft. Wat al verwerkt is, haalt
+   * de app er niet uit: eerst die verwerking ongedaan maken, of de andere regel kiezen.
+   */
+  resolvePaymentDouble(keepId: number, removeId: number): void {
+    this.findPaymentDouble(keepId, removeId);
+    this.markDuplicate(removeId, keepId);
+  }
+
+  /** "Het zijn twee verschillende betalingen": de melding voor dit paar komt niet meer terug. */
+  dismissPaymentDouble(a: number, b: number): void {
+    this.findPaymentDouble(a, b);
+    this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'twee betalingen') ON CONFLICT(task_key) DO NOTHING`).run(BankService.sameKey(a, b));
+  }
+
+  /**
+   * De betalingen waar deze regel een dubbel van kan zijn: dezelfde rekening en hetzelfde bedrag, hooguit een
+   * paar werkdagen ertussen (het ene soort afschrift heeft de dag van de betaling, het andere de boekdatum).
+   * De dichtstbijzijnde eerst. Voor de vraag bij "Negeren": is dit dezelfde betaling als deze?
+   */
+  duplicateCandidates(txId: number): BankTransaction[] {
+    const t = this.get(txId);
+    return (this.db
+      .prepare('SELECT * FROM bank_transactions WHERE bank_account_id = ? AND amount = ? AND id <> ? AND duplicate_of IS NULL AND transaction_date BETWEEN ? AND ?')
+      .all(t.bank_account_id, t.amount, t.id, addDays(t.transaction_date, -7), addDays(t.transaction_date, 7)) as BankTransaction[])
+      .map((c) => ({ c, workdays: workdaysBetween(c.transaction_date, t.transaction_date), days: Math.abs(diffDays(c.transaction_date, t.transaction_date)) }))
+      .filter((x) => x.workdays <= SAME_PAYMENT_WORKDAYS)
+      .sort((x, y) => x.workdays - y.workdays || x.days - y.days || x.c.id - y.c.id)
+      .map((x) => x.c);
+  }
+
+  /**
+   * Een regel als dubbel aan de betaling koppelen die blijft (#225): hij gaat uit de boekhouding (status
+   * 'genegeerd'), telt niet meer mee in het saldo en is terug te zetten. Ook voor een regel die al genegeerd
+   * was. Alleen bij dezelfde rekening en hetzelfde bedrag, hooguit een paar werkdagen ertussen; een regel die
+   * al verwerkt is, haalt de app er niet uit.
+   */
+  markDuplicate(txId: number, keptId: number): void {
+    const t = this.get(txId);
+    if (txId === keptId) throw new ValidationError('Een betaling kan geen dubbel van zichzelf zijn. Kies de andere regel.');
+    if (t.duplicate_of) throw new ValidationError('Deze regel is al als dubbel uit je boekhouding gehaald');
+    if (!this.duplicateCandidates(txId).some((c) => c.id === keptId)) {
+      throw new ValidationError('Dat is niet dezelfde betaling: een dubbele regel staat op dezelfde rekening, met hetzelfde bedrag en hooguit een paar werkdagen ertussen.');
+    }
+    if (t.status === 'gematcht') throw new ValidationError('Deze betaling is al verwerkt. Maak die verwerking eerst ongedaan (open de betaling en kies "Ongedaan maken"), of haal de andere regel eruit.');
+    const r = this.db.prepare(`UPDATE bank_transactions SET status = 'genegeerd', duplicate_of = ? WHERE id = ? AND status <> 'gematcht'`).run(keptId, txId);
+    if (r.changes !== 1) throw new ValidationError('Deze betaling is intussen verwerkt. Bekijk het opnieuw.');
+  }
+
   /** Wat uit de boekhouding is gehaald omdat het bedrag er dubbel in stond, met de betaling die bleef. */
   removedDuplicates(bankAccountId?: number): RemovedDuplicate[] {
     return (this.db
@@ -983,6 +1140,12 @@ export class BankService {
     const t = this.get(txId);
     if (!t.duplicate_of) throw new ValidationError('Deze betaling is niet als dubbel uit je boekhouding gehaald');
     tx(this.db, () => {
+      // één losse regel tegenover één losse regel (#225): alleen deze komt terug, en de app meldt dit paar niet opnieuw
+      if (!t.batch_ref && !this.get(t.duplicate_of!).batch_ref) {
+        this.db.prepare(`UPDATE bank_transactions SET status = 'nieuw', duplicate_of = NULL WHERE id = ?`).run(t.id);
+        this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'teruggezet') ON CONFLICT(task_key) DO NOTHING`).run(BankService.sameKey(t.id, t.duplicate_of!));
+        return;
+      }
       // de melding hoort bij de regel en de eerste deelpost: zoek welke van de twee kanten dit was
       const siblings = this.db.prepare('SELECT id, batch_ref FROM bank_transactions WHERE duplicate_of = ? ORDER BY id').all(t.duplicate_of) as { id: number; batch_ref: string | null }[];
       this.db.prepare(`UPDATE bank_transactions SET status = 'nieuw', duplicate_of = NULL WHERE duplicate_of = ?`).run(t.duplicate_of);
@@ -1336,7 +1499,12 @@ export class BankService {
     });
   }
 
-  ignore(txId: number): void {
+  /**
+   * Negeren: de regel telt niet mee in de boekhouding, wel in het saldo (het geld ging van de rekening af).
+   * Met `duplicateOf` is het een dubbele regel van die betaling (#225): dan telt hij ook in het saldo niet mee.
+   */
+  ignore(txId: number, duplicateOf?: number | null): void {
+    if (duplicateOf) return this.markDuplicate(txId, duplicateOf);
     const t = this.get(txId);
     this.assertOpen(t);
     this.db.prepare(`UPDATE bank_transactions SET status = 'genegeerd' WHERE id = ?`).run(txId);

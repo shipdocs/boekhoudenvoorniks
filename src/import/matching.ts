@@ -120,7 +120,10 @@ export class MatchingEngine {
   autoMatch(asOf: IsoDate = today(), level: AutopilotLevel = 'normaal'): { matched: number; details: { txId: number; label: string; reasons: string[]; confidence: number }[] } {
     const details: { txId: number; label: string; reasons: string[]; confidence: number }[] = [];
     const threshold = thresholdFor('bankkoppeling', level);
+    // waarschijnlijk dezelfde betaling als een regel die er al staat (#225): niet vanzelf, eerst de melding
+    const held = this.bank.heldAsDouble();
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 }).reverse()) {
+      if (held.has(t.id)) continue;
       if (this.bank.ownTransferTarget(t)) continue; // eigen overboeking: nooit een factuur
       const suggestions = this.suggest(t, this.invoices.listOpen(asOf), this.purchases.listOpen()).filter((s) => s.kind !== 'rekening');
       const [best, second] = suggestions;

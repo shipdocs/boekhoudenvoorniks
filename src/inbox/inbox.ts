@@ -60,6 +60,7 @@ export type TaskKind =
   | 'bank-stale'
   | 'bank-balance'
   | 'bank-double'
+  | 'bank-same'
   | 'bank-statement'
   | 'bank-locked'
   | 'exchange-conflict'
@@ -116,7 +117,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
+  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; sameFirstId?: number; sameSecondId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
     proposal?: string;
     /** waar de vraag "dezelfde aankoop?" of "alleen als bewijs?" over gaat (#179); is dat intussen iets anders, dan gebeurt er niets */
@@ -310,8 +311,10 @@ export class InboxService {
     // aankopen waar een afschrijving bij kan horen, en betalingen waar een bon op wacht: pas laden als het nodig is
     let index: PurchaseIndex | null = null;
     let waiting: Set<number> | null = null;
+    // waarschijnlijk dezelfde betaling als een regel die er al staat (#225): niet vanzelf boeken, eerst de melding
+    const held = this.bank.heldAsDouble();
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
-      if (t.amount >= 0 || !t.counter_name) continue;
+      if (t.amount >= 0 || !t.counter_name || held.has(t.id)) continue;
       if (firstOpen && t.transaction_date < firstOpen) continue; // vergrendelde periode: niet boeken
       if (this.bank.ownTransferTarget(t)) continue; // eigen overboeking: nooit als kosten
       if (this.own?.isOwnPayment(t)) continue; // betaling aan je eigen bedrijf (#205): nooit vanzelf, altijd de vraag
@@ -361,8 +364,10 @@ export class InboxService {
   private autoOwnTransfers(): number {
     let n = 0;
     const firstOpen = this.ledger.firstOpenDate();
+    const held = this.bank.heldAsDouble(); // waarschijnlijk een dubbele regel (#225): eerst de melding
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
       if (firstOpen && t.transaction_date < firstOpen) continue; // vergrendelde periode: niet boeken
+      if (held.has(t.id)) continue;
       const other = this.bank.ownTransferTarget(t);
       if (this.db.prepare(`SELECT 1 FROM automation_log WHERE kind = 'bank-own' AND ref_id = ? AND status = 'klopt_niet'`).get(t.id)) continue;
       if (!other) {
@@ -785,6 +790,28 @@ export class InboxService {
         priority: 1,
         actions: [{ id: 'bekijken', label: 'Bekijken', primary: true }],
         ref: { bankAccountId: d.bankAccountId, doubleLineId: d.lineId, doublePartId: d.firstPartId },
+      });
+    }
+
+    // twee losse regels die dezelfde betaling lijken, uit verschillende imports (#225)
+    for (const d of this.bank.paymentDoubles()) {
+      const size = formatEuro(Math.abs(d.amount));
+      const who = (x: { counterName: string | null; description: string }) => `"${(x.counterName || x.description || 'zonder naam').replace(/\s+/g, ' ').slice(0, 60)}"`;
+      const processed = [d.first, d.second].filter((x) => x.status === 'gematcht').length;
+      const ignored = [d.first, d.second].some((x) => x.status === 'genegeerd');
+      tasks.push({
+        key: `bank-same-${d.firstId}-${d.secondId}`,
+        kind: 'bank-same',
+        icon: '⚠️',
+        title: `${d.accountName}: ${size} staat er waarschijnlijk twee keer in`,
+        question:
+          `Op ${formatDateNl(d.first.date)} staan twee regels van ${size} die dezelfde betaling lijken: ${who(d.first)} en ${who(d.second)}. Dat komt waarschijnlijk doordat dezelfde betaling uit twee afschriften is ingelezen. ` +
+          (processed === 2 ? 'Beide zijn al verwerkt, dus het bedrag telt dubbel. ' : ignored ? 'Eén ervan is genegeerd, maar telt nog wel mee in de saldocontrole. ' : '') +
+          'Bekijk ze naast elkaar en haal er één uit.',
+        amount: Math.abs(d.amount),
+        priority: 1,
+        actions: [{ id: 'bekijken', label: 'Bekijken', primary: true }],
+        ref: { bankAccountId: d.bankAccountId, sameFirstId: d.firstId, sameSecondId: d.secondId },
       });
     }
 
@@ -1375,6 +1402,7 @@ export class InboxService {
       'recurring-invoice:geen': 'De app vraagt voor deze betaling niet meer om een factuur.',
       'bank-statement:inlezen': 'De app leest het afschrift in, net als wanneer je het bij Bank in de app sleept. Wat er al staat, slaat hij over.',
       'bank-statement:niet-nu': 'De app vraagt het morgen opnieuw, en na drie keer niet meer voor dit bestand. Het bestand blijft staan waar het staat.',
+      'bank-same:bekijken': 'Je ziet de twee regels naast elkaar en kiest welke blijft. De andere haalt de app uit je boekhouding; die blijft bewaard en is terug te zetten.',
       'bank-double:bekijken': 'Je ziet de ene regel en de deelposten naast elkaar en kiest welke kant blijft. De andere kant haalt de app uit je boekhouding; die blijft bewaard en is terug te zetten.',
       'bank-balance:bekijken': 'Je ziet de overgeslagen betaling naast de betaling die er al stond, en kunt hem alsnog toevoegen.',
       'bank-balance:open': 'Lees het afschrift in van de dagen die nog ontbreken. Wat er al staat, slaat de app over.',
@@ -1456,8 +1484,8 @@ export class InboxService {
     const status = this.bank.importStatus();
     const bankUpdatedTo = status.map((st) => st.coverageTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
-      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') && !kinds.has('bank-double') },
-      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement', 'bank-double'].includes(k)) },
+      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') && !kinds.has('bank-double') && !kinds.has('bank-same') },
+      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement', 'bank-double', 'bank-same'].includes(k)) },
       { label: 'Alle bonnetjes verwerkt', ok: !kinds.has('document-review') },
       { label: 'Geen facturen te laat', ok: !kinds.has('invoice-overdue') },
       { label: 'Btw-aangifte op tijd', ok: !kinds.has('vat-due') },

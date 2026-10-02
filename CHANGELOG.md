@@ -7,6 +7,7 @@
 - Staat een aankoop op "weet ik nog niet" en komt de betaling binnen, dan vraagt de app eerst of ze bij elkaar horen. Bij "Ja" sluit de betaling de aankoop af en komt er geen tweede post bij (#223).
 - Bij een betaling aan je eigen bedrijf stelt de app Privé voor, ook als je hem via de gewone bankindeling verwerkt. Staat er al een aankoop die erbij past, dan vraagt de app eerst of ze bij elkaar horen (#230).
 - Een bon en de factuur van dezelfde aankoop worden niet meer twee aankopen als het bedrag een paar cent verschilt of de leverancier net anders geschreven is: bij hetzelfde nummer vraagt de app eerst of het dezelfde aankoop is. Dat gebeurt nu ook als je een aankoop met de hand invoert, en bij een bon met een datum in de toekomst krijg je een waarschuwing (#224).
+- Dezelfde betaling uit twee afschriften die hem net anders opschrijven (bijvoorbeeld "Card Payment: Printhuis" en "Printhuis") komt er niet meer twee keer in. Staat hij er al dubbel in, dan meldt de app dat op Vandaag, en een regel die je als dubbel negeert telt niet meer mee in de saldocontrole (#225).
 
 ## 1.0.1 — klaar voor de Microsoft Store
 
