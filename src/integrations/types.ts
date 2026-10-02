@@ -3,6 +3,8 @@ import type { Cents } from '../shared/money';
 export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
 
 export interface SecretStore {
+  /** staat de veilige opslag op dit systeem aan? (bv. false zonder sleutelbeheer of bij MCP) */
+  readonly available: boolean;
   get(key: string): string | null;
   set(key: string, value: string): void;
   delete(key: string): void;

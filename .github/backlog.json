@@ -81,7 +81,7 @@
       "title": "Open banking: live bankkoppeling via een gelicentieerde AISP-partner",
       "milestone": "V3",
       "labels": ["input nodig"],
-      "body": "De interface staat klaar (`src/integrations/openbanking.ts`). Transacties gaan door dezelfde import- en matchingstraat als CSV/MT940/CAMT.\n\n**Input nodig:** keuze voor een partner (bijv. Enable Banking, Tink, Yapily, GoCardless Bank Account Data), met contract, kosten, verwerkersovereenkomst en API-sleutels. Toestemmingen verlopen na maximaal 180 dagen (PSD2); de app moet dan opnieuw toestemming vragen."
+      "body": "Transacties gaan door dezelfde import- en matchingstraat als CSV/MT940/CAMT (`BankSource: 'openbanking'`; de losse providerinterface is verwijderd, die komt terug bij de echte bouw, #243).\n\n**Input nodig:** keuze voor een partner (bijv. Enable Banking, Tink, Yapily, GoCardless Bank Account Data), met contract, kosten, verwerkersovereenkomst en API-sleutels. Toestemmingen verlopen na maximaal 180 dagen (PSD2); de app moet dan opnieuw toestemming vragen."
     },
     {
       "title": "Directe btw-aangifte via SBR/Digipoort",
