@@ -86,7 +86,8 @@ export type TaskKind =
   | 'mail-customer'
   | 'sale-own-company'
   | 'sale-vat-mode'
-  | 'sale-reread';
+  | 'sale-reread'
+  | 'sale-manual';
 
 export interface TaskAction {
   id: string;
@@ -1011,15 +1012,36 @@ export class InboxService {
           priority: 2,
           ref: { questionId: q.id },
         });
+      } else if (q.reason === 'zelf') {
+        // de app kan deze verkoop niet betrouwbaar inlezen (#228), bv. een totaal dat niet bij de regels past:
+        // niet raden en niet stil overslaan. De gebruiker boekt hem zelf en sluit de melding af.
+        tasks.push({
+          key: `sale-manual-${q.id}`,
+          kind: 'sale-manual',
+          icon: '🧾',
+          title: `${q.label}: verkoop van ${formatEuro(q.total ?? 0)} niet ingelezen`,
+          question: `${q.label} gaf een betaalde factuur door ${sale}, maar de app kan hem niet inlezen: ${q.signals.join(' en ')}. De app raadt niet en heeft niets geboekt. Boek deze verkoop zelf: maak de factuur in de app, of verwerk het geld als het op je bank binnenkomt als "Verkoop via een ander systeem". Kies daarna "Ik boek hem zelf".`,
+          amount: q.total ?? undefined,
+          actions: [{ id: 'zelf', label: 'Ik boek hem zelf', primary: true }],
+          priority: 2,
+          ref: { questionId: q.id },
+        });
       } else if (q.reason === 'btw') {
-        // de bron zegt op een onbekende manier hoe de btw berekend is (#228): niet raden
+        // de bron zegt op een onbekende manier hoe de btw berekend is (#228): niet raden. Is bekend wat er
+        // betaald is, dan alleen het antwoord dat daarbij past; "Ik boek hem zelf" is altijd de uitweg.
+        const fits = q.fits ?? { inclusief: true, exclusief: true };
+        const only = fits.inclusief !== fits.exclusief ? ` Alleen prijzen ${fits.inclusief ? 'inclusief' : 'exclusief'} btw past daarbij.` : '';
         tasks.push({
           key: `sale-vat-mode-${q.id}`,
           kind: 'sale-vat-mode',
           icon: '🧾',
           title: `${q.label}: prijzen met of zonder btw?`,
-          question: `${q.label} gaf een betaalde factuur door ${sale}, maar de app herkent niet hoe de btw daarop berekend is ("${(q.order.pricesUnknown ?? '').slice(0, 40)}"). Daarom is er nog niets geboekt. Kijk op de factuur: zijn de prijzen per regel inclusief btw, dan is het totaal ${formatEuro(q.totals!.inclusief)}; zijn ze exclusief btw, dan is het ${formatEuro(q.totals!.exclusief)}.${q.order.total !== undefined ? ` Er is ${formatEuro(q.order.total)} betaald.` : ''}`,
-          actions: [{ id: 'inclusief', label: 'Prijzen zijn inclusief btw' }, { id: 'exclusief', label: 'Prijzen zijn exclusief btw' }],
+          question: `${q.label} gaf een betaalde factuur door ${sale}, maar de app herkent niet hoe de btw daarop berekend is ("${(q.order.pricesUnknown ?? '').slice(0, 40)}"). Daarom is er nog niets geboekt. Kijk op de factuur: zijn de prijzen per regel inclusief btw, dan is het totaal ${formatEuro(q.totals!.inclusief)}; zijn ze exclusief btw, dan is het ${formatEuro(q.totals!.exclusief)}.${q.order.total !== undefined ? ` Er is ${formatEuro(q.order.total)} betaald.${only}` : ''}`,
+          actions: [
+            ...(fits.inclusief ? [{ id: 'inclusief', label: 'Prijzen zijn inclusief btw' }] : []),
+            ...(fits.exclusief ? [{ id: 'exclusief', label: 'Prijzen zijn exclusief btw' }] : []),
+            { id: 'zelf', label: 'Ik boek hem zelf' },
+          ],
           priority: 2,
           ref: { questionId: q.id },
         });
@@ -1053,15 +1075,22 @@ export class InboxService {
       }
     }
 
+    // een teruggedraaide factuur uit een koppeling (#228): de klant betaalde niet te veel, de factuur was meestal
+    // verkeerd ingelezen. Staat de vraag "opnieuw inlezen?" er al, dan geen tweede melding; anders verwijzen.
+    const reversed = this.integrations?.reversedUnsettled() ?? [];
     for (const o of this.invoices.overpaidCustomers()) {
       const key = `customer-overpaid-${o.relationId}-${o.amount}`;
       if (this.isSkipped(key)) continue;
+      const undone = reversed.filter((r) => r.relationId === o.relationId);
+      if (undone.some((r) => r.asked)) continue;
       tasks.push({
         key,
         kind: 'customer-overpaid',
         icon: '💶',
         title: `${o.name} heeft ${formatEuro(o.amount)} te veel betaald`,
-        question: 'Bijvoorbeeld een factuur twee keer betaald. Maak het terug over; zodra die betaling op je bankafschrift staat, koppelt de app hem aan deze klant. Spreek je af dat het van de volgende factuur afgaat? Vraag je boekhouder hoe je dat verwerkt.',
+        question: undone[0]
+          ? `Je draaide factuur ${undone[0].number} uit ${undone[0].label} terug, terwijl die via de betaaldienst betaald was. Deed je dat omdat hij verkeerd was ingelezen, maak dan niets over maar werk de koppeling bij (Instellingen → Koppelingen → Nu bijwerken): de app vraagt dan op Vandaag of hij de factuur opnieuw mag inlezen. Heeft je klant echt te veel betaald, betaal het dan terug; zodra die betaling op je bankafschrift staat, koppelt de app hem aan deze klant.`
+          : 'Bijvoorbeeld een factuur twee keer betaald. Maak het terug over; zodra die betaling op je bankafschrift staat, koppelt de app hem aan deze klant. Spreek je af dat het van de volgende factuur afgaat? Vraag je boekhouder hoe je dat verwerkt.',
         amount: o.amount,
         actions: [{ id: 'open', label: 'Bekijk klant', primary: true }, { id: 'klopt', label: 'Klopt, laat staan' }],
         priority: 2,
@@ -1542,6 +1571,8 @@ export class InboxService {
       'sale-own-company:verkoop': 'Wordt een gewone betaalde factuur: telt mee als omzet, met btw.',
       'sale-vat-mode:inclusief': 'De app rekent de btw uit de prijzen terug: het totaal van de regels is wat de klant betaalde.',
       'sale-vat-mode:exclusief': 'De btw komt boven op de prijzen van de regels.',
+      'sale-vat-mode:zelf': 'De app leest deze verkoop niet in en vraagt er niet meer naar. Er wordt niets geboekt: dat doe je zelf.',
+      'sale-manual:zelf': 'De melding verdwijnt en de app leest deze verkoop niet meer in. Er wordt niets geboekt: dat doe je zelf.',
       'sale-reread:opnieuw': 'De factuur komt er opnieuw in zoals de app hem nu leest. De teruggedraaide factuur en de creditfactuur blijven staan; de betaling van toen gaat weer van de betaaldienst af.',
       'sale-reread:niet': 'Er verandert niets. De app vraagt het niet meer.',
       'job-link:ja': 'De kosten tellen mee bij deze klus.',

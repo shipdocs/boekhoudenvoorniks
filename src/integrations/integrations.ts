@@ -75,20 +75,33 @@ function withPrices(order: ExternalOrder, mode: 'inclusief' | 'exclusief'): Exte
   return mode === 'exclusief' ? known : { ...known, lines: linesFromInclusive(order.lines), total: order.total ?? linesTotal(order.lines) };
 }
 
+/** Past dit totaal bij wat er betaald is? Een cent per regel is afronden; meer niet (bv. een korting die de app niet las). */
+function fitsPaid(order: ExternalOrder, total: Cents): boolean {
+  return order.total === undefined || Math.abs(total - order.total) <= order.lines.length;
+}
+
+/** Bij onbekend of de prijzen inclusief btw zijn: welk antwoord past bij wat er betaald is? Zonder opgegeven totaal allebei. */
+function priceFits(order: ExternalOrder): { inclusief: boolean; exclusief: boolean } {
+  return { inclusief: fitsPaid(order, invoiceTotal(withPrices(order, 'inclusief'))), exclusief: fitsPaid(order, invoiceTotal(order)) };
+}
+
 /**
  * Waarom een verkoop uit een koppeling op een antwoord wacht, in de volgorde waarin de app het vraagt:
  * 'opnieuw' = de factuur is in de app teruggedraaid en wordt nu anders gelezen (#228), 'btw' = onbekend of
- * de prijzen inclusief btw zijn (#228), 'eigen-bedrijf' = de klant is je eigen bedrijf (#231).
+ * de prijzen inclusief btw zijn (#228), 'eigen-bedrijf' = de klant is je eigen bedrijf (#231), 'zelf' = de app
+ * kan de verkoop niet betrouwbaar inlezen (het totaal past niet bij de regels, of een btw-tarief of korting is
+ * niet te lezen): de gebruiker boekt hem zelf en sluit de melding af (#228).
  */
-export type SaleReason = 'opnieuw' | 'btw' | 'eigen-bedrijf';
+export type SaleReason = 'opnieuw' | 'btw' | 'eigen-bedrijf' | 'zelf';
 /**
  * De antwoorden, per vraag: opnieuw inlezen of niet, prijzen inclusief of exclusief btw, geen omzet of toch een
  * gewone verkoop. Bij "geen omzet" met geld op de bank dat de betaling kan zijn, zegt de gebruiker erbij of dat
- * dit geld is ('neutraal-bank') of dat het nog van de betaaldienst komt ('neutraal-betaaldienst').
+ * dit geld is ('neutraal-bank') of dat het nog van de betaaldienst komt ('neutraal-betaaldienst'). 'zelf': de
+ * gebruiker boekt de verkoop zelf; de app leest hem niet in en vraagt er niet meer naar.
  */
-export type SaleAnswer = 'opnieuw' | 'niet' | 'inclusief' | 'exclusief' | 'neutraal' | 'neutraal-bank' | 'neutraal-betaaldienst' | 'verkoop';
+export type SaleAnswer = 'opnieuw' | 'niet' | 'inclusief' | 'exclusief' | 'neutraal' | 'neutraal-bank' | 'neutraal-betaaldienst' | 'verkoop' | 'zelf';
 type NeutralAnswer = Extract<SaleAnswer, `neutraal${string}`>;
-const ANSWERS: Record<SaleReason, SaleAnswer[]> = { opnieuw: ['opnieuw', 'niet'], btw: ['inclusief', 'exclusief'], 'eigen-bedrijf': ['neutraal', 'neutraal-bank', 'neutraal-betaaldienst', 'verkoop'] };
+const ANSWERS: Record<SaleReason, SaleAnswer[]> = { opnieuw: ['opnieuw', 'niet'], btw: ['inclusief', 'exclusief', 'zelf'], 'eigen-bedrijf': ['neutraal', 'neutraal-bank', 'neutraal-betaaldienst', 'verkoop'], zelf: ['zelf'] };
 
 /**
  * Een vraag is open zolang er geen antwoord is, en opnieuw als de boeking van "geen omzet" is teruggedraaid
@@ -120,13 +133,15 @@ export interface SaleQuestion {
   label: string;
   reason: SaleReason;
   order: ExternalOrder;
-  /** wat er voor de verkoop betaald is, inclusief btw; null zolang niet vaststaat of de prijzen inclusief btw zijn */
+  /** wat er voor de verkoop betaald is, inclusief btw; null als de bron dat niet opgaf en niet vaststaat of de prijzen inclusief btw zijn */
   total: Cents | null;
   /** bij 'btw': het totaal als de prijzen inclusief btw zijn, en als ze exclusief btw zijn */
   totals: { inclusief: Cents; exclusief: Cents } | null;
+  /** bij 'btw': welk antwoord past bij wat er betaald is (zonder opgegeven totaal allebei) */
+  fits: { inclusief: boolean; exclusief: boolean } | null;
   /** bij 'opnieuw': de factuur die is teruggedraaid */
   previous: { number: string; total: Cents } | null;
-  /** waarom de app het vraagt, in gewone woorden */
+  /** waarom de app het vraagt (bij 'zelf': waarom hij de verkoop niet kan inlezen), in gewone woorden */
   signals: string[];
   /**
    * bij 'eigen-bedrijf': geld op de bank dat de betaling van deze verkoop kan zijn. `sure`: het ordernummer staat
@@ -262,8 +277,9 @@ export class IntegrationService {
   /**
    * Webshop-orders → definitieve facturen, betaald via de tussenrekening betaalprovider. Niet vanzelf als de
    * app iets niet zeker weet: een verkoop aan je eigen bedrijf (#231), prijzen waarvan niet vaststaat of ze
-   * inclusief btw zijn, of een teruggedraaide factuur die nu anders gelezen wordt (#228). Die wachten als vraag
-   * op Vandaag, en er is dan nog niets geboekt.
+   * inclusief btw zijn, een teruggedraaide factuur die nu anders gelezen wordt, of een order die de app niet
+   * betrouwbaar kan inlezen, bv. doordat het totaal niet bij de regels past (#228). Die wachten als vraag of
+   * melding op Vandaag, en er is dan nog niets geboekt. Zo ziet de gebruiker het ook als de app vanzelf bijwerkt.
    */
   importOrders(source: string, orders: ExternalOrder[]): SyncResult {
     const result: SyncResult = { created: 0, skipped: 0, messages: [] };
@@ -303,7 +319,9 @@ export class IntegrationService {
         result.messages.push(
           outcome === 'btw'
             ? `Order ${order.number}: de app weet niet of de prijzen inclusief of exclusief btw zijn. Niets geboekt; kies het op Vandaag.`
-            : `Order ${order.number}: de klant is je eigen bedrijf. Niet als omzet geboekt; kies op Vandaag wat het was.`,
+            : outcome === 'zelf'
+              ? `Order ${order.number}: niet ingelezen. Niets geboekt; op Vandaag staat waarom en wat je kunt doen.`
+              : `Order ${order.number}: de klant is je eigen bedrijf. Niet als omzet geboekt; kies op Vandaag wat het was.`,
         );
       } catch (e) {
         result.messages.push(`Order ${order.number}: ${(e as Error).message}`);
@@ -317,7 +335,17 @@ export class IntegrationService {
    * `questionId`: de vraag waar de gebruiker net op antwoordde; een volgende vraag komt op dezelfde regel.
    */
   private process(source: string, order: ExternalOrder, messages: string[], questionId?: number): 'geboekt' | SaleReason {
+    const manual = (why: string) => {
+      this.hold(source, order, 'zelf', [why], questionId);
+      return 'zelf' as const;
+    };
+    if (order.unreadable) return manual(order.unreadable);
     if (order.pricesUnknown) {
+      // past wat er betaald is bij geen van beide antwoorden, dan valt er niets te kiezen
+      const fits = priceFits(order);
+      if (!fits.inclusief && !fits.exclusief) {
+        return manual(`met prijzen inclusief btw komt het totaal op ${formatEuro(linesTotal(order.lines))} en exclusief btw op ${formatEuro(invoiceTotal(order))}, maar er is ${formatEuro(order.total!)} betaald`);
+      }
       this.hold(source, order, 'btw', [], questionId);
       return 'btw';
     }
@@ -325,6 +353,18 @@ export class IntegrationService {
     if (ownSale) {
       this.hold(source, order, 'eigen-bedrijf', ownSale.signals, questionId);
       return 'eigen-bedrijf';
+    }
+    return this.bookOrManual(source, order, messages, questionId);
+  }
+
+  /**
+   * De factuur boeken, tenzij het totaal niet bij de regels past (bv. een korting die de app niet las): dan
+   * niets boeken, maar de melding op Vandaag dat de gebruiker deze verkoop zelf boekt (#228).
+   */
+  private bookOrManual(source: string, order: ExternalOrder, messages: string[], questionId?: number): 'geboekt' | 'zelf' {
+    if (!fitsPaid(order, invoiceTotal(order))) {
+      this.hold(source, order, 'zelf', [`de regels tellen op tot ${formatEuro(invoiceTotal(order))}, maar er is ${formatEuro(order.total!)} betaald (bijvoorbeeld door een korting)`], questionId);
+      return 'zelf';
     }
     this.bookOrder(source, order, messages);
     return 'geboekt';
@@ -364,14 +404,27 @@ export class IntegrationService {
   /**
    * De teruggedraaide factuur loslaten, zodat de order opnieuw gelezen kan worden (#228). De betaling van toen
    * stond bij de betaaldienst: die gaat er met de creditfactuur weer af, zodat daar alleen de nieuwe verkoop
-   * nog staat. De oude factuur en de creditfactuur blijven staan.
+   * nog staat. Was er bij het inlezen een cent afrondingsverschil geboekt, dan gaat die cent op dezelfde
+   * rekening terug en van de betaaldienst precies wat erop was gezet. De oude factuur en de creditfactuur
+   * blijven staan.
    */
   private releaseReversed(source: string, order: ExternalOrder): void {
     const old = this.db.prepare('SELECT id, number FROM invoices WHERE external_source = ? AND external_id = ?').get(source, order.externalId) as { id: number; number: string } | undefined;
     if (!old) return;
     const credit = this.db.prepare(`SELECT id, total, amount_paid, invoice_date FROM invoices WHERE credit_of_invoice_id = ? AND status != 'concept'`).get(old.id) as { id: number; total: Cents; amount_paid: Cents; invoice_date: string } | undefined;
     if (!credit) throw new ValidationError(`Factuur ${old.number} is niet (meer) teruggedraaid. Kijk het opnieuw na.`);
-    const open = credit.total - credit.amount_paid;
+    let open = credit.total - credit.amount_paid;
+    // wat er bij het inlezen als afrondingsverschil op de oude factuur is geboekt
+    const rounding = (this.db
+      .prepare(
+        `SELECT COALESCE(SUM(l.debit - l.credit), 0) AS amount FROM journal_entries e JOIN journal_lines l ON l.journal_entry_id = e.id JOIN chart_of_accounts a ON a.id = l.account_id
+         WHERE e.source_ref = ? AND e.source = 'bank' AND e.status = 'definitief' AND e.reverses_entry_id IS NULL AND a.rgs_code = ?`,
+      )
+      .get(`invoice:${old.id}`, ACCOUNTS.betalingsverschillen) as { amount: Cents }).amount;
+    if (rounding !== 0 && Math.abs(rounding) < Math.abs(open)) {
+      this.invoices.registerPayment(credit.id, { amount: -rounding, date: credit.invoice_date, moneyAccount: ACCOUNTS.betalingsverschillen, description: `Teruggedraaid: afrondingsverschil webshoporder ${order.number}` });
+      open += rounding;
+    }
     if (open !== 0) {
       this.invoices.registerPayment(credit.id, { amount: open, date: credit.invoice_date, moneyAccount: ACCOUNTS.tussenrekeningPsp, description: `Teruggedraaid: betaling webshoporder ${order.number}` });
     }
@@ -442,8 +495,9 @@ export class IntegrationService {
         label: INTEGRATIONS.find((d) => d.id === r.source)?.label ?? r.source,
         reason: r.reason,
         order,
-        total: order.pricesUnknown ? null : paidTotal(order),
+        total: order.total ?? (order.pricesUnknown ? null : invoiceTotal(order)),
         totals: r.reason === 'btw' ? { inclusief: linesTotal(order.lines), exclusief: invoiceTotal(order) } : null,
+        fits: r.reason === 'btw' ? priceFits(order) : null,
         previous,
         signals: JSON.parse(r.signals) as string[],
         bank: r.reason === 'eigen-bedrijf' ? this.neutralBank(order) : null,
@@ -455,7 +509,9 @@ export class IntegrationService {
    * Het antwoord op een vraag bij een verkoop uit een koppeling. Na "opnieuw inlezen" of de keuze voor
    * inclusief of exclusief btw kan de volgende vraag komen (zelfde order); anders wordt de order nu geboekt.
    *  - 'opnieuw' / 'niet' (#228): de teruggedraaide factuur opnieuw inlezen, of laten zoals het is.
-   *  - 'inclusief' / 'exclusief' (#228): hoe de prijzen per regel bedoeld zijn.
+   *  - 'inclusief' / 'exclusief' (#228): hoe de prijzen per regel bedoeld zijn. Past dat niet bij wat er
+   *    betaald is, dan een melding in gewone taal en blijft de vraag staan.
+   *  - 'zelf' (#228): de gebruiker boekt de verkoop zelf; de app boekt niets en vraagt er niet meer naar.
    *  - 'verkoop' / 'neutraal' (#231), bij een verkoop aan je eigen bedrijf. 'verkoop': toch een gewone betaalde
    *    factuur, met omzet en btw. 'neutraal': geen factuur, geen omzet en geen btw; het geld dat de betaaldienst
    *    ervoor uitbetaalt telt als privé-storting. Dat staat op de tussenrekening, net als bij een gewone
@@ -474,14 +530,20 @@ export class IntegrationService {
       const done = (entryId: number | null = null) =>
         void this.db.prepare(`UPDATE integration_questions SET answer = ?, journal_entry_id = ?, answered_at = datetime('now') WHERE id = ?`).run(answer, entryId, Number(id));
       let order = JSON.parse(row.order_data) as ExternalOrder;
-      if (answer === 'niet') return done();
+      if (answer === 'niet' || answer === 'zelf') return done();
       if (answer === 'neutraal' || answer === 'neutraal-bank' || answer === 'neutraal-betaaldienst') return done(this.bookNeutral(row.source, order, answer, bankTransactionId));
       if (answer === 'verkoop') {
-        this.bookOrder(row.source, order, []);
-        return done();
+        if (this.bookOrManual(row.source, order, [], Number(id)) === 'geboekt') done();
+        return;
       }
       if (answer === 'opnieuw') this.releaseReversed(row.source, order);
-      else order = withPrices(order, answer);
+      else {
+        if (!priceFits(order)[answer]) {
+          const total = answer === 'inclusief' ? linesTotal(order.lines) : invoiceTotal(order);
+          throw new ValidationError(`Met prijzen ${answer} btw komt de factuur op ${formatEuro(total)}, maar er is ${formatEuro(order.total!)} betaald. Kies de andere knop of boek deze verkoop zelf.`);
+        }
+        order = withPrices(order, answer);
+      }
       if (this.process(row.source, order, [], Number(id)) === 'geboekt') done();
     });
   }
@@ -621,6 +683,28 @@ export class IntegrationService {
       )
       .all(source) as { external_id: string }[];
     return new Set(rows.map((r) => r.external_id));
+  }
+
+  /**
+   * Facturen uit een koppeling die helemaal zijn teruggedraaid terwijl ze via de betaaldienst betaald waren,
+   * en waarvan de creditfactuur nog open staat (#228). In de boeken heeft de klant dan "te veel betaald", maar
+   * meestal draaide de gebruiker de factuur terug omdat hij verkeerd was ingelezen. `asked`: de vraag "opnieuw
+   * inlezen?" staat al op Vandaag; anders kan die bij het volgende bijwerken nog komen. Na het antwoord (ook
+   * "Nee, laat zo") of met geld op de bank eraan gekoppeld telt de factuur hier niet meer mee.
+   */
+  reversedUnsettled(): { relationId: number; number: string; label: string; asked: boolean }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT i.relation_id AS relationId, i.number, i.external_source AS source, q.id AS question, q.answer
+         FROM invoices i JOIN invoices c ON c.credit_of_invoice_id = i.id AND c.status != 'concept' AND c.total = -i.total AND c.amount_paid != c.total
+         LEFT JOIN integration_questions q ON q.source = i.external_source AND q.external_id = i.external_id
+         WHERE i.external_source IN (${INTEGRATIONS.map(() => '?').join(',')})
+           AND NOT EXISTS (SELECT 1 FROM bank_transactions b WHERE b.matched_invoice_id IN (i.id, c.id))`,
+      )
+      .all(...INTEGRATIONS.map((d) => d.id)) as { relationId: number; number: string; source: string; question: number | null; answer: string | null }[];
+    return rows
+      .filter((r) => r.question === null || r.answer === null)
+      .map((r) => ({ relationId: r.relationId, number: r.number, label: INTEGRATIONS.find((d) => d.id === r.source)?.label ?? r.source, asked: r.question !== null }));
   }
 
   private knownPayouts(source: string): Set<string> {
