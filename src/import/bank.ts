@@ -11,7 +11,7 @@ import { businessShareFor, setBusinessShare } from '../intake/business-share';
 import type { EventService } from '../core-ledger/events';
 import type { RelationsService } from '../relations/relations';
 import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, customerVatSituation, isPurchaseVatCode, isSalesVatCode, suggestedSalesVat, vatNumberMatchesCountry, type SalesVatCode } from '../shared/vat';
-import { roundHalfAwayFromZero, type Cents } from '../shared/money';
+import { formatEuro, roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { addDays, diffDays, today, workdaysBetween, type IsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
 import { korActive } from '../settings/settings';
@@ -1168,6 +1168,12 @@ export class BankService {
     // andere munt (#74): de bank rekende een eigen koers; een klein verschil is een koersverschil
     const p = this.purchases.get(purchaseId);
     const settleFx = Boolean(p.currency && p.currency !== 'EUR' && -t.amount !== p.open_amount && withinFx(-t.amount, p.open_amount));
+    // nooit meer betalen dan er open staat (#221): een aankoop die intussen betaald is, krijgt er geen tweede
+    // betaling bij; dat zou een vordering op de leverancier geven die er niet is
+    if (p.status !== 'open' || p.open_amount === 0) throw new ValidationError('Deze aankoop staat al op betaald');
+    if (!settleFx && -t.amount > 0 === p.open_amount > 0 && Math.abs(t.amount) > Math.abs(p.open_amount)) {
+      throw new ValidationError(`Deze betaling is hoger dan wat er bij deze aankoop nog open staat (${formatEuro(p.open_amount)}). Klopt het bedrag van de aankoop niet? Pas dat eerst aan bij Aankopen.`);
+    }
     this.purchases.registerPayment(purchaseId, { amount: -t.amount, date: t.transaction_date, moneyAccount: account.rgs_code, bankTransactionId: txId, settleFx });
   }
 

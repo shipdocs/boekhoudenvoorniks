@@ -168,3 +168,55 @@ describe('betaling al geboekt op een eigen rekening (gemengde rekening zoals Rev
     expect(s.relations.get(p.relation_id!).paid_with).toBe('prive');
   });
 });
+
+describe('één afschrijving, meer aankopen die erbij passen (#221)', () => {
+  const doubles = (s: S) => s.inbox.tasks('2026-09-28').filter((t) => t.kind === 'purchase-double');
+
+  it('twee aankopen met hetzelfde bedrag en één afschrijving: nooit vanzelf samen, en "ja" kan maar bij één van de twee', () => {
+    const { s } = setup();
+    const lev = s.relations.findOrCreateSupplier('Parkeerhuis');
+    const park = (date: string) => s.purchases.create({ relationId: lev.id, invoiceDate: date, description: 'Parkeren — Parkeerhuis', lines: [{ account: 'WBedKanKan', netAmount: 1000, vatCode: 'geen' }] });
+    const a = park('2026-09-01');
+    const b = park('2026-09-03');
+    s.quick.payPurchaseWith(a.id, 'prive', { always: true });
+    expect(s.purchases.get(b.id).status).toBe('betaald');
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-02', amount: -1000, description: 'PARKEERHUIS UTRECHT', counterName: 'Parkeerhuis' }] });
+    const t = s.bank.list({ status: 'nieuw' })[0]!;
+    s.bank.bookToAccount(t.id, { account: 'WBedKanKan', vatCode: 'geen' });
+    expect(s.ledger.balance('WBedKanKan')).toBe(3000);
+    expect(s.bookedPayments.candidates().map((c) => [c.purchase.id, c.bankTransaction.id, c.certain])).toEqual([[a.id, t.id, false], [b.id, t.id, false]]);
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    expect(s.purchases.list()).toHaveLength(2);
+    expect(s.ledger.balance('WBedKanKan')).toBe(3000);
+    expect(doubles(s)).toHaveLength(2);
+    // "ja" bij de eerste: die vervalt; de tweede is een echte aankoop en blijft staan
+    s.bookedPayments.resolve(a.id, t.id, a.invoice_date);
+    expect(s.ledger.balance('WBedKanKan')).toBe(2000);
+    expect(doubles(s)).toEqual([]);
+    expect(s.bookedPayments.find(s.purchases.get(b.id))).toBeNull();
+    expect(() => s.bookedPayments.resolve(b.id, t.id, b.invoice_date)).toThrow('Bij deze betaling hoort al een andere aankoop of een bon. Eén betaling kan niet bij twee aankopen horen.');
+    expect(s.purchases.get(b.id).status).toBe('betaald');
+    expect(s.ledger.balance('WBedKanKan')).toBe(2000);
+    // een andere categorie voor de betaling verandert daar niets aan
+    s.bank.reclassify(t.id, { account: 'WBedKanSof', vatCode: 'geen' });
+    expect(s.bookedPayments.candidates()).toEqual([]);
+    // de verwerking ongedaan gemaakt en opnieuw geboekt: een nieuwe boeking, de vraag komt terug
+    s.bank.unmatch(t.id, '2026-09-28');
+    s.bank.bookToAccount(t.id, { account: 'WBedKanKan', vatCode: 'geen' });
+    expect(s.bookedPayments.candidates()).toMatchObject([{ purchase: { id: b.id }, bankTransaction: { id: t.id } }]);
+  });
+
+  it('voortaan privé, en van die leverancier staan twee afschrijvingen van dat bedrag als kosten (elke week): niet vanzelf, wel een vraag', () => {
+    const { s } = setup();
+    const lev = s.relations.findOrCreateSupplier('Kantoorhal');
+    const p = s.purchases.create({ relationId: lev.id, invoiceDate: '2026-09-10', description: 'Kantoor — Kantoorhal', lines: [{ account: 'WBedKanKan', netAmount: 2500, vatCode: 'geen' }] });
+    s.quick.payPurchaseWith(p.id, 'prive', { always: true });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-04', amount: -2500, description: 'KANTOORHAL UTRECHT week 36', counterName: 'Kantoorhal' }, { date: '2026-09-11', amount: -2500, description: 'KANTOORHAL UTRECHT week 37', counterName: 'Kantoorhal' }] });
+    for (const t of s.bank.list({ status: 'nieuw' })) s.bank.bookToAccount(t.id, { account: 'WBedKanKan', vatCode: 'geen' });
+    const second = s.bank.list().find((t) => t.transaction_date === '2026-09-11')!;
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+    expect(s.bookedPayments.candidates()).toMatchObject([{ purchase: { id: p.id }, bankTransaction: { id: second.id }, certain: false }]);
+    expect(doubles(s)).toHaveLength(1);
+  });
+});

@@ -11,6 +11,7 @@ import { detectCurrency } from '../shared/currency';
 import { today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
+import { BankPurchaseMatcher } from '../documents/bank-purchase-match';
 
 /**
  * Vreemde valuta voor wat er al in de administratie stond (#74). Vóór versie 0.3.9 las de app elke
@@ -199,7 +200,8 @@ export class FxRepair {
       supplierIban: null,
       foreign: { currency, total: foreignTotal, rate: fx.rate, rateDate: fx.date, source: 'ecb' },
     } as unknown as DocumentResult;
-    const booked = p.relation_name ? this.intake.findBookedBankTransaction(probe) : null;
+    // alleen als er maar één afschrijving past: `fixAll` voert dit voorstel zonder vraag uit
+    const booked = p.relation_name ? this.intake.findBookedBankTransaction(probe, new Set(), { sure: true, forPurchase: true }) : null;
     if (booked) {
       return withBlocker({ ...base, euroTotal: -booked.amount, source: 'bank', rate: foreignTotal / -booked.amount, alreadyBooked: { bankTransactionId: booked.id, amount: -booked.amount, date: booked.transaction_date } });
     }
@@ -227,11 +229,15 @@ export class FxRepair {
       if (input.alreadyBookedBankTransactionId) {
         const t = this.bank.get(input.alreadyBookedBankTransactionId);
         if (t.status !== 'gematcht' || t.matched_purchase_invoice_id || t.matched_invoice_id) throw new ValidationError('Deze betaling is intussen anders verwerkt. Kijk het opnieuw na.');
+        // één betaling is één uitgave (#221): hoort er al een andere aankoop bij, dan niet nog een
+        const matcher = new BankPurchaseMatcher(this.db);
+        if (matcher.merged(t)) throw new ValidationError('Bij deze betaling hoort al een andere aankoop. Eén betaling kan niet bij twee aankopen horen.');
         // de betaling staat al als kosten geboekt: de aankoop vervalt, de bon wordt het bewijsstuk
         const files = this.intake.links.forTarget({ kind: 'aankoop', id: purchaseId });
         this.purchases.cancel(purchaseId, p.invoice_date);
         if (p.document_id) this.markForeign(p.document_id, currency, input.foreignTotal, -t.amount, 'bank', t.transaction_date);
         this.intake.moveToBank(files, t.id, 'gebruiker');
+        matcher.markMerged(t);
         return { kind: 'dubbel' as const };
       }
       // de afschrijving uit het voorstel kan intussen anders verwerkt of genegeerd zijn: dan niet dat bedrag gebruiken

@@ -1010,6 +1010,8 @@ export function createApi(s: Services, host: HostContext) {
        * bij die betaling. Stond hij op "weet ik nog niet": de betaling wordt aan de aankoop gekoppeld.
        */
       mergeWithBooked: (id: number, bankTransactionId: number) => s.bookedPayments.resolve(id, bankTransactionId, s.purchases.get(id).invoice_date),
+      /** "Nee, apart betaald": die betaling is een andere uitgave. De app vraagt het niet meer en voegt de twee nooit vanzelf samen. */
+      rejectBooked: (id: number, bankTransactionId: number) => s.bookedPayments.reject(Number(id), Number(bankTransactionId)),
     },
     /** Vreemde valuta in wat er al stond (#74): nakijken en omrekenen. */
     valuta: {
@@ -1138,7 +1140,8 @@ export function createApi(s: Services, host: HostContext) {
           return { ...t, account_name: accounts.get(t.bank_account_id) ?? null, booked_as: booking?.summary || null, vat_period: booking?.vatPeriod ?? null };
         });
       },
-      suggestions: (txId: number) => s.matching.suggest(s.bank.get(txId)),
+      /** voorstellen op het scherm van de betaling; ook een aankoop waar je eerder "Nee" op zei, zodat je hem alsnog kunt kiezen */
+      suggestions: (txId: number) => s.matching.suggest(s.bank.get(txId), undefined, undefined, { withRejected: true }),
       /** alle gegevens van één betaling, met eerdere betalingen aan dezelfde partij */
       details: (txId: number) => s.bank.details(txId),
       /** de factuur of aankoop die de app bij een betaling voorstelt, om te vergelijken */
@@ -1210,6 +1213,8 @@ export function createApi(s: Services, host: HostContext) {
       reclassify: (txId: number, categoryKey: string, vatCode: string, businessPct?: number) => {
         const category = s.categories.find(categoryKey);
         if (!category) throw new Error('Onbekende categorie');
+        // lijkt er een aankoop bij te horen die er al staat, dan eerst die vraag: anders tellen de kosten twee keer
+        s.bookedPayments.assertNoDouble(Number(txId));
         // boeken en leren in één transactie: nooit een gewijzigde boeking met een mislukte leerstap
         return tx(s.db, () => {
           const entryId = s.bank.reclassify(txId, { account: category.account, vatCode, ...(businessPct !== undefined ? { businessPct } : {}) }, `categorie gewijzigd naar ${category.label.toLowerCase()}`);

@@ -118,7 +118,9 @@ export function runVatChecks(
       key: 'dubbel',
       blocking: true,
       title: `${dups} mogelijk dubbele ${dups === 1 ? 'aankoop' : 'aankopen'}`,
-      detail: 'Zelfde leverancier en bedrag rond dezelfde datum, of een betaling die ook los als kosten of op "weet ik nog niet" staat. Controleer of je kosten en btw niet twee keer telt.',
+      detail:
+        'Zelfde leverancier en bedrag rond dezelfde datum, of een betaling die ook los als kosten of op "weet ik nog niet" staat. Controleer of je kosten en btw niet twee keer telt.' +
+        (doubles.bank.length > 0 ? ' Op Vandaag staat bij zo\'n betaling de vraag "staat deze aankoop dubbel?"; daar kies je ja of nee.' : ''),
       count: dups,
       fingerprint: [...dupDocs.map((d) => `d${d.id}`), ...doubles.purchases.map((p) => `p${p.a.id}-${p.b.id}`), ...doubles.bank.map((x) => `b${x.transaction.id}-p${x.purchase.id}`)].join(','),
       screen: 'aankopen',

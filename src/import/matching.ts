@@ -7,7 +7,7 @@ import { formatDateNl, today, type IsoDate } from '../shared/dates';
 import { formatEuro } from '../shared/money';
 import { withinFx } from '../shared/currency';
 import { THRESHOLDS, thresholdFor, type AutopilotLevel } from '../automation/decisions';
-import { mentionsNumber, supplierNameFit, type Pair } from '../documents/bank-purchase-match';
+import { mentionsNumber, mentionsReference, supplierNameFit, type Pair } from '../documents/bank-purchase-match';
 
 export type Suggestion =
   | { kind: 'factuur'; invoiceId: number; label: string; score: number; reasons: string[] }
@@ -51,7 +51,12 @@ export class MatchingEngine {
     private readonly rejected: (pair: Pair) => boolean = () => false,
   ) {}
 
-  suggest(t: BankTransaction, openInvoices?: InvoiceSummary[], openPurchases?: PurchaseInvoice[]): Suggestion[] {
+  /**
+   * `withRejected`: ook een aankoop waar de gebruiker bij deze betaling eerder "Nee" op zei. Alleen voor
+   * het scherm van de betaling zelf: daar kan hij hem alsnog kiezen (een vergissing, of eerst willen
+   * kijken). Vanzelf koppelen en de vragen op Vandaag slaan zo'n paar altijd over.
+   */
+  suggest(t: BankTransaction, openInvoices?: InvoiceSummary[], openPurchases?: PurchaseInvoice[], opts: { withRejected?: boolean } = {}): Suggestion[] {
     const text = `${t.description} ${t.reference ?? ''}`;
     const out: Suggestion[] = [];
 
@@ -86,9 +91,14 @@ export class MatchingEngine {
         if (p.open_amount === -t.amount) (score += 50, reasons.push('bedrag klopt'));
         // andere munt (#74): de bank rekende een eigen koers, dus ongeveer hetzelfde bedrag
         else if (p.currency && p.currency !== 'EUR' && withinFx(-t.amount, p.open_amount)) (score += 40, reasons.push(`bedrag klopt ongeveer (${p.currency}, andere koers)`));
-        if (p.supplier_reference && mentionsNumber(text, p.supplier_reference)) (score += 60, reasons.push('factuurnummer staat in de omschrijving'));
+        if (p.supplier_reference && mentionsReference(text, p.supplier_reference)) (score += 60, reasons.push('factuurnummer staat in de omschrijving'));
         if (supplierNameFit(t, p) === 'ja') (score += 20, reasons.push('naam van de leverancier'));
-        if (score >= 50 && !this.rejected({ purchaseId: p.id, bankTransactionId: t.id })) out.push({ kind: 'inkoop', purchaseId: p.id, label: `Aankoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''} · ${formatEuro(p.open_amount)} open, ${formatDateNl(p.invoice_date)}`, score, reasons });
+        if (score < 50) continue;
+        if (this.rejected({ purchaseId: p.id, bankTransactionId: t.id })) {
+          if (!opts.withRejected) continue;
+          reasons.push('je koos eerder "Nee"');
+        }
+        out.push({ kind: 'inkoop', purchaseId: p.id, label: `Aankoop ${p.description}${p.relation_name ? ' — ' + p.relation_name : ''} · ${formatEuro(p.open_amount)} open, ${formatDateNl(p.invoice_date)}`, score, reasons });
       }
     }
 
