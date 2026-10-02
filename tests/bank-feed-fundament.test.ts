@@ -10,6 +10,7 @@ import { sanitizeForExchange } from '../src/exchange/exchange';
 import { BANK_FEED, BANK_FEED_SECRET_KEYS } from '../src/shared/bank-feed';
 import { SafeStorageSecretStore } from '../src/main/secrets';
 import { INTEGRATIONS } from '../src/integrations/integrations';
+import { ValidationError } from '../src/shared/validation';
 
 /** De tabel uit migratie 33, exact zoals het contract hem voorschrijft. */
 const FEED_COLUMNS = [
@@ -154,9 +155,19 @@ describe('Ponto WP1: fundament (#243)', () => {
       // een rekening zonder koppeling blijft gewoon verwijderbaar (bestaande regels ongewijzigd)
       const derde = s.bank.addAccount('Derde', null);
       expect(s.bank.removable(derde.id)).toEqual({ ok: true, reason: null });
-      // status 'weg' (ontkoppeld) blokkeert niet
-      s.db.prepare(`UPDATE bank_feed_accounts SET status = 'weg' WHERE external_id = 'ext-1'`).run();
-      expect(s.bank.removable(extra.id)).toEqual({ ok: true, reason: null });
+    });
+
+    it('ook een feedrij met status "weg" blokkeert verwijderen: geen kale FOREIGN KEY-fout', () => {
+      const s = setupMinimal();
+      const gekoppeld = s.bank.addAccount('Gekoppeld', null);
+      s.db.prepare(`INSERT INTO bank_feed_accounts (external_id, bank_account_id, status) VALUES ('ext-weg', ?, 'weg')`).run(gekoppeld.id);
+      // removable weigert, ook al staat de rij als 'weg': de foreign key bestaat nog
+      expect(s.bank.removable(gekoppeld.id)).toEqual({ ok: false, reason: 'Deze rekening is gekoppeld aan Ponto' });
+      // en het echte verwijderen gooit de nette melding, niet de kale SQLite-constraintfout
+      expect(() => s.bank.removeAccount(gekoppeld.id)).toThrow(ValidationError);
+      expect(() => s.bank.removeAccount(gekoppeld.id)).toThrow('Deze rekening is gekoppeld aan Ponto');
+      // de rekening bestaat daarna nog steeds
+      expect(s.bank.listAccounts().some((a) => a.id === gekoppeld.id)).toBe(true);
     });
   });
 

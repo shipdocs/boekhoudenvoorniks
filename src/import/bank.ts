@@ -306,7 +306,9 @@ export class BankService {
     const account = this.getAccount(id);
     if (this.listAccounts().length === 1) return { ok: false, reason: 'Je hebt minstens één rekening nodig' };
     if (account.rgs_code === ACCOUNTS.bank) return { ok: false, reason: 'Dit is je hoofdrekening; die kan niet weg' };
-    if (this.db.prepare('SELECT 1 FROM bank_feed_accounts WHERE bank_account_id = ? AND status <> \'weg\'').get(id)) return { ok: false, reason: 'Deze rekening is gekoppeld aan Ponto' };
+    // zolang een feedrij via de foreign key naar deze rekening wijst, kan de rekening niet weg
+    // (óók met status 'weg': loskoppelen of verwijderen van de rij hoort bij de latere service)
+    if (this.db.prepare('SELECT 1 FROM bank_feed_accounts WHERE bank_account_id = ?').get(id)) return { ok: false, reason: 'Deze rekening is gekoppeld aan Ponto' };
     if (this.db.prepare('SELECT 1 FROM bank_transactions WHERE bank_account_id = ?').get(id)) return { ok: false, reason: 'Er zijn afschriften van deze rekening ingelezen' };
     const used = this.db
       .prepare(
