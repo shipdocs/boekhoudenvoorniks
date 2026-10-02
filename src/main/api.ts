@@ -940,6 +940,11 @@ export function createApi(s: Services, host: HostContext) {
         return s.intake.retryRate(Number(id));
       },
       confirm: (id: number, c: Confirmation) => s.intake.confirm(id, c),
+      /**
+       * De vraag vóór het verwerken van een bon waarop de leverancier, het nummer, het bedrag of de datum is
+       * verbeterd (#224): staat de aankoop er met die gegevens al? null = niets gevonden.
+       */
+      duplicateOf: (id: number, c: Pick<Confirmation, 'supplier' | 'date' | 'total' | 'invoiceNumber' | 'business'>) => s.intake.duplicateOfConfirmation(Number(id), c),
       ignore: (id: number) => s.intake.ignore(id),
       /** Het antwoord op "dezelfde aankoop?" of "alleen als bewijs koppelen?" (#179): ja, nee of later. */
       decide: (id: number, answer: 'ja' | 'nee' | 'later', candidate?: string) => {
