@@ -7,7 +7,7 @@ import { formatDateNl, today, type IsoDate } from '../shared/dates';
 import { formatEuro } from '../shared/money';
 import { withinFx } from '../shared/currency';
 import { THRESHOLDS, thresholdFor, type AutopilotLevel } from '../automation/decisions';
-import { dateFits, mentionsNumber, mentionsReference, sameIban, supplierNameFit, type Pair } from '../documents/bank-purchase-match';
+import { dateFits, mentionsNumber, mentionsReference, sameIban, supplierNameFit, type BankPurchaseMatcher, type PurchaseIndex } from '../documents/bank-purchase-match';
 import { paymentProviderIn } from '../shared/payment-providers';
 
 export type Suggestion =
@@ -48,8 +48,12 @@ export class MatchingEngine {
     private readonly invoices: InvoiceService,
     private readonly purchases: PurchaseService,
     private readonly relations: RelationsService,
-    /** een paar dat de gebruiker afwees ("Nee, iets anders") stelt de app niet opnieuw voor */
-    private readonly rejected: (pair: Pair) => boolean = () => false,
+    /**
+     * De gedeelde vergelijking van een betaling met een aankoop (#221): een paar dat de gebruiker afwees
+     * ("Nee, iets anders") stelt de app niet opnieuw voor, en vanzelf koppelen aan een aankoop gebeurt alleen
+     * als er volgens die vergelijking niets anders bij past.
+     */
+    private readonly matcher: BankPurchaseMatcher | null = null,
   ) {}
 
   /**
@@ -108,7 +112,7 @@ export class MatchingEngine {
       // geld dat binnenkomt met alleen hetzelfde bedrag als een creditnota is te weinig: dat kan net zo goed
       // van een klant zijn
       if (score < (refund ? 60 : 50)) continue;
-      if (this.rejected({ purchaseId: p.id, bankTransactionId: t.id })) {
+      if (this.matcher?.rejected({ purchaseId: p.id, bankTransactionId: t.id })) {
         if (!opts.withRejected) continue;
         reasons.push('je koos eerder "Nee"');
       }
@@ -137,7 +141,10 @@ export class MatchingEngine {
     const threshold = thresholdFor('bankkoppeling', level);
     // waarschijnlijk dezelfde betaling als een regel die er al staat (#225): niet vanzelf, eerst de melding
     const held = this.bank.heldAsDouble();
-    for (const t of this.bank.list({ status: 'nieuw', limit: 5000 }).reverse()) {
+    let pool = this.bank.list({ status: 'nieuw', limit: 5000 }).reverse();
+    // de aankopen voor de gedeelde vergelijking: pas laden als het nodig is, en opnieuw na elke koppeling
+    let index: PurchaseIndex | null = null;
+    for (const t of pool) {
       if (held.has(t.id)) continue;
       if (this.bank.ownTransferTarget(t)) continue; // eigen overboeking: nooit een factuur
       const suggestions = this.suggest(t, this.invoices.listOpen(asOf), this.purchases.listOpen()).filter((s) => s.kind !== 'rekening');
@@ -145,10 +152,16 @@ export class MatchingEngine {
       if (!best) continue;
       const { confidence } = matchConfidence(best.score, second?.score);
       if (confidence < threshold) continue; // te weinig zeker of twijfel → gebruiker beslist
+      // Een afschrijving bij een aankoop: past er ook een aankoop bij die al op privé of contant betaald staat,
+      // of is er nog een afschrijving die bij deze aankoop past (elke maand hetzelfde bedrag), dan kiest de
+      // gebruiker (#221, #222). Het rekeningnummer of de naam alleen zegt niet welke van de twee het is.
+      if (best.kind === 'inkoop' && t.amount < 0 && this.matcher && !this.matcher.sure(t, best.purchaseId, (index ??= this.matcher.index()), pool)) continue;
       try {
         if (best.kind === 'factuur') this.bank.matchInvoice(t.id, best.invoiceId);
         else if (best.kind === 'inkoop') this.bank.matchPurchase(t.id, best.purchaseId);
         details.push({ txId: t.id, label: best.label, reasons: best.reasons, confidence });
+        pool = pool.filter((x) => x.id !== t.id);
+        index = null;
       } catch {
         // bv. periode afgesloten — laat staan voor handmatige verwerking
       }

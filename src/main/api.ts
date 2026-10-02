@@ -286,7 +286,7 @@ export function createApi(s: Services, host: HostContext) {
         s.vat.markSubmitted(r.periodKey!, { alreadyFiled: true });
         return;
       case 'bank-sale:klopt':
-        s.bank.repeatSale(r.bankTransactionId!);
+        s.inbox.bookSale(r.bankTransactionId!);
         return;
       case 'bank-sale:anders':
         return { navigate: { screen: 'categorie', id: r.bankTransactionId } };
@@ -1222,6 +1222,25 @@ export function createApi(s: Services, host: HostContext) {
       matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(notHeld(txId), invoiceId),
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(notHeld(txId), purchaseId),
       /**
+       * Geld dat binnenkomt: de open creditnota's van leveranciers waar het bij kan horen (#227), om uit te
+       * kiezen. `strong`: bedrag en leverancier passen; dan eerst "Ja" of "Nee, iets anders" (`rejectPurchases`).
+       * Koppelen gaat met `matchPurchase`: Bank aan Crediteuren, geen omzet en geen tweede keer lagere kosten.
+       */
+      creditNotes: (txId: number) => {
+        const t = s.bank.get(Number(txId));
+        if (t.status !== 'nieuw') return [];
+        return s.bookedPayments.matcher.creditsFor(t).map((c) => ({
+          purchaseId: c.purchase.id,
+          supplier: purchaseSupplierName(c.purchase),
+          description: c.purchase.description,
+          date: c.purchase.invoice_date,
+          open: c.open,
+          sameAmount: c.sameAmount,
+          sameSupplier: c.sameSupplier,
+          strong: c.strong,
+        }));
+      },
+      /**
        * Zelf indelen; past er een aankoop sterk bij die er al staat, dan eerst die vraag beantwoorden. Een
        * betaling aan je eigen bedrijf op privé of "weet ik nog niet" gaat samen met de factuur ervan (dan null).
        */
@@ -1269,9 +1288,19 @@ export function createApi(s: Services, host: HostContext) {
       rejectPurchases: (txId: number) => s.bookedPayments.matcher.rejectAll(s.bank.get(Number(txId))),
       salesVatSuggestion: (txId: number) => s.bank.salesVatSuggestion(txId),
       /** verkoop via een ander systeem (Mollie, webshop, kassa, pin, contant) */
-      bookSale: (txId: number, input: SaleInput) => s.bank.bookSale(notHeld(txId), input),
+      bookSale: (txId: number, input: SaleInput) => s.inbox.bookSale(Number(txId), input),
       previousSale: (txId: number) => s.bank.previousSale(txId),
-      repeatSale: (txId: number) => s.bank.repeatSale(notHeld(txId)),
+      repeatSale: (txId: number) => s.inbox.bookSale(Number(txId)),
+      /**
+       * Geld van een betaaldienst terwijl er verkopen in de app op hun geld wachten (#227): de naam van de
+       * betaaldienst, anders null. Dan is dit waarschijnlijk de uitbetaling en geen nieuwe verkoop.
+       */
+      awaitedPayout: (txId: number) => {
+        const t = s.bank.get(Number(txId));
+        return t.status === 'nieuw' ? s.bank.awaitedPayout(t) : null;
+      },
+      /** "Uitbetaling van de betaaldienst: geen nieuwe verkoop": het geld dat onderweg was, is binnen. */
+      bookPayout: (txId: number) => s.inbox.bookPayout(Number(txId)),
       saleChannels: () => s.bank.saleChannels(),
       /** negeren; met `duplicateOf` als dubbele regel van die betaling: dan telt hij ook in het saldo niet mee (#225) */
       ignore: (txId: number, duplicateOf?: number | null) => s.bank.ignore(txId, duplicateOf),

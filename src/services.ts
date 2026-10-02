@@ -91,7 +91,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const bank = new BankService(db, ledger, invoices, purchases, relations, events);
   // een betaling en een aankoop waarvan de gebruiker zei dat ze niet bij elkaar horen, stelt de app niet opnieuw voor
   const purchaseMatcher = new BankPurchaseMatcher(db);
-  const matching = new MatchingEngine(bank, invoices, purchases, relations, (pair) => purchaseMatcher.rejected(pair));
+  const matching = new MatchingEngine(bank, invoices, purchases, relations, purchaseMatcher);
   const vat = new VatService(db, ledger, settings);
   const dashboard = new DashboardService(db, ledger, invoices, bank, vat);
   const periods = new PeriodCloseService(db, ledger, bank);
