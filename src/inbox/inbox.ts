@@ -44,6 +44,7 @@ export type TaskKind =
   | 'setup'
   | 'bank-invoice'
   | 'bank-purchase'
+  | 'bank-purchase-paid'
   | 'bank-category'
   | 'bank-business'
   | 'bank-income'
@@ -567,7 +568,7 @@ export class InboxService {
       const pur = suggestions.find((x) => x.kind === 'inkoop');
       if (q && (q.strong || !(inv && inv.score >= 50))) {
         if (q.kind === 'open') oneClick.push({ at: tasks.length, t, q, who });
-        tasks.push(this.purchaseTask(t, q, who));
+        tasks.push(q.kind === 'elders' ? this.paidElsewhereTask(t, q, who) : this.purchaseTask(t, q, who));
         continue;
       }
       if (inv && inv.kind === 'factuur' && inv.score >= 50) {
@@ -1194,9 +1195,9 @@ export class InboxService {
 
   /**
    * De vraag bij een afschrijving waar een aankoop bij past die er al staat (#221). Eén aankoop en het
-   * bedrag klopt: met één klik koppelen (Crediteuren aan Bank, geen tweede kostenpost). Meer aankopen, een
-   * bedrag dat net niet klopt, of een aankoop die al op privé of contant betaald staat: bekijken op het
-   * bankscherm en daar kiezen.
+   * bedrag klopt: met één klik koppelen (Crediteuren aan Bank, geen tweede kostenpost). Meer aankopen of een
+   * bedrag dat net niet klopt: bekijken op het bankscherm en daar kiezen. Eén aankoop die al op privé of
+   * contant betaald staat, is een eigen vraag (`paidElsewhereTask`).
    */
   private purchaseTask(t: BankTransaction, q: PaymentQuestion, who: string, contested = false): Task {
     const p = q.fit.purchase;
@@ -1227,9 +1228,6 @@ export class InboxService {
       const at = name && all.every((f) => purchaseSupplierName(f.purchase) === name) ? ` bij ${name}` : '';
       const of = all.every((f) => dueOf(f.purchase, f.state) === due) ? ` van ${formatEuro(due)}` : '';
       question = `Er staan ${all.length} ${all.every((f) => f.state === 'open') ? 'open ' : ''}aankopen${at}${of}${at || of ? '' : ' die bij deze betaling passen'}. Bij welke hoort deze betaling?`;
-    } else if (q.fit.state === 'elders') {
-      const how = q.fit.via === 'kas' ? 'contant betaald' : q.fit.via === 'prive' ? 'betaald met privégeld' : 'betaald met privégeld of contant';
-      question = `${describePurchase(p).replace(/^de/, 'De')} (${formatEuro(p.total)}) staat op ${how}. Is dit dezelfde betaling? Verwerk je deze betaling als zakelijk, dan tellen de kosten en de btw twee keer.`;
     } else {
       const open = `Er staat nog een open aankoop ${name ? `bij ${name}` : `"${p.description}"`} van ${formatDateNl(p.invoice_date)} van ${formatEuro(due)}.`;
       question = contested ? `${open} Er zijn meer betalingen die daarbij passen. Is het deze?` : `${open} Deze betaling is ${paid}. Hoort die erbij?`;
@@ -1243,6 +1241,45 @@ export class InboxService {
         { id: 'open', label: 'Bekijken', primary: true, hint: choice ? 'Je ziet de betaling naast de aankoop die erbij kan horen, en kiest daar. Er wordt nog niets geboekt.' : 'Het bedrag is anders dan dat van de aankoop; je ziet wat je kunt doen. Er wordt nog niets geboekt.' },
         { id: 'nee', label: 'Nee, iets anders' },
       ],
+    };
+  }
+
+  /**
+   * De vraag bij een afschrijving die past bij een aankoop die al op privé of contant betaald staat (#222):
+   * is dit dezelfde betaling? Ja: de afschrijving betaalt de aankoop en de privé- of kasbetaling gaat terug,
+   * zodat kosten en btw één keer tellen. Contant staat niet op de bank: dan stelt de app geen "Ja" voor.
+   */
+  private paidElsewhereTask(t: BankTransaction, q: PaymentQuestion, who: string): Task {
+    const p = q.fit.purchase;
+    const via = q.fit.via;
+    const name = purchaseSupplierName(p) ?? p.description;
+    // staat de leverancier op "voortaan privé" (of contant)? Dat gaat bij "ja" uit
+    const always = p.relation_id !== null ? (this.db.prepare('SELECT paid_with FROM relations WHERE id = ?').get(p.relation_id) as { paid_with: 'prive' | 'kas' | null } | undefined)?.paid_with ?? null : null;
+    const how = via === 'kas' ? 'contant betaald' : via === 'prive' ? 'betaald met privégeld' : 'betaald met privégeld of contant';
+    const undone = via === 'kas' ? 'de contante betaling' : via === 'prive' ? 'de betaling met privégeld' : 'de betaling met privégeld of contant';
+    return {
+      key: `bank-${t.id}`,
+      kind: 'bank-purchase-paid',
+      icon: '👯',
+      title: `${formatEuro(-t.amount)} betaald aan ${who}: dezelfde betaling als je bon?`,
+      question:
+        `${describePurchase(p).replace(/^de/, 'De')} (${formatEuro(p.total)}) staat op ${how}. ` +
+        `Op ${this.bank.getAccount(t.bank_account_id).name} staat op ${formatDateNl(t.transaction_date)} ${formatEuro(-t.amount)} aan ${who}, nog niet verwerkt. Is dat dezelfde betaling?` +
+        (always ? ` Je hebt bij ${name} "voortaan ${always === 'kas' ? 'contant' : 'privé'}" aangezet.` : ''),
+      amount: t.amount,
+      actions: [
+        {
+          id: 'ja',
+          label: 'Ja, dezelfde betaling',
+          ...(via === 'prive' ? { primary: true } : {}),
+          hint: `De betaling op je rekening wordt aan de aankoop gekoppeld en ${undone} wordt teruggedraaid. Kosten en btw tellen één keer.${always ? ` "Voortaan ${always === 'kas' ? 'contant' : 'privé'}" gaat uit voor ${name}.` : ''}`,
+        },
+        { id: 'nee', label: 'Nee, iets anders', hint: 'Er verandert niets aan de aankoop. Je deelt deze betaling daarna zelf in; de app vraagt dit niet meer.' },
+        { id: 'open', label: 'Bekijken' },
+      ],
+      why: 'Omdat het bedrag, de naam en de datum bij elkaar passen. Verwerk je deze betaling als zakelijk, dan tellen de kosten en de btw twee keer.',
+      priority: 1,
+      ref: { bankTransactionId: t.id, purchaseId: p.id },
     };
   }
 

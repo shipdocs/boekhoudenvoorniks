@@ -10,7 +10,7 @@ import { splitGross } from '../import/bank';
 import type { CategoryLookup } from '../shared/categories';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isReverseCharge, type PurchaseVatCode, type SalesVatCode } from '../shared/vat';
 import { assertIsoDate, type IsoDate } from '../shared/dates';
-import type { Cents } from '../shared/money';
+import { formatEuro, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
 import type { BookedPayments } from '../documents/booked-payment';
 
@@ -96,14 +96,24 @@ export class QuickActions {
    * Met `always`: ook de andere open rekeningen van deze leverancier, en nieuwe rekeningen voortaan meteen.
    * Of de betaling al op een eigen rekening staat, vraagt het scherm eerst (`bookedPayment`); bij de
    * andere open rekeningen laat de app zo'n rekening open (`skipped`) en gaat de leverancier niet op privé.
+   * Staat er een afschrijving die bij deze aankoop past nog onverwerkt op een eigen rekening (#222), dan
+   * kan het alleen met `separate` ("Nee, apart betaald"): die afschrijving hoort dan niet bij deze aankoop.
    */
-  payPurchaseWith(id: number, via: 'prive' | 'kas', opts: { always?: boolean } = {}): { paid: PurchaseInvoice[]; skipped: PurchaseInvoice[] } {
+  payPurchaseWith(id: number, via: 'prive' | 'kas', opts: { always?: boolean; separate?: boolean } = {}): { paid: PurchaseInvoice[]; skipped: PurchaseInvoice[] } {
     return tx(this.db, () => {
       const p = this.purchases.get(id);
       if (p.status !== 'open' || p.open_amount <= 0) throw new ValidationError('Deze rekening staat al op betaald');
+      const pending = this.booked?.findPending(p) ?? [];
+      if (pending.length > 0 && !opts.separate) {
+        const t = pending[0]!;
+        throw new ValidationError(`Op je rekening staat een afschrijving van ${formatEuro(-t.amount)} aan ${t.counter_name ?? p.relation_name ?? p.description} die nog niet verwerkt is. Kies eerst of dat de betaling van deze aankoop is.`);
+      }
+      // apart betaald: de app vraagt bij die afschrijving niet meer of hij bij deze aankoop hoort
+      for (const t of pending) this.booked!.reject(p.id, t.id);
       const all = opts.always && p.relation_id !== null;
       const others = all ? this.purchases.list({ status: 'open' }).filter((x) => x.id !== p.id && x.relation_id === p.relation_id && x.open_amount > 0) : [];
-      const skipped = others.filter((x) => !!this.booked?.find(x));
+      // de betaling staat al op een eigen rekening, geboekt of nog niet verwerkt: die rekening blijft open
+      const skipped = others.filter((x) => !!this.booked?.find(x) || (this.booked?.findPending(x).length ?? 0) > 0);
       const moneyAccount = via === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen;
       const paid = [p, ...others.filter((x) => !skipped.includes(x))].map((t) => this.purchases.registerPayment(t.id, { amount: t.open_amount, date: t.invoice_date, moneyAccount }));
       if (all && skipped.length === 0) this.relations.setPaidWith(p.relation_id!, via);

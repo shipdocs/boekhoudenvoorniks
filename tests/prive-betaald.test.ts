@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { setup } from './helpers';
+import { financialSnapshot, setup } from './helpers';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
+import { createApi, type HostContext } from '../src/main/api';
+import { paidWithNote, proposedPaidWith } from '../src/shared/paid-with';
+import { formatEuro } from '../src/shared/money';
+import { ValidationError } from '../src/shared/validation';
 
 type S = ReturnType<typeof setup>['s'];
 
@@ -218,5 +222,258 @@ describe('één afschrijving, meer aankopen die erbij passen (#221)', () => {
     expect(s.purchases.get(p.id).status).toBe('betaald');
     expect(s.bookedPayments.candidates()).toMatchObject([{ purchase: { id: p.id }, bankTransaction: { id: second.id }, certain: false }]);
     expect(doubles(s)).toHaveLength(1);
+  });
+});
+
+describe('privé of contant betaald, en daarna staat de afschrijving toch op je rekening (#222)', () => {
+  const world = () => {
+    const ctx = setup();
+    ctx.s.settings.update({ onboardingDone: true });
+    const api = createApi(ctx.s, { appVersion: () => '0.0.0', hasSmtpPassword: () => false } as unknown as HostContext);
+    return { ...ctx, api };
+  };
+  /** Een open aankoop in euro's, zonder btw (het totaal is het bedrag). */
+  const order = (s: S, name: string, date: string, amount: number) =>
+    s.purchases.create({ relationId: s.relations.findOrCreateSupplier(name).id, invoiceDate: date, description: `Software — ${name}`, lines: [{ account: 'WBedKanSof', netAmount: amount, vatCode: 'geen' }] });
+  /** Een afschrijving, nog niet verwerkt. */
+  const debit = (s: S, date: string, amount: number, counterName: string) => {
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date, amount: -amount, description: `${counterName} betaling`, counterName }] });
+    return s.bank.list().find((t) => t.transaction_date === date && t.amount === -amount && t.counter_name === counterName)!;
+  };
+  /** De leverancier mag voortaan vanzelf als kosten geboekt worden. */
+  const autoRule = (s: S, name: string) => {
+    for (let i = 0; i < 3; i++) s.memory.learn(name, { categoryKey: 'software', vatCode: 'geen', business: true });
+    s.memory.setAutomatic(s.memory.get(name)!.supplier_key, true);
+  };
+  const bankTasks = (s: S, txId: number) => s.inbox.tasks('2026-09-28').filter((t) => t.ref.bankTransactionId === txId && t.kind.startsWith('bank-'));
+  const WHY = 'Omdat het bedrag, de naam en de datum bij elkaar passen. Verwerk je deze betaling als zakelijk, dan tellen de kosten en de btw twee keer.';
+
+  it('privé betaald, daarna de afschrijving: eerst de vraag; "ja" koppelt de betaling en draait de privébetaling terug', async () => {
+    const ctx = world();
+    const { s, api } = ctx;
+    const p = order(s, 'Wolkendienst', '2026-09-01', 1500);
+    s.quick.payPurchaseWith(p.id, 'prive');
+    const t = debit(s, '2026-09-03', 1500, 'WOLKENDIENST');
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    const tasks = bankTasks(s, t.id);
+    expect(tasks).toHaveLength(1);
+    const task = tasks[0]!;
+    expect(task).toMatchObject({ key: `bank-${t.id}`, kind: 'bank-purchase-paid', priority: 1, amount: -1500, ref: { bankTransactionId: t.id, purchaseId: p.id } });
+    expect(task.title).toBe(`${formatEuro(1500)} betaald aan WOLKENDIENST: dezelfde betaling als je bon?`);
+    expect(task.question).toBe(`De aankoop bij Wolkendienst van 1 september 2026 (${formatEuro(1500)}) staat op betaald met privégeld. Op Zakelijke rekening staat op 3 september 2026 ${formatEuro(1500)} aan WOLKENDIENST, nog niet verwerkt. Is dat dezelfde betaling?`);
+    expect(task.why).toBe(WHY);
+    expect(task.group).toBeUndefined();
+    expect(task.actions.map((a) => [a.id, a.label, a.primary ?? false])).toEqual([['ja', 'Ja, dezelfde betaling', true], ['nee', 'Nee, iets anders', false], ['open', 'Bekijken', false]]);
+    expect(task.actions[0]!.hint).toBe('De betaling op je rekening wordt aan de aankoop gekoppeld en de betaling met privégeld wordt teruggedraaid. Kosten en btw tellen één keer.');
+    expect(task.actions[1]!.hint).toBe('Er verandert niets aan de aankoop. Je deelt deze betaling daarna zelf in; de app vraagt dit niet meer.');
+    // de betaling is nog niet verwerkt: dat telt mee in "Ben ik bij?"
+    expect(s.inbox.home('2026-09-28').checklist.find((c) => c.label === 'Alle betalingen verwerkt')).toMatchObject({ ok: false });
+    // "Bekijken" gaat naar de betaling zelf
+    expect(await api.home.act(task, 'open')).toEqual({ navigate: { screen: 'betaling', id: t.id } });
+    // zakelijk of privé kiezen zonder antwoord kan niet: anders tellen de kosten twee keer
+    const before = financialSnapshot(ctx);
+    expect(() => s.inbox.answerBank(t.id, { business: true, categoryKey: 'software', vatCode: 'geen' })).toThrow(ValidationError);
+    expect(() => api.bank.book(t.id, { account: 'WBedKanSof', vatCode: 'geen' })).toThrow(/Kies eerst "Ja" of "Nee, iets anders"/);
+    expect(financialSnapshot(ctx)).toEqual(before);
+
+    await api.home.act(task, 'ja');
+    expect(s.bank.get(t.id)).toMatchObject({ status: 'gematcht', matched_purchase_invoice_id: p.id });
+    expect(s.purchases.get(p.id)).toMatchObject({ status: 'betaald', open_amount: 0 });
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.bank)).toBe(-1500);
+    expect(s.ledger.balance('WBedKanSof')).toBe(1500); // de kosten één keer
+    expect(bankTasks(s, t.id)).toEqual([]);
+    expect(s.bookedPayments.candidates()).toEqual([]);
+  });
+
+  it('"voortaan privé" bij die leverancier: de leveranciersregel boekt de afschrijving niet vanzelf; na "ja" staat voortaan privé uit', async () => {
+    const { s, api } = world();
+    autoRule(s, 'WOLKENDIENST');
+    const p = order(s, 'Wolkendienst', '2026-09-01', 1500);
+    s.quick.payPurchaseWith(p.id, 'prive', { always: true });
+    expect(s.relations.get(p.relation_id!).paid_with).toBe('prive');
+    const t = debit(s, '2026-09-03', 1500, 'WOLKENDIENST');
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    expect(s.bank.get(t.id).status).toBe('nieuw');
+    const [task] = bankTasks(s, t.id);
+    expect(task).toMatchObject({ kind: 'bank-purchase-paid' });
+    expect(task!.question).toMatch(/Is dat dezelfde betaling\? Je hebt bij Wolkendienst "voortaan privé" aangezet\.$/);
+    expect(task!.actions[0]!.hint).toBe('De betaling op je rekening wordt aan de aankoop gekoppeld en de betaling met privégeld wordt teruggedraaid. Kosten en btw tellen één keer. "Voortaan privé" gaat uit voor Wolkendienst.');
+    await api.home.act(task!, 'ja');
+    expect(s.relations.get(p.relation_id!).paid_with).toBeNull();
+    expect(s.bank.get(t.id).matched_purchase_invoice_id).toBe(p.id);
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    expect(s.ledger.balance('WBedKanSof')).toBe(1500);
+  });
+
+  it('in dollars, en de bank rekende een andere koers: "ja" boekt het koersverschil', async () => {
+    const { s, api } = world();
+    const p = buyUsd(s, 'Wolkendienst', '2026-08-01');
+    s.quick.payPurchaseWith(p.id, 'prive');
+    const t = debit(s, '2026-08-14', 1675, 'WOLKENDIENST');
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    const [task] = bankTasks(s, t.id);
+    expect(task).toMatchObject({ kind: 'bank-purchase-paid', ref: { purchaseId: p.id } });
+    expect(task!.question).toBe(`De aankoop bij Wolkendienst van 1 augustus 2026 (${formatEuro(1666)}) staat op betaald met privégeld. Op Zakelijke rekening staat op 14 augustus 2026 ${formatEuro(1675)} aan WOLKENDIENST, nog niet verwerkt. Is dat dezelfde betaling?`);
+    await api.home.act(task!, 'ja');
+    expect(s.purchases.get(p.id)).toMatchObject({ status: 'betaald', open_amount: 0 });
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.koersverschillen)).toBe(9);
+    expect(s.ledger.balance(ACCOUNTS.bank)).toBe(-1675);
+    expect(software(s)).toBe(1666);
+  });
+
+  it('contant betaald en hetzelfde bedrag gepind: de vraag zonder voorkeur; "ja" draait de kasbetaling terug', async () => {
+    const { s, api } = world();
+    const p = order(s, 'Bouwmarkt De Hamer', '2026-09-10', 4840);
+    s.quick.payPurchaseWith(p.id, 'kas');
+    expect(s.ledger.balance(ACCOUNTS.kas)).toBe(-4840);
+    const t = debit(s, '2026-09-11', 4840, 'Bouwmarkt De Hamer');
+    s.inbox.autoProcess('2026-09-28');
+    const [task] = bankTasks(s, t.id);
+    expect(task).toMatchObject({ kind: 'bank-purchase-paid' });
+    expect(task!.question).toContain('staat op contant betaald. ');
+    // contant staat niet op de bank: het kunnen net zo goed twee aankopen zijn, dus geen voorgestelde keuze
+    expect(task!.actions.filter((a) => a.primary)).toEqual([]);
+    expect(task!.actions[0]!.hint).toBe('De betaling op je rekening wordt aan de aankoop gekoppeld en de contante betaling wordt teruggedraaid. Kosten en btw tellen één keer.');
+    await api.home.act(task!, 'ja');
+    expect(s.ledger.balance(ACCOUNTS.kas)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    expect(s.bank.get(t.id).matched_purchase_invoice_id).toBe(p.id);
+    expect(s.ledger.balance('WBedKanSof')).toBe(4840);
+  });
+
+  it('"Nee, iets anders": de aankoop blijft betaald, de vraag komt niet terug en je deelt de betaling zelf in', async () => {
+    const ctx = world();
+    const { s, api } = ctx;
+    const p = order(s, 'Wolkendienst', '2026-09-01', 1500);
+    s.quick.payPurchaseWith(p.id, 'prive');
+    const t = debit(s, '2026-09-03', 1500, 'WOLKENDIENST');
+    const before = financialSnapshot(ctx);
+    const [task] = bankTasks(s, t.id);
+    expect(await api.home.act(task!, 'nee')).toEqual({ navigate: { screen: 'betaling', id: t.id } });
+    expect(financialSnapshot(ctx)).toEqual(before);
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+    expect(bankTasks(s, t.id).map((x) => x.kind)).toEqual(['bank-business']);
+    expect(api.bank.purchaseQuestion(t.id)).toBeNull();
+    s.inbox.answerBank(t.id, { business: true, categoryKey: 'software', vatCode: 'geen' });
+    expect(s.bank.get(t.id).status).toBe('gematcht');
+    expect(s.ledger.balance('WBedKanSof')).toBe(3000); // twee aankopen
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(-1500);
+  });
+
+  it('twee afschrijvingen die bij één privé betaalde aankoop passen: bij allebei de vraag, dichtstbij eerst', () => {
+    const { s } = world();
+    const p = order(s, 'Wolkendienst', '2026-09-01', 1500);
+    s.quick.payPurchaseWith(p.id, 'prive', { always: true });
+    const later = debit(s, '2026-09-09', 1500, 'WOLKENDIENST');
+    const sooner = debit(s, '2026-09-02', 1500, 'WOLKENDIENST');
+    expect(s.bookedPayments.findPending(s.purchases.get(p.id)).map((t) => t.id)).toEqual([sooner.id, later.id]);
+    expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
+    expect(bankTasks(s, sooner.id).map((x) => x.kind)).toEqual(['bank-purchase-paid']);
+    expect(bankTasks(s, later.id).map((x) => x.kind)).toEqual(['bank-purchase-paid']);
+    // een afschrijving van een andere leverancier, of buiten het venster, hoort er niet bij
+    debit(s, '2026-09-03', 1500, 'Printhuis');
+    debit(s, '2026-11-03', 1500, 'WOLKENDIENST');
+    expect(s.bookedPayments.findPending(s.purchases.get(p.id)).map((t) => t.id)).toEqual([sooner.id, later.id]);
+  });
+
+  it('"Al betaald" terwijl de afschrijving nog onverwerkt op je rekening staat: eerst vragen; "ja" koppelt, "nee, apart betaald" onthoudt het', () => {
+    const ctx = world();
+    const { s, api } = ctx;
+    const p = order(s, 'Wolkendienst', '2026-09-01', 1500);
+    const t = debit(s, '2026-09-03', 1500, 'WOLKENDIENST');
+    expect(api.purchases.bookedPayment(p.id)).toEqual({ bankTransactionId: t.id, date: '2026-09-03', amount: 1500, counterName: 'WOLKENDIENST', account: 'Zakelijke rekening', status: 'nieuw', booking: null });
+    const before = financialSnapshot(ctx);
+    expect(() => api.purchases.paidWith(p.id, 'prive')).toThrow(`Op je rekening staat een afschrijving van ${formatEuro(1500)} aan WOLKENDIENST die nog niet verwerkt is. Kies eerst of dat de betaling van deze aankoop is.`);
+    expect(() => api.purchases.paidWith(p.id, 'kas', { always: true })).toThrow(ValidationError);
+    expect(financialSnapshot(ctx)).toEqual(before);
+    expect(s.relations.get(p.relation_id!).paid_with).toBeNull();
+    // "Ja, dat is hem": de afschrijving betaalt de aankoop
+    api.purchases.mergeWithBooked(p.id, t.id);
+    expect(s.bank.get(t.id)).toMatchObject({ status: 'gematcht', matched_purchase_invoice_id: p.id });
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(0);
+
+    // "Nee, apart betaald": privé betaald, en de app vraagt bij die afschrijving niet meer naar deze aankoop
+    const q = order(s, 'Printhuis', '2026-09-10', 4840);
+    const u = debit(s, '2026-09-11', 4840, 'Printhuis');
+    const { paid, skipped } = api.purchases.paidWith(q.id, 'prive', { separate: true });
+    expect(paid.map((x) => x.id)).toEqual([q.id]);
+    expect(skipped).toEqual([]);
+    expect(s.purchases.get(q.id).status).toBe('betaald');
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(-4840);
+    expect(s.bookedPayments.matcher.rejected({ purchaseId: q.id, bankTransactionId: u.id })).toBe(true);
+    expect(api.purchases.bookedPayment(q.id)).toBeNull();
+    expect(bankTasks(s, u.id).map((x) => x.kind)).toEqual(['bank-business']);
+    s.inbox.answerBank(u.id, { business: true, categoryKey: 'software', vatCode: 'geen' });
+    expect(s.bank.get(u.id).status).toBe('gematcht');
+  });
+
+  it('voortaan altijd: een andere open rekening waarvan de afschrijving nog onverwerkt op je rekening staat, blijft open', () => {
+    const { s } = world();
+    const juli = order(s, 'Wolkendienst', '2026-07-01', 1500);
+    const sep = order(s, 'Wolkendienst', '2026-09-01', 1500);
+    const t = debit(s, '2026-07-03', 1500, 'WOLKENDIENST');
+    const r = s.quick.payPurchaseWith(sep.id, 'prive', { always: true });
+    expect(r.paid.map((x) => x.id)).toEqual([sep.id]);
+    expect(r.skipped.map((x) => x.id)).toEqual([juli.id]);
+    expect(s.purchases.get(juli.id).status).toBe('open');
+    // niet "voortaan privé": deze leverancier betaal je (ook) van een eigen rekening
+    expect(s.relations.get(sep.relation_id!).paid_with).toBeNull();
+    expect(s.bookedPayments.findPending(s.purchases.get(juli.id)).map((x) => x.id)).toEqual([t.id]);
+  });
+
+  it('een nieuwe bon van een leverancier op "voortaan privé", terwijl de afschrijving op je rekening wacht: de aankoop blijft open', async () => {
+    const { s, api } = world();
+    const lev = s.relations.findOrCreateSupplier('Wolkendienst');
+    s.relations.setPaidWith(lev.id, 'prive');
+    const t = debit(s, '2026-09-03', 1936, 'WOLKENDIENST');
+    const d = await s.intake.add('wolkendienst-sep.jpg', new Uint8Array([1]), '2026-09-05');
+    s.intake.confirm(d.id, { supplier: 'Wolkendienst', date: '2026-09-01', total: 1936, categoryKey: 'software', vatCode: 'hoog', business: true, paidWith: 'later' });
+    const p = s.purchases.get(s.intake.get(d.id).purchase_invoice_id!);
+    expect(p).toMatchObject({ status: 'open', open_amount: 1936 });
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(0);
+    // de vraag bij de betaling handelt het af: koppelen, geen tweede kostenpost
+    const [task] = bankTasks(s, t.id);
+    expect(task).toMatchObject({ kind: 'bank-purchase', ref: { purchaseId: p.id } });
+    await api.home.act(task!, 'klopt');
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+
+    // zonder afschrijving op je rekening blijft het zoals het was: meteen op privé betaald
+    const e = await s.intake.add('wolkendienst-nov.jpg', new Uint8Array([2]), '2026-11-05');
+    s.intake.confirm(e.id, { supplier: 'Wolkendienst', date: '2026-11-01', total: 1936, categoryKey: 'software', vatCode: 'hoog', business: true, paidWith: 'later' });
+    expect(s.purchases.get(s.intake.get(e.id).purchase_invoice_id!)).toMatchObject({ status: 'betaald', open_amount: 0 });
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(-1936);
+  });
+
+  it('zelf privé gekozen bij de bon terwijl er een afschrijving bij past: uitgevoerd, en daarna de vraag bij de betaling', async () => {
+    const { s } = world();
+    const t = debit(s, '2026-09-03', 1936, 'WOLKENDIENST');
+    const d = await s.intake.add('wolkendienst-sep.jpg', new Uint8Array([1]), '2026-09-05');
+    s.intake.confirm(d.id, { supplier: 'Wolkendienst', date: '2026-09-01', total: 1936, categoryKey: 'software', vatCode: 'hoog', business: true, paidWith: 'prive' });
+    expect(s.purchases.get(s.intake.get(d.id).purchase_invoice_id!).status).toBe('betaald');
+    expect(bankTasks(s, t.id).map((x) => x.kind)).toEqual(['bank-purchase-paid']);
+  });
+
+  it('het voorstel "Hoe betaald?": contant of privé van de telefoon, maar er staat een afschrijving van dat bedrag: de aankoop blijft open', () => {
+    const match = { id: 7 };
+    expect(proposedPaidWith({ proposed_paid_with: 'prive', bank_match: match })).toBe('later');
+    expect(proposedPaidWith({ proposed_paid_with: 'kas', bank_match: match })).toBe('later');
+    expect(proposedPaidWith({ proposed_paid_with: 'prive', bank_match: null })).toBe('prive');
+    expect(proposedPaidWith({ proposed_paid_with: 'kas' })).toBe('kas');
+    expect(proposedPaidWith({ proposed_paid_with: 'bank', bank_match: match })).toBe('bank');
+    expect(proposedPaidWith({ proposed_paid_with: null, bank_match: match })).toBe('bank');
+    expect(proposedPaidWith({ proposed_paid_with: 'later', bank_match: null })).toBe('later');
+    expect(paidWithNote({ proposed_paid_with: 'kas', bank_match: null })).toBe(' Contant betaald.');
+    expect(paidWithNote({ proposed_paid_with: 'prive' })).toBe(' Met privégeld betaald.');
+    expect(paidWithNote({ proposed_paid_with: 'kas', bank_match: match })).toBe(' Op je telefoon koos je contant, maar op je rekening staat ook een afschrijving van dit bedrag. De aankoop blijft open; bij de betaling vraagt de app of die erbij hoort.');
+    expect(paidWithNote({ proposed_paid_with: 'prive', bank_match: match })).toBe(' Op je telefoon koos je privégeld, maar op je rekening staat ook een afschrijving van dit bedrag. De aankoop blijft open; bij de betaling vraagt de app of die erbij hoort.');
+    expect(paidWithNote({ proposed_paid_with: 'bank', bank_match: match })).toBe('');
   });
 });

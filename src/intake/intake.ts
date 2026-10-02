@@ -1080,6 +1080,12 @@ export class IntakeService {
     return match && (match.sure || !opts.sure) ? match.transaction : null;
   }
 
+  /** Staat er een nog niet verwerkte afschrijving op een eigen rekening die bij deze (open) aankoop past? */
+  private awaitsDebit(purchaseId: number): boolean {
+    const probe = this.matcher.probe(purchaseId);
+    return !!probe && this.matcher.transactionsFor(probe, 'open', 'nieuw').length > 0;
+  }
+
   /**
    * BOEKHOUDING (deterministisch): verwerkt het document met de (bevestigde) gegevens.
    * Leert de leverancier alleen als de gebruiker zelf bevestigde.
@@ -1147,8 +1153,11 @@ export class IntakeService {
       });
       if (bankTx && c.paidWith === 'bank') this.bank.matchPurchase(bankTx.id, purchase.id);
       else {
-        // niet op de zakelijke rekening gevonden: leverancier die je altijd privé/contant betaalt → meteen betaald
-        const paidWith = c.paidWith === 'later' ? relation.paid_with : c.paidWith === 'bank' ? null : c.paidWith;
+        // niet op de zakelijke rekening gevonden: leverancier die je altijd privé/contant betaalt → meteen betaald.
+        // Staat er toch een afschrijving die erbij past op een eigen rekening te wachten (#222), dan blijft de
+        // aankoop open: bij die betaling vraagt de app of ze bij elkaar horen.
+        const usual = c.paidWith === 'later' && relation.paid_with && !this.awaitsDebit(purchase.id) ? relation.paid_with : null;
+        const paidWith = c.paidWith === 'later' ? usual : c.paidWith === 'bank' ? null : c.paidWith;
         if (paidWith) this.purchases.registerPayment(purchase.id, { amount: purchase.total, date: c.date, moneyAccount: paidWith === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen });
       }
       // de aankoop is uit dit document geboekt; kopieën die erop wachtten horen er nu ook bij (niets extra geboekt)
