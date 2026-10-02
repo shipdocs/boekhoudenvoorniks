@@ -248,9 +248,20 @@ export function createApi(s: Services, host: HostContext) {
     return { available: Boolean(host.statementFolder) && s.statementFolder.available && !s.settings.officeCopy(), enabled: cfg.enabled, path: cfg.path || defaultPath || '', defaultPath };
   };
 
+  /**
+   * Een regel die waarschijnlijk dezelfde betaling is als een regel die er al staat (#225), deel je pas in na
+   * het antwoord bij die melding. Geeft de id terug, om hem meteen door te geven.
+   */
+  const notHeld = (txId: number): number => {
+    s.bank.assertNotHeld(s.bank.get(Number(txId)));
+    return Number(txId);
+  };
+
   /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
   const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
     const r = task.ref;
+    // een vastgehouden regel heeft geen eigen taak; kwam de knop van een lijst van vóór de melding, dan eerst die vraag
+    if (r.bankTransactionId && task.kind.startsWith('bank-')) notHeld(r.bankTransactionId);
     switch (`${task.kind}:${actionId}`) {
       case 'bank-invoice:klopt':
         s.bank.matchInvoice(r.bankTransactionId!, r.invoiceId!);
@@ -1103,7 +1114,7 @@ export function createApi(s: Services, host: HostContext) {
       openingBalance: (bankAccountId: number, amount: Cents, date: IsoDate) => s.bank.setOpeningBalance(bankAccountId, amount, date),
       getOpeningBalance: (bankAccountId: number) => s.bank.openingBalance(bankAccountId),
       ownTransfer: (txId: number) => s.bank.ownTransferTarget(s.bank.get(txId)),
-      bookOwnTransfer: (txId: number) => s.bank.bookOwnTransfer(txId),
+      bookOwnTransfer: (txId: number) => s.bank.bookOwnTransfer(notHeld(txId)),
       previewFile: (filename: string, content: string) => {
         const format = detectFormat(filename, content);
         if (format !== 'csv') return { format, csv: null, savedMapping: null };
@@ -1202,9 +1213,9 @@ export function createApi(s: Services, host: HostContext) {
         return m ? { documentId: m.document?.id ?? null, purchaseId: m.purchase?.id ?? null, settledDocumentId: m.settledDocumentId } : null;
       },
       /** De keuze bij een betaling aan je eigen bedrijf: privé of "weet ik nog niet", voor de betaling en de factuur samen. */
-      settleOwnCompany: (txId: number, choice: 'prive' | 'vraag') => s.ownCompany.settle(Number(txId), choice),
-      matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(txId, invoiceId),
-      matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(txId, purchaseId),
+      settleOwnCompany: (txId: number, choice: 'prive' | 'vraag') => s.ownCompany.settle(notHeld(txId), choice),
+      matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(notHeld(txId), invoiceId),
+      matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(notHeld(txId), purchaseId),
       /**
        * Zelf indelen; past er een aankoop sterk bij die er al staat, dan eerst die vraag beantwoorden. Een
        * betaling aan je eigen bedrijf op privé of "weet ik nog niet" gaat samen met de factuur ervan (dan null).
@@ -1246,16 +1257,16 @@ export function createApi(s: Services, host: HostContext) {
       },
       /** "Ja, dit is de betaling van die aankoop": koppelen zonder tweede kostenpost (Crediteuren aan Bank). */
       linkPurchase: (txId: number, purchaseId: number) => {
-        const t = s.bank.get(Number(txId));
+        const t = s.bank.get(notHeld(txId));
         return s.bookedPayments.resolve(Number(purchaseId), t.id, t.transaction_date);
       },
       /** "Nee, iets anders": de aankopen die nu bij deze betaling passen, stelt de app er niet meer bij voor. */
       rejectPurchases: (txId: number) => s.bookedPayments.matcher.rejectAll(s.bank.get(Number(txId))),
       salesVatSuggestion: (txId: number) => s.bank.salesVatSuggestion(txId),
       /** verkoop via een ander systeem (Mollie, webshop, kassa, pin, contant) */
-      bookSale: (txId: number, input: SaleInput) => s.bank.bookSale(txId, input),
+      bookSale: (txId: number, input: SaleInput) => s.bank.bookSale(notHeld(txId), input),
       previousSale: (txId: number) => s.bank.previousSale(txId),
-      repeatSale: (txId: number) => s.bank.repeatSale(txId),
+      repeatSale: (txId: number) => s.bank.repeatSale(notHeld(txId)),
       saleChannels: () => s.bank.saleChannels(),
       /** negeren; met `duplicateOf` als dubbele regel van die betaling: dan telt hij ook in het saldo niet mee (#225) */
       ignore: (txId: number, duplicateOf?: number | null) => s.bank.ignore(txId, duplicateOf),

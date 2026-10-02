@@ -5,6 +5,9 @@ import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { parseCsv, previewCsv } from '../src/import/csv';
 import { paymentText, sameCounterparty } from '../src/import/same-payment';
 import type { NormalizedTransaction, ParseResult } from '../src/import/types';
+import { parseDocumentText } from '../src/intake/text-parser';
+import { createApi, type HostContext } from '../src/main/api';
+import type { Task } from '../src/inbox/inbox';
 
 /**
  * Dezelfde betaling uit verschillende exportindelingen (#225): de ene export zet "Card Payment: " voor de
@@ -236,7 +239,9 @@ describe('melding op Vandaag: twee regels die dezelfde betaling lijken', () => {
     const account = s.bank.ensureDefaultAccount(OWN);
     oudeImport(db, account.id, 'csv', { date: '2026-09-08', amount: -1299, name: 'Card Payment: Printhuis', text: 'Card Payment: Printhuis' });
     oudeImport(db, account.id, 'camt', { date: '2026-09-08', amount: -1299, name: 'Kantoorhal', text: 'Bon 12' });
-    oudeImport(db, account.id, 'camt', { date: '2026-09-09', amount: -1299, name: 'Printhuis', text: 'Bon 13' });
+    // een andere dag in hetzelfde soort afschrift, of meer dan een paar werkdagen later in een ander soort
+    oudeImport(db, account.id, 'csv', { date: '2026-09-09', amount: -1299, name: 'Printhuis', text: 'Printhuis' });
+    oudeImport(db, account.id, 'camt', { date: '2026-09-15', amount: -1299, name: 'Printhuis', text: 'Bon 13' });
     oudeImport(db, account.id, 'camt', { date: '2026-09-08', amount: -1300, name: 'Printhuis', text: 'Bon 14' });
     // twee keer koffie op dezelfde dag in hetzelfde afschrift
     s.bank.import(result('csv', [tx('2026-09-10', -350, { counterName: 'Koffiehoek', description: 'Koffiehoek 1' }), tx('2026-09-10', -350, { counterName: 'Koffiehoek', description: 'Koffiehoek 2' })]));
@@ -245,5 +250,153 @@ describe('melding op Vandaag: twee regels die dezelfde betaling lijken', () => {
     s.bank.import(result('openbanking', [tx('2026-09-11', -350, { counterName: 'Koffiehoek', description: 'Koffiehoek', bankId: 'K2' })]));
     expect(s.bank.paymentDoubles()).toEqual([]);
     expect(sameTasks(s)).toEqual([]);
+  });
+});
+
+describe('nagekomen uit de review (#225)', () => {
+  const auto = (s: S) => {
+    for (let i = 0; i < 3; i++) s.memory.learn('Printhuis', { categoryKey: 'kantoor', vatCode: 'geen', business: true });
+    s.memory.setAutomatic('printhuis', true);
+    s.settings.update({ onboardingDone: true });
+  };
+  function start() {
+    const ctx = setup();
+    const account = ctx.s.bank.ensureDefaultAccount(OWN);
+    const a = oudeImport(ctx.db, account.id, 'csv', { date: '2026-09-08', amount: -1299, name: 'Card Payment: Printhuis', text: 'Card Payment: Printhuis' });
+    const b = oudeImport(ctx.db, account.id, 'camt', { date: '2026-09-08', amount: -1299, name: 'Printhuis', text: 'Printhuis' });
+    return { ...ctx, account, a, b };
+  }
+
+  it('de regel die blijft was zelf genegeerd: hij komt terug als nog te verwerken, zodat de betaling niet verdwijnt', () => {
+    const { s, a, b } = start();
+    // de oude situatie: de ene regel is ooit met de hand genegeerd, zonder koppeling
+    s.bank.ignore(a);
+    expect(s.bank.paymentDoubles()).toMatchObject([{ firstId: a, secondId: b, first: { status: 'genegeerd' }, second: { status: 'nieuw' } }]);
+    s.bank.resolvePaymentDouble(a, b);
+    expect(s.bank.get(b)).toMatchObject({ status: 'genegeerd', duplicate_of: a });
+    // precies één regel die nog verwerkt moet worden
+    expect(s.bank.get(a)).toMatchObject({ status: 'nieuw', duplicate_of: null });
+    expect(s.bank.countUnprocessed()).toBe(1);
+    expect(s.inbox.tasks('2026-09-12').some((t) => t.ref.bankTransactionId === a)).toBe(true);
+    // via "Negeren → Ja, dubbel van": hetzelfde
+    const again = start();
+    again.s.bank.ignore(again.a);
+    again.s.bank.ignore(again.b, again.a);
+    expect(again.s.bank.get(again.a).status).toBe('nieuw');
+    // was de regel die blijft al verwerkt, dan verandert daar niets aan
+    const done = start();
+    done.s.bank.bookToAccount(done.a, { account: 'WBedKanKan', vatCode: 'geen' });
+    done.s.bank.resolvePaymentDouble(done.a, done.b);
+    expect(done.s.bank.get(done.a).status).toBe('gematcht');
+  });
+
+  it('een vastgehouden regel krijgt op Vandaag geen eigen taak met één klik en zit in geen groep; zelf indelen kan pas na het antwoord', async () => {
+    const { s, a, b } = start();
+    auto(s);
+    s.memory.setAutomatic('printhuis', false);
+    s.bank.bookToAccount(a, { account: 'WBedKanKan', vatCode: 'geen' });
+    expect([...s.bank.heldAsDouble()]).toEqual([b]);
+    const tasks = s.inbox.tasks('2026-09-12');
+    expect(tasks.filter((t) => t.kind === 'bank-same')).toHaveLength(1);
+    expect(tasks.filter((t) => t.ref.bankTransactionId === b)).toEqual([]);
+    expect(tasks.filter((t) => t.group?.key.startsWith('bank-'))).toEqual([]);
+    // ook via het bankscherm: eerst de vraag of het dezelfde betaling is
+    expect(() => s.inbox.answerBank(b, { business: true, categoryKey: 'kantoor', vatCode: 'geen' })).toThrow(/twee keer.*dezelfde betaling/);
+    expect(() => s.inbox.bookBank(b, { account: 'WBedKanKan', vatCode: 'geen' })).toThrow(/twee keer/);
+    // en een knop uit een lijst van vóór de melding doet niets meer
+    const api = createApi(s, { appVersion: () => 'test' } as unknown as HostContext);
+    const oud = { key: `bank-${b}`, kind: 'bank-category', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: b, categoryKey: 'kantoor', vatCode: 'geen' } } as Task;
+    await expect(api.home.act(oud, 'klopt')).rejects.toThrow(/twee keer/);
+    expect(() => api.bank.bookOwnTransfer(b)).toThrow(/twee keer/);
+    expect(s.ledger.balance('WBedKanKan')).toBe(1299);
+    // "twee verschillende betalingen": dan is het een gewone betaling, met zijn gewone taak
+    s.bank.dismissPaymentDouble(a, b);
+    expect(s.inbox.tasks('2026-09-12').find((t) => t.ref.bankTransactionId === b)).toMatchObject({ kind: 'bank-category', group: { key: 'bank-category:printhuis:kantoor' } });
+    s.inbox.answerBank(b, { business: true, categoryKey: 'kantoor', vatCode: 'geen' });
+    expect(s.ledger.balance('WBedKanKan')).toBe(2598);
+  });
+
+  it('beide regels nog open: alleen de eerste heeft een taak, en een bon neemt de vastgehouden regel niet als betaling', () => {
+    const { s, a, b } = start();
+    s.settings.update({ onboardingDone: true });
+    const tasks = s.inbox.tasks('2026-09-12');
+    expect(tasks.filter((t) => t.ref.bankTransactionId === a)).toHaveLength(1);
+    expect(tasks.filter((t) => t.ref.bankTransactionId === b)).toEqual([]);
+    const gelezen = parseDocumentText([{ text: 'Printhuis', page: 1, bbox: [10, 20, 300, 34], confidence: 0.97 }, { text: 'Datum: 08-09-2026', page: 1, bbox: [10, 40, 300, 54], confidence: 0.97 }, { text: 'Totaal 12,99', page: 1, bbox: [10, 60, 300, 74], confidence: 0.97 }], 'ocr:test');
+    // (zonder de vastgehouden regel is er één kandidaat; met beide zou het twijfel zijn)
+    expect(s.intake.findBankMatch(gelezen)?.id).toBe(a);
+    s.bank.bookToAccount(a, { account: 'WBedKanKan', vatCode: 'geen' });
+    expect(s.intake.findBankMatch(gelezen)).toBeNull();
+  });
+
+  it('dezelfde betaling met een dag verschil uit twee soorten afschrift: ook gemeld en vastgehouden', () => {
+    const { s, db } = setup();
+    const account = s.bank.ensureDefaultAccount(OWN);
+    const a = oudeImport(db, account.id, 'mt940', { date: '2026-09-07', amount: -1299, name: 'PRINTHUIS UTRECHT', text: 'Betaalautomaat' });
+    const b = oudeImport(db, account.id, 'camt', { date: '2026-09-08', amount: -1299, name: 'Printhuis', text: 'Bon 4411' });
+    s.bank.bookToAccount(a, { account: 'WBedKanKan', vatCode: 'geen' });
+    auto(s);
+    expect(s.bank.paymentDoubles()).toMatchObject([{ firstId: a, secondId: b, first: { date: '2026-09-07' }, second: { date: '2026-09-08' } }]);
+    expect([...s.bank.heldAsDouble()]).toEqual([b]);
+    expect(s.inbox.autoProcess('2026-09-12')).toMatchObject({ booked: 0 });
+    expect(s.ledger.balance('WBedKanKan')).toBe(1299);
+    const [task] = sameTasks(s);
+    expect(task!.question).toMatch(/7 september 2026 en 8 september 2026/);
+    // dezelfde dag gaat voor: een derde regel op de 8e hoort bij de regel van de 8e
+    const c = oudeImport(db, account.id, 'csv', { date: '2026-09-08', amount: -1299, name: 'Card Payment: Printhuis', text: 'Card Payment: Printhuis' });
+    expect(s.bank.paymentDoubles().map((d) => [d.firstId, d.secondId])).toEqual([[b, c]]);
+  });
+
+  it('met een dag verschil geen melding bij een andere tegenpartij, hetzelfde soort afschrift of meer dan een paar werkdagen', () => {
+    const { s, db } = setup();
+    const account = s.bank.ensureDefaultAccount(OWN);
+    oudeImport(db, account.id, 'csv', { date: '2026-09-08', amount: -1299, name: 'Card Payment: Printhuis', text: 'Card Payment: Printhuis' });
+    oudeImport(db, account.id, 'camt', { date: '2026-09-09', amount: -1299, name: 'Kantoorhal', text: 'Bon 12' });
+    oudeImport(db, account.id, 'csv', { date: '2026-09-09', amount: -1299, name: 'Printhuis', text: 'Printhuis' });
+    // woensdag 9 → dinsdag 15 september: vier werkdagen
+    oudeImport(db, account.id, 'camt', { date: '2026-09-15', amount: -1299, name: 'Printhuis', text: 'Bon 15' });
+    expect(s.bank.paymentDoubles()).toEqual([]);
+    // drie werkdagen (woensdag 9 → maandag 14) is nog dezelfde betaling
+    const near = oudeImport(db, account.id, 'camt', { date: '2026-09-14', amount: -1299, name: 'Printhuis', text: 'Bon 16' });
+    expect(s.bank.paymentDoubles().map((d) => d.secondId)).toEqual([near]);
+  });
+
+  it('negeren als dubbel van een betaling met een andere datum: de saldocontrole telt de betaling op de datum van het afschrift met het saldo', () => {
+    const { s, db } = setup();
+    const account = s.bank.ensureDefaultAccount(OWN);
+    s.bank.setOpeningBalance(account.id, 100000, '2026-09-01');
+    // dezelfde betaling: uit MT940 op de 9e (al verwerkt) en uit CAMT op de 8e, met het eindsaldo van de 8e
+    const mt = oudeImport(db, account.id, 'mt940', { date: '2026-09-09', amount: -1299, name: 'PRINTHUIS UTRECHT', text: 'Betaalautomaat' });
+    const camt = oudeImport(db, account.id, 'camt', { date: '2026-09-08', amount: -1299, name: 'Printhuis', text: 'Bon 4411' });
+    db.prepare('UPDATE import_batch_accounts SET closing_balance = ?, closing_date = ? WHERE batch_id = (SELECT import_batch_id FROM bank_transactions WHERE id = ?)').run(100000 - 1299, '2026-09-08', camt);
+    s.bank.bookToAccount(mt, { account: 'WBedKanKan', vatCode: 'geen' });
+    expect(s.bank.balanceCheck(account.id)).toMatchObject({ difference: 0 });
+    s.bank.ignore(camt, mt);
+    expect(s.bank.balanceCheck(account.id)).toMatchObject({ app: 100000 - 1299, difference: 0 });
+    expect(s.inbox.tasks('2026-09-12').filter((t) => t.kind === 'bank-balance')).toEqual([]);
+    // teruggezet: weer zoals het was
+    s.bank.restoreDuplicate(camt);
+    expect(s.bank.balanceCheck(account.id)).toMatchObject({ difference: 0 });
+  });
+
+  it('terugzetten van een regel die al genegeerd was: hij is weer genegeerd en wordt niet vanzelf geboekt', () => {
+    const { s, a, b } = start();
+    s.bank.bookToAccount(a, { account: 'WBedKanKan', vatCode: 'geen' });
+    s.bank.ignore(b);
+    s.bank.resolvePaymentDouble(a, b);
+    auto(s);
+    s.bank.restoreDuplicate(b);
+    expect(s.bank.get(b)).toMatchObject({ status: 'genegeerd', duplicate_of: null });
+    expect(s.inbox.autoProcess('2026-09-12')).toMatchObject({ booked: 0 });
+    expect(s.ledger.balance('WBedKanKan')).toBe(1299);
+    // een tweede keer koppelen en terugzetten onthoudt het opnieuw
+    s.bank.markDuplicate(b, a);
+    s.bank.restoreDuplicate(b);
+    expect(s.bank.get(b).status).toBe('genegeerd');
+    // een regel die nog open was, komt terug als nog te verwerken
+    const open = start();
+    open.s.bank.resolvePaymentDouble(open.a, open.b);
+    open.s.bank.restoreDuplicate(open.b);
+    expect(open.s.bank.get(open.b).status).toBe('nieuw');
   });
 });
