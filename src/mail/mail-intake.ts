@@ -3,7 +3,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { IntakeService } from '../intake/intake';
 import type { SettingsService } from '../settings/settings';
-import { today, type IsoDate } from '../shared/dates';
+import { diffDays, today, type IsoDate } from '../shared/dates';
 
 /** Eén bijlage uit een e-mail. */
 export interface MailAttachment {
@@ -206,6 +206,18 @@ function normalizeAddress(a: string): string {
   return a.trim().toLowerCase();
 }
 
+/** Zoveel dagen na de originele mail telt een doorgestuurde kopie nog als dezelfde mail; een maandfactuur komt later. */
+export const COPY_WINDOW_DAYS = 21;
+/** Bij de mail die blijft liggen omdat hij een kopie is van een mail die al verwerkt is (#229). */
+export const COPY_NOTE = 'kopie van een mail die al verwerkt is';
+
+/** Onderwerp om te vergelijken: zonder hoofdletters, dubbele spaties en "Fw:", "Fwd:" of "Re:" ervoor. */
+function bareSubject(subject: string): { subject: string; forwarded: boolean } {
+  const clean = subject.slice(0, 300).replace(/\s+/g, ' ').trim().toLowerCase();
+  const bare = clean.replace(/^(?:(?:re|fwd?|doorst|antw|tr|wg|aw)\s*:\s*)+/, '');
+  return { subject: bare, forwarded: bare !== clean };
+}
+
 /**
  * Inkomende post: haalt bonnetjes en facturen uit een apart mailadres voor de administratie.
  *
@@ -342,6 +354,30 @@ export class MailIntakeService {
     return numbers.some((n) => new RegExp(`(^|[^\\w-])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\w-]|$)`).test(haystack));
   }
 
+  /**
+   * Een doorgestuurde kopie ("Fw:", "Fwd:", "Re:") zonder bijlage van een mail waarvan de bijlage al een
+   * document is (#229): er is niets meer te doen. Alleen als jij hem zelf doorstuurt of de afzender van toen
+   * hem nog eens stuurt, en alleen kort na de originele mail of als het factuurnummer van toen erin staat:
+   * de factuur van een volgende maand heeft vaak hetzelfde onderwerp en is wel nieuw.
+   */
+  private isCopyOfProcessed(m: MailMessage, fromOwner: boolean): boolean {
+    const { subject, forwarded } = bareSubject(m.subject);
+    if (!forwarded || !subject) return false;
+    const from = normalizeAddress(m.fromAddress);
+    const earlier = (this.db.prepare(`SELECT from_address, subject, received_on, document_ids FROM mail_messages WHERE outcome = 'bijlage' AND subject IS NOT NULL`).all() as Pick<MailRecord, 'from_address' | 'subject' | 'received_on' | 'document_ids'>[])
+      .filter((r) => bareSubject(r.subject!).subject === subject && (fromOwner || normalizeAddress(r.from_address ?? '') === from));
+    const haystack = `${m.subject}\n${m.text}`.toLowerCase();
+    return earlier.some((r) => {
+      const days = r.received_on ? diffDays(r.received_on, m.date) : null;
+      if (days !== null && days >= 0 && days <= COPY_WINDOW_DAYS) return true;
+      return (JSON.parse(r.document_ids) as number[]).some((id) => {
+        const row = this.db.prepare('SELECT result FROM documents WHERE id = ?').get(id) as { result: string | null } | undefined;
+        const number = row?.result ? ((JSON.parse(row.result) as { invoiceNumber?: { value?: string } | null }).invoiceNumber?.value ?? '').trim().toLowerCase() : '';
+        return number.length >= 4 && haystack.includes(number);
+      });
+    });
+  }
+
   async poll(source: MailSource, asOf: IsoDate = today()): Promise<PollResult> {
     const cfg = this.settings.get().mailIn;
     const result: PollResult = { documents: 0, onlineInvoices: 0, fromCustomers: 0, other: 0, errors: 0, missingFolders: [] };
@@ -408,8 +444,9 @@ export class MailIntakeService {
             // een kopie (bcc) van je eigen factuur of offerte: geen inkoop
             this.record(key, folder, uid, m, 'eigen');
             result.other++;
-          } else if (customers.has(from)) {
-            // klant: niet aankomen, ook geen bijlagen als bonnetje (bv. een getekende offerte)
+          } else if (customers.has(from) && !own.has(from)) {
+            // klant: niet aankomen, ook geen bijlagen als bonnetje (bv. een getekende offerte). Je eigen adres is
+            // nooit een klant, ook niet als je eigen bedrijf als klant in de app staat (#229)
             this.record(key, folder, uid, m, 'klant', { relationId: customers.get(from)! });
             result.fromCustomers++;
           } else {
@@ -420,6 +457,10 @@ export class MailIntakeService {
               const movedTo = await this.moveProcessed(source, uid, main);
               this.finish(key, added, () => this.record(key, folder, uid, m!, 'bijlage', { documentIds: added.ids, movedTo }));
               result.documents += added.ids.length;
+            } else if (this.isCopyOfProcessed(m, own.has(from))) {
+              // de factuur uit de originele mail staat er al: geen tweede bon uit de tekst en geen seintje (#229)
+              this.record(key, folder, uid, m, 'overig', { note: COPY_NOTE });
+              result.other++;
             } else if (this.pdf && looksLikeReceipt(m)) {
               // de bon staat in de mail zelf (webshop, app): de tekst als PDF bewaren
               const added = await this.addBodyAsReceipt(key, m, asOf);
@@ -484,11 +525,12 @@ export class MailIntakeService {
     return r;
   }
 
-  /** Voor Vandaag: facturen die online staan en mail van klanten. */
+  /** Voor Vandaag: facturen die online staan en mail van klanten. Mail van je eigen adres is geen mail van een klant (#229). */
   attention(): (MailRecord & { relation_name: string | null })[] {
-    return this.db
+    const own = this.ownAddresses();
+    return (this.db
       .prepare(`SELECT m.*, r.name AS relation_name FROM mail_messages m LEFT JOIN relations r ON r.id = m.relation_id WHERE m.outcome IN ('online-factuur','klant') ORDER BY m.id DESC LIMIT 50`)
-      .all() as (MailRecord & { relation_name: string | null })[];
+      .all() as (MailRecord & { relation_name: string | null })[]).filter((m) => !(m.outcome === 'klant' && own.has(normalizeAddress(m.from_address ?? ''))));
   }
 
   /** Mail van deze klant (nieuwste eerst), voor het seintje bij de klant en de factuur. */

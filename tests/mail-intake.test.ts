@@ -170,6 +170,93 @@ describe('inkomende post', () => {
   });
 });
 
+describe('doorgestuurde kopie van een al verwerkte mail (#229)', () => {
+  const toPdf = async (html: string) => makePdf(html.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '').split('\n').map((l) => l.trim()).filter(Boolean));
+  const doorgestuurd = '---------- Forwarded message ----------\nFrom: Wolkje <billing@wolkje.example>\nYour new Wolkje invoice is ready.\nInvoice number QX7ZTR2K-0003\nTotal € 15,77';
+  /** je eigen bedrijf staat ook als klant in de app (bv. een proefabonnement op je eigen dienst) */
+  const eigenKlant = (s: ReturnType<typeof setup>['s']) => s.relations.create({ name: 'Stukadoorsbedrijf Piet', email: 'piet@example.nl', address: 'Kalkweg 1', postcode: '1234 AB', city: 'Utrecht', type: 'klant' });
+  const mailTasks = (s: ReturnType<typeof setup>['s']) => s.inbox.tasks('2026-09-05').filter((t) => t.kind === 'mail-customer' || t.kind === 'mail-online');
+
+  it('zonder bijlage, na de originele mail met de factuur: geen klantmail, geen tweede bon, niets te doen', async () => {
+    const { s, box } = withMail();
+    s.mail.setPdfRenderer(toPdf);
+    eigenKlant(s);
+    box.add('INBOX', { uid: 1, fromAddress: 'billing@wolkje.example', fromName: 'Wolkje', subject: 'Your new Wolkje Invoice', date: '2026-09-01', attachments: [att('invoice.jpg', jpg(7))] });
+    expect(await s.mail.poll(box, '2026-09-02')).toMatchObject({ documents: 1 });
+    box.add('INBOX', { uid: 2, fromAddress: 'Piet@Example.nl', fromName: 'Stukadoorsbedrijf Piet', subject: 'Fw: Your new Wolkje Invoice', date: '2026-09-03', text: doorgestuurd });
+    expect(await s.mail.poll(box, '2026-09-04')).toMatchObject({ documents: 0, fromCustomers: 0, onlineInvoices: 0, other: 1, errors: 0 });
+    expect(s.intake.list()).toHaveLength(1);
+    expect(mailTasks(s)).toEqual([]);
+    expect(s.mail.summary().recent[0]).toMatchObject({ outcome: 'overig', note: 'kopie van een mail die al verwerkt is' });
+    // de kopie blijft staan waar hij stond: alleen de originele mail ging naar Verwerkt
+    expect(box.moved).toEqual([{ uid: 1, from: 'INBOX', to: 'Verwerkt' }]);
+  });
+
+  it('ook met "Fwd:" of "RE:" ervoor, en van de afzender van de originele mail zelf', async () => {
+    const { s, box } = withMail();
+    s.mail.setPdfRenderer(toPdf);
+    box.add('INBOX', { uid: 1, fromAddress: 'billing@wolkje.example', subject: 'Your new Wolkje Invoice', date: '2026-09-01', attachments: [att('invoice.jpg', jpg(7))] });
+    await s.mail.poll(box, '2026-09-02');
+    box.add('INBOX', { uid: 2, fromAddress: 'piet@example.nl', subject: 'Fwd:  your new wolkje invoice', date: '2026-09-03', text: doorgestuurd });
+    box.add('INBOX', { uid: 3, fromAddress: 'billing@wolkje.example', subject: 'RE: Fw: Your new Wolkje Invoice', date: '2026-09-04', text: doorgestuurd });
+    expect(await s.mail.poll(box, '2026-09-05')).toMatchObject({ documents: 0, onlineInvoices: 0, other: 2 });
+    expect(s.intake.list()).toHaveLength(1);
+    expect(mailTasks(s)).toEqual([]);
+  });
+
+  it('een mail van je eigen adres is nooit mail van een klant, ook niet als je eigen bedrijf als klant in de app staat', async () => {
+    const { s, box } = withMail();
+    eigenKlant(s);
+    box.add('INBOX', { uid: 1, fromAddress: 'piet@example.nl', fromName: 'Stukadoorsbedrijf Piet', subject: 'Notitie voor mezelf', text: 'Niet vergeten: de bus naar de garage.' });
+    expect(await s.mail.poll(box, '2026-09-02')).toMatchObject({ fromCustomers: 0, other: 1 });
+    expect(mailTasks(s)).toEqual([]);
+  });
+
+  it('een seintje dat er al stond van je eigen adres verdwijnt van Vandaag', async () => {
+    const { s, box } = withMail();
+    s.settings.update({ company: { ...s.settings.get().company, email: '' } });
+    eigenKlant(s);
+    box.add('INBOX', { uid: 1, fromAddress: 'piet@example.nl', subject: 'Fw: Your new Wolkje Invoice' });
+    expect(await s.mail.poll(box, '2026-09-02')).toMatchObject({ fromCustomers: 1 });
+    expect(mailTasks(s)).toHaveLength(1);
+    s.settings.update({ company: { ...s.settings.get().company, email: 'piet@example.nl' } });
+    expect(mailTasks(s)).toEqual([]);
+  });
+
+  it('een nieuwe mail met hetzelfde onderwerp is geen kopie: zonder "Fw:" ervoor, of pas een maand later', async () => {
+    const { s, box } = withMail();
+    box.add('INBOX', { uid: 1, fromAddress: 'billing@wolkje.example', fromName: 'Wolkje', subject: 'Your new Wolkje Invoice', date: '2026-09-01', attachments: [att('invoice.jpg', jpg(7))] });
+    await s.mail.poll(box, '2026-09-02');
+    // de factuur van de volgende maand, nu zonder bijlage: gewoon een factuur die online staat
+    box.add('INBOX', { uid: 2, fromAddress: 'billing@wolkje.example', fromName: 'Wolkje', subject: 'Your new Wolkje Invoice', date: '2026-10-01', text: 'Your invoice is ready: https://wolkje.example/billing' });
+    // en die van de maand daarna stuur je zelf door vanuit een andere mailbox
+    box.add('INBOX', { uid: 3, fromAddress: 'piet@example.nl', fromName: 'Piet', subject: 'Fw: Your new Wolkje Invoice', date: '2026-11-02', text: 'Your invoice is ready: https://wolkje.example/billing' });
+    expect(await s.mail.poll(box, '2026-11-03')).toMatchObject({ onlineInvoices: 2, other: 0 });
+    expect(s.inbox.tasks('2026-11-03').filter((t) => t.kind === 'mail-online')).toHaveLength(2);
+  });
+
+  it('later dan drie weken telt alleen nog als kopie als het factuurnummer van toen erin staat', async () => {
+    const { s, box } = withMail();
+    box.add('INBOX', { uid: 1, subject: 'Factuur', date: '2026-09-01', attachments: [att('factuur.xml', UBL)] });
+    await s.mail.poll(box, '2026-09-02');
+    const number = s.intake.list()[0]!.result!.invoiceNumber!.value;
+    box.add('INBOX', { uid: 2, fromAddress: 'piet@example.nl', subject: 'Fw: Factuur', date: '2026-10-20', text: `Zie hieronder.\nFactuurnummer ${number}` });
+    box.add('INBOX', { uid: 3, fromAddress: 'piet@example.nl', subject: 'Fw: Factuur', date: '2026-10-20', text: 'Zie hieronder, graag nakijken.' });
+    await s.mail.poll(box, '2026-10-21');
+    expect(s.mail.summary().recent.slice(0, 2).map((m) => m.note)).toEqual([null, 'kopie van een mail die al verwerkt is']);
+    expect(s.intake.list()).toHaveLength(1);
+  });
+
+  it('een antwoord van een klant blijft mail van een klant', async () => {
+    const { s, box, klant } = withMail();
+    box.add('INBOX', { uid: 1, fromAddress: 'billing@wolkje.example', subject: 'Your new Wolkje Invoice', date: '2026-09-01', attachments: [att('invoice.jpg', jpg(7))] });
+    await s.mail.poll(box, '2026-09-02');
+    box.add('INBOX', { uid: 2, fromAddress: 'jansen@example.nl', subject: 'Re: Your new Wolkje Invoice', date: '2026-09-03', text: 'Is deze voor mij bedoeld?' });
+    expect(await s.mail.poll(box, '2026-09-04')).toMatchObject({ fromCustomers: 1 });
+    expect(mailTasks(s).map((t) => t.title)).toEqual([`Mail van ${klant.name}`]);
+  });
+});
+
 describe('dubbele bonnen en bewijs uit de mail (#179)', () => {
   const BOUWMAAT = ['Bouwmaat Nederland B.V.', 'Factuurnummer: 2026018472', 'Factuurdatum 23-09-2026', 'Knauf Goldband 100,00', 'BTW 21% 100,00 21,00', 'Totaal 121,00'];
 
