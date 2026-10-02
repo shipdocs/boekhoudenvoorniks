@@ -172,6 +172,8 @@ describe('inkomende post', () => {
 
 describe('doorgestuurde kopie van een al verwerkte mail (#229)', () => {
   const toPdf = async (html: string) => makePdf(html.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '').split('\n').map((l) => l.trim()).filter(Boolean));
+  /** de factuur uit de originele mail, zoals de app hem leest: nummer QX7ZTR2K-0003, € 15,77 */
+  const factuur = () => att('invoice.pdf', makePdf(['Wolkje', 'Invoice number QX7ZTR2K-0003', 'Date 01-09-2026', 'Total € 15,77']));
   const doorgestuurd = '---------- Forwarded message ----------\nFrom: Wolkje <billing@wolkje.example>\nYour new Wolkje invoice is ready.\nInvoice number QX7ZTR2K-0003\nTotal € 15,77';
   /** je eigen bedrijf staat ook als klant in de app (bv. een proefabonnement op je eigen dienst) */
   const eigenKlant = (s: ReturnType<typeof setup>['s']) => s.relations.create({ name: 'Stukadoorsbedrijf Piet', email: 'piet@example.nl', address: 'Kalkweg 1', postcode: '1234 AB', city: 'Utrecht', type: 'klant' });
@@ -181,7 +183,7 @@ describe('doorgestuurde kopie van een al verwerkte mail (#229)', () => {
     const { s, box } = withMail();
     s.mail.setPdfRenderer(toPdf);
     eigenKlant(s);
-    box.add('INBOX', { uid: 1, fromAddress: 'billing@wolkje.example', fromName: 'Wolkje', subject: 'Your new Wolkje Invoice', date: '2026-09-01', attachments: [att('invoice.jpg', jpg(7))] });
+    box.add('INBOX', { uid: 1, fromAddress: 'billing@wolkje.example', fromName: 'Wolkje', subject: 'Your new Wolkje Invoice', date: '2026-09-01', attachments: [factuur()] });
     expect(await s.mail.poll(box, '2026-09-02')).toMatchObject({ documents: 1 });
     box.add('INBOX', { uid: 2, fromAddress: 'Piet@Example.nl', fromName: 'Stukadoorsbedrijf Piet', subject: 'Fw: Your new Wolkje Invoice', date: '2026-09-03', text: doorgestuurd });
     expect(await s.mail.poll(box, '2026-09-04')).toMatchObject({ documents: 0, fromCustomers: 0, onlineInvoices: 0, other: 1, errors: 0 });
@@ -195,7 +197,7 @@ describe('doorgestuurde kopie van een al verwerkte mail (#229)', () => {
   it('ook met "Fwd:" of "RE:" ervoor, en van de afzender van de originele mail zelf', async () => {
     const { s, box } = withMail();
     s.mail.setPdfRenderer(toPdf);
-    box.add('INBOX', { uid: 1, fromAddress: 'billing@wolkje.example', subject: 'Your new Wolkje Invoice', date: '2026-09-01', attachments: [att('invoice.jpg', jpg(7))] });
+    box.add('INBOX', { uid: 1, fromAddress: 'billing@wolkje.example', subject: 'Your new Wolkje Invoice', date: '2026-09-01', attachments: [factuur()] });
     await s.mail.poll(box, '2026-09-02');
     box.add('INBOX', { uid: 2, fromAddress: 'piet@example.nl', subject: 'Fwd:  your new wolkje invoice', date: '2026-09-03', text: doorgestuurd });
     box.add('INBOX', { uid: 3, fromAddress: 'billing@wolkje.example', subject: 'RE: Fw: Your new Wolkje Invoice', date: '2026-09-04', text: doorgestuurd });
@@ -245,6 +247,85 @@ describe('doorgestuurde kopie van een al verwerkte mail (#229)', () => {
     await s.mail.poll(box, '2026-10-21');
     expect(s.mail.summary().recent.slice(0, 2).map((m) => m.note)).toEqual([null, 'kopie van een mail die al verwerkt is']);
     expect(s.intake.list()).toHaveLength(1);
+  });
+
+  it('een andere bon onder hetzelfde onderwerp binnen drie weken is geen kopie: die wordt gewoon een bon', async () => {
+    const { s, box } = withMail();
+    s.mail.setPdfRenderer(toPdf);
+    const bon = (nummer: string, totaal: string) => `---------- Forwarded message ----------\nFrom: Tankstation Voorbeeld <bon@tankstation.example>\nBedankt voor het tanken.\nBonnummer ${nummer}\nTotaal € ${totaal}`;
+    box.add('INBOX', { uid: 1, fromAddress: 'piet@example.nl', fromName: 'Piet', subject: 'Fw: Je bon van Tankstation Voorbeeld', date: '2026-09-01', text: bon('55001', '72,40') });
+    expect(await s.mail.poll(box, '2026-09-02')).toMatchObject({ documents: 1 });
+    // een week later een andere tankbeurt, zelfde onderwerp
+    box.add('INBOX', { uid: 2, fromAddress: 'piet@example.nl', fromName: 'Piet', subject: 'Fw: Je bon van Tankstation Voorbeeld', date: '2026-09-08', text: bon('55917', '63,10') });
+    expect(await s.mail.poll(box, '2026-09-09')).toMatchObject({ documents: 1, other: 0, errors: 0 });
+    expect(s.intake.list().map((d) => d.result?.total?.value).sort()).toEqual([6310, 7240]);
+    // dezelfde bon nog eens doorgestuurd: dat is wel een kopie
+    box.add('INBOX', { uid: 3, fromAddress: 'piet@example.nl', fromName: 'Piet', subject: 'Fwd: Fw: Je bon van Tankstation Voorbeeld', date: '2026-09-10', text: `Nog een keer.\n${bon('55001', '72,40')}` });
+    expect(await s.mail.poll(box, '2026-09-11')).toMatchObject({ documents: 0, other: 1 });
+    expect(s.intake.list()).toHaveLength(2);
+    expect(s.mail.summary().recent[0]).toMatchObject({ outcome: 'overig', note: 'kopie van een mail die al verwerkt is' });
+  });
+
+  it('hetzelfde bedrag maar een ander bonnummer in de tekst: geen kopie', async () => {
+    const { s, box } = withMail();
+    s.mail.setPdfRenderer(toPdf);
+    const bon = (nummer: string) => `Bedankt voor je bestelling bij Koffiehoek Voorbeeld.\nBestelnummer: ${nummer}\nTotaal € 12,99`;
+    box.add('INBOX', { uid: 1, fromAddress: 'bestel@koffiehoek.example', subject: 'Bedankt voor je bestelling', date: '2026-09-01', attachments: [att('bon.pdf', makePdf(['Koffiehoek Voorbeeld', 'Factuurnummer: 880011', 'Datum 01-09-2026', 'Totaal 12,99']))] });
+    await s.mail.poll(box, '2026-09-02');
+    box.add('INBOX', { uid: 2, fromAddress: 'piet@example.nl', subject: 'Fw: Bedankt voor je bestelling', date: '2026-09-09', text: bon('880377') });
+    expect(await s.mail.poll(box, '2026-09-10')).toMatchObject({ documents: 1, other: 0 });
+    expect(s.intake.list()).toHaveLength(2);
+  });
+
+  it('een factuur van een andere leverancier onder hetzelfde algemene onderwerp is geen kopie', async () => {
+    const { s, box } = withMail();
+    s.mail.setPdfRenderer(toPdf);
+    box.add('INBOX', { uid: 1, fromAddress: 'facturen@verfhandel.example', fromName: 'Verfhandel Voorbeeld', subject: 'Uw factuur', date: '2026-09-01', attachments: [att('factuur.pdf', makePdf(['Verfhandel Voorbeeld', 'Factuurnummer: VH-20260917', 'Factuurdatum 01-09-2026', 'Totaal 48,40']))] });
+    expect(await s.mail.poll(box, '2026-09-02')).toMatchObject({ documents: 1 });
+    // de bon staat in de tekst
+    box.add('INBOX', { uid: 2, fromAddress: 'piet@example.nl', subject: 'Fwd: Uw factuur', date: '2026-09-10', text: 'Van: Gereedschapwinkel Voorbeeld <info@gereedschapwinkel.example>\nUw factuur voor de boormachine.\nFactuurnummer: GW-7712\nTotaal € 149,00' });
+    expect(await s.mail.poll(box, '2026-09-11')).toMatchObject({ documents: 1, other: 0 });
+    expect(s.intake.list().map((d) => d.result?.total?.value).sort((a, b) => a! - b!)).toEqual([4840, 14900]);
+    // of de factuur staat online: dan het seintje op Vandaag
+    box.add('INBOX', { uid: 3, fromAddress: 'piet@example.nl', subject: 'Fwd: Uw factuur', date: '2026-09-12', text: 'Van: Stroomleverancier Voorbeeld <service@stroom.example>\nUw factuur staat klaar: https://mijn.stroom.example/facturen' });
+    expect(await s.mail.poll(box, '2026-09-13')).toMatchObject({ documents: 0, onlineInvoices: 1, other: 0 });
+    expect(s.inbox.tasks('2026-09-13').filter((t) => t.kind === 'mail-online')).toHaveLength(1);
+    // dezelfde mail van de verfhandel nog eens, zonder bedrag in de tekst: wel een kopie
+    box.add('INBOX', { uid: 4, fromAddress: 'piet@example.nl', subject: 'Fwd: Uw factuur', date: '2026-09-14', text: 'Van: Verfhandel Voorbeeld <facturen@verfhandel.example>\nUw factuur vindt u in de bijlage of op https://verfhandel.example/mijn' });
+    expect(await s.mail.poll(box, '2026-09-15')).toMatchObject({ documents: 0, onlineInvoices: 0, other: 1 });
+    expect(s.mail.summary().recent[0]).toMatchObject({ note: 'kopie van een mail die al verwerkt is' });
+  });
+
+  it('het factuurnummer van toen telt alleen als heel woord, en een jaartal is geen factuurnummer', async () => {
+    const ctx = withMail();
+    const { s, box, db } = ctx;
+    s.mail.setPdfRenderer(toPdf);
+    const setNumber = (value: string) => {
+      const row = db.prepare('SELECT id, result FROM documents ORDER BY id LIMIT 1').get() as { id: number; result: string };
+      const result = JSON.parse(row.result) as { invoiceNumber: { value: string } };
+      result.invoiceNumber.value = value;
+      db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(result), row.id);
+    };
+    box.add('INBOX', { uid: 1, subject: 'Factuur', date: '2026-09-01', attachments: [att('factuur.pdf', makePdf(['Verfhandel Voorbeeld', 'Factuurnummer: 20260917', 'Factuurdatum 01-09-2026', 'Totaal 48,40']))] });
+    await s.mail.poll(box, '2026-09-02');
+    // het nummer zit hier alleen in een langer nummer
+    box.add('INBOX', { uid: 2, fromAddress: 'piet@example.nl', subject: 'Fw: Factuur', date: '2026-11-20', text: 'Factuurnummer 9920260917-B\nTotaal € 302,50' });
+    expect(await s.mail.poll(box, '2026-11-21')).toMatchObject({ documents: 1, other: 0 });
+    // als nummer gelezen jaartal: staat in elke datum
+    setNumber('2026');
+    box.add('INBOX', { uid: 3, fromAddress: 'piet@example.nl', subject: 'Fw: Factuur', date: '2026-11-22', text: 'Factuur van 3 november 2026\nTotaal € 77,00' });
+    expect(await s.mail.poll(box, '2026-11-23')).toMatchObject({ documents: 1, other: 0 });
+    expect(s.intake.list()).toHaveLength(3);
+  });
+
+  it('kon de app de factuur van toen niet lezen, dan raadt hij niet: de doorgestuurde tekst wordt een bon om te controleren', async () => {
+    const { s, box } = withMail();
+    s.mail.setPdfRenderer(toPdf);
+    box.add('INBOX', { uid: 1, fromAddress: 'billing@wolkje.example', subject: 'Your new Wolkje Invoice', date: '2026-09-01', attachments: [att('invoice.jpg', jpg(7))] });
+    await s.mail.poll(box, '2026-09-02');
+    box.add('INBOX', { uid: 2, fromAddress: 'piet@example.nl', subject: 'Fw: Your new Wolkje Invoice', date: '2026-09-03', text: doorgestuurd });
+    expect(await s.mail.poll(box, '2026-09-04')).toMatchObject({ documents: 1, other: 0 });
+    expect(s.intake.list().map((d) => d.status)).toEqual(['controle', 'controle']);
   });
 
   it('een antwoord van een klant blijft mail van een klant', async () => {
