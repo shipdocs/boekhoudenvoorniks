@@ -92,13 +92,17 @@ export class PeriodCloseService {
       const statementTo = (this.db.prepare('SELECT MAX(period_to) AS d FROM import_batch_accounts WHERE bank_account_id = ?').get(st.bankAccountId) as { d: string | null }).d;
       // loopt het laatste afschrift wel t/m de einddatum, dan is het op die dag zelf gemaakt
       const sameDay = [st.coverageTo, statementTo].some((d) => d !== null && d >= until);
+      // een dag in deze periode die alleen op de dag zelf is ingelezen, terwijl het volgende afschrift later begint
+      const { gap } = st;
       out.push({
         key: `bank-afschrift-${st.bankAccountId}`,
         level: 'bevestigen',
-        title: sameDay ? `${st.name}: afschriften compleet t/m ${formatDateNl(covered)}` : `${st.name}: afschriften t/m ${formatDateNl(covered)}`,
-        detail: sameDay
-          ? `Het laatste afschrift is op ${formatDateNl(until)} zelf ingelezen: wat er later die dag nog bij kwam, staat er niet in. Lees een afschrift in dat je daarna hebt gedownload. Is er die dag echt niets meer op deze rekening gebeurd? Dan kun je dat bevestigen.`
-          : `Lees een afschrift in dat t/m ${formatDateNl(until)} loopt. Is er na ${formatDateNl(covered)} echt niets meer op deze rekening gebeurd? Dan kun je dat bevestigen.`,
+        title: gap || sameDay ? `${st.name}: afschriften compleet t/m ${formatDateNl(covered)}` : `${st.name}: afschriften t/m ${formatDateNl(covered)}`,
+        detail: gap
+          ? `Er is een afschrift op ${formatDateNl(gap)} zelf ingelezen, en het afschrift daarna begint pas later: wat er op die dag later nog bij kwam, staat er niet in. Lees een afschrift in waar ${formatDateNl(gap)} ook in staat en dat je daarna hebt gedownload. Is er die dag echt niets meer op deze rekening gebeurd? Dan kun je dat bevestigen.`
+          : sameDay
+            ? `Het laatste afschrift is op ${formatDateNl(until)} zelf ingelezen: wat er later die dag nog bij kwam, staat er niet in. Lees een afschrift in dat je daarna hebt gedownload. Is er die dag echt niets meer op deze rekening gebeurd? Dan kun je dat bevestigen.`
+            : `Lees een afschrift in dat t/m ${formatDateNl(until)} loopt. Is er na ${formatDateNl(covered)} echt niets meer op deze rekening gebeurd? Dan kun je dat bevestigen.`,
         screen: 'bank',
       });
     }
