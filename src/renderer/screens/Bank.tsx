@@ -8,6 +8,8 @@ import { InvestmentHint, investmentInfo } from './Purchases';
 import { CategoryChips } from './Categories';
 import { PaymentDetails, PaymentEvidence } from './PaymentDetails';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
+import { formatEuro } from '../../shared/money';
+import { formatForeign } from '../../shared/currency';
 
 /** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
 function formatDateTime(sqlite: string): string {
@@ -28,8 +30,9 @@ function knownFromText(known: { from: string; to: string }[]): string {
 }
 
 type BatchDouble = Awaited<ReturnType<typeof api.bank.doubles>>[number];
+type PaymentDouble = Awaited<ReturnType<typeof api.bank.sameDoubles>>[number];
 
-export function Bank({ focus, skippedFor, imported, double }: { /** vanaf Vandaag: dit dubbele bedrag meteen laten zien */ double?: { lineId: number; firstPartId: number }; focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult }) {
+export function Bank({ focus, skippedFor, imported, double, same }: { /** vanaf Vandaag: dit dubbele bedrag meteen laten zien */ double?: { lineId: number; firstPartId: number }; /** vanaf Vandaag: deze twee regels die dezelfde betaling lijken meteen laten zien */ same?: { firstId: number; secondId: number }; focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult }) {
   const { go, toast, settings, refreshBadge } = useApp();
   const { run } = useAction();
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
@@ -47,6 +50,10 @@ export function Bank({ focus, skippedFor, imported, double }: { /** vanaf Vandaa
   const doubles = useLoad(() => api.bank.doubles());
   const [showDouble, setShowDouble] = useState<{ lineId: number; firstPartId: number } | null>(double ?? null);
   const openDouble = showDouble ? (doubles.data ?? []).find((d) => d.lineId === showDouble.lineId && d.firstPartId === showDouble.firstPartId) : undefined;
+  // twee losse regels die dezelfde betaling lijken, uit verschillende imports (#225)
+  const sames = useLoad(() => api.bank.sameDoubles());
+  const [showSame, setShowSame] = useState<{ firstId: number; secondId: number } | null>(same ?? null);
+  const openSame = showSame ? (sames.data ?? []).find((d) => d.firstId === showSame.firstId && d.secondId === showSame.secondId) : undefined;
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
   const [last, setLast] = useState<ImportResult | null>(imported ?? null);
   // de regels die zijn overgeslagen omdat de betaling er al stond: van één import of van één rekening
@@ -69,7 +76,7 @@ export function Bank({ focus, skippedFor, imported, double }: { /** vanaf Vandaa
     const r = await run(() => api.bank.importFile(filename, content, m));
     if (!r) return;
     setLast(r);
-    await Promise.all([status.reload(), doubles.reload()]);
+    await Promise.all([status.reload(), doubles.reload(), sames.reload()]);
     if (r.warnings.length) toast(`${r.warnings.length} ${r.warnings.length === 1 ? 'regel kon' : 'regels konden'} we niet lezen (bv. ${r.warnings[0]!.charAt(0).toLowerCase()}${r.warnings[0]!.slice(1)})`, 'error');
     await txs.reload();
   };
@@ -112,6 +119,15 @@ export function Bank({ focus, skippedFor, imported, double }: { /** vanaf Vandaa
             ⚠️ <strong><Euro cents={Math.abs(d.total)} /> staat er waarschijnlijk twee keer in</strong> ({d.accountName}): één keer als één regel op <DateNl date={d.line.date} /> en één keer als {d.parts.length} deelposten op <DateNl date={d.parts[0]!.date} />.
           </span>
           <Button small kind="primary" onClick={() => setShowDouble({ lineId: d.lineId, firstPartId: d.firstPartId })}>Bekijken en oplossen</Button>
+        </div>
+      ))}
+
+      {(sames.data ?? []).map((d) => (
+        <div key={`${d.firstId}-${d.secondId}`} className="notice warn row between" style={{ marginTop: 14 }} data-testid="zelfde-betaling">
+          <span>
+            ⚠️ <strong><Euro cents={Math.abs(d.amount)} /> staat er waarschijnlijk twee keer in</strong> ({d.accountName}): twee regels op <DateNl date={d.first.date} />{d.second.date !== d.first.date && <> en <DateNl date={d.second.date} /></>} die dezelfde betaling lijken, uit verschillende afschriften.
+          </span>
+          <Button small kind="primary" onClick={() => setShowSame({ firstId: d.firstId, secondId: d.secondId })}>Bekijken en oplossen</Button>
         </div>
       ))}
 
@@ -179,7 +195,8 @@ export function Bank({ focus, skippedFor, imported, double }: { /** vanaf Vandaa
               <td>{st.lastImport ? <>{formatDateTime(st.lastImport.at)}<div className="small muted">{st.lastImport.filename ?? st.lastImport.source.toUpperCase()}</div></> : <span className="muted">nog nooit</span>}</td>
               <td>{st.lastImport ? <><DateNl date={st.lastImport.from} /> t/m <DateNl date={st.lastImport.to} /><div className="small muted">{st.lastImport.transactions} betalingen, {st.lastImport.imported} nieuw</div></> : '—'}
                 {st.skipped > 0 && <div className="small"><button className="linklike" onClick={() => setReview({ bankAccountId: st.bankAccountId })}>{st.skipped === 1 ? '1 regel stond er al' : `${st.skipped} regels stonden er al`}: bekijken</button></div>}</td>
-              <td>{st.coverageTo ? <><DateNl date={st.coverageTo} />{staleDays(st.coverageTo) >= 14 && <div><span className="pill warn">{staleDays(st.coverageTo)} dagen geleden</span></div>}</> : '—'}</td>
+              <td>{st.completeTo ? <><DateNl date={st.completeTo} />{staleDays(st.completeTo) >= 14 && <div><span className="pill warn">{staleDays(st.completeTo)} dagen geleden</span></div>}</> : '—'}
+                {st.gap && <div className="small muted">Van {formatDateNl(st.gap)} is alleen een afschrift van die dag zelf ingelezen. Lees een afschrift in waar die dag ook in staat en dat je daarna hebt gedownload.</div>}</td>
               <td className="num" style={{ whiteSpace: 'nowrap' }}>
                 <Button small kind="ghost" onClick={() => setEditing({ id: st.bankAccountId, name: st.name, iban: st.iban, isPot: Boolean(accounts.data?.find((a) => a.id === st.bankAccountId)?.is_pot) })}>Wijzigen</Button>
                 <Button small kind="ghost" onClick={() => setOpening({ id: st.bankAccountId, name: st.name })}>Beginsaldo</Button>
@@ -192,8 +209,9 @@ export function Bank({ focus, skippedFor, imported, double }: { /** vanaf Vandaa
 
       <StatementFolderCard />
 
-      {review && <ImportReview {...review} onClose={() => setReview(null)} onChanged={async () => { await Promise.all([txs.reload(), status.reload(), doubles.reload()]); refreshBadge(); }} />}
+      {review && <ImportReview {...review} onClose={() => setReview(null)} onChanged={async () => { await Promise.all([txs.reload(), status.reload(), doubles.reload(), sames.reload()]); refreshBadge(); }} />}
       {openDouble && <DoubleDialog double={openDouble} onClose={() => setShowDouble(null)} onChanged={async () => { setShowDouble(null); await Promise.all([txs.reload(), status.reload(), doubles.reload()]); refreshBadge(); }} />}
+      {openSame && <SameDialog double={openSame} onClose={() => setShowSame(null)} onChanged={async () => { setShowSame(null); await Promise.all([txs.reload(), status.reload(), sames.reload()]); refreshBadge(); }} />}
       {mapping && <CsvMappingDialog {...mapping} onClose={() => setMapping(null)} onConfirm={async (m) => { const x = mapping; setMapping(null); await doImport(x.filename, x.content, m); }} />}
       {opening && <OpeningBalance accountId={opening.id} name={opening.name} onClose={() => setOpening(null)} />}
       {editing && <AccountDialog account={editing === 'nieuw' ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await Promise.all([status.reload(), accounts.reload()]); }} />}
@@ -397,6 +415,66 @@ function DoubleDialog({ double: d, onClose, onChanged }: { double: BatchDouble; 
 }
 
 /** Rekening toevoegen of wijzigen: naam, IBAN, of het je btw-potje is en (bij nieuw) het beginsaldo. */
+/**
+ * Twee losse regels die dezelfde betaling lijken (#225): naast elkaar, met uit welk afschrift ze komen. Eén
+ * van de twee gaat uit de boekhouding; die blijft bewaard en is terug te zetten. Wat al verwerkt is, haalt de
+ * app er niet zelf uit: dan de andere kiezen, of eerst de verwerking ongedaan maken.
+ */
+function SameDialog({ double: d, onClose, onChanged }: { double: PaymentDouble; onClose: () => void; onChanged: () => Promise<void> }) {
+  const { go } = useApp();
+  const { run, busy } = useAction();
+  const act = async (fn: () => Promise<unknown>, done: string) => {
+    if ((await run(async () => { await fn(); return true; }, done)) !== undefined) await onChanged();
+  };
+  const side = (t: PaymentDouble['first']) => (
+    <table className="list small">
+      <tbody>
+        <tr>
+          <td><DateNl date={t.date} /></td>
+          <td>
+            {t.counterName ?? '—'}
+            <div className="muted">{t.description}</div>
+            <div className="muted">{STATUS_TEXT[t.status]}{t.filename ? ` · uit ${t.filename}` : ''}{t.status === 'gematcht' && <> · <button className="linklike" onClick={() => go({ screen: 'categorie', id: t.id })}>openen</button></>}</div>
+          </td>
+          <td className="num"><Euro cents={t.amount} sign /></td>
+        </tr>
+      </tbody>
+    </table>
+  );
+  const canRemoveFirst = d.first.status !== 'gematcht';
+  const canRemoveSecond = d.second.status !== 'gematcht';
+  // Is precies één van de twee genegeerd, dan gaat die eruit: de andere is de betaling die in je boekhouding hoort.
+  // Anders liefst de regel die er later bij kwam; is die al verwerkt en de eerste niet, dan de eerste.
+  const ignoredFirst = d.first.status === 'genegeerd';
+  const ignoredSecond = d.second.status === 'genegeerd';
+  const primary = ignoredFirst !== ignoredSecond ? (ignoredFirst ? 'eerste' : 'tweede') : canRemoveSecond ? 'tweede' : canRemoveFirst ? 'eerste' : null;
+  return (
+    <Modal title="Deze betaling staat er waarschijnlijk twee keer in" wide onClose={onClose}>
+      <p>
+        Dezelfde betaling kan in twee afschriften net anders staan, bijvoorbeeld de ene keer met “Card Payment:” voor de naam. Beide regels staan nu in de app ({d.accountName}), dus <strong><Euro cents={Math.abs(d.amount)} /> telt dubbel</strong>. Kies welke regel blijft. De andere haalt de app uit je boekhouding; die blijft bewaard en kun je altijd terugzetten.
+      </p>
+      <div className="grid cols-2">
+        <div>
+          <h3>Stond er al</h3>
+          {side(d.first)}
+        </div>
+        <div>
+          <h3>Kwam er later bij</h3>
+          {side(d.second)}
+        </div>
+      </div>
+      {!canRemoveFirst && !canRemoveSecond && <p className="small">Beide regels zijn al verwerkt. Die haalt de app er niet zomaar uit: open de regel die er dubbel in staat, kies <strong>Ongedaan maken</strong> en kom daarna hier terug.</p>}
+      {(ignoredFirst || ignoredSecond) && <p className="small" data-testid="genegeerd-blijft">{ignoredFirst && ignoredSecond ? 'Beide regels zijn genegeerd' : ignoredFirst ? 'De regel die er al stond is genegeerd' : 'De regel die er later bij kwam is genegeerd'}. Houd je een genegeerde regel, dan komt die terug bij je nog te verwerken betalingen: anders staat deze betaling nergens in je boekhouding.</p>}
+      {canRemoveFirst !== canRemoveSecond && <p className="small">{canRemoveFirst ? 'De regel die er later bij kwam' : 'De regel die er al stond'} is al verwerkt. Die haalt de app er niet zomaar uit: haal de andere eruit, of maak eerst die verwerking ongedaan (open de regel en kies <strong>Ongedaan maken</strong>).</p>}
+      <div className="row end" style={{ marginTop: 14, flexWrap: 'wrap' }}>
+        <Button disabled={busy} onClick={() => void act(() => api.bank.dismissSame(d.firstId, d.secondId), 'Goed, de app meldt dit niet meer')}>Nee, dit zijn twee verschillende betalingen</Button>
+        <Button kind={primary === 'eerste' ? 'primary' : undefined} disabled={busy || !canRemoveFirst} onClick={() => void act(() => api.bank.resolveSame(d.secondId, d.firstId), 'Opgelost: de dubbele regel is uit je boekhouding gehaald')}>De regel die later kwam houden</Button>
+        <Button kind={primary === 'tweede' ? 'primary' : undefined} disabled={busy || !canRemoveSecond} onClick={() => void act(() => api.bank.resolveSame(d.firstId, d.secondId), 'Opgelost: de dubbele regel is uit je boekhouding gehaald')}>De regel die er al stond houden</Button>
+      </div>
+    </Modal>
+  );
+}
+
 function AccountDialog({ account, onClose, onSaved }: { account: { id: number; name: string; iban: string | null; isPot: boolean } | null; onClose: () => void; onSaved: () => Promise<void> }) {
   const { settings, reloadSettings } = useApp();
   const { run, busy } = useAction();
@@ -623,6 +701,15 @@ function SaleForm({ txId, amount, description, busy, onBook }: { txId: number; a
   );
 }
 
+type PurchaseCandidate = NonNullable<Awaited<ReturnType<typeof api.bank.purchaseQuestion>>>['candidates'][number];
+
+/** "Aankoop bij Printhuis van 3 september 2026, € 48,40, nog niet betaald": een aankoop die bij een betaling kan horen. */
+function purchaseCandidateText(c: PurchaseCandidate): string {
+  const amount = `${formatEuro(c.total)}${c.currency && c.foreignTotal !== null ? ` (${formatForeign(c.foreignTotal, c.currency)})` : ''}`;
+  const paid = c.state === 'elders' ? (c.via === 'kas' ? 'contant betaald' : c.via === 'prive' ? 'betaald met privégeld' : 'betaald met privégeld of contant') : c.open !== c.total ? `nog ${formatEuro(c.open)} te betalen` : 'nog niet betaald';
+  return `Aankoop ${c.supplier ? `bij ${c.supplier}` : `"${c.description}"`} van ${formatDateNl(c.date)}, ${amount}, ${paid}${c.question ? ', staat op "weet ik nog niet"' : ''}`;
+}
+
 export function CategorizeTransaction({ id }: { id: number }) {
   const { go, meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
@@ -640,8 +727,26 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const previousSale = useLoad(() => api.bank.previousSale(id), [id]);
   // betaling aan je eigen bedrijf (#205): geen gewone aankoop, en de factuur ervan gaat in dezelfde keuze mee
   const ownCompany = useLoad(() => api.bank.ownCompany(id), [id]);
+  // een aankoop die er al staat en bij deze afschrijving past (#221): eerst die vraag, anders tellen de kosten dubbel
+  const purchaseQuestion = useLoad(() => api.bank.purchaseQuestion(id), [id]);
+  // geld dat binnenkomt: de open creditnota's van leveranciers waar het bij kan horen (#227)
+  const creditNotes = useLoad(() => api.bank.creditNotes(id), [id]);
+  // geld van een betaaldienst terwijl er verkopen in de app op hun geld wachten (#227): de naam van die dienst
+  const payout = useLoad(() => api.bank.awaitedPayout(id), [id]);
+  // bij "Negeren": de betalingen waar deze regel een dubbel van kan zijn (#225); null = nog niet gevraagd
+  const [doubleOf, setDoubleOf] = useState<Awaited<ReturnType<typeof api.bank.duplicateCandidates>> | null>(null);
+  // waarschijnlijk dezelfde betaling als een regel die er al staat (#225): eerst die vraag, daarna pas indelen
+  const sames = useLoad(() => api.bank.sameDoubles());
   const t = txs.data?.find((x) => x.id === id);
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
+  const held = t.status === 'nieuw' ? (sames.data ?? []).find((d) => (d.secondId === t.id && d.second.status === 'nieuw') || (d.firstId === t.id && d.second.status !== 'nieuw')) : undefined;
+  /** de betalingen waar deze regel een dubbel van kan zijn; kiezen koppelt hem daaraan */
+  const doubleChoices = (candidates: NonNullable<typeof doubleOf>) => candidates.map((c) => (
+    <button key={c.id} disabled={busy} onClick={() => void done(api.bank.ignore(t.id, c.id))}>
+      Ja, dubbel van <DateNl date={c.transaction_date} /> · {c.counter_name ?? 'Onbekend'}
+      <div className="hint">{c.description.length > 90 ? `${c.description.slice(0, 90)}…` : c.description} · {STATUS_TEXT[c.status]}{c.status === 'genegeerd' ? ': die komt terug bij je nog te verwerken betalingen' : ''}</div>
+    </button>
+  ));
   const done = async (p: Promise<unknown>, investment?: string) => {
     // ook acties die niets teruggeven (bv. ongedaan maken) tellen als gelukt als ze niet falen
     if ((await run(async () => { await p; return true; }, investment ? undefined : 'Verwerkt ✓')) !== undefined) {
@@ -652,6 +757,15 @@ export function CategorizeTransaction({ id }: { id: number }) {
   /** categorie gekozen: bij een investering daarna uitleg tonen (met de gekozen btw) */
   const inv = (categoryKey: string, vatCode: string) => (categoryKey === 'investering' ? vatCode : undefined);
   const invoices = [...(overdue.data ?? []), ...(openInvoices.data ?? [])];
+  const linked = t.status === 'nieuw' ? purchaseQuestion.data ?? null : null;
+  const credits = t.status === 'nieuw' && t.amount > 0 ? creditNotes.data ?? [] : [];
+  // een creditnota van een leverancier met dit bedrag: geld terug daarvan is geen omzet (#227)
+  const strongCredits = credits.filter((c) => c.strong);
+  // past er een aankoop of creditnota sterk bij, dan eerst "Ja" of "Nee, iets anders": tot dan geen andere keuzes
+  const mustAnswer = Boolean(linked?.strong) || strongCredits.length > 0;
+  // voorstellen die al in de kaart hierboven staan, niet nog een keer onder "Hoort dit hierbij?"
+  const proposals = (suggestions.data ?? []).filter((s) => s.kind !== 'rekening' && !(s.kind === 'inkoop' && linked?.candidates.some((c) => c.purchaseId === s.purchaseId)));
+  const creditText = (c: (typeof credits)[number]) => `Creditnota ${c.supplier ? `van ${c.supplier}` : `"${c.description}"`} van ${formatDateNl(c.date)}, nog ${formatEuro(c.open)} terug te krijgen`;
   return (
     <div className="page-narrow">
       <div className="row between">
@@ -665,17 +779,84 @@ export function CategorizeTransaction({ id }: { id: number }) {
       </details>
       <PaymentEvidence txId={t.id} />
 
-      {t.status === 'nieuw' && ownCompany.data && (
+      {held && (
+        <div className="notice warn row between" role="note" data-testid="vastgehouden-dubbel">
+          <span>
+            <strong>Deze regel staat er waarschijnlijk twee keer in.</strong> Op <DateNl date={(held.firstId === t.id ? held.second : held.first).date} /> staat dezelfde betaling uit een ander afschrift. Kies eerst of het dezelfde betaling is; daarna kun je hem indelen.
+          </span>
+          <Button small kind="primary" onClick={() => go({ screen: 'bank', extra: { same: { firstId: held.firstId, secondId: held.secondId } } })}>Bekijken en oplossen</Button>
+        </div>
+      )}
+      {/* past er een andere aankoop sterk bij, dan eerst die vraag hieronder; daarna pas privé of "weet ik nog niet" */}
+      {t.status === 'nieuw' && ownCompany.data && !mustAnswer && (
         <div className="notice warn" role="note" data-testid="eigen-bedrijf">
           <strong>Dit is een betaling aan je eigen bedrijf</strong>
           <div className="small" style={{ marginTop: 4 }}>
             De naam op het afschrift is je eigen bedrijfsnaam, maar het is geen overboeking naar een eigen rekening. Bijvoorbeeld een betaling voor je eigen dienst. Dat is geen gewone aankoop: geen kosten en geen btw-aftrek.{' '}
-            {ownCompany.data.documentId || ownCompany.data.purchaseId ? 'De factuur van je eigen bedrijf met hetzelfde bedrag gaat in dezelfde keuze mee.' : 'Komt de factuur later binnen, dan hoort die hierbij.'}
+            {ownCompany.data.documentId || ownCompany.data.purchaseId ? 'De factuur van je eigen bedrijf met hetzelfde bedrag gaat in dezelfde keuze mee.' : 'Komt de factuur later binnen, dan hoort die hierbij.'}{' '}
+            Meestal is dit privé: je betaalt jezelf. Bij "weet ik nog niet" blijft het open staan en houdt het je btw-aangifte tegen.
           </div>
           <div className="row" style={{ marginTop: 8 }}>
-            <Button small disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'prive'))}>Privé</Button>
+            <Button small kind="primary" disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'prive'))}>Privé</Button>
             <Button small disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'vraag'))}>Weet ik nog niet: vraag mijn boekhouder</Button>
-            <span className="small muted">Was het toch iets anders? Kies dat dan hieronder.</span>
+            <span className="small muted">
+              {ownCompany.data.documentId || ownCompany.data.purchaseId
+                ? 'Kies je hieronder "Nee, dit was privé" of "Weet ik nog niet", dan gaat de factuur ook mee. Een soort kosten kan niet zolang die factuur erbij hoort.'
+                : 'Was het toch iets anders? Kies dat dan hieronder.'}
+            </span>
+          </div>
+        </div>
+      )}
+      {linked && (
+        <div className="notice warn" role="note" data-testid="aankoop-bij-betaling">
+          <strong>Hoort deze betaling bij een aankoop die er al staat?</strong>
+          {linked.candidates.map((c) => (
+            <div key={c.purchaseId} style={{ marginTop: 8 }}>
+              <div className="small">{purchaseCandidateText(c)}</div>
+              {c.amountFit === 'ongeveer' ? (
+                <div className="small muted">Het bedrag is anders dan deze betaling (<Euro cents={-t.amount} />). Klopt het bedrag van de aankoop niet? Pas dat eerst aan bij Aankopen; daarna kun je hem hier koppelen.</div>
+              ) : (
+                <div className="row" style={{ marginTop: 4 }}>
+                  {/* contant betaald staat niet op de bank: het kunnen net zo goed twee aankopen zijn, dus geen voorgestelde keuze */}
+                  <Button small kind={linked.oneClick && !(c.state === 'elders' && c.via !== 'prive') ? 'primary' : undefined} disabled={busy} onClick={() => void done(api.bank.linkPurchase(t.id, c.purchaseId))}>Ja, dit is de betaling van die aankoop</Button>
+                </div>
+              )}
+            </div>
+          ))}
+          <div className="small" style={{ marginTop: 8 }}>
+            {linked.strong ? 'Kies je een soort kosten, dan tellen de kosten en de btw twee keer. ' : ''}
+            {/* alleen als er een "Ja" te kiezen is: bij een bedrag dat net anders is, staat er geen knop */}
+            {linked.candidates.some((c) => c.amountFit !== 'ongeveer') && 'Bij "Ja" wordt de betaling aan de aankoop gekoppeld; er komt geen tweede kostenpost bij.'}
+            {linked.candidates.some((c) => c.state === 'elders' && c.amountFit !== 'ongeveer') ? ' De betaling met privégeld of contant die bij de aankoop stond, wordt teruggedraaid.' : ''}
+            {linked.candidates.every((c) => c.amountFit === 'ongeveer') && 'Hoort de betaling er niet bij, kies dan "Nee, iets anders"; daarna deel je hem zelf in.'}
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <Button small disabled={busy} onClick={async () => {
+              // op deze pagina blijven: daarna deel je de betaling zelf in
+              if ((await run(async () => { await api.bank.rejectPurchases(t.id); return true; })) !== undefined) await Promise.all([purchaseQuestion.reload(), suggestions.reload(), ownCompany.reload()]);
+            }}>Nee, iets anders</Button>
+          </div>
+        </div>
+      )}
+      {strongCredits.length > 0 && (
+        <div className="notice warn" role="note" data-testid="creditnota-bij-geld">
+          <strong>Is dit het geld terug van een creditnota die er al staat?</strong>
+          {strongCredits.map((c) => (
+            <div key={c.purchaseId} style={{ marginTop: 8 }}>
+              <div className="small">{creditText(c)}</div>
+              <div className="row" style={{ marginTop: 4 }}>
+                <Button small kind={strongCredits.length === 1 ? 'primary' : undefined} disabled={busy} onClick={() => void done(api.bank.matchPurchase(t.id, c.purchaseId))}>Ja, dit is het geld terug van die creditnota</Button>
+              </div>
+            </div>
+          ))}
+          <div className="small" style={{ marginTop: 8 }}>
+            Geld terug van een leverancier is geen omzet. Bij "Ja" wordt het geld aan de creditnota gekoppeld; de kosten zijn bij de creditnota al verlaagd en gaan niet nog een keer omlaag.
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <Button small disabled={busy} onClick={async () => {
+              // op deze pagina blijven: daarna deel je het geld zelf in
+              if ((await run(async () => { await api.bank.rejectPurchases(t.id); return true; })) !== undefined) await Promise.all([creditNotes.reload(), suggestions.reload()]);
+            }}>Nee, iets anders</Button>
           </div>
         </div>
       )}
@@ -687,13 +868,34 @@ export function CategorizeTransaction({ id }: { id: number }) {
             <Button disabled={busy} onClick={async () => {
               // op deze pagina blijven: daarna meteen opnieuw indelen
               if ((await run(async () => { await api.bank.unmatch(t.id); return true; }, 'Teruggedraaid. Kies nu wat het wel was.')) !== undefined) {
-                await Promise.all([txs.reload(), suggestions.reload(), own.reload()]);
+                setDoubleOf(null);
+                await Promise.all([txs.reload(), suggestions.reload(), own.reload(), sames.reload(), creditNotes.reload(), payout.reload()]);
               }
             }}>Ongedaan maken</Button>
             {t.status === 'gematcht' && !t.matched_invoice_id && !t.matched_purchase_invoice_id && t.amount < 0 && (
               <Button onClick={() => setRecat(!recat)}>Andere categorie</Button>
             )}
+            {/* eerder genegeerd zonder koppeling: alsnog zeggen van welke betaling dit een dubbele regel is (#225) */}
+            {t.status === 'genegeerd' && !t.duplicate_of && (
+              <Button disabled={busy} onClick={async () => {
+                const found = await run(() => api.bank.duplicateCandidates(t.id));
+                if (found !== undefined) setDoubleOf(found);
+              }}>Dit is een dubbele regel van…</Button>
+            )}
           </div>
+          {t.status === 'genegeerd' && !t.duplicate_of && doubleOf && (
+            <div className="notice" role="note" data-testid="genegeerd-dubbel" style={{ marginTop: 12 }}>
+              {doubleOf.length === 0 ? (
+                <span className="small">Er staat geen andere betaling van hetzelfde bedrag op deze rekening binnen een paar werkdagen.</span>
+              ) : (
+                <>
+                  <strong>Van welke betaling is dit een dubbele regel?</strong>
+                  <div className="small" style={{ marginTop: 4 }}>Een genegeerde regel telt nog mee in de saldocontrole. Koppel je hem aan de betaling waar hij een dubbel van is, dan telt hij daar niet meer in mee. Je kunt hem altijd terugzetten.</div>
+                  <div className="choice" style={{ marginTop: 8 }}>{doubleChoices(doubleOf)}</div>
+                </>
+              )}
+            </div>
+          )}
           {recat && (
             <div style={{ marginTop: 12 }}>
               <CategoryPicker txId={t.id} amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode, businessPct) => void done(api.bank.reclassify(t.id, categoryKey, vatCode, businessPct), inv(categoryKey, vatCode))} />
@@ -710,11 +912,11 @@ export function CategorizeTransaction({ id }: { id: number }) {
               <Button kind="primary" disabled={busy} onClick={() => void done(api.bank.bookOwnTransfer(t.id))}>Klopt, verwerk als overboeking</Button>
             </div>
           )}
-          {(suggestions.data ?? []).filter((s) => s.kind !== 'rekening').length > 0 && (
+          {!mustAnswer && proposals.length > 0 && (
             <>
               <h2>Hoort dit hierbij?</h2>
               <div className="choice">
-                {suggestions.data!.filter((s) => s.kind !== 'rekening').map((s) => (
+                {proposals.map((s) => (
                   <button key={s.label} disabled={busy} onClick={() => void done(s.kind === 'factuur' ? api.bank.matchInvoice(t.id, s.invoiceId) : s.kind === 'inkoop' ? api.bank.matchPurchase(t.id, s.purchaseId) : Promise.resolve())}>
                     {s.label}
                     <div className="hint">{s.reasons.join(' · ')}</div>
@@ -724,8 +926,19 @@ export function CategorizeTransaction({ id }: { id: number }) {
             </>
           )}
 
-          {t.amount > 0 ? (
+          {mustAnswer ? null : t.amount > 0 ? (
             <>
+              {payout.data && (
+                <div className="notice warn" role="note" data-testid="uitbetaling-betaaldienst">
+                  <strong>Is dit de uitbetaling van {payout.data}?</strong>
+                  <div className="small" style={{ marginTop: 4 }}>
+                    Er staan verkopen in de app waarvan het geld nog niet binnen is. Is dit de uitbetaling daarvan, dan is het geen nieuwe verkoop: kies je "Verkoop via een ander systeem", dan telt de omzet twee keer.
+                  </div>
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <Button small kind="primary" disabled={busy} onClick={() => void done(api.bank.bookPayout(t.id))}>Uitbetaling van {payout.data}: geen nieuwe verkoop</Button>
+                  </div>
+                </div>
+              )}
               {previousSale.data && (
                 <div className="card">
                   <strong>Weer een verkoop{previousSale.data.channel ? ` via ${previousSale.data.channel}` : ''}?</strong>
@@ -742,6 +955,14 @@ export function CategorizeTransaction({ id }: { id: number }) {
                   </select>
                 </Field>
               )}
+              {credits.length > 0 && (
+                <Field label="Geld terug bij een creditnota van een leverancier">
+                  <select defaultValue="" onChange={(e) => e.target.value && void done(api.bank.matchPurchase(t.id, Number(e.target.value)))}>
+                    <option value="">Kies de creditnota…</option>
+                    {credits.map((c) => <option key={c.purchaseId} value={c.purchaseId}>{c.supplier ?? c.description} — {formatDateNl(c.date)} — {(c.open / 100).toFixed(2).replace('.', ',')}</option>)}
+                  </select>
+                </Field>
+              )}
               <div className="choice" style={{ marginTop: 12 }}>
                 {(pots.data ?? []).filter((p) => p.id !== t.bank_account_id).map((p) => (
                   <button key={`pot-${p.id}`} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: p.rgs_code, description: `Uit potje ${p.name}` }))}>
@@ -755,6 +976,12 @@ export function CategorizeTransaction({ id }: { id: number }) {
                 </button>
                 {refund && (
                   <div className="card flat">
+                    {/* staat de creditnota er al, dan zijn de kosten daar al verlaagd: niet nog een keer */}
+                    {credits.some((c) => c.sameAmount || c.sameSupplier) && (
+                      <p className="small" role="note" data-testid="refund-creditnota">
+                        <strong>Let op:</strong> er staat een open creditnota {credits.some((c) => c.sameAmount) ? 'met dit bedrag' : 'van deze leverancier'}. Hoort dit geld daarbij, kies hem dan hierboven bij "Geld terug bij een creditnota van een leverancier": de kosten zijn bij de creditnota al verlaagd.
+                      </p>
+                    )}
                     <CategoryPicker
                       incoming
                       amount={Math.abs(t.amount)}
@@ -821,8 +1048,27 @@ export function CategorizeTransaction({ id }: { id: number }) {
             </>
           )}
           <div className="row end" style={{ marginTop: 16 }}>
-            <Button kind="ghost" onClick={() => void done(api.bank.ignore(t.id))} title="Bijvoorbeeld een dubbele regel">Negeren (dubbel of niet belangrijk)</Button>
+            <Button kind="ghost" disabled={busy} onClick={async () => {
+              // staat er een betaling van hetzelfde bedrag rond dezelfde dag, dan eerst de vraag of dit daar een dubbel van is
+              const found = await run(() => api.bank.duplicateCandidates(t.id));
+              if (found === undefined) return;
+              if (found.length === 0) return void done(api.bank.ignore(t.id));
+              setDoubleOf(found);
+            }} title="Bijvoorbeeld een dubbele regel">Negeren (dubbel of niet belangrijk)</Button>
           </div>
+          {doubleOf && (
+            <div className="notice" role="note" data-testid="negeren-dubbel" style={{ marginTop: 8 }}>
+              <strong>Staat deze betaling er al in?</strong>
+              <div className="small" style={{ marginTop: 4 }}>Is dit een dubbele regel, kies dan van welke betaling. De app koppelt hem daaraan: hij telt dan niet mee in je boekhouding en ook niet in de saldocontrole, en je kunt hem altijd terugzetten.</div>
+              <div className="choice" style={{ marginTop: 8 }}>
+                {doubleChoices(doubleOf)}
+                <button disabled={busy} onClick={() => void done(api.bank.ignore(t.id))}>
+                  Nee, alleen negeren
+                  <div className="hint">Het geld ging wel van je rekening, maar hoort niet in je boekhouding</div>
+                </button>
+              </div>
+            </div>
+          )}
           <p className="small muted" style={{ textAlign: 'right', marginTop: 4 }}>Negeren telt niet mee in je boekhouding: alleen voor een dubbele regel. Twijfel je, kies dan "Weet ik nog niet".</p>
         </>
       )}

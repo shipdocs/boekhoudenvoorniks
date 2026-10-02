@@ -3,16 +3,18 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import type { BalanceCheck, BankService, BankTransaction } from '../import/bank';
+import type { BalanceCheck, BankService, BankTransaction, BookToAccountInput, SaleInput } from '../import/bank';
 import type { MatchingEngine } from '../import/matching';
 import type { InvoiceService } from '../documents/invoices';
 import type { QuoteService } from '../documents/quotes';
 import type { JobService } from '../jobs/jobs';
 import { EVIDENCE_QUESTION, OWN_INVOICE_NOTE, type IntakeDocument, type IntakeService } from '../intake/intake';
 import type { OwnCompanyPayments } from '../documents/own-company';
+import type { IntegrationService } from '../integrations/integrations';
 import { ALREADY_PRESENT, VIEW_EXISTING } from '../shared/document-outcome';
 import { PROPOSED_BY_LABEL, type Classification } from '../intake/classify';
-import { ASK_AUTO_AFTER_CONFIRMATIONS, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
+import { futureDateIssue } from '../intake/validation';
+import { autoAfterConfirmations, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
 import type { PurchaseService } from '../documents/purchases';
 import type { RecurringService } from '../import/recurring';
 import { normalizeIban, ValidationError } from '../shared/validation';
@@ -33,6 +35,8 @@ import { explain } from '../automation/explain';
 import type { InvestmentCheck } from '../tax/investment-check';
 import type { MailIntakeService } from '../mail/mail-intake';
 import type { BookedPayments } from '../documents/booked-payment';
+import { BankPurchaseMatcher, describePurchase, dueOf, mentionsReference, pairKey, purchaseSupplierName, sameIban, supplierNameFit, type PaymentQuestion, type PurchaseIndex } from '../documents/bank-purchase-match';
+import { formatForeign } from '../shared/currency';
 import type { FxRepair } from '../fx/repair';
 import type { StatementFolder } from '../import/statement-folder';
 import { statementHelp } from '../shared/bank-statement-help';
@@ -42,6 +46,7 @@ export type TaskKind =
   | 'setup'
   | 'bank-invoice'
   | 'bank-purchase'
+  | 'bank-purchase-paid'
   | 'bank-category'
   | 'bank-business'
   | 'bank-income'
@@ -56,6 +61,7 @@ export type TaskKind =
   | 'bank-stale'
   | 'bank-balance'
   | 'bank-double'
+  | 'bank-same'
   | 'bank-statement'
   | 'bank-locked'
   | 'exchange-conflict'
@@ -77,7 +83,11 @@ export type TaskKind =
   | 'fx-repair'
   | 'purchase-double'
   | 'mail-online'
-  | 'mail-customer';
+  | 'mail-customer'
+  | 'sale-own-company'
+  | 'sale-vat-mode'
+  | 'sale-reread'
+  | 'sale-manual';
 
 export interface TaskAction {
   id: string;
@@ -112,7 +122,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
+  ref: { relationId?: number; questionId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; sameFirstId?: number; sameSecondId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
     proposal?: string;
     /** waar de vraag "dezelfde aankoop?" of "alleen als bewijs?" over gaat (#179); is dat intussen iets anders, dan gebeurt er niets */
@@ -133,7 +143,10 @@ export interface HomeData {
     /** banksaldo − te reserveren btw − openstaande rekeningen */
     freeToSpend: Cents;
   };
-  /** t/m welke datum de bankgegevens bijgewerkt zijn (laatste transactiedatum over alle rekeningen) */
+  /**
+   * t/m welke datum de bankgegevens bijgewerkt zijn, over alle rekeningen. Een dag telt pas als het afschrift
+   * ná die dag is ingelezen (#226): met een export van vandaag ben je bij t/m gisteren.
+   */
   bankUpdatedTo: IsoDate | null;
   vat: { periodLabel: string; deadline: IsoDate; deadlineLabel: string; estimate: Cents };
   tasks: Task[];
@@ -166,7 +179,7 @@ function proposalNote(c: Classification): string {
  * Vingerafdruk van alles wat "Ja" bij een bon zal boeken. Zo kan een opnieuw gelezen document niet
  * stil met een andere leverancier, datum, bedrag of factuurnummer worden bevestigd vanuit een oude taak.
  */
-export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classification' | 'bank_match' | 'proposed_paid_with'>): string | undefined {
+export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classification' | 'bank_match' | 'bank_match_strong' | 'proposed_paid_with'>): string | undefined {
   const c = d.classification;
   const r = d.result;
   return c && r
@@ -185,12 +198,25 @@ export function documentProposal(d: Pick<IntakeDocument, 'result' | 'classificat
     : undefined;
 }
 
-/** De twee keuzes bij iets van je eigen bedrijf (#205): nooit gewone kosten met btw-aftrek. */
-const ownCompanyActions = (): TaskAction[] => [{ id: 'prive', label: 'Privé' }, { id: 'vraag', label: 'Weet ik nog niet: vraag mijn boekhouder' }, { id: 'open', label: 'Bekijken' }];
+/**
+ * De twee keuzes bij iets van je eigen bedrijf (#205): nooit gewone kosten met btw-aftrek. Bij een betaling
+ * aan je eigen bedrijfsnaam is Privé de voorgestelde keuze (#230); bij alleen een factuur is er geen voorkeur.
+ */
+const ownCompanyActions = (primaryPrive = false): TaskAction[] => [
+  { id: 'prive', label: 'Privé', ...(primaryPrive ? { primary: true } : {}) },
+  { id: 'vraag', label: 'Weet ik nog niet: vraag mijn boekhouder' },
+  { id: 'open', label: 'Bekijken' },
+];
+/** Hoe een aankoop buiten de bank om betaald is, in woorden (null = deels privé, deels contant). */
+const paidElsewhere = (via: 'prive' | 'kas' | null): string => (via === 'kas' ? 'contant betaald' : via === 'prive' ? 'betaald met privégeld' : 'betaald met privégeld of contant');
+/** Waarom de app bij een betaling aan je eigen bedrijf Privé voorstelt. */
+const OWN_PRIVATE_WHY = 'Je betaalt dan jezelf: geen kosten en geen btw terug. Daarom stelt de app Privé voor. Bij "weet ik nog niet" blijft het open staan en houdt het je btw-aangifte tegen.';
 const OWN_HINTS = {
   prive: 'Geen kosten en geen btw: het telt als privé. De factuur blijft bewaard.',
   vraag: 'Staat apart op "weet ik nog niet", zonder btw-aftrek. Het komt terug als controle vóór je btw-aangifte en staat in het pakket voor je boekhouder.',
 };
+/** Bij "Geen omzet" voor een verkoop aan je eigen bedrijf (#231): de keuze is te herstellen. */
+const SALE_UNDO_HINT = 'Klopt het achteraf niet, draai dan de boeking terug: de app stelt de vraag dan opnieuw.';
 
 export class InboxService {
   constructor(
@@ -210,12 +236,23 @@ export class InboxService {
     private readonly categories: CategoryLookup,
     private readonly investments?: InvestmentCheck,
     private readonly mail?: MailIntakeService,
-  ) {}
+  ) {
+    this.matcher = new BankPurchaseMatcher(db);
+  }
+
+  /** de gedeelde vergelijking van een betaling met een aankoop die er al staat (#221) */
+  private readonly matcher: BankPurchaseMatcher;
 
   /** betalingen aan je eigen bedrijf en de factuur die erbij hoort (#205) */
   private own: OwnCompanyPayments | null = null;
   setOwnCompany(own: OwnCompanyPayments): void {
     this.own = own;
+  }
+
+  /** verkopen uit een koppeling die op een keuze wachten (#231) */
+  private integrations: IntegrationService | null = null;
+  setIntegrations(integrations: IntegrationService): void {
+    this.integrations = integrations;
   }
 
   private booked: BookedPayments | null = null;
@@ -287,25 +324,40 @@ export class InboxService {
       countDecision(this.db, 'bankkoppeling', 'automatic');
     }
     const firstOpen = this.ledger.firstOpenDate();
+    // aankopen waar een afschrijving bij kan horen, en betalingen waar een bon op wacht: pas laden als het nodig is
+    let index: PurchaseIndex | null = null;
+    let waiting: Set<number> | null = null;
+    // waarschijnlijk dezelfde betaling als een regel die er al staat (#225): niet vanzelf boeken, eerst de melding
+    const held = this.bank.heldAsDouble();
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
-      if (t.amount >= 0 || !t.counter_name) continue;
+      if (t.amount >= 0 || !t.counter_name || held.has(t.id)) continue;
       if (firstOpen && t.transaction_date < firstOpen) continue; // vergrendelde periode: niet boeken
+      // een betaling van vandaag (#226): de dag is nog niet voorbij, het afschrift ervan is dus niet compleet.
+      // Hij staat er meteen en is zelf in te delen; vanzelf boeken doet de app pas vanaf morgen
+      if (t.transaction_date >= asOf) continue;
       if (this.bank.ownTransferTarget(t)) continue; // eigen overboeking: nooit als kosten
       if (this.own?.isOwnPayment(t)) continue; // betaling aan je eigen bedrijf (#205): nooit vanzelf, altijd de vraag
       const rule = this.memory.get(t.counter_name);
       if (!this.memory.isAutomatic(rule)) continue;
       // privéauto: tanken en parkeren nooit automatisch als zakelijke kosten
       if (rule!.business && this.fuelIsPrivate(rule!.category_key)) continue;
-      // Staat er een open bonnetje/inkoopfactuur met dit bedrag? Dan niet als losse kosten boeken.
-      const openPurchase = this.db.prepare(`SELECT 1 FROM purchase_invoices WHERE status = 'open' AND total - amount_paid = ?`).get(-t.amount);
-      if (openPurchase) continue;
+      // Kan deze betaling bij een aankoop horen die er al staat (open, of op privé of contant betaald gezet)?
+      // Ook met een bedrag dat door de koers iets afwijkt. Dan niet als losse kosten boeken: eerst de vraag.
+      index ??= this.matcher.index();
+      if (this.matcher.blocksAuto(t, index)) continue;
+      // een bon die nog op controle wacht en deze betaling als voorstel heeft: de bon neemt de betaling straks mee
+      waiting ??= new Set(this.intake.list('controle').flatMap((d) => (d.bank_match ? [d.bank_match.id] : [])));
+      if (waiting.has(t.id)) continue;
       try {
         // boeken en vastleggen in één transactie: nooit een automatische boeking zonder logregel
         tx(this.db, () => {
           this.bookCategory(t, rule!.category_key, rule!.vat_code, Boolean(rule!.business), false);
           const label = rule!.business ? this.categories.label(rule!.category_key) : 'privé';
+          // bij een bevestigde vaste last kan vanzelf boeken door "Ja, vaste last" zijn aangegaan: dan heeft de
+          // gebruiker dát bevestigd, en niet apart gezegd dat het automatisch mag
+          const how = this.recurring.confirmedFor(t) ? 'dit als vaste last hebt bevestigd' : 'hebt gezegd dat dit voortaan automatisch mag';
           const explanation = explain([
-            { type: 'leveranciersregel', label: `je ${rule!.confirmations}× ${rule!.display_name} als ${label} hebt bevestigd en hebt gezegd dat dit voortaan automatisch mag`, value: 0.97 },
+            { type: 'leveranciersregel', label: `je ${rule!.confirmations}× ${rule!.display_name} als ${label} hebt bevestigd en ${how}`, value: 0.97 },
           ]);
           logAutomation(this.db, {
             kind: 'bank-auto',
@@ -334,8 +386,10 @@ export class InboxService {
   private autoOwnTransfers(): number {
     let n = 0;
     const firstOpen = this.ledger.firstOpenDate();
+    const held = this.bank.heldAsDouble(); // waarschijnlijk een dubbele regel (#225): eerst de melding
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
       if (firstOpen && t.transaction_date < firstOpen) continue; // vergrendelde periode: niet boeken
+      if (held.has(t.id)) continue;
       const other = this.bank.ownTransferTarget(t);
       if (this.db.prepare(`SELECT 1 FROM automation_log WHERE kind = 'bank-own' AND ref_id = ? AND status = 'klopt_niet'`).get(t.id)) continue;
       if (!other) {
@@ -382,10 +436,72 @@ export class InboxService {
     if (learn && t.counter_name) this.memory.learn(t.counter_name, { categoryKey, vatCode, business });
   }
 
+  /**
+   * Mag de gebruiker deze afschrijving zelf indelen, op de rekening `account`? Past er een aankoop sterk bij
+   * die er al staat, dan eerst de vraag beantwoorden ("Ja" of "Nee, iets anders"): anders staan de kosten er
+   * twee keer in. Naar "weet ik nog niet" ook niet naast een aankoop met dit bedrag die daar al staat (#223).
+   * Een betaling aan je eigen bedrijf (#230) gaat via de gewone indeling dezelfde weg als via
+   * de vraag op Vandaag: privé of "weet ik nog niet" neemt de factuur mee (`gedaan`: er is niets meer te
+   * boeken). Iets anders kan alleen als er geen factuur van je eigen bedrijf bij hoort. Ook hier gaat de
+   * vraag bij een andere aankoop die sterk past voor (`mustAnswer`).
+   * Een regel die waarschijnlijk dezelfde betaling is als een regel die er al staat (#225): eerst dat antwoord.
+   * Geld dat binnenkomt en sterk bij een open creditnota van een leverancier past (#227): ook eerst die vraag.
+   */
+  private guardBank(t: BankTransaction, account: string | undefined): 'door' | 'gedaan' {
+    this.bank.assertNotHeld(t);
+    if (t.amount >= 0) {
+      this.matcher.assertAnswered(t);
+      return 'door';
+    }
+    const m = this.own?.match(t);
+    if (m && !m.mustAnswer) {
+      const choice = account === ACCOUNTS.vraagposten ? 'vraag' : account === ACCOUNTS.priveOpnamen ? 'prive' : null;
+      if (choice) {
+        this.own!.settle(t.id, choice);
+        return 'gedaan';
+      }
+      if (m.document || m.purchase) throw new ValidationError('Bij deze betaling hoort een factuur van je eigen bedrijf. Kies "Privé" of "Weet ik nog niet": de factuur gaat dan mee.');
+    }
+    this.matcher.assertAnswered(t, account);
+    return 'door';
+  }
+
+  /**
+   * Een betaling zelf op een rekening boeken (kosten, privé, "weet ik nog niet", …), na de controle
+   * hierboven. null: de betaling is samen met de factuur van je eigen bedrijf afgehandeld.
+   */
+  bookBank(bankTransactionId: number, input: BookToAccountInput): number | null {
+    if (this.guardBank(this.bank.get(bankTransactionId), input.account) === 'gedaan') return null;
+    return this.bank.bookToAccount(bankTransactionId, input);
+  }
+
+  /**
+   * Geld dat binnenkomt als verkoop boeken ("Verkoop via een ander systeem", of net als vorige keer met
+   * `input` leeg), na dezelfde controle: niet naast een open creditnota die er sterk bij past.
+   */
+  bookSale(bankTransactionId: number, input?: SaleInput): number {
+    this.guardBank(this.bank.get(bankTransactionId), undefined);
+    return input ? this.bank.bookSale(bankTransactionId, input) : this.bank.repeatSale(bankTransactionId);
+  }
+
+  /**
+   * De uitbetaling van een betaaldienst (#227): de verkopen staan al in de app, dus dit geld is geen nieuwe
+   * verkoop. Het komt op "onderweg" (kruisposten), waar de uitbetaling volgens de koppeling tegenover staat.
+   */
+  bookPayout(bankTransactionId: number): number {
+    const t = this.bank.get(bankTransactionId);
+    const provider = this.bank.awaitedPayout(t);
+    if (!provider) throw new ValidationError('Er staan geen verkopen in de app waarvan het geld nog niet binnen is. Kies "Verkoop via een ander systeem" als dit geld van een klant is.');
+    this.guardBank(t, ACCOUNTS.kruisposten);
+    return this.bank.bookToAccount(bankTransactionId, { account: ACCOUNTS.kruisposten, description: `Uitbetaling ${provider}` });
+  }
+
   /** De gebruiker beantwoordt een vraag uit de inbox. */
   answerBank(bankTransactionId: number, answer: { business: boolean; categoryKey?: string; vatCode?: string; businessPct?: number }): void {
     const t = this.bank.get(bankTransactionId);
     const category = answer.categoryKey ?? 'overig';
+    // betaling aan je eigen bedrijf, privé: al afgehandeld met de factuur erbij; je eigen bedrijf wordt niet onthouden
+    if (this.guardBank(t, answer.business ? this.categories.find(category)?.account : ACCOUNTS.priveOpnamen) === 'gedaan') return;
     const vatCode = answer.vatCode ?? this.categories.find(category)?.defaultVat ?? 'hoog';
     this.bookCategory(t, category, vatCode, answer.business, true, answer.businessPct);
   }
@@ -444,7 +560,15 @@ export class InboxService {
     // betalingen in een vergrendelde periode kun je niet meer indelen: één melding in plaats van een vraag per betaling
     const firstOpen = this.ledger.firstOpenDate();
     const locked = { afgesloten: 0, uitwisseling: 0 };
+    const index = this.matcher.index();
+    // vragen "hoort dit bij de aankoop …?" die met één klik te beantwoorden zijn, om na de ronde te vergelijken
+    const oneClick: { at: number; t: BankTransaction; q: PaymentQuestion; who: string }[] = [];
+    // Waarschijnlijk dezelfde betaling als een regel die er al staat (#225): daarvoor is de melding "staat er
+    // twee keer in" de enige vraag. Geen eigen taak met één klik en niet in een groep, anders staat hij er zo dubbel in.
+    const doubles = this.bank.paymentDoubles();
+    const held = this.bank.heldAsDouble(doubles);
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
+      if (held.has(t.id)) continue;
       if (firstOpen && t.transaction_date < firstOpen) {
         locked[this.ledger.periodLockFor(t.transaction_date)?.kind ?? 'afgesloten']++;
         continue;
@@ -502,9 +626,12 @@ export class InboxService {
         continue;
       }
       // betaling aan je eigen bedrijf (#205), bv. een abonnement op je eigen dienst: één vraag voor de
-      // betaling en de factuur samen, met alleen privé of "weet ik nog niet" als keuze
-      const ownMatch = this.own?.match(t);
-      if (ownMatch) {
+      // betaling en de factuur samen, met alleen privé of "weet ik nog niet" als keuze. Privé is het
+      // voorstel (#230): je betaalt jezelf, en "weet ik nog niet" houdt de btw-aangifte tegen.
+      // Past er een andere aankoop sterk bij (gewone kosten, of al op privé of contant betaald), dan eerst
+      // de vraag bij die aankoop hieronder: anders komt de betaling er los naast.
+      const ownMatch = this.own?.match(t, index);
+      if (ownMatch && !ownMatch.mustAnswer) {
         const doc = ownMatch.document;
         if (doc) ownDocuments.add(doc.id);
         const paid = `Op ${formatDateNl(t.transaction_date)} is ${formatEuro(-t.amount)} van je rekening naar ${who} gegaan`;
@@ -513,23 +640,35 @@ export class InboxService {
           kind: 'bank-own-company',
           icon: '🏠',
           title: doc || ownMatch.purchase ? `Factuur van je eigen bedrijf: ${formatEuro(-t.amount)}` : `${formatEuro(-t.amount)} betaald aan je eigen bedrijf`,
-          question: doc
-            ? `${OWN_INVOICE_NOTE} ${paid}: de betaling ervan. Kies wat het was; de factuur en de betaling gaan samen mee.`
-            : ownMatch.purchase
-              ? `${paid}: je eigen bedrijf. De factuur daarvan (${formatDateNl(ownMatch.purchase.invoice_date)}) staat al op "weet ik nog niet". Kies wat het was; de betaling en de factuur gaan samen mee.`
-              : `${paid}: dat is je eigen bedrijf, geen eigen rekening. Bijvoorbeeld een betaling voor je eigen dienst. Dat is geen gewone aankoop. Kies wat het was${ownMatch.settledDocumentId ? '; de factuur die je al op privé zette, komt erbij' : '; komt de factuur later binnen, dan hoort die hierbij'}.`,
+          question:
+            (doc
+              ? `${OWN_INVOICE_NOTE} ${paid}: de betaling ervan. Kies wat het was; de factuur en de betaling gaan samen mee.`
+              : ownMatch.purchase
+                ? `${paid}: je eigen bedrijf. De factuur daarvan (${formatDateNl(ownMatch.purchase.invoice_date)}) staat al op "weet ik nog niet". Kies wat het was; de betaling en de factuur gaan samen mee.`
+                : `${paid}: dat is je eigen bedrijf, geen eigen rekening. Bijvoorbeeld een betaling voor je eigen dienst. Dat is geen gewone aankoop. Kies wat het was${ownMatch.settledDocumentId ? '; de factuur die je al op privé zette, komt erbij' : '; komt de factuur later binnen, dan hoort die hierbij'}.`) + ' Meestal is dit privé.',
           amount: t.amount,
-          actions: ownCompanyActions(),
-          why: doc ? `Omdat ${this.intake.ownIssue(doc)!.suggestion.signals.join(', ')}, en de betaling hetzelfde bedrag heeft en naar je eigen bedrijfsnaam ging.` : 'Omdat de naam op het afschrift je eigen bedrijfsnaam is.',
+          actions: ownCompanyActions(true),
+          why: `${doc ? `Omdat ${this.intake.ownIssue(doc)!.suggestion.signals.join(', ')}, en de betaling hetzelfde bedrag heeft en naar je eigen bedrijfsnaam ging.` : 'Omdat de naam op het afschrift je eigen bedrijfsnaam is.'} ${OWN_PRIVATE_WHY}`,
           priority: 2,
           ref: { bankTransactionId: t.id, documentId: doc?.id, purchaseId: ownMatch.purchase?.id },
         });
         continue;
       }
-      const suggestions = this.matching.suggest(t);
+      // hoort deze afschrijving bij een aankoop die er al staat? Eerst die vraag, vóór een soort kosten.
+      // Past de aankoop maar zwak (alleen het bedrag), dan gaat een open creditfactuur waar de betaling bij
+      // lijkt te horen voor: een terugbetaling aan een klant.
+      const q = t.amount < 0 ? this.matcher.question(t, index) : null;
+      const suggestions = q?.strong ? [] : this.matching.suggest(t);
       const inv = suggestions.find((x) => x.kind === 'factuur');
       const pur = suggestions.find((x) => x.kind === 'inkoop');
-      if (inv && inv.kind === 'factuur' && inv.score >= 50) {
+      if (q && (q.strong || !(inv && inv.score >= 50))) {
+        if (q.kind === 'open') oneClick.push({ at: tasks.length, t, q, who });
+        tasks.push(q.kind === 'elders' ? this.paidElsewhereTask(t, q, who) : this.purchaseTask(t, q, who));
+        continue;
+      }
+      // geld terug bij een open creditnota van een leverancier (#227) gaat voor als die beter past dan een factuur
+      const refund = t.amount > 0 && pur && pur.score >= 50 && !(inv && inv.score >= pur.score) ? pur : null;
+      if (!refund && inv && inv.kind === 'factuur' && inv.score >= 50) {
         tasks.push({
           key: `bank-${t.id}`,
           kind: 'bank-invoice',
@@ -545,14 +684,24 @@ export class InboxService {
         continue;
       }
       if (pur && pur.kind === 'inkoop' && pur.score >= 50) {
+        // geld dat binnenkomt bij een open creditnota van een leverancier (#227)
+        const back = t.amount > 0 ? this.purchases.get(pur.purchaseId) : null;
+        const from = back ? purchaseSupplierName(back) : null;
         tasks.push({
           key: `bank-${t.id}`,
           kind: 'bank-purchase',
           icon: '🧾',
-          title: `${formatEuro(-t.amount)} betaald aan ${who}`,
-          question: `Hoort dit bij ${pur.label.replace(/^(Inkoop|Aankoop) /, '')}?`,
+          title: back ? `${formatEuro(t.amount)} ontvangen van ${who}` : `${formatEuro(-t.amount)} betaald aan ${who}`,
+          question: back
+            ? `Is dit het geld terug van de creditnota ${from ? `van ${from}` : `"${back.description}"`} van ${formatDateNl(back.invoice_date)} (${formatEuro(-back.open_amount)})? Geld terug van een leverancier is geen omzet.`
+            : `Hoort dit bij ${pur.label.replace(/^(Inkoop|Aankoop) /, '')}?`,
           amount: t.amount,
-          actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'nee', label: 'Nee' }],
+          actions: back
+            ? [
+                { id: 'klopt', label: 'Klopt', primary: true, hint: 'Het geld wordt aan de creditnota gekoppeld; die is daarna afgehandeld. Geen omzet: de kosten zijn bij de creditnota al verlaagd.' },
+                { id: 'nee', label: 'Nee', hint: 'De app vraagt dit niet meer. Je kiest daarna zelf waar het geld voor was.' },
+              ]
+            : [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'nee', label: 'Nee' }],
           group: { key: 'bank-purchase', label: 'Alle betalingen koppelen' },
           why: `Omdat ${pur.reasons.join(', ')}.`,
           ref: { bankTransactionId: t.id, purchaseId: pur.purchaseId },
@@ -576,12 +725,20 @@ export class InboxService {
         continue;
       }
       if (t.amount > 0) {
+        // geld van een betaaldienst terwijl er verkopen op hun uitbetaling wachten (#227): geen "weer een verkoop".
+        // Wacht zo'n verkoop nog op een keuze (#231), dan is er nog niets geboekt: eerst die vraag.
+        const payout = this.bank.awaitedPayout(t);
+        const waiting = payout ? (this.integrations?.questions()[0] ?? null) : null;
         tasks.push({
           key: `bank-${t.id}`,
           kind: 'bank-income',
           icon: '💶',
           title: `${formatEuro(t.amount)} ontvangen van ${who}`,
-          question: 'Waar is dit geld voor?',
+          question: waiting
+            ? `Waar is dit geld voor? Op Vandaag staat nog een vraag over een verkoop uit ${waiting.label} (${waiting.order.number}); beantwoord die eerst. Is dit de uitbetaling daarvan door ${payout}, dan is het geen nieuwe verkoop: anders telt de omzet twee keer.`
+            : payout
+              ? `Waar is dit geld voor? Er staan verkopen in de app waarvan het geld nog niet binnen is. Is dit de uitbetaling daarvan door ${payout}, dan is het geen nieuwe verkoop: anders telt de omzet twee keer.`
+              : 'Waar is dit geld voor?',
           amount: t.amount,
           actions: [{ id: 'open', label: 'Uitzoeken', primary: true }],
           ref: { bankTransactionId: t.id },
@@ -620,6 +777,11 @@ export class InboxService {
         });
       }
     }
+    // twee betalingen die bij dezelfde aankoop passen: hooguit één is het, dus geen van beide met één klik
+    // (en niet in "alle koppelen"): bekijken en kiezen
+    const perPurchase = new Map<number, number>();
+    for (const x of oneClick) perPurchase.set(x.q.fit.purchase.id, (perPurchase.get(x.q.fit.purchase.id) ?? 0) + 1);
+    for (const x of oneClick) if (perPurchase.get(x.q.fit.purchase.id)! > 1) tasks[x.at] = this.purchaseTask(x.t, x.q, x.who, true);
 
     // na het antwoord van de boekhouder: iets teruggedraaid waarop al betaald was
     const conflicts = this.db.prepare(`SELECT value FROM settings WHERE key = 'exchangeConflicts'`).get() as { value: string } | undefined;
@@ -660,14 +822,17 @@ export class InboxService {
     if (s.onboardingDone && s.profile.hasBusinessAccount) {
       const watching = this.statements?.available && this.statements.config().enabled;
       for (const st of this.bank.importStatus()) {
-        const days = st.coverageTo ? diffDays(st.coverageTo, asOf) : null;
+        const days = st.completeTo ? diffDays(st.completeTo, asOf) : null;
         if (days !== null && days < BANK_STALE_DAYS) continue;
         tasks.push({
           key: `bank-stale-${st.bankAccountId}`,
           kind: 'bank-stale',
           icon: '🏦',
-          title: st.coverageTo ? `${st.name}: bank bijgewerkt tot ${formatDateNl(st.coverageTo)}` : `${st.name}: nog geen bankafschrift ingelezen`,
-          question: st.coverageTo
+          title: st.completeTo ? `${st.name}: bank bijgewerkt tot ${formatDateNl(st.completeTo)}` : `${st.name}: nog geen bankafschrift ingelezen`,
+          question: st.gap
+            ? // een nieuwer afschrift alleen helpt hier niet (#226): de dag die op de dag zelf is ingelezen moet erin staan
+              `Er is een afschrift op ${formatDateNl(st.gap)} zelf ingelezen, en het afschrift daarna begint pas later: wat er op die dag later nog bij kwam, staat er niet in. Download bij je bank een afschrift waar ${formatDateNl(st.gap)} ook in staat${watching ? ': de app ziet het in je downloadmap en vraagt of hij het mag inlezen' : ' en sleep het in de app'}. ${statementHelp(st.iban)}`
+            : st.completeTo
             ? `Dat is ${days} dagen geleden. Download een nieuw afschrift bij je bank${watching ? ': de app ziet het in je downloadmap en vraagt of hij het mag inlezen' : ' en sleep het in de app'}. Dan zoeken we uit wat bij welke factuur hoort. ${statementHelp(st.iban)}`
             : `Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes. ${statementHelp(st.iban)}`,
           actions: [{ id: 'open', label: 'Afschrift inlezen', primary: true }],
@@ -702,6 +867,28 @@ export class InboxService {
         priority: 1,
         actions: [{ id: 'bekijken', label: 'Bekijken', primary: true }],
         ref: { bankAccountId: d.bankAccountId, doubleLineId: d.lineId, doublePartId: d.firstPartId },
+      });
+    }
+
+    // twee losse regels die dezelfde betaling lijken, uit verschillende imports (#225)
+    for (const d of doubles) {
+      const size = formatEuro(Math.abs(d.amount));
+      const who = (x: { counterName: string | null; description: string }) => `"${(x.counterName || x.description || 'zonder naam').replace(/\s+/g, ' ').slice(0, 60)}"`;
+      const processed = [d.first, d.second].filter((x) => x.status === 'gematcht').length;
+      const ignored = [d.first, d.second].some((x) => x.status === 'genegeerd');
+      tasks.push({
+        key: `bank-same-${d.firstId}-${d.secondId}`,
+        kind: 'bank-same',
+        icon: '⚠️',
+        title: `${d.accountName}: ${size} staat er waarschijnlijk twee keer in`,
+        question:
+          `Op ${formatDateNl(d.first.date)}${d.second.date === d.first.date ? '' : ` en ${formatDateNl(d.second.date)}`} staan twee regels van ${size} die dezelfde betaling lijken: ${who(d.first)} en ${who(d.second)}. Dat komt waarschijnlijk doordat dezelfde betaling uit twee afschriften is ingelezen${d.second.date === d.first.date ? '' : ' (het ene heeft de dag van de betaling, het andere de dag dat de bank hem boekte)'}. ` +
+          (processed === 2 ? 'Beide zijn al verwerkt, dus het bedrag telt dubbel. ' : ignored ? 'Eén ervan is genegeerd, maar telt nog wel mee in de saldocontrole. ' : '') +
+          'Bekijk ze naast elkaar en haal er één uit.',
+        amount: Math.abs(d.amount),
+        priority: 1,
+        actions: [{ id: 'bekijken', label: 'Bekijken', primary: true }],
+        ref: { bankAccountId: d.bankAccountId, sameFirstId: d.firstId, sameSecondId: d.secondId },
       });
     }
 
@@ -740,7 +927,8 @@ export class InboxService {
       const pending = this.intake.pending(d);
       // factuur van je eigen bedrijf (#205): bij zeker de twee keuzes, bij waarschijnlijk eerst bekijken
       const own = pending ? null : this.intake.ownIssue(d);
-      const bad = pending ? d.issues.find((i) => i.field === pending.kind) : own ?? d.issues.find((i) => i.severity === 'fout');
+      // een datum in de toekomst (#224) is verkeerd gelezen: eerst bekijken, niet met één klik boeken
+      const bad = pending ? d.issues.find((i) => i.field === pending.kind) : own ?? d.issues.find((i) => i.severity === 'fout') ?? futureDateIssue(d.issues) ?? undefined;
       const name = d.result?.supplier?.value ?? d.original_name;
       const paid = pending?.kind === 'evidence' && pending.target ? `Op ${formatDateNl(pending.target.date)} is ${formatEuro(pending.target.amount)} betaald aan ${pending.target.supplier}. ` : '';
       tasks.push({
@@ -807,15 +995,102 @@ export class InboxService {
       }
     }
 
+    // verkopen uit een koppeling die op een keuze wachten: er is nog niets geboekt
+    for (const q of this.integrations?.questions() ?? []) {
+      const sale = `aan ${q.order.customer.name} (${q.order.number}, ${formatDateNl(q.order.date)})`;
+      if (q.reason === 'opnieuw') {
+        // een teruggedraaide factuur die de app nu anders leest (#228), bv. doordat de prijzen inclusief btw waren.
+        // Niet vanzelf: de gebruiker kan hem intussen zelf opnieuw gemaakt hebben.
+        tasks.push({
+          key: `sale-reread-${q.id}`,
+          kind: 'sale-reread',
+          icon: '🔁',
+          title: 'Teruggedraaide factuur opnieuw inlezen?',
+          question: `Factuur ${q.previous?.number ?? q.order.number}${q.previous ? ` (${formatEuro(q.previous.total)})` : ''} ${sale} kwam uit ${q.label} en heb je teruggedraaid. De app leest hem nu anders: ${q.signals.join(' en ')}. Zal de app hem opnieuw inlezen? Heb je hem zelf al opnieuw gemaakt, kies dan "Nee": anders telt de omzet dubbel.`,
+          amount: q.total ?? undefined,
+          actions: [{ id: 'opnieuw', label: 'Ja, opnieuw inlezen', primary: true }, { id: 'niet', label: 'Nee, laat zo' }],
+          priority: 2,
+          ref: { questionId: q.id },
+        });
+      } else if (q.reason === 'zelf') {
+        // de app kan deze verkoop niet betrouwbaar inlezen (#228), bv. een totaal dat niet bij de regels past:
+        // niet raden en niet stil overslaan. De gebruiker boekt hem zelf en sluit de melding af.
+        tasks.push({
+          key: `sale-manual-${q.id}`,
+          kind: 'sale-manual',
+          icon: '🧾',
+          title: `${q.label}: verkoop van ${formatEuro(q.total ?? 0)} niet ingelezen`,
+          question: `${q.label} gaf een betaalde factuur door ${sale}, maar de app kan hem niet inlezen: ${q.signals.join(' en ')}. De app raadt niet en heeft niets geboekt. Boek deze verkoop zelf: maak de factuur in de app, of verwerk het geld als het op je bank binnenkomt als "Verkoop via een ander systeem". Kies daarna "Ik boek hem zelf".`,
+          amount: q.total ?? undefined,
+          actions: [{ id: 'zelf', label: 'Ik boek hem zelf', primary: true }],
+          priority: 2,
+          ref: { questionId: q.id },
+        });
+      } else if (q.reason === 'btw') {
+        // de bron zegt op een onbekende manier hoe de btw berekend is (#228): niet raden. Is bekend wat er
+        // betaald is, dan alleen het antwoord dat daarbij past; "Ik boek hem zelf" is altijd de uitweg.
+        const fits = q.fits ?? { inclusief: true, exclusief: true };
+        const only = fits.inclusief !== fits.exclusief ? ` Alleen prijzen ${fits.inclusief ? 'inclusief' : 'exclusief'} btw past daarbij.` : '';
+        tasks.push({
+          key: `sale-vat-mode-${q.id}`,
+          kind: 'sale-vat-mode',
+          icon: '🧾',
+          title: `${q.label}: prijzen met of zonder btw?`,
+          question: `${q.label} gaf een betaalde factuur door ${sale}, maar de app herkent niet hoe de btw daarop berekend is ("${(q.order.pricesUnknown ?? '').slice(0, 40)}"). Daarom is er nog niets geboekt. Kijk op de factuur: zijn de prijzen per regel inclusief btw, dan is het totaal ${formatEuro(q.totals!.inclusief)}; zijn ze exclusief btw, dan is het ${formatEuro(q.totals!.exclusief)}.${q.order.total !== undefined ? ` Er is ${formatEuro(q.order.total)} betaald.${only}` : ''}`,
+          actions: [
+            ...(fits.inclusief ? [{ id: 'inclusief', label: 'Prijzen zijn inclusief btw' }] : []),
+            ...(fits.exclusief ? [{ id: 'exclusief', label: 'Prijzen zijn exclusief btw' }] : []),
+            { id: 'zelf', label: 'Ik boek hem zelf' },
+          ],
+          priority: 2,
+          ref: { questionId: q.id },
+        });
+      } else {
+        // verkoop aan je eigen bedrijf (#231), bv. een proefabonnement op je eigen dienst. Geen omzet is het
+        // voorstel: je verkoopt aan jezelf. Bij maar één aanwijzing (bv. alleen dezelfde naam) kan het ook een
+        // klant zijn die net zo heet: dan stelt de app geen van beide voor.
+        const sure = q.signals.length >= 2;
+        // geld op de bank dat de betaling kan zijn: zonder het ordernummer erbij kiest de gebruiker of dat dit geld is
+        const onBank = q.bank ? `${formatEuro(q.total ?? 0)}${q.bank.counterName ? ` van ${q.bank.counterName}` : ''} op ${formatDateNl(q.bank.date)}${q.bank.description ? ` ("${q.bank.description.slice(0, 60)}")` : ''}` : null;
+        tasks.push({
+          key: `sale-own-company-${q.id}`,
+          kind: 'sale-own-company',
+          icon: '🏠',
+          title: `Verkoop aan je eigen bedrijf: ${formatEuro(q.total ?? 0)}`,
+          question:
+            `${q.label} gaf een betaalde verkoop door van ${formatEuro(q.total ?? 0)} ${sale}. Dat lijkt je eigen bedrijf, bijvoorbeeld een proefabonnement op je eigen dienst. Aan jezelf verkopen is geen omzet, dus de app heeft nog niets geboekt. Kies wat het was.` +
+            (!onBank ? '' : q.bank!.sure ? ` Op je bank staat al ${onBank}, met het nummer van deze verkoop erbij: bij "Geen omzet" telt dat geld als privé-storting.` : ` Op je bank staat ${onBank}. Is dat de betaling van deze verkoop, of komt het geld nog van de betaaldienst?`),
+          amount: q.total ?? undefined,
+          actions:
+            q.bank && !q.bank.sure
+              ? [{ id: 'neutraal-bank', label: 'Geen omzet: dit is het geld op de bank' }, { id: 'neutraal-betaaldienst', label: 'Geen omzet: het komt van de betaaldienst' }, { id: 'verkoop', label: 'Toch een echte verkoop' }]
+              : [
+                  { id: 'neutraal', label: 'Geen omzet', primary: sure || undefined, ...(q.bank ? { hint: `Geen factuur, geen omzet en geen btw. De betaling die al op je bank staat, telt als privé-storting. ${SALE_UNDO_HINT}` } : {}) },
+                  { id: 'verkoop', label: 'Toch een echte verkoop' },
+                ],
+          why: `Omdat ${q.signals.join(', ')}.`,
+          priority: 2,
+          ref: { questionId: q.id, ...(q.bank ? { bankTransactionId: q.bank.id } : {}) },
+        });
+      }
+    }
+
+    // een teruggedraaide factuur uit een koppeling (#228): de klant betaalde niet te veel, de factuur was meestal
+    // verkeerd ingelezen. Staat de vraag "opnieuw inlezen?" er al, dan geen tweede melding; anders verwijzen.
+    const reversed = this.integrations?.reversedUnsettled() ?? [];
     for (const o of this.invoices.overpaidCustomers()) {
       const key = `customer-overpaid-${o.relationId}-${o.amount}`;
       if (this.isSkipped(key)) continue;
+      const undone = reversed.filter((r) => r.relationId === o.relationId);
+      if (undone.some((r) => r.asked)) continue;
       tasks.push({
         key,
         kind: 'customer-overpaid',
         icon: '💶',
         title: `${o.name} heeft ${formatEuro(o.amount)} te veel betaald`,
-        question: 'Bijvoorbeeld een factuur twee keer betaald. Maak het terug over; zodra die betaling op je bankafschrift staat, koppelt de app hem aan deze klant. Spreek je af dat het van de volgende factuur afgaat? Vraag je boekhouder hoe je dat verwerkt.',
+        question: undone[0]
+          ? `Je draaide factuur ${undone[0].number} uit ${undone[0].label} terug, terwijl die via de betaaldienst betaald was. Deed je dat omdat hij verkeerd was ingelezen, maak dan niets over maar werk de koppeling bij (Instellingen → Koppelingen → Nu bijwerken): de app vraagt dan op Vandaag of hij de factuur opnieuw mag inlezen. Heeft je klant echt te veel betaald, betaal het dan terug; zodra die betaling op je bankafschrift staat, koppelt de app hem aan deze klant.`
+          : 'Bijvoorbeeld een factuur twee keer betaald. Maak het terug over; zodra die betaling op je bankafschrift staat, koppelt de app hem aan deze klant. Spreek je af dat het van de volgende factuur afgaat? Vraag je boekhouder hoe je dat verwerkt.',
         amount: o.amount,
         actions: [{ id: 'open', label: 'Bekijk klant', primary: true }, { id: 'klopt', label: 'Klopt, laat staan' }],
         priority: 2,
@@ -908,13 +1183,18 @@ export class InboxService {
       const label = `${formatEuro(series.amount)} per ${series.interval}`;
       if (series.status === 'voorgesteld') {
         const seen = this.recurring.state(series, asOf).payments.slice(-4).reverse();
+        // gaat met "Ja" ook vanzelf boeken aan (de leverancier is al vaak genoeg hetzelfde ingedeeld), dan zegt de knop dat
+        const auto = this.recurring.willAutomate(series.id, autoAfterConfirmations(s.autopilot));
+        const autoHint = auto
+          ? `De app let voortaan op of de factuur en de betaling elke keer binnenkomen, en boekt betalingen aan ${auto.display_name} voortaan zelf als ${auto.business ? this.categories.label(auto.category_key) : 'privé'}: zo heb je ze al ${auto.confirmations} keer ingedeeld. Je ziet ze bij "Automatisch gedaan" en kunt ze altijd terugdraaien.`
+          : undefined;
         tasks.push({
           key: `recurring-${series.id}`,
           kind: 'recurring-confirm',
           icon: '🔁',
           title: `${series.counter_name} lijkt een vaste last`,
           question: `Ongeveer ${label}. Als vaste last letten we erop dat de factuur en de betaling elke keer binnenkomen.`,
-          actions: [{ id: 'ja', label: 'Ja, vaste last', primary: true }, { id: 'nee', label: 'Nee' }],
+          actions: [{ id: 'ja', label: 'Ja, vaste last', primary: true, ...(autoHint ? { hint: autoHint } : {}) }, { id: 'nee', label: 'Nee' }],
           priority: 3,
           why: seen.length ? `Omdat we deze betalingen zagen: ${seen.map((p) => `${formatDateNl(p.transaction_date)} ${formatEuro(Math.abs(p.amount))}`).join(', ')}.` : undefined,
           ref: { seriesId: series.id },
@@ -1038,7 +1318,7 @@ export class InboxService {
         }
       }
     }
-    const askAfter = s.autopilot === 'voorzichtig' ? Number.POSITIVE_INFINITY : s.autopilot === 'maximaal' ? 2 : ASK_AUTO_AFTER_CONFIRMATIONS;
+    const askAfter = autoAfterConfirmations(s.autopilot);
     for (const rule of Number.isFinite(askAfter) ? this.memory.pendingApprovals(askAfter) : []) {
       const label = rule.business ? this.categories.label(rule.category_key) : 'privé';
       tasks.push({
@@ -1074,21 +1354,35 @@ export class InboxService {
       });
     }
 
-    // privé/contant betaald gezet, en een afschrijving met hetzelfde bedrag staat al als kosten op je rekening
+    // een aankoop (open, of op privé/contant betaald gezet) en een afschrijving die er precies bij lijkt te
+    // horen, maar die al los geboekt is als kosten of op "weet ik nog niet"
     for (const c of this.booked?.candidates().filter((x) => !x.certain) ?? []) {
-      const key = `dubbel-${c.purchase.id}-${c.bankTransaction.id}`;
+      const key = pairKey({ purchaseId: c.purchase.id, bankTransactionId: c.bankTransaction.id });
       if (this.isSkipped(key)) continue;
       const name = c.purchase.relation_name ?? c.purchase.description;
       const account = this.bank.getAccount(c.bankTransaction.bank_account_id).name;
+      const elsewhere = c.state === 'elders';
+      const onQuestion = c.booking === 'vraag';
       tasks.push({
         key,
         kind: 'purchase-double',
         icon: '👯',
         title: `${name}: staat deze aankoop dubbel?`,
-        question: `De bon van ${formatDateNl(c.purchase.invoice_date)} (${formatEuro(c.purchase.total)}) staat op betaald met privégeld of contant. Op ${account} staat op ${formatDateNl(c.bankTransaction.transaction_date)} ook ${formatEuro(-c.bankTransaction.amount)} aan ${c.bankTransaction.counter_name ?? name}, al geboekt als kosten. Is dat dezelfde betaling?`,
+        question:
+          `De bon van ${formatDateNl(c.purchase.invoice_date)} (${formatEuro(c.purchase.total)}) staat ${elsewhere ? 'op betaald met privégeld of contant' : 'nog open'}. ` +
+          `Op ${account} staat op ${formatDateNl(c.bankTransaction.transaction_date)} ook ${formatEuro(-c.bankTransaction.amount)} aan ${c.bankTransaction.counter_name ?? name}, ${onQuestion ? 'al verwerkt als "weet ik nog niet"' : 'al geboekt als kosten'}. Is dat dezelfde betaling?`,
         amount: -c.purchase.total,
         actions: [
-          { id: 'ja', label: 'Ja, dezelfde betaling', primary: true },
+          {
+            id: 'ja',
+            label: 'Ja, dezelfde betaling',
+            primary: true,
+            hint: onQuestion
+              ? `De betaling wordt aan de aankoop gekoppeld; die staat daarna als betaald. De losse post op "weet ik nog niet" vervalt.${elsewhere ? ' De privé- of contante betaling wordt teruggedraaid.' : ''}`
+              : elsewhere
+                ? undefined
+                : 'De aankoop vervalt en de bon wordt het bewijsstuk bij de betaling op je rekening. Kosten en btw blijven zoals ze bij de betaling geboekt zijn.',
+          },
           { id: 'nee', label: 'Nee, twee aankopen' },
         ],
         why: 'Anders tellen de kosten en de btw twee keer.',
@@ -1132,6 +1426,99 @@ export class InboxService {
     return tasks.map((t, i) => ({ t, i })).sort((a, b) => (a.t.priority ?? 2) - (b.t.priority ?? 2) || a.i - b.i).map((x) => x.t);
   }
 
+  /**
+   * De vraag bij een afschrijving waar een aankoop bij past die er al staat (#221). Eén aankoop en het
+   * bedrag klopt: met één klik koppelen (Crediteuren aan Bank, geen tweede kostenpost). Meer aankopen of een
+   * bedrag dat net niet klopt: bekijken op het bankscherm en daar kiezen. Eén aankoop die al op privé of
+   * contant betaald staat en precies past, is een eigen vraag (`paidElsewhereTask`).
+   */
+  private purchaseTask(t: BankTransaction, q: PaymentQuestion, who: string, contested = false): Task {
+    const p = q.fit.purchase;
+    const paid = formatEuro(-t.amount);
+    const due = dueOf(p, q.fit.state);
+    const base = { key: `bank-${t.id}`, kind: 'bank-purchase' as const, icon: '🧾', title: `${paid} betaald aan ${who}`, amount: t.amount, ref: { bankTransactionId: t.id, purchaseId: p.id } };
+    if (q.kind === 'open' && !contested) {
+      const amounts = [formatEuro(p.total), p.currency && p.foreign_total !== null ? formatForeign(p.foreign_total, p.currency) : null, p.amount_paid > 0 ? `nog ${formatEuro(due)} open` : null].filter(Boolean).join(', ');
+      const number = mentionsReference(`${t.description} ${t.reference ?? ''}`, p.supplier_reference);
+      const reasons = [q.fit.amount === 'gelijk' ? 'het bedrag klopt' : 'het bedrag klopt op de koers na', supplierNameFit(t, p) === 'ja' ? 'de naam van de leverancier past' : null, sameIban(t.counter_iban, p.payee_iban) ? 'het rekeningnummer van de leverancier klopt' : null, number ? 'het factuurnummer in de omschrijving staat' : null];
+      return {
+        ...base,
+        question:
+          `Hoort dit bij ${describePurchase(p)} (${amounts})?` +
+          (q.fit.amount === 'koers' ? ` De bank schreef ${paid} af: een andere koers dan geschat. Het verschil van ${formatEuro(Math.abs(-t.amount - due))} boekt de app als koersverschil.` : '') +
+          (p.question ? ' Die aankoop staat op "weet ik nog niet". Dat blijft zo tot je hem indeelt; de betaling komt er niet nog een keer bij.' : '') +
+          (q.fit.inWindow ? '' : ' De datums liggen ver uit elkaar; kijk of het klopt.'),
+        actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'nee', label: 'Nee' }],
+        // "alle koppelen" alleen als bedrag, leverancier en datum passen: een zwakke kandidaat lees je zelf
+        ...(q.strong ? { group: { key: 'bank-purchase', label: 'Alle betalingen koppelen' } } : {}),
+        why: `Omdat ${reasons.filter(Boolean).join(', ')}.`,
+      };
+    }
+    const all = [q.fit, ...q.others];
+    const name = purchaseSupplierName(p);
+    let question: string;
+    if (all.length > 1) {
+      const at = name && all.every((f) => purchaseSupplierName(f.purchase) === name) ? ` bij ${name}` : '';
+      const of = all.every((f) => dueOf(f.purchase, f.state) === due) ? ` van ${formatEuro(due)}` : '';
+      question = `Er staan ${all.length} ${all.every((f) => f.state === 'open') ? 'open ' : ''}aankopen${at}${of}${at || of ? '' : ' die bij deze betaling passen'}. Bij welke hoort deze betaling?`;
+    } else if (q.fit.state === 'elders') {
+      // staat al op privé of contant betaald en het bedrag is net anders: geen "Ja" met één klik, wel de vraag
+      question = `${describePurchase(p).replace(/^de/, 'De')} (${formatEuro(due)}) staat op ${paidElsewhere(q.fit.via)}. Deze betaling is ${paid}. Is dat dezelfde betaling?`;
+    } else {
+      const open = `Er staat nog een open aankoop ${name ? `bij ${name}` : `"${p.description}"`} van ${formatDateNl(p.invoice_date)} van ${formatEuro(due)}.`;
+      question = contested ? `${open} Er zijn meer betalingen die daarbij passen. Is het deze?` : `${open} Deze betaling is ${paid}. Hoort die erbij?`;
+    }
+    // is er iets te kiezen? Niet als het bedrag in euro's net anders is: dan eerst het bedrag van de aankoop aanpassen
+    const choice = all.some((f) => f.amount !== 'ongeveer');
+    return {
+      ...base,
+      question,
+      actions: [
+        { id: 'open', label: 'Bekijken', primary: true, hint: choice ? 'Je ziet de betaling naast de aankoop die erbij kan horen, en kiest daar. Er wordt nog niets geboekt.' : 'Het bedrag is anders dan dat van de aankoop; je ziet wat je kunt doen. Er wordt nog niets geboekt.' },
+        { id: 'nee', label: 'Nee, iets anders' },
+      ],
+    };
+  }
+
+  /**
+   * De vraag bij een afschrijving die past bij een aankoop die al op privé of contant betaald staat (#222):
+   * is dit dezelfde betaling? Ja: de afschrijving betaalt de aankoop en de privé- of kasbetaling gaat terug,
+   * zodat kosten en btw één keer tellen. Contant staat niet op de bank: dan stelt de app geen "Ja" voor.
+   */
+  private paidElsewhereTask(t: BankTransaction, q: PaymentQuestion, who: string): Task {
+    const p = q.fit.purchase;
+    const via = q.fit.via;
+    const name = purchaseSupplierName(p) ?? p.description;
+    // staat de leverancier op "voortaan privé" (of contant)? Dat gaat bij "ja" uit
+    const always = p.relation_id !== null ? (this.db.prepare('SELECT paid_with FROM relations WHERE id = ?').get(p.relation_id) as { paid_with: 'prive' | 'kas' | null } | undefined)?.paid_with ?? null : null;
+    const how = paidElsewhere(via);
+    const undone = via === 'kas' ? 'de contante betaling' : via === 'prive' ? 'de betaling met privégeld' : 'de betaling met privégeld of contant';
+    return {
+      key: `bank-${t.id}`,
+      kind: 'bank-purchase-paid',
+      icon: '👯',
+      title: `${formatEuro(-t.amount)} betaald aan ${who}: dezelfde betaling als je bon?`,
+      question:
+        `${describePurchase(p).replace(/^de/, 'De')} (${formatEuro(p.total)}) staat op ${how}. ` +
+        `Op ${this.bank.getAccount(t.bank_account_id).name} staat op ${formatDateNl(t.transaction_date)} ${formatEuro(-t.amount)} aan ${who}, nog niet verwerkt. Is dat dezelfde betaling?` +
+        (always ? ` Je hebt bij ${name} "voortaan ${always === 'kas' ? 'contant' : 'privé'}" aangezet.` : ''),
+      amount: t.amount,
+      actions: [
+        {
+          id: 'ja',
+          label: 'Ja, dezelfde betaling',
+          ...(via === 'prive' ? { primary: true } : {}),
+          hint: `De betaling op je rekening wordt aan de aankoop gekoppeld en ${undone} wordt teruggedraaid. Kosten en btw tellen één keer.${always ? ` "Voortaan ${always === 'kas' ? 'contant' : 'privé'}" gaat uit voor ${name}.` : ''}`,
+        },
+        { id: 'nee', label: 'Nee, iets anders', hint: 'Er verandert niets aan de aankoop. Je deelt deze betaling daarna zelf in; de app vraagt dit niet meer.' },
+        { id: 'open', label: 'Bekijken' },
+      ],
+      why: 'Omdat het bedrag, de naam en de datum bij elkaar passen. Verwerk je deze betaling als zakelijk, dan tellen de kosten en de btw twee keer.',
+      priority: 1,
+      ref: { bankTransactionId: t.id, purchaseId: p.id },
+    };
+  }
+
   /** Bij elke knop: wat er in je boekhouding gebeurt als je hem kiest. */
   private explainActions(t: Task): void {
     const cat = t.ref.categoryKey ? this.categories.label(t.ref.categoryKey) : null;
@@ -1147,7 +1534,7 @@ export class InboxService {
       'bank-invoice:klopt': 'De betaling wordt aan de factuur gekoppeld; die staat daarna als betaald. Geen nieuwe omzet: die telde al bij de factuur.',
       'bank-invoice:nee': 'Je deelt de betaling zelf in.',
       'bank-purchase:klopt': 'De betaling wordt aan de aankoop gekoppeld; die staat daarna als betaald. De kosten telden al bij de aankoop.',
-      'bank-purchase:nee': 'Je deelt de betaling zelf in.',
+      'bank-purchase:nee': 'De app vraagt dit niet meer. Je deelt de betaling daarna zelf in.',
       'bank-sale:klopt': 'Wordt geboekt als omzet, met dezelfde btw als de vorige keer.',
       'bank-sale:anders': 'Je deelt de betaling zelf in.',
       'bank-refund:klopt': 'Geen kosten: het geld ging terug naar je klant.',
@@ -1178,12 +1565,23 @@ export class InboxService {
       'vat-check:open': 'Je gaat naar de plek waar je het oplost.',
       'vat-check:overslaan': 'De controle verdwijnt; de aangifte gaat door zoals het nu is.',
       'customer-overpaid:klopt': 'Het te veel betaalde blijft als tegoed van de klant staan.',
+      'sale-own-company:neutraal': `Geen factuur, geen omzet en geen btw. Het geld dat de betaaldienst hiervoor uitbetaalt, telt als privé-storting. ${SALE_UNDO_HINT}`,
+      'sale-own-company:neutraal-bank': `Geen factuur, geen omzet en geen btw. De betaling op je bank telt als privé-storting; er komt niets bij de betaaldienst te staan. ${SALE_UNDO_HINT}`,
+      'sale-own-company:neutraal-betaaldienst': `Geen factuur, geen omzet en geen btw. Het geld dat de betaaldienst hiervoor uitbetaalt, telt als privé-storting; de betaling op je bank deel je daarna zelf in. ${SALE_UNDO_HINT}`,
+      'sale-own-company:verkoop': 'Wordt een gewone betaalde factuur: telt mee als omzet, met btw.',
+      'sale-vat-mode:inclusief': 'De app rekent de btw uit de prijzen terug: het totaal van de regels is wat de klant betaalde.',
+      'sale-vat-mode:exclusief': 'De btw komt boven op de prijzen van de regels.',
+      'sale-vat-mode:zelf': 'De app leest deze verkoop niet in en vraagt er niet meer naar. Er wordt niets geboekt: dat doe je zelf.',
+      'sale-manual:zelf': 'De melding verdwijnt en de app leest deze verkoop niet meer in. Er wordt niets geboekt: dat doe je zelf.',
+      'sale-reread:opnieuw': 'De factuur komt er opnieuw in zoals de app hem nu leest. De teruggedraaide factuur en de creditfactuur blijven staan; de betaling van toen gaat weer van de betaaldienst af.',
+      'sale-reread:niet': 'Er verandert niets. De app vraagt het niet meer.',
       'job-link:ja': 'De kosten tellen mee bij deze klus.',
       'job-link:algemeen': 'Hoort niet bij een klus: gewone bedrijfskosten.',
       'mail-online:bon': 'De mail wordt als bon bewaard; je controleert hem daarna.',
       'recurring-invoice:geen': 'De app vraagt voor deze betaling niet meer om een factuur.',
       'bank-statement:inlezen': 'De app leest het afschrift in, net als wanneer je het bij Bank in de app sleept. Wat er al staat, slaat hij over.',
       'bank-statement:niet-nu': 'De app vraagt het morgen opnieuw, en na drie keer niet meer voor dit bestand. Het bestand blijft staan waar het staat.',
+      'bank-same:bekijken': 'Je ziet de twee regels naast elkaar en kiest welke blijft. De andere haalt de app uit je boekhouding; die blijft bewaard en is terug te zetten.',
       'bank-double:bekijken': 'Je ziet de ene regel en de deelposten naast elkaar en kiest welke kant blijft. De andere kant haalt de app uit je boekhouding; die blijft bewaard en is terug te zetten.',
       'bank-balance:bekijken': 'Je ziet de overgeslagen betaling naast de betaling die er al stond, en kunt hem alsnog toevoegen.',
       'bank-balance:open': 'Lees het afschrift in van de dagen die nog ontbreken. Wat er al staat, slaat de app over.',
@@ -1263,10 +1661,10 @@ export class InboxService {
     const deadline = vatDeadline(current.end, s.vatPeriod);
     const kinds = new Set(tasks.map((t) => t.kind));
     const status = this.bank.importStatus();
-    const bankUpdatedTo = status.map((st) => st.coverageTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
+    const bankUpdatedTo = status.map((st) => st.completeTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
-      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') && !kinds.has('bank-double') },
-      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement', 'bank-double'].includes(k)) },
+      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') && !kinds.has('bank-double') && !kinds.has('bank-same') },
+      { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement', 'bank-double', 'bank-same'].includes(k)) },
       { label: 'Alle bonnetjes verwerkt', ok: !kinds.has('document-review') },
       { label: 'Geen facturen te laat', ok: !kinds.has('invoice-overdue') },
       { label: 'Btw-aangifte op tijd', ok: !kinds.has('vat-due') },

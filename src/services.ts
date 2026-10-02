@@ -44,6 +44,7 @@ import { MailIntakeService } from './mail/mail-intake';
 import { FxService } from './fx/fx';
 import { FxRepair } from './fx/repair';
 import { BookedPayments } from './documents/booked-payment';
+import { BankPurchaseMatcher } from './documents/bank-purchase-match';
 import { OwnCompanyPayments } from './documents/own-company';
 import { BookedInfo } from './search/booked-info';
 
@@ -88,7 +89,9 @@ export function createServices(db: Db, deps: ServiceDeps) {
   };
   const sender = new DocumentSender(db, settings, invoices, quotes, deps.pdf, mailerFactory);
   const bank = new BankService(db, ledger, invoices, purchases, relations, events);
-  const matching = new MatchingEngine(bank, invoices, purchases, relations);
+  // een betaling en een aankoop waarvan de gebruiker zei dat ze niet bij elkaar horen, stelt de app niet opnieuw voor
+  const purchaseMatcher = new BankPurchaseMatcher(db);
+  const matching = new MatchingEngine(bank, invoices, purchases, relations, purchaseMatcher);
   const vat = new VatService(db, ledger, settings);
   const dashboard = new DashboardService(db, ledger, invoices, bank, vat);
   const periods = new PeriodCloseService(db, ledger, bank);
@@ -107,13 +110,19 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const fx = new FxService(db, deps.fetch);
   const intake = new IntakeService(db, purchases, relations, bank, memory, classifier, categories, deps.storeFile, deps.ocr ?? null, () => settings.get().autopilot, () => settings.get().jobLocation, () => settings.get().carUse, () => settings.get().company.vatNumber);
   intake.setFx(fx);
+  // handmatige invoer naast een aankoop of bon die er al staat: dezelfde dubbel-controle als bij een bon (#224)
+  quick.setDuplicateCheck((entry) => intake.findDuplicateOfManual(entry));
   intake.setFileRemover(deps.removeFile ?? null);
   // je eigen bedrijf, om een factuur van jezelf en de betaling ervan te herkennen (#205)
   const ownIdentity = () => {
     const c = settings.get().company;
-    return { name: c.name, vatNumber: c.vatNumber, kvkNumber: c.kvkNumber, ibans: [c.iban, ...bank.listAccounts().map((a) => a.iban ?? '')].filter(Boolean) };
+    return { name: c.name, vatNumber: c.vatNumber, kvkNumber: c.kvkNumber, ibans: [c.iban, ...bank.listAccounts().map((a) => a.iban ?? '')].filter(Boolean), email: c.email };
   };
   intake.setOwnIdentity(ownIdentity);
+  // een verkoop aan je eigen bedrijf uit een koppeling wordt geen omzet, maar een vraag (#231)
+  integrations.setOwnCompany(ownIdentity, bank);
+  // zolang zo'n verkoop op een keuze wacht, is geld van de betaaldienst geen nieuwe verkoop
+  bank.setSalesWaiting(() => integrations.hasQuestions());
   const ownCompany = new OwnCompanyPayments(db, bank, purchases, intake, ownIdentity);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);
@@ -132,11 +141,12 @@ export function createServices(db: Db, deps: ServiceDeps) {
   // vreemde valuta in wat er al stond (#74): bonnen en aankopen van vóór 0.3.9 omrekenen
   const fxRepair = new FxRepair(db, fx, intake, purchases, bank);
   inbox.setFxRepair(fxRepair);
-  // aankoop dubbel met een betaling die al als kosten geboekt is (bv. via een gemengde rekening)
-  const bookedPayments = new BookedPayments(db, purchases, intake, relations);
+  // aankoop en afschrijving die dezelfde uitgave zijn (bv. de betaling al als kosten geboekt via een gemengde rekening)
+  const bookedPayments = new BookedPayments(db, purchases, intake, relations, bank);
   quick.setBookedPayments(bookedPayments);
   inbox.setBookedPayments(bookedPayments);
   inbox.setOwnCompany(ownCompany);
+  inbox.setIntegrations(integrations);
   // afschriften uit de downloadmap (#184): standaard uit; de vraag "Inlezen?" komt op Vandaag
   const statementFolder = new StatementFolder(db, settings, bank, deps.statementFiles ?? null);
   inbox.setStatementFolder(statementFolder);

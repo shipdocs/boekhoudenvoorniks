@@ -58,6 +58,141 @@ describe('periode afsluiten', () => {
     expect(() => s.periods.close('2026-09-30', [], ASOF)).toThrow(/Eerst bevestigen/);
     expect(s.periods.close('2026-09-30', [check.key], ASOF).closedUntil).toBe('2026-09-30');
   });
+
+  it('een tussentijdse export van de laatste dag dekt die dag nog niet: eerst bevestigen, of een afschrift van een dag later (#226)', () => {
+    const { s } = scenario();
+    const lees = (at: string, transactions: { date: string; amount: number; description: string }[]) => {
+      const batch = s.bank.import({ source: 'csv', warnings: [], transactions }).batchId;
+      for (const t of s.bank.list({ status: 'nieuw' })) s.bank.bookToAccount(t.id, { account: ACCOUNTS.bankkosten, description: 'Rente' });
+      s.db.prepare('UPDATE import_batches SET imported_at = ? WHERE id = ?').run(at, batch);
+    };
+    // het afschrift is op 30 september zelf gedownload en ingelezen: wat er later die dag nog bij kwam, staat er niet in
+    lees('2026-09-30 10:00:00', [{ date: '2026-09-29', amount: 5000, description: 'Rente' }, { date: '2026-09-30', amount: 2500, description: 'Rente' }]);
+    const check = s.periods.checks('2026-09-30').find((c) => c.key.startsWith('bank-afschrift-'))!;
+    expect(check).toMatchObject({ level: 'bevestigen' });
+    expect(check.title).toMatch(/compleet t\/m 29 september 2026/);
+    expect(check.detail).toMatch(/op 30 september 2026 zelf/);
+    expect(() => s.periods.close('2026-09-30', [], ASOF)).toThrow(/Eerst bevestigen/);
+    // de volgende ochtend opnieuw gedownload: er kwam die middag nog een betaling bij, en nu is de dag compleet
+    lees('2026-10-01 10:00:00', [{ date: '2026-09-30', amount: 2500, description: 'Rente' }, { date: '2026-09-30', amount: 700, description: 'Rente spaarrekening' }]);
+    expect(s.periods.checks('2026-09-30')).toEqual([]);
+    expect(s.periods.close('2026-09-30', [], ASOF).closedUntil).toBe('2026-09-30');
+  });
+
+  it('een later afschrift dat pas de dag erna begint, dekt de dag van de tussentijdse export niet (#226)', () => {
+    const { s } = scenario();
+    const lees = (at: string, transactions: { date: string; amount: number; description: string }[]) => {
+      const batch = s.bank.import({ source: 'csv', warnings: [], transactions }).batchId;
+      for (const t of s.bank.list({ status: 'nieuw' })) s.bank.bookToAccount(t.id, { account: ACCOUNTS.bankkosten, description: 'Rente' });
+      s.db.prepare('UPDATE import_batches SET imported_at = ? WHERE id = ?').run(at, batch);
+    };
+    lees('2026-09-30 10:00:00', [{ date: '2026-09-29', amount: 5000, description: 'Rente' }, { date: '2026-09-30', amount: 2500, description: 'Rente' }]);
+    // het volgende afschrift is een export "vanaf 1 oktober": de middag van 30 september staat in geen van beide
+    lees('2026-10-10 10:00:00', [{ date: '2026-10-01', amount: 1200, description: 'Rente' }, { date: '2026-10-09', amount: 900, description: 'Rente' }]);
+    expect(s.bank.importStatus()[0]).toMatchObject({ coverageTo: '2026-10-09', completeTo: '2026-09-29', gap: '2026-09-30' });
+    const check = s.periods.checks('2026-09-30').find((c) => c.key.startsWith('bank-afschrift-'))!;
+    expect(check).toMatchObject({ level: 'bevestigen' });
+    expect(check.title).toMatch(/compleet t\/m 29 september 2026/);
+    expect(check.detail).toMatch(/op 30 september 2026 zelf ingelezen.*waar 30 september 2026 ook in staat/);
+    expect(() => s.periods.close('2026-09-30', [], ASOF)).toThrow(/Eerst bevestigen/);
+    // een afschrift van later dat 30 september wel bevat, dicht het gat: dan telt ook oktober mee
+    lees('2026-10-11 10:00:00', [{ date: '2026-09-30', amount: 2500, description: 'Rente' }, { date: '2026-10-01', amount: 1200, description: 'Rente' }]);
+    expect(s.bank.importStatus()[0]).toMatchObject({ completeTo: '2026-10-09', gap: null });
+    expect(s.periods.checks('2026-09-30')).toEqual([]);
+  });
+
+  it('zo\'n gat midden in de periode vraagt bij het afsluiten ook om een bevestiging, en is daarna afgedaan (#226)', () => {
+    const { s } = scenario();
+    const lees = (at: string, transactions: { date: string; amount: number; description: string }[]) => {
+      const batch = s.bank.import({ source: 'csv', warnings: [], transactions }).batchId;
+      for (const t of s.bank.list({ status: 'nieuw' })) s.bank.bookToAccount(t.id, { account: ACCOUNTS.bankkosten, description: 'Rente' });
+      s.db.prepare('UPDATE import_batches SET imported_at = ? WHERE id = ?').run(at, batch);
+    };
+    lees('2026-09-15 10:00:00', [{ date: '2026-09-14', amount: 5000, description: 'Rente' }, { date: '2026-09-15', amount: 2500, description: 'Rente' }]);
+    lees('2026-10-05 10:00:00', [{ date: '2026-09-16', amount: 1200, description: 'Rente' }, { date: '2026-10-04', amount: 900, description: 'Rente' }]);
+    expect(s.bank.importStatus()[0]).toMatchObject({ completeTo: '2026-09-14', gap: '2026-09-15' });
+    const check = s.periods.checks('2026-09-30').find((c) => c.key.startsWith('bank-afschrift-'))!;
+    expect(check.detail).toMatch(/op 15 september 2026 zelf ingelezen/);
+    expect(() => s.periods.close('2026-09-30', [], ASOF)).toThrow(/Eerst bevestigen/);
+    // bevestigd dat er die dag niets meer bij kwam: afgesloten is afgesloten, de dag telt niet meer als gat
+    expect(s.periods.close('2026-09-30', [check.key], ASOF).closedUntil).toBe('2026-09-30');
+    expect(s.bank.importStatus()[0]).toMatchObject({ completeTo: '2026-10-04', gap: null });
+  });
+
+  it('bevestigen kan ook: na de tussentijdse export is er echt niets meer bij gekomen (#226)', () => {
+    const { s } = scenario();
+    const batch = s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-30', amount: 2500, description: 'Rente' }] }).batchId;
+    s.bank.bookToAccount(s.bank.list()[0]!.id, { account: ACCOUNTS.bankkosten, description: 'Rente' });
+    s.db.prepare(`UPDATE import_batches SET imported_at = '2026-09-30 10:00:00' WHERE id = ?`).run(batch);
+    const check = s.periods.checks('2026-09-30').find((c) => c.key.startsWith('bank-afschrift-'))!;
+    expect(s.periods.close('2026-09-30', [check.key], ASOF).closedUntil).toBe('2026-09-30');
+  });
+});
+
+describe('bank bijgewerkt t/m (#226)', () => {
+  it('de dag van de export telt pas mee als het afschrift ná die dag is ingelezen', () => {
+    const { s } = scenario();
+    s.settings.update({ onboardingDone: true });
+    const days = [{ date: '2026-09-28', amount: 5000, description: 'Rente' }, { date: '2026-09-30', amount: 2500, description: 'Rente' }];
+    const eerste = s.bank.import({ source: 'csv', warnings: [], transactions: days }).batchId;
+    s.db.prepare(`UPDATE import_batches SET imported_at = '2026-09-30 10:00:00' WHERE id = ?`).run(eerste);
+    // de laatste betaling is van 30 september, maar die dag is pas compleet na een import op een latere dag
+    expect(s.bank.importStatus()[0]).toMatchObject({ coverageTo: '2026-09-30', completeTo: '2026-09-29' });
+    expect(s.inbox.home('2026-09-30').bankUpdatedTo).toBe('2026-09-29');
+    // importeren en tonen blijven direct: de betaling van vandaag staat er gewoon
+    expect(s.bank.list().map((t) => t.transaction_date)).toContain('2026-09-30');
+    // hetzelfde afschrift een dag later: niets nieuws, wel compleet t/m 30 september
+    const tweede = s.bank.import({ source: 'csv', warnings: [], transactions: days }).batchId;
+    s.db.prepare(`UPDATE import_batches SET imported_at = '2026-10-01 10:00:00' WHERE id = ?`).run(tweede);
+    expect(s.bank.importStatus()[0]).toMatchObject({ coverageTo: '2026-09-30', completeTo: '2026-09-30' });
+    expect(s.inbox.home('2026-10-01').bankUpdatedTo).toBe('2026-09-30');
+  });
+
+  it('een afschrift dat eerder ophoudt dan de dag van inlezen: bijgewerkt t/m de laatste dag van dat afschrift', () => {
+    const { s } = scenario();
+    const batch = s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-10', amount: 5000, description: 'Rente' }] }).batchId;
+    s.db.prepare(`UPDATE import_batches SET imported_at = '2026-09-30 10:00:00' WHERE id = ?`).run(batch);
+    expect(s.bank.importStatus()[0]).toMatchObject({ coverageTo: '2026-09-10', completeTo: '2026-09-10' });
+  });
+
+  it('een afschrift dat begint na een dag die alleen op de dag zelf is ingelezen, telt niet verder dan die dag', () => {
+    const { s } = scenario();
+    s.settings.update({ onboardingDone: true });
+    const eerste = s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-28', amount: 5000, description: 'Rente' }, { date: '2026-09-30', amount: 2500, description: 'Rente' }] }).batchId;
+    s.db.prepare(`UPDATE import_batches SET imported_at = '2026-09-30 10:00:00' WHERE id = ?`).run(eerste);
+    const tweede = s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-10-01', amount: 1200, description: 'Rente' }, { date: '2026-10-04', amount: 900, description: 'Rente' }] }).batchId;
+    s.db.prepare(`UPDATE import_batches SET imported_at = '2026-10-05 10:00:00' WHERE id = ?`).run(tweede);
+    expect(s.bank.importStatus()[0]).toMatchObject({ coverageTo: '2026-10-04', completeTo: '2026-09-29', gap: '2026-09-30' });
+    expect(s.inbox.home('2026-10-05').bankUpdatedTo).toBe('2026-09-29');
+    // de melding op Vandaag zegt welk afschrift er nodig is: een nieuwer afschrift alleen helpt niet
+    const stale = s.inbox.tasks('2026-10-20').find((t) => t.kind === 'bank-stale')!;
+    expect(stale.title).toContain('tot 29 september 2026');
+    expect(stale.question).toContain('waar 30 september 2026 ook in staat');
+    // een dag zonder betalingen tussen twee afschriften is geen gat: het eerste afschrift was al compleet
+    const derde = s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-30', amount: 2500, description: 'Rente' }, { date: '2026-10-04', amount: 900, description: 'Rente' }] }).batchId;
+    s.db.prepare(`UPDATE import_batches SET imported_at = '2026-10-05 11:00:00' WHERE id = ?`).run(derde);
+    const vierde = s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-10-08', amount: 300, description: 'Rente' }] }).batchId;
+    s.db.prepare(`UPDATE import_batches SET imported_at = '2026-10-12 10:00:00' WHERE id = ?`).run(vierde);
+    expect(s.bank.importStatus()[0]).toMatchObject({ completeTo: '2026-10-08', gap: null });
+  });
+
+  it('een betaling zonder afschrift maakt een dag die alleen op de dag zelf is ingelezen niet compleet', () => {
+    const { s } = scenario();
+    const batch = s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-29', amount: 5000, description: 'Rente' }, { date: '2026-09-30', amount: 2500, description: 'Rente' }] }).batchId;
+    s.db.prepare(`UPDATE import_batches SET imported_at = '2026-09-30 10:00:00' WHERE id = ?`).run(batch);
+    s.db.prepare(`INSERT INTO bank_transactions (bank_account_id, transaction_date, amount, description, source, dedup_hash, created_at) VALUES (?, '2026-09-30', 700, 'Rente spaarrekening', 'csv', 'los-1', '2026-10-05 10:00:00')`).run(s.bank.importStatus()[0]!.bankAccountId);
+    expect(s.bank.importStatus()[0]).toMatchObject({ completeTo: '2026-09-29' });
+    expect(s.periods.checks('2026-09-30').some((c) => c.key.startsWith('bank-afschrift-'))).toBe(true);
+  });
+
+  it('"niet bijgewerkt" op Vandaag rekent met dezelfde dag', () => {
+    const { s } = scenario();
+    s.settings.update({ onboardingDone: true });
+    const batch = s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-10', amount: 5000, description: 'Rente' }] }).batchId;
+    s.db.prepare(`UPDATE import_batches SET imported_at = '2026-09-10 10:00:00' WHERE id = ?`).run(batch);
+    const stale = s.inbox.tasks('2026-09-25').find((t) => t.kind === 'bank-stale')!;
+    expect(stale.title).toContain('tot 9 september 2026');
+  });
 });
 
 describe('afgesloten is afgesloten', () => {

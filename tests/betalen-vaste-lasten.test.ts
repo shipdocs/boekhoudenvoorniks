@@ -118,10 +118,11 @@ describe('vaste lasten (#30)', () => {
 });
 
 describe('vaste lasten boeken automatisch (#30)', () => {
-  it('een bevestigde reeks boekt nieuwe betalingen direct met de bekende categorie en btw', () => {
+  it('een bevestigde reeks van een leverancier die al drie keer zo bevestigd is, boekt nieuwe betalingen direct met de bekende categorie en btw', () => {
     const { s } = setup();
     s.settings.update({ onboardingDone: true });
-    s.memory.learn('KPN BV', { categoryKey: 'telefoon', vatCode: 'hoog', business: true });
+    // dezelfde drempel als de vraag "voortaan automatisch?" (#227); met minder blijft het een vraag (koppelen-randgevallen)
+    for (let i = 0; i < 3; i++) s.memory.learn('KPN BV', { categoryKey: 'telefoon', vatCode: 'hoog', business: true });
     for (const d of ['2026-06-03', '2026-07-03', '2026-08-03']) {
       s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: d, amount: -6050, description: 'Abonnement', counterName: 'KPN BV', counterIban: 'NL44RABO0123456789' }] });
     }

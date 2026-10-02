@@ -13,7 +13,8 @@ import { formatDateNl } from '../../shared/dates';
 import type { IntakeDocument, PendingProposal } from '../../intake/intake';
 import { DOCUMENT_OUTCOME_LABEL } from '../../shared/document-outcome';
 import { TargetDetails } from './UploadOutcome';
-import { proposedPaidWith } from '../../shared/paid-with';
+import { paidWithNote, proposedPaidWith } from '../../shared/paid-with';
+import { futureDateIssue } from '../../intake/validation';
 
 // pdf.js gebruikt Map.getOrInsertComputed, dat oudere Chromium-versies (bv. die van de e2e-tests) nog niet kennen
 for (const proto of [Map.prototype, WeakMap.prototype] as unknown as Record<string, unknown>[]) {
@@ -157,6 +158,8 @@ export function DocumentReview({ id }: { id: number }) {
   const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
   const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; businessPct: number | null; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
+  // de verbeterde gegevens lijken op een aankoop of bon die er al staat (#224): eerst de vraag, pas na "Toch boeken" verwerken
+  const [duplicate, setDuplicate] = useState<{ entry: string; lead: string } | null>(null);
 
   const d = doc.data;
   useEffect(() => {
@@ -212,10 +215,16 @@ export function DocumentReview({ id }: { id: number }) {
   // factuur van je eigen bedrijf (#205): alleen privé of "weet ik nog niet"; bij twijfel eerst de vraag
   const ownIssue = !proposal && d.status === 'controle' ? d.issues.find((i) => i.field === 'own-company') : undefined;
   const own = ownIssue ? (ownIssue.suggestion as { level: 'zeker' | 'waarschijnlijk'; signals: string[] }) : null;
+  // de datum is in de toekomst gelezen (#224): de waarschuwing blijft staan tot de datum is aangepast
+  const futureIssue = d.status === 'controle' ? futureDateIssue(d.issues) : null;
+  const futureDate = futureIssue && form.date === (r?.invoiceDate?.value ?? '') ? futureIssue : null;
   const refresh = async () => {
     setForm(null);
     await view.reload();
   };
+  // de vraag geldt voor de gegevens zoals ze er toen stonden; verandert de gebruiker iets, dan kijkt de app opnieuw
+  const entry = `${form.supplier.trim()}|${form.date}|${form.total}|${form.invoiceNumber.trim()}|${form.business}`;
+  const shownDuplicate = duplicate?.entry === entry ? duplicate : null;
 
   return (
     <div className="page">
@@ -252,6 +261,7 @@ export function DocumentReview({ id }: { id: number }) {
           {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document') && !(proposal && i.field === proposal.kind) && !(own && i.field === 'own-company')).map((i) => (
             <div key={i.field + i.message} className="notice warn">{i.message}</div>
           ))}
+          {futureDate && <div className="notice warn" data-testid="datum-toekomst">{futureDate.message}</div>}
           {proposal && <ProposalChoice doc={d} proposal={proposal} question={d.issues.find((i) => i.field === proposal.kind)?.message ?? ''} onDone={refresh} />}
           <LinkedTo doc={d} onChanged={refresh} />
           {own && (
@@ -385,10 +395,14 @@ export function DocumentReview({ id }: { id: number }) {
                   {!form.splits && form.categoryKey !== 'onbekend' && <BusinessShareField supplier={form.supplier} value={form.businessPct} onChange={(v) => setForm({ ...form, businessPct: v })} />}
                   <Field label="Hoe betaald?">
                     <div className="chips">
-                      <button className={form.paidWith === 'bank' || form.paidWith === 'later' ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: d.bank_match ? 'bank' : 'later' })}>Zakelijke rekening</button>
+                      {/* "later" naast een gevonden betaling (de telefoon zei contant of privé, #222): nog niets gekozen, de aankoop blijft open */}
+                      <button className={form.paidWith === 'bank' || (form.paidWith === 'later' && !d.bank_match) ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: d.bank_match ? 'bank' : 'later' })}>Zakelijke rekening</button>
                       <button className={form.paidWith === 'kas' ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: 'kas' })}>Contant</button>
                       <button className={form.paidWith === 'prive' ? 'selected' : ''} onClick={() => setForm({ ...form, paidWith: 'prive' })}>Met privégeld</button>
                     </div>
+                    {form.paidWith === 'later' && d.bank_match && paidWithNote(d) && (
+                      <div className="small muted">{paidWithNote(d).trim()} Weet je het zeker? Kies dan hierboven zelf hoe je betaalde.</div>
+                    )}
                   </Field>
                   {(jobs.data ?? []).length > 0 && (
                     <Field label="Voor een klus?" hint="optioneel">
@@ -400,16 +414,27 @@ export function DocumentReview({ id }: { id: number }) {
                   )}
                 </>
               )}
+              {shownDuplicate && (
+                <div className="notice warn" role="alert" data-testid="mogelijk-dubbel" style={{ marginBottom: 12 }}>
+                  <strong>Staat deze aankoop er al in?</strong>
+                  <div className="small" style={{ marginTop: 4 }}>{shownDuplicate.lead} Kijk het eerst na bij Aankopen & bonnetjes. Is dit een andere aankoop, kies dan “Toch boeken”. Is het dezelfde, kies dan “Negeren”.</div>
+                </div>
+              )}
               <div className="row end">
                 <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
                 <Button kind="primary" disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
+                  if (!shownDuplicate) {
+                    const found = await run(() => api.documents.duplicateOf(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, business: form.business }));
+                    if (found === undefined) return;
+                    if (found) return setDuplicate({ entry, lead: `Lijkt op ${found.label}.${found.detail ? ` ${found.detail}` : ''}` });
+                  }
                   const isInvestment = form.business && !form.splits && form.categoryKey === 'investering';
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, allowDuplicate: !!shownDuplicate, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
                   if (res) {
                     go({ screen: 'aankopen' });
                     if (isInvestment) showInvestmentSaved(investmentInfo(form.total!, form.vatCode, true));
                   }
-                }}>Klopt, verwerken</Button>
+                }}>{shownDuplicate ? 'Toch boeken' : 'Klopt, verwerken'}</Button>
               </div>
               </>
               )}

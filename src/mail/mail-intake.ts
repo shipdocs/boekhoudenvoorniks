@@ -3,7 +3,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { IntakeService } from '../intake/intake';
 import type { SettingsService } from '../settings/settings';
-import { today, type IsoDate } from '../shared/dates';
+import { diffDays, today, type IsoDate } from '../shared/dates';
 
 /** Eén bijlage uit een e-mail. */
 export interface MailAttachment {
@@ -206,6 +206,43 @@ function normalizeAddress(a: string): string {
   return a.trim().toLowerCase();
 }
 
+/** Zoveel dagen na de originele mail telt een doorgestuurde kopie nog als dezelfde mail; een maandfactuur komt later. */
+export const COPY_WINDOW_DAYS = 21;
+/** Bij de mail die blijft liggen omdat hij een kopie is van een mail die al verwerkt is (#229). */
+export const COPY_NOTE = 'kopie van een mail die al verwerkt is';
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Staat dit nummer als heel woord in de tekst? "0917" in "20260917" of "A-0917-B" telt niet. */
+function hasNumber(text: string, number: string): boolean {
+  return new RegExp(`(^|[^\\w-])${escapeRe(number)}([^\\w-]|$)`, 'i').test(text);
+}
+
+/** Een nummer waar je een factuur aan herkent: lang genoeg, met een cijfer, en geen jaartal ("2026" staat in elke datum). */
+function usableNumber(number: string): boolean {
+  return number.length >= 4 && /\d/.test(number) && !/^(19|20)\d{2}$/.test(number);
+}
+
+/** Bedragen in een tekst, in centen ("€ 1.234,56", "12.99"). Een datum als 01.09.2026 telt niet. */
+function amountsIn(text: string): Set<number> {
+  const out = new Set<number>();
+  for (const m of text.matchAll(/(?<![\d.,])(\d{1,3}(?:[.,]\d{3})+|\d+)[.,](\d{2})(?![.,]?\d)/g)) out.add(Number(m[1]!.replace(/[.,]/g, '')) * 100 + Number(m[2]));
+  return out;
+}
+
+/** Nummers die de tekst zelf een factuur-, bestel- of bonnummer noemt ("Bestelnummer: 880377", "Order #1001"). */
+function labelledNumbers(text: string): string[] {
+  const re = /\b(?:factuur|bestel|order|kassabon|bon|invoice|receipt)(?:[\s-]?(?:nummer|nr|number|no)\b\.?\s*[:#]?|\s*#)\s*([a-z0-9][\w/.-]{2,})/gi;
+  return [...text.matchAll(re)].map((m) => m[1]!.replace(/[.,;:]+$/, '').toLowerCase()).filter((n) => /\d/.test(n));
+}
+
+/** Onderwerp om te vergelijken: zonder hoofdletters, dubbele spaties en "Fw:", "Fwd:" of "Re:" ervoor. */
+function bareSubject(subject: string): { subject: string; forwarded: boolean } {
+  const clean = subject.slice(0, 300).replace(/\s+/g, ' ').trim().toLowerCase();
+  const bare = clean.replace(/^(?:(?:re|fwd?|doorst|antw|tr|wg|aw)\s*:\s*)+/, '');
+  return { subject: bare, forwarded: bare !== clean };
+}
+
 /**
  * Inkomende post: haalt bonnetjes en facturen uit een apart mailadres voor de administratie.
  *
@@ -342,6 +379,68 @@ export class MailIntakeService {
     return numbers.some((n) => new RegExp(`(^|[^\\w-])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\w-]|$)`).test(haystack));
   }
 
+  /** Wat de app weet van de documenten uit een eerdere mail: factuurnummers en totaalbedragen (ook in een vreemde munt). */
+  private documentFacts(ids: number[]): { numbers: string[]; totals: Set<number> } {
+    const numbers: string[] = [];
+    const totals = new Set<number>();
+    const add = (number: string | null | undefined, total: number | null | undefined) => {
+      const n = (number ?? '').trim().toLowerCase();
+      if (usableNumber(n) && !numbers.includes(n)) numbers.push(n);
+      if (total) totals.add(Math.abs(total));
+    };
+    for (const id of ids) {
+      const row = this.db.prepare('SELECT d.result, p.supplier_reference, p.total FROM documents d LEFT JOIN purchase_invoices p ON p.id = d.purchase_invoice_id WHERE d.id = ?').get(id) as { result: string | null; supplier_reference: string | null; total: number | null } | undefined;
+      if (!row) continue;
+      const result = row.result ? (JSON.parse(row.result) as { invoiceNumber?: { value?: string } | null; total?: { value?: number } | null; foreign?: { total?: number } | null }) : null;
+      add(result?.invoiceNumber?.value, result?.total?.value);
+      add(null, result?.foreign?.total);
+      // na het controleren: wat de gebruiker zelf verbeterde
+      add(row.supplier_reference, row.total);
+    }
+    return { numbers, totals };
+  }
+
+  /**
+   * Een doorgestuurde kopie ("Fw:", "Fwd:", "Re:") zonder bijlage van een mail waarvan de bijlage (of de
+   * tekst) al een document is (#229): er is niets meer te doen. Alleen als jij hem zelf doorstuurt of de
+   * afzender van toen hem nog eens stuurt, én de inhoud die van toen is. Hetzelfde onderwerp zegt weinig
+   * ("Uw factuur", "Bedankt voor je bestelling"), dus:
+   *  - het factuurnummer van toen staat erin (als heel woord): een kopie, ook later nog;
+   *  - anders alleen kort na de originele mail (de factuur van een volgende maand heeft vaak hetzelfde
+   *    onderwerp en is wel nieuw). Staat er in de tekst zelf een bon, dan moet het bedrag van toen erin staan
+   *    en geen ander factuur- of bestelnummer. Staat er alleen een link naar een factuur in, dan moet de
+   *    afzender van toen in de doorgestuurde tekst staan. Staat er geen van beide in, dan valt er niets te doen.
+   * Bij twijfel is het geen kopie: de mail gaat de gewone weg (bon uit de tekst met de dubbel-controle, of
+   * het seintje dat de factuur online staat), zodat er nooit stil een aankoop wegvalt.
+   */
+  private isCopyOfProcessed(m: MailMessage, fromOwner: boolean, own: Set<string>): boolean {
+    const { subject, forwarded } = bareSubject(m.subject);
+    if (!forwarded || !subject) return false;
+    const from = normalizeAddress(m.fromAddress);
+    const earlier = (this.db.prepare(`SELECT from_address, subject, received_on, document_ids FROM mail_messages WHERE outcome = 'bijlage' AND subject IS NOT NULL`).all() as Pick<MailRecord, 'from_address' | 'subject' | 'received_on' | 'document_ids'>[])
+      .filter((r) => bareSubject(r.subject!).subject === subject && (fromOwner || normalizeAddress(r.from_address ?? '') === from));
+    if (earlier.length === 0) return false;
+    const text = `${m.subject}\n${m.text}`;
+    const receipt = looksLikeReceipt(m);
+    const link = onlineInvoiceDomain(m) !== null;
+    const amounts = amountsIn(text);
+    const named = labelledNumbers(text);
+    return earlier.some((r) => {
+      const facts = this.documentFacts(JSON.parse(r.document_ids) as number[]);
+      if (facts.numbers.some((n) => hasNumber(text, n))) return true;
+      const days = r.received_on ? diffDays(r.received_on, m.date) : null;
+      if (days === null || days < 0 || days > COPY_WINDOW_DAYS) return false;
+      if (receipt) {
+        // een bon in de tekst: alleen dezelfde als het bedrag van toen erin staat en er geen ander nummer genoemd wordt
+        const otherNumber = facts.numbers.length > 0 && named.some((n) => !facts.numbers.includes(n));
+        return !otherNumber && [...facts.totals].some((t) => amounts.has(t));
+      }
+      if (!link) return true;
+      const sender = normalizeAddress(r.from_address ?? '');
+      return !fromOwner || (sender !== '' && !own.has(sender) && text.toLowerCase().includes(sender));
+    });
+  }
+
   async poll(source: MailSource, asOf: IsoDate = today()): Promise<PollResult> {
     const cfg = this.settings.get().mailIn;
     const result: PollResult = { documents: 0, onlineInvoices: 0, fromCustomers: 0, other: 0, errors: 0, missingFolders: [] };
@@ -408,8 +507,9 @@ export class MailIntakeService {
             // een kopie (bcc) van je eigen factuur of offerte: geen inkoop
             this.record(key, folder, uid, m, 'eigen');
             result.other++;
-          } else if (customers.has(from)) {
-            // klant: niet aankomen, ook geen bijlagen als bonnetje (bv. een getekende offerte)
+          } else if (customers.has(from) && !own.has(from)) {
+            // klant: niet aankomen, ook geen bijlagen als bonnetje (bv. een getekende offerte). Je eigen adres is
+            // nooit een klant, ook niet als je eigen bedrijf als klant in de app staat (#229)
             this.record(key, folder, uid, m, 'klant', { relationId: customers.get(from)! });
             result.fromCustomers++;
           } else {
@@ -420,6 +520,10 @@ export class MailIntakeService {
               const movedTo = await this.moveProcessed(source, uid, main);
               this.finish(key, added, () => this.record(key, folder, uid, m!, 'bijlage', { documentIds: added.ids, movedTo }));
               result.documents += added.ids.length;
+            } else if (this.isCopyOfProcessed(m, own.has(from), own)) {
+              // de factuur uit de originele mail staat er al: geen tweede bon uit de tekst en geen seintje (#229)
+              this.record(key, folder, uid, m, 'overig', { note: COPY_NOTE });
+              result.other++;
             } else if (this.pdf && looksLikeReceipt(m)) {
               // de bon staat in de mail zelf (webshop, app): de tekst als PDF bewaren
               const added = await this.addBodyAsReceipt(key, m, asOf);
@@ -484,11 +588,12 @@ export class MailIntakeService {
     return r;
   }
 
-  /** Voor Vandaag: facturen die online staan en mail van klanten. */
+  /** Voor Vandaag: facturen die online staan en mail van klanten. Mail van je eigen adres is geen mail van een klant (#229). */
   attention(): (MailRecord & { relation_name: string | null })[] {
-    return this.db
+    const own = this.ownAddresses();
+    return (this.db
       .prepare(`SELECT m.*, r.name AS relation_name FROM mail_messages m LEFT JOIN relations r ON r.id = m.relation_id WHERE m.outcome IN ('online-factuur','klant') ORDER BY m.id DESC LIMIT 50`)
-      .all() as (MailRecord & { relation_name: string | null })[];
+      .all() as (MailRecord & { relation_name: string | null })[]).filter((m) => !(m.outcome === 'klant' && own.has(normalizeAddress(m.from_address ?? ''))));
   }
 
   /** Mail van deze klant (nieuwste eerst), voor het seintje bij de klant en de factuur. */

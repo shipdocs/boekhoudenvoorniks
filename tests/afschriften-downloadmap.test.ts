@@ -11,6 +11,7 @@ import { sanitizeForExchange } from '../src/exchange/exchange';
 import { LOOK_BACK_DAYS, MAX_STATEMENT_BYTES, type FolderAccess } from '../src/import/statement-folder';
 import { bankOfIban, GENERAL_STATEMENT_HELP, statementHelp } from '../src/shared/bank-statement-help';
 import type { Task } from '../src/inbox/inbox';
+import { addDays, today } from '../src/shared/dates';
 
 /**
  * Afschriften uit je downloadmap (#184, deel 2), met een echte (tijdelijke) map. De app kijkt alleen na
@@ -237,9 +238,10 @@ describe('afschriften uit de downloadmap', () => {
     await t.scan();
     const [q] = t.questions();
     const a = api(t.s, t.dir);
+    // de knop op Vandaag rekent met de datum van vandaag: de vraag komt morgen terug
     await a.home.act(q!, 'niet-nu');
-    expect(t.questions('2026-10-01')).toEqual([]);
-    expect(t.questions('2026-10-02')).toHaveLength(1);
+    expect(t.questions(today())).toEqual([]);
+    expect(t.questions(addDays(today(), 1))).toHaveLength(1);
     await a.home.act(q!, 'niet-nu');
     t.s.statementFolder.notNow(q!.ref.statementId!, '2026-10-03');
     expect(t.rows()).toEqual([{ status: 'afgewezen', filename: 'afschrift.xml', present: 1 }]);

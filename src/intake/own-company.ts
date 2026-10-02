@@ -8,6 +8,8 @@ export interface OwnIdentity {
   kvkNumber: string;
   /** het rekeningnummer op je facturen en je eigen bankrekeningen */
   ibans: string[];
+  /** het e-mailadres van je bedrijf (om een verkoop aan jezelf te herkennen, #231) */
+  email?: string;
 }
 
 /**
@@ -105,4 +107,36 @@ export function detectOwnInvoice(result: DocumentResult, own: OwnIdentity, isOwn
   // alleen je eigen rekeningnummer zegt te weinig: dat staat er ook op bij "wordt afgeschreven van rekening …"
   if (signals.length === 1 && !payee) return { level: 'waarschijnlijk', signals };
   return null;
+}
+
+/** De klant van een verkoop zoals een koppeling (webshop, Mollie Facturen) hem doorgeeft. */
+export interface SaleCustomer {
+  name: string;
+  email?: string | null;
+  vatNumber?: string | null;
+  kvkNumber?: string | null;
+}
+
+/**
+ * Een verkoop aan je eigen bedrijf (#231), bv. een proefabonnement op je eigen dienst dat je eigen bedrijf
+ * betaalt: de spiegel van `detectOwnInvoice`. De klant heeft dan jouw bedrijfsnaam, btw-nummer, KvK-nummer
+ * of het e-mailadres van je bedrijf (Instellingen → Bedrijf). Heeft de klant een ander btw- of KvK-nummer,
+ * dan is het een ander bedrijf, ook met dezelfde naam. Twee of meer aanwijzingen = zeker, één =
+ * waarschijnlijk; in beide gevallen boekt de app niets vanzelf en volgt eerst de vraag wat het was.
+ */
+export function detectOwnCustomer(customer: SaleCustomer, own: OwnIdentity): OwnInvoice | null {
+  const ownVat = compact(own.vatNumber);
+  const ownKvk = own.kvkNumber.replace(/\D/g, '');
+  const ownEmail = (own.email ?? '').trim().toLowerCase();
+  const vat = compact(customer.vatNumber ?? '');
+  const kvk = (customer.kvkNumber ?? '').replace(/\D/g, '');
+  if ((vat && vat !== ownVat) || (kvk && kvk !== ownKvk)) return null;
+
+  const signals: string[] = [];
+  if (sameCompanyName(customer.name, own.name)) signals.push('de klant heeft je eigen bedrijfsnaam');
+  if (vat) signals.push('de klant heeft je eigen btw-nummer');
+  if (kvk) signals.push('de klant heeft je eigen KvK-nummer');
+  if (ownEmail && (customer.email ?? '').trim().toLowerCase() === ownEmail) signals.push('de klant heeft het e-mailadres van je bedrijf');
+  if (signals.length === 0) return null;
+  return { level: signals.length >= 2 ? 'zeker' : 'waarschijnlijk', signals };
 }
