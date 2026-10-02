@@ -125,6 +125,8 @@ export class BankFeedService {
    * Ponto-id's in `saveLinks` te valideren (regel 7). Expliciet: pas na een geslaagde `test()`.
    */
   private lastTest: { accounts: PontoAccount[]; creds: PontoCredentials } | null = null;
+  /** Alleen de laatst gestarte verbindingstest mag het bewaarbare resultaat opleveren. */
+  private testGeneration = 0;
   /** Eén gedeelde single-flight-lock (regel 9); #253 en #247 hergebruiken dezelfde. */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -216,6 +218,7 @@ export class BankFeedService {
   async test(creds: PontoCredentials): Promise<{ accounts: FeedTestAccount[] }> {
     const blocked = this.blocked();
     if (blocked !== null) throw new ValidationError(blocked);
+    const generation = ++this.testGeneration;
     // Een nieuwe expliciete testpoging maakt een ouder resultaat ongeldig. Na een mislukte
     // hertest mogen rekeningen of andere credentials nooit alsnog met dat oude resultaat
     // worden opgeslagen.
@@ -247,6 +250,9 @@ export class BankFeedService {
     const accounts: FeedTestAccount[] = [];
     for (const account of found) {
       accounts.push(this.describeAccount(account, existing));
+    }
+    if (generation !== this.testGeneration) {
+      throw new ValidationError('Er is inmiddels een nieuwere verbindingstest gestart; gebruik daarvan het resultaat.');
     }
     // regel 7: het laatste expliciete testresultaat van deze instantie, waartegen saveLinks valideert
     this.lastTest = { accounts: found, creds: testedCreds };
