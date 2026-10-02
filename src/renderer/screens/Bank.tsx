@@ -195,7 +195,7 @@ export function Bank({ focus, skippedFor, imported, double, same }: { /** vanaf 
               <td>{st.lastImport ? <>{formatDateTime(st.lastImport.at)}<div className="small muted">{st.lastImport.filename ?? st.lastImport.source.toUpperCase()}</div></> : <span className="muted">nog nooit</span>}</td>
               <td>{st.lastImport ? <><DateNl date={st.lastImport.from} /> t/m <DateNl date={st.lastImport.to} /><div className="small muted">{st.lastImport.transactions} betalingen, {st.lastImport.imported} nieuw</div></> : '—'}
                 {st.skipped > 0 && <div className="small"><button className="linklike" onClick={() => setReview({ bankAccountId: st.bankAccountId })}>{st.skipped === 1 ? '1 regel stond er al' : `${st.skipped} regels stonden er al`}: bekijken</button></div>}</td>
-              <td>{st.coverageTo ? <><DateNl date={st.coverageTo} />{staleDays(st.coverageTo) >= 14 && <div><span className="pill warn">{staleDays(st.coverageTo)} dagen geleden</span></div>}</> : '—'}</td>
+              <td>{st.completeTo ? <><DateNl date={st.completeTo} />{staleDays(st.completeTo) >= 14 && <div><span className="pill warn">{staleDays(st.completeTo)} dagen geleden</span></div>}</> : '—'}</td>
               <td className="num" style={{ whiteSpace: 'nowrap' }}>
                 <Button small kind="ghost" onClick={() => setEditing({ id: st.bankAccountId, name: st.name, iban: st.iban, isPot: Boolean(accounts.data?.find((a) => a.id === st.bankAccountId)?.is_pot) })}>Wijzigen</Button>
                 <Button small kind="ghost" onClick={() => setOpening({ id: st.bankAccountId, name: st.name })}>Beginsaldo</Button>

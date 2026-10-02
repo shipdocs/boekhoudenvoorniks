@@ -127,7 +127,7 @@ describe('"Waarom?" en autopilot (#28, #29)', () => {
     s.settings.update({ onboardingDone: true });
     for (const k of [1, 2, 3]) s.memory.learn('SHELL', { categoryKey: 'auto', vatCode: 'hoog', business: true });
     s.memory.setAutomatic(s.memory.get('SHELL')!.supplier_key, true);
-    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-20', amount: -6050, description: 'Tank', counterName: 'SHELL' }] });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-19', amount: -6050, description: 'Tank', counterName: 'SHELL' }] });
     expect(s.inbox.autoProcess('2026-09-20').booked).toBe(1);
     s.db.prepare(`UPDATE automation_log SET created_at = '2026-09-20 12:00:00'`).run(); // het logboek noteert het echte moment; deze test speelt in september 2026
     const month = s.inbox.month('2026-09', '2026-09-20');
@@ -143,6 +143,26 @@ describe('"Waarom?" en autopilot (#28, #29)', () => {
     expect(s.memory.isAutomatic(s.memory.get('SHELL'))).toBe(false);
     expect(s.inbox.home('2026-09-21').monthCounts.automatic).toBe(0);
     expect(s.ledger.balance(ACCOUNTS.bank)).toBe(0); // boeking teruggedraaid; de betaling wacht weer op een antwoord
+  });
+
+  it('bank: een betaling van vandaag staat er meteen, maar vanzelf boeken gebeurt pas een dag later (#226)', () => {
+    const { s } = setup();
+    s.settings.update({ onboardingDone: true });
+    for (const k of [1, 2, 3]) s.memory.learn('SHELL', { categoryKey: 'auto', vatCode: 'hoog', business: true });
+    s.memory.setAutomatic(s.memory.get('SHELL')!.supplier_key, true);
+    s.bank.import({ source: 'csv', warnings: [], transactions: [
+      { date: '2026-09-19', amount: -6050, description: 'Tank', counterName: 'SHELL' },
+      { date: '2026-09-20', amount: -4840, description: 'Tank', counterName: 'SHELL' },
+    ] });
+    // de export van 20 september is van die dag zelf: alleen de betaling van gisteren gaat vanzelf
+    expect(s.inbox.autoProcess('2026-09-20').booked).toBe(1);
+    const [today] = s.bank.list({ status: 'nieuw' });
+    expect(today).toMatchObject({ transaction_date: '2026-09-20', amount: -4840 });
+    // importeren en tonen blijven direct: de betaling staat als vraag op Vandaag en is zelf in te delen
+    expect(s.inbox.tasks('2026-09-20').find((t) => t.ref.bankTransactionId === today!.id)).toMatchObject({ kind: 'bank-category' });
+    // een dag later boekt de app hem alsnog zelf
+    expect(s.inbox.autoProcess('2026-09-21').booked).toBe(1);
+    expect(s.bank.list({ status: 'nieuw' })).toHaveLength(0);
   });
 
   it('voorzichtig: niets gaat automatisch; een taak afhandelen telt als "door jou"', async () => {

@@ -138,7 +138,10 @@ export interface HomeData {
     /** banksaldo − te reserveren btw − openstaande rekeningen */
     freeToSpend: Cents;
   };
-  /** t/m welke datum de bankgegevens bijgewerkt zijn (laatste transactiedatum over alle rekeningen) */
+  /**
+   * t/m welke datum de bankgegevens bijgewerkt zijn, over alle rekeningen. Een dag telt pas als het afschrift
+   * ná die dag is ingelezen (#226): met een export van vandaag ben je bij t/m gisteren.
+   */
   bankUpdatedTo: IsoDate | null;
   vat: { periodLabel: string; deadline: IsoDate; deadlineLabel: string; estimate: Cents };
   tasks: Task[];
@@ -316,6 +319,9 @@ export class InboxService {
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
       if (t.amount >= 0 || !t.counter_name || held.has(t.id)) continue;
       if (firstOpen && t.transaction_date < firstOpen) continue; // vergrendelde periode: niet boeken
+      // een betaling van vandaag (#226): de dag is nog niet voorbij, het afschrift ervan is dus niet compleet.
+      // Hij staat er meteen en is zelf in te delen; vanzelf boeken doet de app pas vanaf morgen
+      if (t.transaction_date >= asOf) continue;
       if (this.bank.ownTransferTarget(t)) continue; // eigen overboeking: nooit als kosten
       if (this.own?.isOwnPayment(t)) continue; // betaling aan je eigen bedrijf (#205): nooit vanzelf, altijd de vraag
       const rule = this.memory.get(t.counter_name);
@@ -755,14 +761,14 @@ export class InboxService {
     if (s.onboardingDone && s.profile.hasBusinessAccount) {
       const watching = this.statements?.available && this.statements.config().enabled;
       for (const st of this.bank.importStatus()) {
-        const days = st.coverageTo ? diffDays(st.coverageTo, asOf) : null;
+        const days = st.completeTo ? diffDays(st.completeTo, asOf) : null;
         if (days !== null && days < BANK_STALE_DAYS) continue;
         tasks.push({
           key: `bank-stale-${st.bankAccountId}`,
           kind: 'bank-stale',
           icon: '🏦',
-          title: st.coverageTo ? `${st.name}: bank bijgewerkt tot ${formatDateNl(st.coverageTo)}` : `${st.name}: nog geen bankafschrift ingelezen`,
-          question: st.coverageTo
+          title: st.completeTo ? `${st.name}: bank bijgewerkt tot ${formatDateNl(st.completeTo)}` : `${st.name}: nog geen bankafschrift ingelezen`,
+          question: st.completeTo
             ? `Dat is ${days} dagen geleden. Download een nieuw afschrift bij je bank${watching ? ': de app ziet het in je downloadmap en vraagt of hij het mag inlezen' : ' en sleep het in de app'}. Dan zoeken we uit wat bij welke factuur hoort. ${statementHelp(st.iban)}`
             : `Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes. ${statementHelp(st.iban)}`,
           actions: [{ id: 'open', label: 'Afschrift inlezen', primary: true }],
@@ -1489,7 +1495,7 @@ export class InboxService {
     const deadline = vatDeadline(current.end, s.vatPeriod);
     const kinds = new Set(tasks.map((t) => t.kind));
     const status = this.bank.importStatus();
-    const bankUpdatedTo = status.map((st) => st.coverageTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
+    const bankUpdatedTo = status.map((st) => st.completeTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
       { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') && !kinds.has('bank-double') && !kinds.has('bank-same') },
       { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement', 'bank-double', 'bank-same'].includes(k)) },

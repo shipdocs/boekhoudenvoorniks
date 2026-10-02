@@ -63,6 +63,11 @@ export interface BankImportStatus {
   /** eerste en laatste transactiedatum van alle ingelezen afschriften samen */
   coverageFrom: string | null;
   coverageTo: string | null;
+  /**
+   * t/m welke dag de bankgegevens compleet zijn (#226). Een dag telt pas als het afschrift ná die dag is
+   * ingelezen: een export van vandaag mist wat er later vandaag nog bij komt.
+   */
+  completeTo: string | null;
   totalTransactions: number;
   /** regels die zijn overgeslagen omdat de betaling er al stond (en niet alsnog toegevoegd), of die als dubbel uit de boekhouding zijn gehaald */
   skipped: number;
@@ -1264,6 +1269,17 @@ export class BankService {
       const coverage = this.db
         .prepare('SELECT MIN(transaction_date) AS f, MAX(transaction_date) AS t, COUNT(*) AS n FROM bank_transactions WHERE bank_account_id = ?')
         .get(a.id) as { f: string | null; t: string | null; n: number };
+      // per afschrift: de laatste dag ervan, maar hooguit de dag vóór het inlezen; een betaling zonder afschrift
+      // (met de hand toegevoegd) telt vanaf de dag nadat hij erin kwam
+      const complete = this.db
+        .prepare(
+          `SELECT MAX(d) AS d FROM (
+             SELECT MIN(s.period_to, date(b.imported_at, 'localtime', '-1 day')) AS d
+               FROM import_batch_accounts s JOIN import_batches b ON b.id = s.batch_id WHERE s.bank_account_id = @id
+             UNION ALL
+             SELECT MIN(transaction_date, date(created_at, 'localtime', '-1 day')) FROM bank_transactions WHERE bank_account_id = @id AND import_batch_id IS NULL)`,
+        )
+        .get({ id: a.id }) as { d: string | null };
       return {
         bankAccountId: a.id,
         name: a.name,
@@ -1273,6 +1289,7 @@ export class BankService {
           : null,
         coverageFrom: coverage.f,
         coverageTo: coverage.t,
+        completeTo: complete.d,
         totalTransactions: coverage.n,
         skipped:
           (this.db.prepare('SELECT COUNT(*) AS n FROM import_skipped WHERE bank_account_id = ? AND added_transaction_id IS NULL').get(a.id) as { n: number }).n +

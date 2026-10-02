@@ -94,7 +94,10 @@ describe('inbox: "Ben ik bij?"', () => {
     expect(ask.actions.map((a) => a.id)).toEqual(['ja', 'nee']);
     s.memory.setAutomatic(ask.ref.supplierKey!, true);
     s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-16', amount: -8800, description: 'Pin', counterName: 'PRAXIS UTRECHT' }] });
-    expect(s.inbox.autoProcess('2026-09-16')).toMatchObject({ booked: 1 });
+    // een betaling van vandaag staat er meteen, als vraag; vanzelf boeken doet de app pas een dag later (#226)
+    expect(s.inbox.autoProcess('2026-09-16')).toMatchObject({ booked: 0 });
+    expect(s.inbox.tasks('2026-09-16').find((t) => t.amount === -8800)).toMatchObject({ kind: 'bank-category' });
+    expect(s.inbox.autoProcess('2026-09-17')).toMatchObject({ booked: 1 });
     expect(s.inbox.home('2026-09-16').automated[0]!.summary).toContain('PRAXIS');
     expect(s.inbox.tasks('2026-09-16').some((t) => t.amount === -8800)).toBe(false);
 
