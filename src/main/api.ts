@@ -1195,8 +1195,10 @@ export function createApi(s: Services, host: HostContext) {
         const t = s.bank.get(Number(txId));
         const q = t.status === 'nieuw' ? s.bookedPayments.matcher.question(t) : null;
         if (!q) return null;
-        // de factuur van je eigen bedrijf die al bij deze betaling hoort, staat in de melding daarover (#230): niet nog een keer hier
-        const ownPurchase = s.ownCompany.match(t)?.purchase?.id ?? null;
+        // de factuur van je eigen bedrijf die al bij deze betaling hoort, staat in de melding daarover (#230): niet nog
+        // een keer hier. Past er ook een andere aankoop sterk bij, dan staan ze hier allebei: eerst kiezen.
+        const own = s.ownCompany.match(t);
+        const ownPurchase = own && !own.mustAnswer ? own.purchase?.id ?? null : null;
         const fits = [q.fit, ...q.others].filter((f) => f.purchase.id !== ownPurchase);
         if (fits.length === 0) return null;
         return {

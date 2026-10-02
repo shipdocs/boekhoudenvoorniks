@@ -414,18 +414,19 @@ export class InboxService {
    * twee keer in. Naar "weet ik nog niet" ook niet naast een aankoop met dit bedrag die daar al staat (#223).
    * Een betaling aan je eigen bedrijf (#230) gaat via de gewone indeling dezelfde weg als via
    * de vraag op Vandaag: privé of "weet ik nog niet" neemt de factuur mee (`gedaan`: er is niets meer te
-   * boeken). Iets anders kan alleen als er geen factuur van je eigen bedrijf bij hoort.
+   * boeken). Iets anders kan alleen als er geen factuur van je eigen bedrijf bij hoort. Ook hier gaat de
+   * vraag bij een andere aankoop die sterk past voor (`mustAnswer`).
    */
   private guardBank(t: BankTransaction, account: string | undefined): 'door' | 'gedaan' {
     if (t.amount >= 0) return 'door';
-    if (this.own?.isOwnPayment(t)) {
+    const m = this.own?.match(t);
+    if (m && !m.mustAnswer) {
       const choice = account === ACCOUNTS.vraagposten ? 'vraag' : account === ACCOUNTS.priveOpnamen ? 'prive' : null;
       if (choice) {
-        this.own.settle(t.id, choice);
+        this.own!.settle(t.id, choice);
         return 'gedaan';
       }
-      const m = this.own.match(t);
-      if (m?.document || m?.purchase) throw new ValidationError('Bij deze betaling hoort een factuur van je eigen bedrijf. Kies "Privé" of "Weet ik nog niet": de factuur gaat dan mee.');
+      if (m.document || m.purchase) throw new ValidationError('Bij deze betaling hoort een factuur van je eigen bedrijf. Kies "Privé" of "Weet ik nog niet": de factuur gaat dan mee.');
     }
     this.matcher.assertAnswered(t, account);
     return 'door';
@@ -567,8 +568,10 @@ export class InboxService {
       // betaling aan je eigen bedrijf (#205), bv. een abonnement op je eigen dienst: één vraag voor de
       // betaling en de factuur samen, met alleen privé of "weet ik nog niet" als keuze. Privé is het
       // voorstel (#230): je betaalt jezelf, en "weet ik nog niet" houdt de btw-aangifte tegen.
-      const ownMatch = this.own?.match(t);
-      if (ownMatch) {
+      // Past er een andere aankoop sterk bij (gewone kosten, of al op privé of contant betaald), dan eerst
+      // de vraag bij die aankoop hieronder: anders komt de betaling er los naast.
+      const ownMatch = this.own?.match(t, index);
+      if (ownMatch && !ownMatch.mustAnswer) {
         const doc = ownMatch.document;
         if (doc) ownDocuments.add(doc.id);
         const paid = `Op ${formatDateNl(t.transaction_date)} is ${formatEuro(-t.amount)} van je rekening naar ${who} gegaan`;
