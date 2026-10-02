@@ -3,6 +3,7 @@ import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { setup } from './helpers';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
 import type { FetchLike } from '../src/integrations/types';
+import { mapMollieSalesInvoice } from '../src/integrations/mollie';
 
 function mockFetch(routes: Record<string, unknown>, calls: string[] = []): FetchLike {
   return async (url, init) => {
@@ -162,6 +163,32 @@ describe('integraties (fase 3)', () => {
     expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(0);
     expect(s.ledger.balance(ACCOUNTS.kruisposten)).toBe(11611);
     expect(s.ledger.balance(ACCOUNTS.bankkosten)).toBe(404);
+  });
+
+  describe('Mollie Facturen: vatMode', () => {
+    const base = {
+      id: 'invoice_9',
+      status: 'paid',
+      invoiceNumber: 'I-0099',
+      currency: 'EUR',
+      recipient: { type: 'consumer' as const, givenName: 'Jan', familyName: 'Jansen', email: 'jan@example.nl', streetAndNumber: null, postalCode: null, city: null, country: 'NL' },
+      issuedAt: '2026-09-01T00:00:00Z',
+      paidAt: '2026-09-03T00:00:00Z',
+      createdAt: '2026-09-01T00:00:00Z',
+    };
+    const line = (value: string) => ({ description: 'Abonnement', quantity: 1, vatRate: '21.00', unitPrice: { value, currency: 'EUR' } });
+
+    it('inclusive: rekent terug naar exclusief, totaal blijft het bedrag op de factuur', () => {
+      const o = mapMollieSalesInvoice({ ...base, vatMode: 'inclusive', lines: [line('10.89')] });
+      expect(o.lines[0]!.unitPriceExVat).toBe(900);
+    });
+    it('exclusive en ontbrekende vatMode: bedrag ongewijzigd', () => {
+      expect(mapMollieSalesInvoice({ ...base, vatMode: 'exclusive', lines: [line('9.00')] }).lines[0]!.unitPriceExVat).toBe(900);
+      expect(mapMollieSalesInvoice({ ...base, lines: [line('9.00')] }).lines[0]!.unitPriceExVat).toBe(900);
+    });
+    it('onbekende vatMode: niet raden maar een fout met uitleg', () => {
+      expect(() => mapMollieSalesInvoice({ ...base, vatMode: 'anders', lines: [line('9.00')] })).toThrow(/onbekende btw-instelling/);
+    });
   });
 
   it('Mollie-uitbetaling boekt kosten en voorbelasting; bank sluit aan via kruisposten', async () => {
