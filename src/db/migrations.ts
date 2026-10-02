@@ -1184,4 +1184,30 @@ export const migrations: string[] = [
   DROP TABLE batch_groups;
   DROP TABLE batch_members;
   `,
+  /* 30: creditnota's van leveranciers die ten onrechte op "betaald" stonden (#227) */ `
+  -- Bij een bedrag onder nul was "betaald >= totaal" altijd waar: een creditnota kwam na een aanpassing of na
+  -- een deel van het geld terug op 'betaald', terwijl er nog geld terug moest komen. Die staan weer open, zodat
+  -- de terugbetaling eraan gekoppeld kan worden. Alleen de status: er verandert geen boeking en geen bedrag.
+  UPDATE purchase_invoices SET status = 'open' WHERE total < 0 AND amount_paid > total AND status = 'betaald';
+  `,
+  /* 31: verkoop uit een koppeling die op een antwoord wacht (#231) */ `
+  -- Een verkoop uit een webshop of Mollie Facturen die de app niet vanzelf als omzet boekt, bv. een verkoop
+  -- aan je eigen bedrijf: de order zoals hij binnenkwam, waarom hij wacht en wat de gebruiker koos.
+  -- Zolang answer leeg is, is er niets geboekt. De regel blijft daarna staan: zo komt de order niet opnieuw binnen.
+  -- reason: 'eigen-bedrijf' (#231), 'btw' of 'opnieuw' (#228). answer: het laatste antwoord, bv. 'neutraal'
+  -- (geen omzet en geen btw), 'verkoop' (gewone factuur) of 'niet' (een teruggedraaide factuur niet opnieuw inlezen).
+  CREATE TABLE integration_questions (
+    id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    order_data TEXT NOT NULL,
+    signals TEXT NOT NULL DEFAULT '[]',
+    answer TEXT,
+    journal_entry_id INTEGER REFERENCES journal_entries(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    answered_at TEXT,
+    UNIQUE (source, external_id)
+  );
+  `,
 ];

@@ -125,7 +125,7 @@ describe('integraties (fase 3)', () => {
       status: 'paid',
       invoiceNumber: 'I-0042',
       currency: 'EUR',
-      recipient: { type: 'business', organizationName: 'Scheepvaartbedrijf De Vries', vatNumber: 'NL123456789B01', email: 'info@devries.nl', streetAndNumber: 'Kade 3', postalCode: '3000 AB', city: 'Rotterdam', country: 'NL' },
+      recipient: { type: 'business', organizationName: 'Scheepvaartbedrijf De Vries', vatNumber: 'NL004455667B01', email: 'info@devries.nl', streetAndNumber: 'Kade 3', postalCode: '3000 AB', city: 'Rotterdam', country: 'NL' },
       lines: [{ description: 'AIS-abonnement september', quantity: 1, vatRate: '21.00', unitPrice: { value: '100.00', currency: 'EUR' } }],
       issuedAt: '2026-09-01T00:00:00Z',
       paidAt: '2026-09-03T00:00:00Z',
@@ -151,7 +151,7 @@ describe('integraties (fase 3)', () => {
     expect(r).toMatchObject({ created: 1, skipped: 0 });
     const inv = s.invoices.list()[0]!;
     expect(inv).toMatchObject({ total: 12100, status: 'betaald' });
-    expect(s.relations.list().find((x) => x.name === 'Scheepvaartbedrijf De Vries')).toMatchObject({ vat_number: 'NL123456789B01', email: 'info@devries.nl' });
+    expect(s.relations.list().find((x) => x.name === 'Scheepvaartbedrijf De Vries')).toMatchObject({ vat_number: 'NL004455667B01', email: 'info@devries.nl' });
     expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(12100);
     // een tweede sync maakt geen dubbele factuur
     expect((await s.integrations.sync('mollie-facturen')).created).toBe(0);

@@ -1,5 +1,6 @@
-import { parseEuro } from '../shared/money';
+import { parseEuro, roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { getJson } from './http';
+import { lineAmount, linesFromInclusive, linesTotal, linesTotalWithVat } from './prices';
 import type { ExternalOrder, ExternalPayout, FetchLike, IntegrationDefinition } from './types';
 
 export const MOLLIE: IntegrationDefinition = {
@@ -79,6 +80,8 @@ interface MollieSalesInvoiceRecipient {
   givenName?: string;
   familyName?: string;
   organizationName?: string;
+  /** KvK-nummer (alleen bij een bedrijf) */
+  organizationNumber?: string | null;
   vatNumber?: string | null;
   email: string | null;
   streetAndNumber: string | null;
@@ -87,26 +90,88 @@ interface MollieSalesInvoiceRecipient {
   city: string | null;
   country: string | null;
 }
+/** Korting: een vast bedrag ('amount', in de munt van de factuur) of een percentage ('percentage'). */
+interface MollieDiscount {
+  type: string;
+  value: string;
+}
 interface MollieSalesInvoiceLine {
   description: string;
   quantity: number;
   vatRate: string;
   unitPrice: MollieAmount;
+  discount?: MollieDiscount | null;
 }
 interface MollieSalesInvoice {
   id: string;
   status: string;
   invoiceNumber: string | null;
   currency: string;
+  /**
+   * 'exclusive' (de standaard bij Mollie): de btw komt boven op de prijs per regel. 'inclusive': de prijs per
+   * regel is al inclusief btw.
+   */
+  vatMode?: string | null;
   recipient: MollieSalesInvoiceRecipient;
   lines: MollieSalesInvoiceLine[];
+  /** korting op de hele factuur, boven op de kortingen per regel */
+  discount?: MollieDiscount | null;
+  /** het totaal inclusief btw, zoals Mollie het uitrekende (na kortingen) */
+  totalAmount?: MollieAmount | null;
   issuedAt: string | null;
   paidAt: string | null;
   createdAt: string;
 }
 
+/**
+ * `vatMode` zegt of de prijs per regel inclusief of exclusief btw is (#228). Inclusief: terugrekenen naar
+ * exclusief btw, zodat het totaal blijft wat de klant betaalde. Een waarde die de app niet kent: niet raden;
+ * de regels gaan mee zoals Mollie ze gaf en de gebruiker krijgt de vraag (`pricesUnknown`). Dat geldt ook als
+ * Mollie niets opgeeft (dan geldt de standaard, exclusief) terwijl het totaal alleen bij prijzen inclusief btw
+ * past. Een korting (per regel of op de hele factuur) wordt een eigen regel met een negatief bedrag, tegen
+ * hetzelfde btw-tarief. Het totaal van Mollie gaat mee ter controle: komt de app daar met de regels en de
+ * kortingen niet op uit, dan boekt hij niets. Wat hij niet kan lezen (een btw-tarief, een onbekend soort
+ * korting, een korting zonder totaal om hem mee te controleren) maakt de order `unreadable`: niet raden.
+ */
 export function mapMollieSalesInvoice(inv: MollieSalesInvoice): ExternalOrder {
   const r = inv.recipient;
+  let unreadable: string | undefined;
+  let discounted = false;
+  const lines: ExternalOrder['lines'] = [];
+  for (const l of inv.lines) {
+    const rate = Math.round(parseFloat(l.vatRate));
+    const readable = Number.isFinite(rate) && rate >= 0;
+    if (!readable) unreadable ??= 'het btw-tarief van een regel is niet te lezen';
+    const line = { description: l.description, quantity: l.quantity, unitPriceExVat: parseEuro(l.unitPrice.value), vatPercentage: readable ? rate : 0 };
+    lines.push(line);
+    const off = discountAmount(l.discount, lineAmount(line));
+    if (off === null) unreadable ??= 'een korting op de factuur is niet te lezen';
+    else if (off !== 0) {
+      discounted = true;
+      lines.push({ description: `Korting op ${l.description}`, quantity: 1, unitPriceExVat: -off, vatPercentage: line.vatPercentage });
+    }
+  }
+  // korting op de hele factuur: per btw-tarief, naar verhouding van wat er na de kortingen per regel staat
+  const perRate = new Map<number, Cents>();
+  for (const l of lines) perRate.set(l.vatPercentage, (perRate.get(l.vatPercentage) ?? 0) + lineAmount(l));
+  const whole = discountAmount(inv.discount, linesTotal(lines));
+  if (whole === null) unreadable ??= 'een korting op de factuur is niet te lezen';
+  else if (whole !== 0 && linesTotal(lines) === 0) unreadable ??= 'een korting op de factuur is niet te lezen';
+  else if (whole !== 0) {
+    discounted = true;
+    const base = linesTotal(lines);
+    let left = whole;
+    [...perRate].forEach(([rate, amount], i, all) => {
+      const share = i === all.length - 1 ? left : roundHalfAwayFromZero((whole * amount) / base);
+      left -= share;
+      if (share !== 0) lines.push({ description: 'Korting', quantity: 1, unitPriceExVat: -share, vatPercentage: rate });
+    });
+  }
+  const stated = inv.totalAmount ? parseEuro(inv.totalAmount.value) : undefined;
+  if (discounted && stated === undefined) unreadable ??= 'er staat een korting op de factuur, maar Mollie gaf geen totaal door om die mee te controleren';
+  const contradicted = !inv.vatMode && stated !== undefined && stated === linesTotal(lines) && Math.abs(linesTotalWithVat(lines) - stated) > lines.length;
+  const mode = contradicted ? 'niet opgegeven' : inv.vatMode || 'exclusive';
+  const total = stated ?? (mode === 'inclusive' ? linesTotal(lines) : undefined);
   const name = r.type === 'business' ? r.organizationName || r.email || 'Klant' : [r.givenName, r.familyName].filter(Boolean).join(' ') || r.email || 'Klant';
   return {
     externalId: inv.id,
@@ -120,19 +185,36 @@ export function mapMollieSalesInvoice(inv: MollieSalesInvoice): ExternalOrder {
       city: r.city,
       country: r.country,
       vatNumber: r.type === 'business' ? (r.vatNumber ?? null) : null,
+      kvkNumber: r.type === 'business' ? (r.organizationNumber ?? null) : null,
     },
-    lines: inv.lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPriceExVat: parseEuro(l.unitPrice.value), vatPercentage: Math.round(parseFloat(l.vatRate)) })),
+    lines: mode === 'inclusive' && !unreadable ? linesFromInclusive(lines) : lines,
     paid: inv.status === 'paid',
     currency: inv.currency,
+    ...(total !== undefined ? { total } : {}),
+    ...(mode === 'inclusive' || mode === 'exclusive' ? {} : { pricesUnknown: String(mode) }),
+    ...(unreadable ? { unreadable } : {}),
   };
+}
+
+/** De korting in centen op een bedrag; 0 zonder korting, null als de app de opgave niet kan lezen. */
+function discountAmount(d: MollieDiscount | null | undefined, base: Cents): Cents | null {
+  if (!d) return 0;
+  const value = parseFloat(d.value);
+  if (!Number.isFinite(value) || value < 0) return null;
+  if (d.type === 'percentage') return value <= 100 ? roundHalfAwayFromZero((base * value) / 100) : null;
+  if (d.type === 'amount') return roundHalfAwayFromZero(value * 100);
+  return null;
 }
 
 /**
  * Mollie sorteert nieuwste eerst (zoals bij settlements): stopt zodra een al bekende factuur
  * langskomt. De lijst kent geen datum- of statusfilter, dus overige statussen worden hier al geknipt.
+ * `wanted`: facturen die in de app zijn teruggedraaid en opnieuw bekeken moeten worden (#228); die staan
+ * verder terug, dus de app leest door tot hij ze heeft gehad.
  */
-export async function fetchMollieSalesInvoices(fetchImpl: FetchLike, cfg: { apiKey: string }, knownIds: Set<string>): Promise<ExternalOrder[]> {
+export async function fetchMollieSalesInvoices(fetchImpl: FetchLike, cfg: { apiKey: string }, knownIds: Set<string>, wanted: Set<string> = new Set()): Promise<ExternalOrder[]> {
   const out: ExternalOrder[] = [];
+  const pending = new Set(wanted);
   let url: string | null = 'https://api.mollie.com/v2/sales-invoices?limit=50';
   for (let i = 0; url && i < 20; i++) {
     const page: { _embedded: { invoices: MollieSalesInvoice[] }; _links: { next: { href: string } | null } } = await getJson(fetchImpl, url, { Authorization: `Bearer ${cfg.apiKey}` });
@@ -142,9 +224,10 @@ export async function fetchMollieSalesInvoices(fetchImpl: FetchLike, cfg: { apiK
         reachedKnown = true;
         continue;
       }
+      pending.delete(inv.id);
       if (inv.status === 'paid') out.push(mapMollieSalesInvoice(inv));
     }
-    url = reachedKnown ? null : page._links.next?.href ?? null;
+    url = reachedKnown && pending.size === 0 ? null : page._links.next?.href ?? null;
   }
   return out;
 }

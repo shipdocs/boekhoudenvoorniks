@@ -10,6 +10,7 @@ import { formatEuro, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
 import { parseUblSalesInvoice } from '../intake/ubl';
 import { SKIPPABLE_SECTIONS } from '../shared/switchover';
+import { forgetRejections } from '../documents/bank-purchase-match';
 
 /**
  * Overstappen met een lopende administratie.
@@ -627,6 +628,7 @@ export class SwitchoverService {
     if (item.purchase_invoice_id) {
       this.db.prepare('UPDATE opening_items SET purchase_invoice_id = NULL WHERE id = ?').run(item.id);
       this.db.prepare('DELETE FROM purchase_invoices WHERE id = ? AND is_opening = 1').run(item.purchase_invoice_id);
+      forgetRejections(this.db, item.purchase_invoice_id);
     }
     if (item.asset_id) {
       this.db.prepare('UPDATE opening_items SET asset_id = NULL WHERE id = ?').run(item.id);

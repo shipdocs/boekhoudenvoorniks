@@ -34,6 +34,7 @@ import { EvidenceLinks, sameTarget, targetKey, type DocumentLink, type LinkOrigi
 import type { DocumentOutcome } from '../shared/document-outcome';
 import { detectOwnInvoice, sameCompanyName, OWN_COMPANY_CANDIDATE, OWN_COMPANY_ISSUE, type OwnIdentity, type OwnInvoice } from './own-company';
 import type { PaidWith } from '../shared/paid-with';
+import { BankPurchaseMatcher, BANK_DAYS_BEFORE, SURE_DAYS, dateFits, fitOf, probeOfDocument, sameSupplierName } from '../documents/bank-purchase-match';
 
 
 export interface IntakeDocument {
@@ -58,6 +59,11 @@ export interface IntakeDocument {
   proposed_paid_with: PaidWith | null;
   created_at: string;
   bank_match: BankTransaction | null;
+  /**
+   * Past die betaling ook op leverancier en datum, niet alleen op het bedrag (de gedeelde vergelijking, #221)?
+   * Alleen dan wijkt de betaalwijze van de telefoon ervoor (#222): de aankoop blijft open tot de vraag bij de betaling.
+   */
+  bank_match_strong: boolean;
   /** de aankoop of bankbetaling waar dit document bij hoort (#179); null = nergens aan gekoppeld */
   link: DocumentLink | null;
   /** wat er met het document gebeurd is: geboekt, alleen bewijs, dubbel, of nog controleren */
@@ -122,9 +128,11 @@ export interface Confirmation {
   vatAmount?: Cents | null;
   /** zakelijk deel in procenten (1–100); weglaten = wat eerder voor deze leverancier gold, anders 100 */
   businessPct?: number;
+  /** "Toch boeken": de gebruiker zag dat er al een aankoop of bon staat die lijkt op wat hij hier heeft verbeterd (#224) */
+  allowDuplicate?: boolean;
 }
 
-type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'decisions' | 'link' | 'outcome'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
+type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'bank_match_strong' | 'decisions' | 'link' | 'outcome'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
 
 const MIME: Record<string, string> = { pdf: 'application/pdf', xml: 'application/xml', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
 
@@ -182,9 +190,14 @@ export interface DuplicateMatch {
   /** het bestaande document is het bewijs bij deze bankbetaling */
   bankTransactionId?: number | null;
   label: string;
-  /** waarom het niet zeker is */
-  reason?: 'datum' | 'nummer' | 'soort';
+  /** waarom het niet zeker is; bedrag = zelfde nummer maar een ander bedrag, leverancier = de naam is net anders geschreven */
+  reason?: 'datum' | 'nummer' | 'soort' | 'bedrag' | 'leverancier';
+  /** bij een ander bedrag: beide bedragen in een zin, voor in de vraag */
+  detail?: string;
 }
+
+/** De vraag bij een mogelijke kopie: waar hij op lijkt, en bij een ander bedrag welke bedragen het zijn. */
+export const duplicateLead = (match: Pick<DuplicateMatch, 'label' | 'detail'>): string => `Lijkt op ${match.label}.${match.detail ? ` ${match.detail}` : ''}`;
 
 /** Wat er van een document of aankoop nodig is om te zien of het hetzelfde is. */
 export interface DuplicateProbe {
@@ -217,7 +230,7 @@ function probeOf(r: DocumentResult): DuplicateProbe {
   const number = r.invoiceNumber?.value ? normalizeInvoiceNumber(r.invoiceNumber.value) : '';
   return {
     number: number || null,
-    reliable: number.length >= 3 && (r.invoiceNumber?.confidence ?? 0) >= RELIABLE_NUMBER_CONFIDENCE,
+    reliable: number.length >= MIN_NUMBER_LENGTH && (r.invoiceNumber?.confidence ?? 0) >= RELIABLE_NUMBER_CONFIDENCE,
     date: r.invoiceDate?.value ?? null,
     credit: r.documentType?.value === 'credit_note' || (r.total?.value ?? 0) < 0,
   };
@@ -235,6 +248,26 @@ export function documentFingerprint(r: DocumentResult | null): string {
     r?.invoiceNumber?.value ? normalizeInvoiceNumber(r.invoiceNumber.value) : null,
   ]);
 }
+
+/** Wat de dubbel-controle nodig heeft van een bon die binnenkomt of een aankoop die met de hand wordt ingevoerd. */
+interface DuplicateSubject {
+  supplier: string;
+  total: Cents;
+  /** het bedrag in de vreemde munt van het document (#74), of null */
+  foreign: { currency: string; total: Cents } | null;
+  probe: DuplicateProbe;
+}
+
+/** Een aankoop die met de hand wordt ingevoerd, zonder document (#224). */
+export interface ManualPurchase {
+  supplier: string;
+  total: Cents;
+  date: IsoDate;
+  number?: string | null;
+}
+
+/** Een nummer zegt pas iets vanaf drie tekens: een korter nummer komt bij de volgende bon zo weer terug. */
+const MIN_NUMBER_LENGTH = 3;
 
 const candidateOf = (m: Pick<DuplicateMatch, 'documentId' | 'purchaseId' | 'bankTransactionId'>): string =>
   m.purchaseId ? `aankoop:${m.purchaseId}` : m.bankTransactionId ? `bank:${m.bankTransactionId}` : `document:${m.documentId}`;
@@ -274,10 +307,13 @@ export class IntakeService {
     private readonly ownVatNumber: () => string = () => '',
   ) {
     this.links = new EvidenceLinks(db);
+    this.matcher = new BankPurchaseMatcher(db);
   }
 
   /** de koppeling tussen een document en de aankoop of bankbetaling waar het bij hoort (#179) */
   readonly links: EvidenceLinks;
+  /** de gedeelde vergelijking van een betaling met een aankoop of bon (#221) */
+  private readonly matcher: BankPurchaseMatcher;
   /** per bestand één toevoeging tegelijk (zie exclusive) */
   private readonly busy = new Map<string, Promise<unknown>>();
   /** een bewaard bestand weer weghalen als het document toch niet vastgelegd kon worden */
@@ -880,7 +916,7 @@ export class IntakeService {
     }
     const issues = [...extraIssues, ...validateDocument(result, asOf)];
     if (duplicate) {
-      issues.push({ field: 'duplicate', severity: 'fout', message: `Lijkt op ${duplicate.label}. Is dit dezelfde aankoop?`, suggestion: duplicate });
+      issues.push({ field: 'duplicate', severity: 'fout', message: `${duplicateLead(duplicate)} Is dit dezelfde aankoop?`, suggestion: duplicate });
     } else {
       // de betaling waar deze bon vroeger bij stond, hoort intussen bij een aankoop: die aankoop is er dus al
       const purchase = legacy?.purchases.map((p) => this.links.describe({ kind: 'aankoop', id: p })).find((p) => p && !rejected.has(`aankoop:${p.id}`));
@@ -949,58 +985,109 @@ export class IntakeService {
   }
 
   /**
-   * Zoekt of dit document al eerder binnenkwam of al geboekt is: zelfde leverancier en zelfde bedrag,
-   * en dan compareDuplicate (zeker of mogelijk). Een voorstel dat voor dit document is afgewezen, komt
-   * niet terug zolang leverancier, datum, bedrag en nummer gelijk blijven.
+   * Zoekt of dit document al eerder binnenkwam of al geboekt is. Een voorstel dat voor dit document is
+   * afgewezen, komt niet terug zolang leverancier, datum, bedrag en nummer gelijk blijven.
    */
   findDuplicate(id: number, result: DocumentResult): DuplicateMatch | null {
     if (!result.total || !result.supplier) return null;
-    const key = supplierKey(result.supplier.value);
+    const subject: DuplicateSubject = { supplier: result.supplier.value, total: result.total.value, foreign: result.foreign ?? null, probe: probeOf(result) };
+    return this.duplicateOf(subject, id, this.rejected(id, result));
+  }
+
+  /**
+   * Staat er al een aankoop of een bon die lijkt op wat de gebruiker met de hand invoert (#224)? Het
+   * ingetypte nummer telt als betrouwbaar. Er wordt hier niets vastgelegd: het is alleen de vraag vooraf.
+   */
+  findDuplicateOfManual(entry: ManualPurchase): DuplicateMatch | null {
+    if (!entry.supplier.trim() || !entry.total) return null;
+    const number = entry.number ? normalizeInvoiceNumber(entry.number) : '';
+    const probe: DuplicateProbe = { number: number || null, reliable: number.length >= MIN_NUMBER_LENGTH, date: entry.date, credit: entry.total < 0 };
+    return this.duplicateOf({ supplier: entry.supplier, total: entry.total, foreign: null, probe }, null, new Set());
+  }
+
+  /**
+   * De dubbel-controle zelf. Dezelfde leverancier (ook net anders geschreven: "Pakketreus EU" en
+   * "Pakketreus") en dan:
+   *  - hetzelfde bedrag: compareDuplicate (zeker of mogelijk);
+   *  - een andere munt aan één kant en het bedrag binnen de koersmarge (`withinFx`): hooguit mogelijk;
+   *  - een ander bedrag maar hetzelfde nummer (minstens drie tekens): mogelijk, want een bon en de factuur
+   *    van dezelfde aankoop verschillen soms een paar cent (koers, afronding) (#224). Niet als dat nummer bij
+   *    deze leverancier al bij meer dan één aankoop staat: dan is het geen factuurnummer maar een klant- of
+   *    contractnummer, en zou elke nieuwe factuur de vraag krijgen tegen elke eerdere.
+   * Zeker is het alleen bij precies dezelfde leverancier en precies hetzelfde bedrag; al het andere is een vraag.
+   */
+  private duplicateOf(subject: DuplicateSubject, id: number | null, rejected: Set<string>): DuplicateMatch | null {
+    const key = supplierKey(subject.supplier);
     if (!key) return null;
-    const probe = probeOf(result);
-    const total = result.total.value;
-    const rejected = this.rejected(id, result);
+    const { probe, total, foreign } = subject;
+    const supplierFit = (name: string | null | undefined): 'gelijk' | 'variant' | null =>
+      !name ? null : supplierKey(name) === key ? 'gelijk' : sameSupplierName(name, subject.supplier) ? 'variant' : null;
     // vreemde munt (#74): ook hetzelfde bedrag in die munt, en een oudere boeking waarin dat bedrag als euro's staat
-    const foreign = result.foreign ?? null;
+    const amountFit = (other: { total: Cents; currency: string | null; foreignTotal: Cents | null }): 'gelijk' | 'koers' | null => {
+      if (other.total === total) return 'gelijk';
+      const otherForeign = !!other.currency && other.currency !== 'EUR';
+      if (foreign && (otherForeign ? other.currency === foreign.currency && other.foreignTotal === foreign.total : other.total === foreign.total)) return 'gelijk';
+      // één kant in een andere munt: de bank of de kaart rekende een eigen koers. Staan beide in dezelfde
+      // vreemde munt, dan zijn de bedragen in die munt te vergelijken en is een ander bedrag een andere aankoop.
+      const sameCurrency = !!foreign && otherForeign && other.currency === foreign.currency;
+      return (foreign || otherForeign) && !sameCurrency && withinFx(other.total, total) ? 'koers' : null;
+    };
+    const compare = (supplier: 'gelijk' | 'variant', amount: 'gelijk' | 'koers' | null, other: DuplicateProbe): Pick<DuplicateMatch, 'strength' | 'reason'> | null => {
+      if (!amount) {
+        // een ander bedrag: alleen hetzelfde nummer is dan nog een reden om het te vragen, en alleen als dat
+        // nummer bij deze leverancier niet vaker voorkomt
+        if (!probe.number || probe.number.length < MIN_NUMBER_LENGTH || probe.number !== other.number || sameNumber.size > 1) return null;
+        return { strength: 'mogelijk', reason: probe.credit !== other.credit ? 'soort' : 'bedrag' };
+      }
+      const found = compareDuplicate(probe, other);
+      if (found?.strength !== 'zeker') return found;
+      if (amount === 'koers') return { strength: 'mogelijk', reason: 'bedrag' };
+      return supplier === 'variant' ? { strength: 'mogelijk', reason: 'leverancier' } : found;
+    };
 
     const purchases = this.db
       .prepare(
-        `SELECT p.id, p.supplier_reference, p.invoice_date, p.total, r.name AS supplier,
+        `SELECT p.id, p.supplier_reference, p.invoice_date, p.total, p.currency, p.foreign_total, r.name AS supplier,
                 (SELECT k.document_id FROM document_links k WHERE k.purchase_invoice_id = p.id AND k.is_primary = 1) AS document_id
-         FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id
-         WHERE p.total = ? OR (? IS NOT NULL AND ((p.currency = ? AND p.foreign_total = ?) OR (p.currency IS NULL AND p.total = ?)))`,
+         FROM purchase_invoices p JOIN relations r ON r.id = p.relation_id ORDER BY p.id`,
       )
-      .all(total, foreign?.currency ?? null, foreign?.currency ?? null, foreign?.total ?? null, foreign?.total ?? null) as { id: number; supplier_reference: string | null; invoice_date: string; total: number; document_id: number | null; supplier: string | null }[];
-    const sameAmount = (r: DocumentResult) =>
-      r.total!.value === total || (!!foreign && (r.foreign ? r.foreign.currency === foreign.currency && r.foreign.total === foreign.total : r.total!.value === foreign.total));
+      .all() as { id: number; supplier_reference: string | null; invoice_date: string; total: number; currency: string | null; foreign_total: number | null; document_id: number | null; supplier: string }[];
     const docs = this.db
       .prepare(
         `SELECT d.id, d.result, k.purchase_invoice_id, k.bank_transaction_id FROM documents d LEFT JOIN document_links k ON k.document_id = d.id
-          WHERE d.id <> ? AND d.status IN ('nieuw','controle','verwerkt') AND d.result IS NOT NULL AND d.duplicate_of_document_id IS NOT ? ORDER BY d.id`,
+          WHERE d.id IS NOT ? AND d.status IN ('nieuw','controle','verwerkt') AND d.result IS NOT NULL AND (? IS NULL OR d.duplicate_of_document_id IS NOT ?) ORDER BY d.id`,
       )
-      .all(id, id) as { id: number; result: string; purchase_invoice_id: number | null; bank_transaction_id: number | null }[];
+      .all(id, id, id) as { id: number; result: string; purchase_invoice_id: number | null; bank_transaction_id: number | null }[];
 
-    let weak: DuplicateMatch | null = null;
-    const consider = (found: ReturnType<typeof compareDuplicate>, match: Omit<DuplicateMatch, 'strength' | 'reason'>): DuplicateMatch | null => {
-      if (!found || rejected.has(candidateOf(match))) return null;
-      if (found.strength === 'zeker') return { ...match, ...found };
-      weak ??= { ...match, ...found };
-      return null;
-    };
+    // alles van deze leverancier wat er al staat: eerst de aankopen, dan de documenten
+    type Candidate = { supplier: 'gelijk' | 'variant'; total: Cents; currency: string | null; foreignTotal: Cents | null; other: DuplicateProbe; match: Omit<DuplicateMatch, 'strength' | 'reason'> };
+    const candidates: Candidate[] = [];
     for (const p of purchases) {
-      if (!p.supplier || supplierKey(p.supplier) !== key) continue;
+      const supplier = supplierFit(p.supplier);
+      if (!supplier) continue;
       const number = p.supplier_reference ? normalizeInvoiceNumber(p.supplier_reference) : '';
       // een bevestigde aankoop: het nummer is nagekeken, of het document waar het uit komt telt hieronder mee
-      const other: DuplicateProbe = { number: number || null, reliable: number.length >= 3, date: p.invoice_date, credit: p.total < 0 };
-      const certain = consider(compareDuplicate(probe, other), { documentId: p.document_id, purchaseId: p.id, label: `de aankoop bij ${p.supplier} van ${formatDateNl(p.invoice_date)}` });
-      if (certain) return certain;
+      const other: DuplicateProbe = { number: number || null, reliable: number.length >= MIN_NUMBER_LENGTH, date: p.invoice_date, credit: p.total < 0 };
+      candidates.push({ supplier, total: p.total, currency: p.currency, foreignTotal: p.foreign_total, other, match: { documentId: p.document_id, purchaseId: p.id, label: `de aankoop bij ${p.supplier} van ${formatDateNl(p.invoice_date)}` } });
     }
     for (const d of docs) {
       const r = JSON.parse(d.result) as DocumentResult;
-      if (!r.total || !sameAmount(r) || !r.supplier || supplierKey(r.supplier.value) !== key) continue;
-      const label = `het document van ${r.supplier.value}${r.invoiceDate ? ` van ${formatDateNl(r.invoiceDate.value)}` : ''}`;
-      const certain = consider(compareDuplicate(probe, probeOf(r)), { documentId: d.id, purchaseId: d.purchase_invoice_id, bankTransactionId: d.bank_transaction_id, label });
-      if (certain) return certain;
+      const supplier = r.total ? supplierFit(r.supplier?.value) : null;
+      if (!r.total || !supplier) continue;
+      const label = `het document van ${r.supplier!.value}${r.invoiceDate ? ` van ${formatDateNl(r.invoiceDate.value)}` : ''}`;
+      candidates.push({ supplier, total: r.total.value, currency: r.foreign?.currency ?? null, foreignTotal: r.foreign?.total ?? null, other: probeOf(r), match: { documentId: d.id, purchaseId: d.purchase_invoice_id, bankTransactionId: d.bank_transaction_id, label } });
+    }
+    // Bij hoeveel aankopen van deze leverancier staat dit nummer al? Alleen wat geboekt is telt: een bon die nog
+    // op controle wacht kan zelf de kopie zijn.
+    const sameNumber = new Set(candidates.filter((c) => c.match.purchaseId && !!probe.number && c.other.number === probe.number).map((c) => c.match.purchaseId));
+
+    let weak: DuplicateMatch | null = null;
+    for (const c of candidates) {
+      const found = compare(c.supplier, amountFit(c), c.other);
+      if (!found || rejected.has(candidateOf(c.match))) continue;
+      if (found.strength === 'zeker') return { ...c.match, ...found };
+      // een ander bedrag: beide bedragen erbij, zodat te zien is of het dezelfde aankoop kan zijn
+      weak ??= { ...c.match, ...found, ...(found.reason === 'bedrag' && c.total !== total ? { detail: `Het nummer is hetzelfde, het bedrag niet: daar ${formatEuro(c.total)}, hier ${formatEuro(total)}.` } : {}) };
     }
     return weak;
   }
@@ -1025,24 +1112,35 @@ export class IntakeService {
     return this.get(id);
   }
 
-  /** Zoekt een onverwerkte banktransactie met hetzelfde bedrag rond dezelfde datum. */
+  /**
+   * Zoekt een onverwerkte banktransactie met hetzelfde bedrag rond dezelfde datum: tot tien dagen ervoor of
+   * erna. Past de naam of het rekeningnummer van de leverancier, dan mag de betaling tot twintig dagen na
+   * de bon liggen (hetzelfde venster als overal waar de app een betaling en een aankoop vergelijkt).
+   * Een regel die als waarschijnlijke dubbel wordt vastgehouden, telt niet mee.
+   */
   findBankMatch(result: DocumentResult): BankTransaction | null {
     if (!result.total) return null;
     const foreign = Boolean(result.foreign);
     // vreemde munt: de bank rekende een eigen koers, dus ongeveer hetzelfde bedrag
-    const candidates = this.bank.list({ status: 'nieuw', limit: 2000 }).filter((t) => (foreign ? t.amount < 0 && withinFx(-t.amount, result.total!.value) : t.amount === -result.total!.value));
+    const amountFits = this.bank.list({ status: 'nieuw', limit: 2000 }).filter((t) => (foreign ? t.amount < 0 && withinFx(-t.amount, result.total!.value) : t.amount === -result.total!.value));
+    if (amountFits.length === 0) return null;
+    // een regel die waarschijnlijk dezelfde betaling is als een regel die er al staat (#225), is geen kandidaat:
+    // eerst het antwoord bij die melding
+    const held = this.bank.heldAsDouble();
+    const candidates = amountFits.filter((t) => !held.has(t.id));
     const date = result.invoiceDate?.value;
     const scored = candidates
       .map((t) => {
         let score = 1;
+        const nameMatch = Boolean(result.supplier && t.counter_name && sameSupplierName(result.supplier.value, t.counter_name));
+        const ibanMatch = Boolean(result.supplierIban && t.counter_iban === result.supplierIban.value);
         if (date) {
           const d = Math.abs(diffDays(date, t.transaction_date));
-          if (d > 10) return null;
-          score += d <= 3 ? 2 : 1;
+          if (nameMatch || ibanMatch ? !dateFits({ invoice_date: date, due_date: null }, t.transaction_date) : d > BANK_DAYS_BEFORE) return null;
+          score += d <= SURE_DAYS ? 2 : 1;
         }
-        const nameMatch = Boolean(result.supplier && t.counter_name && supplierKey(t.counter_name).split(' ')[0] === supplierKey(result.supplier.value).split(' ')[0]);
         if (nameMatch) score += 3;
-        if (result.supplierIban && t.counter_iban === result.supplierIban.value) score += 3;
+        if (ibanMatch) score += 3;
         // bij een omgerekend bedrag alleen met de naam van de winkel, of als het bedrag heel dicht bij ligt
         if (foreign && !nameMatch && Math.abs(-t.amount - result.total!.value) > Math.round(result.total!.value * 0.02)) return null;
         return { t, score };
@@ -1055,53 +1153,45 @@ export class IntakeService {
   }
 
   /**
-   * Een al (zonder document) verwerkte banktransactie met exact dit bedrag en datum ±3 dagen.
-   * Vreemde munt (#74): de bank rekende een eigen koers, dus ongeveer dit bedrag, tot 7 dagen later
-   * en alleen met de naam van de leverancier. Is er rond die datum (10 dagen vóór tot 20 dagen na) nog
-   * een vergelijkbare afschrijving van die leverancier, dan is het te onzeker: dan niets aannemen.
+   * Een al (zonder document) als kosten geboekte afschrijving die bij deze bon hoort: bedrag, leverancier en
+   * datum passen (de gedeelde vergelijking; in een andere munt mag het bedrag binnen de koers afwijken). In
+   * euro's ook zonder naam: precies dit bedrag binnen een paar dagen. Passen er meer van dezelfde
+   * leverancier (elke week hetzelfde bedrag), dan de dichtstbijzijnde: de gebruiker krijgt het als vraag.
+   * Met `sure` alleen als er maar één past (voor wat zonder vraag verder gaat). Bij een creditnota: de
+   * terugbetaling die al geboekt is. Met `forPurchase` (de bon is al een aankoop) telt een betaling waar al
+   * een andere aankoop mee is samengevoegd niet mee; voor een losse bon wel, want die betaling heeft nog geen bon.
    */
-  findBookedBankTransaction(result: DocumentResult, rejected: Set<string> = new Set()): BankTransaction | null {
-    if (!result.total || !result.invoiceDate) return null;
+  findBookedBankTransaction(result: DocumentResult, rejected: Set<string> = new Set(), opts: { sure?: boolean; forPurchase?: boolean } = {}): BankTransaction | null {
+    const probe = probeOfDocument(result);
+    if (!probe) return null;
     // een betaling waarbij deze bon is afgewezen ("Nee, andere aankoop") stellen we niet opnieuw voor
-    const open = (t: BankTransaction) => !rejected.has(`bank:${t.id}`);
-    if (result.foreign) {
-      const supplier = result.supplier ? supplierKey(result.supplier.value) : '';
-      if (!supplier) return null;
-      // "Eleven Labs Inc." op de factuur, "Elevenlabs" op de bank; "fireworks.ai" en "Fireworks AI"
-      const compact = (k: string) => k.replace(/\s+/g, '');
-      const same = (name: string) => {
-        const k = supplierKey(name);
-        const [a, b] = [compact(supplier), compact(k)];
-        return k.split(' ')[0] === supplier.split(' ')[0] || (Math.min(a.length, b.length) >= 4 && (a.startsWith(b) || b.startsWith(a)));
-      };
-      const rows = (
-        this.db
-          .prepare(
-            `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount < 0 AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
-               AND julianday(transaction_date) - julianday(?) BETWEEN -10 AND 20
-               AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.bank_transaction_id = bank_transactions.id)
-               -- alleen als kosten geboekt: niet een privé-opname of eigen overboeking met toevallig hetzelfde bedrag
-               AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
-                            WHERE l.journal_entry_id = bank_transactions.matched_journal_entry_id AND a.category = 'kosten')`,
-          )
-          .all(result.invoiceDate.value) as BankTransaction[]
-      ).filter((t) => open(t) && withinFx(-t.amount, result.total!.value) && !!t.counter_name && same(t.counter_name));
-      // een factuur in dollars wordt vaak pas later met de kaart betaald (bv. 1 aug gefactureerd, 14 aug betaald);
-      // een abonnement komt maar eens per maand langs, dus binnen 20 dagen is het deze betaling
-      const days = (t: BankTransaction) => diffDays(result.invoiceDate!.value, t.transaction_date);
-      return rows.length === 1 && days(rows[0]!) >= -3 && days(rows[0]!) <= 20 ? rows[0]! : null;
-    }
-    const rows = (this.db
-      .prepare(
-        `SELECT * FROM bank_transactions WHERE status = 'gematcht' AND amount = ? AND matched_invoice_id IS NULL AND matched_purchase_invoice_id IS NULL
-           AND ABS(julianday(transaction_date) - julianday(?)) <= 3
-           AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.bank_transaction_id = bank_transactions.id)
-               -- alleen als kosten geboekt: niet een privé-opname of eigen overboeking met toevallig hetzelfde bedrag
-               AND EXISTS (SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
-                            WHERE l.journal_entry_id = bank_transactions.matched_journal_entry_id AND a.category = 'kosten')`,
-      )
-      .all(-result.total.value, result.invoiceDate.value) as BankTransaction[]).filter(open);
-    return rows.length === 1 ? rows[0]! : null;
+    const match = this.matcher.bookedMatch(probe, 'open', { skip: (t) => rejected.has(`bank:${t.id}`), merged: !opts.forPurchase });
+    return match && (match.sure || !opts.sure) ? match.transaction : null;
+  }
+
+  /** Staat er een nog niet verwerkte afschrijving op een eigen rekening die bij deze (open) aankoop past? */
+  private awaitsDebit(purchaseId: number): boolean {
+    const probe = this.matcher.probe(purchaseId);
+    return !!probe && this.matcher.transactionsFor(probe, 'open', 'nieuw').length > 0;
+  }
+
+  /**
+   * De gebruiker verbeterde op het controlescherm de leverancier, het nummer, het bedrag of de datum (#224):
+   * staat er met die gegevens al een aankoop of bon die erop lijkt? Bij het inlezen is alleen vergeleken met
+   * wat toen gelezen was. Het ingevulde nummer telt als betrouwbaar, zoals bij handmatige invoer. Een voorstel
+   * waar bij deze bon al "Nee" op is gezegd, komt niet terug. null = niets gevonden, er is niets veranderd, of
+   * de bon is privé (dan wordt er geen aankoop geboekt). Er wordt hier niets vastgelegd.
+   */
+  duplicateOfConfirmation(id: number, c: Pick<Confirmation, 'supplier' | 'date' | 'total' | 'invoiceNumber' | 'business'>): DuplicateMatch | null {
+    if (!c.business || !c.supplier?.trim() || !c.total) return null;
+    const doc = this.get(id);
+    const number = c.invoiceNumber ? normalizeInvoiceNumber(c.invoiceNumber) : '';
+    if (JSON.stringify([supplierKey(c.supplier), c.date, c.total, number || null]) === documentFingerprint(doc.result)) return null;
+    const read = doc.result;
+    const probe: DuplicateProbe = { number: number || null, reliable: number.length >= MIN_NUMBER_LENGTH, date: c.date, credit: c.total < 0 || read?.documentType?.value === 'credit_note' };
+    // het bedrag in de vreemde munt geldt alleen nog als het bedrag in euro's niet is aangepast
+    const foreign = read?.foreign && read.total?.value === c.total ? read.foreign : null;
+    return this.duplicateOf({ supplier: c.supplier, total: c.total, foreign, probe }, id, read ? this.rejected(id, read) : new Set());
   }
 
   /**
@@ -1124,6 +1214,9 @@ export class IntakeService {
     if (this.pending(doc)) throw new ValidationError('Kies eerst of deze bon bij iets hoort dat er al staat. Daarna kun je hem verwerken.');
     if (!c.supplier?.trim()) throw new ValidationError('Vul de winkel of leverancier in');
     if (!Number.isSafeInteger(c.total) || c.total === 0) throw new ValidationError('Vul het totaalbedrag in');
+    // de leverancier, het nummer, het bedrag of de datum verbeterd: staat de aankoop er met die gegevens al? (#224)
+    const again = ownInvoice || c.allowDuplicate ? null : this.duplicateOfConfirmation(id, c);
+    if (again) throw new ValidationError(`${duplicateLead(again)} Staat deze aankoop er al in? Kijk het eerst na; is het een andere aankoop, kies dan "Toch boeken".`);
     // "Weet ik nog niet (vraag mijn boekhouder)": apart op Vraagposten, zonder btw-aftrek en zonder iets te
     // leren; de btw-controle en het pakket voor de boekhouder melden hem tot hij is ingedeeld
     if (c.categoryKey === QUESTION_CATEGORY) c = { ...c, vatCode: 'geen', vatAmount: null, splits: null, business: true, businessPct: undefined };
@@ -1171,8 +1264,11 @@ export class IntakeService {
       });
       if (bankTx && c.paidWith === 'bank') this.bank.matchPurchase(bankTx.id, purchase.id);
       else {
-        // niet op de zakelijke rekening gevonden: leverancier die je altijd privé/contant betaalt → meteen betaald
-        const paidWith = c.paidWith === 'later' ? relation.paid_with : c.paidWith === 'bank' ? null : c.paidWith;
+        // niet op de zakelijke rekening gevonden: leverancier die je altijd privé/contant betaalt → meteen betaald.
+        // Staat er toch een afschrijving die erbij past (bedrag, leverancier en datum) op een eigen rekening te
+        // wachten (#222), dan blijft de aankoop open: bij die betaling vraagt de app of ze bij elkaar horen.
+        const usual = c.paidWith === 'later' && relation.paid_with && !this.awaitsDebit(purchase.id) ? relation.paid_with : null;
+        const paidWith = c.paidWith === 'later' ? usual : c.paidWith === 'bank' ? null : c.paidWith;
         if (paidWith) this.purchases.registerPayment(purchase.id, { amount: purchase.total, date: c.date, moneyAccount: paidWith === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen });
       }
       // de aankoop is uit dit document geboekt; kopieën die erop wachtten horen er nu ook bij (niets extra geboekt)
@@ -1273,13 +1369,17 @@ export class IntakeService {
     const result = row.result ? (JSON.parse(row.result) as DocumentResult) : null;
     const issues = JSON.parse(row.issues) as Issue[];
     const link = this.links.forDocument(id);
+    const bankMatch = row.status === 'verwerkt' || !result ? null : (issues.some((i) => i.field === OWN_COMPANY_ISSUE) ? this.findOwnPayment(result) : null) ?? this.findBankMatch(result);
+    const probe = bankMatch && result ? probeOfDocument(result) : null;
     return {
       ...row,
       result,
       classification: row.classification ? JSON.parse(row.classification) : null,
       issues,
       decisions: row.decisions ? (JSON.parse(row.decisions) as Decision[]) : null,
-      bank_match: row.status === 'verwerkt' || !result ? null : (issues.some((i) => i.field === OWN_COMPANY_ISSUE) ? this.findOwnPayment(result) : null) ?? this.findBankMatch(result),
+      bank_match: bankMatch,
+      // dezelfde maatstaf als `awaitsDebit` bij het boeken: bedrag, leverancier en datum
+      bank_match_strong: Boolean(bankMatch && probe && fitOf(bankMatch, probe, 'open')?.strength === 'sterk'),
       link,
       outcome: this.links.outcome({ ...row, issues }, link),
     };

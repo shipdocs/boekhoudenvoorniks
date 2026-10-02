@@ -221,3 +221,97 @@ describe('controle "weet ik nog niet": welke betalingen zijn het?', () => {
     expect(r.total).toBe(40000);
   });
 });
+
+describe('controle "dubbel": aankopen onderling en een aankoop tegenover een los geboekte betaling (#221)', () => {
+  const SOFTWARE = 'WBedKanSof';
+  const world = () => {
+    const { s } = setup();
+    s.settings.update({ onboardingDone: true, autopilot: 'voorzichtig' });
+    const dubbel = (period = '2026-Q3') => s.vat.checks(period).find((c) => c.key === 'dubbel');
+    /** een aankoop zonder btw, met of zonder leverancier als relatie */
+    const buy = (date: string, amount: number, opts: { supplier?: string; description?: string; reference?: string } = {}) =>
+      s.purchases.create({ relationId: opts.supplier ? s.relations.findOrCreateSupplier(opts.supplier).id : null, supplierReference: opts.reference ?? null, invoiceDate: date, description: opts.description ?? `Software — ${opts.supplier}`, lines: [{ account: SOFTWARE, netAmount: amount, vatCode: 'geen' }] });
+    /** een afschrijving die los geboekt is, zonder aankoop of bon eraan */
+    const booked = (date: string, amount: number, counterName: string, account: string) => {
+      s.bank.import({ source: 'csv', warnings: [], transactions: [{ date, amount: -amount, description: `${counterName} betaling`, counterName }] });
+      const t = s.bank.list().find((x) => x.transaction_date === date && x.amount === -amount && x.counter_name === counterName)!;
+      s.bank.bookToAccount(t.id, { account, vatCode: 'geen' });
+      return t;
+    };
+    return { s, dubbel, buy, booked };
+  };
+
+  it('twee aankopen zonder leverancier als relatie, met dezelfde naam in de omschrijving', () => {
+    const { dubbel, buy } = world();
+    const a = buy('2026-08-01', 1500, { description: 'Software — Wolkendienst' });
+    expect(dubbel()).toBeUndefined();
+    const b = buy('2026-08-02', 1500, { description: 'Abonnement — Wolkendienst' });
+    buy('2026-08-02', 1500, { description: 'Abonnement — Printhuis' });
+    buy('2026-08-02', 1500, { description: 'Losse aankoop zonder naam' });
+    expect(dubbel()).toMatchObject({ blocking: true, count: 1, fingerprint: `p${a.id}-${b.id}`, items: [{ kind: 'aankoop', id: a.id }, { kind: 'aankoop', id: b.id }] });
+  });
+
+  it('dezelfde leverancier onder twee schrijfwijzen (twee relaties); een ander factuurnummer is geen dubbele', () => {
+    const { dubbel, buy } = world();
+    const a = buy('2026-08-01', 1500, { supplier: 'Wolkendienst Inc.' });
+    const b = buy('2026-08-03', 1500, { supplier: 'WOLKENDIENST' });
+    expect(a.relation_id).not.toBe(b.relation_id);
+    expect(dubbel()).toMatchObject({ count: 1, fingerprint: `p${a.id}-${b.id}` });
+    // meer dan drie dagen ertussen, of een andere leverancier: niet
+    buy('2026-08-07', 1500, { supplier: 'Wolkendienst' });
+    buy('2026-08-02', 1500, { supplier: 'Bouwmarkt De Hamer' });
+    expect(dubbel()).toMatchObject({ count: 1 });
+    const { dubbel: geen, buy: koop } = world();
+    koop('2026-08-01', 1500, { supplier: 'Wolkendienst Inc.', reference: 'WD-001' });
+    koop('2026-08-01', 1500, { supplier: 'Wolkendienst Inc.', reference: 'WD-002' });
+    expect(geen()).toBeUndefined();
+  });
+
+  it('in dollars mag het bedrag in euro\'s door de koers iets verschillen', () => {
+    const { s, dubbel } = world();
+    const usd = (euro: number, date: string) =>
+      s.purchases.create({ relationId: s.relations.findOrCreateSupplier('Wolkendienst Inc.').id, invoiceDate: date, description: 'Software — Wolkendienst Inc.', lines: [{ account: SOFTWARE, netAmount: euro, vatCode: 'buiten-eu' }], foreign: { currency: 'USD', total: 1800, rate: 1800 / euro } });
+    const a = usd(1577, '2026-08-01');
+    const b = usd(1596, '2026-08-02');
+    expect(dubbel()).toMatchObject({ count: 1, fingerprint: `p${a.id}-${b.id}` });
+  });
+
+  it('een aankoop en dezelfde betaling los als kosten geboekt: de betaling en de aankoop staan er allebei bij', () => {
+    const { s, dubbel, buy, booked } = world();
+    const p = buy('2026-08-01', 1500, { supplier: 'Wolkendienst Inc.' });
+    const t = booked('2026-08-14', 1500, 'WOLKENDIENST', SOFTWARE);
+    booked('2026-08-14', 2500, 'WOLKENDIENST', SOFTWARE); // ander bedrag
+    booked('2026-08-15', 1500, 'WOLKENDIENST', ACCOUNTS.priveOpnamen); // privé-opname: telt niet
+    const check = dubbel()!;
+    expect(check).toMatchObject({ blocking: true, count: 1, fingerprint: `b${t.id}-p${p.id}`, items: [{ kind: 'bank', id: t.id, amount: -1500 }, { kind: 'aankoop', id: p.id, amount: -1500 }] });
+    expect(check.detail).toBe('Zelfde leverancier en bedrag rond dezelfde datum, of een betaling die ook los als kosten of op "weet ik nog niet" staat. Controleer of je kosten en btw niet twee keer telt. Op Vandaag staat bij zo\'n betaling de vraag "staat deze aankoop dubbel?"; daar kies je ja of nee.');
+    // de betaling telt in het tijdvak waarin hij is afgeschreven
+    expect(dubbel('2026-Q2')).toBeUndefined();
+    // gekoppeld aan de aankoop: niet meer dubbel
+    s.bookedPayments.resolve(p.id, t.id, p.invoice_date);
+    expect(dubbel()).toBeUndefined();
+  });
+
+  it('een aankoop en dezelfde betaling los op "weet ik nog niet"', () => {
+    const { dubbel, buy, booked } = world();
+    const p = buy('2026-08-01', 1500, { supplier: 'Wolkendienst Inc.' });
+    const t = booked('2026-08-03', 1500, 'WOLKENDIENST', ACCOUNTS.vraagposten);
+    expect(dubbel()).toMatchObject({ count: 1, fingerprint: `b${t.id}-p${p.id}` });
+  });
+
+  it('een paar waarvan je zei dat het twee aankopen zijn, telt niet meer; twee creditnota\'s worden nog wel gemeld', () => {
+    const { s, dubbel, buy, booked } = world();
+    const p = buy('2026-08-01', 1500, { supplier: 'Wolkendienst Inc.' });
+    const t = booked('2026-08-03', 1500, 'WOLKENDIENST', SOFTWARE);
+    expect(dubbel()).toMatchObject({ count: 1 });
+    s.inbox.skipTask(`dubbel-${p.id}-${t.id}`, 'nee');
+    expect(dubbel()).toBeUndefined();
+    const credit = (date: string) => s.purchases.create({ relationId: s.relations.findOrCreateSupplier('Printhuis').id, invoiceDate: date, description: 'Creditnota — Printhuis', lines: [{ account: SOFTWARE, netAmount: -4000, vatCode: 'geen' }] });
+    const a = credit('2026-09-01');
+    const b = credit('2026-09-02');
+    expect(dubbel()).toMatchObject({ count: 1, fingerprint: `p${a.id}-${b.id}` });
+    // een aankoop en een creditnota van hetzelfde bedrag zijn geen dubbele
+    s.purchases.create({ relationId: a.relation_id, invoiceDate: '2026-09-02', description: 'Drukwerk — Printhuis', lines: [{ account: SOFTWARE, netAmount: 4000, vatCode: 'geen' }] });
+    expect(dubbel()).toMatchObject({ count: 1 });
+  });
+});

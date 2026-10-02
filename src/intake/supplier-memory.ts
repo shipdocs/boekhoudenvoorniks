@@ -1,4 +1,5 @@
 import type { Db } from '../db/database';
+import type { AutopilotLevel } from '../automation/decisions';
 
 export interface SupplierRule {
   supplier_key: string;
@@ -14,6 +15,14 @@ export interface SupplierRule {
 
 /** Na zoveel gelijke bevestigingen vragen we of de leverancier voortaan automatisch mag. */
 export const ASK_AUTO_AFTER_CONFIRMATIONS = 3;
+
+/**
+ * De drempel bij een autopilotstand: na zoveel gelijke bevestigingen komt de vraag "voortaan automatisch?",
+ * en mag een bevestigde vaste last vanzelf geboekt worden (#227). Voorzichtig: nooit.
+ */
+export function autoAfterConfirmations(level: AutopilotLevel): number {
+  return level === 'voorzichtig' ? Number.POSITIVE_INFINITY : level === 'maximaal' ? 2 : ASK_AUTO_AFTER_CONFIRMATIONS;
+}
 
 /** Normaliseert een leveranciers-/tegenpartijnaam: "GAMMA UTRECHT B.V. 1234" → "gamma utrecht". */
 export function supplierKey(name: string): string {
