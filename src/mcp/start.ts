@@ -28,7 +28,7 @@ export async function startMcp(dbFile: string, version: string): Promise<void> {
   const services = createServices(db, {
     pdf: readonlyError,
     mailerFactory: readonlyError,
-    secrets: { get: () => null, set: () => undefined, delete: () => undefined },
+    secrets: { available: false, get: () => null, set: () => undefined, delete: () => undefined },
     fetch: readonlyError as never,
     storeFile: readonlyError,
   });
