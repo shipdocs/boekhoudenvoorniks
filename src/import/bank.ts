@@ -69,6 +69,12 @@ export interface BankImportStatus {
    * ingelezen: een export van vandaag mist wat er later vandaag nog bij komt.
    */
   completeTo: string | null;
+  /**
+   * Een dag waarvan alleen een afschrift van die dag zelf is ingelezen, terwijl het volgende afschrift pas
+   * later begint: wat er die dag later nog bij kwam, staat nergens in. `completeTo` loopt dan niet verder
+   * dan de dag ervoor, tot een later gemaakt afschrift die dag bevat of de periode is afgesloten.
+   */
+  gap: string | null;
   totalTransactions: number;
   /** regels die zijn overgeslagen omdat de betaling er al stond (en niet alsnog toegevoegd), of die als dubbel uit de boekhouding zijn gehaald */
   skipped: number;
@@ -1259,6 +1265,7 @@ export class BankService {
    * dat afschrift, en t/m welke datum zijn de bankgegevens in totaal bijgewerkt.
    */
   importStatus(): BankImportStatus[] {
+    const firstOpen = this.ledger.firstOpenDate();
     return this.listAccounts().map((a) => {
       const last = this.db
         .prepare(
@@ -1281,6 +1288,22 @@ export class BankService {
              SELECT MIN(transaction_date, date(created_at, 'localtime', '-1 day')) FROM bank_transactions WHERE bank_account_id = @id AND import_batch_id IS NULL)`,
         )
         .get({ id: a.id }) as { d: string | null };
+      // Een afschrift dat op zijn eigen laatste dag is ingelezen, is voor die dag niet compleet. Dat blijft zo
+      // tot een afschrift dat ná die dag is ingelezen die dag ook bevat: een afschrift dat pas een dag later
+      // begint, dekt hem niet. Een dag zonder afschrift is geen gat (bij een CSV begint de periode bij de
+      // eerste betaling). Wat in een afgesloten periode ligt, is bij het afsluiten al bevestigd.
+      const partial = this.db
+        .prepare(
+          `SELECT MIN(date(b.imported_at, 'localtime')) AS d
+             FROM import_batch_accounts s JOIN import_batches b ON b.id = s.batch_id
+            WHERE s.bank_account_id = @id AND s.period_to >= date(b.imported_at, 'localtime') AND date(b.imported_at, 'localtime') >= @open
+              AND NOT EXISTS (
+                SELECT 1 FROM import_batch_accounts s2 JOIN import_batches b2 ON b2.id = s2.batch_id
+                 WHERE s2.bank_account_id = s.bank_account_id AND date(b2.imported_at, 'localtime') > date(b.imported_at, 'localtime')
+                   AND s2.period_from <= date(b.imported_at, 'localtime') AND s2.period_to >= date(b.imported_at, 'localtime'))`,
+        )
+        .get({ id: a.id, open: firstOpen ?? '' }) as { d: string | null };
+      const gap = partial.d && complete.d && complete.d >= partial.d ? partial.d : null;
       return {
         bankAccountId: a.id,
         name: a.name,
@@ -1290,7 +1313,8 @@ export class BankService {
           : null,
         coverageFrom: coverage.f,
         coverageTo: coverage.t,
-        completeTo: complete.d,
+        completeTo: gap ? addDays(gap, -1) : complete.d,
+        gap,
         totalTransactions: coverage.n,
         skipped:
           (this.db.prepare('SELECT COUNT(*) AS n FROM import_skipped WHERE bank_account_id = ? AND added_transaction_id IS NULL').get(a.id) as { n: number }).n +

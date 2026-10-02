@@ -784,7 +784,10 @@ export class InboxService {
           kind: 'bank-stale',
           icon: '🏦',
           title: st.completeTo ? `${st.name}: bank bijgewerkt tot ${formatDateNl(st.completeTo)}` : `${st.name}: nog geen bankafschrift ingelezen`,
-          question: st.completeTo
+          question: st.gap
+            ? // een nieuwer afschrift alleen helpt hier niet (#226): de dag die op de dag zelf is ingelezen moet erin staan
+              `Er is een afschrift op ${formatDateNl(st.gap)} zelf ingelezen, en het afschrift daarna begint pas later: wat er op die dag later nog bij kwam, staat er niet in. Download bij je bank een afschrift waar ${formatDateNl(st.gap)} ook in staat${watching ? ': de app ziet het in je downloadmap en vraagt of hij het mag inlezen' : ' en sleep het in de app'}. ${statementHelp(st.iban)}`
+            : st.completeTo
             ? `Dat is ${days} dagen geleden. Download een nieuw afschrift bij je bank${watching ? ': de app ziet het in je downloadmap en vraagt of hij het mag inlezen' : ' en sleep het in de app'}. Dan zoeken we uit wat bij welke factuur hoort. ${statementHelp(st.iban)}`
             : `Lees een afschrift in, dan koppelen we betalingen automatisch aan je facturen en bonnetjes. ${statementHelp(st.iban)}`,
           actions: [{ id: 'open', label: 'Afschrift inlezen', primary: true }],
