@@ -200,4 +200,151 @@ describe('verkoop aan je eigen bedrijf via een koppeling (#231)', () => {
     expect(s.bank.get(t.id)).toMatchObject({ status: 'gematcht', matched_invoice_id: null });
     expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, priveStorting: -1089 });
   });
+
+  it('staat er geld van je eigen naam op de bank zonder het nummer erbij, dan boekt "Geen omzet" niet stil via de betaaldienst: eerst de vraag of dat dit geld is', async () => {
+    for (const keuze of ['neutraal-bank', 'neutraal-betaaldienst'] as const) {
+      const { s, api, question, books } = withMollie();
+      s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-11', amount: 1089, description: 'Abonnement', counterName: 'Stukadoorsbedrijf Piet' }] });
+      const t = s.bank.list()[0]!;
+      await s.integrations.sync('mollie-facturen');
+      const [task] = question();
+      expect(task!.actions.map((a) => a.id)).toEqual(['neutraal-bank', 'neutraal-betaaldienst', 'verkoop']);
+      expect(task!.actions.every((a) => a.hint)).toBe(true);
+      expect(task!.question).toContain('Op je bank staat');
+      expect(task!.question).toContain('Abonnement');
+      expect(task!.ref).toMatchObject({ bankTransactionId: t.id });
+      // een oud scherm dat nog "Geen omzet" stuurt: niets geboekt, de vraag blijft staan
+      await expect(api.home.act({ ...task!, actions: [] }, 'neutraal')).rejects.toThrow(/Op je bank staat/);
+      expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, priveStorting: 0 });
+      await api.home.act(task!, keuze);
+      expect(question()).toEqual([]);
+      if (keuze === 'neutraal-bank') {
+        // de bankregel is de betaling: privé-storting, niets bij de betaaldienst en niets meer in te delen
+        expect(s.bank.get(t.id)).toMatchObject({ status: 'gematcht', matched_invoice_id: null });
+        expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, priveStorting: -1089 });
+        expect(s.inbox.tasks('2026-09-15').filter((x) => x.ref.bankTransactionId === t.id)).toEqual([]);
+      } else {
+        // het geld komt nog van de betaaldienst; de bankregel is iets anders en blijft staan
+        expect(s.bank.get(t.id)).toMatchObject({ status: 'nieuw' });
+        expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 1089, priveStorting: -1089 });
+      }
+    }
+  });
+
+  it('had je die bankregel zelf al als privé-storting ingedeeld, dan boekt "dit is het geld op de bank" niets meer', async () => {
+    const { s, api, question, books } = withMollie();
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-11', amount: 1089, description: 'Abonnement', counterName: 'Stukadoorsbedrijf Piet' }] });
+    const t = s.bank.list()[0]!;
+    await s.integrations.sync('mollie-facturen');
+    s.bank.bookToAccount(t.id, { account: ACCOUNTS.priveStortingen, description: 'Privé gestort' });
+    await api.home.act(question()[0]!, 'neutraal-bank');
+    expect(question()).toEqual([]);
+    expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, priveStorting: -1089 });
+  });
+
+  it('een kort ordernummer dat toevallig in een ander nummer op de bank zit, is niet de betaling: de ontvangst van een andere klant blijft staan', async () => {
+    const order = (number: string) => ({
+      id: 77,
+      number,
+      status: 'completed',
+      currency: 'EUR',
+      date_paid: '2026-09-10T10:00:00',
+      date_created: '2026-09-10T09:00:00',
+      billing: { first_name: 'Piet', last_name: 'Pleister', company: 'Stukadoorsbedrijf Piet', address_1: 'Kalkweg 1', address_2: '', postcode: '1234 AB', city: 'Utrecht', country: 'NL', email: 'piet@example.nl' },
+      line_items: [{ name: 'Stucmortel 25kg', quantity: 1, subtotal: '10.00', subtotal_tax: '2.10', total: '10.00', total_tax: '2.10' }],
+      shipping_lines: [],
+      fee_lines: [],
+    });
+    const woo = (number: string, bank: { date: string; description: string; counterName: string }) => {
+      const ctx = setup({ fetch: mockFetch({ '/wp-json/wc/v3/orders': [order(number)] }) });
+      ctx.s.settings.update({ onboardingDone: true });
+      ctx.s.integrations.configure('woocommerce', { url: 'https://winkel.example.nl', consumerKey: 'ck_x', consumerSecret: 'cs_y' }, true);
+      ctx.s.bank.import({ source: 'csv', warnings: [], transactions: [{ amount: 1210, ...bank }] });
+      const api = createApi(ctx.s, { appVersion: () => '0.0.0', hasSmtpPassword: () => false } as unknown as HostContext);
+      const question = () => ctx.s.inbox.tasks('2026-09-15').filter((t) => t.kind === 'sale-own-company');
+      return { ...ctx, api, question, t: ctx.s.bank.list()[0]! };
+    };
+    // "77" zit in het factuurnummer van een andere klant, weken eerder
+    {
+      const { s, api, question, t } = woo('77', { date: '2026-08-02', description: 'Factuur 2026-0177 Bouwbedrijf Voorbeeld', counterName: 'Bouwbedrijf Voorbeeld' });
+      await s.integrations.sync('woocommerce');
+      expect(question()[0]!.actions.map((a) => a.id)).toEqual(['neutraal', 'verkoop']);
+      await api.home.act(question()[0]!, 'neutraal');
+      expect(s.bank.get(t.id)).toMatchObject({ status: 'nieuw' });
+      expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(1210);
+      expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(-1210);
+    }
+    // het korte nummer staat er wel los in, maar dat is te weinig om er zeker van te zijn: de vraag
+    {
+      const { s, question, t } = woo('77', { date: '2026-09-11', description: 'Order 77', counterName: 'Bouwbedrijf Voorbeeld' });
+      await s.integrations.sync('woocommerce');
+      expect(question()[0]!.actions.map((a) => a.id)).toEqual(['neutraal-bank', 'neutraal-betaaldienst', 'verkoop']);
+      expect(question()[0]!.ref).toMatchObject({ bankTransactionId: t.id });
+    }
+    // een lang nummer als heel woord, maar maanden eerder: ook de vraag
+    {
+      const { s, question } = woo('WC-20260077', { date: '2026-05-02', description: 'Betaling WC-20260077', counterName: 'Bouwbedrijf Voorbeeld' });
+      await s.integrations.sync('woocommerce');
+      expect(question()[0]!.actions.map((a) => a.id)).toEqual(['neutraal-bank', 'neutraal-betaaldienst', 'verkoop']);
+    }
+  });
+
+  it('komt de uitbetaling op de bank terwijl de vraag nog open staat, dan waarschuwt de app en stelt hij geen nieuwe verkoop voor', async () => {
+    const { s, api, question, books } = withMollie();
+    await s.integrations.sync('mollie-facturen');
+    expect(books().betaaldienst).toBe(0);
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-12', amount: 1054, description: 'Uitbetaling 7654321.2609.01', counterName: 'Stichting Mollie Payments' }] });
+    const t = s.bank.list()[0]!;
+    expect(s.bank.awaitedPayout(s.bank.get(t.id))).toBe('Mollie');
+    const [income] = s.inbox.tasks('2026-09-15').filter((x) => x.ref.bankTransactionId === t.id);
+    expect(income).toMatchObject({ kind: 'bank-income' });
+    expect(income!.question).toContain('Mollie Facturen');
+    expect(income!.question).toContain('beantwoord die eerst');
+    expect(income!.question).toContain('geen nieuwe verkoop');
+    // na het antwoord is het de gewone waarschuwing bij een uitbetaling
+    await api.home.act(question()[0]!, 'neutraal');
+    const [after] = s.inbox.tasks('2026-09-15').filter((x) => x.ref.bankTransactionId === t.id);
+    expect(after!.question).not.toContain('beantwoord die eerst');
+    expect(after!.question).toContain('geen nieuwe verkoop');
+  });
+
+  it('alleen dezelfde bedrijfsnaam: "Geen omzet" is dan niet de voorgestelde knop; bij meer aanwijzingen wel', async () => {
+    const naam = withMollie();
+    await naam.s.integrations.sync('mollie-facturen');
+    expect(naam.question()[0]!.actions.filter((a) => a.primary)).toEqual([]);
+    const meer = withMollie(mollieInvoice({ vatNumber: 'NL123456789B01' }));
+    await meer.s.integrations.sync('mollie-facturen');
+    expect(meer.question()[0]!.actions.filter((a) => a.primary).map((a) => a.id)).toEqual(['neutraal']);
+    expect(meer.question()[0]!.actions[0]!.hint).toContain('draai');
+  });
+
+  it('verkeerd geklikt: draai je de boeking van "Geen omzet" terug, dan komt de vraag terug en kun je alsnog "Toch een echte verkoop" kiezen', async () => {
+    const { s, db, api, question, books } = withMollie();
+    await s.integrations.sync('mollie-facturen');
+    await api.home.act(question()[0]!, 'neutraal');
+    expect(question()).toEqual([]);
+    const entry = (db.prepare('SELECT journal_entry_id AS id FROM integration_questions').get() as { id: number }).id;
+    s.ledger.reverse(entry, '2026-09-15');
+    expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, priveStorting: 0 });
+    // de vraag staat er weer; bijwerken maakt er geen tweede van
+    expect(await s.integrations.sync('mollie-facturen')).toMatchObject({ created: 0 });
+    expect(question()).toHaveLength(1);
+    await api.home.act(question()[0]!, 'verkoop');
+    expect(question()).toEqual([]);
+    expect(s.invoices.list()).toMatchObject([{ total: 1089, status: 'betaald' }]);
+    expect(books()).toEqual({ omzet: 900, btw: -189, betaaldienst: 1089, priveStorting: 0 });
+  });
+
+  it('ook via de bank: zet je de bankregel terug op nieuw, dan komt de vraag terug', async () => {
+    const { s, api, question, books } = withMollie();
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-11', amount: 1089, description: 'Betaling I-0050', counterName: 'Stichting Derdengelden Voorbeeld' }] });
+    const t = s.bank.list()[0]!;
+    await s.integrations.sync('mollie-facturen');
+    expect(question()[0]!.question).toContain('Op je bank staat');
+    await api.home.act(question()[0]!, 'neutraal');
+    expect(question()).toEqual([]);
+    s.bank.unmatch(t.id, '2026-09-15');
+    expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, priveStorting: 0 });
+    expect(question()).toHaveLength(1);
+  });
 });

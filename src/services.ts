@@ -121,6 +121,8 @@ export function createServices(db: Db, deps: ServiceDeps) {
   intake.setOwnIdentity(ownIdentity);
   // een verkoop aan je eigen bedrijf uit een koppeling wordt geen omzet, maar een vraag (#231)
   integrations.setOwnCompany(ownIdentity, bank);
+  // zolang zo'n verkoop op een keuze wacht, is geld van de betaaldienst geen nieuwe verkoop
+  bank.setSalesWaiting(() => integrations.hasQuestions());
   const ownCompany = new OwnCompanyPayments(db, bank, purchases, intake, ownIdentity);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);

@@ -214,6 +214,8 @@ const OWN_HINTS = {
   prive: 'Geen kosten en geen btw: het telt als privé. De factuur blijft bewaard.',
   vraag: 'Staat apart op "weet ik nog niet", zonder btw-aftrek. Het komt terug als controle vóór je btw-aangifte en staat in het pakket voor je boekhouder.',
 };
+/** Bij "Geen omzet" voor een verkoop aan je eigen bedrijf (#231): de keuze is te herstellen. */
+const SALE_UNDO_HINT = 'Klopt het achteraf niet, draai dan de boeking terug: de app stelt de vraag dan opnieuw.';
 
 export class InboxService {
   constructor(
@@ -722,16 +724,20 @@ export class InboxService {
         continue;
       }
       if (t.amount > 0) {
-        // geld van een betaaldienst terwijl er verkopen op hun uitbetaling wachten (#227): geen "weer een verkoop"
+        // geld van een betaaldienst terwijl er verkopen op hun uitbetaling wachten (#227): geen "weer een verkoop".
+        // Wacht zo'n verkoop nog op een keuze (#231), dan is er nog niets geboekt: eerst die vraag.
         const payout = this.bank.awaitedPayout(t);
+        const waiting = payout ? (this.integrations?.questions()[0] ?? null) : null;
         tasks.push({
           key: `bank-${t.id}`,
           kind: 'bank-income',
           icon: '💶',
           title: `${formatEuro(t.amount)} ontvangen van ${who}`,
-          question: payout
-            ? `Waar is dit geld voor? Er staan verkopen in de app waarvan het geld nog niet binnen is. Is dit de uitbetaling daarvan door ${payout}, dan is het geen nieuwe verkoop: anders telt de omzet twee keer.`
-            : 'Waar is dit geld voor?',
+          question: waiting
+            ? `Waar is dit geld voor? Op Vandaag staat nog een vraag over een verkoop uit ${waiting.label} (${waiting.order.number}); beantwoord die eerst. Is dit de uitbetaling daarvan door ${payout}, dan is het geen nieuwe verkoop: anders telt de omzet twee keer.`
+            : payout
+              ? `Waar is dit geld voor? Er staan verkopen in de app waarvan het geld nog niet binnen is. Is dit de uitbetaling daarvan door ${payout}, dan is het geen nieuwe verkoop: anders telt de omzet twee keer.`
+              : 'Waar is dit geld voor?',
           amount: t.amount,
           actions: [{ id: 'open', label: 'Uitzoeken', primary: true }],
           ref: { bankTransactionId: t.id },
@@ -1019,18 +1025,30 @@ export class InboxService {
         });
       } else {
         // verkoop aan je eigen bedrijf (#231), bv. een proefabonnement op je eigen dienst. Geen omzet is het
-        // voorstel: je verkoopt aan jezelf.
+        // voorstel: je verkoopt aan jezelf. Bij maar één aanwijzing (bv. alleen dezelfde naam) kan het ook een
+        // klant zijn die net zo heet: dan stelt de app geen van beide voor.
+        const sure = q.signals.length >= 2;
+        // geld op de bank dat de betaling kan zijn: zonder het ordernummer erbij kiest de gebruiker of dat dit geld is
+        const onBank = q.bank ? `${formatEuro(q.total ?? 0)}${q.bank.counterName ? ` van ${q.bank.counterName}` : ''} op ${formatDateNl(q.bank.date)}${q.bank.description ? ` ("${q.bank.description.slice(0, 60)}")` : ''}` : null;
         tasks.push({
           key: `sale-own-company-${q.id}`,
           kind: 'sale-own-company',
           icon: '🏠',
           title: `Verkoop aan je eigen bedrijf: ${formatEuro(q.total ?? 0)}`,
-          question: `${q.label} gaf een betaalde verkoop door van ${formatEuro(q.total ?? 0)} ${sale}. Dat lijkt je eigen bedrijf, bijvoorbeeld een proefabonnement op je eigen dienst. Aan jezelf verkopen is geen omzet, dus de app heeft nog niets geboekt. Kies wat het was.`,
+          question:
+            `${q.label} gaf een betaalde verkoop door van ${formatEuro(q.total ?? 0)} ${sale}. Dat lijkt je eigen bedrijf, bijvoorbeeld een proefabonnement op je eigen dienst. Aan jezelf verkopen is geen omzet, dus de app heeft nog niets geboekt. Kies wat het was.` +
+            (!onBank ? '' : q.bank!.sure ? ` Op je bank staat al ${onBank}, met het nummer van deze verkoop erbij: bij "Geen omzet" telt dat geld als privé-storting.` : ` Op je bank staat ${onBank}. Is dat de betaling van deze verkoop, of komt het geld nog van de betaaldienst?`),
           amount: q.total ?? undefined,
-          actions: [{ id: 'neutraal', label: 'Geen omzet', primary: true }, { id: 'verkoop', label: 'Toch een echte verkoop' }],
+          actions:
+            q.bank && !q.bank.sure
+              ? [{ id: 'neutraal-bank', label: 'Geen omzet: dit is het geld op de bank' }, { id: 'neutraal-betaaldienst', label: 'Geen omzet: het komt van de betaaldienst' }, { id: 'verkoop', label: 'Toch een echte verkoop' }]
+              : [
+                  { id: 'neutraal', label: 'Geen omzet', primary: sure || undefined, ...(q.bank ? { hint: `Geen factuur, geen omzet en geen btw. De betaling die al op je bank staat, telt als privé-storting. ${SALE_UNDO_HINT}` } : {}) },
+                  { id: 'verkoop', label: 'Toch een echte verkoop' },
+                ],
           why: `Omdat ${q.signals.join(', ')}.`,
           priority: 2,
-          ref: { questionId: q.id },
+          ref: { questionId: q.id, ...(q.bank ? { bankTransactionId: q.bank.id } : {}) },
         });
       }
     }
@@ -1518,7 +1536,9 @@ export class InboxService {
       'vat-check:open': 'Je gaat naar de plek waar je het oplost.',
       'vat-check:overslaan': 'De controle verdwijnt; de aangifte gaat door zoals het nu is.',
       'customer-overpaid:klopt': 'Het te veel betaalde blijft als tegoed van de klant staan.',
-      'sale-own-company:neutraal': 'Geen factuur, geen omzet en geen btw. Het geld dat de betaaldienst hiervoor uitbetaalt, telt als privé-storting.',
+      'sale-own-company:neutraal': `Geen factuur, geen omzet en geen btw. Het geld dat de betaaldienst hiervoor uitbetaalt, telt als privé-storting. ${SALE_UNDO_HINT}`,
+      'sale-own-company:neutraal-bank': `Geen factuur, geen omzet en geen btw. De betaling op je bank telt als privé-storting; er komt niets bij de betaaldienst te staan. ${SALE_UNDO_HINT}`,
+      'sale-own-company:neutraal-betaaldienst': `Geen factuur, geen omzet en geen btw. Het geld dat de betaaldienst hiervoor uitbetaalt, telt als privé-storting; de betaling op je bank deel je daarna zelf in. ${SALE_UNDO_HINT}`,
       'sale-own-company:verkoop': 'Wordt een gewone betaalde factuur: telt mee als omzet, met btw.',
       'sale-vat-mode:inclusief': 'De app rekent de btw uit de prijzen terug: het totaal van de regels is wat de klant betaalde.',
       'sale-vat-mode:exclusief': 'De btw komt boven op de prijzen van de regels.',
