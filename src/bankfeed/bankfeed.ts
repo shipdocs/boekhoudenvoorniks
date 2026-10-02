@@ -124,7 +124,7 @@ export class BankFeedService {
    * Het laatste expliciete testresultaat van deze service-instantie; alleen hiertegen zijn
    * Ponto-id's in `saveLinks` te valideren (regel 7). Expliciet: pas na een geslaagde `test()`.
    */
-  private lastTest: { accounts: PontoAccount[] } | null = null;
+  private lastTest: { accounts: PontoAccount[]; creds: PontoCredentials } | null = null;
   /** Eén gedeelde single-flight-lock (regel 9); #253 en #247 hergebruiken dezelfde. */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -185,7 +185,7 @@ export class BankFeedService {
       configured: creds !== null && this.secrets.available,
       // regel 3: hooguit de laatste vier tekens van de Client ID, nooit een volledige credential;
       // zonder leesbare credential is er ook geen betrouwbaar laatste-vier om te tonen (regel 4)
-      clientIdLast4: creds === null ? null : creds.clientId.slice(-4),
+      clientIdLast4: creds === null || !this.secrets.available ? null : creds.clientId.slice(-4),
       accounts: rows.map((row) => ({
         id: row.id,
         pontoId: row.external_id,
@@ -216,13 +216,18 @@ export class BankFeedService {
   async test(creds: PontoCredentials): Promise<{ accounts: FeedTestAccount[] }> {
     const blocked = this.blocked();
     if (blocked !== null) throw new ValidationError(blocked);
+    // Een nieuwe expliciete testpoging maakt een ouder resultaat ongeldig. Na een mislukte
+    // hertest mogen rekeningen of andere credentials nooit alsnog met dat oude resultaat
+    // worden opgeslagen.
+    this.lastTest = null;
     if (typeof creds?.clientId !== 'string' || creds.clientId.trim() === '' || typeof creds?.clientSecret !== 'string' || creds.clientSecret.trim() === '') {
       throw new ValidationError('Vul zowel de Client ID als het Client Secret in');
     }
     // eerst veilig proberen met alleen de scope-controle: de nepclient in tests geeft de scope
     // mee, maar het contract van `test()` kent geen losse probe; de verbindingstest zelf
     // weigert `pi` via de scope-controle in de client (PontoError 'forbidden').
-    const client = this.makeClient({ clientId: creds.clientId.trim(), clientSecret: creds.clientSecret.trim() });
+    const testedCreds = { clientId: creds.clientId.trim(), clientSecret: creds.clientSecret.trim() };
+    const client = this.makeClient(testedCreds);
     let scope = 'ai';
     let found: PontoAccount[];
     try {
@@ -244,14 +249,14 @@ export class BankFeedService {
       accounts.push(this.describeAccount(account, existing));
     }
     // regel 7: het laatste expliciete testresultaat van deze instantie, waartegen saveLinks valideert
-    this.lastTest = { accounts: found };
+    this.lastTest = { accounts: found, creds: testedCreds };
     return { accounts };
   }
 
   /** Advies bij één gevonden rekening, op basis van de bestaande bankrekeningen. */
   private describeAccount(account: PontoAccount, existing: ReturnType<BankService['listAccounts']>): FeedTestAccount {
     // alleen EUR + IBAN + niet-deprecated is bruikbaar (regel 5)
-    const usable = account.currency === 'EUR' && account.iban !== null && !account.deprecated;
+    const usable = this.usable(account);
     let reason: string | null = null;
     if (!usable) {
       if (account.currency !== 'EUR') reason = 'Deze rekening is niet in euro\'s; de bankfeed leest alleen eurorekeningen.';
@@ -287,6 +292,10 @@ export class BankFeedService {
     };
   }
 
+  private usable(account: PontoAccount): boolean {
+    return account.currency === 'EUR' && account.iban !== null && !account.deprecated;
+  }
+
   // ---------- rekeningkeuzes bewaren ----------
 
   /**
@@ -310,6 +319,11 @@ export class BankFeedService {
     }
     // alle id's tegen het laatste expliciete testresultaat valideren (regel 7)
     if (this.lastTest === null) throw new ValidationError('Test eerst de verbinding voordat je rekeningen koppelt.');
+    const savedCreds = creds === null ? this.readCredentials()! : { clientId: creds.clientId.trim(), clientSecret: creds.clientSecret.trim() };
+    if (savedCreds.clientId !== this.lastTest.creds.clientId || savedCreds.clientSecret !== this.lastTest.creds.clientSecret) {
+      throw new ValidationError('Test deze inloggegevens opnieuw voordat je de rekeningkeuzes bewaart.');
+    }
+    if (!Array.isArray(links)) throw new ValidationError('De rekeningkeuzes ontbreken; test eerst opnieuw de verbinding.');
     const known = new Map(this.lastTest.accounts.map((a) => [a.id, a]));
     const seen = new Set<string>();
     for (const link of links) {
@@ -317,8 +331,13 @@ export class BankFeedService {
       if (!known.has(link.pontoId.trim())) throw new ValidationError('Onbekende Ponto-rekening; test eerst opnieuw de verbinding.');
       if (seen.has(link.pontoId.trim())) throw new ValidationError('Deze Ponto-rekening staat twee keer in de lijst; koppel haar één keer.');
       seen.add(link.pontoId.trim());
-      if (typeof link.bankAccountId === 'number' && !Number.isInteger(link.bankAccountId)) {
+      if (link.bankAccountId !== null && link.bankAccountId !== 'nieuw'
+        && (typeof link.bankAccountId !== 'number' || !Number.isInteger(link.bankAccountId))) {
         throw new ValidationError('Onbekende bankrekening; kies een bestaande rekening of "nieuw".');
+      }
+      const account = known.get(link.pontoId.trim())!;
+      if (link.bankAccountId !== null && !this.usable(account)) {
+        throw new ValidationError('Deze Ponto-rekening is niet bruikbaar; kies "niet gebruiken".');
       }
       if (typeof link.bankAccountId === 'number') {
         try {
@@ -328,18 +347,14 @@ export class BankFeedService {
         }
       }
     }
-    const savedCreds = creds === null ? this.readCredentials()! : { clientId: creds.clientId.trim(), clientSecret: creds.clientSecret.trim() };
     tx(this.db, () => {
-      // credentials uitsluitend in de SecretStore (regel 2)
-      this.secrets.set(BANK_FEED_SECRET_KEYS.clientId, savedCreds.clientId);
-      this.secrets.set(BANK_FEED_SECRET_KEYS.clientSecret, savedCreds.clientSecret);
-      const now = new Date().toISOString();
       for (const link of links) {
         const pontoId = link.pontoId.trim();
         const account = known.get(pontoId)!;
         if (link.bankAccountId === null) {
-          // expliciet niets doen: een eerder bewaarde koppeling voor deze rekening mag blijven,
-          // de gebruiker heeft hier niets over gezegd; wel geen nieuwe rij.
+          // `null` is de expliciete keuze "niet gebruiken" uit de wizard. Een bestaande
+          // actieve koppeling moet daarmee ook echt stoppen voordat #253 rondes toevoegt.
+          this.upsertFeedRow(pontoId, null, account, 'niet-gebruiken');
           continue;
         }
         if (link.bankAccountId === 'nieuw') {
@@ -349,34 +364,43 @@ export class BankFeedService {
             .prepare('SELECT bank_account_id FROM bank_feed_accounts WHERE provider = \'ponto\' AND external_id = ?')
             .get(pontoId) as { bank_account_id: number | null } | undefined;
           if (previous?.bank_account_id != null) {
-            this.upsertFeedRow(pontoId, previous.bank_account_id, account, now);
+            this.upsertFeedRow(pontoId, previous.bank_account_id, account, 'actief');
             continue;
           }
           const name = link.name?.trim() || account.name?.trim() || 'Bankrekening (Ponto)';
           const created = this.bank.addAccount(name, account.iban, { pot: false });
-          this.upsertFeedRow(pontoId, created.id, account, now);
+          this.upsertFeedRow(pontoId, created.id, account, 'actief');
         } else {
-          this.upsertFeedRow(pontoId, link.bankAccountId, account, now);
+          this.upsertFeedRow(pontoId, link.bankAccountId, account, 'actief');
         }
       }
+      // credentials uitsluitend in de SecretStore (regel 2). Schrijf ze pas nadat alle
+      // rekeningkeuzes zonder fout zijn verwerkt; de productie-store deelt deze DB-transactie.
+      this.secrets.set(BANK_FEED_SECRET_KEYS.clientId, savedCreds.clientId);
+      this.secrets.set(BANK_FEED_SECRET_KEYS.clientSecret, savedCreds.clientSecret);
     });
   }
 
   /** Maakt of actualiseert de feedrij voor één gekoppelde Ponto-rekening (migratie 33). */
-  private upsertFeedRow(pontoId: string, bankAccountId: number, account: PontoAccount, now: string): void {
+  private upsertFeedRow(
+    pontoId: string,
+    bankAccountId: number | null,
+    account: PontoAccount,
+    status: 'actief' | 'niet-gebruiken',
+  ): void {
     const existing = this.db
       .prepare('SELECT id FROM bank_feed_accounts WHERE provider = \'ponto\' AND external_id = ?')
       .get(pontoId) as { id: number } | undefined;
     if (existing !== undefined) {
       this.db
-        .prepare('UPDATE bank_feed_accounts SET bank_account_id = ?, iban = ?, name = ?, holder = ?, expires_at = ?, details_synchronized_at = COALESCE(details_synchronized_at, ?), balance = COALESCE(balance, ?), balance_at = COALESCE(balance_at, ?) WHERE id = ?')
-        .run(bankAccountId, account.iban, account.name, account.holder, account.expiresAt, account.detailsSynchronizedAt, account.balance, account.balanceAt, existing.id);
+        .prepare('UPDATE bank_feed_accounts SET bank_account_id = ?, iban = ?, name = ?, holder = ?, status = ?, expires_at = ?, details_synchronized_at = COALESCE(?, details_synchronized_at), balance = COALESCE(?, balance), balance_at = COALESCE(?, balance_at) WHERE id = ?')
+        .run(bankAccountId, account.iban, account.name, account.holder, status, account.expiresAt, account.detailsSynchronizedAt, account.balance, account.balanceAt, existing.id);
       return;
     }
     this.db
-      .prepare(`INSERT INTO bank_feed_accounts (provider, external_id, bank_account_id, iban, name, holder, status, details_synchronized_at, expires_at, balance, balance_at, last_ok_at)
-        VALUES ('ponto', ?, ?, ?, ?, ?, 'actief', ?, ?, ?, ?, ?)`)
-      .run(pontoId, bankAccountId, account.iban, account.name, account.holder, account.detailsSynchronizedAt, account.expiresAt, account.balance, account.balanceAt, now);
+      .prepare(`INSERT INTO bank_feed_accounts (provider, external_id, bank_account_id, iban, name, holder, status, details_synchronized_at, expires_at, balance, balance_at)
+        VALUES ('ponto', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(pontoId, bankAccountId, account.iban, account.name, account.holder, status, account.detailsSynchronizedAt, account.expiresAt, account.balance, account.balanceAt);
   }
 
   // ---------- loskoppelen ----------
@@ -390,10 +414,9 @@ export class BankFeedService {
     if (blocked !== null) throw new ValidationError(blocked);
     tx(this.db, () => {
       this.db.prepare('DELETE FROM bank_feed_accounts WHERE provider = \'ponto\'').run();
+      this.secrets.delete(BANK_FEED_SECRET_KEYS.clientId);
+      this.secrets.delete(BANK_FEED_SECRET_KEYS.clientSecret);
     });
-    this.secrets.delete(BANK_FEED_SECRET_KEYS.clientId);
-    this.secrets.delete(BANK_FEED_SECRET_KEYS.clientSecret);
     this.lastTest = null;
   }
 }
-
