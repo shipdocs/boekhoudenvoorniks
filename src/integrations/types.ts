@@ -49,6 +49,12 @@ export interface ExternalOrder {
    * De regels staan er dan in zoals de bron ze gaf en de app boekt niets voordat de gebruiker het zegt (#228).
    */
   pricesUnknown?: string;
+  /**
+   * De app kan deze order niet betrouwbaar inlezen (hier: waarom, in gewone woorden), bv. een btw-tarief of een
+   * korting die hij niet kan lezen. Dan boekt hij niets en meldt hij het op Vandaag: de gebruiker boekt de
+   * verkoop zelf (#228).
+   */
+  unreadable?: string;
 }
 
 /** Een uitbetaling van een betaalprovider naar de bank. */

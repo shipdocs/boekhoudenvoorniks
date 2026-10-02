@@ -415,10 +415,13 @@ export function createApi(s: Services, host: HostContext) {
       case 'sale-own-company:verkoop':
       case 'sale-vat-mode:inclusief':
       case 'sale-vat-mode:exclusief':
+      case 'sale-vat-mode:zelf':
+      case 'sale-manual:zelf':
       case 'sale-reread:opnieuw':
       case 'sale-reread:niet':
         // verkoop uit een koppeling die op een keuze wacht: aan je eigen bedrijf (#231), prijzen met of zonder
-        // btw, of een teruggedraaide factuur opnieuw inlezen (#228). Past het antwoord niet meer bij de vraag, dan een melding
+        // btw, een teruggedraaide factuur opnieuw inlezen, of een verkoop die de app niet kan inlezen en die je
+        // zelf boekt (#228). Past het antwoord niet meer bij de vraag, dan een melding
         // bij "dit is het geld op de bank" gaat de bankregel mee die de gebruiker zag: is dat intussen een andere, dan gebeurt er niets
         s.integrations.answerQuestion(r.questionId!, actionId as SaleAnswer, actionId === 'neutraal-bank' ? r.bankTransactionId : undefined);
         return;

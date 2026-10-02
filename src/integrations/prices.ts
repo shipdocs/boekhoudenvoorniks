@@ -4,7 +4,7 @@ import type { ExternalOrder } from './types';
 type OrderLine = ExternalOrder['lines'][number];
 
 /** Het bedrag van een regel: aantal × prijs per stuk, in hele centen. */
-function lineAmount(l: Pick<OrderLine, 'quantity' | 'unitPriceExVat'>): Cents {
+export function lineAmount(l: Pick<OrderLine, 'quantity' | 'unitPriceExVat'>): Cents {
   return roundHalfAwayFromZero(l.quantity * l.unitPriceExVat);
 }
 
@@ -39,16 +39,19 @@ function netOfGross(gross: Cents, rate: number): Cents {
  * dat tarief, niet per regel afgerond en opgeteld: zo ontstaat er geen verschil van een cent per regel. Wat er
  * per regel bij het afronden overblijft, gaat naar de regels die het meest zijn afgerond. Past het bedrag van
  * een regel niet in hele centen per stuk, dan wordt het één regel met het aantal in de omschrijving.
+ * Een regel zonder leesbaar btw-tarief blijft zoals hij is: daar valt niets uit terug te rekenen.
  */
 export function linesFromInclusive(lines: OrderLine[]): OrderLine[] {
   const gross = lines.map(lineAmount);
   const net = [...gross];
   for (const rate of new Set(lines.map((l) => l.vatPercentage))) {
-    if (rate === 0) continue;
+    if (!Number.isFinite(rate) || rate <= 0) continue;
     const group = lines.map((_, i) => i).filter((i) => lines[i]!.vatPercentage === rate);
     const exact = new Map(group.map((i) => [i, (gross[i]! * 100) / (100 + rate)]));
     for (const i of group) net[i] = roundHalfAwayFromZero(exact.get(i)!);
     let rest = netOfGross(group.reduce((s, i) => s + gross[i]!, 0), rate) - group.reduce((s, i) => s + net[i]!, 0);
+    // nooit eindeloos verdelen: zonder regels of zonder heel aantal centen valt er niets te verdelen
+    if (group.length === 0 || !Number.isInteger(rest)) continue;
     const step = Math.sign(rest);
     // eerst de regels die het verst naar de andere kant zijn afgerond
     const order = [...group].sort((a, b) => step * (exact.get(b)! - net[b]! - (exact.get(a)! - net[a]!)) || a - b);

@@ -90,6 +90,13 @@ describe('prijzen inclusief btw terugrekenen', () => {
     expect(totals({ lines } as ExternalOrder)).toEqual({ subtotal: 2500, vat: 300, total: 2800 });
   });
 
+  it('een regel zonder leesbaar btw-tarief blijft zoals hij is; de app blijft er niet in hangen', () => {
+    expect(linesFromInclusive(incl([1000, NaN], [1210, 21]))).toEqual([
+      { description: 'Regel 1', quantity: 1, unitPriceExVat: 1000, vatPercentage: NaN },
+      { description: 'Regel 2', quantity: 1, unitPriceExVat: 1000, vatPercentage: 21 },
+    ]);
+  });
+
   it('voor elk bedrag van € 0,01 tot € 50,00: de btw is wat er in het bedrag zit, en het totaal wijkt hooguit één cent af', () => {
     let exact = 0;
     for (const rate of [21, 9]) {
@@ -149,15 +156,76 @@ describe('Mollie Facturen: vatMode (#228)', () => {
     expect(s.invoices.overpaidCustomers()).toEqual([]);
   });
 
-  it('past het totaal niet bij de regels (bv. een korting), dan boekt de app niets en zegt hij waarom', async () => {
-    const { s, books } = withMollie([invoice({ vatMode: 'exclusive', lines: [line('100.00')], totalAmount: eur('108.90') })]);
+  it('past het totaal niet bij de regels, dan boekt de app niets en staat het op Vandaag, ook na vanzelf bijwerken; "Ik boek hem zelf" sluit het af', async () => {
+    const { s, api, tasks, books } = withMollie([invoice({ vatMode: 'exclusive', lines: [line('100.00')], totalAmount: eur('108.90') })]);
     const r = await s.integrations.sync('mollie-facturen');
-    expect(r.created).toBe(0);
-    expect(r.messages.join(' ')).toContain(formatEuro(12100));
-    expect(r.messages.join(' ')).toContain(formatEuro(10890));
+    expect(r).toMatchObject({ created: 0, skipped: 1 });
+    expect(r.messages.join(' ')).toContain('Vandaag');
     expect(s.invoices.list()).toHaveLength(0);
     expect(s.relations.list().some((x) => x.name === 'Rederij Voorbeeld')).toBe(false);
     expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, debiteuren: 0 });
+    const [task] = tasks('sale-manual');
+    expect(task).toMatchObject({ title: `Mollie Facturen: verkoop van ${formatEuro(10890)} niet ingelezen`, amount: 10890 });
+    expect(task!.question).toContain('Rederij Voorbeeld');
+    expect(task!.question).toContain('I-0061');
+    expect(task!.question).toContain(formatEuro(12100));
+    expect(task!.question).toContain(formatEuro(10890));
+    expect(task!.actions.map((a) => a.id)).toEqual(['zelf']);
+    expect(task!.actions.every((a) => a.hint)).toBe(true);
+    // bij elke keer bijwerken dezelfde ene melding, geen nieuwe
+    for (let i = 0; i < 2; i++) expect(await s.integrations.sync('mollie-facturen')).toMatchObject({ created: 0, messages: [] });
+    expect(tasks('sale-manual')).toHaveLength(1);
+    await api.home.act(task!, 'zelf');
+    expect(tasks('sale-manual')).toEqual([]);
+    expect(await s.integrations.sync('mollie-facturen')).toMatchObject({ created: 0, messages: [] });
+    expect(tasks('sale-manual')).toEqual([]);
+    expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, debiteuren: 0 });
+  });
+
+  it('een korting op een regel of op de hele factuur leest de app mee: het totaal is wat de klant betaalde', async () => {
+    const korting = (type: string, value: string) => ({ type, value });
+    // 10% korting op de regel: € 90,00 + € 18,90
+    const regel = mapMollieSalesInvoice(invoice({ vatMode: 'exclusive', lines: [{ ...line('100.00'), discount: korting('percentage', '10') }], totalAmount: eur('108.90') }));
+    expect(totals(regel)).toEqual({ subtotal: 9000, vat: 1890, total: 10890 });
+    expect(regel.lines.map((l) => l.unitPriceExVat)).toEqual([10000, -1000]);
+    expect(regel.lines[1]!.description).toContain('Korting');
+    // een vast bedrag korting op de regel
+    expect(totals(mapMollieSalesInvoice(invoice({ vatMode: 'exclusive', lines: [{ ...line('100.00'), discount: korting('amount', '10.00') }], totalAmount: eur('108.90') })))).toEqual({ subtotal: 9000, vat: 1890, total: 10890 });
+    // korting op de hele factuur, twee tarieven: per tarief naar verhouding
+    const factuur = mapMollieSalesInvoice(invoice({ vatMode: 'exclusive', lines: [line('100.00'), line('50.00', '9.00', 1, 'Boekje')], discount: korting('percentage', '20'), totalAmount: eur('140.40') }));
+    expect(totals(factuur)).toEqual({ subtotal: 12000, vat: 2040, total: 14040 });
+    // prijzen inclusief btw met korting
+    expect(totals(mapMollieSalesInvoice(invoice({ lines: [{ ...line('121.00'), discount: korting('percentage', '10') }], totalAmount: eur('108.90') })))).toEqual({ subtotal: 9000, vat: 1890, total: 10890 });
+    const { s, books } = withMollie([invoice({ vatMode: 'exclusive', lines: [{ ...line('100.00'), discount: korting('percentage', '10') }], totalAmount: eur('108.90') })]);
+    expect(await s.integrations.sync('mollie-facturen')).toMatchObject({ created: 1, messages: [] });
+    expect(books()).toEqual({ omzet: 9000, btw: 1890, betaaldienst: 10890, debiteuren: 0 });
+  });
+
+  it('een regel zonder leesbaar btw-tarief: niet als 0% inlezen en niet blijven hangen, maar de melding dat je hem zelf boekt', async () => {
+    for (const vatRate of [null, '', 'geen']) {
+      for (const vatMode of ['inclusive', 'exclusive', 'margin']) {
+        const order = mapMollieSalesInvoice(invoice({ vatMode, lines: [{ ...line('10.00'), vatRate }], totalAmount: eur('10.00') }));
+        expect(order.unreadable).toContain('btw-tarief');
+        expect(order.lines).toEqual([{ description: 'Abonnement', quantity: 1, unitPriceExVat: 1000, vatPercentage: 0 }]);
+      }
+    }
+    const { s, tasks, books } = withMollie([invoice({ lines: [{ ...line('10.00'), vatRate: null }], totalAmount: eur('10.00') })]);
+    expect(await s.integrations.sync('mollie-facturen')).toMatchObject({ created: 0, skipped: 1 });
+    expect(tasks('sale-manual')[0]!.question).toContain('btw-tarief');
+    expect(tasks('sale-vat-mode')).toEqual([]);
+    expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, debiteuren: 0 });
+  });
+
+  it('een korting die de app niet kent, of een korting zonder totaal om hem mee te controleren: niets geboekt, melding op Vandaag', async () => {
+    for (const inv of [
+      invoice({ vatMode: 'exclusive', lines: [{ ...line('100.00'), discount: { type: 'staffel', value: '3' } }], totalAmount: eur('108.90') }),
+      invoice({ vatMode: 'exclusive', lines: [{ ...line('100.00'), discount: { type: 'percentage', value: '10' } }], totalAmount: undefined }),
+    ]) {
+      const { s, tasks, books } = withMollie([inv]);
+      expect(await s.integrations.sync('mollie-facturen')).toMatchObject({ created: 0, skipped: 1 });
+      expect(tasks('sale-manual')[0]!.question).toContain('korting');
+      expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, debiteuren: 0 });
+    }
   });
 
   it('onbekende vatMode: niet raden maar een vraag op Vandaag; daarna ingelezen zoals jij zegt', async () => {
@@ -172,7 +240,9 @@ describe('Mollie Facturen: vatMode (#228)', () => {
       expect(task!.question).toContain('I-0061');
       expect(task!.question).toContain(formatEuro(1089));
       expect(task!.question).toContain(formatEuro(1318));
-      expect(task!.actions.map((a) => a.id)).toEqual(['inclusief', 'exclusief']);
+      // alleen het antwoord dat bij het betaalde bedrag past, en altijd de uitweg "Ik boek hem zelf"
+      expect(task!.actions.map((a) => a.id)).toEqual([answer, 'zelf']);
+      expect(task!.actions.every((a) => a.hint)).toBe(true);
       // nog een keer bijwerken verandert niets
       expect(await s.integrations.sync('mollie-facturen')).toMatchObject({ created: 0 });
       expect(tasks('sale-vat-mode')).toHaveLength(1);
@@ -192,12 +262,50 @@ describe('Mollie Facturen: vatMode (#228)', () => {
     expect(books()).toEqual({ omzet: 900, btw: 189, betaaldienst: 1089, debiteuren: 0 });
   });
 
-  it('past jouw antwoord niet bij wat er betaald is, dan boekt de app niets en blijft de vraag staan', async () => {
+  it('een antwoord dat niet bij het betaalde bedrag past (een oud scherm): een melding in gewone taal, niets geboekt, de vraag blijft staan', async () => {
     const { s, api, tasks, books } = withMollie([invoice({ vatMode: 'margin', totalAmount: eur('10.89') })]);
     await s.integrations.sync('mollie-facturen');
-    await expect(api.home.act(tasks('sale-vat-mode')[0]!, 'exclusief')).rejects.toThrow(/betaald/);
+    const act = api.home.act(tasks('sale-vat-mode')[0]!, 'exclusief');
+    await expect(act).rejects.toThrow(`Met prijzen exclusief btw komt de factuur op ${formatEuro(1318)}, maar er is ${formatEuro(1089)} betaald. Kies de andere knop of boek deze verkoop zelf.`);
     expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, debiteuren: 0 });
     expect(tasks('sale-vat-mode')).toHaveLength(1);
+  });
+
+  it('geeft Mollie geen totaal door, dan kan het allebei: beide knoppen, en "Ik boek hem zelf" sluit de vraag zonder iets te boeken', async () => {
+    const { s, api, tasks, books } = withMollie([invoice({ vatMode: 'margin', totalAmount: undefined })]);
+    await s.integrations.sync('mollie-facturen');
+    const [task] = tasks('sale-vat-mode');
+    expect(task!.actions.map((a) => a.id)).toEqual(['inclusief', 'exclusief', 'zelf']);
+    await api.home.act(task!, 'zelf');
+    expect(tasks('sale-vat-mode')).toEqual([]);
+    expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, debiteuren: 0 });
+    expect(await s.integrations.sync('mollie-facturen')).toMatchObject({ created: 0 });
+    expect(s.invoices.list()).toHaveLength(0);
+  });
+
+  it('past het betaalde bedrag bij geen van beide (onbekende opgave en een korting), dan geen vraag die vastloopt maar de melding dat je hem zelf boekt', async () => {
+    const { s, api, tasks, books } = withMollie([invoice({ vatMode: 'margin', lines: [line('100.00')], totalAmount: eur('90.00') })]);
+    expect(await s.integrations.sync('mollie-facturen')).toMatchObject({ created: 0, skipped: 1 });
+    expect(tasks('sale-vat-mode')).toEqual([]);
+    const [task] = tasks('sale-manual');
+    expect(task).toMatchObject({ title: `Mollie Facturen: verkoop van ${formatEuro(9000)} niet ingelezen`, amount: 9000 });
+    expect(task!.question).toContain(formatEuro(10000));
+    expect(task!.question).toContain(formatEuro(12100));
+    expect(task!.question).toContain(formatEuro(9000));
+    await api.home.act(task!, 'zelf');
+    expect(tasks('sale-manual')).toEqual([]);
+    expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, debiteuren: 0 });
+  });
+
+  it('verkoop aan je eigen bedrijf met een totaal dat niet bij de regels past: "Toch een echte verkoop" geeft geen fout maar de melding dat je hem zelf boekt', async () => {
+    const eigen = { type: 'business', organizationName: 'Stukadoorsbedrijf Piet', vatNumber: null, email: 'administratie@voorbeeld.example', streetAndNumber: 'Kalkweg 1', postalCode: '1234 AB', city: 'Utrecht', country: 'NL' };
+    const { s, api, tasks, books } = withMollie([invoice({ vatMode: 'exclusive', recipient: eigen, lines: [line('100.00')], totalAmount: eur('108.90') })]);
+    await s.integrations.sync('mollie-facturen');
+    await api.home.act(tasks('sale-own-company')[0]!, 'verkoop');
+    expect(tasks('sale-own-company')).toEqual([]);
+    expect(tasks('sale-manual')).toHaveLength(1);
+    expect(s.invoices.list()).toHaveLength(0);
+    expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, debiteuren: 0 });
   });
 });
 
@@ -252,6 +360,52 @@ describe('een factuur die te hoog is ingelezen verbeteren: terugdraaien en opnie
     expect(await s.integrations.sync('mollie-facturen')).toMatchObject({ created: 0, messages: [] });
     expect(s.invoices.list()).toHaveLength(3);
     expect(tasks('sale-reread')).toEqual([]);
+  });
+
+  it('tussen terugdraaien en de vraag staat er geen "maak het terug over" op Vandaag: de klant betaalde niet te veel', async () => {
+    const { s, api, tasks, old } = oud();
+    reverse(s, old.id);
+    // nog niet bijgewerkt: de melding verwijst naar het bijwerken van de koppeling
+    const [before] = tasks('customer-overpaid');
+    expect(before!.title).toContain(formatEuro(1318));
+    expect(before!.question).not.toContain('Maak het terug over');
+    expect(before!.question).toContain(old.number!);
+    expect(before!.question).toContain('werk de koppeling bij');
+    // bijgewerkt: de vraag "opnieuw inlezen?" staat er, de melding over te veel betaald niet meer
+    await s.integrations.sync('mollie-facturen');
+    expect(tasks('sale-reread')).toHaveLength(1);
+    expect(tasks('customer-overpaid')).toEqual([]);
+    await api.home.act(tasks('sale-reread')[0]!, 'opnieuw');
+    expect(tasks('customer-overpaid')).toEqual([]);
+  });
+
+  it('een gewone klant die te veel betaalde houdt de gewone melding', async () => {
+    const { s, tasks, klant } = withMollie([]);
+    const inv = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-01', dueDate: '2026-09-15', lines: [{ description: 'Stucwerk', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
+    s.invoices.registerPayment(inv.id, { amount: inv.total! + 500, date: '2026-09-05' });
+    expect(tasks('customer-overpaid')[0]!.question).toContain('Maak het terug over');
+  });
+
+  it('een factuur met een afrondingsverschil van een cent: na terugdraaien en opnieuw inlezen blijft er geen cent staan bij de betaaldienst of op betalingsverschillen', async () => {
+    const eigen = { type: 'business', organizationName: 'Stukadoorsbedrijf Piet', vatNumber: null, email: 'administratie@voorbeeld.example', streetAndNumber: 'Kalkweg 1', postalCode: '1234 AB', city: 'Utrecht', country: 'NL' };
+    const tien = invoice({ recipient: eigen, lines: [line('10.00')], totalAmount: eur('10.00'), totalVatAmount: eur('1.74'), subtotalAmount: eur('8.26') });
+    const { s, api, tasks, books } = withMollie([tien]);
+    // eerst gewoon als omzet ingelezen: factuur € 10,01, € 10,00 bij de betaaldienst en een cent afrondingsverschil
+    s.integrations.setOwnCompany(() => null, s.bank);
+    s.integrations.importOrders('mollie-facturen', [mapMollieSalesInvoice(tien)]);
+    expect(s.invoices.list()[0]).toMatchObject({ total: 1001, open_amount: 0 });
+    expect(books().betaaldienst).toBe(1000);
+    expect(s.ledger.balance(ACCOUNTS.betalingsverschillen)).toBe(1);
+    s.integrations.setOwnCompany(() => ({ name: 'Stukadoorsbedrijf Piet', vatNumber: 'NL123456789B01', kvkNumber: '12345678', ibans: [], email: 'piet@example.nl' }), s.bank);
+    reverse(s, s.invoices.list()[0]!.id);
+    await s.integrations.sync('mollie-facturen');
+    await api.home.act(tasks('sale-reread')[0]!, 'opnieuw');
+    // de betaling van toen is helemaal terug: niets bij de betaaldienst, geen cent op betalingsverschillen
+    expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 0, debiteuren: 0 });
+    expect(s.ledger.balance(ACCOUNTS.betalingsverschillen)).toBe(0);
+    await api.home.act(tasks('sale-own-company')[0]!, 'neutraal');
+    expect(books()).toEqual({ omzet: 0, btw: 0, betaaldienst: 1000, debiteuren: 0 });
+    expect(s.ledger.balance(ACCOUNTS.betalingsverschillen)).toBe(0);
   });
 
   it('"Nee": er verandert niets en de app vraagt het niet opnieuw (bv. als je hem zelf al opnieuw maakte)', async () => {
