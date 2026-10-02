@@ -293,12 +293,12 @@ function ForeignModal({ purchaseId, fromDocument, onClose, onDone }: { purchaseI
  */
 export function BankPaidExplanation({ status, asOf = today() }: { status: Pick<BankImportStatus, 'name' | 'completeTo'>; asOf?: string }) {
   if (!status.completeTo) {
-    return <p className="small muted">Voor {status.name} is nog geen compleet bankafschrift ingelezen. Laat de rekening open; na het inlezen koppelt de app de betaling automatisch.</p>;
+    return <p className="small muted">Voor {status.name} is nog geen compleet bankafschrift ingelezen. Laat de rekening open; na het inlezen koppelt de app de betaling, of vraagt de app of ze bij elkaar horen.</p>;
   }
   const days = Math.max(0, diffDays(status.completeTo, asOf));
   return (
     <p className="small muted">
-      {status.name} is bijgewerkt t/m {formatDateNl(status.completeTo)}{days === 0 ? ' (vandaag)' : ` (${days} ${days === 1 ? 'dag' : 'dagen'} geleden)`}. Laat de rekening open; zodra de betaling in een volgend afschrift staat, koppelt de app hem automatisch.
+      {status.name} is bijgewerkt t/m {formatDateNl(status.completeTo)}{days === 0 ? ' (vandaag)' : ` (${days} ${days === 1 ? 'dag' : 'dagen'} geleden)`}. Laat de rekening open; zodra de betaling in een volgend afschrift staat, koppelt de app hem of vraagt de app of ze bij elkaar horen.
     </p>
   );
 }
@@ -389,7 +389,7 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
         <Button onClick={onClose}>Annuleren</Button>
         <Button kind="primary" disabled={busy} onClick={async () => {
           if (via === 'bank') {
-            toast('De rekening blijft open. Na je volgende bankafschrift koppelt de app de betaling automatisch ✓');
+            toast('De rekening blijft open. Na je volgende bankafschrift koppelt de app de betaling, of vraagt de app of ze bij elkaar horen ✓');
             await onDone();
             return;
           }
