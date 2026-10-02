@@ -40,7 +40,8 @@ export function openDatabase(filename: string, log: (message: string) => void = 
   if (filename !== ':memory:' && existsSync(filename)) assertDatabaseFileNotNewer(filename);
   const db = new Database(filename);
   try {
-    // Eerst de schema-versie: WAL, migraties en bijlagecorrecties kunnen allemaal schrijven.
+    // Nogmaals op de schrijfverbinding controleren. Elke migratiestap doet dit bovendien opnieuw
+    // binnen zijn transactielock; de WAL voorkomt de zeer trage fsync per migratie op Windows/Linux.
     assertDatabaseNotNewer(db);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
@@ -86,18 +87,23 @@ export function openReadonly(filename: string): Db {
 }
 
 export function migrate(db: Db): void {
-  assertDatabaseNotNewer(db);
-  const current = db.pragma('user_version', { simple: true }) as number;
-  for (let i = current; i < migrations.length; i++) {
-    const sql = migrations[i]!;
-    db.transaction(() => {
+  // De versie wordt binnen dezelfde transactie gelezen als waarin de migratie schrijft. Als een ander
+  // proces tegelijk migreert, wint maar één schrijver; de ander leest daarna opnieuw of faalt veilig.
+  for (;;) {
+    const changed = db.transaction(() => {
+      const current = db.pragma('user_version', { simple: true }) as number;
+      if (current > migrations.length) throw new NewerDatabaseError(current);
+      if (current === migrations.length) return false;
+      const sql = migrations[current]!;
       // een migratie mag altijd boeken of corrigeren, ook in een afgesloten periode (migratie 22)
       const lockable = Boolean(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger_lock_bypass'`).get());
       if (lockable) db.exec('INSERT OR IGNORE INTO ledger_lock_bypass (id) VALUES (1)');
       db.exec(sql);
       if (lockable) db.exec('DELETE FROM ledger_lock_bypass');
-      db.pragma(`user_version = ${i + 1}`);
+      db.pragma(`user_version = ${current + 1}`);
+      return true;
     })();
+    if (!changed) return;
   }
 }
 
