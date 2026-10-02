@@ -1,6 +1,10 @@
 # Wijzigingen
 
-## Volgende versie
+## 1.1.0 — bank en bonnen horen bij elkaar: geen dubbele kosten meer
+
+Deze versie zorgt dat een betaling op je bank en de bon of factuur ervan niet meer los van elkaar in je boeken komen. Past iets bij elkaar, dan vraagt de app het eerst.
+
+### Nieuw
 
 - Een betaling die bij een aankoop hoort die er al staat, boekt de app niet meer vanzelf als losse kosten, ook niet als het bedrag door de koers iets anders is. Je krijgt eerst de vraag of ze bij elkaar horen (#221).
 - Staat een aankoop op privé of contant betaald en komt de afschrijving daarna toch op je rekening binnen, dan vraagt de app eerst of het dezelfde betaling is, ook als het bedrag een paar cent afwijkt (#222).
