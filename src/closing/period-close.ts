@@ -84,15 +84,21 @@ export class PeriodCloseService {
       out.push({ key: 'documenten', level: 'blokkeert', title: `${docs.n} ${docs.n === 1 ? 'bon of factuur' : 'bonnen of facturen'} t/m ${formatDateNl(until)} nog niet gecontroleerd`, detail: 'Controleer ze eerst, dan tellen ze mee in deze periode. Wat later nog binnenkomt, komt in de volgende periode.', screen: 'aankopen' });
     }
     for (const st of this.bank.importStatus()) {
-      const statementTo = (this.db.prepare('SELECT MAX(period_to) AS d FROM import_batch_accounts WHERE bank_account_id = ?').get(st.bankAccountId) as { d: string | null }).d;
-      const covered = [st.coverageTo, statementTo].filter((d): d is string => Boolean(d)).sort().pop() ?? null;
+      // een dag is pas gedekt als het afschrift ná die dag is ingelezen (#226): een export van de laatste dag
+      // zelf mist wat er later die dag nog bij kwam
+      const covered = st.completeTo;
       if (!covered) continue; // rekening zonder afschriften: niets te controleren
       if (covered >= until) continue;
+      const statementTo = (this.db.prepare('SELECT MAX(period_to) AS d FROM import_batch_accounts WHERE bank_account_id = ?').get(st.bankAccountId) as { d: string | null }).d;
+      // loopt het laatste afschrift wel t/m de einddatum, dan is het op die dag zelf gemaakt
+      const sameDay = [st.coverageTo, statementTo].some((d) => d !== null && d >= until);
       out.push({
         key: `bank-afschrift-${st.bankAccountId}`,
         level: 'bevestigen',
-        title: `${st.name}: afschriften t/m ${formatDateNl(covered)}`,
-        detail: `Lees een afschrift in dat t/m ${formatDateNl(until)} loopt. Is er na ${formatDateNl(covered)} echt niets meer op deze rekening gebeurd? Dan kun je dat bevestigen.`,
+        title: sameDay ? `${st.name}: afschriften compleet t/m ${formatDateNl(covered)}` : `${st.name}: afschriften t/m ${formatDateNl(covered)}`,
+        detail: sameDay
+          ? `Het laatste afschrift is op ${formatDateNl(until)} zelf ingelezen: wat er later die dag nog bij kwam, staat er niet in. Lees een afschrift in dat je daarna hebt gedownload. Is er die dag echt niets meer op deze rekening gebeurd? Dan kun je dat bevestigen.`
+          : `Lees een afschrift in dat t/m ${formatDateNl(until)} loopt. Is er na ${formatDateNl(covered)} echt niets meer op deze rekening gebeurd? Dan kun je dat bevestigen.`,
         screen: 'bank',
       });
     }
