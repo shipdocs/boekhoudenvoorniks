@@ -116,9 +116,11 @@ export function createServices(db: Db, deps: ServiceDeps) {
   // je eigen bedrijf, om een factuur van jezelf en de betaling ervan te herkennen (#205)
   const ownIdentity = () => {
     const c = settings.get().company;
-    return { name: c.name, vatNumber: c.vatNumber, kvkNumber: c.kvkNumber, ibans: [c.iban, ...bank.listAccounts().map((a) => a.iban ?? '')].filter(Boolean) };
+    return { name: c.name, vatNumber: c.vatNumber, kvkNumber: c.kvkNumber, ibans: [c.iban, ...bank.listAccounts().map((a) => a.iban ?? '')].filter(Boolean), email: c.email };
   };
   intake.setOwnIdentity(ownIdentity);
+  // een verkoop aan je eigen bedrijf uit een koppeling wordt geen omzet, maar een vraag (#231)
+  integrations.setOwnCompany(ownIdentity, bank);
   const ownCompany = new OwnCompanyPayments(db, bank, purchases, intake, ownIdentity);
   const recurring = new RecurringService(db, memory);
   const search = new SearchService(db);
@@ -142,6 +144,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   quick.setBookedPayments(bookedPayments);
   inbox.setBookedPayments(bookedPayments);
   inbox.setOwnCompany(ownCompany);
+  inbox.setIntegrations(integrations);
   // afschriften uit de downloadmap (#184): standaard uit; de vraag "Inlezen?" komt op Vandaag
   const statementFolder = new StatementFolder(db, settings, bank, deps.statementFiles ?? null);
   inbox.setStatementFolder(statementFolder);

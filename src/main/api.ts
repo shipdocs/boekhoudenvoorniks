@@ -408,6 +408,11 @@ export function createApi(s: Services, host: HostContext) {
       case 'customer-overpaid:klopt':
         s.inbox.skipTask(task.key, 'klopt zo');
         return;
+      case 'sale-own-company:neutraal':
+      case 'sale-own-company:verkoop':
+        // verkoop aan je eigen bedrijf uit een koppeling (#231): geen omzet, of toch een gewone factuur
+        s.integrations.answerQuestion(r.questionId!, actionId === 'neutraal' ? 'neutraal' : 'verkoop');
+        return;
       case 'bank-pot:klopt':
       case 'bank-own:klopt':
         s.bank.bookOwnTransfer(r.bankTransactionId!);
