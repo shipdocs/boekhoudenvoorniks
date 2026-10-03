@@ -102,10 +102,18 @@ describe('status (#246)', () => {
     expect(st.accounts[0]!.bankAccountId).toBeGreaterThan(0);
     expect(st.accounts[0]!.iban).toBe('NL91ABNA0417164300');
     expect(st.accounts[0]!.balance).toBe(123456);
+    expect(st.accounts[0]!.coveredTo).toBeNull();
     expect(st.accounts[0]!.gap).toBeNull();
     // Een verbindingstest is nog geen financiële ophaalronde; #253 zet dit pas na succes.
     expect(st.accounts[0]!.lastOkAt).toBeNull();
     expect(st.accounts[0]!.lastErrorKind).toBeNull();
+  });
+
+  it('geeft de bewezen dekkingsdatum door zonder andere feedstatus te veranderen', async () => {
+    await h.feed.test(CREDS);
+    h.feed.saveLinks(CREDS, [{ pontoId: 'acc-1', bankAccountId: 'nieuw' }]);
+    h.s.db.prepare('UPDATE bank_feed_accounts SET covered_to = ? WHERE external_id = ?').run('2026-09-12', 'acc-1');
+    expect(h.feed.status().accounts[0]).toMatchObject({ pontoId: 'acc-1', coveredTo: '2026-09-12' });
   });
 
   it('zonder veilige opslag: secureStorage false en niet ingesteld', () => {
