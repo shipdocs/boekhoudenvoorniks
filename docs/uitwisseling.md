@@ -217,7 +217,10 @@ Bestandsnamen bevatten geen klantnaam: `gb-<eerste 8 tekens administratie-ID>-17
   ziet dat (handig voor bv. betalingen na balansdatum bij dubieuze debiteuren), maar zijn handelingen
   moeten t/m de einddatum blijven, en hij kan geen post van na de einddatum terugdraaien. Het scherm zegt
   dat zo tegen de klant (besluit 4). **Zonder de tabel `secrets`** en zonder instellingen voor
-  SMTP, IMAP en koppelingen. De eerste export is groot (bijlagen); de grens van mailservers ligt vaak
+  SMTP, IMAP en koppelingen. Dat geldt ook voor de Ponto-bankkoppeling: Client ID en Client Secret staan
+  als geheim in `secrets`, en `sanitizeForExchange` wist ook `bank_feed_accounts`. Er gaat dus geen
+  credential en geen feed-koppeling mee naar de boekhouder of het kantoor; de al ingelezen
+  banktransacties wel, zoals alle betalingen. De eerste export is groot (bijlagen); de grens van mailservers ligt vaak
   rond 10–25 MB. Is het pakket groter, dan raadt de app de gedeelde map of een bestand aan. Pakketten
   met alleen de wijzigingen sinds de vorige uitwisseling zijn een latere uitbreiding.
 - **Antwoord:** een lijst handelingen (zie hieronder) en een samenvatting voor de klant. Geen vragen:
