@@ -137,11 +137,29 @@ export interface Task {
     candidate?: string };
 }
 
+export interface BalanceOverviewRow {
+  bankAccountId: number;
+  name: string;
+  /** saldo volgens het grootboek */
+  ledger: Cents;
+  /** betalingen die nog niet zijn verwerkt (nog niet in het grootboek) */
+  pending: Cents;
+  /** genegeerde betalingen: wel van de rekening af, niet geboekt */
+  ignored: Cents;
+  /** beginsaldo + alle ingelezen betalingen */
+  transactions: Cents;
+  ledgerMatches: boolean;
+  /** het laatste afschrift met een eindsaldo, tegenover wat de app die dag heeft; null = niets om mee te vergelijken */
+  statement: { date: IsoDate; bank: Cents; app: Cents; matches: boolean } | null;
+}
+
 export interface HomeData {
   asOf: IsoDate;
   greeting: string;
   money: {
     bank: Cents;
+    /** saldo per bankrekening (grootboek + nog te verwerken boekingen), zelfde som als `bank` */
+    bankAccounts: { id: number; name: string; balance: Cents }[];
     toReceive: Cents;
     toPay: Cents;
     /** te reserveren btw: lopende periode(s) + aangegeven maar nog niet betaald */
@@ -453,6 +471,35 @@ export class InboxService {
     const key = `bank-balance-${bankAccountId}-${check.date}`;
     const accepted = this.db.prepare(`SELECT 1 FROM task_skips WHERE task_key LIKE ? AND reason = ?`).get(`bank-balance-${bankAccountId}-%`, `verschil ${check.difference}`);
     return accepted ? null : { ...check, key };
+  }
+
+  /**
+   * Saldocontrole per bankrekening: grootboek, transacties en laatste afschrift naast elkaar.
+   * Grootboek + nog te verwerken betalingen moet gelijk zijn aan beginsaldo + alle betalingen; het
+   * eindsaldo van het laatste afschrift wordt vergeleken met wat de app op die dag heeft (zelfde som als de taak).
+   */
+  balanceOverview(): BalanceOverviewRow[] {
+    const sw = this.settings.get().switchover;
+    return this.bank.listAccounts().map((a) => {
+      const ledger = this.ledger.balance(a.rgs_code);
+      const unbooked = (status: string) => (this.db.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE status = ? AND duplicate_of IS NULL AND bank_account_id = ?`).get(status, a.id) as { s: number }).s;
+      const pending = unbooked('nieuw');
+      const ignored = unbooked('genegeerd');
+      const opening = this.bank.openingBalance(a.id);
+      const transactions = (opening.date ? opening.amount : 0) + this.bank.statementBalance(a.id);
+      const zeroFrom = sw.date && sw.bankConfirmed.includes(a.id) ? sw.date : null;
+      const check = this.bank.balanceCheck(a.id, zeroFrom);
+      return {
+        bankAccountId: a.id,
+        name: a.name,
+        ledger,
+        pending,
+        transactions,
+        ignored,
+        ledgerMatches: ledger + pending + ignored === transactions,
+        statement: check ? { date: check.date, bank: check.bank, app: check.app, matches: check.difference === 0 } : null,
+      };
+    });
   }
 
   /** "Dit klopt, negeren" bij een saldo dat niet klopt: het verschil van nu is goed zo. */
@@ -1829,7 +1876,13 @@ export class InboxService {
     const tasks = this.tasks(asOf);
     const bankAccounts = this.bank.listAccounts();
     const ledgerBank = bankAccounts.reduce((sum, a) => sum + this.ledger.balance(a.rgs_code), 0);
-    const pending = (this.db.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE status = 'nieuw'`).get() as { s: number }).s;
+    const pendingRows = this.db.prepare(`SELECT bank_account_id AS id, COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE status = 'nieuw' GROUP BY bank_account_id`).all() as { id: number; s: number }[];
+    const pending = pendingRows.reduce((sum, r) => sum + r.s, 0);
+    const perAccount = bankAccounts.map((a) => ({
+      id: a.id,
+      name: a.name,
+      balance: this.ledger.balance(a.rgs_code) + (pendingRows.find((r) => r.id === a.id)?.s ?? 0),
+    }));
     const toReceive = this.invoices.listOpen(asOf).reduce((sum, i) => sum + Math.max(0, i.open_amount), 0);
     const toPay = (this.db.prepare(`SELECT COALESCE(SUM(total - amount_paid), 0) AS s FROM purchase_invoices WHERE status = 'open'`).get() as { s: number }).s;
     // Alles wat op BTW-rekeningen staat (lopend kwartaal + nog niet betaalde aangiftes)
@@ -1852,7 +1905,7 @@ export class InboxService {
     return {
       asOf,
       greeting: greeting(),
-      money: { bank: ledgerBank + pending, toReceive, toPay, vatReserve, vatPot, freeToSpend: ledgerBank + pending - vatReserve - toPay },
+      money: { bank: ledgerBank + pending, bankAccounts: perAccount, toReceive, toPay, vatReserve, vatPot, freeToSpend: ledgerBank + pending - vatReserve - toPay },
       bankUpdatedTo,
       vat: { periodLabel: current.label, deadline, deadlineLabel: formatDateNl(deadline), estimate: this.vat.calculate(current.key).summary.teBetalen },
       tasks,
