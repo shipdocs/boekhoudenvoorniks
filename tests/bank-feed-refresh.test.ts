@@ -518,10 +518,13 @@ describe('manual_sync_at pas na een werkelijke start (#247)', () => {
     const { feedId } = await linkAccount(h);
     happySyncs(h);
     h.startFailure.accountTransactions = new PontoError('Ponto: te veel aanvragen (fout 429)', 'rate-limit', 429);
-    h.startFailure.accountDetails = new PontoError('Ponto: te veel aanvragen (fout 429)', 'rate-limit', 429);
+    h.startFailure.accountDetails = new PontoError('Ponto: netwerkfout bij synchronisatie', 'network');
     const summary = alsToegestaan(await h.feed.refreshNow(feedId));
     expect(feedRow(h.s.db).manual_sync_at).toBeNull();
-    expect(summary.failed).toEqual([{ pontoId: 'acc-1', errorKind: 'rate-limit' }]);
+    expect(summary.failed).toEqual([
+      { pontoId: 'acc-1', errorKind: 'rate-limit', subtype: 'accountTransactions' },
+      { pontoId: 'acc-1', errorKind: 'network', subtype: 'accountDetails' },
+    ]);
     // de ronde na afloop draaide wel (altijd opnieuw lezen), maar er is niets gestart
     expect(h.transactionsCalls).toBe(1);
   });
