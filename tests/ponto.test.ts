@@ -621,6 +621,36 @@ describe('Ponto', () => {
       expect(call.init?.headers?.Authorization).toBe('Bearer fake-token');
     });
 
+    it('deelt één tokenaanvraag tussen twee gelijktijdige synchronisatiestarts', async () => {
+      let tokenCalls = 0;
+      let syncCalls = 0;
+      let releaseToken!: () => void;
+      const tokenGate = new Promise<void>((resolve) => { releaseToken = resolve; });
+      const fetchImpl: FetchLike = async (url, init) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === '/oauth2/token') {
+          tokenCalls += 1;
+          await tokenGate;
+          return jsonResponse(200, { access_token: 'fake-token', expires_in: 1800, scope: 'ai' });
+        }
+        if (parsed.pathname === '/synchronizations' && init?.method === 'POST') {
+          syncCalls += 1;
+          return jsonResponse(200, { data: { id: `sync-${syncCalls}`, type: 'synchronization' } });
+        }
+        return jsonResponse(404, { error: 'geen route in de nep-server' });
+      };
+      const client = makeClient(fetchImpl);
+      const starts = Promise.all([
+        client.startSynchronization('acc-1', 'accountTransactions', '198.51.100.7'),
+        client.startSynchronization('acc-1', 'accountDetails', '198.51.100.7'),
+      ]);
+      await Promise.resolve();
+      expect(tokenCalls).toBe(1);
+      releaseToken();
+      await expect(starts).resolves.toHaveLength(2);
+      expect(tokenCalls).toBe(1);
+    });
+
     it('leest de synchronisatiestatus en fouten defensief', async () => {
       const client = makeClient(routeFetch({
         'POST /oauth2/token': tokenOk(),
