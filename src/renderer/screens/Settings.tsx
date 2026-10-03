@@ -13,6 +13,7 @@ import { ScannerSettings } from './Scanner';
 import { businessEffect } from '../../shared/business-share';
 import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 import { ONLINE_HELP } from '../../shared/online-help';
+import { PontoCard } from './PontoDialog';
 
 type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'scanner' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
 
@@ -273,7 +274,7 @@ export function SettingsScreen() {
         </>,
       )}
 
-      {tab === 'koppelingen' && <Integrations />}
+      {tab === 'koppelingen' && <Integrations showPonto={meta.bankFeed} />}
       {tab === 'scanner' && <ScannerSettings />}
       {tab === 'ai' && section(
         <>
@@ -517,12 +518,13 @@ function IncomingMail() {
   );
 }
 
-function Integrations() {
+function Integrations({ showPonto }: { showPonto: boolean }) {
   const { run, busy } = useAction();
   const list = useLoad(() => api.integrations.list());
   const [values, setValues] = useState<Record<string, Record<string, string>>>({});
   return (
     <div className="grid">
+      {showPonto && <PontoCard />}
       <p className="muted">Twee soorten koppelingen. Een <strong>omzetbron</strong> (webshop of Mollie Facturen) maakt van betaalde bestellingen/facturen automatisch omzet. Een <strong>betaalprovider</strong> (Mollie, Stripe) boekt alleen de uitbetaling en de kosten, zodat de bijschrijving op je bank klopt — daarvoor moet de omzet al ergens anders geboekt zijn. Gebruik je Mollie of Stripe zonder omzetbron hieronder, boek je omzet dan handmatig via "Verkoop via een ander systeem" bij de bank.</p>
       <ErrorBox error={list.error} />
       {(list.data ?? []).map((s) => {
