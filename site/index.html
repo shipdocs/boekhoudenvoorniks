@@ -59,6 +59,7 @@
           "Offerte omzetten naar klus en factuur",
           "Bonnetjes en e-facturen (UBL) verwerken",
           "Bankafschriften inlezen: CSV, MT940 en CAMT.053",
+          "Bank optioneel automatisch ophalen met Ponto (vanaf versie 1.2.0), rechtstreeks tussen de app en Ponto; afschriften blijven de basis",
           "Automatisch betalingen koppelen aan facturen",
           "Btw-aangifte per kwartaal met rubrieken 1a, 1b, 1e, 2a en 5b",
           "Btw verlegd en kleineondernemersregeling (KOR)",
@@ -109,7 +110,7 @@
             "name": "Is BoekhoudenVoorNiks echt gratis?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Ja. Het programma is altijd gratis te downloaden en te gebruiken: geen proefperiode, geen limiet op facturen of bonnetjes en geen account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen."
+              "text": "Ja. Het programma is altijd gratis te downloaden en te gebruiken: geen proefperiode, geen limiet op facturen of bonnetjes en geen account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen. De optionele bankkoppeling met Ponto zit in het gratis programma; Ponto zelf is een afzonderlijke zakelijke dienst waarvan Ponto de kosten en voorwaarden bepaalt."
             }
           },
           {
@@ -198,6 +199,14 @@
             "acceptedAnswer": {
               "@type": "Answer",
               "text": "Ja. Kies een instapdatum en lees een auditfile (XAF) uit je vorige programma in, of het overzicht van je boekhouder (kolommen- of saldibalans en openstaande facturen). Heb je een auditfile per jaar, dan zet je ze allemaal tegelijk neer. De app vult je startbalans in; jij kijkt het na."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Kan mijn bank automatisch worden opgehaald?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja, vanaf versie 1.2.0 en optioneel, met Ponto: een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit, met je eigen Client ID en Client Secret. De app haalt je betalingen dan zelf op, rechtstreeks bij Ponto; ShipDocs ziet je bankgegevens niet. Een wizard leidt je in vijf stappen langs Ponto. Wat Ponto kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto. De app zegt tot welke datum de betalingen volledig zijn bijgewerkt, en afschriften inlezen blijft de basis en terugval."
             }
           },
           {
@@ -364,9 +373,24 @@
       <div class="grid4">
         <div class="card"><div class="emoji">💰</div><h3>Ik heb werk gedaan</h3><p>Offerte → klant akkoord → klus → <em>werk klaar</em> → factuur in één klik. Mailen met PDF erbij.</p></div>
         <div class="card"><div class="emoji">📸</div><h3>Ik heb een bonnetje</h3><p>Foto of PDF erin. Wij lezen winkel, datum, bedrag en BTW, en zoeken de betaling op je bank erbij. Privé betaald? Dat zet je met één klik goed.</p></div>
-        <div class="card"><div class="emoji">🏦</div><h3>Er is betaald</h3><p>Bankafschrift inlezen: betalingen worden automatisch gekoppeld aan facturen en bonnetjes.</p></div>
+        <div class="card"><div class="emoji">🏦</div><h3>Er is betaald</h3><p>Laat je bank automatisch ophalen met Ponto (nieuw, optioneel) of lees een bankafschrift in. Betalingen worden gekoppeld aan facturen en bonnetjes.</p></div>
         <div class="card"><div class="emoji">📮</div><h3>BTW-aangifte</h3><p>"Te betalen € 3.365, uiterlijk 31 oktober." Plus exact wat je invult bij de Belastingdienst.</p></div>
       </div>
+    </section>
+
+    <section id="bank" class="wrap split reverse">
+      <div>
+        <h2>Je bank automatisch ophalen <span class="soon">nieuw in 1.2.0</span></h2>
+        <p>Geen afschrift meer downloaden en inlezen: met Ponto haalt de app je betalingen zelf op en koppelt ze aan je facturen en bonnetjes. Je stelt het één keer in, in vijf stappen.</p>
+        <ul class="checks">
+          <li><strong>Rechtstreeks tussen de app en Ponto</strong><br><span class="muted">ShipDocs ziet je bankgegevens en je inloggegevens niet.</span></li>
+          <li><strong>Je ziet tot wanneer het compleet is</strong><br><span class="muted">De app zegt tot welke datum de betalingen volledig zijn bijgewerkt, en vraagt een ontbrekende periode te onderbouwen met een afschrift.</span></li>
+          <li><strong>Afschriften blijven de basis en de terugval</strong><br><span class="muted">Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen.</span></li>
+        </ul>
+        <p class="muted">Ponto is een afzonderlijke zakelijke dienst met een eigen overeenkomst. Wat het kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto.</p>
+        <p><a href="bank-ophalen.html">Stap voor stap: bank automatisch ophalen →</a></p>
+      </div>
+      <figure class="shot"><picture><source srcset="img/ponto-5-status.webp" type="image/webp"><img src="img/ponto-5-status.png" alt="De kaart op Bank na het koppelen met Ponto: status, toestemming tot een datum en de knoppen Nu bijwerken en Nu ophalen" width="908" height="328" loading="lazy" decoding="async"></picture></figure>
     </section>
 
     <section class="wrap split">
@@ -408,6 +432,7 @@
         <div><h3>Eigen opmaak</h3><p>Logo, kleuren, lettertype en vaste teksten, met live voorbeeld.</p></div>
         <div><h3>Bonnetjes & e-facturen</h3><p>UBL/XML gaat altijd voor, dan de PDF-tekst, en pas daarna lokale tekstherkenning. Twijfel? Dan zie je waar op de bon we het bedrag lazen.</p></div>
         <div><h3>Alle Nederlandse banken</h3><p>CSV van ING, Rabobank, ABN AMRO, bunq, Knab en Triodos, plus MT940 en CAMT.053.</p></div>
+        <div><h3>Bank automatisch ophalen <span class="soon">nieuw in 1.2.0</span></h3><p>Optioneel met Ponto, een afzonderlijke zakelijke dienst: de app haalt je betalingen zelf op. Afschriften blijven de basis. <a href="bank-ophalen.html">Zo stel je het in</a></p></div>
         <div><h3>Webshop & betalingen</h3><p>WooCommerce en Shopify worden facturen; Mollie Facturen ook. Mollie- en Stripe-uitbetalingen kloppen vanzelf met je bank.</p></div>
         <div><h3>Voor je boekhouder</h3><p>Eén knop voor een pakket dat je boekhouder in zijn eigen programma inleest: auditfile, kolommenbalans, openstaande posten, RGS en al je bonnen. <a href="boekhouders.html">Voor boekhouders</a></p></div>
         <div><h3>KOR en buitenland</h3><p>Met de KOR gaat btw op inkopen naar de kosten, verlegde btw blijft zichtbaar. Goederen en diensten aan EU-bedrijven apart in de ICP-opgaaf.</p></div>
@@ -544,6 +569,7 @@
           <p class="per">voor altijd, zonder account</p>
           <ul>
             <li>Offertes, facturen, bonnetjes, bank en btw</li>
+            <li>Bank ook automatisch ophalen met Ponto (optioneel; Ponto is een afzonderlijke dienst met eigen voorwaarden)</li>
             <li>Pakket voor je boekhouder (auditfile)</li>
             <li>Overstappen, back-ups, periode afsluiten</li>
             <li>Open source; je administratie op je eigen computer</li>
@@ -581,7 +607,7 @@
 
     <section id="vragen" class="wrap faq">
       <h2>Veelgestelde vragen</h2>
-        <details><summary>Is BoekhoudenVoorNiks echt gratis?</summary><p>Ja. Het programma is altijd gratis te downloaden en te gebruiken: geen proefperiode, geen limiet op facturen of bonnetjes en geen account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen.</p></details>
+        <details><summary>Is BoekhoudenVoorNiks echt gratis?</summary><p>Ja. Het programma is altijd gratis te downloaden en te gebruiken: geen proefperiode, geen limiet op facturen of bonnetjes en geen account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen. De optionele bankkoppeling met Ponto zit in het gratis programma; Ponto zelf is een afzonderlijke zakelijke dienst waarvan Ponto de kosten en voorwaarden bepaalt.</p></details>
         <details><summary>Ik ben net gestart als zzp'er. Is BoekhoudenVoorNiks iets voor mij?</summary><p>Ja. Het programma is gemaakt voor ondernemers die geen boekhouder willen worden. Je maakt je eerste offerte en factuur, verwerkt bonnetjes en bank, en ziet elk kwartaal wat je bij de btw-aangifte invult. Wil je dat een boekhouder meekijkt, dan zijn de eerste 4 maanden samenwerken gratis: genoeg voor je eerste btw-kwartaal. Het programma zelf blijft altijd gratis.</p></details>
         <details><summary>Wanneer doe ik mijn eerste btw-aangifte?</summary><p>Meestal doe je per kwartaal aangifte. De aangifte en de betaling moeten uiterlijk de laatste dag van de maand na het kwartaal binnen zijn: voor het eerste kwartaal dus 30 april. Het programma laat per kwartaal zien wat je moet betalen of terugkrijgt, tot wanneer, en precies wat je in elke rubriek invult. Twijfel je, vraag het dan aan je boekhouder of de Belastingdienst.</p></details>
         <details><summary>Wat is de uitwisseling met je boekhouder?</summary><p>Werkt je boekhouder ook met BoekhoudenVoorNiks, dan stuur je hem een kwartaal of jaar, versleuteld zodat alleen zijn kantoor het kan openen. Hij corrigeert wat nodig is en stuurt een antwoord terug. Jij leest dat in; wat je intussen deed blijft staan, en de periode is daarna afgesloten. Beschikbaar vanaf versie 0.7.</p></details>
@@ -593,6 +619,7 @@
         <details><summary>Kan ik als zzp'er mijn btw-aangifte ermee doen?</summary><p>Ja. Het programma rekent je btw per kwartaal (of maand) uit uit je facturen en aankopen, en laat precies zien wat je invult bij de rubrieken 1a, 1b, 1e, 2a en 5b in Mijn Belastingdienst Zakelijk. Direct elektronisch indienen via Digipoort is nog in voorbereiding.</p></details>
         <details><summary>Werkt het met btw verlegd en de kleineondernemersregeling (KOR)?</summary><p>Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij btw verlegd controleert het programma of het btw-nummer van je klant op de factuur staat. Met de KOR telt de btw op je inkopen bij de kosten, en verlegde btw die je toch moet betalen staat per kwartaal op het btw-scherm.</p></details>
         <details><summary>Kan ik overstappen vanuit een ander boekhoudprogramma?</summary><p>Ja. Kies een instapdatum en lees een auditfile (XAF) uit je vorige programma in, of het overzicht van je boekhouder (kolommen- of saldibalans en openstaande facturen). Heb je een auditfile per jaar, dan zet je ze allemaal tegelijk neer. De app vult je startbalans in; jij kijkt het na.</p></details>
+        <details><summary>Kan mijn bank automatisch worden opgehaald?</summary><p>Ja, vanaf versie 1.2.0 en optioneel, met Ponto: een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit, met je eigen Client ID en Client Secret. De app haalt je betalingen dan zelf op, rechtstreeks bij Ponto; ShipDocs ziet je bankgegevens niet. Een wizard leidt je in vijf stappen langs Ponto. Wat Ponto kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto. De app zegt tot welke datum de betalingen volledig zijn bijgewerkt, en afschriften inlezen blijft de basis en terugval.</p></details>
         <details><summary>Welke banken worden ondersteund?</summary><p>Elke bank: lees je afschrift in als CAMT.053 of MT940. Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf; bij andere banken geef je één keer aan welke kolom wat is. Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes. Vanaf versie 1.2.0 kun je optioneel ook je bank laten ophalen met Ponto, een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit; welke banken die ondersteunt, bepaalt Ponto. Afschriften blijven de basis en terugval.</p></details>
         <details><summary>Heb ik boekhoudkennis nodig?</summary><p>Nee. Je werkt met klanten, klussen, offertes, facturen en bonnetjes. Het programma maakt daar automatisch een dubbele boekhouding van en vraagt alleen iets als het niet zeker is.</p></details>
         <details><summary>Waar staat mijn administratie?</summary><p>Op je eigen computer, in een lokaal databasebestand. Er is geen cloud nodig. Elke dag wordt automatisch een back-up gemaakt en je kunt zelf een kopie maken op een USB-stick.</p></details>
@@ -635,6 +662,7 @@
           <li><a href="./#functies">Functies</a></li>
           <li><a href="./#prijzen">Prijzen</a></li>
           <li><a href="./#overstappen">Overstappen</a></li>
+          <li><a href="bank-ophalen.html">Bank automatisch ophalen</a></li>
           <li><a href="btw-aangifte.html">Btw-aangifte zelf doen</a></li>
           <li><a href="zonder-abonnement.html">Zonder abonnement, offline</a></li>
           <li><a href="./#vragen">Veelgestelde vragen</a></li>

@@ -11,7 +11,7 @@ Belangrijke feiten:
 - Facturen en offertes: pdf en e-mail via eigen mailserver (SMTP), doorlopende factuurnummering, creditfacturen, automatische betalingsherinneringen, eigen opmaak (logo, kleuren, teksten).
 - Btw per factuurregel: 21%, 9%, 0%, btw verlegd, vrijgesteld/KOR. Bij btw verlegd verplicht btw-nummer van de klant.
 - Btw-aangifte: berekening per kwartaal, maand of jaar met rubrieken 1a, 1b, 1e, 2a, 5a, 5b en 5g. De gebruiker neemt de bedragen over in Mijn Belastingdienst Zakelijk. Direct indienen via SBR/Digipoort is in voorbereiding (nog niet beschikbaar).
-- Bank: elke bank via CAMT.053 of MT940; CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos en Revolut wordt vanzelf herkend, andere CSV-indelingen stel je één keer in; automatische koppeling van betalingen aan facturen en bonnetjes. Vanaf versie 1.2.0 kun je optioneel ook je bank laten ophalen met Ponto (een afzonderlijke zakelijke dienst met een eigen overeenkomst en eigen inloggegevens van de gebruiker): de app haalt betalingen dan rechtstreeks bij Ponto op en stuurt niets naar ShipDocs. Afschriften blijven de basis en terugval. Welke banken Ponto ondersteunt, wat het kost en of je bedrijf wordt toegelaten, bepaalt Ponto.
+- Bank: elke bank via CAMT.053 of MT940; CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos en Revolut wordt vanzelf herkend, andere CSV-indelingen stel je één keer in; automatische koppeling van betalingen aan facturen en bonnetjes. Vanaf versie 1.2.0 kun je optioneel ook je bank laten ophalen met Ponto (een afzonderlijke zakelijke dienst met een eigen overeenkomst en eigen inloggegevens van de gebruiker): de app haalt betalingen dan rechtstreeks bij Ponto op en stuurt niets naar ShipDocs. Het scherm zegt tot welke datum de betalingen volledig zijn bijgewerkt. Afschriften blijven de basis en terugval. De koppeling zit in het gratis programma. Welke banken Ponto ondersteunt, wat het kost en of je bedrijf wordt toegelaten, bepaalt Ponto.
 - Bonnetjes: e-facturen (UBL/XML) en pdf's met tekst worden automatisch gelezen; foto's via een optionele lokale tekstherkenning (OCR). AI doet alleen voorstellen; boekingen worden door vaste regels gemaakt.
 - Klussen: offerte → klus → factuur, met kosten per klus.
 - Voor de boekhouder: "Pakket voor je boekhouder" — één ZIP per boekjaar met auditfile (XAF 3.2, gevalideerd), kolommenbalans, grootboekkaarten, journaalposten, openstaande debiteuren/crediteuren per factuur, RGS-brugstaat, btw-overzicht, relaties, facturen en bonnen met index, en een lees-mij met aansluiting, controles en importroutes (Caseware, AFAS, Visionplanner, Twinfield, Exact Online, Yuki, SnelStart). Geen back-up maar een overdracht. Voorbeeldpakket: https://boekhoudenvoorniks.nl/voorbeeld/voorbeeldpakket-boekhouder-2025.zip. Daarnaast een expertmodus met grootboek (RGS), journaal, balans, W&V, correctieboekingen en losse exports.
@@ -20,7 +20,7 @@ Belangrijke feiten:
 - Fiscaal: KOR (btw op inkopen naar de kosten), ICP-opgaaf met goederen en diensten apart, aftrekposten (afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek) en een schatting van de inkomstenbelasting. Altijd laten controleren door een boekhouder.
 - Uitwisseling met de boekhouder (vanaf versie 0.7): de klant stuurt een periode (kwartaal of jaar) versleuteld naar het kantoor van zijn boekhouder (uitnodiging met controlecode, alleen dat kantoor kan het openen), de boekhouder corrigeert in BoekhoudenVoorNiks (correctieboekingen, terugdraaien, grootboekrekeningen) en stuurt een antwoord terug; bij het inlezen is de periode afgesloten en blijft het werk van daarna staan. Loopt niet via servers van de maker.
 - Periode afsluiten en meerdere administraties op één computer (vanaf versie 0.7).
-- Huidige versie: 1.1.1. Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
+- Huidige versie: 1.2.0 (nieuw: bank optioneel automatisch ophalen met Ponto). Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
 - Broncode: https://github.com/shipdocs/boekhoudenvoorniks
 - Uitgever: ShipDocs, Middelweg 211, 1911 EE Uitgeest, Nederland. KvK 95207341, btw NL005138041B29. info@shipdocs.app, +31 20 369 5765.
 
@@ -33,6 +33,7 @@ Belangrijke feiten:
 - [Zonder abonnement, offline en open source](https://boekhoudenvoorniks.nl/zonder-abonnement.html)
 - [Voor boekhouders](https://boekhoudenvoorniks.nl/boekhouders.html): pakket voor de boekhouder en uitwisseling
 - [Waarom we dit maakten](https://boekhoudenvoorniks.nl/waarom.html): in één week gebouwd met AI, bewust lokaal en zonder cloud
+- [Bank automatisch ophalen met Ponto](https://boekhoudenvoorniks.nl/bank-ophalen.html): optioneel vanaf 1.2.0, stappenplan en veelgestelde vragen
 - [Wat is er nieuw](https://boekhoudenvoorniks.nl/wijzigingen.html): release notes per versie
 - [Downloads](https://boekhoudenvoorniks.nl/downloaden.html): installers voor Windows en Linux (AppImage en .deb)
 - [Uitgebreide beschrijving voor LLM's](https://boekhoudenvoorniks.nl/llms-full.txt)
