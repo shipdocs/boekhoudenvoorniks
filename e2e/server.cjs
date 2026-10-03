@@ -8,6 +8,7 @@
  *                      met een nagebootste licentie-Worker (echte Ed25519-handtekening, eigen sleutelpaar)
  * POST /__downloads    de map die in de test de Downloads-map is (leeg aangemaakt per test); de test zet er bestanden in
  * POST /__opened       de bijlagen die geopend zijn: het pad uit de database en de inhoud van het bestand (base64)
+ * POST /__ponto        stelt uitsluitend de fictieve Ponto-provider in en geeft zijn veilige aanroeplog terug
  * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
  * POST /__store        de versie uit de Microsoft Store nabootsen: body {"on":true} en eventueel "readOnly";
  *                      geeft terug wat er gebeurde (toestemming voor lokaal lezen, "Opnieuw proberen")
@@ -41,7 +42,10 @@ const { folderAccess } = require(path.join(ROOT, 'main/main/statement-files.js')
 const { markComplete, planSwitch, sharedDataDir } = require(path.join(ROOT, 'main/main/data-dir.js'));
 const { Bonnenscanner } = require(path.join(ROOT, 'main/scanner/scanner.js'));
 const { PHONE_SCANNER } = require(path.join(ROOT, 'main/shared/phone-scanner.js'));
+const { BANK_FEED } = require(path.join(ROOT, 'main/shared/bank-feed.js'));
 const Database = require('better-sqlite3');
+// Alleen deze testserver zet de nog niet vrijgegeven functie aan. Productbuilds houden de vlag uit.
+BANK_FEED.available = true;
 /** het kantoor op deze "computer" (in de app: kantoor.json in de gegevensmap) */
 let officeProfile = null;
 /** geheimen per administratie (in de app: in de eigen database, versleuteld); blijven bewaard bij wisselen */
@@ -61,6 +65,129 @@ let pickedFolder = null;
 let scannerPlatform = 'linux';
 /** testschakelaar voor veilige opslag (#249): null = zoals de host zelf (standaard aan) */
 let secureStorageSwitch = null;
+const datePlus = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+const defaultPonto = () => ({
+  clientId: 'e2e-client',
+  clientSecret: 'e2e-secret',
+  scope: 'ai',
+  publicIp: '198.51.100.7',
+  accounts: [{
+    id: 'ponto-zakelijk', iban: 'NL91ABNA0417164300', name: 'Ponto zakelijke rekening',
+    currency: 'EUR', balance: '1000.00', balanceAt: '2026-10-02T08:00:00.000Z',
+    detailsSynchronizedAt: '2026-10-02T08:00:00.000Z', expiresAt: datePlus(7), deprecated: false,
+  }],
+  transactions: { 'ponto-zakelijk': [{ id: 'ponto-tx-1', date: '2026-10-01', amount: '-12.34', name: 'E2E leverancier', iban: 'NL44RABO0123456789', description: 'E2E aankoop' }] },
+  synchronizedAt: { 'ponto-zakelijk': '2026-10-02T08:05:00.000Z' },
+  pagination: { pageSize: 100, incomplete: false },
+  sync: {
+    accountTransactions: { status: 'success', pendingPolls: 0 },
+    accountDetails: { status: 'success', pendingPolls: 0 },
+  },
+  errors: {},
+  calls: [],
+  synchronizations: new Map(),
+  nextSync: 1,
+});
+let ponto = defaultPonto();
+
+const jsonResponse = (status, value) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+const accountResource = (account) => ({
+  id: account.id,
+  type: 'account',
+  attributes: {
+    referenceType: 'IBAN', reference: account.iban, description: account.name, holderName: 'E2E Holding B.V.',
+    currency: account.currency ?? 'EUR', currentBalance: account.balance ?? null,
+    currentBalanceReferenceDate: account.balanceAt ?? null, authorizationExpirationExpectedAt: account.expiresAt ?? null,
+    deprecated: Boolean(account.deprecated),
+  },
+  meta: { account: { synchronizedAt: account.detailsSynchronizedAt ?? null, availability: account.availability ?? 'available' } },
+});
+const transactionResource = (entry) => ({
+  id: entry.id, type: 'transaction', attributes: {
+    executionDate: entry.date, valueDate: entry.date, amount: entry.amount, currency: entry.currency ?? 'EUR',
+    remittanceInformationType: 'unstructured', remittanceInformation: entry.description ?? '',
+    counterpartName: entry.name ?? null, counterpartReference: entry.iban ?? null, endToEndId: entry.reference ?? null,
+  },
+});
+
+/** Volledig lokale Ponto/Cloudflare-nep. Het log bevat bewust nooit headers, credentials, tokens of IP-adressen. */
+async function pontoFetch(input, init = {}) {
+  const url = new URL(String(input));
+  const method = init.method ?? 'GET';
+  if (url.origin === 'https://www.cloudflare.com' && url.pathname === '/cdn-cgi/trace') {
+    ponto.calls.push({ method, path: 'cloudflare-trace' });
+    return new Response(`fl=tests\nip=${ponto.publicIp}\nts=0\n`, { status: 200 });
+  }
+  if (url.origin !== 'https://api.myponto.com') throw new Error('geen netwerk in e2e-tests');
+  if (url.pathname === '/oauth2/token' && method === 'POST') {
+    ponto.calls.push({ method, path: 'token' });
+    if (ponto.errors.token) return jsonResponse(ponto.errors.token, { errors: [] });
+    const auth = new Headers(init.headers).get('Authorization') ?? '';
+    const expected = `Basic ${Buffer.from(`${ponto.clientId}:${ponto.clientSecret}`).toString('base64')}`;
+    if (auth !== expected) return jsonResponse(401, { errors: [{ title: 'ongeldige credentials' }] });
+    return jsonResponse(200, { access_token: 'e2e-token', token_type: 'Bearer', expires_in: 3600, scope: ponto.scope });
+  }
+  if (url.pathname === '/accounts' && method === 'GET') {
+    ponto.calls.push({ method, path: 'accounts' });
+    if (ponto.errors.accounts) return jsonResponse(ponto.errors.accounts, { errors: [] });
+    return jsonResponse(200, { data: ponto.accounts.map(accountResource) });
+  }
+  const accountMatch = url.pathname.match(/^\/accounts\/([^/]+)$/);
+  if (accountMatch && method === 'GET') {
+    ponto.calls.push({ method, path: 'account', accountId: accountMatch[1] });
+    if (ponto.errors.account) return jsonResponse(ponto.errors.account, { errors: [] });
+    const account = ponto.accounts.find((item) => item.id === decodeURIComponent(accountMatch[1]));
+    return account ? jsonResponse(200, { data: accountResource(account) }) : jsonResponse(404, { errors: [] });
+  }
+  const transactionMatch = url.pathname.match(/^\/accounts\/([^/]+)\/transactions$/);
+  if (transactionMatch && method === 'GET') {
+    const accountId = decodeURIComponent(transactionMatch[1]);
+    const all = ponto.transactions[accountId] ?? [];
+    const cursor = Number(url.searchParams.get('page[cursor]') ?? 0);
+    const size = Math.max(1, Number(ponto.pagination.pageSize) || 100);
+    const page = all.slice(cursor, cursor + size);
+    const more = cursor + size < all.length;
+    ponto.calls.push({ method, path: 'transactions', accountId, cursor });
+    if (ponto.errors.transactions) return jsonResponse(ponto.errors.transactions, { errors: [] });
+    const next = more
+      ? ponto.pagination.incomplete
+        ? `https://example.invalid/accounts/${accountId}/transactions?page[cursor]=${cursor + size}`
+        : `https://api.myponto.com/accounts/${accountId}/transactions?page[limit]=100&page[cursor]=${cursor + size}`
+      : undefined;
+    return jsonResponse(200, {
+      data: page.map(transactionResource),
+      meta: {
+        synchronizedAt: ponto.synchronizedAt[accountId] ?? null,
+        latestSynchronization: { id: `latest-${accountId}`, type: 'synchronization', attributes: { status: 'success', subtype: 'accountTransactions', errors: [] } },
+      },
+      ...(next ? { links: { next } } : {}),
+    });
+  }
+  if (url.pathname === '/synchronizations' && method === 'POST') {
+    const parsed = JSON.parse(String(init.body));
+    const attributes = parsed?.data?.attributes ?? {};
+    const subtype = attributes.subtype;
+    const cfg = ponto.sync[subtype];
+    ponto.calls.push({ method, path: 'synchronizations', accountId: attributes.resourceId, subtype });
+    if (!cfg) return jsonResponse(400, { errors: [] });
+    if (cfg.startStatus) return jsonResponse(cfg.startStatus, { errors: [] });
+    const id = `e2e-sync-${ponto.nextSync++}`;
+    ponto.synchronizations.set(id, { subtype, polls: 0 });
+    return jsonResponse(200, { data: { id, type: 'synchronization' } });
+  }
+  const syncMatch = url.pathname.match(/^\/synchronizations\/([^/]+)$/);
+  if (syncMatch && method === 'GET') {
+    const sync = ponto.synchronizations.get(decodeURIComponent(syncMatch[1]));
+    if (!sync) return jsonResponse(404, { errors: [] });
+    const cfg = ponto.sync[sync.subtype];
+    sync.polls += 1;
+    const status = sync.polls <= (cfg.pendingPolls ?? 0) ? 'running' : cfg.status;
+    ponto.calls.push({ method, path: 'synchronization', subtype: sync.subtype, status });
+    return jsonResponse(200, { data: { id: syncMatch[1], type: 'synchronization', attributes: { status, errors: status === 'error' ? ['fictieve synchronisatiefout'] : [] } } });
+  }
+  return jsonResponse(404, { errors: [] });
+}
 
 /** zoals de app: de huidige administratie sluiten en een andere openen */
 function openAdmin(key) {
@@ -177,7 +304,7 @@ function init(fresh) {
     pdf: async (html) => Buffer.from(`%PDF-1.4 test ${html.length}`),
     mailerFactory: async () => ({ send: async (m) => { sent.push({ to: m.to, subject: m.subject }); return { messageId: `<e2e-${sent.length}@test>` }; } }),
     secrets: secretsFor(file),
-    fetch: async () => { throw new Error('geen netwerk in e2e-tests'); },
+    fetch: pontoFetch,
     storeFile,
     removeFile: (p) => deleteAttachment(path.dirname(file), p),
     statementFiles: folderAccess,
@@ -300,7 +427,7 @@ function init(fresh) {
       if (!fs.existsSync(target)) throw new Error('Het bestand is niet gevonden');
       openedAttachments.push({ stored: p, content: fs.readFileSync(target).toString('base64') });
     },
-    async openExternal() {},
+    async openExternal(url) { openedAttachments.push({ url }); },
     setSmtpPassword: (pw) => { smtpPassword = pw || null; },
     hasSmtpPassword: () => smtpPassword !== null,
     // veilige opslag zoals in de app (#249): dezelfde methode, met een veilige standaard (aan,
@@ -362,6 +489,7 @@ http
         restoreCalls = [];
         store = noStore();
         openedAttachments = [];
+        ponto = defaultPonto();
         secureStorageSwitch = null;
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         resetFolders();
@@ -378,6 +506,21 @@ http
       if (req.url === '/__downloads') return res.end(JSON.stringify({ ok: downloadsDir() }));
       if (req.url === '/__restore') return res.end(JSON.stringify({ ok: restoreCalls }));
       if (req.url === '/__opened') return res.end(JSON.stringify({ ok: openedAttachments }));
+      if (req.url === '/__ponto') {
+        const input = body ? JSON.parse(body) : {};
+        if (input.reset) ponto = defaultPonto();
+        if (input.clientId !== undefined) ponto.clientId = String(input.clientId);
+        if (input.clientSecret !== undefined) ponto.clientSecret = String(input.clientSecret);
+        if (input.scope !== undefined) ponto.scope = String(input.scope);
+        if (input.publicIp !== undefined) ponto.publicIp = String(input.publicIp);
+        if (input.accounts) ponto.accounts = input.accounts;
+        if (input.transactions) ponto.transactions = input.transactions;
+        if (input.synchronizedAt) ponto.synchronizedAt = input.synchronizedAt;
+        if (input.pagination) ponto.pagination = { ...ponto.pagination, ...input.pagination };
+        if (input.sync) ponto.sync = { ...ponto.sync, ...input.sync };
+        if (input.errors) ponto.errors = { ...ponto.errors, ...input.errors };
+        return res.end(JSON.stringify({ ok: { calls: ponto.calls, accounts: ponto.accounts.map((account) => ({ id: account.id })), sync: ponto.sync } }));
+      }
       if (req.url === '/__pay') {
         const a = licensing?.accounts.get(licensing.lastStarted);
         if (a) a.paid = true;
