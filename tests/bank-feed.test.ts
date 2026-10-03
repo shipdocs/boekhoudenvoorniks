@@ -19,7 +19,7 @@ import type { NormalizedTransaction } from '../src/import/types';
 
 const CREDS: PontoCredentials = { clientId: 'client-id-1234', clientSecret: 'geheim-wachtwoord' };
 /** Vast moment: dit is het referentiemoment van alle synchronisatietijdstippen in de tests. */
-const NOW = new Date('2026-10-12T12:00:00Z');
+const NOW = new Date('2026-10-12T16:00:00Z');
 
 const account = (over: Partial<PontoAccount> = {}): PontoAccount => ({
   id: 'acc-1',
@@ -210,10 +210,10 @@ describe('nieuwe transacties en bewezen dekking (#253)', () => {
     await h.feed.round();
     // de transacties staan erin, maar zonder eerder bewijs is er geen covered_to
     expect(feedRow(h.s.db).covered_to).toBeNull();
-    // en de app beweert ook geen feeddekking: de enige regels zijn de transacties zelf
-    // (volgens de bestaande regel van de app telt zo'n regel haar eigen dag mee)
+    // en de app beweert ook via completeTo geen dekking: de eerste transactie bewijst de
+    // stille dagen ervoor of erna niet
     const st = h.s.bank.importStatus().find((x) => x.bankAccountId === feedRow(h.s.db).bank_account_id)!;
-    expect(st.completeTo).toBe('2026-10-10');
+    expect(st.completeTo).toBeNull();
   });
 
   it('sluit gatloos aan op een bestaand afschrift: geen dubbel en geen gat', async () => {
@@ -237,6 +237,29 @@ describe('nieuwe transacties en bewezen dekking (#253)', () => {
     expect(st.gap).toBeNull();
   });
 
+  it('sluit aan op completeTo en slaat een ouder open gat niet over', async () => {
+    const bankAccountId = await linkAccount(h);
+    // Dit afschrift is op zijn eigen laatste dag ingelezen: 5 oktober is daardoor nog
+    // gedeeltelijk en completeTo blijft 4 oktober.
+    bestaandAfschrift(h, bankAccountId, '2026-10-05', '2026-10-05 12:00:00');
+    // Een later afschrift begint pas op 10 oktober en vult 5 oktober niet. Een simpele
+    // MAX(period_to/imported_at)-query zou ten onrechte 10 oktober als aansluiting kiezen.
+    bestaandAfschrift(h, bankAccountId, '2026-10-10', '2026-10-11 08:00:00');
+    const before = h.s.bank.importStatus().find((x) => x.bankAccountId === bankAccountId)!;
+    expect(before.completeTo).toBe('2026-10-04');
+    expect(before.gap).toBe('2026-10-05');
+
+    h.reads.set('acc-1', pontoRead({ transactions: [] }));
+    await h.feed.round();
+
+    // De feed begint bij de echte bewezen grens en vult het gat. Hij springt niet vanaf het
+    // latere losse afschrift door naar 11 oktober.
+    expect(h.lastReadArgs[0]).toEqual({ accountId: 'acc-1', sinceDate: '2026-09-27' });
+    const after = h.s.bank.importStatus().find((x) => x.bankAccountId === bankAccountId)!;
+    expect(after.completeTo).toBe('2026-10-11');
+    expect(after.gap).toBeNull();
+  });
+
   it('leest uitsluitend vanaf max(link_from, covered_to - 7 dagen) terug', async () => {
     const bankAccountId = await linkAccount(h);
     // een bewezen dekkingsrij t/m 30 september en een koppelingsdag van 15 september
@@ -257,8 +280,8 @@ describe('nieuwe transacties en bewezen dekking (#253)', () => {
     expect(h.lastReadArgs[0]).toEqual({ accountId: 'acc-1', sinceDate: undefined });
     // maar ook geen dekking: 1 oktober als "eerste transactie" bewijst niets
     expect(feedRow(h.s.db).covered_to).toBeNull();
-    // alleen de transactie zelf telt (bestaande app-regel), geen feeddekking ervóór
-    expect(h.s.bank.importStatus().find((x) => x.bankAccountId === feedRow(h.s.db).bank_account_id)!.completeTo).toBe('2026-10-01');
+    // ook completeTo blijft leeg: een losse Ponto-transactie is geen dekkingsbewijs
+    expect(h.s.bank.importStatus().find((x) => x.bankAccountId === feedRow(h.s.db).bank_account_id)!.completeTo).toBeNull();
   });
 });
 
@@ -285,11 +308,14 @@ describe('synchronisatiemetadata bepaalt de dekking (#253)', () => {
   });
 
   it('onvolledige paginering importeert veilig maar geeft geen dekking', async () => {
+    const bankAccountId = feedRow(h.s.db).bank_account_id as number;
+    const before = h.s.bank.importStatus().find((x) => x.bankAccountId === bankAccountId)!.completeTo;
     h.reads.set('acc-1', pontoRead({ complete: false, transactions: [tx('2026-10-08', -3500, 'p1')] }));
     const summary = await h.feed.round();
     expect(summary.accounts[0]!.imported).toBe(1); // de veilige regel is gewoon geïmporteerd
     expect(feedRow(h.s.db).covered_to).toBeNull();
     expect(feedRow(h.s.db).transactions_synchronized_at).toBeNull();
+    expect(h.s.bank.importStatus().find((x) => x.bankAccountId === bankAccountId)!.completeTo).toBe(before);
   });
 
   it('ontbrekende of mislukte transactiemetadata geeft geen dekking', async () => {
@@ -433,9 +459,10 @@ describe('saldocontrole (#253)', () => {
   });
 
   /** Maakt de saldo-metadata vergelijkbaar: saldo en transacties op exact hetzelfde moment. */
-  const vergelijkbaar = (balance: number) => {
-    h.fake = [account({ balance, balanceAt: '2026-10-12T12:00:00.000Z' })];
-    h.reads.set('acc-1', pontoRead({ transactions: [] }));
+  const vergelijkbaar = (balance: number, hour = 12) => {
+    const moment = `2026-10-12T${String(hour).padStart(2, '0')}:00:00.000Z`;
+    h.fake = [account({ balance, balanceAt: moment, detailsSynchronizedAt: moment })];
+    h.reads.set('acc-1', pontoRead({ transactions: [], synchronizedAt: moment }));
   };
 
   it('zonder geboekt beginsaldo is balanceDifference null', async () => {
@@ -487,12 +514,13 @@ describe('saldocontrole (#253)', () => {
     await h.feed.round();
     const feedId = feedRow(h.s.db).id as number;
     expect(h.feed.balanceDifference(feedId)).toEqual({ difference: 10000, rounds: 1 });
-    // tweede vergelijkbare volledige ronde met hetzelfde verschil
+    // Dezelfde provider-snapshot opnieuw ophalen is geen onafhankelijke tweede bevestiging.
+    await h.feed.round();
+    expect(h.feed.balanceDifference(feedId)).toEqual({ difference: 10000, rounds: 1 });
+    // Pas een nieuwer, vergelijkbaar synchronisatiesnapshot bevestigt hetzelfde verschil.
+    vergelijkbaar(110000, 13);
     await h.feed.round();
     expect(h.feed.balanceDifference(feedId)).toEqual({ difference: 10000, rounds: 2 });
-    // een derde gelijke ronde telt gewoon door
-    await h.feed.round();
-    expect(h.feed.balanceDifference(feedId)).toEqual({ difference: 10000, rounds: 3 });
   });
 
   it('een ander verschil of een nulverschil reset de teller conservatief', async () => {
@@ -501,11 +529,11 @@ describe('saldocontrole (#253)', () => {
     const feedId = feedRow(h.s.db).id as number;
     expect(h.feed.balanceDifference(feedId)).toEqual({ difference: 10000, rounds: 1 });
     // een ander verschil: terug naar 1
-    vergelijkbaar(120000);
+    vergelijkbaar(120000, 13);
     await h.feed.round();
     expect(h.feed.balanceDifference(feedId)).toEqual({ difference: 20000, rounds: 1 });
     // nulverschil: de teller is leeg
-    vergelijkbaar(100000);
+    vergelijkbaar(100000, 14);
     await h.feed.round();
     expect(h.feed.balanceDifference(feedId)).toEqual({ difference: 0, rounds: 0 });
   });
@@ -531,6 +559,35 @@ describe('saldocontrole (#253)', () => {
     h.fake = [account({ balance: 110000, balanceAt: null })];
     await h.feed.round();
     expect(h.feed.balanceDifference(feedId)).toBeNull();
+  });
+
+  it('gebruikt bij een dubbel rond de saldogrens de datum uit de huidige Ponto-ronde', async () => {
+    const bankAccountId = feedRow(h.s.db).bank_account_id as number;
+    // Dezelfde betaling stond al via een afschrift één dag later in de administratie.
+    h.s.bank.import({
+      source: 'csv',
+      warnings: [],
+      transactions: [{
+        date: '2026-10-11',
+        amount: -5000,
+        counterIban: 'NL44RABO0123456789',
+        counterName: 'Koffiehoek',
+        description: 'Betaling p1',
+      }],
+    }, { bankAccountId, importedAt: '2026-10-12 10:00:00' });
+    // Ponto dateert haar op 10 oktober en het saldo op datzelfde moment bevat de betaling.
+    const moment = '2026-10-10T12:00:00.000Z';
+    h.fake = [account({ balance: 95000, balanceAt: moment, detailsSynchronizedAt: moment })];
+    h.reads.set('acc-1', pontoRead({
+      synchronizedAt: moment,
+      transactions: [tx('2026-10-10', -5000, 'p1')],
+    }));
+
+    await h.feed.round();
+
+    const feedId = feedRow(h.s.db).id as number;
+    expect(h.feed.balanceDifference(feedId)).toEqual({ difference: 0, rounds: 0 });
+    expect((h.s.db.prepare('SELECT COUNT(*) AS n FROM import_skipped').get() as { n: number }).n).toBe(1);
   });
 });
 
@@ -585,6 +642,40 @@ describe('gelijktijdigheid en de service-lock (#253)', () => {
     expect(h.calls.filter((c) => c.startsWith('transactions:'))).toHaveLength(1);
     // credentials staan in de veilige opslag
     expect(h.secrets.get(BANK_FEED_SECRET_KEYS.clientId)).toBe('client-id-1234');
+  });
+
+  it('een gewone round() tijdens save() deelt de verplichte eerste ronde', async () => {
+    await h.feed.test(CREDS);
+    h.reads.set('acc-1', pontoRead({ transactions: [tx('2026-10-10', -3500, 'p1')] }));
+    h.clientCalls = 0;
+    h.calls.length = 0;
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    (h.feed as unknown as { makeClient: unknown }).makeClient = () => ({
+      accounts: async () => {
+        h.calls.push('accounts');
+        return { accounts: h.fake, scope: 'ai' };
+      },
+      transactions: async () => {
+        h.calls.push('transactions:acc-1');
+        entered();
+        await gate;
+        return h.reads.get('acc-1')!;
+      },
+    });
+
+    const saving = h.feed.save(CREDS, [{ pontoId: 'acc-1', bankAccountId: 'nieuw' }]);
+    await started;
+    const overlapping = h.feed.round();
+    release();
+    const [saved, joined] = await Promise.all([saving, overlapping]);
+
+    expect(joined).toEqual(saved);
+    expect(h.calls.filter((call) => call === 'accounts')).toHaveLength(1);
+    expect(h.calls.filter((call) => call.startsWith('transactions:'))).toHaveLength(1);
+    expect((h.s.db.prepare('SELECT COUNT(*) AS n FROM import_batches').get() as { n: number }).n).toBe(1);
   });
 
   it('de ronde loopt door dezelfde lock: exclusive() en round() kunnen niet door elkaar', async () => {
