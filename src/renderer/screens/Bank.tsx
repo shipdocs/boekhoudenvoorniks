@@ -47,6 +47,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
   const txs = useLoad(() => api.bank.transactions({ ...(view === 'hulp' ? { status: 'nieuw' as const } : {}), ...(query ? { search: query } : {}) }), [view, query]);
   const accounts = useLoad(() => api.bank.accounts());
   const status = useLoad(() => api.bank.importStatus());
+  const overview = useLoad(() => api.bank.balanceOverview());
   // verzamelbetalingen die er twee keer in staan (één regel én losse deelposten)
   const doubles = useLoad(() => api.bank.doubles());
   const [showDouble, setShowDouble] = useState<{ lineId: number; firstPartId: number } | null>(double ?? null);
@@ -207,6 +208,30 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
         </tbody>
       </table>
       <p className="small muted">Een nieuwe rekening komt er ook vanzelf bij als je een afschrift inleest met een rekeningnummer dat de app nog niet kent.</p>
+
+      {(overview.data ?? []).length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h3 style={{ marginTop: 0 }}>Saldocontrole</h3>
+          <p className="small muted">Per rekening naast elkaar: wat het grootboek zegt, wat je betalingen samen zijn en wat je laatste afschrift als eindsaldo noemt.</p>
+          <table className="list">
+            <thead><tr><th>Rekening</th><th className="num">Grootboek</th><th className="num">Betalingen</th><th className="num">Laatste afschrift</th><th><span className="sr-only">Uitkomst</span></th></tr></thead>
+            <tbody>
+              {(overview.data ?? []).map((o) => (
+                <tr key={o.bankAccountId}>
+                  <td>{o.name}</td>
+                  <td className="num"><Euro cents={o.ledger} />{o.pending !== 0 && <div className="small muted">+ <Euro cents={o.pending} /> nog te verwerken</div>}{o.ignored !== 0 && <div className="small muted">+ <Euro cents={o.ignored} /> genegeerd</div>}</td>
+                  <td className="num"><Euro cents={o.transactions} /></td>
+                  <td className="num">{o.statement ? <><Euro cents={o.statement.bank} /><div className="small muted">op <DateNl date={o.statement.date} /></div></> : <span className="muted">geen eindsaldo</span>}</td>
+                  <td>
+                    {o.ledgerMatches ? <span className="pill good">grootboek klopt ✓</span> : <span className="pill warn">grootboek wijkt af</span>}{' '}
+                    {o.statement && (o.statement.matches ? <span className="pill good">afschrift klopt ✓</span> : <span className="pill warn">afschrift wijkt af</span>)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {meta.bankFeed && <PontoCard initialStep={bankFeed === 'credentials' ? 4 : undefined} focusAccountId={feedAccountId} />}
 

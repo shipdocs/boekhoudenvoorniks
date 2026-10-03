@@ -1210,6 +1210,7 @@ export function createApi(s: Services, host: HostContext) {
     bank: {
       accounts: () => s.bank.listAccounts(),
       importStatus: () => s.bank.importStatus(),
+      balanceOverview: () => s.inbox.balanceOverview(),
       addAccount: (name: string, iban: string | null, opts?: { pot?: boolean }) => s.bank.addAccount(name, iban, opts),
       updateAccount: (id: number, patch: { name?: string; iban?: string | null; pot?: boolean }) => s.bank.updateAccount(id, patch),
       removableAccount: (id: number) => s.bank.removable(id),
