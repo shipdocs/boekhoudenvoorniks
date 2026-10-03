@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SITE = path.join(__dirname, '..', 'site');
-const DOWNLOAD = 'https://github.com/shipdocs/boekhoudenvoorniks/releases/latest';
+const DOWNLOAD = 'downloaden.html';
 const GITHUB = 'https://github.com/shipdocs/boekhoudenvoorniks';
 
 /** Het hoofdmenu: weinig punten, de doelgroep-pagina's samen onder "Voor wie". */
@@ -39,6 +39,7 @@ const FOOTER = [
       { href: './#functies', label: 'Functies' },
       { href: './#prijzen', label: 'Prijzen' },
       { href: './#overstappen', label: 'Overstappen' },
+      { href: 'bank-ophalen.html', label: 'Bank automatisch ophalen' },
       { href: 'btw-aangifte.html', label: 'Btw-aangifte zelf doen' },
       { href: 'zonder-abonnement.html', label: 'Zonder abonnement, offline' },
       { href: './#vragen', label: 'Veelgestelde vragen' },
