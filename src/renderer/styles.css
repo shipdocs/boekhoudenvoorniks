@@ -153,6 +153,13 @@ table.list tr.clickable:hover td { background: var(--surface-2); }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(10, 15, 25, .45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
 .modal { background: var(--surface); border-radius: 14px; padding: 22px 24px; width: min(560px, 100%); max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
 .modal.wide { width: min(980px, 100%); }
+.ponto-progress { display: grid; grid-template-columns: auto minmax(120px, 1fr); align-items: center; gap: 12px; margin-bottom: 20px; color: var(--muted); font-size: 13px; }
+.ponto-progress progress { width: 100%; accent-color: var(--primary); }
+.ponto-dialog-actions { margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--border); }
+.ponto-account { margin: 0; min-width: 0; }
+.ponto-account legend { padding: 0 6px; }
+.ponto-card { margin-top: 24px; }
+.ponto-status-account { background: var(--surface-2); }
 .toasts { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
 .toast { background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; max-width: 420px; box-shadow: var(--shadow); }
 .toast.error { background: var(--bad); color: #fff; }
