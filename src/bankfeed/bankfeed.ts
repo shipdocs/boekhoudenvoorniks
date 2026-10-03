@@ -142,6 +142,8 @@ const MANUAL_SYNC_WINDOW_MS = 30 * 60_000;
 const MANUAL_SYNC_POLL_MS = 3_000;
 /** Maximale pollduur per gestarte synchronisatie (#247). */
 const MANUAL_SYNC_POLL_MAX_MS = 2 * 60_000;
+/** Maximale wachttijd op de Cloudflare-trace, zodat de service-lock nooit onbeperkt vaststaat. */
+const CLOUDFLARE_TRACE_TIMEOUT_MS = 30_000;
 /** Het enige toegestane trace-adres voor het publieke IP (#247). */
 const CLOUDFLARE_TRACE_URL = 'https://www.cloudflare.com/cdn-cgi/trace';
 
@@ -619,6 +621,9 @@ export class BankFeedService {
     const firstFailure = [txFailure, detailsFailure].find((kind) => kind !== null);
     if (firstFailure !== undefined && !summary.failed.some((f) => f.pontoId === row.external_id)) {
       summary.failed.push({ pontoId: row.external_id, errorKind: firstFailure });
+      // Een volledige transactieronde wist terecht eerdere rondefouten, maar mag een zojuist
+      // mislukte handmatige subsynchronisatie niet maskeren in de blijvende feedstatus.
+      this.markError(row.id, firstFailure);
     }
     return { allowed: true, summary };
   }
@@ -637,7 +642,7 @@ export class BankFeedService {
   private async pollSynchronization(client: BankFeedClient, id: string): Promise<string | null> {
     const deadline = this.now().getTime() + MANUAL_SYNC_POLL_MAX_MS;
     for (;;) {
-      if (this.now().getTime() > deadline) return 'timeout';
+      if (this.now().getTime() >= deadline) return 'timeout';
       let status: 'pending' | 'running' | 'success' | 'error';
       try {
         status = (await client.synchronization!(id)).status;
@@ -646,7 +651,9 @@ export class BankFeedService {
       }
       if (status === 'success') return null;
       if (status === 'error') return 'synchronization-error';
-      await this.wait(MANUAL_SYNC_POLL_MS);
+      const remaining = deadline - this.now().getTime();
+      if (remaining <= 0) return 'timeout';
+      await this.wait(Math.min(MANUAL_SYNC_POLL_MS, remaining));
     }
   }
 
@@ -657,12 +664,16 @@ export class BankFeedService {
    */
   private async publicIp(): Promise<string> {
     let text: string;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLOUDFLARE_TRACE_TIMEOUT_MS);
     try {
-      const response = await this.traceFetch(CLOUDFLARE_TRACE_URL, { method: 'GET' });
+      const response = await this.traceFetch(CLOUDFLARE_TRACE_URL, { method: 'GET', signal: controller.signal });
       if (!response.ok) throw new Error('trace mislukt');
       text = await response.text();
     } catch {
       throw new ValidationError('Het publieke IP-adres kon nu niet worden bepaald; het handmatig bijwerken is niet gestart. Probeer het later opnieuw.');
+    } finally {
+      clearTimeout(timer);
     }
     const ip = traceIp(text);
     if (ip === null) {
