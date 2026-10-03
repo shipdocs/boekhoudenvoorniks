@@ -1,7 +1,10 @@
 # Wijzigingen
 
-## Volgende versie
+## 1.2.0 — je bank automatisch ophalen met Ponto
 
+Deze versie voegt een optionele koppeling met Ponto toe. Je afschriften blijven de basis en de terugval.
+
+### Nieuw
 - **Bank automatisch ophalen met Ponto (optioneel).** Naast het inlezen van afschriften kun je je zakelijke bank laten ophalen via Ponto, een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit. Een wizard op Bank (en in Instellingen onder Koppelingen) leidt je in vijf stappen langs Ponto: account, bank, een eigen koppeling met alleen rekeninginformatie, en het plakken en testen van je Client ID en Client Secret. Wat Ponto kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto. Per rekening kies je waar die in je administratie hoort; de app zegt erbij tot welke datum de betalingen bewezen aansluiten op je afschriften en vraagt een ontbrekende periode te onderbouwen met een afschrift of openingssaldo. Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen. Client ID en Client Secret staan versleuteld in de veilige opslag van je computer en gaan nooit mee in een pakket of kopie voor je boekhouder. Gewoon ophalen gaat rechtstreeks tussen de app en Ponto; ShipDocs ziet niets. Alleen als je op *Nu bijwerken* klikt, vraagt de app eerst je publieke IP-adres op bij Cloudflare en stuurt het aan Ponto (dat vereist Ponto); de app bewaart en logt het niet, en daarna kan het 30 minuten niet opnieuw. Loopt je toestemming bij Ponto binnen 14 dagen af, of is die verlopen, dan staat er een taak op Vandaag. Ontkoppelen wist de inloggegevens op je computer en laat je betalingen staan. Stappenplan: `docs/bank-ophalen-ponto.md`.
 - **Al betaald, via je bank: de app onthoudt het nu.** Kies je bij een aankoop "Via <je zakelijke rekening>", dan blijft de aankoop open, maar Vandaag zegt niet meer dat hij te laat betaald is zolang het afschrift van die rekening nog niet tot die dag is ingelezen: je ziet "wacht op het afschrift van …". Lees je het afschrift in en komt de betaling erin, dan koppelt de app hem (of vraagt hij of ze bij elkaar horen). Staat hij er na een compleet afschrift niet in, dan telt de aankoop weer als gewoon open. Er wordt niets geboekt, dus ook niets dubbel (#239).
 
