@@ -1,3 +1,4 @@
+import { runBackgroundFeeds } from './background-feeds';
 import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -547,6 +548,8 @@ function initServices(): void {
     },
     setSmtpPassword: (pw) => (pw ? secrets.set(SMTP_SECRET, pw) : secrets.delete(SMTP_SECRET)),
     hasSmtpPassword: () => secrets.get(SMTP_SECRET) !== null,
+    // veilige opslag (sleutelbeheer) zoals de services die zelf ook lezen (#249, regel 6)
+    secureStorage: () => secrets.available,
     testSmtp: (smtp, password) => verifySmtp(smtp ?? services.settings.get().smtp, password || secrets.get(SMTP_SECRET)),
     mail: {
       setPassword: (pw) => (pw ? secrets.set(IMAP_SECRET, pw) : secrets.delete(IMAP_SECRET)),
@@ -840,12 +843,7 @@ async function backgroundTasks(): Promise<void> {
   } catch (e) {
     console.error('Herinneringen mislukt', e);
   }
-  try {
-    const results = await services.integrations.syncAllEnabled();
-    if (Object.keys(results).length > 0) emit('integrations', results);
-  } catch (e) {
-    console.error('Synchronisatie mislukt', e);
-  }
+  await runBackgroundFeeds(services, emit, (...args) => console.error(...args));
 }
 
 function createWindow(): void {
