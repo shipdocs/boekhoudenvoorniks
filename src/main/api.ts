@@ -37,6 +37,7 @@ import type { JobStatus } from '../jobs/jobs';
 import type { LineInput } from '../documents/totals';
 import { documentProposal, type Task } from '../inbox/inbox';
 import type { SaleAnswer } from '../integrations/integrations';
+import type { FeedLink } from '../bankfeed/bankfeed';
 import { ONLINE_HELP } from '../shared/online-help';
 import type { OpeningInput, SectionKey } from '../onboarding/switchover';
 import type { XafApplyChoices } from '../onboarding/xaf-import';
@@ -76,6 +77,8 @@ export interface HostContext {
   openExternal(url: string): Promise<void>;
   setSmtpPassword(password: string): void;
   hasSmtpPassword(): boolean;
+  /** of deze computer veilige opslag (sleutelbeheer) heeft; in de app gelezen uit `SecretStore.available`, in e2e met een schakelaar (#249) */
+  secureStorage(): boolean;
   /** test met de ingevulde (nog niet opgeslagen) gegevens en het ingetypte wachtwoord, anders het opgeslagen */
   testSmtp(smtp?: AppSettings['smtp'], password?: string): Promise<void>;
   backupNow(): Promise<string | null>;
@@ -259,6 +262,37 @@ export function createApi(s: Services, host: HostContext) {
   const notHeld = (txId: number): number => {
     s.bank.assertNotHeld(s.bank.get(Number(txId)));
     return Number(txId);
+  };
+
+  // ---------- Ponto-bankfeed (#249) ----------
+
+  /**
+   * Na een feedronde met werkelijk nieuwe transacties: precies één keer automatisch verwerken
+   * (regel 4). Zonder nieuwe imports gebeurt er niets; de uitkomst gaat één keer mee in het
+   * antwoord van de route.
+   */
+  const processedFeedRounds = new WeakMap<object, { autoMatched?: number }>();
+  const autoNaFeedronde = (summary: { importedAny: boolean }): { autoMatched?: number } => {
+    if (!summary.importedAny) return {};
+    const previous = processedFeedRounds.get(summary);
+    if (previous) return previous;
+    // Overlappende routes krijgen hetzelfde resultaat van de service-lock. Verwerk dat eenmaal.
+    const result: { autoMatched?: number } = {};
+    processedFeedRounds.set(summary, result);
+    const auto = s.inbox.autoProcess();
+    result.autoMatched = auto.matched + auto.booked;
+    return result;
+  };
+
+  /**
+   * Iedere feedroute weigert het zodra de vlag uit staat of er niets naar buiten mag (#249
+   * regel 1); read-only controleert de service zelf bij de schrijvende routes. `status()` van
+   * de service is bewust zonder guard (alleen lezen); de route zelf doet hier dezelfde check.
+   */
+  const feedGuard = (): void => {
+    if (!BANK_FEED.available) throw new ValidationError('De Ponto-bankfeed is nog niet beschikbaar in deze versie.');
+    const outbound = s.settings.outboundBlocked();
+    if (outbound !== null) throw new ValidationError(outbound);
   };
 
   /** Een feedtaak uit de renderer is alleen een aanwijzing: gebruik uitsluitend de actuele DB-taak. */
@@ -1665,6 +1699,57 @@ export function createApi(s: Services, host: HostContext) {
       configure: (id: string, values: Record<string, string>, enabled: boolean) => s.integrations.configure(id, values, enabled),
       disconnect: (id: string) => s.integrations.disconnect(id),
       sync: (id: string) => s.integrations.sync(id),
+    },
+    // Ponto-bankfeed (#249): uitsluitend doorgang naar de bestaande BankFeedService. De service
+    // bewaakt zelf de vlag, alleen-lezen, kantoorkopie/demo/outbound (regel 1) en de ene
+    // service-lock (regel 9); deze routes voegen geen eigen logica, timer of lock toe en geven
+    // nooit een credential, token, IP of ruwe providerrespons terug (regel 3).
+    bankfeed: {
+      /** status van de feed; `secureStorage` komt uit de host (het echte sleutelbeheer, regel 6) */
+      status: () => {
+        feedGuard();
+        const st = s.bankFeed.status();
+        return { ...st, secureStorage: st.secureStorage && host.secureStorage() };
+      },
+      /** verbindingsprobe met ingetypte gegevens; bewaart niets (#246) */
+      testen: async (clientId: string, clientSecret: string) => {
+        feedGuard();
+        return s.bankFeed.test({ clientId, clientSecret });
+      },
+      /**
+       * Bewaar inloggegevens en rekeningkeuzes, gevolgd door één verplichte eerste ronde (#253).
+       * Beide gevuld = vervangen; allebei null = behouden; precies één null = weigeren
+       * (regel 2, geen impliciete menging).
+       */
+      opslaan: async (clientId: string | null, clientSecret: string | null, links: FeedLink[]) => {
+        feedGuard();
+        if (clientId !== null && typeof clientId !== 'string') throw new ValidationError('De Client ID moet tekst zijn.');
+        if (clientSecret !== null && typeof clientSecret !== 'string') throw new ValidationError('Het Client Secret moet tekst zijn.');
+        // regel 2: beide gevuld = vervangen, allebei null = behouden, precies één null = weigeren
+        if ((clientId === null) !== (clientSecret === null)) {
+          throw new ValidationError('Vul zowel de Client ID als het Client Secret in, of laat allebei leeg om de huidige te houden.');
+        }
+        const summary = await s.bankFeed.save(clientId === null ? null : { clientId, clientSecret: clientSecret as string }, links ?? []);
+        return { ...summary, ...autoNaFeedronde(summary) };
+      },
+      /** één ophaalronde over alle actieve koppelingen; nieuwe transacties worden meteen verwerkt */
+      ophalen: async () => {
+        feedGuard();
+        const summary = await s.bankFeed.round();
+        return { ...summary, ...autoNaFeedronde(summary) };
+      },
+      /** "Nu bijwerken" voor één koppeling (#247); nieuwe transacties worden meteen verwerkt */
+      bijwerken: async (feedAccountId: number) => {
+        feedGuard();
+        const r = await s.bankFeed.refreshNow(Number(feedAccountId));
+        if (!r.allowed) return r;
+        return { allowed: true as const, summary: r.summary, ...autoNaFeedronde(r.summary) };
+      },
+      /** koppeling en inloggegevens wissen; banktransacties en bankrekeningen blijven staan (#246) */
+      verwijderen: () => {
+        feedGuard();
+        s.bankFeed.remove();
+      },
     },
   };
 }
