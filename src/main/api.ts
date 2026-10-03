@@ -271,10 +271,17 @@ export function createApi(s: Services, host: HostContext) {
    * (regel 4). Zonder nieuwe imports gebeurt er niets; de uitkomst gaat één keer mee in het
    * antwoord van de route.
    */
+  const processedFeedRounds = new WeakMap<object, { autoMatched?: number }>();
   const autoNaFeedronde = (summary: { importedAny: boolean }): { autoMatched?: number } => {
     if (!summary.importedAny) return {};
+    const previous = processedFeedRounds.get(summary);
+    if (previous) return previous;
+    // Overlappende routes krijgen hetzelfde resultaat van de service-lock. Verwerk dat eenmaal.
+    const result: { autoMatched?: number } = {};
+    processedFeedRounds.set(summary, result);
     const auto = s.inbox.autoProcess();
-    return { autoMatched: auto.matched + auto.booked };
+    result.autoMatched = auto.matched + auto.booked;
+    return result;
   };
 
   /**
