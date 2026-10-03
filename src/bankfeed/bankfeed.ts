@@ -73,6 +73,8 @@ export interface FeedAccountInfo {
   status: 'actief' | 'niet-gebruiken' | 'weg';
   expiresAt: IsoDate | null;
   transactionsSynchronizedAt: string | null;
+  /** Laatste dag waarvoor de feed aantoonbaar zonder begingat aansluit. */
+  coveredTo: IsoDate | null;
   detailsSynchronizedAt: string | null;
   lastOkAt: string | null;
   lastErrorKind: string | null;
@@ -300,6 +302,7 @@ export class BankFeedService {
         status: row.status as FeedAccountInfo['status'],
         expiresAt: row.expires_at,
         transactionsSynchronizedAt: row.transactions_synchronized_at,
+        coveredTo: row.covered_to as IsoDate | null,
         detailsSynchronizedAt: row.details_synchronized_at,
         lastOkAt: row.last_ok_at,
         lastErrorKind: row.last_error_kind,
