@@ -223,6 +223,28 @@ describe('bruikbaarheid en IBAN-suggestie (#246 regel 5 en 6)', () => {
     expect(result.accounts[0]!.link.note).not.toMatch(/Nieuwe rekening/);
   });
 
+  it('geeft de bewezen completeTo van een exact gematchte bestaande rekening door', async () => {
+    const bestaand = h.s.bank.addAccount('Zakelijk', 'NL91ABNA0417164300');
+    h.s.bank.import({
+      source: 'csv',
+      warnings: [],
+      transactions: [{ date: '2026-09-12', amount: -2500, description: 'Testbetaling' }],
+    }, {
+      bankAccountId: bestaand.id,
+      importedAt: '2026-09-13 12:00:00',
+      period: { from: '2026-09-01', to: '2026-09-12' },
+    });
+
+    const result = await h.feed.test(CREDS);
+    expect(result.accounts[0]!.suggestedBankAccountId).toBe(bestaand.id);
+    expect(result.accounts[0]!.link).toMatchObject({
+      completeTo: '2026-09-12',
+      from: '2026-09-12',
+      proven: true,
+    });
+    expect(result.accounts[0]!.link.note).toMatch(/bewezen compleet t\/m 2026-09-12/);
+  });
+
   it('vreemde valuta, geen IBAN en deprecated zijn onbruikbaar, elk met een reden', async () => {
     h.fake = [
       account({ id: 'acc-usd', currency: 'USD' }),

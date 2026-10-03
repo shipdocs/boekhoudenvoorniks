@@ -376,11 +376,17 @@ export class BankFeedService {
     const normalized = account.iban === null ? null : normalizeIban(account.iban);
     const match = normalized === null ? undefined : existing.find((a) => a.iban === normalized);
     const suggested = match ? match.id : null;
-    const completeTo: IsoDate | null = null;
+    // Sinds #253 bestaat de centrale bewezen dekking. Geef die bij een exact gematchte
+    // bestaande rekening door aan de wizard; een eerste transactiedatum is nadrukkelijk
+    // geen bewijs en een rekening zonder completeTo blijft dus onbewezen.
+    const completeTo = match ? this.bankCompleteTo(match.id) : null;
+    const proven = completeTo !== null;
     let note: string;
     if (match) {
-      note = 'Deze rekening bestaat al in je administratie; de feed hangt haar daar aan.'
-        + (usable ? '' : ` Let op: ${reason}`);
+      note = proven
+        ? `Deze rekening bestaat al in je administratie en is bewezen compleet t/m ${completeTo}; de feed sluit daarop aan.`
+        : 'Deze rekening bestaat al in je administratie, maar de eerdere periode is nog niet bewezen compleet. Lees daarvoor een afschrift in of leg een openingssaldo vast.';
+      if (!usable) note += ` Let op: ${reason}`;
     } else if (!usable) {
       note = `${reason} De feed koppelt haar niet.`;
     } else {
@@ -398,7 +404,7 @@ export class BankFeedService {
       usable,
       reason,
       suggestedBankAccountId: suggested,
-      link: { completeTo, from: null, proven: false, note },
+      link: { completeTo, from: completeTo, proven, note },
     };
   }
 
