@@ -372,11 +372,13 @@ describe('autoProcess uitsluitend bij werkelijk nieuwe imports, maximaal één k
     h.reads.set('acc-1', pontoRead({ transactions: [] }));
     const spy = vi.spyOn(h.s.inbox, 'autoProcess');
     const r = await h.api.bankfeed.bijwerken(feedId);
-    if ('summary' in r) {
-      expect(r.summary.importedAny).toBe(false);
-      expect(r.autoMatched).toBeUndefined();
-      expect(spy).not.toHaveBeenCalled();
-    }
+    expect(r.allowed).toBe(true);
+    if (!r.allowed) throw new Error('De eerste handmatige ronde moet toegestaan zijn.');
+    expect(r.summary.importedAny).toBe(false);
+    expect(r.autoMatched).toBeUndefined();
+    expect(spy).not.toHaveBeenCalled();
+    expect(h.calls).toContain('start:accountTransactions');
+    expect(h.calls).toContain('transactions:acc-1');
   });
 });
 
