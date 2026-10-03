@@ -10,6 +10,7 @@ import { PaymentDetails, PaymentEvidence } from './PaymentDetails';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
 import { formatEuro } from '../../shared/money';
 import { formatForeign } from '../../shared/currency';
+import { PontoCard } from './PontoDialog';
 
 /** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
 function formatDateTime(sqlite: string): string {
@@ -32,8 +33,8 @@ function knownFromText(known: { from: string; to: string }[]): string {
 type BatchDouble = Awaited<ReturnType<typeof api.bank.doubles>>[number];
 type PaymentDouble = Awaited<ReturnType<typeof api.bank.sameDoubles>>[number];
 
-export function Bank({ focus, skippedFor, imported, double, same }: { /** vanaf Vandaag: dit dubbele bedrag meteen laten zien */ double?: { lineId: number; firstPartId: number }; /** vanaf Vandaag: deze twee regels die dezelfde betaling lijken meteen laten zien */ same?: { firstId: number; secondId: number }; focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult }) {
-  const { go, toast, settings, refreshBadge } = useApp();
+export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feedAccountId }: { /** vanaf Vandaag: dit dubbele bedrag meteen laten zien */ double?: { lineId: number; firstPartId: number }; /** vanaf Vandaag: deze twee regels die dezelfde betaling lijken meteen laten zien */ same?: { firstId: number; secondId: number }; focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult; bankFeed?: 'credentials'; feedAccountId?: number }) {
+  const { go, toast, settings, refreshBadge, meta } = useApp();
   const { run } = useAction();
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
   // zoeken in naam, omschrijving en rekeningnummer; vertraagd zodat niet elke toets een zoekopdracht is
@@ -205,7 +206,9 @@ export function Bank({ focus, skippedFor, imported, double, same }: { /** vanaf 
           ))}
         </tbody>
       </table>
-      <p className="small muted">Een nieuwe rekening komt er ook vanzelf bij als je een afschrift inleest met een rekeningnummer dat de app nog niet kent. Automatisch ophalen bij je bank komt later.</p>
+      <p className="small muted">Een nieuwe rekening komt er ook vanzelf bij als je een afschrift inleest met een rekeningnummer dat de app nog niet kent.</p>
+
+      {meta.bankFeed && <PontoCard initialStep={bankFeed === 'credentials' ? 4 : undefined} focusAccountId={feedAccountId} />}
 
       <StatementFolderCard />
 
