@@ -1,11 +1,11 @@
 /**
- * Ponto-bankfeed (WP1, #243). De kant van de app is nog niet af: tot WP10 (sandbox- én
- * echte-bankproef) succesvol is afgerond en een afzonderlijke gereviewde release-PR de vlag
- * aanzet (#252), staat hij uit. Zolang hij uit staat: geen kaart of knop in het scherm en
- * `bank_feed_accounts` blijft leeg. Een object, zodat de tests het kunnen omzetten (ze zetten
- * het zelf aan).
+ * Ponto-bankfeed (WP1, #243). Aan sinds versie 1.2.0, na de geslaagde proef van #252. Staat hij
+ * uit (de tests zetten hem om): geen kaart of knop in het scherm, geen netwerk en
+ * `bank_feed_accounts` blijft leeg. Ook met de vlag aan blijven demo-modus, een geblokkeerd
+ * netwerk, alleen-bekijken en een kantoorkopie de bankfeed buiten beeld houden. Een object, zodat
+ * de tests het kunnen omzetten.
  */
-export const BANK_FEED = { available: false };
+export const BANK_FEED = { available: true };
 
 /**
  * De sleutels van de Ponto-credentials in de veilige opslag, hier alleen als contract gereserveerd
