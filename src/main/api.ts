@@ -840,8 +840,8 @@ export function createApi(s: Services, host: HostContext) {
         vatSuppletieUrl: SUPPLETIE_URL,
         /** telefoon koppelen voor de bonnenscanner is beschikbaar (nu nog niet: shared/phone-scanner.ts) */
         phoneScanner: PHONE_SCANNER.available,
-        /** Ponto-bankfeed beschikbaar (nu nog niet: shared/bank-feed.ts, #243); het scherm ziet alleen deze vlag */
-        bankFeed: BANK_FEED.available,
+        /** Alleen tonen als deze administratie de feed ook werkelijk mag gebruiken. */
+        bankFeed: BANK_FEED.available && s.settings.outboundBlocked() === null && host.readOnly?.() !== true,
       }),
     },
     onboarding: {
