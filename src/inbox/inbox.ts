@@ -40,6 +40,7 @@ import { formatForeign } from '../shared/currency';
 import type { FxRepair } from '../fx/repair';
 import type { StatementFolder } from '../import/statement-folder';
 import { statementHelp } from '../shared/bank-statement-help';
+import { BANK_FEED } from '../shared/bank-feed';
 
 
 export type TaskKind =
@@ -60,6 +61,12 @@ export type TaskKind =
   | 'vat-due'
   | 'bank-stale'
   | 'bank-balance'
+  | 'feed-expiring'
+  | 'feed-expired'
+  | 'feed-credentials'
+  | 'feed-account-gone'
+  | 'feed-silent'
+  | 'feed-balance'
   | 'bank-double'
   | 'bank-same'
   | 'bank-statement'
@@ -123,7 +130,7 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
-  ref: { relationId?: number; questionId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; sameFirstId?: number; sameSecondId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
+  ref: { relationId?: number; questionId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; feedAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; sameFirstId?: number; sameSecondId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
     proposal?: string;
     /** waar de vraag "dezelfde aankoop?" of "alleen als bewijs?" over gaat (#179); is dat intussen iets anders, dan gebeurt er niets */
@@ -297,6 +304,137 @@ export class InboxService {
 
   private isSkipped(key: string): boolean {
     return !!this.db.prepare(`SELECT 1 FROM task_skips WHERE task_key = ? AND fingerprint = 'x'`).get(key);
+  }
+
+  /** Lokale Vandaag-taken voor de door de ophaaldienst vastgelegde Ponto-statussen. */
+  private feedTasks(asOf: IsoDate): { tasks: Task[]; replacesStale: Set<number> } {
+    const tasks: Task[] = [];
+    const replacesStale = new Set<number>();
+    if (!BANK_FEED.available || this.settings.get().demoMode) return { tasks, replacesStale };
+
+    const rows = this.db
+      .prepare(
+        `SELECT f.*, b.name AS bank_name
+           FROM bank_feed_accounts f
+           JOIN bank_accounts b ON b.id = f.bank_account_id
+          WHERE f.provider = 'ponto' AND f.bank_account_id IS NOT NULL
+            AND f.status IN ('actief', 'weg')
+          ORDER BY f.id`,
+      )
+      .all() as {
+        id: number;
+        bank_account_id: number;
+        bank_name: string;
+        name: string | null;
+        status: 'actief' | 'weg';
+        expires_at: string | null;
+        balance: number | null;
+        balance_at: string | null;
+        balance_diff: number | null;
+        balance_diff_rounds: number;
+        transactions_synchronized_at: string | null;
+        last_ok_at: string | null;
+        last_error_kind: string | null;
+        last_round_at: string | null;
+        created_at: string;
+      }[];
+
+    for (const row of rows) {
+      const account = row.name?.trim() || row.bank_name;
+      const ref = { feedAccountId: row.id, bankAccountId: row.bank_account_id };
+      const expires = /^\d{4}-\d{2}-\d{2}/.test(row.expires_at ?? '') ? row.expires_at!.slice(0, 10) as IsoDate : null;
+      const errorState = row.last_round_at?.slice(0, 10) ?? row.created_at.slice(0, 10);
+      let health: Task | null = null;
+
+      if (row.status === 'weg' || row.last_error_kind === 'account-gone') {
+        health = {
+          key: `feed-account-gone-${row.id}-${errorState}`,
+          kind: 'feed-account-gone', icon: '🔌', priority: 1,
+          title: `${account}: niet meer gekoppeld bij Ponto`,
+          question: 'Deze rekening staat niet meer in je Ponto-koppeling. Bekijk de koppeling of gebruik deze rekening niet meer.',
+          actions: [{ id: 'bekijken', label: 'Bekijken', primary: true }, { id: 'niet-gebruiken', label: 'Niet gebruiken' }],
+          ref,
+        };
+      } else if (row.last_error_kind === 'credentials') {
+        health = {
+          key: `feed-credentials-${row.id}-${errorState}`,
+          kind: 'feed-credentials', icon: '🔑', priority: 1,
+          title: 'Plak je Ponto-gegevens opnieuw',
+          question: `De inloggegevens voor ${account} werken niet meer of zijn op deze computer niet leesbaar.`,
+          actions: [{ id: 'opnieuw', label: 'Opnieuw plakken', primary: true }],
+          ref,
+        };
+      } else if ((expires !== null && expires < asOf) || row.last_error_kind === 'expired') {
+        const state = expires ?? errorState;
+        health = {
+          key: `feed-expired-${row.id}-${state}`,
+          kind: 'feed-expired', icon: '⏳', priority: 1,
+          title: `${account}: toestemming bij Ponto is verlopen`,
+          question: 'Ponto kan geen nieuwe betalingen ophalen. Verleng de toestemming bij Ponto of lees voorlopig een afschrift in.',
+          actions: [{ id: 'ponto', label: 'Naar Ponto', primary: true }, { id: 'afschrift', label: 'Afschrift inlezen' }],
+          ref,
+        };
+      } else if (expires !== null && diffDays(asOf, expires) >= 0 && diffDays(asOf, expires) <= 14) {
+        health = {
+          key: `feed-expiring-${row.id}-${expires}`,
+          kind: 'feed-expiring', icon: '⏳', priority: 2,
+          title: `${account}: verleng je toestemming vóór ${formatDateNl(expires)}`,
+          question: 'Verleng de toestemming bij Ponto, dan blijven je betalingen vanzelf binnenkomen.',
+          actions: [{ id: 'ponto', label: 'Naar Ponto', primary: true }, { id: 'later', label: 'Later' }],
+          ref,
+        };
+      } else {
+        const lastOk = (row.last_ok_at ?? row.created_at).slice(0, 10) as IsoDate;
+        if (diffDays(lastOk, asOf) > 3) {
+          health = {
+            key: `feed-silent-${row.id}-${lastOk}`,
+            kind: 'feed-silent', icon: '🏦', priority: 1,
+            title: `${account}: al meer dan 3 dagen niets opgehaald`,
+            question: 'Ponto heeft al een paar dagen geen volledige ronde afgerond. Bekijk je bankkoppeling of lees een afschrift in.',
+            actions: [{ id: 'bank', label: 'Bank bekijken', primary: true }, { id: 'afschrift', label: 'Afschrift inlezen' }],
+            ref,
+          };
+        }
+      }
+
+      if (health !== null && !this.isSkipped(health.key)) {
+        tasks.push(health);
+        // Een concrete storingstaak vervangt de dubbele stale-melding. Een naderende
+        // verloopdatum doet dat niet; de feed kan dan nog gezond zijn.
+        if (health.kind !== 'feed-expiring') replacesStale.add(row.bank_account_id);
+      }
+
+      // #253 schrijft dit verschil pas na vergelijkbare volledige rondes. Vereis daarnaast
+      // dezelfde metadata en een geboekt beginsaldo die balanceDifference() geldig maken.
+      const balanceAt = Date.parse(row.balance_at ?? '');
+      const transactionsAt = Date.parse(row.transactions_synchronized_at ?? '');
+      if (
+        row.status === 'actief'
+        && row.balance_diff !== null
+        && row.balance_diff !== 0
+        && row.balance_diff_rounds >= 2
+        && row.balance !== null
+        && row.balance_at !== null
+        && row.transactions_synchronized_at !== null
+        && Number.isFinite(balanceAt)
+        && balanceAt === transactionsAt
+        && this.bank.openingBalance(row.bank_account_id).date !== null
+      ) {
+        const key = `feed-balance-${row.id}-${row.balance_diff}`;
+        if (!this.isSkipped(key)) {
+          tasks.push({
+            key,
+            kind: 'feed-balance', icon: '⚖️', priority: 1,
+            title: `${account}: het saldo verschilt met ${formatEuro(Math.abs(row.balance_diff))}`,
+            question: 'Ponto en de app zien na twee vergelijkbare volledige rondes hetzelfde verschil. Bekijk de rekening voordat je dit negeert.',
+            amount: Math.abs(row.balance_diff) as Cents,
+            actions: [{ id: 'bank', label: 'Bank bekijken', primary: true }, { id: 'negeren', label: 'Negeren' }],
+            ref,
+          });
+        }
+      }
+    }
+    return { tasks, replacesStale };
   }
 
   /**
@@ -837,9 +975,13 @@ export class InboxService {
       });
     }
 
+    const feed = this.feedTasks(asOf);
+    tasks.push(...feed.tasks);
+
     if (s.onboardingDone && s.profile.hasBusinessAccount) {
       const watching = this.statements?.available && this.statements.config().enabled;
       for (const st of this.bank.importStatus()) {
+        if (feed.replacesStale.has(st.bankAccountId)) continue;
         const days = st.completeTo ? diffDays(st.completeTo, asOf) : null;
         if (days !== null && days < BANK_STALE_DAYS) continue;
         tasks.push({
@@ -1700,7 +1842,7 @@ export class InboxService {
     const status = this.bank.importStatus();
     const bankUpdatedTo = status.map((st) => st.completeTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
     const checklist = [
-      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') && !kinds.has('bank-double') && !kinds.has('bank-same') },
+      { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') && !kinds.has('bank-double') && !kinds.has('bank-same') && !kinds.has('feed-expired') && !kinds.has('feed-credentials') && !kinds.has('feed-account-gone') && !kinds.has('feed-silent') && !kinds.has('feed-balance') },
       { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement', 'bank-double', 'bank-same'].includes(k)) },
       { label: 'Alle bonnetjes verwerkt', ok: !kinds.has('document-review') },
       { label: 'Geen facturen te laat', ok: !kinds.has('invoice-overdue') },
