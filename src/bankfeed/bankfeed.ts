@@ -143,6 +143,8 @@ export interface BankFeedDeps {
   secrets: SecretStore;
   bank: BankService;
   settings: SettingsService;
+  /** injecteerbare klok voor deterministische ronde-/fouttijdstippen */
+  now?: () => Date;
   /** maakt de client voor één netwerkaanroep; in productie de echte, in tests een nep */
   client: (creds: PontoCredentials) => Pick<PontoClient, 'accounts' | 'transactions'>;
 }
@@ -152,6 +154,7 @@ export class BankFeedService {
   private readonly secrets: SecretStore;
   private readonly bank: BankService;
   private readonly settings: SettingsService;
+  private readonly now: () => Date;
   private readonly makeClient: (creds: PontoCredentials) => Pick<PontoClient, 'accounts' | 'transactions'>;
   /**
    * Het laatste expliciete testresultaat van deze service-instantie; alleen hiertegen zijn
@@ -175,6 +178,7 @@ export class BankFeedService {
     this.secrets = deps.secrets;
     this.bank = deps.bank;
     this.settings = deps.settings;
+    this.now = deps.now ?? (() => new Date());
     this.makeClient = deps.client;
   }
 
@@ -457,10 +461,14 @@ export class BankFeedService {
    * daarom veilig binnen de gehouden lock draaien.
    */
   async save(creds: PontoCredentials | null, links: FeedLink[]): Promise<RoundSummary> {
-    return this.exclusive(async () => {
+    const run = this.exclusive(async () => {
       this.saveLinks(creds, links);
       return this.roundLocked();
     });
+    // Een gewone round() die tijdens opslaan binnenkomt, hoort bij deze verplichte eerste
+    // ronde aan te sluiten. Anders zou hij achter `save()` in dezelfde queue belanden en
+    // direct daarna een tweede netwerk-/importronde uitvoeren.
+    return this.trackInFlight(run);
   }
 
   // ---------- loskoppelen ----------
@@ -496,6 +504,11 @@ export class BankFeedService {
     if (accountId !== undefined) return run;
     // registreer de in-flight ronde vóór de eerste await: een tweede, overlappende
     // aanroep sluit nog vóórdat de lock draait aan op dezelfde uitvoering
+    return this.trackInFlight(run);
+  }
+
+  /** Publiceert één reeds ingeplande volledige ronde als de gedeelde in-flight uitvoering. */
+  private trackInFlight(run: Promise<RoundSummary>): Promise<RoundSummary> {
     const settled = run.then(
       (v) => {
         if (this.inFlight === settled) this.inFlight = null;
@@ -583,7 +596,7 @@ export class BankFeedService {
     // bewezen grens: de dekking die de feed al bewees (covered_to) of die van een bestaand
     // afschrift van de gebruiker — hier sluit de ronde gatloos op aan. De eerste
     // transactiedatum bewijst nooit begindekking (#253).
-    const provenTo = laterDate(row.covered_to, this.statementCompleteTo(bankAccountId));
+    const provenTo = laterDate(row.covered_to, this.bankCompleteTo(bankAccountId));
     // terugleesvenster uitsluitend max(link_from, covered_to - 7 dagen) wanneer die bewezen
     // grenzen bestaan; zeven dagen is alleen voor dedup/wijzigingen, niet voor begindekking
     const window: string[] = [];
@@ -621,7 +634,18 @@ export class BankFeedService {
       const to = syncUtc!.slice(0, 10);
       if (from <= to) options.period = { from, to };
     }
-    const result = this.bank.import({ source: 'openbanking', warnings: [], transactions: read.transactions } satisfies ParseResult, options);
+    // `BankService.import` leidt zonder expliciete `period` voor gewone afschriften alsnog
+    // een periode af uit de eerste/laatste transactie. Voor Ponto mag dat juist nooit: een
+    // transactie bewijst geen stille dagen en een onvolledige lezing mag `completeTo` niet
+    // opschuiven. Verwijder daarom die afgeleide statistiek atomair wanneer deze ronde geen
+    // bewezen periode levert; de veilige transacties en hun importbatch blijven bestaan.
+    const result = tx(this.db, () => {
+      const imported = this.bank.import({ source: 'openbanking', warnings: [], transactions: read.transactions } satisfies ParseResult, options);
+      if (options.period === undefined) {
+        this.db.prepare('DELETE FROM import_batch_accounts WHERE batch_id = ? AND bank_account_id = ?').run(imported.batchId, bankAccountId);
+      }
+      return imported;
+    });
     if (forwarded) {
       // het nieuwe, nieuwere transactiesynchronisatietijdstip wordt vastgelegd; covered_to
       // schuift alleen mee als er een bewezen grens was om op aan te sluiten (#253: dekking
@@ -654,7 +678,11 @@ export class BankFeedService {
       this.db
         .prepare('UPDATE bank_feed_accounts SET last_ok_at = ?, last_error = NULL, last_error_kind = NULL, last_round_at = ? WHERE id = ?')
         .run(now, now, row.id);
-      this.compareBalance(row.id, bankAccountId, account, read);
+      // Dezelfde provider-snapshot opnieuw lezen is geen tweede onafhankelijke bevestiging
+      // van een saldoafwijking. Vergelijk alleen wanneer het transactiesynchronisatiemoment
+      // werkelijk vooruitging; een identieke snapshot behoudt de bestaande teller.
+      if (forwarded) this.compareBalance(row.id, bankAccountId, account, read, result.batchId);
+      else if (!this.balanceMetadataComparable(account, read)) this.resetBalanceDiff(row.id);
     } else {
       // niet-vergelijkbare ronde (onvolledige paginering of onbruikbare metadata): de
       // saldoafwijkingsteller conservatief resetten (#253)
@@ -664,23 +692,12 @@ export class BankFeedService {
     return result.imported;
   }
 
-  /**
-   * Bewezen afschriftdekking van de gebruiker zelf (bestaande afschriftimports), volgens de
-   * eigen regel van de app: een dag telt pas als de import ná die dag is ingelezen (#226).
-   * Uitsluitend-lezen; de ronde van de feed zelf (bron openbanking) telt hier niet mee, die
-   * beweert haar dagen via `covered_to` en alléén na een volledige, geslaagde ronde.
-   */
-  private statementCompleteTo(bankAccountId: number): string | null {
-    const row = this.db
-      .prepare(
-        `SELECT MAX(d) AS d FROM (
-           SELECT MIN(s.period_to, date(b.imported_at, 'localtime', '-1 day')) AS d
-             FROM import_batch_accounts s JOIN import_batches b ON b.id = s.batch_id
-            WHERE s.bank_account_id = ? AND b.source <> 'openbanking'
-         )`,
-      )
-      .get(bankAccountId) as { d: string | null };
-    return row.d;
+  /** De actuele bewezen `completeTo` volgens de bestaande centrale importstatus (#226). */
+  private bankCompleteTo(bankAccountId: number): string | null {
+    // `importStatus()` is de ene bestaande bron van waarheid voor bewezen dekking. Die
+    // verwerkt ook een nog open gedeeltelijke dag/gat en handmatige dekking. Een lokale
+    // MAX-query zou zo'n ouder gat kunnen overslaan en de feed te laat laten aansluiten.
+    return this.bank.importStatus().find((status) => status.bankAccountId === bankAccountId)?.completeTo ?? null;
   }
 
   /**
@@ -691,11 +708,9 @@ export class BankFeedService {
    * Zonder geboekt beginsaldo is er niets te vergelijken; `closing_balance` wordt nooit
    * geschreven en `balanceCheck()` zelf wordt niet aangeraakt.
    */
-  private compareBalance(feedRowId: number, bankAccountId: number, account: PontoAccount, read: PontoRead): void {
-    const balanceMs = parseMoment(account.balanceAt);
-    const syncMs = parseMoment(read.synchronizedAt);
+  private compareBalance(feedRowId: number, bankAccountId: number, account: PontoAccount, read: PontoRead, batchId: number): void {
     const balanceDay = sqliteUtcOrNull(account.balanceAt);
-    if (account.balance === null || balanceMs === null || syncMs === null || balanceMs !== syncMs || balanceDay === null) {
+    if (account.balance === null || !this.balanceMetadataComparable(account, read) || balanceDay === null) {
       this.resetBalanceDiff(feedRowId);
       return;
     }
@@ -705,10 +720,29 @@ export class BankFeedService {
       this.resetBalanceDiff(feedRowId);
       return;
     }
+    // Gebruik voor dubbelen uit deze Ponto-import de datum die Ponto zelf meegaf. Een al
+    // bestaande afschriftregel kan enkele werkdagen verschoven zijn; rond de saldogrens zou
+    // zijn oude datum anders een vals verschil veroorzaken. Dit is hetzelfde conservatieve
+    // dubbelpad als `BankService.balanceCheck()` gebruikt voor een specifieke importbatch.
     const sum = (this.db
-      .prepare('SELECT COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE bank_account_id = ? AND duplicate_of IS NULL AND transaction_date >= ? AND transaction_date <= ?')
-      .get(bankAccountId, booked.date, balanceDay.slice(0, 10)) as { s: number }).s;
+      .prepare(
+        `SELECT COALESCE(SUM(amount), 0) AS s FROM (
+           SELECT t.amount, COALESCE(
+             (SELECT MIN(k.transaction_date) FROM import_skipped k WHERE k.matched_transaction_id = t.id AND k.batch_id = ? AND k.added_transaction_id IS NULL),
+             (SELECT MIN(d.transaction_date) FROM bank_transactions d WHERE d.duplicate_of = t.id AND d.import_batch_id = ?),
+             t.transaction_date) AS date
+           FROM bank_transactions t WHERE t.bank_account_id = ? AND t.duplicate_of IS NULL)
+         WHERE date >= ? AND date <= ?`,
+      )
+      .get(batchId, batchId, bankAccountId, booked.date, balanceDay.slice(0, 10)) as { s: number }).s;
     this.recordBalanceDiff(feedRowId, (account.balance - (booked.amount + sum)) as Cents);
+  }
+
+  /** Saldo en transacties beschrijven aantoonbaar exact hetzelfde provider-moment. */
+  private balanceMetadataComparable(account: PontoAccount, read: PontoRead): boolean {
+    const balanceMs = parseMoment(account.balanceAt);
+    const syncMs = parseMoment(read.synchronizedAt);
+    return account.balance !== null && balanceMs !== null && syncMs !== null && balanceMs === syncMs;
   }
 
   /**
@@ -763,7 +797,7 @@ export class BankFeedService {
 
   /** Actueel SQLite-UTC-moment, zoals de rest van de app het schrijft. */
   private sqliteNow(): string {
-    return toSqliteUtc(new Date().toISOString());
+    return toSqliteUtc(this.now().toISOString());
   }
 
   /**
