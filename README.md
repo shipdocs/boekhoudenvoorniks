@@ -26,7 +26,7 @@ Instellingen → Over → *Vraag of feedback mailen*. GitHub-issues zijn voor on
 | **Werk & facturen** | Offertes → klant akkoord → klus → *werk klaar* → factuur in één klik. PDF + e-factuur (UBL, Peppol BIS 3.0) per e-mail (eigen SMTP). Doorlopende nummering, creditfacturen, betaalstatus, automatische herinneringen. Per klus een dossier: resultaat (omzet − materiaal − uitbesteed werk), werkbon die de factuur vult, en de vraag "Was dit voor de klus bij …?" bij een bon. Optioneel (standaard uit, alleen lokaal): de locatie van de bonfoto koppelt aan de klus. |
 | **Opmaak** | Logo, kleuren, lettertype en vaste tekstblokken met live voorbeeld; eigen HTML-template in expertmodus. |
 | **Aankopen & bonnetjes** | Betalen met een betaal-QR (EPC) voor je bank-app, met een waarschuwing als het rekeningnummer anders is dan vorige keer. Foto, PDF of e-factuur (UBL) erin. Eerst UBL, dan de PDF-tekstlaag, dan lokale OCR (GLM-OCR, download bij eerste gebruik). Daarna validatie, classificatie, een confidence-inschatting en de koppeling met de bank. Regels op de bon worden herkend; een gemengde bon (materiaal + werkbroek + iets privé) wordt op verzoek per soort geboekt. Bonnen kunnen ook vanzelf binnenkomen uit een **bonnenmap** (een map op je computer, bijvoorbeeld gesynchroniseerd met je telefoon; standaard uit): nieuwe bestanden komen in de inbox en gaan daarna naar de submap `verwerkt`. |
-| **Bank** | Elke bank via CAMT.053 of MT940. CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos en Revolut wordt vanzelf herkend; bij andere banken wijs je één keer de kolommen aan. Wisselen van soort afschrift geeft geen dubbele betalingen, en een saldo dat niet klopt met je afschrift wordt gemeld. Als je dat aanzet, ziet de app een gedownload afschrift in je Downloads-map en vraagt of hij het mag inlezen. Automatische koppeling aan facturen en bonnetjes; de app leert per leverancier. Vaste lasten en abonnementen worden herkend (ontbrekende factuur of afschrijving wordt gemeld). |
+| **Bank** | Elke bank via CAMT.053 of MT940. CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos en Revolut wordt vanzelf herkend; bij andere banken wijs je één keer de kolommen aan. Wisselen van soort afschrift geeft geen dubbele betalingen, en een saldo dat niet klopt met je afschrift wordt gemeld. Als je dat aanzet, ziet de app een gedownload afschrift in je Downloads-map en vraagt of hij het mag inlezen. Optioneel (vanaf versie 1.2.0): betalingen automatisch ophalen met Ponto, een afzonderlijke zakelijke dienst met een eigen overeenkomst en eigen inloggegevens; de afschriften blijven de basis en terugval ([stappenplan](docs/bank-ophalen-ponto.md)). Automatische koppeling aan facturen en bonnetjes; de app leert per leverancier. Vaste lasten en abonnementen worden herkend (ontbrekende factuur of afschrijving wordt gemeld). |
 | **Belasting** | BTW per kwartaal in mensentaal ("Te betalen € 3.365, uiterlijk 31 oktober"). Daaronder de officiële rubrieken (1a/1b/1e/2a/5a/5b/5g) om over te nemen in Mijn Belastingdienst Zakelijk. Vóór de aangifte controleert de app wat de aangifte fout kan maken (onverwerkte bank, uitgaven zonder bewijs, dubbele aankopen, verlegd zonder btw-nummer, negatieve kas, vraagposten). Periode-afsluiting, CSV-export en een XBRL-voorbereiding. Buitenland: verkoop aan EU-bedrijven (3b, met ICP-overzicht), uitvoer (3a) en verlegde btw op diensten uit/buiten de EU (4a/4b, bv. Stripe, Google, Meta), met een duidelijke disclaimer; OSS zit er niet in. Een schatting van de inkomstenbelasting (zelfstandigenaftrek, mkb-winstvrijstelling, geversioneerde tarieven), altijd als schatting gemarkeerd en uit te zetten. |
 | **Zoeken** | Ctrl+K: één zoekveld over klanten, facturen, bonnen, bank en klussen, met bedragen (`>400`) en periodes (`2026-09`). Garantie per aankoop ("nog 14 maanden garantie"). |
 | **Koppelingen** | WooCommerce, Shopify, Mollie Facturen (orders/facturen → facturen), Mollie, Stripe (uitbetalingen + kosten). |
@@ -54,12 +54,13 @@ src/
   ocr-runtime/   ingebouwde OCR: download (sha256, hervatten), llama-server starten/stoppen
   intake/        documentinbox: UBL, PDF-tekst, OCR-interface, validatie, classificatie, confidence, leveranciersgeheugen
   btw/           BTW-berekening uit journal_lines → rubrieken, periode-afsluiting, XBRL (voorbereiding)
+  bankfeed/      Ponto-bankfeed: veilige credentials, rekeningkoppeling, ophaalronde met bewezen dekking, handmatig bijwerken; vlag `BANK_FEED.available` (`src/shared/bank-feed.ts`, aan sinds 1.2.0)
   jobs/          klussen (offerte → klus → factuur)
   scanner/       bonnenmap (bestanden uit een map naar de inbox); ontvanger voor de bonnenscanner op Android (koppelen, ontvangstpunt, mDNS), uit tot die app er is: shared/phone-scanner.ts, docs/bonnenscanner-protocol.md
   inbox/         "Ben ik bij?": taken, automatisch verwerken, geld-overzicht
   onboarding/    "Aan de slag"-lijstje en de overstap-hulp (instapdatum, startbalans, controles)
   dashboard/     read-only overzichten
-  integrations/  WooCommerce, Shopify, Mollie Facturen, Mollie, Stripe, open-banking-interface (los; zonder configuratie inactief)
+  integrations/  WooCommerce, Shopify, Mollie Facturen, Mollie, Stripe, Ponto-client (bank ophalen, `ponto.ts`)
   export/        auditfile (XAF), journaal/saldibalans CSV, pakket voor de boekhouder (ZIP)
   main/          Electron-hoofdproces: IPC-whitelist, PDF (Chromium printToPDF), safeStorage, back-ups, updater
   renderer/      React-UI
@@ -71,8 +72,11 @@ Online onderdelen (Cloudflare Workers): `workers/site` (de website) staat hier; 
 en de routes in `src/main/main.ts` (`licenseApi`) en `src/intake/llm-jev.ts`.
 
 De renderer heeft geen Node-toegang (`contextIsolation`, `sandbox`). Alle aanroepen gaan via één
-IPC-kanaal naar een whitelist in `src/main/api.ts`. Geheimen (SMTP-wachtwoord, API-sleutels)
-worden versleuteld met het sleutelbeheer van het besturingssysteem.
+IPC-kanaal naar een whitelist in `src/main/api.ts`. Geheimen (SMTP-wachtwoord, API-sleutels, het Client ID en Client Secret van Ponto)
+worden versleuteld met het sleutelbeheer van het besturingssysteem. De Ponto-gegevens gaan nooit
+mee in een klantkopie of boekhouderspakket (`sanitizeForExchange` wist `secrets` en `bank_feed_accounts`).
+Gewoon ophalen gaat rechtstreeks tussen de app en Ponto; alleen bij een bewuste klik op *Nu bijwerken*
+vraagt de app het publieke IP-adres bij Cloudflare op en stuurt het aan Ponto (nooit bewaard of gelogd).
 
 ## Naam en technische namen
 

@@ -89,12 +89,12 @@ describe('Ponto WP1: fundament (#243)', () => {
   });
 
   describe('featureflag BANK_FEED', () => {
-    it('staat standaard uit en is alleen via api.app.meta zichtbaar voor de renderer', () => {
-      expect(BANK_FEED.available).toBe(false);
+    it('staat standaard aan (1.2.0) en is alleen via api.app.meta zichtbaar voor de renderer', () => {
+      expect(BANK_FEED.available).toBe(true);
       // de renderer importeert de vlag niet: alleen api.ts (main) leest hem
       const api = createApi(setupMinimal(), { appVersion: () => '0.0.0', hasSmtpPassword: () => false } as unknown as HostContext);
       const meta = api.app.meta();
-      expect(meta.bankFeed).toBe(false);
+      expect(meta.bankFeed).toBe(true);
       expect(meta.phoneScanner).toBe(false);
     });
   });
