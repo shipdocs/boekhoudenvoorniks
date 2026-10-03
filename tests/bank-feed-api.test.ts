@@ -204,6 +204,7 @@ describe('de vlag staat uit: alle routes weigeren (#249 regel 1)', () => {
 describe('guards: kantoorkopie, demo en read-only (#249 regel 1)', () => {
   it('de kantoorkopie stelt niets in en haalt niets op', async () => {
     h.s.settings.markOfficeCopy({ office: 'Kantoor De Vries', exchange: 3, endDate: '2026-09-30' });
+    expect(h.api.app.meta().bankFeed).toBe(false);
     expect(() => h.api.bankfeed.status()).toThrow(/Kantoor De Vries/);
     await expect(h.api.bankfeed.testen(CREDS.clientId, CREDS.clientSecret)).rejects.toThrow(/Kantoor De Vries/);
     await expect(h.api.bankfeed.opslaan(CREDS.clientId, CREDS.clientSecret, [])).rejects.toThrow(/Kantoor De Vries/);
@@ -215,6 +216,7 @@ describe('guards: kantoorkopie, demo en read-only (#249 regel 1)', () => {
 
   it('de demo stelt niets in en haalt niets op', async () => {
     h.s.settings.update({ demoMode: true });
+    expect(h.api.app.meta().bankFeed).toBe(false);
     await expect(h.api.bankfeed.testen(CREDS.clientId, CREDS.clientSecret)).rejects.toThrow(/demo/i);
     await expect(h.api.bankfeed.opslaan(CREDS.clientId, CREDS.clientSecret, [])).rejects.toThrow(/demo/i);
     await expect(h.api.bankfeed.ophalen()).rejects.toThrow(/demo/i);
