@@ -73,8 +73,21 @@
     <p class="lead">Per versie wat er is toegevoegd, verbeterd en opgelost. De app werkt zichzelf bij; bij de eerste start van een nieuwe versie maakt hij eerst een kopie van je administratie.</p>
 
     <nav class="toc" aria-label="Versies">
-      <a href="#v1.1.1">1.1.1</a><a href="#v1.1.0">1.1.0</a><a href="#v1.0.1">1.0.1</a><a href="#v1.0.0">1.0.0</a><a href="#v0.7.6">0.7.6</a><a href="#v0.7.5">0.7.5</a><a href="#v0.7.4">0.7.4</a><a href="#v0.7.3">0.7.3</a><a href="#v0.7.2">0.7.2</a><a href="#v0.7.1">0.7.1</a><a href="#v0.7.0">0.7.0</a><a href="#v0.6.15">0.6.15</a><a href="#v0.6.14">0.6.14</a><a href="#v0.6.13">0.6.13</a><a href="#v0.6.12">0.6.12</a><a href="#v0.6.11">0.6.11</a><a href="#v0.6.10">0.6.10</a><a href="#v0.6.9">0.6.9</a><a href="#v0.6.8">0.6.8</a><a href="#v0.6.7">0.6.7</a><a href="#v0.6.6">0.6.6</a><a href="#v0.6.5">0.6.5</a><a href="#v0.6.4">0.6.4</a><a href="#v0.6.3">0.6.3</a><a href="#v0.6.2">0.6.2</a><a href="#v0.6.1">0.6.1</a><a href="#v0.6.0">0.6.0</a><a href="#v0.5.0">0.5.0</a><a href="#v0.4.0">0.4.0</a><a href="#v0.3">0.3.x</a><a href="#v0.2.0">0.2.0</a><a href="#v0.1.0">0.1.0</a>
+      <a href="#volgende">Volgende versie</a><a href="#v1.1.1">1.1.1</a><a href="#v1.1.0">1.1.0</a><a href="#v1.0.1">1.0.1</a><a href="#v1.0.0">1.0.0</a><a href="#v0.7.6">0.7.6</a><a href="#v0.7.5">0.7.5</a><a href="#v0.7.4">0.7.4</a><a href="#v0.7.3">0.7.3</a><a href="#v0.7.2">0.7.2</a><a href="#v0.7.1">0.7.1</a><a href="#v0.7.0">0.7.0</a><a href="#v0.6.15">0.6.15</a><a href="#v0.6.14">0.6.14</a><a href="#v0.6.13">0.6.13</a><a href="#v0.6.12">0.6.12</a><a href="#v0.6.11">0.6.11</a><a href="#v0.6.10">0.6.10</a><a href="#v0.6.9">0.6.9</a><a href="#v0.6.8">0.6.8</a><a href="#v0.6.7">0.6.7</a><a href="#v0.6.6">0.6.6</a><a href="#v0.6.5">0.6.5</a><a href="#v0.6.4">0.6.4</a><a href="#v0.6.3">0.6.3</a><a href="#v0.6.2">0.6.2</a><a href="#v0.6.1">0.6.1</a><a href="#v0.6.0">0.6.0</a><a href="#v0.5.0">0.5.0</a><a href="#v0.4.0">0.4.0</a><a href="#v0.3">0.3.x</a><a href="#v0.2.0">0.2.0</a><a href="#v0.1.0">0.1.0</a>
     </nav>
+
+    <article id="volgende" class="release">
+      <header>
+        <h2>Volgende versie</h2>
+        <p class="summary">Optioneel je bank automatisch laten ophalen met Ponto. Je afschriften blijven de basis.</p>
+      </header>
+      <h3><span class="tag new">Nieuw</span></h3>
+      <ul>
+        <li><strong>Bank automatisch ophalen met Ponto</strong>: Ponto is een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit. Een wizard op Bank leidt je langs Ponto en het plakken en testen van je Client ID en Client Secret. Wat Ponto kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto. De app zegt per rekening tot welke datum de betalingen aansluiten op je afschriften; ontbreekt er een periode, dan vraagt hij die te onderbouwen met een afschrift of openingssaldo.</li>
+        <li><strong>Je gegevens blijven van jou</strong>: Client ID en Client Secret staan versleuteld op je eigen computer en gaan nooit mee naar je boekhouder. Gewoon ophalen gaat rechtstreeks tussen de app en Ponto. Alleen bij een bewuste klik op <em>Nu bijwerken</em> vraagt de app je publieke IP-adres op bij Cloudflare en stuurt het aan Ponto, omdat Ponto dat vereist; het wordt niet bewaard of gelogd. Zie de <a href="privacy.html">privacyverklaring</a>.</li>
+        <li><strong>Toestemming bijhouden</strong>: loopt je toestemming bij Ponto binnen 14 dagen af, of is die verlopen, dan staat er een taak op Vandaag.</li>
+      </ul>
+    </article>
 
     <article id="v1.1.1" class="release">
       <header>
