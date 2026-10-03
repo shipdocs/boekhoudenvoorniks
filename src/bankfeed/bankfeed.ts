@@ -121,7 +121,12 @@ export interface RoundSummary {
   /** de koppelingen die deze ronde zijn overgeslagen omdat de bank ze tijdelijk readonly gaf */
   skipped: { pontoId: string }[];
   /** de koppelingen die mislukten of wegvielen, uitsluitend met de afgesproken foutsoort */
-  failed: { pontoId: string; errorKind: string }[];
+  failed: {
+    pontoId: string;
+    errorKind: string;
+    /** Alleen bij handmatig verversen wanneer beide onafhankelijke syncs apart falen. */
+    subtype?: 'accountTransactions' | 'accountDetails';
+  }[];
   /** of er in deze ronde minstens één nieuwe transactie is geïmporteerd */
   importedAny: boolean;
 }
@@ -618,12 +623,21 @@ export class BankFeedService {
     // nooit ruwe providerfouten.
     const txFailure = txRun.started ? txErrorKind : txRun.errorKind;
     const detailsFailure = detailsRun.started ? detailsErrorKind : detailsRun.errorKind;
-    const firstFailure = [txFailure, detailsFailure].find((kind) => kind !== null);
-    if (firstFailure !== undefined && !summary.failed.some((f) => f.pontoId === row.external_id)) {
-      summary.failed.push({ pontoId: row.external_id, errorKind: firstFailure });
+    const manualFailures = [
+      ...(txFailure === null ? [] : [{ pontoId: row.external_id, errorKind: txFailure, subtype: 'accountTransactions' as const }]),
+      ...(detailsFailure === null ? [] : [{ pontoId: row.external_id, errorKind: detailsFailure, subtype: 'accountDetails' as const }]),
+    ];
+    if (manualFailures.length > 0 && !summary.failed.some((f) => f.pontoId === row.external_id)) {
+      // Bij één mislukte subsync blijft het bestaande compacte resultaat intact. Wanneer
+      // beide falen blijven subtype en foutsoort afzonderlijk zichtbaar in dezelfde summary.
+      if (manualFailures.length === 1) {
+        summary.failed.push({ pontoId: row.external_id, errorKind: manualFailures[0]!.errorKind });
+      } else {
+        summary.failed.push(...manualFailures);
+      }
       // Een volledige transactieronde wist terecht eerdere rondefouten, maar mag een zojuist
       // mislukte handmatige subsynchronisatie niet maskeren in de blijvende feedstatus.
-      this.markError(row.id, firstFailure);
+      this.markError(row.id, manualFailures[0]!.errorKind);
     }
     return { allowed: true, summary };
   }
