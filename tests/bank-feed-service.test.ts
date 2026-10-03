@@ -1,4 +1,6 @@
 import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { migrate } from '../src/db/database';
@@ -457,7 +459,7 @@ describe('guards (#246 regel 10)', () => {
   it('read-only (MCP-koppeling): geen configuratie en geen netwerk', async () => {
     // een echte read-only database, zoals de koppeling voor Claude Code/Codex haar opent
     h.s.db.close();
-    const file = `/tmp/gb-wp4a-readonly-${process.pid}.sqlite`;
+    const file = join(tmpdir(), `gb-wp4a-readonly-${process.pid}.sqlite`);
     const bron = new Database(file);
     bron.pragma('journal_mode = WAL');
     migrate(bron);
