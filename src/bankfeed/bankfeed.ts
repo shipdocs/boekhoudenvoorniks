@@ -1,10 +1,11 @@
+import { isIP } from 'node:net';
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Cents } from '../shared/money';
 import { addDays, toSqliteUtc, type IsoDate } from '../shared/dates';
 import { normalizeIban, ValidationError } from '../shared/validation';
 import { BANK_FEED, BANK_FEED_SECRET_KEYS } from '../shared/bank-feed';
-import type { SecretStore } from '../integrations/types';
+import type { FetchLike, SecretStore } from '../integrations/types';
 import { PontoClient, PontoError, type PontoAccount, type PontoCredentials, type PontoRead } from '../integrations/ponto';
 import type { SettingsService } from '../settings/settings';
 import type { BankService } from '../import/bank';
@@ -45,6 +46,21 @@ import type { ParseResult } from '../import/types';
  * uitsluitend `max(link_from, covered_to - 7 dagen)`; fouten gelden per rekening en stoppen
  * de rest van de ronde niet; er worden nooit credentials, tokens, ruwe responses of IP's
  * bewaard; `autoProcess()` wordt hier niet aangeroepen.
+ *
+ * Bindende regels uit #247 (handmatig "Nu bijwerken"): uitsluitend door een expliciete
+ * aanroep, nooit timer of achtergrond; dezelfde service-brede lock, zonder geneste
+ * `exclusive()`/`round()`-aanroepen; binnen 30 minuten sinds een werkelijk gestarte handmatige
+ * synchronisatie geen enkele netwerkaanroep, dus ook geen Cloudflare-trace; het publieke IP
+ * wordt precies één keer per toegestane klik opgevraagd, uitsluitend uit `ip=` van de trace
+ * gelezen, met `node:net.isIP` gevalideerd en nooit bewaard, gelogd of teruggegeven;
+ * `accountTransactions` en `accountDetails` starten onafhankelijk en worden per subtype
+ * gepolld (elke drie seconden, maximaal twee minuten, nooit automatische retry; een 429 geldt
+ * alleen voor het eigen subtype); `manual_sync_at` wordt pas gezet zodra minstens één
+ * synchronisatie werkelijk is gestart; na afloop leest precies één gerichte ronde de
+ * transacties opnieuw en schuift alléén transactieresponsmetadata de dekking op; mislukte
+ * accountDetails betekent: transacties wél importeren, maar geen nieuwe saldovergelijking in
+ * die ronde; fouten en time-outs zijn gewone, veilige tekst/status, nooit een ruwe
+ * providerresponse, token, credential of IP.
  */
 // ---------- types (contract #246 en #253) ----------
 
@@ -105,10 +121,36 @@ export interface RoundSummary {
   /** de koppelingen die deze ronde zijn overgeslagen omdat de bank ze tijdelijk readonly gaf */
   skipped: { pontoId: string }[];
   /** de koppelingen die mislukten of wegvielen, uitsluitend met de afgesproken foutsoort */
-  failed: { pontoId: string; errorKind: string }[];
+  failed: {
+    pontoId: string;
+    errorKind: string;
+    /** Alleen bij handmatig verversen wanneer beide onafhankelijke syncs apart falen. */
+    subtype?: 'accountTransactions' | 'accountDetails';
+  }[];
   /** of er in deze ronde minstens één nieuwe transactie is geïmporteerd */
   importedAny: boolean;
 }
+
+/**
+ * De clientmogelijkheden die de service gebruikt (#246/#253/#247). De synchronisatiemethoden
+ * bestaan sinds WP2 en zijn nodig voor het handmatig bijwerken; een client zonder die methoden
+ * kan alleen de bestaande basis en de ronde (#253).
+ */
+export type BankFeedClient = Pick<PontoClient, 'accounts' | 'transactions'> &
+  Partial<Pick<PontoClient, 'startSynchronization' | 'synchronization'>>;
+
+// ---------- handmatig bijwerken (#247): constanten ----------
+
+/** Binnen dit venster na een werkelijk gestarte handmatige synchronisatie: geen enkel netwerkverzoek. */
+const MANUAL_SYNC_WINDOW_MS = 30 * 60_000;
+/** Pollinterval voor handmatig gestarte synchronisaties (#247). */
+const MANUAL_SYNC_POLL_MS = 3_000;
+/** Maximale pollduur per gestarte synchronisatie (#247). */
+const MANUAL_SYNC_POLL_MAX_MS = 2 * 60_000;
+/** Maximale wachttijd op de Cloudflare-trace, zodat de service-lock nooit onbeperkt vaststaat. */
+const CLOUDFLARE_TRACE_TIMEOUT_MS = 30_000;
+/** Het enige toegestane trace-adres voor het publieke IP (#247). */
+const CLOUDFLARE_TRACE_URL = 'https://www.cloudflare.com/cdn-cgi/trace';
 
 // ---------- service ----------
 
@@ -146,7 +188,18 @@ export interface BankFeedDeps {
   /** injecteerbare klok voor deterministische ronde-/fouttijdstippen */
   now?: () => Date;
   /** maakt de client voor één netwerkaanroep; in productie de echte, in tests een nep */
-  client: (creds: PontoCredentials) => Pick<PontoClient, 'accounts' | 'transactions'>;
+  client: (creds: PontoCredentials) => BankFeedClient;
+  /**
+   * fetch voor het eenmalig opvragen van het publieke IP bij Cloudflare (#247); nooit voor
+   * iets anders. Standaard een functie die weigert, zodat een omgeving zonder netwerkbasis
+   * geen trace kan doen.
+   */
+  fetch?: FetchLike;
+  /**
+   * Wachttijd tussen pollrondes voor handmatige synchronisaties (#247). Standaard echt
+   * wachten; in tests geïnjecteerd zodat er nooit echt geslapen wordt.
+   */
+  wait?: (ms: number) => Promise<void>;
 }
 
 export class BankFeedService {
@@ -155,7 +208,11 @@ export class BankFeedService {
   private readonly bank: BankService;
   private readonly settings: SettingsService;
   private readonly now: () => Date;
-  private readonly makeClient: (creds: PontoCredentials) => Pick<PontoClient, 'accounts' | 'transactions'>;
+  private readonly makeClient: (creds: PontoCredentials) => BankFeedClient;
+  /** Alleen voor de eenmalige Cloudflare-trace (#247); nooit voor Ponto-verkeer. */
+  private readonly traceFetch: FetchLike;
+  /** Wachttijd tussen pollrondes; in productie echt, in tests geïnjecteerd (#247). */
+  private readonly wait: (ms: number) => Promise<void>;
   /**
    * Het laatste expliciete testresultaat van deze service-instantie; alleen hiertegen zijn
    * Ponto-id's in `saveLinks` te valideren (regel 7). Expliciet: pas na een geslaagde `test()`.
@@ -180,6 +237,8 @@ export class BankFeedService {
     this.settings = deps.settings;
     this.now = deps.now ?? (() => new Date());
     this.makeClient = deps.client;
+    this.traceFetch = deps.fetch ?? (async () => { throw new Error('Deze omgeving heeft geen netwerkbasis voor het publieke IP-adres.'); });
+    this.wait = deps.wait ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
   }
 
   // ---------- lock (regel 9) ----------
@@ -488,6 +547,155 @@ export class BankFeedService {
     this.lastTest = null;
   }
 
+  // ---------- handmatig bijwerken (#247) ----------
+
+  /**
+   * Het door de gebruiker gestarte "Nu bijwerken" voor één koppeling, uitsluitend door een
+   * expliciete aanroep en altijd door dezelfde service-brede lock als round()/save() (#247).
+   * Binnen 30 minuten sinds een werkelijk gestarte handmatige synchronisatie gebeurt er
+   * helemáál geen netwerk — geen trace, geen synchronisatie, geen ronde — en volgt
+   * `allowed: false` met het moment waarop weer mag. Bij een toegestane klik wordt het
+   * publieke IP precies één keer opgevraagd (Cloudflare-trace, uitsluitend `ip=`, gevalideerd
+   * met `node:net.isIP`, nergens bewaard), starten `accountTransactions` en `accountDetails`
+   * onafhankelijk, wordt ieder gestart id gepolld (drie seconden interval, maximaal twee
+   * minuten, zonder automatische retry) en leest daarna precies één gerichte ronde de
+   * transacties opnieuw. Mislukte accountDetails betekent: transacties wél importeren, maar
+   * geen nieuwe saldovergelijking in die ronde.
+   */
+  async refreshNow(feedAccountId: number): Promise<{ allowed: true; summary: RoundSummary } | { allowed: false; allowedAt: string }> {
+    return this.exclusive(() => this.refreshNowLocked(feedAccountId));
+  }
+
+  /** De uitvoering van refreshNow binnen de gehouden lock; gebruikt nooit de publieke round(). */
+  private async refreshNowLocked(feedAccountId: number): Promise<{ allowed: true; summary: RoundSummary } | { allowed: false; allowedAt: string }> {
+    const blocked = this.blocked();
+    if (blocked !== null) throw new ValidationError(blocked);
+    if (!Number.isInteger(feedAccountId)) throw new ValidationError('Onbekende bankkoppeling; ververs het scherm en probeer het opnieuw.');
+    const row = this.db
+      .prepare('SELECT * FROM bank_feed_accounts WHERE id = ? AND provider = \'ponto\'')
+      .get(feedAccountId) as FeedRow | undefined;
+    if (row === undefined || row.status !== 'actief' || row.bank_account_id === null) {
+      throw new ValidationError('Deze bankkoppeling is niet actief; koppel de rekening eerst via de instellingen.');
+    }
+    // Het venster telt sinds een werkelijk gestarte handmatige synchronisatie (#247): eerst het
+    // venster, daarna pas — en alléén bij een toegestane klik — enige netwerkaanroep.
+    const lastManualMs = parseMoment(row.manual_sync_at);
+    const nowMs = this.now().getTime();
+    if (lastManualMs !== null && nowMs - lastManualMs < MANUAL_SYNC_WINDOW_MS) {
+      return { allowed: false, allowedAt: new Date(lastManualMs + MANUAL_SYNC_WINDOW_MS).toISOString() };
+    }
+    const creds = this.readCredentials();
+    if (creds === null) throw new ValidationError('Er staan nog geen werkende inloggegevens in de veilige opslag; test eerst de verbinding.');
+    const client = this.makeClient(creds);
+    // aanroepen gebeuren als methode op de client: de echte client gebruikt `this`
+    if (typeof client.startSynchronization !== 'function' || typeof client.synchronization !== 'function') {
+      throw new ValidationError('Handmatig bijwerken is in deze omgeving niet beschikbaar.');
+    }
+    // Precies één trace per toegestane klik; het IP bestaat uitsluitend hier in geheugen.
+    const customerIp = await this.publicIp();
+    // Twee volstrekt onafhankelijke starts (#247): een fout bij de ene laat de andere onverlet.
+    const [txStart, detailsStart] = await Promise.allSettled([
+      client.startSynchronization!(row.external_id, 'accountTransactions', customerIp),
+      client.startSynchronization!(row.external_id, 'accountDetails', customerIp),
+    ]);
+    const txRun = this.startOutcome(txStart);
+    const detailsRun = this.startOutcome(detailsStart);
+    if (txRun.started || detailsRun.started) {
+      // pas zodra minstens één synchronisatie werkelijk is gestart (#247)
+      this.db.prepare('UPDATE bank_feed_accounts SET manual_sync_at = ? WHERE id = ?').run(this.sqliteNow(), row.id);
+    }
+    if (!txRun.started) this.markError(row.id, txRun.errorKind);
+    if (!detailsRun.started) this.markError(row.id, detailsRun.errorKind);
+    // Ieder gestart id onafhankelijk gepolld; een 429, fout of time-out geldt alleen voor het
+    // eigen subtype, zonder automatische retry (#247).
+    const [txErrorKind, detailsErrorKind] = await Promise.all([
+      txRun.started ? this.pollSynchronization(client, txRun.id) : Promise.resolve(null),
+      detailsRun.started ? this.pollSynchronization(client, detailsRun.id) : Promise.resolve(null),
+    ]);
+    if (txErrorKind !== null) this.markError(row.id, txErrorKind);
+    if (detailsErrorKind !== null) this.markError(row.id, detailsErrorKind);
+    // Na afloop precies één gerichte ronde (#253/#247); zonder geslaagde details-sync geen
+    // nieuwe saldovergelijking in die ronde.
+    const summary = await this.roundLocked(feedAccountId, { skipBalanceCheck: detailsErrorKind !== null || !detailsRun.started });
+    // De twee starts blijven twee afzonderlijke resultaten (#247): een subtype dat niet
+    // startte, faalde of time-out liep, staat als veilige foutsoort in de samenvatting —
+    // naast een eventueel wél geslaagde andere subtype. Uitsluitend vaste foutsoorten,
+    // nooit ruwe providerfouten.
+    const txFailure = txRun.started ? txErrorKind : txRun.errorKind;
+    const detailsFailure = detailsRun.started ? detailsErrorKind : detailsRun.errorKind;
+    const manualFailures = [
+      ...(txFailure === null ? [] : [{ pontoId: row.external_id, errorKind: txFailure, subtype: 'accountTransactions' as const }]),
+      ...(detailsFailure === null ? [] : [{ pontoId: row.external_id, errorKind: detailsFailure, subtype: 'accountDetails' as const }]),
+    ];
+    if (manualFailures.length > 0 && !summary.failed.some((f) => f.pontoId === row.external_id)) {
+      // Bij één mislukte subsync blijft het bestaande compacte resultaat intact. Wanneer
+      // beide falen blijven subtype en foutsoort afzonderlijk zichtbaar in dezelfde summary.
+      if (manualFailures.length === 1) {
+        summary.failed.push({ pontoId: row.external_id, errorKind: manualFailures[0]!.errorKind });
+      } else {
+        summary.failed.push(...manualFailures);
+      }
+      // Een volledige transactieronde wist terecht eerdere rondefouten, maar mag een zojuist
+      // mislukte handmatige subsynchronisatie niet maskeren in de blijvende feedstatus.
+      this.markError(row.id, manualFailures[0]!.errorKind);
+    }
+    return { allowed: true, summary };
+  }
+
+  /** Uitkomst van één startpoging, uitsluitend met de veilige foutsoort. */
+  private startOutcome(result: PromiseSettledResult<{ id: string }>): SubtypeRun {
+    if (result.status === 'fulfilled') return { started: true, id: result.value.id };
+    return { started: false, errorKind: this.errorKind(result.reason) };
+  }
+
+  /**
+   * Pollt één gestarte synchronisatie elke drie seconden tot success/error, maximaal twee
+   * minuten (#247). Geeft de veilige foutsoort terug bij een pollfout, time-out of foutstatus,
+   * en null bij succes — nooit ruwe providerfouten en nooit een automatische retry.
+   */
+  private async pollSynchronization(client: BankFeedClient, id: string): Promise<string | null> {
+    const deadline = this.now().getTime() + MANUAL_SYNC_POLL_MAX_MS;
+    for (;;) {
+      if (this.now().getTime() >= deadline) return 'timeout';
+      let status: 'pending' | 'running' | 'success' | 'error';
+      try {
+        status = (await client.synchronization!(id)).status;
+      } catch (e) {
+        return this.errorKind(e);
+      }
+      if (status === 'success') return null;
+      if (status === 'error') return 'synchronization-error';
+      const remaining = deadline - this.now().getTime();
+      if (remaining <= 0) return 'timeout';
+      await this.wait(Math.min(MANUAL_SYNC_POLL_MS, remaining));
+    }
+  }
+
+  /**
+   * Vraagt het publieke IP precies éénmaal op bij Cloudflare (#247), leest uitsluitend de
+   * `ip=`-regel en valideert haar met `node:net.isIP`. Geen fallback, geen verzonnen adres en
+   * het IP wordt nooit bewaard, gelogd of teruggegeven.
+   */
+  private async publicIp(): Promise<string> {
+    let text: string;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLOUDFLARE_TRACE_TIMEOUT_MS);
+    try {
+      const response = await this.traceFetch(CLOUDFLARE_TRACE_URL, { method: 'GET', signal: controller.signal });
+      if (!response.ok) throw new Error('trace mislukt');
+      text = await response.text();
+    } catch {
+      throw new ValidationError('Het publieke IP-adres kon nu niet worden bepaald; het handmatig bijwerken is niet gestart. Probeer het later opnieuw.');
+    } finally {
+      clearTimeout(timer);
+    }
+    const ip = traceIp(text);
+    if (ip === null) {
+      throw new ValidationError('Het publieke IP-adres kon nu niet worden bepaald; het handmatig bijwerken is niet gestart. Probeer het later opnieuw.');
+    }
+    return ip;
+  }
+
   // ---------- ophaalronde (#253) ----------
 
   /**
@@ -528,7 +736,7 @@ export class BankFeedService {
    * Ponto-accountlijst op en verwerkt daarna fouten per gekoppelde rekening, zonder de
    * overige rekeningen te blokkeren (#253). Neemt aan dat de lock al gehouden wordt.
    */
-  private async roundLocked(accountId?: number): Promise<RoundSummary> {
+  private async roundLocked(accountId?: number, opts?: { skipBalanceCheck?: boolean }): Promise<RoundSummary> {
     const blocked = this.blocked();
     if (blocked !== null) throw new ValidationError(blocked);
     const creds = this.readCredentials();
@@ -573,7 +781,7 @@ export class BankFeedService {
           summary.skipped.push({ pontoId: row.external_id });
           continue;
         }
-        const imported = await this.roundAccount(row, account, client);
+        const imported = await this.roundAccount(row, account, client, opts);
         summary.accounts.push({ pontoId: row.external_id, bankAccountId, imported });
         if (imported > 0) summary.importedAny = true;
       } catch (e) {
@@ -591,7 +799,7 @@ export class BankFeedService {
    * De transactieronde voor één actieve koppeling, met bewezen dekking en saldo (#253).
    * Neemt aan dat de accountlijst al gelezen is en de rekening niet weg of readonly is.
    */
-  private async roundAccount(row: FeedRow, account: PontoAccount, client: Pick<PontoClient, 'transactions'>): Promise<number> {
+  private async roundAccount(row: FeedRow, account: PontoAccount, client: Pick<PontoClient, 'transactions'>, opts?: { skipBalanceCheck?: boolean }): Promise<number> {
     const bankAccountId = row.bank_account_id!;
     // bewezen grens: de dekking die de feed al bewees (covered_to) of die van een bestaand
     // afschrift van de gebruiker — hier sluit de ronde gatloos op aan. De eerste
@@ -671,6 +879,10 @@ export class BankFeedService {
         .prepare('UPDATE bank_feed_accounts SET details_synchronized_at = ?, balance = COALESCE(?, balance), balance_at = COALESCE(?, balance_at) WHERE id = ?')
         .run(account.detailsSynchronizedAt, account.balance, account.balanceAt, row.id);
     }
+    // Bij een handmatige ronde zonder geslaagde accountDetails (#247) wordt géén nieuwe
+    // saldovergelijking gedaan en ook de teller niet aangeraakt: het saldo van Ponto kan dan
+    // ouder zijn dan de net geïmporteerde transacties.
+    const skipBalance = opts?.skipBalanceCheck === true;
     if (provable) {
       // de ronde op deze rekening is volledig en geslaagd: pas dáár hoort `last_ok_at` bij
       // (niet door testen of alleen opslaan, #246)
@@ -681,12 +893,15 @@ export class BankFeedService {
       // Dezelfde provider-snapshot opnieuw lezen is geen tweede onafhankelijke bevestiging
       // van een saldoafwijking. Vergelijk alleen wanneer het transactiesynchronisatiemoment
       // werkelijk vooruitging; een identieke snapshot behoudt de bestaande teller.
-      if (forwarded) this.compareBalance(row.id, bankAccountId, account, read, result.batchId);
-      else if (!this.balanceMetadataComparable(account, read)) this.resetBalanceDiff(row.id);
+      if (forwarded) {
+        if (!skipBalance) this.compareBalance(row.id, bankAccountId, account, read, result.batchId);
+      } else if (!skipBalance && !this.balanceMetadataComparable(account, read)) {
+        this.resetBalanceDiff(row.id);
+      }
     } else {
+      if (!skipBalance) this.resetBalanceDiff(row.id);
       // niet-vergelijkbare ronde (onvolledige paginering of onbruikbare metadata): de
       // saldoafwijkingsteller conservatief resetten (#253)
-      this.resetBalanceDiff(row.id);
       this.db.prepare('UPDATE bank_feed_accounts SET last_round_at = ? WHERE id = ?').run(this.sqliteNow(), row.id);
     }
     return result.imported;
@@ -856,4 +1071,23 @@ function sqliteUtcOrNull(iso: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Uitkomst van één synchronisatiesubtype tijdens het handmatig bijwerken; bestaat uitsluitend
+ * in geheugen tijdens de aanroep (#247), nooit op schijf.
+ */
+type SubtypeRun = { started: true; id: string } | { started: false; errorKind: string };
+
+/**
+ * Leest uitsluitend de eerste `ip=`-regel uit een Cloudflare-trace en valideert haar met
+ * `node:net.isIP`; alles anders is null (#247). Het resultaat wordt nergens bewaard.
+ */
+function traceIp(text: string): string | null {
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith('ip=')) continue;
+    const value = line.slice('ip='.length).trim();
+    return isIP(value) !== 0 ? value : null;
+  }
+  return null;
 }

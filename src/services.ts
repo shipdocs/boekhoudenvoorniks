@@ -157,12 +157,15 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const xafImport = new XafImportService(db, settings, relations, bank, switchover);
   // Ponto-bankfeed (WP4A, #246): alleen de basis; de ophaalronde komt in #253. Netwerk gaat via
   // dezelfde fetch als de koppelingen (niets in de demo of de kopie bij de boekhouder).
+  // Sinds WP5 (#247) gebruikt die fetch ook de enige toegestane Cloudflare-trace voor het
+  // handmatig "Nu bijwerken"; het IP zelf wordt nooit bewaard.
   const bankFeed = new BankFeedService({
     db,
     secrets: deps.secrets,
     bank,
     settings,
     client: (creds) => new PontoClient(integrationFetch, creds),
+    fetch: integrationFetch,
   });
 
   // alleen-lezen (koppeling voor Claude Code/Codex): niets aanvullen, de app deed dat al bij het openen
