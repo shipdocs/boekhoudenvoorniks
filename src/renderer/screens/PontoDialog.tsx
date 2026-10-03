@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, Field, Modal, useAction, useLoad } from '../ui';
+import { Button, DateNl, Field, Modal, useAction, useApp, useLoad } from '../ui';
 import { pontoAccountStatusText, pontoCooldownText, pontoLinkText } from '../../shared/bank-feed-text';
 import type { FeedAccountInfo, FeedLink, FeedTestAccount, RoundSummary } from '../../bankfeed/bankfeed';
 
@@ -44,10 +44,11 @@ export function PontoCredentialFields({ clientId, clientSecret, onClientId, onCl
   );
 }
 
-export function PontoAccountChoice({ account, bankAccounts, value, onChange }: {
+export function PontoAccountChoice({ account, bankAccounts, value, usedBankAccountIds = [], onChange }: {
   account: FeedTestAccount;
   bankAccounts: BankAccount[];
   value: number | 'nieuw' | null;
+  usedBankAccountIds?: number[];
   onChange(value: number | 'nieuw' | null): void;
 }) {
   return (
@@ -58,7 +59,7 @@ export function PontoAccountChoice({ account, bankAccounts, value, onChange }: {
           <Field label="In deze administratie gebruiken als">
             <select value={value ?? ''} onChange={(e) => onChange(e.target.value === 'nieuw' ? 'nieuw' : e.target.value ? Number(e.target.value) : null)}>
               <option value="">Niet gebruiken</option>
-              {bankAccounts.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}{bank.iban ? ` (${bank.iban})` : ''}</option>)}
+              {bankAccounts.map((bank) => <option key={bank.id} value={bank.id} disabled={bank.id !== value && usedBankAccountIds.includes(bank.id)}>{bank.name}{bank.iban ? ` (${bank.iban})` : ''}{bank.id !== value && usedBankAccountIds.includes(bank.id) ? ' — al gekozen' : ''}</option>)}
               <option value="nieuw">Nieuwe zakelijke rekening maken</option>
             </select>
           </Field>
@@ -114,7 +115,13 @@ export function PontoDialog({ initialStep = 0, onClose, onChanged }: { initialSt
     try {
       const result = await api.bankfeed.testen(clientId, clientSecret);
       setTested(result.accounts);
-      setChoices(Object.fromEntries(result.accounts.map((account) => [account.pontoId, account.usable ? account.suggestedBankAccountId : null])));
+      const used = new Set<number>();
+      setChoices(Object.fromEntries(result.accounts.map((account) => {
+        const suggested = account.usable ? account.suggestedBankAccountId : null;
+        if (suggested == null || used.has(suggested)) return [account.pontoId, null];
+        used.add(suggested);
+        return [account.pontoId, suggested];
+      })));
       setStep(5);
     } catch (e) {
       setError((e as Error).message);
@@ -185,7 +192,7 @@ export function PontoDialog({ initialStep = 0, onClose, onChanged }: { initialSt
         <div className="grid">
           <h3>Kies waar elke rekening hoort</h3>
           {summary ? <Summary summary={summary} /> : (tested ?? []).map((account) => (
-            <PontoAccountChoice key={account.pontoId} account={account} bankAccounts={banks.data ?? []} value={choices[account.pontoId] ?? null} onChange={(value) => setChoices((current) => ({ ...current, [account.pontoId]: value }))} />
+            <PontoAccountChoice key={account.pontoId} account={account} bankAccounts={banks.data ?? []} value={choices[account.pontoId] ?? null} usedBankAccountIds={Object.entries(choices).filter(([pontoId]) => pontoId !== account.pontoId).map(([, value]) => value).filter((value): value is number => typeof value === 'number')} onChange={(value) => setChoices((current) => ({ ...current, [account.pontoId]: value }))} />
           ))}
           {!tested && <p role="alert">Test eerst de Client ID en het Client Secret.</p>}
         </div>
@@ -225,12 +232,14 @@ function PontoAccountRow({ account, onRefresh, busy, cooldown }: { account: Feed
 }
 
 export function PontoCard({ initialStep, focusAccountId }: { initialStep?: number; focusAccountId?: number }) {
+  const { toast } = useApp();
   const status = useLoad(() => api.bankfeed.status());
   const { run, busy } = useAction();
   const [wizard, setWizard] = useState<number | null>(initialStep ?? null);
   const [privacyAccount, setPrivacyAccount] = useState<FeedAccountInfo | null>(null);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [disconnect, setDisconnect] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [cooldowns, setCooldowns] = useState<Record<number, string>>({});
   const focused = useMemo(() => status.data?.accounts.find((account) => account.id === focusAccountId), [status.data, focusAccountId]);
 
@@ -265,9 +274,17 @@ export function PontoCard({ initialStep, focusAccountId }: { initialStep?: numbe
     await status.reload();
   };
   const remove = async () => {
-    await run(() => api.bankfeed.verwijderen(), 'Ponto is ontkoppeld. Bestaande transacties zijn bewaard.');
-    setDisconnect(false);
-    await status.reload();
+    setRemoving(true);
+    try {
+      await api.bankfeed.verwijderen();
+      toast('Ponto is ontkoppeld. Bestaande transacties zijn bewaard.');
+      setDisconnect(false);
+      await status.reload();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setRemoving(false);
+    }
   };
 
   return (
@@ -286,7 +303,7 @@ export function PontoCard({ initialStep, focusAccountId }: { initialStep?: numbe
 
       {wizard != null && <PontoDialog initialStep={wizard} onClose={() => setWizard(null)} onChanged={() => status.reload()} />}
       {privacyAccount && <Modal title="Handmatig bijwerken via Ponto" onClose={() => setPrivacyAccount(null)}><p>Voor deze handmatige actie ontvangt Cloudflare je publieke IP-adres. Ponto vereist dit om de synchronisatie te starten. De app bewaart het IP-adres niet.</p><div className="row end"><Button onClick={() => setPrivacyAccount(null)}>Annuleren</Button><Button kind="primary" onClick={() => void acceptPrivacy()}>Doorgaan en bijwerken</Button></div></Modal>}
-      {disconnect && <Modal title="Ponto ontkoppelen" onClose={() => setDisconnect(false)}><p>De koppeling en opgeslagen inloggegevens worden op deze computer verwijderd. Je bestaande transacties en bankrekeningen blijven staan.</p><p>Verwijder de custom integration daarna ook zelf in Ponto.</p><div className="row end"><Button onClick={() => setDisconnect(false)}>Annuleren</Button><Button kind="danger" disabled={busy} onClick={() => void remove()}>Ontkoppelen</Button></div></Modal>}
+      {disconnect && <Modal title="Ponto ontkoppelen" onClose={() => setDisconnect(false)}><p>De koppeling en opgeslagen inloggegevens worden op deze computer verwijderd. Je bestaande transacties en bankrekeningen blijven staan.</p><p>Verwijder de custom integration daarna ook zelf in Ponto.</p><div className="row end"><Button disabled={removing} onClick={() => setDisconnect(false)}>Annuleren</Button><Button kind="danger" disabled={busy || removing} onClick={() => void remove()}>Ontkoppelen</Button></div></Modal>}
     </div>
   );
 }

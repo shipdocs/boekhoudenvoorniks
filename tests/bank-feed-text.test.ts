@@ -47,6 +47,12 @@ describe('Ponto-componenten', () => {
     expect(html).toContain('<option value="nieuw">Nieuwe zakelijke rekening maken</option>');
   });
 
+  it('maakt een lokale rekening die al voor een andere Ponto-rekening is gekozen onbeschikbaar', () => {
+    const html = renderToStaticMarkup(createElement(PontoAccountChoice, { account: testedAccount(), bankAccounts: [{ id: 8, name: 'Tweede', iban: null } as never], value: null, usedBankAccountIds: [8], onChange: () => undefined }));
+    expect(html).toContain('value="8" disabled=""');
+    expect(html).toContain('al gekozen');
+  });
+
   it('toont van opgeslagen credentials alleen de laatste vier tekens', () => {
     const html = renderToStaticMarkup(createElement(PontoStoredCredentialHint, { last4: 'WXYZ' }));
     expect(html).toContain('WXYZ');
