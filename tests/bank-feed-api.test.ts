@@ -424,6 +424,20 @@ describe('Ponto staat buiten de generieke synchronisatie (regel 7)', () => {
     expect(Object.keys(results)).toEqual([]);
     expect(h.clientCalls).toBe(0);
   });
+
+  it('laat bij uitgeschakelde feature de generieke sync draaien zonder Ponto of foutlog', async () => {
+    BANK_FEED.available = false;
+    const results = { webshop: { created: 0, skipped: 0, messages: [] } };
+    const sync = vi.spyOn(h.s.integrations, 'syncAllEnabled').mockResolvedValue(results);
+    const round = vi.spyOn(h.s.bankFeed, 'round');
+    const emit = vi.fn();
+    const log = vi.fn();
+    await runBackgroundFeeds(h.s, emit, log);
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(round).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('integrations', results);
+    expect(log).not.toHaveBeenCalled();
+  });
 });
 
 describe('host.secureStorage (regel 6)', () => {
