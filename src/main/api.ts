@@ -60,6 +60,8 @@ import type { Bonnenscanner } from '../scanner/scanner';
 import { PHONE_SCANNER } from '../shared/phone-scanner';
 import { BANK_FEED } from '../shared/bank-feed';
 
+const PONTO_DASHBOARD_URL = 'https://dashboard.myponto.com';
+
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
 
 export interface HostContext {
@@ -257,6 +259,16 @@ export function createApi(s: Services, host: HostContext) {
   const notHeld = (txId: number): number => {
     s.bank.assertNotHeld(s.bank.get(Number(txId)));
     return Number(txId);
+  };
+
+  /** Een feedtaak uit de renderer is alleen een aanwijzing: gebruik uitsluitend de actuele DB-taak. */
+  const currentFeedTask = (task: Task, actionId: string): Task => {
+    if (!task.kind.startsWith('feed-')) return task;
+    const current = s.inbox.tasks().find((candidate) => candidate.kind === task.kind && candidate.key === task.key);
+    if (!current || !current.actions.some((action) => action.id === actionId)) {
+      throw new ValidationError('Deze Ponto-melding is intussen veranderd. Bekijk Vandaag opnieuw.');
+    }
+    return current;
   };
 
   /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
@@ -497,6 +509,30 @@ export function createApi(s: Services, host: HostContext) {
       case 'bank-balance:bekijken':
         // op het bankscherm: de overgeslagen regels van deze rekening, met "Toch toevoegen"
         return { navigate: { screen: 'bank', extra: { skippedFor: r.bankAccountId } } };
+      case 'feed-expiring:ponto':
+      case 'feed-expired:ponto':
+        await host.openExternal(PONTO_DASHBOARD_URL);
+        return;
+      case 'feed-expiring:later':
+      case 'feed-balance:negeren':
+        s.inbox.skipTask(task.key, actionId);
+        return;
+      case 'feed-credentials:opnieuw':
+        return { navigate: { screen: 'bank', extra: { bankFeed: 'credentials', feedAccountId: r.feedAccountId } } };
+      case 'feed-account-gone:bekijken':
+      case 'feed-silent:bank':
+      case 'feed-balance:bank':
+        return { navigate: { screen: 'bank', extra: { feedAccountId: r.feedAccountId } } };
+      case 'feed-expired:afschrift':
+      case 'feed-silent:afschrift':
+        return { navigate: { screen: 'bank', extra: { importStatement: true, bankAccountId: r.bankAccountId } } };
+      case 'feed-account-gone:niet-gebruiken': {
+        const changed = s.db
+          .prepare(`UPDATE bank_feed_accounts SET status = 'niet-gebruiken', bank_account_id = NULL WHERE id = ? AND provider = 'ponto' AND status = 'weg'`)
+          .run(r.feedAccountId!).changes;
+        if (changed !== 1) throw new ValidationError('Deze Ponto-melding is intussen veranderd. Bekijk Vandaag opnieuw.');
+        return;
+      }
       default: {
         const screens: Partial<Record<Task['kind'], [string, number | string | undefined]>> = {
           setup: ['welkom', undefined],
@@ -917,8 +953,9 @@ export function createApi(s: Services, host: HostContext) {
       },
       /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
       act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
-        const result = await doAct(task, actionId, payload);
-        if (!result?.navigate) s.inbox.recordUserAction(task, actionId);
+        const current = currentFeedTask(task, actionId);
+        const result = await doAct(current, actionId, payload);
+        if (!result?.navigate) s.inbox.recordUserAction(current, actionId);
         return result;
       },
       month: (month?: string) => s.inbox.month(month),
