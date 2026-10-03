@@ -118,6 +118,16 @@ export function Home() {
         <div className="card">
           <div className="value"><Euro cents={data.money.bank} /></div>
           <div className="label">op de bank{data.bankUpdatedTo ? ` · bijgewerkt t/m ${formatDateNl(data.bankUpdatedTo)}` : ''}</div>
+          {data.money.bankAccounts.length > 1 && (
+            <div className="small muted" style={{ marginTop: 6 }}>
+              {data.money.bankAccounts.map((a) => (
+                <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span>{a.name}</span>
+                  <span><Euro cents={a.balance} /></span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="card clickable" onClick={() => go({ screen: 'werk', extra: { filter: 'open' } })}>
           <div className="value"><Euro cents={data.money.toReceive} /></div>

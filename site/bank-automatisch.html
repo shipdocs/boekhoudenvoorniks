@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bank automatisch inlezen | BoekhoudenVoorNiks</title>
+  <meta name="description" content="Je bank bijhouden zonder handwerk: de app leest afschriften die je downloadt vanzelf in vanuit een map, of haalt je betalingen op met Ponto. Gratis programma, jij houdt de controle.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/bank-automatisch.html">
+  <meta property="og:type" content="article">
+  <meta property="og:locale" content="nl_NL">
+  <meta property="og:site_name" content="BoekhoudenVoorNiks">
+  <meta property="og:url" content="https://boekhoudenvoorniks.nl/bank-automatisch.html">
+  <meta property="og:title" content="Bankafschriften automatisch inlezen">
+  <meta property="og:description" content="Je bank bijhouden zonder handwerk: de app leest afschriften die je downloadt vanzelf in vanuit een map, of haalt je betalingen op met Ponto. Gratis programma, jij houdt de controle.">
+  <meta property="og:image" content="https://boekhoudenvoorniks.nl/img/ponto-5-status.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://boekhoudenvoorniks.nl/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Bank automatisch",
+          "item": "https://boekhoudenvoorniks.nl/bank-automatisch.html"
+        }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Hoe werkt het inlezen via een map?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Zet Afschriften vanzelf inlezen aan bij Bank. De app kijkt dan in je Downloads-map, of in een map die je zelf kiest, naar nieuwe bankafschriften (CAMT.053, MT940 of een CSV van een bank die de app kent). Vind je er een, dan staat er op Vandaag een vraag met Inlezen en Niet nu. De app verplaatst of verwijdert nooit bestanden en opent alleen bestanden die op een afschrift lijken."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Gaat er iets vanzelf mijn boekhouding in?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Bij de map niet: je bevestigt eerst met Inlezen. Bij Ponto haalt de app betalingen vanzelf op, die als nieuwe betalingen binnenkomen. Ze worden gekoppeld aan je facturen en bonnetjes volgens dezelfde regels als bij een afschrift, en wat niet zeker is, komt als vraag op Vandaag."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Wat is Ponto en wat kost het?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Ponto is een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit. Wat het kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto; controleer dat bij Ponto zelf. BoekhoudenVoorNiks blijft gratis."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Zien jullie mijn bankgegevens?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Nee. Gewoon ophalen gaat rechtstreeks tussen de app en Ponto. Client ID en Client Secret staan versleuteld op je eigen computer en gaan nooit mee naar je boekhouder. Alleen bij een bewuste klik op Nu bijwerken vraagt de app je publieke IP-adres op bij Cloudflare en stuurt het aan Ponto, omdat Ponto dat vereist; het wordt niet bewaard of gelogd."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Kan ik gewoon afschriften blijven inlezen?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Ja. Afschriften blijven de basis en de terugval. Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen als je later Ponto aanzet."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Wat als er een periode ontbreekt?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "De app laat per rekening zien tot welke datum de betalingen aantoonbaar aansluiten op je afschriften. Ontbreekt er een periode, dan zegt hij dat en vraagt hij die te onderbouwen met een afschrift of een openingssaldo. Dat is niet hetzelfde als 'compleet'."
+          }
+        }
+      ]
+    }
+  ]
+}
+  </script>
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="./"><picture><source srcset="img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href="./#functies">Functies</a>
+        <a href="./#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="stukadoors.html">Stukadoors</a>
+            <a href="schilders.html">Schilders</a>
+            <a href="webdevelopers.html">Webdevelopers</a>
+            <a href="boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="waarom.html">Waarom</a>
+        <a href="wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="downloaden.html">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script>
+  (function () {
+    var top = document.querySelector('.top'), button = top.querySelector('.menu-button');
+    button.addEventListener('click', function () {
+      var open = top.classList.toggle('open');
+      button.setAttribute('aria-expanded', String(open));
+    });
+    top.querySelectorAll('details.sub').forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (!d.open) return;
+        top.querySelectorAll('details.sub[open]').forEach(function (o) { if (o !== d) o.open = false; });
+      });
+    });
+    function closeAll() {
+      var focused = document.activeElement, wasInside = top.contains(focused);
+      top.querySelectorAll('details.sub[open]').forEach(function (o) {
+        o.open = false;
+        if (o.contains(focused)) { o.querySelector('summary').focus(); wasInside = false; }
+      });
+      if (!top.classList.contains('open')) return;
+      top.classList.remove('open');
+      button.setAttribute('aria-expanded', 'false');
+      // de focus nooit achterlaten op een verborgen link
+      if (wasInside && focused !== button) button.focus();
+    }
+    document.addEventListener('click', function (e) { if (!top.contains(e.target)) closeAll(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
+  })();
+  </script>
+
+  <main class="wrap notes">
+    <p class="eyebrow">Nieuw in versie 1.2.0</p>
+    <h1>Je bank bijhouden zonder handwerk</h1>
+    <p class="lead">Geen bankbestanden meer zoeken en slepen. BoekhoudenVoorNiks leest je afschriften vanzelf in vanuit een map, of haalt je betalingen op met Ponto. Daarna gaat het zoals je gewend bent: betalingen worden gekoppeld aan je facturen en bonnetjes, en alleen wat niet zeker is komt als vraag op Vandaag.</p>
+    <div class="cta">
+      <a class="btn" href="downloaden.html">Gratis downloaden voor Windows of Linux</a>
+      <a class="btn ghost" href="wijzigingen.html">Wat is er nieuw</a>
+    </div>
+
+    <h2>Twee manieren, jij kiest</h2>
+    <div class="features">
+      <div><h3>Via een map</h3><p>Download je afschrift bij je bank zoals altijd. De app kijkt in je Downloads-map, of een map naar keuze, en vraagt op Vandaag: <em>Nieuw afschrift gevonden, inlezen?</em> Eén klik. Gratis en zonder aparte dienst.</p></div>
+      <div><h3>Met Ponto</h3><p>Optioneel: je zakelijke bank laat je betalingen vanzelf ophalen. De app doet dat bij het starten en daarna ongeveer elke zes uur, en je kunt zelf <em>Nu ophalen</em> kiezen. Ponto is een afzonderlijke dienst waar je zelf een overeenkomst mee sluit.</p></div>
+    </div>
+
+    <h2>Zo werkt de map</h2>
+    <ol class="steps">
+      <li><strong>Zet het aan</strong> bij Bank, onder <em>Afschriften vanzelf inlezen</em>. Standaard staat het uit.</li>
+      <li><strong>Download een afschrift</strong> bij je bank (CAMT.053, MT940 of een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut).</li>
+      <li><strong>Bevestig op Vandaag:</strong> "Nieuw afschrift gevonden: Knab zakelijk, 1 t/m 29 september". Kies <em>Inlezen</em> of <em>Niet nu</em>.</li>
+      <li><strong>Klaar:</strong> de betalingen worden gekoppeld aan je facturen en bonnetjes. Er verhuist of verdwijnt nooit een bestand uit je map.</li>
+    </ol>
+
+    <h2>Zo werkt Ponto</h2>
+    <ol class="steps">
+      <li><strong>Open een account bij Ponto</strong> en koppel daar je zakelijke bankrekening(en).</li>
+      <li><strong>Maak een eigen koppeling</strong> met alleen rekeninginformatie (AIS) en plak Client ID en Client Secret in de wizard op Bank. De app test de verbinding.</li>
+      <li><strong>Kies per rekening</strong> waar die in je administratie hoort. Bij elke keuze staat of de aansluiting op je afschriften bewezen is.</li>
+      <li><strong>Betalingen komen vanzelf binnen.</strong> Loopt je toestemming bij Ponto binnen 14 dagen af, dan staat er een taak op Vandaag.</li>
+    </ol>
+    <figure class="shot"><img src="img/ponto-4-rekening-kiezen.png" alt="Per Ponto-rekening kiezen waar die in de administratie hoort, met de melding tot welke datum de aansluiting bewezen is" width="980" height="426" loading="lazy" decoding="async"></figure>
+    <figure class="shot"><img src="img/ponto-5-status.png" alt="De kaart op Bank na het koppelen: status, toestemming tot een datum en de knoppen Nu ophalen en Ontkoppelen" width="908" height="328" loading="lazy" decoding="async"></figure>
+    <p class="fine">De schermafbeeldingen zijn gemaakt met een demo-administratie en een nep-Ponto; de gegevens zijn fictief.</p>
+
+    <h2>Daar kun je op rekenen</h2>
+    <ul class="checks">
+      <li><strong>Geen dubbele betalingen</strong><br><span class="muted">Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen, ook niet als je later Ponto aanzet.</span></li>
+      <li><strong>Eerlijk over wat er mist</strong><br><span class="muted">Per rekening zegt de app tot welke datum de betalingen aantoonbaar aansluiten. Ontbreekt er een periode, dan vraagt hij die te onderbouwen met een afschrift of openingssaldo.</span></li>
+      <li><strong>Je gegevens blijven van jou</strong><br><span class="muted">Inloggegevens voor Ponto staan versleuteld op je eigen computer. Ophalen gaat rechtstreeks tussen de app en Ponto; ShipDocs ziet niets en je boekhouder krijgt ze niet mee.</span></li>
+      <li><strong>Meerdere rekeningen overzichtelijk</strong><br><span class="muted">Het startscherm toont naast het totaal ook het saldo per bankrekening.</span></li>
+      <li><strong>Afschriften blijven de terugval</strong><br><span class="muted">Valt Ponto weg of verloopt je toestemming, dan lees je gewoon een afschrift in.</span></li>
+    </ul>
+
+    <h2>Veelgestelde vragen</h2>
+    <div class="faq">
+      <details><summary>Hoe werkt het inlezen via een map?</summary><p>Zet <em>Afschriften vanzelf inlezen</em> aan bij Bank. De app kijkt dan in je Downloads-map, of in een map die je zelf kiest, naar nieuwe bankafschriften (CAMT.053, MT940 of een CSV van een bank die de app kent). Vind je er een, dan staat er op Vandaag een vraag met <em>Inlezen</em> en <em>Niet nu</em>. De app verplaatst of verwijdert nooit bestanden en opent alleen bestanden die op een afschrift lijken.</p></details>
+      <details><summary>Gaat er iets vanzelf mijn boekhouding in?</summary><p>Bij de map niet: je bevestigt eerst met <em>Inlezen</em>. Bij Ponto haalt de app betalingen vanzelf op, die als nieuwe betalingen binnenkomen. Ze worden gekoppeld aan je facturen en bonnetjes volgens dezelfde regels als bij een afschrift, en wat niet zeker is, komt als vraag op Vandaag.</p></details>
+      <details><summary>Wat is Ponto en wat kost het?</summary><p>Ponto is een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit. Wat het kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto; controleer dat bij Ponto zelf. BoekhoudenVoorNiks blijft gratis.</p></details>
+      <details><summary>Zien jullie mijn bankgegevens?</summary><p>Nee. Gewoon ophalen gaat rechtstreeks tussen de app en Ponto. Client ID en Client Secret staan versleuteld op je eigen computer en gaan nooit mee naar je boekhouder. Alleen bij een bewuste klik op <em>Nu bijwerken</em> vraagt de app je publieke IP-adres op bij Cloudflare en stuurt het aan Ponto, omdat Ponto dat vereist; het wordt niet bewaard of gelogd.</p></details>
+      <details><summary>Kan ik gewoon afschriften blijven inlezen?</summary><p>Ja. Afschriften blijven de basis en de terugval. Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen als je later Ponto aanzet.</p></details>
+      <details><summary>Wat als er een periode ontbreekt?</summary><p>De app laat per rekening zien tot welke datum de betalingen aantoonbaar aansluiten op je afschriften. Ontbreekt er een periode, dan zegt hij dat en vraagt hij die te onderbouwen met een afschrift of een openingssaldo. Dat is niet hetzelfde als 'compleet'.</p></details>
+    </div>
+
+    <div class="cta" style="margin-top: 32px">
+      <a class="btn" href="downloaden.html">Gratis downloaden</a>
+    </div>
+    <p class="fine">Meer lezen: <a href="btw-aangifte.html">btw-aangifte zelf doen</a> · <a href="zonder-abonnement.html">zonder abonnement en offline</a> · <a href="starters.html">voor starters</a>. Ponto is een dienst van een derde partij; kosten, banken en toelating bepaalt Ponto. Deze pagina geeft uitleg, geen fiscaal advies.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="./#functies">Functies</a></li>
+          <li><a href="./#prijzen">Prijzen</a></li>
+          <li><a href="./#overstappen">Overstappen</a></li>
+          <li><a href="bank-automatisch.html" aria-current="page">Bank automatisch inlezen</a></li>
+          <li><a href="btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="zonder-abonnement.html">Zonder abonnement, offline</a></li>
+          <li><a href="./#vragen">Veelgestelde vragen</a></li>
+          <li><a href="wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="starters.html">Starters</a></li>
+          <li><a href="stukadoors.html">Stukadoors</a></li>
+          <li><a href="schilders.html">Schilders</a></li>
+          <li><a href="webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="waarom.html">Waarom we dit maakten</a></li>
+          <li><a href="downloaden.html">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks">Vragen en feedback: mail ons</a></li>
+          <li><a href="voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a></p>
+  </footer>
+</body>
+</html>
