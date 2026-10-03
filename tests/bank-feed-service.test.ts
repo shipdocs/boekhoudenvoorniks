@@ -42,12 +42,15 @@ interface Harness {
   clientCalls: number;
 }
 
-function makeFakeClient(h: Harness): (creds: PontoCredentials) => { accounts: () => Promise<{ accounts: PontoAccount[]; scope: string }> } {
+function makeFakeClient(h: Harness): (creds: PontoCredentials) => { accounts: () => Promise<{ accounts: PontoAccount[]; scope: string }>; transactions: () => Promise<never> } {
   return () => ({
     accounts: async () => {
       h.clientCalls += 1;
       return { accounts: h.fake, scope: h.scope };
     },
+    // WP4A testt alleen de basis; de ophaalronde (met transacties) komt in #253 en gebruikt
+    // haar eigen nepclient. Hier wordt die methode nooit aangeroepen.
+    transactions: async () => { throw new Error('geen transacties in de basistests'); },
   });
 }
 
