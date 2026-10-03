@@ -547,6 +547,8 @@ function initServices(): void {
     },
     setSmtpPassword: (pw) => (pw ? secrets.set(SMTP_SECRET, pw) : secrets.delete(SMTP_SECRET)),
     hasSmtpPassword: () => secrets.get(SMTP_SECRET) !== null,
+    // veilige opslag (sleutelbeheer) zoals de services die zelf ook lezen (#249, regel 6)
+    secureStorage: () => secrets.available,
     testSmtp: (smtp, password) => verifySmtp(smtp ?? services.settings.get().smtp, password || secrets.get(SMTP_SECRET)),
     mail: {
       setPassword: (pw) => (pw ? secrets.set(IMAP_SECRET, pw) : secrets.delete(IMAP_SECRET)),
@@ -845,6 +847,15 @@ async function backgroundTasks(): Promise<void> {
     if (Object.keys(results).length > 0) emit('integrations', results);
   } catch (e) {
     console.error('Synchronisatie mislukt', e);
+  }
+  try {
+    // Ponto-bankfeed (#249): dezelfde bestaande taak naast de ongewijzigde koppelingen; geen
+    // eigen timer — de start- en zesuurstaak hierboven zijn de enige momenten. Overlap met de
+    // handmatige routes voorkomt de ene service-brede lock in de BankFeedService zelf.
+    await services.bankFeed.round();
+  } catch (e) {
+    // alleen gewone foutsoort/boodschap: nooit credentials, tokens, IP's of providerpayload
+    console.error('Bankfeed ophalen mislukt', e instanceof Error ? `${e.name}: ${e.message}` : e);
   }
 }
 

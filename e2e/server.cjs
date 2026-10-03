@@ -59,6 +59,8 @@ let scanner = null;
 let lastPairing = null;
 let pickedFolder = null;
 let scannerPlatform = 'linux';
+/** testschakelaar voor veilige opslag (#249): null = zoals de host zelf (standaard aan) */
+let secureStorageSwitch = null;
 
 /** zoals de app: de huidige administratie sluiten en een andere openen */
 function openAdmin(key) {
@@ -301,6 +303,9 @@ function init(fresh) {
     async openExternal() {},
     setSmtpPassword: (pw) => { smtpPassword = pw || null; },
     hasSmtpPassword: () => smtpPassword !== null,
+    // veilige opslag zoals in de app (#249): dezelfde methode, met een veilige standaard (aan,
+    // zoals MemorySecretStore) en een testschakelaar via POST /__securestorage
+    secureStorage: () => secureStorageSwitch !== null ? secureStorageSwitch : secretsFor(file).available,
     async testSmtp() { throw new Error('Geen mailserver in de test'); },
     async backupNow() { return path.join(dir, 'backup.sqlite'); },
     async restoreBackup(password) { restoreCalls.push(password ?? null); return false; },
@@ -357,6 +362,7 @@ http
         restoreCalls = [];
         store = noStore();
         openedAttachments = [];
+        secureStorageSwitch = null;
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         resetFolders();
         await scanner?.stop();
@@ -380,6 +386,12 @@ http
       if (req.url === '/__store') {
         if (body) store = { ...store, ...JSON.parse(body) };
         return res.end(JSON.stringify({ ok: store }));
+      }
+      if (req.url === '/__securestorage') {
+        // {"on":true|false} dwingt de schakelaar; zonder body terug naar de veilige standaard
+        secureStorageSwitch = body && JSON.parse(body).on !== undefined ? Boolean(JSON.parse(body).on) : null;
+        if (body && JSON.parse(body).on === undefined) secureStorageSwitch = null;
+        return res.end(JSON.stringify({ ok: secureStorageSwitch }));
       }
       if (req.url === '/__datafolder') {
         const input = body ? JSON.parse(body) : {};
