@@ -11,7 +11,7 @@ Belangrijke feiten:
 - Facturen en offertes: pdf en e-mail via eigen mailserver (SMTP), doorlopende factuurnummering, creditfacturen, automatische betalingsherinneringen, eigen opmaak (logo, kleuren, teksten).
 - Btw per factuurregel: 21%, 9%, 0%, btw verlegd, vrijgesteld/KOR. Bij btw verlegd verplicht btw-nummer van de klant.
 - Btw-aangifte: berekening per kwartaal, maand of jaar met rubrieken 1a, 1b, 1e, 2a, 5a, 5b en 5g. De gebruiker neemt de bedragen over in Mijn Belastingdienst Zakelijk. Direct indienen via SBR/Digipoort is in voorbereiding (nog niet beschikbaar).
-- Bank: elke bank via CAMT.053 of MT940; CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos en Revolut wordt vanzelf herkend, andere CSV-indelingen stel je één keer in; automatische koppeling van betalingen aan facturen en bonnetjes. Vanaf versie 1.2.0 kun je optioneel ook je bank laten ophalen met Ponto (een afzonderlijke zakelijke dienst met een eigen overeenkomst en eigen inloggegevens van de gebruiker): de app haalt betalingen dan rechtstreeks bij Ponto op en stuurt niets naar ShipDocs. Afschriften blijven de basis en terugval. Welke banken Ponto ondersteunt, wat het kost en of je bedrijf wordt toegelaten, bepaalt Ponto.
+- Bank: elke bank via CAMT.053 of MT940; CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos en Revolut wordt vanzelf herkend, andere CSV-indelingen stel je één keer in; automatische koppeling van betalingen aan facturen en bonnetjes. Vanaf versie 1.2.0 kun je optioneel ook je bank laten ophalen met Ponto (een afzonderlijke zakelijke dienst met een eigen overeenkomst en eigen inloggegevens van de gebruiker): de app haalt betalingen dan rechtstreeks bij Ponto op en stuurt niets naar ShipDocs. Het scherm zegt tot welke datum de betalingen volledig zijn bijgewerkt. Afschriften blijven de basis en terugval. De koppeling zit in het gratis programma. Welke banken Ponto ondersteunt, wat het kost en of je bedrijf wordt toegelaten, bepaalt Ponto.
 - Bonnetjes: e-facturen (UBL/XML) en pdf's met tekst worden automatisch gelezen; foto's via een optionele lokale tekstherkenning (OCR). AI doet alleen voorstellen; boekingen worden door vaste regels gemaakt. Een aankoop die privé (privérekening, telefoonrekening, privé-creditcard) of contant betaald is, zet je met één klik op betaald; per leverancier te onthouden.
 - Klussen: offerte → klus → factuur, met kosten per klus.
 - Voor de boekhouder: "Pakket voor je boekhouder" — één ZIP per boekjaar met auditfile (XAF 3.2, gevalideerd), kolommenbalans, grootboekkaarten, journaalposten, openstaande debiteuren/crediteuren per factuur, RGS-brugstaat, btw-overzicht, relaties, facturen en bonnen met index, en een lees-mij met aansluiting, controles en importroutes (Caseware, AFAS, Visionplanner, Twinfield, Exact Online, Yuki, SnelStart). Geen back-up maar een overdracht. Voorbeeldpakket: https://boekhoudenvoorniks.nl/voorbeeld/voorbeeldpakket-boekhouder-2025.zip. Daarnaast een expertmodus met grootboek (RGS), journaal, balans, W&V, correctieboekingen en losse exports.
@@ -20,7 +20,7 @@ Belangrijke feiten:
 - Fiscaal: KOR (btw op inkopen naar de kosten), ICP-opgaaf met goederen en diensten apart, aftrekposten (afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek) en een schatting van de inkomstenbelasting. Altijd laten controleren door een boekhouder.
 - Uitwisseling met de boekhouder (vanaf versie 0.7): de klant stuurt een periode (kwartaal of jaar) versleuteld naar het kantoor van zijn boekhouder (uitnodiging met controlecode, alleen dat kantoor kan het openen), de boekhouder corrigeert in BoekhoudenVoorNiks (correctieboekingen, terugdraaien, grootboekrekeningen) en stuurt een antwoord terug; bij het inlezen is de periode afgesloten en blijft het werk van daarna staan. Loopt niet via servers van de maker.
 - Periode afsluiten en meerdere administraties op één computer (vanaf versie 0.7).
-- Huidige versie: 1.1.1. Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
+- Huidige versie: 1.2.0 (nieuw: bank optioneel automatisch ophalen met Ponto). Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
 - Broncode: https://github.com/shipdocs/boekhoudenvoorniks
 - Uitgever: ShipDocs, Middelweg 211, 1911 EE Uitgeest, Nederland. KvK 95207341, btw NL005138041B29. info@shipdocs.app, +31 20 369 5765.
 
@@ -28,7 +28,7 @@ Belangrijke feiten:
 
 ### Is BoekhoudenVoorNiks echt gratis?
 
-Ja. Het programma is altijd gratis te downloaden en te gebruiken: geen proefperiode, geen limiet op facturen of bonnetjes en geen account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen.
+Ja. Het programma is altijd gratis te downloaden en te gebruiken: geen proefperiode, geen limiet op facturen of bonnetjes en geen account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen. De optionele bankkoppeling met Ponto zit in het gratis programma; Ponto zelf is een afzonderlijke zakelijke dienst waarvan Ponto de kosten en voorwaarden bepaalt.
 
 ### Ik ben net gestart als zzp'er. Is BoekhoudenVoorNiks iets voor mij?
 
@@ -73,6 +73,10 @@ Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij 
 ### Kan ik overstappen vanuit een ander boekhoudprogramma?
 
 Ja. Kies een instapdatum en lees een auditfile (XAF) uit je vorige programma in, of het overzicht van je boekhouder (kolommen- of saldibalans en openstaande facturen). Heb je een auditfile per jaar, dan zet je ze allemaal tegelijk neer. De app vult je startbalans in; jij kijkt het na.
+
+### Kan mijn bank automatisch worden opgehaald?
+
+Ja, vanaf versie 1.2.0 en optioneel, met Ponto: een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit, met je eigen Client ID en Client Secret. De app haalt je betalingen dan zelf op, rechtstreeks bij Ponto; ShipDocs ziet je bankgegevens niet. Een wizard leidt je in vijf stappen langs Ponto. Wat Ponto kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto. De app zegt tot welke datum de betalingen volledig zijn bijgewerkt, en afschriften inlezen blijft de basis en terugval.
 
 ### Welke banken worden ondersteund?
 
