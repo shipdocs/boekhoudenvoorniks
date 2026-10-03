@@ -1,3 +1,4 @@
+import { runBackgroundFeeds } from './background-feeds';
 import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -842,21 +843,7 @@ async function backgroundTasks(): Promise<void> {
   } catch (e) {
     console.error('Herinneringen mislukt', e);
   }
-  try {
-    const results = await services.integrations.syncAllEnabled();
-    if (Object.keys(results).length > 0) emit('integrations', results);
-  } catch (e) {
-    console.error('Synchronisatie mislukt', e);
-  }
-  try {
-    // Ponto-bankfeed (#249): dezelfde bestaande taak naast de ongewijzigde koppelingen; geen
-    // eigen timer — de start- en zesuurstaak hierboven zijn de enige momenten. Overlap met de
-    // handmatige routes voorkomt de ene service-brede lock in de BankFeedService zelf.
-    await services.bankFeed.round();
-  } catch (e) {
-    // alleen gewone foutsoort/boodschap: nooit credentials, tokens, IP's of providerpayload
-    console.error('Bankfeed ophalen mislukt', e instanceof Error ? `${e.name}: ${e.message}` : e);
-  }
+  await runBackgroundFeeds(services, emit, (...args) => console.error(...args));
 }
 
 function createWindow(): void {

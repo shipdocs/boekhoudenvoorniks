@@ -1,3 +1,4 @@
+import { runBackgroundFeeds } from '../src/main/background-feeds';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { migrate } from '../src/db/database';
@@ -414,7 +415,7 @@ describe('gelijktijdige achtergrondronde en IPC delen één service-uitvoering (
   });
 });
 
-describe('de bestaande integrations-sync blijft ongewijzigd één keer draaien (regel 7)', () => {
+describe('Ponto staat buiten de generieke synchronisatie (regel 7)', () => {
   it('syncAllEnabled roept ponto nooit aan en blijft zijn eigen resultaat geven', async () => {
     await linkAccount(h);
     const results = await h.s.integrations.syncAllEnabled();
@@ -458,17 +459,69 @@ describe('foutteksten en de achtergrondtaak lekken niets (regel 10)', () => {
     expect(JSON.stringify(feedRow(h.s))).not.toContain('test-geheim-wachtwoord');
   });
 
-  it('de achtergrondronde logt alleen naam en boodschap van de fout — de aanroep slaat niets over', async () => {
+
+});
+
+
+describe('regressies onafhankelijke review', () => {
+  it('verwerkt een gedeelde ronde eenmaal bij twee gelijktijdige IPC-aanroepen', async () => {
     await linkAccount(h);
-    (h.s.bankFeed as unknown as { makeClient: unknown }).makeClient = () => ({
-      accounts: () => Promise.reject(new PontoError('Ponto: serverstoring', 'server', 500)),
-      transactions: () => { throw new Error('nooit'); },
-    });
-    // de bestaande taaklogica: round() draait en een fout verdwijnt in een veilige logregel
-    const errors: string[] = [];
-    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => errors.push(args.map(String).join(' ')));
-    await h.s.bankFeed.round().catch(() => undefined);
-    expect(errors.length).toBe(0); // de service zelf logt niet; de taak omhulsel logt
-    vi.restoreAllMocks();
+    h.reads.set('acc-1', pontoRead({ transactions: [tx('2026-10-11', -3500, 'review-1')] }));
+    const auto = vi.spyOn(h.s.inbox, 'autoProcess');
+    const [a, b] = await Promise.all([h.api.bankfeed.ophalen(), h.api.bankfeed.ophalen()]);
+    expect(a.importedAny).toBe(true);
+    expect(b.importedAny).toBe(true);
+    expect(h.calls.filter(c => c === 'accounts')).toHaveLength(1);
+    expect(auto).toHaveBeenCalledTimes(1);
+    expect(a.autoMatched).toBe(b.autoMatched);
+  });
+
+  it('controleert ieder routeantwoord op secrets, volledige Client ID, token en IP', async () => {
+    const answers: unknown[] = [];
+    answers.push(await h.api.bankfeed.testen(CREDS.clientId, CREDS.clientSecret));
+    h.reads.set('acc-1', pontoRead({ transactions: [tx('2026-10-11', -3500, 'review-2')] }));
+    answers.push(await h.api.bankfeed.opslaan(CREDS.clientId, CREDS.clientSecret, [{ pontoId: 'acc-1', bankAccountId: 'nieuw' }]));
+    answers.push(h.api.bankfeed.status());
+    answers.push(await h.api.bankfeed.ophalen());
+    const refreshed = await h.api.bankfeed.bijwerken(Number(feedRow(h.s).id));
+    expect(refreshed.allowed).toBe(true);
+    answers.push(refreshed);
+    answers.push(await h.api.bankfeed.bijwerken(Number(feedRow(h.s).id)));
+    answers.push(h.api.bankfeed.verwijderen());
+    for (const answer of answers) {
+      const serialized = JSON.stringify(answer) ?? 'undefined';
+      for (const secret of [CREDS.clientId, CREDS.clientSecret, '203.0.113.7']) {
+        expect(serialized).not.toContain(secret);
+      }
+      expect(serialized).not.toMatch(/clientSecret|access_token|refresh_token/);
+    }
+  });
+
+  it('het echte achtergrondblok draait integrations eenmaal naast de gedeelde IPC-ronde', async () => {
+    await linkAccount(h);
+    const results = { webshop: { created: 0, skipped: 0, messages: [] } };
+    const sync = vi.spyOn(h.s.integrations, 'syncAllEnabled').mockResolvedValue(results);
+    const emit = vi.fn();
+    const log = vi.fn();
+    await Promise.all([runBackgroundFeeds(h.s, emit, log), h.api.bankfeed.ophalen()]);
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(h.calls.filter(c => c === 'accounts')).toHaveLength(1);
+    expect(log).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith('integrations', results);
+  });
+
+  it.each([new Error(`${CREDS.clientId} ${CREDS.clientSecret} 203.0.113.7 raw-provider`),
+    { token: 'raw-provider', secret: CREDS.clientSecret }])('logt geen inhoud van onverwachte achtergrondfouten', async error => {
+    const sync = vi.spyOn(h.s.integrations, 'syncAllEnabled').mockResolvedValue({});
+    vi.spyOn(h.s.bankFeed, 'round').mockRejectedValue(error);
+    const log = vi.fn();
+    await runBackgroundFeeds(h.s, vi.fn(), log);
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledTimes(1);
+    const serialized = JSON.stringify(log.mock.calls);
+    for (const secret of [CREDS.clientId, CREDS.clientSecret, '203.0.113.7', 'raw-provider']) {
+      expect(serialized).not.toContain(secret);
+    }
   });
 });
