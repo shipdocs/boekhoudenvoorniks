@@ -94,7 +94,7 @@ interface Harness {
   startFailure: Partial<Record<Subtype, Error>>;
   /** laat het poll van dit id deze fout gooien */
   pollFailure: Map<string, Error>;
-  trace: { calls: number; urls: string[]; body: string | null; fail: 'network' | 'status' | null };
+  trace: { calls: number; urls: string[]; body: string | null; fail: 'network' | 'status' | 'hang' | null; aborted: number };
   customerIps: string[];
   calls: string[];
   clientCalls: number;
@@ -167,13 +167,21 @@ function fakeClient(h: Harness): BankFeedClient {
 }
 
 function fakeTraceFetch(h: Harness): FetchLike {
-  return async (url) => {
+  return async (url, init) => {
     h.trace.calls += 1;
     h.trace.urls.push(url);
     h.calls.push('trace');
     if (h.trace.fail === 'network') throw new Error('netwerk weg');
     if (h.trace.fail === 'status') {
       return { ok: false, status: 503, json: async () => { throw new Error('geen json'); }, text: async () => '' };
+    }
+    if (h.trace.fail === 'hang') {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          h.trace.aborted += 1;
+          reject(new Error('trace afgebroken'));
+        }, { once: true });
+      });
     }
     if (h.trace.body === null) throw new Error('geen trace-body geconfigureerd');
     const body = h.trace.body;
@@ -219,7 +227,7 @@ function setup(): Harness {
     pollsUntilSuccess: new Map(),
     startFailure: {},
     pollFailure: new Map(),
-    trace: { calls: 0, urls: [], body: traceBody(IP_V4), fail: null },
+    trace: { calls: 0, urls: [], body: traceBody(IP_V4), fail: null, aborted: 0 },
     customerIps: [],
     calls: [],
     clientCalls: 0,
@@ -354,6 +362,20 @@ describe('het publieke IP via precies één Cloudflare-trace (#247)', () => {
     expect(h.trace.calls).toBe(2); // beide pogingen vragen het IP op, geen enkele Ponto-aanroep
     expect(h.clientCalls).toBe(0);
   });
+
+  it('breekt een vastgelopen trace na dertig seconden af en geeft de service-lock vrij', async () => {
+    const { feedId } = await linkAccount(h);
+    h.trace.fail = 'hang';
+    const refresh = h.feed.refreshNow(feedId);
+    const rejected = expect(refresh).rejects.toThrow(/publieke IP/);
+    const queued = h.feed.exclusive(async () => 'lock vrij');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await rejected;
+    await expect(queued).resolves.toBe('lock vrij');
+    expect(h.trace.aborted).toBe(1);
+    expect(h.clientCalls).toBe(0);
+    expect(feedRow(h.s.db).manual_sync_at).toBeNull();
+  });
 });
 
 describe('het venster van dertig minuten (#247)', () => {
@@ -476,9 +498,8 @@ describe('twee onafhankelijke synchronisaties (#247)', () => {
     expect(summary.failed).toEqual([{ pontoId: 'acc-1', errorKind: 'timeout' }]);
     // elke wachtronde is exact drie seconden en het poll bleef binnen de twee minuten
     expect(h.waitCalls.every((ms) => ms === 3000)).toBe(true);
-    expect(h.waitCalls.length).toBeGreaterThanOrEqual(40);
-    expect(h.nowMs - start).toBeGreaterThanOrEqual(120_000);
-    expect(h.nowMs - start).toBeLessThanOrEqual(130_000);
+    expect(h.waitCalls).toHaveLength(40);
+    expect(h.nowMs - start).toBe(120_000);
   });
 
   it('een time-out bij accountDetails laat de transacties gewoon doorgaan', async () => {
@@ -580,6 +601,8 @@ describe('mislukte accountDetails voorkomt een nieuwe saldovergelijking (#247/#2
     expect(h.feed.balanceDifference(feedId)).toBeNull();
     expect(feedRow(h.s.db).balance_diff).toBeNull();
     expect(feedRow(h.s.db).balance_diff_rounds).toBe(0);
+    // De succesvolle transactieronde mag de mislukte handmatige detailsync niet maskeren.
+    expect(feedRow(h.s.db).last_error_kind).toBe('synchronization-error');
     // en een eerdere, al vastgelegde afwijking blijft onaangetast door zo'n ronde
     h.s.db.prepare('UPDATE bank_feed_accounts SET balance_diff = ?, balance_diff_rounds = 1 WHERE id = ?').run(7000, feedId);
     h.nowMs += 30 * 60_000; // voorbij het venster: de volgende klik is weer toegestaan

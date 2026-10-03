@@ -301,6 +301,8 @@ export class PontoClient {
   private readonly timeoutMs: number;
   /** Alleen in geheugen, nooit ergens opgeslagen. */
   private token: { value: string; scope: string; expiresAtMs: number } | null = null;
+  /** Gelijktijdige eerste aanvragen delen één tokenrequest; fouten worden niet gecachet. */
+  private tokenRequest: Promise<{ value: string; scope: string }> | null = null;
 
   constructor(
     fetchImpl: FetchLike,
@@ -492,9 +494,21 @@ export class PontoClient {
   private async getToken(): Promise<{ value: string; scope: string }> {
     const nowMs = this.nowFn().getTime();
     if (this.token !== null && nowMs < this.token.expiresAtMs) return this.token;
+    if (this.tokenRequest !== null) return this.tokenRequest;
     if (this.creds.clientId.trim() === '' || this.creds.clientSecret.trim() === '') {
       throw new PontoError('Ponto: ontbrekende client-id of client-secret', 'credentials');
     }
+    const request = this.fetchToken(nowMs);
+    this.tokenRequest = request;
+    try {
+      return await request;
+    } finally {
+      if (this.tokenRequest === request) this.tokenRequest = null;
+    }
+  }
+
+  /** Voert één daadwerkelijke tokenaanvraag uit en vult pas na volledige validatie de cache. */
+  private async fetchToken(nowMs: number): Promise<{ value: string; scope: string }> {
     const json = await this.request(`${this.baseUrl}/oauth2/token`, {
       method: 'POST',
       headers: {
