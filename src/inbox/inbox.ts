@@ -22,7 +22,7 @@ import type { VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
 import { PRIVATE_CAR_CATEGORIES, type CategoryLookup } from '../shared/categories';
 import { findKnownSupplier, KNOWN_SUPPLIERS } from '../intake/suppliers';
-import { addDays, diffDays, formatDateNl, periodFor, today, vatDeadline, type IsoDate } from '../shared/dates';
+import { addDays, diffDays, formatDateNl, isIsoDate, periodFor, today, vatDeadline, type IsoDate } from '../shared/dates';
 
 /** Na zoveel dagen zonder nieuwe bankgegevens vragen we om een afschrift in te lezen. */
 export const BANK_STALE_DAYS = 14;
@@ -342,7 +342,8 @@ export class InboxService {
     for (const row of rows) {
       const account = row.name?.trim() || row.bank_name;
       const ref = { feedAccountId: row.id, bankAccountId: row.bank_account_id };
-      const expires = /^\d{4}-\d{2}-\d{2}/.test(row.expires_at ?? '') ? row.expires_at!.slice(0, 10) as IsoDate : null;
+      const expiresDay = row.expires_at?.slice(0, 10) ?? '';
+      const expires = isIsoDate(expiresDay) ? expiresDay : null;
       const errorState = row.last_round_at?.slice(0, 10) ?? row.created_at.slice(0, 10);
       let health: Task | null = null;
 

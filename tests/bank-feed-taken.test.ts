@@ -89,6 +89,12 @@ describe('Ponto-taken op Vandaag (#248)', () => {
     expect(task).toMatchObject({ priority: 1, actions: [{ id: 'ponto', label: 'Naar Ponto' }, { id: 'afschrift', label: 'Afschrift inlezen' }] });
   });
 
+  it('behandelt een onmogelijke verloopdatum niet als echte kalenderdatum', () => {
+    const ctx = context();
+    addFeed(ctx, { expires_at: '2026-02-31' });
+    expect(feedTasks(ctx)).toEqual([]);
+  });
+
   it('maakt taken voor bewezen verlopen, credentials en verdwenen rekening met de afgesproken acties', () => {
     const expired = context();
     addFeed(expired, { expires_at: null, last_error_kind: 'expired' });
