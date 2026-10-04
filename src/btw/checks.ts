@@ -592,7 +592,7 @@ export function runVatChecks(
       key: 'oninbaar-inkoop',
       blocking: false,
       title: `${stalePurchases.length} ${stalePurchases.length === 1 ? 'inkoopfactuur' : 'inkoopfacturen'} al meer dan een jaar na de vervaldatum onbetaald`,
-      detail: 'Vraag na of de leverancier de btw heeft teruggevraagd omdat jij niet betaalde. Zo ja, dan moet je de btw die je aftrok terugbetalen. Of de factuur nog geldt, of is kwijtgescholden, moet je zelf beoordelen; laat je boekhouder meekijken.',
+      detail: 'Betaal je een inkoopfactuur niet, dan moet je de btw die je aftrok terugbetalen: zodra vaststaat dat je niet betaalt, en uiterlijk een jaar na de uiterste betaaldatum (artikel 29 Wet OB). Open de aankoop en kies "Btw terugnemen": de app boekt het over het openstaande deel. Betaal je later alsnog, dan trek je die btw weer af, en de app doet dat vanzelf bij de betaling. Is de factuur kwijtgescholden of betwist, laat dan je boekhouder meekijken.',
       count: stalePurchases.length,
       fingerprint: stalePurchases.map((p) => p.id).join(','),
       screen: 'aankopen',

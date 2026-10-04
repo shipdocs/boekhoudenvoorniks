@@ -1359,4 +1359,19 @@ export const migrations: string[] = [
   );
   CREATE INDEX idx_vies_checks_vat ON vies_checks(vat_number);
   `,
+  // Onbetaalde inkoop: de afgetrokken voorbelasting terugbetalen (uiterlijk 1 jaar na de uiterste betaaldatum) en bij latere betaling opnieuw aftrekken.
+  `
+  CREATE TABLE purchase_vat_repayments (
+    id INTEGER PRIMARY KEY,
+    purchase_id INTEGER NOT NULL REFERENCES purchase_invoices(id),
+    journal_entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+    vat_amount INTEGER NOT NULL,
+    -- het openstaande bedrag op het moment van terugbetalen, en hoeveel daarvan daarna alsnog is betaald
+    basis INTEGER NOT NULL,
+    paid_since INTEGER NOT NULL DEFAULT 0,
+    rededucted INTEGER NOT NULL DEFAULT 0,
+    repaid_on TEXT NOT NULL
+  );
+  CREATE INDEX idx_purchase_vat_repayments_purchase ON purchase_vat_repayments(purchase_id);
+  `,
 ];
