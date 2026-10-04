@@ -1,5 +1,4 @@
-import { compile as compileLegacy } from './rules-2026-2';
-import { RULES_VERSION } from './rules-version';
+// Bevroren compiler voor bestaande gebeurtenissen t/m versie 2026.2. Nieuwe boekingen gebruiken rules.ts.
 import { ACCOUNTS, REVERSE_CHARGE_ACCOUNTS, SALES_ACCOUNTS } from './accounts';
 import { signedLine, type EntrySource, type PostLine } from './ledger';
 import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isReverseCharge, isSalesVatCode, type PurchaseVatCode } from '../shared/vat';
@@ -45,15 +44,7 @@ export function businessPct(pct: number | null | undefined): number {
 
 /** Berekent de BTW op een inkoopregel. Bij verlegd is de BTW wel te berekenen maar niet te betalen aan de leverancier. */
 export function purchaseVat(line: PurchaseLineInput): Cents {
-  if (!isPurchaseVatCode(line.vatCode)) throw new ValidationError('Kies een btw-tarief');
-  if (line.vatAmount !== undefined) {
-    assertCents(line.vatAmount, 'btw-bedrag');
-    if (PURCHASE_VAT_RATES[line.vatCode].percentage === 0 && line.vatAmount !== 0) throw new ValidationError('Bij geen btw of 0% hoort geen btw-bedrag');
-    if ((line.netAmount >= 0 && line.vatAmount < 0) || (line.netAmount <= 0 && line.vatAmount > 0)) throw new ValidationError('Het btw-bedrag moet hetzelfde teken hebben als het bedrag exclusief btw');
-    const max = roundHalfAwayFromZero(Math.abs(line.netAmount) * PURCHASE_VAT_RATES[line.vatCode].percentage / 100);
-    if (Math.abs(line.vatAmount) > max + 2) throw new ValidationError('Het btw-bedrag is hoger dan het gekozen tarief toelaat');
-    return line.vatAmount;
-  }
+  if (line.vatAmount !== undefined) return line.vatAmount;
   return roundHalfAwayFromZero((line.netAmount * PURCHASE_VAT_RATES[line.vatCode].percentage) / 100);
 }
 
@@ -84,11 +75,11 @@ export function expenseLines(lines: PurchaseLineInput[], counterAccount: string,
     const netBiz = biz(l.netAmount);
     const vat = biz(fullVat);
     // het privédeel telt niet als kosten en heeft geen btw-aftrek: het gaat naar de privé-opnamen
-    const privateShare = l.netAmount - netBiz + (isReverseCharge(l.vatCode) ? 0 : fullVat - vat);
+    const privateShare = pct === 100 ? 0 : l.netAmount + (isReverseCharge(l.vatCode) ? 0 : fullVat) - (netBiz + (isReverseCharge(l.vatCode) ? 0 : vat));
     netTotal += netBiz;
     out.push(signedLine(l.account, netBiz, { relationId, vatCode: l.vatCode, description: l.description ?? null }));
     if (privateShare !== 0) {
-      out.push(signedLine(ACCOUNTS.priveOpnamen, privateShare, { relationId, ...(isReverseCharge(l.vatCode) ? { vatCode: l.vatCode } : {}), description: `Privédeel (${100 - pct}%)${l.description ? `: ${l.description}` : ''}` }));
+      out.push(signedLine(ACCOUNTS.priveOpnamen, privateShare, { relationId, description: `Privédeel (${100 - pct}%)${l.description ? `: ${l.description}` : ''}` }));
       payable += privateShare;
     }
     if (vat !== 0) {
@@ -98,9 +89,10 @@ export function expenseLines(lines: PurchaseLineInput[], counterAccount: string,
           : signedLine(ACCOUNTS.btwVoorbelasting, vat, { relationId, vatCode: l.vatCode }),
       );
       vatTotal += vat;
+      if (isReverseCharge(l.vatCode)) {
+        out.push(signedLine(REVERSE_CHARGE_ACCOUNTS[l.vatCode], -vat, { relationId, vatCode: l.vatCode }));
+      }
     }
-    if (isReverseCharge(l.vatCode) && fullVat !== vat) out.push(signedLine(ACCOUNTS.priveOpnamen, fullVat - vat, { relationId, description: 'Niet-aftrekbare verlegde btw privédeel' }));
-    if (isReverseCharge(l.vatCode) && fullVat !== 0) out.push(signedLine(REVERSE_CHARGE_ACCOUNTS[l.vatCode], -fullVat, { relationId, vatCode: l.vatCode }));
     payable += netBiz + (isReverseCharge(l.vatCode) ? 0 : vat);
   }
   out.push(signedLine(counterAccount, -payable, { relationId, description: description ?? null }));
@@ -177,9 +169,7 @@ export interface CompiledEntry {
   lines: PostLine[];
 }
 
-export function compile(event: DomainEvent, version = RULES_VERSION): CompiledEntry {
-  if (version === '2026.1' || version === '2026.2') return compileLegacy(event);
-  if (version !== RULES_VERSION && event.type !== 'boeking') throw new ValidationError('Onbekende versie van de boekingsregels');
+export function compile(event: DomainEvent): CompiledEntry {
   switch (event.type) {
     case 'boeking': {
       const p = event.payload;
@@ -198,7 +188,7 @@ export function compile(event: DomainEvent, version = RULES_VERSION): CompiledEn
 /** Banktransactie direct op een rekening, inclusief btw-splitsing. */
 export function bankCategoryLines(p: BankCategoriePayload): PostLine[] {
   const vatCode = p.vatCode;
-  if (p.accountCategory === 'kosten' || (p.accountCategory === 'activa' && (p.amount < 0 || p.account === ACCOUNTS.inventaris || p.account === ACCOUNTS.vervoermiddelen))) {
+  if (p.accountCategory === 'kosten' || (p.accountCategory === 'activa' && p.amount < 0)) {
     if (!isPurchaseVatCode(vatCode)) throw new ValidationError('Kies een ander btw-tarief');
     const rate = PURCHASE_VAT_RATES[vatCode];
     // een negatieve transactie is een uitgave; een positieve op een kostenrekening is een terugbetaling
@@ -212,7 +202,7 @@ export function bankCategoryLines(p: BankCategoriePayload): PostLine[] {
     const vatAccount = SALES_ACCOUNTS[vatCode]?.vat;
     return [
       signedLine(p.bankAccount, p.amount),
-      signedLine(SALES_ACCOUNTS[vatCode]?.revenue ?? p.account, -net, { relationId: p.relationId, vatCode }),
+      signedLine(p.account, -net, { relationId: p.relationId, vatCode }),
       vat !== 0 && vatAccount ? signedLine(vatAccount, -vat, { relationId: p.relationId, vatCode }) : null,
     ].filter((l): l is PostLine => l !== null);
   }

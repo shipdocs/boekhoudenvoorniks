@@ -56,7 +56,7 @@ export const INCOME_TAX_RULES: IncomeTaxRules[] = [
     mkbWinstvrijstelling: 0.127,
     algemeneHeffingskorting: { max: 3068, phaseOutFrom: 28406, phaseOutRate: 0.06337 },
     arbeidskorting: { build: [[12169, 0.08053], [26288, 0.3003], [43071, 0.02258]], max: 5599, phaseOutFrom: 43071, phaseOutRate: 0.0651 },
-    zvw: { rate: 0.0526, maxIncome: 75860 },
+    zvw: { rate: 0.0526, maxIncome: 75864 },
     startersaftrek: 2123,
     kia: { min: 2901, pct: 0.28, pctUpTo: 70602, fixed: 19769, fixedUpTo: 130744, phaseOutRate: 0.0756, phaseOutUpTo: 392230, minPerAsset: 450 },
     desinvesteringDrempel: 2900,

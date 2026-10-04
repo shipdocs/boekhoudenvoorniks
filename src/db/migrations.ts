@@ -1252,4 +1252,11 @@ export const migrations: string[] = [
     UNIQUE (provider, external_id)
   );
   `,
+  /* 34: leverancierscredits toewijzen aan een bedrijfsmiddel, zonder journaalregels te wijzigen */ `
+  CREATE TABLE asset_credit_allocations (
+    journal_line_id INTEGER PRIMARY KEY REFERENCES journal_lines(id),
+    asset_id INTEGER NOT NULL REFERENCES assets(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];

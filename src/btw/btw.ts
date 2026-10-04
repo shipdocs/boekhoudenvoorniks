@@ -1,3 +1,4 @@
+import { accountOpenItems } from '../core-ledger/open-items';
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
@@ -6,7 +7,7 @@ import type { SettingsService } from '../settings/settings';
 import { centsToDecimalString, formatEuro, type Cents } from '../shared/money';
 import { addDays, periodFor, periodFromKey, today, type IsoDate, type Period } from '../shared/dates';
 import { runVatChecks, skipKey, type VatCheck } from './checks';
-import { carPrivateUse, carPrivateUseEntries, type CarPrivateUse } from './car';
+import { carPrivateUseFromLedger, carPrivateUseEntries, type CarPrivateUse } from './car';
 import { normalizeVatNumber, ValidationError } from '../shared/validation';
 
 /**
@@ -284,7 +285,7 @@ export class VatService {
     }[];
     const byEntry = new Map<number, VatDetailLine>();
     for (const r of rows) {
-      const omzet = s.omzet?.includes(r.rgs_code) ? r.net : s.inkoop && r.vat_code !== null && s.inkoop.includes(r.vat_code) && (r.category === 'kosten' || r.category === 'activa') ? -r.net : 0;
+      const omzet = s.omzet?.includes(r.rgs_code) ? r.net : s.inkoop && r.vat_code !== null && s.inkoop.includes(r.vat_code) && (r.category === 'kosten' || r.category === 'activa' || r.rgs_code === ACCOUNTS.priveOpnamen) ? -r.net : 0;
       const btw = s.btw?.includes(r.rgs_code) ? r.net * (s.btwSign ?? 1) : 0;
       if (omzet === 0 && btw === 0) continue;
       const line = byEntry.get(r.id) ?? {
@@ -314,18 +315,7 @@ export class VatService {
   accountLines(rgs: string, upTo?: IsoDate): { account: string; name: string; lines: VatDetailLine[]; total: Cents } {
     const account = this.ledger.getAccount(rgs);
     const to = upTo ?? '9999-12-31';
-    const rows = this.db
-      .prepare(
-        `SELECT e.id, e.entry_date, e.description, e.source, e.source_ref, SUM(l.debit) - SUM(l.credit) AS net
-         FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
-         WHERE l.account_id = ? AND e.entry_date <= ?
-           AND NOT (e.status = 'teruggedraaid' AND EXISTS (SELECT 1 FROM journal_entries r WHERE r.reverses_entry_id = e.id AND r.entry_date <= ?))
-           AND NOT (e.reverses_entry_id IS NOT NULL AND EXISTS (SELECT 1 FROM journal_entries o WHERE o.id = e.reverses_entry_id AND o.entry_date <= ?))
-         GROUP BY e.id
-         HAVING net <> 0
-         ORDER BY e.entry_date, e.id`,
-      )
-      .all(account.id, to, to, to) as { id: number; entry_date: string; description: string; source: string; source_ref: string | null; net: number }[];
+    const rows = accountOpenItems(this.db, rgs, to);
     const isQuestion = this.db.prepare(
       `SELECT 1 FROM purchase_invoice_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.purchase_invoice_id = ? AND a.rgs_code = ?`,
     );
@@ -375,7 +365,7 @@ export class VatService {
     const omzetNul = byAccount(ACCOUNTS.omzetNul) + byAccount(ACCOUNTS.omzetVerlegd);
     const omzetVrijgesteld = byAccount(ACCOUNTS.omzetVrijgesteld);
     // 2a: grondslag = kosten/activa-regels met btw-code 'verlegd' (debet, dus −net)
-    const inkoopGrondslag = (code: string) => 0 - rows.filter((r) => r.vat_code === code && (r.category === 'kosten' || r.category === 'activa')).reduce((s, r) => s + r.net, 0) || 0;
+    const inkoopGrondslag = (code: string) => 0 - rows.filter((r) => r.vat_code === code && (r.category === 'kosten' || r.category === 'activa' || r.rgs_code === ACCOUNTS.priveOpnamen)).reduce((s, r) => s + r.net, 0) || 0;
     const verlegdInkoop = inkoopGrondslag('verlegd');
     const btwVerlegd = byAccount(ACCOUNTS.btwAfdragenVerlegd);
     // buitenland (#16): 3a uitvoer, 3b EU-bedrijven (ICP), 4a/4b verlegde inkoop van buiten/binnen de EU
@@ -387,7 +377,7 @@ export class VatService {
     const btwBuitenEu = byAccount(ACCOUNTS.btwAfdragenBuitenEu);
     const inkoopEu = inkoopGrondslag('eu');
     const btwEu = byAccount(ACCOUNTS.btwAfdragenEu);
-    const voorbelasting = -byAccount(ACCOUNTS.btwVoorbelasting);
+    const voorbelasting = -byAccount(ACCOUNTS.btwVoorbelasting) || 0;
     const btwPrive = byAccount(ACCOUNTS.btwPriveGebruik);
 
     const btw5a = btwHoog + btwLaag + btwPrive + btwVerlegd + btwBuitenEu + btwEu;
@@ -582,7 +572,7 @@ export class VatService {
     const period = periodFromKey(periodKey);
     const year = Number(period.end.slice(0, 4));
     const booked = this.carEntries(year).reduce((s, e) => s + e.amount, 0);
-    return { year, lastPeriod: period.end.endsWith('-12-31'), due: carPrivateUse(this.settings.get(), year), booked };
+    return { year, lastPeriod: period.end.endsWith('-12-31'), due: carPrivateUseFromLedger(this.db, this.settings.get(), year), booked };
   }
 
   private carEntries(year: number): { id: number; entry_date: IsoDate; amount: Cents }[] {
@@ -595,11 +585,11 @@ export class VatService {
     const car = this.carPrivateUse(periodKey);
     if (!car.lastPeriod) throw new ValidationError('De btw over privégebruik van je auto hoort in de laatste aangifte van het jaar');
     if (this.calculate(periodKey).status === 'ingediend') throw new ValidationError(`${period.label} is al ingediend`);
-    if (car.due.state !== 'bekend') throw new ValidationError('Vul eerst bij Instellingen → Btw en belasting in of je privé rijdt en wat de cataloguswaarde van je auto is');
+    if (car.due.state !== 'bekend') throw new ValidationError('Vul eerst bij Instellingen → Btw en belasting de cataloguswaarde, ingebruikname en afgetrokken aanschaf-btw in. Ontbreken autokosten in deze administratie? Vul ook de afgetrokken btw op die kosten in.');
     const { amount, pct } = car.due;
     tx(this.db, () => {
       for (const e of this.carEntries(car.year)) this.ledger.reverse(e.id, e.entry_date, `Btw privégebruik auto ${car.year} opnieuw berekend`);
-      this.ledger.post({
+      if (amount !== 0) this.ledger.post({
         date: period.end,
         description: `Btw privégebruik auto ${car.year} (${(pct * 100).toLocaleString('nl-NL')}% van de cataloguswaarde)`,
         source: 'handmatig',

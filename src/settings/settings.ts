@@ -156,6 +156,12 @@ export interface AppSettings {
    * (bijvoorbeeld een marge-auto en geen aftrek op de kosten) is er geen btw-correctie.
    */
   carVatDeducted: boolean | null;
+  /** Alleen de aanschaf; geen aanschaf-btw betekent 1,5% forfait. */
+  carPurchaseVatDeducted: boolean | null;
+  /** Aftrek bij aanschaf buiten deze administratie; null = afleiden uit de boekingen. */
+  carPurchaseVatAmount: number | null;
+  /** Jaar en werkelijke aftrek op autokosten, als aanvulling buiten deze administratie. */
+  carCostVatOverride: { year: number; amount: number } | null;
   /** Btw-correctie privégebruik: forfait (2,7%/1,5%) of werkelijk privégebruik uit een rittenadministratie. */
   carVatMethod: 'forfait' | 'werkelijk' | null;
   /** jaar waarin de auto in gebruik is genomen voor je bedrijf */
@@ -242,6 +248,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   carPrivateUse: null,
   carCatalogValue: null,
   carVatDeducted: null,
+  carPurchaseVatDeducted: null,
+  carPurchaseVatAmount: null,
+  carCostVatOverride: null,
   carVatMethod: null,
   carInUseSince: null,
   carInUseMonth: null,
@@ -280,6 +289,12 @@ function integerInRange(value: number, min: number, max: number, label: string):
 }
 
 function validateSettings(settings: AppSettings): void {
+  if (settings.carPurchaseVatDeducted !== null && typeof settings.carPurchaseVatDeducted !== 'boolean') throw new ValidationError('Geef aan of er aanschaf-btw is afgetrokken');
+  if (settings.carPurchaseVatAmount !== null) integerInRange(settings.carPurchaseVatAmount, 0, 100000000000, 'Afgetrokken aanschaf-btw');
+  if (settings.carCostVatOverride !== null) {
+    integerInRange(settings.carCostVatOverride.year, 1800, 9999, 'Jaar autokosten-btw');
+    integerInRange(settings.carCostVatOverride.amount, 0, 100000000000, 'Afgetrokken autokosten-btw');
+  }
   integerInRange(settings.paymentTermDays, 0, 365, 'Betaaltermijn');
   integerInRange(settings.quoteValidityDays, 1, 3650, 'Geldigheid offerte');
   integerInRange(settings.smtp.port, 1, 65535, 'SMTP-poort');

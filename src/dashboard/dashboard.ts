@@ -56,7 +56,7 @@ export class DashboardService {
     for (let i = 11; i >= 0; i--) {
       const d = new Date(Date.UTC(y, m - 1 - i, 1));
       const p = periodFor(d.toISOString().slice(0, 10), 'maand');
-      const rc = this.revenueAndCosts(p.start, p.end);
+      const rc = this.revenueAndCosts(p.start, p.end < asOf ? p.end : asOf);
       byMonth.push({ month: p.key, label: `${MONTH_LABELS[d.getUTCMonth()]}${d.getUTCMonth() === 0 || i === 11 ? ' ' + String(d.getUTCFullYear()).slice(2) : ''}`, revenue: rc.revenue, costs: rc.costs });
     }
     const open = this.invoices.listOpen(asOf).filter((i) => i.open_amount > 0);
@@ -65,11 +65,11 @@ export class DashboardService {
     const vatReport = this.vat.calculate(vatPeriod.key);
     const bankAccounts = this.bank.listAccounts();
     const ledgerBalance = bankAccounts.length
-      ? bankAccounts.reduce((s, a) => s + this.ledger.balance(a.rgs_code), 0)
-      : this.ledger.balance(ACCOUNTS.bank);
+      ? bankAccounts.reduce((s, a) => s + this.ledger.balance(a.rgs_code, { to: asOf }), 0)
+      : this.ledger.balance(ACCOUNTS.bank, { to: asOf });
     return {
       asOf,
-      revenueThisMonth: this.revenueAndCosts(month.start, month.end).revenue,
+      revenueThisMonth: this.revenueAndCosts(month.start, asOf).revenue,
       revenueThisYear: ytd.revenue,
       profitThisYear: ytd.revenue - ytd.costs,
       revenueByMonth: byMonth,
