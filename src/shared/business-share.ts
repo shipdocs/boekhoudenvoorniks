@@ -1,5 +1,10 @@
 import { roundHalfAwayFromZero, type Cents } from './money';
 
+/** Een ongewijzigde standaard is geen persoonlijke keuze; een ingetikte 100 wel. */
+export function selectedBusinessPct(edited: number | null, remembered: number | null | undefined): number | undefined {
+  return edited ?? (remembered !== undefined && remembered !== null && remembered < 100 ? remembered : undefined);
+}
+
 /** Zakelijk deel van een bedrag; 100% laat het ongemoeid. Zelfde afronding als het boeken. */
 export function shareOf(amount: Cents, pct: number): Cents {
   return pct === 100 ? amount : roundHalfAwayFromZero((amount * pct) / 100);

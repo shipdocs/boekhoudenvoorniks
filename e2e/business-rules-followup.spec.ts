@@ -1,0 +1,91 @@
+import { test, expect, onboard, nav, call } from './fixtures';
+
+test('PR275: zonder opgegeven kosten-btw kan het jaar geen nul-override aanmaken', async ({ page }) => {
+  await onboard(page);
+  await call(page, 'settings.update', { carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait' });
+  await page.reload();
+  await nav(page, 'Instellingen');
+  await page.locator('main .chips').first().getByRole('button', { name: /Btw/ }).click();
+  await expect(page.getByRole('spinbutton', { name: 'Jaar autokosten-btw' })).toBeDisabled();
+  expect((await call<{ carCostVatOverride: unknown }>(page, 'settings.get')).carCostVatOverride).toBeNull();
+});
+
+test('F04: afleiden uit aankoop verwijdert het verborgen handbedrag', async ({ page }) => {
+  await onboard(page);
+  await call(page, 'settings.update', { carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carPurchaseVatDeducted: true, carPurchaseVatAmount: 650000 });
+  await page.reload();
+  await nav(page, 'Instellingen');
+  await page.locator('main .chips').first().getByRole('button', { name: /Btw/ }).click();
+  const select = page.locator('label.field', { hasText: 'Heb je bij de aanschaf btw afgetrokken?' }).locator('select');
+  await select.selectOption('');
+  await expect(page.locator('label.field', { hasText: 'Afgetrokken btw bij aanschaf' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Opslaan', exact: true }).first().click();
+  const result = await call<{ carPurchaseVatDeducted: boolean | null; carPurchaseVatAmount: number | null }>(page, 'settings.get');
+  expect(result.carPurchaseVatDeducted).toBeNull();
+  expect(result.carPurchaseVatAmount).toBeNull();
+});
+
+test('F01: telefoonkeuze 70% blijft gelden bij ongewijzigde bank-UI-default', async ({ page }) => {
+  await onboard(page);
+  await call(page, 'settings.update', { phoneInternetBusinessPct: 70 });
+  await page.reload();
+  const csv = ['"Datum";"Naam / Omschrijving";"Rekening";"Tegenrekening";"Code";"Af Bij";"Bedrag (EUR)";"Mutatiesoort";"Mededelingen"', '"20260915";"KPN";"NL91ABNA0417164300";"";"BA";"Af";"121,00";"Incasso";"Telefoon"'].join('\n');
+  await call(page, 'bank.importFile', 'telefoon.csv', csv);
+  await nav(page, 'Bank');
+  await page.locator('table.list tbody tr', { hasText: 'KPN' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Was dit zakelijk?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Telefoon & internet', exact: true }).click();
+  const percentage = page.locator('label.field', { hasText: 'Hoeveel daarvan is zakelijk?' }).locator('input');
+  await expect(percentage).toHaveValue('100');
+  // Het percentageveld is niet gewijzigd.
+  await page.getByRole('button', { name: 'Opslaan', exact: true }).click();
+  await expect(page.getByText('Verwerkt ✓').last()).toBeVisible();
+  const overview = await call<{ items: { key: string; amount: number | null }[] }>(page, 'incomeTax.overview', 2026);
+  expect(overview.items.find(i => i.key === 'telefoon-prive')?.amount).toBe(3000);
+});
+
+test('F03: memoriaal koppelt een gekozen vraagpost en neemt de blokkade weg', async ({ page }) => {
+  await onboard(page);
+  await call(page, 'settings.update', { advancedMode: true });
+  const id = await call<number>(page, 'ledger.manualEntry', { date: '2026-09-15', description: 'Onbekende bankbetaling', lines: [{ account: 'BSchOvsVrp', debit: 10000 }, { account: 'BLiqBanRba', credit: 10000 }] });
+  await page.reload();
+  await nav(page, 'Boekhouding');
+  await page.getByRole('button', { name: 'Journaal', exact: true }).click();
+  await page.getByRole('button', { name: 'Correctieboeking', exact: true }).click();
+  const memo = page.getByRole('dialog', { name: 'Correctieboeking (memoriaal)' });
+  await memo.locator('input[type=date]').fill('2026-09-16');
+  await memo.locator('input').nth(1).fill('Telefoonkosten uitgezocht');
+  await memo.locator('select').nth(0).selectOption('WBedKanTel');
+  await memo.locator('input[placeholder=debet]').nth(0).fill('100');
+  await memo.locator('select').nth(1).selectOption('BSchOvsVrp');
+  await memo.locator('input[placeholder=credit]').nth(1).fill('100');
+  await memo.locator('label.field', { hasText: 'Welke vraagpost boek je af?' }).locator('select').selectOption(String(id));
+  await memo.getByRole('button', { name: 'Boeken', exact: true }).click();
+  await expect(page.locator('.toasts').getByText('Geboekt')).toBeVisible();
+  expect(await call(page, 'ledger.questionItems', '2026-09-30')).toEqual([]);
+});
+
+test('F03: een backdated memoriaal kan een later afgeboekte vraagpost niet dubbel verbruiken', async ({ page }) => {
+  await onboard(page);
+  await call(page, 'settings.update', { advancedMode: true });
+  const id = await call<number>(page, 'ledger.manualEntry', { date: '2026-09-01', description: 'Onbekende bankbetaling', lines: [{ account: 'BSchOvsVrp', debit: 10000 }, { account: 'BLiqBanRba', credit: 10000 }] });
+  await call(page, 'ledger.manualEntry', { questionEntryId: id, date: '2026-09-20', description: 'Al uitgezocht', lines: [{ account: 'WBedKanTel', debit: 10000 }, { account: 'BSchOvsVrp', credit: 10000 }] });
+  const before = await call<unknown[]>(page, 'ledger.entries');
+  await page.reload();
+  await nav(page, 'Boekhouding');
+  await page.getByRole('button', { name: 'Journaal', exact: true }).click();
+  await page.getByRole('button', { name: 'Correctieboeking', exact: true }).click();
+  const memo = page.getByRole('dialog', { name: 'Correctieboeking (memoriaal)' });
+  await memo.locator('input[type=date]').fill('2026-09-10');
+  await memo.locator('input').nth(1).fill('Nogmaals afboeken op eerdere datum');
+  await memo.locator('select').nth(0).selectOption('WBedKanTel');
+  await memo.locator('input[placeholder=debet]').nth(0).fill('100');
+  await memo.locator('select').nth(1).selectOption('BSchOvsVrp');
+  await memo.locator('input[placeholder=credit]').nth(1).fill('100');
+  await memo.locator('label.field', { hasText: 'Welke vraagpost boek je af?' }).locator('select').selectOption(String(id));
+  await memo.getByRole('button', { name: 'Boeken', exact: true }).click();
+  await expect(page.getByText(/Deze vraagpost is op een latere datum al afgeboekt/)).toBeVisible();
+  await expect(memo).toBeVisible();
+  expect((await call<unknown[]>(page, 'ledger.entries')).length).toBe(before.length);
+  expect(await call(page, 'ledger.questionItems', '2026-09-30')).toEqual([]);
+});

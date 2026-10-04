@@ -6,6 +6,7 @@ import { ValidationError } from '../shared/validation';
 import { DEFAULT_ACCOUNTS, type AccountCategory } from './accounts';
 import { RULES_VERSION } from './rules-version';
 import rgsTaxonomy from './rgs-codes.json';
+import { settleQuestionItem } from './open-items';
 
 /** Officiële RGS-codes (taxonomie-release in rgs-codes.json). */
 export const RGS_VERSION: string = rgsTaxonomy.version;
@@ -35,6 +36,8 @@ export interface PostEntry {
   reversesEntryId?: number | null;
   /** De gebeurtenis waar deze post uit volgt (#19). Zonder: er wordt een gebeurtenis "boeking" vastgelegd. */
   eventId?: number | null;
+  /** Expliciet gekozen vraagpost die deze memoriaalboeking (gedeeltelijk) afboekt. */
+  questionEntryId?: number;
 }
 
 export interface Account {
@@ -375,6 +378,7 @@ export class Ledger {
       entry.lines.forEach((line, i) => {
         insertLine.run(entryId, accountIds[i], line.debit ?? 0, line.credit ?? 0, line.relationId ?? null, line.vatCode ?? null, line.description ?? null);
       });
+      if (entry.questionEntryId !== undefined) settleQuestionItem(this.db, entry.questionEntryId, entryId);
       return entryId;
     });
   }

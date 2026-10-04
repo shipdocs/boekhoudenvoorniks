@@ -206,7 +206,7 @@ export function SettingsScreen() {
                     </Field>
                     {draft.carVatDeducted && <>
                       <Field label="Heb je bij de aanschaf btw afgetrokken?" hint="Los van de btw op brandstof en onderhoud. Zonder aanschaf-btw geldt 1,5%.">
-                        <select value={draft.carPurchaseVatDeducted === null ? '' : draft.carPurchaseVatDeducted ? 'ja' : 'nee'} onChange={e => set({ carPurchaseVatDeducted: e.target.value === '' ? null : e.target.value === 'ja' })}>
+                        <select value={draft.carPurchaseVatDeducted === null ? '' : draft.carPurchaseVatDeducted ? 'ja' : 'nee'} onChange={e => set({ carPurchaseVatDeducted: e.target.value === '' ? null : e.target.value === 'ja', ...(e.target.value !== 'ja' ? { carPurchaseVatAmount: null } : {}) })}>
                           <option value="">Afleiden uit de aankoop in deze administratie</option><option value="ja">Ja</option><option value="nee">Nee (bijvoorbeeld marge-auto of lease)</option>
                         </select>
                       </Field>
@@ -819,7 +819,7 @@ function BusinessShareReview({ name, onClose }: { name: string; onClose: () => v
     const ok = Number.isInteger(Number(raw)) && Number(raw) >= 1 && Number(raw) <= 100;
     const newPct = ok ? Number(raw) : l.currentPct;
     const after = businessEffect(l.parts, newPct, l.noVatDeduction);
-    const changes = ok && newPct !== l.currentPct;
+    const changes = ok && !l.vatWarning && newPct !== l.currentPct;
     return { l, raw, ok, newPct, after, changes, selected: changes && !skip[keyOf(l)] };
   });
   const selected = rows.filter((r) => r.selected);
@@ -846,7 +846,7 @@ function BusinessShareReview({ name, onClose }: { name: string; onClose: () => v
                   <tr key={keyOf(r.l)} className={r.changes ? '' : 'muted'}>
                     <td><input type="checkbox" disabled={!r.changes} checked={r.selected} onChange={(e) => setSkip({ ...skip, [keyOf(r.l)]: !e.target.checked })} aria-label="Meenemen" /></td>
                     <td><DateNl date={r.l.date} /></td>
-                    <td>{r.l.description}{r.l.filedPeriod && <div className="small muted">periode al ingediend ({r.l.filedPeriod.replace("-", " ")})</div>}</td>
+                    <td>{r.l.description}{r.l.vatWarning && <div className="small notice warn">{r.l.vatWarning}</div>}{r.l.filedPeriod && <div className="small muted">periode al ingediend ({r.l.filedPeriod.replace("-", " ")})</div>}</td>
                     <td className="right"><Euro cents={r.l.gross} /></td>
                     <td>{r.l.currentPct}%</td>
                     <td><input type="number" min={1} max={100} style={{ width: 64 }} value={r.raw} onChange={(e) => setPcts({ ...pcts, [keyOf(r.l)]: e.target.value })} aria-label="Nieuw zakelijk deel" /> %</td>

@@ -86,7 +86,7 @@ export function carPrivateUseFromLedger(db: Db, s: AppSettings, year: number): C
       AND COALESCE(l.vat_code, '') != 'niet-aftrekbaar' AND e.entry_date BETWEEN ? AND ?`).get(ACCOUNTS.vervoermiddelen, `${s.carInUseSince ?? year}-01-01`, `${year}-12-31`) as { n: number };
   if ((cars.length > 1 || acquisitions.n > 1) && s.carCostVatOverride?.year !== year) return { state: 'onbekend' };
   const knownAcquisition = (cars.length === 1 && !cars[0]!.is_opening) || (cars.length === 0 && acquisitions.n === 1);
-  const purchaseVat = s.carPurchaseVatAmount ?? (knownAcquisition ? vatOn([ACCOUNTS.vervoermiddelen], `${s.carInUseSince ?? year}-01-01`, `${year}-12-31`) : null);
+  const purchaseVat = (s.carPurchaseVatDeducted === true ? s.carPurchaseVatAmount : null) ?? (knownAcquisition ? vatOn([ACCOUNTS.vervoermiddelen], `${s.carInUseSince ?? year}-01-01`, `${year}-12-31`) : null);
   const purchaseDeducted = s.carPurchaseVatDeducted ?? (purchaseVat === null ? null : purchaseVat > 0);
   const costVat = s.carCostVatOverride?.year === year ? s.carCostVatOverride.amount : vatOn(['WBedAutBra', 'WBedAutOnd'], `${year}-01-01`, `${year}-12-31`);
   return carPrivateUse(s, year, { purchaseDeducted, purchaseVat, costVat });

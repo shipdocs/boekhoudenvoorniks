@@ -80,6 +80,8 @@ function ManualEntry({ onClose, onDone, defaultDate }: { onClose: () => void; on
   const { run, busy } = useAction();
   const [date, setDate] = useState(defaultDate ?? today());
   const [description, setDescription] = useState('');
+  const [questionEntryId, setQuestionEntryId] = useState<number | undefined>();
+  const questions = useLoad(() => api.ledger.questionItems(date), [date]);
   const [lines, setLines] = useState<{ account: string; debit: number | null; credit: number | null }[]>([{ account: '', debit: null, credit: null }, { account: '', debit: null, credit: null }]);
   const d = lines.reduce((s, l) => s + (l.debit ?? 0), 0);
   const c = lines.reduce((s, l) => s + (l.credit ?? 0), 0);
@@ -104,10 +106,14 @@ function ManualEntry({ onClose, onDone, defaultDate }: { onClose: () => void; on
         <Button small onClick={() => setLines([...lines, { account: '', debit: null, credit: null }])}>+ Regel</Button>
         <span className={d === c ? 'pill good' : 'pill bad'}>Debet <Euro cents={d} /> · Credit <Euro cents={c} /></span>
       </div>
+      <Field label="Welke vraagpost boek je af?" hint="Kies alleen een post die bij deze correctie hoort. Boek op Vraagposten het tegengestelde bedrag.">
+        <select value={questionEntryId ?? ''} onChange={e => setQuestionEntryId(e.target.value ? Number(e.target.value) : undefined)}><option value="">Geen koppeling</option>{(questions.data ?? []).map(q => <option key={q.id} value={q.id}>#{q.id} · {q.entry_date} · {q.description}</option>)}</select>
+      </Field>
+      <ErrorBox error={questions.error} />
       <div className="row end" style={{ marginTop: 14 }}>
         <Button onClick={onClose}>Annuleren</Button>
         <Button kind="primary" disabled={busy || d !== c || d === 0 || !description} onClick={async () => {
-          const r = await run(() => api.ledger.manualEntry({ date, description, lines: lines.filter((l) => l.account && (l.debit || l.credit)).map((l) => ({ account: l.account, debit: l.debit ?? undefined, credit: l.credit ?? undefined })) }), 'Geboekt');
+          const r = await run(() => api.ledger.manualEntry({ questionEntryId, date, description, lines: lines.filter((l) => l.account && (l.debit || l.credit)).map((l) => ({ account: l.account, debit: l.debit ?? undefined, credit: l.credit ?? undefined })) }), 'Geboekt');
           if (r !== undefined) onDone();
         }}>Boeken</Button>
       </div>
