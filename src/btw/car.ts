@@ -45,17 +45,49 @@ export function carPrivateUseEntries(db: Db, year: number): { id: number; entry_
 export function carPrivateUse(
   s: Pick<AppSettings, 'carUse' | 'carPrivateUse' | 'carCatalogValue' | 'carInUseSince' | 'carInUseMonth' | 'kor'> & Partial<Pick<AppSettings, 'carVatDeducted' | 'carVatMethod'>>,
   year: number,
+  basis?: { purchaseDeducted: boolean | null; purchaseVat: Cents | null; costVat: Cents },
 ): CarPrivateUse {
   if (s.kor || s.carUse !== 'zakelijk' || s.carPrivateUse === false || s.carVatDeducted === false) return { state: 'n.v.t.' };
   if (s.carInUseSince !== null && s.carInUseSince > year) return { state: 'n.v.t.' };
   if (s.carPrivateUse === true && s.carVatDeducted === true && s.carVatMethod === 'werkelijk') return { state: 'werkelijk' };
   if (s.carVatDeducted !== true || s.carVatMethod !== 'forfait') return { state: 'onbekend' };
   if (s.carPrivateUse !== true || !s.carCatalogValue || s.carCatalogValue <= 0) return { state: 'onbekend' };
+  if (!basis || s.carInUseSince === null) return { state: 'onbekend' };
   // in het jaar van ingebruikname naar rato: vanaf de maand van ingebruikname
   const firstYear = s.carInUseSince === year;
   if (firstYear && !(s.carInUseMonth && s.carInUseMonth >= 1 && s.carInUseMonth <= 12)) return { state: 'onbekend' };
   const months = firstYear ? 13 - s.carInUseMonth! : 12;
   const old = s.carInUseSince !== null && year >= s.carInUseSince + CAR_OLD_AFTER_YEARS;
-  const pct = old ? CAR_PRIVATE_PCT_OLD : CAR_PRIVATE_PCT;
-  return { state: 'bekend', amount: Math.round((s.carCatalogValue * pct * months) / 12), pct, catalogValue: s.carCatalogValue, months };
+  if (!old && (basis.purchaseDeducted === null || (basis.purchaseDeducted && basis.purchaseVat === null))) return { state: 'onbekend' };
+  const pct = old || basis.purchaseDeducted === false ? CAR_PRIVATE_PCT_OLD : CAR_PRIVATE_PCT;
+  const forfait = Math.round((s.carCatalogValue * pct * months) / 12);
+  const maximum = Math.max(0, basis.costVat + (basis.purchaseDeducted && !old ? Math.round((basis.purchaseVat ?? 0) / 5) : 0));
+  return { state: 'bekend', amount: Math.min(forfait, maximum), pct, catalogValue: s.carCatalogValue, months };
+}
+
+/** Eén auto in deze administratie: gebruik alleen de werkelijk afgetrokken btw, ook bij gemengde bonnen. */
+export function carPrivateUseFromLedger(db: Db, s: AppSettings, year: number): CarPrivateUse {
+  const vatOn = (accounts: string[], from: IsoDate, to: IsoDate): Cents => {
+    const rows = db.prepare(`SELECT e.id, l.vat_code AS code,
+      SUM(CASE WHEN a.rgs_code IN (${accounts.map(() => '?').join(',')}) THEN l.debit - l.credit ELSE 0 END) AS carBase,
+      SUM(CASE WHEN a.category IN ('kosten', 'activa') THEN l.debit - l.credit ELSE 0 END) AS base,
+      SUM(CASE WHEN a.rgs_code = ? THEN l.debit - l.credit ELSE 0 END) AS vat
+      FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+      WHERE e.entry_date BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening') AND l.vat_code IS NOT NULL
+      GROUP BY e.id, l.vat_code`).all(...accounts, ACCOUNTS.btwVoorbelasting, from, to) as { carBase: number; base: number; vat: number }[];
+    return rows.reduce((n, r) => n + (r.base ? Math.round(r.vat * r.carBase / r.base) : 0), 0);
+  };
+  const cars = db.prepare(`SELECT s.is_opening FROM assets s JOIN journal_lines l ON l.id = s.journal_line_id JOIN journal_entries e ON e.id = l.journal_entry_id
+    WHERE s.account_rgs = ? AND s.status != 'vervallen' AND s.acquired_on <= ? AND (s.disposed_on IS NULL OR s.disposed_on >= ?)
+      AND e.status = 'definitief'`).all(ACCOUNTS.vervoermiddelen, `${year}-12-31`, `${year}-01-01`) as { is_opening: number }[];
+  // Het register kan nog leeg zijn: zoek dan naar de aanschafboekingen zelf.
+  const acquisitions = db.prepare(`SELECT COUNT(*) AS n FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+    WHERE a.rgs_code = ? AND l.debit > 0 AND e.status = 'definitief' AND e.reverses_entry_id IS NULL AND e.source != 'opening'
+      AND COALESCE(l.vat_code, '') != 'niet-aftrekbaar' AND e.entry_date BETWEEN ? AND ?`).get(ACCOUNTS.vervoermiddelen, `${s.carInUseSince ?? year}-01-01`, `${year}-12-31`) as { n: number };
+  if ((cars.length > 1 || acquisitions.n > 1) && s.carCostVatOverride?.year !== year) return { state: 'onbekend' };
+  const knownAcquisition = (cars.length === 1 && !cars[0]!.is_opening) || (cars.length === 0 && acquisitions.n === 1);
+  const purchaseVat = (s.carPurchaseVatDeducted === true ? s.carPurchaseVatAmount : null) ?? (knownAcquisition ? vatOn([ACCOUNTS.vervoermiddelen], `${s.carInUseSince ?? year}-01-01`, `${year}-12-31`) : null);
+  const purchaseDeducted = s.carPurchaseVatDeducted ?? (purchaseVat === null ? null : purchaseVat > 0);
+  const costVat = s.carCostVatOverride?.year === year ? s.carCostVatOverride.amount : vatOn(['WBedAutBra', 'WBedAutOnd'], `${year}-01-01`, `${year}-12-31`);
+  return carPrivateUse(s, year, { purchaseDeducted, purchaseVat, costVat });
 }

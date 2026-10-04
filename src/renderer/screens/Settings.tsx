@@ -204,6 +204,20 @@ export function SettingsScreen() {
                         <option value="nee">Nee (bijvoorbeeld een occasion zonder btw, en geen btw op de kosten)</option>
                       </select>
                     </Field>
+                    {draft.carVatDeducted && <>
+                      <Field label="Heb je bij de aanschaf btw afgetrokken?" hint="Los van de btw op brandstof en onderhoud. Zonder aanschaf-btw geldt 1,5%.">
+                        <select value={draft.carPurchaseVatDeducted === null ? '' : draft.carPurchaseVatDeducted ? 'ja' : 'nee'} onChange={e => set({ carPurchaseVatDeducted: e.target.value === '' ? null : e.target.value === 'ja', ...(e.target.value !== 'ja' ? { carPurchaseVatAmount: null } : {}) })}>
+                          <option value="">Afleiden uit de aankoop in deze administratie</option><option value="ja">Ja</option><option value="nee">Nee (bijvoorbeeld marge-auto of lease)</option>
+                        </select>
+                      </Field>
+                      {draft.carPurchaseVatDeducted === true && <Field label="Afgetrokken btw bij aanschaf" hint="Laat leeg als de aanschaf volledig in deze administratie staat.">
+                        <MoneyInput value={draft.carPurchaseVatAmount} onChange={v => set({ carPurchaseVatAmount: v })} />
+                      </Field>}
+                      <Field label="Btw op autokosten buiten deze administratie" hint="Het volledige afgetrokken bedrag over onderhoud en gebruik voor het aangegeven jaar; laat leeg om de boekingen te gebruiken.">
+                        <div className="row"><input aria-label="Jaar autokosten-btw" type="number" min="1800" max="9999" value={draft.carCostVatOverride?.year ?? new Date().getFullYear()} disabled={!draft.carCostVatOverride} onChange={e => draft.carCostVatOverride && set({ carCostVatOverride: { ...draft.carCostVatOverride, year: Number(e.target.value) } })} />
+                        <MoneyInput value={draft.carCostVatOverride?.amount ?? null} onChange={v => set({ carCostVatOverride: v === null ? null : { year: draft.carCostVatOverride?.year ?? new Date().getFullYear(), amount: v } })} /></div>
+                      </Field>
+                    </>}
                     {draft.carVatDeducted && (
                       <Field label="Hoe reken je het privégebruik?" hint="vraag je boekhouder als je twijfelt">
                         <select value={draft.carVatMethod ?? ''} onChange={(e) => set({ carVatMethod: (e.target.value || null) as AppSettings['carVatMethod'] })}>
@@ -219,7 +233,7 @@ export function SettingsScreen() {
                       ? 'Heb je geen btw teruggekregen op de auto en de kosten? Dan betaal je ook geen btw over het privégebruik.'
                       : draft.carVatMethod === 'werkelijk'
                         ? 'Met je echte privékilometers rekent je boekhouder de btw uit; die komt in je laatste aangifte van het jaar.'
-                        : 'Met het forfait betaal je één keer per jaar btw, in je laatste aangifte van het jaar: 2,7% van de cataloguswaarde (vanaf het 5e jaar na ingebruikname 1,5%; in het eerste jaar naar rato). De app zet dat voor je klaar. Betaal je een eigen bijdrage, of is de auto bijzonder (bijvoorbeeld zonder btw gekocht)? Vraag je boekhouder of het forfait klopt.'}{' '}
+                        : 'Met het forfait betaal je één keer per jaar btw, in je laatste aangifte van het jaar: 2,7% van de cataloguswaarde (vanaf het 5e jaar na ingebruikname 1,5%; in het eerste jaar naar rato). Zonder aanschaf-btw geldt 1,5%. De correctie is begrensd op de afgetrokken btw op autokosten, plus tijdens de eerste vijf jaren een vijfde van de aanschaf-btw. De app zet dat voor je klaar. Betaal je een eigen bijdrage? Vraag je boekhouder of het forfait klopt.'}{' '}
                     Daarnaast telt privégebruik mee voor de inkomstenbelasting (bijtelling). Dat rekent de app niet uit: vraag je boekhouder.
                   </p>
                 </>
@@ -805,7 +819,7 @@ function BusinessShareReview({ name, onClose }: { name: string; onClose: () => v
     const ok = Number.isInteger(Number(raw)) && Number(raw) >= 1 && Number(raw) <= 100;
     const newPct = ok ? Number(raw) : l.currentPct;
     const after = businessEffect(l.parts, newPct, l.noVatDeduction);
-    const changes = ok && newPct !== l.currentPct;
+    const changes = ok && !l.vatWarning && newPct !== l.currentPct;
     return { l, raw, ok, newPct, after, changes, selected: changes && !skip[keyOf(l)] };
   });
   const selected = rows.filter((r) => r.selected);
@@ -832,7 +846,7 @@ function BusinessShareReview({ name, onClose }: { name: string; onClose: () => v
                   <tr key={keyOf(r.l)} className={r.changes ? '' : 'muted'}>
                     <td><input type="checkbox" disabled={!r.changes} checked={r.selected} onChange={(e) => setSkip({ ...skip, [keyOf(r.l)]: !e.target.checked })} aria-label="Meenemen" /></td>
                     <td><DateNl date={r.l.date} /></td>
-                    <td>{r.l.description}{r.l.filedPeriod && <div className="small muted">periode al ingediend ({r.l.filedPeriod.replace("-", " ")})</div>}</td>
+                    <td>{r.l.description}{r.l.vatWarning && <div className="small notice warn">{r.l.vatWarning}</div>}{r.l.filedPeriod && <div className="small muted">periode al ingediend ({r.l.filedPeriod.replace("-", " ")})</div>}</td>
                     <td className="right"><Euro cents={r.l.gross} /></td>
                     <td>{r.l.currentPct}%</td>
                     <td><input type="number" min={1} max={100} style={{ width: 64 }} value={r.raw} onChange={(e) => setPcts({ ...pcts, [keyOf(r.l)]: e.target.value })} aria-label="Nieuw zakelijk deel" /> %</td>

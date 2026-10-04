@@ -3,4 +3,4 @@
  * andere journaalregels oplevert; oude posten houden hun versie, zodat hercompileren met
  * dezelfde versie reproduceerbaar blijft.
  */
-export const RULES_VERSION = '2026.2';
+export const RULES_VERSION = '2026.3';

@@ -1252,4 +1252,64 @@ export const migrations: string[] = [
     UNIQUE (provider, external_id)
   );
   `,
+  /* 34: leverancierscredits toewijzen aan een bedrijfsmiddel, zonder journaalregels te wijzigen */ `
+  CREATE TABLE asset_credit_allocations (
+    journal_line_id INTEGER PRIMARY KEY REFERENCES journal_lines(id),
+    asset_id INTEGER NOT NULL REFERENCES assets(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
+  /* 35: expliciete afboekingen van vraagposten, zonder blind salderen */ `
+  CREATE TABLE question_item_settlements (
+    original_entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+    settlement_entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    PRIMARY KEY (original_entry_id, settlement_entry_id),
+    CHECK (original_entry_id != settlement_entry_id)
+  );
+  `,
+  /* 36: gedateerde afschrijvingshistorie; eerdere jaarbedragen nooit overschrijven */ `
+  CREATE TABLE asset_depreciation_history (
+    asset_id INTEGER NOT NULL REFERENCES assets(id),
+    year INTEGER NOT NULL,
+    journal_entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+    amount INTEGER NOT NULL,
+    PRIMARY KEY (asset_id, journal_entry_id)
+  );
+  -- De oude jaarcache kan bij verkoop zijn verlaagd. De onveranderlijke cumulatieve
+  -- journaalregels bevatten nog het oorspronkelijke bedrag. De app boekte de activa
+  -- in primaire-sleutelvolgorde, met per activum één cumulatieve regel.
+  INSERT INTO asset_depreciation_history (asset_id, year, journal_entry_id, amount)
+  WITH old AS (
+    SELECT d.asset_id, d.year, d.journal_entry_id, s.account_rgs,
+      ROW_NUMBER() OVER (PARTITION BY d.journal_entry_id, s.account_rgs ORDER BY d.asset_id) AS position
+    FROM asset_depreciation d JOIN assets s ON s.id = d.asset_id
+  ), posted AS (
+    SELECT l.journal_entry_id, l.credit AS amount,
+      CASE a.rgs_code WHEN 'BMvaBedCae' THEN 'BMvaBedIna' WHEN 'BMvaTraCae' THEN 'BMvaTraVrt' END AS account_rgs,
+      ROW_NUMBER() OVER (PARTITION BY l.journal_entry_id, a.rgs_code ORDER BY l.id) AS position
+    FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+    WHERE a.rgs_code IN ('BMvaBedCae', 'BMvaTraCae') AND l.credit > 0
+  )
+  SELECT o.asset_id, o.year, o.journal_entry_id, p.amount FROM old o JOIN posted p
+    ON p.journal_entry_id = o.journal_entry_id AND p.account_rgs = o.account_rgs AND p.position = o.position;
+
+  -- Bestaande verkoop- en aankoopcorrecties hebben een verwijzing naar het activum.
+  INSERT INTO asset_depreciation_history (asset_id, year, journal_entry_id, amount)
+  SELECT s.id,
+    CASE WHEN e.source_ref = 'afschrijving-correctie:' || s.id THEN CAST(substr(e.entry_date, 1, 4) AS INTEGER)
+      ELSE CAST(substr(e.source_ref, length('afschrijving-correctie:' || s.id || ':') + 1) AS INTEGER) END,
+    e.id, SUM(l.credit - l.debit)
+  FROM assets s JOIN journal_entries e ON e.source_ref = 'afschrijving-correctie:' || s.id
+    OR e.source_ref LIKE 'afschrijving-correctie:' || s.id || ':%'
+  JOIN journal_lines l ON l.journal_entry_id = e.id
+  JOIN chart_of_accounts a ON a.id = l.account_id
+  WHERE a.rgs_code = CASE s.account_rgs WHEN 'BMvaBedIna' THEN 'BMvaBedCae' WHEN 'BMvaTraVrt' THEN 'BMvaTraCae' END
+    AND e.reverses_entry_id IS NULL
+  GROUP BY s.id, e.id;
+  CREATE TRIGGER asset_depreciation_history_no_update BEFORE UPDATE ON asset_depreciation_history
+    BEGIN SELECT RAISE(ABORT, 'Afschrijvingshistorie is onveranderlijk'); END;
+  CREATE TRIGGER asset_depreciation_history_no_delete BEFORE DELETE ON asset_depreciation_history
+    BEGIN SELECT RAISE(ABORT, 'Afschrijvingshistorie is onveranderlijk'); END;
+  `,
 ];

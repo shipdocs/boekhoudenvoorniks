@@ -1,3 +1,4 @@
+import { assertQuestionNotSettled } from '../core-ledger/open-items';
 import { sameBankName } from '../shared/bank-name';
 import { createHash } from 'node:crypto';
 import { sameCounterparty, sameTextVariant } from './same-payment';
@@ -1606,35 +1607,36 @@ export class BankService {
    * inclusief BTW-splitsing. De gebruiker ziet alleen een categorie en een BTW-keuze.
    */
   bookToAccount(txId: number, input: BookToAccountInput): number {
-    const t = this.get(txId);
-    this.assertOpen(t);
-    const bank = this.getAccount(t.bank_account_id);
-    const target = this.ledger.getAccount(input.account);
-    const description = input.description?.trim() || t.description || t.counter_name || 'Banktransactie';
-    const relationId = input.relationId ?? (t.counter_iban ? this.relations.findByIban(t.counter_iban)?.id ?? null : null);
-    const vatCode = input.vatCode ?? 'geen';
-    // omzet komt op de omzetrekening die bij de btw hoort (21%, 0% buiten de EU, …): zo belandt het in de juiste rubriek
-    const account = target.category === 'omzet' && isSalesVatCode(vatCode) ? SALES_ACCOUNTS[vatCode]?.revenue ?? target.rgs_code : target.rgs_code;
-    // gemengd gebruik: alleen bij een uitgave op kosten of een bedrijfsmiddel
-    const expense = t.amount < 0 && (target.category === 'kosten' || target.category === 'activa');
-    if (input.businessPct !== undefined && expense && t.counter_name) setBusinessShare(this.db, t.counter_name, input.businessPct);
-    const pct = expense ? businessPct(input.businessPct ?? businessShareFor(this.db, t.counter_name)) : 100;
-    const payload: BankCategoriePayload = {
-      bankTransactionId: txId,
-      date: t.transaction_date,
-      amount: t.amount,
-      bankAccount: bank.rgs_code,
-      account,
-      accountCategory: target.category,
-      vatCode,
-      relationId,
-      description,
-      ...(pct < 100 ? { businessPct: pct } : {}),
-      ...(input.channel?.trim() ? { channel: input.channel.trim().slice(0, 60) } : {}),
-      // KOR: geen aftrek van voorbelasting op kosten
-      ...(target.category !== 'omzet' && korActive(this.db) ? { noVatDeduction: true } : {}),
-    };
     return tx(this.db, () => {
+      const t = this.get(txId);
+      this.assertOpen(t);
+      const bank = this.getAccount(t.bank_account_id);
+      const target = this.ledger.getAccount(input.account);
+      const description = input.description?.trim() || t.description || t.counter_name || 'Banktransactie';
+      const relationId = input.relationId ?? (t.counter_iban ? this.relations.findByIban(t.counter_iban)?.id ?? null : null);
+      const vatCode = input.vatCode ?? 'geen';
+      if (target.category === 'omzet' && korActive(this.db) && (vatCode === 'hoog' || vatCode === 'laag')) throw new ValidationError('Je gebruikt de KOR: kies geen btw bij deze verkoop');
+      // omzet komt op de omzetrekening die bij de btw hoort (21%, 0% buiten de EU, …): zo belandt het in de juiste rubriek
+      const account = target.category === 'omzet' && isSalesVatCode(vatCode) ? SALES_ACCOUNTS[vatCode]?.revenue ?? target.rgs_code : target.rgs_code;
+      // Hetzelfde zakelijke deel bij aankoop en terugbetaling van kosten of bedrijfsmiddelen.
+      const expense = target.category === 'kosten' || (target.category === 'activa' && (t.amount < 0 || target.rgs_code === ACCOUNTS.inventaris || target.rgs_code === ACCOUNTS.vervoermiddelen));
+      if (input.businessPct !== undefined && expense && t.counter_name) setBusinessShare(this.db, t.counter_name, input.businessPct);
+      const pct = expense ? businessPct(input.businessPct ?? businessShareFor(this.db, t.counter_name)) : 100;
+      const payload: BankCategoriePayload = {
+        bankTransactionId: txId,
+        date: t.transaction_date,
+        amount: t.amount,
+        bankAccount: bank.rgs_code,
+        account,
+        accountCategory: target.category,
+        vatCode,
+        relationId,
+        description,
+        ...(expense && (pct < 100 || input.businessPct !== undefined) ? { businessPct: pct } : {}),
+        ...(input.channel?.trim() ? { channel: input.channel.trim().slice(0, 60) } : {}),
+        // KOR: geen aftrek van voorbelasting op kosten
+        ...(target.category !== 'omzet' && korActive(this.db) ? { noVatDeduction: true } : {}),
+      };
       const { entryId } = this.events.record({ type: 'bank-categorie', payload }, [{ kind: 'bank', refId: txId }], { jobId: input.jobId ?? null });
       this.db.prepare(`UPDATE bank_transactions SET status = 'gematcht', matched_journal_entry_id = ? WHERE id = ?`).run(entryId, txId);
       return entryId;
@@ -1650,22 +1652,27 @@ export class BankService {
     if (t.status !== 'gematcht' || !t.matched_journal_entry_id || t.matched_invoice_id || t.matched_purchase_invoice_id) {
       throw new ValidationError('Alleen een betaling waar je zelf een soort kosten bij koos, kun je zo aanpassen');
     }
+    assertQuestionNotSettled(this.db, t.matched_journal_entry_id);
     if (this.sharedWith(t).length > 0) throw new ValidationError('Dit is een overboeking tussen je eigen rekeningen. Klopt dat niet? Maak het dan ongedaan.');
     const event = this.events.forEntry(t.matched_journal_entry_id);
     if (!event || event.type !== 'bank-categorie') throw new ValidationError('Deze betaling is met een oudere versie van de app verwerkt. Maak de verwerking ongedaan en doe het opnieuw.');
     const target = this.ledger.getAccount(change.account);
     const old = event.payload as BankCategoriePayload;
+    const vatCode = change.vatCode ?? old.vatCode;
+    if (target.category === 'omzet' && korActive(this.db) && (vatCode === 'hoog' || vatCode === 'laag')) throw new ValidationError('Je gebruikt de KOR: kies geen btw bij deze verkoop');
     const payload: BankCategoriePayload = {
       ...old,
-      account: target.rgs_code,
+      account: target.category === 'omzet' && isSalesVatCode(vatCode) ? SALES_ACCOUNTS[vatCode]?.revenue ?? target.rgs_code : target.rgs_code,
       accountCategory: target.category,
-      vatCode: change.vatCode ?? old.vatCode,
+      vatCode,
+      ...(target.category === 'omzet' ? { noVatDeduction: false } : old.accountCategory === 'omzet' ? { noVatDeduction: korActive(this.db) } : {}),
       description: change.description?.trim() || old.description,
     };
-    if (change.businessPct !== undefined) {
+    if (target.category === 'omzet' || (target.category !== 'kosten' && target.category !== 'activa')) delete payload.businessPct;
+    if (change.businessPct !== undefined && (target.category === 'kosten' || target.category === 'activa')) {
       const pct = businessPct(change.businessPct);
       if (pct < 100) payload.businessPct = pct;
-      else delete payload.businessPct;
+      else payload.businessPct = pct;
     }
     return tx(this.db, () => {
       const { entryId } = this.events.replace(event.id, { type: 'bank-categorie', payload }, reason);
@@ -1702,6 +1709,7 @@ export class BankService {
     const shared = this.sharedWith(t);
     tx(this.db, () => {
       if (t.status === 'gematcht' && t.matched_journal_entry_id) {
+        assertQuestionNotSettled(this.db, t.matched_journal_entry_id);
         if (t.matched_invoice_id) this.invoices.undoPayment(t.matched_invoice_id, t.amount, t.matched_journal_entry_id, date);
         else if (t.matched_purchase_invoice_id) this.purchases.undoPayment(t.matched_purchase_invoice_id, -t.amount, t.matched_journal_entry_id, date);
         else this.ledger.reverse(t.matched_journal_entry_id, date);

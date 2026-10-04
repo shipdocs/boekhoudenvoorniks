@@ -9,11 +9,59 @@ elektricien). Alle bedragen in de voorbeelden zijn in euro's.
 
 **Code-audit (peildatum 27 september 2026, `main` @ `9970c62`).** De vragenlijst is bijgewerkt met
 een audit van de code zelf. Per onderdeel staat onder **Bevinding code-audit** wat de code nu
-werkelijk deed en waar het fout ging. De audit is door een fiscalist gedaan; alle bevindingen hieronder
+werkelijk deed en waar het fout ging. Deze code-audit is geen onafhankelijke fiscale goedkeuring; de bevindingen hieronder
 zijn inmiddels in de code verwerkt (zie **Status** in de tabel en de regressietests in
 `tests/fiscale-audit.test.ts`). De beschrijving per onderdeel gaat over de code van vóór de correctie.
 De vraagnummers 1–26 zijn ongewijzigd gebleven, nieuwe vragen beginnen bij 27; ze blijven staan voor
 bevestiging van de gekozen uitwerking.
+
+## Aanvullende business-rule-review — 4 oktober 2026
+
+De review van `main` op `4ae07b7` leverde zestien reproduceerbare bevindingen op. De onderstaande
+correcties zijn opgenomen in regelversie **2026.3**, met regressietests in
+`tests/business-rules-review.test.ts` en aanvullende grensgevallen in
+`tests/business-rules-boundaries.test.ts`. Dit vervangt geen controle van een echte administratie.
+
+| ID | Herstel |
+|---|---|
+| R01 | Een gewijzigde verkoop-btw-code kiest ook de passende omzetrekening en aangifterubriek. |
+| R02 | Terugbetalingen op kosten en bedrijfsmiddelen gebruiken hetzelfde zakelijke deel als aankopen. |
+| R03 | KOR-controle geldt voor bankverkopen, direct boeken en herindelen; het scherm kiest vrijgesteld. |
+| R04 | Niet-aftrekbare btw hoort ook bij gemengd gebruikte investeringen bij de kostprijs, per afzonderlijke regel. |
+| R05 | Vraagposten blijven afzonderlijk zichtbaar, ook als ontvangsten en uitgaven per saldo nul zijn. |
+| R06 | Overgeslagen controles vervallen zodra de betrokken boekingen wijzigen; IDs maken deel uit van de vingerafdruk. |
+| R07 | Historische openstaande facturen gebruiken boekingen en betalingen tot de peildatum, met creditverrekening. |
+| R08 | Maandomzet, maandgrafiek en grootboekbanksaldo respecteren de peildatum. |
+| R09 | Dubbele aankopen rond kwartaalgrenzen worden onafhankelijk van de invoervolgorde gevonden. |
+| R10 | Een al verwerkt zakelijk deel wordt niet nogmaals via de algemene telefooninstelling gecorrigeerd; ook 100% is expliciet. |
+| R11 | Inkoop-btw wordt centraal op centen, code en teken gecontroleerd; geen positieve btw bij geen-btw/0%. |
+| R12 | Bij een volledig verlegde B2B-prestatie blijft de volledige factuurgrondslag en btw-schuld staan; alleen de aftrek is beperkt. De niet-aftrekbare btw op het privédeel gaat naar privé. |
+| R13 | Periodeafsluiting vraagt bevestiging voor nog onduidelijke boekingen. |
+| R14 | Leverancierscredits verlagen de kostprijs. Eén passend middel wordt automatisch gekoppeld; bij meer middelen kiest de gebruiker bij Investeringen. Ongekoppelde credits geven een waarschuwing. |
+| R15 | Het autoforfait respecteert het maximum op basis van afgetrokken btw; zonder aanschaf-btw geldt 1,5%. Ontbrekende aanschafgegevens vereisen aanvulling; bedragen buiten deze administratie kunnen per jaar worden opgegeven. |
+| R16 | Leverancierscreditnota’s kunnen expliciete negatieve btw hebben; onjuiste tekens en te hoge bedragen worden afgewezen. |
+
+Aanvullend is de Zvw-grondslaggrens voor 2025 gecorrigeerd naar € 75.864. Ponto gebruikt voor
+ISO-tijdstippen expliciet de Nederlandse kalenderdatum, onafhankelijk van de computertijdzone.
+
+**Bestaande administraties:** journaalregels worden niet stil gewijzigd. Oude gebeurtenissen blijven
+met de bevroren compiler van 2026.2 reproduceerbaar. Een bewuste correctie via de app maakt een
+tegenboeking en een nieuwe gebeurtenis met 2026.3. Het afgeleide activaregister herstelt ontbrekende
+KOR-btw en toegewezen credits. Eerdere aangiften en vastgelegde KIA blijven volgens de bestaande
+correctie- en periodeslotregels gehandhaafd. Bij credits na eerdere afschrijving moet de boekhouder
+ook reeds toegepaste afschrijving en investeringsaftrek beoordelen.
+
+De verlegde-btw-test veronderstelt één volledig aan de ondernemer verlegde B2B-prestatie die ook
+privé wordt gebruikt. Een afzonderlijk privé geleverde prestatie vraagt een eigen btw-beoordeling.
+De autoregel ondersteunt één auto; bij meerdere auto’s of een eigen bijdrage zijn afzonderlijke
+berekeningen nodig. Het dashboardbanksaldo komt uit het grootboek tot de peildatum; het getoonde
+afschriftsaldo blijft het laatst geïmporteerde banksaldo.
+
+Bronnen, gecontroleerd op 4 oktober 2026:
+
+- [Verlegde btw aftrekken — Belastingdienst](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/btw/btw_aftrekken/welke_btw_is_aftrekbaar/verlegde_btw_aftrekken)
+- [Btw en privégebruik auto — Belastingdienst](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/btw/btw_aftrekken/btw_en_de_auto/privegebruik_auto_van_de_zaak/)
+- [Percentages en maximumbijdrage-inkomen Zvw — Belastingdienst](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/werk_en_inkomen/zorgverzekeringswet/veranderingen-bijdrage-zvw/)
 
 Legenda: **OK** = lijkt juist binnen de scope, **LET OP** = alleen juist onder voorwaarden,
 **FOUT** = vermoedelijk correctie nodig in de code.
@@ -39,8 +87,8 @@ was de app niet fiscaal juist:
 | P1 | Tekst werkruimte thuis: "bureau, stoel en kast mag je altijd aftrekken" is te stellig | `src/tax/overview.ts` | 33 | Verwerkt (ook AOV en meewerkaftrek) |
 | P2 | Afschrijving start op aankoopdatum in plaats van ingebruikname | `src/tax/assets.ts` | 17 | Verwerkt: veld "sinds wanneer gebruik je het" |
 
-Nog niet verwerkt (bewust): het privédeel van telefoon en internet wordt nog achteraf gecorrigeerd in
-plaats van per boeking gesplitst (vraag 24), en btw-aftrek naar rato bij een privéauto blijft liggen
+De algemene telefooninstelling corrigeert alleen boekingen zonder expliciet zakelijk deel
+(vraag 24). Btw-aftrek naar rato bij een privéauto blijft liggen
 (vraag 21; wel als notitie voor de boekhouder). De jaartabellen staan nog op `checked: false` tot alle
 waarden (ook heffingskortingen en Zvw) tegen de officiële tabel zijn afgevinkt.
 
@@ -245,7 +293,7 @@ Graag per waarde controleren tegen de publicaties van de Belastingdienst.
 | Algemene heffingskorting max. | € 3.068, afbouw 6,337% vanaf € 28.406 | € 3.115, afbouw 6,398% vanaf € 29.736 |
 | Arbeidskorting opbouw | 8,053% tot € 12.169; 30,030% tot € 26.288; 2,258% tot € 43.071 | 8,324% tot € 11.965; 31,009% tot € 25.845; 1,950% tot € 45.592 |
 | Arbeidskorting max. / afbouw | € 5.599; 6,51% vanaf € 43.071 | € 5.685; 6,51% vanaf € 45.592 |
-| Zvw-bijdrage ondernemer | 5,26% tot € 75.860 | 4,85% tot € 79.409 |
+| Zvw-bijdrage ondernemer | 5,26% tot € 75.864 | 4,85% tot € 79.409 |
 
 15. Kloppen deze waarden? Na akkoord zet ik per jaar `checked: true`. De app toont dan niet langer "nog niet gecontroleerd".
 

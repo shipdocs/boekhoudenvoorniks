@@ -3,6 +3,7 @@ import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
 import type { CsvMapping } from '../../import/csv';
 import { saleVatText, type PurchaseVatCode, type SalesVatCode } from '../../shared/vat';
+import { selectedBusinessPct } from '../../shared/business-share';
 import { referenceIn } from '../../shared/references';
 import { InvestmentHint, investmentInfo } from './Purchases';
 import { CategoryChips } from './Categories';
@@ -653,7 +654,7 @@ function CsvMappingDialog({ headers, rows, suggested, onClose, onConfirm }: { he
 }
 
 /** Categoriekeuze in mensentaal (kosten + overige bestemmingen). */
-export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { initial?: string; onPick: (categoryKey: string, vatCode: string, businessPct: number) => void; incoming?: boolean; /** betaald bedrag (positief), voor de investeringshint */ amount?: number; /** de betaling: voor het zakelijke deel dat eerder voor deze tegenpartij is opgegeven */ txId?: number }) {
+export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { initial?: string; onPick: (categoryKey: string, vatCode: string, businessPct?: number) => void; incoming?: boolean; /** betaald bedrag (positief), voor de investeringshint */ amount?: number; /** de betaling: voor het zakelijke deel dat eerder voor deze tegenpartij is opgegeven */ txId?: number }) {
   const { meta } = useApp();
   const share = useLoad(() => (txId !== undefined && !incoming ? api.bank.businessShare(txId) : Promise.resolve(null)), [txId]);
   const [pctInput, setPctInput] = useState<string | null>(null);
@@ -674,13 +675,13 @@ export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { in
         </select>
       </Field>
       {txId !== undefined && !incoming && (
-        <Field label="Hoeveel daarvan is zakelijk?" hint={pctNumber < 100 && pctOk ? `Het privédeel (${100 - pctNumber}%) telt niet als kosten en de btw erover trek je niet af. De app onthoudt dit voor ${share.data?.name ?? 'deze partij'}.` : 'Alles zakelijk? Laat 100 staan. Gebruik je dit ook privé, bijvoorbeeld opslag, telefoon of internet? Vul het zakelijke deel in.'}>
+        <Field label="Hoeveel daarvan is zakelijk?" hint={pctNumber < 100 && pctOk ? `Het privédeel (${100 - pctNumber}%) telt niet als kosten en de btw erover trek je niet af. De app onthoudt dit voor ${share.data?.name ?? 'deze partij'}.` : 'Laat je 100 ongewijzigd, dan gebruikt de app je algemene instellingen voor telefoon en internet. Vul een percentage in om voor deze betaling een eigen keuze vast te leggen.'}>
           <span className="row" style={{ gap: 6, alignItems: 'center' }}>
             <input type="number" min={1} max={100} step={1} style={{ width: 90 }} value={pct} onChange={(e) => setPctInput(e.target.value)} /> %
           </span>
         </Field>
       )}
-      <div className="row end"><Button kind="primary" disabled={!pctOk} onClick={() => onPick(cat, vat, pctOk ? pctNumber : 100)}>Opslaan</Button></div>
+      <div className="row end"><Button kind="primary" disabled={!pctOk} onClick={() => onPick(cat, vat, selectedBusinessPct(pctInput === null ? null : pctNumber, share.data?.pct))}>Opslaan</Button></div>
     </div>
   );
 }
@@ -692,14 +693,15 @@ export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { in
  * voor de volgende betaling van deze betaler.
  */
 function SaleForm({ txId, amount, description, busy, onBook }: { txId: number; amount: number; description: string; busy: boolean; onBook: (input: { vatCode: SalesVatCode; relationId: number | null; channel: string; reference: string }) => void }) {
-  const { meta } = useApp();
+  const { meta, settings } = useApp();
   const hint = useLoad(() => api.bank.salesVatSuggestion(txId), [txId]);
   const channels = useLoad(() => api.bank.saleChannels());
   const [picked, setPicked] = useState<SalesVatCode | null>(null);
   const [channel, setChannel] = useState('');
   // een nummer uit de omschrijving van de bank, bv. I-MOL-2026-00344
   const [reference, setReference] = useState(() => referenceIn(description) ?? '');
-  const vat = picked ?? hint.data?.vatCode ?? 'hoog';
+  const suggested = picked ?? hint.data?.vatCode ?? 'hoog';
+  const vat = settings.kor && (suggested === 'hoog' || suggested === 'laag') ? 'vrijgesteld' : suggested;
   const rate = meta.salesVat.find((v) => v.code === vat);
   const net = Math.round((amount * 100) / (100 + (rate?.percentage ?? 0)));
   return (
@@ -713,7 +715,7 @@ function SaleForm({ txId, amount, description, busy, onBook }: { txId: number; a
       </Field>
       <Field label="Hoeveel btw rekende je?" hint="kijk op de factuur of bon die je klant kreeg">
         <select value={vat} onChange={(e) => setPicked(e.target.value as SalesVatCode)}>
-          {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
+          {meta.salesVat.filter(v => !settings.kor || v.percentage === 0).map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
         </select>
       </Field>
       {hint.error && !picked && <p className="small" style={{ margin: 0 }}>Er is geen voorstel. Kies zelf de btw die op de factuur staat.</p>}

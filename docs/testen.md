@@ -73,3 +73,15 @@ app zelf is gegenereerd.
 - het verpakte Electron-programma: dat wordt apart in CI gecontroleerd;
 - fiscale juistheid van ieder denkbaar praktijkgeval: voeg daarvoor een gericht scenario en een
   handmatig gecontroleerde verwachting toe.
+
+## Business rules en correcties
+
+`tests/business-rules-review.test.ts` bewaakt de zestien bevindingen van 4 oktober 2026.
+`tests/business-rules-boundaries.test.ts` test onder meer historische betalingen, tegenboekingen,
+credits bij meerdere bedrijfsmiddelen, btw-maxima en reproduceerbaarheid van oude regelversies.
+`e2e/business-rules.spec.ts` controleert de creditkeuze en de aparte aanschaf-/autokosten-btw-instellingen.
+
+De scannertest voor een verhuizing naar `127.0.0.2` controleert eerst met een onafhankelijke HTTP-server
+of de testomgeving dat tweede loopback-adres kan bereiken. Als de transportlaag alle lokale verzoeken
+naar `127.0.0.1` stuurt, wordt uitsluitend deze netwerkproef met een expliciete reden overgeslagen.
+Op een normale Linux-/Windows-host blijft de echte scannerproef actief.
