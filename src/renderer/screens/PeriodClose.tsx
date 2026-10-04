@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { Button, ErrorBox, Modal, useAction, useApp, useLoad } from '../ui';
+import { Button, Euro, ErrorBox, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
+import type { YearEndKind } from '../../closing/year-end';
 import { addDays, formatDateNl } from '../../shared/dates';
 
 const QUARTER: Record<string, string> = { '03-31': '1e kwartaal', '06-30': '2e kwartaal', '09-30': '3e kwartaal', '12-31': 'heel' };
@@ -41,9 +42,11 @@ export function usePeriodChoice() {
 export function PeriodPicker({ label, choice }: { label: string; choice: ReturnType<typeof usePeriodChoice> }) {
   const { go } = useApp();
   const { dates, until, setUntil, list, checks, confirmed, setConfirmed } = choice;
+  const [yearEnd, setYearEnd] = useState<number | null>(null);
   if (!dates.data || !until) return null;
   return (
     <>
+      {yearEnd !== null && <YearEndDialog year={yearEnd} onClose={() => { setYearEnd(null); void checks.reload(); }} />}
       <label className="row" style={{ alignItems: 'center', gap: 8 }}>
         <span>{label}</span>
         <select value={until} onChange={(e) => setUntil(e.target.value)} aria-label={label}>
@@ -64,7 +67,8 @@ export function PeriodPicker({ label, choice }: { label: string; choice: ReturnT
                 </label>
               ) : c.title}
               <div className="muted">{c.detail}</div>
-              {c.level === 'blokkeert' && c.screen && <Button small onClick={() => go({ screen: c.screen! })}>Oplossen</Button>}
+              {c.level === 'blokkeert' && c.screen && c.screen !== 'jaarafsluiting' && <Button small onClick={() => go({ screen: c.screen as 'bank' | 'aankopen' | 'werk' })}>Oplossen</Button>}
+              {c.screen === 'jaarafsluiting' && <Button small onClick={() => setYearEnd(Number(until.slice(0, 4)))}>Posten invullen</Button>}
             </li>
           ))}
         </ul>
@@ -134,5 +138,63 @@ export function PeriodCloseCard() {
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Jaarafsluiting: vooruitbetaalde kosten, nog te betalen kosten, voorraad en onderhanden werk invullen. */
+function YearEndDialog({ year, onClose }: { year: number; onClose: () => void }) {
+  const kinds = useLoad(() => api.yearEnd.kinds());
+  const items = useLoad(() => api.yearEnd.list(year), [year]);
+  const accounts = useLoad(() => api.ledger.accounts());
+  const { run, busy } = useAction();
+  const [kind, setKind] = useState<YearEndKind>('vooruitbetaald');
+  const [description, setDescription] = useState('');
+  const [amount, setAmount] = useState<number | null>(null);
+  const [costAccount, setCostAccount] = useState('');
+  const info = kinds.data?.[kind];
+  return (
+    <Modal title={`Jaarafsluiting ${year}`} wide onClose={onClose}>
+      <p className="small muted">Deze posten boekt de app op 31 december {year} en draait ze op 1 januari {year + 1} automatisch weer om, zodat ze alleen in {year} meetellen. Je vult het bedrag in; je boekhouder kan de waardering controleren.</p>
+      <ErrorBox error={kinds.error ?? items.error ?? accounts.error} />
+      {(items.data ?? []).length > 0 && (
+        <table className="small" style={{ width: '100%', marginBottom: 10 }}>
+          <tbody>
+            {(items.data ?? []).map((i) => (
+              <tr key={i.id}>
+                <td>{kinds.data?.[i.kind].label}</td><td>{i.description}</td><td className="num"><Euro cents={i.amount} /></td>
+                <td><Button small kind="ghost" disabled={busy} onClick={async () => { await run(() => api.yearEnd.remove(i.id)); await items.reload(); }}>Verwijderen</Button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="grid cols-2">
+        <Field label="Soort">
+          <select value={kind} onChange={(e) => setKind(e.target.value as YearEndKind)}>
+            {Object.entries(kinds.data ?? {}).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Bedrag"><MoneyInput value={amount} onChange={setAmount} /></Field>
+      </div>
+      {info && <p className="small muted">{info.help}</p>}
+      <div className="grid cols-2">
+        <Field label="Omschrijving"><input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="bv. verzekering 2027, project Jansen" /></Field>
+        {info?.needsCostAccount && (
+          <Field label="Kostensoort">
+            <select value={costAccount} onChange={(e) => setCostAccount(e.target.value)}>
+              <option value="">Kies…</option>
+              {(accounts.data ?? []).filter((a) => a.category === 'kosten' && !a.archived).map((a) => <option key={a.id} value={a.rgs_code}>{a.code} {a.name}</option>)}
+            </select>
+          </Field>
+        )}
+      </div>
+      <div className="row end" style={{ marginTop: 12 }}>
+        <Button onClick={onClose}>Klaar</Button>
+        <Button kind="primary" disabled={busy || !amount || !description || (info?.needsCostAccount && !costAccount)} onClick={async () => {
+          const r = await run(() => api.yearEnd.add({ year, kind, description, amount: amount!, costAccount: info?.needsCostAccount ? costAccount : null }), 'Toegevoegd');
+          if (r) { setDescription(''); setAmount(null); await items.reload(); }
+        }}>Toevoegen</Button>
+      </div>
+    </Modal>
   );
 }

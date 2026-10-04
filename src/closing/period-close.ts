@@ -27,7 +27,7 @@ export interface CloseCheck {
   title: string;
   detail: string;
   /** scherm om het op te lossen */
-  screen?: 'bank' | 'aankopen' | 'werk';
+  screen?: 'bank' | 'aankopen' | 'werk' | 'jaarafsluiting';
 }
 
 export interface PeriodStatus {
@@ -140,6 +140,22 @@ export class PeriodCloseService {
           `Dat is ${formatEuro(prive.opnames - prive.stortingen)} per saldo uit je bedrijf (opnames min stortingen).` +
           (big.length ? ` Grote stortingen: ${big.map((b) => `${formatDateNl(b.date)} ${formatEuro(b.amount)}`).join('; ')}. De Belastingdienst vraagt bij zo'n storting waar het geld vandaan komt: bewaar daar een bewijs van (bijvoorbeeld een afschrift van je spaarrekening).` : ''),
       });
+    }
+    // Jaarafsluiting: posten zonder bon of betaling die de winst van het jaar veranderen (boekhoudkundig: overlopende posten, voorraad, onderhanden werk)
+    if (until.slice(5) === '12-31') {
+      const year = Number(until.slice(0, 4));
+      const items = this.db.prepare(`SELECT kind, amount FROM year_end_items WHERE year = ? AND removed = 0`).all(year) as { kind: string; amount: Cents }[];
+      if (items.length === 0) {
+        out.push({
+          key: 'jaarafsluiting',
+          level: 'bevestigen',
+          title: `Jaarafsluiting ${year}: heb je aan vooruitbetaalde kosten, nog te betalen kosten, voorraad en onderhanden werk gedacht?`,
+          detail: 'Vooruitbetaald: een verzekering of abonnement dat deels bij volgend jaar hoort. Nog te betalen: kosten van dit jaar waarvan je de factuur nog niet hebt (bv. energie van december). Voorraad: materialen die je op 31 december nog hebt. Onderhanden werk: werk waar je kosten aan maakte maar dat je nog niet factureerde; dat kan je winst flink veranderen, vooral in de bouw. Vul ze in vóór je afsluit, of bevestig dat ze er niet zijn.',
+          screen: 'jaarafsluiting',
+        });
+      } else {
+        out.push({ key: 'jaarafsluiting', level: 'info', title: `Jaarafsluiting ${year}: ${items.length} ${items.length === 1 ? 'post' : 'posten'} verwerkt`, detail: `Totaal ${formatEuro(items.reduce((n, i) => n + i.amount, 0))}. Ze worden op 1 januari automatisch omgekeerd, zodat ze alleen in ${year} meetellen.`, screen: 'jaarafsluiting' });
+      }
     }
     const drafts = this.db.prepare(`SELECT COUNT(*) AS n FROM invoices WHERE status = 'concept' AND invoice_date <= ?`).get(until) as { n: number };
     if (drafts.n > 0) {
