@@ -369,9 +369,10 @@ export class AssetService {
   }
 
   /** Nog niet geboekte afschrijving van een jaar, tot en met `untilMonth` (12 = het hele jaar). */
-  projected(year: number, untilMonth = 12): Cents {
+  projected(year: number, untilMonth = 12, depreciationRgs?: string): Cents {
     const rows = this.db.prepare(`SELECT * FROM assets WHERE status = 'actief'`).all() as AssetRow[];
     return rows
+      .filter((a) => !depreciationRgs || DEPRECIATION_ACCOUNTS[a.account_rgs]?.expense === depreciationRgs)
       .filter((a) => !this.db.prepare('SELECT 1 FROM asset_depreciation WHERE asset_id = ? AND year = ?').get(a.id, year))
       .reduce((s, a) => s + this.dueFor(a, year, untilMonth), 0);
   }

@@ -327,7 +327,8 @@ export class IncomeTaxService {
     // representatie loopt door het jaar heen op: net als de winst doortrekken; KIA alleen over wat al gekocht is
     const reprYear = adj ? Math.round((adj.representatie.total * daysInYear) / elapsed) : 0;
     const phoneYear = adj ? Math.round((adj.phonePrivate.bijtelling * daysInYear) / elapsed) : 0;
-    const bijtellingen = adj ? representatieBijtelling(reprYear / 100, rules.representatie) + (adj.desinvesteringsbijtelling + phoneYear) / 100 : 0;
+    const carYear = adj ? Math.round((adj.carPrivate.bijtelling * daysInYear) / elapsed) : 0;
+    const bijtellingen = adj ? representatieBijtelling(reprYear / 100, rules.representatie) + (adj.desinvesteringsbijtelling + phoneYear + carYear) / 100 : 0;
     const breakdown = estimateIncomeTax(profitYear / 100, rules, { urencriterium: s.urencriterium, starter: adj?.starter, kia: adj ? adj.kia / 100 : 0, bijtellingen, partnerHours: s.partnerHours, nietGerealiseerd: s.nietGerealiseerdeZelfstandigenaftrek });
     const taxYear = breakdown.total * 100;
     return {
@@ -341,7 +342,7 @@ export class IncomeTaxService {
       rulesYear: rules.year,
       rulesChecked: rules.checked,
       disclaimer: INCOME_TAX_DISCLAIMER,
-      notIncluded: [...NOT_INCLUDED, ...(s.urencriterium ? [] : ['zelfstandigenaftrek (je hebt aangegeven niet aan het urencriterium te voldoen)'])],
+      notIncluded: [...NOT_INCLUDED, ...(adj?.carPrivate.state === 'onbekend' ? ['bijtelling privégebruik auto van de zaak (gegevens ontbreken: de schatting is te laag)'] : []), ...(s.urencriterium ? [] : ['zelfstandigenaftrek (je hebt aangegeven niet aan het urencriterium te voldoen)'])],
     };
   }
 }

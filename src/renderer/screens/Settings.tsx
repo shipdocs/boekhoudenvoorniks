@@ -196,6 +196,9 @@ export function SettingsScreen() {
                       </div>
                     </Field>
                   </div>
+                  <Field label="Bijtellingspercentage voor de inkomstenbelasting" hint="standaard 22%; een zuinige of elektrische auto kan lager zijn, zie je kentekenbewijs of de Belastingdienst">
+                    <input inputMode="numeric" value={draft.carBijtellingPct ?? ''} onChange={(e) => set({ carBijtellingPct: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) })} placeholder="22" aria-label="Bijtellingspercentage" />
+                  </Field>
                   <div className="grid cols-2">
                     <Field label="Kreeg je btw terug op de auto of de kosten?" hint="bij aankoop, of op brandstof en onderhoud">
                       <select value={draft.carVatDeducted === null ? '' : draft.carVatDeducted ? 'ja' : 'nee'} onChange={(e) => set({ carVatDeducted: e.target.value === '' ? null : e.target.value === 'ja' })}>
