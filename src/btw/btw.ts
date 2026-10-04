@@ -574,17 +574,26 @@ export class VatService {
     return runVatChecks(this.db, this.ledger, period, { current, previous: hadActivity ? prev.summary.teBetalen : null }, car.lastPeriod ? car : null, turnover);
   }
 
-  /** Omzet volgens alle aangiftes van het jaar tegenover de omzetrekeningen in het grootboek. */
-  turnoverReconciliation(year: number): { year: number; aangifte: Cents; grootboek: Cents } {
+  /**
+   * Omzet volgens alle aangiftes van het jaar tegenover de omzetrekeningen in het grootboek (op boekingsdatum).
+   * `jaarovergang`: omzet die op btw-datum in een ander jaar valt dan op boekingsdatum; `correcties`: wat via een
+   * suppletie loopt of al is afgehandeld en daarom niet in de gewone aangifte staat.
+   */
+  turnoverReconciliation(year: number): { year: number; aangifte: Cents; grootboek: Cents; jaarovergang: Cents; correcties: Cents } {
     const aangifte = this.listPeriods(year).reduce((s, p) => s + this.calculate(p.period.key).summary.omzet, 0);
-    const r = this.db
-      .prepare(
-        `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS s FROM journal_lines l
-         JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
-         WHERE a.category = 'omzet' AND e.entry_date BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')`,
-      )
-      .get(`${year}-01-01`, `${year}-12-31`) as { s: number };
-    return { year, aangifte, grootboek: r.s };
+    const sum = (dateExpr: string) =>
+      (
+        this.db
+          .prepare(
+            `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS s FROM journal_lines l
+             JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+             WHERE a.category = 'omzet' AND ${dateExpr} BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')`,
+          )
+          .get(`${year}-01-01`, `${year}-12-31`) as { s: number }
+      ).s;
+    const grootboek = sum('e.entry_date');
+    const opVatDatum = sum('COALESCE(e.vat_date, e.entry_date)');
+    return { year, aangifte, grootboek, jaarovergang: grootboek - opVatDatum, correcties: opVatDatum - aangifte };
   }
 
   /**
