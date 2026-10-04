@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /workspace/scratch/7269a48577ad/review-main-current
+
+
+ Test Files  97 passed | 1 skipped (98)
+      Tests  1598 passed | 5 skipped (1603)
+   Start at  19:12:13
+   Duration  24.83s (tests 77%, import 13%, transform 10%)
+
+    Isolate  98 workers spawned · ~142ms startup each (spawn + environment, per file)
+             at least ~1.84s faster with isolate: false — reuses workers across files instead of one per file
+

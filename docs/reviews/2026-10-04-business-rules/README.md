@@ -4,6 +4,13 @@ Dit dossier hoort bij [PR #274](https://github.com/shipdocs/boekhoudenvoorniks/p
 Het bewaart het onderzoek vóór herstel, de gemaakte implementatiekeuzes en het bewijs na herstel,
 zodat een volgende agent de wijzigingen kan beoordelen zonder de chatgeschiedenis.
 
+## Vervolgcontrole van main na PR #276
+
+De controle van `main` op commit `c71239c` bevestigde dat alle eerdere correcties zijn overgenomen,
+maar vond een nieuwe fout in de leescontrole van investeringscredits. Lees
+[de oorzaak, correctie en regressiebewijzen](creditcontrole-na-pr276.md): meerdere credits konden
+ieder afzonderlijk passen, maar samen de kostprijs overschrijden en toch uit de btw-waarschuwing verdwijnen.
+
 ## Actuele vervolgcontrole na Claude’s review
 
 Claude’s correcties uit [PR #275](https://github.com/shipdocs/boekhoudenvoorniks/pull/275) zijn meegenomen.

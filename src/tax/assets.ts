@@ -199,10 +199,25 @@ export class AssetService {
 
   /**
    * Credits die de gebruiker nog moet toewijzen, zonder iets te schrijven (voor controles en
-   * overzichten). `sync` wijst een credit zelf toe als er precies één kandidaat is; die tellen hier dus niet mee.
+   * overzichten). Reserveer de kostprijs van iedere automatisch koppelbare credit in dezelfde
+   * datum-/regelvolgorde als `sync`, zodat volgende credits alleen de resterende kostprijs gebruiken.
    */
   pendingCredits(): ReturnType<AssetService['unassignedCredits']> {
-    return this.unassignedCredits(false).filter(c => c.candidates.length !== 1);
+    const remaining = new Map<number, Cents>();
+    const pending: ReturnType<AssetService['unassignedCredits']> = [];
+    for (const c of this.unassignedCredits(false)) {
+      const candidates = c.candidates.filter(a => {
+        if (!remaining.has(a.id)) remaining.set(a.id, this.row(a.id).cost);
+        return remaining.get(a.id)! >= c.amount;
+      });
+      if (candidates.length === 1) {
+        const id = candidates[0]!.id;
+        remaining.set(id, remaining.get(id)! - c.amount);
+      } else {
+        pending.push({ ...c, candidates });
+      }
+    }
+    return pending;
   }
 
   allocateCredit(lineId: number, assetId: number): void {
