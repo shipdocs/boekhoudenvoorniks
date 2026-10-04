@@ -35,6 +35,8 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
   const [date, setDate] = useState(today());
   const [secondDate, setSecondDate] = useState('');
   const [reference, setReference] = useState('');
+  const [deliveryDate, setDeliveryDate] = useState('');
+  const [deliveryDateTo, setDeliveryDateTo] = useState('');
   const [intro, setIntro] = useState('');
   const [notes, setNotes] = useState('');
   const [templateId, setTemplateId] = useState<number | null>(null);
@@ -47,6 +49,8 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
     setDate('invoice_date' in d ? d.invoice_date : d.quote_date);
     setSecondDate('due_date' in d ? d.due_date : d.valid_until);
     setReference(d.reference ?? '');
+    setDeliveryDate('delivery_date' in d ? d.delivery_date ?? '' : '');
+    setDeliveryDateTo('delivery_date_to' in d ? d.delivery_date_to ?? '' : '');
     setIntro(d.intro ?? '');
     setNotes(d.notes ?? '');
     setTemplateId(d.template_id);
@@ -76,7 +80,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
     };
     const r = await run(async () => {
       if (isInvoice) {
-        const p = { ...payload, invoiceDate: date, dueDate: secondDate || undefined };
+        const p = { ...payload, invoiceDate: date, dueDate: secondDate || undefined, deliveryDate: deliveryDate || null, deliveryDateTo: deliveryDate && deliveryDateTo ? deliveryDateTo : null };
         return id ? api.invoices.updateDraft(id, p) : api.invoices.createDraft(p);
       }
       const p = { ...payload, quoteDate: date, validUntil: secondDate || undefined };
@@ -158,6 +162,16 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
             </div>
           );
         })()}
+        {isInvoice && (
+          <div className="row" style={{ marginTop: 12 }}>
+            <Field label="Datum levering of dienst" hint={settings.kor ? 'Mag leeg bij de KOR.' : 'Leeg = de factuurdatum. Vul in als je eerder of later leverde, of een voorschot rekent.'}>
+              <input type="date" value={deliveryDate} disabled={!editable} onChange={(e) => setDeliveryDate(e.target.value)} />
+            </Field>
+            <Field label="t/m (alleen bij een periode)" hint="Bijvoorbeeld bij een klus van meerdere weken.">
+              <input type="date" value={deliveryDateTo} min={deliveryDate || undefined} disabled={!editable || !deliveryDate} onChange={(e) => setDeliveryDateTo(e.target.value)} />
+            </Field>
+          </div>
+        )}
         <div style={{ marginTop: 12 }}>
           <Field label={isInvoice ? 'Omschrijving / klus' : 'Waar gaat de offerte over?'} hint="bv. Woonkamer stucen">
             <input value={reference} disabled={!editable} onChange={(e) => setReference(e.target.value)} />

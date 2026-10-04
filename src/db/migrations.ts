@@ -1312,4 +1312,9 @@ export const migrations: string[] = [
   CREATE TRIGGER asset_depreciation_history_no_delete BEFORE DELETE ON asset_depreciation_history
     BEGIN SELECT RAISE(ABORT, 'Afschrijvingshistorie is onveranderlijk'); END;
   `,
+  // Datum van levering of dienst (of periode) op een factuur: een eis voor gewone btw-facturen. Leeg = de factuurdatum.
+  `
+  ALTER TABLE invoices ADD COLUMN delivery_date TEXT;
+  ALTER TABLE invoices ADD COLUMN delivery_date_to TEXT;
+  `,
 ];

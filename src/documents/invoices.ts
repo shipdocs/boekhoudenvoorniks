@@ -27,6 +27,9 @@ export interface InvoiceRow {
   number: string | null;
   invoice_date: IsoDate;
   due_date: IsoDate;
+  /** datum van levering of dienst, of het begin van de periode; null = de factuurdatum */
+  delivery_date: IsoDate | null;
+  delivery_date_to: IsoDate | null;
   status: InvoiceStatus;
   template_id: number | null;
   reference: string | null;
@@ -80,6 +83,10 @@ export interface InvoiceDraftInput {
   relationId: number;
   invoiceDate?: IsoDate;
   dueDate?: IsoDate;
+  /** datum van levering of dienst (of begin van de periode); leeg = de factuurdatum */
+  deliveryDate?: IsoDate | null;
+  /** einde van de periode, alleen samen met deliveryDate */
+  deliveryDateTo?: IsoDate | null;
   reference?: string | null;
   intro?: string | null;
   notes?: string | null;
@@ -116,13 +123,14 @@ export class InvoiceService {
     const due = input.dueDate ?? addDays(date, relation.payment_term_days ?? s.paymentTermDays);
     assertIsoDate(due, 'vervaldatum');
     const lines = normalizeLines(input.lines);
+    const delivery = normalizeDelivery(input.deliveryDate, input.deliveryDateTo);
     return tx(this.db, () => {
       const result = this.db
         .prepare(
-          `INSERT INTO invoices (relation_id, quote_id, invoice_date, due_date, template_id, reference, intro, notes, external_source, external_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO invoices (relation_id, quote_id, invoice_date, due_date, delivery_date, delivery_date_to, template_id, reference, intro, notes, external_source, external_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(relation.id, input.quoteId ?? null, date, due, input.templateId ?? null, input.reference ?? null, input.intro ?? null, input.notes ?? null, input.externalSource ?? null, input.externalId ?? null);
+        .run(relation.id, input.quoteId ?? null, date, due, delivery.from, delivery.to, input.templateId ?? null, input.reference ?? null, input.intro ?? null, input.notes ?? null, input.externalSource ?? null, input.externalId ?? null);
       const id = Number(result.lastInsertRowid);
       writeLines(this.db, 'invoice_lines', 'invoice_id', id, lines);
       return this.get(id);
@@ -139,13 +147,16 @@ export class InvoiceService {
     assertIsoDate(date, 'factuurdatum');
     assertIsoDate(due, 'vervaldatum');
     const lines = input.lines ? normalizeLines(input.lines) : null;
+    const delivery = normalizeDelivery(input.deliveryDate !== undefined ? input.deliveryDate : inv.delivery_date, input.deliveryDateTo !== undefined ? input.deliveryDateTo : inv.delivery_date_to);
     return tx(this.db, () => {
       this.db
-        .prepare('UPDATE invoices SET relation_id = ?, invoice_date = ?, due_date = ?, template_id = ?, reference = ?, intro = ?, notes = ? WHERE id = ?')
+        .prepare('UPDATE invoices SET relation_id = ?, invoice_date = ?, due_date = ?, delivery_date = ?, delivery_date_to = ?, template_id = ?, reference = ?, intro = ?, notes = ? WHERE id = ?')
         .run(
           relationId,
           date,
           due,
+          delivery.from,
+          delivery.to,
           input.templateId !== undefined ? input.templateId : inv.template_id,
           input.reference !== undefined ? input.reference : inv.reference,
           input.intro !== undefined ? input.intro : inv.intro,
@@ -232,6 +243,10 @@ export class InvoiceService {
     }
     if (kor && inv.lines.some((l) => l.vat_percentage > 0)) {
       throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw. Kies bij elke regel "Geen btw".');
+    }
+    // binnenlandse verlegging past niet bij de KOR: je levert vrijgesteld en vermeldt de KOR (belastingdienst.nl, factuureisen KOR, 2026-10-04)
+    if (kor && inv.lines.some((l) => l.vat_code === 'verlegd')) {
+      throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): dan lever je vrijgesteld van btw en kies je geen "Btw verlegd". Kies bij elke regel "Geen btw (vrijgesteld of KOR)".');
     }
   }
 
@@ -478,6 +493,8 @@ export class InvoiceService {
         number: inv.number,
         date: inv.invoice_date,
         dueDate: inv.due_date,
+        deliveryDate: inv.delivery_date,
+        deliveryDateTo: inv.delivery_date_to,
         reference: inv.reference,
         intro: inv.intro,
         notes: inv.notes,
@@ -490,6 +507,19 @@ export class InvoiceService {
       { kor: s.kor },
     );
   }
+}
+
+/** Datum van levering of dienst (of een periode): beide optioneel, het einde alleen met een begin en niet eerder dan het begin. */
+export function normalizeDelivery(from: IsoDate | null | undefined, to: IsoDate | null | undefined): { from: IsoDate | null; to: IsoDate | null } {
+  const a = from || null;
+  const b = to || null;
+  if (a) assertIsoDate(a, 'datum levering');
+  if (b) {
+    if (!a) throw new ValidationError('Vul ook de begindatum van de levering of dienst in');
+    assertIsoDate(b, 'einddatum levering');
+    if (b < a) throw new ValidationError('De einddatum van de levering ligt vóór de begindatum');
+  }
+  return { from: a, to: b && b !== a ? b : null };
 }
 
 export function displayStatus(status: InvoiceStatus, dueDate: IsoDate, open: Cents, asOf: IsoDate): InvoiceDisplayStatus {

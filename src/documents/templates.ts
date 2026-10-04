@@ -159,6 +159,9 @@ export interface RenderableDocument {
   number: string | null;
   date: string;
   dueDate?: string | null;
+  /** datum van levering of dienst (of begin van de periode), ISO; leeg = de factuurdatum */
+  deliveryDate?: string | null;
+  deliveryDateTo?: string | null;
   validUntil?: string | null;
   reference?: string | null;
   intro?: string | null;
@@ -194,6 +197,11 @@ export function renderDocumentHtml(doc: RenderableDocument, customer: Renderable
       numberLabel: isInvoice ? 'Factuurnummer' : 'Offertenummer',
       number: doc.number ?? 'CONCEPT',
       date: formatDateNl(doc.date),
+      // gewone btw-facturen vermelden altijd de datum van levering of dienst; leeg = de factuurdatum. Onder de KOR en op een creditfactuur alleen als je hem zelf invult.
+      delivery: doc.deliveryDate
+        ? (doc.deliveryDateTo ? `${formatDateNl(doc.deliveryDate)} t/m ${formatDateNl(doc.deliveryDateTo)}` : formatDateNl(doc.deliveryDate))
+        : isInvoice && !isCredit && !opts.kor ? formatDateNl(doc.date) : null,
+      deliveryLabel: doc.deliveryDateTo ? 'Periode levering/dienst' : 'Datum levering/dienst',
       dueDate: isInvoice && !isCredit && doc.dueDate ? formatDateNl(doc.dueDate) : null,
       validUntil: !isInvoice && doc.validUntil ? formatDateNl(doc.validUntil) : null,
       reference: doc.reference,

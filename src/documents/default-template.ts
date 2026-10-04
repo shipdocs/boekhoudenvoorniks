@@ -55,6 +55,7 @@ export const DEFAULT_HTML_TEMPLATE = `<!doctype html>
     <table class="meta">
       <tr><td>{{doc.numberLabel}}</td><td>{{doc.number}}</td></tr>
       <tr><td>Datum</td><td>{{doc.date}}</td></tr>
+      {{#doc.delivery}}<tr><td>{{doc.deliveryLabel}}</td><td>{{doc.delivery}}</td></tr>{{/doc.delivery}}
       {{#doc.dueDate}}<tr><td>Vervaldatum</td><td>{{doc.dueDate}}</td></tr>{{/doc.dueDate}}
       {{#doc.validUntil}}<tr><td>Geldig tot</td><td>{{doc.validUntil}}</td></tr>{{/doc.validUntil}}
       {{#doc.reference}}<tr><td>Referentie</td><td>{{doc.reference}}</td></tr>{{/doc.reference}}

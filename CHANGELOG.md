@@ -5,7 +5,10 @@
 ### Nieuw
 - **KOR: bewaking van de omzetgrens van € 20.000.** Gebruik je de kleineondernemersregeling, dan waarschuwt de app op Vandaag en bij Belasting zodra je omzet dit jaar bij € 16.000 komt, en nogmaals zodra hij boven € 20.000 komt: dan vervalt de KOR per direct. De omzet wordt geteld zoals de Belastingdienst het doet (omzet tegen 21%, 9% en 0%, uitvoer, leveringen naar andere EU-landen, nationale verlegging en wat onder de KOR valt; niet: diensten die elders belast zijn, zoals EU-diensten aan bedrijven).
 
+- **Datum van levering of dienst op je factuur.** Een gewone btw-factuur moet de datum noemen waarop je leverde of de dienst verrichtte. In de factuureditor staat nu "Datum levering of dienst" (en "t/m" voor een periode, bijvoorbeeld bij een klus van meerdere weken). Laat je het leeg, dan staat de factuurdatum erop. Onder de KOR hoeft het niet: daar staat het er alleen als je het zelf invult. In de e-factuur (UBL) gaat een eigen datum mee als leveringsdatum en een periode als factuurperiode.
+
 ### Verbeterd
+- **KOR: "Btw verlegd" is niet meer te kiezen.** Met de kleineondernemersregeling lever je vrijgesteld van btw; je kiest dan "Geen btw (vrijgesteld of KOR)" en de factuur noemt de KOR. De app weigert nu "Btw verlegd" bij een factuur of een verkoop via de bank onder de KOR.
 - **Inkomstenbelasting 2026: bedragen gecontroleerd.** Alle bedragen van 2026 (schijven, heffingskortingen, Zvw, zelfstandigen- en startersaftrek, MKB-winstvrijstelling, KIA, representatie, kilometervergoeding) zijn nagelopen op belastingdienst.nl. De app meldt daarom voor 2026 niet meer dat de tabel nog niet is nagekeken.
 
 ## 1.2.0 — je bank automatisch ophalen met Ponto
