@@ -219,7 +219,7 @@ function Assets() {
         <p>{c.name} · <DateNl date={c.date} /> · <Euro cents={c.amount} /></p>
         <p className="small muted">De credit staat al in je boekhouding. Kies het bedrijfsmiddel om ook de kostprijs en afschrijving bij te werken.</p>
         {c.candidates.length ? <div className="row">{c.candidates.map(a => <Button key={a.id} small disabled={busy} onClick={async () => {
-          if (await run(() => api.assets.allocateCredit(c.lineId, a.id), 'Creditnota gekoppeld') !== undefined) { await list.reload(); await credits.reload(); }
+          if (await run(async () => { await api.assets.allocateCredit(c.lineId, a.id); return true; }, 'Creditnota gekoppeld')) { await list.reload(); await credits.reload(); }
         }}>{a.name}</Button>)}</div> : <p>Er is geen passend bedrijfsmiddel. Controleer de categorie en leverancier van de creditnota bij Aankopen.</p>}
       </div>)}
       <KiaProgress assets={list.data} />
