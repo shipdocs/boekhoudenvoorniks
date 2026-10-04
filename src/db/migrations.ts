@@ -1344,4 +1344,19 @@ export const migrations: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  // Controle van een btw-nummer in VIES (alleen op verzoek van de gebruiker): het resultaat met datum, als bewijs.
+  `
+  CREATE TABLE vies_checks (
+    id INTEGER PRIMARY KEY,
+    vat_number TEXT NOT NULL,
+    relation_id INTEGER REFERENCES relations(id),
+    -- 1 = geldig, 0 = ongeldig, NULL = geen uitslag (dienst niet bereikbaar)
+    valid INTEGER,
+    name TEXT,
+    address TEXT,
+    message TEXT,
+    checked_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_vies_checks_vat ON vies_checks(vat_number);
+  `,
 ];

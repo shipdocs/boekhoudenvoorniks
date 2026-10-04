@@ -213,7 +213,7 @@ describe('Vervolgregressies: expliciete keuzes, vraagposten en historische activ
     db.exec('DROP TRIGGER asset_depreciation_history_no_update; DROP TRIGGER asset_depreciation_history_no_delete; DROP TABLE asset_depreciation_history');
     db.prepare('UPDATE asset_depreciation SET amount = 10000 WHERE asset_id = ?').run(assets[0]!.id);
     // latere migraties (leverdatum op facturen) horen bij de simulatie van een oudere database niet meer aanwezig te zijn
-    db.exec('ALTER TABLE invoices DROP COLUMN delivery_date; ALTER TABLE invoices DROP COLUMN delivery_date_to; DROP TABLE invoice_writeoffs; DROP TABLE year_end_items');
+    db.exec('ALTER TABLE invoices DROP COLUMN delivery_date; ALTER TABLE invoices DROP COLUMN delivery_date_to; DROP TABLE invoice_writeoffs; DROP TABLE year_end_items; DROP TABLE vies_checks');
     db.pragma('user_version = 35');
     const journalBefore = db.prepare('SELECT * FROM journal_lines ORDER BY id').all();
     migrate(db);

@@ -654,6 +654,11 @@ export function createApi(s: Services, host: HostContext) {
         return s.periods.close(String(until), keys);
       },
     },
+    /** btw-nummer controleren in VIES: alleen op verzoek (stuurt het nummer naar de EU-dienst) */
+    vies: {
+      latest: (vatNumber: string) => s.vies.latest(String(vatNumber)),
+      check: (vatNumber: string, relationId?: number | null) => s.vies.check(String(vatNumber), relationId ?? null),
+    },
     /** jaarafsluiting: vooruitbetaald, nog te betalen, voorraad, onderhanden werk */
     yearEnd: {
       kinds: () => YEAR_END_KINDS,
