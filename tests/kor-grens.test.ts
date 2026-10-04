@@ -57,13 +57,12 @@ describe('KOR: bewaking van de omzetgrens van € 20.000', () => {
     sale(s, klant.id, '2026-02-10', 100000);
     expect(check(s, '2026-Q1')).toBeUndefined();
   });
-  it('uitvoer, 0% en omzet die onder de KOR valt tellen mee', () => {
+  it('0% en omzet die onder de KOR valt tellen mee', () => {
     const { s, klant } = setup();
     s.settings.update({ kor: true });
-    const us = s.relations.create({ name: 'Acme Inc', address: '1 Main St', postcode: '10001', city: 'New York', country: 'US', email: 'a@acme.example' });
     sale(s, klant.id, '2026-02-10', 700000, 'nul');
     sale(s, klant.id, '2026-02-11', 700000, 'vrijgesteld');
-    sale(s, us.id, '2026-02-12', 700000, 'export');
+    sale(s, klant.id, '2026-02-12', 700000, 'nul');
     expect(check(s, '2026-Q1')?.fingerprint).toBe('2026:boven');
   });
   it('een dienst aan een bedrijf in een ander EU-land is elders belast en telt niet mee', () => {

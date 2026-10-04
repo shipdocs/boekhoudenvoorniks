@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { setup } from './helpers';
 
 type S = ReturnType<typeof setup>['s'];
-type Code = 'hoog' | 'vrijgesteld' | 'verlegd' | 'icp-dienst' | 'icp';
+type Code = 'hoog' | 'vrijgesteld' | 'verlegd' | 'icp-dienst' | 'icp' | 'export';
 function draft(s: S, relationId: number, vatCode: Code = 'hoog', extra: Record<string, unknown> = {}, amount = 100000) {
   return s.invoices.createDraft({ relationId, invoiceDate: '2026-04-10', lines: [{ description: 'Werk', quantity: 1, unitPrice: amount, vatCode }], ...extra });
 }
@@ -36,6 +36,51 @@ describe('KOR en "btw verlegd"', () => {
     s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-04-11', amount: 50000, description: 'Klant', counterName: 'Klant' }] });
     const t = s.bank.list().find((x) => x.counter_name === 'Klant')!;
     expect(() => s.bank.bookSale(t.id, { vatCode: 'verlegd' })).toThrow(/KOR/);
+  });
+});
+
+describe('KOR: uitvoer en EU-diensten', () => {
+  const de = (s: S) => s.relations.create({ name: 'Bau GmbH', address: 'Hauptstraße 1', postcode: '47533', city: 'Kleve', country: 'DE', vat_number: 'DE123456789', email: 'info@bau.example' });
+  it('uitvoer buiten de EU krijgt onder de KOR de KOR-vrijstelling, niet 0% uitvoer', () => {
+    const { s } = setup();
+    s.settings.update({ kor: true });
+    const us = s.relations.create({ name: 'Acme Inc', address: '1 Main St', postcode: '10001', city: 'New York', country: 'US', email: 'a@acme.example' });
+    expect(() => s.invoices.finalize(draft(s, us.id, 'export').id)).toThrow(/KOR/);
+    expect(() => s.invoices.finalize(draft(s, us.id, 'vrijgesteld').id)).not.toThrow();
+  });
+  it('zonder KOR blijft uitvoer gewoon 0%', () => {
+    const { s } = setup();
+    const us = s.relations.create({ name: 'Acme Inc', address: '1 Main St', postcode: '10001', city: 'New York', country: 'US', email: 'a@acme.example' });
+    expect(() => s.invoices.finalize(draft(s, us.id, 'export').id)).not.toThrow();
+  });
+  it('een EU-dienst onder de KOR vraagt het btw-nummer van de leverancier én van de klant', () => {
+    const { s } = setup();
+    s.settings.update({ kor: true, company: { ...s.settings.get().company, vatNumber: '' } });
+    const klant = de(s);
+    expect(() => s.invoices.finalize(draft(s, klant.id, 'icp-dienst').id)).toThrow(/btw-nummer/);
+    s.settings.update({ company: { ...s.settings.get().company, vatNumber: 'NL123456789B01' } });
+    const inv = s.invoices.finalize(draft(s, klant.id, 'icp-dienst').id);
+    const h = html(s, inv.id);
+    expect(h).toContain('Btw verlegd (reverse charge');
+    expect(h).toContain('DE123456789');
+    // geen tegenstrijdige KOR-vermelding, en als gewone btw-factuur wel een leverdatum
+    expect(h).not.toContain('kleineondernemersregeling');
+    expect(h).toContain('Datum levering/dienst');
+  });
+  it('een EU-dienst onder de KOR geeft een melding over aangifte en ICP, op Vandaag en bij de controles', () => {
+    const { s } = setup();
+    s.settings.update({ kor: true });
+    s.invoices.finalize(draft(s, de(s).id, 'icp-dienst').id);
+    const c = s.vat.checks('2026-Q2').find((x) => x.key === 'kor-eu-dienst')!;
+    expect(c).toMatchObject({ blocking: false });
+    expect(c.detail).toContain('ICP');
+    expect(s.inbox.tasks('2026-07-05').some((t) => t.kind === 'vat-check' && t.key.endsWith('kor-eu-dienst'))).toBe(true);
+  });
+  it('zonder EU-dienst geen melding', () => {
+    const { s, klant } = setup();
+    s.settings.update({ kor: true });
+    s.invoices.finalize(draft(s, klant.id, 'vrijgesteld').id);
+    expect(s.vat.checks('2026-Q2').some((x) => x.key === 'kor-eu-dienst')).toBe(false);
   });
 });
 

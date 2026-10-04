@@ -457,6 +457,28 @@ export function runVatChecks(
     }
   }
 
+  // KOR en een EU-dienst: die valt buiten de Nederlandse KOR (belast in het land van de klant, btw verlegd). Dan horen
+  // btw-aangifte en ICP-opgaaf erbij; dat toont de app voor KOR-gebruikers niet vanzelf.
+  if (korActive(db)) {
+    const eu = db
+      .prepare(
+        `SELECT DISTINCT i.id, i.number FROM invoices i JOIN invoice_lines l ON l.invoice_id = i.id
+         WHERE i.status <> 'concept' AND i.number IS NOT NULL AND l.vat_code = 'icp-dienst' AND i.invoice_date BETWEEN ? AND ? ORDER BY i.id`,
+      )
+      .all(`${end.slice(0, 4)}-01-01`, end) as { id: number; number: string }[];
+    if (eu.length > 0) {
+      found.push({
+        key: 'kor-eu-dienst',
+        blocking: false,
+        title: `${eu.length === 1 ? `Factuur ${eu[0]!.number}` : `${eu.length} facturen`} met een dienst aan een bedrijf in een ander EU-land: de KOR geldt daar niet voor`,
+        detail: 'Een dienst die in het land van de klant belast is, valt buiten de Nederlandse KOR. Je factureert hem zonder btw met "btw verlegd" en beide btw-nummers. Voor zulke diensten doe je wel btw-aangifte en de opgaaf intracommunautaire prestaties (ICP). Die overzichten maakt de app voor KOR-gebruikers niet vanzelf: laat je boekhouder dit doen, of zoek de btw-aangifte op in Mijn Belastingdienst Zakelijk.',
+        count: eu.length,
+        fingerprint: `${end.slice(0, 4)}:${eu.map((e) => e.id).join(',')}`,
+        screen: 'belasting',
+      });
+    }
+  }
+
   // Rekening-courant met de Belastingdienst: na elke aangifte en betaling hoort die op nul te staan
   // (of op het bedrag van de vorige aangifte als dat nog betaald moet worden).
   // Saldo tot het eind van deze periode, zonder de boeking van deze aangifte zelf: de betaling van de vorige

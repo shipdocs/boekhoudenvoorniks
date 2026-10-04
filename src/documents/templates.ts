@@ -188,6 +188,9 @@ export function renderDocumentHtml(doc: RenderableDocument, customer: Renderable
   const totals = computeTotals(lines);
   const isInvoice = doc.kind === 'factuur';
   const isCredit = totals.total < 0;
+  // KOR-vrijstelling: alleen als er iets vrijgesteld geleverd is. Een dienst die elders belast is (EU-dienst met verlegging, klant buiten de EU) valt er niet onder.
+  const elsewhere = (code: string) => code === 'icp-dienst' || code === 'dienst-buiten-eu';
+  const korExempt = doc.lines.some((l) => l.vat_code === 'vrijgesteld') || (Boolean(opts.kor) && doc.lines.some((l) => !elsewhere(l.vat_code)));
   const view = {
     style: { ...template.colors, font: template.font, logo: template.logo },
     company: { ...company, iban: company.iban ? formatIban(company.iban) : '' },
@@ -200,7 +203,7 @@ export function renderDocumentHtml(doc: RenderableDocument, customer: Renderable
       // gewone btw-facturen vermelden altijd de datum van levering of dienst; leeg = de factuurdatum. Onder de KOR en op een creditfactuur alleen als je hem zelf invult.
       delivery: doc.deliveryDate
         ? (doc.deliveryDateTo ? `${formatDateNl(doc.deliveryDate)} t/m ${formatDateNl(doc.deliveryDateTo)}` : formatDateNl(doc.deliveryDate))
-        : isInvoice && !isCredit && !opts.kor ? formatDateNl(doc.date) : null,
+        : isInvoice && !isCredit && !korExempt ? formatDateNl(doc.date) : null,
       deliveryLabel: doc.deliveryDateTo ? 'Periode levering/dienst' : 'Datum levering/dienst',
       dueDate: isInvoice && !isCredit && doc.dueDate ? formatDateNl(doc.dueDate) : null,
       validUntil: !isInvoice && doc.validUntil ? formatDateNl(doc.validUntil) : null,
@@ -217,7 +220,7 @@ export function renderDocumentHtml(doc: RenderableDocument, customer: Renderable
       export: doc.lines.some((l) => l.vat_code === 'export'),
       outsideEuService: doc.lines.some((l) => l.vat_code === 'dienst-buiten-eu'),
       outsideEuServiceText: OUTSIDE_EU_SERVICE_TEXT,
-      kor: opts.kor || doc.lines.some((l) => l.vat_code === 'vrijgesteld'),
+      kor: korExempt,
       isInvoice,
       isCredit,
     },

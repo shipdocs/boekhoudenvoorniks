@@ -20,6 +20,7 @@ import { isUbl, parseUbl, findEmbeddedUbl } from './ubl';
 import { extractPdf } from './pdf-text';
 import { parseDocumentText } from './text-parser';
 import { validateDocument } from './validation';
+import { amountOutlierIssue } from './outliers';
 import { assessConfidence } from './confidence';
 import { PROPOSED_BY_LABEL, type Classifier, type Classification } from './classify';
 import type { SupplierMemory } from './supplier-memory';
@@ -915,6 +916,8 @@ export class IntakeService {
       classification = { ...classification, business: false, automatic: false, reasons: [...classification.reasons, 'privéauto: tanken, parkeren en onderhoud zijn privé; zakelijke km vul je apart in'] };
     }
     const issues = [...extraIssues, ...validateDocument(result, asOf)];
+    const outlier = this.amountOutlier(result);
+    if (outlier) issues.push(outlier);
     if (duplicate) {
       issues.push({ field: 'duplicate', severity: 'fout', message: `${duplicateLead(duplicate)} Is dit dezelfde aankoop?`, suggestion: duplicate });
     } else {
@@ -1003,6 +1006,19 @@ export class IntakeService {
     const number = entry.number ? normalizeInvoiceNumber(entry.number) : '';
     const probe: DuplicateProbe = { number: number || null, reliable: number.length >= MIN_NUMBER_LENGTH, date: entry.date, credit: entry.total < 0 };
     return this.duplicateOf({ supplier: entry.supplier, total: entry.total, foreign: null, probe }, null, new Set());
+  }
+
+  /** Een bedrag dat ver boven het gebruikelijke bedrag bij dezelfde leverancier ligt (#283). */
+  private amountOutlier(result: DocumentResult): Issue | null {
+    const name = result.supplier?.value;
+    const total = result.total?.value;
+    if (!name || total === undefined || result.foreign) return null;
+    const key = supplierKey(name);
+    if (!key) return null;
+    const rows = this.db
+      .prepare(`SELECT p.total, r.name FROM purchase_invoices p JOIN relations r ON r.id = p.relation_id WHERE p.total > 0 AND (p.currency IS NULL OR p.currency = 'EUR')`)
+      .all() as { total: number; name: string }[];
+    return amountOutlierIssue(rows.filter((r) => supplierKey(r.name) === key).map((r) => r.total), total);
   }
 
   /**

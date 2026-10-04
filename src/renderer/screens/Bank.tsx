@@ -715,7 +715,7 @@ function SaleForm({ txId, amount, description, busy, onBook }: { txId: number; a
       </Field>
       <Field label="Hoeveel btw rekende je?" hint="kijk op de factuur of bon die je klant kreeg">
         <select value={vat} onChange={(e) => setPicked(e.target.value as SalesVatCode)}>
-          {meta.salesVat.filter(v => !settings.kor || (v.percentage === 0 && v.code !== 'verlegd')).map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
+          {meta.salesVat.filter(v => !settings.kor || (v.percentage === 0 && v.code !== 'verlegd' && v.code !== 'export')).map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
         </select>
       </Field>
       {hint.error && !picked && <p className="small" style={{ margin: 0 }}>Er is geen voorstel. Kies zelf de btw die op de factuur staat.</p>}

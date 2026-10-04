@@ -1509,8 +1509,7 @@ export class InboxService {
     // KOR: geen aangifte, maar de omzetgrens van € 20.000 blijft bewaakt
     if (s.kor) {
       const now = this.vat.currentPeriod(asOf);
-      const korCheck = this.vat.checks(now.key).find((c) => c.key === 'kor-grens' && !c.skipped);
-      if (korCheck) {
+      for (const korCheck of this.vat.checks(now.key).filter((c) => c.key.startsWith('kor-') && !c.skipped)) {
         tasks.push({
           key: `vat-check-${now.key}-${korCheck.key}`,
           kind: 'vat-check',

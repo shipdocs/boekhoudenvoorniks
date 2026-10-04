@@ -16,6 +16,9 @@ interface EditLine {
 
 const toNumber = (s: string) => Number(s.replace(',', '.'));
 
+// onder de KOR: vrijgesteld, of een dienst die elders belast is (EU-dienst met verlegging, klant buiten de EU)
+const KOR_SALES_VAT: string[] = ['vrijgesteld', 'icp-dienst', 'dienst-buiten-eu'];
+
 export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?: number }) {
   const { go, meta, settings, toast, route } = useApp();
   const { run, busy } = useAction();
@@ -35,12 +38,20 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
   const [date, setDate] = useState(today());
   const [secondDate, setSecondDate] = useState('');
   const [reference, setReference] = useState('');
+  const [dateWarnings, setDateWarnings] = useState<string[]>([]);
   const [deliveryDate, setDeliveryDate] = useState('');
   const [deliveryDateTo, setDeliveryDateTo] = useState('');
   const [intro, setIntro] = useState('');
   const [notes, setNotes] = useState('');
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [lines, setLines] = useState<EditLine[]>([{ description: '', quantity: '1', unit: '', unitPrice: null, vatCode: defaultVat }]);
+
+  useEffect(() => {
+    if (!isInvoice || !date) { setDateWarnings([]); return; }
+    let live = true;
+    api.invoices.dateWarnings(date, id).then((w) => { if (live) setDateWarnings(w); }, () => { if (live) setDateWarnings([]); });
+    return () => { live = false; };
+  }, [isInvoice, date, id]);
 
   useEffect(() => {
     const d = doc.data;
@@ -162,6 +173,11 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
             </div>
           );
         })()}
+        {isInvoice && editable && dateWarnings.length > 0 && (
+          <div className="notice warn" style={{ marginTop: 12 }}>
+            {dateWarnings.map((w) => <div key={w} className="small">{w}</div>)}
+          </div>
+        )}
         {isInvoice && (
           <div className="row" style={{ marginTop: 12 }}>
             <Field label="Datum levering of dienst" hint={settings.kor ? 'Mag leeg bij de KOR.' : 'Leeg = de factuurdatum. Vul in als je eerder of later leverde, of een voorschot rekent.'}>
@@ -195,8 +211,8 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
                   <td><input aria-label={`Eenheid regel ${i + 1}`} value={l.unit} disabled={!editable} onChange={(e) => setLine(i, { unit: e.target.value })} placeholder="m²" /></td>
                   <td>{editable ? <MoneyInput ariaLabel={`Prijs regel ${i + 1}`} value={l.unitPrice} onChange={(v) => setLine(i, { unitPrice: v })} /> : <Euro cents={l.unitPrice} />}</td>
                   <td>
-                    <select aria-label={`Btw regel ${i + 1}`} value={l.vatCode} disabled={!editable || settings.kor} onChange={(e) => setLine(i, { vatCode: e.target.value as SalesVatCode })}>
-                      {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
+                    <select aria-label={`Btw regel ${i + 1}`} value={l.vatCode} disabled={!editable} onChange={(e) => setLine(i, { vatCode: e.target.value as SalesVatCode })}>
+                      {meta.salesVat.filter((v) => !settings.kor || KOR_SALES_VAT.includes(v.code) || v.code === l.vatCode).map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
                     </select>
                   </td>
                   <td className="num"><Euro cents={lineTotal} /></td>

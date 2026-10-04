@@ -1615,7 +1615,7 @@ export class BankService {
       const description = input.description?.trim() || t.description || t.counter_name || 'Banktransactie';
       const relationId = input.relationId ?? (t.counter_iban ? this.relations.findByIban(t.counter_iban)?.id ?? null : null);
       const vatCode = input.vatCode ?? 'geen';
-      if (target.category === 'omzet' && korActive(this.db) && (vatCode === 'hoog' || vatCode === 'laag' || vatCode === 'verlegd')) throw new ValidationError('Je gebruikt de KOR: kies geen btw bij deze verkoop');
+      if (target.category === 'omzet' && korActive(this.db) && (vatCode === 'hoog' || vatCode === 'laag' || vatCode === 'verlegd' || vatCode === 'export')) throw new ValidationError('Je gebruikt de KOR: kies geen btw bij deze verkoop');
       // omzet komt op de omzetrekening die bij de btw hoort (21%, 0% buiten de EU, …): zo belandt het in de juiste rubriek
       const account = target.category === 'omzet' && isSalesVatCode(vatCode) ? SALES_ACCOUNTS[vatCode]?.revenue ?? target.rgs_code : target.rgs_code;
       // Hetzelfde zakelijke deel bij aankoop en terugbetaling van kosten of bedrijfsmiddelen.

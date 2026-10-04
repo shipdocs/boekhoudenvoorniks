@@ -381,13 +381,17 @@ function IcpCard({ periodKey }: { periodKey: string }) {
 function KorLimit() {
   const current = useLoad(() => api.vat.current());
   const list = useLoad(async () => (current.data ? api.vat.checks(current.data.key) : []), [current.data?.key]);
-  const check = (list.data ?? []).find((c) => c.key === 'kor-grens' && !c.skipped);
-  if (!check) return null;
+  const found = (list.data ?? []).filter((c) => c.key.startsWith('kor-') && !c.skipped);
+  if (found.length === 0) return null;
   return (
-    <div className="notice warn" style={{ marginTop: 14 }}>
-      <strong>{check.title}</strong>
-      <div className="small">{check.detail}</div>
-    </div>
+    <>
+      {found.map((check) => (
+        <div key={check.key} className="notice warn" style={{ marginTop: 14 }}>
+          <strong>{check.title}</strong>
+          <div className="small">{check.detail}</div>
+        </div>
+      ))}
+    </>
   );
 }
 
