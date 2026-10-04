@@ -24,6 +24,7 @@ import { QuickActions } from './quick/quick';
 import { IntegrationService } from './integrations/integrations';
 import type { FetchLike, SecretStore } from './integrations/types';
 import { PeriodCloseService } from './closing/period-close';
+import { ViesService } from './btw/vies';
 import { YearEndService } from './closing/year-end';
 import { ExchangeService } from './exchange/exchange';
 import { LicenseService } from './license/license';
@@ -90,6 +91,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     if (settings.officeCopy()) return Promise.reject(new Error(settings.outboundBlocked()!));
     return deps.fetch(url, init);
   };
+  const vies = new ViesService(db, integrationFetch);
   const sender = new DocumentSender(db, settings, invoices, quotes, deps.pdf, mailerFactory);
   const bank = new BankService(db, ledger, invoices, purchases, relations, events);
   // een betaling en een aankoop waarvan de gebruiker zei dat ze niet bij elkaar horen, stelt de app niet opnieuw voor
@@ -177,7 +179,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, ownCompany, statementFolder, periods, yearEnd, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed };
+  return { db, ownCompany, statementFolder, vies, periods, yearEnd, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed };
 }
 
 export type Services = ReturnType<typeof createServices>;
