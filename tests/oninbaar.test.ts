@@ -58,3 +58,32 @@ describe('Controle oninbare facturen', () => {
     expect(s.vat.checks('2026-Q2').find((c) => c.key === 'oninbaar-inkoop')).toBeDefined();
   });
 });
+
+describe('Inkoop niet betaald: voorbelasting terugnemen', () => {
+  const buy = (s: S) => s.purchases.create({ invoiceDate: '2025-01-10', dueDate: '2025-02-09', description: 'Hout', lines: [{ account: 'WKprInkMat', netAmount: 100000, vatCode: 'hoog', vatAmount: 21000 }] });
+  const voorbelasting = (s: S, period: string) => s.vat.calculate(period).rubrieken.find((r) => r.code === '5b')!.btw;
+  it('de btw wordt kosten en de voorbelasting daalt in het tijdvak van het terugnemen', () => {
+    const { s } = setup();
+    const p = buy(s);
+    expect(voorbelasting(s, '2025-Q1')).toBe(21000);
+    s.purchases.repayInputVat(p.id, '2026-03-31');
+    expect(voorbelasting(s, '2026-Q1')).toBe(-21000);
+    expect(() => s.purchases.repayInputVat(p.id, '2026-03-31')).toThrow(/al teruggenomen/);
+    expect(s.purchases.get(p.id).open_amount).toBe(121000); // de schuld blijft staan
+  });
+  it('alsnog (deels) betaald: de btw over dat deel weer aftrekken in het tijdvak van de betaling', () => {
+    const { s } = setup();
+    const p = buy(s);
+    s.purchases.repayInputVat(p.id, '2026-03-31');
+    s.purchases.registerPayment(p.id, { amount: 60500, date: '2026-05-10' });
+    expect(voorbelasting(s, '2026-Q2')).toBe(10500);
+    s.purchases.registerPayment(p.id, { amount: 60500, date: '2026-08-10' });
+    expect(voorbelasting(s, '2026-Q3')).toBe(10500);
+  });
+  it('een betaalde of KOR-inkoop kun je niet terugnemen', () => {
+    const { s } = setup();
+    const p = buy(s);
+    s.purchases.registerPayment(p.id, { amount: 121000, date: '2025-03-01' });
+    expect(() => s.purchases.repayInputVat(p.id, '2026-03-31')).toThrow(/openstaat/);
+  });
+});

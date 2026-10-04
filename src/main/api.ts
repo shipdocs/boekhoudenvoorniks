@@ -1093,6 +1093,7 @@ export function createApi(s: Services, host: HostContext) {
       setSupplierAutomatic: (key: string, automatic: boolean) => s.memory.setAutomatic(key, automatic),
     },
     purchases: {
+      repayInputVat: (id: number, date: IsoDate) => s.purchases.repayInputVat(Number(id), date),
       /** met hoe hij betaald is: de bankrekening, "privé betaald" of "contant" */
       list: (filter?: { status?: 'open' | 'betaald' }) => {
         const list = s.purchases.list(filter);
