@@ -207,7 +207,7 @@ export class TaxOverviewService {
       explain: 'Wat je verdiende min je zakelijke kosten. Ook de kilometers en het deel van je investeringen voor dit jaar zijn er al af.',
       note: `Winst uit onderneming volgens de boekhouding${adj.unbookedDepreciation > 0 ? `, inclusief ${eur(adj.unbookedDepreciation)} afschrijving ${running ? 'tot nu toe (wordt na afloop van het jaar geboekt)' : 'die nog niet geboekt is'}` : ''}.`,
     });
-    const credits = this.assets.unassignedCredits();
+    const credits = this.assets.unassignedCredits(false); // bookDue (sync) draaide hierboven al
     if (credits.length) items.push({ key: 'investering-credit', label: 'Koppel creditnota’s aan je investeringen', amount: null, explain: 'Bij Investeringen kies je bij welke aankoop elke creditnota hoort. Tot die tijd kunnen afschrijving en investeringsaftrek afwijken.', note: `${credits.length} creditnota’s nog niet toegewezen.`, status: 'warn' });
     if (adj.representatie.total > 0) {
       items.push({

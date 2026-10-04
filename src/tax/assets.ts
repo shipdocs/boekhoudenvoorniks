@@ -197,6 +197,14 @@ export class AssetService {
       WHERE s.status = 'actief' AND e.status = 'definitief' AND s.account_rgs = ? AND s.acquired_on <= ? AND s.cost >= ? AND (? IS NULL OR l.relation_id = ?) ORDER BY s.id`).all(c.rgs, c.date, c.amount, c.relation, c.relation) as { id: number; name: string }[] }));
   }
 
+  /**
+   * Credits die de gebruiker nog moet toewijzen, zonder iets te schrijven (voor controles en
+   * overzichten). `sync` wijst een credit zelf toe als er precies één kandidaat is; die tellen hier dus niet mee.
+   */
+  pendingCredits(): ReturnType<AssetService['unassignedCredits']> {
+    return this.unassignedCredits(false).filter(c => c.candidates.length !== 1);
+  }
+
   allocateCredit(lineId: number, assetId: number): void {
     tx(this.db, () => {
       this.sync();
