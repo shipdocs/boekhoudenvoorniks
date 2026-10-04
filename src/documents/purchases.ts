@@ -240,6 +240,7 @@ export class PurchaseService {
       });
       const paid = p.amount_paid + settled;
       this.db.prepare('UPDATE purchase_invoices SET amount_paid = ?, status = ? WHERE id = ?').run(paid, paidStatus(p.total, paid), id);
+      this.redeductAfterRepayment(id, p.description, p.relation_id, settled, payment.date);
       if (payment.bankTransactionId) {
         this.db
           .prepare(`UPDATE bank_transactions SET status = 'gematcht', matched_journal_entry_id = ?, matched_purchase_invoice_id = ? WHERE id = ?`)
@@ -247,6 +248,68 @@ export class PurchaseService {
       }
       return this.get(id);
     });
+  }
+
+  /**
+   * Een inkoop die je niet betaalt: de voorbelasting over het openstaande deel moet je terugbetalen, uiterlijk 1 jaar na de
+   * uiterste betaaldatum (art. 29 Wet OB; belastingdienst.nl, 2026-10-04). De btw wordt dan kosten (of onderdeel van de kostprijs).
+   * Betaal je later alsnog, dan mag je die btw weer aftrekken (zie `redeductAfterRepayment`).
+   */
+  repayInputVat(id: number, date: IsoDate): PurchaseInvoice {
+    assertIsoDate(date, 'datum');
+    return tx(this.db, () => {
+      const p = this.get(id);
+      if (p.status !== 'open' || p.open_amount <= 0 || p.total <= 0) throw new ValidationError('Alleen bij een inkoop die nog (deels) openstaat kun je de btw terugnemen');
+      if (korActive(this.db)) throw new ValidationError('Je gebruikt de KOR: je trok geen btw af, dus er is niets terug te nemen');
+      if (!p.journal_entry_id) throw new ValidationError('Deze inkoop is nog niet geboekt');
+      if (this.db.prepare('SELECT 1 FROM purchase_vat_repayments WHERE purchase_id = ? AND paid_since < basis').get(id)) throw new ValidationError('Voor deze inkoop is de btw al teruggenomen');
+      const rows = this.db.prepare(`SELECT l.debit, l.credit, a.rgs_code, a.category FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = ?`).all(p.journal_entry_id) as { debit: Cents; credit: Cents; rgs_code: string; category: string }[];
+      const deducted = rows.filter((r) => r.rgs_code === ACCOUNTS.btwVoorbelasting).reduce((n, r) => n + r.debit - r.credit, 0);
+      if (deducted <= 0) throw new ValidationError('Op deze inkoop is geen btw afgetrokken');
+      const base = rows.filter((r) => (r.category === 'kosten' || r.category === 'activa') && r.debit > 0);
+      const baseTotal = base.reduce((n, r) => n + r.debit, 0);
+      if (baseTotal <= 0) throw new ValidationError('Kon de kosten van deze inkoop niet bepalen');
+      const vat = Math.round((deducted * p.open_amount) / p.total);
+      if (vat <= 0) throw new ValidationError('Er is geen btw om terug te nemen over het openstaande bedrag');
+      const debits = base.map((r) => ({ account: r.rgs_code, debit: Math.round((vat * r.debit) / baseTotal) }));
+      debits[0]!.debit += vat - debits.reduce((n, d) => n + d.debit, 0);
+      const entryId = this.ledger.post({
+        date,
+        description: `Btw terugnemen, inkoop niet betaald: ${p.description}`,
+        source: 'handmatig',
+        sourceRef: `purchase:${id}`,
+        lines: [...debits.filter((d) => d.debit !== 0), { account: ACCOUNTS.btwVoorbelasting, credit: vat }],
+      });
+      this.db.prepare('INSERT INTO purchase_vat_repayments (purchase_id, journal_entry_id, vat_amount, basis, repaid_on) VALUES (?, ?, ?, ?, ?)').run(id, entryId, vat, p.open_amount, date);
+      return this.get(id);
+    });
+  }
+
+  /** Betaal je na het terugnemen van de btw alsnog, dan trek je de btw over dat deel weer af, in het tijdvak van de betaling. */
+  private redeductAfterRepayment(id: number, description: string, relationId: number | null, settled: Cents, date: IsoDate): void {
+    if (settled <= 0 || !this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'purchase_vat_repayments'").get()) return;
+    const r = this.db.prepare('SELECT * FROM purchase_vat_repayments WHERE purchase_id = ? AND paid_since < basis ORDER BY id LIMIT 1').get(id) as
+      | { id: number; journal_entry_id: number; vat_amount: Cents; basis: Cents; paid_since: Cents; rededucted: Cents }
+      | undefined;
+    if (!r) return;
+    const part = Math.min(settled, r.basis - r.paid_since);
+    const done = r.paid_since + part >= r.basis;
+    const vat = done ? r.vat_amount - r.rededucted : Math.round((r.vat_amount * part) / r.basis);
+    if (vat > 0) {
+      const original = this.db.prepare(`SELECT l.debit, a.rgs_code FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = ? AND l.debit > 0`).all(r.journal_entry_id) as { debit: Cents; rgs_code: string }[];
+      const total = original.reduce((n, o) => n + o.debit, 0);
+      const credits = original.map((o) => ({ account: o.rgs_code, credit: Math.round((vat * o.debit) / total) }));
+      credits[0]!.credit += vat - credits.reduce((n, c) => n + c.credit, 0);
+      this.ledger.post({
+        date,
+        description: `Btw weer aftrekken, inkoop alsnog betaald: ${description}`,
+        source: 'handmatig',
+        sourceRef: `purchase:${id}`,
+        lines: [{ account: ACCOUNTS.btwVoorbelasting, debit: vat }, ...credits.filter((c) => c.credit !== 0)],
+      });
+    }
+    this.db.prepare('UPDATE purchase_vat_repayments SET paid_since = paid_since + ?, rededucted = rededucted + ? WHERE id = ?').run(part, vat > 0 ? vat : 0, r.id);
+    void relationId;
   }
 
   /**
