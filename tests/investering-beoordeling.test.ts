@@ -9,13 +9,23 @@ const purchase = (s: ReturnType<typeof setup>['s'], date: string, amount: number
 const find = (s: ReturnType<typeof setup>['s'], period: string, key: string) => s.vat.checks(period).find((c) => c.key === key);
 
 describe('Bijzondere investeringssituaties: beoordelingstaken', () => {
-  it('KOR met een recent bedrijfsmiddel: vraag naar herziening; zonder KOR niet', () => {
+  it('KOR: een vijfde van de afgetrokken btw per jaar terug, pas vanaf € 500 (voorbeeld Belastingdienst)', () => {
     const { s } = setup();
-    purchase(s, '2025-03-01', 500000);
-    s.assets.sync('2025-03-02');
-    expect(find(s, '2026-Q2', 'kor-herziening')).toBeUndefined();
+    // auto in 2024 met € 4.500 btw (21% van € 21.428,57): 4.500 / 5 = 900 per jaar
+    s.purchases.create({ invoiceDate: '2024-01-10', description: 'Bus', lines: [{ account: ACCOUNTS.vervoermiddelen, netAmount: 2142857, vatCode: 'hoog', vatAmount: 450000 }] });
+    s.assets.sync('2024-01-11');
+    expect(find(s, '2026-Q2', 'kor-herziening')).toBeUndefined(); // zonder KOR niets
     s.settings.update({ kor: true });
-    expect(find(s, '2026-Q2', 'kor-herziening')).toMatchObject({ blocking: false, count: 1 });
+    const c = find(s, '2026-Q2', 'kor-herziening')!;
+    expect(c.title).toMatch(/900,00/);
+    expect(c.items![0]!.amount).toBe(450000);
+  });
+  it('KOR: onder € 500 per jaar geen herziening', () => {
+    const { s } = setup();
+    purchase(s, '2024-03-01', 500000); // btw € 1.050, een vijfde = € 210
+    s.assets.sync('2024-03-02');
+    s.settings.update({ kor: true });
+    expect(find(s, '2026-Q2', 'kor-herziening')).toBeUndefined();
   });
   it('een bedrijfsmiddel naar privé geeft een vraag over de btw op de onttrekking', () => {
     const { s } = setup();
