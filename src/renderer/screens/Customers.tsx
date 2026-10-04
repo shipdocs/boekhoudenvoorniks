@@ -23,12 +23,34 @@ export function CountrySelect({ value, onChange }: { value: string | null | unde
   );
 }
 
+/** Btw-nummer in VIES controleren: alleen na een klik, want dan gaat het nummer naar de EU-dienst. */
+function ViesCheck({ vatNumber, relationId }: { vatNumber: string; relationId?: number | null }) {
+  const saved = useLoad(() => api.vies.latest(vatNumber), [vatNumber]);
+  const { run, busy } = useAction();
+  const [result, setResult] = useState<Awaited<ReturnType<typeof api.vies.check>> | null>(null);
+  const r = result ?? saved.data;
+  return (
+    <div className="small" style={{ marginTop: 6 }}>
+      <Button small disabled={busy} title="Stuurt dit btw-nummer naar VIES, de EU-controle van btw-nummers" onClick={async () => { const x = await run(() => api.vies.check(vatNumber, relationId ?? null)); if (x) setResult(x); }}>Controleer nu in VIES</Button>{' '}
+      <a href="#" onClick={(e) => { e.preventDefault(); void api.app.openExternal(VIES_URL); }}>of open VIES zelf</a>
+      {r && (
+        <div className={r.valid === false ? 'notice warn small' : 'muted'} style={{ marginTop: 4 }}>
+          {r.valid === true && <>✓ Geldig volgens VIES{r.name ? `: ${r.name}` : ''}{r.address ? `, ${r.address}` : ''}. </>}
+          {r.valid === false && <>✗ {r.message} Reken geen 0% of verlegde btw zolang het nummer niet klopt. </>}
+          {r.valid === null && <>{r.message} </>}
+          <span>Gecontroleerd op {r.checkedAt.slice(0, 10).split('-').reverse().join('-')}.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Uitleg over de btw bij een klant in het buitenland. */
-export function CustomerVatHint({ country, vatNumber }: { country: string | null | undefined; vatNumber: string | null | undefined }) {
+export function CustomerVatHint({ country, vatNumber, relationId }: { country: string | null | undefined; vatNumber: string | null | undefined; relationId?: number | null }) {
   const land = countryName(country);
   switch (customerVatSituation(country, vatNumber)) {
     case 'eu-bedrijf':
-      return <div className="notice small">Bedrijf in {land}: meestal verleg je de btw naar de klant. Op de factuur kies je dan <strong>Dienst aan een bedrijf in een ander EU-land</strong>, of bij spullen <strong>Goederen naar een bedrijf in een ander EU-land</strong>. Uitzondering: werk aan een gebouw of grond in Nederland, dan gewoon Nederlandse btw. Twijfel je? Vraag je boekhouder.{' '}<a href="#" onClick={(e) => { e.preventDefault(); void api.app.openExternal(VIES_URL); }}>Controleer het btw-nummer in VIES</a>: bij een ongeldig nummer is 0% niet toegestaan.</div>;
+      return <div className="notice small">Bedrijf in {land}: meestal verleg je de btw naar de klant. Op de factuur kies je dan <strong>Dienst aan een bedrijf in een ander EU-land</strong>, of bij spullen <strong>Goederen naar een bedrijf in een ander EU-land</strong>. Uitzondering: werk aan een gebouw of grond in Nederland, dan gewoon Nederlandse btw. Twijfel je? Vraag je boekhouder.{' '}<a href="#" onClick={(e) => { e.preventDefault(); void api.app.openExternal(VIES_URL); }}>Controleer het btw-nummer in VIES</a>: bij een ongeldig nummer is 0% niet toegestaan.{vatNumber && <ViesCheck vatNumber={vatNumber} relationId={relationId} />}</div>;
     case 'eu-particulier':
       return <div className="notice small">Particulier in {land}: je rekent gewoon Nederlandse btw, zolang je in totaal minder dan {formatEuro(EU_B2C_THRESHOLD)} per jaar aan particulieren in andere EU-landen verkoopt. Is dit een bedrijf? Vul dan het btw-nummer in.</div>;
     case 'buiten-eu':
@@ -144,7 +166,7 @@ export function CustomerDetail({ id }: { id?: number }) {
               <Field label="Btw-nummer van de klant" hint="alleen als het een bedrijf is"><input value={r.vat_number ?? ''} onChange={(e) => set({ vat_number: e.target.value })} placeholder="bv. DE123456789" /></Field>
               <Field label="Handelsregisternummer" hint="het buitenlandse 'KvK-nummer', mag leeg"><input value={r.kvk_number ?? ''} onChange={(e) => set({ kvk_number: e.target.value })} placeholder="bv. CHE-123.456.789" /></Field>
             </div>
-            <CustomerVatHint country={r.country} vatNumber={r.vat_number} />
+            <CustomerVatHint country={r.country} vatNumber={r.vat_number} relationId={'id' in r ? (r as { id?: number }).id : null} />
           </>
         )}
         <div className="grid cols-2">

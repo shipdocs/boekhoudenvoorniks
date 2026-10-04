@@ -166,7 +166,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           const label = suggested ? meta.salesVat.find((v) => v.code === suggested)?.pickLabel ?? suggested : null;
           return (
             <div style={{ marginTop: 12 }}>
-              <CustomerVatHint country={rel.country} vatNumber={rel.vat_number} />
+              <CustomerVatHint country={rel.country} vatNumber={rel.vat_number} relationId={rel.id} />
               {suggested && lines.some((l) => l.vatCode !== suggested) && (
                 <Button small onClick={() => setLines((ls) => ls.map((l) => ({ ...l, vatCode: suggested })))}>Zet alle regels op "{label}"</Button>
               )}
