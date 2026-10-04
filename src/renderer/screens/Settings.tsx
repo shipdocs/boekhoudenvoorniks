@@ -158,6 +158,21 @@ export function SettingsScreen() {
             </div>
           )}
           <h3>Inkomstenbelasting</h3>
+          <Field label="Rechtsvorm" hint="de schatting is voor een ondernemer in de inkomstenbelasting">
+            <select value={draft.legalForm ?? ''} onChange={(e) => set({ legalForm: (e.target.value || null) as typeof draft.legalForm })}>
+              <option value="">Nog niet opgegeven (eenmanszaak of zzp)</option>
+              <option value="eenmanszaak">Eenmanszaak of zzp</option>
+              <option value="vof">Vof of maatschap</option>
+              <option value="bv">Bv (geen schatting inkomstenbelasting)</option>
+            </select>
+          </Field>
+          {draft.legalForm === 'vof' && (
+            <Field label="Jouw deel van de winst (%)" hint="de winst wordt verdeeld over de vennoten; ieder betaalt over zijn eigen deel">
+              <input inputMode="numeric" value={draft.profitSharePct} onChange={(e) => set({ profitSharePct: Math.min(100, Number(e.target.value.replace(/\D/g, '').slice(0, 3)) || 0) })} />
+            </Field>
+          )}
+          {draft.legalForm === 'bv' && <p className="small muted">Een bv betaalt vennootschapsbelasting over de winst; jij betaalt inkomstenbelasting over je loon als directeur. De app maakt daar geen schatting van; vraag je boekhouder.</p>}
+          {draft.legalForm !== 'bv' && <label className="row"><input type="checkbox" checked={draft.ibConfirmed} onChange={(e) => set({ ibConfirmed: e.target.checked })} /> Ik ben ondernemer voor de inkomstenbelasting: ik werk minstens 1.225 uur per jaar in mijn bedrijf en dat is meer dan de helft van mijn werktijd</label>}
           <label className="row"><input type="checkbox" checked={draft.incomeTaxEstimate} onChange={(e) => set({ incomeTaxEstimate: e.target.checked })} /> Toon een schatting van de inkomstenbelasting</label>
           {draft.incomeTaxEstimate && (
             <label className="row"><input type="checkbox" checked={draft.urencriterium} onChange={(e) => set({ urencriterium: e.target.checked })} /> Ik werk minstens 1.225 uur per jaar in mijn bedrijf (urencriterium, voor de zelfstandigenaftrek)</label>
