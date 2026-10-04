@@ -8,7 +8,7 @@ export const MOLLIE: IntegrationDefinition = {
   label: 'Mollie (uitbetalingen)',
   kind: 'betaalprovider',
   description: 'Boekt de uitbetalingen (settlements) van Mollie naar je bank, met de transactiekosten en de btw daarover, zodat de bijschrijving op je bank vanzelf klopt. Boekt zelf geen omzet: daarvoor heb je "Mollie Facturen" hieronder nodig, of een webshopkoppeling (WooCommerce/Shopify). Gebruik je geen van die twee, zet deze koppeling dan niet aan: je tussenrekening bij de betaalprovider loopt dan alsmaar verder in de min.',
-  fields: [{ key: 'apiKey', label: 'Organisatie-access-token', type: 'secret', help: 'Mollie dashboard → Ontwikkelaars → Organisatie-access-tokens (settlements.read)' }],
+  fields: [{ key: 'apiKey', label: 'Advanced-access-token', type: 'secret', help: 'Mollie dashboard → Ontwikkelaars → Access-tokens, met scope "settlements.read"' }],
 };
 
 /**
