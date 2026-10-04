@@ -1,5 +1,5 @@
 import type { Db } from '../db/database';
-import type { SettingsService } from '../settings/settings';
+import type { AppSettings, SettingsService } from '../settings/settings';
 import { periodFor, today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 import type { AssetService } from './assets';
@@ -273,6 +273,8 @@ export interface IncomeTaxEstimate {
   /** tekst die ALTIJD bij de schatting getoond wordt */
   disclaimer: string;
   notIncluded: string[];
+  /** wat de schatting veronderstelt en nog bevestigd moet worden (ondernemerschap, rechtsvorm, aftrekvoorwaarden) */
+  assumptions: string[];
 }
 
 export const INCOME_TAX_DISCLAIMER =
@@ -297,6 +299,17 @@ export function profitBetween(db: Db, from: IsoDate, to: IsoDate): Cents {
   return row.p;
 }
 
+/** Wat de schatting veronderstelt zolang de gebruiker het niet heeft bevestigd. */
+export function assumptionsFor(s: Pick<AppSettings, 'legalForm' | 'ibConfirmed' | 'urencriterium' | 'profitSharePct'>): string[] {
+  const out: string[] = [];
+  if (!s.ibConfirmed) {
+    out.push('Je hebt nog niet bevestigd dat je ondernemer voor de inkomstenbelasting bent. Dat is nodig voor de ondernemersaftrek: je werkt minstens 1.225 uur per jaar in je bedrijf en dat is meer dan de helft van je werktijd.');
+  }
+  if (s.legalForm === null) out.push('Je rechtsvorm is niet opgegeven; de schatting gaat uit van een eenmanszaak (of zzp zonder bv).');
+  if (s.legalForm === 'vof') out.push(`Vof of maatschap: de schatting rekent met jouw deel van de winst (${s.profitSharePct}%). De aftrekposten (investeringen, bijtellingen) zijn niet verdeeld; laat je boekhouder dat nakijken.`);
+  return out;
+}
+
 export class IncomeTaxService {
   constructor(
     private readonly db: Db,
@@ -313,16 +326,18 @@ export class IncomeTaxService {
   /** null als de schatting uit staat (Instellingen). */
   estimate(asOf: IsoDate = today()): IncomeTaxEstimate | null {
     const s = this.settings.get();
-    if (!s.incomeTaxEstimate) return null;
+    // een bv betaalt vennootschapsbelasting over de winst; de schatting voor een ondernemer in de inkomstenbelasting past dan niet
+    if (!s.incomeTaxEstimate || s.legalForm === 'bv') return null;
     const year = periodFor(asOf, 'jaar');
     const y = Number(asOf.slice(0, 4));
     const daysInYear = (Date.UTC(y + 1, 0, 1) - Date.UTC(y, 0, 1)) / 86400000;
     const elapsed = Math.min(daysInYear, Math.max(1, (Date.parse(asOf) - Date.UTC(y, 0, 1)) / 86400000 + 1));
-    const profitToDate = this.profit(year.start, asOf);
+    const share = s.legalForm === 'vof' ? Math.min(100, Math.max(0, s.profitSharePct)) / 100 : 1;
+    const profitToDate = Math.round(this.profit(year.start, asOf) * share);
     const adj = this.fiscal?.overview.adjustments(y, asOf);
     // afschrijving wordt pas na afloop van het jaar geboekt: de verwachting voor het hele jaar gaat er zo af
     const depreciation = this.fiscal ? this.fiscal.assets.projected(y, 12) : 0;
-    const profitYear = Math.round((profitToDate * daysInYear) / elapsed) - depreciation;
+    const profitYear = Math.round((profitToDate * daysInYear) / elapsed) - Math.round(depreciation * share);
     const { rules } = rulesFor(y);
     // representatie loopt door het jaar heen op: net als de winst doortrekken; KIA alleen over wat al gekocht is
     const reprYear = adj ? Math.round((adj.representatie.total * daysInYear) / elapsed) : 0;
@@ -342,6 +357,7 @@ export class IncomeTaxService {
       rulesYear: rules.year,
       rulesChecked: rules.checked,
       disclaimer: INCOME_TAX_DISCLAIMER,
+      assumptions: assumptionsFor(s),
       notIncluded: [...NOT_INCLUDED, ...(adj?.carPrivate.state === 'onbekend' ? ['bijtelling privégebruik auto van de zaak (gegevens ontbreken: de schatting is te laag)'] : []), ...(s.urencriterium ? [] : ['zelfstandigenaftrek (je hebt aangegeven niet aan het urencriterium te voldoen)'])],
     };
   }
