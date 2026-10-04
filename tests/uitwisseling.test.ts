@@ -310,3 +310,24 @@ describe('uitwisseling: afronden', () => {
     expect(c.s.exchange.readAnswer(o.s.exchange.createAnswer(VERSION).file, VERSION).conflicts).toEqual([]);
   });
 });
+
+describe('Vervolgcontrole vraagposten in het antwoord van de boekhouder', () => {
+  it('neemt expliciete afboekingen mee, ook bij afwijkende ids voor nieuwe handelingen', async () => {
+    const profile = office();
+    const c = client(profile);
+    const original = c.s.ledger.post({ date: '2026-09-01', source: 'handmatig', description: 'Onbekende afschrijving', lines: [{ account: ACCOUNTS.vraagposten, debit: 10000 }, { account: ACCOUNTS.bank, credit: 10000 }] });
+    const exp = await c.s.exchange.createExport('2026-09-30', ['vraagposten'], VERSION, c.bundle, ASOF);
+    const o = openAtOffice(profile, exp.file);
+    o.s.exchange.act({ kind: 'memoriaal', input: { questionEntryId: original, date: '2026-09-30', description: 'Oorspronkelijke vraagpost afboeken', lines: [{ account: ACCOUNTS.vraagposten, credit: 10000 }, { account: ACCOUNTS.bankkosten, debit: 10000 }] } });
+    const newQuestion = o.s.exchange.act({ kind: 'memoriaal', input: { date: '2026-09-30', description: 'Nieuw onbekend bedrag', lines: [{ account: ACCOUNTS.vraagposten, debit: 2000 }, { account: ACCOUNTS.bank, credit: 2000 }] } }).entryIds[0]!;
+    o.s.exchange.act({ kind: 'memoriaal', input: { questionEntryId: newQuestion, date: '2026-09-30', description: 'Nieuwe vraagpost afboeken', lines: [{ account: ACCOUNTS.vraagposten, credit: 2000 }, { account: ACCOUNTS.bankkosten, debit: 2000 }] } });
+    // De klant werkt door: de nieuwe ids vallen hierdoor anders uit dan in de kopie.
+    c.s.purchases.create({ invoiceDate: '2026-10-01', description: 'Verder gewerkt', lines: [{ account: ACCOUNTS.bankkosten, netAmount: 1000, vatCode: 'geen' }] });
+    c.s.exchange.readAnswer(o.s.exchange.createAnswer(VERSION).file, VERSION);
+    const api = createApi(c.s, {} as HostContext);
+    expect(api.ledger.questionItems('2026-09-30')).toEqual([]);
+    expect(c.s.ledger.balance(ACCOUNTS.vraagposten, { to: '2026-09-30' })).toBe(0);
+    expect(c.s.ledger.checkIntegrity().balanced).toBe(true);
+    expect((c.db.prepare('SELECT original_entry_id FROM question_item_settlements ORDER BY original_entry_id').all() as { original_entry_id: number }[]).some(row => row.original_entry_id === original)).toBe(true);
+  });
+});

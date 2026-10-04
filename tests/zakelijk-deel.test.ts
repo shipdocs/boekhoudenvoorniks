@@ -57,15 +57,15 @@ describe('zakelijk deel (gemengd gebruik)', () => {
     expect(bal(s, 'WBedKanSof')).toBe(8000);
   });
 
-  it('verlegde btw: alleen het zakelijke deel wordt aangegeven en afgetrokken', () => {
+  it('verlegde btw: de volledige B2B-dienst wordt aangegeven, alleen het zakelijke deel afgetrokken', () => {
     const { s } = setup();
     s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-02-01', amount: -10000, description: 'Anthropic', counterName: 'Anthropic' }] });
     const t = s.bank.list()[0]!;
     s.bank.bookToAccount(t.id, { account: 'WBedKanSof', vatCode: 'buiten-eu', businessPct: 50 });
     expect(bal(s, 'WBedKanSof')).toBe(5000);
-    expect(bal(s, ACCOUNTS.priveOpnamen)).toBe(5000);
+    expect(bal(s, ACCOUNTS.priveOpnamen)).toBe(6050);
     const r = s.vat.calculate('2026-Q1');
-    expect(r.summary).toMatchObject({ btwVerlegd: 1050, voorbelasting: 1050, teBetalen: 0 });
+    expect(r.summary).toMatchObject({ btwVerlegd: 2100, voorbelasting: 1050, teBetalen: 1050 });
     expect(s.ledger.checkIntegrity()).toMatchObject({ balanced: true });
   });
 

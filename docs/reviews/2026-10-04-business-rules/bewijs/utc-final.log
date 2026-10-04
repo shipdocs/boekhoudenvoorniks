@@ -1,0 +1,13 @@
+
+ RUN  v5.0.2 /workspace/scratch/7269a48577ad/gratis-boekhouden
+
+······················································································
+
+ Test Files  3 passed (3)
+      Tests  86 passed (86)
+   Start at  14:50:00
+   Duration  2.67s (transform 54%, tests 34%, import 11%)
+
+  Transform  transforming modules took 2.79s · 54% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns

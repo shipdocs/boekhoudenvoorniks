@@ -257,7 +257,7 @@ describe('auto van de zaak: btw privégebruik (vraag 32)', () => {
   it('32: forfait alleen na bevestiging van btw-aftrek en de keuze voor het forfait', () => {
     expect(carPrivateUse(base, 2026).state).toBe('onbekend');
     expect(carPrivateUse({ ...base, carVatDeducted: true }, 2026).state).toBe('onbekend');
-    expect(carPrivateUse({ ...base, carVatDeducted: true, carVatMethod: 'forfait' }, 2026)).toMatchObject({ state: 'bekend', amount: 1080_00 });
+    expect(carPrivateUse({ ...base, carVatDeducted: true, carVatMethod: 'forfait' }, 2026, { purchaseDeducted: true, purchaseVat: 10000_00, costVat: 2000_00 })).toMatchObject({ state: 'bekend', amount: 1080_00 });
   });
 
   it('32: geen btw afgetrokken: geen correctie; werkelijk gebruik: de app boekt niets', () => {

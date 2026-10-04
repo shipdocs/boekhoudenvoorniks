@@ -379,28 +379,31 @@ export class InvoiceService {
     return row;
   }
 
-  get(id: number, asOf: IsoDate = today()): Invoice {
+  get(id: number, asOf?: IsoDate): Invoice {
     const row = this.row(id);
     const lines = readLines(this.db, 'invoice_lines', 'invoice_id', id);
     const totals = computeTotals(toLineInputs(lines));
     const snapshot = row.relation_snapshot ? (JSON.parse(row.relation_snapshot) as Relation) : null;
     const relation = snapshot ?? this.relations.get(row.relation_id);
     const total = row.total ?? totals.total;
-    const open = row.status === 'concept' ? 0 : total - row.amount_paid;
-    const display = displayStatus(row.status, row.due_date, open, asOf);
+    const open = row.status === 'concept' ? 0 : this.openAt(asOf ?? '9999-12-31').get(id) ?? 0;
+    const historicalStatus = row.status === 'concept' ? 'concept' : (total >= 0 ? open <= 0 : open >= 0) ? 'betaald' : 'verzonden';
+    const display = displayStatus(historicalStatus, row.due_date, open, asOf ?? today());
     return {
       ...row,
+      status: historicalStatus,
+      amount_paid: row.status === 'concept' ? 0 : total - open,
       relation_name: relation.name,
       relation_email: this.relations.get(row.relation_id).email ?? relation.email,
       lines,
       totals,
       open_amount: open,
       display_status: display,
-      days_overdue: display === 'vervallen' ? Math.max(0, Math.round((Date.parse(asOf) - Date.parse(row.due_date)) / 86_400_000)) : 0,
+      days_overdue: display === 'vervallen' ? Math.max(0, Math.round((Date.parse(asOf ?? today()) - Date.parse(row.due_date)) / 86_400_000)) : 0,
     };
   }
 
-  list(filter: { status?: InvoiceDisplayStatus; relationId?: number; search?: string; from?: IsoDate; to?: IsoDate } = {}, asOf: IsoDate = today()): InvoiceSummary[] {
+  list(filter: { status?: InvoiceDisplayStatus; relationId?: number; search?: string; from?: IsoDate; to?: IsoDate } = {}, asOf?: IsoDate): InvoiceSummary[] {
     const where: string[] = [];
     const params: unknown[] = [];
     if (filter.relationId) (where.push('i.relation_id = ?'), params.push(filter.relationId));
@@ -419,17 +422,37 @@ export class InvoiceService {
          ORDER BY CASE WHEN i.status = 'concept' THEN 0 ELSE 1 END, i.invoice_date DESC, i.id DESC`,
       )
       .all(...params) as (Omit<InvoiceSummary, 'display_status' | 'open_amount' | 'total'> & { total: number | null })[];
+    const balances = this.openAt(asOf ?? '9999-12-31');
     const result = rows.map((r) => {
       const total = r.total ?? (r.status === 'concept' ? this.get(r.id, asOf).totals.total : 0);
-      const open = r.status === 'concept' ? 0 : total - r.amount_paid;
-      return { ...r, total, open_amount: open, display_status: displayStatus(r.status, r.due_date, open, asOf) };
+      const open = r.status === 'concept' ? 0 : balances.get(r.id) ?? 0;
+      const status: InvoiceStatus = r.status === 'concept' ? 'concept' : (total >= 0 ? open <= 0 : open >= 0) ? 'betaald' : 'verzonden';
+      return { ...r, status, amount_paid: r.status === 'concept' ? 0 : total - open, total, open_amount: open, display_status: displayStatus(status, r.due_date, open, asOf ?? today()) };
     });
     return filter.status ? result.filter((r) => r.display_status === filter.status) : result;
   }
 
+  /** Open bedrag op de peildatum, inclusief deelbetalingen, tegenboekingen en creditverrekening. */
+  private openAt(asOf: IsoDate): Map<number, Cents> {
+    const rows = this.db.prepare(`SELECT e.source_ref AS ref, SUM(l.debit - l.credit) AS amount
+      FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
+      JOIN chart_of_accounts a ON a.id = l.account_id
+      WHERE a.rgs_code = ? AND e.entry_date <= ? AND e.source_ref LIKE 'invoice:%'
+      GROUP BY e.source_ref`).all(ACCOUNTS.debiteuren, asOf) as { ref: string; amount: Cents }[];
+    const open = new Map(rows.map(r => [Number(r.ref.slice(8)), r.amount]));
+    const credits = this.db.prepare(`SELECT id, credit_of_invoice_id AS original FROM invoices
+      WHERE status <> 'concept' AND credit_of_invoice_id IS NOT NULL AND invoice_date <= ? ORDER BY id`).all(asOf) as { id: number; original: number }[];
+    for (const c of credits) {
+      const settle = Math.min(Math.max(0, open.get(c.original) ?? 0), Math.max(0, -(open.get(c.id) ?? 0)));
+      open.set(c.original, (open.get(c.original) ?? 0) - settle);
+      open.set(c.id, (open.get(c.id) ?? 0) + settle);
+    }
+    return open;
+  }
+
   /** Openstaande (definitieve, niet volledig betaalde) facturen — voor matching en dashboard. */
   listOpen(asOf: IsoDate = today()): InvoiceSummary[] {
-    return this.list({}, asOf).filter((i) => i.status === 'verzonden');
+    return this.list({ to: asOf }, asOf).filter((i) => i.status === 'verzonden' && i.open_amount !== 0);
   }
 
   /** E-factuur (UBL, Peppol BIS 3.0) met de gegevens zoals ze op de definitieve factuur staan (#24). */

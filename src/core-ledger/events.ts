@@ -70,7 +70,7 @@ export class EventService {
   /** Opnieuw compileren uit de opgeslagen gebeurtenis (puur; boekt niets). */
   recompile(id: number): CompiledEntry {
     const e = this.get(id);
-    return compile({ type: e.type, payload: e.payload } as DomainEvent);
+    return compile({ type: e.type, payload: e.payload } as DomainEvent, e.rules_version);
   }
 
   /**

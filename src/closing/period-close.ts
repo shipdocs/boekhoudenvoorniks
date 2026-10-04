@@ -1,3 +1,5 @@
+import { accountOpenItems } from '../core-ledger/open-items';
+import { ACCOUNTS } from '../core-ledger/accounts';
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
@@ -83,6 +85,8 @@ export class PeriodCloseService {
     if (docs.n > 0) {
       out.push({ key: 'documenten', level: 'blokkeert', title: `${docs.n} ${docs.n === 1 ? 'bon of factuur' : 'bonnen of facturen'} t/m ${formatDateNl(until)} nog niet gecontroleerd`, detail: 'Controleer ze eerst, dan tellen ze mee in deze periode. Wat later nog binnenkomt, komt in de volgende periode.', screen: 'aankopen' });
     }
+    const questions = accountOpenItems(this.db, ACCOUNTS.vraagposten, until);
+    if (questions.length) out.push({ key: 'vraagposten', level: 'bevestigen', title: `${questions.length} boekingen staan nog bij "weet ik nog niet"`, detail: 'Deel deze boekingen eerst in, of bevestig dat je ze met je boekhouder hebt besproken. Na het afsluiten worden correcties in de volgende open periode geboekt.', screen: 'aankopen' });
     for (const st of this.bank.importStatus()) {
       // een dag is pas gedekt als het afschrift ná die dag is ingelezen (#226): een export van de laatste dag
       // zelf mist wat er later die dag nog bij kwam

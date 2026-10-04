@@ -71,7 +71,7 @@ describe('btw over privégebruik van de auto van de zaak', () => {
 
   it('2,7% van de cataloguswaarde in vak 1d; één knop neemt het op', () => {
     const { s } = withAccounts();
-    s.settings.update({ carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carCatalogValue: 40000_00, carInUseSince: 2024 });
+    s.settings.update({ carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carPurchaseVatDeducted: true, carPurchaseVatAmount: 10000_00, carCostVatOverride: { year: 2026, amount: 2000_00 }, carCatalogValue: 40000_00, carInUseSince: 2024 });
     const check = s.vat.checks('2026-Q4').find((c) => c.key === 'auto-prive')!;
     expect(check.title).toMatch(/1\.080,00/);
     expect(check.action?.id).toBe('auto-prive');
@@ -90,7 +90,7 @@ describe('btw over privégebruik van de auto van de zaak', () => {
 
   it('andere cataloguswaarde: opnieuw opnemen vervangt het oude bedrag', () => {
     const { s } = withAccounts();
-    s.settings.update({ carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carCatalogValue: 40000_00, carInUseSince: 2024 });
+    s.settings.update({ carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carPurchaseVatDeducted: true, carPurchaseVatAmount: 10000_00, carCostVatOverride: { year: 2026, amount: 2000_00 }, carCatalogValue: 40000_00, carInUseSince: 2024 });
     s.vat.bookCarPrivateUse('2026-Q4');
     s.settings.update({ carCatalogValue: 50000_00 });
     const check = s.vat.checks('2026-Q4').find((c) => c.key === 'auto-prive')!;
@@ -101,7 +101,7 @@ describe('btw over privégebruik van de auto van de zaak', () => {
 
   it('vanaf het 5e jaar na ingebruikname 1,5%; per maand is december de laatste aangifte', () => {
     const { s } = withAccounts();
-    s.settings.update({ vatPeriod: 'maand', carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carCatalogValue: 40000_00, carInUseSince: 2021 });
+    s.settings.update({ vatPeriod: 'maand', carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carPurchaseVatDeducted: true, carPurchaseVatAmount: 10000_00, carCostVatOverride: { year: 2026, amount: 2000_00 }, carCatalogValue: 40000_00, carInUseSince: 2021 });
     expect(s.vat.checks('2026-11').map((c) => c.key)).not.toContain('auto-prive');
     expect(s.vat.checks('2026-12').find((c) => c.key === 'auto-prive')?.title).toMatch(/600,00/);
   });
@@ -110,13 +110,13 @@ describe('btw over privégebruik van de auto van de zaak', () => {
     const { s, keys } = withAccounts();
     s.settings.update({ carUse: 'zakelijk', carPrivateUse: false });
     expect(keys('2026-Q4')).not.toContain('auto-prive');
-    s.settings.update({ carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carCatalogValue: 30000_00, kor: true });
+    s.settings.update({ carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carPurchaseVatDeducted: true, carPurchaseVatAmount: 10000_00, carCostVatOverride: { year: 2026, amount: 2000_00 }, carCatalogValue: 30000_00, kor: true });
     expect(keys('2026-Q4')).not.toContain('auto-prive');
   });
 
   it('in het jaaroverzicht staat een notitie voor de boekhouder', () => {
     const { s } = withAccounts();
-    s.settings.update({ carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carCatalogValue: 40000_00, carInUseSince: 2026 });
+    s.settings.update({ carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carPurchaseVatDeducted: true, carPurchaseVatAmount: 10000_00, carCostVatOverride: { year: 2026, amount: 2000_00 }, carCatalogValue: 40000_00, carInUseSince: 2026 });
     // eerste jaar zonder maand: eerst vragen
     expect(s.vat.checks('2026-Q4').find((c) => c.key === 'auto-prive')?.screen).toBe('instellingen');
     s.settings.update({ carInUseMonth: 7 });
@@ -129,7 +129,7 @@ describe('btw over privégebruik van de auto van de zaak', () => {
 
   it('jaaroverzicht: "geboekt" alleen als de eigen correctie met het juiste bedrag er staat', () => {
     const { s } = withAccounts();
-    s.settings.update({ carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carCatalogValue: 40000_00, carInUseSince: 2024 });
+    s.settings.update({ carUse: 'zakelijk', carPrivateUse: true, carVatDeducted: true, carVatMethod: 'forfait', carPurchaseVatDeducted: true, carPurchaseVatAmount: 10000_00, carCostVatOverride: { year: 2026, amount: 2000_00 }, carCatalogValue: 40000_00, carInUseSince: 2024 });
     const status = () => s.taxOverview.year(2026, '2026-12-31').items.find((i) => i.key === 'auto-prive')!.status;
     // een losse boeking op dezelfde kostenrekening telt niet als de correctie
     s.ledger.post({ date: '2026-06-01', description: 'iets anders', source: 'handmatig', lines: [{ account: ACCOUNTS.btwPriveAuto, debit: 1080_00, credit: 0 }, { account: ACCOUNTS.priveStortingen, debit: 0, credit: 1080_00 }] });
@@ -199,7 +199,7 @@ describe('controle "weet ik nog niet": welke betalingen zijn het?', () => {
     s.bank.bookToAccount(a.id, { account: ACCOUNTS.vraagposten });
     s.bank.bookToAccount(b.id, { account: ACCOUNTS.vraagposten });
     const check = s.vat.checks('2026-Q2').find((c) => c.key === 'vraagposten')!;
-    expect(check.account).toEqual({ rgs: ACCOUNTS.vraagposten });
+    expect(check.account).toEqual({ rgs: ACCOUNTS.vraagposten, upTo: '2026-06-30' });
     const r = s.vat.accountLines(ACCOUNTS.vraagposten);
     expect(r.total).toBe(s.ledger.balance(ACCOUNTS.vraagposten));
     expect(r.lines.map((l) => l.bankTransactionId)).toEqual([a.id, b.id]);

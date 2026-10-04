@@ -9,7 +9,7 @@
 import { basicAuth } from './http';
 import type { FetchLike } from './types';
 import { parseEuro, type Cents } from '../shared/money';
-import { isIsoDate, toIsoDate, type IsoDate } from '../shared/dates';
+import { isIsoDate, type IsoDate } from '../shared/dates';
 import type { NormalizedTransaction } from '../import/types';
 
 export const PONTO_BASE_URL = 'https://api.myponto.com';
@@ -115,13 +115,16 @@ function firstIban(...values: unknown[]): string | null {
   return null;
 }
 
-/** Lokale kalenderdatum van een datum of ISO-moment; null bij onbruikbare invoer. */
+/** Nederlandse kalenderdatum van een datum of ISO-moment; null bij onbruikbare invoer. */
 function calendarDate(value: unknown): IsoDate | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
+  const day = trimmed.slice(0, 10);
   if (isIsoDate(trimmed)) return trimmed;
+  // new Date rolt 2026-02-30 door naar maart; een ongeldige kalenderdatum blijft onbruikbaar
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed) && !isIsoDate(day)) return null;
   const parsed = new Date(trimmed);
-  return Number.isNaN(parsed.getTime()) ? null : toIsoDate(parsed);
+  return Number.isNaN(parsed.getTime()) ? null : new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' }).format(parsed) as IsoDate;
 }
 
 /** Bedrag (number of string) via de bestaande geldparser naar centen; null bij onbruikbare invoer. */
