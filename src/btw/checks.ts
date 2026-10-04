@@ -648,7 +648,7 @@ export function runVatChecks(
       key: 'btw-afrekening',
       blocking: false,
       title: `De rekening met de Belastingdienst staat op ${formatEuro(Math.abs(afrekening))} ${afrekening < 0 ? 'te betalen' : 'te ontvangen'}`,
-      detail: `Voor deze aangifte hoort die rekening op nul te staan, of op het bedrag van de vorige aangifte (${formatEuro(Math.abs(payable.previous ?? 0))}) als je dat nog moet betalen. Dit verschil betekent meestal dat een betaling aan of teruggave van de Belastingdienst niet (of voor een ander bedrag) is gekoppeld, of dat een suppletie nog niet is betaald. Bekijk de boekingen en koppel de betaling.`,
+      detail: `Voor deze aangifte hoort die rekening op nul te staan, of op het bedrag van de vorige aangifte (${formatEuro(Math.abs(payable.previous ?? 0))}) als dat nog ${(payable.previous ?? 0) < 0 ? 'terugkomt van' : 'betaald moet worden aan'} de Belastingdienst. Dit verschil betekent meestal dat een betaling aan of teruggave van de Belastingdienst niet (of voor een ander bedrag) is gekoppeld, dat een teruggave nog niet is uitbetaald, of dat een suppletie nog niet is betaald. Bekijk de boekingen en koppel de betaling.`,
       count: 1,
       fingerprint: String(afrekening),
       screen: 'bank',

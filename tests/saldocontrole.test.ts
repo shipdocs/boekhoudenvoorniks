@@ -47,3 +47,23 @@ describe('saldocontrole na verwerken', () => {
     expect(row!.ledgerMatches).toBe(true);
   });
 });
+
+describe('saldocontrole bij een eigen overboeking waarvan één afschrift nog ontbreekt', () => {
+  it('telt de overboeking mee voor de rekening die nog achterloopt', () => {
+    const MAIN = 'NL91ABNA0417164300';
+    const SPAAR = 'NL44RABO0123456789';
+    const { s } = setup();
+    s.settings.update({ onboardingDone: true, autopilot: 'normaal' });
+    s.bank.updateAccount(s.bank.ensureDefaultAccount().id, { iban: MAIN });
+    const main = s.bank.ensureDefaultAccount();
+    const spaar = s.bank.addAccount('Spaarrekening', SPAAR);
+    s.bank.setOpeningBalance(spaar.id, 50000, '2026-01-01');
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-03-02', amount: 50000, description: 'Overboeking', counterIban: SPAAR, counterName: 'Spaar' }] }, { bankAccountId: main.id });
+    s.inbox.autoProcess('2026-03-05');
+
+    const rows = s.inbox.balanceOverview();
+    const spaarRow = rows.find((r) => r.bankAccountId === spaar.id)!;
+    expect(spaarRow).toMatchObject({ ledger: 0, transactions: 50000, awaitingStatement: -50000, ledgerMatches: true });
+    expect(rows.find((r) => r.bankAccountId === main.id)).toMatchObject({ awaitingStatement: 0, ledgerMatches: true });
+  });
+});
