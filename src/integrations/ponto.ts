@@ -119,7 +119,10 @@ function firstIban(...values: unknown[]): string | null {
 function calendarDate(value: unknown): IsoDate | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
+  const day = trimmed.slice(0, 10);
   if (isIsoDate(trimmed)) return trimmed;
+  // new Date rolt 2026-02-30 door naar maart; een ongeldige kalenderdatum blijft onbruikbaar
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed) && !isIsoDate(day)) return null;
   const parsed = new Date(trimmed);
   return Number.isNaN(parsed.getTime()) ? null : new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' }).format(parsed) as IsoDate;
 }

@@ -125,7 +125,7 @@ export class AssetService {
       for (const f of fresh) {
         const id = (this.db.prepare('SELECT id FROM assets WHERE journal_line_id = ?').get(f.id) as { id: number }).id;
         const cost = this.costAt(id);
-        this.db.prepare(`UPDATE assets SET cost = ?, residual = MIN(residual, ?) WHERE id = ? AND status = 'actief'`).run(cost, cost, id);
+        this.db.prepare(`UPDATE assets SET cost = ? WHERE id = ? AND status = 'actief'`).run(cost, id);
       }
       // Elke credit verlaagt meteen de beschikbare kostprijs; meerdere credits kunnen die niet overschrijden.
       for (const c of this.unassignedCredits(false)) {
@@ -133,8 +133,7 @@ export class AssetService {
         if (candidates.length === 1) {
           const id = candidates[0]!.id;
           this.db.prepare('INSERT INTO asset_credit_allocations (journal_line_id, asset_id) VALUES (?, ?)').run(c.lineId, id);
-          const cost = this.costAt(id);
-          this.db.prepare('UPDATE assets SET cost = ?, residual = MIN(residual, ?) WHERE id = ?').run(cost, cost, id);
+          this.db.prepare('UPDATE assets SET cost = ? WHERE id = ?').run(this.costAt(id), id);
         }
       }
 
@@ -232,7 +231,9 @@ export class AssetService {
   }
 
   private enrich(a: AssetRow, asOf: IsoDate): Asset {
-    a = { ...a, cost: this.costAt(a.id, asOf) };
+    // restwaarde niet opslaan na een credit: eerdere peildata houden de oorspronkelijke restwaarde
+    const cost = this.costAt(a.id, asOf);
+    a = { ...a, cost, residual: Math.min(a.residual, cost) };
     const booked = this.booked(a.id) + this.elsewhere(a, 9999);
     const deadline = addDays(a.acquired_on, 91);
     return {
