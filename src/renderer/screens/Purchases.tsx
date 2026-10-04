@@ -126,6 +126,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                 <td>{p.relation_name ?? '—'}</td>
                 <td>
                   {p.description} {p.attachment_path && <span title="Bewijsstuk aanwezig">📎</span>}
+                  {p.vat_warning && <div className="small notice warn">{p.vat_warning}</div>}
                   {p.question && <div className="small"><span className="pill warn">nog uitzoeken</span> staat bij "weet ik nog niet", zonder btw-aftrek</div>}
                   {p.business_pct < 100 && <div className="small"><strong>{p.business_pct}% zakelijk</strong>, {100 - p.business_pct}% privé</div>}
                   {p.warranty_months ? <div className="small muted">🛡️ {warrantyText(p.invoice_date, p.warranty_months)}</div> : null}

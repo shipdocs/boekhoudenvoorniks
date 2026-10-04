@@ -1342,6 +1342,9 @@ export class IntakeService {
     }
     const vat = result?.vat.value ?? [];
     const complete = vat.length > 1 && vat.every((v) => v.base !== null) && vat.reduce((s, v) => s + (v.base ?? 0) + v.amount, 0) === c.total;
+    if (complete && vat.some(v => ![0, 9, 21].includes(v.rate))) {
+      throw new ValidationError('Op deze bon is een niet-ondersteund btw-tarief herkend. Controleer het tarief en vul het btw-bedrag zelf in.');
+    }
     if (complete) {
       return vat.map((v) => ({
         account,

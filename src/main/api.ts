@@ -1,3 +1,4 @@
+import { accountOpenItems } from '../core-ledger/open-items';
 import { ValidationError } from '../shared/validation';
 import { isPurchaseVatCode } from '../shared/vat';
 import { TERMS_VERSION } from '../shared/legal';
@@ -12,7 +13,8 @@ import type { QuoteInput, QuoteStatus } from '../documents/quotes';
 import type { DocumentTemplate, TemplateType } from '../documents/templates';
 import { renderDocumentHtml, FONTS } from '../documents/templates';
 import type { SendOptions } from '../documents/sending';
-import { expenseLines, purchaseVat, type PurchaseInvoiceInput } from '../documents/purchases';
+import { storedPurchaseVat, storedVatWarning } from '../core-ledger/stored-purchase';
+import { expenseLines, type PurchaseInvoiceInput } from '../documents/purchases';
 import { businessEffect } from '../shared/business-share';
 import type { BookToAccountInput, SaleInput } from '../import/bank';
 import { previewCsv, headerSignature, type CsvMapping } from '../import/csv';
@@ -1084,11 +1086,12 @@ export function createApi(s: Services, host: HostContext) {
           // gemengd gebruik: welk deel is zakelijk, en wat blijft er dan aan kosten en btw-aftrek over
           const ev = p.journal_entry_id ? s.purchases.eventFor(p.journal_entry_id) : null;
           const pct = ev?.businessPct ?? 100;
-          const eff = ev ? businessEffect(ev.lines.map((l) => ({ net: l.netAmount, vat: purchaseVat(l) })), pct, ev.noVatDeduction) : null;
+          const eff = ev ? businessEffect(ev.lines.map((l) => ({ net: l.netAmount, vat: storedPurchaseVat(l) })), pct, ev.noVatDeduction) : null;
           return {
             ...p,
             paid_via: p.amount_paid > 0 ? s.search.infoFor(`inkoop:${p.id}`)?.paidVia ?? null : null,
             business_pct: pct,
+            vat_warning: ev ? storedVatWarning(ev.lines) : null,
             /** btw die je terugkrijgt bij dit zakelijke deel (bij verlegde btw: niet apart getoond) */
             vat_deductible: eff && pct < 100 ? eff.btw : p.vat_total,
             business_amount: eff && pct < 100 ? eff.kosten + eff.btw : null,
@@ -1677,7 +1680,8 @@ export function createApi(s: Services, host: HostContext) {
       archiveAccount: (id: number) => s.ledger.archiveAccount(id),
       entries: (filter?: { from?: IsoDate; to?: IsoDate; source?: EntrySource; accountRgs?: string; limit?: number }) => s.ledger.listEntries(filter),
       balances: (from?: IsoDate, to?: IsoDate) => s.ledger.balances({ from, to }),
-      manualEntry: (entry: { date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents }[] }) =>
+      questionItems: (to?: IsoDate) => accountOpenItems(s.db, ACCOUNTS.vraagposten, to),
+      manualEntry: (entry: { questionEntryId?: number; date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents }[] }) =>
         s.settings.officeCopy() ? s.exchange.act({ kind: 'memoriaal', input: entry }).entryIds[0]! : s.ledger.post({ ...entry, source: 'handmatig' }),
       reverse: (id: number, date: IsoDate) => (s.settings.officeCopy() ? s.exchange.act({ kind: 'terugdraaien', input: { entryId: id, date } }).entryIds[0]! : s.ledger.reverse(id, date)),
       integrity: () => s.ledger.checkIntegrity(),

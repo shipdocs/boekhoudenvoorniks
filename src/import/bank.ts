@@ -1,3 +1,4 @@
+import { assertQuestionNotSettled } from '../core-ledger/open-items';
 import { sameBankName } from '../shared/bank-name';
 import { createHash } from 'node:crypto';
 import { sameCounterparty, sameTextVariant } from './same-payment';
@@ -1651,6 +1652,7 @@ export class BankService {
     if (t.status !== 'gematcht' || !t.matched_journal_entry_id || t.matched_invoice_id || t.matched_purchase_invoice_id) {
       throw new ValidationError('Alleen een betaling waar je zelf een soort kosten bij koos, kun je zo aanpassen');
     }
+    assertQuestionNotSettled(this.db, t.matched_journal_entry_id);
     if (this.sharedWith(t).length > 0) throw new ValidationError('Dit is een overboeking tussen je eigen rekeningen. Klopt dat niet? Maak het dan ongedaan.');
     const event = this.events.forEntry(t.matched_journal_entry_id);
     if (!event || event.type !== 'bank-categorie') throw new ValidationError('Deze betaling is met een oudere versie van de app verwerkt. Maak de verwerking ongedaan en doe het opnieuw.');
@@ -1707,6 +1709,7 @@ export class BankService {
     const shared = this.sharedWith(t);
     tx(this.db, () => {
       if (t.status === 'gematcht' && t.matched_journal_entry_id) {
+        assertQuestionNotSettled(this.db, t.matched_journal_entry_id);
         if (t.matched_invoice_id) this.invoices.undoPayment(t.matched_invoice_id, t.amount, t.matched_journal_entry_id, date);
         else if (t.matched_purchase_invoice_id) this.purchases.undoPayment(t.matched_purchase_invoice_id, -t.amount, t.matched_journal_entry_id, date);
         else this.ledger.reverse(t.matched_journal_entry_id, date);

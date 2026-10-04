@@ -1,6 +1,7 @@
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
-import { businessPct, expenseLines, purchaseVat, splitGross, type BankCategoriePayload, type InkoopPayload, type PurchaseLineInput } from '../core-ledger/rules';
+import { businessPct, expenseLines, splitGross, type BankCategoriePayload, type InkoopPayload, type PurchaseLineInput } from '../core-ledger/rules';
+import { storedExpenseLines, storedPurchaseVat, storedVatWarning } from '../core-ledger/stored-purchase';
 import { PURCHASE_VAT_RATES, isPurchaseVatCode, isReverseCharge } from '../shared/vat';
 import type { Cents } from '../shared/money';
 import type { IsoDate } from '../shared/dates';
@@ -62,6 +63,7 @@ export interface BusinessShareLine {
   /** kosten en btw-aftrek nu; bij verlegde btw is `btw` geen echte aftrek (per saldo nul) */
   /** de bedragen per regel voor de weergave (kosten en btw voor het zakelijke deel bepaald) */
   parts: { net: Cents; vat: Cents }[];
+  vatWarning?: string | null;
   noVatDeduction: boolean;
   now: { kosten: Cents; btw: Cents };
   reverseCharge: boolean;
@@ -85,7 +87,8 @@ export class BusinessShareService {
 
   /** Kosten en btw-aftrek van een uitgave bij een zakelijk percentage (zelfde rekenregels als het boeken). */
   static effect(lines: PurchaseLineInput[], pct: number, noVatDeduction?: boolean): { kosten: Cents; btw: Cents; reverseCharge: boolean } {
-    const r = expenseLines(lines, 'X', null, undefined, { noVatDeduction, businessPct: pct });
+    const calculate = storedVatWarning(lines) ? storedExpenseLines : expenseLines;
+    const r = calculate(lines, 'X', null, undefined, { noVatDeduction, businessPct: pct });
     return { kosten: r.net, btw: r.vat, reverseCharge: lines.some((l) => isReverseCharge(l.vatCode)) };
   }
 
@@ -115,7 +118,7 @@ export class BusinessShareService {
       if (!event) continue;
       const cur = event.businessPct ?? 100;
       const eff = BusinessShareService.effect(event.lines, cur, event.noVatDeduction);
-      out.push({ kind: 'inkoop', refId: p.id, date: event.date, description: p.description, gross: p.total, currentPct: cur, proposedPct: proposed, parts: event.lines.map((l) => ({ net: l.netAmount, vat: purchaseVat(l) })), noVatDeduction: Boolean(event.noVatDeduction), now: { kosten: eff.kosten, btw: eff.btw }, reverseCharge: eff.reverseCharge, filedPeriod: filed(event.date) });
+      out.push({ kind: 'inkoop', vatWarning: storedVatWarning(event.lines), refId: p.id, date: event.date, description: p.description, gross: p.total, currentPct: cur, proposedPct: proposed, parts: event.lines.map((l) => ({ net: l.netAmount, vat: storedPurchaseVat(l) })), noVatDeduction: Boolean(event.noVatDeduction), now: { kosten: eff.kosten, btw: eff.btw }, reverseCharge: eff.reverseCharge, filedPeriod: filed(event.date) });
     }
     return out.sort((a, b) => a.date.localeCompare(b.date));
   }

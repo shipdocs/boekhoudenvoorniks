@@ -42,13 +42,13 @@ export interface ExchangePartner {
 
 /** Een correctie van de boekhouder, zoals hij in het antwoord staat. */
 export type ExchangeAction =
-  | { kind: 'memoriaal'; input: { date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents }[] } }
+  | { kind: 'memoriaal'; input: { questionEntry?: EntryRef; date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents }[] } }
   | { kind: 'terugdraaien'; input: { entry: EntryRef; date: IsoDate } }
   | { kind: 'rekening'; input: { code: string; rgs: string; rgsRef?: string | null; name: string; category: AccountCategory } };
 
 /** Een correctie zoals de boekhouder hem in de kopie doet (terugdraaien met het nummer van de post hier). */
 export type CopyAction =
-  | Extract<ExchangeAction, { kind: 'memoriaal' }>
+  | { kind: 'memoriaal'; input: Omit<Extract<ExchangeAction, { kind: 'memoriaal' }>['input'], 'questionEntry'> & { questionEntryId?: number } }
   | { kind: 'terugdraaien'; input: { entryId: number; date: IsoDate } }
   | Extract<ExchangeAction, { kind: 'rekening' }>;
 
@@ -150,7 +150,7 @@ export class ExchangeService {
           const input = action.input;
           this.assertInPeriod(input.date, copy.endDate);
           created = [this.ledger.post({ ...input, source: 'handmatig' })];
-          recorded = { kind: 'memoriaal', input: { date: input.date, description: input.description, lines: input.lines } };
+          recorded = { kind: 'memoriaal', input: { date: input.date, description: input.description, lines: input.lines, ...(input.questionEntryId !== undefined ? { questionEntry: this.refFor(input.questionEntryId, info.baseEntryId) } : {}) } };
           const total = input.lines.reduce((t, l) => t + (l.debit ?? 0), 0);
           summary = `Correctieboeking ${formatDateNl(input.date)}: ${input.description} (${formatEuro(total)})`;
         } else if (action.kind === 'terugdraaien') {
@@ -318,7 +318,7 @@ export class ExchangeService {
       for (const a of body.actions) {
         if (a.kind === 'memoriaal') {
           this.assertInPeriod(a.input.date, until);
-          created.set(a.seq, [this.ledger.post({ ...a.input, source: 'handmatig' })]);
+          created.set(a.seq, [this.ledger.post({ ...a.input, ...(a.input.questionEntry ? { questionEntryId: resolve(a.input.questionEntry) } : {}), source: 'handmatig' })]);
         } else if (a.kind === 'terugdraaien') {
           this.assertInPeriod(a.input.date, until);
           const id = resolve(a.input.entry);

@@ -1,3 +1,4 @@
+import { accountOpenItems, assertQuestionNotSettled } from '../core-ledger/open-items';
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
@@ -125,9 +126,12 @@ export class PurchaseService {
 
   /** Staat (een deel van) deze aankoop nog op Vraagposten ("weet ik nog niet")? */
   isQuestion(id: number): boolean {
-    return this.db
+    const question = this.db
       .prepare(`SELECT 1 FROM purchase_invoice_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.purchase_invoice_id = ? AND a.rgs_code = ?`)
       .get(id, ACCOUNTS.vraagposten) !== undefined;
+    if (!question) return false;
+    const p = this.get(id);
+    return !p.journal_entry_id || accountOpenItems(this.db, ACCOUNTS.vraagposten).some(item => item.id === p.journal_entry_id);
   }
 
   /**
@@ -185,6 +189,7 @@ export class PurchaseService {
       const p = this.get(id);
       if (p.is_opening) throw new ValidationError('Deze rekening komt uit je vorige administratie. Pas hem aan in de overstap-hulp');
       if (!p.journal_entry_id) throw new ValidationError('Deze aankoop kan niet aangepast worden');
+      assertQuestionNotSettled(this.db, p.journal_entry_id);
       const event = this.events.forEntry(p.journal_entry_id);
       if (!event || event.type !== 'inkoop') throw new ValidationError('Deze aankoop is met een oudere versie van de app verwerkt en kan zo niet aangepast worden. Vraag je boekhouder.');
       const old = event.payload as InkoopPayload;
