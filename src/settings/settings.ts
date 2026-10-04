@@ -140,6 +140,12 @@ export interface AppSettings {
   vatPotAccountId: number | null;
   /** Schatting inkomstenbelasting tonen (#33); altijd als schatting gemarkeerd. */
   incomeTaxEstimate: boolean;
+  /** Rechtsvorm; null = nog niet opgegeven (de schatting gaat dan uit van een eenmanszaak). Een bv betaalt geen inkomstenbelasting over de winst. */
+  legalForm: 'eenmanszaak' | 'vof' | 'bv' | null;
+  /** vof of maatschap: jouw deel van de winst in procenten (de schatting is per ondernemer) */
+  profitSharePct: number;
+  /** Bevestigd dat je ondernemer voor de inkomstenbelasting bent en aan de voorwaarden voor de aftrek voldoet */
+  ibConfirmed: boolean;
   /** Voldoe ik aan het urencriterium (1.225 uur)? Bepaalt of de zelfstandigenaftrek meetelt in de schatting. */
   urencriterium: boolean;
   /**
@@ -266,6 +272,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   startersaftrekYears: null,
   nietGerealiseerdeZelfstandigenaftrek: 0,
   vatPotAccountId: null,
+  legalForm: null,
+  profitSharePct: 100,
+  ibConfirmed: false,
   incomeTaxEstimate: true,
   urencriterium: true,
   sendUbl: true,
