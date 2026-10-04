@@ -90,6 +90,15 @@ export interface VatCorrection {
 
 /** Correcties tot en met € 1.000 btw mag je meenemen in de volgende aangifte; daarboven een suppletie. */
 export const SUPPLETIE_THRESHOLD: Cents = 100000;
+/**
+ * Termijn bij een suppletie: heb je te weinig btw aangegeven (btw > 0), dan zo snel mogelijk en uiterlijk
+ * binnen acht weken na ontdekking, anders volgen belastingrente en een boete.
+ */
+export function suppletieTermijn(btw: Cents): string {
+  return btw > 0
+    ? 'Je gaf te weinig btw aan: verbeter dit zo snel mogelijk, uiterlijk binnen acht weken nadat je de fout ontdekte. Daarna kan de Belastingdienst belastingrente en een boete opleggen.'
+    : 'Je gaf te veel btw aan: verbeter dit zo snel mogelijk, dan krijg je het terug.';
+}
 export const SUPPLETIE_URL = 'https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-aangifte-corrigeren';
 
 const safeLabel = (key: string) => {
@@ -420,7 +429,7 @@ export class VatService {
     if (omzetVrijgesteld !== 0 && !this.settings.get().kor) warnings.push('Er staan factuurregels zonder btw ("Vrijgesteld / KOR"), maar je gebruikt de KOR niet. Kijk die facturen na.');
     for (const c of corrections) {
       if (c.suppletie) {
-        warnings.push(`Er is ${formatEuro(Math.abs(c.btw))} btw gecorrigeerd over ${c.label}. Dat is meer dan € 1.000: dat verbeter je apart in Mijn Belastingdienst Zakelijk (een "suppletie"). Het zit niet in de bedragen hieronder.`);
+        warnings.push(`Er is ${formatEuro(Math.abs(c.btw))} btw gecorrigeerd over ${c.label}. Dat is meer dan € 1.000: dat verbeter je apart in Mijn Belastingdienst Zakelijk (een "suppletie"). Het zit niet in de bedragen hieronder. ${suppletieTermijn(c.btw)}`);
       }
     }
     if (omzetExport !== 0 || omzetIcp !== 0 || omzetDienstBuitenEu !== 0 || btwBuitenEu !== 0 || btwEu !== 0) {
@@ -561,7 +570,30 @@ export class VatService {
     const prev = this.calculate(prevPeriod.key);
     const hadActivity = prev.summary.omzet !== 0 || prev.summary.voorbelasting !== 0;
     const car = this.carPrivateUse(periodKey);
-    return runVatChecks(this.db, this.ledger, period, { current, previous: hadActivity ? prev.summary.teBetalen : null }, car.lastPeriod ? car : null);
+    const turnover = car.lastPeriod ? this.turnoverReconciliation(car.year) : null;
+    return runVatChecks(this.db, this.ledger, period, { current, previous: hadActivity ? prev.summary.teBetalen : null }, car.lastPeriod ? car : null, turnover);
+  }
+
+  /**
+   * Omzet volgens alle aangiftes van het jaar tegenover de omzetrekeningen in het grootboek (op boekingsdatum).
+   * `jaarovergang`: omzet die op btw-datum in een ander jaar valt dan op boekingsdatum; `correcties`: wat via een
+   * suppletie loopt of al is afgehandeld en daarom niet in de gewone aangifte staat.
+   */
+  turnoverReconciliation(year: number): { year: number; aangifte: Cents; grootboek: Cents; jaarovergang: Cents; correcties: Cents } {
+    const aangifte = this.listPeriods(year).reduce((s, p) => s + this.calculate(p.period.key).summary.omzet, 0);
+    const sum = (dateExpr: string) =>
+      (
+        this.db
+          .prepare(
+            `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS s FROM journal_lines l
+             JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+             WHERE a.category = 'omzet' AND ${dateExpr} BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')`,
+          )
+          .get(`${year}-01-01`, `${year}-12-31`) as { s: number }
+      ).s;
+    const grootboek = sum('e.entry_date');
+    const opVatDatum = sum('COALESCE(e.vat_date, e.entry_date)');
+    return { year, aangifte, grootboek, jaarovergang: grootboek - opVatDatum, correcties: opVatDatum - aangifte };
   }
 
   /**
