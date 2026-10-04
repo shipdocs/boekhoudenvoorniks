@@ -479,6 +479,49 @@ export function runVatChecks(
     }
   }
 
+  // Oninbare facturen: een vordering geldt uiterlijk 1 jaar na de uiterste betaaldatum als oninbaar; de btw mag dan terug
+  // (belastingdienst.nl, Teruggaaf door oninbare vorderingen, 2026-10-04). Alleen bij het factuurstelsel, dat de app gebruikt.
+  const yearAgo = `${Number(end.slice(0, 4)) - 1}${end.slice(4)}`;
+  const stale = db
+    .prepare(
+      `SELECT i.id, i.number, i.due_date AS date, r.name AS label, i.vat_total AS vat,
+         (SELECT COALESCE(SUM(l.debit - l.credit), 0) FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
+          JOIN chart_of_accounts a ON a.id = l.account_id WHERE a.rgs_code = ? AND e.source_ref = 'invoice:' || i.id AND e.entry_date <= ?) AS open
+       FROM invoices i JOIN relations r ON r.id = i.relation_id
+       WHERE i.status <> 'concept' AND i.is_opening = 0 AND i.credit_of_invoice_id IS NULL AND i.vat_total > 0 AND i.due_date <= ?
+       ORDER BY i.due_date`,
+    )
+    .all(ACCOUNTS.debiteuren, end, yearAgo) as { id: number; number: string; date: IsoDate; label: string; vat: Cents; open: Cents }[];
+  const staleOpen = stale.filter((i) => i.open > 0);
+  if (staleOpen.length > 0) {
+    found.push({
+      key: 'oninbaar',
+      blocking: false,
+      title: `${staleOpen.length === 1 ? `Factuur ${staleOpen[0]!.number}` : `${staleOpen.length} facturen`} staat meer dan een jaar open na de vervaldatum: btw terugvragen?`,
+      detail: `Een vordering geldt uiterlijk 1 jaar na de uiterste betaaldatum als oninbaar. Je mag de btw dan terugvragen: in de aangifte van het tijdvak waarin dat jaar verstreken is, trek je de btw en de omzet af bij rubriek 1a of 1b. Open de factuur en kies "Afboeken als oninbaar"; de app boekt dat voor je. Komt er later alsnog betaling, dan geeft de app de btw over dat deel opnieuw aan. Heb je het zelf al in een eerdere aangifte verwerkt, sla dit dan over.`,
+      count: staleOpen.length,
+      fingerprint: staleOpen.map((i) => `${i.id}:${i.open}`).join(','),
+      screen: 'werk',
+      items: staleOpen.map((i) => ({ kind: 'factuur' as const, id: i.id, date: i.date, label: `${i.number} ${i.label}`, amount: i.open })),
+    });
+  }
+  // Inkopen die al ruim een jaar onbetaald staan: de leverancier kan zijn btw hebben teruggevraagd; dan moet jij de voorbelasting terugbetalen.
+  const stalePurchases = db
+    .prepare(`SELECT p.id, p.invoice_date AS date, COALESCE(r.name, p.description) AS label, p.total FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id WHERE p.status = 'open' AND p.total > 0 AND p.due_date IS NOT NULL AND p.due_date <= ? ORDER BY p.due_date LIMIT 50`)
+    .all(yearAgo) as { id: number; date: IsoDate; label: string; total: Cents }[];
+  if (stalePurchases.length > 0) {
+    found.push({
+      key: 'oninbaar-inkoop',
+      blocking: false,
+      title: `${stalePurchases.length} ${stalePurchases.length === 1 ? 'inkoopfactuur' : 'inkoopfacturen'} al meer dan een jaar na de vervaldatum onbetaald`,
+      detail: 'Vraag na of de leverancier de btw heeft teruggevraagd omdat jij niet betaalde. Zo ja, dan moet je de btw die je aftrok terugbetalen. Of de factuur nog geldt, of is kwijtgescholden, moet je zelf beoordelen; laat je boekhouder meekijken.',
+      count: stalePurchases.length,
+      fingerprint: stalePurchases.map((p) => p.id).join(','),
+      screen: 'aankopen',
+      items: stalePurchases.map((p) => ({ kind: 'aankoop' as const, id: p.id, date: p.date, label: p.label, amount: -p.total })),
+    });
+  }
+
   // Rekening-courant met de Belastingdienst: na elke aangifte en betaling hoort die op nul te staan
   // (of op het bedrag van de vorige aangifte als dat nog betaald moet worden).
   // Saldo tot het eind van deze periode, zonder de boeking van deze aangifte zelf: de betaling van de vorige

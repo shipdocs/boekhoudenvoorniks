@@ -318,6 +318,7 @@ export class InvoiceService {
         ],
       });
       this.applyPaymentAmount(id, payment.amount, payment.date);
+      this.redeclareAfterWriteOff(id, inv, payment.amount, payment.date);
       if (payment.bankTransactionId) {
         this.db
           .prepare(`UPDATE bank_transactions SET status = 'gematcht', matched_journal_entry_id = ?, matched_invoice_id = ? WHERE id = ?`)
@@ -325,6 +326,70 @@ export class InvoiceService {
       }
       return this.get(id);
     });
+  }
+
+  /**
+   * Oninbare factuur (factuurstelsel): de omzet en de btw van het onbetaalde deel gaan terug, in de aangifte van
+   * het tijdvak van de afschrijfdatum. De Belastingdienst beschouwt een vordering uiterlijk 1 jaar na de uiterste
+   * betaaldatum als oninbaar (belastingdienst.nl, Teruggaaf door oninbare vorderingen, 2026-10-04).
+   */
+  writeOffBadDebt(id: number, date: IsoDate = today()): Invoice {
+    assertIsoDate(date, 'datum');
+    return tx(this.db, () => {
+      const inv = this.get(id);
+      if (inv.status !== 'verzonden' || inv.open_amount <= 0 || (inv.total ?? 0) <= 0) throw new ValidationError('Alleen een factuur die nog (deels) openstaat kun je als oninbaar afboeken');
+      if (inv.credit_of_invoice_id || inv.is_opening) throw new ValidationError('Een creditfactuur of beginsaldo kun je niet als oninbaar afboeken');
+      if (date < inv.invoice_date) throw new ValidationError('De datum ligt vóór de factuurdatum');
+      if (this.db.prepare('SELECT 1 FROM invoice_writeoffs WHERE invoice_id = ? AND amount > recovered').get(id)) throw new ValidationError('Deze factuur is al als oninbaar afgeboekt');
+      const open = inv.open_amount;
+      const ratio = open / inv.total!;
+      const lines: PostLine[] = [];
+      let used = 0;
+      for (const g of inv.totals.groups) {
+        const accounts = SALES_ACCOUNTS[g.vatCode];
+        if (!accounts) throw new ValidationError('Er ging iets mis met de btw-keuze op deze factuur');
+        const net = Math.round(g.net * ratio);
+        const vat = Math.round(g.vat * ratio);
+        used += net + vat;
+        lines.push({ account: accounts.revenue, debit: net, relationId: inv.relation_id, vatCode: g.vatCode });
+        if (vat !== 0 && accounts.vat) lines.push({ account: accounts.vat, debit: vat, relationId: inv.relation_id, vatCode: g.vatCode });
+      }
+      lines[0]!.debit = (lines[0]!.debit ?? 0) + (open - used); // afrondingsverschil naar de eerste omzetregel
+      const entryId = this.ledger.post({
+        date,
+        description: `Oninbare vordering factuur ${inv.number}`,
+        source: 'handmatig',
+        sourceRef: `invoice:${id}`,
+        lines: [...lines.filter((l) => (l.debit ?? 0) !== 0), { account: ACCOUNTS.debiteuren, credit: open, relationId: inv.relation_id, description: inv.number }],
+      });
+      this.db.prepare('INSERT INTO invoice_writeoffs (invoice_id, journal_entry_id, amount, written_off_on) VALUES (?, ?, ?, ?)').run(id, entryId, open, date);
+      return this.get(id);
+    });
+  }
+
+  /** Komt er na een afschrijving alsnog betaald, dan geef je de btw over dat deel opnieuw aan (in het tijdvak van de betaling). */
+  private redeclareAfterWriteOff(id: number, inv: InvoiceRow, paid: Cents, date: IsoDate): void {
+    if (paid <= 0) return;
+    const w = this.db.prepare('SELECT * FROM invoice_writeoffs WHERE invoice_id = ? AND amount > recovered ORDER BY id LIMIT 1').get(id) as { id: number; journal_entry_id: number; amount: Cents; recovered: Cents } | undefined;
+    if (!w) return;
+    const part = Math.min(paid, w.amount - w.recovered);
+    const original = this.db.prepare(`SELECT l.account_id, a.rgs_code, l.debit, l.vat_code FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = ? AND l.debit > 0`).all(w.journal_entry_id) as { rgs_code: string; debit: Cents; vat_code: string | null }[];
+    const lines: PostLine[] = [];
+    let used = 0;
+    for (const o of original) {
+      const amount = Math.round((o.debit * part) / w.amount);
+      used += amount;
+      lines.push({ account: o.rgs_code, credit: amount, relationId: inv.relation_id, vatCode: o.vat_code });
+    }
+    lines[0]!.credit = (lines[0]!.credit ?? 0) + (part - used);
+    this.ledger.post({
+      date,
+      description: `Alsnog betaald na afschrijving oninbaar, factuur ${inv.number}: btw opnieuw aangeven`,
+      source: 'handmatig',
+      sourceRef: `invoice:${id}`,
+      lines: [{ account: ACCOUNTS.debiteuren, debit: part, relationId: inv.relation_id, description: inv.number }, ...lines.filter((l) => (l.credit ?? 0) !== 0)],
+    });
+    this.db.prepare('UPDATE invoice_writeoffs SET recovered = recovered + ? WHERE id = ?').run(part, w.id);
   }
 
   /** Openstaande facturen per ouderdomsklasse op `asOf`. */

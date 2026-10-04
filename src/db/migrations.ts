@@ -1317,4 +1317,16 @@ export const migrations: string[] = [
   ALTER TABLE invoices ADD COLUMN delivery_date TEXT;
   ALTER TABLE invoices ADD COLUMN delivery_date_to TEXT;
   `,
+  // Oninbare facturen: de afschrijving (omzet en btw terug) en wat daarna alsnog binnenkomt (opnieuw aangeven).
+  `
+  CREATE TABLE invoice_writeoffs (
+    id INTEGER PRIMARY KEY,
+    invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+    journal_entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+    amount INTEGER NOT NULL,
+    recovered INTEGER NOT NULL DEFAULT 0,
+    written_off_on TEXT NOT NULL
+  );
+  CREATE INDEX idx_invoice_writeoffs_invoice ON invoice_writeoffs(invoice_id);
+  `,
 ];
