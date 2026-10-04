@@ -480,22 +480,43 @@ export function runVatChecks(
   }
 
   // Bijzondere investeringssituaties: de app signaleert en vraagt om beoordeling, en herberekent niets stilzwijgend.
-  // 1. Overstap naar de KOR met bedrijfsmiddelen waarop je btw aftrok: herziening (bedrijfsmiddelen 5 jaar, onroerend goed 10 jaar).
+  // 1. KOR met bedrijfsmiddelen waarop je btw aftrok: herziening per jaar over de herzieningsperiode van 5 jaar (jaar van ingebruikname + 4),
+  //    een vijfde van de afgetrokken btw per jaar. Geen herziening als het totaal in dat jaar onder € 500 blijft en het goed in een eerder
+  //    jaar in gebruik is genomen. (belastingdienst.nl, Moet ik mijn btw-aftrek herzien vanwege de KOR, 2026-10-04)
   if (korActive(db)) {
-    const firstYear = Number(end.slice(0, 4)) - 4;
-    const recent = db
-      .prepare(`SELECT id, name, acquired_on AS date, cost FROM assets WHERE status = 'actief' AND substr(acquired_on, 1, 4) >= ? AND acquired_on <= ? ORDER BY acquired_on`)
-      .all(String(firstYear), end) as { id: number; name: string; date: IsoDate; cost: Cents }[];
-    if (recent.length > 0) {
+    const year = Number(end.slice(0, 4));
+    const rows = db
+      .prepare(
+        `SELECT s.id, s.name, s.acquired_on AS date, s.cost, l.debit AS lineDebit,
+           (SELECT COALESCE(SUM(x.debit - x.credit), 0) FROM journal_lines x JOIN chart_of_accounts xa ON xa.id = x.account_id WHERE x.journal_entry_id = l.journal_entry_id AND xa.rgs_code = ?) AS vat,
+           (SELECT COALESCE(SUM(x.debit), 0) FROM journal_lines x JOIN chart_of_accounts xa ON xa.id = x.account_id WHERE x.journal_entry_id = l.journal_entry_id AND xa.category IN ('kosten', 'activa')) AS base
+         FROM assets s JOIN journal_lines l ON l.id = s.journal_line_id
+         WHERE s.status = 'actief' AND CAST(substr(s.acquired_on, 1, 4) AS INTEGER) BETWEEN ? AND ? ORDER BY s.acquired_on`,
+      )
+      .all(ACCOUNTS.btwVoorbelasting, year - 4, year) as { id: number; name: string; date: IsoDate; cost: Cents; lineDebit: Cents; vat: Cents; base: Cents }[];
+    const withVat = rows.map((r) => ({ ...r, deducted: r.base > 0 ? Math.round((r.vat * r.lineDebit) / r.base) : 0 })).filter((r) => r.deducted > 0);
+    const earlier = withVat.filter((r) => Number(r.date.slice(0, 4)) < year);
+    const thisYear = withVat.filter((r) => Number(r.date.slice(0, 4)) === year);
+    const perYear = earlier.reduce((n, r) => n + Math.round(r.deducted / 5), 0);
+    const KOR_HERZIENING_DREMPEL: Cents = 50000;
+    if (perYear >= KOR_HERZIENING_DREMPEL || thisYear.length > 0) {
+      const items = [...earlier, ...thisYear];
       found.push({
         key: 'kor-herziening',
         blocking: false,
-        title: `Je gebruikt de KOR en hebt ${recent.length} ${recent.length === 1 ? 'bedrijfsmiddel' : 'bedrijfsmiddelen'} van de laatste 5 jaar: moet de btw-aftrek herzien worden?`,
-        detail: 'Heb je btw afgetrokken op een bedrijfsmiddel en ga je daarna de KOR gebruiken, dan moet je (een deel van) die btw mogelijk terugbetalen: bij roerende goederen kijkt de Belastingdienst 5 jaar terug, bij onroerende zaken 10 jaar. Voor kleine bedragen geldt een ondergrens. De app rekent dit niet uit; laat je boekhouder het bedrag bepalen en neem het mee in je aangifte.',
-        count: recent.length,
-        fingerprint: recent.map((r) => r.id).join(','),
+        title: perYear >= KOR_HERZIENING_DREMPEL
+          ? `KOR: je moet over ${year} waarschijnlijk ${formatEuro(perYear)} aan btw-aftrek terugbetalen (herziening)`
+          : `KOR: ${thisYear.length === 1 ? 'een bedrijfsmiddel' : `${thisYear.length} bedrijfsmiddelen`} van dit jaar met afgetrokken btw: herziening nagaan`,
+        detail:
+          (perYear >= KOR_HERZIENING_DREMPEL
+            ? `Bij een bedrijfsmiddel waarop je btw aftrok, hoort die aftrek bij 5 jaar gebruik (het jaar van ingebruikname en de 4 jaren daarna). Gebruik je de KOR, dan zijn al je prestaties vrijgesteld en heb je geen recht op aftrek: je betaalt per jaar een vijfde van de afgetrokken btw terug. Voor ${year}: ${earlier.map((r) => `${r.name} ${formatEuro(Math.round(r.deducted / 5))}`).join('; ')}. `
+            : perYear > 0 ? `Voor oudere bedrijfsmiddelen is de herziening over ${year} ${formatEuro(perYear)}: onder € 500, dus daarvoor hoef je niets terug te betalen. ` : '') +
+          (thisYear.length > 0 ? `Voor ${thisYear.map((r) => r.name).join(', ')} (dit jaar in gebruik genomen) kijk je naar de volledige afgetrokken btw (${formatEuro(thisYear.reduce((n, r) => n + r.deducted, 0))}) en het deel van het jaar dat je in de KOR zat. ` : '') +
+          'Dit is een schatting op basis van de btw in je boekhouding en het aanschafjaar. Je vraagt de herziening zelf schriftelijk aan: een aangifte omzetbelasting aanvragen bij je belastingkantoor. Laat je boekhouder het bedrag bevestigen.',
+        count: items.length,
+        fingerprint: `${year}:${items.map((r) => `${r.id}:${r.deducted}`).join(',')}`,
         screen: 'belasting',
-        items: recent.map((r) => ({ kind: 'aankoop' as const, id: r.id, date: r.date, label: r.name, amount: r.cost })),
+        items: items.map((r) => ({ kind: 'aankoop' as const, id: r.id, date: r.date, label: r.name, amount: r.deducted })),
       });
     }
   }
