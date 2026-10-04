@@ -62,6 +62,7 @@ import QRCode from 'qrcode';
 import type { Bonnenscanner } from '../scanner/scanner';
 import { PHONE_SCANNER } from '../shared/phone-scanner';
 import { BANK_FEED } from '../shared/bank-feed';
+import { YEAR_END_KINDS, type YearEndKind } from '../closing/year-end';
 
 const PONTO_DASHBOARD_URL = 'https://dashboard.myponto.com';
 
@@ -652,6 +653,13 @@ export function createApi(s: Services, host: HostContext) {
         if (blocking.length === 0) await host.safetyBackup?.(`voor-afsluiten-tm-${String(until)}`);
         return s.periods.close(String(until), keys);
       },
+    },
+    /** jaarafsluiting: vooruitbetaald, nog te betalen, voorraad, onderhanden werk */
+    yearEnd: {
+      kinds: () => YEAR_END_KINDS,
+      list: (year: number) => s.yearEnd.list(Number(year)),
+      add: (input: { year: number; kind: YearEndKind; description: string; amount: Cents; costAccount?: string | null }) => s.yearEnd.add(input),
+      remove: (id: number) => s.yearEnd.remove(Number(id), today()),
     },
     /** uitwisseling met de boekhouder (docs/uitwisseling.md) */
     exchange: {
