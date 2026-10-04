@@ -479,6 +479,63 @@ export function runVatChecks(
     }
   }
 
+  // Bijzondere investeringssituaties: de app signaleert en vraagt om beoordeling, en herberekent niets stilzwijgend.
+  // 1. Overstap naar de KOR met bedrijfsmiddelen waarop je btw aftrok: herziening (bedrijfsmiddelen 5 jaar, onroerend goed 10 jaar).
+  if (korActive(db)) {
+    const firstYear = Number(end.slice(0, 4)) - 4;
+    const recent = db
+      .prepare(`SELECT id, name, acquired_on AS date, cost FROM assets WHERE status = 'actief' AND substr(acquired_on, 1, 4) >= ? AND acquired_on <= ? ORDER BY acquired_on`)
+      .all(String(firstYear), end) as { id: number; name: string; date: IsoDate; cost: Cents }[];
+    if (recent.length > 0) {
+      found.push({
+        key: 'kor-herziening',
+        blocking: false,
+        title: `Je gebruikt de KOR en hebt ${recent.length} ${recent.length === 1 ? 'bedrijfsmiddel' : 'bedrijfsmiddelen'} van de laatste 5 jaar: moet de btw-aftrek herzien worden?`,
+        detail: 'Heb je btw afgetrokken op een bedrijfsmiddel en ga je daarna de KOR gebruiken, dan moet je (een deel van) die btw mogelijk terugbetalen: bij roerende goederen kijkt de Belastingdienst 5 jaar terug, bij onroerende zaken 10 jaar. Voor kleine bedragen geldt een ondergrens. De app rekent dit niet uit; laat je boekhouder het bedrag bepalen en neem het mee in je aangifte.',
+        count: recent.length,
+        fingerprint: recent.map((r) => r.id).join(','),
+        screen: 'belasting',
+        items: recent.map((r) => ({ kind: 'aankoop' as const, id: r.id, date: r.date, label: r.name, amount: r.cost })),
+      });
+    }
+  }
+  // 2. Bedrijfsmiddel naar privé: de btw over de onttrekking (waarde in het economisch verkeer) boekt de app niet.
+  const toPrivate = db
+    .prepare(`SELECT id, name, disposed_on AS date, proceeds FROM assets WHERE disposal_kind = 'prive' AND disposed_on BETWEEN ? AND ? ORDER BY disposed_on`)
+    .all(start, end) as { id: number; name: string; date: IsoDate; proceeds: Cents | null }[];
+  if (toPrivate.length > 0 && !korActive(db)) {
+    found.push({
+      key: 'investering-prive',
+      blocking: false,
+      title: `${toPrivate.length === 1 ? `${toPrivate[0]!.name} is` : `${toPrivate.length} bedrijfsmiddelen zijn`} naar privé gegaan: btw over de onttrekking?`,
+      detail: 'Haalde je btw af op dit bedrijfsmiddel, dan moet je mogelijk btw betalen over wat het nu waard is (onttrekking voor privé). De app boekt de vermogensovergang maar niet die btw. Laat je boekhouder het bedrag bepalen; verwerk het via een correctieboeking in deze aangifte.',
+      count: toPrivate.length,
+      fingerprint: toPrivate.map((r) => r.id).join(','),
+      screen: 'belasting',
+      items: toPrivate.map((r) => ({ kind: 'aankoop' as const, id: r.id, date: r.date, label: r.name, amount: r.proceeds })),
+    });
+  }
+  // 3. Creditnota op een bedrijfsmiddel nadat het jaar van aanschaf al is afgerond: afschrijving en investeringsaftrek van eerdere jaren kloppen mogelijk niet meer.
+  const lateCredits = db
+    .prepare(
+      `SELECT s.id, s.name, e.entry_date AS date, l.credit AS amount FROM asset_credit_allocations k
+       JOIN assets s ON s.id = k.asset_id JOIN journal_lines l ON l.id = k.journal_line_id JOIN journal_entries e ON e.id = l.journal_entry_id
+       WHERE e.entry_date BETWEEN ? AND ? AND substr(e.entry_date, 1, 4) > substr(s.acquired_on, 1, 4) ORDER BY e.entry_date`,
+    )
+    .all(start, end) as { id: number; name: string; date: IsoDate; amount: Cents }[];
+  if (lateCredits.length > 0) {
+    found.push({
+      key: 'investering-credit-later',
+      blocking: false,
+      title: `${lateCredits.length === 1 ? 'Een creditnota' : `${lateCredits.length} creditnota's`} op een bedrijfsmiddel uit een eerder jaar`,
+      detail: 'De kostprijs is verlaagd, maar de afschrijving en investeringsaftrek (KIA) van eerdere jaren zijn al verwerkt. De app past die jaren niet vanzelf aan. Vraag je boekhouder of de aangifte van het aanschafjaar gecorrigeerd moet worden.',
+      count: lateCredits.length,
+      fingerprint: lateCredits.map((r) => `${r.id}:${r.amount}`).join(','),
+      screen: 'belasting',
+      items: lateCredits.map((r) => ({ kind: 'aankoop' as const, id: r.id, date: r.date, label: r.name, amount: -r.amount })),
+    });
+  }
+
   // Oninbare facturen: een vordering geldt uiterlijk 1 jaar na de uiterste betaaldatum als oninbaar; de btw mag dan terug
   // (belastingdienst.nl, Teruggaaf door oninbare vorderingen, 2026-10-04). Alleen bij het factuurstelsel, dat de app gebruikt.
   const yearAgo = `${Number(end.slice(0, 4)) - 1}${end.slice(4)}`;
