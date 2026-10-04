@@ -1683,7 +1683,7 @@ export function createApi(s: Services, host: HostContext) {
       entries: (filter?: { from?: IsoDate; to?: IsoDate; source?: EntrySource; accountRgs?: string; limit?: number }) => s.ledger.listEntries(filter),
       balances: (from?: IsoDate, to?: IsoDate) => s.ledger.balances({ from, to }),
       questionItems: (to?: IsoDate) => accountOpenItems(s.db, ACCOUNTS.vraagposten, to),
-      manualEntry: (entry: { questionEntryId?: number; date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents }[] }) =>
+      manualEntry: (entry: { questionEntryId?: number; date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents; vatCode?: string | null; relationId?: number | null }[] }) =>
         s.settings.officeCopy() ? s.exchange.act({ kind: 'memoriaal', input: entry }).entryIds[0]! : s.ledger.post({ ...entry, source: 'handmatig' }),
       reverse: (id: number, date: IsoDate) => (s.settings.officeCopy() ? s.exchange.act({ kind: 'terugdraaien', input: { entryId: id, date } }).entryIds[0]! : s.ledger.reverse(id, date)),
       integrity: () => s.ledger.checkIntegrity(),

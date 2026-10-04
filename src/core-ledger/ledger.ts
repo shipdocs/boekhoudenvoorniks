@@ -3,7 +3,7 @@ import { tx } from '../db/database';
 import { assertCents, type Cents } from '../shared/money';
 import { addDays, assertIsoDate, formatDateNl, type IsoDate } from '../shared/dates';
 import { ValidationError } from '../shared/validation';
-import { DEFAULT_ACCOUNTS, type AccountCategory } from './accounts';
+import { ACCOUNTS, DEFAULT_ACCOUNTS, type AccountCategory } from './accounts';
 import { RULES_VERSION } from './rules-version';
 import rgsTaxonomy from './rgs-codes.json';
 import { settleQuestionItem } from './open-items';
@@ -321,6 +321,31 @@ export class Ledger {
     }
     if (debit !== credit) {
       throw new LedgerError(`Journaalpost is niet in balans: debet ${debit} ≠ credit ${credit}`);
+    }
+    if (entry.source === 'handmatig') this.validateManualVat(entry);
+  }
+
+  /**
+   * Een handmatige correctie met btw-code: de rapportage (2a/4a/4b) leest de grondslag uit de btw-code op de
+   * kostenregel, dus code, grondslag en de verschuldigde btw moeten op elkaar aansluiten.
+   */
+  private validateManualVat(entry: PostEntry): void {
+    const coded = entry.lines.filter((l) => l.vatCode);
+    if (coded.length === 0) return;
+    const btwAccount: Record<string, string> = { verlegd: ACCOUNTS.btwAfdragenVerlegd, eu: ACCOUNTS.btwAfdragenEu, 'buiten-eu': ACCOUNTS.btwAfdragenBuitenEu };
+    for (const l of coded) {
+      const code = l.vatCode!;
+      if (!Object.hasOwn(btwAccount, code)) throw new LedgerError(`Btw-code "${code}" kun je bij een correctieboeking niet kiezen; alleen verlegde btw (binnenland, EU, buiten de EU)`);
+      const acc = this.getAccount(l.account);
+      if (!(acc.category === 'kosten' || acc.category === 'activa') || !(l.debit ?? 0)) {
+        throw new LedgerError(`Btw-code "${code}" hoort bij een debetregel op een kosten- of activarekening (de grondslag), niet bij ${acc.code} ${acc.name}`);
+      }
+    }
+    for (const code of new Set(coded.map((l) => l.vatCode!))) {
+      const base = coded.filter((l) => l.vatCode === code).reduce((n, l) => n + (l.debit ?? 0), 0);
+      const owed = entry.lines.filter((l) => l.account === btwAccount[code]).reduce((n, l) => n + (l.credit ?? 0) - (l.debit ?? 0), 0);
+      const ok = [0.21, 0.09].some((r) => Math.abs(owed - Math.round(base * r)) <= 1);
+      if (!ok) throw new LedgerError(`Bij verlegde btw (${code}) moet ook de verschuldigde btw op de juiste rekening staan: 21% of 9% van de grondslag (${base / 100} euro)`);
     }
   }
 
