@@ -1,6 +1,8 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 1.3.0 — fiscale controles en jaarafsluiting voor je boekhouder
+
+Deze versie komt uit een review door een boekhouder-expert: meer controles op btw en inkomstenbelasting, een begeleide jaarafsluiting, en een betere aansluiting op wat de Belastingdienst vraagt.
 
 ### Nieuw
 - **KOR: bewaking van de omzetgrens van € 20.000.** Gebruik je de kleineondernemersregeling, dan waarschuwt de app op Vandaag en bij Belasting zodra je omzet dit jaar bij € 16.000 komt, en nogmaals zodra hij boven € 20.000 komt: dan vervalt de KOR per direct. De omzet wordt geteld zoals de Belastingdienst het doet (omzet tegen 21%, 9% en 0%, uitvoer, leveringen naar andere EU-landen, nationale verlegging en wat onder de KOR valt; niet: diensten die elders belast zijn, zoals EU-diensten aan bedrijven).

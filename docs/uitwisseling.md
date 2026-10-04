@@ -319,6 +319,11 @@ Een jaarafsluiting is een uitwisseling tot en met 31 december; na het inlezen is
 De boekhouder boekt de correcties aan het eind van het jaar (afschrijvingen, overlopende posten,
 onderhanden werk, privégebruik auto, KIA).
 
+Sinds versie 1.3.0 kan de klant zelf de overlopende posten invullen vóór het afsluiten: vooruitbetaalde
+kosten, nog te betalen kosten, voorraad en onderhanden werk (bij het afsluiten t/m 31 december, "Posten
+invullen"). Ze staan als gewone memoriaalboekingen op 31 december met een omkering op 1 januari, dus de
+boekhouder ziet ze in de export; de waardering blijft aan hem of de klant.
+
 De app **rekent** het resultaat en de privérekeningen van eerdere jaren door naar het eigen vermogen
 (`openingBalance` in `src/reports/opening-balance.ts`, gebruikt door de rapporten in de app én het
 pakket voor de boekhouder); er is geen echte afsluitboeking. Een correctieboeking die
