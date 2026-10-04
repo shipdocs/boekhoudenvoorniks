@@ -72,6 +72,13 @@ export const ACCOUNTS = {
   leningen: 'BLasLen',
   overigeVorderingen: 'BVorOvr',
   overigeSchulden: 'BSchOvr',
+  /** jaarafsluiting: posten die bij het volgende jaar horen (of nog niet gefactureerd zijn) */
+  vooruitbetaaldeKosten: 'BVorOvrVkv',
+  nogTeBetalenKosten: 'BSchOvrNtb',
+  voorraad: 'BVrdHan',
+  onderhandenWerk: 'BVrdOwe',
+  voorraadmutatie: 'WKprVom',
+  onderhandenWerkMutatie: 'WWivWow',
 } as const;
 
 export const DEFAULT_ACCOUNTS: AccountSeed[] = [
@@ -92,6 +99,10 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '0510', rgs: ACCOUNTS.priveOpnamen, ref: 'BEivKapProOvp', name: 'Privé-opnamen', category: 'passiva', system: true },
   { code: '0520', rgs: ACCOUNTS.priveStortingen, ref: 'BEivKapPrsOps', name: 'Privé-stortingen', category: 'passiva', system: true },
   { code: '0700', rgs: ACCOUNTS.leningen, ref: 'BLasSakLvl', name: 'Leningen', category: 'passiva', system: true },
+  { code: '1595', rgs: ACCOUNTS.vooruitbetaaldeKosten, ref: 'BVorOvrOvk', name: 'Vooruitbetaalde kosten', category: 'activa', system: true },
+  { code: '1330', rgs: ACCOUNTS.voorraad, ref: 'BVrdHanVoo', name: 'Voorraad', category: 'activa', system: true },
+  { code: '1340', rgs: ACCOUNTS.onderhandenWerk, ref: 'BVrdOweVoo', name: 'Onderhanden werk', category: 'activa', system: true },
+  { code: '1685', rgs: ACCOUNTS.nogTeBetalenKosten, ref: 'BSchOvsOvs', name: 'Nog te betalen kosten', category: 'passiva', system: true },
   { code: '1680', rgs: ACCOUNTS.overigeSchulden, ref: 'BSchOvsOvs', name: 'Overige schulden', category: 'passiva', system: true },
   { code: '1600', rgs: ACCOUNTS.crediteuren, ref: 'BSchCreHac', name: 'Crediteuren', category: 'passiva', system: true },
   { code: '1690', rgs: ACCOUNTS.vraagposten, ref: 'BSchTusTovTvp', name: 'Vraagposten (nog uitzoeken)', category: 'passiva', system: true },
@@ -143,6 +154,8 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   // verschil tussen de koers op de factuur en wat de bank echt afschreef (#74)
   { code: '4510', rgs: ACCOUNTS.koersverschillen, ref: 'WFbeWisWis', name: 'Koersverschillen', category: 'kosten', system: true },
   // rente van de bank: geen omzet en geen btw, wel winst (staat bij de financiële baten en lasten, net als bankkosten)
+  { code: '7050', rgs: ACCOUNTS.voorraadmutatie, ref: 'WKprVom', name: 'Voorraadmutatie', category: 'kosten', system: true },
+  { code: '7060', rgs: ACCOUNTS.onderhandenWerkMutatie, ref: 'WWivWow', name: 'Wijziging onderhanden werk', category: 'kosten', system: true },
   { code: '4520', rgs: ACCOUNTS.renteBaten, ref: 'WFbeRlmObr', name: 'Ontvangen rente', category: 'kosten', system: true },
 ];
 

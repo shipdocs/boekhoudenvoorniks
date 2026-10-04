@@ -24,6 +24,7 @@ import { QuickActions } from './quick/quick';
 import { IntegrationService } from './integrations/integrations';
 import type { FetchLike, SecretStore } from './integrations/types';
 import { PeriodCloseService } from './closing/period-close';
+import { YearEndService } from './closing/year-end';
 import { ExchangeService } from './exchange/exchange';
 import { LicenseService } from './license/license';
 import { AccountantExport } from './export/accountant';
@@ -97,6 +98,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const vat = new VatService(db, ledger, settings);
   const dashboard = new DashboardService(db, ledger, invoices, bank, vat);
   const periods = new PeriodCloseService(db, ledger, bank);
+  const yearEnd = new YearEndService(db, ledger);
   /** een losse e-mail met de instellingen van de gebruiker (bv. de export voor de boekhouder) */
   const sendMail = async (message: MailMessage) => (await mailerFactory()).send(message);
   const exchange = new ExchangeService(db, ledger, settings, periods, deps.secrets);
@@ -175,7 +177,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, ownCompany, statementFolder, periods, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed };
+  return { db, ownCompany, statementFolder, periods, yearEnd, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed };
 }
 
 export type Services = ReturnType<typeof createServices>;

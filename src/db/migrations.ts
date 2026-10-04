@@ -1329,4 +1329,19 @@ export const migrations: string[] = [
   );
   CREATE INDEX idx_invoice_writeoffs_invoice ON invoice_writeoffs(invoice_id);
   `,
+  // Jaarafsluiting: vooruitbetaalde kosten, nog te betalen kosten, voorraad en onderhanden werk, met automatische omkering op 1 januari.
+  `
+  CREATE TABLE year_end_items (
+    id INTEGER PRIMARY KEY,
+    year INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('vooruitbetaald','nog-te-betalen','voorraad','onderhanden-werk')),
+    description TEXT NOT NULL,
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    cost_account TEXT,
+    journal_entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+    reversal_entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+    removed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];
