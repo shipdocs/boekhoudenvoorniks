@@ -1,0 +1,88 @@
+
+ RUN  v5.0.2 /workspace/scratch/7269a48577ad/credit-check-baseline
+
+ ❯ tests/asset-credit-checks.test.ts (6 tests | 4 failed) 375ms
+   ❯ Investeringscredits: leescontrole houdt rekening met resterende kostprijs (6)
+     × credits [ 80000, 80000 ]: 1 onopgelost, kostprijs na verwerking 20000 68ms
+     × credits [ 80000, 30000, 20000 ]: 1 onopgelost, kostprijs na verwerking 0 48ms
+     × een eerdere unieke credit kan een volgende credit eenduidig maken 60ms
+     × beoordeelt een later ingevoerde credit op boekingsdatum en houdt de aangiftepeildatum aan 54ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/asset-credit-checks.test.ts > Investeringscredits: leescontrole houdt rekening met resterende kostprijs > credits [ 80000, 80000 ]: 1 onopgelost, kostprijs na verwerking 20000
+ FAIL  tests/asset-credit-checks.test.ts > Investeringscredits: leescontrole houdt rekening met resterende kostprijs > credits [ 80000, 30000, 20000 ]: 1 onopgelost, kostprijs na verwerking 0
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ tests/asset-credit-checks.test.ts:29:21
+     27|
+     28|     const planned = s.assets.pendingCredits();
+     29|     expect(planned).toHaveLength(pending);
+       |                     ^
+     30|     expect(planned.every(c => c.candidates.length === 0)).toBe(true);
+     31|     for (let i = 0; i < 2; i++) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  tests/asset-credit-checks.test.ts > Investeringscredits: leescontrole houdt rekening met resterende kostprijs > een eerdere unieke credit kan een volgende credit eenduidig maken
+AssertionError: expected { key: 'investering-credit', …(8) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "blocking": true,
+  "count": 1,
+  "detail": "Kies bij Belasting → Voor je aangifte → Investeringen het bedrijfsmiddel. De kostprijs, afschrijving en investeringsaftrek kunnen anders afwijken van je boekhouding.",
+  "fingerprint": "[[7,50000]]",
+  "key": "investering-credit",
+  "screen": "belasting",
+  "skipReason": null,
+  "skipped": false,
+  "title": "1 creditnota's moeten nog aan een investering worden gekoppeld",
+}
+
+ ❯ tests/asset-credit-checks.test.ts:53:79
+     51|     expect(s.assets.unassignedCredits(false).map(c => c.candidates.len…
+     52|     const before = snapshot(db);
+     53|     expect(s.vat.checks('2026-Q1').find(c => c.key === 'investering-cr…
+       |                                                                               ^
+     54|     expect(snapshot(db)).toEqual(before);
+     55|     s.assets.sync('2026-02-05');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  tests/asset-credit-checks.test.ts > Investeringscredits: leescontrole houdt rekening met resterende kostprijs > beoordeelt een later ingevoerde credit op boekingsdatum en houdt de aangiftepeildatum aan
+AssertionError: expected [] to deeply equal [ '2026-04-01' ]
+
+- Expected
++ Received
+
+- [
+-   "2026-04-01",
+- ]
++ []
+
+ ❯ tests/asset-credit-checks.test.ts:85:38
+     83|     const before = snapshot(db);
+     84|     const planned = s.assets.pendingCredits();
+     85|     expect(planned.map(c => c.date)).toEqual(['2026-04-01']);
+       |                                      ^
+     86|     expect(s.vat.checks('2026-Q1').find(c => c.key === 'investering-cr…
+     87|     expect(s.vat.checks('2026-Q2').find(c => c.key === 'investering-cr…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 2 passed (6)
+   Start at  19:11:48
+   Duration  2.43s (transform 72%, tests 16%, import 12%)
+
