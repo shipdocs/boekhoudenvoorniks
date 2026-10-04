@@ -82,6 +82,7 @@ function ManualEntry({ onClose, onDone, defaultDate }: { onClose: () => void; on
   const [description, setDescription] = useState('');
   const [questionEntryId, setQuestionEntryId] = useState<number | undefined>();
   const questions = useLoad(() => api.ledger.questionItems(date), [date]);
+  const [reverseCharge, setReverseCharge] = useState(false);
   const [lines, setLines] = useState<{ account: string; debit: number | null; credit: number | null; vatCode?: string }[]>([{ account: '', debit: null, credit: null }, { account: '', debit: null, credit: null }]);
   const d = lines.reduce((s, l) => s + (l.debit ?? 0), 0);
   const c = lines.reduce((s, l) => s + (l.credit ?? 0), 0);
@@ -98,12 +99,13 @@ function ManualEntry({ onClose, onDone, defaultDate }: { onClose: () => void; on
               <td><select value={l.account} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, account: e.target.value } : x)))}><option value="">Rekening…</option>{(accounts.data ?? []).map((a) => <option key={a.id} value={a.rgs_code}>{a.code} {a.name}</option>)}</select></td>
               <td><MoneyInput value={l.debit} placeholder="debet" onChange={(v) => setLines(lines.map((x, j) => (j === i ? { ...x, debit: v } : x)))} /></td>
               <td><MoneyInput value={l.credit} placeholder="credit" onChange={(v) => setLines(lines.map((x, j) => (j === i ? { ...x, credit: v } : x)))} /></td>
-              <td><select value={l.vatCode ?? ''} aria-label="Btw-code" title="Alleen voor verlegde btw: de grondslag in de aangifte komt uit deze code" onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, vatCode: e.target.value || undefined } : x)))}><option value="">Geen btw-code</option><option value="verlegd">Verlegd (binnenland, 2a)</option><option value="eu">Verlegd, EU (4b)</option><option value="buiten-eu">Verlegd, buiten de EU (4a)</option></select></td>
+              {reverseCharge && <td><select value={l.vatCode ?? ''} aria-label="Btw-code" title="Alleen voor verlegde btw: de grondslag in de aangifte komt uit deze code" onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, vatCode: e.target.value || undefined } : x)))}><option value="">Geen btw-code</option><option value="verlegd">Verlegd (binnenland, 2a)</option><option value="eu">Verlegd, EU (4b)</option><option value="buiten-eu">Verlegd, buiten de EU (4a)</option></select></td>}
             </tr>
           ))}
         </tbody>
       </table>
-      {lines.some((l) => l.vatCode) && <p className="small muted">Verlegde btw: kies de code op de kostenregel (debet) en boek ook de verschuldigde btw (21% of 9%) credit op "Af te dragen BTW verlegd", en eventueel de voorbelasting debet.</p>}
+      <label className="row small" style={{ marginTop: 8 }}><input type="checkbox" checked={reverseCharge} onChange={(e) => { setReverseCharge(e.target.checked); if (!e.target.checked) setLines(lines.map((x) => ({ ...x, vatCode: undefined }))); }} /> Deze correctie bevat verlegde btw (grondslag voor rubriek 2a, 4a of 4b)</label>
+      {reverseCharge && <p className="small muted">Verlegde btw: kies de code op de kostenregel (debet) en boek ook de verschuldigde btw (21% of 9%) credit op "Af te dragen BTW verlegd", en eventueel de voorbelasting debet.</p>}
       <div className="row between" style={{ marginTop: 10 }}>
         <Button small onClick={() => setLines([...lines, { account: '', debit: null, credit: null }])}>+ Regel</Button>
         <span className={d === c ? 'pill good' : 'pill bad'}>Debet <Euro cents={d} /> · Credit <Euro cents={c} /></span>
