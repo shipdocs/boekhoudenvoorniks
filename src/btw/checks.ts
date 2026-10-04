@@ -4,7 +4,7 @@ import type { Db } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { formatEuro, type Cents } from '../shared/money';
-import type { IsoDate, Period } from '../shared/dates';
+import { addDays, periodFor, type IsoDate, type Period } from '../shared/dates';
 import type { CarPrivateUse } from './car';
 import { EU_B2C_THRESHOLD, EU_COUNTRIES, countryCode } from '../shared/vat';
 import { BankPurchaseMatcher, purchaseSupplierName, type PurchaseProbe } from '../documents/bank-purchase-match';
@@ -50,6 +50,62 @@ export const EVIDENCE_THRESHOLD: Cents = 10000;
 /** Verschil met het vorige tijdvak dat we melden (signaal, geen blokkade). */
 export const BIG_CHANGE_MIN: Cents = 50000;
 
+/**
+ * ICP-opgaaf voor goederen: alleen per kwartaal als de leveringen in dat kwartaal én in elk van de vier
+ * kwartalen ervoor niet boven dit bedrag kwamen (ICP-toelichting Belastingdienst; geldt niet voor diensten).
+ * Precies € 50.000 is dus nog geen overschrijding.
+ */
+export const ICP_MONTHLY_GOODS_LIMIT: Cents = 5000000;
+/** Een afwijking tussen btw en omzet tot dit bedrag is afronding, geen fout. */
+export const RATE_TOLERANCE: Cents = 100;
+
+function icpGoodsBetween(db: Db, from: IsoDate, to: IsoDate): Cents {
+  const r = db
+    .prepare(
+      `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS s FROM journal_lines l
+       JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+       WHERE a.rgs_code = ? AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')`,
+    )
+    .get(ACCOUNTS.omzetIcp, from, to) as { s: number };
+  return r.s;
+}
+
+/** Het kwartaal waarin `periodEnd` valt en de vier ervoor, met de ICP-goederen per kwartaal (nieuwste eerst). */
+export function icpGoodsByQuarter(db: Db, periodEnd: IsoDate): { period: Period; amount: Cents }[] {
+  const out: { period: Period; amount: Cents }[] = [];
+  let q = periodFor(periodEnd, 'kwartaal');
+  for (let i = 0; i < 5; i++) {
+    out.push({ period: q, amount: icpGoodsBetween(db, q.start, q.end) });
+    q = periodFor(addDays(q.start, -1), 'kwartaal');
+  }
+  return out;
+}
+
+/** Verkoopboekingen waarvan de btw niet past bij het tarief van de omzetrekening (21% of 9%). */
+export function rateMismatches(db: Db, start: IsoDate, end: IsoDate): { entryId: number; date: IsoDate; description: string; pct: number; base: Cents; vat: Cents; expected: Cents }[] {
+  const out: ReturnType<typeof rateMismatches> = [];
+  for (const [pct, revenue, vatAccount] of [
+    [21, ACCOUNTS.omzetHoog, ACCOUNTS.btwAfdragenHoog],
+    [9, ACCOUNTS.omzetLaag, ACCOUNTS.btwAfdragenLaag],
+  ] as const) {
+    const rows = db
+      .prepare(
+        `SELECT e.id AS entryId, e.entry_date AS date, e.description,
+           SUM(CASE WHEN a.rgs_code = ? THEN l.credit - l.debit ELSE 0 END) AS base,
+           SUM(CASE WHEN a.rgs_code = ? THEN l.credit - l.debit ELSE 0 END) AS vat
+         FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+         WHERE a.rgs_code IN (?, ?) AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')
+         GROUP BY e.id HAVING base <> 0 OR vat <> 0 ORDER BY e.entry_date, e.id`,
+      )
+      .all(revenue, vatAccount, revenue, vatAccount, start, end) as { entryId: number; date: IsoDate; description: string; base: number; vat: number }[];
+    for (const r of rows) {
+      const expected = Math.round((r.base * pct) / 100);
+      if (Math.abs(r.vat - expected) > RATE_TOLERANCE) out.push({ ...r, pct, expected });
+    }
+  }
+  return out;
+}
+
 export function skipKey(periodKey: string, checkKey: string): string {
   return `vat-check:${periodKey}:${checkKey}`;
 }
@@ -61,6 +117,8 @@ export function runVatChecks(
   payable: { current: Cents; previous: Cents | null },
   /** alleen in de laatste aangifte van het jaar */
   car: { year: number; due: CarPrivateUse; booked: Cents } | null = null,
+  /** alleen in de laatste aangifte van het jaar: omzet volgens alle aangiftes tegenover de omzet in het grootboek */
+  turnover: { year: number; aangifte: Cents; grootboek: Cents } | null = null,
 ): VatCheck[] {
   const found: Omit<VatCheck, 'skipped' | 'skipReason'>[] = [];
   const { start, end } = period;
@@ -309,6 +367,84 @@ export function runVatChecks(
       fingerprint: `${car.year}:${amount}:${car.booked}`,
       screen: 'belasting',
       action: { id: 'auto-prive', label: car.booked ? 'Bedrag bijwerken' : 'Neem op in deze aangifte' },
+    });
+  }
+
+  // ICP-goederen boven € 50.000 per kwartaal: de opgaaf moet dan per maand
+  const quarters = icpGoodsByQuarter(db, end);
+  const overLimit = quarters.filter((q) => q.amount > ICP_MONTHLY_GOODS_LIMIT);
+  if (quarters[0]!.amount !== 0 && overLimit.length > 0) {
+    const months: string[] = [];
+    for (let m = quarters[0]!.period.start; m <= quarters[0]!.period.end; m = addDays(periodFor(m, 'maand').end, 1)) {
+      const mp = periodFor(m, 'maand');
+      months.push(`${mp.label}: ${formatEuro(icpGoodsBetween(db, mp.start, mp.end))}`);
+    }
+    found.push({
+      key: 'icp-maandelijks',
+      blocking: false,
+      title: `Je ICP-opgaaf voor goederen moet per maand, niet per kwartaal`,
+      detail:
+        `Je leverde in ${overLimit.map((q) => `${q.period.label} (${formatEuro(q.amount)})`).join(' en ')} meer dan ${formatEuro(ICP_MONTHLY_GOODS_LIMIT)} aan goederen aan bedrijven in andere EU-landen. ` +
+        `Dan doe je de opgaaf intracommunautaire prestaties (ICP) voor goederen per maand, binnen een maand na afloop van elke maand, totdat je vijf kwartalen op rij onder die grens blijft. Voor diensten blijft per kwartaal genoeg. ` +
+        `Goederen per maand: ${months.join('; ')}. Het overzicht per maand zie je bij ICP met de periode van die maand.`,
+      count: 1,
+      fingerprint: quarters.map((q) => `${q.period.key}:${q.amount}`).join(','),
+      screen: 'belasting',
+    });
+  }
+
+  // Past de btw bij het tarief? Een verkeerde btw-code of een handmatig btw-bedrag valt zo op.
+  const wrongRate = rateMismatches(db, start, end);
+  if (wrongRate.length > 0) {
+    const sample = wrongRate.slice(0, 5).map((r) => `${r.description || `boeking ${r.entryId}`}: btw ${formatEuro(r.vat)}, bij ${r.pct}% over ${formatEuro(r.base)} verwacht je ${formatEuro(r.expected)}`);
+    found.push({
+      key: 'tarief-plausibel',
+      blocking: false,
+      title: `${wrongRate.length} ${wrongRate.length === 1 ? 'verkoop' : 'verkopen'} waarvan de btw niet bij het tarief past`,
+      detail: `Op omzet tegen 21% of 9% hoort ongeveer dat percentage aan btw te staan. ${sample.join('; ')}${wrongRate.length > sample.length ? '; …' : ''}. Waarschijnlijk is een verkeerde btw-keuze of een verkeerd btw-bedrag ingevuld. Klopt het wel (bijvoorbeeld een gemengde boeking)? Sla deze controle dan over.`,
+      count: wrongRate.length,
+      fingerprint: wrongRate.map((r) => `${r.entryId}:${r.base}:${r.vat}`).join(','),
+      screen: 'expert',
+    });
+  }
+
+  // Rekening-courant met de Belastingdienst: na elke aangifte en betaling hoort die op nul te staan
+  // (of op het bedrag van de vorige aangifte als dat nog betaald moet worden).
+  // Saldo tot het eind van deze periode, zonder de boeking van deze aangifte zelf: de betaling van de vorige
+  // aangifte valt meestal in deze periode. Verwacht: nul (betaald) of precies de vorige aangifte (nog te betalen).
+  const afrekening = (
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(l.debit - l.credit), 0) AS s FROM journal_lines l
+         JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+         WHERE a.rgs_code = ? AND e.entry_date <= ? AND COALESCE(e.source_ref, '') <> ?`,
+      )
+      .get(ACCOUNTS.btwAfrekening, end, `vat:${period.key}`) as { s: number }
+  ).s;
+  const verwacht = -(payable.previous ?? 0);
+  if (afrekening !== 0 && afrekening !== verwacht) {
+    found.push({
+      key: 'btw-afrekening',
+      blocking: false,
+      title: `De rekening met de Belastingdienst staat op ${formatEuro(Math.abs(afrekening))} ${afrekening < 0 ? 'te betalen' : 'te ontvangen'}`,
+      detail: `Voor deze aangifte hoort die rekening op nul te staan, of op het bedrag van de vorige aangifte (${formatEuro(Math.abs(payable.previous ?? 0))}) als je dat nog moet betalen. Dit verschil betekent meestal dat een betaling aan of teruggave van de Belastingdienst niet (of voor een ander bedrag) is gekoppeld, of dat een suppletie nog niet is betaald. Bekijk de boekingen en koppel de betaling.`,
+      count: 1,
+      fingerprint: String(afrekening),
+      screen: 'bank',
+      account: { rgs: ACCOUNTS.btwAfrekening, upTo: end },
+    });
+  }
+
+  if (turnover && Math.abs(turnover.aangifte - turnover.grootboek) >= RATE_TOLERANCE) {
+    const diff = turnover.grootboek - turnover.aangifte;
+    found.push({
+      key: 'omzet-afstemming',
+      blocking: false,
+      title: `De omzet in je btw-aangiftes van ${turnover.year} wijkt ${formatEuro(Math.abs(diff))} af van je omzet in de boekhouding`,
+      detail: `Aangiftes: ${formatEuro(turnover.aangifte)}, boekhouding: ${formatEuro(turnover.grootboek)}. Een boekhouder zoekt dit altijd uit, want de Belastingdienst vergelijkt de omzet in de btw-aangifte met die in de inkomstenbelasting. Meestal komt het door facturen die aan het eind van het jaar zijn gecorrigeerd en pas in het volgende jaar in de aangifte komen, of door een correctie die via een suppletie loopt.`,
+      count: 1,
+      fingerprint: `${turnover.year}:${turnover.aangifte}:${turnover.grootboek}`,
+      screen: 'belasting',
     });
   }
 
