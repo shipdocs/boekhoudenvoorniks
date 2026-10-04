@@ -42,7 +42,7 @@ export interface ExchangePartner {
 
 /** Een correctie van de boekhouder, zoals hij in het antwoord staat. */
 export type ExchangeAction =
-  | { kind: 'memoriaal'; input: { questionEntry?: EntryRef; date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents }[] } }
+  | { kind: 'memoriaal'; input: { questionEntry?: EntryRef; date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents; vatCode?: string | null; relationId?: number | null }[] } }
   | { kind: 'terugdraaien'; input: { entry: EntryRef; date: IsoDate } }
   | { kind: 'rekening'; input: { code: string; rgs: string; rgsRef?: string | null; name: string; category: AccountCategory } };
 
