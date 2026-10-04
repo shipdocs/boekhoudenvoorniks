@@ -330,7 +330,8 @@ export class Ledger {
    * kostenregel, dus code, grondslag en de verschuldigde btw moeten op elkaar aansluiten.
    */
   private validateManualVat(entry: PostEntry): void {
-    const coded = entry.lines.filter((l) => l.vatCode);
+    // regels op omzet- en btw-rekeningen (bv. een oninbare factuur) zijn verkoop-btw en vallen hier buiten
+    const coded = entry.lines.filter((l) => l.vatCode && !['omzet', 'btw'].includes(this.getAccount(l.account).category));
     if (coded.length === 0) return;
     const btwAccount: Record<string, string> = { verlegd: ACCOUNTS.btwAfdragenVerlegd, eu: ACCOUNTS.btwAfdragenEu, 'buiten-eu': ACCOUNTS.btwAfdragenBuitenEu };
     for (const l of coded) {
