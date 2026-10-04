@@ -214,7 +214,7 @@ export function SettingsScreen() {
                         <MoneyInput value={draft.carPurchaseVatAmount} onChange={v => set({ carPurchaseVatAmount: v })} />
                       </Field>}
                       <Field label="Btw op autokosten buiten deze administratie" hint="Het volledige afgetrokken bedrag over onderhoud en gebruik voor het aangegeven jaar; laat leeg om de boekingen te gebruiken.">
-                        <div className="row"><input aria-label="Jaar autokosten-btw" type="number" min="1800" max="9999" value={draft.carCostVatOverride?.year ?? new Date().getFullYear()} onChange={e => set({ carCostVatOverride: { year: Number(e.target.value), amount: draft.carCostVatOverride?.amount ?? 0 } })} />
+                        <div className="row"><input aria-label="Jaar autokosten-btw" type="number" min="1800" max="9999" value={draft.carCostVatOverride?.year ?? new Date().getFullYear()} disabled={!draft.carCostVatOverride} onChange={e => draft.carCostVatOverride && set({ carCostVatOverride: { ...draft.carCostVatOverride, year: Number(e.target.value) } })} />
                         <MoneyInput value={draft.carCostVatOverride?.amount ?? null} onChange={v => set({ carCostVatOverride: v === null ? null : { year: draft.carCostVatOverride?.year ?? new Date().getFullYear(), amount: v } })} /></div>
                       </Field>
                     </>}
