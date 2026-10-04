@@ -557,6 +557,35 @@ export function runVatChecks(
     });
   }
 
+  // Btw-nummer van de afnemer: een 0%-levering of verlegde verkoop aan een EU-bedrijf is alleen juist als het nummer geldig is.
+  // De app controleert alleen de vorm; VIES (op klik, bij de klant) geeft de uitslag met datum. Alleen een waarschuwing.
+  const euSales = db
+    .prepare(
+      `SELECT DISTINCT i.id, i.number, i.invoice_date AS date, r.name AS label, REPLACE(REPLACE(REPLACE(UPPER(COALESCE(r.vat_number, '')), ' ', ''), '.', ''), '-', '') AS vat
+       FROM invoices i JOIN invoice_lines l ON l.invoice_id = i.id JOIN relations r ON r.id = i.relation_id
+       WHERE i.status <> 'concept' AND i.credit_of_invoice_id IS NULL AND l.vat_code IN ('icp', 'icp-dienst') AND i.invoice_date BETWEEN ? AND ? ORDER BY i.invoice_date`,
+    )
+    .all(start, end) as { id: number; number: string; date: IsoDate; label: string; vat: string }[];
+  const viesState = (vat: string): 'geldig' | 'ongeldig' | 'onbekend' => {
+    const row = vat ? (db.prepare('SELECT valid FROM vies_checks WHERE vat_number = ? AND valid IS NOT NULL ORDER BY id DESC LIMIT 1').get(vat) as { valid: number } | undefined) : undefined;
+    return row ? (row.valid === 1 ? 'geldig' : 'ongeldig') : 'onbekend';
+  };
+  const viesTodo = euSales.map((i) => ({ ...i, state: viesState(i.vat) })).filter((i) => i.state !== 'geldig');
+  if (viesTodo.length > 0) {
+    const invalid = viesTodo.filter((i) => i.state === 'ongeldig').length;
+    found.push({
+      key: 'vies',
+      blocking: false,
+      title: invalid > 0
+        ? `${invalid} ${invalid === 1 ? 'verkoop' : 'verkopen'} aan een EU-bedrijf met een btw-nummer dat VIES niet kent`
+        : `${viesTodo.length} ${viesTodo.length === 1 ? 'verkoop' : 'verkopen'} aan een EU-bedrijf waarvan het btw-nummer niet in VIES is gecontroleerd`,
+      detail: 'Een levering zonder btw naar een ander EU-land (of verlegde btw) is alleen juist als de klant een geldig btw-nummer heeft; anders kan de Belastingdienst de btw alsnog naheffen. Open de klant en kies "Controleer nu in VIES": de uitslag met datum bewaar je als bewijs. Is het nummer ongeldig, vraag de klant dan om het juiste nummer en reken tot die tijd Nederlandse btw.',
+      count: viesTodo.length,
+      fingerprint: viesTodo.map((i) => `${i.id}:${i.state}`).join(','),
+      screen: 'werk',
+      items: viesTodo.map((i) => ({ kind: 'factuur' as const, id: i.id, date: i.date, label: `${i.number} ${i.label}${i.state === 'ongeldig' ? ' (nummer ongeldig volgens VIES)' : ''}`, amount: null })),
+    });
+  }
   // Oninbare facturen: een vordering geldt uiterlijk 1 jaar na de uiterste betaaldatum als oninbaar; de btw mag dan terug
   // (belastingdienst.nl, Teruggaaf door oninbare vorderingen, 2026-10-04). Alleen bij het factuurstelsel, dat de app gebruikt.
   const yearAgo = `${Number(end.slice(0, 4)) - 1}${end.slice(4)}`;
