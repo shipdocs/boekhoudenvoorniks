@@ -215,6 +215,33 @@ export function SettingsScreen() {
                     <input inputMode="numeric" value={draft.carBijtellingPct ?? ''} onChange={(e) => set({ carBijtellingPct: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) })} placeholder="22" aria-label="Bijtellingspercentage" />
                   </Field>
                   <div className="grid cols-2">
+                    <Field label="Eerste tenaamstelling van de auto" hint="voor de grens van 16 jaar (daarna andere bijtelling)">
+                      <input type="date" value={draft.carRegisteredOn ?? ''} onChange={(e) => set({ carRegisteredOn: e.target.value || null })} />
+                    </Field>
+                    <Field label="Tot wanneer gebruik je deze auto?" hint="leeg = nog steeds">
+                      <input type="date" value={draft.carInUseUntil ?? ''} onChange={(e) => set({ carInUseUntil: e.target.value || null })} />
+                    </Field>
+                  </div>
+                  {draft.carRegisteredOn && new Date().getFullYear() - Number(draft.carRegisteredOn.slice(0, 4)) >= 16 && (
+                    <Field label="Waarde in het economisch verkeer (dagwaarde)" hint="een auto ouder dan 16 jaar: 35% van deze waarde in plaats van 22% van de cataloguswaarde">
+                      <MoneyInput value={draft.carMarketValue} onChange={(v) => set({ carMarketValue: v })} />
+                    </Field>
+                  )}
+                  {draft.carsExtra.map((c, i) => (
+                    <div key={i} className="card" style={{ marginTop: 8 }}>
+                      <div className="grid cols-2">
+                        <Field label="Naam of kenteken"><input value={c.name} onChange={(e) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} /></Field>
+                        <Field label="Cataloguswaarde"><MoneyInput value={c.catalogValue} onChange={(v) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, catalogValue: v ?? 0 } : x)) })} /></Field>
+                        <Field label="In gebruik vanaf"><input type="date" value={c.inUseFrom} onChange={(e) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, inUseFrom: e.target.value } : x)) })} /></Field>
+                        <Field label="In gebruik tot" hint="leeg = nog steeds"><input type="date" value={c.inUseUntil ?? ''} onChange={(e) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, inUseUntil: e.target.value || null } : x)) })} /></Field>
+                        <Field label="Eerste tenaamstelling"><input type="date" value={c.registeredOn ?? ''} onChange={(e) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, registeredOn: e.target.value || null } : x)) })} /></Field>
+                        <Field label="Bijtellingspercentage"><input inputMode="numeric" value={c.pct ?? ''} placeholder="22" onChange={(e) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, pct: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) } : x)) })} /></Field>
+                      </div>
+                      <Button small kind="ghost" onClick={() => set({ carsExtra: draft.carsExtra.filter((_, j) => j !== i) })}>Deze auto verwijderen</Button>
+                    </div>
+                  ))}
+                  <div><Button small onClick={() => set({ carsExtra: [...draft.carsExtra, { name: '', catalogValue: 0, pct: null, inUseFrom: `${new Date().getFullYear()}-01-01`, inUseUntil: null, registeredOn: null, marketValue: null }] })}>+ Nog een auto van de zaak</Button></div>
+                  <div className="grid cols-2">
                     <Field label="Kreeg je btw terug op de auto of de kosten?" hint="bij aankoop, of op brandstof en onderhoud">
                       <select value={draft.carVatDeducted === null ? '' : draft.carVatDeducted ? 'ja' : 'nee'} onChange={(e) => set({ carVatDeducted: e.target.value === '' ? null : e.target.value === 'ja' })}>
                         <option value="">Nog niet opgegeven</option>

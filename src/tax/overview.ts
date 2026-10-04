@@ -1,4 +1,5 @@
 import type { Db } from '../db/database';
+import { carBijtellingForYear, CAR_STANDARD_PCT, type IbCar } from './car-ib';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import type { AppSettings, SettingsService } from '../settings/settings';
 import { today, type IsoDate } from '../shared/dates';
@@ -190,13 +191,21 @@ export class TaxOverviewService {
     const s = this.settings.get();
     const none = { state: 'n.v.t.' as const, bijtelling: 0, pct: 0, costs: 0 };
     if (s.carUse !== 'zakelijk' || s.carPrivateUse === false) return none;
-    if (s.carInUseSince !== null && s.carInUseSince > year) return none;
-    if (s.carPrivateUse !== true || !s.carCatalogValue || s.carCatalogValue <= 0) return { ...none, state: 'onbekend' };
-    const firstYear = s.carInUseSince === year;
-    if (firstYear && !(s.carInUseMonth && s.carInUseMonth >= 1 && s.carInUseMonth <= 12)) return { ...none, state: 'onbekend' };
-    const pct = s.carBijtellingPct ?? 22;
-    const months = firstYear ? 13 - s.carInUseMonth! : 12;
-    const annual = (s.carCatalogValue * pct * months) / 1200;
+    const cars: IbCar[] = [];
+    if (s.carInUseSince !== null && s.carInUseSince > year) {
+      // eerste auto nog niet in gebruik; een extra auto kan er wel zijn
+    } else {
+      if (s.carPrivateUse !== true || !s.carCatalogValue || s.carCatalogValue <= 0) return { ...none, state: 'onbekend' };
+      const firstYear = s.carInUseSince === year;
+      if (firstYear && !(s.carInUseMonth && s.carInUseMonth >= 1 && s.carInUseMonth <= 12)) return { ...none, state: 'onbekend' };
+      const from: IsoDate = s.carInUseSince === null || s.carInUseSince < year ? `${year}-01-01` : `${year}-${String(s.carInUseMonth).padStart(2, '0')}-01`;
+      cars.push({ name: 'Auto', catalogValue: s.carCatalogValue, pct: s.carBijtellingPct, inUseFrom: from, inUseUntil: s.carInUseUntil as IsoDate | null, registeredOn: s.carRegisteredOn as IsoDate | null, marketValue: s.carMarketValue });
+    }
+    cars.push(...s.carsExtra);
+    if (cars.length === 0) return none;
+    const { annual, incomplete } = carBijtellingForYear(cars, year);
+    if (incomplete.length > 0) return { ...none, state: 'onbekend' };
+    const pct = s.carBijtellingPct ?? CAR_STANDARD_PCT;
     const daysInYear = (Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 86400000;
     const elapsed = running ? Math.min(daysInYear, Math.max(1, (Date.parse(asOf) - Date.UTC(year, 0, 1)) / 86400000 + 1)) : daysInYear;
     const from = `${year}-01-01`;
