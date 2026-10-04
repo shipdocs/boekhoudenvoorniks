@@ -1,0 +1,20 @@
+[2m[WebServer] [22m(node:103) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 9 tests using 1 worker
+
+(node:111) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:111) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 e2e/business-rules-followup.spec.ts:3:5 › PR275: zonder opgegeven kosten-btw kan het jaar geen nul-override aanmaken (2.2s)
+  ✓  2 e2e/business-rules-followup.spec.ts:13:5 › F04: afleiden uit aankoop verwijdert het verborgen handbedrag (2.3s)
+  ✓  3 e2e/business-rules-followup.spec.ts:28:5 › F01: telefoonkeuze 70% blijft gelden bij ongewijzigde bank-UI-default (1.6s)
+  ✓  4 e2e/business-rules-followup.spec.ts:47:5 › F03: memoriaal koppelt een gekozen vraagpost en neemt de blokkade weg (2.4s)
+  ✓  5 e2e/business-rules-followup.spec.ts:68:5 › F03: een backdated memoriaal kan een later afgeboekte vraagpost niet dubbel verbruiken (2.4s)
+  ✓  6 e2e/business-rules.spec.ts:3:5 › creditnota bij twee bedrijfsmiddelen: de keuze werkt door in het register (1.4s)
+  ✓  7 e2e/business-rules.spec.ts:21:5 › aanschaf-btw en jaarlijkse autokosten-btw zijn apart op te geven (2.1s)
+  ✓  8 e2e/uitwisseling.spec.ts:16:5 › uitwisseling: uitnodigen, versturen, corrigeren bij de boekhouder, antwoord inlezen (4.2s)
+  ✓  9 e2e/uitwisseling.spec.ts:100:5 › kantoorsleutel delen met een collega: met wachtwoord, en dezelfde controlecode (3.5s)
+
+  9 passed (23.4s)

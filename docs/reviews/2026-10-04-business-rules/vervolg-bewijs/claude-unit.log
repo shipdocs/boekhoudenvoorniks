@@ -1,0 +1,37 @@
+
+ RUN  v5.0.2 /workspace/scratch/7269a48577ad/review-pr-275
+
+···································································-······································-···stderr | tests/data-dir-wissel.test.ts > wisselen naar een lege map > een database die nog open is gaat compleet mee (wijzigingen in de WAL)
+2 bijlagepad(en) omgezet naar een pad binnen de map van de administratie
+
+····················································stderr | tests/data-dir.test.ts > overzetten naar de gedeelde map > neemt een database mee die nog open is (wijzigingen in de WAL)
+2 bijlagepad(en) omgezet naar een pad binnen de map van de administratie
+
+································································································stderr | tests/afschriften-downloadmap.test.ts > op de map letten > een map die niet (meer) bestaat of een fout bij het kijken houdt de app niet tegen
+Op de map met afschriften letten lukt niet ENOENT: no such file or directory, watch '/tmp/bvn-bestaat-niet-184'
+
+·····stderr | tests/afschriften-downloadmap.test.ts > op de map letten > een map die niet (meer) bestaat of een fout bij het kijken houdt de app niet tegen
+Kijken in de map met afschriften mislukt database dicht
+
+stderr | tests/afschriften-downloadmap.test.ts > op de map letten > een map die niet (meer) bestaat of een fout bij het kijken houdt de app niet tegen
+Kijken in de map met afschriften mislukt database dicht
+
+··stderr | tests/afschriften-downloadmap.test.ts > op de map letten > een map die niet (meer) bestaat of een fout bij het kijken houdt de app niet tegen
+Kijken in de map met afschriften mislukt database dicht
+
+·stderr | tests/afschriften-downloadmap.test.ts > op de map letten > een map die niet (meer) bestaat of een fout bij het kijken houdt de app niet tegen
+Kijken in de map met afschriften mislukt database dicht
+
+··stderr | tests/afschriften-downloadmap.test.ts > op de map letten > een map die niet (meer) bestaat of een fout bij het kijken houdt de app niet tegen
+Kijken in de map met afschriften mislukt database dicht
+
+································································································································································································································································································································································································································································································································································································································-······································································································-··············································································································································································································································································································································································································································································································································································································-
+
+ Test Files  95 passed | 1 skipped (96)
+      Tests  1566 passed | 5 skipped (1571)
+   Start at  18:00:13
+   Duration  24.17s (tests 79%, import 13%, transform 8%)
+
+    Isolate  96 workers spawned · ~125ms startup each (spawn + environment, per file)
+             at least ~1.59s faster with isolate: false — reuses workers across files instead of one per file
+

@@ -4,6 +4,13 @@ Dit dossier hoort bij [PR #274](https://github.com/shipdocs/boekhoudenvoorniks/p
 Het bewaart het onderzoek vóór herstel, de gemaakte implementatiekeuzes en het bewijs na herstel,
 zodat een volgende agent de wijzigingen kan beoordelen zonder de chatgeschiedenis.
 
+## Actuele vervolgcontrole na Claude’s review
+
+Claude’s correcties uit [PR #275](https://github.com/shipdocs/boekhoudenvoorniks/pull/275) zijn meegenomen.
+Lees eerst [de vervolgcontrole en overdracht](vervolg-na-claude.md): die beschrijft vijf resterende
+fouten, het herstel, de migraties 35–36 en de nieuwe testuitslagen. De bestaande R01–R16-secties en
+het oorspronkelijke bewijs hieronder blijven de historische eerste onderzoeksronde beschrijven.
+
 ## Begin hier
 
 1. Lees deze overdracht, vooral de scenario's en afbakeningen per R01–R16.
@@ -34,7 +41,7 @@ R12 gebruikt een expliciete aanname over een volledig aan de ondernemer verlegde
 - Dezelfde correcties gepubliceerd als: `eff49d6b0d140867a602962f27e31a9986b9b087`.
 - Beide correctiecommits hebben exact Git-tree `e17710c5a2ef897f8629cc4dcb1601ada5d5a172`.
   Het verschil in commit-ID komt door publicatie via de GitHub-verbinding met nieuwe commitmetadata.
-- De latere documentatiecommit voegt alleen dit dossier toe. De resultaten hieronder gelden voor
+- De eerste documentatiecommit `446a957` voegde alleen dit dossier toe. De resultaten hieronder gelden voor
   bovenstaande code; er zijn voor deze documentatietoevoeging geen nieuwe testuitslagen geclaimd.
 
 [Het oorspronkelijke HTML-onderzoek](onderzoek-voor-herstel.html) en

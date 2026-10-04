@@ -1,0 +1,282 @@
+{
+  "review_date": "2026-10-04",
+  "repository": "shipdocs/boekhoudenvoorniks",
+  "pull_request": 274,
+  "original_baseline": "4ae07b77a3c51655f043d8b61094ba2ad6a912ce",
+  "claude_head_reviewed": "83ea8bb23fa65e43628f706cb7f51651b138dbba",
+  "claude_pr": 275,
+  "claude_merge_commit": "a607d7326105eb153a622b8facb02e4f18f4d2f0",
+  "local_tested_code_commit": "0551238b57125044834c9913028e3c20aa4261e5",
+  "published_code_commit": "1ef727bdc538f39b6360dba1cbff0e9315a23bd0",
+  "local_code_tree": "d125eaffd35fc8a35e300343b4425987ddbc1395",
+  "github_code_tree": "d125eaffd35fc8a35e300343b4425987ddbc1395",
+  "code_tree_identity_verified": true,
+  "original_evidence": "bewijs/manifest.json remains historical evidence of the original R01–R16 review.",
+  "findings": [
+    "F01 implicit bank default overriding the global phone percentage",
+    "F02 strict write validation incorrectly used for legacy reads",
+    "F03 missing explicit settlement link for manual question entries",
+    "F04 hidden manual purchase VAT overriding automatic ledger inference",
+    "F05 historical asset values using future and mutated annual depreciation"
+  ],
+  "results": {
+    "claude_existing_unit_suite": {
+      "passed": 1566,
+      "skipped": 5,
+      "failed": 0,
+      "total": 1571
+    },
+    "claude_independent_regressions": {
+      "passed": 5,
+      "failed": 6,
+      "total": 11,
+      "distinct_remaining_problems": 5
+    },
+    "claude_independent_browser_regressions": {
+      "passed": 1,
+      "failed": 2,
+      "total": 3
+    },
+    "unit_final": {
+      "passed": 1590,
+      "skipped": 5,
+      "failed": 0,
+      "total": 1595,
+      "files": 97,
+      "timezone": "Europe/Amsterdam",
+      "code_tree": "d125eaffd35fc8a35e300343b4425987ddbc1395"
+    },
+    "utc_final_selection": {
+      "passed": 90,
+      "failed": 0,
+      "timezone": "UTC",
+      "files": [
+        "tests/business-rules-followup.test.ts",
+        "tests/business-rules-review.test.ts",
+        "tests/ponto.test.ts"
+      ]
+    },
+    "directed_units": {
+      "passed": 64,
+      "failed": 0,
+      "files": [
+        "tests/business-rules-followup.test.ts",
+        "tests/belastingvoordelen.test.ts",
+        "tests/uitwisseling.test.ts"
+      ]
+    },
+    "browser_full_before_final_settlement_guard": {
+      "passed": 91,
+      "failed": 0,
+      "code_tree": "728c7f124a1230cd50f43fa8a64979fbc12ef1f6",
+      "log": "vervolg-bewijs/e2e-full.log"
+    },
+    "browser_after_final_settlement_guard_and_new_build": {
+      "passed": 9,
+      "failed": 0,
+      "code_tree": "d125eaffd35fc8a35e300343b4425987ddbc1395",
+      "files": [
+        "e2e/business-rules-followup.spec.ts",
+        "e2e/business-rules.spec.ts",
+        "e2e/uitwisseling.spec.ts"
+      ],
+      "log": "vervolg-bewijs/e2e-last.log"
+    },
+    "typecheck": "passed",
+    "production_build": "passed",
+    "git_diff_check": "passed"
+  },
+  "skips": "Four existing skips plus an independent HTTP capability probe showing 127.0.0.2 unreachable; no production scanner code change.",
+  "known_nonblocking_warnings": [
+    "Existing Vite chunk-size warning",
+    "Existing moderate heading-order accessibility report in the demo walkthrough"
+  ],
+  "limitations": "Local fixtures only; no customer administration, Windows/installer CI or fiscal certification. Old unrelated offsetting question entries are not guessed. Legacy read warnings do not approve their VAT treatment. Original scope limitations remain.",
+  "files": [
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/README.md",
+      "bytes": 37525,
+      "sha256": "4e6fe00703ca7579e115137d7226e80bb7fd9bbf90c07ba9da9ba9066ef51b7d"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/build-final.log",
+      "bytes": 2590,
+      "sha256": "fa2855715be3d98fa3cdab356c0bee268ff1644c0f480bfbfc532ef5bdfbb3fe"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/claude-onafhankelijke-regressies.log",
+      "bytes": 7915,
+      "sha256": "6c12328128a7fd5d029ac6cbb7288f71b5569b522c6677092a314bfba48fbcee"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/claude-onafhankelijke-regressies.ts.txt",
+      "bytes": 8039,
+      "sha256": "ccc0f0bb01541f221ffd5621d7120a8feaad5499b4aaeb0cfc82c6dd36b50cd4"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/claude-schermregressies.log",
+      "bytes": 5975,
+      "sha256": "b3ecda0e68b27a06adbadae0aa04b8d0a1774b83fe99793faec486b24b7e30e2"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/claude-schermregressies.ts.txt",
+      "bytes": 3067,
+      "sha256": "4051eda27aab5e14b2330b73a5730175ed483a74f22d85f27636637634a9a9f9"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/claude-unit.log",
+      "bytes": 5289,
+      "sha256": "49f168f5597f649eb5d8a63bba3980ee1026adc28c95e93bb6bdd1b8f86b3a7f"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/e2e-full.log",
+      "bytes": 12857,
+      "sha256": "7d3d634163d26a96fd70f5bf4005f6a67190c1de7cb01d64dedb3aa073daa7c1"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/e2e-gerichte-regressies.log",
+      "bytes": 1362,
+      "sha256": "5552d101d545dd607260232338698fe8b91d36510622b2a5306adeee75933c59"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/e2e-last.log",
+      "bytes": 1755,
+      "sha256": "a2e54492e3413a4c715e3313502a8a15994db11066915b39bf6222c5d5a77d0a"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/e2e-voor-laatste-afschrijvingscorrectie.log",
+      "bytes": 12853,
+      "sha256": "b7de761c63830b18d2487064ffc414232357a6aad2f31282db23003e1c789fd7"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/gerichte-regressies.log",
+      "bytes": 456,
+      "sha256": "a424631d8b4dcb85213cf3dce292250031c02c3192143b39e55bf4da5a93ed41"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/typecheck-final.log",
+      "bytes": 169,
+      "sha256": "c2334b642b045e7fec76a72d61b5ca3321e9937013b8c4cbb7f10518127fc162"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/unit-eerste-vervolgrun.log",
+      "bytes": 1472,
+      "sha256": "bc94863d231492349abcce85e51a5854e70f9c1d2a19e1c2f11b8bb7980c147d"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/unit-final.log",
+      "bytes": 431,
+      "sha256": "bf3d5668c2dd6754daacef96d112185c274db66320d53407d01a40c32596f648"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-bewijs/utc-final.log",
+      "bytes": 456,
+      "sha256": "24ba8bca2b2f87c2c4bdc62535f200370b42beafd10186054db0ddf045cde897"
+    },
+    {
+      "path": "docs/reviews/2026-10-04-business-rules/vervolg-na-claude.md",
+      "bytes": 12590,
+      "sha256": "cf8c1e688e522a046081c818618776ef1147f4e2d24e8af11ed3e5193b523794"
+    },
+    {
+      "path": "e2e/business-rules-followup.spec.ts",
+      "bytes": 6438,
+      "sha256": "a8b138a0eb4b297babf72d66b71b76e82cdb756e596c847bc433e52ee5ca443d"
+    },
+    {
+      "path": "src/btw/car.ts",
+      "bytes": 7121,
+      "sha256": "f57957b9aeddd2bd3ee68e077782044bf3d83483dcac470a103e4e0986d195e9"
+    },
+    {
+      "path": "src/core-ledger/ledger.ts",
+      "bytes": 23577,
+      "sha256": "ced5a00bc8d3e385f9e33bec51059595b69aef5eae0805be0442616787a45151"
+    },
+    {
+      "path": "src/core-ledger/open-items.ts",
+      "bytes": 4467,
+      "sha256": "2c828d609d4e1a0b4db669531e5dc9475efefce595bf3c1cdea71b11bb756d25"
+    },
+    {
+      "path": "src/core-ledger/stored-purchase.ts",
+      "bytes": 684,
+      "sha256": "afec3c086d0fdd32fea86cb73145958168625d2fa4127ea6599f20947baf5fca"
+    },
+    {
+      "path": "src/db/migrations.ts",
+      "bytes": 70132,
+      "sha256": "3a478db8a78ba1e44a3da60716b23420253684ce99699c6a5abfd131ef453bf8"
+    },
+    {
+      "path": "src/documents/purchases.ts",
+      "bytes": 23577,
+      "sha256": "6ff9fbc900b843073b65eddf16a8465e57c744f72312e9cf78796c12ba9ee98f"
+    },
+    {
+      "path": "src/exchange/exchange.ts",
+      "bytes": 22681,
+      "sha256": "6505f2b0531008fbd94c9afcfcfb22373cb62c98ab37783a19e668758e531247"
+    },
+    {
+      "path": "src/import/bank.ts",
+      "bytes": 111560,
+      "sha256": "780c359cd4e4639188837d200bff54f24368dcce47bfbd577bee01536f4b02a0"
+    },
+    {
+      "path": "src/intake/business-share.ts",
+      "bytes": 12763,
+      "sha256": "2833b3176daf7e01a6f6faf04cd429ad86a8cf157b60225c6970b96a2a2e1d50"
+    },
+    {
+      "path": "src/intake/intake.ts",
+      "bytes": 88337,
+      "sha256": "b6b434a43c60f6d5c5680de53eacf5602cdc559f2b4ca3363a1e499a8b67f62a"
+    },
+    {
+      "path": "src/main/api.ts",
+      "bytes": 107052,
+      "sha256": "fab5578a698788eecfbd5adbf554d577ac3e5d0ed2c2c81f81ba1dfb4635614d"
+    },
+    {
+      "path": "src/renderer/screens/Bank.tsx",
+      "bytes": 77757,
+      "sha256": "0ed1de0f252b25a4b9f2f0e21326603db0d990528317487365ccc95bd3db5dd8"
+    },
+    {
+      "path": "src/renderer/screens/Expert.tsx",
+      "bytes": 14322,
+      "sha256": "b54f88f9894fd81e31109aeaad0d7e5846774dd2a0d1229299d5ee2d37e78d58"
+    },
+    {
+      "path": "src/renderer/screens/Purchases.tsx",
+      "bytes": 46434,
+      "sha256": "2cc68df4fe9dbd0e622bf11796a21a39c945be626386c8e26ab09496ed4308f1"
+    },
+    {
+      "path": "src/renderer/screens/Settings.tsx",
+      "bytes": 64556,
+      "sha256": "acd2ab9bb26a6e87bf80c553490acf36bb6211d668dc8db25f9a4f3b11e33972"
+    },
+    {
+      "path": "src/shared/business-share.ts",
+      "bytes": 1080,
+      "sha256": "3469f6d9a9f8aaa305bef76f5fee3726faec009e13029d13f13a7bd297402382"
+    },
+    {
+      "path": "src/tax/assets.ts",
+      "bytes": 27298,
+      "sha256": "ea039bfe6df884035e71cc682709f0179eec969efe1ebf55a45c19f84cbf93c5"
+    },
+    {
+      "path": "tests/business-rules-followup.test.ts",
+      "bytes": 19515,
+      "sha256": "12e11511311a84fb0817cf22a3bed389aec46e757870ac2f82ff6101444ae52f"
+    },
+    {
+      "path": "tests/uitwisseling.test.ts",
+      "bytes": 22980,
+      "sha256": "01d6e30209a1bfee9ebd123de5ff0e8b6488d0191217159944dd4108c929d0b4"
+    }
+  ]
+}
