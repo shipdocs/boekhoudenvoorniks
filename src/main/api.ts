@@ -966,6 +966,7 @@ export function createApi(s: Services, host: HostContext) {
       registerPayment: (id: number, payment: PaymentInput) => s.invoices.registerPayment(id, payment),
       paidCash: (id: number, amount: Cents, date: IsoDate) => s.quick.customerPaidCash(id, amount, date),
       writeOff: (id: number) => s.invoices.writeOffRemainder(id),
+      writeOffBadDebt: (id: number, date: IsoDate) => s.invoices.writeOffBadDebt(id, date),
       html: (id: number) => s.invoices.renderHtml(id),
       dateWarnings: (invoiceDate: IsoDate, excludeId?: number) => s.invoices.dateWarnings(invoiceDate, excludeId),
       send: (id: number, opts?: SendOptions) => s.sender.sendInvoice(id, opts),
