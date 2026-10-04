@@ -151,6 +151,8 @@ export interface AppSettings {
   carPrivateUse: boolean | null;
   /** cataloguswaarde van de auto van de zaak, incl. btw en bpm (centen) */
   carCatalogValue: number | null;
+  /** bijtellingspercentage privégebruik voor de IB (bv. 22); null = standaard 22% */
+  carBijtellingPct: number | null;
   /**
    * Trok je btw af op de aanschaf of de kosten van de auto? (null = nog niet gevraagd) Zonder aftrek
    * (bijvoorbeeld een marge-auto en geen aftrek op de kosten) is er geen btw-correctie.
@@ -247,6 +249,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   carUse: 'onbekend',
   carPrivateUse: null,
   carCatalogValue: null,
+  carBijtellingPct: null,
   carVatDeducted: null,
   carPurchaseVatDeducted: null,
   carPurchaseVatAmount: null,
