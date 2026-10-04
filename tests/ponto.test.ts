@@ -563,6 +563,11 @@ describe('Ponto', () => {
       expect(mapPontoTransaction(tx('t', baseTx({ executionDate: 'niet-een-datum', valueDate: 'ook-niet' })), null)).toBeNull();
     });
 
+    it('rolt een ongeldige kalenderdatum niet door naar de volgende maand', () => {
+      expect(mapPontoTransaction(tx('t', baseTx({ executionDate: '2026-02-30', valueDate: '2026-03-11' })), null)?.date).toBe('2026-03-11');
+      expect(mapPontoTransaction(tx('t', baseTx({ executionDate: '2026-02-30T10:00:00Z', valueDate: undefined })), null)).toBeNull();
+    });
+
     it('kiest gestructureerde remittance als reference, anders endToEndId behalve NOTPROVIDED', () => {
       const structured = tx('t', baseTx({ remittanceInformationType: 'structured', remittanceInformation: '+++042/2026/00042+++' }));
       expect(mapPontoTransaction(structured, null)?.reference).toBe('+++042/2026/00042+++');
