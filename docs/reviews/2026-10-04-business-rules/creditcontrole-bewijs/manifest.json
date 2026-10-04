@@ -1,0 +1,104 @@
+{
+  "baseline_commit": "c71239ce5cb8938c2d7ebdea2b5110b054629605",
+  "recorded_at": "2026-10-04T17:13:50.346401+00:00",
+  "source_files": [
+    {
+      "path": "src/tax/assets.ts",
+      "sha256": "6bd999f900d54b1ef2a158415e663e608669ed179b94c33bc6b4163bb653502c",
+      "git_blob_sha": "7bda978c9ea30ca98bbf780489ed01a8595b23c9"
+    },
+    {
+      "path": "tests/asset-credit-checks.test.ts",
+      "sha256": "776c15bb7a1b4bf0f312274d912305396506337a9dd1b10b5afc7ca4c2c36214",
+      "git_blob_sha": "d4308042fccf72c2373dde7f0f539749a05a2091"
+    }
+  ],
+  "checks": [
+    {
+      "log": "main-bestaande-tests.log",
+      "command": "TZ=Europe/Amsterdam node node_modules/vitest/vitest.mjs run",
+      "exit_code": 0,
+      "result": {
+        "passed": 1592,
+        "skipped": 5,
+        "failed": 0
+      },
+      "version": "main",
+      "sha256": "945f70748b62c471b70ac4aca35edd1684a4934a720f4f10440f849826b7c218"
+    },
+    {
+      "log": "voor-herstel.log",
+      "command": "TZ=Europe/Amsterdam node node_modules/vitest/vitest.mjs run tests/asset-credit-checks.test.ts",
+      "exit_code": 1,
+      "result": {
+        "passed": 2,
+        "failed": 4
+      },
+      "version": "main_met_nieuwe_regressies",
+      "sha256": "d5c6ac5b8a0cd153f2bb72279c68f47b123ac8e0acfc352f015d2e0b75b435cc"
+    },
+    {
+      "log": "gericht.log",
+      "command": "TZ=Europe/Amsterdam node node_modules/vitest/vitest.mjs run tests/asset-credit-checks.test.ts tests/business-rules-followup.test.ts",
+      "exit_code": 0,
+      "result": {
+        "passed": 31,
+        "failed": 0
+      },
+      "version": "fix",
+      "sha256": "693043f84c2ca3443f0c9d782c96439f5610ac3c54a2fef26da42a6950195620"
+    },
+    {
+      "log": "unit.log",
+      "command": "TZ=Europe/Amsterdam node node_modules/vitest/vitest.mjs run",
+      "exit_code": 0,
+      "result": {
+        "passed": 1598,
+        "skipped": 5,
+        "failed": 0
+      },
+      "version": "fix",
+      "sha256": "844f38e023e353e1013255916913fd20d260cbccc7f1701de9afbf7ee300062d"
+    },
+    {
+      "log": "utc.log",
+      "command": "TZ=UTC node node_modules/vitest/vitest.mjs run tests/asset-credit-checks.test.ts tests/business-rules-review.test.ts tests/business-rules-boundaries.test.ts tests/business-rules-followup.test.ts tests/ponto.test.ts",
+      "exit_code": 0,
+      "result": {
+        "passed": 118,
+        "failed": 0
+      },
+      "version": "fix",
+      "sha256": "fcf9df4123d827a2b713e677ba7c32a25f1811210b2daafb2fb08747eeec2efc"
+    },
+    {
+      "log": "e2e.log",
+      "command": "PW_CHROMIUM=/root/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell E2E_PORT=5193 node node_modules/@playwright/test/cli.js test e2e/business-rules-followup.spec.ts e2e/business-rules.spec.ts e2e/uitwisseling.spec.ts",
+      "exit_code": 0,
+      "result": {
+        "passed": 9,
+        "failed": 0
+      },
+      "version": "fix",
+      "sha256": "c4821455abe5af3e4ff7e0dee3b6d0741f71c3fd35c60f5ea994f602cfae30ac"
+    },
+    {
+      "log": "typecheck.log",
+      "command": "node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+      "exit_code": 0,
+      "result": {},
+      "version": "fix",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "log": "build.log",
+      "command": "npm run build",
+      "exit_code": 0,
+      "result": {
+        "warning": "Bestaande Vite-waarschuwing: chunks groter dan 500 kB"
+      },
+      "version": "fix",
+      "sha256": "4b0800a211df9c954ff5517e436bf3e5b831b2d0495aff8ac26fd67c85d43aed"
+    }
+  ]
+}
