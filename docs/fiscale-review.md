@@ -107,6 +107,27 @@ waarden (ook heffingskortingen en Zvw) tegen de officiële tabel zijn afgevinkt.
 
 ---
 
+## Aanvullingen in versie 1.3.0 — 4 oktober 2026
+
+Uitwerking van de punten uit issue #286 en de bronnen die erbij zijn geraadpleegd (belastingdienst.nl en
+wetten.overheid.nl, geraadpleegd op 4 oktober 2026). Ook hier geldt: graag per punt **klopt** / **klopt niet, want …**.
+
+| Onderwerp | Wat de app doet | Bron |
+|---|---|---|
+| Bijtelling auto van de zaak (IB) | 22% van de cataloguswaarde per jaar (percentage instelbaar), naar rato per maand, maximaal de autokosten (brandstof, onderhoud, afschrijving vervoermiddelen); bij ≤ 500 privékilometer geen bijtelling; auto ouder dan 16 jaar: 35% van de dagwaarde vanaf de maand van 16 jaar; extra auto's apart | Belastingdienst, Winst uit onderneming 2026, "Onttrekking privégebruik auto van de onderneming" |
+| Oninbare facturen (btw) | Melding een jaar na de uiterste betaaldatum; "Afboeken als oninbaar" boekt omzet en btw van het openstaande deel terug in het tijdvak van de afschrijving; bij latere betaling wordt de btw over dat deel opnieuw aangegeven in het tijdvak van de betaling | Belastingdienst, Btw-teruggaaf door oninbare vorderingen; art. 29 Wet OB |
+| Onbetaalde inkoop (btw) | "Btw terugnemen": de afgetrokken voorbelasting over het openstaande deel wordt kosten; bij latere betaling wordt die btw weer afgetrokken | art. 29 Wet OB (uiterlijk een jaar na de uiterste betaaldatum) |
+| KOR-herziening | Per bedrijfsmiddel een vijfde van de afgetrokken btw per jaar over de herzieningsperiode van 5 jaar; geen herziening als het totaal in dat jaar onder € 500 blijft en het goed in een eerder jaar in gebruik is genomen; eerste jaar: volledige btw naar het deel van het jaar in de KOR (door de gebruiker te bepalen) | Belastingdienst, Moet ik mijn btw-aftrek herzien vanwege de kleineondernemersregeling |
+| Goederen aan een EU-bedrijf onder de KOR | KOR-vrijstelling op de factuur, geen intracommunautaire levering, niet in rubriek 3b of de opgaaf ICP; de omzet telt mee voor de KOR-grens | Belastingdienst, EU-KOR |
+| Memoriaalboeking met btw-code | Verlegde btw (binnenland, EU, buiten de EU) per regel; de app controleert dat de verschuldigde btw (21% of 9%) op de juiste rekening staat | Eigen regel, bedoeld voor 2a/4a/4b |
+| Jaarafsluiting | Vooruitbetaalde kosten, nog te betalen kosten, voorraad en onderhanden werk: boeking op 31 december, omkering op 1 januari; het bedrag en de waardering bepaalt de gebruiker | Boekhoudkundig gebruik (overlopende posten) |
+| IB-schatting: rechtsvorm | Eenmanszaak of zzp; bij een vof of maatschap het deel van de winst van de gebruiker; bij een bv geen schatting; bevestiging van ondernemerschap (urencriterium, meer dan de helft van de werktijd) | Wet IB 2001, ondernemersaftrek |
+| VIES | Op klik van de gebruiker wordt één btw-nummer naar VIES gestuurd; de uitslag met datum wordt bewaard; waarschuwing bij een EU-verkoop zonder geldige uitslag | Europese Commissie, VIES |
+
+Beoordelingstaken zonder berekening (de app signaleert, de boekhouder beslist): een bedrijfsmiddel dat naar
+privé gaat (btw over de onttrekking) en een creditnota op een bedrijfsmiddel uit een eerder jaar
+(afschrijving en investeringsaftrek van dat jaar).
+
 ## 1. Btw-codes en rubrieken
 
 ### 1.1 Verkoop
