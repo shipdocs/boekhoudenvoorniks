@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import jsQR from 'jsqr';
@@ -962,7 +963,18 @@ describe('bonnenscanner: alleen het lokale netwerk, vindbaar via mDNS', () => {
   });
 
   // 127.0.0.2 als tweede adres van deze computer bestaat op Linux en Windows, niet op macOS
-  it.skipIf(process.platform === 'darwin')('een nieuw IP-adres (router herstart): het ontvangstpunt verhuist mee, op dezelfde poort', async () => {
+  it.skipIf(process.platform === 'darwin')('een nieuw IP-adres (router herstart): het ontvangstpunt verhuist mee, op dezelfde poort', async (ctx) => {
+    // Sommige testcontainers sturen alle loopback-verzoeken door naar 127.0.0.1.
+    // Controleer dit met een onafhankelijke HTTP-server, voordat de scanner getest wordt.
+    const probe = createServer((_req, res) => res.end('tweede-loopback'));
+    await new Promise<void>((resolve, reject) => { probe.once('error', reject); probe.listen(0, '127.0.0.2', resolve); });
+    let secondLoopback = false;
+    try {
+      const url = `http://127.0.0.2:${(probe.address() as { port: number }).port}`;
+      secondLoopback = await (await fetch(url, { signal: AbortSignal.timeout(1000) })).text() === 'tweede-loopback';
+    } catch { /* de transportlaag ondersteunt dit tweede adres niet */ }
+    finally { await new Promise<void>(resolve => probe.close(() => resolve())); }
+    if (!secondLoopback) ctx.skip('Deze testomgeving kan een HTTP-server op 127.0.0.2 niet bereiken');
     let current = LOOPBACK;
     const t = start({ interfaces: () => current });
     const p = await pair(t);

@@ -92,13 +92,13 @@ export class AssetService {
 
   /** Nieuwe aankopen op een activarekening opnemen; teruggedraaide aankopen laten vervallen. */
   sync(asOf: IsoDate = today()): void {
+    if (this.db.readonly) return;
     const accounts = Object.keys(DEPRECIATION_ACCOUNTS);
     tx(this.db, () => {
       const fresh = this.db
         .prepare(
           `SELECT l.id, a.rgs_code, COALESCE(NULLIF(l.description, ''), e.description) AS name, e.entry_date,
-             -- niet-aftrekbare btw (KOR) staat op de regel direct erna en hoort bij de kostprijs
-             l.debit + COALESCE((SELECT n.debit FROM journal_lines n WHERE n.id = l.id + 1 AND n.journal_entry_id = l.journal_entry_id AND n.account_id = l.account_id AND n.vat_code = '${NON_DEDUCTIBLE_VAT}'), 0) AS debit
+             ${this.lineAmount('l')} AS debit
            FROM journal_lines l
            JOIN journal_entries e ON e.id = l.journal_entry_id
            JOIN chart_of_accounts a ON a.id = l.account_id
@@ -106,17 +106,36 @@ export class AssetService {
              AND COALESCE(l.vat_code, '') != '${NON_DEDUCTIBLE_VAT}'
              AND e.status = 'definitief' AND e.reverses_entry_id IS NULL
              -- een beginbalans is geen nieuwe investering (geen KIA, en de afschrijving liep al)
-             AND e.source != 'opening'
-             AND NOT EXISTS (SELECT 1 FROM assets s WHERE s.journal_line_id = l.id)`,
+             AND e.source != 'opening'`,
         )
         .all(...accounts) as { id: number; rgs_code: string; name: string; entry_date: IsoDate; debit: Cents }[];
       const since = this.db.prepare(`SELECT value FROM settings WHERE key = 'counter:depreciation-since'`).get() as { value: string } | undefined;
       const sinceYear = since ? Number(JSON.parse(since.value)) : null;
-      const insert = this.db.prepare('INSERT INTO assets (journal_line_id, account_rgs, name, acquired_on, cost, lifetime_months, booked_elsewhere_until) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      const insert = this.db.prepare('INSERT OR IGNORE INTO assets (journal_line_id, account_rgs, name, acquired_on, cost, lifetime_months, booked_elsewhere_until) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const f of fresh) {
         // gekocht vóór de update: eerdere jaren niet vanzelf boeken (de gebruiker kan dat wel kiezen)
         const elsewhere = sinceYear && Number(f.entry_date.slice(0, 4)) < sinceYear ? sinceYear - 1 : null;
         insert.run(f.id, f.rgs_code, f.name.slice(0, 200), f.entry_date, f.debit, MIN_LIFETIME_MONTHS, elsewhere);
+      }
+
+      // Een gecorrigeerde aankoop krijgt een nieuw bedrijfsmiddel; credits moeten opnieuw passen.
+      this.db.prepare(`DELETE FROM asset_credit_allocations WHERE asset_id IN (
+        SELECT s.id FROM assets s JOIN journal_lines l ON l.id = s.journal_line_id JOIN journal_entries e ON e.id = l.journal_entry_id WHERE e.status = 'teruggedraaid')`).run();
+      // Herstel bestaande KOR-prijzen en trek alleen nog geldige, toegewezen credits af.
+      for (const f of fresh) {
+        const id = (this.db.prepare('SELECT id FROM assets WHERE journal_line_id = ?').get(f.id) as { id: number }).id;
+        const cost = this.costAt(id);
+        this.db.prepare(`UPDATE assets SET cost = ?, residual = MIN(residual, ?) WHERE id = ? AND status = 'actief'`).run(cost, cost, id);
+      }
+      // Elke credit verlaagt meteen de beschikbare kostprijs; meerdere credits kunnen die niet overschrijden.
+      for (const c of this.unassignedCredits(false)) {
+        const candidates = c.candidates.filter(a => this.row(a.id).cost >= c.amount);
+        if (candidates.length === 1) {
+          const id = candidates[0]!.id;
+          this.db.prepare('INSERT INTO asset_credit_allocations (journal_line_id, asset_id) VALUES (?, ?)').run(c.lineId, id);
+          const cost = this.costAt(id);
+          this.db.prepare('UPDATE assets SET cost = ?, residual = MIN(residual, ?) WHERE id = ?').run(cost, cost, id);
+        }
       }
 
       // aankoop teruggedraaid (bv. andere categorie gekozen): bedrijfsmiddel vervalt, geboekte afschrijving terug
@@ -146,6 +165,49 @@ export class AssetService {
     });
   }
 
+  private lineAmount(alias: string): string {
+    return `${alias}.debit - ${alias}.credit + COALESCE((SELECT SUM(n.debit - n.credit) FROM journal_lines n
+      WHERE n.journal_entry_id = ${alias}.journal_entry_id AND n.account_id = ${alias}.account_id AND n.id > ${alias}.id
+        AND n.vat_code = '${NON_DEDUCTIBLE_VAT}' AND n.id < COALESCE((SELECT MIN(x.id) FROM journal_lines x
+          WHERE x.journal_entry_id = ${alias}.journal_entry_id AND x.account_id = ${alias}.account_id AND x.id > ${alias}.id
+            AND COALESCE(x.vat_code, '') != '${NON_DEDUCTIBLE_VAT}'), 9223372036854775807)), 0)`;
+  }
+
+  private costAt(assetId: number, to: IsoDate = '9999-12-31'): Cents {
+    const row = this.db.prepare(`SELECT ${this.lineAmount('l')} AS base FROM assets s JOIN journal_lines l ON l.id = s.journal_line_id WHERE s.id = ?`).get(assetId) as { base: number };
+    const reduction = this.db.prepare(`SELECT COALESCE(SUM(-(${this.lineAmount('l')})), 0) AS amount
+      FROM asset_credit_allocations k JOIN journal_lines l ON l.id = k.journal_line_id JOIN journal_entries e ON e.id = l.journal_entry_id
+      WHERE k.asset_id = ? AND e.entry_date <= ? AND e.reverses_entry_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reverses_entry_id = e.id AND r.entry_date <= ?)`)
+      .get(assetId, to, to) as { amount: number };
+    return Math.max(0, row.base - reduction.amount);
+  }
+
+  /** Credits waarvoor het bedrijfsmiddel nog gekozen moet worden. Geen verkoop- of tegenboekingen. */
+  unassignedCredits(sync = true): { lineId: number; date: IsoDate; name: string; amount: Cents; candidates: { id: number; name: string }[] }[] {
+    if (sync) this.sync();
+    const rows = this.db.prepare(`SELECT l.id, e.entry_date AS date, e.description AS name, -(${this.lineAmount('l')}) AS amount, a.rgs_code AS rgs, l.relation_id AS relation
+      FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+      WHERE a.rgs_code IN (?, ?) AND l.credit > 0 AND COALESCE(l.vat_code, '') != '${NON_DEDUCTIBLE_VAT}'
+        AND e.source IN ('inkoop', 'bank') AND e.status = 'definitief' AND e.reverses_entry_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM asset_credit_allocations k WHERE k.journal_line_id = l.id)
+      ORDER BY e.entry_date, l.id`).all(ACCOUNTS.inventaris, ACCOUNTS.vervoermiddelen) as { id: number; date: IsoDate; name: string; amount: Cents; rgs: string; relation: number | null }[];
+    return rows.map(c => ({ lineId: c.id, date: c.date, name: c.name, amount: c.amount, candidates: this.db.prepare(`SELECT s.id, s.name FROM assets s JOIN journal_lines l ON l.id = s.journal_line_id JOIN journal_entries e ON e.id = l.journal_entry_id
+      WHERE s.status = 'actief' AND e.status = 'definitief' AND s.account_rgs = ? AND s.acquired_on <= ? AND s.cost >= ? AND (? IS NULL OR l.relation_id = ?) ORDER BY s.id`).all(c.rgs, c.date, c.amount, c.relation, c.relation) as { id: number; name: string }[] }));
+  }
+
+  allocateCredit(lineId: number, assetId: number): void {
+    tx(this.db, () => {
+      this.sync();
+      const assigned = this.db.prepare('SELECT asset_id FROM asset_credit_allocations WHERE journal_line_id = ?').get(lineId) as { asset_id: number } | undefined;
+      if (assigned?.asset_id === assetId) return;
+      const credit = this.unassignedCredits(false).find(c => c.lineId === lineId);
+      if (!credit || !credit.candidates.some(a => a.id === assetId)) throw new ValidationError('Kies een bestaand bedrijfsmiddel van deze aankoop waarvoor de credit past');
+      this.db.prepare('INSERT INTO asset_credit_allocations (journal_line_id, asset_id) VALUES (?, ?)').run(lineId, assetId);
+      this.sync();
+    });
+  }
+
   /** Afschrijving die buiten de app is gedaan (jaren tot en met booked_elsewhere_until), tot en met `uptoYear`. */
   private elsewhere(a: AssetRow, uptoYear: number): Cents {
     if (a.booked_elsewhere_until === null) return 0;
@@ -170,13 +232,14 @@ export class AssetService {
   }
 
   private enrich(a: AssetRow, asOf: IsoDate): Asset {
+    a = { ...a, cost: this.costAt(a.id, asOf) };
     const booked = this.booked(a.id) + this.elsewhere(a, 9999);
     const deadline = addDays(a.acquired_on, 91);
     return {
       ...a,
       booked,
-      bookValue: a.status === 'actief' ? a.cost - booked : 0,
-      perYear: Math.round(((a.cost - a.residual) * 12) / a.lifetime_months),
+      bookValue: a.status === 'actief' ? Math.max(0, a.cost - booked) : 0,
+      perYear: Math.max(0, Math.round(((a.cost - a.residual) * 12) / a.lifetime_months)),
       belowThreshold: a.cost < ASSET_THRESHOLD,
       energyHint: a.status === 'actief' && !a.is_opening && ENERGY_HINT.test(a.name) && deadline >= asOf ? { deadline } : null,
     };
@@ -185,7 +248,7 @@ export class AssetService {
   list(filter: { includeGone?: boolean } = {}, asOf: IsoDate = today()): Asset[] {
     this.sync(asOf);
     const rows = this.db.prepare(`SELECT * FROM assets ${filter.includeGone ? '' : `WHERE status != 'vervallen'`} ORDER BY acquired_on DESC, id DESC`).all() as AssetRow[];
-    return rows.map((a) => this.enrich(a, asOf));
+    return rows.filter(a => a.acquired_on <= asOf).map((a) => this.enrich(a, asOf));
   }
 
   /** Naam, levensduur, restwaarde of "telt niet mee voor de KIA" aanpassen. Afschrijving die al geboekt is, blijft staan. */
@@ -204,7 +267,7 @@ export class AssetService {
         throw new ValidationError(a.is_opening ? 'Vul tussen 1 en 50 jaar in' : 'Vul tussen 5 en 50 jaar in (korter dan 5 jaar mag niet voor de belasting)');
       }
     }
-    if (patch.residual !== undefined && (!Number.isSafeInteger(patch.residual) || patch.residual < 0 || patch.residual >= a.cost)) {
+    if (patch.residual !== undefined && (!Number.isSafeInteger(patch.residual) || patch.residual < 0 || (a.cost > 0 ? patch.residual >= a.cost : patch.residual > 0))) {
       throw new ValidationError('Wat het daarna nog waard is, moet lager zijn dan wat je ervoor betaalde');
     }
     if (patch.name !== undefined && !patch.name.trim()) throw new ValidationError('Geef de investering een naam');
@@ -218,6 +281,7 @@ export class AssetService {
 
   /** Nog te boeken afschrijving van één bedrijfsmiddel over een jaar (tot en met `untilMonth`). */
   private dueFor(a: AssetRow, year: number, untilMonth = 12): Cents {
+    a = { ...a, cost: this.costAt(a.id, `${year}-${String(untilMonth).padStart(2, '0')}-31`) };
     if (Number(depreciationStart(a).slice(0, 4)) > year) return 0;
     if (a.booked_elsewhere_until !== null && year <= a.booked_elsewhere_until) return 0;
     return Math.max(0, cumulativeDepreciation(a, year, untilMonth) - this.booked(a.id, year - 1) - this.elsewhere(a, year - 1));

@@ -1,3 +1,5 @@
+import { AssetService } from '../tax/assets';
+import { accountOpenItems } from '../core-ledger/open-items';
 import type { Db } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
@@ -66,7 +68,7 @@ export function runVatChecks(
   const bank = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE status = 'nieuw' AND transaction_date BETWEEN ? AND ?`).get(start, end) as { n: number; s: number };
   if (bank.n > 0) {
     const items = (db.prepare(`SELECT id, transaction_date AS date, COALESCE(counter_name, description) AS label, amount FROM bank_transactions WHERE status = 'nieuw' AND transaction_date BETWEEN ? AND ? ORDER BY transaction_date LIMIT 50`).all(start, end) as Omit<CheckItem, 'kind'>[]).map((i) => ({ ...i, kind: 'bank' as const }));
-    found.push({ key: 'bank-open', blocking: true, title: `${bank.n} betalingen moet je nog uitzoeken`, detail: 'Verwerk ze eerst, anders mis je mogelijk btw die je terug kunt krijgen.', count: bank.n, fingerprint: `${bank.n}:${bank.s}`, screen: 'bank', items });
+    found.push({ key: 'bank-open', blocking: true, title: `${bank.n} betalingen moet je nog uitzoeken`, detail: 'Verwerk ze eerst, anders mis je mogelijk btw die je terug kunt krijgen.', count: bank.n, fingerprint: JSON.stringify(db.prepare(`SELECT id, amount FROM bank_transactions WHERE status = 'nieuw' AND transaction_date BETWEEN ? AND ? ORDER BY id`).all(start, end)), screen: 'bank', items });
   }
 
   const noEvidencePurchases = db
@@ -135,6 +137,9 @@ export function runVatChecks(
     });
   }
 
+  const assetCredits = new AssetService(db, ledger).unassignedCredits().filter(c => c.date <= end);
+  if (assetCredits.length) found.push({ key: 'investering-credit', blocking: true, title: `${assetCredits.length} creditnota's moeten nog aan een investering worden gekoppeld`, detail: 'Kies bij Belasting → Voor je aangifte → Investeringen het bedrijfsmiddel. De kostprijs, afschrijving en investeringsaftrek kunnen anders afwijken van je boekhouding.', count: assetCredits.length, fingerprint: JSON.stringify(assetCredits.map(c => [c.lineId, c.amount])), screen: 'belasting' });
+
   const reverseNoVat = db
     .prepare(
       `SELECT DISTINCT i.id, i.number, i.invoice_date AS date, r.name AS relation FROM invoices i JOIN relations r ON r.id = i.relation_id
@@ -160,9 +165,10 @@ export function runVatChecks(
     found.push({ key: 'kas-negatief', blocking: true, title: `Je contante geld staat op ${formatEuro(kas)}`, detail: 'Je hebt meer contant uitgegeven dan er binnenkwam. Waarschijnlijk mist er contant ontvangen geld, of geld dat je van de bank opnam.', count: 1, fingerprint: String(kas), screen: 'aankopen', account: { rgs: ACCOUNTS.kas } });
   }
 
-  const vraag = ledger.balance(ACCOUNTS.vraagposten);
-  if (vraag !== 0) {
-    found.push({ key: 'vraagposten', blocking: true, title: `${formatEuro(Math.abs(vraag))} staat nog bij "weet ik nog niet"`, detail: 'Zoek uit waar deze betalingen of bonnen bij horen (of vraag het je boekhouder): er kan btw in zitten die je terugkrijgt. Een bon deel je hier meteen in met Indelen (of later bij Aankopen).', count: 1, fingerprint: String(vraag), screen: 'bank', account: { rgs: ACCOUNTS.vraagposten } });
+  const questionItems = accountOpenItems(db, ACCOUNTS.vraagposten, end);
+  if (questionItems.length > 0) {
+    const gross = questionItems.reduce((s, i) => s + Math.abs(i.net), 0);
+    found.push({ key: 'vraagposten', blocking: true, title: `${questionItems.length} boekingen (${formatEuro(gross)}) staan nog bij "weet ik nog niet"`, detail: 'Zoek elke betaling of bon uit. Ontvangsten en uitgaven die elkaar opheffen blijven afzonderlijk zichtbaar; er kan btw in zitten.', count: questionItems.length, fingerprint: JSON.stringify(questionItems.map(i => [i.id, i.net])), screen: 'bank', account: { rgs: ACCOUNTS.vraagposten, upTo: end } });
   }
 
   // Geld "onderweg" tussen eigen rekeningen of van een betaalprovider: dan mist er meestal een afschrift
@@ -274,8 +280,8 @@ export function runVatChecks(
     found.push({
       key: 'auto-prive',
       blocking: true,
-      title: 'Rijd je ook privé in je auto van de zaak?',
-      detail: 'Dan betaal je misschien in deze laatste aangifte van het jaar btw over dat privégebruik. Vul bij Instellingen → Btw en belasting in of je privé rijdt, of je btw hebt teruggekregen op de auto of de kosten, hoe je het privégebruik berekent, wat de cataloguswaarde is en sinds wanneer je hem gebruikt.',
+      title: 'Vul de btw-gegevens voor privégebruik van je auto aan',
+      detail: 'Dan betaal je misschien in deze laatste aangifte van het jaar btw over dat privégebruik. Vul de aanschaf-btw en afgetrokken btw op autokosten in bij Instellingen → Btw en belasting in of je privé rijdt, of je btw hebt teruggekregen op de auto of de kosten, hoe je het privégebruik berekent, wat de cataloguswaarde is en sinds wanneer je hem gebruikt.',
       count: 1,
       fingerprint: `onbekend:${car.year}`,
       screen: 'instellingen',
@@ -298,7 +304,7 @@ export function runVatChecks(
       title: `Btw over privégebruik van je auto: ${formatEuro(amount)}`,
       detail:
         `Je rijdt ook privé in je auto van de zaak. Daarover betaal je één keer per jaar btw: ${(pct * 100).toLocaleString('nl-NL')}% van de cataloguswaarde (${formatEuro(catalogValue)}). ` +
-        `${months < 12 ? `Je gebruikt de auto pas sinds dit jaar, dus over ${months} ${months === 1 ? 'maand' : 'maanden'}. ` : ''}Dit komt in vak 1d van deze aangifte.`,
+        `${months < 12 ? `Je gebruikt de auto pas sinds dit jaar, dus over ${months} ${months === 1 ? 'maand' : 'maanden'}. ` : ''}De correctie is begrensd op de afgetrokken autokosten-btw, plus waar van toepassing een vijfde van de aanschaf-btw. Dit komt in vak 1d van deze aangifte.`,
       count: 1,
       fingerprint: `${car.year}:${amount}:${car.booked}`,
       screen: 'belasting',

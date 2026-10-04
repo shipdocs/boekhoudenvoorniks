@@ -697,8 +697,8 @@ export class BankPurchaseMatcher {
     ).map(({ banked: _banked, question, ...rest }): PurchaseProbe => ({ ...rest, question: Boolean(question) }));
     const purchases: { a: PurchaseProbe; b: PurchaseProbe }[] = [];
     for (const [j, b] of near.entries()) {
-      if (b.invoice_date < start || b.invoice_date > end) continue;
       for (const a of near.slice(0, j)) {
+        if ((a.invoice_date < start || a.invoice_date > end) && (b.invoice_date < start || b.invoice_date > end)) continue;
         if (Math.abs(diffDays(a.invoice_date, b.invoice_date)) > SURE_DAYS || a.total > 0 !== b.total > 0) continue;
         // hetzelfde bedrag; in een andere munt mag het bedrag in euro's iets verschillen (andere koers)
         const foreign = (a.currency && a.currency !== 'EUR') || (b.currency && b.currency !== 'EUR');

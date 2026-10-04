@@ -1332,12 +1332,12 @@ export class IntakeService {
     }
     // zelf ingevuld btw-bedrag: gaat voor wat de app las of uitrekende (niet bij verlegde btw: die reken je zelf uit)
     if (c.vatAmount !== undefined && c.vatAmount !== null && !isReverseCharge(c.vatCode)) {
-      if (!Number.isInteger(c.vatAmount) || c.vatAmount < 0 || c.vatAmount > c.total) throw new ValidationError('Het btw-bedrag kan niet meer zijn dan het totaal');
+      if (!Number.isSafeInteger(c.vatAmount) || Math.abs(c.vatAmount) > Math.abs(c.total) || (c.total >= 0 && c.vatAmount < 0) || (c.total <= 0 && c.vatAmount > 0)) throw new ValidationError('Het btw-bedrag kan niet meer zijn dan het totaal');
       const pct = PURCHASE_VAT_RATES[c.vatCode].percentage;
       if (pct === 0 && c.vatAmount !== 0) throw new ValidationError('Bij "geen btw" of 0% hoort geen btw-bedrag');
       // nooit meer btw dan het tarief toelaat (een paar cent afronding per regel mag)
-      const max = Math.round((c.total * pct) / (100 + pct));
-      if (c.vatAmount > max + 2) throw new ValidationError(`Bij ${pct}% kan de btw hooguit ${(max / 100).toFixed(2).replace('.', ',')} zijn. Staat er meer op de bon? Dan klopt het tarief of het totaal niet.`);
+      const max = Math.round((Math.abs(c.total) * pct) / (100 + pct));
+      if (Math.abs(c.vatAmount) > max + 2) throw new ValidationError(`Bij ${pct}% kan de btw hooguit ${(max / 100).toFixed(2).replace('.', ',')} zijn. Staat er meer op de bon? Dan klopt het tarief of het totaal niet.`);
       return [{ account, netAmount: c.total - c.vatAmount, vatCode: c.vatCode, vatAmount: c.vatAmount }];
     }
     const vat = result?.vat.value ?? [];

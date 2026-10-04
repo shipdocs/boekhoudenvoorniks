@@ -103,7 +103,7 @@ export class PurchaseService {
       const { entryId } = this.events.record(
         {
           type: 'inkoop',
-          payload: { purchaseId: id, date: input.invoiceDate, description: input.description.trim(), relationId: input.relationId ?? null, supplierReference: input.supplierReference ?? null, lines: input.lines, ...(noVatDeduction ? { noVatDeduction } : {}), ...(pct < 100 ? { businessPct: pct } : {}) },
+          payload: { purchaseId: id, date: input.invoiceDate, description: input.description.trim(), relationId: input.relationId ?? null, supplierReference: input.supplierReference ?? null, lines: input.lines, ...(noVatDeduction ? { noVatDeduction } : {}), ...(pct < 100 || input.businessPct !== undefined ? { businessPct: pct } : {}) },
         },
         evidence,
         { jobId: input.jobId ?? null },
@@ -196,7 +196,7 @@ export class PurchaseService {
       if (opts.businessPct !== undefined) {
         const pct = businessPct(opts.businessPct);
         if (pct < 100) payload.businessPct = pct;
-        else delete payload.businessPct;
+        else payload.businessPct = pct;
       }
       const { entryId } = this.events.replace(event.id, { type: 'inkoop', payload }, reason);
       this.db

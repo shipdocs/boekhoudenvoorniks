@@ -6,7 +6,7 @@ import type { Cents } from '../shared/money';
 import type { AssetService } from './assets';
 import { ASSET_THRESHOLD } from './assets';
 import type { HoursService, MileageService } from './mileage';
-import { carPrivateUse, carPrivateUseEntries } from '../btw/car';
+import { carPrivateUseFromLedger, carPrivateUseEntries } from '../btw/car';
 import { estimateIncomeTax, kiaFor, profitBetween, representatieBijtelling, rulesFor, type IncomeTaxBreakdown } from './income-tax';
 
 /** De startersaftrek is in 2027 nog € 10 en vervalt per 2028 (wetswijziging); tot die tijd max 3× in de eerste 5 jaar. */
@@ -142,11 +142,17 @@ export class TaxOverviewService {
     const running = year >= Number(asOf.slice(0, 4));
     const to = running ? asOf : `${year}-12-31`;
     const repr = this.costsOn(ACCOUNTS.representatie, `${year}-01-01`, to);
-    const phoneCosts = this.costsOn('WBedKanTel', `${year}-01-01`, to);
+    // Een per boeking opgegeven zakelijk deel is al verwerkt in kosten en voorbelasting.
+    // Ook de tegenboeking deelt dezelfde gebeurtenis; zo heffen correcties elkaar hier op.
+    const phoneCosts = (this.db.prepare(`SELECT COALESCE(SUM(l.debit - l.credit), 0) AS s
+      FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
+      JOIN chart_of_accounts a ON a.id = l.account_id LEFT JOIN events v ON v.id = e.event_id
+      WHERE a.rgs_code = 'WBedKanTel' AND e.entry_date BETWEEN ? AND ?
+        AND json_extract(v.payload, '$.businessPct') IS NULL`).get(`${year}-01-01`, to) as { s: number }).s;
     const phoneVatBase = (this.db
       .prepare(
         `SELECT COALESCE(SUM(l.debit - l.credit), 0) AS s FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
-         JOIN chart_of_accounts a ON a.id = l.account_id WHERE a.rgs_code = 'WBedKanTel' AND l.vat_code = 'hoog' AND e.entry_date BETWEEN ? AND ?`,
+         JOIN chart_of_accounts a ON a.id = l.account_id LEFT JOIN events v ON v.id = e.event_id WHERE json_extract(v.payload, '$.businessPct') IS NULL AND a.rgs_code = 'WBedKanTel' AND l.vat_code = 'hoog' AND e.entry_date BETWEEN ? AND ?`,
       )
       .get(`${year}-01-01`, to) as { s: number }).s;
     const privatePct = 100 - (s.phoneInternetBusinessPct ?? 100);
@@ -201,6 +207,8 @@ export class TaxOverviewService {
       explain: 'Wat je verdiende min je zakelijke kosten. Ook de kilometers en het deel van je investeringen voor dit jaar zijn er al af.',
       note: `Winst uit onderneming volgens de boekhouding${adj.unbookedDepreciation > 0 ? `, inclusief ${eur(adj.unbookedDepreciation)} afschrijving ${running ? 'tot nu toe (wordt na afloop van het jaar geboekt)' : 'die nog niet geboekt is'}` : ''}.`,
     });
+    const credits = this.assets.unassignedCredits();
+    if (credits.length) items.push({ key: 'investering-credit', label: 'Koppel creditnota’s aan je investeringen', amount: null, explain: 'Bij Investeringen kies je bij welke aankoop elke creditnota hoort. Tot die tijd kunnen afschrijving en investeringsaftrek afwijken.', note: `${credits.length} creditnota’s nog niet toegewezen.`, status: 'warn' });
     if (adj.representatie.total > 0) {
       items.push({
         key: 'representatie',
@@ -334,7 +342,7 @@ export class TaxOverviewService {
       });
     }
     if (s.carUse === 'zakelijk' && s.carPrivateUse !== false) {
-      const car = carPrivateUse(s, year);
+      const car = carPrivateUseFromLedger(this.db, s, year);
       // alleen de correctie die de app zelf boekte, en alleen als het bedrag nog klopt
       const bookedAmount = carPrivateUseEntries(this.db, year).reduce((sum, e) => sum + e.amount, 0);
       const booked = car.state === 'bekend' && bookedAmount === car.amount;

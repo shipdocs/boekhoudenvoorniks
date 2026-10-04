@@ -195,6 +195,7 @@ function Overview({ year }: { year: number }) {
 function Assets() {
   const { toast } = useApp();
   const list = useLoad(() => api.assets.list());
+  const credits = useLoad(() => api.assets.unassignedCredits());
   const { run, busy } = useAction();
   const [editing, setEditing] = useState<AssetItem | null>(null);
   const [selling, setSelling] = useState<AssetItem | null>(null);
@@ -212,6 +213,15 @@ function Assets() {
         Alles vanaf € 450 (zonder btw) dat je jaren gebruikt, zoals een bus, steigers, een machine of laptop. De kosten tellen verdeeld over minstens 5 jaar (dat heet afschrijven).
         Dat doet de app elk jaar zelf. Kies je bij een aankoop "Investering (vanaf € 450, gaat jaren mee)", dan komt het hier vanzelf bij.
       </p>
+      <ErrorBox error={credits.error} />
+      {(credits.data ?? []).map(c => <div className="card" key={c.lineId}>
+        <strong>Bij welke investering hoort deze creditnota?</strong>
+        <p>{c.name} · <DateNl date={c.date} /> · <Euro cents={c.amount} /></p>
+        <p className="small muted">De credit staat al in je boekhouding. Kies het bedrijfsmiddel om ook de kostprijs en afschrijving bij te werken.</p>
+        {c.candidates.length ? <div className="row">{c.candidates.map(a => <Button key={a.id} small disabled={busy} onClick={async () => {
+          if (await run(() => api.assets.allocateCredit(c.lineId, a.id), 'Creditnota gekoppeld') !== undefined) { await list.reload(); await credits.reload(); }
+        }}>{a.name}</Button>)}</div> : <p>Er is geen passend bedrijfsmiddel. Controleer de categorie en leverancier van de creditnota bij Aankopen.</p>}
+      </div>)}
       <KiaProgress assets={list.data} />
       {list.data.length === 0 ? (
         <Empty icon="🧰" title="Nog geen investeringen">Kies bij een aankoop "Investering (vanaf € 450, gaat jaren mee)".</Empty>

@@ -692,14 +692,15 @@ export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { in
  * voor de volgende betaling van deze betaler.
  */
 function SaleForm({ txId, amount, description, busy, onBook }: { txId: number; amount: number; description: string; busy: boolean; onBook: (input: { vatCode: SalesVatCode; relationId: number | null; channel: string; reference: string }) => void }) {
-  const { meta } = useApp();
+  const { meta, settings } = useApp();
   const hint = useLoad(() => api.bank.salesVatSuggestion(txId), [txId]);
   const channels = useLoad(() => api.bank.saleChannels());
   const [picked, setPicked] = useState<SalesVatCode | null>(null);
   const [channel, setChannel] = useState('');
   // een nummer uit de omschrijving van de bank, bv. I-MOL-2026-00344
   const [reference, setReference] = useState(() => referenceIn(description) ?? '');
-  const vat = picked ?? hint.data?.vatCode ?? 'hoog';
+  const suggested = picked ?? hint.data?.vatCode ?? 'hoog';
+  const vat = settings.kor && (suggested === 'hoog' || suggested === 'laag') ? 'vrijgesteld' : suggested;
   const rate = meta.salesVat.find((v) => v.code === vat);
   const net = Math.round((amount * 100) / (100 + (rate?.percentage ?? 0)));
   return (
@@ -713,7 +714,7 @@ function SaleForm({ txId, amount, description, busy, onBook }: { txId: number; a
       </Field>
       <Field label="Hoeveel btw rekende je?" hint="kijk op de factuur of bon die je klant kreeg">
         <select value={vat} onChange={(e) => setPicked(e.target.value as SalesVatCode)}>
-          {meta.salesVat.map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
+          {meta.salesVat.filter(v => !settings.kor || v.percentage === 0).map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
         </select>
       </Field>
       {hint.error && !picked && <p className="small" style={{ margin: 0 }}>Er is geen voorstel. Kies zelf de btw die op de factuur staat.</p>}

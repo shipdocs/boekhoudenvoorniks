@@ -1485,6 +1485,8 @@ export function createApi(s: Services, host: HostContext) {
       overview: (year: number) => s.taxOverview.year(year),
     },
     assets: {
+      unassignedCredits: () => s.assets.unassignedCredits(),
+      allocateCredit: (lineId: number, assetId: number) => s.assets.allocateCredit(lineId, assetId),
       list: () => s.assets.list(),
       update: (id: number, patch: { name?: string; lifetimeMonths?: number; residual?: Cents; kiaExcluded?: boolean; bookInApp?: boolean; inUseOn?: IsoDate | null }) => s.assets.update(id, patch),
       dispose: (id: number, date: IsoDate, proceeds: Cents, kind?: 'verkocht' | 'prive') => s.assets.dispose(id, date, proceeds, kind),

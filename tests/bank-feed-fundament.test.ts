@@ -22,18 +22,18 @@ const FEED_COLUMNS = [
 
 describe('Ponto WP1: fundament (#243)', () => {
   describe('migratie 33', () => {
-    it('bestaat: migratie 32 is de voorlaatste en 33 maakt de tabel op een nieuwe database', () => {
-      expect(migrations.length).toBe(33);
+    it('bestaat: migratie 33 maakt de tabel op een nieuwe database', () => {
+      expect(migrations.length).toBeGreaterThanOrEqual(33);
       expect(migrations[31]!).toContain('expected_on_bank_account_id');
       expect(migrations[32]!).toContain('CREATE TABLE bank_feed_accounts');
       const db = new Database(':memory:');
       db.pragma('foreign_keys = ON');
       migrate(db);
-      expect(db.pragma('user_version', { simple: true })).toBe(33);
+      expect(db.pragma('user_version', { simple: true })).toBe(migrations.length);
       db.close();
     });
 
-    it('op een bestaande database (user_version 32) draait alleen migratie 33 en laat bestaande rijen staan', () => {
+    it('op een bestaande database (user_version 32) draaien migratie 33 en latere migraties en laat bestaande rijen staan', () => {
       const db = new Database(':memory:');
       db.pragma('foreign_keys = ON');
       for (const m of migrations.slice(0, 32)) db.exec(m);
@@ -42,7 +42,7 @@ describe('Ponto WP1: fundament (#243)', () => {
       db.exec(`INSERT INTO chart_of_accounts (id, rgs_code, code, name, category) VALUES (1, 'BLiqBanRba', '1100', 'Bank', 'activa');
         INSERT INTO bank_accounts (id, name, account_id) VALUES (1, 'Zakelijk', 1);`);
       migrate(db);
-      expect(db.pragma('user_version', { simple: true })).toBe(33);
+      expect(db.pragma('user_version', { simple: true })).toBe(migrations.length);
       expect(db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bank_feed_accounts'`).get()).toBeTruthy();
       expect(db.prepare('SELECT COUNT(*) AS n FROM bank_accounts').get()).toEqual({ n: 1 });
       db.close();
