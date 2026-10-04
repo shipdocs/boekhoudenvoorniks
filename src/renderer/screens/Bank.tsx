@@ -220,7 +220,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
               {(overview.data ?? []).map((o) => (
                 <tr key={o.bankAccountId}>
                   <td>{o.name}</td>
-                  <td className="num"><Euro cents={o.ledger} />{o.pending !== 0 && <div className="small muted">+ <Euro cents={o.pending} /> nog te verwerken</div>}{o.ignored !== 0 && <div className="small muted">+ <Euro cents={o.ignored} /> genegeerd</div>}</td>
+                  <td className="num"><Euro cents={o.ledger} />{o.pending !== 0 && <div className="small muted">+ <Euro cents={o.pending} /> nog te verwerken</div>}{o.ignored !== 0 && <div className="small muted">+ <Euro cents={o.ignored} /> genegeerd</div>}{o.awaitingStatement !== 0 && <div className="small muted">− <Euro cents={o.awaitingStatement} /> overboeking, afschrift van deze rekening nog niet ingelezen</div>}</td>
                   <td className="num"><Euro cents={o.transactions} /></td>
                   <td className="num">{o.statement ? <><Euro cents={o.statement.bank} /><div className="small muted">op <DateNl date={o.statement.date} /></div></> : <span className="muted">geen eindsaldo</span>}</td>
                   <td>

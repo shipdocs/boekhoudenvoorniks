@@ -146,6 +146,8 @@ export interface BalanceOverviewRow {
   pending: Cents;
   /** genegeerde betalingen: wel van de rekening af, niet geboekt */
   ignored: Cents;
+  /** eigen overboekingen die al in het grootboek staan via de andere rekening, maar waarvan het afschrift van deze rekening nog niet binnen is */
+  awaitingStatement: Cents;
   /** beginsaldo + alle ingelezen betalingen */
   transactions: Cents;
   ledgerMatches: boolean;
@@ -485,6 +487,19 @@ export class InboxService {
       const unbooked = (status: string) => (this.db.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE status = ? AND duplicate_of IS NULL AND bank_account_id = ?`).get(status, a.id) as { s: number }).s;
       const pending = unbooked('nieuw');
       const ignored = unbooked('genegeerd');
+      // een overboeking tussen eigen rekeningen die vanaf de andere kant is geboekt, terwijl het afschrift van deze kant nog niet is ingelezen
+      const awaitingStatement = (
+        this.db
+          .prepare(
+            `SELECT COALESCE(SUM(l.debit - l.credit), 0) AS s FROM journal_lines l
+             JOIN chart_of_accounts c ON c.id = l.account_id
+             JOIN journal_entries e ON e.id = l.journal_entry_id
+             WHERE c.rgs_code = ? AND e.source = 'bank'
+               AND EXISTS (SELECT 1 FROM bank_transactions t WHERE t.matched_journal_entry_id = e.id AND t.bank_account_id <> ?)
+               AND NOT EXISTS (SELECT 1 FROM bank_transactions t WHERE t.matched_journal_entry_id = e.id AND t.bank_account_id = ?)`,
+          )
+          .get(a.rgs_code, a.id, a.id) as { s: number }
+      ).s;
       const opening = this.bank.openingBalance(a.id);
       const transactions = (opening.date ? opening.amount : 0) + this.bank.statementBalance(a.id);
       const zeroFrom = sw.date && sw.bankConfirmed.includes(a.id) ? sw.date : null;
@@ -496,7 +511,8 @@ export class InboxService {
         pending,
         transactions,
         ignored,
-        ledgerMatches: ledger + pending + ignored === transactions,
+        awaitingStatement,
+        ledgerMatches: ledger + pending + ignored - awaitingStatement === transactions,
         statement: check ? { date: check.date, bank: check.bank, app: check.app, matches: check.difference === 0 } : null,
       };
     });
