@@ -256,6 +256,10 @@ export class InvoiceService {
     if (kor && inv.lines.some((l) => l.vat_code === 'export')) {
       throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): ook bij goederen naar een land buiten de EU kies je "Geen btw (vrijgesteld of KOR)". De factuur noemt dan de KOR.');
     }
+    // goederen aan een EU-bedrijf: onder de KOR geen intracommunautaire levering, geen rubriek 3b en geen ICP-opgaaf; de omzet telt wel mee voor de KOR-grens (belastingdienst.nl, EU-KOR, 2026-10-04)
+    if (kor && inv.lines.some((l) => l.vat_code === 'icp')) {
+      throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): ook bij goederen naar een bedrijf in een ander EU-land kies je "Geen btw (vrijgesteld of KOR)". De factuur noemt dan de KOR en je doet geen opgaaf ICP.');
+    }
   }
 
   private journalLines(totals: DocumentTotals, relationId: number, number: string): PostLine[] {

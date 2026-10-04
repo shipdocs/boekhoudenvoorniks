@@ -48,6 +48,24 @@ describe('KOR: uitvoer en EU-diensten', () => {
     expect(() => s.invoices.finalize(draft(s, us.id, 'export').id)).toThrow(/KOR/);
     expect(() => s.invoices.finalize(draft(s, us.id, 'vrijgesteld').id)).not.toThrow();
   });
+  it('goederen aan een EU-bedrijf krijgen onder de KOR de KOR-vrijstelling, geen ICP-levering', () => {
+    const { s } = setup();
+    s.settings.update({ kor: true });
+    const klant = de(s);
+    expect(() => s.invoices.finalize(draft(s, klant.id, 'icp').id)).toThrow(/KOR/);
+    const inv = s.invoices.finalize(draft(s, klant.id, 'vrijgesteld').id);
+    const h = html(s, inv.id);
+    expect(h).toContain('kleineondernemersregeling');
+    expect(h).not.toContain('Intracommunautaire levering');
+    expect(s.vat.icp('2026-Q2').lines).toHaveLength(0);
+  });
+  it('een verkoop via de bank met ICP wordt onder de KOR geweigerd', () => {
+    const { s } = setup();
+    s.settings.update({ kor: true });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-04-11', amount: 50000, description: 'Klant', counterName: 'Klant' }] });
+    const t = s.bank.list().find((x) => x.counter_name === 'Klant')!;
+    expect(() => s.bank.bookSale(t.id, { vatCode: 'icp' })).toThrow(/KOR/);
+  });
   it('zonder KOR blijft uitvoer gewoon 0%', () => {
     const { s } = setup();
     const us = s.relations.create({ name: 'Acme Inc', address: '1 Main St', postcode: '10001', city: 'New York', country: 'US', email: 'a@acme.example' });
