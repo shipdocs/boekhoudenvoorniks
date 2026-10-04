@@ -1,3 +1,4 @@
+import type { IbCar } from '../tax/car-ib';
 import type { Db } from '../db/database';
 import type { PeriodType } from '../shared/dates';
 import { ValidationError, isValidEmail } from '../shared/validation';
@@ -159,6 +160,14 @@ export interface AppSettings {
   carCatalogValue: number | null;
   /** bijtellingspercentage privégebruik voor de IB (bv. 22); null = standaard 22% */
   carBijtellingPct: number | null;
+  /** datum eerste tenaamstelling van de auto (voor de grens van 16 jaar bij de bijtelling) */
+  carRegisteredOn: string | null;
+  /** waarde in het economisch verkeer (dagwaarde), voor een auto ouder dan 16 jaar */
+  carMarketValue: number | null;
+  /** tot wanneer je de auto gebruikte (leeg = nog steeds) */
+  carInUseUntil: string | null;
+  /** nog een auto van de zaak, bijvoorbeeld een vervangende of een tweede auto in hetzelfde jaar */
+  carsExtra: IbCar[];
   /**
    * Trok je btw af op de aanschaf of de kosten van de auto? (null = nog niet gevraagd) Zonder aftrek
    * (bijvoorbeeld een marge-auto en geen aftrek op de kosten) is er geen btw-correctie.
@@ -256,6 +265,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   carPrivateUse: null,
   carCatalogValue: null,
   carBijtellingPct: null,
+  carRegisteredOn: null,
+  carMarketValue: null,
+  carInUseUntil: null,
+  carsExtra: [],
   carVatDeducted: null,
   carPurchaseVatDeducted: null,
   carPurchaseVatAmount: null,
