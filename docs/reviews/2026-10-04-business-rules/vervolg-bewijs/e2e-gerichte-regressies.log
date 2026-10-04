@@ -1,0 +1,17 @@
+[2m[WebServer] [22m(node:76) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 6 tests using 1 worker
+
+(node:84) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:84) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 e2e/business-rules-followup.spec.ts:3:5 › PR275: zonder opgegeven kosten-btw kan het jaar geen nul-override aanmaken (1.8s)
+  ✓  2 e2e/business-rules-followup.spec.ts:13:5 › F04: afleiden uit aankoop verwijdert het verborgen handbedrag (1.8s)
+  ✓  3 e2e/business-rules-followup.spec.ts:28:5 › F01: telefoonkeuze 70% blijft gelden bij ongewijzigde bank-UI-default (1.6s)
+  ✓  4 e2e/business-rules-followup.spec.ts:47:5 › F03: memoriaal koppelt een gekozen vraagpost en neemt de blokkade weg (2.4s)
+  ✓  5 e2e/uitwisseling.spec.ts:16:5 › uitwisseling: uitnodigen, versturen, corrigeren bij de boekhouder, antwoord inlezen (3.8s)
+  ✓  6 e2e/uitwisseling.spec.ts:100:5 › kantoorsleutel delen met een collega: met wachtwoord, en dezelfde controlecode (3.5s)
+
+  6 passed (16.5s)

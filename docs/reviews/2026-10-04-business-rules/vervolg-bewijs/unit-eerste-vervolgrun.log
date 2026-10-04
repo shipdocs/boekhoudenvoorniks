@@ -1,0 +1,37 @@
+
+ RUN  v5.0.2 /workspace/scratch/7269a48577ad/gratis-boekhouden
+
+ ❯ tests/belastingvoordelen.test.ts (28 tests | 1 failed) 1269ms
+   ❯ bedrijfsmiddelen en afschrijving (9)
+     × verkoop in een jaar dat al geboekt is: het teveel aan afschrijving gaat terug 63ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/belastingvoordelen.test.ts > bedrijfsmiddelen en afschrijving > verkoop in een jaar dat al geboekt is: het teveel aan afschrijving gaat terug
+AssertionError: expected 30000 to be 90000 // Object.is equality
+
+- Expected
++ Received
+
+- 90000
++ 30000
+
+ ❯ tests/belastingvoordelen.test.ts:127:25
+    125|     const [a] = s.assets.list({}, '2026-01-10');
+    126|     const sold = s.assets.dispose(a!.id, '2025-07-01', 0);
+    127|     expect(sold.booked).toBe(600_00 + 300_00); // 2025 alleen jan–jun
+       |                         ^
+    128|     expect(balance(s, 'BMvaBedCae')).toBe(0);
+    129|     expect(balance(s, 'WAfsRvmBei')).toBe(3000_00 - 900_00);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 95 passed | 1 skipped (97)
+      Tests  1 failed | 1588 passed | 5 skipped (1594)
+   Start at  12:33:34
+   Duration  26.44s (tests 79%, import 13%, transform 8%)
+
+    Isolate  97 workers spawned · ~138ms startup each (spawn + environment, per file)
+             at least ~1.77s faster with isolate: false — reuses workers across files instead of one per file
+
