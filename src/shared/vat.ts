@@ -121,6 +121,8 @@ export function suggestedSalesVat(situation: CustomerVatSituation): SalesVatCode
 }
 
 /** Wettelijke vermelding op de factuur bij een intracommunautaire levering van goederen. */
+/** EU-controle van btw-nummers; de app opent alleen de pagina en stuurt zelf niets op. */
+export const VIES_URL = 'https://ec.europa.eu/taxation_customs/vies/#/vat-validation';
 export const ICP_TEXT = 'Intracommunautaire levering, vrijgesteld van btw (art. 138 Btw-richtlijn)';
 /** Wettelijke vermelding op de factuur bij een dienst aan een bedrijf in een ander EU-land. */
 export const ICP_SERVICE_TEXT = 'Btw verlegd (reverse charge, art. 196 Btw-richtlijn)';
