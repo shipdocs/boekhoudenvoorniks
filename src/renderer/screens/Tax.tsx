@@ -1,3 +1,4 @@
+import { VIES_URL } from '../../shared/vat';
 import { useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, ErrorBox, Euro, Modal, useAction, useApp, useLoad } from '../ui';
@@ -369,7 +370,7 @@ function IcpCard({ periodKey }: { periodKey: string }) {
           </ul>
         </div>
       )}
-      <div className="notice small" style={{ marginTop: 10 }}>{BUITENLAND_TEXT}</div>
+      <div className="notice small" style={{ marginTop: 10 }}>{BUITENLAND_TEXT} <a href="#" onClick={(e) => { e.preventDefault(); void api.app.openExternal(VIES_URL); }}>Open VIES</a></div>
       <div className="row" style={{ marginTop: 10 }}>
         <Button small onClick={() => void run(() => api.vat.exportIcpCsv(periodKey), 'Opgeslagen')}>ICP-overzicht (CSV)</Button>
       </div>

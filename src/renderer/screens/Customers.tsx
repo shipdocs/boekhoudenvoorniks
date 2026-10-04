@@ -4,7 +4,7 @@ import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, StatusPill, useAct
 import { EarningsPerJob } from './Jobs';
 import type { Relation, RelationInput } from '../../relations/relations';
 import { COUNTRIES, countryName } from '../../shared/countries';
-import { EU_B2C_THRESHOLD, customerVatSituation, vatNumberMatchesCountry } from '../../shared/vat';
+import { EU_B2C_THRESHOLD, VIES_URL, customerVatSituation, vatNumberMatchesCountry } from '../../shared/vat';
 import { formatEuro } from '../../shared/money';
 
 /** Land kiezen; een land dat niet in de lijst staat kan als landcode (bv. "ZA"). */
@@ -28,7 +28,7 @@ export function CustomerVatHint({ country, vatNumber }: { country: string | null
   const land = countryName(country);
   switch (customerVatSituation(country, vatNumber)) {
     case 'eu-bedrijf':
-      return <div className="notice small">Bedrijf in {land}: meestal verleg je de btw naar de klant. Op de factuur kies je dan <strong>Dienst aan een bedrijf in een ander EU-land</strong>, of bij spullen <strong>Goederen naar een bedrijf in een ander EU-land</strong>. Uitzondering: werk aan een gebouw of grond in Nederland, dan gewoon Nederlandse btw. Twijfel je? Vraag je boekhouder.</div>;
+      return <div className="notice small">Bedrijf in {land}: meestal verleg je de btw naar de klant. Op de factuur kies je dan <strong>Dienst aan een bedrijf in een ander EU-land</strong>, of bij spullen <strong>Goederen naar een bedrijf in een ander EU-land</strong>. Uitzondering: werk aan een gebouw of grond in Nederland, dan gewoon Nederlandse btw. Twijfel je? Vraag je boekhouder.{' '}<a href="#" onClick={(e) => { e.preventDefault(); void api.app.openExternal(VIES_URL); }}>Controleer het btw-nummer in VIES</a>: bij een ongeldig nummer is 0% niet toegestaan.</div>;
     case 'eu-particulier':
       return <div className="notice small">Particulier in {land}: je rekent gewoon Nederlandse btw, zolang je in totaal minder dan {formatEuro(EU_B2C_THRESHOLD)} per jaar aan particulieren in andere EU-landen verkoopt. Is dit een bedrijf? Vul dan het btw-nummer in.</div>;
     case 'buiten-eu':
