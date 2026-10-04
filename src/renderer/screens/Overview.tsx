@@ -88,10 +88,41 @@ export function Overview() {
           </tbody>
         </table>
       )}
+      {x.openInvoices.items.length > 0 && (
+        <table className="list small" style={{ marginTop: 8 }} aria-label="Openstaande facturen naar ouderdom">
+          <tbody>
+            {x.openInvoices.aging.filter((b) => b.count > 0).map((b) => (
+              <tr key={b.key}><td>{b.label}</td><td className="num">{b.count}</td><td className="num"><Euro cents={b.amount} /></td></tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <CostComparison />
       <FixedCosts />
       <div style={{ marginTop: 14 }}><AccountantPackageCard /></div>
       <div style={{ marginTop: 14 }}><ExchangeCard onChange={() => setPeriodVersion((v) => v + 1)} /></div>
       <div style={{ marginTop: 14 }}><PeriodCloseCard key={periodVersion} /></div>
+    </div>
+  );
+}
+
+/** Kosten per soort tegenover dezelfde periode vorig jaar: alleen wat opvalt (#281). */
+function CostComparison() {
+  const c = useLoad(() => api.dashboard.costComparison());
+  const d = c.data;
+  if (!d || d.rows.length === 0) return null;
+  return (
+    <div className="card" style={{ marginTop: 18 }}>
+      <h2 style={{ marginTop: 0 }}>Kosten die opvallen tegenover {d.previousYear}</h2>
+      <p className="muted small">Dit jaar tot nu tegenover dezelfde periode vorig jaar. Een signaal: kijk of er een boeking mist, dubbel is of verkeerd is ingedeeld.</p>
+      <table className="list small">
+        <thead><tr><th>Soort</th><th className="num">{d.year}</th><th className="num">{d.previousYear}</th><th className="num">Verschil</th></tr></thead>
+        <tbody>
+          {d.rows.map((r) => (
+            <tr key={r.rgs}><td>{r.account}</td><td className="num"><Euro cents={r.now} /></td><td className="num"><Euro cents={r.before} /></td><td className="num"><Euro cents={r.diff} /></td></tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

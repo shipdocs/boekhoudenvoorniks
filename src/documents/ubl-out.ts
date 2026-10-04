@@ -117,6 +117,12 @@ export function buildInvoiceUbl(inv: Invoice, company: CompanySettings, buyer: P
   const qtyTag = credit ? 'CreditedQuantity' : 'InvoicedQuantity';
   const ns = credit ? 'urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2' : 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2';
   const t = inv.totals;
+  // levering: bij een ICP-levering altijd (met land), anders alleen als je zelf een datum of periode invult
+  const icpGoods = t.groups.some((g) => g.vatCode === 'icp');
+  const delivery =
+    icpGoods || (inv.delivery_date && !inv.delivery_date_to)
+      ? `<cac:Delivery><cbc:ActualDeliveryDate>${inv.delivery_date ?? inv.invoice_date}</cbc:ActualDeliveryDate>${icpGoods ? `<cac:DeliveryLocation><cac:Address><cac:Country><cbc:IdentificationCode>${esc((buyer.country || 'NL').toUpperCase())}</cbc:IdentificationCode></cac:Country></cac:Address></cac:DeliveryLocation>` : ''}</cac:Delivery>`
+      : '';
   const subtotals = t.groups
     .map((g) => {
       const c = taxCategory(g.vatCode, g.percentage);
@@ -141,9 +147,10 @@ ${credit ? '' : `<cbc:DueDate>${inv.due_date}</cbc:DueDate>`}
 ${inv.notes ? `<cbc:Note>${esc(inv.notes.slice(0, 1000))}</cbc:Note>` : ''}
 <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
 <cbc:BuyerReference>${esc(inv.reference || inv.number!)}</cbc:BuyerReference>
+${inv.delivery_date_to ? `<cac:InvoicePeriod><cbc:StartDate>${inv.delivery_date}</cbc:StartDate><cbc:EndDate>${inv.delivery_date_to}</cbc:EndDate></cac:InvoicePeriod>` : ''}
 ${party('AccountingSupplierParty', seller)}
 ${party('AccountingCustomerParty', buyer)}
-${t.groups.some((g) => g.vatCode === 'icp') ? `<cac:Delivery><cbc:ActualDeliveryDate>${inv.invoice_date}</cbc:ActualDeliveryDate><cac:DeliveryLocation><cac:Address><cac:Country><cbc:IdentificationCode>${esc((buyer.country || 'NL').toUpperCase())}</cbc:IdentificationCode></cac:Country></cac:Address></cac:DeliveryLocation></cac:Delivery>` : ''}
+${delivery}
 <cac:PaymentMeans><cbc:PaymentMeansCode>58</cbc:PaymentMeansCode><cbc:PaymentID>${esc(inv.number!)}</cbc:PaymentID><cac:PayeeFinancialAccount><cbc:ID>${esc(company.iban.replace(/\s/g, '').toUpperCase())}</cbc:ID><cbc:Name>${esc(company.name)}</cbc:Name></cac:PayeeFinancialAccount></cac:PaymentMeans>
 ${credit ? '' : `<cac:PaymentTerms><cbc:Note>Te betalen vóór ${inv.due_date}</cbc:Note></cac:PaymentTerms>`}
 <cac:TaxTotal><cbc:TaxAmount currencyID="EUR">${amt(sign * t.vatTotal)}</cbc:TaxAmount>

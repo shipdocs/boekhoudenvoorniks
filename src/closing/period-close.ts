@@ -7,6 +7,10 @@ import { PeriodLockedError } from '../core-ledger/ledger';
 import type { BankService } from '../import/bank';
 import { addDays, assertIsoDate, formatDateNl, today, type IsoDate } from '../shared/dates';
 import { ValidationError } from '../shared/validation';
+import { formatEuro, type Cents } from '../shared/money';
+
+/** Een privé-storting vanaf dit bedrag noemen we bij het afsluiten. */
+export const PRIVE_DEPOSIT_NOTICE: Cents = 100000;
 
 /**
  * Periodes afsluiten: afgewerkt is afgewerkt (docs/uitwisseling.md, "Periodeslot"). Wat t/m de
@@ -108,6 +112,33 @@ export class PeriodCloseService {
             ? `Het laatste afschrift is op ${formatDateNl(until)} zelf ingelezen: wat er later die dag nog bij kwam, staat er niet in. Lees een afschrift in dat je daarna hebt gedownload. Is er die dag echt niets meer op deze rekening gebeurd? Dan kun je dat bevestigen.`
             : `Lees een afschrift in dat t/m ${formatDateNl(until)} loopt. Is er na ${formatDateNl(covered)} echt niets meer op deze rekening gebeurd? Dan kun je dat bevestigen.`,
         screen: 'bank',
+      });
+    }
+    // Privé: de Belastingdienst vraagt bij stortingen waar het geld vandaan komt, een boekhouder kijkt daarom naar de stand
+    const prive = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(CASE WHEN a.rgs_code = ? THEN l.debit - l.credit ELSE 0 END), 0) AS opnames,
+                COALESCE(SUM(CASE WHEN a.rgs_code = ? THEN l.credit - l.debit ELSE 0 END), 0) AS stortingen
+         FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+         WHERE a.rgs_code IN (?, ?) AND e.entry_date BETWEEN ? AND ?`,
+      )
+      .get(ACCOUNTS.priveOpnamen, ACCOUNTS.priveStortingen, ACCOUNTS.priveOpnamen, ACCOUNTS.priveStortingen, `${until.slice(0, 4)}-01-01`, until) as { opnames: number; stortingen: number };
+    if (prive.opnames !== 0 || prive.stortingen !== 0) {
+      const big = this.db
+        .prepare(
+          `SELECT e.entry_date AS date, SUM(l.credit - l.debit) AS amount FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+           WHERE a.rgs_code = ? AND e.entry_date BETWEEN ? AND ? AND e.reverses_entry_id IS NULL
+             AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reverses_entry_id = e.id)
+           GROUP BY e.id HAVING SUM(l.credit - l.debit) >= ? ORDER BY e.entry_date`,
+        )
+        .all(ACCOUNTS.priveStortingen, `${until.slice(0, 4)}-01-01`, until, PRIVE_DEPOSIT_NOTICE) as { date: IsoDate; amount: number }[];
+      out.push({
+        key: 'prive',
+        level: 'info',
+        title: `Privé dit jaar: ${formatEuro(prive.opnames)} opgenomen, ${formatEuro(prive.stortingen)} gestort`,
+        detail:
+          `Dat is ${formatEuro(prive.opnames - prive.stortingen)} per saldo uit je bedrijf (opnames min stortingen).` +
+          (big.length ? ` Grote stortingen: ${big.map((b) => `${formatDateNl(b.date)} ${formatEuro(b.amount)}`).join('; ')}. De Belastingdienst vraagt bij zo'n storting waar het geld vandaan komt: bewaar daar een bewijs van (bijvoorbeeld een afschrift van je spaarrekening).` : ''),
       });
     }
     const drafts = this.db.prepare(`SELECT COUNT(*) AS n FROM invoices WHERE status = 'concept' AND invoice_date <= ?`).get(until) as { n: number };

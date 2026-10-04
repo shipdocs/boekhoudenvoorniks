@@ -1,5 +1,23 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Nieuw
+- **KOR: bewaking van de omzetgrens van € 20.000.** Gebruik je de kleineondernemersregeling, dan waarschuwt de app op Vandaag en bij Belasting zodra je omzet dit jaar bij € 16.000 komt, en nogmaals zodra hij boven € 20.000 komt: dan vervalt de KOR per direct. De omzet wordt geteld zoals de Belastingdienst het doet (omzet tegen 21%, 9% en 0%, uitvoer, leveringen naar andere EU-landen, nationale verlegging en wat onder de KOR valt; niet: diensten die elders belast zijn, zoals EU-diensten aan bedrijven).
+
+- **Datum van levering of dienst op je factuur.** Een gewone btw-factuur moet de datum noemen waarop je leverde of de dienst verrichtte. In de factuureditor staat nu "Datum levering of dienst" (en "t/m" voor een periode, bijvoorbeeld bij een klus van meerdere weken). Laat je het leeg, dan staat de factuurdatum erop. Onder de KOR hoeft het niet: daar staat het er alleen als je het zelf invult. In de e-factuur (UBL) gaat een eigen datum mee als leveringsdatum en een periode als factuurperiode.
+
+- **KOR en diensten of goederen naar het buitenland.** Onder de KOR kies je bij uitvoer buiten de EU de KOR-vrijstelling (niet "0% uitvoer"). Een dienst aan een bedrijf in een ander EU-land kun je wel met "btw verlegd" factureren: die valt buiten de Nederlandse KOR en vraagt jouw btw-nummer én dat van de klant. De factuur noemt dan niet de KOR, en de app waarschuwt dat daar btw-aangifte en ICP-opgaaf bij horen.
+- **Openstaande facturen naar ouderdom.** Op "Hoe gaat het?" staat bij "Wie moet nog betalen?" de indeling: nog niet vervallen, 1-30, 31-60, 61-90 en meer dan 90 dagen te laat.
+- **Waarschuwing bij de factuurdatum.** In de factuureditor meldt de app een datum in de toekomst, of een datum vóór die van de vorige definitieve factuur. Alleen een signaal; vooruit of terugdateren mag.
+- **Kosten die opvallen tegenover vorig jaar.** Op "Hoe gaat het?" staan kostensoorten die dit jaar tot nu minstens € 250 en minstens de helft meer of minder zijn dan dezelfde periode vorig jaar.
+- **Privé bij het afsluiten.** Bij een periode afsluiten zie je de stand van privé-opnamen en -stortingen dit jaar, met grote stortingen (vanaf € 1.000), want de Belastingdienst vraagt waar dat geld vandaan komt. Het blokkeert niets.
+- **Afwijkend bedrag bij een leverancier.** Staat er een bon of factuur met een bedrag dat minstens drie keer en € 100 boven het gebruikelijke bedrag van die leverancier ligt (na minstens drie eerdere aankopen), dan controleert de app hem eerst en boekt hem niet vanzelf.
+
+### Verbeterd
+- **KOR: "Btw verlegd" is niet meer te kiezen.** Met de kleineondernemersregeling lever je vrijgesteld van btw; je kiest dan "Geen btw (vrijgesteld of KOR)" en de factuur noemt de KOR. De app weigert nu "Btw verlegd" bij een factuur of een verkoop via de bank onder de KOR.
+- **Inkomstenbelasting 2026: bedragen gecontroleerd.** Alle bedragen van 2026 (schijven, heffingskortingen, Zvw, zelfstandigen- en startersaftrek, MKB-winstvrijstelling, KIA, representatie, kilometervergoeding) zijn nagelopen op belastingdienst.nl. De app meldt daarom voor 2026 niet meer dat de tabel nog niet is nagekeken.
+
 ## 1.2.0 — je bank automatisch ophalen met Ponto
 
 Deze versie voegt een optionele koppeling met Ponto toe. Je afschriften blijven de basis en de terugval.

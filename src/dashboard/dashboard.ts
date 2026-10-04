@@ -1,7 +1,7 @@
 import type { Db } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import type { InvoiceService } from '../documents/invoices';
+import type { AgingBucket, InvoiceService } from '../documents/invoices';
 import type { BankService } from '../import/bank';
 import type { VatService } from '../btw/btw';
 import { periodFor, today, type IsoDate } from '../shared/dates';
@@ -14,7 +14,7 @@ export interface DashboardData {
   revenueThisYear: Cents;
   profitThisYear: Cents;
   revenueByMonth: { month: string; label: string; revenue: Cents; costs: Cents }[];
-  openInvoices: { count: number; amount: Cents; overdueCount: number; overdueAmount: Cents; items: { id: number; number: string | null; relation: string; open: Cents; dueDate: IsoDate; overdue: boolean }[] };
+  openInvoices: { aging: AgingBucket[]; count: number; amount: Cents; overdueCount: number; overdueAmount: Cents; items: { id: number; number: string | null; relation: string; open: Cents; dueDate: IsoDate; overdue: boolean }[] };
   bank: { ledgerBalance: Cents; statementBalance: Cents; unprocessed: number };
   vat: { periodKey: string; periodLabel: string; toPay: Cents; periodEnd: IsoDate };
   concepts: number;
@@ -23,6 +23,22 @@ export interface DashboardData {
 const MONTH_LABELS = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
 
 /** Read-only overzichten bovenop core-ledger. */
+/** Verschil per kostensoort vanaf dit bedrag (centen) is een melding waard. */
+const COMPARISON_MIN: Cents = 25000;
+export interface CostComparisonRow {
+  account: string;
+  rgs: string;
+  now: Cents;
+  before: Cents;
+  diff: Cents;
+}
+/** Dezelfde dag een jaar eerder; 29 februari wordt 28 februari. */
+function addYearsSafe(date: IsoDate, years: number): IsoDate {
+  const y = Number(date.slice(0, 4)) + years;
+  const md = date.slice(5);
+  return (md === '02-29' ? `${y}-02-28` : `${y}-${md}`) as IsoDate;
+}
+
 export class DashboardService {
   constructor(
     private readonly db: Db,
@@ -74,6 +90,7 @@ export class DashboardService {
       profitThisYear: ytd.revenue - ytd.costs,
       revenueByMonth: byMonth,
       openInvoices: {
+        aging: this.invoices.aging(asOf),
         count: open.length,
         amount: open.reduce((s, i) => s + i.open_amount, 0),
         overdueCount: overdue.length,
@@ -87,6 +104,27 @@ export class DashboardService {
       vat: { periodKey: vatPeriod.key, periodLabel: vatPeriod.label, toPay: vatReport.summary.teBetalen, periodEnd: vatPeriod.end },
       concepts: (this.db.prepare(`SELECT COUNT(*) AS n FROM invoices WHERE status = 'concept'`).get() as { n: number }).n,
     };
+  }
+
+  /**
+   * Kosten per soort dit jaar tot `asOf`, tegenover dezelfde periode vorig jaar. Alleen wat opvalt: minstens
+   * € 250 verschil én minstens de helft meer of minder (of nieuw). Een boekhouder doet dit om gemiste, dubbele
+   * of verkeerd ingedeelde boekingen te vinden; het is een signaal, geen oordeel.
+   */
+  costComparison(asOf: IsoDate = today()): { year: number; previousYear: number; rows: CostComparisonRow[] } {
+    const year = Number(asOf.slice(0, 4));
+    const previous = addYearsSafe(asOf, -1);
+    const now = this.ledger.balances({ from: `${year}-01-01`, to: asOf });
+    const before = new Map(this.ledger.balances({ from: `${year - 1}-01-01`, to: previous }).map((b) => [b.account_id, b.balance]));
+    const rows = now
+      .filter((b) => b.category === 'kosten')
+      .map((b) => ({ account: b.name, rgs: b.rgs_code, now: b.balance, before: before.get(b.account_id) ?? 0 }))
+      .filter((r) => r.now !== 0 || r.before !== 0)
+      .map((r) => ({ ...r, diff: r.now - r.before }))
+      .filter((r) => Math.abs(r.diff) >= COMPARISON_MIN && (r.before <= 0 || Math.abs(r.diff) * 2 >= Math.abs(r.before)))
+      .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
+      .slice(0, 8);
+    return { year, previousYear: year - 1, rows };
   }
 
   /**
