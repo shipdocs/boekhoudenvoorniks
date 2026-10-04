@@ -7,6 +7,7 @@ import { formatEuro, type Cents } from '../shared/money';
 import { addDays, periodFor, type IsoDate, type Period } from '../shared/dates';
 import type { CarPrivateUse } from './car';
 import { EU_B2C_THRESHOLD, EU_COUNTRIES, countryCode } from '../shared/vat';
+import { korActive } from '../settings/settings';
 import { BankPurchaseMatcher, purchaseSupplierName, type PurchaseProbe } from '../documents/bank-purchase-match';
 
 /**
@@ -56,6 +57,14 @@ export const BIG_CHANGE_MIN: Cents = 50000;
  * Precies € 50.000 is dus nog geen overschrijding.
  */
 export const ICP_MONTHLY_GOODS_LIMIT: Cents = 5000000;
+/**
+ * KOR: de omzet in een kalenderjaar mag niet boven € 20.000 komen; zodra dat wel gebeurt, vervalt de regeling
+ * per direct en is ook die laatste levering belast (belastingdienst.nl, voorwaarden en afmelden KOR, geraadpleegd 2026-10-04).
+ */
+export const KOR_TURNOVER_LIMIT: Cents = 2000000;
+/** Vanaf dit deel van de grens waarschuwen we dat de KOR bijna vervalt. */
+export const KOR_WARN_FROM: Cents = 1600000;
+const KOR_TURNOVER_ACCOUNTS = [ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, ACCOUNTS.omzetNul, ACCOUNTS.omzetVerlegd, ACCOUNTS.omzetVrijgesteld, ACCOUNTS.omzetExport, ACCOUNTS.omzetIcp];
 /** Een afwijking tussen btw en omzet tot dit bedrag is afronding, geen fout. */
 export const RATE_TOLERANCE: Cents = 100;
 
@@ -410,6 +419,64 @@ export function runVatChecks(
       fingerprint: wrongRate.map((r) => `${r.entryId}:${r.base}:${r.vat}`).join(','),
       screen: 'expert',
     });
+  }
+
+  // KOR: omzet dit jaar tegenover de grens van € 20.000. Meetellen (belastingdienst.nl): omzet tegen 21%, 9% en 0%
+  // (uitvoer, leveringen naar andere EU-landen), nationale verlegging en wat onder de KOR valt. Niet: diensten die
+  // elders belast zijn (EU-diensten aan bedrijven, klanten buiten de EU), privégebruik en verkoop van bedrijfsmiddelen.
+  if (korActive(db)) {
+    const turnover = (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS s FROM journal_lines l
+           JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
+           WHERE a.rgs_code IN (${KOR_TURNOVER_ACCOUNTS.map(() => '?').join(',')}) AND e.entry_date BETWEEN ? AND ?`,
+        )
+        .get(...KOR_TURNOVER_ACCOUNTS, `${end.slice(0, 4)}-01-01`, end) as { s: number }
+    ).s;
+    if (turnover > KOR_TURNOVER_LIMIT) {
+      found.push({
+        key: 'kor-grens',
+        blocking: false,
+        title: `Je omzet is dit jaar boven de ${formatEuro(KOR_TURNOVER_LIMIT)} van de KOR gekomen`,
+        detail: `Je omzet in ${end.slice(0, 4)} is ${formatEuro(turnover)}. Zodra de omzet boven de ${formatEuro(KOR_TURNOVER_LIMIT)} komt, mag je de kleineondernemersregeling niet meer gebruiken: je meldt je direct af bij de Belastingdienst, rekent vanaf dat moment btw en de levering die over de grens ging is ook belast. Dat betekent ook btw-aangifte doen. Vraag je boekhouder wat voor jou de beste volgende stap is.`,
+        count: 1,
+        fingerprint: `${end.slice(0, 4)}:boven`,
+        screen: 'belasting',
+      });
+    } else if (turnover >= KOR_WARN_FROM) {
+      found.push({
+        key: 'kor-grens',
+        blocking: false,
+        title: `Je zit bijna aan de omzetgrens van de KOR (${formatEuro(turnover)} van ${formatEuro(KOR_TURNOVER_LIMIT)})`,
+        detail: `Boven de ${formatEuro(KOR_TURNOVER_LIMIT)} omzet in een kalenderjaar vervalt de kleineondernemersregeling per direct en moet je btw rekenen, ook over de factuur waarmee je over de grens gaat. Plan dat vooruit: bij nieuwe opdrachten of voorschotten kun je daar al rekening mee houden.`,
+        count: 1,
+        fingerprint: `${end.slice(0, 4)}:bijna`,
+        screen: 'belasting',
+      });
+    }
+  }
+
+  // KOR en een EU-dienst: die valt buiten de Nederlandse KOR (belast in het land van de klant, btw verlegd). Dan horen
+  // btw-aangifte en ICP-opgaaf erbij; dat toont de app voor KOR-gebruikers niet vanzelf.
+  if (korActive(db)) {
+    const eu = db
+      .prepare(
+        `SELECT DISTINCT i.id, i.number FROM invoices i JOIN invoice_lines l ON l.invoice_id = i.id
+         WHERE i.status <> 'concept' AND i.number IS NOT NULL AND l.vat_code = 'icp-dienst' AND i.invoice_date BETWEEN ? AND ? ORDER BY i.id`,
+      )
+      .all(`${end.slice(0, 4)}-01-01`, end) as { id: number; number: string }[];
+    if (eu.length > 0) {
+      found.push({
+        key: 'kor-eu-dienst',
+        blocking: false,
+        title: `${eu.length === 1 ? `Factuur ${eu[0]!.number}` : `${eu.length} facturen`} met een dienst aan een bedrijf in een ander EU-land: de KOR geldt daar niet voor`,
+        detail: 'Een dienst die in het land van de klant belast is, valt buiten de Nederlandse KOR. Je factureert hem zonder btw met "btw verlegd" en beide btw-nummers. Voor zulke diensten doe je wel btw-aangifte en de opgaaf intracommunautaire prestaties (ICP). Die overzichten maakt de app voor KOR-gebruikers niet vanzelf: laat je boekhouder dit doen, of zoek de btw-aangifte op in Mijn Belastingdienst Zakelijk.',
+        count: eu.length,
+        fingerprint: `${end.slice(0, 4)}:${eu.map((e) => e.id).join(',')}`,
+        screen: 'belasting',
+      });
+    }
   }
 
   // Rekening-courant met de Belastingdienst: na elke aangifte en betaling hoort die op nul te staan

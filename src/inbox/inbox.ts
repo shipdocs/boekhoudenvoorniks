@@ -1506,6 +1506,23 @@ export class InboxService {
       });
     }
 
+    // KOR: geen aangifte, maar de omzetgrens van € 20.000 blijft bewaakt
+    if (s.kor) {
+      const now = this.vat.currentPeriod(asOf);
+      for (const korCheck of this.vat.checks(now.key).filter((c) => c.key.startsWith('kor-') && !c.skipped)) {
+        tasks.push({
+          key: `vat-check-${now.key}-${korCheck.key}`,
+          kind: 'vat-check',
+          icon: '⚠️',
+          title: korCheck.title,
+          question: korCheck.detail,
+          actions: [{ id: 'open', label: 'Bekijken', primary: true }, { id: 'overslaan', label: 'Klopt' }],
+          priority: 1,
+          ref: { periodKey: now.key, checkKey: korCheck.key },
+        });
+      }
+    }
+
     if (!s.kor) {
       const previous = periodFor(addDays(this.vat.currentPeriod(asOf).start, -1), s.vatPeriod);
       const report = this.vat.calculate(previous.key);

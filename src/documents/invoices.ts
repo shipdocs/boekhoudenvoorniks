@@ -10,7 +10,7 @@ import { renderDocumentHtml, type RenderableParty } from './templates';
 import { computeTotals, type DocumentTotals, type LineInput } from './totals';
 import { normalizeLines, readLines, toLineInputs, writeLines, type DocLine } from './lines';
 import { counterKey, formatDocumentNumber } from './numbering';
-import { addDays, assertIsoDate, today, type IsoDate } from '../shared/dates';
+import { addDays, assertIsoDate, formatDateNl, today, type IsoDate } from '../shared/dates';
 import { assertCents, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
 
@@ -27,6 +27,9 @@ export interface InvoiceRow {
   number: string | null;
   invoice_date: IsoDate;
   due_date: IsoDate;
+  /** datum van levering of dienst, of het begin van de periode; null = de factuurdatum */
+  delivery_date: IsoDate | null;
+  delivery_date_to: IsoDate | null;
   status: InvoiceStatus;
   template_id: number | null;
   reference: string | null;
@@ -80,6 +83,10 @@ export interface InvoiceDraftInput {
   relationId: number;
   invoiceDate?: IsoDate;
   dueDate?: IsoDate;
+  /** datum van levering of dienst (of begin van de periode); leeg = de factuurdatum */
+  deliveryDate?: IsoDate | null;
+  /** einde van de periode, alleen samen met deliveryDate */
+  deliveryDateTo?: IsoDate | null;
   reference?: string | null;
   intro?: string | null;
   notes?: string | null;
@@ -116,13 +123,14 @@ export class InvoiceService {
     const due = input.dueDate ?? addDays(date, relation.payment_term_days ?? s.paymentTermDays);
     assertIsoDate(due, 'vervaldatum');
     const lines = normalizeLines(input.lines);
+    const delivery = normalizeDelivery(input.deliveryDate, input.deliveryDateTo);
     return tx(this.db, () => {
       const result = this.db
         .prepare(
-          `INSERT INTO invoices (relation_id, quote_id, invoice_date, due_date, template_id, reference, intro, notes, external_source, external_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO invoices (relation_id, quote_id, invoice_date, due_date, delivery_date, delivery_date_to, template_id, reference, intro, notes, external_source, external_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(relation.id, input.quoteId ?? null, date, due, input.templateId ?? null, input.reference ?? null, input.intro ?? null, input.notes ?? null, input.externalSource ?? null, input.externalId ?? null);
+        .run(relation.id, input.quoteId ?? null, date, due, delivery.from, delivery.to, input.templateId ?? null, input.reference ?? null, input.intro ?? null, input.notes ?? null, input.externalSource ?? null, input.externalId ?? null);
       const id = Number(result.lastInsertRowid);
       writeLines(this.db, 'invoice_lines', 'invoice_id', id, lines);
       return this.get(id);
@@ -139,13 +147,16 @@ export class InvoiceService {
     assertIsoDate(date, 'factuurdatum');
     assertIsoDate(due, 'vervaldatum');
     const lines = input.lines ? normalizeLines(input.lines) : null;
+    const delivery = normalizeDelivery(input.deliveryDate !== undefined ? input.deliveryDate : inv.delivery_date, input.deliveryDateTo !== undefined ? input.deliveryDateTo : inv.delivery_date_to);
     return tx(this.db, () => {
       this.db
-        .prepare('UPDATE invoices SET relation_id = ?, invoice_date = ?, due_date = ?, template_id = ?, reference = ?, intro = ?, notes = ? WHERE id = ?')
+        .prepare('UPDATE invoices SET relation_id = ?, invoice_date = ?, due_date = ?, delivery_date = ?, delivery_date_to = ?, template_id = ?, reference = ?, intro = ?, notes = ? WHERE id = ?')
         .run(
           relationId,
           date,
           due,
+          delivery.from,
+          delivery.to,
           input.templateId !== undefined ? input.templateId : inv.template_id,
           input.reference !== undefined ? input.reference : inv.reference,
           input.intro !== undefined ? input.intro : inv.intro,
@@ -220,6 +231,10 @@ export class InvoiceService {
     if (!kor && !company.vatNumber) missing.push('btw-nummer');
     if (missing.length) throw new ValidationError(`Vul eerst je bedrijfsgegevens aan bij Instellingen: ${missing.join(', ')}`);
     if (!relation.address || !relation.city) throw new ValidationError(`Adres van ${relation.name} ontbreekt (verplicht op een factuur)`);
+    // een KOR-gebruiker die een EU-dienst verlegt, vermeldt ook zijn eigen btw-identificatienummer
+    if (kor && !company.vatNumber && inv.lines.some((l) => l.vat_code === 'icp-dienst')) {
+      throw new ValidationError('Bij "btw verlegd" op een dienst aan een bedrijf in een ander EU-land moeten jouw btw-nummer én dat van de klant op de factuur. Vul het jouwe in bij Instellingen.');
+    }
     if (inv.lines.some((l) => needsCustomerVatNumber(l.vat_code)) && !relation.vat_number) {
       throw new ValidationError(`Bij btw verlegd moet het btw-nummer van ${relation.name} op de factuur staan. Vul het in bij de klant.`);
     }
@@ -232,6 +247,14 @@ export class InvoiceService {
     }
     if (kor && inv.lines.some((l) => l.vat_percentage > 0)) {
       throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw. Kies bij elke regel "Geen btw".');
+    }
+    // binnenlandse verlegging past niet bij de KOR: je levert vrijgesteld en vermeldt de KOR (belastingdienst.nl, factuureisen KOR, 2026-10-04)
+    if (kor && inv.lines.some((l) => l.vat_code === 'verlegd')) {
+      throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): dan lever je vrijgesteld van btw en kies je geen "Btw verlegd". Kies bij elke regel "Geen btw (vrijgesteld of KOR)".');
+    }
+    // uitvoer is een Nederlandse prestatie en valt onder de KOR: de KOR-vrijstelling, niet de gewone 0%-uitvoer. Een dienst die elders belast is (EU-dienst met verlegging, klant buiten de EU) valt er niet onder en blijft mogelijk.
+    if (kor && inv.lines.some((l) => l.vat_code === 'export')) {
+      throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): ook bij goederen naar een land buiten de EU kies je "Geen btw (vrijgesteld of KOR)". De factuur noemt dan de KOR.');
     }
   }
 
@@ -298,6 +321,37 @@ export class InvoiceService {
       }
       return this.get(id);
     });
+  }
+
+  /** Openstaande facturen per ouderdomsklasse op `asOf`. */
+  aging(asOf: IsoDate = today()): AgingBucket[] {
+    const open = this.listOpen(asOf).filter((i) => i.open_amount > 0);
+    return AGING_BUCKETS.map((b) => {
+      const inBucket = open.filter((i) => {
+        const late = Math.round((Date.parse(`${asOf}T00:00:00Z`) - Date.parse(`${i.due_date}T00:00:00Z`)) / 86_400_000);
+        return late >= b.from && late <= b.to;
+      });
+      return { key: b.key, label: b.label, count: inBucket.length, amount: inBucket.reduce((sum, i) => sum + i.open_amount, 0) };
+    });
+  }
+
+  /**
+   * Waarschuwingen bij de datum van een nieuwe of aangepaste factuur: een datum in de toekomst of vóór de
+   * datum van de vorige definitieve factuur (de nummers lopen dan niet in datumvolgorde). Alleen een signaal.
+   */
+  dateWarnings(invoiceDate: IsoDate, excludeId?: number, asOf: IsoDate = today()): string[] {
+    assertIsoDate(invoiceDate, 'factuurdatum');
+    const out: string[] = [];
+    if (invoiceDate > asOf) {
+      out.push(`De factuurdatum (${formatDateNl(invoiceDate)}) ligt in de toekomst. De omzet en de btw komen dan pas in die periode. Klopt het jaar en de maand?`);
+    }
+    const last = this.db
+      .prepare(`SELECT number, invoice_date FROM invoices WHERE status <> 'concept' AND number IS NOT NULL AND is_opening = 0 AND credit_of_invoice_id IS NULL AND id IS NOT ? ORDER BY invoice_date DESC, id DESC LIMIT 1`)
+      .get(excludeId ?? null) as { number: string; invoice_date: IsoDate } | undefined;
+    if (last && invoiceDate < last.invoice_date) {
+      out.push(`Factuur ${last.number} heeft een latere datum (${formatDateNl(last.invoice_date)}). Je nieuwe factuur krijgt een hoger nummer maar een eerdere datum; dat mag, maar controleer of de datum klopt.`);
+    }
+    return out;
   }
 
   /** Draait een eerder geregistreerde betaling terug (bv. bij het ontkoppelen van een banktransactie). */
@@ -478,6 +532,8 @@ export class InvoiceService {
         number: inv.number,
         date: inv.invoice_date,
         dueDate: inv.due_date,
+        deliveryDate: inv.delivery_date,
+        deliveryDateTo: inv.delivery_date_to,
         reference: inv.reference,
         intro: inv.intro,
         notes: inv.notes,
@@ -491,6 +547,29 @@ export class InvoiceService {
     );
   }
 }
+
+/** Datum van levering of dienst (of een periode): beide optioneel, het einde alleen met een begin en niet eerder dan het begin. */
+export function normalizeDelivery(from: IsoDate | null | undefined, to: IsoDate | null | undefined): { from: IsoDate | null; to: IsoDate | null } {
+  const a = from || null;
+  const b = to || null;
+  if (a) assertIsoDate(a, 'datum levering');
+  if (b) {
+    if (!a) throw new ValidationError('Vul ook de begindatum van de levering of dienst in');
+    assertIsoDate(b, 'einddatum levering');
+    if (b < a) throw new ValidationError('De einddatum van de levering ligt vóór de begindatum');
+  }
+  return { from: a, to: b && b !== a ? b : null };
+}
+
+/** Indeling van openstaande facturen naar dagen na de vervaldatum, zoals een boekhouder ze doorloopt. */
+export const AGING_BUCKETS = [
+  { key: 'op-tijd', label: 'Nog niet vervallen', from: -Infinity, to: 0 },
+  { key: '1-30', label: '1 tot 30 dagen te laat', from: 1, to: 30 },
+  { key: '31-60', label: '31 tot 60 dagen te laat', from: 31, to: 60 },
+  { key: '61-90', label: '61 tot 90 dagen te laat', from: 61, to: 90 },
+  { key: '90+', label: 'Meer dan 90 dagen te laat', from: 91, to: Infinity },
+] as const;
+export type AgingBucket = { key: (typeof AGING_BUCKETS)[number]['key']; label: string; count: number; amount: Cents };
 
 export function displayStatus(status: InvoiceStatus, dueDate: IsoDate, open: Cents, asOf: IsoDate): InvoiceDisplayStatus {
   if (status === 'concept') return 'concept';

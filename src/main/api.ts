@@ -967,6 +967,7 @@ export function createApi(s: Services, host: HostContext) {
       paidCash: (id: number, amount: Cents, date: IsoDate) => s.quick.customerPaidCash(id, amount, date),
       writeOff: (id: number) => s.invoices.writeOffRemainder(id),
       html: (id: number) => s.invoices.renderHtml(id),
+      dateWarnings: (invoiceDate: IsoDate, excludeId?: number) => s.invoices.dateWarnings(invoiceDate, excludeId),
       send: (id: number, opts?: SendOptions) => s.sender.sendInvoice(id, opts),
       sendReminder: (id: number, opts?: SendOptions) => s.sender.sendReminder(id, opts),
       emailLog: (id: number) => s.sender.emailLog('factuur', id),
@@ -1666,6 +1667,7 @@ export function createApi(s: Services, host: HostContext) {
     },
     dashboard: {
       get: () => s.dashboard.get(),
+      costComparison: () => s.dashboard.costComparison(),
       reports: (from: IsoDate, to: IsoDate) => s.dashboard.reports(from, to),
     },
     ledger: {
