@@ -73,12 +73,36 @@
     <p class="lead">Per versie wat er is toegevoegd, verbeterd en opgelost. De app werkt zichzelf bij; bij de eerste start van een nieuwe versie maakt hij eerst een kopie van je administratie.</p>
 
     <nav class="toc" aria-label="Versies">
-      <a href="#v1.2.0">1.2.0</a><a href="#v1.1.1">1.1.1</a><a href="#v1.1.0">1.1.0</a><a href="#v1.0.1">1.0.1</a><a href="#v1.0.0">1.0.0</a><a href="#v0.7.6">0.7.6</a><a href="#v0.7.5">0.7.5</a><a href="#v0.7.4">0.7.4</a><a href="#v0.7.3">0.7.3</a><a href="#v0.7.2">0.7.2</a><a href="#v0.7.1">0.7.1</a><a href="#v0.7.0">0.7.0</a><a href="#v0.6.15">0.6.15</a><a href="#v0.6.14">0.6.14</a><a href="#v0.6.13">0.6.13</a><a href="#v0.6.12">0.6.12</a><a href="#v0.6.11">0.6.11</a><a href="#v0.6.10">0.6.10</a><a href="#v0.6.9">0.6.9</a><a href="#v0.6.8">0.6.8</a><a href="#v0.6.7">0.6.7</a><a href="#v0.6.6">0.6.6</a><a href="#v0.6.5">0.6.5</a><a href="#v0.6.4">0.6.4</a><a href="#v0.6.3">0.6.3</a><a href="#v0.6.2">0.6.2</a><a href="#v0.6.1">0.6.1</a><a href="#v0.6.0">0.6.0</a><a href="#v0.5.0">0.5.0</a><a href="#v0.4.0">0.4.0</a><a href="#v0.3">0.3.x</a><a href="#v0.2.0">0.2.0</a><a href="#v0.1.0">0.1.0</a>
+      <a href="#v1.3.0">1.3.0</a><a href="#v1.2.0">1.2.0</a><a href="#v1.1.1">1.1.1</a><a href="#v1.1.0">1.1.0</a><a href="#v1.0.1">1.0.1</a><a href="#v1.0.0">1.0.0</a><a href="#v0.7.6">0.7.6</a><a href="#v0.7.5">0.7.5</a><a href="#v0.7.4">0.7.4</a><a href="#v0.7.3">0.7.3</a><a href="#v0.7.2">0.7.2</a><a href="#v0.7.1">0.7.1</a><a href="#v0.7.0">0.7.0</a><a href="#v0.6.15">0.6.15</a><a href="#v0.6.14">0.6.14</a><a href="#v0.6.13">0.6.13</a><a href="#v0.6.12">0.6.12</a><a href="#v0.6.11">0.6.11</a><a href="#v0.6.10">0.6.10</a><a href="#v0.6.9">0.6.9</a><a href="#v0.6.8">0.6.8</a><a href="#v0.6.7">0.6.7</a><a href="#v0.6.6">0.6.6</a><a href="#v0.6.5">0.6.5</a><a href="#v0.6.4">0.6.4</a><a href="#v0.6.3">0.6.3</a><a href="#v0.6.2">0.6.2</a><a href="#v0.6.1">0.6.1</a><a href="#v0.6.0">0.6.0</a><a href="#v0.5.0">0.5.0</a><a href="#v0.4.0">0.4.0</a><a href="#v0.3">0.3.x</a><a href="#v0.2.0">0.2.0</a><a href="#v0.1.0">0.1.0</a>
     </nav>
+
+    <article id="v1.3.0" class="release">
+      <header>
+        <h2>1.3.0 <span class="tag latest">Nieuwste versie</span></h2>
+        <p class="meta"><time datetime="2026-10-04">4 oktober 2026</time> · <a href="https://github.com/shipdocs/boekhoudenvoorniks/releases/tag/v1.3.0">Downloads en controlegetallen</a></p>
+        <p class="summary">Meer controles op btw en inkomstenbelasting, een begeleide jaarafsluiting en een betere aansluiting op wat de Belastingdienst vraagt. Uit een review door een boekhouder-expert.</p>
+      </header>
+      <h3><span class="tag new">Nieuw</span></h3>
+      <ul>
+        <li><strong>Bijtelling auto van de zaak in je inkomstenbelasting</strong>: 22% van de cataloguswaarde, maximaal de autokosten, ook voor meerdere auto's en voor een auto ouder dan 16 jaar. Ontbreken er gegevens, dan staat dat er duidelijk bij: de schatting is dan te laag.</li>
+        <li><strong>Oninbare facturen</strong>: een jaar na de vervaldatum meldt de app dat je de btw mag terugvragen. Je boekt de factuur af als oninbaar en de btw gaat terug in de aangifte. Komt er later alsnog betaling, dan geeft de app de btw over dat deel opnieuw aan. Een inkoop die je niet betaalt, kun je met &ldquo;Btw terugnemen&rdquo; afhandelen.</li>
+        <li><strong>Begeleide jaarafsluiting</strong>: bij het afsluiten van een jaar vraagt de app naar vooruitbetaalde kosten, nog te betalen kosten, voorraad en onderhanden werk. De app boekt het op 31 december en draait het op 1 januari om.</li>
+        <li><strong>Btw-nummers controleren in VIES</strong>: bij een klant in een ander EU-land klik je op &ldquo;Controleer nu in VIES&rdquo;. Alleen dan gaat dat ene btw-nummer naar de gratis EU-dienst; de uitslag met datum blijft bewaard. De btw-controle waarschuwt bij een EU-verkoop zonder geldige uitslag.</li>
+        <li><strong>KOR: omzetgrens en herziening</strong>: de app bewaakt de grens van &euro; 20.000, rekent de herziening van btw-aftrek op bedrijfsmiddelen uit en toont de leverdatum op je factuur.</li>
+        <li><strong>Correctieboeking met btw-code</strong>: voor verlegde btw kies je de code per regel, zodat de grondslag in rubriek 2a, 4a of 4b komt.</li>
+        <li><strong>Rechtsvorm en ondernemerschap</strong>: bij de schatting van de inkomstenbelasting geef je je rechtsvorm op en bevestig je dat je ondernemer bent. Voor een bv maakt de app geen schatting.</li>
+        <li><strong>Meer signalen voor je boekhouder</strong>: ouderdom van openstaande facturen, kosten die opvallen tegenover vorig jaar, privé-stortingen bij het afsluiten, en een bedrijfsmiddel dat naar privé gaat.</li>
+      </ul>
+      <h3><span class="tag improved">Verbeterd</span></h3>
+      <ul>
+        <li><strong>KOR en het buitenland</strong>: onder de KOR kies je bij uitvoer en bij goederen aan een EU-bedrijf de KOR-vrijstelling. Een EU-dienst met verlegde btw blijft mogelijk.</li>
+        <li><strong>Inkomstenbelasting 2026</strong>: alle bedragen zijn nagelopen op belastingdienst.nl.</li>
+      </ul>
+    </article>
 
     <article id="v1.2.0" class="release">
       <header>
-        <h2>1.2.0 <span class="tag latest">Nieuwste versie</span></h2>
+        <h2>1.2.0</h2>
         <p class="meta"><time datetime="2026-10-03">3 oktober 2026</time> · <a href="https://github.com/shipdocs/boekhoudenvoorniks/releases/tag/v1.2.0">Downloads en controlegetallen</a></p>
         <p class="summary">Optioneel je bank automatisch laten ophalen met Ponto. Je afschriften blijven de basis.</p>
       </header>
