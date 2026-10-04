@@ -49,6 +49,23 @@ describe('ICP: maandopgaaf voor goederen boven € 50.000 per kwartaal', () => {
   });
 });
 
+describe('ICP-grens: wanneer geleverd is telt, niet wanneer het in een aangifte staat', () => {
+  it('een late correctie telt mee in het kwartaal van de factuurdatum', () => {
+    const { s } = setup();
+    icpSale(s, '2026-07-10', ICP_MONTHLY_GOODS_LIMIT);
+    s.vat.markSubmitted('2026-Q3');
+    icpSale(s, '2026-08-01', 1000); // te laat geboekt: komt in de aangifte van Q4 terecht
+    expect(keys(s, '2026-Q3')).toContain('icp-maandelijks');
+  });
+  it('bij een maandaangifte telt het lopende kwartaal alleen tot het einde van die maand', () => {
+    const { s } = setup();
+    icpSale(s, '2026-07-10', 3000000);
+    icpSale(s, '2026-09-10', 3000000);
+    expect(keys(s, '2026-07')).not.toContain('icp-maandelijks');
+    expect(keys(s, '2026-09')).toContain('icp-maandelijks');
+  });
+});
+
 describe('Tarief-plausibiliteit', () => {
   const post = (s: S, btw: number) =>
     s.ledger.post({
@@ -72,6 +89,13 @@ describe('Tarief-plausibiliteit', () => {
     const check = s.vat.checks('2026-Q3').find((c) => c.key === 'tarief-plausibel')!;
     expect(check.count).toBe(1);
     expect(check.detail).toContain('Handmatige verkoop');
+  });
+  it('een foute verkoop die is teruggedraaid, geeft geen melding meer', () => {
+    const { s } = setup();
+    const id = post(s, 1500);
+    expect(keys(s, '2026-Q3')).toContain('tarief-plausibel');
+    s.ledger.reverse(id, '2026-07-11');
+    expect(keys(s, '2026-Q3')).not.toContain('tarief-plausibel');
   });
   it('afronding binnen € 1 telt niet', () => {
     const { s } = setup();
@@ -121,6 +145,15 @@ describe('Omzet in aangiftes tegenover het grootboek (laatste aangifte)', () => 
     const check = s.vat.checks('2026-Q4').find((c) => c.key === 'omzet-afstemming')!;
     expect(check.title).toContain('10.000,00');
     expect(s.vat.turnoverReconciliation(2026)).toMatchObject({ aangifte: 0, grootboek: 1000000 });
+  });
+  it('een factuur die door de jaarovergang in het volgende jaar in de aangifte staat, wordt als zodanig verklaard', () => {
+    const { s, klant } = setup();
+    s.vat.markSubmitted('2026-Q4');
+    s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-12-30', lines: [{ description: 'laat', quantity: 1, unitPrice: 100000, vatCode: 'hoog' }] }).id);
+    const r = s.vat.turnoverReconciliation(2026);
+    expect(r).toMatchObject({ aangifte: 0, grootboek: 100000, jaarovergang: 100000, correcties: 0 });
+    const check = s.vat.checks('2026-Q4').find((c) => c.key === 'omzet-afstemming')!;
+    expect(check.detail).toMatch(/volledig verklaard/);
   });
   it('alleen in de laatste aangifte van het jaar', () => {
     const { s, klant } = setup();

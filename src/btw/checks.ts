@@ -59,12 +59,13 @@ export const ICP_MONTHLY_GOODS_LIMIT: Cents = 5000000;
 /** Een afwijking tussen btw en omzet tot dit bedrag is afronding, geen fout. */
 export const RATE_TOLERANCE: Cents = 100;
 
+/** Per kwartaal telt wanneer er geleverd is (de factuurdatum), niet in welke aangifte een late correctie terechtkomt. */
 function icpGoodsBetween(db: Db, from: IsoDate, to: IsoDate): Cents {
   const r = db
     .prepare(
       `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS s FROM journal_lines l
        JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
-       WHERE a.rgs_code = ? AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')`,
+       WHERE a.rgs_code = ? AND e.entry_date BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')`,
     )
     .get(ACCOUNTS.omzetIcp, from, to) as { s: number };
   return r.s;
@@ -75,7 +76,8 @@ export function icpGoodsByQuarter(db: Db, periodEnd: IsoDate): { period: Period;
   const out: { period: Period; amount: Cents }[] = [];
   let q = periodFor(periodEnd, 'kwartaal');
   for (let i = 0; i < 5; i++) {
-    out.push({ period: q, amount: icpGoodsBetween(db, q.start, q.end) });
+    // het lopende kwartaal alleen tot het einde van de periode die je aangeeft
+    out.push({ period: q, amount: icpGoodsBetween(db, q.start, i === 0 && periodEnd < q.end ? periodEnd : q.end) });
     q = periodFor(addDays(q.start, -1), 'kwartaal');
   }
   return out;
@@ -95,6 +97,8 @@ export function rateMismatches(db: Db, start: IsoDate, end: IsoDate): { entryId:
            SUM(CASE WHEN a.rgs_code = ? THEN l.credit - l.debit ELSE 0 END) AS vat
          FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
          WHERE a.rgs_code IN (?, ?) AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening')
+           -- een teruggedraaide verkoop en zijn tegenboeking heffen elkaar op: geen van beide melden
+           AND e.reverses_entry_id IS NULL AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reverses_entry_id = e.id)
          GROUP BY e.id HAVING base <> 0 OR vat <> 0 ORDER BY e.entry_date, e.id`,
       )
       .all(revenue, vatAccount, revenue, vatAccount, start, end) as { entryId: number; date: IsoDate; description: string; base: number; vat: number }[];
@@ -118,7 +122,7 @@ export function runVatChecks(
   /** alleen in de laatste aangifte van het jaar */
   car: { year: number; due: CarPrivateUse; booked: Cents } | null = null,
   /** alleen in de laatste aangifte van het jaar: omzet volgens alle aangiftes tegenover de omzet in het grootboek */
-  turnover: { year: number; aangifte: Cents; grootboek: Cents } | null = null,
+  turnover: { year: number; aangifte: Cents; grootboek: Cents; jaarovergang: Cents; correcties: Cents } | null = null,
 ): VatCheck[] {
   const found: Omit<VatCheck, 'skipped' | 'skipReason'>[] = [];
   const { start, end } = period;
@@ -375,7 +379,7 @@ export function runVatChecks(
   const overLimit = quarters.filter((q) => q.amount > ICP_MONTHLY_GOODS_LIMIT);
   if (quarters[0]!.amount !== 0 && overLimit.length > 0) {
     const months: string[] = [];
-    for (let m = quarters[0]!.period.start; m <= quarters[0]!.period.end; m = addDays(periodFor(m, 'maand').end, 1)) {
+    for (let m = quarters[0]!.period.start; m <= end; m = addDays(periodFor(m, 'maand').end, 1)) {
       const mp = periodFor(m, 'maand');
       months.push(`${mp.label}: ${formatEuro(icpGoodsBetween(db, mp.start, mp.end))}`);
     }
@@ -437,11 +441,15 @@ export function runVatChecks(
 
   if (turnover && Math.abs(turnover.aangifte - turnover.grootboek) >= RATE_TOLERANCE) {
     const diff = turnover.grootboek - turnover.aangifte;
+    const rest = diff - turnover.jaarovergang - turnover.correcties;
     found.push({
       key: 'omzet-afstemming',
       blocking: false,
       title: `De omzet in je btw-aangiftes van ${turnover.year} wijkt ${formatEuro(Math.abs(diff))} af van je omzet in de boekhouding`,
-      detail: `Aangiftes: ${formatEuro(turnover.aangifte)}, boekhouding: ${formatEuro(turnover.grootboek)}. Een boekhouder zoekt dit altijd uit, want de Belastingdienst vergelijkt de omzet in de btw-aangifte met die in de inkomstenbelasting. Meestal komt het door facturen die aan het eind van het jaar zijn gecorrigeerd en pas in het volgende jaar in de aangifte komen, of door een correctie die via een suppletie loopt.`,
+      detail:
+        `Aangiftes: ${formatEuro(turnover.aangifte)}, boekhouding: ${formatEuro(turnover.grootboek)}. Een boekhouder zoekt dit altijd uit, want de Belastingdienst vergelijkt de omzet in de btw-aangifte met die in de inkomstenbelasting. ` +
+        `Daarvan komt ${formatEuro(turnover.jaarovergang)} door facturen die in een ander jaar in de aangifte staan dan in de boekhouding (jaarovergang) en ${formatEuro(turnover.correcties)} door een correctie die via een suppletie loopt of al is afgehandeld. ` +
+        (rest !== 0 ? `Onverklaard blijft ${formatEuro(rest)}: zoek dat uit.` : 'Het verschil is daarmee volledig verklaard.'),
       count: 1,
       fingerprint: `${turnover.year}:${turnover.aangifte}:${turnover.grootboek}`,
       screen: 'belasting',
