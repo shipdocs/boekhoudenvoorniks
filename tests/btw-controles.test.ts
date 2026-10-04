@@ -150,3 +150,25 @@ describe('Suppletie: termijn van acht weken', () => {
     expect(s.vat.calculate('2026-Q4').corrections).toMatchObject([{ btw: 100000, suppletie: false }]);
   });
 });
+
+describe('Investeringsaftrek en personenauto', () => {
+  it('een nieuwe auto telt standaard niet mee voor de KIA', async () => {
+    const { s } = setup();
+    s.purchases.create({ invoiceDate: '2026-03-01', description: 'Auto', lines: [{ account: ACCOUNTS.vervoermiddelen, netAmount: 1000000, vatCode: 'hoog' }] });
+    s.purchases.create({ invoiceDate: '2026-03-02', description: 'Laptop', lines: [{ account: ACCOUNTS.inventaris, netAmount: 300000, vatCode: 'hoog' }] });
+    const assets = s.assets.list({}, '2026-12-31');
+    expect(assets.find((a) => a.name.includes('Auto'))!.kia_excluded).toBe(1);
+    expect(assets.find((a) => a.name.includes('Laptop'))!.kia_excluded).toBe(0);
+    expect(s.taxOverview.adjustments(2026, '2026-12-31')).toMatchObject({ investments: 300000 });
+  });
+  it('een vervoermiddel dat wel meetelt (bestelauto), geeft een controlevraag', () => {
+    const { s } = setup();
+    s.purchases.create({ invoiceDate: '2026-03-01', description: 'Bestelbus', lines: [{ account: ACCOUNTS.vervoermiddelen, netAmount: 1000000, vatCode: 'hoog' }] });
+    const bus = s.assets.list({}, '2026-12-31')[0]!;
+    s.assets.update(bus.id, { kiaExcluded: false });
+    expect(s.taxOverview.adjustments(2026, '2026-12-31')).toMatchObject({ investments: 1000000 });
+    expect(s.taxOverview.year(2026, '2026-12-31').items.some((i) => i.key === 'kia-auto')).toBe(true);
+    s.assets.update(bus.id, { kiaExcluded: true });
+    expect(s.taxOverview.year(2026, '2026-12-31').items.some((i) => i.key === 'kia-auto')).toBe(false);
+  });
+});

@@ -57,6 +57,19 @@ De autoregel ondersteunt één auto; bij meerdere auto’s of een eigen bijdrage
 berekeningen nodig. Het dashboardbanksaldo komt uit het grootboek tot de peildatum; het getoonde
 afschriftsaldo blijft het laatst geïmporteerde banksaldo.
 
+## Aanvullende btw- en IB-controles — 4 oktober 2026
+
+Naast de correcties hierboven zijn controles toegevoegd die een boekhouder doet (tests in `tests/btw-controles.test.ts`):
+
+- **ICP-goederen:** boven € 50.000 aan intracommunautaire goederenleveringen in een kwartaal, of in een van de vier kwartalen ervoor, moet de ICP-opgaaf per maand. Precies € 50.000 telt niet als overschrijding; diensten blijven per kwartaal. De btw-controle `icp-maandelijks` meldt dit met de bedragen per maand.
+- **Tarief-plausibiliteit:** `tarief-plausibel` meldt verkopen waarvan de btw meer dan € 1 afwijkt van 21% of 9% over de omzet.
+- **Rekening met de Belastingdienst:** `btw-afrekening` meldt als het saldo van rekening 1750 niet nul is en niet gelijk aan de vorige aangifte.
+- **Omzetafstemming:** `omzet-afstemming` (alleen in de laatste aangifte van het jaar) vergelijkt de omzet in de aangiftes met de omzetrekeningen in het grootboek.
+- **Suppletie:** bij te weinig aangegeven btw staat de termijn van acht weken na ontdekking in de melding en in de taak op Vandaag. Exact € 1.000 btw-verschil loopt nog mee in de volgende aangifte.
+- **Investeringsaftrek en auto:** een vervoermiddel telt bij nieuwe aankopen standaard niet meer mee voor de KIA (voor een personenauto bestaat die niet); wie een bestelauto of taxi heeft, zet dat uit bij Investeringen. Een vervoermiddel dat wel meetelt, geeft een controlevraag in het belastingoverzicht. Bestaande bedrijfsmiddelen blijven ongewijzigd.
+
+Bronnen (secundair; de pagina's van de Belastingdienst waren niet rechtstreeks te openen), geraadpleegd op 4 oktober 2026: [ICP-maandgrens](https://www.taxence.nl/nieuws/drempel-maandelijkse-opgaaf-icl-verlaagd-naar-e-50-000/), [suppletie](https://bieb.knab.nl/ondernemen/btw-aangifte-corrigeren-via-het-formulier-suppletie-omzetbelasting), [KIA en personenauto](https://www.mkbservicedesk.nl/belastingen/aftrekposten/wat-is-de-kleinschaligheidsinvesteringsaftrek-kia). Dit vervangt geen controle door een fiscalist.
+
 Bronnen, gecontroleerd op 4 oktober 2026:
 
 - [Verlegde btw aftrekken — Belastingdienst](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/btw/btw_aftrekken/welke_btw_is_aftrekbaar/verlegde_btw_aftrekken)
