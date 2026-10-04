@@ -417,17 +417,18 @@ const BUITENLAND_TEXT = 'Nog niet door een belastingexpert nagekeken. Controleer
 
 /** Schatting inkomstenbelasting (#33 fase 2). Altijd als schatting gemarkeerd; uit te zetten in Instellingen. */
 function IncomeTaxCard() {
-  const { go } = useApp();
+  const { go, settings } = useApp();
   const est = useLoad(() => api.incomeTax.estimate());
   const [open, setOpen] = useState(false);
   const e = est.data;
-  if (!e) return null;
+  if (!e) return settings.legalForm === 'bv' ? <div className="card notice small" style={{ marginTop: 14 }}>Je hebt een bv: de app maakt geen schatting van inkomstenbelasting over je bedrijfswinst. Een bv betaalt vennootschapsbelasting; vraag je boekhouder wat je opzij moet zetten.</div> : null;
   const b = e.breakdown;
   const euro = (n: number) => `€ ${n.toLocaleString('nl-NL')}`;
   return (
     <div className="card" style={{ marginTop: 14 }}>
       <h2 style={{ marginTop: 0 }}>Inkomstenbelasting {e.year} <span className="muted small">(schatting)</span></h2>
       <AccountantNotice compact />
+      {e.assumptions.map((t) => <div key={t} className="notice warn small">{t} <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Aanpassen bij Instellingen</span></div>)}
       <p>
         Winst tot nu: <strong><Euro cents={e.profitToDate} /></strong>. Doorgetrokken naar het hele jaar: <Euro cents={e.profitYear} />.<br />
         Geschatte inkomstenbelasting + zorgpremie (Zvw) over {e.year}: <strong>± <Euro cents={e.taxYear} /></strong>.<br />
