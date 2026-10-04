@@ -111,11 +111,13 @@ export class AssetService {
         .all(...accounts) as { id: number; rgs_code: string; name: string; entry_date: IsoDate; debit: Cents }[];
       const since = this.db.prepare(`SELECT value FROM settings WHERE key = 'counter:depreciation-since'`).get() as { value: string } | undefined;
       const sinceYear = since ? Number(JSON.parse(since.value)) : null;
-      const insert = this.db.prepare('INSERT OR IGNORE INTO assets (journal_line_id, account_rgs, name, acquired_on, cost, lifetime_months, booked_elsewhere_until) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      // Een auto telt standaard niet mee voor de investeringsaftrek: voor een personenauto bestaat die niet (alleen voor
+      // bijvoorbeeld een bestelauto of taxi). Wie dat wel heeft, zet het vinkje bij Investeringen uit.
+      const insert = this.db.prepare('INSERT OR IGNORE INTO assets (journal_line_id, account_rgs, name, acquired_on, cost, lifetime_months, booked_elsewhere_until, kia_excluded) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
       for (const f of fresh) {
         // gekocht vóór de update: eerdere jaren niet vanzelf boeken (de gebruiker kan dat wel kiezen)
         const elsewhere = sinceYear && Number(f.entry_date.slice(0, 4)) < sinceYear ? sinceYear - 1 : null;
-        insert.run(f.id, f.rgs_code, f.name.slice(0, 200), f.entry_date, f.debit, MIN_LIFETIME_MONTHS, elsewhere);
+        insert.run(f.id, f.rgs_code, f.name.slice(0, 200), f.entry_date, f.debit, MIN_LIFETIME_MONTHS, elsewhere, f.rgs_code === ACCOUNTS.vervoermiddelen ? 1 : 0);
       }
 
       // Een gecorrigeerde aankoop krijgt een nieuw bedrijfsmiddel; credits moeten opnieuw passen.

@@ -208,6 +208,20 @@ export class TaxOverviewService {
       note: `Winst uit onderneming volgens de boekhouding${adj.unbookedDepreciation > 0 ? `, inclusief ${eur(adj.unbookedDepreciation)} afschrijving ${running ? 'tot nu toe (wordt na afloop van het jaar geboekt)' : 'die nog niet geboekt is'}` : ''}.`,
     });
     const credits = this.assets.unassignedCredits(false); // bookDue (sync) draaide hierboven al
+    // Voor een personenauto bestaat geen investeringsaftrek. Een vervoermiddel dat toch meetelt, vraagt om een controle.
+    const carsInKia = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM assets WHERE status != 'vervallen' AND kia_excluded = 0 AND account_rgs = ? AND cost >= ? AND substr(acquired_on, 1, 4) = ?`)
+      .get(ACCOUNTS.vervoermiddelen, ASSET_THRESHOLD, String(year)) as { n: number };
+    if (carsInKia.n > 0) {
+      items.push({
+        key: 'kia-auto',
+        label: 'Telt je auto mee voor de investeringsaftrek?',
+        amount: null,
+        explain: 'Voor een personenauto krijg je geen investeringsaftrek (alleen voor bijvoorbeeld een bestelauto of taxi). Een auto die nu meetelt, kan de aftrek te hoog maken.',
+        note: `${carsInKia.n} ${carsInKia.n === 1 ? 'vervoermiddel telt' : 'vervoermiddelen tellen'} mee. Bij Investeringen zet je "Dit is een personenauto" aan als het er een is.`,
+        status: 'warn',
+      });
+    }
     if (credits.length) items.push({ key: 'investering-credit', label: 'Koppel creditnota’s aan je investeringen', amount: null, explain: 'Bij Investeringen kies je bij welke aankoop elke creditnota hoort. Tot die tijd kunnen afschrijving en investeringsaftrek afwijken.', note: `${credits.length} creditnota’s nog niet toegewezen.`, status: 'warn' });
     if (adj.representatie.total > 0) {
       items.push({

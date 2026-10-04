@@ -18,7 +18,7 @@ import { autoAfterConfirmations, supplierKey, type SupplierMemory } from '../int
 import type { PurchaseService } from '../documents/purchases';
 import type { RecurringService } from '../import/recurring';
 import { normalizeIban, ValidationError } from '../shared/validation';
-import type { VatService } from '../btw/btw';
+import { suppletieTermijn, type VatService } from '../btw/btw';
 import type { SettingsService } from '../settings/settings';
 import { PRIVATE_CAR_CATEGORIES, type CategoryLookup } from '../shared/categories';
 import { findKnownSupplier, KNOWN_SUPPLIERS } from '../intake/suppliers';
@@ -1641,7 +1641,7 @@ export class InboxService {
         kind: 'vat-suppletie',
         icon: '📮',
         title: `Btw ${c.label} verbeteren`,
-        question: `Er is achteraf ${formatEuro(Math.abs(c.btw))} btw ${c.btw >= 0 ? 'bijgekomen' : 'afgegaan'}. Dat is meer dan € 1.000. Dat verbeter je apart in Mijn Belastingdienst Zakelijk (dat heet een "suppletie": een verbetering van een oude aangifte).`,
+        question: `Er is achteraf ${formatEuro(Math.abs(c.btw))} btw ${c.btw >= 0 ? 'bijgekomen' : 'afgegaan'}. Dat is meer dan € 1.000. Dat verbeter je apart in Mijn Belastingdienst Zakelijk (dat heet een "suppletie": een verbetering van een oude aangifte). ${suppletieTermijn(c.btw)}`,
         amount: c.btw,
         actions: [{ id: 'gedaan', label: 'Verbetering is verstuurd', primary: true }, { id: 'open', label: 'Bekijken' }],
         priority: 1,
