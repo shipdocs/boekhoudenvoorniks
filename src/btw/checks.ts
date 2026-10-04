@@ -137,7 +137,7 @@ export function runVatChecks(
     });
   }
 
-  const assetCredits = new AssetService(db, ledger).unassignedCredits().filter(c => c.date <= end);
+  const assetCredits = new AssetService(db, ledger).pendingCredits().filter(c => c.date <= end);
   if (assetCredits.length) found.push({ key: 'investering-credit', blocking: true, title: `${assetCredits.length} creditnota's moeten nog aan een investering worden gekoppeld`, detail: 'Kies bij Belasting → Voor je aangifte → Investeringen het bedrijfsmiddel. De kostprijs, afschrijving en investeringsaftrek kunnen anders afwijken van je boekhouding.', count: assetCredits.length, fingerprint: JSON.stringify(assetCredits.map(c => [c.lineId, c.amount])), screen: 'belasting' });
 
   const reverseNoVat = db
