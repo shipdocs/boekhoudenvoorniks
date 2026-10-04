@@ -67,7 +67,8 @@ export const INCOME_TAX_RULES: IncomeTaxRules[] = [
   },
   {
     year: 2026,
-    checked: false,
+    // alle bedragen nagelopen op belastingdienst.nl (box 1, heffingskortingen, Zvw, ondernemersaftrek, KIA, representatie, km) op 2026-10-04
+    checked: true,
     brackets: [[38883, 0.3575], [78426, 0.3756], [null, 0.495]],
     zelfstandigenaftrek: 1200,
     mkbWinstvrijstelling: 0.127,

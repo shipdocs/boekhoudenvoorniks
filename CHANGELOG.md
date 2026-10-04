@@ -1,5 +1,13 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Nieuw
+- **KOR: bewaking van de omzetgrens van € 20.000.** Gebruik je de kleineondernemersregeling, dan waarschuwt de app op Vandaag en bij Belasting zodra je omzet dit jaar bij € 16.000 komt, en nogmaals zodra hij boven € 20.000 komt: dan vervalt de KOR per direct. De omzet wordt geteld zoals de Belastingdienst het doet (omzet tegen 21%, 9% en 0%, uitvoer, leveringen naar andere EU-landen, nationale verlegging en wat onder de KOR valt; niet: diensten die elders belast zijn, zoals EU-diensten aan bedrijven).
+
+### Verbeterd
+- **Inkomstenbelasting 2026: bedragen gecontroleerd.** Alle bedragen van 2026 (schijven, heffingskortingen, Zvw, zelfstandigen- en startersaftrek, MKB-winstvrijstelling, KIA, representatie, kilometervergoeding) zijn nagelopen op belastingdienst.nl. De app meldt daarom voor 2026 niet meer dat de tabel nog niet is nagekeken.
+
 ## 1.2.0 — je bank automatisch ophalen met Ponto
 
 Deze versie voegt een optionele koppeling met Ponto toe. Je afschriften blijven de basis en de terugval.

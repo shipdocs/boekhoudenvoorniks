@@ -191,7 +191,7 @@ describe('Schatting inkomstenbelasting (#33 fase 2)', () => {
     expect(e.profitYear).toBe(Math.round((2400000 * 365) / 183));
     expect(e.reserveToDate).toBe(Math.round((e.taxYear * 183) / 365));
     expect(e.disclaimer).toMatch(/schatting/);
-    expect(e.rulesChecked).toBe(false);
+    expect(e.rulesChecked).toBe(true); // 2026-tabel nagelopen op belastingdienst.nl (2026-10-04)
     s.settings.update({ incomeTaxEstimate: false });
     expect(s.incomeTax.estimate('2026-07-02')).toBeNull();
   });

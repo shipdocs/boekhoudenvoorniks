@@ -67,6 +67,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
           <p className="muted">Btw die je betaalt op je aankopen krijg je met de KOR niet terug. De app telt die btw daarom bij je kosten (of bij de prijs van je investering).</p>
           <Button onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Btw-instellingen</Button>
         </div>
+        <KorLimit />
         <KorReverseCharge year={year} />
         <IncomeTaxCard />
       </div>
@@ -377,6 +378,19 @@ function IcpCard({ periodKey }: { periodKey: string }) {
 }
 
 /** KOR: verlegde btw blijft verschuldigd. */
+function KorLimit() {
+  const current = useLoad(() => api.vat.current());
+  const list = useLoad(async () => (current.data ? api.vat.checks(current.data.key) : []), [current.data?.key]);
+  const check = (list.data ?? []).find((c) => c.key === 'kor-grens' && !c.skipped);
+  if (!check) return null;
+  return (
+    <div className="notice warn" style={{ marginTop: 14 }}>
+      <strong>{check.title}</strong>
+      <div className="small">{check.detail}</div>
+    </div>
+  );
+}
+
 function KorReverseCharge({ year }: { year: number }) {
   const list = useLoad(() => api.vat.korReverseCharge(year), [year]);
   if (!list.data || list.data.length === 0) return null;
