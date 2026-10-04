@@ -265,3 +265,37 @@ describe('Vraagposten: afboeking achteraf', () => {
     expect(s.ledger.balance(ACCOUNTS.vraagposten)).toBe(0);
   });
 });
+
+describe('Controles schrijven niets weg', () => {
+  const snapshot = (db: ReturnType<typeof setup>['db']) => ({
+    entries: db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get(),
+    allocations: db.prepare('SELECT COUNT(*) AS n FROM asset_credit_allocations').get(),
+    costs: db.prepare('SELECT id, cost FROM assets ORDER BY id').all(),
+  });
+  const period = { start: '2026-01-01', end: '2026-03-31' } as never;
+
+  it('btw-controle meldt een credit met twee kandidaten zonder te koppelen of te boeken', async () => {
+    const { runVatChecks } = await import('../src/btw/checks');
+    const { s, db } = setup();
+    purchase(s, '2026-02-01', 100000);
+    purchase(s, '2026-02-02', 100000);
+    s.assets.list({}, '2026-02-03');
+    purchase(s, '2026-03-01', -20000);
+    const before = snapshot(db);
+    const checks = runVatChecks(db, s.ledger, period, { current: 0, previous: null });
+    expect(checks.find(c => c.key === 'investering-credit')?.count).toBe(1);
+    expect(snapshot(db)).toEqual(before);
+  });
+
+  it('btw-controle toont geen credit die sync zelf zou koppelen (één kandidaat) en schrijft niets', async () => {
+    const { runVatChecks } = await import('../src/btw/checks');
+    const { s, db } = setup();
+    purchase(s, '2026-02-01', 100000);
+    s.assets.list({}, '2026-02-03');
+    purchase(s, '2026-03-01', -20000);
+    const before = snapshot(db);
+    const checks = runVatChecks(db, s.ledger, period, { current: 0, previous: null });
+    expect(checks.find(c => c.key === 'investering-credit')).toBeUndefined();
+    expect(snapshot(db)).toEqual(before);
+  });
+});
