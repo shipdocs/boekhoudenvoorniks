@@ -13,7 +13,8 @@ export interface SecretStore {
 export interface ConfigField {
   key: string;
   label: string;
-  type: 'text' | 'url' | 'secret';
+  type: 'text' | 'url' | 'secret' | 'select';
+  options?: { value: string; label: string }[];
   placeholder?: string;
   help?: string;
 }
@@ -73,6 +74,8 @@ export interface ExternalPayout {
   feesVat: Cents;
   /** 'eu': de provider zit in een ander EU-land en rekent geen btw; de btw is naar jou verlegd (4b, #16) */
   feesReverseCharge?: 'eu';
+  /** Onbekende fiscale behandeling: niet boeken alsof btw afwezig of verlegd is. */
+  feesTaxUnconfirmed?: boolean;
   currency: string;
   reference: string;
 }

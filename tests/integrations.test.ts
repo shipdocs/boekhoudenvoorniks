@@ -49,7 +49,7 @@ describe('integraties (fase 3)', () => {
       externalId: 'inv_1',
       number: 'I-MOL-2026-00342',
       date: '2026-09-22',
-      customer: { name: 'Burando Shipping AG', email: null, address: 'Hafenstrasse 1', postcode: '20457', city: 'Hamburg', country: 'DE', vatNumber: null },
+      customer: { name: 'Burando Shipping AG', email: null, address: 'Hafenstrasse 1', postcode: '20457', city: 'Rotterdam', country: 'NL', vatNumber: null },
       lines: [{ description: 'Dienst', quantity: 1, unitPriceExVat: 50000, vatPercentage: 0 }],
       paid: true,
       currency: 'EUR',

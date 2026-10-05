@@ -1,5 +1,7 @@
 # Fiscale review: voor de boekhouder
 
+**Antwoorden en correcties, 5 oktober 2026:** zie [de bronnencontrole en uitwerking van issue #44](fiscale-review-44.md) voor vragen 1–16, 10a en XBRL. Die gedateerde uitwerking gaat vóór de historische codebevindingen hieronder. `checked` betekent alleen dat de tariefparameters tegen officiële bronnen zijn gecontroleerd; geen algemene fiscale goedkeuring.
+
 Dit document is bedoeld om voor te leggen aan een boekhouder of fiscalist (issue #44). Het beschrijft
 hoe BoekhoudenVoorNiks boekt en rekent op de punten die nog niet gecontroleerd zijn. Per punt staat de
 vraag die we beantwoord willen hebben. Graag per vraag: **klopt** / **klopt niet, want …**.
@@ -336,9 +338,9 @@ Graag per waarde controleren tegen de publicaties van de Belastingdienst.
 - mkb-winstvrijstelling 12,7% × € 48.800 = € 6.198
 - belastbaar € 42.602
 - box 1 ≈ € 15.298
-- heffingskortingen ≈ € 7.919
+- heffingskortingen ≈ € 7.690
 - Zvw ≈ € 2.066
-- **schatting ≈ € 9.445**
+- **schatting ≈ € 9.674** (gecorrigeerd 5 oktober 2026; onder AOW-leeftijd, uitsluitend ondernemingswinst, geen startersaftrek)
 
 16. Komt dit ongeveer overeen met wat u voor zo'n ondernemer (zonder partner en zonder ander inkomen) zou verwachten?
 
@@ -524,8 +526,9 @@ Zodra de antwoorden binnen zijn, leggen we de uitkomst vast in tests:
 12. Afschrijving met een latere ingebruiknamedatum (17).
 13. Investering onder de KOR: kostprijs inclusief niet-aftrekbare btw (27).
 
-Pas daarna gaat een jaar op `checked: true`, en pas daarna gebruikt de app ergens de claim
-"fiscaal gecontroleerd".
+Deze controles blijven nodig voor een volledige fiscale review. De app gebruikt inmiddels `checked`
+uitsluitend voor gecontroleerde tariefparameters; het scherm zegt niet dat de hele applicatie
+"fiscaal gecontroleerd" is. Zie de afbakening in [de antwoorden van 5 oktober 2026](fiscale-review-44.md).
 
 ## 5. Bronnen
 

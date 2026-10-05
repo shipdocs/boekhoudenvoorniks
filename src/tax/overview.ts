@@ -233,7 +233,8 @@ export class TaxOverviewService {
     const projectedHours = Math.round((h.total * daysInYear) / elapsed);
 
     const breakdown = estimateIncomeTax(profit / 100, rules, {
-      urencriterium: s.urencriterium,
+      ondernemer: s.ibConfirmed,
+      urencriterium: s.urencriterium && s.ibHoursCondition !== null,
       starter: adj.starter,
       kia: adj.kia / 100,
       bijtellingen: (adj.representatie.bijtelling + adj.desinvesteringsbijtelling + adj.phonePrivate.bijtelling + adj.carPrivate.bijtelling) / 100,
@@ -288,15 +289,17 @@ export class TaxOverviewService {
       items.push({
         key: 'kia',
         label: 'Extra aftrek voor je investeringen',
-        amount: -adj.kia,
+        amount: -Math.round(breakdown.kia * 100),
         explain:
-          adj.kia > 0
+          !s.ibConfirmed
+            ? 'Bevestig eerst bij Instellingen dat je ondernemer bent voor de inkomstenbelasting; tot die tijd rekenen we geen investeringsaftrek.'
+            : adj.kia > 0
             ? `Je kocht dit jaar voor ${eur(adj.investments)} aan dingen die jaren meegaan (vanaf € 450 per stuk). Daarvoor krijg je extra aftrek.`
             : adj.investments / 100 > rules.kia.phaseOutUpTo
               ? `Je kocht dit jaar voor ${eur(adj.investments)} aan dingen die jaren meegaan. Boven € ${rules.kia.phaseOutUpTo.toLocaleString('nl-NL')} per jaar is er geen extra aftrek meer.`
               : `Je kocht dit jaar voor ${eur(adj.investments)} aan dingen die jaren meegaan. Extra aftrek krijg je pas vanaf € ${rules.kia.min.toLocaleString('nl-NL')} per jaar${running ? '; wat je later dit jaar nog koopt, telt mee' : ''}.`,
         note: `Kleinschaligheidsinvesteringsaftrek (KIA) over ${eur(adj.investments)} investeringen. Aangifte: winst uit onderneming → investeringsaftrek.`,
-        status: adj.kia > 0 ? 'ok' : 'info',
+        status: s.ibConfirmed && adj.kia > 0 ? 'ok' : 'info',
       });
     }
     if (adj.desinvesteringsbijtelling > 0) {
@@ -313,22 +316,26 @@ export class TaxOverviewService {
       key: 'zelfstandigenaftrek',
       label: 'Aftrek voor zelfstandigen',
       amount: -Math.round(breakdown.zelfstandigenaftrek * 100),
-      explain: s.urencriterium
+      explain: !s.ibConfirmed || !s.ibHoursCondition
+        ? 'Bevestig bij Instellingen je ondernemerschap en de voorwaarden voor het urencriterium; tot die tijd rekenen we geen zelfstandigenaftrek.'
+        : s.urencriterium
         ? `Omdat je minstens ${rules.urencriterium.toLocaleString('nl-NL')} uur per jaar aan je bedrijf werkt.`
         : `Die krijg je alleen als je minstens ${rules.urencriterium.toLocaleString('nl-NL')} uur per jaar aan je bedrijf werkt. Je hebt aangegeven dat je dat niet haalt.`,
       note: 'Zelfstandigenaftrek (ondernemersaftrek), met urencriterium.',
-      status: s.urencriterium ? 'ok' : 'info',
+      status: s.ibConfirmed && s.urencriterium && s.ibHoursCondition ? 'ok' : 'info',
     });
     if (adj.starter || (s.startYear && year - s.startYear < 5)) {
       items.push({
         key: 'startersaftrek',
         label: 'Extra aftrek voor starters',
         amount: -Math.round(breakdown.startersaftrek * 100),
-        explain: adj.starter
+        explain: !s.ibConfirmed || !s.urencriterium || !s.ibHoursCondition
+          ? 'Startersaftrek telt alleen mee bij bevestigd ondernemerschap, het urencriterium en recht op de startersregeling. Bevestig die voorwaarden bij Instellingen.'
+          : adj.starter
           ? 'Omdat je bedrijf nog geen 5 jaar bestaat. Je krijgt deze aftrek hooguit 3 keer, en na 2027 bestaat hij niet meer.'
           : 'Deze aftrek heb je al 3 keer gehad, of hij bestaat niet meer (na 2027 afgeschaft).',
         note: `Startersaftrek (ondernemersaftrek); ${s.startersaftrekYears ? `eerder gebruikt in: ${s.startersaftrekYears.join(', ') || 'geen jaren'}` : 'aanname: sinds opgave elk jaar gebruikt (per jaar opgeven bij Instellingen)'}. Bij recht op startersaftrek geldt de beperking van de zelfstandigenaftrek tot de winst niet. 2027: € 10, vanaf 2028 vervallen.`,
-        status: adj.starter ? 'ok' : 'info',
+        status: breakdown.startersaftrek > 0 ? 'ok' : 'info',
       });
     }
     if (breakdown.zelfstandigenaftrekVerrekend > 0) {
@@ -365,7 +372,9 @@ export class TaxOverviewService {
       key: 'mkb',
       label: 'Korting voor kleine bedrijven',
       amount: -Math.round(breakdown.mkbWinstvrijstelling * 100),
-      explain: `Over je winst hoef je ${(rules.mkbWinstvrijstelling * 100).toLocaleString('nl-NL')}% geen belasting te betalen. Dat gaat vanzelf.`,
+      explain: s.ibConfirmed
+        ? `Over je winst na ondernemersaftrek hoef je ${(rules.mkbWinstvrijstelling * 100).toLocaleString('nl-NL')}% geen belasting te betalen. Bij verlies wordt het verlies kleiner.`
+        : 'Bevestig eerst bij Instellingen dat je ondernemer bent voor de inkomstenbelasting; tot die tijd rekenen we geen mkb-winstvrijstelling.',
       note: 'Mkb-winstvrijstelling over de winst na ondernemersaftrek (bij verlies: verkleint het verlies).',
     });
     if (breakdown.taxableProfit < 0) {

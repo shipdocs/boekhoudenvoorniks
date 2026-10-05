@@ -14,6 +14,8 @@ export interface CompanySettings {
   website: string;
   kvkNumber: string;
   vatNumber: string;
+  /** Nummer voor contact/aangifte bij de Belastingdienst; niet het btw-id op facturen. */
+  omzetbelastingNumber: string;
   iban: string;
   bic: string;
 }
@@ -145,8 +147,10 @@ export interface AppSettings {
   legalForm: 'eenmanszaak' | 'vof' | 'bv' | null;
   /** vof of maatschap: jouw deel van de winst in procenten (de schatting is per ondernemer) */
   profitSharePct: number;
-  /** Bevestigd dat je ondernemer voor de inkomstenbelasting bent en aan de voorwaarden voor de aftrek voldoet */
+  /** Bevestigd ondernemerschap voor de inkomstenbelasting; urencriterium staat afzonderlijk. */
   ibConfirmed: boolean;
+  /** Tweede voorwaarde urencriterium: meerderheid werktijd, of bevestigde starteruitzondering. */
+  ibHoursCondition: 'meerderheid' | 'starter' | null;
   /** Voldoe ik aan het urencriterium (1.225 uur)? Bepaalt of de zelfstandigenaftrek meetelt in de schatting. */
   urencriterium: boolean;
   /**
@@ -242,6 +246,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     website: '',
     kvkNumber: '',
     vatNumber: '',
+    omzetbelastingNumber: '',
     iban: '',
     bic: '',
   },
@@ -288,8 +293,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   legalForm: null,
   profitSharePct: 100,
   ibConfirmed: false,
+  ibHoursCondition: null,
   incomeTaxEstimate: true,
-  urencriterium: true,
+  urencriterium: false,
   sendUbl: true,
   jobLocation: false,
   switchover: { mode: null, date: null, status: 'concept', provisional: false, filedElsewhere: [], dismissed: [], bankConfirmed: [], bankChecks: {}, accountantEquity: null },
@@ -314,6 +320,8 @@ function integerInRange(value: number, min: number, max: number, label: string):
 }
 
 function validateSettings(settings: AppSettings): void {
+  if (settings.ibHoursCondition !== null && !['meerderheid', 'starter'].includes(settings.ibHoursCondition)) throw new ValidationError('Ongeldige keuze voor het urencriterium');
+  if (typeof settings.ibConfirmed !== 'boolean' || typeof settings.urencriterium !== 'boolean') throw new ValidationError('Bevestig ondernemerschap en het urencriterium met ja of nee');
   if (settings.carPurchaseVatDeducted !== null && typeof settings.carPurchaseVatDeducted !== 'boolean') throw new ValidationError('Geef aan of er aanschaf-btw is afgetrokken');
   if (settings.carPurchaseVatAmount !== null) integerInRange(settings.carPurchaseVatAmount, 0, 100000000000, 'Afgetrokken aanschaf-btw');
   if (settings.carCostVatOverride !== null) {

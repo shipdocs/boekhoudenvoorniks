@@ -204,8 +204,14 @@ export class InvoiceService {
         throw new ValidationError(`Factuurnummer ${number} bestaat al. Pas je factuurnummer aan bij Instellingen → Facturen & offertes`);
       }
       const totals = inv.totals;
+      const serviceDate = inv.delivery_date_to ?? inv.delivery_date ?? inv.invoice_date;
+      const icpService = inv.lines.some((l) => l.vat_code === 'icp-dienst');
+      if (icpService && serviceDate.slice(0, 7) !== inv.invoice_date.slice(0, 7) && inv.lines.some((l) => l.vat_code !== 'icp-dienst')) {
+        throw new ValidationError('Deze EU-dienst hoort in een ander btw-tijdvak dan de andere regels. Maak aparte facturen voor de EU-dienst en de overige leveringen, met hun eigen leverdatum.');
+      }
       const entryId = this.ledger.post({
         date: inv.invoice_date,
+        ...(icpService && serviceDate !== inv.invoice_date ? { vatDate: serviceDate } : {}),
         description: `${totals.total < 0 ? 'Creditfactuur' : 'Factuur'} ${number} ${relation.name}`,
         source: 'factuur',
         sourceRef: `invoice:${id}`,

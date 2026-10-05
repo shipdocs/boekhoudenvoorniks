@@ -139,6 +139,7 @@ export function SettingsScreen() {
           {!draft.kor && (
             <div className="grid cols-2">
               <Field label="Btw-identificatienummer"><input value={draft.company.vatNumber} onChange={(e) => set({ company: { ...draft.company, vatNumber: e.target.value } })} /></Field>
+              {draft.advancedMode && <Field label="Omzetbelastingnummer" hint="staat bij de Belastingdienst; voor de XBRL-testexport, niet op je facturen (zonder NL)"><input value={draft.company.omzetbelastingNumber} onChange={(e) => set({ company: { ...draft.company, omzetbelastingNumber: e.target.value } })} placeholder="123456789B01" /></Field>}
               <Field label="Aangifte doen per">
                 <select value={draft.vatPeriod} onChange={(e) => set({ vatPeriod: e.target.value as AppSettings['vatPeriod'] })}>
                   <option value="kwartaal">Kwartaal</option><option value="maand">Maand</option><option value="jaar">Jaar</option>
@@ -172,11 +173,22 @@ export function SettingsScreen() {
             </Field>
           )}
           {draft.legalForm === 'bv' && <p className="small muted">Een bv betaalt vennootschapsbelasting over de winst; jij betaalt inkomstenbelasting over je loon als directeur. De app maakt daar geen schatting van; vraag je boekhouder.</p>}
-          {draft.legalForm !== 'bv' && <label className="row"><input type="checkbox" checked={draft.ibConfirmed} onChange={(e) => set({ ibConfirmed: e.target.checked })} /> Ik ben ondernemer voor de inkomstenbelasting: ik werk minstens 1.225 uur per jaar in mijn bedrijf en dat is meer dan de helft van mijn werktijd</label>}
+          {draft.legalForm !== 'bv' && <>
+            <label className="row"><input type="checkbox" checked={draft.ibConfirmed} onChange={(e) => set({ ibConfirmed: e.target.checked })} /> Ik ben ondernemer voor de inkomstenbelasting (bij twijfel: check dit met mijn boekhouder)</label>
+            <p className="small muted">Dat hangt onder meer af van zelfstandigheid, winstverwachting en ondernemersrisico. Het urencriterium is een aparte voorwaarde voor sommige aftrekposten. Zolang dit niet is bevestigd, rekent de schatting zonder ondernemersaftrek, mkb-winstvrijstelling en KIA.</p>
+          </>}
           <label className="row"><input type="checkbox" checked={draft.incomeTaxEstimate} onChange={(e) => set({ incomeTaxEstimate: e.target.checked })} /> Toon een schatting van de inkomstenbelasting</label>
-          {draft.incomeTaxEstimate && (
-            <label className="row"><input type="checkbox" checked={draft.urencriterium} onChange={(e) => set({ urencriterium: e.target.checked })} /> Ik werk minstens 1.225 uur per jaar in mijn bedrijf (urencriterium, voor de zelfstandigenaftrek)</label>
-          )}
+          {draft.incomeTaxEstimate && draft.legalForm !== 'bv' && <>
+            <label className="row"><input type="checkbox" checked={draft.urencriterium} onChange={(e) => set({ urencriterium: e.target.checked })} /> Ik werk minstens 1.225 uur in dit kalenderjaar aan mijn onderneming(en)</label>
+            {draft.urencriterium && <Field label="Welke situatie past bij jouw werktijd?" hint="ook bij starten in de loop van het jaar geldt 1.225 uur; de tweede voorwaarde heeft een uitzondering voor starters">
+              <select value={draft.ibHoursCondition ?? ''} onChange={(e) => set({ ibHoursCondition: (e.target.value || null) as AppSettings['ibHoursCondition'] })}>
+                <option value="">Nog niet bevestigd / geen van beide</option>
+                <option value="meerderheid">Meer tijd aan mijn bedrijf dan aan ander werk</option>
+                <option value="starter">Ik was in minstens één van de vorige vijf kalenderjaren geen ondernemer</option>
+              </select>
+            </Field>}
+            <p className="small muted">De schatting gaat uit van iemand onder de AOW-leeftijd die het hele jaar in Nederland belasting en volksverzekeringen betaalt, met alleen deze ondernemingswinst. Is jouw situatie anders? Zet de schatting uit en laat je boekhouder rekenen.</p>
+          </>}
           <Field label="Waarmee rijd je zakelijk?">
             <select value={draft.carUse} onChange={(e) => set({ carUse: e.target.value as AppSettings['carUse'] })}>
               <option value="onbekend">Nog niet opgegeven</option>
@@ -598,7 +610,9 @@ function Integrations({ showPonto }: { showPonto: boolean }) {
             <div className="grid cols-2">
               {s.definition.fields.map((f) => (
                 <Field key={f.key} label={f.label} hint={f.help}>
-                  <input type={f.type === 'secret' ? 'password' : 'text'} placeholder={f.type === 'secret' && s.secretsSet[f.key] ? '•••••• (ingesteld)' : f.placeholder} value={v[f.key] ?? (f.type === 'secret' ? '' : s.config[f.key] ?? '')} onChange={(e) => setValues({ ...values, [id]: { ...v, [f.key]: e.target.value } })} />
+                  {f.type === 'select' ? <select value={v[f.key] ?? s.config[f.key] ?? 'onbekend'} onChange={(e) => setValues({ ...values, [id]: { ...v, [f.key]: e.target.value } })}>
+                    {f.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select> : <input type={f.type === 'secret' ? 'password' : 'text'} placeholder={f.type === 'secret' && s.secretsSet[f.key] ? '•••••• (ingesteld)' : f.placeholder} value={v[f.key] ?? (f.type === 'secret' ? '' : s.config[f.key] ?? '')} onChange={(e) => setValues({ ...values, [id]: { ...v, [f.key]: e.target.value } })} />}
                 </Field>
               ))}
             </div>

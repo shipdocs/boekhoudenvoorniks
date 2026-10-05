@@ -53,6 +53,12 @@ function vatCodeFor(pct: number): SalesVatCode {
   return 'nul';
 }
 
+function foreignOrderIssue(order: ExternalOrder): string | null {
+  return order.customer.country && order.customer.country.toUpperCase() !== 'NL'
+    ? 'de klant zit buiten Nederland. Controleer de plaats van levering en het btw-tarief en boek deze verkoop zelf. Buitenlandse btw en OSS verwerkt deze koppeling niet'
+    : null;
+}
+
 /** De regels van een order zoals ze op de factuur komen. */
 function invoiceLines(order: ExternalOrder) {
   return order.lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unitPriceExVat, vatCode: vatCodeFor(l.vatPercentage), vatPercentage: l.vatPercentage }));
@@ -204,6 +210,7 @@ export class IntegrationService {
     for (const f of def.fields) {
       const v = values[f.key];
       if (v === undefined || v === '') continue;
+      if (f.type === 'select' && !f.options?.some((o) => o.value === v)) throw new ValidationError(`Ongeldige keuze bij ${f.label}`);
       if (f.type === 'secret') this.secrets.set(`integration:${id}:${f.key}`, v.trim());
       else config[f.key] = v.trim();
     }
@@ -228,7 +235,7 @@ export class IntegrationService {
     const out: Record<string, string> = { ...s.config };
     for (const f of def.fields) {
       if (f.type === 'secret') out[f.key] = this.secrets.get(`integration:${id}:${f.key}`) ?? '';
-      if (!out[f.key]) throw new Error(`${def.label}: "${f.label}" is niet ingevuld`);
+      if (!out[f.key] && f.type !== 'select') throw new Error(`${def.label}: "${f.label}" is niet ingevuld`);
     }
     return out;
   }
@@ -252,7 +259,9 @@ export class IntegrationService {
       } else if (id === 'mollie') {
         result = this.importPayouts(id, await fetchMollieSettlements(this.fetchImpl, { apiKey: cfg.apiKey! }, this.knownPayouts(id)));
       } else {
-        result = this.importPayouts(id, await fetchStripePayouts(this.fetchImpl, { apiKey: cfg.apiKey! }, this.knownPayouts(id)));
+        const payouts = await fetchStripePayouts(this.fetchImpl, { apiKey: cfg.apiKey!, feesTax: cfg.feesTax }, this.knownPayouts(id));
+        if (payouts.some((p) => p.feesTaxUnconfirmed)) throw new ValidationError('Controleer eerst de btw op je Stripe-kosten bij Instellingen → Koppelingen. Gemengde of onbekende kosten: verwerk de uitbetaling en kosten zelf, met de kostenfactuur. Er is niets automatisch geboekt.');
+        result = this.importPayouts(id, payouts);
       }
       this.db.prepare('UPDATE integrations SET last_sync_at = ?, last_error = NULL WHERE provider = ?').run(started, id);
       return result;
@@ -340,6 +349,8 @@ export class IntegrationService {
       return 'zelf' as const;
     };
     if (order.unreadable) return manual(order.unreadable);
+    const foreignIssue = foreignOrderIssue(order);
+    if (foreignIssue) return manual(foreignIssue);
     if (order.pricesUnknown) {
       // past wat er betaald is bij geen van beide antwoorden, dan valt er niets te kiezen
       const fits = priceFits(order);
@@ -362,6 +373,12 @@ export class IntegrationService {
    * niets boeken, maar de melding op Vandaag dat de gebruiker deze verkoop zelf boekt (#228).
    */
   private bookOrManual(source: string, order: ExternalOrder, messages: string[], questionId?: number): 'geboekt' | 'zelf' {
+    // Ook vragen die vóór deze controle zijn opgeslagen moeten de fiscale controle doorlopen.
+    const foreignIssue = foreignOrderIssue(order);
+    if (foreignIssue) {
+      this.hold(source, order, 'zelf', [foreignIssue], questionId);
+      return 'zelf';
+    }
     if (!fitsPaid(order, invoiceTotal(order))) {
       this.hold(source, order, 'zelf', [`de regels tellen op tot ${formatEuro(invoiceTotal(order))}, maar er is ${formatEuro(order.total!)} betaald (bijvoorbeeld door een korting)`], questionId);
       return 'zelf';
@@ -726,6 +743,11 @@ export class IntegrationService {
       }
       if (p.currency !== 'EUR' || !p.date) {
         result.skipped++;
+        continue;
+      }
+      if (p.feesTaxUnconfirmed || (source === 'stripe' && p.feesNet !== 0 && !p.feesReverseCharge && this.state(source).config.feesTax !== 'vrijgesteld')) {
+        result.skipped++;
+        result.messages.push(`Uitbetaling ${p.reference}: controleer eerst de btw op de Stripe-kosten; nog niet geboekt.`);
         continue;
       }
       const kor = korActive(this.db);

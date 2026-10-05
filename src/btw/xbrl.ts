@@ -6,31 +6,33 @@ import { escapeHtml } from '../documents/render';
  * Genereert een XBRL-instance voor de aangifte omzetbelasting (SBR / Nederlandse Taxonomie).
  *
  * STATUS: voorbereiding voor fase 3 (directe aangifte via Digipoort). De elementnamen volgen de
- * NT bd-i-concepten zoals wij die kennen, maar entrypoint, contexten en versie MOETEN gevalideerd
+ * NT20-concepten en het entrypoint voor OB 2026 (docs/fiscale-review-44.md). De volledige instance MOET gevalideerd
  * worden tegen de actuele NT-release en de Belastingdienst-testomgeving voordat dit gebruikt wordt
  * (zie GitHub-issue "Digipoort/SBR aansluiting"). Tot die tijd: alleen export, niet indienen.
  */
-export const NT_VERSION = 'NT-VERIFY';
-const ENTRYPOINT = 'http://www.nltaxonomie.nl/nt/bd/20XX/entrypoints/bd-rpt-ob-aangifte-20XX.xsd';
+export const NT_VERSION = 'NT20-BD-20251210 (OB 2026, testexport)';
+const NAMESPACE = 'http://www.nltaxonomie.nl/nt20/bd/20251210/dictionary/bd-data';
+const ENTRYPOINT = 'http://www.nltaxonomie.nl/nt20/bd/20251210/entrypoints/bd-rpt-ob-aangifte-2026.xsd';
 
 const CONCEPTS: Record<string, { omzet?: string; btw?: string }> = {
-  '1a': { omzet: 'TurnoverSuppliesServicesGeneralTariff', btw: 'ValueAddedTaxSuppliesServicesGeneralTariff' },
-  '1b': { omzet: 'TurnoverSuppliesServicesReducedTariff', btw: 'ValueAddedTaxSuppliesServicesReducedTariff' },
+  '1a': { omzet: 'TaxedTurnoverSuppliesServicesGeneralTariff', btw: 'ValueAddedTaxSuppliesServicesGeneralTariff' },
+  '1b': { omzet: 'TaxedTurnoverSuppliesServicesReducedTariff', btw: 'ValueAddedTaxSuppliesServicesReducedTariff' },
   '1d': { btw: 'ValueAddedTaxPrivateUse' },
-  '1e': { omzet: 'TurnoverSupplyServicesZeroOrNotTaxed' },
+  '1e': { omzet: 'SuppliesServicesNotTaxed' },
   '2a': { omzet: 'TurnoverSuppliesServicesByWhichVATTaxationIsTransferred', btw: 'ValueAddedTaxSuppliesServicesByWhichVATTaxationIsTransferred' },
-  '3a': { omzet: 'TurnoverSuppliesToCountriesOutsideEC' },
-  '3b': { omzet: 'TurnoverSuppliesToCountriesWithinEC' },
-  '4a': { omzet: 'TurnoverSuppliesServicesFromCountriesOutsideEC', btw: 'ValueAddedTaxOnSuppliesFromCountriesOutsideEC' },
-  '4b': { omzet: 'TurnoverSuppliesServicesFromCountriesWithinEC', btw: 'ValueAddedTaxOnSuppliesFromCountriesWithinEC' },
+  '3a': { omzet: 'SuppliesToCountriesOutsideTheEC' },
+  '3b': { omzet: 'SuppliesToCountriesWithinTheEC' },
+  '4a': { omzet: 'TurnoverFromTaxedSuppliesFromCountriesOutsideTheEC', btw: 'ValueAddedTaxOnSuppliesFromCountriesOutsideTheEC' },
+  '4b': { omzet: 'TurnoverFromTaxedSuppliesFromCountriesWithinTheEC', btw: 'ValueAddedTaxOnSuppliesFromCountriesWithinTheEC' },
   '5a': { btw: 'ValueAddedTaxOwed' },
   '5b': { btw: 'ValueAddedTaxOnInput' },
   '5g': { btw: 'ValueAddedTaxOwedToBePaidBack' },
 };
 
 export function buildVatXbrl(report: VatReport, company: CompanySettings): string {
-  const vatId = company.vatNumber.replace(/\s/g, '').toUpperCase();
-  if (!vatId) throw new Error('Btw-identificatienummer ontbreekt bij de bedrijfsgegevens');
+  if (report.period.start.slice(0, 4) !== '2026' || report.period.end.slice(0, 4) !== '2026') throw new Error('Deze XBRL-testexport ondersteunt alleen de gecontroleerde taxonomie voor 2026');
+  const vatId = company.omzetbelastingNumber?.replace(/\s/g, '').toUpperCase();
+  if (!vatId || !/^\d{9}B\d{2}$/.test(vatId)) throw new Error('Vul je omzetbelastingnummer in bij Instellingen (9 cijfers, B en 2 cijfers; zonder NL). Gebruik het nummer voor de Belastingdienst, niet je btw-id op facturen.');
   const facts: string[] = [];
   for (const r of report.rubrieken) {
     const c = CONCEPTS[r.code];
@@ -45,7 +47,7 @@ export function buildVatXbrl(report: VatReport, company: CompanySettings): strin
   xmlns:link="http://www.xbrl.org/2003/linkbase"
   xmlns:xlink="http://www.w3.org/1999/xlink"
   xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
-  xmlns:bd-i="http://www.nltaxonomie.nl/nt/bd/20XX/items/bd-data">
+  xmlns:bd-i="${NAMESPACE}">
   <link:schemaRef xlink:type="simple" xlink:href="${ENTRYPOINT}"/>
   <xbrli:context id="Msg">
     <xbrli:entity><xbrli:identifier scheme="www.belastingdienst.nl/omzetbelastingnummer">${escapeHtml(vatId)}</xbrli:identifier></xbrli:entity>

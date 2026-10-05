@@ -166,7 +166,7 @@ describe('Omzet in aangiftes tegenover het grootboek (laatste aangifte)', () => 
 describe('Suppletie: termijn van acht weken', () => {
   it('te weinig aangegeven: termijn en gevolgen staan in de tekst', () => {
     expect(suppletieTermijn(210000)).toMatch(/acht weken.*belastingrente/);
-    expect(suppletieTermijn(-5000)).not.toMatch(/acht weken/);
+    expect(suppletieTermijn(-210000)).toMatch(/acht weken/);
   });
   it('waarschuwing in de aangifte en taak in de inbox noemen de termijn', () => {
     const { s, klant } = setup();

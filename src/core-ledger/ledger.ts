@@ -28,6 +28,8 @@ export interface PostLine {
 
 export interface PostEntry {
   date: IsoDate;
+  /** Fiscaal tijdstip als dit afwijkt van de documentdatum (bijvoorbeeld een EU-dienst). */
+  vatDate?: IsoDate;
   description: string;
   source: EntrySource;
   sourceRef?: string | null;
@@ -304,6 +306,7 @@ export class Ledger {
   /** Valideert een journaalpost zonder hem op te slaan. Gooit LedgerError bij fouten. */
   validate(entry: PostEntry): void {
     assertIsoDate(entry.date);
+    if (entry.vatDate !== undefined) assertIsoDate(entry.vatDate);
     if (!entry.description?.trim()) throw new LedgerError('Omschrijving is verplicht');
     if (entry.lines.length < 2) throw new LedgerError('Een journaalpost heeft minimaal twee regels');
     let debit = 0;
@@ -354,11 +357,11 @@ export class Ledger {
     this.validate(entry);
     this.assertWritable();
     return tx(this.db, () => {
-      // Afgesloten periode: een late post komt op de eerste open dag; de btw volgt de documentdatum.
+      // Afgesloten periode: een late post komt op de eerste open dag; de btw volgt het fiscale tijdstip.
       const bookDate = this.bookingDate(entry);
       const description = bookDate === entry.date ? entry.description.trim() : `${entry.description.trim()} (documentdatum ${formatDateNl(entry.date)})`;
       // Een al aangegeven btw-periode verandert nooit: het btw-effect gaat naar de volgende open periode.
-      let { vatDate, correctionOf } = entry.source === 'btw' ? { vatDate: entry.date, correctionOf: null as string | null } : this.vatDateFor(entry.date);
+      let { vatDate, correctionOf } = entry.source === 'btw' ? { vatDate: entry.date, correctionOf: null as string | null } : this.vatDateFor(entry.vatDate ?? entry.date);
       if (entry.reversesEntryId && entry.source !== 'btw') {
         // Een tegenboeking hoort bij dezelfde correctie als het origineel, anders blijft die correctie openstaan.
         const original = this.db.prepare('SELECT vat_correction_of FROM journal_entries WHERE id = ?').get(entry.reversesEntryId) as { vat_correction_of: string | null } | undefined;
@@ -418,8 +421,12 @@ export class Ledger {
       const original = this.getEntry(entryId);
       if (original.status === 'teruggedraaid') throw new LedgerError('Deze journaalpost is al teruggedraaid');
       if (original.reverses_entry_id) throw new LedgerError('Een tegenboeking kan niet zelf teruggedraaid worden');
+      const fiscalDate = original.event_id
+        ? (this.db.prepare("SELECT json_extract(payload, '$.vatDate') AS date FROM events WHERE id = ?").get(original.event_id) as { date: IsoDate | null }).date
+        : null;
       const reversalId = this.post({
         date,
+        ...(fiscalDate ? { vatDate: fiscalDate } : {}),
         description: description ?? `Tegenboeking: ${original.description}`,
         source: original.source,
         sourceRef: original.source_ref,

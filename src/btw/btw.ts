@@ -55,7 +55,7 @@ export interface VatReport {
 
 export interface IcpLine {
   relationId: number | null;
-  /** goederen (art. 138) of diensten: in de ICP-opgaaf apart op te geven */
+  /** goederen (art. 138) of diensten: onderscheiden voor tijdstip en opgaaffrequentie */
   kind: 'goederen' | 'diensten';
   name: string;
   /** landcode uit het btw-nummer (EL = Griekenland) */
@@ -71,7 +71,7 @@ export interface IcpReport {
   lines: IcpLine[];
   /** totaal van deze periode (zonder correcties op eerdere periodes) */
   total: Cents;
-  /** correcties op de opgaaf ICP van een eerdere periode: daar verbeteren, los van een btw-suppletie */
+  /** correcties op de opgaaf ICP van een eerdere periode: in de volgende ICP-opgaaf verbeteren, los van een btw-suppletie */
   corrections: (IcpLine & { periodKey: string; periodLabel: string })[];
 }
 
@@ -91,13 +91,13 @@ export interface VatCorrection {
 /** Correcties tot en met € 1.000 btw mag je meenemen in de volgende aangifte; daarboven een suppletie. */
 export const SUPPLETIE_THRESHOLD: Cents = 100000;
 /**
- * Termijn bij een suppletie: heb je te weinig btw aangegeven (btw > 0), dan zo snel mogelijk en uiterlijk
- * binnen acht weken na ontdekking, anders volgen belastingrente en een boete.
+ * Termijn bij een suppletie: zo snel mogelijk en uiterlijk binnen acht weken na ontdekking.
+ * Bij te weinig aangegeven btw kunnen belastingrente en een boete volgen.
  */
 export function suppletieTermijn(btw: Cents): string {
   return btw > 0
     ? 'Je gaf te weinig btw aan: verbeter dit zo snel mogelijk, uiterlijk binnen acht weken nadat je de fout ontdekte. Daarna kan de Belastingdienst belastingrente en een boete opleggen.'
-    : 'Je gaf te veel btw aan: verbeter dit zo snel mogelijk, dan krijg je het terug.';
+    : 'Je gaf te veel btw aan: verbeter dit zo snel mogelijk, uiterlijk binnen acht weken nadat je de fout ontdekte.';
 }
 export const SUPPLETIE_URL = 'https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-aangifte-corrigeren';
 
@@ -436,7 +436,7 @@ export class VatService {
       warnings.push(BUITENLAND_DISCLAIMER);
     }
     if (omzetIcp !== 0) warnings.push('Je verkocht aan bedrijven in andere EU-landen. Dat geef je ook apart op (de "ICP-opgaaf"); het overzicht staat hieronder.');
-    if (this.icp(periodKey).corrections.length > 0) warnings.push('Er zijn verkopen aan EU-bedrijven gecorrigeerd over een eerdere periode. Verbeter daarvoor de ICP-opgaaf van die periode; dat staat los van de btw-aangifte en een eventuele suppletie.');
+    if (this.icp(periodKey).corrections.length > 0) warnings.push('Er zijn verkopen aan EU-bedrijven gecorrigeerd over een eerdere periode. Vermeld die correcties in de volgende ICP-opgaaf, met de oorspronkelijke periode; dat staat los van de btw-aangifte en een eventuele suppletie.');
 
     const stored = this.db.prepare('SELECT status, submitted_at FROM vat_periods WHERE period_key = ?').get(period.key) as { status: 'concept' | 'ingediend'; submitted_at: string | null } | undefined;
     return {
@@ -477,18 +477,20 @@ export class VatService {
    */
   icp(periodKey: string): IcpReport {
     const period = periodFromKey(periodKey);
+    // Een nieuwe creditfactuur is een vermindering in de huidige opgaaf, geen herstel van een oude fout.
+    const correction = `CASE WHEN EXISTS (SELECT 1 FROM invoices i WHERE e.source_ref = 'invoice:' || i.id AND i.credit_of_invoice_id IS NOT NULL) THEN NULL ELSE e.vat_correction_of END`;
     const query = (where: string) =>
       this.db
         .prepare(
-          `SELECT l.relation_id, a.rgs_code, e.vat_correction_of AS correction_of, r.name, r.country, r.vat_number, SUM(l.credit) - SUM(l.debit) AS net
+          `SELECT l.relation_id, a.rgs_code, ${correction} AS correction_of, r.name, r.country, r.vat_number, SUM(l.credit) - SUM(l.debit) AS net
            FROM journal_lines l
            JOIN journal_entries e ON e.id = l.journal_entry_id
            JOIN chart_of_accounts a ON a.id = l.account_id
            LEFT JOIN relations r ON r.id = l.relation_id
            WHERE a.rgs_code IN (?, ?) AND COALESCE(e.vat_date, e.entry_date) BETWEEN ? AND ? AND e.source NOT IN ('btw', 'opening') AND ${where}
-           GROUP BY e.vat_correction_of, l.relation_id, a.rgs_code
+           GROUP BY correction_of, l.relation_id, a.rgs_code
            HAVING net <> 0
-           ORDER BY e.vat_correction_of, r.name, a.rgs_code`,
+           ORDER BY correction_of, r.name, a.rgs_code`,
         )
         .all(ACCOUNTS.omzetIcp, ACCOUNTS.omzetIcpDienst, period.start, period.end) as { relation_id: number | null; rgs_code: string; correction_of: string | null; name: string | null; country: string | null; vat_number: string | null; net: number }[];
     const toLine = (r: ReturnType<typeof query>[number]): IcpLine => {
@@ -509,9 +511,9 @@ export class VatService {
       };
     };
     // Prestaties van deze periode. Correcties op een eerdere periode staan apart: die verbeter je in
-    // de opgaaf ICP van die periode, los van de vraag of de btw via een suppletie loopt.
-    const lines = query('e.vat_correction_of IS NULL').map(toLine);
-    const corrections = query('e.vat_correction_of IS NOT NULL').map((r) => ({ ...toLine(r), periodKey: r.correction_of!, periodLabel: safeLabel(r.correction_of!) }));
+    // de volgende opgaaf ICP, met de oorspronkelijke periode; los van een btw-suppletie.
+    const lines = query(`${correction} IS NULL`).map(toLine);
+    const corrections = query(`${correction} IS NOT NULL`).map((r) => ({ ...toLine(r), periodKey: r.correction_of!, periodLabel: safeLabel(r.correction_of!) }));
     return { period, lines, total: lines.reduce((s, l) => s + l.amount, 0), corrections };
   }
 
