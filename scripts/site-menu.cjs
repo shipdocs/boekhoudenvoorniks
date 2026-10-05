@@ -36,6 +36,7 @@ const FOOTER = [
   {
     title: 'Programma',
     items: [
+      { href: 'werkadministratie.html', label: 'Werkadministratie, geen boekhoudpakket' },
       { href: './#functies', label: 'Functies' },
       { href: './#prijzen', label: 'Prijzen' },
       { href: './#overstappen', label: 'Overstappen' },
