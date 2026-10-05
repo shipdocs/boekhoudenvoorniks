@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Inventaris van fiscale en boekhoudkundige regels die BoekhoudenVoorNiks toepast; geen fiscale goedkeuring.",
+  "rules": [
+    {
+      "id": "BvN-BTW-001",
+      "title": "Nederlandse verkoop- en inkoop-btw: 21%, 9% en 0%",
+      "domain": "btw",
+      "scope": "Tariefkeuze, berekening en aangifterubrieken 1a, 1b, 1e en 5b.",
+      "implementation": ["src/shared/vat.ts", "src/core-ledger/rules.ts", "src/btw/btw.ts"],
+      "tests": ["tests/btw.test.ts", "tests/fiscale-audit.test.ts"],
+      "sources": [{"authority": "Belastingdienst", "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-tarieven"}],
+      "verification": {"status": "te-controleren", "checkedOn": null},
+      "notes": "Controleer tarief, toepassingsvoorwaarden, afronding en rubriek afzonderlijk."
+    },
+    {
+      "id": "BvN-BTW-002",
+      "title": "Verlegde btw en buitenlandse prestaties",
+      "domain": "btw",
+      "scope": "Binnenlandse verlegging, EU-inkoop, niet-EU-inkoop, ICP-goederen, ICP-diensten en uitvoer/diensten buiten de EU.",
+      "implementation": ["src/shared/vat.ts", "src/core-ledger/rules.ts", "src/btw/btw.ts"],
+      "tests": ["tests/buitenland.test.ts", "tests/fiscale-review-44.test.ts"],
+      "sources": [{"authority": "Belastingdienst", "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/zakendoen-met-het-buitenland"}],
+      "verification": {"status": "extern-te-beoordelen", "checkedOn": null},
+      "notes": "Plaats-van-dienst, bewijs en de voorwaarden voor 0% zijn contextafhankelijk."
+    },
+    {
+      "id": "BvN-BTW-003",
+      "title": "KOR: geen btw heffen en geen voorbelasting aftrekken",
+      "domain": "btw",
+      "scope": "Boeking van omzet, inkopen, investeringen en verlegde btw wanneer KOR actief is.",
+      "implementation": ["src/core-ledger/rules.ts", "src/btw/checks.ts", "src/settings/settings.ts"],
+      "tests": ["tests/kor-grens.test.ts", "tests/factuur-kor-levering.test.ts"],
+      "sources": [{"authority": "Belastingdienst", "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/kleineondernemersregeling"}],
+      "verification": {"status": "extern-te-beoordelen", "checkedOn": null},
+      "notes": "Neem in-/uittreden, omzetgrens, buitenlandse situaties en herziening als afzonderlijke vervolgregels op."
+    },
+    {
+      "id": "BvN-BTW-004",
+      "title": "Suppletie en correcties na een btw-aangifte",
+      "domain": "btw",
+      "scope": "Drempel van 1.000 euro, eerstvolgende aangifte versus suppletie en correctieperiode.",
+      "implementation": ["src/btw/btw.ts", "src/btw/checks.ts"],
+      "tests": ["tests/btw.test.ts", "tests/btw-controles.test.ts"],
+      "sources": [{"authority": "Belastingdienst", "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-aangifte-corrigeren"}],
+      "verification": {"status": "te-controleren", "checkedOn": null},
+      "notes": "Controleer drempel, termijn na ontdekking en behandeling van exact het grensbedrag."
+    },
+    {
+      "id": "BvN-BTW-005",
+      "title": "ICP-frequentie en OSS-signaal",
+      "domain": "btw",
+      "scope": "Maandelijkse ICP-opgaaf voor goederen en signalering van EU-B2C-omzet boven de OSS-drempel.",
+      "implementation": ["src/btw/checks.ts", "src/shared/vat.ts"],
+      "tests": ["tests/btw-controles.test.ts", "tests/fiscale-review-44.test.ts"],
+      "sources": [{"authority": "Belastingdienst", "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/opgaaf-icp"}],
+      "verification": {"status": "te-controleren", "checkedOn": null},
+      "notes": "ICP-goederen en -diensten hebben niet in alle gevallen dezelfde frequentie."
+    },
+    {
+      "id": "BvN-BTW-006",
+      "title": "Btw-correctie privégebruik auto van de zaak",
+      "domain": "btw",
+      "scope": "Forfaits 2,7% en 1,5%, tijdsevenredigheid en maximum op werkelijk afgetrokken btw.",
+      "implementation": ["src/btw/car.ts", "src/tax/overview.ts"],
+      "tests": ["tests/fiscale-audit.test.ts", "tests/business-rules-review.test.ts"],
+      "sources": [{"authority": "Belastingdienst", "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-en-privegebruik-auto-van-de-zaak"}],
+      "verification": {"status": "extern-te-beoordelen", "checkedOn": null},
+      "notes": "Eigen bijdrage, marge-auto, meerdere auto's en werkelijke methode vallen niet volledig in de automatische berekening."
+    },
+    {
+      "id": "BvN-IB-001",
+      "title": "Jaarparameters schatting inkomstenbelasting",
+      "domain": "inkomstenbelasting",
+      "scope": "Box-1-schijven, heffingskortingen, Zvw, ondernemers- en startersaftrek, mkb-winstvrijstelling, urencriterium en kilometerbedrag.",
+      "implementation": ["src/tax/income-tax.ts", "src/tax/overview.ts"],
+      "tests": ["tests/fiscale-review-44.test.ts", "tests/ib-ondernemerschap.test.ts"],
+      "sources": [{"authority": "Belastingdienst", "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/ondernemers/content/inkomstenbelasting-voor-ondernemers"}],
+      "verification": {"status": "te-controleren", "checkedOn": null},
+      "notes": "Splits dit cluster tijdens de nulmeting per jaartabel en regeling; de app toont nadrukkelijk een schatting."
+    },
+    {
+      "id": "BvN-IB-002",
+      "title": "KIA en desinvesteringsbijtelling",
+      "domain": "inkomstenbelasting",
+      "scope": "Jaarlijkse KIA-schijven, minimum per bedrijfsmiddel, uitgesloten middelen en desinvesteringsdrempel.",
+      "implementation": ["src/tax/income-tax.ts", "src/tax/assets.ts", "src/tax/overview.ts"],
+      "tests": ["tests/belastingvoordelen.test.ts", "tests/investering-beoordeling.test.ts"],
+      "sources": [{"authority": "Belastingdienst", "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/ondernemers/content/kleinschaligheidsinvesteringsaftrek"}],
+      "verification": {"status": "extern-te-beoordelen", "checkedOn": null},
+      "notes": "Uitsluitingen en bijzondere bedrijfsmiddelen vereisen beoordeling, niet alleen een bedragentabel."
+    },
+    {
+      "id": "BvN-IB-003",
+      "title": "Afschrijving bedrijfsmiddelen",
+      "domain": "inkomstenbelasting",
+      "scope": "Activeringsgrens, minimale levensduur, restwaarde en start op ingebruiknamedatum.",
+      "implementation": ["src/tax/assets.ts"],
+      "tests": ["tests/fiscale-audit.test.ts", "tests/investering-beoordeling.test.ts"],
+      "sources": [{"authority": "Belastingdienst", "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/ondernemers/content/afschrijven-op-bedrijfsmiddelen"}],
+      "verification": {"status": "extern-te-beoordelen", "checkedOn": null},
+      "notes": "De grens van 450 euro en vijf jaar zijn verschillende regels; splits ze bij de inhoudelijke controle."
+    },
+    {
+      "id": "BvN-DOC-001",
+      "title": "Factuureisen en fiscale factuurteksten",
+      "domain": "documenten",
+      "scope": "Verplichte factuurgegevens, nummering, KOR/vrijstelling, verlegging, ICP en UBL-belastingcategorieën.",
+      "implementation": ["src/documents/invoices.ts", "src/documents/ubl-out.ts", "src/shared/vat.ts"],
+      "tests": ["tests/documents.test.ts", "tests/factuur-kor-levering.test.ts"],
+      "sources": [{"authority": "Belastingdienst", "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/aan-welke-eisen-moeten-facturen-voldoen"}],
+      "verification": {"status": "extern-te-beoordelen", "checkedOn": null},
+      "notes": "UBL/Peppol-specificaties moeten naast de fiscale bron afzonderlijk worden geregistreerd."
+    }
+  ]
+}
