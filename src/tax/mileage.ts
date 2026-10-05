@@ -29,7 +29,10 @@ export interface TimeEntry {
 
 export interface HoursForecast {
   target: number;
+  /** gewerkt tot en met vandaag */
   total: number;
+  /** uren die nog op de planning staan (een herhaling of periode die nog loopt) */
+  planned: number;
   remaining: number;
   /** uren per week die je tot 31 december nog moet maken */
   perWeekNeeded: number;
@@ -78,7 +81,7 @@ function spansFor(input: HoursInput): Span[] {
     assertIsoDate(input.repeatUntil, 'einddatum van de herhaling');
     if (input.repeatUntil < input.date) throw new ValidationError('De herhaling moet eindigen op of na de begindatum');
     if (period === 'dag') {
-      for (let d = input.date; d <= input.repeatUntil; d = addDays(d, 1)) if (weekday(d) !== 0 && weekday(d) !== 6) spans.push({ start: d, end: d });
+      for (let d = input.date; d <= input.repeatUntil && spans.length <= MAX_SPANS; d = addDays(d, 1)) if (weekday(d) !== 0 && weekday(d) !== 6) spans.push({ start: d, end: d });
     } else {
       for (let i = 0; ; i++) {
         const span = period === 'week' ? spanFor(addDays(first.start, 7 * i), 'week') : spanFor(addMonths(first.start, i), 'maand');
@@ -206,20 +209,23 @@ export class HoursService {
   check(input: HoursInput): { regels: number; warnings: string[] } {
     const spans = this.validate(input);
     const fmt = (n: number) => (Math.round(n * 10) / 10).toLocaleString('nl-NL');
-    let existing = 0;
-    let onWorkOrders = 0;
+    // Een bestaande regel telt één keer, ook als hij in meer herhaalde periodes valt.
+    const seen = new Map<string, { hours: number; workOrder: boolean }>();
     let tooMany = false;
     for (const span of spans) {
-      const e = this.db
-        .prepare(`SELECT COALESCE(SUM(hours), 0) AS h FROM time_entries WHERE entry_date <= ? AND COALESCE(period_end, entry_date) >= ?`)
-        .get(span.end, span.start) as { h: number };
-      const w = this.db
-        .prepare(`SELECT COALESCE(SUM(quantity), 0) AS h FROM job_work_items WHERE work_date BETWEEN ? AND ? AND ${WORK_UNIT}`)
-        .get(span.start, span.end) as { h: number };
-      existing += e.h + w.h;
-      onWorkOrders += w.h;
-      if (e.h + w.h + input.hours > 16 * days(span)) tooMany = true;
+      const entries = this.db
+        .prepare(`SELECT id, hours FROM time_entries WHERE entry_date <= ? AND COALESCE(period_end, entry_date) >= ?`)
+        .all(span.end, span.start) as { id: number; hours: number }[];
+      const items = this.db
+        .prepare(`SELECT id, quantity AS hours FROM job_work_items WHERE work_date BETWEEN ? AND ? AND ${WORK_UNIT}`)
+        .all(span.start, span.end) as { id: number; hours: number }[];
+      for (const r of entries) seen.set(`e${r.id}`, { hours: r.hours, workOrder: false });
+      for (const r of items) seen.set(`w${r.id}`, { hours: r.hours, workOrder: true });
+      const inSpan = [...entries, ...items].reduce((sum, r) => sum + r.hours, 0);
+      if (inSpan + input.hours > 16 * days(span)) tooMany = true;
     }
+    const existing = [...seen.values()].reduce((sum, r) => sum + r.hours, 0);
+    const onWorkOrders = [...seen.values()].filter((r) => r.workOrder).reduce((sum, r) => sum + r.hours, 0);
     const warnings: string[] = [];
     if (existing > 0) {
       warnings.push(`In ${spans.length > 1 ? 'deze periodes' : 'deze periode'} staat al ${fmt(existing)} uur${onWorkOrders > 0 ? ` (waarvan ${fmt(onWorkOrders)} op werkbonnen)` : ''}. Tel je niets dubbel?`);
@@ -258,10 +264,16 @@ export class HoursService {
     const first = this.db
       .prepare(`SELECT MIN(d) AS d FROM (SELECT MIN(entry_date) AS d FROM time_entries WHERE substr(entry_date, 1, 4) = ? UNION ALL SELECT MIN(work_date) FROM job_work_items WHERE substr(work_date, 1, 4) = ? AND ${WORK_UNIT})`)
       .get(y, y) as { d: IsoDate | null };
-    const done =
-      (this.db.prepare('SELECT COALESCE(SUM(hours), 0) AS h FROM time_entries WHERE substr(entry_date, 1, 4) = ? AND entry_date <= ?').get(y, asOf) as { h: number }).h +
-      (this.db.prepare(`SELECT COALESCE(SUM(quantity), 0) AS h FROM job_work_items WHERE substr(work_date, 1, 4) = ? AND work_date <= ? AND ${WORK_UNIT}`).get(y, asOf) as { h: number }).h;
-    const remaining = Math.max(0, Math.round((target - total) * 10) / 10);
+    // Alleen wat tot en met vandaag gewerkt is telt als gedaan; een periode die doorloopt wordt naar verhouding geteld.
+    const rows = this.db.prepare('SELECT entry_date, period_end, hours FROM time_entries WHERE substr(entry_date, 1, 4) = ? AND entry_date <= ?').all(y, asOf) as { entry_date: IsoDate; period_end: IsoDate | null; hours: number }[];
+    const fromEntries = rows.reduce((sum, r) => {
+      const end = r.period_end ?? r.entry_date;
+      if (end <= asOf) return sum + r.hours;
+      return sum + (r.hours * (diffDays(r.entry_date, asOf) + 1)) / (diffDays(r.entry_date, end) + 1);
+    }, 0);
+    const fromWorkOrders = (this.db.prepare(`SELECT COALESCE(SUM(quantity), 0) AS h FROM job_work_items WHERE substr(work_date, 1, 4) = ? AND work_date <= ? AND ${WORK_UNIT}`).get(y, asOf) as { h: number }).h;
+    const done = Math.round((fromEntries + fromWorkOrders) * 10) / 10;
+    const remaining = Math.max(0, Math.round((target - done) * 10) / 10);
     const weeksLeft = (diffDays(asOf, `${year}-12-31`) + 1) / 7;
     const perDay = first.d && first.d <= asOf ? done / (diffDays(first.d, asOf) + 1) : 0;
     let reachDate: IsoDate | null = null;
@@ -271,7 +283,8 @@ export class HoursService {
     }
     return {
       target,
-      total,
+      total: done,
+      planned: Math.max(0, Math.round((total - done) * 10) / 10),
       remaining,
       perWeekNeeded: remaining > 0 && weeksLeft > 0 ? Math.ceil((remaining / weeksLeft) * 10) / 10 : 0,
       perWeekNow: Math.round(perDay * 7 * 10) / 10,

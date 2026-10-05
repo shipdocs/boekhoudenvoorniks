@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
-import { formatDateNl, isoWeek, monthOf, today, weekOf } from '../../shared/dates';
+import { formatDateNl, isIsoDate, isoWeek, monthOf, today, weekOf } from '../../shared/dates';
 import type { HoursPeriod } from '../../tax/mileage';
 import { ACCOUNTANT_CHECK_REASONS, ACCOUNTANT_CHECK_TITLE } from '../../shared/legal';
 import { kiaFor, rulesFor } from '../../tax/income-tax';
@@ -447,7 +447,7 @@ function Hours({ year }: { year: number }) {
   useEffect(() => {
     setWarnings([]);
     setInfo('');
-    if (!(n > 0) || !date) return;
+    if (!(n > 0) || !isIsoDate(date)) return;
     let stale = false;
     api.hours.check(input).then(
       (r) => { if (!stale) { setWarnings(r.warnings); setInfo(r.regels > 1 ? `Dit maakt ${r.regels} regels.` : ''); } },
@@ -471,7 +471,7 @@ function Hours({ year }: { year: number }) {
   };
   const t = totals.data;
   const f = forecast.data;
-  const range = period === 'week' ? weekOf(date) : period === 'maand' ? monthOf(date) : null;
+  const range = !isIsoDate(date) ? null : period === 'week' ? weekOf(date) : period === 'maand' ? monthOf(date) : null;
   const hint = {
     dag: 'Wat je op die dag werkte.',
     week: 'Het totaal over de hele week (maandag t/m zondag).',
@@ -494,6 +494,7 @@ function Hours({ year }: { year: number }) {
               {f.remaining === 0
                 ? `Je hebt de ${f.target.toLocaleString('nl-NL')} uur gehaald.`
                 : `Nog ${f.remaining.toLocaleString('nl-NL')} uur voor de ${f.target.toLocaleString('nl-NL')}: dat is ${f.perWeekNeeded.toLocaleString('nl-NL')} uur per week tot 31 december.` +
+                  (f.planned > 0 ? ` Daarnaast staat er ${f.planned.toLocaleString('nl-NL')} uur gepland.` : '') +
                   (f.reachDate ? ` Op je tempo tot nu toe (${f.perWeekNow.toLocaleString('nl-NL')} uur per week) haal je het op ${formatDateNl(f.reachDate)}.` : f.perWeekNow > 0 ? ` Op je tempo tot nu toe (${f.perWeekNow.toLocaleString('nl-NL')} uur per week) haal je het dit jaar niet.` : '')}
             </p>
           )}
