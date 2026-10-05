@@ -3,9 +3,9 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
 import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useLoad } from '../ui';
-import { BusinessShareField, CategoryChoice, InvestmentHint, SupplierInput, investmentInfo } from './Purchases';
+import { BusinessShareField, CategoryChoice, InvestmentHint, ReverseRateField, SupplierInput, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
-import type { PurchaseVatCode } from '../../shared/vat';
+import { isReverseCharge, type PurchaseVatCode } from '../../shared/vat';
 import { ReaderChoice } from './Reader';
 import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
 import type { DocumentResult } from '../../intake/types';
@@ -157,7 +157,7 @@ export function DocumentReview({ id }: { id: number }) {
   const jobSuggestion = useLoad(() => api.jobs.suggestForDocument(id), [id]);
   const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
-  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; business: boolean; businessPct: number | null; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
+  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; vatRate: 9 | 21; business: boolean; businessPct: number | null; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
   // de verbeterde gegevens lijken op een aankoop of bon die er al staat (#224): eerst de vraag, pas na "Toch boeken" verwerken
   const [duplicate, setDuplicate] = useState<{ entry: string; lead: string } | null>(null);
 
@@ -173,6 +173,7 @@ export function DocumentReview({ id }: { id: number }) {
       vatAmount: null,
       categoryKey: d.classification?.categoryKey ?? 'materiaal',
       vatCode: (d.classification?.vatCode ?? 'hoog') as PurchaseVatCode,
+      vatRate: 21,
       business: d.classification?.business ?? true,
       businessPct: null,
       // de betaalwijze die op de telefoon is gekozen (bonnenscanner) is het voorstel
@@ -382,7 +383,7 @@ export function DocumentReview({ id }: { id: number }) {
                   {!form.splits && form.categoryKey !== 'onbekend' && <InvestmentHint categoryKey={form.categoryKey} gross={form.total} vatCode={form.vatCode} onUse={() => setForm({ ...form, categoryKey: 'investering' })} />}
                   {form.categoryKey !== 'onbekend' && <div className="grid cols-2">
                     <Field label="Btw op de bon">
-                      <select value={form.vatCode} onChange={(e) => setForm({ ...form, vatCode: e.target.value as PurchaseVatCode, vatAmount: null })}>
+                      <select value={form.vatCode} onChange={(e) => setForm({ ...form, vatCode: e.target.value as PurchaseVatCode, vatRate: 21, vatAmount: null })}>
                         {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
                       </select>
                     </Field>
@@ -392,6 +393,7 @@ export function DocumentReview({ id }: { id: number }) {
                       </Field>
                     )}
                   </div>}
+                  {form.categoryKey !== 'onbekend' && <ReverseRateField vatCode={form.vatCode} value={form.vatRate} onChange={(vatRate) => setForm({ ...form, vatRate })} />}
                   {!form.splits && form.categoryKey !== 'onbekend' && <BusinessShareField supplier={form.supplier} value={form.businessPct} onChange={(v) => setForm({ ...form, businessPct: v })} />}
                   <Field label="Hoe betaald?">
                     <div className="chips">
@@ -429,7 +431,7 @@ export function DocumentReview({ id }: { id: number }) {
                     if (found) return setDuplicate({ entry, lead: `Lijkt op ${found.label}.${found.detail ? ` ${found.detail}` : ''}` });
                   }
                   const isInvestment = form.business && !form.splits && form.categoryKey === 'investering';
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, allowDuplicate: !!shownDuplicate, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, ...(isReverseCharge(form.vatCode) && form.vatRate === 9 ? { vatRate: 9 } : {}), business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, allowDuplicate: !!shownDuplicate, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
                   if (res) {
                     go({ screen: 'aankopen' });
                     if (isInvestment) showInvestmentSaved(investmentInfo(form.total!, form.vatCode, true));

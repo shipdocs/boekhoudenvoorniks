@@ -12,7 +12,7 @@ import { businessPct, type BankCategoriePayload } from '../core-ledger/rules';
 import { businessShareFor, setBusinessShare } from '../intake/business-share';
 import type { EventService } from '../core-ledger/events';
 import type { RelationsService } from '../relations/relations';
-import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, customerVatSituation, isPurchaseVatCode, isSalesVatCode, suggestedSalesVat, vatNumberMatchesCountry, type SalesVatCode } from '../shared/vat';
+import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, customerVatSituation, isPurchaseVatCode, isSalesVatCode, reverseChargeRate, suggestedSalesVat, vatNumberMatchesCountry, type SalesVatCode } from '../shared/vat';
 import { formatEuro, roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { addDays, diffDays, formatDateNl, isIsoDate, today, workdaysBetween, type IsoDate } from '../shared/dates';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
@@ -199,6 +199,8 @@ export interface BookToAccountInput {
   /** RGS-code van de tegenrekening (kosten, omzet, privé, …) */
   account: string;
   vatCode?: string;
+  /** verlegde inkoop: 9 als de prestatie onder het lage tarief valt; weglaten = 21% (#316) */
+  vatRate?: number;
   description?: string;
   relationId?: number | null;
   /** klus waar deze uitgave bij hoort (#32) */
@@ -1615,6 +1617,7 @@ export class BankService {
       const description = input.description?.trim() || t.description || t.counter_name || 'Banktransactie';
       const relationId = input.relationId ?? (t.counter_iban ? this.relations.findByIban(t.counter_iban)?.id ?? null : null);
       const vatCode = input.vatCode ?? 'geen';
+      const vatRate = reverseChargeRate(vatCode, input.vatRate);
       if (target.category === 'omzet' && korActive(this.db) && (vatCode === 'hoog' || vatCode === 'laag' || vatCode === 'verlegd' || vatCode === 'export' || vatCode === 'icp')) throw new ValidationError('Je gebruikt de KOR: kies geen btw bij deze verkoop');
       // omzet komt op de omzetrekening die bij de btw hoort (21%, 0% buiten de EU, …): zo belandt het in de juiste rubriek
       const account = target.category === 'omzet' && isSalesVatCode(vatCode) ? SALES_ACCOUNTS[vatCode]?.revenue ?? target.rgs_code : target.rgs_code;
@@ -1630,6 +1633,7 @@ export class BankService {
         account,
         accountCategory: target.category,
         vatCode,
+        ...(vatRate && target.category !== 'omzet' ? { vatRate } : {}),
         relationId,
         description,
         ...(expense && (pct < 100 || input.businessPct !== undefined) ? { businessPct: pct } : {}),
@@ -1647,7 +1651,7 @@ export class BankService {
    * Andere categorie of btw-keuze voor een al geboekte transactie (#19): de gebeurtenis wordt
    * vervangen, de oude post krijgt een tegenboeking en de nieuwe wordt opnieuw gecompileerd.
    */
-  reclassify(txId: number, change: { account: string; vatCode?: string; description?: string; businessPct?: number }, reason = 'andere categorie'): number {
+  reclassify(txId: number, change: { account: string; vatCode?: string; vatRate?: number; description?: string; businessPct?: number }, reason = 'andere categorie'): number {
     const t = this.get(txId);
     if (t.status !== 'gematcht' || !t.matched_journal_entry_id || t.matched_invoice_id || t.matched_purchase_invoice_id) {
       throw new ValidationError('Alleen een betaling waar je zelf een soort kosten bij koos, kun je zo aanpassen');
@@ -1668,6 +1672,9 @@ export class BankService {
       ...(target.category === 'omzet' ? { noVatDeduction: false } : old.accountCategory === 'omzet' ? { noVatDeduction: korActive(this.db) } : {}),
       description: change.description?.trim() || old.description,
     };
+    // tarief bij verlegging: een nieuwe keuze gaat voor; bij een andere btw-code vervalt het
+    const vatRate = reverseChargeRate(vatCode, change.vatRate !== undefined ? change.vatRate : change.vatCode === undefined || change.vatCode === old.vatCode ? old.vatRate : undefined);
+    if (vatRate && target.category !== 'omzet') payload.vatRate = vatRate; else delete payload.vatRate;
     if (target.category === 'omzet' || (target.category !== 'kosten' && target.category !== 'activa')) delete payload.businessPct;
     if (change.businessPct !== undefined && (target.category === 'kosten' || target.category === 'activa')) {
       const pct = businessPct(change.businessPct);

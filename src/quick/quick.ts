@@ -8,7 +8,7 @@ import type { InvoiceService, Invoice } from '../documents/invoices';
 import type { RelationsService } from '../relations/relations';
 import { splitGross } from '../import/bank';
 import type { CategoryLookup } from '../shared/categories';
-import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isReverseCharge, type PurchaseVatCode, type SalesVatCode } from '../shared/vat';
+import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isReverseCharge, reverseChargeRate, type PurchaseVatCode, type SalesVatCode } from '../shared/vat';
 import { assertIsoDate, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
@@ -26,6 +26,8 @@ export interface ExpenseInput {
   /** bedrag zoals op de bon (inclusief BTW; bij verlegd: het betaalde bedrag) */
   grossAmount: Cents;
   vatCode: PurchaseVatCode;
+  /** verlegde inkoop: 9 als de prestatie onder het lage tarief valt; weglaten = 21% (#316) */
+  vatRate?: number;
   paidWith: PaidWith;
   attachmentPath?: string | null;
   jobId?: number | null;
@@ -93,7 +95,8 @@ export class QuickActions {
     if (!Number.isSafeInteger(input.grossAmount) || input.grossAmount === 0) throw new ValidationError('Vul een bedrag in');
     const duplicate = input.allowDuplicate ? null : this.duplicateOf(input);
     if (duplicate) throw new ValidationError(duplicateEntryMessage(duplicate));
-    const { net, vat } = splitGross(input.grossAmount, PURCHASE_VAT_RATES[input.vatCode].percentage, isReverseCharge(input.vatCode));
+    const vatRate = reverseChargeRate(input.vatCode, input.vatRate);
+    const { net, vat } = splitGross(input.grossAmount, vatRate ?? PURCHASE_VAT_RATES[input.vatCode].percentage, isReverseCharge(input.vatCode));
     return tx(this.db, () => {
       const relationId = input.supplierName?.trim() ? this.relations.findOrCreateSupplier(input.supplierName).id : null;
       const purchase = this.purchases.create({
@@ -104,7 +107,7 @@ export class QuickActions {
         attachmentPath: input.attachmentPath ?? null,
         jobId: input.jobId ?? null,
         businessPct: input.businessPct,
-        lines: [{ account: category.account, netAmount: net, vatCode: input.vatCode, vatAmount: vat, description: input.description }],
+        lines: [{ account: category.account, netAmount: net, vatCode: input.vatCode, vatAmount: vat, ...(vatRate ? { vatRate } : {}), description: input.description }],
       });
       if (input.paidWith !== 'bank') {
         this.purchases.registerPayment(purchase.id, {
