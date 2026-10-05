@@ -1,6 +1,6 @@
 # BoekhoudenVoorNiks
 
-> Gratis, lokaal boekhoudprogramma (desktop-app voor Windows en Linux) voor zzp'ers en kleine ondernemers in Nederland, vooral vakmensen zoals stukadoors, schilders, timmerlieden, loodgieters en elektriciens. De gebruiker werkt met klanten, klussen, offertes, facturen, bonnetjes en de bank; het programma maakt daar automatisch een dubbele boekhouding van (RGS-grootboekschema) en rekent de btw-aangifte uit. Geen account, de administratie staat op de eigen computer. Het programma is gratis; alleen de uitwisseling met de boekhouder is een los abonnement.
+> Gratis, lokaal boekhoudprogramma, bedoeld als werkadministratie en niet als boekhoudpakket waarin je moet leren boekhouden: de gebruiker houdt werk, bonnetjes en betalingen bij en de boekhouding komt daar vanzelf uit (desktop-app voor Windows en Linux) voor zzp'ers en kleine ondernemers in Nederland, vooral vakmensen zoals stukadoors, schilders, timmerlieden, loodgieters en elektriciens. De gebruiker werkt met klanten, klussen, offertes, facturen, bonnetjes en de bank; het programma maakt daar automatisch een dubbele boekhouding van (RGS-grootboekschema) en rekent de btw-aangifte uit. Geen account, de administratie staat op de eigen computer. Het programma is gratis; alleen de uitwisseling met de boekhouder is een los abonnement.
 
 Belangrijke feiten:
 
