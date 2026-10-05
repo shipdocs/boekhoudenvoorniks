@@ -418,7 +418,8 @@ function Trips({ year }: { year: number }) {
   );
 }
 
-const PERIOD_LABEL = { dag: 'Dag', week: 'Week', maand: 'Maand' } as const;
+/** Uren leg je per week of per maand vast; één dag blijft in de lijst staan als je die eerder invoerde. */
+const PERIOD_LABEL = { week: 'Week', maand: 'Maand' } as const;
 
 /** "Week 41 (5–11 okt)", "oktober 2026" of de dag zelf. */
 function periodText(start: string, end: string | null): string {
@@ -434,7 +435,7 @@ function Hours({ year }: { year: number }) {
   const list = useLoad(() => api.hours.list(year), [year]);
   const forecast = useLoad(() => api.hours.forecast(year), [year]);
   const { run, busy } = useAction();
-  const [period, setPeriod] = useState<HoursPeriod>('dag');
+  const [period, setPeriod] = useState<HoursPeriod>('week');
   const [date, setDate] = useState(today());
   const [hours, setHours] = useState('');
   const [what, setWhat] = useState('');
@@ -472,16 +473,12 @@ function Hours({ year }: { year: number }) {
   const t = totals.data;
   const f = forecast.data;
   const range = !isIsoDate(date) ? null : period === 'week' ? weekOf(date) : period === 'maand' ? monthOf(date) : null;
-  const hint = {
-    dag: 'Wat je op die dag werkte.',
-    week: 'Het totaal over de hele week (maandag t/m zondag).',
-    maand: 'Het totaal over de hele maand.',
-  }[period];
+  const hint = period === 'maand' ? 'Het totaal over de hele maand.' : 'Het totaal over de hele week (maandag t/m zondag).';
   return (
     <>
       <p className="muted">
         Voor de zelfstandigenaftrek (en startersaftrek) moet je minstens 1.225 uur per jaar aan je bedrijf werken. Uren op de werkbonnen van je klussen tellen vanzelf mee.
-        Vul hier de rest in: offertes maken, administratie, inkopen, reistijd, of gewoon al je werk, per dag, per week of per maand.
+        Vul hier de rest in: offertes maken, administratie, inkopen, reistijd, of gewoon al je werk, per week of per maand.
       </p>
       {t && (
         <div className="card">
@@ -502,7 +499,7 @@ function Hours({ year }: { year: number }) {
       )}
       <div className="card" style={{ marginTop: 12 }}>
         <div className="chips" style={{ marginBottom: 12 }} role="group" aria-label="Periode">
-          {(Object.keys(PERIOD_LABEL) as HoursPeriod[]).map((p) => (
+          {(Object.keys(PERIOD_LABEL) as ('week' | 'maand')[]).map((p) => (
             <button key={p} className={period === p ? 'selected' : ''} onClick={() => setPeriod(p)}>Per {PERIOD_LABEL[p].toLowerCase()}</button>
           ))}
         </div>
@@ -510,20 +507,20 @@ function Hours({ year }: { year: number }) {
           {period === 'maand' ? (
             <Field label="Maand"><input type="month" value={date.slice(0, 7)} onChange={(e) => e.target.value && setDate(`${e.target.value}-01`)} /></Field>
           ) : (
-            <Field label={period === 'week' ? 'Een dag in de week' : 'Datum'}><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+            <Field label="Een dag in de week"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
           )}
-          <Field label={period === 'dag' ? 'Uren' : 'Uren in totaal'}><input value={hours} onChange={(e) => setHours(e.target.value)} inputMode="decimal" style={{ width: 110 }} /></Field>
-          <div style={{ flex: 1, minWidth: 200 }}><Field label="Wat heb je gedaan?"><input value={what} onChange={(e) => setWhat(e.target.value)} placeholder={period === 'dag' ? 'bv. offertes en administratie' : 'bv. ontwikkeling van mijn producten, offertes, administratie'} /></Field></div>
+          <Field label="Uren in totaal"><input value={hours} onChange={(e) => setHours(e.target.value)} inputMode="decimal" style={{ width: 110 }} /></Field>
+          <div style={{ flex: 1, minWidth: 200 }}><Field label="Wat heb je gedaan?"><input value={what} onChange={(e) => setWhat(e.target.value)} placeholder="bv. ontwikkeling van mijn producten, offertes, administratie" /></Field></div>
           <Button kind="primary" disabled={busy || !hours || !what || (repeat && !until)} onClick={() => void add()}>Toevoegen</Button>
         </div>
         <p className="muted" style={{ margin: '8px 0 0' }}>
           {hint}
           {range && <> Je kiest: {periodText(range.start, range.end)}.</>}
-          {period !== 'dag' && ' Een globale omschrijving is genoeg; schrijf op waar je tijd naartoe ging.'}
+          {' Een globale omschrijving is genoeg; schrijf op waar je tijd naartoe ging.'}
         </p>
         <label className="row" style={{ gap: 8, marginTop: 8, alignItems: 'center' }}>
           <input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
-          <span>Herhaal {period === 'dag' ? 'op elke werkdag' : period === 'week' ? 'elke week' : 'elke maand'} tot en met</span>
+          <span>Herhaal {period === 'week' ? 'elke week' : 'elke maand'} tot en met</span>
           <input type="date" value={until} disabled={!repeat} onChange={(e) => setUntil(e.target.value)} aria-label="Herhalen tot en met" />
         </label>
         {info && <p className="muted" style={{ margin: '8px 0 0' }}>{info}</p>}
