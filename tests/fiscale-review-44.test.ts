@@ -107,6 +107,28 @@ describe('fiscale review #44: bronbewijs en buitenlandse btw', () => {
   });
 });
 
+describe('fiscale review #44: voorstel bij een buitenlandse factuur zonder btw', () => {
+  it('stelt geen Nederlandse 21% voorbelasting voor, maar laat de btw leeg tot de gebruiker kiest', async () => {
+    const { s } = setup();
+    const doc = parseUbl(readFileSync(join(__dirname, 'fixtures/ubl-invoice.xml'), 'utf8'));
+    doc.supplierCountry = { ...doc.supplier!, value: 'US' };
+    doc.supplier = { ...doc.supplier!, value: 'Acme Inc' };
+    doc.vat.value = [];
+    doc.reverseCharge = false;
+    const c = await s.classifier.classify(doc);
+    expect(c.vatCode).toBe('geen');
+    expect(c.automatic).toBe(false);
+    expect(c.reasons.join(' ')).toContain('Controleer de btw');
+  });
+  it('een Nederlandse factuur zonder btw-gegevens houdt het gewone voorstel', async () => {
+    const { s } = setup();
+    const doc = parseUbl(readFileSync(join(__dirname, 'fixtures/ubl-invoice.xml'), 'utf8'));
+    doc.supplier = { ...doc.supplier!, value: 'Onbekende bv' };
+    doc.vat.value = [{ rate: 21, base: 10000, amount: 2100 }];
+    expect((await s.classifier.classify(doc)).vatCode).toBe('hoog');
+  });
+});
+
 describe('fiscale review #44: ICP en XBRL', () => {
   it('EU-diensten volgen het einde van de dienst, goederen de factuurdatum; hercompileren bewaart het fiscale tijdstip', () => {
     const { s } = setup();
