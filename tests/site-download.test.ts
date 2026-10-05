@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import worker, { download } from '../workers/site/src/index';
+import worker, { countPoint, download } from '../workers/site/src/index';
 
 /** De vaste downloadadressen van de website (/download/...): doorsturen naar het bestand van de nieuwste release. */
 
@@ -82,5 +82,45 @@ describe('downloadadressen op de website', () => {
     expect(index.headers.get('location')).toBe('https://boekhoudenvoorniks.nl/downloaden.html');
     const post = await worker.fetch(new Request('https://boekhoudenvoorniks.nl/download/windows', { method: 'POST' }), env);
     expect(post.status).not.toBe(302);
+  });
+});
+
+describe('anonieme tellers', () => {
+  const points: { indexes?: string[]; blobs?: string[]; doubles?: number[] }[] = [];
+  const env = { ASSETS: { fetch: async () => new Response('<html></html>', { status: 200 }) }, STATS: { writeDataPoint: (p: (typeof points)[number]) => void points.push(p) } };
+  const get = (path: string, headers: Record<string, string> = {}) => worker.fetch(new Request(`https://boekhoudenvoorniks.nl${path}`, { headers }), env);
+
+  it('telt een paginabezoek zonder IP-adres, met land en verwijzende site (alleen de host)', async () => {
+    points.length = 0;
+    await get('/starters.html', { 'cf-ipcountry': 'NL', referer: 'https://www.google.com/search?q=geheim', 'user-agent': 'Mozilla/5.0', 'cf-connecting-ip': '203.0.113.9' });
+    expect(points).toEqual([{ indexes: ['pagina'], blobs: ['pagina', '/starters.html', 'NL', 'google.com', 'mens'], doubles: [1] }]);
+    expect(JSON.stringify(points)).not.toMatch(/203\.0\.113|geheim/);
+  });
+
+  it('telt de homepage als "/" en eigen verwijzingen als intern', async () => {
+    points.length = 0;
+    await get('/', { referer: 'https://boekhoudenvoorniks.nl/waarom.html' });
+    expect(points[0]!.blobs).toEqual(['pagina', '/', '', 'intern', 'mens']);
+  });
+
+  it('telt geen afbeeldingen, stijl of onbekende bestanden, en geen robots als mens', async () => {
+    points.length = 0;
+    await get('/styles.css');
+    await get('/img/vandaag.png');
+    expect(points).toEqual([]);
+    expect(countPoint('pagina', '/', new Request('https://x/', { headers: { 'user-agent': 'Googlebot/2.1' } })).blobs[4]).toBe('bot');
+  });
+
+  it('telt een download per soort, maar geen onbekende download', async () => {
+    points.length = 0;
+    await get('/download/nergens');
+    expect(points).toEqual([]);
+    await get('/download/windows', { 'user-agent': 'Mozilla/5.0' });
+    expect(points[0]!.blobs?.slice(0, 2)).toEqual(['download', 'windows']);
+  });
+
+  it('werkt ook zonder teller (lokaal of in tests)', async () => {
+    const res = await worker.fetch(new Request('https://boekhoudenvoorniks.nl/'), { ASSETS: env.ASSETS });
+    expect(res.status).toBe(200);
   });
 });

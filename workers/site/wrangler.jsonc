@@ -14,6 +14,8 @@
     // eerst de Worker: www. omzetten naar het hoofddomein
     "run_worker_first": true
   },
+  // anonieme tellers (pagina's en downloads); uitlezen met workers/site/stats.mjs
+  "analytics_engine_datasets": [{ "binding": "STATS", "dataset": "boekhoudenvoorniks_site" }],
   "routes": [
     { "pattern": "boekhoudenvoorniks.nl", "custom_domain": true },
     { "pattern": "www.boekhoudenvoorniks.nl", "custom_domain": true }
