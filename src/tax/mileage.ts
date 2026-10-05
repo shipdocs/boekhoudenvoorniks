@@ -129,6 +129,7 @@ export class MileageService {
         ],
       });
       this.db.prepare('UPDATE trips SET journal_entry_id = ? WHERE id = ?').run(entryId, id);
+      if (input.jobId) this.db.prepare('UPDATE events SET job_id = ? WHERE id = (SELECT event_id FROM journal_entries WHERE id = ?)').run(input.jobId, entryId);
       return this.get(id);
     });
   }
