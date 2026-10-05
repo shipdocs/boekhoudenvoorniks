@@ -156,7 +156,8 @@ describe('BTW-aangifte', () => {
     expect(s.vat.checks('2026-Q3').find((c) => c.key === 'bank-open')).toMatchObject({ count: 1, blocking: true });
     expect(s.vat.exportCsv('2026-Q3')).toContain('1a;');
     const xbrl = buildVatXbrl(r, s.settings.get().company);
-    expect(xbrl).toContain('<bd-i:TurnoverSuppliesServicesGeneralTariff contextRef="Msg" unitRef="EUR" decimals="INF">1000</bd-i:TurnoverSuppliesServicesGeneralTariff>');
-    expect(xbrl).toContain('NL123456789B01');
+    expect(xbrl).toContain('<bd-i:TaxedTurnoverSuppliesServicesGeneralTariff contextRef="Msg" unitRef="EUR" decimals="INF">1000</bd-i:TaxedTurnoverSuppliesServicesGeneralTariff>');
+    expect(xbrl).toContain('123456789B01');
+    expect(xbrl).not.toContain('NL123456789B01');
   });
 });

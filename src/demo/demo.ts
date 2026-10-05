@@ -39,6 +39,7 @@ function fillDemo(s: Services, asOf: IsoDate): void {
       website: '',
       kvkNumber: '12345678',
       vatNumber: 'NL123456789B01',
+      omzetbelastingNumber: '123456789B01',
       iban,
       bic: 'ABNANL2A',
     },

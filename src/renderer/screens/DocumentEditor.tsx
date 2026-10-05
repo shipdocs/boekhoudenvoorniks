@@ -180,7 +180,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         )}
         {isInvoice && (
           <div className="row" style={{ marginTop: 12 }}>
-            <Field label="Datum levering of dienst" hint={settings.kor ? 'Mag leeg bij de KOR.' : 'Leeg = de factuurdatum. Vul in als je eerder of later leverde, of een voorschot rekent.'}>
+            <Field label="Datum levering of dienst" hint={settings.kor ? 'Mag leeg bij de KOR, behalve als de dienst in een ander tijdvak geleverd is.' : 'Leeg = de factuurdatum. Vul in als je eerder of later leverde. Bij EU-diensten bepaalt deze datum (of het einde van de periode) het btw- en ICP-tijdvak.'}>
               <input type="date" value={deliveryDate} disabled={!editable} onChange={(e) => setDeliveryDate(e.target.value)} />
             </Field>
             <Field label="t/m (alleen bij een periode)" hint="Bijvoorbeeld bij een klus van meerdere weken.">

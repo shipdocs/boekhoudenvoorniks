@@ -1,5 +1,13 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Verbeterd
+- **Schatting inkomstenbelasting: voorwaarden apart bevestigen.** Ondernemerschap, het urencriterium (1.225 uur) en de tweede voorwaarde (meer tijd aan je bedrijf dan aan ander werk, of de starteruitzondering) bevestig je nu afzonderlijk bij Instellingen. Zolang dat niet is gedaan, rekent de schatting zonder mkb-winstvrijstelling, KIA en ondernemersaftrek: **je ziet daardoor na deze update een hoger bedrag dan eerst**, met een melding wat je moet bevestigen. De arbeidskorting rekent met de vaste beginbedragen van de Belastingdienst; de tabel van 2025 is gecontroleerd.
+- **Buitenlandse btw is niet meer automatisch verlegd.** Een buitenlandse factuur zonder btw krijgt geen verlegde btw en geen 21% voorbelasting meer als voorstel: de btw blijft leeg tot je kiest. Webshoporders van buiten Nederland boek je zelf. Stripe-uitbetalingen worden pas geboekt als je bij Instellingen → Koppelingen aangeeft welke btw voor je Stripe-kosten geldt (bestaande Stripe-gebruikers krijgen tot dan een melding).
+- **EU-diensten volgen de leverdatum.** Voor btw en ICP telt de dienst- of einddatum van een EU-dienst; de factuurdatum blijft bewaard. Een EU-dienst in een ander tijdvak dan de overige regels moet op een aparte factuur. Het onderscheid met een creditnota en een correctie van een eerdere periode in de ICP-opgaaf is aangepast.
+- **Controles en uitleg.** De OSS-signalering kijkt ook naar het vorige kalenderjaar, de ICP-maandgrens en de suppletietermijn (acht weken) zijn aangepast, en de XBRL-testexport gebruikt de taxonomie voor 2026 met een apart omzetbelastingnummer.
+
 ## 1.3.0 — fiscale controles en jaarafsluiting voor je boekhouder
 
 Deze versie komt uit een review door een boekhouder-expert: meer controles op btw en inkomstenbelasting, een begeleide jaarafsluiting, en een betere aansluiting op wat de Belastingdienst vraagt.

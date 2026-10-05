@@ -317,7 +317,7 @@ export function runVatChecks(
   // plaats van heffing af van het soort dienst (bv. werk aan een gebouw: altijd in dat land). De app
   // kent het soort prestatie niet, dus: waarschuwen dat het gecontroleerd moet worden.
   const year = end.slice(0, 4);
-  const euConsumers = (
+  const consumerTurnover = (from: string, to: string) => (
     db
       .prepare(
         `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS s FROM journal_lines l
@@ -328,18 +328,21 @@ export function runVatChecks(
            AND UPPER(COALESCE(r.country, 'NL')) IN (${[...EU_COUNTRIES].filter((c) => c !== 'NL').map(() => '?').join(',')})
            AND COALESCE(r.vat_number, '') = ''`,
       )
-      .get(ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, `${year}-01-01`, end, ...[...EU_COUNTRIES].filter((c) => c !== 'NL')) as { s: number }
+      .get(ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, from, to, ...[...EU_COUNTRIES].filter((c) => c !== 'NL')) as { s: number }
   ).s;
+  const euConsumers = consumerTurnover(`${year}-01-01`, end);
+  const previousYear = String(Number(year) - 1);
+  const previousConsumers = consumerTurnover(`${previousYear}-01-01`, `${previousYear}-12-31`);
   if (euConsumers > 0) {
-    const above = euConsumers > EU_B2C_THRESHOLD;
+    const above = euConsumers > EU_B2C_THRESHOLD || previousConsumers > EU_B2C_THRESHOLD;
     found.push({
       key: above ? 'oss-drempel' : 'eu-particulier',
       blocking: false,
       title: above ? `Meer dan ${formatEuro(EU_B2C_THRESHOLD)} verkocht aan particulieren in andere EU-landen` : 'Verkocht aan particulieren in andere EU-landen: controleer de btw',
-      detail: `Dit jaar ${formatEuro(euConsumers)} met Nederlandse btw. ${
+      detail: `Dit jaar ${formatEuro(euConsumers)} met Nederlandse btw; vorig jaar ${formatEuro(previousConsumers)}. ${
         above
-          ? `Stuur je spullen op of lever je digitale diensten, dan reken je boven ${formatEuro(EU_B2C_THRESHOLD)} per jaar de btw van het land van de klant (via de "OSS-regeling").`
-          : `Voor spullen die je opstuurt en digitale diensten mag dat tot ${formatEuro(EU_B2C_THRESHOLD)} per jaar.`
+          ? `Stuur je spullen op of lever je digitale diensten, dan reken je boven ${formatEuro(EU_B2C_THRESHOLD)} in het lopende of vorige kalenderjaar de btw van het land van de klant (via de "OSS-regeling").`
+          : `Voor spullen die je opstuurt en digitale diensten mag dat tot ${formatEuro(EU_B2C_THRESHOLD)} in zowel het lopende als het vorige kalenderjaar.`
       } Voor andere diensten hangt het af van wat je doet: werk aan een huis of gebouw in dat land is bijvoorbeeld altijd belast in dat land. Dat regelt de app niet: laat je boekhouder controleren welke btw geldt.`,
       count: 1,
       fingerprint: `${year}:${above ? 'boven' : 'onder'}`,
@@ -398,7 +401,7 @@ export function runVatChecks(
       title: `Je ICP-opgaaf voor goederen moet per maand, niet per kwartaal`,
       detail:
         `Je leverde in ${overLimit.map((q) => `${q.period.label} (${formatEuro(q.amount)})`).join(' en ')} meer dan ${formatEuro(ICP_MONTHLY_GOODS_LIMIT)} aan goederen aan bedrijven in andere EU-landen. ` +
-        `Dan doe je de opgaaf intracommunautaire prestaties (ICP) voor goederen per maand, binnen een maand na afloop van elke maand, totdat je vijf kwartalen op rij onder die grens blijft. Voor diensten blijft per kwartaal genoeg. ` +
+        `Dan doe je de opgaaf intracommunautaire prestaties (ICP) voor goederen per maand, binnen een maand na afloop van elk tijdvak. De kwartaalgrens geldt voor het lopende kwartaal en de vier kwartalen ervoor. Bij overschrijding in de eerste maand geef je elke maand op; in de tweede maand de eerste twee maanden samen en daarna maandelijks; in de derde maand nog dat kwartaal en daarna maandelijks. Voor diensten blijft per kwartaal genoeg. ` +
         `Goederen per maand: ${months.join('; ')}. Het overzicht per maand zie je bij ICP met de periode van die maand.`,
       count: 1,
       fingerprint: quarters.map((q) => `${q.period.key}:${q.amount}`).join(','),

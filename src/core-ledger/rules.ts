@@ -122,6 +122,7 @@ export function splitGross(gross: Cents, percentage: number, verlegd = false): {
 /** Een expliciete boeking (handmatig, of uit de backfill van vóór het gebeurtenissenmodel). */
 export interface BoekingPayload {
   date: IsoDate;
+  vatDate?: IsoDate;
   description: string;
   source: EntrySource;
   sourceRef?: string | null;
@@ -171,6 +172,7 @@ export type DomainEvent =
 
 export interface CompiledEntry {
   date: IsoDate;
+  vatDate?: IsoDate;
   description: string;
   source: EntrySource;
   sourceRef: string | null;
@@ -183,7 +185,7 @@ export function compile(event: DomainEvent, version = RULES_VERSION): CompiledEn
   switch (event.type) {
     case 'boeking': {
       const p = event.payload;
-      return { date: p.date, description: p.description, source: p.source, sourceRef: p.sourceRef ?? null, lines: p.lines };
+      return { date: p.date, ...(p.vatDate ? { vatDate: p.vatDate } : {}), description: p.description, source: p.source, sourceRef: p.sourceRef ?? null, lines: p.lines };
     }
     case 'inkoop': {
       const p = event.payload;
