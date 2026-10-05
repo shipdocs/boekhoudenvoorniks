@@ -28,7 +28,7 @@ Belangrijke feiten:
 
 ### Is BoekhoudenVoorNiks echt gratis?
 
-Ja. Het programma is altijd gratis te downloaden en te gebruiken: geen proefperiode, geen limiet op facturen of bonnetjes en geen account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen.
+Ja. Het programma is altijd gratis te downloaden en te gebruiken: geen proefperiode, geen limiet op facturen of bonnetjes en geen account, en je administratie staat op je eigen computer. Alleen de uitwisseling met je boekhouder (een periode versturen en zijn correcties inlezen) is een los abonnement: de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw (€ 10,89 inclusief). Die heb je niet nodig om je boekhouding te doen. De optionele bankkoppeling met Ponto zit in het gratis programma; Ponto zelf is een afzonderlijke zakelijke dienst waarvan Ponto de kosten en voorwaarden bepaalt.
 
 ### Ik ben net gestart als zzp'er. Is BoekhoudenVoorNiks iets voor mij?
 
@@ -73,6 +73,10 @@ Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij 
 ### Kan ik overstappen vanuit een ander boekhoudprogramma?
 
 Ja. Kies een instapdatum en lees een auditfile (XAF) uit je vorige programma in, of het overzicht van je boekhouder (kolommen- of saldibalans en openstaande facturen). Heb je een auditfile per jaar, dan zet je ze allemaal tegelijk neer. De app vult je startbalans in; jij kijkt het na.
+
+### Kan mijn bank automatisch worden opgehaald?
+
+Ja, vanaf versie 1.2.0 en optioneel, met Ponto: een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit, met je eigen Client ID en Client Secret. De app haalt je betalingen dan zelf op, rechtstreeks bij Ponto; ShipDocs ziet je bankgegevens niet. Een wizard leidt je in vijf stappen langs Ponto. Wat Ponto kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto. De app zegt tot welke datum de betalingen volledig zijn bijgewerkt, en afschriften inlezen blijft de basis en terugval.
 
 ### Welke banken worden ondersteund?
 
