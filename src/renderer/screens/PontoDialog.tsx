@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, Field, Modal, useAction, useApp, useLoad } from '../ui';
-import { pontoAccountStatusText, pontoCooldownText, pontoLinkText } from '../../shared/bank-feed-text';
+import { pontoAccountStatusText, pontoCooldownText, pontoErrorKindText, pontoLinkText } from '../../shared/bank-feed-text';
 import type { FeedAccountInfo, FeedLink, FeedTestAccount, RoundSummary } from '../../bankfeed/bankfeed';
 
 const PONTO_DASHBOARD = 'https://dashboard.myponto.com';
@@ -234,12 +234,15 @@ function PontoAccountRow({ account, onRefresh, busy, cooldown }: { account: Feed
 export function PontoCard({ initialStep, focusAccountId }: { initialStep?: number; focusAccountId?: number }) {
   const { toast } = useApp();
   const status = useLoad(() => api.bankfeed.status());
-  const { run, busy } = useAction();
+  const { busy: busyOther } = useAction();
+  const [busyManual, setBusyManual] = useState(false);
+  const busy = busyOther || busyManual;
   const [wizard, setWizard] = useState<number | null>(initialStep ?? null);
   const [privacyAccount, setPrivacyAccount] = useState<FeedAccountInfo | null>(null);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [disconnect, setDisconnect] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [lastAction, setLastAction] = useState<{ at: Date; ok: boolean; lines: string[] } | null>(null);
   const [cooldowns, setCooldowns] = useState<Record<number, string>>({});
   const focused = useMemo(() => status.data?.accounts.find((account) => account.id === focusAccountId), [status.data, focusAccountId]);
 
@@ -256,11 +259,31 @@ export function PontoCard({ initialStep, focusAccountId }: { initialStep?: numbe
     if (initialStep != null) setWizard(initialStep);
   }, [initialStep]);
 
+  const track = async (label: string, fn: () => Promise<{ allowed?: boolean; allowedAt?: string; summary?: RoundSummary } | RoundSummary>, accountId?: number) => {
+    let outcome: { ok: boolean; lines: string[] };
+    try {
+      const result = await fn();
+      const summary: RoundSummary | undefined = 'summary' in result ? result.summary : 'failed' in result ? (result as RoundSummary) : undefined;
+      if ('allowed' in result && result.allowed === false && accountId !== undefined && result.allowedAt) {
+        const allowedAt = result.allowedAt;
+        setCooldowns((current) => ({ ...current, [accountId]: allowedAt }));
+        outcome = { ok: false, lines: [`${label}: nog niet toegestaan, probeer het ${pontoCooldownText(allowedAt).toLowerCase()}.`] };
+      } else {
+        const failed = summary?.failed ?? [];
+        const imported = summary?.accounts.reduce((sum, a) => sum + a.imported, 0) ?? 0;
+        outcome = failed.length === 0
+          ? { ok: true, lines: [`${label}: gelukt. ${imported} nieuwe transactie${imported === 1 ? '' : 's'} geïmporteerd.`] }
+          : { ok: false, lines: [`${label}: niet volledig gelukt.`, ...failed.map((f) => `${f.subtype === 'accountDetails' ? 'Saldo' : f.subtype === 'accountTransactions' ? 'Transacties' : 'Rekening'}: ${pontoErrorKindText(f.errorKind)}`)] };
+      }
+    } catch (e) {
+      outcome = { ok: false, lines: [`${label}: mislukt. ${(e as Error).message}`] };
+    }
+    setLastAction({ at: new Date(), ...outcome });
+    await status.reload();
+  };
   const refresh = async (account: FeedAccountInfo) => {
     if (!privacyAccepted) return setPrivacyAccount(account);
-    const result = await run(() => api.bankfeed.bijwerken(account.id));
-    if (result && !result.allowed) setCooldowns((current) => ({ ...current, [account.id]: result.allowedAt }));
-    await status.reload();
+    await refreshAfterAcceptance(account);
   };
   const acceptPrivacy = async () => {
     const account = privacyAccount;
@@ -269,9 +292,8 @@ export function PontoCard({ initialStep, focusAccountId }: { initialStep?: numbe
     if (account) await refreshAfterAcceptance(account);
   };
   const refreshAfterAcceptance = async (account: FeedAccountInfo) => {
-    const result = await run(() => api.bankfeed.bijwerken(account.id));
-    if (result && !result.allowed) setCooldowns((current) => ({ ...current, [account.id]: result.allowedAt }));
-    await status.reload();
+    setBusyManual(true);
+    try { await track(`Handmatig bijwerken (${account.name})`, () => api.bankfeed.bijwerken(account.id), account.id); } finally { setBusyManual(false); }
   };
   const remove = async () => {
     setRemoving(true);
@@ -292,11 +314,12 @@ export function PontoCard({ initialStep, focusAccountId }: { initialStep?: numbe
       <div className="row between"><div><h2 style={{ margin: 0 }}>Bank automatisch ophalen met Ponto</h2><p className="small muted" style={{ margin: '4px 0 0' }}>Ponto is een afzonderlijke zakelijke dienst.</p></div>{status.data?.configured && <span className="pill good">gekoppeld</span>}</div>
       {status.error && <div role="alert" className="notice bad">{status.error}</div>}
       {status.loading && <div role="status">Ponto-status laden…</div>}
+      {lastAction && <div role={lastAction.ok ? 'status' : 'alert'} className={`notice ${lastAction.ok ? 'good' : 'bad'}`}><strong>{lastAction.at.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</strong>{lastAction.lines.map((line) => <div key={line}>{line}</div>)}<button type="button" className="btn small" onClick={() => setLastAction(null)}>Sluiten</button></div>}
       {focused && <div role="status" className="small">Deze rekening hoort bij de melding die je opende.</div>}
       {(status.data?.accounts ?? []).map((account) => <PontoAccountRow key={account.id} account={account} busy={busy} cooldown={cooldownFor(account)} onRefresh={(selected) => void refresh(selected)} />)}
       <div className="row">
         {!status.data?.configured && <Button kind="primary" onClick={() => setWizard(0)}>Ponto instellen</Button>}
-        {status.data?.configured && <Button disabled={busy} onClick={async () => { await run(() => api.bankfeed.ophalen(), 'Bank bijgewerkt'); await status.reload(); }}>Nu ophalen</Button>}
+        {status.data?.configured && <Button disabled={busy} onClick={async () => { setBusyManual(true); try { await track('Bank ophalen', () => api.bankfeed.ophalen()); } finally { setBusyManual(false); } }}>Nu ophalen</Button>}
         {status.data?.configured && <Button onClick={() => setWizard(4)}>Opnieuw plakken</Button>}
         {status.data?.configured && <Button kind="danger" onClick={() => setDisconnect(true)}>Ontkoppelen</Button>}
       </div>
