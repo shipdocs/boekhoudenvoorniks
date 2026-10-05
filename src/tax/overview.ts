@@ -471,8 +471,8 @@ export class TaxOverviewService {
         key: `energie-${a.id}`,
         label: `Misschien extra aftrek: ${a.name}`,
         amount: null,
-        explain: `Voor sommige energiezuinige of milieuvriendelijke aankopen krijg je veel extra aftrek. Dat moet je wel snel aanvragen. Vraag je boekhouder vóór ${deadline} of dit meetelt.`,
-        note: `Mogelijk EIA/MIA/Vamil (Energielijst/Milieulijst). Melden bij RVO binnen 3 maanden na opdracht; aankoopdatum ${a.acquired_on}.`,
+        explain: `Voor sommige energiezuinige of milieuvriendelijke aankopen krijg je veel extra aftrek. Dat moet je wel snel aanvragen, binnen 3 maanden na de dag dat je bestelde (niet na de factuur- of betaaldatum). Vraag je boekhouder uiterlijk vóór ${deadline} of dit meetelt; bestelde je eerder dan de aankoopdatum, dan is er minder tijd.`,
+        note: `Mogelijk EIA/MIA/Vamil (Energielijst/Milieulijst). Aanvragen bij RVO binnen 3 maanden na de besteldatum; de datum hierboven gaat uit van de aankoopdatum ${a.acquired_on}.`,
         status: 'warn',
       });
     }
@@ -501,7 +501,9 @@ export class TaxOverviewService {
       status: 'info',
     });
     if (fallback) {
-      items.push({ key: 'regels', label: `Bedragen van ${rules.year}`, amount: null, explain: `Voor ${year} kent de app nog niet alle bedragen.`, note: `Gerekend met de tabel van ${rules.year} (plus bekende wijzigingen); controleren.`, forAccountant: true, status: 'warn' });
+      // De startersaftrek van € 10 (2027) en € 0 (2028) staat in het voorstel Belastingplan 2027 en is nog niet aangenomen.
+      const voorstel = year >= 2027 ? ` De startersaftrek is hierin € ${rules.startersaftrek.toLocaleString('nl-NL')}: dat is het voorstel in het Belastingplan 2027 (nog niet aangenomen door de Tweede en Eerste Kamer). Wordt het voorstel niet aangenomen, dan blijft de startersaftrek hoger.` : '';
+      items.push({ key: 'regels', label: `Bedragen van ${rules.year}`, amount: null, explain: `Voor ${year} kent de app nog niet alle bedragen.${voorstel}`, note: `Gerekend met de tabel van ${rules.year} (plus bekende wijzigingen); controleren.`, forAccountant: true, status: 'warn' });
     }
     return {
       year,

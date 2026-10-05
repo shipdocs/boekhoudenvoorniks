@@ -16,6 +16,18 @@ describe('Bijtelling auto van de zaak: pure berekening', () => {
     const r = carBijtellingForYear([car({ catalogValue: 3000000, registeredOn: '2010-05-01', marketValue: 400000 })], 2026);
     expect(r.annual).toBe(Math.round((3000000 * 22 * 4) / 1200 + (400000 * 35 * 8) / 1200));
   });
+  it('tot en met 2025 geldt 15 jaar, vanaf 2026 16 jaar (eerste tenaamstelling 1 mei 2010)', () => {
+    const c = car({ catalogValue: 3000000, registeredOn: '2010-05-01', marketValue: 400000 });
+    // 2025: 15 jaar op 1 mei 2025, dus 8 maanden dagwaarde; 2026: 16 jaar op 1 mei 2026, dus ook 8 maanden
+    expect(carBijtellingForYear([c], 2025).annual).toBe(Math.round((3000000 * 22 * 4) / 1200 + (400000 * 35 * 8) / 1200));
+    // eerste tenaamstelling 1 december 2010: 15 jaar op 1 dec 2025, 16 jaar op 1 dec 2026
+    const d = car({ catalogValue: 3000000, registeredOn: '2010-12-01', marketValue: 400000 });
+    expect(carBijtellingForYear([d], 2025).annual).toBe(Math.round((3000000 * 22 * 11) / 1200 + (400000 * 35 * 1) / 1200));
+    expect(carBijtellingForYear([d], 2026).annual).toBe(Math.round((3000000 * 22 * 11) / 1200 + (400000 * 35 * 1) / 1200));
+    // een auto van 1 juli 2010 is in 2026 nog geen 16, maar was in 2025 al 15 geworden (vanaf juli 2025 dagwaarde)
+    const e = car({ catalogValue: 3000000, registeredOn: '2010-07-01', marketValue: 400000 });
+    expect(carBijtellingForYear([e], 2025).annual).toBe(Math.round((3000000 * 22 * 6) / 1200 + (400000 * 35 * 6) / 1200));
+  });
   it('ouder dan 16 jaar zonder dagwaarde: gegevens ontbreken', () => {
     expect(carBijtellingForYear([car({ registeredOn: '2005-01-01' })], 2026).incomplete).toEqual(['Auto']);
   });

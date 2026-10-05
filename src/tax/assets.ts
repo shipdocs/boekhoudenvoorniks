@@ -2,7 +2,7 @@ import { tx, type Db } from '../db/database';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { NON_DEDUCTIBLE_VAT } from '../core-ledger/rules';
 import type { Ledger, PostLine } from '../core-ledger/ledger';
-import { addDays, today, type IsoDate } from '../shared/dates';
+import { addMonths, today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
 
@@ -274,7 +274,8 @@ export class AssetService {
     const external = a.booked_elsewhere_until === null ? 0 : Number(asOf.slice(0, 4)) <= a.booked_elsewhere_until
       ? cumulativeDepreciation(a, Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7))) : this.elsewhere(a, a.booked_elsewhere_until);
     const booked = this.booked(a.id, undefined, asOf) + external;
-    const deadline = addDays(a.acquired_on, 91);
+    // RVO: aanvragen binnen 3 maanden na de besteldatum. De app kent alleen de aankoopdatum; bestelde je eerder, dan is de termijn korter.
+    const deadline = addMonths(a.acquired_on, 3);
     return {
       ...a,
       booked,

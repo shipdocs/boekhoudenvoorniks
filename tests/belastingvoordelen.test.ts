@@ -43,6 +43,15 @@ describe('KIA en beperkt aftrekbare kosten', () => {
     expect(rulesFor(2026).rules.zelfstandigenaftrek).toBe(1200);
   });
 
+  it('overzicht 2027: startersaftrek € 10 wordt als voorstel genoemd, niet als vaststaand', () => {
+    const { s } = setup();
+    const item = s.taxOverview.year(2027, '2027-03-01').items.find((i) => i.key === 'regels');
+    expect(item?.explain).toMatch(/voorstel in het Belastingplan 2027/);
+    expect(item?.explain).toMatch(/nog niet aangenomen/);
+    // voor 2026 staat er geen voorstel-tekst
+    expect(s.taxOverview.year(2026, '2026-03-01').items.find((i) => i.key === 'regels')).toBeUndefined();
+  });
+
   it('startersaftrek: max 3× in de eerste 5 jaar, niet meer vanaf 2028', () => {
     const s = { startYear: 2025, startersaftrekUsed: { count: 0, asOfYear: 2026 } };
     expect(isStarter(s, 2026)).toBe(true);
@@ -61,6 +70,16 @@ describe('bedrijfsmiddelen en afschrijving', () => {
     expect(cumulativeDepreciation(a, 2025, 12)).toBe(30000);
     expect(cumulativeDepreciation(a, 2030, 6)).toBe(300000);
     expect(cumulativeDepreciation(a, 2035, 12)).toBe(300000);
+  });
+
+  it('EIA/MIA-hint: drie kalendermaanden na de aankoopdatum, nooit 91 dagen', () => {
+    const { s } = setup();
+    buy(s, '2026-11-30', 3630_00, 'Zonnepanelen');
+    const a = s.assets.list({}, '2026-12-01')[0]!;
+    expect(a.energyHint).toEqual({ deadline: '2027-02-28' });
+    expect(s.assets.list({}, '2027-03-01')[0]!.energyHint).toBeNull();
+    buy(s, '2026-10-10', 3630_00, 'Warmtepomp');
+    expect(s.assets.list({}, '2026-12-01').find((x) => x.name === 'Warmtepomp')!.energyHint).toEqual({ deadline: '2027-01-10' });
   });
 
   it('aankoop wordt bedrijfsmiddel; afgesloten jaar wordt geboekt, en maar één keer', () => {
