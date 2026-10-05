@@ -13,6 +13,7 @@ import { CheckItems } from './CheckItems';
 import type { CheckItem } from '../../btw/checks';
 import type { UploadResult } from '../../intake/intake';
 import { UploadBlocked } from './UploadOutcome';
+import { FetchBar } from './FetchBar';
 
 // bon bekijken: pas laden als je er een opent (PDF.js is groot)
 const DocumentPreview = lazy(() => import('./DocumentReview').then((m) => ({ default: m.DocumentPreview })));
@@ -158,6 +159,8 @@ export function Home() {
       </p>
 
       <GettingStarted />
+
+      <FetchBar onFetched={async () => { await reload(); refreshBadge(); }} />
 
       <h2>Wat wil je doen?</h2>
       <div className="actions4">
