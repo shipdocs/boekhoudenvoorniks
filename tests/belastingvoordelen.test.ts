@@ -211,6 +211,8 @@ describe('kilometers, uren en privéauto', () => {
     expect(s.hours.add({ date: '2026-07-10', hours: 100, description: 'Werk', period: 'maand', repeatUntil: '2026-09-30' })).toHaveLength(3);
     expect(() => s.hours.add({ date: '2026-06-06', hours: 6, description: 'Werk', repeatUntil: '2026-06-07' })).toThrow(/geen werkdag/);
     expect(() => s.hours.add({ date: '2026-06-06', hours: 6, description: 'Werk', repeatUntil: '2026-06-01' })).toThrow(/na de begindatum/);
+    // een herhaling ver in de toekomst wordt snel afgewezen
+    expect(() => s.hours.check({ date: '2026-06-01', hours: 6, description: 'Werk', repeatUntil: '9999-12-31' })).toThrow(/te veel regels/);
   });
 
   it('uren: waarschuwing bij dubbel tellen en onwaarschijnlijke aantallen', () => {
@@ -222,6 +224,9 @@ describe('kilometers, uren en privéauto', () => {
     const w = s.hours.check({ date: '2026-02-12', hours: 100, description: 'x', period: 'maand' }).warnings;
     expect(w[0]).toMatch(/al 12 uur \(waarvan 8 op werkbonnen\)/);
     expect(s.hours.check({ date: '2026-02-03', hours: 10, description: 'x' }).warnings.join(' ')).toMatch(/meer dan 16 uur per dag/);
+    // een maandregel die in meerdere herhaalde weken valt, telt één keer
+    s.hours.add({ date: '2026-05-01', hours: 100, description: 'Maand', period: 'maand' });
+    expect(s.hours.check({ date: '2026-05-04', hours: 10, description: 'x', period: 'week', repeatUntil: '2026-05-25' }).warnings[0]).toMatch(/al 100 uur/);
   });
 
   it('uren: prognose voor wie halverwege het jaar begint', () => {
@@ -233,9 +238,13 @@ describe('kilometers, uren en privéauto', () => {
     expect(f.perWeekNeeded).toBeCloseTo(1125 / (88 / 7), 0);
     expect(f.perWeekNow).toBeCloseTo((100 / 35) * 7, 0); // 1 sep t/m 5 okt = 35 dagen
     expect(f.reachDate).toBeNull(); // op dat tempo niet voor 31 december
-    s.hours.add({ date: '2026-10-01', hours: 700, description: 'Eerdere uren dit jaar', period: 'maand' });
-    s.hours.add({ date: '2026-08-01', hours: 500, description: 'Eerdere uren dit jaar', period: 'maand' });
-    expect(s.hours.forecast(2026, '2026-10-05', 1225)).toMatchObject({ remaining: 0, perWeekNeeded: 0 });
+    // een maand die nog loopt telt naar verhouding mee: 5 van 31 dagen van 620 uur = 100 uur gedaan, 520 gepland
+    s.hours.add({ date: '2026-10-01', hours: 620, description: 'Lopende maand', period: 'maand' });
+    expect(s.hours.forecast(2026, '2026-10-05', 1225)).toMatchObject({ total: 200, planned: 520, remaining: 1025 });
+    // gepland telt niet als gehaald; alleen gewerkte uren
+    s.hours.add({ date: '2026-07-01', hours: 700, description: 'Eerdere uren dit jaar', period: 'maand' });
+    s.hours.add({ date: '2026-08-01', hours: 700, description: 'Eerdere uren dit jaar', period: 'maand' });
+    expect(s.hours.forecast(2026, '2026-10-05', 1225)).toMatchObject({ total: 1600, remaining: 0, perWeekNeeded: 0 });
   });
 
   it('privéauto: tanken wordt een privé-vraag, nooit automatisch zakelijk', () => {
