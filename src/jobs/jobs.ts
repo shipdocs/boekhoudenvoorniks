@@ -50,6 +50,17 @@ export interface JobResult {
   marginPct: number | null;
 }
 
+/** Eén kostenpost op een klus: een aankoop, een direct geboekte betaling of iets anders (bv. kilometers). */
+export interface JobCostItem {
+  kind: 'aankoop' | 'bank' | 'overig';
+  purchaseId: number | null;
+  bankTransactionId: number | null;
+  date: IsoDate;
+  label: string;
+  /** netto, exclusief btw */
+  amount: Cents;
+}
+
 export interface WorkItem {
   id: number;
   job_id: number;
@@ -185,6 +196,32 @@ export class JobService {
     const byLabel = new Map<string, number>();
     for (const r of rows) byLabel.set(COST_LABEL(r.rgs_code), (byLabel.get(COST_LABEL(r.rgs_code)) ?? 0) + r.net);
     return ['Materiaal', 'Uitbesteed werk', 'Overige kosten'].filter((l) => byLabel.get(l)).map((label) => ({ label, amount: byLabel.get(label)! }));
+  }
+
+  /** De kostenposten achter het klusresultaat, elk met de bron waarmee je hem kunt verplaatsen of loskoppelen. */
+  costItems(id: number): JobCostItem[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ev.type, ev.event_date AS date,
+           (SELECT SUM(l.debit) - SUM(l.credit) FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = e.id AND a.category = 'kosten') AS net,
+           (SELECT p.id FROM purchase_invoices p WHERE p.journal_entry_id = e.id) AS purchase_id,
+           (SELECT COALESCE(r.name, p.description) FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id WHERE p.journal_entry_id = e.id) AS purchase_label,
+           (SELECT b.id FROM bank_transactions b WHERE b.matched_journal_entry_id = e.id ORDER BY b.id LIMIT 1) AS bank_id,
+           (SELECT b.counter_name FROM bank_transactions b WHERE b.matched_journal_entry_id = e.id ORDER BY b.id LIMIT 1) AS bank_label
+         FROM journal_entries e JOIN events ev ON ev.id = e.event_id
+         WHERE ev.job_id = ?
+         ORDER BY ev.event_date DESC, e.id DESC`,
+      )
+      .all(id) as { type: string; date: IsoDate; net: number | null; purchase_id: number | null; purchase_label: string | null; bank_id: number | null; bank_label: string | null }[];
+    return rows
+      .filter((r) => r.net)
+      .map((r) =>
+        r.purchase_id !== null
+          ? { kind: 'aankoop' as const, purchaseId: r.purchase_id, bankTransactionId: null, date: r.date, label: r.purchase_label ?? 'Aankoop', amount: r.net! }
+          : r.bank_id !== null
+            ? { kind: 'bank' as const, purchaseId: null, bankTransactionId: r.bank_id, date: r.date, label: r.bank_label ?? 'Betaling', amount: r.net! }
+            : { kind: 'overig' as const, purchaseId: null, bankTransactionId: null, date: r.date, label: 'Overige kosten', amount: r.net! },
+      );
   }
 
   result(id: number): JobResult {
