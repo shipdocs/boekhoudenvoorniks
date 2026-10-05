@@ -139,4 +139,19 @@ describe('kosten aan een klus herstelbaar (kostenplaatsen)', () => {
     expect(s.jobs.result(a.id).totalCosts).toBe(0);
     expect(s.jobs.result(b.id).totalCosts).toBe(20000);
   });
+
+  it('kilometers tellen mee bij de klus, zijn te verplaatsen en verdwijnen bij weghalen', () => {
+    const { s, klant } = setup();
+    const a = s.jobs.create({ relationId: klant.id, title: 'Badkamer' });
+    const b = s.jobs.create({ relationId: klant.id, title: 'Dakgoot' });
+    const rit = s.mileage.add({ date: '2026-09-02', km: 80, description: 'Utrecht', jobId: a.id });
+    expect(s.jobs.costItems(a.id)).toMatchObject([{ kind: 'rit', tripId: rit.id, label: '80 km: Utrecht', amount: rit.amount }]);
+    expect(s.jobs.result(a.id).totalCosts).toBe(rit.amount);
+    s.jobs.linkTrip(rit.id, b.id);
+    expect(s.jobs.result(a.id).totalCosts).toBe(0);
+    expect(s.jobs.result(b.id).totalCosts).toBe(rit.amount);
+    s.mileage.remove(rit.id);
+    expect(s.jobs.costItems(b.id)).toEqual([]);
+    expect(s.jobs.result(b.id).totalCosts).toBe(0);
+  });
 });

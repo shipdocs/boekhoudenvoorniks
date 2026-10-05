@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { LinkJobModal } from './Jobs';
 import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
 import { formatDateNl, isIsoDate, isoWeek, monthOf, today, weekOf } from '../../shared/dates';
 import type { HoursPeriod, TimeEntry } from '../../tax/mileage';
@@ -375,11 +376,16 @@ function Trips({ year }: { year: number }) {
   const [date, setDate] = useState(today());
   const [km, setKm] = useState('');
   const [what, setWhat] = useState('');
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [linking, setLinking] = useState<{ id: number; description: string; job_id: number | null } | null>(null);
+  const jobs = useLoad(() => api.jobs.list());
+  const jobName = (id: number | null) => { const j = (jobs.data ?? []).find((x) => x.id === id); return j ? `${j.relation_name} · ${j.title}` : null; };
   const add = async () => {
-    const r = await run(() => api.mileage.add({ date, km: Number(km.replace(',', '.')), description: what }), 'Rit toegevoegd');
+    const r = await run(() => api.mileage.add({ date, km: Number(km.replace(',', '.')), description: what, jobId }), 'Rit toegevoegd');
     if (r) {
       setKm('');
       setWhat('');
+      setJobId(null);
       await list.reload();
     }
   };
@@ -395,6 +401,14 @@ function Trips({ year }: { year: number }) {
         <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label="Kilometers"><input value={km} onChange={(e) => setKm(e.target.value)} inputMode="decimal" style={{ width: 110 }} /></Field>
         <div style={{ flex: 1, minWidth: 200 }}><Field label="Waarheen / waarvoor"><input value={what} onChange={(e) => setWhat(e.target.value)} placeholder="bv. klant Jansen, Utrecht (heen en terug)" /></Field></div>
+        {(jobs.data ?? []).some((j) => j.status !== 'geannuleerd' && j.status !== 'gefactureerd') && (
+          <Field label="Voor een klus? (optioneel)">
+            <select value={jobId ?? ''} onChange={(e) => setJobId(Number(e.target.value) || null)}>
+              <option value="">Nee / algemeen</option>
+              {(jobs.data ?? []).filter((j) => ['gepland', 'bezig', 'klaar'].includes(j.status)).map((j) => <option key={j.id} value={j.id}>{j.title} — {j.relation_name}</option>)}
+            </select>
+          </Field>
+        )}
         <Button kind="primary" disabled={busy || !km || !what} onClick={() => void add()}>Toevoegen</Button>
       </div>
       {(list.data ?? []).length > 0 && (
@@ -404,16 +418,17 @@ function Trips({ year }: { year: number }) {
             {list.data!.map((t) => (
               <tr key={t.id}>
                 <td><DateNl date={t.trip_date} /></td>
-                <td>{t.description}</td>
+                <td>{t.description}{t.job_id !== null && <div className="small muted">🔨 {jobName(t.job_id) ?? 'Klus'}</div>}</td>
                 <td className="num">{t.km.toLocaleString('nl-NL')}</td>
                 <td className="num"><Euro cents={t.amount} /></td>
-                <td><Button small kind="ghost" onClick={async () => { if (await run(async () => { await api.mileage.remove(t.id); return true; })) await list.reload(); }}>Weghalen</Button></td>
+                <td><span className="row"><Button small kind="ghost" title="Voor welke klus was deze rit? Of algemeen" ariaLabel="Klus kiezen" onClick={() => setLinking(t)}>🔨</Button><Button small kind="ghost" onClick={async () => { if (await run(async () => { await api.mileage.remove(t.id); return true; })) await list.reload(); }}>Weghalen</Button></span></td>
               </tr>
             ))}
             <tr><td /><td><strong>Totaal {year}</strong></td><td className="num"><strong>{Math.round(total.km * 10) / 10}</strong></td><td className="num"><strong><Euro cents={total.amount} /></strong></td><td /></tr>
           </tbody>
         </table>
       )}
+      {linking && <LinkJobModal title={linking.description} current={linking.job_id} onClose={() => setLinking(null)} onPick={async (to) => { const l = linking; if (await run(async () => { await api.jobs.linkTrip(l.id, to); return true; }, to === null ? 'Rit is nu algemeen ✓' : 'Rit gekoppeld aan de klus ✓')) { setLinking(null); await list.reload(); } }} />}
     </>
   );
 }

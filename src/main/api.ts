@@ -1034,6 +1034,7 @@ export function createApi(s: Services, host: HostContext) {
       },
       linkPurchase: (purchaseId: number, jobId: number | null) => s.jobs.linkPurchase(purchaseId, jobId),
       linkBankTransaction: (txId: number, jobId: number | null) => s.jobs.linkBankTransaction(txId, jobId),
+      linkTrip: (tripId: number, jobId: number | null) => s.jobs.linkTrip(tripId, jobId),
       costItems: (id: number) => s.jobs.costItems(id),
       workItems: (id: number) => s.jobs.workItems(id),
       addWorkItem: (id: number, item: { date: IsoDate; description: string; quantity: number; unit?: string | null; unitPrice: Cents; vatCode: string }) => s.jobs.addWorkItem(id, item),
