@@ -89,8 +89,8 @@ describe('demo', () => {
     expect(st.onboardingDone).toBe(true);
     expect(pendingSteps(st)).toEqual([]);
     expect(s.invoices.list().length).toBe(5);
-    expect(s.invoices.list({ status: 'betaald' }).length).toBe(2);
-    expect(s.invoices.list({ status: 'vervallen' }).length).toBe(1);
+    expect(s.invoices.list({ status: 'betaald' }, '2026-09-26').length).toBe(2);
+    expect(s.invoices.list({ status: 'vervallen' }, '2026-09-26').length).toBe(1);
     expect(s.quotes.list().length).toBe(2);
     expect(s.jobs.list({ active: true }).length).toBe(1);
     expect(s.ledger.checkIntegrity()).toMatchObject({ balanced: true });
@@ -121,7 +121,7 @@ describe('demo', () => {
   it('verstuurt in de demo geen e-mail', async () => {
     const s = emptyServices();
     seedDemo(s, '2026-09-26');
-    const inv = s.invoices.list({ status: 'openstaand' })[0]!;
+    const inv = s.invoices.list({ status: 'openstaand' }, '2026-09-26')[0]!;
     await expect(s.sender.sendInvoice(inv.id)).rejects.toThrow(/demo/);
   });
 });
