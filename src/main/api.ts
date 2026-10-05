@@ -1524,7 +1524,9 @@ export function createApi(s: Services, host: HostContext) {
       add: (input: HoursInput) => s.hours.add(input),
       check: (input: HoursInput) => s.hours.check(input),
       forecast: (year: number) => s.hours.forecast(year, today(), rulesFor(year).rules.urencriterium),
+      update: (id: number, input: Omit<HoursInput, 'repeatUntil'>) => s.hours.update(id, input),
       remove: (id: number) => s.hours.remove(id),
+      removeMany: (ids: number[]) => s.hours.removeMany(ids),
     },
     /**
      * Claude Code en Codex: de app installeert niets en zoekt pas als de gebruiker daarom vraagt.
