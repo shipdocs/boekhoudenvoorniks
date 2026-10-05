@@ -31,6 +31,18 @@ export interface PurchaseLineInput {
   vatCode: PurchaseVatCode;
   /** optioneel afwijkend BTW-bedrag (zoals op de bon); anders berekend */
   vatAmount?: Cents;
+  /** verlegde inkoop (verlegd/eu/buiten-eu): tarief van de prestatie, 9 of 21; ontbreekt = 21 (#316) */
+  vatRate?: ReverseChargeRate;
+}
+
+export type ReverseChargeRate = 9 | 21;
+
+/** Tarief waartegen de btw van deze regel wordt berekend; bij verlegging 21% tenzij de prestatie onder het lage tarief valt. */
+export function purchaseRate(line: Pick<PurchaseLineInput, 'vatCode' | 'vatRate'>): number {
+  if (line.vatRate === undefined) return PURCHASE_VAT_RATES[line.vatCode].percentage;
+  if (!isReverseCharge(line.vatCode)) throw new ValidationError('Een ander tarief kan alleen bij verlegde btw');
+  if (line.vatRate !== 9 && line.vatRate !== 21) throw new ValidationError('Kies bij verlegde btw 9% of 21%');
+  return line.vatRate;
 }
 
 /**
@@ -48,13 +60,14 @@ export function purchaseVat(line: PurchaseLineInput): Cents {
   if (!isPurchaseVatCode(line.vatCode)) throw new ValidationError('Kies een btw-tarief');
   if (line.vatAmount !== undefined) {
     assertCents(line.vatAmount, 'btw-bedrag');
-    if (PURCHASE_VAT_RATES[line.vatCode].percentage === 0 && line.vatAmount !== 0) throw new ValidationError('Bij geen btw of 0% hoort geen btw-bedrag');
+    const rate = purchaseRate(line);
+    if (rate === 0 && line.vatAmount !== 0) throw new ValidationError('Bij geen btw of 0% hoort geen btw-bedrag');
     if ((line.netAmount >= 0 && line.vatAmount < 0) || (line.netAmount <= 0 && line.vatAmount > 0)) throw new ValidationError('Het btw-bedrag moet hetzelfde teken hebben als het bedrag exclusief btw');
-    const max = roundHalfAwayFromZero(Math.abs(line.netAmount) * PURCHASE_VAT_RATES[line.vatCode].percentage / 100);
+    const max = roundHalfAwayFromZero(Math.abs(line.netAmount) * rate / 100);
     if (Math.abs(line.vatAmount) > max + 2) throw new ValidationError('Het btw-bedrag is hoger dan het gekozen tarief toelaat');
     return line.vatAmount;
   }
-  return roundHalfAwayFromZero((line.netAmount * PURCHASE_VAT_RATES[line.vatCode].percentage) / 100);
+  return roundHalfAwayFromZero((line.netAmount * purchaseRate(line)) / 100);
 }
 
 /**
@@ -141,6 +154,8 @@ export interface BankCategoriePayload {
   account: string;
   accountCategory: AccountCategory;
   vatCode: string;
+  /** verlegde inkoop: 9 als de prestatie onder het lage tarief valt; ontbreekt = 21 (#316) */
+  vatRate?: 9;
   relationId: number | null;
   description: string;
   /** verkoop via een ander systeem: de naam die de gebruiker gaf, bv. "Mollie" of "webshop" */
@@ -202,11 +217,11 @@ export function bankCategoryLines(p: BankCategoriePayload): PostLine[] {
   const vatCode = p.vatCode;
   if (p.accountCategory === 'kosten' || (p.accountCategory === 'activa' && (p.amount < 0 || p.account === ACCOUNTS.inventaris || p.account === ACCOUNTS.vervoermiddelen))) {
     if (!isPurchaseVatCode(vatCode)) throw new ValidationError('Kies een ander btw-tarief');
-    const rate = PURCHASE_VAT_RATES[vatCode];
+    const rate = purchaseRate({ vatCode, vatRate: p.vatRate });
     // een negatieve transactie is een uitgave; een positieve op een kostenrekening is een terugbetaling
     const gross = -p.amount;
-    const { net, vat } = splitGross(gross, rate.percentage, isReverseCharge(vatCode));
-    return expenseLines([{ account: p.account, netAmount: net, vatCode, vatAmount: vat, description: p.description }], p.bankAccount, p.relationId, p.description, { noVatDeduction: p.noVatDeduction, businessPct: p.businessPct }).lines;
+    const { net, vat } = splitGross(gross, rate, isReverseCharge(vatCode));
+    return expenseLines([{ account: p.account, netAmount: net, vatCode, vatAmount: vat, ...(p.vatRate ? { vatRate: p.vatRate } : {}), description: p.description }], p.bankAccount, p.relationId, p.description, { noVatDeduction: p.noVatDeduction, businessPct: p.businessPct }).lines;
   }
   if (p.accountCategory === 'omzet') {
     if (!isSalesVatCode(vatCode)) throw new ValidationError('Kies een ander btw-tarief');

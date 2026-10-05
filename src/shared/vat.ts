@@ -1,4 +1,4 @@
-import { normalizeVatNumber } from './validation';
+import { ValidationError, normalizeVatNumber } from './validation';
 
 /**
  * BTW-codes per regel. Het percentage wordt per regel opgeslagen (niet hardcoded op de factuur),
@@ -75,6 +75,21 @@ export function countryCode(input: string | null | undefined): string | null {
 /** Verlegde inkoop: je betaalt de leverancier alleen netto en rekent de btw zelf af. */
 export function isReverseCharge(code: string): code is 'verlegd' | 'eu' | 'buiten-eu' {
   return code === 'verlegd' || code === 'eu' || code === 'buiten-eu';
+}
+
+/**
+ * Tarief van een verlegde inkoop (#316): het tarief van de prestatie. 21% is de standaard en wordt niet
+ * apart bewaard (undefined); 9% alleen als de prestatie onder tabel I valt. Bij andere codes is er geen keuze.
+ */
+export function reverseChargeRate(vatCode: string, vatRate: number | null | undefined): 9 | undefined {
+  if (vatRate === undefined || vatRate === null) return undefined;
+  if (!isReverseCharge(vatCode)) {
+    if (vatRate === PURCHASE_VAT_RATES[vatCode as PurchaseVatCode]?.percentage) return undefined;
+    throw new ValidationError('Een ander tarief kan alleen bij verlegde btw');
+  }
+  if (vatRate === 21) return undefined;
+  if (vatRate === 9) return 9;
+  throw new ValidationError('Kies bij verlegde btw 9% of 21%');
 }
 
 /** Verkoop waarbij het btw-nummer van de klant op de factuur moet staan. */
