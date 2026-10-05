@@ -234,6 +234,22 @@ export class HoursService {
     return { regels: spans.length, warnings };
   }
 
+  /** Vervangt een regel door een nieuwe periode, uren en omschrijving (een week over de jaargrens wordt weer twee regels). */
+  update(id: number, input: Omit<HoursInput, 'repeatUntil'>): TimeEntry[] {
+    if (!this.db.prepare('SELECT 1 FROM time_entries WHERE id = ?').get(id)) throw new ValidationError('Deze regel bestaat niet meer');
+    this.validate(input);
+    if (!input.description.trim()) throw new ValidationError('Wat heb je gedaan?');
+    return tx(this.db, () => {
+      this.remove(id);
+      return this.add(input);
+    });
+  }
+
+  removeMany(ids: number[]): number {
+    const del = this.db.prepare('DELETE FROM time_entries WHERE id = ?');
+    return tx(this.db, () => ids.reduce((n, id) => n + del.run(id).changes, 0));
+  }
+
   remove(id: number): void {
     this.db.prepare('DELETE FROM time_entries WHERE id = ?').run(id);
   }
