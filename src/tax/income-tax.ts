@@ -87,9 +87,10 @@ export const INCOME_TAX_RULES: IncomeTaxRules[] = [
 
 /** De regels van dat jaar, of van het laatst bekende jaar ervoor (dan staat `fallback` aan). */
 /**
- * Wat voor latere jaren al in de wet staat, terwijl de rest van de tabel nog niet bekend is:
- * de zelfstandigenaftrek daalt verder (2027: € 900) en de startersaftrek gaat naar € 10 (2027)
- * en verdwijnt per 2028.
+ * Wat voor latere jaren al bekend is, terwijl de rest van de tabel nog niet bekend is:
+ * de zelfstandigenaftrek daalt verder (2027: € 900, staat in de wet). De startersaftrek naar € 10 (2027)
+ * en € 0 (2028) is een voorstel in het Belastingplan 2027 en nog NIET aangenomen (Rijksoverheid, 2026-10-05);
+ * het overzicht zegt dat erbij. Haal dit weg of corrigeer het zodra het voorstel is aangenomen of verworpen.
  */
 const KNOWN_LATER: Record<number, Partial<Pick<IncomeTaxRules, 'zelfstandigenaftrek' | 'startersaftrek'>>> = {
   2027: { zelfstandigenaftrek: 900, startersaftrek: 10 },

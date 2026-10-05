@@ -3,8 +3,9 @@ import type { IsoDate } from '../shared/dates';
 
 /**
  * Bijtelling privégebruik auto van de onderneming voor de inkomstenbelasting (belastingdienst.nl, Winst uit onderneming 2026,
- * "Onttrekking privégebruik auto van de onderneming"): 22% van de cataloguswaarde per jaar; een auto die ouder is dan 16 jaar:
- * 35% van de waarde in het economisch verkeer, vanaf de maand waarin hij 16 jaar wordt. Een deel van het jaar: naar rato.
+ * "Onttrekking privégebruik auto van de onderneming"): 22% van de cataloguswaarde per jaar; een auto die ouder is dan 16 jaar
+ * (tot en met 2025: ouder dan 15 jaar): 35% van de waarde in het economisch verkeer, vanaf de maand waarin hij die leeftijd
+ * bereikt. Een deel van het jaar: naar rato.
  */
 export interface IbCar {
   name: string;
@@ -20,7 +21,8 @@ export interface IbCar {
   marketValue: Cents | null;
 }
 
-export const CAR_OLD_YEARS = 16;
+/** Leeftijd vanaf wanneer de bijtelling 35% van de waarde in het economisch verkeer is: 15 jaar t/m 2025, 16 jaar vanaf 2026. */
+export const carOldYears = (year: number): number => (year >= 2026 ? 16 : 15);
 export const CAR_OLD_PCT = 35;
 export const CAR_STANDARD_PCT = 22;
 
@@ -44,8 +46,8 @@ export function carBijtellingForYear(cars: IbCar[], year: number): { annual: Cen
       let old = false;
       if (car.registeredOn) {
         const b = new Date(utc(car.registeredOn));
-        // vanaf de maand waarin de auto 16 jaar wordt (voorbeeld Belastingdienst: 16 jaar op 1 mei, dan de eerste 4 maanden catalogusprijs)
-        old = start >= Date.UTC(b.getUTCFullYear() + CAR_OLD_YEARS, b.getUTCMonth(), 1);
+        // vanaf de maand waarin de auto die leeftijd bereikt (voorbeeld Belastingdienst: 16 jaar op 1 mei, dan de eerste 4 maanden catalogusprijs)
+        old = start >= Date.UTC(b.getUTCFullYear() + carOldYears(year), b.getUTCMonth(), 1);
       }
       if (old) {
         if (!car.marketValue || car.marketValue <= 0) { missing = true; continue; }
