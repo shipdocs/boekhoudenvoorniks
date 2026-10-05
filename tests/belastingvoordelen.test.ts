@@ -223,6 +223,25 @@ describe('kilometers, uren en privéauto', () => {
     expect(() => s.hours.add({ date: '2026-02-04', hours: 673, description: 'x', period: 'maand' })).toThrow(/maximaal 672/);
   });
 
+  it('uren bewerken en meerdere regels tegelijk weghalen', () => {
+    const { s } = setup();
+    const [a] = s.hours.add({ date: '2026-03-15', hours: 100, description: 'Maand', period: 'maand' });
+    const [b] = s.hours.add({ date: '2026-04-08', hours: 30, description: 'Week', period: 'week' });
+    const [c] = s.hours.add({ date: '2026-04-15', hours: 25, description: 'Week', period: 'week' });
+    // van maand naar week, met nieuwe uren en omschrijving
+    const [e] = s.hours.update(a!.id, { date: '2026-03-04', hours: 40, description: 'Aangepast', period: 'week' });
+    expect(e).toMatchObject({ entry_date: '2026-03-02', period_end: '2026-03-08', hours: 40, description: 'Aangepast' });
+    expect(s.hours.list(2026).map((x) => x.description).sort()).toEqual(['Aangepast', 'Week', 'Week']);
+    expect(s.hours.totals(2026).other).toBe(95);
+    // ongeldig: bestaat niet, te veel uren, geen omschrijving; de oude regel blijft dan staan
+    expect(() => s.hours.update(9999, { date: '2026-03-04', hours: 1, description: 'x', period: 'week' })).toThrow(/bestaat niet/);
+    expect(() => s.hours.update(e!.id, { date: '2026-03-04', hours: 169, description: 'x', period: 'week' })).toThrow(/maximaal 168/);
+    expect(() => s.hours.update(e!.id, { date: '2026-03-04', hours: 10, description: ' ', period: 'week' })).toThrow(/Wat heb je gedaan/);
+    expect(s.hours.totals(2026).other).toBe(95);
+    expect(s.hours.removeMany([b!.id, c!.id])).toBe(2);
+    expect(s.hours.list(2026)).toHaveLength(1);
+  });
+
   it('uren herhalen: werkdagen, wekelijks en maandelijks', () => {
     const { s } = setup();
     expect(s.hours.add({ date: '2026-06-01', hours: 6, description: 'Werk', repeatUntil: '2026-06-07' })).toHaveLength(5);
