@@ -6,7 +6,7 @@ import type { RelationsService } from '../relations/relations';
 import type { BankService, BankTransaction } from '../import/bank';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { PRIVATE_CAR_CATEGORIES, type CategoryLookup } from '../shared/categories';
-import { PURCHASE_VAT_RATES, isPurchaseVatCode, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
+import { PURCHASE_VAT_RATES, isPurchaseVatCode, isReverseCharge, reverseChargeRate, type PurchaseVatCode } from '../shared/vat';
 import { diffDays, formatDateNl, today, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { countDecision, logAutomation } from '../inbox/automation-log';
@@ -119,6 +119,8 @@ export interface Confirmation {
   invoiceNumber?: string | null;
   categoryKey: string;
   vatCode: PurchaseVatCode;
+  /** verlegde inkoop: 9 als de prestatie onder het lage tarief valt; weglaten = 21% (#316) */
+  vatRate?: number;
   /** false = privé-uitgave: niet in de zakelijke boekhouding */
   business: boolean;
   paidWith: PaidWith;
@@ -1332,18 +1334,20 @@ export class IntakeService {
 
   /** Splitst per BTW-tarief als het document dat laat zien en het klopt met het totaal; anders één regel. */
   private purchaseLines(result: DocumentResult | null, c: Confirmation, account: string): PurchaseLineInput[] {
+    const vatRate = reverseChargeRate(c.vatCode, c.vatRate);
+    const rateField = vatRate ? { vatRate } : {};
     if (c.splits && c.splits.length > 1) {
       if (c.splits.reduce((s, x) => s + x.gross, 0) !== c.total) throw new ValidationError('De delen tellen niet op tot het totaal');
       // een deel met een eigen tarief (van de bonregels) krijgt dat tarief; anders het tarief van de bon
       const codeFor = (r: number | undefined): PurchaseVatCode => (r === undefined || isReverseCharge(c.vatCode) ? c.vatCode : r === 21 ? 'hoog' : r === 9 ? 'laag' : r === 0 ? 'nul' : c.vatCode);
       return c.splits.map((sp) => {
         const vatCode = codeFor(sp.vatRate);
-        const rate = PURCHASE_VAT_RATES[vatCode].percentage;
+        const rate = (isReverseCharge(vatCode) ? vatRate : undefined) ?? PURCHASE_VAT_RATES[vatCode].percentage;
         if (sp.categoryKey === 'prive') return { account: ACCOUNTS.priveOpnamen, netAmount: sp.gross, vatCode: 'geen' as const, description: 'Privé-deel van de bon' };
         const cat = this.categories.find(sp.categoryKey);
         if (!cat) throw new ValidationError('Kies bij elk deel waar het voor was');
         const { net, vat } = splitGross(sp.gross, rate, isReverseCharge(vatCode));
-        return { account: cat.account, netAmount: net, vatCode, vatAmount: vat, description: cat.label };
+        return { account: cat.account, netAmount: net, vatCode, vatAmount: vat, ...(isReverseCharge(vatCode) ? rateField : {}), description: cat.label };
       });
     }
     // zelf ingevuld btw-bedrag: gaat voor wat de app las of uitrekende (niet bij verlegde btw: die reken je zelf uit)
@@ -1370,12 +1374,12 @@ export class IntakeService {
         description: `${v.rate}%`,
       }));
     }
-    const rate = PURCHASE_VAT_RATES[c.vatCode].percentage;
+    const rate = vatRate ?? PURCHASE_VAT_RATES[c.vatCode].percentage;
     const { net, vat: vatAmount } = splitGross(c.total, rate, isReverseCharge(c.vatCode));
     // Gebruik het BTW-bedrag van het document als dat binnen 2 cent klopt (bonnen ronden soms per regel af)
     const docVat = vat.length === 1 ? vat[0]!.amount : null;
     const useDoc = docVat !== null && !isReverseCharge(c.vatCode) && Math.abs(docVat - vatAmount) <= 2;
-    return [{ account, netAmount: useDoc ? c.total - docVat! : net, vatCode: c.vatCode, vatAmount: useDoc ? docVat! : vatAmount }];
+    return [{ account, netAmount: useDoc ? c.total - docVat! : net, vatCode: c.vatCode, vatAmount: useDoc ? docVat! : vatAmount, ...rateField }];
   }
 
   ignore(id: number): void {

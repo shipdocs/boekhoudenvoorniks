@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useLoad, type InvestmentSavedInfo } from '../ui';
 import { diffDays, formatDateNl, today } from '../../shared/dates';
-import type { PurchaseVatCode } from '../../shared/vat';
+import { isReverseCharge, type PurchaseVatCode } from '../../shared/vat';
 import { mightBeInvestment, netAmount } from '../../shared/investment';
 import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
 import type { FxCandidate } from '../../fx/repair';
@@ -456,6 +456,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
   const [amount, setAmount] = useState<number | null>(null);
   const [category, setCategory] = useState('materiaal');
   const [vat, setVat] = useState<PurchaseVatCode>('hoog');
+  const [vatRate, setVatRate] = useState<9 | 21>(21);
   const [paidWith, setPaidWith] = useState<'bank' | 'kas' | 'prive'>('bank');
   const [jobId, setJobId] = useState<number | null>(null);
   const [businessPct, setBusinessPct] = useState<number | null>(null);
@@ -469,7 +470,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
       if (found === undefined) return;
       if (found) return setDuplicate({ entry, label: found.label });
     }
-    const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, paidWith, jobId, allowDuplicate: !!shown, ...(businessPct !== null ? { businessPct } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
+    const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, ...(isReverseCharge(vat) && vatRate === 9 ? { vatRate } : {}), paidWith, jobId, allowDuplicate: !!shown, ...(businessPct !== null ? { businessPct } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
     if (r) {
       onDone();
       if (category === 'investering') showInvestmentSaved(investmentInfo(amount!, vat));
@@ -490,6 +491,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
             {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
           </select>
         </Field>
+        <ReverseRateField vatCode={vat} value={vatRate} onChange={setVatRate} />
         <BusinessShareField supplier={supplier} value={businessPct} onChange={setBusinessPct} />
         <Field label="Hoe betaald?">
           <div className="chips">
@@ -622,6 +624,19 @@ const eur = (cents: number) => `€ ${(cents / 100).toLocaleString('nl-NL', { mi
  * investering is. Legt in gewone taal uit wat er gebeurt als je ja zegt, en dat je verder niets hoeft
  * te doen. De gebruiker beslist; "Nee" verbergt de vraag (de app vraagt het later nog eens op Vandaag).
  */
+/** Tarief bij verlegde btw (#316): bijna altijd 21%; 9% alleen als wat je kocht onder het lage tarief valt. */
+export function ReverseRateField({ vatCode, value, onChange }: { vatCode: string; value: 9 | 21; onChange: (rate: 9 | 21) => void }) {
+  if (!isReverseCharge(vatCode)) return null;
+  return (
+    <Field label="Tarief van wat je kocht" hint="het tarief dat in Nederland zou gelden; bij software, advertenties en advies is dat 21%">
+      <select value={value} onChange={(e) => onChange(Number(e.target.value) === 9 ? 9 : 21)}>
+        <option value={21}>21% (standaard)</option>
+        <option value={9}>9% (bv. boeken, e-books, voedingsmiddelen)</option>
+      </select>
+    </Field>
+  );
+}
+
 export function InvestmentHint({ categoryKey, gross, vatCode, onUse }: { categoryKey: string; gross: number | null | undefined; vatCode: string; onUse: () => void }) {
   const { settings } = useApp();
   const [dismissed, setDismissed] = useState(false);

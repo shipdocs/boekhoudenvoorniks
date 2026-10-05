@@ -105,9 +105,9 @@ export class BusinessShareService {
       if (p.amount >= 0 || (p.accountCategory !== 'kosten' && p.accountCategory !== 'activa') || !isPurchaseVatCode(p.vatCode)) continue;
       const t = this.db.prepare('SELECT counter_name FROM bank_transactions WHERE id = ?').get(p.bankTransactionId) as { counter_name: string | null } | undefined;
       if (!t?.counter_name || supplierKey(t.counter_name) !== key) continue;
-      const { net, vat } = splitGross(-p.amount, PURCHASE_VAT_RATES[p.vatCode].percentage, isReverseCharge(p.vatCode));
+      const { net, vat } = splitGross(-p.amount, p.vatRate ?? PURCHASE_VAT_RATES[p.vatCode].percentage, isReverseCharge(p.vatCode));
       const cur = p.businessPct ?? 100;
-      const eff = BusinessShareService.effect([{ account: p.account, netAmount: net, vatCode: p.vatCode, vatAmount: vat }], cur, p.noVatDeduction);
+      const eff = BusinessShareService.effect([{ account: p.account, netAmount: net, vatCode: p.vatCode, vatAmount: vat, ...(p.vatRate ? { vatRate: p.vatRate } : {}) }], cur, p.noVatDeduction);
       out.push({ kind: 'bank', refId: p.bankTransactionId, date: p.date, description: p.description, gross: -p.amount, currentPct: cur, proposedPct: proposed, parts: [{ net, vat }], noVatDeduction: Boolean(p.noVatDeduction), now: { kosten: eff.kosten, btw: eff.btw }, reverseCharge: eff.reverseCharge, filedPeriod: filed(p.date) });
     }
     const rows = this.db.prepare(`SELECT p.id FROM purchase_invoices p JOIN relations r ON r.id = p.relation_id WHERE p.is_opening = 0 AND p.journal_entry_id IS NOT NULL ORDER BY p.id`).all() as { id: number }[];
@@ -141,8 +141,8 @@ export class BusinessShareService {
     if (!ev) throw new Error('Deze betaling kan niet worden aangepast');
     const p = JSON.parse(ev.payload) as BankCategoriePayload;
     if (!isPurchaseVatCode(p.vatCode)) throw new Error('Deze betaling kan niet worden aangepast');
-    const { net, vat } = splitGross(-p.amount, PURCHASE_VAT_RATES[p.vatCode].percentage, isReverseCharge(p.vatCode));
-    return { lines: [{ account: p.account, netAmount: net, vatCode: p.vatCode, vatAmount: vat }], noVatDeduction: p.noVatDeduction };
+    const { net, vat } = splitGross(-p.amount, p.vatRate ?? PURCHASE_VAT_RATES[p.vatCode].percentage, isReverseCharge(p.vatCode));
+    return { lines: [{ account: p.account, netAmount: net, vatCode: p.vatCode, vatAmount: vat, ...(p.vatRate ? { vatRate: p.vatRate } : {}) }], noVatDeduction: p.noVatDeduction };
   }
 
   /** Past de gekozen boekingen aan (tegenboeking + nieuwe post). Alles in één transactie: of alles, of niets. */

@@ -3,6 +3,7 @@
 ## Nog niet uitgebracht
 
 ### Verbeterd
+- **Verlegde btw: tarief 9% of 21%.** Bij een inkoop met verlegde btw (Nederlandse verlegging, EU of buiten de EU) kies je nu het tarief van wat je kocht: 21% (standaard) of 9% als het onder het verlaagde tarief valt, bijvoorbeeld boeken, e-books of voedingsmiddelen. Rubriek 2a/4a/4b en de aftrek in 5b volgen het gekozen tarief. Bij software, advertenties en advies blijft het 21%. Bestaande boekingen en eerdere jaren veranderen niet. De keuze staat bij Aankoop toevoegen en bij het controleren van een bon of factuur; bij een betaling die je rechtstreeks vanuit de bank boekt is hij er nog niet (#316).
 - **Bijtelling auto ouder dan 15 of 16 jaar.** Tot en met 2025 gold de bijtelling van 35% van de waarde in het economisch verkeer voor een auto ouder dan 15 jaar, vanaf 2026 voor een auto ouder dan 16 jaar. De app rekende voor alle jaren met 16 jaar; nu per belastingjaar het juiste aantal.
 - **Extra aftrek voor zuinige en milieuvriendelijke aankopen (EIA/MIA/Vamil): juiste termijn.** Je vraagt dit aan binnen 3 maanden na de dag dat je bestelde, niet na de factuur- of betaaldatum. De app telt nu drie kalendermaanden vanaf de aankoopdatum (was 91 dagen) en zegt erbij dat je minder tijd hebt als je eerder bestelde.
 - **Startersaftrek 2027 en later is een voorstel.** In het overzicht voor 2027 en later staat nu dat de verlaging van de startersaftrek naar € 10 (2027) en € 0 (2028) een voorstel in het Belastingplan 2027 is dat nog niet is aangenomen.
@@ -12,6 +13,8 @@
 - **Buitenlandse btw is niet meer automatisch verlegd.** Een buitenlandse factuur zonder btw krijgt geen verlegde btw en geen 21% voorbelasting meer als voorstel: de btw blijft leeg tot je kiest. Webshoporders van buiten Nederland boek je zelf. Stripe-uitbetalingen worden pas geboekt als je bij Instellingen → Koppelingen aangeeft welke btw voor je Stripe-kosten geldt (bestaande Stripe-gebruikers krijgen tot dan een melding).
 - **EU-diensten volgen de leverdatum.** Voor btw en ICP telt de dienst- of einddatum van een EU-dienst; de factuurdatum blijft bewaard. Een EU-dienst in een ander tijdvak dan de overige regels moet op een aparte factuur. Het onderscheid met een creditnota en een correctie van een eerdere periode in de ICP-opgaaf is aangepast.
 - **Controles en uitleg.** De OSS-signalering kijkt ook naar het vorige kalenderjaar, de ICP-maandgrens en de suppletietermijn (acht weken) zijn aangepast, en de XBRL-testexport gebruikt de taxonomie voor 2026 met een apart omzetbelastingnummer.
+- **Saldocontrole bij een overboeking tussen eigen rekeningen.** Staat een overboeking al in je boekhouding via de andere rekening, maar is het afschrift van deze rekening nog niet ingelezen, dan telt dat bedrag mee en staat het apart vermeld in het bankoverzicht. De saldocontrole meldt dan geen verschil meer. De btw-controle op de rekening-courant met de Belastingdienst legt nu ook uit wat het verschil betekent bij een teruggave die nog niet is uitbetaald.
+- **Mollie: duidelijkere foutmelding.** Geeft de server van een aanbieder een foutpagina (HTML) terug, dan zegt de app dat het aan de aanbieder ligt en dat je het later kunt proberen, in plaats van een stuk paginacode te tonen. Bij Mollie heet het veld nu "Advanced-access-token" met de scope "settlements.read".
 
 ## 1.3.0 — fiscale controles en jaarafsluiting voor je boekhouder
 

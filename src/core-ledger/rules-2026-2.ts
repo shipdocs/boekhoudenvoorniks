@@ -30,6 +30,8 @@ export interface PurchaseLineInput {
   vatCode: PurchaseVatCode;
   /** optioneel afwijkend BTW-bedrag (zoals op de bon); anders berekend */
   vatAmount?: Cents;
+  /** verlegde inkoop: tarief van de prestatie (zie rules.ts); in deze versie alleen om te lezen */
+  vatRate?: 9 | 21;
 }
 
 /**
@@ -45,7 +47,7 @@ export function businessPct(pct: number | null | undefined): number {
 /** Berekent de BTW op een inkoopregel. Bij verlegd is de BTW wel te berekenen maar niet te betalen aan de leverancier. */
 export function purchaseVat(line: PurchaseLineInput): Cents {
   if (line.vatAmount !== undefined) return line.vatAmount;
-  return roundHalfAwayFromZero((line.netAmount * PURCHASE_VAT_RATES[line.vatCode].percentage) / 100);
+  return roundHalfAwayFromZero((line.netAmount * (line.vatRate ?? PURCHASE_VAT_RATES[line.vatCode].percentage)) / 100);
 }
 
 /**
