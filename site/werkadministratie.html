@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Werkadministratie voor vakmensen: de boekhouding maakt zichzelf | BoekhoudenVoorNiks</title>
+  <meta name="description" content="Geen boekhoudpakket waarin je moet leren boekhouden, maar een werkadministratie voor vakmensen: jij werkt met klussen, bonnetjes en betalingen, het programma maakt er een correcte boekhouding van. Gratis en lokaal.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/werkadministratie.html">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="nl_NL">
+  <meta property="og:site_name" content="BoekhoudenVoorNiks">
+  <meta property="og:url" content="https://boekhoudenvoorniks.nl/werkadministratie.html">
+  <meta property="og:title" content="Een werkadministratie voor vakmensen, geen boekhoudpakket">
+  <meta property="og:description" content="Jij werkt met klussen, bonnetjes en betalingen. Het programma maakt er vanzelf een correcte boekhouding van.">
+  <meta property="og:image" content="https://boekhoudenvoorniks.nl/img/vandaag.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://boekhoudenvoorniks.nl/" },
+        { "@type": "ListItem", "position": 2, "name": "Werkadministratie", "item": "https://boekhoudenvoorniks.nl/werkadministratie.html" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Moet ik kunnen boekhouden om dit programma te gebruiken?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Nee. Je werkt met klussen, offertes, facturen, bonnetjes en betalingen. Het programma maakt daar een dubbele boekhouding van volgens vaste regels en vraagt alleen iets als het echt niet zeker is." }
+        },
+        {
+          "@type": "Question",
+          "name": "Is het dan wel een echte boekhouding?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Ja. Onder water staat een dubbele boekhouding met grootboek, journaalposten, balans en btw-aangifte. Je boekhouder kan er een auditfile (XAF 3.2) en alle overzichten uit halen. Laat de cijfers altijd controleren door een boekhouder." }
+        },
+        {
+          "@type": "Question",
+          "name": "Wat is het verschil met een gewoon boekhoudprogramma?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Een boekhoudpakket laat je zelf boeken en vraagt dus om boekhoudkennis. BoekhoudenVoorNiks begint bij je werk: wat is er gebeurd, welke klus is klaar, welke betaling is binnen. De boekingen volgen daaruit." }
+        },
+        {
+          "@type": "Question",
+          "name": "Wat kost het?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Het programma is altijd gratis, zonder proefperiode of limiet. Alleen samenwerken met je boekhouder vanuit de app is een abonnement, met de eerste 4 maanden gratis." }
+        }
+      ]
+    }
+  ]
+}
+  </script>
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="./"><picture><source srcset="img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href="./#functies">Functies</a>
+        <a href="./#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="stukadoors.html">Stukadoors</a>
+            <a href="schilders.html">Schilders</a>
+            <a href="webdevelopers.html">Webdevelopers</a>
+            <a href="boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="waarom.html">Waarom</a>
+        <a href="wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="downloaden.html">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script>
+  (function () {
+    var top = document.querySelector('.top'), button = top.querySelector('.menu-button');
+    button.addEventListener('click', function () {
+      var open = top.classList.toggle('open');
+      button.setAttribute('aria-expanded', String(open));
+    });
+    top.querySelectorAll('details.sub').forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (!d.open) return;
+        top.querySelectorAll('details.sub[open]').forEach(function (o) { if (o !== d) o.open = false; });
+      });
+    });
+    function closeAll() {
+      var focused = document.activeElement, wasInside = top.contains(focused);
+      top.querySelectorAll('details.sub[open]').forEach(function (o) {
+        o.open = false;
+        if (o.contains(focused)) { o.querySelector('summary').focus(); wasInside = false; }
+      });
+      if (!top.classList.contains('open')) return;
+      top.classList.remove('open');
+      button.setAttribute('aria-expanded', 'false');
+      // de focus nooit achterlaten op een verborgen link
+      if (wasInside && focused !== button) button.focus();
+    }
+    document.addEventListener('click', function (e) { if (!top.contains(e.target)) closeAll(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
+  })();
+  </script>
+
+  <main>
+    <section class="hero wrap">
+      <div>
+        <p class="eyebrow">Een werkadministratie, geen boekhoudpakket</p>
+        <h1>Boekhouden voor vakmensen, zonder boekhoudtermen</h1>
+        <p class="lead">Maak offertes en facturen, fotografeer bonnetjes en lees je bankafschrift in. BoekhoudenVoorNiks maakt daar automatisch je btw-overzicht en volledige boekhouding van. Gratis, op je eigen computer.</p>
+        <div class="cta">
+          <a class="btn" href="downloaden.html">Gratis downloaden voor Windows of Linux</a>
+          <a class="btn ghost" href="#verschil">Wat is het verschil?</a>
+        </div>
+        <p class="fine">Gratis · Werkt offline · Je administratie blijft op je eigen computer</p>
+      </div>
+      <figure class="shot tilt"><picture><source srcset="img/vandaag.webp" type="image/webp"><img src="img/vandaag.png" alt="Startscherm: geld op de bank, nog te ontvangen, btw apart houden en wat er nog moet gebeuren" width="1280" height="840" fetchpriority="high"></picture></figure>
+    </section>
+
+    <section class="wrap">
+      <h2>Wat het je oplevert</h2>
+      <div class="features">
+        <div><h3>Weet wat je aan een klus verdient</h3><p>Per klus zie je wat je uitgaf aan materiaal en wat er overblijft.</p></div>
+        <div><h3>Nooit meer zoeken naar bonnetjes</h3><p>Elke bon hangt aan de betaling op je bank en is zo terug te vinden.</p></div>
+        <div><h3>Van offerte naar factuur in één klik</h3><p>Klant akkoord, werk klaar, factuur klaar. Mailen met pdf erbij.</p></div>
+        <div><h3>Zie hoeveel btw je apart moet houden</h3><p>Elke dag zie je hoeveel van het geld op je rekening eigenlijk van de Belastingdienst is.</p></div>
+        <div><h3>Je boekhouder kan alles gewoon controleren</h3><p>Hij krijgt je boekhouding in een vorm die hij kent, met alle bonnen erbij. <a href="boekhouders.html">Voor boekhouders</a></p></div>
+        <div><h3>Je administratie blijft van jou</h3><p>Alles staat op je eigen computer, zonder account. Stopt ShipDocs, dan blijft het programma werken.</p></div>
+      </div>
+    </section>
+
+    <section id="verschil" class="band">
+      <div class="wrap">
+        <h2>Een werkadministratie, geen boekhoudpakket</h2>
+        <div class="split" style="margin-top: 24px; align-items: start">
+          <div class="card">
+            <h3>Een gewoon boekhoudpakket vraagt</h3>
+            <ul>
+              <li>"Op welke grootboekrekening boek je dit?"</li>
+              <li>"Is dit een debet- of creditboeking?"</li>
+              <li>"Welke btw-code en welke rubriek hoort erbij?"</li>
+              <li>Boekhoudkennis, of een boekhouder die het voor je doet</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Een werkadministratie vraagt</h3>
+            <ul>
+              <li>"Is klus Jansen klaar? Dan maak ik de factuur."</li>
+              <li>"Was die bon van Praxis zakelijk of privé?"</li>
+              <li>"Dit lijkt de betaling van factuur 2026-038. Klopt dat?"</li>
+              <li>Alleen wat jij weet en een boekhoudprogramma niet kan raden</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap">
+      <h2>Jij doet je werk, de boekhouding volgt</h2>
+      <div class="grid4">
+        <div class="card"><div class="emoji">🛠️</div><h3>Je werkt</h3><p>Offerte, klus, factuur. Je schrijft uren en materiaal op zoals je dat altijd deed.</p></div>
+        <div class="card"><div class="emoji">📸</div><h3>Je bewaart een bon</h3><p>Foto of pdf erin. Winkel, datum, bedrag en btw worden gelezen en aan de betaling gekoppeld.</p></div>
+        <div class="card"><div class="emoji">🏦</div><h3>Er wordt betaald</h3><p>Lees je bank in. Betalingen worden gekoppeld aan facturen en bonnetjes.</p></div>
+        <div class="card"><div class="emoji">📒</div><h3>De boekhouding ontstaat</h3><p>Grootboek, journaalposten, btw-aangifte en balans, zonder dat jij ze invult.</p></div>
+      </div>
+    </section>
+
+    <section class="wrap split">
+      <div>
+        <h2>Ook een volledige boekhouding</h2>
+        <p>Dat je niet hoeft te boeken, betekent niet dat er niet geboekt wordt. Op de achtergrond bouwt het programma een complete boekhouding op, voor jou en voor je boekhouder.</p>
+        <ul class="checks">
+          <li><strong>Je ziet waarom, en je draait het terug</strong><br><span class="muted">Elke boeking volgt vaste regels voor btw, afschrijving en periodes, bewaakt met geautomatiseerde tests. Bij elke automatische verwerking zie je waarom, en met één knop draai je hem terug.</span></li>
+          <li><strong>Jij bevestigt, het programma boekt</strong><br><span class="muted">Is iets niet eenduidig, dan is het een voorstel dat jij bevestigt. Er wordt nooit iets door een taalmodel geboekt.</span></li>
+          <li><strong>Je boekhouder kan er gewoon mee werken</strong><br><span class="muted">Hij leest alles in zijn eigen programma in, met kolommenbalans, grootboekkaarten en al je bonnen (technisch: een auditfile XAF 3.2 en het RGS-grootboekschema). <a href="boekhouders.html">Voor boekhouders</a></span></li>
+        </ul>
+        <p class="fine">Laat je cijfers altijd controleren door een boekhouder. Dit is geen fiscaal advies.</p>
+      </div>
+      <figure class="shot"><picture><source srcset="img/werk.webp" type="image/webp"><img src="img/werk.png" alt="Werk en facturen: overzicht van facturen en betaalstatus" width="1280" height="840" loading="lazy" decoding="async"></picture></figure>
+    </section>
+
+    <section class="band">
+      <div class="wrap">
+        <h2>Wat je niet hoeft te leren</h2>
+        <div class="features">
+          <div><h3>Debet en credit</h3><p>Je ziet een factuur, een bon of een betaling. De boeking maakt het programma.</p></div>
+          <div><h3>Btw-rubrieken</h3><p>Je ziet "te betalen € 3.365, uiterlijk 31 oktober", met precies wat je invult bij de Belastingdienst.</p></div>
+          <div><h3>Grootboekrekeningen</h3><p>Ze staan klaar. Wil je kijken, dan staat alles in de expertmodus.</p></div>
+          <div><h3>Afschrijving en aftrekposten</h3><p>Bedrijfsmiddelen, KIA, kilometers en starters- of zelfstandigenaftrek komen in een jaaroverzicht.</p></div>
+          <div><h3>Periodes afsluiten</h3><p>Is een kwartaal klaar, dan sluit je het af en verandert er niets meer aan.</p></div>
+          <div><h3>Overstappen</h3><p>Auditfiles van je oude programma worden ingelezen, je begint niet opnieuw.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap">
+      <h2>Voor wie is dit?</h2>
+      <p>Voor zzp'ers en vakmensen die liever hun werk doen dan boekhouden: <a href="stukadoors.html">stukadoors</a>, <a href="schilders.html">schilders</a>, timmerlieden, loodgieters, elektriciens, <a href="webdevelopers.html">webdevelopers</a>. Net begonnen? Zie de <a href="starters.html">checklist voor starters</a>.</p>
+
+      <div class="card trial">
+        <h3>Altijd gratis, op je eigen computer</h3>
+        <p>Geen account, geen proefperiode, geen limiet op facturen of bonnetjes. Alleen samenwerken met je boekhouder vanuit de app is een abonnement, met de eerste 4 maanden gratis, daarna € 9 per maand exclusief btw.</p>
+      </div>
+    </section>
+
+    <section class="wrap">
+      <h2>Veelgestelde vragen</h2>
+      <div class="faq">
+        <details><summary>Moet ik kunnen boekhouden om dit programma te gebruiken?</summary><p>Nee. Je werkt met klussen, offertes, facturen, bonnetjes en betalingen. Het programma maakt daar een dubbele boekhouding van volgens vaste regels en vraagt alleen iets als het echt niet zeker is.</p></details>
+        <details><summary>Is het dan wel een echte boekhouding?</summary><p>Ja. Onder water staat een dubbele boekhouding met grootboek, journaalposten, balans en btw-aangifte. Je boekhouder kan er een auditfile (XAF 3.2) en alle overzichten uit halen. Laat de cijfers altijd controleren door een boekhouder.</p></details>
+        <details><summary>Wat is het verschil met een gewoon boekhoudprogramma?</summary><p>Een boekhoudpakket laat je zelf boeken en vraagt dus om boekhoudkennis. BoekhoudenVoorNiks begint bij je werk: wat is er gebeurd, welke klus is klaar, welke betaling is binnen. De boekingen volgen daaruit.</p></details>
+        <details><summary>Wat kost het?</summary><p>Het programma is altijd gratis, zonder proefperiode of limiet. Alleen samenwerken met je boekhouder vanuit de app is een abonnement, met de eerste 4 maanden gratis.</p></details>
+      </div>
+
+      <div class="cta" style="margin-top: 32px">
+        <a class="btn" href="downloaden.html">Gratis downloaden</a>
+        <a class="btn ghost" href="waarom.html">Waarom we dit maakten</a>
+      </div>
+      <p class="fine">Meer lezen: <a href="btw-aangifte.html">btw-aangifte zelf doen</a> · <a href="zonder-abonnement.html">zonder abonnement en offline</a> · <a href="boekhouders.html">voor boekhouders</a>. Deze pagina geeft uitleg, geen fiscaal advies.</p>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="werkadministratie.html" aria-current="page">Werkadministratie, geen boekhoudpakket</a></li>
+          <li><a href="./#functies">Functies</a></li>
+          <li><a href="./#prijzen">Prijzen</a></li>
+          <li><a href="./#overstappen">Overstappen</a></li>
+          <li><a href="bank-automatisch.html">Bank automatisch inlezen</a></li>
+          <li><a href="btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="zonder-abonnement.html">Zonder abonnement, offline</a></li>
+          <li><a href="./#vragen">Veelgestelde vragen</a></li>
+          <li><a href="wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="starters.html">Starters</a></li>
+          <li><a href="stukadoors.html">Stukadoors</a></li>
+          <li><a href="schilders.html">Schilders</a></li>
+          <li><a href="webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="waarom.html">Waarom we dit maakten</a></li>
+          <li><a href="downloaden.html">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks">Vragen en feedback: mail ons</a></li>
+          <li><a href="voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a></p>
+  </footer>
+</body>
+</html>
