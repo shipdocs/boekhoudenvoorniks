@@ -346,7 +346,7 @@ function IcpCard({ periodKey }: { periodKey: string }) {
   return (
     <div className="card" style={{ marginTop: 14 }}>
       <h2 style={{ marginTop: 0 }}>Verkopen aan EU-bedrijven {icp.data.period.label} (ICP-opgaaf)</h2>
-      <p className="muted small">Deze verkopen geef je apart op in Mijn Belastingdienst Zakelijk, per klant. Goederen en diensten geef je apart op; de soort staat erbij (volgt uit de btw-keuze op de factuur).</p>
+      <p className="muted small">Deze verkopen geef je apart op in Mijn Belastingdienst Zakelijk, per klant. De soort staat erbij voor de juiste periode en opgaaffrequentie. Tel gewone goederen en diensten per klant samen als het formulier één veld vraagt. Vereenvoudigde ABC-leveringen ondersteunt dit overzicht niet.</p>
       <table>
         <thead><tr><th>Land</th><th>Btw-nummer</th><th>Klant</th><th>Soort</th><th className="num">Bedrag</th></tr></thead>
         <tbody>
@@ -364,7 +364,7 @@ function IcpCard({ periodKey }: { periodKey: string }) {
       {icp.data.corrections.length > 0 && (
         <div className="notice warn small" style={{ marginTop: 10 }}>
           <strong>Correcties op een eerdere opgaaf</strong>
-          <div>Deze bedragen horen bij een eerdere periode. Verbeter daarvoor de ICP-opgaaf van die periode in Mijn Belastingdienst Zakelijk. Dat staat los van je btw-aangifte en een eventuele suppletie.</div>
+          <div>Deze bedragen horen bij een eerdere periode. Vul ze in bij de correcties van je volgende ICP-opgaaf in Mijn Belastingdienst Zakelijk, met de oorspronkelijke periode en het verschil. Dat staat los van je btw-aangifte en een eventuele suppletie.</div>
           <ul>
             {icp.data.corrections.map((l) => <li key={`${l.periodKey}-${l.relationId}-${l.kind}`}>{l.periodLabel}: {l.name} ({l.vatNumber || 'geen btw-nummer'}, {l.kind}) € {l.amountEuro.toLocaleString('nl-NL')}</li>)}
           </ul>
@@ -456,7 +456,7 @@ function IncomeTaxCard() {
               <tr><td><strong>Totaal</strong></td><td className="num"><strong>{euro(b.total)}</strong></td></tr>
             </tbody>
           </table>
-          <p className="muted">Tarieven van {e.rulesYear}{e.rulesYear !== e.year ? ` (voor ${e.year} nog niet bekend in de app)` : ''}{e.rulesChecked ? '' : '; deze bedragen zijn nog niet door een belastingexpert nagekeken'}.</p>
+          <p className="muted">Tarieven van {e.rulesYear}{e.rulesYear !== e.year ? ` (voor ${e.year} nog niet bekend in de app)` : ''}. {e.rulesChecked ? 'Tariefparameters gecontroleerd tegen de Belastingdienst; dit blijft een schatting.' : 'Tariefparameters nog niet gecontroleerd tegen de Belastingdienst.'}</p>
           <p className="muted">Niet meegenomen: {e.notIncluded.join('; ')}.</p>
         </div>
       )}

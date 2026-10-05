@@ -44,7 +44,7 @@ describe('Buitenland (#16)', () => {
     expect(rubrieken(s, '2026-Q4')['3b']!.omzet).toBe(25000);
     expect(s.vat.icp('2026-Q4').total).toBe(0);
     expect(s.vat.icp('2026-Q4').corrections).toEqual([expect.objectContaining({ periodKey: '2026-Q3', name: 'Bau GmbH', kind: 'goederen', amount: 25000 })]);
-    expect(s.vat.calculate('2026-Q4').warnings.join(' ')).toMatch(/ICP-opgaaf van die periode/);
+    expect(s.vat.calculate('2026-Q4').warnings.join(' ')).toMatch(/volgende ICP-opgaaf/);
 
     // Door de grote binnenlandse correctie gaat de btw-correctie op Q3 via een suppletie (3b in Q4
     // wordt 0), maar de ICP-correctie blijft gewoon zichtbaar.

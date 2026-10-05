@@ -78,8 +78,8 @@ export function vatFromDocument(doc: DocumentResult): Classification['vatCode'] 
   const country = doc.supplierCountry?.value ?? null;
   if (doc.reverseCharge) return reverseChargeOrigin(doc.supplierVatNumber?.value ?? null, doc.supplierIban?.value ?? null, country);
   const rates = doc.vat.value.filter((v) => v.amount !== 0).map((v) => v.rate);
-  // een buitenlandse leverancier zonder btw op de factuur (bv. een Amerikaans abonnement): btw verlegd naar jou
-  if (rates.length === 0 && country && country !== 'NL') return reverseChargeOrigin(null, null, country);
+  // Geen btw op een buitenlandse factuur bewijst geen verlegging (bv. vrijgestelde financiële dienst).
+  if (rates.length === 0 && country && country !== 'NL') return null;
   if (rates.length === 0) return doc.vat.value.length > 0 ? 'nul' : null;
   if (rates.every((r) => r === 21)) return 'hoog';
   if (rates.every((r) => r === 9)) return 'laag';
@@ -103,10 +103,18 @@ export class Classifier {
     const supplier = doc.supplier?.value ?? context.supplierName ?? null;
     const docVat = vatFromDocument(doc);
     const reasons: string[] = [];
+    const supplierCountry = doc.supplierCountry?.value?.toUpperCase();
+    const vatCountry = doc.supplierVatNumber?.value?.replace(/\s/g, '').toUpperCase().match(/^([A-Z]{2})/)?.[1];
+    const foreign = supplierCountry ? supplierCountry !== 'NL' : !!vatCountry && vatCountry !== 'NL';
+    const propertyService = /\b(stuc|schilder|bouwwerk|bouwkund|verbouw|onroerend|pand|gebouw|construction|painting|property)\w*/i.test(doc.lineDescriptions.join(' '));
+    const needsVatReview = (foreign && (docVat === null || propertyService || (doc.vat.value.some((v) => v.amount !== 0)))) || (doc.reverseCharge && !doc.supplierCountry?.value && !doc.supplierVatNumber?.value);
+    // Zonder btw op een buitenlandse factuur is Nederlandse voorbelasting (21%) geen redelijk voorstel: laat de btw leeg tot de gebruiker kiest.
+    const fallbackVat: NonNullable<Classification['vatCode']> = needsVatReview && docVat === null ? 'geen' : 'hoog';
+    if (needsVatReview) reasons.push('Controleer de btw op de factuur en waar de prestatie belast is. Buitenlandse btw is geen Nederlandse voorbelasting; werk aan een Nederlands pand kan onder binnenlandse verlegging vallen.');
 
     const rule = this.memory.get(supplier);
     if (rule) {
-      const automatic = this.memory.isAutomatic(rule);
+      const automatic = this.memory.isAutomatic(rule) && !needsVatReview;
       return {
         categoryKey: rule.category_key,
         vatCode: (docVat ?? rule.vat_code) as Classification['vatCode'],
@@ -114,7 +122,7 @@ export class Classifier {
         confidence: automatic ? 0.97 : 0.8,
         source: 'geheugen',
         proposedBy: 'geheugen',
-        reasons: [`${rule.display_name}: eerder ${rule.confirmations}× zo bevestigd`],
+        reasons: [...reasons, `${rule.display_name}: eerder ${rule.confirmations}× zo bevestigd`],
         automatic,
       };
     }
@@ -123,22 +131,22 @@ export class Classifier {
     if (known) {
       let category = known.category;
       if (category === 'materiaal' && doc.lineDescriptions.some((l) => TOOL_KEYWORDS.test(l)) && !doc.lineDescriptions.every((l) => !TOOL_KEYWORDS.test(l))) {
-        category = this.netTotal(doc, docVat) >= INVESTMENT_THRESHOLD ? 'investering' : 'gereedschap';
+        category = this.netTotal(doc, docVat ?? fallbackVat) >= INVESTMENT_THRESHOLD ? 'investering' : 'gereedschap';
         reasons.push('artikel lijkt gereedschap');
       }
       reasons.push(known.source === 'index' ? `${known.name} is een bekende winkelketen (lijst van OpenStreetMap)` : `${known.name} is een bekende leverancier`);
       // horeca: de btw op eten en drinken is niet aftrekbaar, ook als hij op de bon staat
-      const vatCode = known.source === 'index' && known.vatCode === 'geen' ? 'geen' : docVat === 'verlegd' && known.vatCode === 'eu' ? 'eu' : docVat ?? known.vatCode;
+      const vatCode = known.source === 'index' && known.vatCode === 'geen' ? 'geen' : docVat ?? known.vatCode;
       return { categoryKey: category, vatCode, business: true, confidence: known.source === 'index' ? 0.65 : 0.75, source: 'regel', proposedBy: 'regel', reasons, automatic: false };
     }
 
     if (doc.lineDescriptions.some((l) => DEVICE_KEYWORDS.test(l))) {
-      const invest = this.netTotal(doc, docVat) >= INVESTMENT_THRESHOLD;
-      return { categoryKey: invest ? 'investering' : 'kantoor', vatCode: docVat ?? 'hoog', business: true, confidence: 0.6, source: 'regel', proposedBy: 'regel', reasons: [invest ? 'apparaat van € 450 of meer (excl. btw): gaat jaren mee' : 'apparaat'], automatic: false };
+      const invest = this.netTotal(doc, docVat ?? fallbackVat) >= INVESTMENT_THRESHOLD;
+      return { categoryKey: invest ? 'investering' : 'kantoor', vatCode: docVat ?? fallbackVat, business: true, confidence: 0.6, source: 'regel', proposedBy: 'regel', reasons: [...reasons, invest ? 'apparaat van € 450 of meer (excl. btw): gaat jaren mee' : 'apparaat'], automatic: false };
     }
 
     if (doc.lineDescriptions.some((l) => TOOL_KEYWORDS.test(l))) {
-      return { categoryKey: this.netTotal(doc, docVat) >= INVESTMENT_THRESHOLD ? 'investering' : 'gereedschap', vatCode: docVat ?? 'hoog', business: true, confidence: 0.6, source: 'regel', proposedBy: 'regel', reasons: ['artikel lijkt gereedschap'], automatic: false };
+      return { categoryKey: this.netTotal(doc, docVat ?? fallbackVat) >= INVESTMENT_THRESHOLD ? 'investering' : 'gereedschap', vatCode: docVat ?? fallbackVat, business: true, confidence: 0.6, source: 'regel', proposedBy: 'regel', reasons: [...reasons, 'artikel lijkt gereedschap'], automatic: false };
     }
 
     if (this.llm) {
@@ -147,12 +155,12 @@ export class Classifier {
         if (r && this.categories.list().some((c) => c.key === r.categoryKey)) {
           // LLM-zekerheid wordt bewust afgetopt: nooit automatisch boeken op alleen een LLM-voorstel
           const reason = this.llm.id === 'jev' ? 'online hulp koos deze uit jouw categorieën' : `voorstel van de slimme herkenning: ${r.explanation}`;
-          return { categoryKey: r.categoryKey, vatCode: docVat ?? 'hoog', business: true, confidence: Math.min(0.7, r.confidence), source: 'llm', proposedBy: this.llm.id, ...(r.model ? { model: r.model } : {}), reasons: [reason], automatic: false };
+          return { categoryKey: r.categoryKey, vatCode: docVat ?? fallbackVat, business: true, confidence: Math.min(0.7, r.confidence), source: 'llm', proposedBy: this.llm.id, ...(r.model ? { model: r.model } : {}), reasons: [...reasons, reason], automatic: false };
         }
       } catch {
         // LLM is optioneel; val terug op standaard
       }
     }
-    return { categoryKey: 'overig', vatCode: docVat ?? 'hoog', business: true, confidence: 0.3, source: 'standaard', proposedBy: 'standaard', reasons: ['onbekende leverancier'], automatic: false };
+    return { categoryKey: 'overig', vatCode: docVat ?? fallbackVat, business: true, confidence: 0.3, source: 'standaard', proposedBy: 'standaard', reasons: [...reasons, 'onbekende leverancier'], automatic: false };
   }
 }

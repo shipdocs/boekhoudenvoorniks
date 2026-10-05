@@ -10,9 +10,9 @@ import type { TaxOverviewService } from './overview';
  * de onderneming. Partner, hypotheek, andere inkomsten, box 3, voorlopige aanslagen en sommige
  * bijzondere aftrekposten zitten er niet in.
  *
- * De tarieven staan per jaar in een aparte, geversioneerde tabel. LET OP: deze tabel is nog niet door
- * een fiscalist gecontroleerd (zie het issue voor de fiscale review); `checked` staat daarom op false
- * en de app toont dat.
+ * De tarieven staan per jaar in een aparte tabel. `checked` betekent dat de parameters tegen
+ * officiële bronnen zijn gecontroleerd (docs/fiscale-review-44.md), niet dat een fiscalist
+ * de gehele applicatie heeft goedgekeurd.
  */
 
 export interface IncomeTaxRules {
@@ -25,7 +25,7 @@ export interface IncomeTaxRules {
   mkbWinstvrijstelling: number;
   algemeneHeffingskorting: { max: number; phaseOutFrom: number; phaseOutRate: number };
   /** arbeidskorting: opbouwtraject [tot inkomen, percentage] + afbouw */
-  arbeidskorting: { build: [number, number][]; max: number; phaseOutFrom: number; phaseOutRate: number };
+  arbeidskorting: { build: [number, number][]; bases: number[]; max: number; phaseOutFrom: number; phaseOutRate: number };
   /** inkomensafhankelijke bijdrage Zvw voor ondernemers */
   zvw: { rate: number; maxIncome: number };
   /** startersaftrek (bovenop de zelfstandigenaftrek; max 3× in de eerste 5 jaar) */
@@ -50,12 +50,12 @@ export interface IncomeTaxRules {
 export const INCOME_TAX_RULES: IncomeTaxRules[] = [
   {
     year: 2025,
-    checked: false,
+    checked: true, // tariefparameters gecontroleerd, 2026-10-05; docs/fiscale-review-44.md
     brackets: [[38441, 0.3582], [76817, 0.3748], [null, 0.495]],
     zelfstandigenaftrek: 2470,
     mkbWinstvrijstelling: 0.127,
     algemeneHeffingskorting: { max: 3068, phaseOutFrom: 28406, phaseOutRate: 0.06337 },
-    arbeidskorting: { build: [[12169, 0.08053], [26288, 0.3003], [43071, 0.02258]], max: 5599, phaseOutFrom: 43071, phaseOutRate: 0.0651 },
+    arbeidskorting: { build: [[12169, 0.08053], [26288, 0.3003], [43071, 0.02258]], bases: [0, 980, 5220], max: 5599, phaseOutFrom: 43071, phaseOutRate: 0.0651 },
     zvw: { rate: 0.0526, maxIncome: 75864 },
     startersaftrek: 2123,
     kia: { min: 2901, pct: 0.28, pctUpTo: 70602, fixed: 19769, fixedUpTo: 130744, phaseOutRate: 0.0756, phaseOutUpTo: 392230, minPerAsset: 450 },
@@ -73,7 +73,7 @@ export const INCOME_TAX_RULES: IncomeTaxRules[] = [
     zelfstandigenaftrek: 1200,
     mkbWinstvrijstelling: 0.127,
     algemeneHeffingskorting: { max: 3115, phaseOutFrom: 29736, phaseOutRate: 0.06398 },
-    arbeidskorting: { build: [[11965, 0.08324], [25845, 0.31009], [45592, 0.0195]], max: 5685, phaseOutFrom: 45592, phaseOutRate: 0.0651 },
+    arbeidskorting: { build: [[11965, 0.08324], [25845, 0.31009], [45592, 0.0195]], bases: [0, 996, 5300], max: 5685, phaseOutFrom: 45592, phaseOutRate: 0.0651 },
     zvw: { rate: 0.0485, maxIncome: 79409 },
     startersaftrek: 2123,
     kia: { min: 2901, pct: 0.28, pctUpTo: 71683, fixed: 20072, fixedUpTo: 132746, phaseOutRate: 0.0756, phaseOutUpTo: 398236, minPerAsset: 450 },
@@ -159,17 +159,13 @@ export interface IncomeTaxBreakdown {
 
 const round = (n: number) => Math.round(n);
 
-function arbeidskorting(income: number, r: IncomeTaxRules['arbeidskorting']): number {
-  let k = 0;
+export function arbeidskorting(income: number, r: IncomeTaxRules['arbeidskorting']): number {
   let prev = 0;
-  for (const [upTo, rate] of r.build) {
-    if (income <= prev) break;
-    k += (Math.min(income, upTo) - prev) * rate;
+  for (const [i, [upTo, rate]] of r.build.entries()) {
+    if (income <= upTo) return Math.max(0, Math.min(r.max, r.bases[i]! + (income - prev) * rate));
     prev = upTo;
   }
-  k = Math.min(k, r.max);
-  if (income > r.phaseOutFrom) k -= (income - r.phaseOutFrom) * r.phaseOutRate;
-  return Math.max(0, k);
+  return Math.max(0, r.max - Math.max(0, income - r.phaseOutFrom) * r.phaseOutRate);
 }
 
 /**
@@ -187,12 +183,13 @@ function arbeidskorting(income: number, r: IncomeTaxRules['arbeidskorting']): nu
 export function estimateIncomeTax(
   profit: number,
   rules: IncomeTaxRules,
-  opts: { urencriterium: boolean; starter?: boolean; kia?: number; bijtellingen?: number; partnerHours?: number; nietGerealiseerd?: number },
+  opts: { urencriterium: boolean; ondernemer?: boolean; starter?: boolean; kia?: number; bijtellingen?: number; partnerHours?: number; nietGerealiseerd?: number },
 ): IncomeTaxBreakdown {
   const bij = opts.bijtellingen ?? 0;
-  const kia = opts.kia ?? 0;
+  const ondernemer = opts.ondernemer !== false;
+  const kia = ondernemer ? opts.kia ?? 0 : 0;
   const fiscal = profit + bij - kia;
-  const uren = opts.urencriterium;
+  const uren = ondernemer && opts.urencriterium;
   const starter = uren && !!opts.starter;
   // starter: geen beperking tot de winst; anders hooguit de (positieve) winst
   const za = uren ? (starter ? rules.zelfstandigenaftrek : Math.min(rules.zelfstandigenaftrek, Math.max(0, fiscal))) : 0;
@@ -201,7 +198,7 @@ export function estimateIncomeTax(
   const verrekend = uren ? Math.min(Math.max(0, opts.nietGerealiseerd ?? 0), Math.max(0, fiscal - za - sa)) : 0;
   const mw = uren ? meewerkaftrekFor(fiscal, opts.partnerHours ?? 0, rules) : 0;
   const ondernemersaftrek = za + sa + verrekend + mw;
-  const mkb = (fiscal - ondernemersaftrek) * rules.mkbWinstvrijstelling;
+  const mkb = ondernemer ? (fiscal - ondernemersaftrek) * rules.mkbWinstvrijstelling : 0;
   const taxableProfit = fiscal - ondernemersaftrek - mkb;
   const taxable = Math.max(0, taxableProfit);
   let box1 = 0;
@@ -278,7 +275,7 @@ export interface IncomeTaxEstimate {
 }
 
 export const INCOME_TAX_DISCLAIMER =
-  'Dit is een schatting, geen aanslag en geen advies. De app kent alleen de winst uit je onderneming en rekent met standaardaftrekposten; je werkelijke inkomstenbelasting kan flink anders zijn. Laat je aangifte altijd controleren door een boekhouder of accountant.';
+  'Dit is een schatting voor iemand onder de AOW-leeftijd die het hele jaar in Nederland belasting en volksverzekeringen betaalt, met alleen deze ondernemingswinst. Ander inkomen, seizoenen en bijzondere omstandigheden kunnen de uitkomst flink veranderen. Dit is geen aanslag; controleer je aangifte met je boekhouder.';
 
 export const NOT_INCLUDED = [
   'je partner, hypotheek en ander inkomen (loon, uitkering, spaargeld)',
@@ -300,11 +297,12 @@ export function profitBetween(db: Db, from: IsoDate, to: IsoDate): Cents {
 }
 
 /** Wat de schatting veronderstelt zolang de gebruiker het niet heeft bevestigd. */
-export function assumptionsFor(s: Pick<AppSettings, 'legalForm' | 'ibConfirmed' | 'urencriterium' | 'profitSharePct'>): string[] {
+export function assumptionsFor(s: Pick<AppSettings, 'legalForm' | 'ibConfirmed' | 'urencriterium' | 'ibHoursCondition' | 'profitSharePct'>): string[] {
   const out: string[] = [];
   if (!s.ibConfirmed) {
-    out.push('Je hebt nog niet bevestigd dat je ondernemer voor de inkomstenbelasting bent. Dat is nodig voor de ondernemersaftrek: je werkt minstens 1.225 uur per jaar in je bedrijf en dat is meer dan de helft van je werktijd.');
+    out.push('Je hebt nog niet bevestigd dat je ondernemer voor de inkomstenbelasting bent. De schatting rekent daarom zonder ondernemersaftrek, mkb-winstvrijstelling en KIA. Het urencriterium is een aparte voorwaarde.');
   }
+  if (s.urencriterium && !s.ibHoursCondition) out.push('Bevestig ook dat je meer dan de helft van je werktijd aan je onderneming besteedt, of dat de starteruitzondering geldt. Tot dan rekent de schatting zonder aftrek voor zelfstandigen.');
   if (s.legalForm === null) out.push('Je rechtsvorm is niet opgegeven; de schatting gaat uit van een eenmanszaak (of zzp zonder bv).');
   if (s.legalForm === 'vof') out.push(`Vof of maatschap: de schatting rekent met jouw deel van de winst (${s.profitSharePct}%). De aftrekposten (investeringen, bijtellingen) zijn niet verdeeld; laat je boekhouder dat nakijken.`);
   return out;
@@ -344,7 +342,7 @@ export class IncomeTaxService {
     const phoneYear = adj ? Math.round((adj.phonePrivate.bijtelling * daysInYear) / elapsed) : 0;
     const carYear = adj ? Math.round((adj.carPrivate.bijtelling * daysInYear) / elapsed) : 0;
     const bijtellingen = adj ? representatieBijtelling(reprYear / 100, rules.representatie) + (adj.desinvesteringsbijtelling + phoneYear + carYear) / 100 : 0;
-    const breakdown = estimateIncomeTax(profitYear / 100, rules, { urencriterium: s.urencriterium, starter: adj?.starter, kia: adj ? adj.kia / 100 : 0, bijtellingen, partnerHours: s.partnerHours, nietGerealiseerd: s.nietGerealiseerdeZelfstandigenaftrek });
+    const breakdown = estimateIncomeTax(profitYear / 100, rules, { ondernemer: s.ibConfirmed, urencriterium: s.urencriterium && s.ibHoursCondition !== null, starter: adj?.starter, kia: adj ? adj.kia / 100 : 0, bijtellingen, partnerHours: s.partnerHours, nietGerealiseerd: s.nietGerealiseerdeZelfstandigenaftrek });
     const taxYear = breakdown.total * 100;
     return {
       year: y,

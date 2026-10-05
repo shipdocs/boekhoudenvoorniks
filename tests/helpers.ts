@@ -52,6 +52,7 @@ export function setup(opts: { fetch?: FetchLike; ocr?: OcrProvider; mailer?: Mai
       website: '',
       kvkNumber: '12345678',
       vatNumber: 'NL123456789B01',
+      omzetbelastingNumber: '123456789B01',
       iban: 'NL91ABNA0417164300',
       bic: '',
     },

@@ -207,7 +207,7 @@ describe('kilometers, uren en privéauto', () => {
 describe('jaaroverzicht en schatting', () => {
   it('KIA, representatie en waarschuwing voor brandstof bij een privéauto', () => {
     const { s } = setup();
-    s.settings.update({ carUse: 'prive', startYear: 2025, startersaftrekUsed: { count: 1, asOfYear: 2026 } });
+    s.settings.update({ ibConfirmed: true, urencriterium: true, ibHoursCondition: 'meerderheid', carUse: 'prive', startYear: 2025, startersaftrekUsed: { count: 1, asOfYear: 2026 } });
     s.quick.recordCashSale({ date: '2026-01-15', description: 'Stucwerk', grossAmount: 36300_00, vatCode: 'hoog', receivedWith: 'bank' });
     buy(s, '2026-02-10', 6050_00, 'Steigerwagen');
     s.quick.recordExpense({ date: '2026-03-01', supplierName: 'Café De Hoek', description: 'Lunch met klant', categoryKey: 'representatie', grossAmount: 100_00, vatCode: 'geen', paidWith: 'kas' });
@@ -230,6 +230,7 @@ describe('jaaroverzicht en schatting', () => {
 
   it('boven de KIA-grens: geen extra aftrek en dat staat er ook', () => {
     const { s } = setup();
+    s.settings.update({ ibConfirmed: true });
     buy(s, '2026-02-10', 484000_00, 'Graafmachine');
     const kia = s.taxOverview.year(2026, '2026-06-30').items.find((i) => i.key === 'kia');
     expect(Math.abs(kia?.amount ?? 1)).toBe(0);

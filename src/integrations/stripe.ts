@@ -6,7 +6,14 @@ export const STRIPE: IntegrationDefinition = {
   label: 'Stripe',
   kind: 'betaalprovider',
   description: 'Boekt de uitbetalingen (payouts) van Stripe naar je bank, met de Stripe-kosten, zodat de bijschrijving op je bank vanzelf klopt. Boekt zelf geen omzet: gebruik je Stripe niet via een gekoppelde webshop, boek de omzet dan zelf bij die bijschrijving met "Verkoop via een ander systeem".',
-  fields: [{ key: 'apiKey', label: 'Restricted API key', type: 'secret', help: 'Stripe dashboard → Developers → API keys → restricted key met leesrechten op Balance en Payouts' }],
+  fields: [
+    { key: 'apiKey', label: 'Restricted API key', type: 'secret', help: 'Stripe dashboard → Developers → API keys → restricted key met leesrechten op Balance en Payouts' },
+    { key: 'feesTax', label: 'Welke btw geldt voor je Stripe-kosten?', type: 'select', help: 'Controleer je kostenfactuur met je boekhouder. Geen btw op de factuur betekent niet vanzelf verlegd. Bij gemengde kosten boek je de uitbetaling en de kosten apart; de app past niet één btw-keuze op alles toe.', options: [
+      { value: 'onbekend', label: 'Nog uitzoeken of gemengde kosten: zelf verwerken' },
+      { value: 'eu', label: 'Bevestigd: alle kosten 21% btw verlegd uit Ierland' },
+      { value: 'vrijgesteld', label: 'Bevestigd: alle kosten vrijgesteld van btw' },
+    ] },
+  ],
 };
 
 interface StripeBalanceTx {
@@ -25,7 +32,7 @@ interface StripePayout {
   statement_descriptor: string | null;
 }
 
-export async function fetchStripePayouts(fetchImpl: FetchLike, cfg: { apiKey: string }, knownIds: Set<string>): Promise<ExternalPayout[]> {
+export async function fetchStripePayouts(fetchImpl: FetchLike, cfg: { apiKey: string; feesTax?: string }, knownIds: Set<string>): Promise<ExternalPayout[]> {
   const headers = { Authorization: `Bearer ${cfg.apiKey}` };
   const payouts = await getJson<{ data: StripePayout[] }>(fetchImpl, 'https://api.stripe.com/v1/payouts?limit=50&status=paid', headers);
   const out: ExternalPayout[] = [];
@@ -39,7 +46,7 @@ export async function fetchStripePayouts(fetchImpl: FetchLike, cfg: { apiKey: st
       gross += t.amount;
       fees += t.fee;
     }
-    // Stripe (Ierland) rekent zakelijke klanten geen btw: verlegd uit de EU, rubriek 4b (#16)
+    // De payout-API bewijst niet of de prestaties vrijgesteld of belast zijn (#44).
     out.push({
       externalId: p.id,
       date: new Date(p.arrival_date * 1000).toISOString().slice(0, 10),
@@ -47,7 +54,8 @@ export async function fetchStripePayouts(fetchImpl: FetchLike, cfg: { apiKey: st
       gross: gross || p.amount,
       feesNet: fees,
       feesVat: 0,
-      feesReverseCharge: 'eu',
+      ...(cfg.feesTax === 'eu' ? { feesReverseCharge: 'eu' as const } : {}),
+      ...(cfg.feesTax !== 'eu' && cfg.feesTax !== 'vrijgesteld' && fees !== 0 ? { feesTaxUnconfirmed: true } : {}),
       currency: p.currency.toUpperCase(),
       reference: p.statement_descriptor ?? p.id,
     });

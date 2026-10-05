@@ -48,7 +48,7 @@ export const PURCHASE_VAT_RATES: Record<PurchaseVatCode, VatRateInfo> = {
   hoog: { code: 'hoog', label: '21% (hoog)', percentage: 21, rubriek: '5b' },
   laag: { code: 'laag', label: '9% (laag)', percentage: 9, rubriek: '5b' },
   nul: { code: 'nul', label: '0%', percentage: 0, rubriek: '-' },
-  verlegd: { code: 'verlegd', label: 'Btw verlegd naar mij (onderaannemer, geen btw op de factuur)', percentage: 21, rubriek: '2a' },
+  verlegd: { code: 'verlegd', label: 'Btw verlegd naar mij in Nederland (ook werk aan een Nederlands pand door een buitenlandse leverancier)', percentage: 21, rubriek: '2a' },
   eu: { code: 'eu', label: 'Buitenlandse leverancier in de EU, geen btw op de factuur (bv. Google, Meta)', percentage: 21, rubriek: '4b' },
   'buiten-eu': { code: 'buiten-eu', label: 'Leverancier buiten de EU, geen btw op de factuur', percentage: 21, rubriek: '4a' },
   geen: { code: 'geen', label: 'Geen btw', percentage: 0, rubriek: '-' },
