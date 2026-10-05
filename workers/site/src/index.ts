@@ -1,6 +1,28 @@
 /** De website: bestanden uit site/; http en www.boekhoudenvoorniks.nl gaan naar https://boekhoudenvoorniks.nl. */
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
+  /** Workers Analytics Engine; ontbreekt het (bij tests of lokaal), dan wordt er niets geteld. */
+  STATS?: { writeDataPoint(point: { indexes?: string[]; blobs?: string[]; doubles?: number[] }): void };
+}
+
+/**
+ * Anonieme tellers voor paginabezoeken en downloads, zonder cookies en zonder IP-adres: alleen wat voor
+ * de statistieken nodig is (soort, pagina of bestand, land, de site waarvandaan iemand kwam, en of het een
+ * robot lijkt). Er wordt niets bewaard waarmee je een bezoeker kunt herkennen.
+ */
+const BOT = /bot|crawl|spider|slurp|preview|fetch|monitor|curl|wget|python|go-http|headless|lighthouse|uptime/i;
+
+export function countPoint(kind: 'pagina' | 'download', name: string, request: Request): { indexes: string[]; blobs: string[]; doubles: number[] } {
+  let referrer = '';
+  try {
+    const host = new URL(request.headers.get('referer') ?? '').hostname.replace(/^www\./, '');
+    referrer = host === 'boekhoudenvoorniks.nl' ? 'intern' : host;
+  } catch {
+    // geen of ongeldige verwijzer
+  }
+  const country = (request as Request & { cf?: { country?: string } }).cf?.country ?? request.headers.get('cf-ipcountry') ?? '';
+  const bot = BOT.test(request.headers.get('user-agent') ?? '') ? 'bot' : 'mens';
+  return { indexes: [kind], blobs: [kind, name, country, referrer, bot], doubles: [1] };
 }
 
 /**
@@ -77,7 +99,11 @@ export default {
     }
     // /download/windows, /download/appimage, ...: het bestand van de nieuwste release
     if (url.pathname === '/download' || url.pathname === '/download/') return Response.redirect(`${url.origin}/downloaden.html`, 302);
-    if (url.pathname.startsWith('/download/') && (request.method === 'GET' || request.method === 'HEAD')) return download(url.pathname.slice('/download/'.length));
+    if (url.pathname.startsWith('/download/') && (request.method === 'GET' || request.method === 'HEAD')) {
+      const kind = url.pathname.slice('/download/'.length);
+      if (request.method === 'GET' && DOWNLOADS[kind]) env.STATS?.writeDataPoint(countPoint('download', kind, request));
+      return download(kind);
+    }
     // één adres per pagina: /index.html is de homepage
     if (url.pathname.endsWith('/index.html')) {
       url.pathname = url.pathname.slice(0, -'index.html'.length);
@@ -87,6 +113,7 @@ export default {
     const assetUrl = new URL(url);
     if (assetUrl.pathname.endsWith('/')) assetUrl.pathname += 'index.html';
     const res = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
+    if (res.ok && request.method === 'GET' && /(\/|\.html)$/.test(assetUrl.pathname)) env.STATS?.writeDataPoint(countPoint('pagina', url.pathname === '/' ? '/' : url.pathname, request));
     const out = new Response(res.body, res);
     out.headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
     out.headers.set('x-content-type-options', 'nosniff');
