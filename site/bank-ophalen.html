@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bank automatisch ophalen met Ponto | BoekhoudenVoorNiks</title>
+  <meta name="description" content="Haal je zakelijke bank automatisch op met Ponto, optioneel in BoekhoudenVoorNiks 1.2.0: stap voor stap, rechtstreeks tussen de app en Ponto. Afschriften inlezen blijft de basis.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/bank-ophalen.html">
+  <meta property="og:type" content="article">
+  <meta property="og:locale" content="nl_NL">
+  <meta property="og:site_name" content="BoekhoudenVoorNiks">
+  <meta property="og:url" content="https://boekhoudenvoorniks.nl/bank-ophalen.html">
+  <meta property="og:title" content="Bank automatisch ophalen met Ponto">
+  <meta property="og:description" content="Haal je zakelijke bank automatisch op met Ponto, optioneel in BoekhoudenVoorNiks 1.2.0: stap voor stap, rechtstreeks tussen de app en Ponto. Afschriften inlezen blijft de basis.">
+  <meta property="og:image" content="https://boekhoudenvoorniks.nl/img/ponto-5-status.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://boekhoudenvoorniks.nl/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Bank automatisch ophalen",
+          "item": "https://boekhoudenvoorniks.nl/bank-ophalen.html"
+        }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Wat kost de Ponto-koppeling?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "De koppeling zit in het gratis programma. Ponto is wel een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit. Wat dat kost, welke banken het ondersteunt en of jouw bedrijf wordt toegelaten, bepaalt Ponto; controleer dat bij Ponto zelf."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Ziet ShipDocs mijn bankgegevens?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Nee. Gewoon ophalen gaat rechtstreeks tussen de app op je computer en Ponto. Alleen als je op Nu bijwerken klikt, vraagt de app eerst je publieke IP-adres op bij Cloudflare en stuurt het aan Ponto, omdat Ponto dat vereist. De app laat dat eerst zien en bewaart of logt het niet."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Moet ik nog afschriften inlezen?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Dat hoeft niet, maar het kan altijd. Afschriften inlezen blijft de basis en de terugval. Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Hoe weet ik dat de betalingen compleet zijn?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "De app zegt tot welke datum de betalingen volledig zijn bijgewerkt. Ontbreekt er een periode, of sluit de app niet aantoonbaar aan op je afschriften, dan zegt het scherm dat en vraagt het die periode te onderbouwen met een afschrift of openingssaldo."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Wat als mijn toestemming bij Ponto afloopt?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Bij elke rekening staat tot wanneer je toestemming bij Ponto loopt. Binnen 14 dagen voor die datum, en na het verlopen, zet de app een taak op Vandaag. Verleng de toestemming bij Ponto, of lees voorlopig een afschrift in."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Gaat de koppeling mee naar mijn boekhouder?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Nee. Client ID en Client Secret staan versleuteld in je administratie en worden niet in een pakket voor je boekhouder of een kopie voor een kantoor meegegeven."
+          }
+        }
+      ]
+    }
+  ]
+}
+  </script>
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="./"><picture><source srcset="img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href="./#functies">Functies</a>
+        <a href="./#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="stukadoors.html">Stukadoors</a>
+            <a href="schilders.html">Schilders</a>
+            <a href="webdevelopers.html">Webdevelopers</a>
+            <a href="boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="waarom.html">Waarom</a>
+        <a href="wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="downloaden.html">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script>
+  (function () {
+    var top = document.querySelector('.top'), button = top.querySelector('.menu-button');
+    button.addEventListener('click', function () {
+      var open = top.classList.toggle('open');
+      button.setAttribute('aria-expanded', String(open));
+    });
+    top.querySelectorAll('details.sub').forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (!d.open) return;
+        top.querySelectorAll('details.sub[open]').forEach(function (o) { if (o !== d) o.open = false; });
+      });
+    });
+    function closeAll() {
+      var focused = document.activeElement, wasInside = top.contains(focused);
+      top.querySelectorAll('details.sub[open]').forEach(function (o) {
+        o.open = false;
+        if (o.contains(focused)) { o.querySelector('summary').focus(); wasInside = false; }
+      });
+      if (!top.classList.contains('open')) return;
+      top.classList.remove('open');
+      button.setAttribute('aria-expanded', 'false');
+      // de focus nooit achterlaten op een verborgen link
+      if (wasInside && focused !== button) button.focus();
+    }
+    document.addEventListener('click', function (e) { if (!top.contains(e.target)) closeAll(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
+  })();
+  </script>
+
+  <main class="wrap notes">
+    <p class="eyebrow">Nieuw in versie 1.2.0</p>
+    <h1>Bank automatisch ophalen met Ponto</h1>
+    <p class="lead">Geen afschrift meer downloaden en inlezen: de app haalt je betalingen zelf op en koppelt ze aan je facturen en bonnetjes. Je stelt het één keer in, in vijf stappen. Het is optioneel: afschriften inlezen blijft de basis en de terugval.</p>
+    <div class="cta">
+      <a class="btn" href="downloaden.html">Gratis downloaden voor Windows of Linux</a>
+      <a class="btn ghost" href="./#functies">Alle functies</a>
+    </div>
+
+    <h2>Wat het je oplevert</h2>
+    <ul class="checks">
+      <li><strong>Betalingen komen vanzelf binnen</strong><br><span class="muted">De app haalt zelf betalingen op bij het starten en daarna ongeveer elke zes uur. Met <em>Nu ophalen</em> start je zelf een ronde.</span></li>
+      <li><strong>Zelfde koppeling als altijd</strong><br><span class="muted">Opgehaalde betalingen worden net als betalingen uit een afschrift gekoppeld aan je facturen en bonnetjes. Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen.</span></li>
+      <li><strong>Je ziet wat compleet is</strong><br><span class="muted">Het scherm laat zien tot welke datum de betalingen volledig zijn bijgewerkt. Ontbreekt er een periode, dan vraagt de app die te onderbouwen met een afschrift of openingssaldo. Dat is niet hetzelfde als "compleet".</span></li>
+      <li><strong>Rechtstreeks, zonder tussenstop bij ons</strong><br><span class="muted">Gewoon ophalen gaat rechtstreeks tussen de app en Ponto. ShipDocs ziet je bankgegevens en je inloggegevens niet.</span></li>
+    </ul>
+
+    <div class="card trial">
+      <h3>Ponto is een afzonderlijke dienst</h3>
+      <p>Ponto is een zakelijke dienst waar je zelf een overeenkomst mee sluit, met je eigen koppeling en je eigen Client ID en Client Secret. Wat Ponto kost, welke banken het ondersteunt en of jouw bedrijf wordt toegelaten, bepaalt Ponto; controleer dat bij Ponto zelf. De koppeling in de app is gratis.</p>
+    </div>
+
+    <h2>Instellen in vijf stappen</h2>
+    <p>Op Bank staat de kaart <em>Bank automatisch ophalen met Ponto</em>. Kies <strong>Ponto instellen</strong>; de wizard loopt je door de stappen. De app telt de schermen van 0 tot 5, dus "Stap 0 van 5" is het eerste. De schermafbeeldingen zijn gemaakt met een nep-Ponto en een demo-administratie: de gegevens en het rekeningnummer zijn fictief.</p>
+    <figure class="shot"><picture><source srcset="img/ponto-1-voor-je-begint.webp" type="image/webp"><img src="img/ponto-1-voor-je-begint.png" alt="Scherm "Stap 0 van 5": Voor je begint, met de uitleg dat Ponto een afzonderlijke zakelijke dienst is" width="980" height="402" loading="lazy" decoding="async"></picture></figure>
+    <ol class="steps">
+      <li><strong>Voor je begint.</strong> De app zegt dat Ponto een afzonderlijke zakelijke dienst is en dat je kosten, voorwaarden, banken en toelating bij Ponto controleert. Heeft je computer geen veilige opslag voor inloggegevens, dan kan de koppeling hier niet worden ingesteld; blijf dan afschriften inlezen.</li>
+      <li><strong>Maak of open je Ponto-account.</strong> Met <em>Open Ponto-dashboard</em> ga je naar het Ponto-dashboard en rond je daar je zakelijke account af.</li>
+      <li><strong>Koppel je bank bij Ponto.</strong> Kies in Ponto de zakelijke bankrekening(en) die je in deze administratie wilt gebruiken en rond de toestemming bij je bank af.</li>
+    </ol>
+    <figure class="shot"><picture><source srcset="img/ponto-2-custom-integration.webp" type="image/webp"><img src="img/ponto-2-custom-integration.png" alt="Scherm "Stap 3 van 5": de knop Custom integration maken en de uitleg dat je alleen AIS kiest" width="980" height="390" loading="lazy" decoding="async"></picture></figure>
+    <ol class="steps" start="4">
+      <li><strong>Maak de koppeling voor Boekhouden Voor Niks.</strong> Met <em>Custom integration maken</em> ga je naar Ponto. Kies alleen <strong>AIS</strong> (rekeninginformatie), selecteer de rekeningen en behandel Client ID en Client Secret als een wachtwoord.</li>
+    </ol>
+    <figure class="shot"><picture><source srcset="img/ponto-3-gegevens-plakken.webp" type="image/webp"><img src="img/ponto-3-gegevens-plakken.png" alt="Scherm "Stap 4 van 5": de velden Client ID en Client Secret, ingevuld maar als wachtwoord verborgen" width="980" height="380" loading="lazy" decoding="async"></picture></figure>
+    <ol class="steps" start="5">
+      <li><strong>Plak en test de twee gegevens.</strong> Plak Client ID en Client Secret en kies <em>Verbinding testen</em>. Daarna kies je per Ponto-rekening waar die in deze administratie hoort: een bestaande rekening, een nieuwe zakelijke rekening, of niet gebruiken. De app stelt een bestaande rekening alleen voor bij een exact gelijk rekeningnummer. Een rekening die niet in euro's is of geen rekeningnummer heeft, is niet bruikbaar. Bij elke keuze staat of de aansluiting op je afschriften bewezen is. <em>Koppelen en ophalen</em> slaat de koppeling op en haalt meteen de eerste betalingen op.</li>
+    </ol>
+    <figure class="shot"><picture><source srcset="img/ponto-4-rekening-kiezen.webp" type="image/webp"><img src="img/ponto-4-rekening-kiezen.png" alt="Scherm "Stap 5 van 5": per Ponto-rekening kiezen waar die in de administratie hoort, met de melding tot welke datum de aansluiting bewezen is" width="980" height="426" loading="lazy" decoding="async"></picture></figure>
+    <p class="fine">Sluit je het venster met ingetypte maar niet opgeslagen gegevens, dan vraagt de app of je ze wilt wissen.</p>
+
+    <h2>Daarna</h2>
+    <figure class="shot"><picture><source srcset="img/ponto-5-status.webp" type="image/webp"><img src="img/ponto-5-status.png" alt="De kaart op Bank na het koppelen: status, toestemming tot een datum en de knoppen Nu bijwerken, Nu ophalen, Opnieuw plakken en Ontkoppelen" width="908" height="328" loading="lazy" decoding="async"></picture></figure>
+    <ul class="checks">
+      <li><strong>Nu ophalen en Nu bijwerken</strong><br><span class="muted"><em>Nu ophalen</em> start zelf een ronde. <em>Nu bijwerken</em> (per rekening) vraagt Ponto om de bank te laten verversen. Voor die ene actie vraagt de app je publieke IP-adres op bij Cloudflare en stuurt het aan Ponto, omdat Ponto dat vereist. De app laat dat eerst zien en bewaart of logt het IP-adres niet. Na een geslaagde start kan dit pas na 30 minuten opnieuw.</span></li>
+      <li><strong>Toestemming bijhouden</strong><br><span class="muted">Bij elke rekening staat tot wanneer je toestemming bij Ponto loopt. Binnen 14 dagen voor de datum en na het verlopen zet de app een taak op Vandaag. Verleng de toestemming bij Ponto, of lees voorlopig een afschrift in.</span></li>
+      <li><strong>Als er iets niet meer werkt</strong><br><span class="muted">Verdwijnt de rekening bij Ponto, of werken de gegevens niet meer, dan meldt de app dat op Vandaag en kun je met <em>Opnieuw plakken</em> de twee gegevens vervangen.</span></li>
+      <li><strong>Ontkoppelen</strong><br><span class="muted"><em>Ontkoppelen</em> verwijdert de koppeling en de opgeslagen inloggegevens van deze computer. Je bestaande betalingen en bankrekeningen blijven staan. Verwijder daarna zelf ook de koppeling in Ponto.</span></li>
+    </ul>
+
+    <h2>Waar blijven de gegevens</h2>
+    <ul class="checks">
+      <li><strong>Op je eigen computer</strong><br><span class="muted">Client ID en Client Secret staan versleuteld in je administratie (en dus in je eigen back-ups). Ze gaan niet mee in een pakket voor je boekhouder of een kopie voor een kantoor.</span></li>
+      <li><strong>Alleen in je eigen administratie</strong><br><span class="muted">In de koppeling werkt de app niet in een kantoorkopie, een demo-administratie of een administratie die alleen bekeken wordt.</span></li>
+    </ul>
+    <p>Meer over wat de app wel en niet verstuurt staat in de <a href="privacy.html">privacyverklaring</a>. Het volledige stappenplan staat ook in de <a href="https://github.com/shipdocs/boekhoudenvoorniks/blob/main/docs/bank-ophalen-ponto.md">documentatie op GitHub</a>.</p>
+
+    <h2>Veelgestelde vragen</h2>
+    <div class="faq">
+      <details><summary>Wat kost de Ponto-koppeling?</summary><p>De koppeling zit in het gratis programma. Ponto is wel een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit. Wat dat kost, welke banken het ondersteunt en of jouw bedrijf wordt toegelaten, bepaalt Ponto; controleer dat bij Ponto zelf.</p></details>
+      <details><summary>Ziet ShipDocs mijn bankgegevens?</summary><p>Nee. Gewoon ophalen gaat rechtstreeks tussen de app op je computer en Ponto. Alleen als je op Nu bijwerken klikt, vraagt de app eerst je publieke IP-adres op bij Cloudflare en stuurt het aan Ponto, omdat Ponto dat vereist. De app laat dat eerst zien en bewaart of logt het niet.</p></details>
+      <details><summary>Moet ik nog afschriften inlezen?</summary><p>Dat hoeft niet, maar het kan altijd. Afschriften inlezen blijft de basis en de terugval. Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen.</p></details>
+      <details><summary>Hoe weet ik dat de betalingen compleet zijn?</summary><p>De app zegt tot welke datum de betalingen volledig zijn bijgewerkt. Ontbreekt er een periode, of sluit de app niet aantoonbaar aan op je afschriften, dan zegt het scherm dat en vraagt het die periode te onderbouwen met een afschrift of openingssaldo.</p></details>
+      <details><summary>Wat als mijn toestemming bij Ponto afloopt?</summary><p>Bij elke rekening staat tot wanneer je toestemming bij Ponto loopt. Binnen 14 dagen voor die datum, en na het verlopen, zet de app een taak op Vandaag. Verleng de toestemming bij Ponto, of lees voorlopig een afschrift in.</p></details>
+      <details><summary>Gaat de koppeling mee naar mijn boekhouder?</summary><p>Nee. Client ID en Client Secret staan versleuteld in je administratie en worden niet in een pakket voor je boekhouder of een kopie voor een kantoor meegegeven.</p></details>
+    </div>
+
+    <div class="cta" style="margin-top: 32px">
+      <a class="btn" href="downloaden.html">Gratis downloaden</a>
+    </div>
+    <p class="fine">Meer lezen: <a href="wijzigingen.html#v1.2.0">wat is er nieuw in 1.2.0</a> · <a href="btw-aangifte.html">btw-aangifte zelf doen</a> · <a href="zonder-abonnement.html">zonder abonnement en offline</a> · <a href="starters.html">voor starters</a> · <a href="boekhouders.html">voor boekhouders</a>. Deze pagina geeft uitleg over het programma; Ponto en je bank bepalen zelf hun voorwaarden.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="./#functies">Functies</a></li>
+          <li><a href="./#prijzen">Prijzen</a></li>
+          <li><a href="./#overstappen">Overstappen</a></li>
+          <li><a href="bank-automatisch.html">Bank automatisch inlezen</a></li>
+          <li><a href="btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="zonder-abonnement.html">Zonder abonnement, offline</a></li>
+          <li><a href="./#vragen">Veelgestelde vragen</a></li>
+          <li><a href="wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="starters.html">Starters</a></li>
+          <li><a href="stukadoors.html">Stukadoors</a></li>
+          <li><a href="schilders.html">Schilders</a></li>
+          <li><a href="webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="waarom.html">Waarom we dit maakten</a></li>
+          <li><a href="downloaden.html">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks">Vragen en feedback: mail ons</a></li>
+          <li><a href="voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a></p>
+  </footer>
+</body>
+</html>
