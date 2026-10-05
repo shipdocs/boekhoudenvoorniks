@@ -177,4 +177,3 @@ Regressies staan in `tests/fiscale-review-44.test.ts` en `e2e/fiscale-review-44.
 [NT-DOC]: https://www.sbr-nl.nl/werken-met-sbr/taxonomie/documentatie-nederlandse-taxonomie?organisatie=481
 
 [DESINV]: https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/winst/inkomstenbelasting/inkomstenbelasting_voor_ondernemers/investeringsaftrek_en_desinvesteringsbijtelling/desinvesteringsbijtelling
-
