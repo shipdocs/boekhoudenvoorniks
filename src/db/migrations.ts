@@ -1374,4 +1374,9 @@ export const migrations: string[] = [
   );
   CREATE INDEX idx_purchase_vat_repayments_purchase ON purchase_vat_repayments(purchase_id);
   `,
+  /* 37: uren voor een hele week of maand */ `
+  -- period_end leeg = één dag (entry_date); anders loopt de regel van entry_date t/m period_end,
+  -- binnen één kalenderjaar (een periode over de jaargrens wordt in twee regels bewaard).
+  ALTER TABLE time_entries ADD COLUMN period_end TEXT;
+  `,
 ];

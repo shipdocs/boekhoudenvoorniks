@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
-import { today } from '../../shared/dates';
+import { formatDateNl, isoWeek, monthOf, today, weekOf } from '../../shared/dates';
+import type { HoursPeriod } from '../../tax/mileage';
 import { ACCOUNTANT_CHECK_REASONS, ACCOUNTANT_CHECK_TITLE } from '../../shared/legal';
 import { kiaFor, rulesFor } from '../../tax/income-tax';
 
@@ -417,19 +418,51 @@ function Trips({ year }: { year: number }) {
   );
 }
 
+const PERIOD_LABEL = { dag: 'Dag', week: 'Week', maand: 'Maand' } as const;
+
+/** "Week 41 (5–11 okt)", "oktober 2026" of de dag zelf. */
+function periodText(start: string, end: string | null): string {
+  if (!end || end === start) return formatDateNl(start);
+  const first = Number(start.slice(8));
+  const month = (d: string) => formatDateNl(d).split(' ')[1];
+  if (start.slice(8) === '01' && end === monthOf(start).end) return `${month(start)} ${start.slice(0, 4)}`;
+  return `Week ${isoWeek(start)} (${first} ${start.slice(5, 7) === end.slice(5, 7) ? '' : `${month(start)} `}–${Number(end.slice(8))} ${month(end)})`;
+}
+
 function Hours({ year }: { year: number }) {
   const totals = useLoad(() => api.hours.totals(year), [year]);
   const list = useLoad(() => api.hours.list(year), [year]);
+  const forecast = useLoad(() => api.hours.forecast(year), [year]);
   const { run, busy } = useAction();
+  const [period, setPeriod] = useState<HoursPeriod>('dag');
   const [date, setDate] = useState(today());
   const [hours, setHours] = useState('');
   const [what, setWhat] = useState('');
+  const [repeat, setRepeat] = useState(false);
+  const [until, setUntil] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [info, setInfo] = useState('');
+  const n = Number(hours.replace(',', '.'));
+  const input = { date, hours: n, description: what, period, ...(repeat && until ? { repeatUntil: until } : {}) };
+  useEffect(() => {
+    setWarnings([]);
+    setInfo('');
+    if (!(n > 0) || !date) return;
+    let stale = false;
+    api.hours.check(input).then(
+      (r) => { if (!stale) { setWarnings(r.warnings); setInfo(r.regels > 1 ? `Dit maakt ${r.regels} regels.` : ''); } },
+      (e: unknown) => { if (!stale) setInfo(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '') : ''); },
+    );
+    return () => { stale = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, date, hours, repeat, until]);
   const reload = async () => {
     await totals.reload();
     await list.reload();
+    await forecast.reload();
   };
   const add = async () => {
-    const r = await run(() => api.hours.add({ date, hours: Number(hours.replace(',', '.')), description: what }), 'Uren toegevoegd');
+    const r = await run(() => api.hours.add(input), 'Uren toegevoegd');
     if (r) {
       setHours('');
       setWhat('');
@@ -437,11 +470,18 @@ function Hours({ year }: { year: number }) {
     }
   };
   const t = totals.data;
+  const f = forecast.data;
+  const range = period === 'week' ? weekOf(date) : period === 'maand' ? monthOf(date) : null;
+  const hint = {
+    dag: 'Wat je op die dag werkte.',
+    week: 'Het totaal over de hele week (maandag t/m zondag).',
+    maand: 'Het totaal over de hele maand.',
+  }[period];
   return (
     <>
       <p className="muted">
         Voor de zelfstandigenaftrek (en startersaftrek) moet je minstens 1.225 uur per jaar aan je bedrijf werken. Uren op de werkbonnen van je klussen tellen vanzelf mee.
-        Vul hier de rest in: offertes maken, administratie, inkopen, reistijd.
+        Vul hier de rest in: offertes maken, administratie, inkopen, reistijd, of gewoon al je werk, per dag, per week of per maand.
       </p>
       {t && (
         <div className="card">
@@ -449,20 +489,51 @@ function Hours({ year }: { year: number }) {
           <div className="progress" style={{ marginTop: 8, height: 8, background: 'var(--surface-2)', borderRadius: 99 }}>
             <div style={{ width: `${Math.min(100, (t.total / 1225) * 100)}%`, height: '100%', background: t.total >= 1225 ? 'var(--good)' : 'var(--primary)', borderRadius: 99 }} />
           </div>
+          {f && (
+            <p className="muted" style={{ margin: '8px 0 0' }}>
+              {f.remaining === 0
+                ? `Je hebt de ${f.target.toLocaleString('nl-NL')} uur gehaald.`
+                : `Nog ${f.remaining.toLocaleString('nl-NL')} uur voor de ${f.target.toLocaleString('nl-NL')}: dat is ${f.perWeekNeeded.toLocaleString('nl-NL')} uur per week tot 31 december.` +
+                  (f.reachDate ? ` Op je tempo tot nu toe (${f.perWeekNow.toLocaleString('nl-NL')} uur per week) haal je het op ${formatDateNl(f.reachDate)}.` : f.perWeekNow > 0 ? ` Op je tempo tot nu toe (${f.perWeekNow.toLocaleString('nl-NL')} uur per week) haal je het dit jaar niet.` : '')}
+            </p>
+          )}
         </div>
       )}
-      <div className="card row" style={{ alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
-        <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Field label="Uren"><input value={hours} onChange={(e) => setHours(e.target.value)} inputMode="decimal" style={{ width: 90 }} /></Field>
-        <div style={{ flex: 1, minWidth: 200 }}><Field label="Wat heb je gedaan?"><input value={what} onChange={(e) => setWhat(e.target.value)} placeholder="bv. offertes en administratie" /></Field></div>
-        <Button kind="primary" disabled={busy || !hours || !what} onClick={() => void add()}>Toevoegen</Button>
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="chips" style={{ marginBottom: 12 }} role="group" aria-label="Periode">
+          {(Object.keys(PERIOD_LABEL) as HoursPeriod[]).map((p) => (
+            <button key={p} className={period === p ? 'selected' : ''} onClick={() => setPeriod(p)}>Per {PERIOD_LABEL[p].toLowerCase()}</button>
+          ))}
+        </div>
+        <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          {period === 'maand' ? (
+            <Field label="Maand"><input type="month" value={date.slice(0, 7)} onChange={(e) => e.target.value && setDate(`${e.target.value}-01`)} /></Field>
+          ) : (
+            <Field label={period === 'week' ? 'Een dag in de week' : 'Datum'}><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+          )}
+          <Field label={period === 'dag' ? 'Uren' : 'Uren in totaal'}><input value={hours} onChange={(e) => setHours(e.target.value)} inputMode="decimal" style={{ width: 110 }} /></Field>
+          <div style={{ flex: 1, minWidth: 200 }}><Field label="Wat heb je gedaan?"><input value={what} onChange={(e) => setWhat(e.target.value)} placeholder={period === 'dag' ? 'bv. offertes en administratie' : 'bv. ontwikkeling van mijn producten, offertes, administratie'} /></Field></div>
+          <Button kind="primary" disabled={busy || !hours || !what || (repeat && !until)} onClick={() => void add()}>Toevoegen</Button>
+        </div>
+        <p className="muted" style={{ margin: '8px 0 0' }}>
+          {hint}
+          {range && <> Je kiest: {periodText(range.start, range.end)}.</>}
+          {period !== 'dag' && ' Een globale omschrijving is genoeg; schrijf op waar je tijd naartoe ging.'}
+        </p>
+        <label className="row" style={{ gap: 8, marginTop: 8, alignItems: 'center' }}>
+          <input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
+          <span>Herhaal {period === 'dag' ? 'op elke werkdag' : period === 'week' ? 'elke week' : 'elke maand'} tot en met</span>
+          <input type="date" value={until} disabled={!repeat} onChange={(e) => setUntil(e.target.value)} aria-label="Herhalen tot en met" />
+        </label>
+        {info && <p className="muted" style={{ margin: '8px 0 0' }}>{info}</p>}
+        {warnings.map((w) => <p key={w} style={{ margin: '8px 0 0', color: 'var(--warn, #b45309)' }}>⚠️ {w}</p>)}
       </div>
       {(list.data ?? []).length > 0 && (
         <table className="list" style={{ marginTop: 12 }}>
           <tbody>
             {list.data!.map((h) => (
               <tr key={h.id}>
-                <td><DateNl date={h.entry_date} /></td>
+                <td>{periodText(h.entry_date, h.period_end)}</td>
                 <td>{h.description}</td>
                 <td className="num">{h.hours.toLocaleString('nl-NL')} uur</td>
                 <td><Button small kind="ghost" onClick={async () => { if (await run(async () => { await api.hours.remove(h.id); return true; })) await reload(); }}>Weghalen</Button></td>

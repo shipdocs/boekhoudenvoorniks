@@ -151,3 +151,22 @@ export function addMonths(date: IsoDate, months: number): IsoDate {
   const last = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][nm - 1]!;
   return `${String(ny).padStart(4, '0')}-${String(nm).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
 }
+
+/** Maandag t/m zondag van de week waarin `date` valt. */
+export function weekOf(date: IsoDate): { start: IsoDate; end: IsoDate } {
+  const start = addDays(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7));
+  return { start, end: addDays(start, 6) };
+}
+
+/** Eerste t/m laatste dag van de maand waarin `date` valt. */
+export function monthOf(date: IsoDate): { start: IsoDate; end: IsoDate } {
+  const start = `${date.slice(0, 7)}-01`;
+  return { start, end: addDays(addMonths(start, 1), -1) };
+}
+
+/** ISO-weeknummer. */
+export function isoWeek(date: IsoDate): number {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  return Math.ceil(((d.getTime() - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86_400_000 + 1) / 7);
+}
