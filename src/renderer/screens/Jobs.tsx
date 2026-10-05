@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, useAction, useApp, useLoad } from '../ui';
-import type { WorkItem } from '../../jobs/jobs';
+import type { JobCostItem, WorkItem } from '../../jobs/jobs';
 
 export function Jobs() {
   const { go } = useApp();
@@ -74,6 +74,76 @@ export function EarningsPerJob({ relationId }: { relationId?: number } = {}) {
           ))}
         </tbody>
       </table>
+    </>
+  );
+}
+
+/** Kies bij welke klus een kostenpost hoort: algemeen, een lopende klus, een afgeronde klus, of zoek in alle. */
+export function LinkJobModal({ title, current, onPick, onClose }: { title: string; current: number | null; onPick: (jobId: number | null) => void | Promise<void>; onClose: () => void }) {
+  const jobs = useLoad(() => api.jobs.list());
+  const [search, setSearch] = useState('');
+  const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+  const matching = (jobs.data ?? []).filter((j) => j.status !== 'geannuleerd' && words.every((w) => [j.title, j.relation_name].join(' ').toLowerCase().includes(w)));
+  const running = matching.filter((j) => ['gepland', 'bezig', 'klaar'].includes(j.status));
+  const done = matching.filter((j) => j.status === 'gefactureerd');
+  const choose = (jobId: number | null) => { void onPick(jobId); };
+  const button = (j: { id: number; title: string; relation_name: string }) => (
+    <button key={j.id} disabled={j.id === current} onClick={() => choose(j.id)}>{j.relation_name} · {j.title}{j.id === current ? ' (nu)' : ''}</button>
+  );
+  return (
+    <Modal title="Hoort bij klus" onClose={onClose}>
+      <p className="muted">{title}</p>
+      <input type="search" aria-label="Zoek een klus" placeholder="Zoek op klant of klus…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: '100%' }} />
+      <div className="choice" style={{ marginTop: 10 }}>
+        <button disabled={current === null} onClick={() => choose(null)}>Algemene bedrijfskosten{current === null ? ' (nu)' : ''}</button>
+        {running.map(button)}
+        {done.length > 0 && <div className="muted small" style={{ marginTop: 6 }}>Afgerond en gefactureerd</div>}
+        {done.map(button)}
+        {words.length > 0 && matching.length === 0 && <p className="muted small">Geen klus gevonden.</p>}
+      </div>
+    </Modal>
+  );
+}
+
+/** Kosten aan deze klus (bonnen, inkoopfacturen, directe bankkosten), elk te verplaatsen of algemeen te maken. */
+function JobCosts({ jobId, onChanged }: { jobId: number; onChanged: () => void }) {
+  const { go } = useApp();
+  const { run, busy } = useAction();
+  const items = useLoad(() => api.jobs.costItems(jobId), [jobId]);
+  const [moving, setMoving] = useState<JobCostItem | null>(null);
+  const list = items.data ?? [];
+  const link = async (item: JobCostItem, to: number | null) => {
+    const ok = await run(async () => {
+      if (item.purchaseId !== null) await api.jobs.linkPurchase(item.purchaseId, to);
+      else if (item.bankTransactionId !== null) await api.jobs.linkBankTransaction(item.bankTransactionId, to);
+      else if (item.tripId !== null) await api.jobs.linkTrip(item.tripId, to);
+      return true;
+    }, to === null ? 'Kosten zijn nu algemeen ✓' : 'Kosten verplaatst ✓');
+    if (ok) { setMoving(null); await items.reload(); onChanged(); }
+  };
+  if (list.length === 0) return null;
+  return (
+    <>
+      <h2>Kosten aan deze klus</h2>
+      <table className="list small">
+        <tbody>
+          {list.map((c, i) => (
+            <tr key={`${c.kind}-${c.purchaseId ?? c.bankTransactionId ?? c.tripId ?? i}-${i}`}>
+              <td><DateNl date={c.date} /></td>
+              <td>{c.label}<div className="muted small">{c.kind === 'aankoop' ? 'Bon of inkoopfactuur' : c.kind === 'bank' ? 'Betaling van je bank' : c.kind === 'rit' ? 'Kilometervergoeding' : 'Overig'}</div></td>
+              <td className="num"><Euro cents={c.amount} /><div className="muted small">excl. btw</div></td>
+              <td>
+                <span className="row">
+                  {c.kind === 'aankoop' && <Button small kind="ghost" onClick={() => go({ screen: 'aankopen' })}>Bekijken</Button>}
+                  {c.kind !== 'overig' && <Button small kind="ghost" disabled={busy} onClick={() => setMoving(c)}>Naar andere klus</Button>}
+                  {c.kind !== 'overig' && <Button small kind="ghost" disabled={busy} onClick={() => void link(c, null)}>Algemeen maken</Button>}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {moving && <LinkJobModal title={`${moving.label}, ${'€ ' + (moving.amount / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2 })} excl. btw`} current={jobId} onClose={() => setMoving(null)} onPick={(to) => link(moving, to)} />}
     </>
   );
 }
@@ -152,6 +222,8 @@ export function JobDetail({ id }: { id: number }) {
 
       <WorkOrder jobId={id} items={work.data ?? []} onChanged={() => void work.reload()} readOnly={j.status === 'gefactureerd' || j.status === 'geannuleerd'} />
 
+      <JobCosts jobId={id} onChanged={() => void job.reload()} />
+
       {j.invoices.length > 0 && (
         <>
           <h2>Facturen</h2>
@@ -169,7 +241,7 @@ export function JobDetail({ id }: { id: number }) {
         </>
       )}
       <p className="small muted" style={{ marginTop: 18 }}>
-        Bonnetjes en betalingen voor materiaal koppelen we aan de klus die loopt; je krijgt de vraag op Vandaag. {j.start_date && <>Gestart <DateNl date={j.start_date} />.</>}
+        Bonnetjes en betalingen voor materiaal koppelen we aan de klus die loopt; je krijgt de vraag op Vandaag. Klopt een koppeling niet, dan verplaats je hem hierboven, of bij Aankopen. {j.start_date && <>Gestart <DateNl date={j.start_date} />.</>}
       </p>
       {j.status !== 'geannuleerd' && j.status !== 'gefactureerd' && <Button kind="ghost" small onClick={() => void setStatus('geannuleerd')}>Klus annuleren</Button>}
     </div>

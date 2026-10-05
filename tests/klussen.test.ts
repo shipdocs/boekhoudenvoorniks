@@ -115,3 +115,43 @@ describe('klussen als dossier (#32)', () => {
     expect(readJpegGps(makeJpegWithGps(52.09, 5.12))).not.toBeNull();
   });
 });
+
+describe('kosten aan een klus herstelbaar (kostenplaatsen)', () => {
+  it('toont elke kostenpost met zijn bron, en verplaatst of maakt hem algemeen', () => {
+    const { s, klant } = setup();
+    const a = s.jobs.create({ relationId: klant.id, title: 'Badkamer' });
+    const b = s.jobs.create({ relationId: klant.id, title: 'Dakgoot' });
+    const gips = s.purchases.create({ invoiceDate: '2026-09-02', description: 'Gips', jobId: a.id, lines: [{ account: ACCOUNTS.inkoopMaterialen, netAmount: 20000, vatCode: 'hoog' }] });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-04', amount: -12100, description: 'Pin', counterName: 'Praxis' }] });
+    const t = s.bank.list({ status: 'nieuw' })[0]!;
+    s.bank.bookToAccount(t.id, { account: ACCOUNTS.inkoopMaterialen, vatCode: 'hoog' });
+    s.jobs.linkBankTransaction(t.id, a.id);
+
+    const items = s.jobs.costItems(a.id);
+    expect(items.map((i) => [i.kind, i.label, i.amount])).toEqual([['bank', 'Praxis', 10000], ['aankoop', 'Gips', 20000]]);
+    expect(items.reduce((sum, i) => sum + i.amount, 0)).toBe(s.jobs.result(a.id).totalCosts);
+
+    s.jobs.linkPurchase(gips.id, b.id); // naar een andere klus
+    expect(s.jobs.costItems(a.id).map((i) => i.kind)).toEqual(['bank']);
+    expect(s.jobs.costItems(b.id).map((i) => i.label)).toEqual(['Gips']);
+    s.jobs.linkBankTransaction(t.id, null); // algemeen
+    expect(s.jobs.costItems(a.id)).toEqual([]);
+    expect(s.jobs.result(a.id).totalCosts).toBe(0);
+    expect(s.jobs.result(b.id).totalCosts).toBe(20000);
+  });
+
+  it('kilometers tellen mee bij de klus, zijn te verplaatsen en verdwijnen bij weghalen', () => {
+    const { s, klant } = setup();
+    const a = s.jobs.create({ relationId: klant.id, title: 'Badkamer' });
+    const b = s.jobs.create({ relationId: klant.id, title: 'Dakgoot' });
+    const rit = s.mileage.add({ date: '2026-09-02', km: 80, description: 'Utrecht', jobId: a.id });
+    expect(s.jobs.costItems(a.id)).toMatchObject([{ kind: 'rit', tripId: rit.id, label: '80 km: Utrecht', amount: rit.amount }]);
+    expect(s.jobs.result(a.id).totalCosts).toBe(rit.amount);
+    s.jobs.linkTrip(rit.id, b.id);
+    expect(s.jobs.result(a.id).totalCosts).toBe(0);
+    expect(s.jobs.result(b.id).totalCosts).toBe(rit.amount);
+    s.mileage.remove(rit.id);
+    expect(s.jobs.costItems(b.id)).toEqual([]);
+    expect(s.jobs.result(b.id).totalCosts).toBe(0);
+  });
+});
