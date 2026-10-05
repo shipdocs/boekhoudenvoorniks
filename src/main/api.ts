@@ -1033,6 +1033,8 @@ export function createApi(s: Services, host: HostContext) {
         return s.jobs.suggest({ date: d.result?.invoiceDate?.value ?? today(), supplier: d.result?.supplier?.value ?? null, gps: gps.gps_lat != null && gps.gps_lon != null ? { lat: gps.gps_lat, lon: gps.gps_lon } : null });
       },
       linkPurchase: (purchaseId: number, jobId: number | null) => s.jobs.linkPurchase(purchaseId, jobId),
+      linkBankTransaction: (txId: number, jobId: number | null) => s.jobs.linkBankTransaction(txId, jobId),
+      costItems: (id: number) => s.jobs.costItems(id),
       workItems: (id: number) => s.jobs.workItems(id),
       addWorkItem: (id: number, item: { date: IsoDate; description: string; quantity: number; unit?: string | null; unitPrice: Cents; vatCode: string }) => s.jobs.addWorkItem(id, item),
       removeWorkItem: (itemId: number) => s.jobs.removeWorkItem(itemId),

@@ -8,6 +8,7 @@ import { CURRENCY_NAMES, formatForeign } from '../../shared/currency';
 import type { FxCandidate } from '../../fx/repair';
 import { CategoryChips } from './Categories';
 import type { PurchaseInvoice } from '../../documents/purchases';
+import { LinkJobModal } from './Jobs';
 import type { UploadResult } from '../../intake/intake';
 import { VIEW_EXISTING } from '../../shared/document-outcome';
 import { uploadOutcomeText } from './UploadOutcome';
@@ -33,6 +34,9 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   // vreemde valuta (#74): een aankoop omrekenen (uit de lijst van de app, of met de hand)
   const [fx, setFx] = useState<{ id: number; fromDocument: boolean } | null>(null);
   const [resolving, setResolving] = useState<{ id: number; label: string } | null>(null);
+  // bij welke klus hoort deze aankoop (kostenplaats)
+  const [jobFor, setJobFor] = useState<PurchaseInvoice | null>(null);
+  const allJobs = useLoad(() => api.jobs.list());
   const foreign = useLoad(() => api.valuta.candidates());
 
   const upload = async (file: File) => {
@@ -128,6 +132,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                   {p.description} {p.attachment_path && <span title="Bewijsstuk aanwezig">📎</span>}
                   {p.vat_warning && <div className="small notice warn">{p.vat_warning}</div>}
                   {p.question && <div className="small"><span className="pill warn">nog uitzoeken</span> staat bij "weet ik nog niet", zonder btw-aftrek</div>}
+                  {p.job_id !== null && <div className="small muted">🔨 {(() => { const j = (allJobs.data ?? []).find((x) => x.id === p.job_id); return j ? `${j.relation_name} · ${j.title}` : 'Klus'; })()}</div>}
                   {p.business_pct < 100 && <div className="small"><strong>{p.business_pct}% zakelijk</strong>, {100 - p.business_pct}% privé</div>}
                   {p.warranty_months ? <div className="small muted">🛡️ {warrantyText(p.invoice_date, p.warranty_months)}</div> : null}
                 </td>
@@ -145,6 +150,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                       if ((await run(async () => { await api.purchases.remove(p.id); return true; }, 'Aankoop weggehaald ✓')) !== undefined) await purchases.reload();
                     }}>Weghalen</Button>}
                     {p.question && <Button small kind="primary" onClick={() => setResolving({ id: p.id, label: `${p.relation_name ?? p.description} ${formatDateNl(p.invoice_date)}` })}>Indelen</Button>}
+                    <Button small kind="ghost" title="Voor welke klus was dit? Of algemene bedrijfskosten" ariaLabel="Klus kiezen" onClick={() => setJobFor(p)}>🔨</Button>
                     <Button small kind="ghost" title="Gebruik je dit ook privé? Stel in hoeveel zakelijk is" ariaLabel="Zakelijk deel aanpassen" onClick={() => setShare(p)}>%</Button>
                     {!p.currency && <Button small kind="ghost" title="Was deze bon in dollars of een andere munt? Dan reken je hem hier om naar euro's." ariaLabel="Omrekenen uit een andere munt" onClick={() => setFx({ id: p.id, fromDocument: false })}>💱</Button>}
                     <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={async () => {
@@ -165,6 +171,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
       {manual && <ManualExpense onClose={() => setManual(false)} onDone={async () => { setManual(false); await purchases.reload(); }} />}
       {pay !== null && <PayModal id={pay} onClose={() => setPay(null)} />}
       {share && <ShareModal purchase={share} onClose={() => setShare(null)} onDone={async () => { setShare(null); await purchases.reload(); }} />}
+      {jobFor && <LinkJobModal title={`${jobFor.relation_name ?? jobFor.description} ${formatDateNl(jobFor.invoice_date)}`} current={jobFor.job_id} onClose={() => setJobFor(null)} onPick={async (to) => { const ok = await run(async () => { await api.jobs.linkPurchase(jobFor.id, to); return true; }, to === null ? 'Aankoop is nu algemeen ✓' : 'Aankoop gekoppeld aan de klus ✓'); if (ok) { setJobFor(null); await purchases.reload(); } }} />}
       {resolving && <ResolveQuestionModal purchase={resolving} onClose={() => setResolving(null)} onDone={async () => { setResolving(null); await purchases.reload(); }} />}
       {paidElsewhere && <PaidElsewhereModal purchase={paidElsewhere} others={(purchases.data ?? []).filter((x) => x.id !== paidElsewhere.id && x.relation_id !== null && x.relation_id === paidElsewhere.relation_id && x.status === 'open' && x.open_amount > 0).length} onClose={() => setPaidElsewhere(null)} onDone={async () => { setPaidElsewhere(null); await purchases.reload(); }} />}
       {fx && <ForeignModal purchaseId={fx.id} fromDocument={fx.fromDocument} onClose={() => setFx(null)} onDone={async () => { setFx(null); await foreign.reload(); await purchases.reload(); }} />}
