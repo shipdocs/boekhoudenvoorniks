@@ -46,6 +46,8 @@ import type { XafApplyChoices } from '../onboarding/xaf-import';
 import { OPEN_ITEMS_TEMPLATE, type ColumnMapping } from '../import/opening-tables';
 import type { EntrySource } from '../core-ledger/ledger';
 import { formatDateNl, today, type IsoDate } from '../shared/dates';
+import type { HoursInput } from '../tax/mileage';
+import { rulesFor } from '../tax/income-tax';
 import type { Cents } from '../shared/money';
 import type { PollResult } from '../mail/mail-intake';
 import type { UpdateStatus } from './updates';
@@ -1519,7 +1521,9 @@ export function createApi(s: Services, host: HostContext) {
     hours: {
       list: (year: number) => s.hours.list(year),
       totals: (year: number) => s.hours.totals(year),
-      add: (input: { date: IsoDate; hours: number; description: string }) => s.hours.add(input),
+      add: (input: HoursInput) => s.hours.add(input),
+      check: (input: HoursInput) => s.hours.check(input),
+      forecast: (year: number) => s.hours.forecast(year, today(), rulesFor(year).rules.urencriterium),
       remove: (id: number) => s.hours.remove(id),
     },
     /**
