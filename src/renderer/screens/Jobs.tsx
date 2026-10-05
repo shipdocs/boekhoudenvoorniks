@@ -116,6 +116,7 @@ function JobCosts({ jobId, onChanged }: { jobId: number; onChanged: () => void }
     const ok = await run(async () => {
       if (item.purchaseId !== null) await api.jobs.linkPurchase(item.purchaseId, to);
       else if (item.bankTransactionId !== null) await api.jobs.linkBankTransaction(item.bankTransactionId, to);
+      else if (item.tripId !== null) await api.jobs.linkTrip(item.tripId, to);
       return true;
     }, to === null ? 'Kosten zijn nu algemeen ✓' : 'Kosten verplaatst ✓');
     if (ok) { setMoving(null); await items.reload(); onChanged(); }
@@ -127,9 +128,9 @@ function JobCosts({ jobId, onChanged }: { jobId: number; onChanged: () => void }
       <table className="list small">
         <tbody>
           {list.map((c, i) => (
-            <tr key={`${c.kind}-${c.purchaseId ?? c.bankTransactionId ?? i}-${i}`}>
+            <tr key={`${c.kind}-${c.purchaseId ?? c.bankTransactionId ?? c.tripId ?? i}-${i}`}>
               <td><DateNl date={c.date} /></td>
-              <td>{c.label}<div className="muted small">{c.kind === 'aankoop' ? 'Bon of inkoopfactuur' : c.kind === 'bank' ? 'Betaling van je bank' : 'Overig'}</div></td>
+              <td>{c.label}<div className="muted small">{c.kind === 'aankoop' ? 'Bon of inkoopfactuur' : c.kind === 'bank' ? 'Betaling van je bank' : c.kind === 'rit' ? 'Kilometervergoeding' : 'Overig'}</div></td>
               <td className="num"><Euro cents={c.amount} /><div className="muted small">excl. btw</div></td>
               <td>
                 <span className="row">

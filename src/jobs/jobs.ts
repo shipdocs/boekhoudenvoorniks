@@ -52,8 +52,9 @@ export interface JobResult {
 
 /** Eén kostenpost op een klus: een aankoop, een direct geboekte betaling of iets anders (bv. kilometers). */
 export interface JobCostItem {
-  kind: 'aankoop' | 'bank' | 'overig';
+  kind: 'aankoop' | 'bank' | 'rit' | 'overig';
   purchaseId: number | null;
+  tripId: number | null;
   bankTransactionId: number | null;
   date: IsoDate;
   label: string;
@@ -198,30 +199,33 @@ export class JobService {
     return ['Materiaal', 'Uitbesteed werk', 'Overige kosten'].filter((l) => byLabel.get(l)).map((label) => ({ label, amount: byLabel.get(label)! }));
   }
 
-  /** De kostenposten achter het klusresultaat, elk met de bron waarmee je hem kunt verplaatsen of loskoppelen. */
+  /** De kostenposten achter het klusresultaat, elk met de bron waarmee je hem kunt verplaatsen of loskoppelen. Teruggedraaide posten en hun tegenboeking heffen elkaar op en staan er niet in. */
   costItems(id: number): JobCostItem[] {
     const rows = this.db
       .prepare(
         `SELECT ev.type, ev.event_date AS date,
            (SELECT SUM(l.debit) - SUM(l.credit) FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = e.id AND a.category = 'kosten') AS net,
+           (SELECT t.id FROM trips t WHERE t.journal_entry_id = e.id AND t.deleted = 0) AS trip_id,
+           (SELECT t.km FROM trips t WHERE t.journal_entry_id = e.id AND t.deleted = 0) AS trip_km,
+           (SELECT t.description FROM trips t WHERE t.journal_entry_id = e.id AND t.deleted = 0) AS trip_description,
            (SELECT p.id FROM purchase_invoices p WHERE p.journal_entry_id = e.id) AS purchase_id,
            (SELECT COALESCE(r.name, p.description) FROM purchase_invoices p LEFT JOIN relations r ON r.id = p.relation_id WHERE p.journal_entry_id = e.id) AS purchase_label,
            (SELECT b.id FROM bank_transactions b WHERE b.matched_journal_entry_id = e.id ORDER BY b.id LIMIT 1) AS bank_id,
            (SELECT b.counter_name FROM bank_transactions b WHERE b.matched_journal_entry_id = e.id ORDER BY b.id LIMIT 1) AS bank_label
          FROM journal_entries e JOIN events ev ON ev.id = e.event_id
-         WHERE ev.job_id = ?
+         WHERE ev.job_id = ? AND e.status <> 'teruggedraaid' AND e.reverses_entry_id IS NULL
          ORDER BY ev.event_date DESC, e.id DESC`,
       )
-      .all(id) as { type: string; date: IsoDate; net: number | null; purchase_id: number | null; purchase_label: string | null; bank_id: number | null; bank_label: string | null }[];
+      .all(id) as { type: string; date: IsoDate; net: number | null; trip_id: number | null; trip_km: number | null; trip_description: string | null; purchase_id: number | null; purchase_label: string | null; bank_id: number | null; bank_label: string | null }[];
     return rows
       .filter((r) => r.net)
-      .map((r) =>
-        r.purchase_id !== null
-          ? { kind: 'aankoop' as const, purchaseId: r.purchase_id, bankTransactionId: null, date: r.date, label: r.purchase_label ?? 'Aankoop', amount: r.net! }
-          : r.bank_id !== null
-            ? { kind: 'bank' as const, purchaseId: null, bankTransactionId: r.bank_id, date: r.date, label: r.bank_label ?? 'Betaling', amount: r.net! }
-            : { kind: 'overig' as const, purchaseId: null, bankTransactionId: null, date: r.date, label: 'Overige kosten', amount: r.net! },
-      );
+      .map((r): JobCostItem => {
+        const base = { purchaseId: null, bankTransactionId: null, tripId: null, date: r.date, amount: r.net! };
+        if (r.purchase_id !== null) return { ...base, kind: 'aankoop', purchaseId: r.purchase_id, label: r.purchase_label ?? 'Aankoop' };
+        if (r.bank_id !== null) return { ...base, kind: 'bank', bankTransactionId: r.bank_id, label: r.bank_label ?? 'Betaling' };
+        if (r.trip_id !== null) return { ...base, kind: 'rit', tripId: r.trip_id, label: `${String(r.trip_km).replace('.', ',')} km: ${r.trip_description ?? ''}` };
+        return { ...base, kind: 'overig', label: 'Overige kosten' };
+      });
   }
 
   result(id: number): JobResult {
@@ -260,6 +264,17 @@ export class JobService {
         .prepare(`UPDATE events SET job_id = ? WHERE id IN (SELECT e.event_id FROM journal_entries e JOIN purchase_invoices p ON p.journal_entry_id = e.id WHERE p.id = ?)`)
         .run(jobId, purchaseId);
       this.learnLocation(jobId, this.db.prepare('SELECT document_id FROM purchase_invoices WHERE id = ?').get(purchaseId) as { document_id: number | null } | undefined);
+    });
+  }
+
+  /** Een rit (kilometervergoeding) aan een klus koppelen, of loskoppelen met null. */
+  linkTrip(tripId: number, jobId: number | null): void {
+    if (jobId) this.get(jobId);
+    const t = this.db.prepare('SELECT journal_entry_id FROM trips WHERE id = ? AND deleted = 0').get(tripId) as { journal_entry_id: number | null } | undefined;
+    if (!t) throw new ValidationError('Deze rit bestaat niet (meer)');
+    tx(this.db, () => {
+      this.db.prepare('UPDATE trips SET job_id = ? WHERE id = ?').run(jobId, tripId);
+      if (t.journal_entry_id) this.db.prepare('UPDATE events SET job_id = ? WHERE id = (SELECT event_id FROM journal_entries WHERE id = ?)').run(jobId, t.journal_entry_id);
     });
   }
 
