@@ -1,88 +1,68 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://boekhoudenvoorniks.nl/</loc>
-    <xhtml:link rel="alternate" hreflang="nl-NL" href="https://boekhoudenvoorniks.nl/"/>
     <lastmod>2026-10-03</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/werkadministratie.html</loc>
     <lastmod>2026-10-05</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.9</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/starters.html</loc>
     <lastmod>2026-10-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.9</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/stukadoors.html</loc>
     <lastmod>2026-09-30</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/schilders.html</loc>
     <lastmod>2026-09-30</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/webdevelopers.html</loc>
     <lastmod>2026-09-30</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/bank-automatisch.html</loc>
     <lastmod>2026-10-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/btw-aangifte.html</loc>
     <lastmod>2026-10-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/zonder-abonnement.html</loc>
     <lastmod>2026-10-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://boekhoudenvoorniks.nl/offline-boekhoudprogramma.html</loc>
+    <lastmod>2026-10-06</lastmod>
+  </url>
+  <url>
+    <loc>https://boekhoudenvoorniks.nl/gratis-boekhoudprogramma-downloaden.html</loc>
+    <lastmod>2026-10-06</lastmod>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/bank-ophalen.html</loc>
     <lastmod>2026-10-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/downloaden.html</loc>
     <lastmod>2026-10-02</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/boekhouders.html</loc>
     <lastmod>2026-10-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/waarom.html</loc>
     <lastmod>2026-09-30</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/wijzigingen.html</loc>
     <lastmod>2026-10-03</lastmod>
-    <changefreq>weekly</changefreq>
   </url>
   <url>
     <loc>https://boekhoudenvoorniks.nl/voorwaarden.html</loc>
@@ -91,9 +71,5 @@
   <url>
     <loc>https://boekhoudenvoorniks.nl/privacy.html</loc>
     <lastmod>2026-09-30</lastmod>
-  </url>
-  <url>
-    <loc>https://boekhoudenvoorniks.nl/llms.txt</loc>
-    <lastmod>2026-10-03</lastmod>
   </url>
 </urlset>
