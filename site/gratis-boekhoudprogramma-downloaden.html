@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gratis boekhoudprogramma downloaden | BoekhoudenVoorNiks</title>
+  <meta name="description" content="Gratis boekhoudprogramma downloaden voor Windows en Linux. Geen proefversie of account, werkt offline en bewaart je administratie lokaal op je eigen computer.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/gratis-boekhoudprogramma-downloaden.html">
+  <meta property="og:type" content="article">
+  <meta property="og:locale" content="nl_NL">
+  <meta property="og:site_name" content="BoekhoudenVoorNiks">
+  <meta property="og:url" content="https://boekhoudenvoorniks.nl/gratis-boekhoudprogramma-downloaden.html">
+  <meta property="og:title" content="Gratis boekhoudprogramma downloaden voor Windows en Linux">
+  <meta property="og:description" content="Gratis boekhoudprogramma downloaden voor Windows en Linux. Geen proefversie of account, werkt offline en bewaart je administratie lokaal op je eigen computer.">
+  <meta property="og:image" content="https://boekhoudenvoorniks.nl/img/vandaag.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://boekhoudenvoorniks.nl/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Gratis boekhoudprogramma downloaden",
+          "item": "https://boekhoudenvoorniks.nl/gratis-boekhoudprogramma-downloaden.html"
+        }
+      ]
+    },
+    {
+      "@type": "WebPage",
+      "name": "Gratis boekhoudprogramma downloaden",
+      "url": "https://boekhoudenvoorniks.nl/gratis-boekhoudprogramma-downloaden.html",
+      "inLanguage": "nl-NL",
+      "about": {
+        "@id": "https://boekhoudenvoorniks.nl/#app"
+      }
+    }
+  ]
+}
+  </script>
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="./"><picture><source srcset="img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href="./#functies">Functies</a>
+        <a href="./#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="stukadoors.html">Stukadoors</a>
+            <a href="schilders.html">Schilders</a>
+            <a href="webdevelopers.html">Webdevelopers</a>
+            <a href="boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="waarom.html">Waarom</a>
+        <a href="wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="downloaden.html">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script>
+  (function () {
+    var top = document.querySelector('.top'), button = top.querySelector('.menu-button');
+    button.addEventListener('click', function () {
+      var open = top.classList.toggle('open');
+      button.setAttribute('aria-expanded', String(open));
+    });
+    top.querySelectorAll('details.sub').forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (!d.open) return;
+        top.querySelectorAll('details.sub[open]').forEach(function (o) { if (o !== d) o.open = false; });
+      });
+    });
+    function closeAll() {
+      var focused = document.activeElement, wasInside = top.contains(focused);
+      top.querySelectorAll('details.sub[open]').forEach(function (o) {
+        o.open = false;
+        if (o.contains(focused)) { o.querySelector('summary').focus(); wasInside = false; }
+      });
+      if (!top.classList.contains('open')) return;
+      top.classList.remove('open');
+      button.setAttribute('aria-expanded', 'false');
+      // de focus nooit achterlaten op een verborgen link
+      if (wasInside && focused !== button) button.focus();
+    }
+    document.addEventListener('click', function (e) { if (!top.contains(e.target)) closeAll(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
+  })();
+  </script>
+
+  <main class="wrap notes">
+    <p class="eyebrow">Gratis downloaden</p>
+    <h1>Gratis boekhoudprogramma downloaden</h1>
+    <p class="lead">Download BoekhoudenVoorNiks gratis voor Windows of Linux. Geen proefversie, geen limiet op facturen en geen account nodig. De administratie blijft lokaal op je eigen computer.</p>
+    <div class="cta">
+      <a class="btn" href="downloaden.html">Naar de officiële downloadpagina</a>
+      <a class="btn ghost" href="offline-boekhoudprogramma.html">Waarom offline?</a>
+    </div>
+    <h2>Wat krijg je gratis?</h2>
+    <ul class="checks">
+      <li><strong>Offertes en facturen</strong><br><span class="muted">Maak offertes, zet ze om naar facturen en houd betalingen bij.</span></li>
+      <li><strong>Bonnetjes en bank</strong><br><span class="muted">Verwerk bonnetjes en importeer bankafschriften zonder alles over te typen.</span></li>
+      <li><strong>Btw-overzicht</strong><br><span class="muted">Zie per aangifteperiode welke bedragen bij de btw-aangifte horen.</span></li>
+      <li><strong>Pakket voor je boekhouder</strong><br><span class="muted">Exporteer onder andere een auditfile en boekhoudoverzichten.</span></li>
+      <li><strong>Lokale opslag en back-up</strong><br><span class="muted">Je administratie staat op je eigen computer en werkt ook offline.</span></li>
+    </ul>
+    <h2>Windows of Linux</h2>
+    <p>De actuele installers, versienummers en controlegetallen staan op één vaste downloadpagina. Gebruik die pagina zodat je altijd de huidige versie en de juiste veiligheidsinformatie krijgt.</p>
+    <div class="card trial">
+      <h3>Geen uitgeklede gratis versie</h3>
+      <p>Het boekhoudprogramma zelf is gratis te gebruiken. Alleen aanvullende diensten kunnen apart kosten hebben, zoals samenwerken met je boekhouder vanuit de app of een externe bankdienst die je zelf kiest.</p>
+    </div>
+    <h2>Veilig downloaden</h2>
+    <p>Download BoekhoudenVoorNiks via de officiële downloadpagina. Daar vind je ook informatie over Windows SmartScreen en het SHA-256-controlegetal waarmee je kunt controleren of een installer ongewijzigd is.</p>
+    <div class="cta" style="margin-top:32px">
+      <a class="btn" href="downloaden.html">BoekhoudenVoorNiks gratis downloaden</a>
+    </div>
+    <p class="fine">Lees ook: <a href="offline-boekhoudprogramma.html">offline boekhoudprogramma</a> · <a href="zonder-abonnement.html">boekhoudprogramma zonder abonnement</a> · <a href="starters.html">boekhouden voor starters</a>.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="werkadministratie.html">Werkadministratie, geen boekhoudpakket</a></li>
+          <li><a href="./#functies">Functies</a></li>
+          <li><a href="./#prijzen">Prijzen</a></li>
+          <li><a href="./#overstappen">Overstappen</a></li>
+          <li><a href="bank-automatisch.html">Bank automatisch inlezen</a></li>
+          <li><a href="btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="zonder-abonnement.html" aria-current="page">Zonder abonnement, offline</a></li>
+          <li><a href="./#vragen">Veelgestelde vragen</a></li>
+          <li><a href="wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="starters.html">Starters</a></li>
+          <li><a href="stukadoors.html">Stukadoors</a></li>
+          <li><a href="schilders.html">Schilders</a></li>
+          <li><a href="webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="waarom.html">Waarom we dit maakten</a></li>
+          <li><a href="downloaden.html">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks">Vragen en feedback: mail ons</a></li>
+          <li><a href="voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a> · <button type="button" class="linkish" data-cookie-settings>Cookie-voorkeuren</button></p>
+    <script src="meta-pixel.js" defer></script>
+  </footer>
+</body>
+</html>
