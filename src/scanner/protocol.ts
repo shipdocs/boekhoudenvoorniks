@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { leesWijziging, type Wijziging } from '@gratis-boekhouden/kern';
 
 /**
  * Het protocol tussen de bonnenscanner (telefoon) en de desktop-app (#48). Dit bestand is de
@@ -6,12 +7,22 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
  * document aan (en hoogt bij een onverenigbare wijziging PROTOCOL_VERSION op).
  *
  * Verzoek (telefoon → pc), de hele HTTP-body:
- *   "BVNS" | versie (1) | richting (1 = verzoek) | apparaat-ID (16) | nonce (12) | cijfertekst | tag (16)
+ *   "BVNS" | versie (1 of 2) | richting (1 = verzoek) | apparaat-ID (16) | nonce (12) | cijfertekst | tag (16)
  * Antwoord (pc → telefoon) na een geslaagde ontsleuteling: zelfde opbouw met richting 2.
  * AES-256-GCM; de eerste 22 bytes zijn de extra te controleren gegevens (AAD), bij een antwoord
  * gevolgd door de nonce van het verzoek. Zo hoort een antwoord bij precies één verzoek.
+ *
+ * Versie 2 (naast versie 1, die blijft werken) voegt drie berichten toe: het hallo-antwoord zegt van
+ * welke versie de btw-regeltabel is (rulesVersion) en welke protocolversies de pc begrijpt, een
+ * `wijziging` draagt een change-set (het gedeelde wijzigingsformaat uit packages/core) en
+ * `stamgegevens` vraagt om de stamgegevens van de administratie. De pc bewaart daar nog niets mee.
  */
 export const PROTOCOL_VERSION = 1;
+/** De versies die deze pc begrijpt; een envelop met een ander versienummer wordt geweigerd. */
+export const PROTOCOL_VERSIONS = [1, 2] as const;
+export type ProtocolVersion = (typeof PROTOCOL_VERSIONS)[number];
+/** Versienummer van de btw-regeltabel, in het hallo-antwoord van versie 2 (`regels`). De tabel zelf volgt. */
+export const RULES_VERSION = 1;
 export const MAGIC = Buffer.from('BVNS', 'ascii');
 export const DIRECTION = { request: 1, response: 2 } as const;
 export const DEVICE_ID_BYTES = 16;
@@ -75,7 +86,20 @@ export interface ReceiptMessage {
   fotos: Buffer[];
 }
 
-export type ScannerMessage = HelloMessage | ReceiptMessage;
+/** Een change-set: het gedeelde wijzigingsformaat van versie 2, gecontroleerd door de kern. */
+export interface WijzigingMessage {
+  soort: 'wijziging';
+  tijd: number;
+  wijziging: Wijziging;
+}
+
+/** Vraag om de stamgegevens van de administratie; het formaat bestaat al, de gegevens volgen nog. */
+export interface StamgegevensMessage {
+  soort: 'stamgegevens';
+  tijd: number;
+}
+
+export type ScannerMessage = HelloMessage | ReceiptMessage | WijzigingMessage | StamgegevensMessage;
 
 export class ProtocolError extends Error {
   constructor(readonly code: ErrorCode, message: string) {
@@ -139,13 +163,13 @@ export function decodePairing(text: string): PairingPayload {
 
 // ---------- envelop: versleutelen en ontsleutelen ----------
 
-function prefix(direction: number, deviceId: Buffer): Buffer {
-  return Buffer.concat([MAGIC, Buffer.from([PROTOCOL_VERSION, direction]), deviceId]);
+function prefix(versie: number, direction: number, deviceId: Buffer): Buffer {
+  return Buffer.concat([MAGIC, Buffer.from([versie, direction]), deviceId]);
 }
 
-function seal(direction: number, deviceId: Buffer, key: Buffer, plaintext: Buffer, aadExtra: Buffer | null, nonce: Buffer): Buffer {
+function seal(versie: number, direction: number, deviceId: Buffer, key: Buffer, plaintext: Buffer, aadExtra: Buffer | null, nonce: Buffer): Buffer {
   if (deviceId.length !== DEVICE_ID_BYTES || key.length !== KEY_BYTES || nonce.length !== NONCE_BYTES) throw new Error('Ongeldige sleutel, nonce of apparaat-ID');
-  const head = prefix(direction, deviceId);
+  const head = prefix(versie, direction, deviceId);
   const cipher = createCipheriv('aes-256-gcm', key, nonce);
   cipher.setAAD(aadExtra ? Buffer.concat([head, aadExtra]) : head);
   const body = Buffer.concat([cipher.update(plaintext), cipher.final()]);
@@ -153,10 +177,12 @@ function seal(direction: number, deviceId: Buffer, key: Buffer, plaintext: Buffe
 }
 
 /** De kop van een envelop, zonder iets te ontsleutelen; null als het ons formaat niet is. */
-export function readHeader(body: Buffer, direction: number): { deviceId: Buffer; nonce: Buffer } | null {
+export function readHeader(body: Buffer, direction: number): { versie: ProtocolVersion; deviceId: Buffer; nonce: Buffer } | null {
   if (body.length < HEADER_BYTES + TAG_BYTES) return null;
-  if (!body.subarray(0, MAGIC.length).equals(MAGIC) || body[MAGIC.length] !== PROTOCOL_VERSION || body[MAGIC.length + 1] !== direction) return null;
-  return { deviceId: body.subarray(MAGIC.length + 2, PREFIX_BYTES), nonce: body.subarray(PREFIX_BYTES, HEADER_BYTES) };
+  if (!body.subarray(0, MAGIC.length).equals(MAGIC) || body[MAGIC.length + 1] !== direction) return null;
+  const versie = body[MAGIC.length]!;
+  if (!(PROTOCOL_VERSIONS as readonly number[]).includes(versie)) return null;
+  return { versie: versie as ProtocolVersion, deviceId: body.subarray(MAGIC.length + 2, PREFIX_BYTES), nonce: body.subarray(PREFIX_BYTES, HEADER_BYTES) };
 }
 
 function open(direction: number, body: Buffer, key: Buffer, aadExtra: Buffer | null): Buffer | null {
@@ -172,9 +198,9 @@ function open(direction: number, body: Buffer, key: Buffer, aadExtra: Buffer | n
   }
 }
 
-/** Verzoek van de telefoon. `nonce` alleen meegeven in tests (anders willekeurig). */
-export function sealRequest(deviceId: Buffer, key: Buffer, plaintext: Buffer, nonce: Buffer = randomBytes(NONCE_BYTES)): Buffer {
-  return seal(DIRECTION.request, deviceId, key, plaintext, null, nonce);
+/** Verzoek van de telefoon. `nonce` en `versie` alleen meegeven in tests (anders willekeurig, versie 1). */
+export function sealRequest(deviceId: Buffer, key: Buffer, plaintext: Buffer, nonce: Buffer = randomBytes(NONCE_BYTES), versie: ProtocolVersion = PROTOCOL_VERSION): Buffer {
+  return seal(versie, DIRECTION.request, deviceId, key, plaintext, null, nonce);
 }
 
 /** Ontsleutelt een verzoek; null als de sleutel niet past of er iets aan veranderd is. */
@@ -182,9 +208,9 @@ export function openRequest(body: Buffer, key: Buffer): Buffer | null {
   return open(DIRECTION.request, body, key, null);
 }
 
-/** Antwoord van de pc, vastgemaakt aan de nonce van het verzoek. */
-export function sealResponse(deviceId: Buffer, key: Buffer, requestNonce: Buffer, json: unknown, nonce: Buffer = randomBytes(NONCE_BYTES)): Buffer {
-  return seal(DIRECTION.response, deviceId, key, Buffer.from(JSON.stringify(json), 'utf8'), requestNonce, nonce);
+/** Antwoord van de pc, vastgemaakt aan de nonce van het verzoek, in de versie van het verzoek. */
+export function sealResponse(deviceId: Buffer, key: Buffer, requestNonce: Buffer, json: unknown, nonce: Buffer = randomBytes(NONCE_BYTES), versie: ProtocolVersion = PROTOCOL_VERSION): Buffer {
+  return seal(versie, DIRECTION.response, deviceId, key, Buffer.from(JSON.stringify(json), 'utf8'), requestNonce, nonce);
 }
 
 /** Zo leest de telefoon het antwoord (voor tests, en als voorbeeld). */
@@ -225,8 +251,11 @@ function cleanText(value: unknown, max: number, multiline: boolean): string | nu
  * Leest de ontsleutelde inhoud van een verzoek. Alles is invoer van buiten: elk veld wordt op type
  * en bereik gecontroleerd, en de foto's moeten precies de rest van het bericht vullen. Onbekende
  * velden worden genegeerd, zodat een nieuwere telefoon-app met een oudere pc blijft werken.
+ *
+ * De protocolversie van de envelop bepaalt welke berichten erin kunnen: versie 1 kent alleen `hallo`
+ * en `bon`; versie 2 kent daarnaast `wijziging` en `stamgegevens`.
  */
-export function parseFrame(plain: Buffer): ScannerMessage {
+export function parseFrame(plain: Buffer, versie: ProtocolVersion = PROTOCOL_VERSION): ScannerMessage {
   if (plain.length < 4) bad('bericht te kort');
   const jsonLength = plain.readUInt32BE(0);
   if (jsonLength < 2 || jsonLength > LIMITS.maxJsonBytes || 4 + jsonLength > plain.length) bad('ongeldige lengte van de gegevens');
@@ -246,6 +275,18 @@ export function parseFrame(plain: Buffer): ScannerMessage {
     const naam = cleanText(raw.naam, LIMITS.maxNameChars, false);
     if (!naam) bad('naam ontbreekt');
     return { soort: 'hallo', tijd, naam, app: cleanText(raw.app, 20, false) || null };
+  }
+  if (versie >= 2 && raw.soort === 'stamgegevens') {
+    if (rest.length > 0) bad('bij stamgegevens horen geen foto\'s');
+    return { soort: 'stamgegevens', tijd };
+  }
+  if (versie >= 2 && raw.soort === 'wijziging') {
+    if (rest.length > 0) bad('bij een wijziging horen geen foto\'s');
+    // het bericht is de change-set plus `soort`; de vijf velden van het formaat controleert de kern
+    const { soort: _soort, ...kandidaat } = raw;
+    const gelezen = leesWijziging({ ...kandidaat, tijd });
+    if (!gelezen.ok) bad('ongeldige change-set');
+    return { soort: 'wijziging', tijd, wijziging: gelezen.wijziging };
   }
   if (raw.soort !== 'bon') bad('onbekend soort bericht');
 

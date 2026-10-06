@@ -3,9 +3,11 @@
 Dit document beschrijft precies hoe de scanner-app op de telefoon (issue #49) bonnen aflevert bij de
 desktop-app (issue #48). Het is het contract: de app op de telefoon kan hiertegen gebouwd worden zonder
 de code van de desktop te lezen. De uitvoerbare versie staat in `src/scanner/protocol.ts`; de tests in
-`tests/bonnenscanner.test.ts` controleren het uitgewerkte voorbeeld onderaan byte voor byte.
+`tests/bonnenscanner.test.ts` controleren het uitgewerkte voorbeeld onderaan byte voor byte. Versie 2
+staat in hetzelfde bestand en wordt gedekt door `tests/bonnenscanner-v2.test.ts`.
 
-Protocolversie: **1**.
+Protocolversie: **1**; daarnaast bestaat **versie 2**, die niets aan versie 1 verandert (zie
+*Versie 2* verderop).
 
 **Stand:** de kant van de pc is gebouwd en getest, maar staat in de app nog uit tot de scanner-app er is.
 De schakelaar is `PHONE_SCANNER` in `src/shared/phone-scanner.ts`; #49 zet hem aan. Zolang hij uit
@@ -373,6 +375,96 @@ await verstuur(k, { soort: 'bon', tijd: Date.now(), id, betaalwijze: 'contant', 
 Controleer bij een versleuteld antwoord ook dat bytes 0–5 `42 56 4E 53 01 02` zijn en bytes 6–21 het
 eigen apparaat-ID (ze zitten in de AAD, dus een afwijking laat het ontsleutelen al mislukken).
 
+## Versie 2: wijzigingen, stamgegevens en wat de pc kan
+
+Versie 2 staat **naast** versie 1: zelfde endpoint (`/v1/bericht`), zelfde envelop, zelfde transport,
+dezelfde regels voor `tijd` en nonce. Een telefoon kiest per bericht in welke versie hij de envelop
+stopt (`PROTOCOL_VERSION`); het antwoord komt altijd in dezelfde versie terug. De koppelcode (QR) en
+het TXT-record blijven `v:1`: welke berichten een pc begrijpt zegt hij zelf, in het hallo-antwoord.
+
+Een nieuw versienummer voor nieuwe berichtsoorten, en niet gewoon nieuwe JSON-velden, omdat een pc
+die een berichtsoort niet kent hem moet **afwijzen** (hij mag geen "ontvangen" zeggen over iets dat
+hij niet gedaan heeft). Een telefoon moet dus vóór het sturen weten wat de pc begrijpt: het
+hallo-antwoord van versie 2 noemt de ondersteunde protocolversies, en de envelop draagt per bericht
+welke versie het is. Een `wijziging` of `stamgegevens` in een envelop van versie 1 wordt geweigerd
+(`ongeldig`); een `hallo` of `bon` mag in beide versies.
+
+### Het hallo-antwoord in versie 2
+
+Precies het oude antwoord, met erbij `regels` en `protocollen` (de voorbeelden in dit deel staan als
+tekst en worden gecontroleerd door `tests/bonnenscanner-v2.test.ts`; het uitgewerkte voorbeeld van
+versie 1 hierboven blijft byte voor byte in `tests/bonnenscanner.test.ts`):
+
+```text
+{"ok":true,"soort":"hallo","pc":"oKGio6SlpqeoqaqrrK2urw","pcTijd":1790848800123,"limieten":{"fotos":10,"fotoBytes":19922944,"notitie":1000},"regels":1,"protocollen":[1,2]}
+```
+
+| Veld | Betekenis |
+|---|---|
+| `regels` | de regelsversie (in de code `rulesVersion`): het versienummer van de btw-regeltabel die bij deze pc hoort (nu 1). De tabel zelf volgt in een latere versie van dit document |
+| `protocollen` | alle protocolversies die deze pc begrijpt, van laag naar hoog (nu `[1,2]`) |
+
+Een hallo in een envelop van versie 1 krijgt precies het oude antwoord, zonder deze velden.
+
+### `wijziging`: een change-set sturen
+
+De telefoon meldt precies één wijziging, in het gedeelde wijzigingsformaat. Dat formaat staat in
+`packages/core`, zuiver en zonder Node, zodat de Android-app er dezelfde regels voor kan gebruiken:
+`leesWijziging` controleert er het formaat, `besluitWijziging` is de idempotentieregel.
+
+```text
+{"soort":"wijziging","tijd":1790848800000,"entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"velden":{"naam":"Familie Jansen"}}
+```
+
+De `tijd` van het bericht is ook de tijd van de change-set. Verder zijn dit de vijf velden van het
+formaat:
+
+| Veld | Verplicht | Betekenis |
+|---|---|---|
+| `entiteit` | ja | wat het is: `"klant"`, `"project"`, `"factuur"`, `"bon"` of `"foto"` |
+| `uuid` | ja | het ID van die ene entiteit: een UUID in kleine letters (`8-4-4-4-12` hexadecimale tekens) |
+| `revisie` | ja | hoe vaak deze entiteit al gewijzigd is: een geheel getal vanaf 1 |
+| `tijd` | ja | wanneer deze revisie is gemaakt, in milliseconden sinds 1-1-1970 UTC (de `tijd` van het bericht) |
+| `velden` | ja | wat er in deze revisie veranderd is: de veranderde velden met hun nieuwe waarde |
+
+Regels; wat er niet aan voldoet wordt geweigerd met `ongeldig`, voordat er iets mee gebeurt:
+
+- Precies deze vijf velden, niets erbij en niets eraf: wat de pc niet kent, kan hij ook niet
+  synchroniseren.
+- `velden` is een object met alleen waarden die in JSON passen (geen functies, geen `NaN`).
+- Documenten (`factuur`, `bon`, `foto`) worden **nooit bewerkt**: zij hebben precies één revisie, dus
+  alleen revisie 1. Klanten en projecten mogen vaker gewijzigd worden.
+- **Idempotent**: dezelfde uuid met dezelfde of een lagere revisie is een no-op (die had de pc al);
+  pas een hogere revisie, of een onbekende uuid, wordt toegepast.
+
+Geen foto's achter dit bericht. Antwoord:
+
+```text
+{"ok":true,"soort":"wijziging","entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1}
+```
+
+### `stamgegevens`: om de stamgegevens vragen
+
+```text
+{"soort":"stamgegevens","tijd":1790848800000}
+```
+
+Alleen `soort` en `tijd`, geen foto's. Het antwoord is voorlopig alleen een bevestiging:
+
+```text
+{"ok":true,"soort":"stamgegevens"}
+```
+
+Welke stamgegevens (klanten, projecten) de pc teruggeeft volgt in een latere versie van dit document;
+tot die tijd gaat er niets uit de administratie terug.
+
+### Wat de pc ermee doet, en wat nog niet
+
+De pc bevestigt een geldige `wijziging` of `stamgegevens`, maar bewaart of synchroniseert er in deze
+stap nog niets mee: er komt geen document bij, er staat niets in een wachtrij. Bewaren en
+synchroniseren volgen in een latere versie van dit document. Ook versie 2 staat achter dezelfde
+schakelaar als de rest: zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
+
 ## Wat dit wel en niet beschermt
 
 - **Meelezen en aanpassen op het netwerk**: niet mogelijk zonder de sleutel. De inhoud (foto's,
@@ -389,14 +481,19 @@ eigen apparaat-ID (ze zitten in de AAD, dus een afwijking laat het ontsleutelen 
 - **Geen forward secrecy**: lekt de sleutel later uit, dan zijn eerder onderschepte berichten van die
   telefoon te lezen. Voor bonnen op een thuisnetwerk is daar bewust voor gekozen; het houdt het
   protocol klein.
-- **Een gekoppelde telefoon kan alleen bonnen afleveren.** Er is geen bericht waarmee iets uit de
-  administratie op te vragen is.
+- **Een gekoppelde telefoon kan alleen bonnen afleveren** (vanaf versie 2 ook wijzigingen melden en
+  om stamgegevens vragen, waar de pc voorlopig alleen "ontvangen" op zegt). Iets uit de administratie
+  opvragen kan niet.
 
 ## Versies
 
 Een onverenigbare wijziging krijgt een nieuw versienummer: byte 4 van de envelop, `v` in de QR-code en
 `v` in het TXT-record. Een pc met versie 1 weigert een envelop met een andere versie (`ongeldig`,
 onversleuteld). Nieuwe, optionele JSON-velden zijn geen nieuwe versie: de pc negeert wat hij niet kent.
+
+Versie 2 (zie hierboven) is de eerste uitbreiding: nieuwe berichtsoorten, met versie 1 precies zoals
+hij was. Een telefoon van versie 1 werkt onveranderd, een hallo in een v1-envelop krijgt het oude
+antwoord, en een pc die alleen versie 1 kent weigert de berichten van versie 2.
 
 ## De bonnenmap als uitwijk
 
