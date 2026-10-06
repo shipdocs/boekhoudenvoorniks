@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { VatRoundingExplanation } from '../src/renderer/screens/Tax';
 import { BankPaidExplanation } from '../src/renderer/screens/Purchases';
+import { taxYearTabs } from '../src/renderer/screens/TaxYear';
 
 const text = (html: string): string => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/\s+/g, ' ').trim();
 
@@ -32,5 +33,10 @@ describe('uitleg in de schermen', () => {
     const rendered = text(renderToStaticMarkup(createElement(BankPaidExplanation, { status: { name: 'Zakelijke rekening', completeTo: null }, asOf: '2026-10-02' })));
     expect(rendered).toContain('nog geen compleet bankafschrift');
     expect(rendered).toContain('Laat de rekening open');
+  });
+
+  it('toont het tabblad Uren alleen als je op het urencriterium rekent (#319)', () => {
+    expect(taxYearTabs(false).map(([k]) => k)).toEqual(['overzicht', 'bedrijfsmiddelen', 'kilometers']);
+    expect(taxYearTabs(true).map(([k]) => k)).toEqual(['overzicht', 'bedrijfsmiddelen', 'kilometers', 'uren']);
   });
 });
