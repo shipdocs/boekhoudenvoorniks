@@ -115,9 +115,23 @@ export default {
     const res = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
     if (res.ok && request.method === 'GET' && /(\/|\.html)$/.test(assetUrl.pathname)) env.STATS?.writeDataPoint(countPoint('pagina', url.pathname === '/' ? '/' : url.pathname, request));
     const out = new Response(res.body, res);
+    // Securityheaders horen bij de sitecode, zodat ze versioneerbaar en testbaar blijven.
+    // CSP staat bewust als allowlist: de site gebruikt inline menu-script/JSON-LD en, na toestemming,
+    // Meta Pixel. frame-ancestors werkt alleen als HTTP-header en voorkomt clickjacking.
     out.headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
     out.headers.set('x-content-type-options', 'nosniff');
     out.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
+    out.headers.set('x-frame-options', 'DENY');
+    out.headers.set('cross-origin-opener-policy', 'same-origin');
+    out.headers.set('permissions-policy', 'camera=(), microphone=(), geolocation=()');
+    out.headers.set(
+      'content-security-policy',
+      "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; " +
+      "form-action 'self' mailto:; script-src 'self' 'unsafe-inline' https://connect.facebook.net; " +
+      "style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.facebook.com; " +
+      "connect-src 'self' https://www.facebook.com https://connect.facebook.net; " +
+      "font-src 'self'; manifest-src 'self'; upgrade-insecure-requests"
+    );
     if (res.ok && LONG_CACHE.test(url.pathname)) out.headers.set('cache-control', 'public, max-age=86400, s-maxage=604800');
     return out;
   },
