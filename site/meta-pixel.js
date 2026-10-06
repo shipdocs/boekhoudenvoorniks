@@ -8,7 +8,15 @@
   var KEY = 'bvn-meta-pixel';
 
   function read() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
-  function write(v) { try { localStorage.setItem(KEY, v); } catch (e) { /* blijft dan alleen voor deze pagina */ } }
+  var memoryChoice = null;
+  function readChoice() { return read() || memoryChoice; }
+  function write(v) {
+    memoryChoice = v || null;
+    try {
+      if (v) localStorage.setItem(KEY, v);
+      else localStorage.removeItem(KEY);
+    } catch (e) { /* keuze blijft dan alleen voor deze pagina */ }
+  }
 
   function loadPixel() {
     if (window.fbq) return;
@@ -64,7 +72,7 @@
     document.body.appendChild(el);
   }
 
-  var saved = read();
+  var saved = readChoice();
   if (saved === 'ja') loadPixel();
   else if (saved !== 'nee') banner();
 
