@@ -120,35 +120,7 @@
       </nav>
     </div>
   </header>
-  <script>
-  (function () {
-    var top = document.querySelector('.top'), button = top.querySelector('.menu-button');
-    button.addEventListener('click', function () {
-      var open = top.classList.toggle('open');
-      button.setAttribute('aria-expanded', String(open));
-    });
-    top.querySelectorAll('details.sub').forEach(function (d) {
-      d.addEventListener('toggle', function () {
-        if (!d.open) return;
-        top.querySelectorAll('details.sub[open]').forEach(function (o) { if (o !== d) o.open = false; });
-      });
-    });
-    function closeAll() {
-      var focused = document.activeElement, wasInside = top.contains(focused);
-      top.querySelectorAll('details.sub[open]').forEach(function (o) {
-        o.open = false;
-        if (o.contains(focused)) { o.querySelector('summary').focus(); wasInside = false; }
-      });
-      if (!top.classList.contains('open')) return;
-      top.classList.remove('open');
-      button.setAttribute('aria-expanded', 'false');
-      // de focus nooit achterlaten op een verborgen link
-      if (wasInside && focused !== button) button.focus();
-    }
-    document.addEventListener('click', function (e) { if (!top.contains(e.target)) closeAll(); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
-  })();
-  </script>
+  <script src="menu.js" defer></script>
 
   <main class="wrap notes">
     <p class="eyebrow">Btw voor stukadoors</p>
