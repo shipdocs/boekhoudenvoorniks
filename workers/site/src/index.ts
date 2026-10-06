@@ -117,7 +117,8 @@ export default {
     const out = new Response(res.body, res);
     // Securityheaders horen bij de sitecode, zodat ze versioneerbaar en testbaar blijven.
     // CSP blokkeert inline uitvoerbare scripts; JSON-LD is niet uitvoerbaar en blijft toegestaan door de browser.
-    // Meta Pixel is na toestemming de enige externe scriptbron. Trusted Types beschermt DOM-script-sinks.
+    // Meta Pixel is na toestemming de enige externe scriptbron. Trusted Types zetten we nog niet afdwingend aan:
+    // third-party scripts moeten daar expliciet compatibel mee zijn; eerst rapporteren/testen om tracking niet stil te breken.
     out.headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
     out.headers.set('x-content-type-options', 'nosniff');
     out.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
@@ -130,7 +131,7 @@ export default {
       "form-action 'self' mailto:; script-src 'self' https://connect.facebook.net; " +
       "style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.facebook.com; " +
       "connect-src 'self' https://www.facebook.com https://connect.facebook.net; " +
-      "font-src 'self'; manifest-src 'self'; require-trusted-types-for 'script'; upgrade-insecure-requests"
+      "font-src 'self'; manifest-src 'self'; upgrade-insecure-requests"
     );
     if (res.ok && LONG_CACHE.test(url.pathname)) out.headers.set('cache-control', 'public, max-age=86400, s-maxage=604800');
     return out;
