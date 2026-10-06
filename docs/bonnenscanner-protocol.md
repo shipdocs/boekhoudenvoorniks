@@ -143,8 +143,9 @@ lengte van de JSON (4 bytes, big-endian) | JSON (UTF-8) | foto 1 | foto 2 | …
 ```
 
 De foto's staan direct achter elkaar, als ruwe JPEG-bytes, in de volgorde van het veld `fotos`. De
-groottes in `fotos` moeten samen precies de rest van het bericht vullen. De JSON is hooguit 16 KiB.
-Velden die de pc niet kent, negeert hij.
+groottes in `fotos` moeten samen precies de rest van het bericht vullen. De JSON is hooguit 16 KiB
+(alleen een `wijziging` uit versie 2 mag tot 128 KiB); daarboven volgt `te-groot`. Velden die de pc
+niet kent, negeert hij.
 
 ### `hallo`: koppeling afmaken, of kijken of de pc er is
 
@@ -232,11 +233,12 @@ namaken; de telefoon gooit er daarom **nooit** een bon of de koppeling om weg.
 | HTTP | `fout` | Versleuteld | Betekenis | Wat doet de telefoon |
 |---|---|---|---|---|
 | 200 | – (`ok: true`) | ja | ontvangen en opgeslagen | bon opruimen ("verstuurd ✓") |
-| 400 | `ongeldig` | ja | ontsleuteld, maar de inhoud klopt niet (veld, grootte, geen JPEG) | niet opnieuw proberen; fout in de app |
+| 400 | `ongeldig` | ja | ontsleuteld, maar de inhoud klopt niet (veld, geen JPEG) | niet opnieuw proberen; fout in de app |
 | 403 | `klok` | ja | `tijd` buiten het venster; `pcTijd` staat erbij | klokverschil onthouden en opnieuw |
 | 409 | `herhaald` | ja | deze nonce is al gebruikt | opnieuw met een nieuwe nonce |
 | 409 | `id-botst` | ja | dit `id` hoort al bij een bon met een andere inhoud | niet opnieuw; de bon bewaren en melden |
 | 413 | `te-groot` | ja | de foto's zijn samen groter dan 19 MiB | kleiner maken, of in twee bonnen |
+| 413 | `te-groot` | ja | de JSON is te groot voor dit soort bericht (boven 16 KiB; een `wijziging` boven 128 KiB) | niet opnieuw; de inhoud kleiner maken of opsplitsen |
 | 500 | `opslaan-mislukt` | ja | de pc kon de bon niet wegschrijven | bon bewaren, later opnieuw |
 | 400 | `ongeldig` | nee | geen envelop van deze versie, of afgebroken | – |
 | 401 | `niet-gekoppeld` | nee | onbekende telefoon, ingetrokken of verlopen sleutel, of niet te ontsleutelen | "koppeling ingetrokken" tonen; bonnen bewaren tot de gebruiker opnieuw koppelt |
@@ -249,7 +251,8 @@ namaken; de telefoon gooit er daarom **nooit** een bon of de koppeling om weg.
 | 500 | `opslaan-mislukt` | nee | onverwachte fout op de pc | bon bewaren, later opnieuw |
 
 De pc controleert in deze volgorde: pad, methode, te veel mislukte pogingen, `Content-Type`,
-`Content-Length`, envelop en apparaat-ID, ontsleutelen, inhoud, `tijd`, nonce, foto's, `id`.
+`Content-Length`, envelop en apparaat-ID, ontsleutelen, inhoud (ook de grootte van de JSON),
+`tijd`, bij een `wijziging` ook het bewerkmoment (zie *Versie 2*), nonce, foto's, `id`.
 
 ## Eén keer aankomen, en wanneer de telefoon mag opruimen
 
@@ -410,21 +413,29 @@ Een hallo in een envelop van versie 1 krijgt precies het oude antwoord, zonder d
 
 De telefoon meldt precies één wijziging, in het gedeelde wijzigingsformaat. Dat formaat staat in
 `packages/core`, zuiver en zonder Node, zodat de Android-app er dezelfde regels voor kan gebruiken:
-`leesWijziging` controleert er het formaat, `besluitWijziging` is de idempotentieregel.
+`leesWijziging` controleert er het formaat, `besluitWijziging` is de idempotentieregel. Het bericht
+heeft **precies** de sleutels `soort`, `tijd` en `wijziging`: precies één change-set per bericht,
+dus geen reeks wijzigingen en geen extra sleutels ernaast. Dit is de enige soort waarbij de pc
+onbekende bovenste velden níét negeert; een bericht zonder die precies drie sleutels geeft
+`ongeldig`.
 
 ```text
-{"soort":"wijziging","tijd":1790848800000,"entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"velden":{"naam":"Familie Jansen"}}
+{"soort":"wijziging","tijd":1790848800000,"wijziging":{"entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"tijd":1790848800000,"velden":{"naam":"Familie Jansen"}}}
 ```
 
-De `tijd` van het bericht is ook de tijd van de change-set. Verder zijn dit de vijf velden van het
-formaat:
+Er staan twee tijden in zo'n bericht, met elk hun eigen betekenis. De `tijd` van het bericht is de
+**verzendtijd** en moet binnen het klokvenster van de pc zitten (zie *Tijdstempel en nonce*). De
+`tijd` ín de change-set is het **bewerkmoment**: wanneer deze revisie is gemaakt. Dat moment mag
+willekeurig oud zijn — de telefoon kan een wijziging offline hebben gemaakt — maar ligt hooguit het
+klokvenster in de toekomst; verder in de toekomst geeft `ongeldig`. Dit zijn de vijf velden van de
+change-set:
 
 | Veld | Verplicht | Betekenis |
 |---|---|---|
 | `entiteit` | ja | wat het is: `"klant"`, `"project"`, `"factuur"`, `"bon"` of `"foto"` |
 | `uuid` | ja | het ID van die ene entiteit: een UUID in kleine letters (`8-4-4-4-12` hexadecimale tekens) |
 | `revisie` | ja | hoe vaak deze entiteit al gewijzigd is: een geheel getal vanaf 1 |
-| `tijd` | ja | wanneer deze revisie is gemaakt, in milliseconden sinds 1-1-1970 UTC (de `tijd` van het bericht) |
+| `tijd` | ja | wanneer deze revisie is gemaakt, in milliseconden sinds 1-1-1970 UTC (het bewerkmoment, niet de verzendtijd van het bericht) |
 | `velden` | ja | wat er in deze revisie veranderd is: de veranderde velden met hun nieuwe waarde |
 
 Regels; wat er niet aan voldoet wordt geweigerd met `ongeldig`, voordat er iets mee gebeurt:
@@ -432,12 +443,20 @@ Regels; wat er niet aan voldoet wordt geweigerd met `ongeldig`, voordat er iets 
 - Precies deze vijf velden, niets erbij en niets eraf: wat de pc niet kent, kan hij ook niet
   synchroniseren.
 - `velden` is een object met alleen waarden die in JSON passen (geen functies, geen `NaN`).
+- `velden` is begrensd (de constanten `WIJZIGING_LIMIETEN` in `packages/core`): hooguit 64 sleutels
+  per object, 6 niveaus diep, 4000 knopen in totaal, 500 elementen per array en 4000 tekens per
+  string. Elke sleutel, op elk niveau, begint met een letter en is hooguit 40 tekens
+  (`^[A-Za-z][A-Za-z0-9_]{0,39}$`). De namen `__proto__`, `constructor` en `prototype` zijn op elk
+  niveau verboden — ook in objecten binnen arrays — zodat een valse sleutel nooit de
+  prototypeketen in kan sluipen. (Een factuur van 200 regels met elk 12 velden, plus een
+  momentopname van de klantgegevens, past ruim binnen deze grenzen.)
 - Documenten (`factuur`, `bon`, `foto`) worden **nooit bewerkt**: zij hebben precies één revisie, dus
   alleen revisie 1. Klanten en projecten mogen vaker gewijzigd worden.
 - **Idempotent**: dezelfde uuid met dezelfde of een lagere revisie is een no-op (die had de pc al);
   pas een hogere revisie, of een onbekende uuid, wordt toegepast.
 
-Geen foto's achter dit bericht. Antwoord:
+Geen foto's achter dit bericht. De JSON van een `wijziging` mag tot 128 KiB; elk ander bericht blijft
+bij 16 KiB, en er bovenuit geeft `te-groot` (zie *Antwoorden*). Antwoord:
 
 ```text
 {"ok":true,"soort":"wijziging","entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1}

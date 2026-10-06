@@ -44,6 +44,8 @@ export const LIMITS = {
   maxPhotoBytes: 19 * 1024 * 1024,
   maxPhotos: 10,
   maxJsonBytes: 16 * 1024,
+  /** JSON van een `wijziging`-bericht: een change-set mag groter zijn dan de rest (limieten van de kern) */
+  maxWijzigingJsonBytes: 128 * 1024,
   maxNoteChars: 1000,
   maxNameChars: 60,
   /** zoveel mag de klok van de telefoon afwijken van die van de pc (ms) */
@@ -250,7 +252,12 @@ function cleanText(value: unknown, max: number, multiline: boolean): string | nu
 /**
  * Leest de ontsleutelde inhoud van een verzoek. Alles is invoer van buiten: elk veld wordt op type
  * en bereik gecontroleerd, en de foto's moeten precies de rest van het bericht vullen. Onbekende
- * velden worden genegeerd, zodat een nieuwere telefoon-app met een oudere pc blijft werken.
+ * velden worden genegeerd, zodat een nieuwere telefoon-app met een oudere pc blijft werken — behalve
+ * bij `wijziging`: dat bericht heeft precies de sleutels soort, tijd en wijziging, precies één
+ * change-set per bericht.
+ *
+ * De JSON van `hallo`, `bon` en `stamgegevens` is hooguit 16 KiB; alleen een `wijziging` in een
+ * v2-envelop mag tot 128 KiB. Daarboven (en voor elk ander soort boven 16 KiB): `te-groot`.
  *
  * De protocolversie van de envelop bepaalt welke berichten erin kunnen: versie 1 kent alleen `hallo`
  * en `bon`; versie 2 kent daarnaast `wijziging` en `stamgegevens`.
@@ -258,7 +265,8 @@ function cleanText(value: unknown, max: number, multiline: boolean): string | nu
 export function parseFrame(plain: Buffer, versie: ProtocolVersion = PROTOCOL_VERSION): ScannerMessage {
   if (plain.length < 4) bad('bericht te kort');
   const jsonLength = plain.readUInt32BE(0);
-  if (jsonLength < 2 || jsonLength > LIMITS.maxJsonBytes || 4 + jsonLength > plain.length) bad('ongeldige lengte van de gegevens');
+  if (jsonLength < 2 || 4 + jsonLength > plain.length) bad('ongeldige lengte van de gegevens');
+  if (jsonLength > LIMITS.maxWijzigingJsonBytes) throw new ProtocolError('te-groot', 'de gegevens zijn te groot');
   let raw: Record<string, unknown>;
   try {
     raw = JSON.parse(plain.subarray(4, 4 + jsonLength).toString('utf8')) as Record<string, unknown>;
@@ -266,6 +274,9 @@ export function parseFrame(plain: Buffer, versie: ProtocolVersion = PROTOCOL_VER
     bad('gegevens zijn geen JSON');
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) bad('gegevens zijn geen object');
+  // Boven 16 KiB past alleen een `wijziging` in een v2-envelop (tot 128 KiB); elk ander bericht is
+  // te groot, ook als de inhoud zelf zou passen. Zo blijft hallo, bon en stamgegevens bescheiden.
+  if (jsonLength > LIMITS.maxJsonBytes && !(versie >= 2 && raw.soort === 'wijziging')) throw new ProtocolError('te-groot', 'deze gegevens zijn te groot voor dit soort bericht');
   const tijd = raw.tijd;
   if (typeof tijd !== 'number' || !Number.isSafeInteger(tijd) || tijd <= 0) bad('tijd ontbreekt');
   const rest = plain.subarray(4 + jsonLength);
@@ -282,9 +293,12 @@ export function parseFrame(plain: Buffer, versie: ProtocolVersion = PROTOCOL_VER
   }
   if (versie >= 2 && raw.soort === 'wijziging') {
     if (rest.length > 0) bad('bij een wijziging horen geen foto\'s');
-    // het bericht is de change-set plus `soort`; de vijf velden van het formaat controleert de kern
-    const { soort: _soort, ...kandidaat } = raw;
-    const gelezen = leesWijziging({ ...kandidaat, tijd });
+    // Precies één wijziging per bericht: naast `soort` en `tijd` hoort alleen de sleutel `wijziging`,
+    // met daarbinnen de change-set in het vijf-velden-formaat (die haar eigen, oudere `tijd` mag
+    // dragen). De controle van die change-set doet de kern.
+    const sleutels = Object.keys(raw);
+    if (sleutels.length !== 3 || !sleutels.includes('wijziging')) bad('een wijziging-bericht heeft precies de sleutels soort, tijd en wijziging');
+    const gelezen = leesWijziging(raw.wijziging);
     if (!gelezen.ok) bad('ongeldige change-set');
     return { soort: 'wijziging', tijd, wijziging: gelezen.wijziging };
   }
