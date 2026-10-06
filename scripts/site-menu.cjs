@@ -22,6 +22,7 @@ const MENU = [
     items: [
       { href: 'starters.html', label: 'Starters', hint: 'Van KvK tot eerste btw-aangifte' },
       { href: 'stukadoors.html', label: 'Stukadoors' },
+      { href: 'btw-stucwerk.html', label: 'Btw op stucwerk: 9% of 21%' },
       { href: 'schilders.html', label: 'Schilders' },
       { href: 'webdevelopers.html', label: 'Webdevelopers' },
       { href: 'boekhouders.html', label: 'Boekhouders', hint: 'Pakket en uitwisseling' },
