@@ -401,7 +401,7 @@ versie 1 hierboven blijft byte voor byte in `tests/bonnenscanner.test.ts`):
 
 | Veld | Betekenis |
 |---|---|
-| `regels` | de regelsversie: het versienummer van de btw-regeltabel die bij deze pc hoort (nu 1). De tabel zelf volgt in een latere versie van dit document |
+| `regels` | de regelsversie (in de code `rulesVersion`): het versienummer van de btw-regeltabel die bij deze pc hoort (nu 1). De tabel zelf volgt in een latere versie van dit document |
 | `protocollen` | alle protocolversies die deze pc begrijpt, van laag naar hoog (nu `[1,2]`) |
 
 Een hallo in een envelop van versie 1 krijgt precies het oude antwoord, zonder deze velden.
