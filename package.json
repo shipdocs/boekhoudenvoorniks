@@ -17,6 +17,7 @@
     "test": "npm run rebuild:node && npm run build:kern && vitest run",
     "test:proefadministratie": "npm run rebuild:node && npm run build:kern && vitest run tests/proefadministratie/proefadministratie.test.ts",
     "test:watch": "npm run build:kern && vitest",
+    "test:golden": "npm run build:kern && node scripts/golden-kern.mjs",
     "rebuild:node": "npm rebuild better-sqlite3",
     "rebuild:electron": "electron-builder install-app-deps",
     "dist": "npm run build && electron-builder --linux --win",
