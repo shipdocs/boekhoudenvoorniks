@@ -31,16 +31,16 @@
   }
 
   function banner() {
-    var el = document.getElementById('cookie-banner');
+    var el = document.getElementById('privacy-choice');
     if (el) el.hidden = false;
   }
 
   function hideBanner() {
-    var el = document.getElementById('cookie-banner');
+    var el = document.getElementById('privacy-choice');
     if (el) el.hidden = true;
   }
 
-  var el = document.getElementById('cookie-banner');
+  var el = document.getElementById('privacy-choice');
   if (el) {
     el.addEventListener('click', function (ev) {
       var choice = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-choice');
