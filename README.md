@@ -168,3 +168,5 @@ Opnieuw maken met `npm run leveranciers:nsi`.
 ## Licentie
 
 BoekhoudenVoorNiks is vrije software onder de [GNU Affero General Public License v3.0 of later](LICENSE) (AGPL-3.0-or-later). Bijdragen: zie [CONTRIBUTING.md](CONTRIBUTING.md), ook voor de rechten op je bijdrage. Zie ook de [gebruiksvoorwaarden](https://boekhoudenvoorniks.nl/voorwaarden.html) en de [privacyverklaring](https://boekhoudenvoorniks.nl/privacy.html).
+
+Interne fiscale onderzoekstooling en agent-skills worden onderhouden in de private serverrepository. De fiscale regels, bronnen, tests en reviewresultaten van de app blijven openbaar. Voor naam en logo's: zie [TRADEMARKS.md](TRADEMARKS.md).

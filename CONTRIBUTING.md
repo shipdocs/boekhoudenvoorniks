@@ -24,3 +24,9 @@ Kun of wil je hier niet mee akkoord gaan, zeg het dan in je pull request; dan ne
 
 Dit geldt voor bijdragen vanaf 30 september 2026. Alle eerdere code is geschreven door ShipDocs (Martin,
 ook onder de namen in [.mailmap](.mailmap)), deels met AI-hulpmiddelen onder zijn leiding.
+
+## Publieke en interne onderdelen
+
+De app, boekhoudregels, tests, fiscale bronnen en afgeronde reviewresultaten zijn publiek. Interne agent-skills, fiscale monitoring, het regelregister, serverimplementaties en commerciële beheerprocessen horen in de private serverrepository. Kopieer deze niet naar een publieke branch of PR. `.gitignore` helpt tegen onbedoeld toevoegen, maar voorkomt geen `git add -f`; controleer altijd de staged diff.
+
+Zie [TRADEMARKS.md](TRADEMARKS.md) voor gebruik van de naam en logo's.
