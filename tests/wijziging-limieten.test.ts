@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 // De grenzen van het wijzigingsformaat, direct tegen de gebouwde kern (@gratis-boekhouden/kern):
-// net binnen een limiet is goed, net erover geeft fout 'velden'. Elke grens komt uit
+// elke limiet wordt in dezelfde test aan beide kanten bewezen — het geval net erbinnen is ok, het
+// geval net erbuiten geeft fout 'velden' en overschrijdt alleen die ene limiet. Elke grens komt uit
 // WIJZIGING_LIMIETEN en nooit uit een hard getal, zodat limiet en test niet uit elkaar kunnen lopen.
 import { leesWijziging, WIJZIGING_LIMIETEN as L, type WijzigingsFout } from '@gratis-boekhouden/kern';
 
@@ -89,55 +90,59 @@ describe('WIJZIGING_LIMIETEN zelf', () => {
 });
 
 describe('aantal sleutels per object', () => {
-  it(`${L.maxSleutels} sleutels in velden is goed`, () => {
+  it(`${L.maxSleutels} sleutels in velden is ok, ${L.maxSleutels + 1} geeft fout velden`, () => {
     expect(foutVan(metVelden(objectMet(L.maxSleutels)))).toBeNull();
-  });
-
-  it(`${L.maxSleutels + 1} sleutels in velden geeft fout velden`, () => {
     expect(foutVan(metVelden(objectMet(L.maxSleutels + 1)))).toBe('velden');
   });
 
-  it(`${L.maxSleutels} sleutels in een genest object is goed`, () => {
+  it(`${L.maxSleutels} sleutels in een genest object is ok, ${L.maxSleutels + 1} geeft fout velden`, () => {
     expect(foutVan(metVelden({ binnen: objectMet(L.maxSleutels) }))).toBeNull();
-  });
-
-  it(`${L.maxSleutels + 1} sleutels in een genest object geeft fout velden`, () => {
     expect(foutVan(metVelden({ binnen: objectMet(L.maxSleutels + 1) }))).toBe('velden');
   });
 });
 
 describe('diepte van velden', () => {
-  it(`een object of array op niveau ${L.maxDiepte} mag nog`, () => {
+  it(`geneste objecten tot en met niveau ${L.maxDiepte} zijn ok, niveau ${L.maxDiepte + 1} geeft fout velden`, () => {
+    // velden zelf is niveau 1: zes containers samen (velden meegeteld) mag nog, zeven niet
     expect(foutVan(metVelden(genest(L.maxDiepte)))).toBeNull();
-    expect(foutVan(metVelden(genestArray(L.maxDiepte)))).toBeNull();
+    expect(foutVan(metVelden(genest(L.maxDiepte + 1)))).toBe('velden');
   });
 
-  it(`een object of array op niveau ${L.maxDiepte + 1} geeft fout velden`, () => {
-    expect(foutVan(metVelden(genest(L.maxDiepte + 1)))).toBe('velden');
+  it(`geneste arrays tot en met niveau ${L.maxDiepte} zijn ok, niveau ${L.maxDiepte + 1} geeft fout velden`, () => {
+    expect(foutVan(metVelden(genestArray(L.maxDiepte)))).toBeNull();
     expect(foutVan(metVelden(genestArray(L.maxDiepte + 1)))).toBe('velden');
   });
 });
 
 describe('totaal aantal knopen', () => {
-  it(`${L.maxKnopen} knopen is goed`, () => {
+  it(`${L.maxKnopen} knopen is ok, ${L.maxKnopen + 1} geeft fout velden`, () => {
+    // acht sleutels met elk een array van L.maxArray - 1 scalars: per sleutel precies L.maxArray
+    // knopen (de array zelf en zijn elementen), samen L.maxKnopen; sleutels, arrays en diepte
+    // blijven ruim binnen hun eigen grens, dus alleen de knopenlimiet wordt op de korrel genomen
+    const binnen = Object.fromEntries(
+      Array.from({ length: L.maxKnopen / L.maxArray }, (_, i) => [`veld${i}`, Array.from({ length: L.maxArray - 1 }, (_, j) => j)]),
+    ) as Record<string, unknown>;
+    expect(Object.keys(binnen).length).toBeLessThan(L.maxSleutels);
+    expect(knopen(binnen)).toBe(L.maxKnopen);
+    expect(foutVan(metVelden(binnen))).toBeNull();
+    binnen.extra = 1; // één scalar-sleutel erbij: alleen het aantal knopen komt erboven
+    expect(knopen(binnen)).toBe(L.maxKnopen + 1);
+    expect(foutVan(metVelden(binnen))).toBe('velden');
+  });
+
+  it(`een dichtere opbouw met ${L.maxKnopen} knopen is ok, ${L.maxKnopen + 1} geeft fout velden`, () => {
     const velden = veldenMetKnopen(L.maxKnopen);
     expect(knopen(velden)).toBe(L.maxKnopen);
     expect(foutVan(metVelden(velden))).toBeNull();
-  });
-
-  it(`${L.maxKnopen + 1} knopen geeft fout velden`, () => {
-    const velden = veldenMetKnopen(L.maxKnopen + 1);
-    expect(knopen(velden)).toBe(L.maxKnopen + 1);
-    expect(foutVan(metVelden(velden))).toBe('velden');
+    const teVeel = veldenMetKnopen(L.maxKnopen + 1);
+    expect(knopen(teVeel)).toBe(L.maxKnopen + 1);
+    expect(foutVan(metVelden(teVeel))).toBe('velden');
   });
 });
 
 describe('elementen per array', () => {
-  it(`${L.maxArray} elementen is goed`, () => {
+  it(`${L.maxArray} elementen is ok, ${L.maxArray + 1} geeft fout velden`, () => {
     expect(foutVan(metVelden({ lijst: Array.from({ length: L.maxArray }, (_, i) => i) }))).toBeNull();
-  });
-
-  it(`${L.maxArray + 1} elementen geeft fout velden`, () => {
     expect(foutVan(metVelden({ lijst: Array.from({ length: L.maxArray + 1 }, (_, i) => i) }))).toBe('velden');
   });
 
@@ -147,33 +152,29 @@ describe('elementen per array', () => {
 });
 
 describe('tekens per string', () => {
-  it(`${L.maxTekens} tekens is goed`, () => {
+  it(`${L.maxTekens} tekens is ok, ${L.maxTekens + 1} geeft fout velden, ook genest`, () => {
     expect(foutVan(metVelden({ tekst: 'x'.repeat(L.maxTekens) }))).toBeNull();
-  });
-
-  it(`${L.maxTekens + 1} tekens geeft fout velden`, () => {
     expect(foutVan(metVelden({ tekst: 'x'.repeat(L.maxTekens + 1) }))).toBe('velden');
+    expect(foutVan(metVelden({ binnen: { tekst: 'x'.repeat(L.maxTekens + 1) } }))).toBe('velden');
   });
 
-  it('een onbegrensd grote string wordt meteen geweigerd, en ook genest telt de grens', () => {
+  it('een onbegrensd grote string wordt meteen geweigerd', () => {
     expect(foutVan(metVelden({ tekst: 'x'.repeat(L.maxTekens * 1000) }))).toBe('velden');
-    expect(foutVan(metVelden({ binnen: { tekst: 'x'.repeat(L.maxTekens + 1) } }))).toBe('velden');
   });
 });
 
 describe('het sleutelpatroon', () => {
-  it('een goede sleutel van 40 tekens is ok', () => {
+  it('een goede sleutel van 40 tekens is ok, slechte sleutels op niveau 1 geven fout velden', () => {
+    // het patroon staat een eerste letter plus 39 tekens toe; 41 tekens is net erbuiten
     expect(foutVan(metVelden({ ['A'.repeat(40)]: 1 }))).toBeNull();
     expect(foutVan(metVelden({ a: 1, A2_: 'x' }))).toBeNull();
-  });
-
-  it('slechte sleutels worden op niveau 1 geweigerd', () => {
     for (const sleutel of ['1abc', 'a-b', 'A'.repeat(41), '']) {
       expect(foutVan(metVelden({ [sleutel]: 1 })), sleutel).toBe('velden');
     }
   });
 
-  it('slechte sleutels worden ook genest geweigerd', () => {
+  it('een goede geneste sleutel is ok, slechte sleutels worden ook genest geweigerd', () => {
+    expect(foutVan(metVelden({ binnen: { goede_sleutel: 1 } }))).toBeNull();
     expect(foutVan(metVelden({ binnen: { '1abc': 1 } }))).toBe('velden');
     expect(foutVan(metVelden({ binnen: { 'a-b': 1 } }))).toBe('velden');
     expect(foutVan(metVelden({ binnen: { ['A'.repeat(41)]: 1 } }))).toBe('velden');
@@ -181,10 +182,12 @@ describe('het sleutelpatroon', () => {
 });
 
 describe('verboden sleutels', () => {
-  it('__proto__ wordt geweigerd: op niveau 1, genest, en in een array van objecten', () => {
+  it('__proto__ wordt geweigerd op niveau 1, genest en in een array van objecten', () => {
+    // JSON.parse maakt '__proto__' als eigen sleutel aan; ook dat geval weigert de kern
     expect(foutVan(viaJson('{"__proto__": {"gevaar": true}}'))).toBe('velden');
     expect(foutVan(viaJson('{"binnen": {"__proto__": 1}}'))).toBe('velden');
     expect(foutVan(viaJson('{"lijst": [{"gewoon": 1}, {"__proto__": 1}]}'))).toBe('velden');
+    expect(foutVan(viaJson('{"lijst": [{"gewoon": 1}]}'))).toBeNull();
   });
 
   it('__proto__ als eigen sleutel via defineProperty wordt ook geweigerd', () => {
@@ -194,16 +197,18 @@ describe('verboden sleutels', () => {
     expect(foutVan(metVelden(velden))).toBe('velden');
   });
 
-  it('constructor wordt geweigerd: op niveau 1, genest, en in een array van objecten', () => {
+  it('constructor wordt geweigerd op niveau 1, genest en in een array van objecten', () => {
     expect(foutVan(metVelden({ constructor: 'x' }))).toBe('velden');
     expect(foutVan(metVelden({ binnen: { constructor: 'x' } }))).toBe('velden');
     expect(foutVan(metVelden({ lijst: [{ gewoon: 1 }, { constructor: 'x' }] }))).toBe('velden');
+    expect(foutVan(metVelden({ lijst: [{ gewoon: 1 }] }))).toBeNull();
   });
 
-  it('prototype wordt geweigerd: op niveau 1, genest, en in een array van objecten', () => {
+  it('prototype wordt geweigerd op niveau 1, genest en in een array van objecten', () => {
     expect(foutVan(metVelden({ prototype: 'x' }))).toBe('velden');
     expect(foutVan(metVelden({ binnen: { prototype: 'x' } }))).toBe('velden');
     expect(foutVan(metVelden({ lijst: [{ prototype: 'x' }] }))).toBe('velden');
+    expect(foutVan(metVelden({ lijst: [{ gewoon: 1 }] }))).toBeNull();
   });
 });
 
