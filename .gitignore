@@ -10,3 +10,15 @@ e2e-report/
 .wrangler/
 .dev.vars
 .ouroboros/artifacts/artifacts.db
+
+# Interne tooling hoort in boekhoudenvoorniks-server, niet in deze repository.
+/.claude/skills/nl-boekhoud-expert/
+/internal/
+/docs/fiscaal/
+/workers/licentie/
+/workers/assistent/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
