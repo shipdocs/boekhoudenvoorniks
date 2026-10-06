@@ -20,6 +20,7 @@ Android-app kan haar letterlijk hetzelfde gebruiken.
 | `src/documents/numbering.ts` | Documentnummerformaten en tellersleutels |
 | `src/documents/render.ts` | Minimale Mustache-subset voor factuur-/offertetemplates |
 | `src/documents/invoices.ts` | `checkInvoiceRequirements`: de wettelijke factuurcontrole als zuivere functie (bedrijfsgegevens, adres, KOR, verlegging, ICP en export), met dezelfde foutmeldingen als de app |
+| `src/sync/changeset.ts` | Het gedeelde wijzigingsformaat van protocol versie 2 (entiteit, uuid, revisie, tijd, velden): `leesWijziging` en de idempotentieregel `besluitWijziging` |
 
 De mapstructuur (`shared`, `documents`) en de interne relatieve imports zijn
 ongewijzigd overgezet: de bestanden zijn exact dezelfde bytes als in `src`.

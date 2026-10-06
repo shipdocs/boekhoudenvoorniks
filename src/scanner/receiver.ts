@@ -3,7 +3,7 @@ import type { ScannerPairing } from './pairing';
 import type { ReceiptSpool } from './spool';
 import { jpegInfo } from './jpeg-pdf';
 import { normalizeRemote, sameSubnet, type LocalInterface } from './network';
-import { CONTENT_TYPE, DIRECTION, ENDPOINT_PATH, HEADER_BYTES, LIMITS, TAG_BYTES, ProtocolError, openRequest, parseFrame, readHeader, sealResponse, toBase64Url, type ErrorCode } from './protocol';
+import { CONTENT_TYPE, DIRECTION, ENDPOINT_PATH, HEADER_BYTES, LIMITS, PROTOCOL_VERSIONS, RULES_VERSION, TAG_BYTES, ProtocolError, openRequest, parseFrame, readHeader, sealResponse, toBase64Url, type ErrorCode } from './protocol';
 
 export interface ReceiverOptions {
   pairing: ScannerPairing;
@@ -33,6 +33,10 @@ const FAILURE_WINDOW_MS = 60_000;
  *   op de privé-adressen van deze computer, en neemt alleen verbindingen aan uit datzelfde netwerk.
  * - Het doet niets met een verzoek dat niet met de sleutel van een gekoppelde telefoon te ontsleutelen
  *   is, en geeft nooit iets uit de administratie terug: alleen "ontvangen" of een foutcode.
+ * - Het begrijpt protocolversie 1 (hallo en bon) en, naast die, versie 2: daarbij zegt het
+ *   hallo-antwoord van welke versie de btw-regeltabel is, en kan een telefoon een change-set
+ *   (`wijziging`) sturen en om `stamgegevens` vragen. Die laatste twee worden in deze stap nog
+ *   nergens bewaard of gesynchroniseerd; er gaat alleen een bevestiging terug.
  * - Alles wat binnenkomt is invoer van buiten: begrensd in grootte en op type gecontroleerd. De naam van
  *   het document maakt de app zelf; alleen het ID van de bon wordt (na controle dat het een UUID is) de
  *   naam van het tijdelijke bestand in de wachtrij.
@@ -261,16 +265,18 @@ export class ScannerReceiver {
       return this.plain(req, res, 401, 'niet-gekoppeld');
     }
 
-    // Vanaf hier weten we dat het bericht van een gekoppelde telefoon komt: antwoorden gaan versleuteld terug.
+    // Vanaf hier weten we dat het bericht van een gekoppelde telefoon komt: antwoorden gaan versleuteld terug,
+    // in dezelfde protocolversie als het verzoek.
+    const versie = head.versie;
     const reply = (status: number, json: Record<string, unknown>): void => {
-      const out = sealResponse(head.deviceId, key, head.nonce, json);
+      const out = sealResponse(head.deviceId, key, head.nonce, json, undefined, versie);
       res.writeHead(status, this.headers(CONTENT_TYPE, out.length));
       res.end(out);
     };
     const now = this.now();
     let msg;
     try {
-      msg = parseFrame(plaintext);
+      msg = parseFrame(plaintext, versie);
     } catch (e) {
       return reply(e instanceof ProtocolError && e.code === 'te-groot' ? 413 : 400, { ok: false, fout: e instanceof ProtocolError ? e.code : 'ongeldig' });
     }
@@ -281,7 +287,27 @@ export class ScannerReceiver {
       this.opts.pairing.seen(deviceId);
       this.opts.pairing.rename(deviceId, msg.naam);
       this.opts.onActivity?.();
-      return reply(200, { ok: true, soort: 'hallo', pc: this.opts.pairing.pcId(), pcTijd: now, limieten: { fotos: LIMITS.maxPhotos, fotoBytes: LIMITS.maxPhotoBytes, notitie: LIMITS.maxNoteChars } });
+      // Een telefoon van versie 2 krijgt ook de versie van de btw-regeltabel en de protocolversies die
+      // deze pc begrijpt; versie 1 krijgt precies het oude antwoord.
+      const extra = versie >= 2 ? { regels: RULES_VERSION, protocollen: [...PROTOCOL_VERSIONS] } : {};
+      return reply(200, { ok: true, soort: 'hallo', pc: this.opts.pairing.pcId(), pcTijd: now, limieten: { fotos: LIMITS.maxPhotos, fotoBytes: LIMITS.maxPhotoBytes, notitie: LIMITS.maxNoteChars }, ...extra });
+    }
+
+    if (msg.soort === 'wijziging') {
+      // Het formaat is gecontroleerd door de kern (change-set, met de idempotentieregel van
+      // packages/core). Bewaren en synchroniseren volgt in een latere stap: er gaat niets uit de
+      // administratie terug en er wordt niets weggeschreven.
+      this.opts.pairing.seen(deviceId);
+      this.opts.onActivity?.();
+      return reply(200, { ok: true, soort: 'wijziging', entiteit: msg.wijziging.entiteit, uuid: msg.wijziging.uuid, revisie: msg.wijziging.revisie });
+    }
+
+    if (msg.soort === 'stamgegevens') {
+      // Ook hier: alleen het bericht bestaat al. Welke stamgegevens de pc teruggeeft (klanten,
+      // projecten) volgt in een latere stap; nu krijgt de telefoon alleen een bevestiging.
+      this.opts.pairing.seen(deviceId);
+      this.opts.onActivity?.();
+      return reply(200, { ok: true, soort: 'stamgegevens' });
     }
 
     // alleen echte JPEG's (aan de inhoud gecontroleerd, niet aan een naam of type dat de telefoon opgeeft)
