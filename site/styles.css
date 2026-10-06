@@ -196,9 +196,9 @@ section { padding: 56px 0; }
 @media (max-width: 720px) { .dl-grid { grid-template-columns: 1fr; } }
 
 /* toestemming voor het meten van advertenties (meta-pixel.js) */
-#cookie-banner { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 50; max-width: 720px; margin: 0 auto; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 40px rgba(20, 30, 50, .22); padding: 16px 18px; gap: 12px; }
-#cookie-banner:not([hidden]) { display: grid !important; }
-#cookie-banner[hidden] { display: none !important; }
-#cookie-banner p { margin: 0; font-size: 15px; }
-#cookie-banner .row { display: flex; gap: 10px; flex-wrap: wrap; }
+#privacy-choice { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 50; max-width: 720px; margin: 0 auto; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 40px rgba(20, 30, 50, .22); padding: 16px 18px; gap: 12px; }
+#privacy-choice:not([hidden]) { display: grid !important; }
+#privacy-choice[hidden] { display: none !important; }
+#privacy-choice p { margin: 0; font-size: 15px; }
+#privacy-choice .row { display: flex; gap: 10px; flex-wrap: wrap; }
 .linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--primary); text-decoration: underline; cursor: pointer; }
