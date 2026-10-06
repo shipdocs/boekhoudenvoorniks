@@ -39,7 +39,9 @@
     "productName": "BoekhoudenVoorNiks",
     "files": [
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "!**/.ouroboros/**",
+      "!**/.ouroboros_eval_artifact.md"
     ],
     "directories": {
       "output": "release",
