@@ -10,3 +10,4 @@ export * from './shared/currency';
 export * from './documents/totals';
 export * from './documents/numbering';
 export * from './documents/render';
+export * from './documents/invoices';
