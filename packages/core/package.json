@@ -1,0 +1,12 @@
+{
+  "name": "@gratis-boekhouden/kern",
+  "version": "1.3.0",
+  "description": "Gedeelde rekenkern van BoekhoudenVoorNiks: zuivere berekeningen zonder Node, Electron of database, zodat de desktop-app en een latere Android-app letterlijk dezelfde berekeningen gebruiken.",
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}
