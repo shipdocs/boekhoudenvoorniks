@@ -510,7 +510,7 @@
     },
     {
       "id": "tarieven-hoog-en-laag",
-      "categorie": "meerdere-tarieven",
+      "categorie": "meerdere tarieven",
       "omschrijving": "Factuur met 21% en 9% naast elkaar",
       "toelichting": "Ijkvoorbeeld uit tests/kern.test.ts: btw per tariefgroep over de som (221 + 90), niet per regel.",
       "invoer": {
@@ -563,7 +563,7 @@
     },
     {
       "id": "tarieven-hoog-laag-nul",
-      "categorie": "meerdere-tarieven",
+      "categorie": "meerdere tarieven",
       "omschrijving": "Factuur met 21%, 9% en 0% naast elkaar",
       "toelichting": "Drie groepen; volgorde op percentage aflopend: hoog, laag, nul.",
       "invoer": {
@@ -630,7 +630,7 @@
     },
     {
       "id": "tarieven-som-voor-btw-21",
-      "categorie": "meerdere-tarieven",
+      "categorie": "meerdere tarieven",
       "omschrijving": "Twee halve-cent-regels in één groep: btw over de som",
       "toelichting": "21% over som 100 = 21; per regel afgerond zou 11 + 11 = 22 zijn — precies het verschil dat de groepsberekening voorkomt.",
       "invoer": {
@@ -674,7 +674,7 @@
     },
     {
       "id": "tarieven-som-voor-btw-9",
-      "categorie": "meerdere-tarieven",
+      "categorie": "meerdere tarieven",
       "omschrijving": "Twee 9%-regels waarvan de som op een halve cent uitkomt",
       "toelichting": "9% over som 450 = 40,5 → 41; per regel zou 20 + 20 = 40 zijn.",
       "invoer": {
@@ -718,7 +718,7 @@
     },
     {
       "id": "tarieven-drie-regels-een-groep",
-      "categorie": "meerdere-tarieven",
+      "categorie": "meerdere tarieven",
       "omschrijving": "Drie regels, één tariefgroep",
       "toelichting": "Groepnetto 600, btw 126.",
       "invoer": {
@@ -771,7 +771,7 @@
     },
     {
       "id": "tarieven-vijf-regels-een-groep",
-      "categorie": "meerdere-tarieven",
+      "categorie": "meerdere tarieven",
       "omschrijving": "Vijf regels, één tariefgroep, btw boven de halve cent",
       "toelichting": "Groepnetto 1051, btw 21% = 220,71 → 221.",
       "invoer": {
@@ -842,7 +842,7 @@
     },
     {
       "id": "tarieven-historisch-tarief-6",
-      "categorie": "meerdere-tarieven",
+      "categorie": "meerdere tarieven",
       "omschrijving": "Oude factuur met het 6%-lage tarief (vóór 2019)",
       "toelichting": "Het percentage staat per regel opgeslagen zodat tariefwijzigingen oude documenten niet raken; vatPercentage 6 overheerst.",
       "invoer": {
@@ -878,7 +878,7 @@
     },
     {
       "id": "tarieven-historisch-en-huidig",
-      "categorie": "meerdere-tarieven",
+      "categorie": "meerdere tarieven",
       "omschrijving": "Zelfde btw-code met twee percentages geeft twee groepen",
       "toelichting": "Groepen keyen op code én percentage (laag:6 en laag:9); volgorde op percentage aflopend.",
       "invoer": {
@@ -930,7 +930,7 @@
     },
     {
       "id": "tarieven-override-gelijk-aan-standaard",
-      "categorie": "meerdere-tarieven",
+      "categorie": "meerdere tarieven",
       "omschrijving": "Expliciet vatPercentage gelijk aan de standaard valt in dezelfde groep",
       "toelichting": "Beide regels vallen in groep laag:9; het netto telt op vóór de btw.",
       "invoer": {
@@ -975,7 +975,7 @@
     },
     {
       "id": "tarieven-groepvolgorde",
-      "categorie": "meerdere-tarieven",
+      "categorie": "meerdere tarieven",
       "omschrijving": "Groepen staan op percentage aflopend",
       "toelichting": "Invoervolgorde is nul, hoog, laag; de groepen komen eruit als hoog (21%), laag (9%), nul (0%).",
       "invoer": {
@@ -1042,7 +1042,7 @@
     },
     {
       "id": "kor-enkele-regel",
-      "categorie": "kor",
+      "categorie": "KOR",
       "omschrijving": "KOR-ondernemer factureert zonder btw",
       "toelichting": "Code vrijgesteld = 0% btw, rubriek \"-\"; totaal gelijk aan subtotaal.",
       "invoer": {
@@ -1077,7 +1077,7 @@
     },
     {
       "id": "kor-meerdere-regels",
-      "categorie": "kor",
+      "categorie": "KOR",
       "omschrijving": "Meerdere vrijgestelde regels tellen op zonder btw",
       "toelichting": "Groepnetto 17625, btw 0.",
       "invoer": {
@@ -1130,7 +1130,7 @@
     },
     {
       "id": "kor-met-hoog-tarief",
-      "categorie": "kor",
+      "categorie": "KOR",
       "omschrijving": "KOR-ondernemer die ook btw-plichtig werk factureert",
       "toelichting": "Twee groepen: vrijgesteld 0% en hoog 21%; alleen over de hoog-groep valt btw.",
       "invoer": {
@@ -1181,7 +1181,7 @@
     },
     {
       "id": "kor-kleine-centen",
-      "categorie": "kor",
+      "categorie": "KOR",
       "omschrijving": "Kleine vrijgestelde bedragen in centen",
       "toelichting": "Netto 3 cent, btw 0.",
       "invoer": {
@@ -1217,7 +1217,7 @@
     },
     {
       "id": "kor-hoog-bedrag",
-      "categorie": "kor",
+      "categorie": "KOR",
       "omschrijving": "Groot vrijgesteld bedrag vlak onder de KOR-omzetgrens van € 20.000",
       "toelichting": "Netto 1999999 cent, btw 0.",
       "invoer": {
@@ -1252,7 +1252,7 @@
     },
     {
       "id": "kor-met-korting",
-      "categorie": "kor",
+      "categorie": "KOR",
       "omschrijving": "Korting op een vrijgestelde factuur",
       "toelichting": "Groepnetto 2500, btw 0.",
       "invoer": {
@@ -2912,5 +2912,19 @@
         "total": 12
       }
     }
+  ],
+  "categorieen": [
+    "afronding",
+    "meerdere tarieven",
+    "KOR",
+    "verlegd",
+    "icp",
+    "export",
+    "creditnota",
+    "korting",
+    "nul-tarief",
+    "dienst-buiten-eu",
+    "grote-bedragen",
+    "kleine-bedragen"
   ]
 }
