@@ -39,6 +39,8 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - run: npm run rebuild:node
+      # de rekenkern eerst bouwen: vitest draait hier kaal (zonder npm test, dat bouwt hem zelf)
+      - run: npm run build:kern
       # de hele suite: de Release-workflow draait hem ook op Windows, dus een test die alleen daar faalt
       # moet hier al zichtbaar zijn en niet pas bij het uitbrengen
       - run: npx vitest run
