@@ -31,50 +31,30 @@
   }
 
   function banner() {
-    if (document.getElementById('cookie-banner')) return;
-    var el = document.createElement('div');
-    el.id = 'cookie-banner';
-    el.setAttribute('role', 'dialog');
-    el.setAttribute('aria-label', 'Meten van advertenties');
-    var p = document.createElement('p');
-    var strong = document.createElement('strong');
-    strong.textContent = 'Mogen we meten of onze advertentie werkt?';
-    p.appendChild(strong);
-    p.appendChild(document.createTextNode(' Met je toestemming laden we de Meta Pixel (Facebook en Instagram). Meta plaatst dan cookies en ziet dat je deze site bezocht. Zonder toestemming gaat er niets naar Meta. '));
-    var more = document.createElement('a');
-    more.href = 'privacy.html#website';
-    more.textContent = 'Meer uitleg';
-    p.appendChild(more);
+    var el = document.getElementById('cookie-banner');
+    if (el) el.hidden = false;
+  }
 
-    var row = document.createElement('div');
-    row.className = 'row';
-    var yes = document.createElement('button');
-    yes.type = 'button';
-    yes.className = 'btn small';
-    yes.setAttribute('data-choice', 'ja');
-    yes.textContent = 'Toestaan';
-    var no = document.createElement('button');
-    no.type = 'button';
-    no.className = 'btn small ghost';
-    no.setAttribute('data-choice', 'nee');
-    no.textContent = 'Niet toestaan';
-    row.appendChild(yes);
-    row.appendChild(no);
-    el.appendChild(p);
-    el.appendChild(row);
+  function hideBanner() {
+    var el = document.getElementById('cookie-banner');
+    if (el) el.hidden = true;
+  }
+
+  var el = document.getElementById('cookie-banner');
+  if (el) {
     el.addEventListener('click', function (ev) {
       var choice = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-choice');
       if (!choice) return;
       write(choice);
-      el.remove();
+      hideBanner();
       if (choice === 'ja') loadPixel();
     });
-    document.body.appendChild(el);
   }
 
   var saved = readChoice();
-  if (saved === 'ja') loadPixel();
-  else if (saved !== 'nee') banner();
+  if (saved === 'ja') { hideBanner(); loadPixel(); }
+  else if (saved === 'nee') hideBanner();
+  else banner();
 
   document.addEventListener('click', function (ev) {
     var t = ev.target;
