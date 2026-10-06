@@ -205,6 +205,24 @@ describe('bonnenscanner v2: wijzigingen (change-sets)', () => {
     expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual({ n: 0 });
   });
 
+  it('dezelfde wijziging nog een keer sturen verandert niets: geen fout, en nog steeds niets bewaard', async () => {
+    const t = start();
+    const p = await pair(t);
+    const uuid = randomUUID();
+    const eerste = await p.wijziging({ uuid, velden: { naam: 'Familie Jansen' } });
+    expect(eerste).toMatchObject({ status: 200, json: { ok: true, soort: 'wijziging', entiteit: 'klant', uuid, revisie: 1 } });
+    // dezelfde uuid met dezelfde revisie, en met een lagere: netjes bevestigd, niets aan de administratie
+    const gelijk = await p.wijziging({ uuid, velden: { naam: 'Familie Jansen' } });
+    expect(gelijk).toMatchObject({ status: 200, json: { ok: true, soort: 'wijziging', uuid, revisie: 1 } });
+    const lager = await p.wijziging({ uuid, revisie: 1, velden: { naam: 'Familie Jansen' } });
+    expect(lager).toMatchObject({ status: 200, json: { ok: true, soort: 'wijziging', uuid, revisie: 1 } });
+    // er is nog steeds niets bewaard
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual({ n: 0 });
+    expect(existsSync(t.spoolDir) ? readdirSync(t.spoolDir) : []).toEqual([]);
+  });
+
   it('een onbekende entiteit wordt geweigerd', async () => {
     const t = start();
     const p = await pair(t);
