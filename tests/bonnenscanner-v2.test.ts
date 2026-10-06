@@ -361,12 +361,13 @@ describe('bonnenscanner v2: verzendtijd en bewerktijd', () => {
     const t = start();
     const p = await pair(t);
     const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
-    // zoals vóór dit formaat: de velden van de change-set rechtstreeks naast `soort` en `tijd`
-    const plat = await p.verstuur(
-      { soort: 'wijziging', tijd: t.clock.now, entiteit: 'klant', uuid: randomUUID(), revisie: 1, velden: { naam: 'x' } },
-      { versie: 2 }
-    );
-    expect(plat).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    // zoals vóór dit formaat: de vijf velden van de change-set rechtstreeks naast `soort` en `tijd`.
+    // Als JSON, precies zoals zo'n bericht vroeger binnenkwam — daarvan mag de pc niets aannemen.
+    const plat = JSON.parse(
+      `{"soort":"wijziging","tijd":${t.clock.now},"entiteit":"klant","uuid":"${randomUUID()}","revisie":1,"velden":{"naam":"x"}}`
+    ) as Record<string, unknown>;
+    const r = await p.verstuur(plat, { versie: 2 });
+    expect(r).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
     await t.scanner.processSpool();
     expect(t.documents()).toEqual([]);
     expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
