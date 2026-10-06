@@ -9,7 +9,7 @@
     "methode": "karakterisering — de verwachte uitvoer is letterlijk door computeTotals uit packages/core/src berekend, niet handmatig nagekomen"
   },
   "uitleg": "Elke vector roept computeTotals(invoer.lines) aan uit de gedeelde kern en vergelijkt het volledige resultaat met \"verwacht\" (lines: regelnetto in invoervolgorde; groups: dezelfde sortering als de kern — percentage aflopend, dan vatCode; subtotal, vatTotal, total). Bedragen zijn centen als gehele getallen; quantity mag een decimaal aantal zijn. Het bestand is puur data: geen code, geen Node-API's.",
-  "vectoren": [
+  "vectors": [
     {
       "id": "afronding-half-product-1505",
       "categorie": "afronding",
