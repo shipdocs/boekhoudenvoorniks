@@ -49,6 +49,13 @@ function AccountantGate({ onAccepted }: { onAccepted: () => void }) {
 }
 
 type Tab = 'overzicht' | 'bedrijfsmiddelen' | 'kilometers' | 'uren';
+
+/** De tabs van dit scherm; Uren alleen als je op het urencriterium rekent (#319). */
+export function taxYearTabs(urencriterium: boolean): ReadonlyArray<readonly [Tab, string]> {
+  const tabs: Array<readonly [Tab, string]> = [['overzicht', 'Voor je aangifte'], ['bedrijfsmiddelen', 'Investeringen'], ['kilometers', 'Kilometers']];
+  if (urencriterium) tabs.push(['uren', 'Uren']);
+  return tabs;
+}
 type AssetItem = Awaited<ReturnType<typeof api.assets.list>>[number];
 
 /**
@@ -57,7 +64,10 @@ type AssetItem = Awaited<ReturnType<typeof api.assets.list>>[number];
  */
 export function TaxYear() {
   const { route, go, settings, reloadSettings } = useApp();
-  const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'overzicht');
+  const tabs = taxYearTabs(settings.urencriterium);
+  const requested = (route.extra?.tab as Tab) ?? 'overzicht';
+  const [chosen, setTab] = useState<Tab>(requested);
+  const tab: Tab = tabs.some(([k]) => k === chosen) ? chosen : 'overzicht';
   const [year, setYear] = useState(new Date().getFullYear());
   return (
     <div className="page">
@@ -70,7 +80,7 @@ export function TaxYear() {
       <AccountantNotice compact />
       <div className="row between" style={{ marginBottom: 16 }}>
         <div className="chips">
-          {([['overzicht', 'Voor je aangifte'], ['bedrijfsmiddelen', 'Investeringen'], ['kilometers', 'Kilometers'], ['uren', 'Uren']] as const).map(([k, l]) => (
+          {tabs.map(([k, l]) => (
             <button key={k} className={tab === k ? 'selected' : ''} onClick={() => setTab(k)}>{l}</button>
           ))}
         </div>
@@ -87,7 +97,7 @@ export function TaxYear() {
       </>
       )}
       <p className="muted small" style={{ marginTop: 18 }}>
-        <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Auto, startjaar en je uren (norm: 1.225 per jaar) instellen</span>
+        <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>{settings.urencriterium ? 'Auto, startjaar en je uren (norm: 1.225 per jaar) instellen' : 'Auto en startjaar instellen'}</span>
       </p>
     </div>
   );
@@ -96,7 +106,7 @@ export function TaxYear() {
 type OverviewData = Awaited<ReturnType<typeof api.incomeTax.overview>>;
 
 /** Het overzicht als platte tekst, om te mailen naar je boekhouder: met alle vaktermen en notities. */
-async function copyForAccountant(d: OverviewData): Promise<void> {
+async function copyForAccountant(d: OverviewData, showHours: boolean): Promise<void> {
   const item = (i: OverviewData['items'][number]) => `- ${i.label}${i.amount !== null ? `: ${euro(i.amount)}` : ''}\n  ${i.explain}${i.note ? `\n  Voor de boekhouder: ${i.note}` : ''}`;
   const lines = [
     `Overzicht inkomstenbelasting ${d.year} uit BoekhoudenVoorNiks${d.running ? ` (tot en met ${d.asOf}, jaar nog bezig)` : ''}`,
@@ -109,7 +119,7 @@ async function copyForAccountant(d: OverviewData): Promise<void> {
     'Aandachtspunten:',
     ...d.items.filter((i) => i.amount === null).map(item),
     '',
-    `Uren: ${d.hours.total} (urencriterium ${d.hours.target}). Zakelijke km privéauto: ${d.km.km} km = ${euro(d.km.amount)}.`,
+    `${showHours ? `Uren: ${d.hours.total} (urencriterium ${d.hours.target}). ` : ''}Zakelijke km privéauto: ${d.km.km} km = ${euro(d.km.amount)}.`,
     `Bedragen/tarieven van ${d.rulesYear}${d.rulesChecked ? '' : ' (tabel in de app nog niet door een fiscalist gecontroleerd)'}.`,
     'Niet meegenomen: partner, andere inkomsten, box 2/3, willekeurige afschrijving, EIA/MIA/Vamil.',
   ];
@@ -124,6 +134,7 @@ async function copyForAccountant(d: OverviewData): Promise<void> {
 const euro = (cents: number) => `${cents < 0 ? '− ' : ''}€ ${(Math.abs(cents) / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function Overview({ year }: { year: number }) {
+  const { settings } = useApp();
   const o = useLoad(() => api.incomeTax.overview(year), [year]);
   if (!o.data) return <ErrorBox error={o.error} />;
   const d = o.data;
@@ -135,7 +146,7 @@ function Overview({ year }: { year: number }) {
     <>
       <div className="row between">
         <p className="muted small" style={{ margin: 0 }}>{d.disclaimer}</p>
-        <Button small onClick={() => void copyForAccountant(d)}>📋 Kopieer voor je boekhouder</Button>
+        <Button small onClick={() => void copyForAccountant(d, settings.urencriterium)}>📋 Kopieer voor je boekhouder</Button>
       </div>
       {d.running && <p className="muted small">{year} is nog niet voorbij: dit zijn de bedragen tot en met vandaag.</p>}
       <div className="card">
@@ -174,10 +185,12 @@ function Overview({ year }: { year: number }) {
         </ul>
       </details>
       <div className="hero" style={{ marginTop: 14 }}>
-        <div className="card">
-          <div className="value">{d.hours.total.toLocaleString('nl-NL')} uur</div>
-          <div className="label">gewerkt{d.running ? `, op weg naar ± ${d.hours.projected.toLocaleString('nl-NL')}` : ''} · nodig voor de aftrek: {d.hours.target.toLocaleString('nl-NL')}</div>
-        </div>
+        {settings.urencriterium && (
+          <div className="card">
+            <div className="value">{d.hours.total.toLocaleString('nl-NL')} uur</div>
+            <div className="label">gewerkt{d.running ? `, op weg naar ± ${d.hours.projected.toLocaleString('nl-NL')}` : ''} · nodig voor de aftrek: {d.hours.target.toLocaleString('nl-NL')}</div>
+          </div>
+        )}
         <div className="card">
           <div className="value">{d.km.km.toLocaleString('nl-NL')} km</div>
           <div className="label">zakelijk met je eigen auto · {euro(d.km.amount)} aftrek</div>
