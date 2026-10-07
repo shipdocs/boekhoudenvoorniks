@@ -281,6 +281,10 @@ export class ScannerReceiver {
       return reply(e instanceof ProtocolError && e.code === 'te-groot' ? 413 : 400, { ok: false, fout: e instanceof ProtocolError ? e.code : 'ongeldig' });
     }
     if (Math.abs(msg.tijd - now) > LIMITS.clockWindowMs) return reply(403, { ok: false, fout: 'klok', pcTijd: now });
+    // Het bewerkmoment van een change-set (wijziging.tijd) mag willekeurig oud zijn — de wijziging kan
+    // offline gemaakt zijn — maar niet verder in de toekomst dan het klokvenster. Dit is de enige
+    // plek waar die regel staat; de kern controleert alleen de vorm van de tijd.
+    if (msg.soort === 'wijziging' && msg.wijziging.tijd > now + LIMITS.clockWindowMs) return reply(400, { ok: false, fout: 'ongeldig' });
     if (!this.opts.pairing.useNonce(deviceId, head.nonce)) return reply(409, { ok: false, fout: 'herhaald' });
 
     if (msg.soort === 'hallo') {

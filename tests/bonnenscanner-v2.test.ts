@@ -81,8 +81,14 @@ function phone(pairing: PairingPayload, clock: { now: number }) {
     const foto = makeJpeg(label);
     return verstuur({ soort: 'bon', tijd: clock.now, id: randomUUID(), betaalwijze: 'pin', fotos: [{ grootte: foto.length }], ...over }, { versie, fotos: [foto] });
   };
+  // Een wijziging-bericht draagt de change-set in een eigen sleutel `wijziging`: de `tijd` van het
+  // bericht is de verzendtijd (binnen het klokvenster), de `tijd` ín de change-set is het moment van
+  // bewerken en mag willekeurig oud zijn. Afwijkingen (`over`) gelden de change-set zelf.
   const wijziging = (over: Record<string, unknown> = {}, opts: { versie?: ProtocolVersion; fotos?: Buffer[]; nonce?: Buffer } = {}) =>
-    verstuur({ soort: 'wijziging', tijd: clock.now, entiteit: 'klant', uuid: randomUUID(), revisie: 1, velden: { naam: 'Familie Jansen' }, ...over }, { versie: 2, ...opts });
+    verstuur(
+      { soort: 'wijziging', tijd: clock.now, wijziging: { entiteit: 'klant', uuid: randomUUID(), revisie: 1, tijd: clock.now, velden: { naam: 'Familie Jansen' }, ...over } },
+      { versie: 2, ...opts }
+    );
   return { key, deviceId, url, post, verstuur, hallo, bon, wijziging };
 }
 
@@ -136,7 +142,7 @@ describe('bonnenscanner v2: versie 1 en versie 2 naast elkaar', () => {
   it('een bericht van versie 2 in een v1-envelop wordt geweigerd: de versie zit in de envelop', async () => {
     const t = start();
     const p = await pair(t);
-    const w = { soort: 'wijziging', tijd: t.clock.now, entiteit: 'klant', uuid: randomUUID(), revisie: 1, velden: { naam: 'x' } };
+    const w = { soort: 'wijziging', tijd: t.clock.now, wijziging: { entiteit: 'klant', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'x' } } };
     const s = { soort: 'stamgegevens', tijd: t.clock.now };
     for (const [what, json] of [['wijziging', w], ['stamgegevens', s]] as const) {
       const r = await p.verstuur(json, { versie: 1 });
@@ -179,7 +185,8 @@ describe('bonnenscanner v2: wijzigingen (change-sets)', () => {
   it('een ongeldige change-set wordt geweigerd en bewaart niets', async () => {
     const t = start();
     const p = await pair(t);
-    const basis = { entiteit: 'klant', uuid: randomUUID(), revisie: 1, velden: { naam: 'x' } };
+    // precies een afwijking per geval, steeds ín de change-set: het bericht zelf is netjes
+    const basis = { entiteit: 'klant', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'x' } };
     const zonderRevisie: Record<string, unknown> = { ...basis };
     delete zonderRevisie.revisie;
     const gevallen: [string, Record<string, unknown>][] = [
@@ -196,7 +203,7 @@ describe('bonnenscanner v2: wijzigingen (change-sets)', () => {
       ['entiteit null', { ...basis, entiteit: null }],
     ];
     for (const [what, json] of gevallen) {
-      const r = await p.verstuur({ soort: 'wijziging', tijd: t.clock.now, ...json }, { versie: 2 });
+      const r = await p.verstuur({ soort: 'wijziging', tijd: t.clock.now, wijziging: { ...json } }, { versie: 2 });
       expect(r.status, what).toBe(400);
       expect(r.sealed, what).toBe(true);
       expect(r.json, what).toMatchObject({ ok: false, fout: 'ongeldig' });
@@ -254,8 +261,12 @@ describe('bonnenscanner v2: wijzigingen (change-sets)', () => {
     const t = start();
     const p = await pair(t);
     const foto = makeJpeg();
-    const r = await p.verstuur({ soort: 'wijziging', tijd: t.clock.now, entiteit: 'klant', uuid: randomUUID(), revisie: 1, velden: { naam: 'x' } }, { versie: 2, fotos: [foto] });
+    const r = await p.verstuur(
+      { soort: 'wijziging', tijd: t.clock.now, wijziging: { entiteit: 'klant', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'x' } } },
+      { versie: 2, fotos: [foto] }
+    );
     expect(r).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual({ n: 0 });
   });
 });
 
@@ -277,8 +288,11 @@ describe('bonnenscanner v2: dezelfde regels als versie 1', () => {
   it('ook een v2-bericht staat op de klok van de pc en op een verse nonce', async () => {
     const t = start();
     const p = await pair(t);
-    // te oude tijdstempel
-    const oudeTijd = await p.verstuur({ soort: 'wijziging', tijd: t.clock.now - LIMITS.clockWindowMs - 1000, entiteit: 'klant', uuid: randomUUID(), revisie: 1, velden: { naam: 'x' } }, { versie: 2 });
+    // te oude verzendtijd
+    const oudeTijd = await p.verstuur(
+      { soort: 'wijziging', tijd: t.clock.now - LIMITS.clockWindowMs - 1000, wijziging: { entiteit: 'klant', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'x' } } },
+      { versie: 2 }
+    );
     expect(oudeTijd).toMatchObject({ status: 403, sealed: true, json: { ok: false, fout: 'klok', pcTijd: t.clock.now } });
     // dezelfde nonce nog een keer, met een geldig bericht: geweigerd
     const nonce = randomBytes(12);
@@ -289,6 +303,197 @@ describe('bonnenscanner v2: dezelfde regels als versie 1', () => {
     // er is niets bewaard door al die berichten
     await t.scanner.processSpool();
     expect(t.documents()).toEqual([]);
+  });
+});
+
+describe('bonnenscanner v2: verzendtijd en bewerktijd', () => {
+  it('bewerkmoment van drie dagen geleden wordt geaccepteerd en behouden', async () => {
+    const t = start();
+    const p = await pair(t);
+    const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
+    const uuid = randomUUID();
+    const drieDagenGeleden = t.clock.now - 3 * 24 * 60 * 60 * 1000;
+    // via de receiver: de verzendtijd is nu, het bewerkmoment mag veel ouder zijn (offline gemaakt)
+    const r = await p.wijziging({ uuid, tijd: drieDagenGeleden });
+    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'wijziging', entiteit: 'klant', uuid, revisie: 1 } });
+    // parseFrame levert het bewerkmoment ongewijzigd terug
+    const bericht = parseFrame(
+      encodeFrame({ soort: 'wijziging', tijd: t.clock.now, wijziging: { entiteit: 'klant', uuid, revisie: 1, tijd: drieDagenGeleden, velden: { naam: 'x' } } }),
+      2
+    );
+    if (bericht.soort !== 'wijziging') throw new Error('onverwacht: geen wijziging');
+    expect(bericht.wijziging.tijd).toBe(drieDagenGeleden);
+    // de tijd van het bericht zelf is de verzendtijd en blijft binnen het klokvenster
+    expect(t.clock.now - bericht.tijd).toBeLessThanOrEqual(LIMITS.clockWindowMs);
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
+  });
+
+  it('bewerkmoment in de toekomst geeft 400 ongeldig', async () => {
+    const t = start();
+    const p = await pair(t);
+    const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
+    // een uur vooruit: verder in de toekomst dan het klokvenster toestaat
+    const r = await p.wijziging({ tijd: t.clock.now + 60 * 60 * 1000 });
+    expect(r).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
+  });
+
+  it('bewerkmoment precies op de grens van het klokvenster', async () => {
+    const t = start();
+    const p = await pair(t);
+    const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
+    // precies nu plus het klokvenster is nog goed
+    const opGrens = await p.wijziging({ tijd: t.clock.now + LIMITS.clockWindowMs });
+    expect(opGrens).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'wijziging' } });
+    // een milliseconde erover is te ver
+    const erover = await p.wijziging({ uuid: randomUUID(), tijd: t.clock.now + LIMITS.clockWindowMs + 1 });
+    expect(erover).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
+  });
+
+  it('het oude platte formaat geeft 400 ongeldig', async () => {
+    const t = start();
+    const p = await pair(t);
+    const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
+    // zoals vóór dit formaat: de vijf velden van de change-set rechtstreeks naast `soort` en `tijd`.
+    // Als JSON, precies zoals zo'n bericht vroeger binnenkwam — daarvan mag de pc niets aannemen.
+    const plat = JSON.parse(
+      `{"soort":"wijziging","tijd":${t.clock.now},"entiteit":"klant","uuid":"${randomUUID()}","revisie":1,"velden":{"naam":"x"}}`
+    ) as Record<string, unknown>;
+    const r = await p.verstuur(plat, { versie: 2 });
+    expect(r).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
+  });
+
+  it('een array, een tweede wijziging of extra sleutels geven 400 ongeldig', async () => {
+    const t = start();
+    const p = await pair(t);
+    const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
+    const een = { entiteit: 'klant', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'x' } };
+    // een array (bijvoorbeeld twee change-sets achter elkaar) is geen change-set
+    const lijst = await p.verstuur({ soort: 'wijziging', tijd: t.clock.now, wijziging: [een] }, { versie: 2 });
+    expect(lijst).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    // een poging om er twee in één bericht te stoppen, naast elkaar
+    const batch = await p.verstuur({ soort: 'wijziging', tijd: t.clock.now, wijziging: een, wijzigingen: [{ ...een, uuid: randomUUID() }] }, { versie: 2 });
+    expect(batch).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    // en een extra bovenste sleutel hoort er niet bij: precies één wijziging per bericht
+    const extra = await p.verstuur({ soort: 'wijziging', tijd: t.clock.now, wijziging: een, extra: 'x' }, { versie: 2 });
+    expect(extra).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
+  });
+
+  it('een wijziging met __proto__ in velden geeft 400 ongeldig', async () => {
+    const t = start();
+    const p = await pair(t);
+    const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
+    // JSON.parse maakt '__proto__' tot een eigen sleutel; precies zo komt het bij de pc binnen
+    const kwaadaardig = JSON.parse(
+      `{"soort":"wijziging","tijd":${t.clock.now},"wijziging":{"entiteit":"klant","uuid":"${randomUUID()}","revisie":1,"tijd":${t.clock.now},"velden":{"__proto__":{"gevaar":true}}}}`
+    ) as Record<string, unknown>;
+    const r = await p.verstuur(kwaadaardig, { versie: 2 });
+    expect(r).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    // en het aanbieden heeft niets in de prototypes kunnen smokkelen
+    expect(({} as Record<string, unknown>).gevaar).toBeUndefined();
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
+  });
+});
+
+describe('bonnenscanner v2: grenzen van de berichtgrootte', () => {
+  it('wijziging van 16 KiB tot 128 KiB geeft 200', async () => {
+    const t = start();
+    const p = await pair(t);
+    const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
+    // 400 korte teksten: boven de 16 KiB van andere berichten, ruim binnen de 128 KiB van een wijziging
+    const json = {
+      soort: 'wijziging',
+      tijd: t.clock.now,
+      wijziging: { entiteit: 'klant', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'Grote mutatie', lijst: Array.from({ length: 400 }, () => 'x'.repeat(48)) } },
+    };
+    const lengte = Buffer.byteLength(JSON.stringify(json), 'utf8');
+    expect(lengte).toBeGreaterThan(LIMITS.maxJsonBytes);
+    expect(lengte).toBeLessThan(LIMITS.maxWijzigingJsonBytes);
+    const r = await p.verstuur(json, { versie: 2 });
+    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'wijziging' } });
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
+  });
+
+  it('kapotte JSON tussen 16 en 128 KiB blijft 400 ongeldig', async () => {
+    const t = start();
+    const p = await pair(t);
+    const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
+    // groot genoeg voor de wijzigingsgrens, maar geen geldige JSON: alsnog gewoon ongeldig
+    const tekst = Buffer.from('{"soort":"wijziging","tijd":' + t.clock.now + ',' + 'x'.repeat(LIMITS.maxJsonBytes + 2000), 'utf8');
+    expect(tekst.length).toBeGreaterThan(LIMITS.maxJsonBytes);
+    expect(tekst.length).toBeLessThan(LIMITS.maxWijzigingJsonBytes);
+    const frame = Buffer.concat([Buffer.alloc(4), tekst]);
+    frame.writeUInt32BE(tekst.length, 0);
+    const nonce = randomBytes(12);
+    const r = await p.post(sealRequest(p.deviceId, p.key, frame, nonce, 2), nonce);
+    expect(r).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
+  });
+
+  it('hallo, bon en stamgegevens boven 16 KiB geven 413 te-groot, een wijziging boven 128 KiB ook', async () => {
+    const t = start();
+    const p = await pair(t);
+    const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
+    const vol = 'x'.repeat(LIMITS.maxJsonBytes); // elke JSON komt hiermee boven de 16 KiB uit
+    const hallo = await p.verstuur({ soort: 'hallo', tijd: t.clock.now, naam: vol }, { versie: 2 });
+    expect(hallo).toMatchObject({ status: 413, sealed: true, json: { ok: false, fout: 'te-groot' } });
+    const bon = await p.bon(2, { overig: vol });
+    expect(bon).toMatchObject({ status: 413, sealed: true, json: { ok: false, fout: 'te-groot' } });
+    const stamgegevens = await p.verstuur({ soort: 'stamgegevens', tijd: t.clock.now, overig: vol }, { versie: 2 });
+    expect(stamgegevens).toMatchObject({ status: 413, sealed: true, json: { ok: false, fout: 'te-groot' } });
+    // een wijziging mag tot 128 KiB: 500 teksten van 300 tekens komt daar bovenuit
+    const teGroteWijziging = await p.wijziging({ velden: { lijst: Array.from({ length: 500 }, () => 'x'.repeat(300)) } });
+    expect(teGroteWijziging).toMatchObject({ status: 413, sealed: true, json: { ok: false, fout: 'te-groot' } });
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
+  });
+
+  it('versie 1 boven 16 KiB geeft 413 te-groot', async () => {
+    const t = start();
+    const p = await pair(t);
+    const voor = t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get() as { n: number };
+    // was vroeger 400 ongeldig boven 16 KiB; sinds de 128 KiB-grens is het bewust 413 te-groot
+    const r = await p.verstuur({ soort: 'hallo', tijd: t.clock.now, naam: 'x'.repeat(LIMITS.maxJsonBytes) }, { versie: 1 });
+    expect(r).toMatchObject({ status: 413, sealed: true, json: { ok: false, fout: 'te-groot' } });
+    // een bon in een v1-envelop boven 16 KiB ook
+    const b = await p.bon(1, { overig: 'x'.repeat(LIMITS.maxJsonBytes) });
+    expect(b).toMatchObject({ status: 413, sealed: true, json: { ok: false, fout: 'te-groot' } });
+    // en ook soort wijziging in een v1-envelop: boven 16 KiB te groot (de 128 KiB-uitzondering geldt
+    // alleen in een v2-envelop)
+    const w = await p.verstuur(
+      { soort: 'wijziging', tijd: t.clock.now, wijziging: { entiteit: 'klant', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'x'.repeat(LIMITS.maxJsonBytes) } } },
+      { versie: 1 }
+    );
+    expect(w).toMatchObject({ status: 413, sealed: true, json: { ok: false, fout: 'te-groot' } });
+    // onder de 16 KiB blijft het bestaande v1-gedrag voor soort wijziging ongewijzigd: ongeldig
+    const klein = await p.verstuur(
+      { soort: 'wijziging', tijd: t.clock.now, wijziging: { entiteit: 'klant', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'x' } } },
+      { versie: 1 }
+    );
+    expect(klein).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    await t.scanner.processSpool();
+    expect(t.documents()).toEqual([]);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual(voor);
   });
 });
 
