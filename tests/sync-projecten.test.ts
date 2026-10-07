@@ -22,6 +22,8 @@ import { CONTENT_TYPE, ENDPOINT_PATH, LIMITS, decodePairing, encodeFrame, openRe
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const n = (db: Database.Database, sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { n: number }).n;
+/** De datum van vandaag zoals de code hem bepaalt (SQLite date('now'), UTC); de testklok stuurt SQLite niet aan. */
+const vandaag = (db: Database.Database) => (db.prepare(`SELECT date('now') AS d`).get() as { d: string }).d;
 const teller = (db: Database.Database) => (db.prepare(`SELECT waarde FROM sync_teller WHERE naam = 'wijziging'`).get() as { waarde: number }).waarde;
 type Kolom = { name: string; type: string; notnull: number; dflt_value: string | null; pk: number };
 const kolommen = (db: Database.Database, tabel: string) => db.prepare(`PRAGMA table_info(${tabel})`).all() as Kolom[];
@@ -265,12 +267,12 @@ describe('projecten-lokaal', () => {
     const job = s.jobs.create({ relationId: klant.id, title: 'Badkamer' });
     const tijd = Date.now();
     const klaar = s.jobs.setStatus(job.id, 'klaar');
-    expect(klaar).toMatchObject({ status: 'klaar', end_date: '2026-10-07', revisie: 2 });
+    expect(klaar).toMatchObject({ status: 'klaar', end_date: vandaag(db), revisie: 2 });
     expect(velden(db, job.id).filter((v) => ['status', 'end_date'].includes(v.veld))).toEqual([
       { veld: 'end_date', tijd, bron: 'pc' },
       { veld: 'status', tijd, bron: 'pc' },
     ]);
-    expect(logboek(db, job.id).filter((l) => l.revisie === 2).map((l) => [l.veld, l.oud, l.nieuw])).toEqual([['end_date', null, '2026-10-07'], ['status', 'gepland', 'klaar']]);
+    expect(logboek(db, job.id).filter((l) => l.revisie === 2).map((l) => [l.veld, l.oud, l.nieuw])).toEqual([['end_date', null, vandaag(db)], ['status', 'gepland', 'klaar']]);
     const seq = rij(db, job.id).sync_seq;
     expect(s.jobs.setStatus(job.id, 'klaar')).toMatchObject({ revisie: 2, sync_seq: seq });
     expect(rij(db, job.id).sync_seq).toBe(seq);
@@ -291,9 +293,9 @@ describe('projecten-lokaal', () => {
     const voor = rij(db, job.id);
     s.jobs.makeInvoice(job.id, [{ description: 'Badkamer', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }]);
     const na = rij(db, job.id);
-    expect(na).toMatchObject({ status: 'gefactureerd', end_date: '2026-10-07', revisie: voor.revisie + 1 });
+    expect(na).toMatchObject({ status: 'gefactureerd', end_date: vandaag(db), revisie: voor.revisie + 1 });
     expect(na.sync_seq).toBeGreaterThan(voor.sync_seq);
-    expect(logboek(db, job.id).filter((l) => l.revisie === 2).map((l) => [l.veld, l.nieuw])).toEqual([['end_date', '2026-10-07'], ['status', 'gefactureerd']]);
+    expect(logboek(db, job.id).filter((l) => l.revisie === 2).map((l) => [l.veld, l.nieuw])).toEqual([['end_date', vandaag(db)], ['status', 'gefactureerd']]);
     expect(velden(db, job.id).find((v) => v.veld === 'status')).toMatchObject({ bron: 'pc' });
   });
 
@@ -1368,3 +1370,4 @@ describe('projecten-wachtrij', () => {
     expect(rijen[0]).toMatchObject({ wacht_op_uuid: klant, verwerkt_op: null });
   });
 });
+
