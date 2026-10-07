@@ -117,7 +117,7 @@ function koppel(p: ScannerPairing, clock: { now: number }): string {
 
 describe('apparaatcode: de migratie', () => {
   /** de migratie die scanner_device_codes maakt; welk nummer hij heeft doet er niet toe */
-  const index = migrations.findIndex((m) => /CREATE TABLE scanner_device_codes\b/.test(m));
+  const index = migrations.findIndex((m) => /CREATE TABLE (IF NOT EXISTS )?scanner_device_codes\b/.test(m));
 
   it('migratie nieuwe tabel', () => {
     const db = new Database(':memory:');
