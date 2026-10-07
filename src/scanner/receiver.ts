@@ -14,11 +14,8 @@ export interface ReceiverOptions {
   spool: ReceiptSpool;
   /** verwerkt een gecontroleerde wijziging in de administratie (SyncOntvangst); zonder deze opdracht wordt een wijziging alleen bevestigd */
   sync?: { verwerk(deviceId: string, bron: string, wijziging: Wijziging, route?: string): SyncResult };
-  /**
-   * de administratie waaruit `stamgegevens` leest (alleen lezen); zonder deze opdracht gebruikt de
-   * ontvanger de database van de koppelingen (pairing), dat is dezelfde administratie
-   */
-  database?: Db;
+  /** de administratie waaruit `stamgegevens` leest (alleen lezen) */
+  database: Db;
   /** de adressen waarop geluisterd wordt (alleen het lokale netwerk); tests geven hier 127.0.0.1 */
   interfaces: () => LocalInterface[];
   /** mag deze afzender? Standaard: alleen uit hetzelfde netwerk als het adres waarop hij binnenkomt. */
@@ -348,9 +345,7 @@ export class ScannerReceiver {
       this.opts.onActivity?.();
       let pagina;
       try {
-        const db = this.opts.database ?? (this.opts.pairing as unknown as { db?: Db }).db;
-        if (!db || typeof db.prepare !== 'function') throw new Error('de administratie is niet beschikbaar');
-        pagina = leesStamgegevens(db, { sinds: msg.sinds ?? 0, na });
+        pagina = leesStamgegevens(this.opts.database, { sinds: msg.sinds ?? 0, na });
       } catch (e) {
         // nooit details naar de telefoon; de melding staat alleen in het eigen logboek
         this.opts.log?.(`Stamgegevens voor de telefoon lezen mislukt: ${(e as Error).message}`);

@@ -117,6 +117,7 @@ export class Bonnenscanner {
       now: deps.now,
       keepLocation: () => deps.settings.get().jobLocation,
       sync: this.sync,
+      database: deps.db,
       onStored: () => void this.processSpool(),
       onActivity: () => deps.onChange?.(),
       log: this.log,
