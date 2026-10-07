@@ -1,6 +1,10 @@
 import Database from 'better-sqlite3';
-import { beforeEach, describe, expect, it } from 'vitest';
-import { migrate } from '../src/db/database';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { migrate, openDatabase } from '../src/db/database';
+import { herstelRelatieUuids } from '../src/relations/herstel';
 import { migrations } from '../src/db/migrations';
 import { volgendeSyncSeq } from '../src/sync/teller';
 
@@ -238,5 +242,98 @@ describe('Wijzigingsnummers', () => {
     const db = metTeller();
     db.exec(`DELETE FROM sync_teller`);
     expect(() => volgendeSyncSeq(db)).toThrow(/wijzigingsteller/);
+  });
+});
+
+describe('Aanvullen na een oudere app-versie', () => {
+  const mappen: string[] = [];
+  afterEach(() => {
+    for (const m of mappen.splice(0)) rmSync(m, { recursive: true, force: true });
+  });
+
+  function metKlanten(): Database.Database {
+    const db = oudeToestand();
+    nieuweKlant(db, 'A');
+    nieuweKlant(db, 'B');
+    migrate(db);
+    return db;
+  }
+  const teller = (db: Database.Database) => (db.prepare(`SELECT waarde FROM sync_teller WHERE naam = 'wijziging'`).get() as { waarde: number }).waarde;
+
+  it('herstel: een rij zonder uuid krijgt een geldige versie-4-uuid en andere uuid\'s blijven gelijk', () => {
+    const db = metKlanten();
+    const voor = db.prepare('SELECT id, uuid FROM relations ORDER BY id').all() as { id: number; uuid: string }[];
+    const r = db.prepare(`INSERT INTO relations (type, name) VALUES ('klant', 'Oud')`).run();
+    herstelRelatieUuids(db, () => {});
+    const rij = db.prepare('SELECT uuid FROM relations WHERE id = ?').get(Number(r.lastInsertRowid)) as { uuid: string };
+    expect(rij.uuid).toMatch(UUID_V4);
+    expect(db.prepare('SELECT id, uuid FROM relations WHERE id <= ? ORDER BY id').all(voor[1]!.id)).toEqual(voor);
+  });
+
+  it('herstel: een rij met wijzigingsnummer 0 krijgt een volgend, uniek nummer boven alle bestaande', () => {
+    const db = metKlanten();
+    const hoogste = teller(db);
+    db.prepare(`INSERT INTO relations (type, name) VALUES ('klant', 'Oud 1')`).run();
+    db.prepare(`INSERT INTO relations (type, name) VALUES ('klant', 'Oud 2')`).run();
+    herstelRelatieUuids(db, () => {});
+    const nummers = (db.prepare('SELECT sync_seq FROM relations ORDER BY id').all() as { sync_seq: number }[]).map((r) => r.sync_seq);
+    expect(nummers.slice(0, 2)).toEqual([1, 2]);
+    expect(nummers.slice(2)).toEqual([hoogste + 1, hoogste + 2]);
+    expect(new Set(nummers).size).toBe(4);
+    expect(teller(db)).toBe(hoogste + 2);
+  });
+
+  it('herstel: zonder rijen om aan te vullen wordt er niets geschreven', () => {
+    const db = metKlanten();
+    const rijen = db.prepare('SELECT * FROM relations ORDER BY id').all();
+    const tellerVoor = teller(db);
+    const meldingen: string[] = [];
+    const voor = db.prepare('SELECT total_changes() AS n').get() as { n: number };
+    herstelRelatieUuids(db, (m) => meldingen.push(m));
+    expect((db.prepare('SELECT total_changes() AS n').get() as { n: number }).n).toBe(voor.n);
+    expect(db.prepare('SELECT * FROM relations ORDER BY id').all()).toEqual(rijen);
+    expect(teller(db)).toBe(tellerVoor);
+    expect(meldingen).toEqual([]);
+  });
+
+  it('herstel: een tweede aanroep verandert niets', () => {
+    const db = metKlanten();
+    db.prepare(`INSERT INTO relations (type, name) VALUES ('klant', 'Oud')`).run();
+    herstelRelatieUuids(db, () => {});
+    const na1 = db.prepare('SELECT * FROM relations ORDER BY id').all();
+    const teller1 = teller(db);
+    herstelRelatieUuids(db, () => {});
+    expect(db.prepare('SELECT * FROM relations ORDER BY id').all()).toEqual(na1);
+    expect(teller(db)).toBe(teller1);
+  });
+
+  it('herstel: een fout wordt gelogd en niet gegooid en laat de rijen ongemoeid', () => {
+    const db = metKlanten();
+    db.prepare(`INSERT INTO relations (type, name) VALUES ('klant', 'Oud')`).run();
+    db.exec(`DROP TABLE sync_teller`);
+    const meldingen: string[] = [];
+    expect(() => herstelRelatieUuids(db, (m) => meldingen.push(m))).not.toThrow();
+    expect(meldingen).toHaveLength(1);
+    expect(meldingen[0]).toMatch(/niet gelukt/);
+    expect(db.prepare(`SELECT uuid, sync_seq FROM relations WHERE name = 'Oud'`).get()).toEqual({ uuid: null, sync_seq: 0 });
+    expect(db.inTransaction).toBe(false);
+  });
+
+  it('herstel: openDatabase vult een rij van een tweede verbinding aan bij het opnieuw openen', () => {
+    const map = mkdtempSync(join(tmpdir(), 'bvn-herstel-'));
+    mappen.push(map);
+    const bestand = join(map, 'administratie.sqlite');
+    openDatabase(bestand, () => {}).close();
+    const tweede = new Database(bestand);
+    tweede.prepare(`INSERT INTO relations (type, name) VALUES ('klant', 'Van een oude versie')`).run();
+    tweede.close();
+    const db = openDatabase(bestand, () => {});
+    try {
+      const rij = db.prepare(`SELECT uuid, sync_seq FROM relations WHERE name = 'Van een oude versie'`).get() as { uuid: string; sync_seq: number };
+      expect(rij.uuid).toMatch(UUID_V4);
+      expect(rij.sync_seq).toBeGreaterThan(0);
+    } finally {
+      db.close();
+    }
   });
 });

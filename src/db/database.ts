@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
 import { migrations } from './migrations';
 import { relativizeAttachmentPaths } from './attachment-paths';
+import { herstelRelatieUuids } from '../relations/herstel';
 
 export type Db = Database.Database;
 
@@ -47,6 +48,7 @@ export function openDatabase(filename: string, log: (message: string) => void = 
     db.pragma('foreign_keys = ON');
     migrate(db);
     relativizeAttachments(db, log);
+    herstelRelatieUuids(db, log);
     return db;
   } catch (e) {
     db.close();
