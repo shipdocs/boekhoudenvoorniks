@@ -41,7 +41,7 @@ const FAILURE_WINDOW_MS = 60_000;
  *   is, en geeft nooit iets uit de administratie terug: alleen "ontvangen" of een foutcode.
  * - Het begrijpt protocolversie 1 (hallo en bon) en, naast die, versie 2: daarbij zegt het
  *   hallo-antwoord van welke versie de btw-regeltabel is, en kan een telefoon een change-set
- *   (`wijziging`) sturen en om `stamgegevens` vragen. Een klantwijziging wordt bewaard door
+ *   (`wijziging`) sturen en om `stamgegevens` vragen. Een klant- of projectwijziging wordt bewaard door
  *   SyncOntvangst (opdracht `sync`); `stamgegevens` krijgt voorlopig alleen een bevestiging.
  * - Alles wat binnenkomt is invoer van buiten: begrensd in grootte en op type gecontroleerd. De naam van
  *   het document maakt de app zelf; alleen het ID van de bon wordt (na controle dat het een UUID is) de
@@ -321,7 +321,7 @@ export class ScannerReceiver {
         return reply(500, { ok: false, fout: 'opslaan-mislukt' });
       }
       if (uitslag.status === 200) {
-        return reply(200, { ok: true, soort: 'wijziging', ...eigen, uitkomst: uitslag.uitkomst, ...(uitslag.fout ? { fout: uitslag.fout } : {}) });
+        return reply(200, { ok: true, soort: 'wijziging', ...eigen, uitkomst: uitslag.uitkomst, ...(uitslag.fout ? { fout: uitslag.fout } : {}), ...(uitslag.melding ? { melding: uitslag.melding } : {}) });
       }
       return reply(uitslag.status, { ok: false, fout: uitslag.fout ?? 'opslaan-mislukt', ...(uitslag.veld ? { veld: uitslag.veld } : {}), ...(uitslag.melding ? { melding: uitslag.melding } : {}) });
     }

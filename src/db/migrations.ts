@@ -1470,4 +1470,76 @@ export const migrations: string[] = [
     PRIMARY KEY (apparaat_id, entiteit, uuid, revisie)
   );
   `,
+  `
+  -- Klussen (jobs) krijgen dezelfde sync-administratie als klanten: uuid, revisie, gewijzigd_op, sync_seq
+  -- en een archiefvlag, plus de tijd per veld (job_field_rev), een logboek (job_changelog) en de
+  -- generieke wachtrij voor wijzigingen die wachten op een nog onbekende verwijzing (sync_wachtrij).
+  -- Alleen additief. uuid mag NULL zijn (een oudere app-versie schrijft rijen zonder uuid en met
+  -- sync_seq 0; het herstel bij het openen vult dat aan) en is uniek via een eigen index, want SQLite
+  -- staat ADD COLUMN met UNIQUE niet toe. revisie: pc-rij-revisie (informatief). gewijzigd_op: bewerktijd
+  -- van de laatste wijziging in milliseconden (informatief, nooit voor delta of sortering). sync_seq:
+  -- nummer uit de globale teller sync_teller, de enige basis voor delta-sync.
+  -- Een veld zonder rij in job_field_rev heeft als tijd de aanmaaktijd van de klus (UTC) en als bron pc;
+  -- deze migratie schrijft daarom geen veldrijen.
+  ALTER TABLE jobs ADD COLUMN uuid TEXT;
+  ALTER TABLE jobs ADD COLUMN revisie INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE jobs ADD COLUMN gewijzigd_op INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE jobs ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1));
+  ALTER TABLE jobs ADD COLUMN sync_seq INTEGER NOT NULL DEFAULT 0;
+
+  UPDATE jobs SET uuid = lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-'||substr('89ab',1+(abs(random())%4),1)||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6))) WHERE uuid IS NULL;
+  UPDATE jobs SET gewijzigd_op = COALESCE(CAST(strftime('%s', created_at) AS INTEGER) * 1000, 0);
+  UPDATE jobs SET sync_seq = (SELECT waarde FROM sync_teller WHERE naam = 'wijziging') + id;
+  UPDATE sync_teller SET waarde = waarde + (SELECT COALESCE(MAX(id), 0) FROM jobs) WHERE naam = 'wijziging';
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_uuid ON jobs(uuid);
+  CREATE INDEX IF NOT EXISTS idx_jobs_sync_seq ON jobs(sync_seq);
+
+  -- IF NOT EXISTS omdat een test (en een teruggezette administratie) de migraties op een al gevulde
+  -- database opnieuw kan draaien.
+  CREATE TABLE IF NOT EXISTS job_field_rev (
+    job_id INTEGER NOT NULL REFERENCES jobs(id),
+    veld TEXT NOT NULL,
+    tijd INTEGER NOT NULL,
+    bron TEXT NOT NULL,
+    PRIMARY KEY (job_id, veld)
+  );
+
+  CREATE TABLE IF NOT EXISTS job_changelog (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER NOT NULL REFERENCES jobs(id),
+    revisie INTEGER NOT NULL,
+    veld TEXT NOT NULL,
+    oud TEXT,
+    nieuw TEXT,
+    tijd INTEGER NOT NULL,
+    bron TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_job_changelog_job ON job_changelog(job_id);
+
+  -- Wijzigingen van een telefoon die wachten op een object dat er nog niet is (een klant, later een project
+  -- of periode). Een rij wordt nooit verwijderd: afhandelen is verwerkt_op, verwerkt_uitkomst en
+  -- verwerkt_reden invullen. wijziging is de volledige wijziging als JSON-tekst, tijd de bewerktijd van de
+  -- telefoon en ontvangen_op de klok van de pc (beide in milliseconden); nummer is voor facturen.
+  CREATE TABLE IF NOT EXISTS sync_wachtrij (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    apparaat_id TEXT NOT NULL,
+    bron TEXT NOT NULL,
+    entiteit TEXT NOT NULL,
+    uuid TEXT NOT NULL,
+    revisie INTEGER NOT NULL,
+    tijd INTEGER NOT NULL,
+    wijziging TEXT NOT NULL,
+    nummer TEXT,
+    wacht_op_entiteit TEXT NOT NULL,
+    wacht_op_uuid TEXT NOT NULL,
+    reden TEXT NOT NULL,
+    ontvangen_op INTEGER NOT NULL,
+    verwerkt_op INTEGER,
+    verwerkt_uitkomst TEXT,
+    verwerkt_reden TEXT,
+    UNIQUE (apparaat_id, entiteit, uuid, revisie)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sync_wachtrij_wacht ON sync_wachtrij(verwerkt_op, wacht_op_entiteit, wacht_op_uuid);
+  `,
 ];

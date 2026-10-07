@@ -251,7 +251,7 @@ describe('bonnenscanner v2: wijzigingen (change-sets)', () => {
       expect(r.json, entiteit).toMatchObject({ ok: false, fout: 'ongeldig' });
     }
     // en de toegestane lijst is precies deze vijf
-    for (const entiteit of ['klant', 'project'] as const) expect((await p.wijziging({ entiteit })).status, entiteit).toBe(200);
+    for (const entiteit of ['klant'] as const) expect((await p.wijziging({ entiteit })).status, entiteit).toBe(200);
     for (const entiteit of ['factuur', 'bon', 'foto'] as const) expect((await p.wijziging({ entiteit })).status, entiteit).toBe(200);
   });
 
@@ -432,7 +432,8 @@ describe('bonnenscanner v2: grenzen van de berichtgrootte', () => {
       soort: 'wijziging',
       tijd: t.clock.now,
       // entiteit project: de velden van een klant zijn sinds de opslag van klanten beperkt tot het klantveldschema
-      wijziging: { entiteit: 'project', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'Grote mutatie', lijst: Array.from({ length: 400 }, () => 'x'.repeat(48)) } },
+      // (sinds de opslag van projecten geldt dat ook voor project; factuur wordt nog niet opgeslagen en laat dit bericht dus ongemoeid)
+      wijziging: { entiteit: 'factuur', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'Grote mutatie', lijst: Array.from({ length: 400 }, () => 'x'.repeat(48)) } },
     };
     const lengte = Buffer.byteLength(JSON.stringify(json), 'utf8');
     expect(lengte).toBeGreaterThan(LIMITS.maxJsonBytes);

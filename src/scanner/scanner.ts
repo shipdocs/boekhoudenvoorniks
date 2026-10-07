@@ -93,6 +93,7 @@ const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest('h
  */
 export class Bonnenscanner {
   readonly pairing: ScannerPairing;
+  private readonly sync: SyncOntvangst;
   private readonly spool: ReceiptSpool;
   private readonly receiver: ScannerReceiver;
   private readonly watch: ReceiptFolderWatch;
@@ -105,6 +106,7 @@ export class Bonnenscanner {
   constructor(private readonly deps: ScannerDeps) {
     this.log = deps.log ?? (() => undefined);
     this.pairing = new ScannerPairing(deps.db, deps.secrets, deps.now);
+    this.sync = new SyncOntvangst(deps.db, new RelationsService(deps.db, deps.now), { now: deps.now, log: this.log });
     this.spool = new ReceiptSpool(deps.db, deps.spoolDir);
     this.receiver = new ScannerReceiver({
       pairing: this.pairing,
@@ -114,7 +116,7 @@ export class Bonnenscanner {
       peerAllowed: deps.peerAllowed,
       now: deps.now,
       keepLocation: () => deps.settings.get().jobLocation,
-      sync: new SyncOntvangst(deps.db, new RelationsService(deps.db, deps.now), { now: deps.now, log: this.log }),
+      sync: this.sync,
       onStored: () => void this.processSpool(),
       onActivity: () => deps.onChange?.(),
       log: this.log,
@@ -144,6 +146,8 @@ export class Bonnenscanner {
   async start(): Promise<void> {
     this.stopped = false;
     this.spool.recover();
+    // wijzigingen die op een klant wachtten (bv. toen de app werd afgesloten) opnieuw proberen
+    this.sync.verwerkWachtrij();
     await this.refresh();
     // intussen gestopt (bv. meteen een andere administratie geopend): niets meer aanzetten
     if (this.stopped) return;

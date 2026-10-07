@@ -69,6 +69,8 @@ export type ErrorCode =
   | 'opslaan-mislukt'
   | 'veld-ongeldig'
   | 'klant-onbekend'
+  | 'project-onbekend'
+  | 'wachtrij-vol'
   | 'onbekend';
 
 export interface HelloMessage {

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { migrations } from './migrations';
 import { relativizeAttachmentPaths } from './attachment-paths';
 import { herstelRelatieUuids } from '../relations/herstel';
+import { herstelJobUuids } from '../jobs/herstel';
 
 export type Db = Database.Database;
 
@@ -49,6 +50,7 @@ export function openDatabase(filename: string, log: (message: string) => void = 
     migrate(db);
     relativizeAttachments(db, log);
     herstelRelatieUuids(db, log);
+    herstelJobUuids(db, log);
     return db;
   } catch (e) {
     db.close();

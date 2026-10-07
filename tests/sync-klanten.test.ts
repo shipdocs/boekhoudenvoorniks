@@ -141,6 +141,8 @@ describe('sync_ontvangen schema en de ondergrens voor velden', () => {
     const db = new Database(':memory:');
     migrate(db);
     db.prepare(`INSERT INTO sync_ontvangen (apparaat_id, entiteit, uuid, revisie, tijd, ontvangen_op, uitkomst) VALUES ('a', 'klant', 'u', 1, 1, 2, 'toegepast')`).run();
+    // latere migraties (klussen met sync-administratie en de wachtrij) horen bij deze oudere toestand niet aanwezig te zijn
+    db.exec('DROP TABLE sync_wachtrij; DROP TABLE job_changelog; DROP TABLE job_field_rev; DROP INDEX idx_jobs_uuid; DROP INDEX idx_jobs_sync_seq; ALTER TABLE jobs DROP COLUMN uuid; ALTER TABLE jobs DROP COLUMN revisie; ALTER TABLE jobs DROP COLUMN gewijzigd_op; ALTER TABLE jobs DROP COLUMN archived; ALTER TABLE jobs DROP COLUMN sync_seq');
     db.pragma(`user_version = ${i}`);
     migrate(db);
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_ontvangen').get()).toEqual({ n: 1 });
@@ -615,12 +617,12 @@ describe('idempotent en per veld samengevoegd', () => {
     expect(n(t, `SELECT COUNT(*) AS n FROM relations WHERE name = 'Dubbel BV' AND archived = 0`)).toBe(2);
   });
 
-  it('niet-ondersteund: project, factuur, bon en foto geven 200 en laten 0 rijen in relations en sync_ontvangen achter', async () => {
+  it('niet-ondersteund: factuur, bon en foto geven 200 en laten 0 rijen in relations en sync_ontvangen achter', async () => {
     const t = start();
     const p = await koppel(t);
     const voor = telling(t);
     const seq = teller(t);
-    for (const entiteit of ['project', 'factuur', 'bon', 'foto']) {
+    for (const entiteit of ['factuur', 'bon', 'foto']) {
       const r = await p.wijziging({ entiteit, velden: { naam: 'Iets', titel: 'x' } });
       expect(r, entiteit).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'wijziging', entiteit, revisie: 1, uitkomst: 'niet-ondersteund' } });
     }
@@ -700,7 +702,7 @@ describe('5 minuten vooruit en het wijzigingsnummer', () => {
     expect((await p.wijziging({ uuid, revisie: 3, velden: { email: 'kapot' } })).status).toBe(400);
     expect((await p.wijziging({ uuid: randomUUID(), velden: { plaats: 'x' } })).status).toBe(409);
     expect((await p.wijziging({ uuid, revisie: 4, tijd: nu + 6 * MINUUT })).status).toBe(400);
-    expect((await p.wijziging({ entiteit: 'project' })).json).toMatchObject({ uitkomst: 'niet-ondersteund' });
+    expect((await p.wijziging({ entiteit: 'factuur' })).json).toMatchObject({ uitkomst: 'niet-ondersteund' });
     expect(teller(t)).toBe(seq);
     expect(klantRij(t, uuid)!.sync_seq).toBe(klantSeq);
   });
