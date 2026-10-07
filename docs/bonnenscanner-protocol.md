@@ -519,8 +519,10 @@ foto's. Het verzoek blijft binnen 16 KiB.
 Het antwoord is een pagina uit één stroom: **eerst alle klanten, dan alle projecten**, samen hoogstens
 **100 items**. Binnen elke soort ligt de volgorde vast op (`seq`, `uuid`); er wordt nooit op bewerktijd of
 met een positie-teller (OFFSET) gepagineerd, dus elk item komt precies één keer langs. Een pagina wordt
-nooit afgekapt of dynamisch verkleind; met 100 items blijft het antwoord versleuteld onder 1 MiB bij velden
-tot hun maximumlengte (notities van 4000 tweebyte-tekens zijn gemeten).
+nooit afgekapt of dynamisch verkleind. Gemeten: 100 klanten met notities van 4000 tweebyte-tekens zijn
+versleuteld ruim onder 1 MiB. Een pagina waarvan alle vrije tekstvelden tegelijk hun maximum hebben, met
+tweebyte-tekens, is ongeveer 1,07 MiB en met driebyte-tekens in de notities ongeveer 1,5 MiB; een telefoon
+moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 
 ```text
 {"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"volgende":null}
