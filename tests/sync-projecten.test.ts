@@ -1389,7 +1389,8 @@ describe('projecten-herstel', () => {
 
   it('een klus uit een geaccepteerde offerte blijft bij zijn klant: een klantwisseling via de telefoon is klus-gekoppeld en de factuur gaat naar de offerteklant', () => {
     const a = admin();
-    const { j } = klusMetOfferte(a);
+    const { j: klus } = klusMetOfferte(a);
+    const j = { ...klus, uuid: klus.uuid! };
     const andere = a.s.relations.create({ name: 'Klant B' });
     const voor = job(a.db, j.uuid)!;
     const r = a.sync.verwerk('dev-1', 'M1', wijziging('project', { uuid: j.uuid, revisie: 1, tijd: Date.now() + DAG, velden: { klant: uuidVan(a, andere.id), notities: 'nieuw' } }));
