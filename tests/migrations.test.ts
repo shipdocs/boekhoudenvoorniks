@@ -94,7 +94,9 @@ describe('migratie: bewijs als echte koppeling (#179)', () => {
     const gammaInvoice = { documentType: f('purchase_invoice'), supplier: f('Gamma'), supplierVatNumber: null, supplierIban: null, invoiceNumber: f('G-2026-7'), invoiceDate: f('2026-07-10'), dueDate: null, currency: f('EUR'), subtotal: null, vat: f([]), total: f(24200), lineDescriptions: [], reverseCharge: false, rawText: '' };
     // een aankoop uit een bon, met een kopie; de betaling van Gamma hoort bij die aankoop
     const geboekt = doc('gamma.jpg', 'verwerkt', null, { mime: 'image/jpeg', source: 'ocr:test' });
-    const purchase = s.purchases.create({ relationId: s.relations.findOrCreateSupplier('Gamma').id, supplierReference: 'G-2026-7', invoiceDate: '2026-07-10', description: 'Materiaal — Gamma', attachmentPath: '/tmp/gamma.jpg', documentId: geboekt, lines: [{ account: 'WKprInkMat', netAmount: 20000, vatCode: 'hoog' }] });
+    // de leverancier rechtstreeks in de oude toestand van relations: de service schrijft al de kolommen van een latere migratie
+    const gammaId = Number(db.prepare(`INSERT INTO relations (type, name) VALUES ('leverancier', 'Gamma')`).run().lastInsertRowid);
+    const purchase = s.purchases.create({ relationId: gammaId, supplierReference: 'G-2026-7', invoiceDate: '2026-07-10', description: 'Materiaal — Gamma', attachmentPath: '/tmp/gamma.jpg', documentId: geboekt, lines: [{ account: 'WKprInkMat', netAmount: 20000, vatCode: 'hoog' }] });
     db.prepare('UPDATE documents SET purchase_invoice_id = ? WHERE id = ?').run(purchase.id, geboekt);
     s.bank.matchPurchase(gamma!.id, purchase.id);
     const ids = {

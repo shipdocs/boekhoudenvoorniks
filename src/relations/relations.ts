@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import type { Db } from '../db/database';
+import { volgendeSyncSeq } from '../sync/teller';
 import { isValidEmail, isValidForeignRegistration, isValidIban, isValidKvk, isValidVatNumber, normalizeIban, normalizeVatNumber, ValidationError } from '../shared/validation';
 import { countryCode } from '../shared/vat';
 
@@ -24,14 +26,59 @@ export interface Relation {
   paid_with: 'kas' | 'prive' | null;
   archived: number;
   created_at: string;
+  /** sync-sleutel naast de interne id: willekeurige versie-4-uuid (NULL tot het herstel bij het openen) */
+  uuid: string | null;
+  /** pc-rij-revisie: begint op 1 en gaat een omhoog per echte wijziging (informatief) */
+  revisie: number;
+  /** bewerktijd van de laatste echte wijziging in milliseconden (informatief, nooit voor delta of sortering) */
+  gewijzigd_op: number;
+  /** wijzigingsnummer uit de globale teller; de enige basis voor delta-sync (0: nog niet genummerd) */
+  sync_seq: number;
 }
 
-export type RelationInput = Partial<Omit<Relation, 'id' | 'archived' | 'created_at' | 'paid_with'>> & { name: string; type?: RelationType };
+export type RelationInput = Partial<Omit<Relation, 'id' | 'archived' | 'created_at' | 'paid_with' | 'uuid' | 'revisie' | 'gewijzigd_op' | 'sync_seq'>> & { name: string; type?: RelationType };
 
 const FIELDS = ['type', 'name', 'contact_name', 'email', 'phone', 'address', 'postcode', 'city', 'country', 'vat_number', 'kvk_number', 'iban', 'payment_term_days', 'notes'] as const;
 
+/**
+ * De ene vaste mapping van kolomnaam naar veldnaam in de sync (relation_field_rev, relation_changelog):
+ * de FIELDS-kolommen houden hun eigen naam, archived heet 'gearchiveerd'. De mapping naar de namen in
+ * het telefoonprotocol is niet hier maar bij het schrijfpad voor telefoonwijzigingen.
+ */
+export const RELATIE_VELD_MAPPING = {
+  type: 'type',
+  name: 'name',
+  contact_name: 'contact_name',
+  email: 'email',
+  phone: 'phone',
+  address: 'address',
+  postcode: 'postcode',
+  city: 'city',
+  country: 'country',
+  vat_number: 'vat_number',
+  kvk_number: 'kvk_number',
+  iban: 'iban',
+  payment_term_days: 'payment_term_days',
+  notes: 'notes',
+  archived: 'gearchiveerd',
+} as const satisfies Record<(typeof FIELDS)[number] | 'archived', string>;
+
+/** Bron van een wijziging die op de pc zelf is gedaan (een telefoon heeft een apparaatcode, zoals M1). */
+const BRON_PC = 'pc';
+
+/**
+ * Administratie voor sync, bijgehouden voor elke lokale wijziging in dezelfde transactie als de
+ * schrijfactie zelf: uuid, revisie (een per echte wijziging), gewijzigd_op, sync_seq uit de globale
+ * teller, de tijd per veld (relation_field_rev) en een logregel per gewijzigd veld (relation_changelog).
+ * Regel voor velden zonder rij in relation_field_rev (bestaande klanten van vóór de migratie): tijd =
+ * created_at van de klant in milliseconden en bron 'pc'; dus niet gewijzigd_op en niet 0.
+ * Een schrijfactie zonder echte verandering schrijft niets, ook niet in de administratie.
+ */
 export class RelationsService {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly klok: () => number = Date.now,
+  ) {}
 
   list(filter: { type?: 'klant' | 'leverancier'; search?: string; includeArchived?: boolean } = {}): Relation[] {
     const where: string[] = [];
@@ -72,10 +119,19 @@ export class RelationsService {
   create(input: RelationInput): Relation {
     const clean = this.clean({ type: 'klant', country: 'NL', ...input });
     const cols = FIELDS.filter((f) => clean[f] !== undefined);
-    const result = this.db
-      .prepare(`INSERT INTO relations (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
-      .run(...cols.map((c) => clean[c] ?? null));
-    return this.get(Number(result.lastInsertRowid));
+    const id = this.db.transaction(() => {
+      const tijd = this.klok();
+      const result = this.db
+        .prepare(`INSERT INTO relations (${cols.join(', ')}, uuid, revisie, gewijzigd_op, sync_seq) VALUES (${cols.map(() => '?').join(', ')}, ?, 1, ?, ?)`)
+        .run(...cols.map((c) => clean[c] ?? null), randomUUID(), tijd, volgendeSyncSeq(this.db));
+      const nieuwId = Number(result.lastInsertRowid);
+      for (const veld of cols) {
+        if (clean[veld] == null) continue;
+        this.schrijfVeld(nieuwId, 1, RELATIE_VELD_MAPPING[veld], null, clean[veld], tijd);
+      }
+      return nieuwId;
+    })();
+    return this.get(id);
   }
 
   /** "Deze betaal ik altijd privé/contant": nieuwe rekeningen van deze leverancier staan meteen op betaald. */
@@ -88,12 +144,45 @@ export class RelationsService {
   update(id: number, input: Partial<RelationInput>): Relation {
     const existing = this.get(id);
     const clean = this.clean({ ...existing, ...input } as RelationInput);
-    this.db.prepare(`UPDATE relations SET ${FIELDS.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`).run(...FIELDS.map((f) => clean[f] ?? null), id);
+    const gewijzigd = FIELDS.filter((f) => (existing[f] ?? null) !== (clean[f] ?? null));
+    if (gewijzigd.length === 0) return existing;
+    this.db.transaction(() => {
+      const tijd = this.klok();
+      const revisie = existing.revisie + 1;
+      this.db
+        .prepare(`UPDATE relations SET ${FIELDS.map((f) => `${f} = ?`).join(', ')}, revisie = ?, gewijzigd_op = ?, sync_seq = ? WHERE id = ?`)
+        .run(...FIELDS.map((f) => clean[f] ?? null), revisie, tijd, volgendeSyncSeq(this.db), id);
+      for (const veld of gewijzigd) this.schrijfVeld(id, revisie, RELATIE_VELD_MAPPING[veld], existing[veld], clean[veld], tijd);
+    })();
     return this.get(id);
   }
 
   archive(id: number): void {
-    this.db.prepare('UPDATE relations SET archived = 1 WHERE id = ?').run(id);
+    const existing = this.db.prepare('SELECT * FROM relations WHERE id = ?').get(id) as Relation | undefined;
+    // een onbekend id of een al gearchiveerde klant doet stilletjes niets
+    if (!existing || existing.archived === 1) return;
+    this.db.transaction(() => {
+      const tijd = this.klok();
+      const revisie = existing.revisie + 1;
+      this.db
+        .prepare('UPDATE relations SET archived = 1, revisie = ?, gewijzigd_op = ?, sync_seq = ? WHERE id = ?')
+        .run(revisie, tijd, volgendeSyncSeq(this.db), id);
+      this.schrijfVeld(id, revisie, RELATIE_VELD_MAPPING.archived, existing.archived, 1, tijd);
+    })();
+  }
+
+  /** De tijd per veld (een rij per klant en veld) en een logregel; oud en nieuw als tekst, null blijft NULL. */
+  private schrijfVeld(relationId: number, revisie: number, veld: string, oud: unknown, nieuw: unknown, tijd: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO relation_field_rev (relation_id, veld, tijd, bron) VALUES (?, ?, ?, ?)
+         ON CONFLICT(relation_id, veld) DO UPDATE SET tijd = excluded.tijd, bron = excluded.bron`,
+      )
+      .run(relationId, veld, tijd, BRON_PC);
+    const tekst = (v: unknown) => (v == null ? null : String(v));
+    this.db
+      .prepare('INSERT INTO relation_changelog (relation_id, revisie, veld, oud, nieuw, tijd, bron) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(relationId, revisie, veld, tekst(oud), tekst(nieuw), tijd, BRON_PC);
   }
 
   private clean(input: RelationInput): Record<(typeof FIELDS)[number], unknown> {
