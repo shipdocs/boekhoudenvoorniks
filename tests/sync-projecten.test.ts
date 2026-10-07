@@ -1371,3 +1371,158 @@ describe('projecten-wachtrij', () => {
   });
 });
 
+// ---------------------------------------------------------------------------------------------------
+// Herstel na review (PR 347): klus met offerte, leverancier als klant, wachtrij opnieuw proberen,
+// kiezen van de aanmaakrij en de eerst opgeslagen inhoud van een wachtrijsleutel.
+// ---------------------------------------------------------------------------------------------------
+
+describe('projecten-herstel', () => {
+  const uuidVan = (a: Admin, id: number) => (a.db.prepare('SELECT uuid FROM relations WHERE id = ?').get(id) as { uuid: string }).uuid;
+  const regel = [{ description: 'Badkamer', quantity: 1, unitPrice: 10000, vatCode: 'hoog' as const }];
+
+  /** Een klus uit een geaccepteerde offerte van de standaardklant. */
+  function klusMetOfferte(a: Admin) {
+    const q = a.s.quotes.create({ relationId: a.klant.id, reference: 'Badkamer', lines: regel });
+    const j = a.s.jobs.acceptQuote(q.id);
+    return { q, j };
+  }
+
+  it('een klus uit een geaccepteerde offerte blijft bij zijn klant: een klantwisseling via de telefoon is klus-gekoppeld en de factuur gaat naar de offerteklant', () => {
+    const a = admin();
+    const { j } = klusMetOfferte(a);
+    const andere = a.s.relations.create({ name: 'Klant B' });
+    const voor = job(a.db, j.uuid)!;
+    const r = a.sync.verwerk('dev-1', 'M1', wijziging('project', { uuid: j.uuid, revisie: 1, tijd: Date.now() + DAG, velden: { klant: uuidVan(a, andere.id), notities: 'nieuw' } }));
+    expect(r).toMatchObject({ status: 200, uitkomst: 'afgewezen', fout: 'klus-gekoppeld' });
+    expect(job(a.db, j.uuid)).toEqual(voor);
+    expect(a.s.jobs.makeInvoice(j.id).relation_id).toBe(a.klant.id);
+  });
+
+  it('de klant van een offerte met een klus wijzigen op de pc kan niet, en makeInvoice weigert een klus en offerte met verschillende klanten', () => {
+    const a = admin();
+    const { q, j } = klusMetOfferte(a);
+    const andere = a.s.relations.create({ name: 'Klant B' });
+    a.s.quotes.setStatus(q.id, 'verzonden');
+    expect(() => a.s.quotes.update(q.id, { relationId: andere.id })).toThrow(/klus/);
+    expect(a.s.quotes.get(q.id).relation_id).toBe(a.klant.id);
+    // een bestaande afwijkende toestand levert nooit een factuur voor de verkeerde klant op
+    a.db.prepare('UPDATE jobs SET relation_id = ? WHERE id = ?').run(andere.id, j.id);
+    a.s.quotes.setStatus(q.id, 'geaccepteerd');
+    expect(() => a.s.jobs.makeInvoice(j.id)).toThrow(/verschillen/);
+    expect(n(a.db, 'SELECT COUNT(*) AS n FROM invoices')).toBe(0);
+  });
+
+  describe('een leverancier is geen klant', () => {
+    const leverancier = (a: Admin) => {
+      const l = a.s.relations.create({ name: 'Bouwmarkt', type: 'leverancier' });
+      return { l, uuid: uuidVan(a, l.id) };
+    };
+
+    it('een nieuw project voor een leverancier is afgewezen geen-klant, met een registerrij en zonder klus', () => {
+      const a = admin();
+      const { uuid: lev } = leverancier(a);
+      const w = projectWijziging(a, {}, { klant: lev });
+      expect(a.sync.verwerk('dev-1', 'M1', w)).toEqual({ status: 200, uitkomst: 'afgewezen', fout: 'geen-klant' });
+      expect(job(a.db, w.uuid)).toBeUndefined();
+      expect(register(a.db, w.uuid)).toEqual([{ apparaat_id: 'dev-1', revisie: 1, uitkomst: 'afgewezen', fout: 'geen-klant' }]);
+      expect(a.sync.verwerk('dev-1', 'M1', w)).toEqual({ status: 200, uitkomst: 'afgewezen', fout: 'geen-klant' });
+    });
+
+    it('ook via een alias van de leverancier, en een klantwisseling naar een leverancier schrijft niets', () => {
+      const a = admin();
+      const { l } = leverancier(a);
+      const alias = randomUUID();
+      a.db.prepare('INSERT INTO relation_aliases (alias_uuid, relation_id, aangemaakt_op) VALUES (?, ?, ?)').run(alias, l.id, VAST);
+      expect(a.sync.verwerk('dev-1', 'M1', projectWijziging(a, {}, { klant: alias }))).toEqual({ status: 200, uitkomst: 'afgewezen', fout: 'geen-klant' });
+      const uuid = nieuwProjectUuid(a);
+      const voor = job(a.db, uuid)!;
+      expect(a.sync.verwerk('dev-1', 'M1', wijziging('project', { uuid, revisie: 2, tijd: VAST, velden: { klant: alias, notities: 'x' } }))).toEqual({ status: 200, uitkomst: 'afgewezen', fout: 'geen-klant' });
+      expect(job(a.db, uuid)).toEqual(voor);
+    });
+
+    it('een beide-relatie is wel een klant', () => {
+      const a = admin();
+      const b = a.s.relations.create({ name: 'Beide BV', type: 'beide' });
+      const w = projectWijziging(a, {}, { klant: uuidVan(a, b.id) });
+      expect(a.sync.verwerk('dev-1', 'M1', w)).toEqual({ status: 200, uitkomst: 'toegepast' });
+      expect(job(a.db, w.uuid)).toMatchObject({ relation_id: b.id });
+    });
+
+    it('een wachtend project waarvan de klant later een leverancier blijkt wordt afgewezen geen-klant en de rij wordt gemarkeerd, niet verwijderd', () => {
+      const a = admin();
+      const { l, uuid: lev } = leverancier(a);
+      // de uuid is bij het wachten nog onbekend: de leverancier krijgt hem pas daarna als alias
+      const alias = randomUUID();
+      const w = projectWijziging(a, {}, { klant: alias });
+      expect(a.sync.verwerk('dev-1', 'M1', w)).toEqual({ status: 200, uitkomst: 'wacht' });
+      const w2 = wijziging('project', { uuid: w.uuid, revisie: 2, tijd: VAST, velden: { notities: 'later' } });
+      expect(a.sync.verwerk('dev-1', 'M1', w2)).toEqual({ status: 200, uitkomst: 'wacht' });
+      a.db.prepare('INSERT INTO relation_aliases (alias_uuid, relation_id, aangemaakt_op) VALUES (?, ?, ?)').run(alias, l.id, VAST);
+      a.sync.verwerkWachtrij();
+      expect(lev).not.toBe(alias);
+      expect(job(a.db, w.uuid)).toBeUndefined();
+      expect(wachtrij(a.db, w.uuid).map((r) => [r.revisie, r.verwerkt_uitkomst, r.verwerkt_reden])).toEqual([[1, 'afgewezen', 'geen-klant'], [2, 'afgewezen', 'geen-klant']]);
+      expect(register(a.db, w.uuid).map((r) => [r.revisie, r.uitkomst, r.fout])).toEqual([[1, 'afgewezen', 'geen-klant'], [2, 'afgewezen', 'geen-klant']]);
+    });
+  });
+
+  const nieuwProjectUuid = (a: Admin) => {
+    const w = projectWijziging(a, { tijd: VAST - DAG });
+    a.sync.verwerk('dev-1', 'M1', w);
+    return w.uuid;
+  };
+
+  it('na een tijdelijke opslagfout verwerkt een herhaling van dezelfde klantwijziging (overgeslagen) de wachtrij alsnog', () => {
+    const a = admin();
+    const klant = randomUUID();
+    const w = projectWijziging(a, {}, { klant });
+    expect(a.sync.verwerk('dev-1', 'M1', w)).toEqual({ status: 200, uitkomst: 'wacht' });
+    a.db.exec(`CREATE TRIGGER tijdelijk BEFORE INSERT ON jobs BEGIN SELECT RAISE(ABORT, 'schijf vol'); END`);
+    const k = klantWijziging(klant);
+    expect(a.sync.verwerk('dev-1', 'M1', k)).toEqual({ status: 200, uitkomst: 'toegepast' });
+    expect(job(a.db, w.uuid)).toBeUndefined();
+    expect(wachtrij(a.db, w.uuid)[0]).toMatchObject({ verwerkt_op: null });
+    a.db.exec('DROP TRIGGER tijdelijk');
+    expect(a.sync.verwerk('dev-1', 'M1', k)).toEqual({ status: 200, uitkomst: 'overgeslagen' });
+    expect(job(a.db, w.uuid)).toMatchObject({ title: 'Badkamer' });
+    expect(wachtrij(a.db, w.uuid)[0]).toMatchObject({ verwerkt_uitkomst: 'toegepast' });
+  });
+
+  it('een oudere rij die op een onbekende klant wacht houdt een nieuwere revisie met een bekende klant niet tegen', () => {
+    const a = admin();
+    const uuid = randomUUID();
+    const klantA = randomUUID();
+    const klantB = randomUUID();
+    expect(a.sync.verwerk('dev-1', 'M1', wijziging('project', { uuid, revisie: 1, tijd: VAST - 2 * MINUUT, velden: { titel: 'Oud', klant: klantA, adres: 'Dorpsstraat 5' } }))).toEqual({ status: 200, uitkomst: 'wacht' });
+    expect(a.sync.verwerk('dev-1', 'M1', wijziging('project', { uuid, revisie: 2, tijd: VAST - MINUUT, velden: { titel: 'Nieuw', klant: klantB } }))).toEqual({ status: 200, uitkomst: 'wacht' });
+    expect(a.sync.verwerk('dev-1', 'M1', wijziging('project', { uuid, revisie: 3, tijd: VAST, velden: { notities: 'erbij' } }))).toEqual({ status: 200, uitkomst: 'wacht' });
+    a.sync.verwerk('dev-1', 'M1', klantWijziging(klantB, 'Klant B'));
+    const b = a.db.prepare('SELECT id FROM relations WHERE uuid = ?').get(klantB) as { id: number };
+    expect(job(a.db, uuid)).toMatchObject({ title: 'Nieuw', relation_id: b.id, notes: 'erbij' });
+    expect(wachtrij(a.db, uuid).map((r) => [r.revisie, r.verwerkt_uitkomst])).toEqual([[1, null], [2, 'toegepast'], [3, 'toegepast']]);
+    // komt klant A later, dan wordt de oudere rij per veld samengevoegd: het adres is nog leeg en komt erbij, titel en klant zijn nieuwer
+    a.sync.verwerk('dev-1', 'M1', klantWijziging(klantA, 'Klant A'));
+    expect(job(a.db, uuid)).toMatchObject({ title: 'Nieuw', relation_id: b.id, address: 'Dorpsstraat 5', notes: 'erbij' });
+    expect(wachtrij(a.db, uuid).map((r) => r.verwerkt_uitkomst)).toEqual(['toegepast', 'toegepast', 'toegepast']);
+  });
+
+  it('dezelfde sleutel met andere inhoud en een bekende klant omzeilt de wachtrij niet: de eerst opgeslagen inhoud blijft leidend', () => {
+    const a = admin();
+    const klant = randomUUID();
+    const uuid = randomUUID();
+    const eerste = wijziging('project', { uuid, revisie: 1, tijd: VAST, velden: { titel: 'Eerste', klant, notities: 'eerst' } });
+    expect(a.sync.verwerk('dev-1', 'M1', eerste)).toEqual({ status: 200, uitkomst: 'wacht' });
+    const herhaling = wijziging('project', { uuid, revisie: 1, tijd: VAST + MINUUT, velden: { titel: 'Tweede', klant: a.klantUuid, notities: 'anders' } });
+    const tellerVoor = teller(a.db);
+    expect(a.sync.verwerk('dev-1', 'M1', herhaling)).toEqual({ status: 200, uitkomst: 'wacht' });
+    expect(job(a.db, uuid)).toBeUndefined();
+    expect(teller(a.db)).toBe(tellerVoor);
+    expect(wachtrij(a.db, uuid)).toHaveLength(1);
+    expect(JSON.parse(wachtrij(a.db, uuid)[0]!.wijziging).velden.titel).toBe('Eerste');
+    // na de klant staat er de eerste inhoud, en een nieuwe herhaling verandert niets meer
+    a.sync.verwerk('dev-1', 'M1', klantWijziging(klant));
+    expect(job(a.db, uuid)).toMatchObject({ title: 'Eerste', notes: 'eerst' });
+    expect(a.sync.verwerk('dev-1', 'M1', herhaling)).toEqual({ status: 200, uitkomst: 'overgeslagen' });
+    expect(job(a.db, uuid)).toMatchObject({ title: 'Eerste', notes: 'eerst' });
+  });
+});

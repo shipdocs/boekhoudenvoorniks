@@ -83,8 +83,10 @@ export class SyncOntvangst {
       return { status: 500, fout: 'opslaan-mislukt' };
     }
     // een toegepaste klant of een toegepast project kan wachtende wijzigingen vrijmaken (een cascade);
-    // dat gebeurt na de transactie van deze wijziging, zodat een fout daarin deze wijziging niet terugdraait
-    if (uitslag.status === 200 && uitslag.uitkomst === 'toegepast') this.verwerkWachtrij();
+    // dat gebeurt na de transactie van deze wijziging, zodat een fout daarin deze wijziging niet terugdraait.
+    // Een klantwijziging die als overgeslagen wordt beantwoord (een herhaling) probeert de wachtrij ook opnieuw:
+    // na een tijdelijke opslagfout kan de klant er al zijn terwijl het wachtende project nog ontbreekt.
+    if (uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant'))) this.verwerkWachtrij();
     return uitslag;
   }
 

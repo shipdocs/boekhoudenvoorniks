@@ -163,6 +163,7 @@ export class JobService {
         const mark = this.db.prepare('UPDATE job_work_items SET invoice_id = ? WHERE id = ?');
         for (const w of open) mark.run(invoice.id, w.id);
       } else if (!lines && job.quote_id && this.quotes.get(job.quote_id).status !== 'gefactureerd') {
+        if (this.quotes.get(job.quote_id).relation_id !== job.relation_id) throw new ValidationError('De klant van de klus en van de offerte verschillen; maak de factuur met eigen regels.');
         invoice = this.quotes.convertToInvoice(job.quote_id);
         if (!invoice.reference) this.invoices.updateDraft(invoice.id, { reference: job.title });
       } else {

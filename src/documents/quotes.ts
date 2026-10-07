@@ -94,6 +94,8 @@ export class QuoteService {
     if (!['concept', 'verzonden'].includes(q.status)) throw new ValidationError('Deze offerte kan niet meer aangepast worden');
     const relationId = input.relationId ?? q.relation_id;
     this.relations.get(relationId);
+    // een klus die uit deze offerte komt houdt dezelfde klant: anders maakt de klus een factuur voor een andere klant
+    if (relationId !== q.relation_id && this.db.prepare('SELECT 1 FROM jobs WHERE quote_id = ?').get(id)) throw new ValidationError('De klant van deze offerte kan niet meer wijzigen: er hoort al een klus bij.');
     const date = input.quoteDate ?? q.quote_date;
     const validUntil = input.validUntil ?? q.valid_until;
     assertIsoDate(date);

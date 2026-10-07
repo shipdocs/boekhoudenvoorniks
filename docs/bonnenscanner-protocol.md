@@ -522,7 +522,7 @@ stap.
 | 200 | `toegepast` | ja | minstens één veld is toegepast (of de klant is nieuw) | wijziging opruimen |
 | 200 | `overgeslagen` | ja | alle velden waren ouder, of deze sleutel had de pc al | wijziging opruimen |
 | 200 | `afgewezen`, `fout: "geen-klant"` | ja | inhoudelijk geweigerd: de `uuid` hoort bij een leverancier | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
-| 200 | `afgewezen`, `fout: "klus-gekoppeld"`, met `melding` | ja | inhoudelijk geweigerd: de klant van een project met facturen, aankopen, ritten of werkbonregels kan niet wisselen; er is niets geschreven in het project | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
+| 200 | `afgewezen`, `fout: "klus-gekoppeld"`, met `melding` | ja | inhoudelijk geweigerd: de klant van een project met een offerte, facturen, aankopen, ritten of werkbonregels kan niet wisselen; er is niets geschreven in het project | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `wacht` | **nee** (wel een rij in `sync_wachtrij`) | een project dat naar een nog onbekende klant verwijst; de pc bewaart de hele wijziging en past haar toe zodra die klant is afgeleverd | wijziging opruimen: de pc heeft haar; een klant die nog niet is afgeleverd moet de telefoon alsnog sturen |
 | 200 | `niet-ondersteund` | **nee** | `factuur`, `bon` en `foto` worden nog niet opgeslagen; er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
 | 400 | `veld-ongeldig`, met `veld` en `melding` | nee | een veld buiten het schema, een ongeldige waarde, een te lange tekst, een lege naam of titel | niet opnieuw; fout in de app |
@@ -637,9 +637,15 @@ project mag elk veld los sturen. Twee regels die de pc zelf ook volgt:
 - Een `status` van de telefoon wordt, ongeacht de tijd, overgeslagen als het project de status
   `gefactureerd` heeft of een factuur heeft. Dat veld krijgt dan alleen een regel in het logboek
   (`job_changelog`); de overige velden van dezelfde wijziging worden gewoon verwerkt.
-- De `klant` van een bestaand project kan alleen wisselen zolang er niets aan hangt: geen factuur,
-  inkoopfactuur, rit of werkbonregel. Anders is de wijziging `afgewezen` met `fout: "klus-gekoppeld"` en
-  een `melding` in het Nederlands, met een registerrij en zonder iets te schrijven in het project.
+- De `klant` van een bestaand project kan alleen wisselen zolang er niets aan hangt: geen offerte (een
+  klus uit een geaccepteerde offerte houdt de klant van die offerte, anders maakt de klus een factuur voor
+  een andere klant), factuur, inkoopfactuur, rit of werkbonregel. Anders is de wijziging `afgewezen` met
+  `fout: "klus-gekoppeld"` en een `melding` in het Nederlands, met een registerrij en zonder iets te
+  schrijven in het project. Op de pc kan de klant van een offerte met een klus ook niet meer wijzigen.
+- De `klant` moet een klant zijn (type klant of beide). Een `uuid` van een leverancier, ook via een alias, is
+  `afgewezen` met `fout: "geen-klant"`, zoals bij klantwijzigingen. Dat geldt ook voor een wachtend project
+  dat bij het verwerken blijkt naar een leverancier te verwijzen: de rij wordt gemarkeerd (`afgewezen`,
+  reden `geen-klant`) en krijgt een registerrij, en niet verwijderd.
 
 **De wachtrij `sync_wachtrij`.** Verwijst een project naar een klant die de pc nog niet kent (ook niet als
 alias), dan antwoordt de pc `wacht`: de hele wijziging wordt als JSON in een rij van `sync_wachtrij`
@@ -647,9 +653,17 @@ bewaard (met `bron`, de tijd, en waar ze op wacht), zonder registerrij en zonder
 onverwerkte rij voor dezelfde `uuid` van welk apparaat dan ook en bestaat het project nog niet, dan wacht
 ook een latere revisie, ook zonder titel of klant. Zonder wachtende rij en zonder project geeft een
 revisie zonder titel of klant `project-onbekend` (409). Dezelfde wijziging nog eens sturen blijft één rij.
+**De eerst opgeslagen inhoud is leidend:** staat de sleutel (apparaat, entiteit, `uuid`, `revisie`) al in de
+wachtrij, verwerkt of niet, dan wordt een herhaling met andere inhoud (ook met een inmiddels bekende
+klant) niet toegepast; ze krijgt `wacht` zolang de rij onverwerkt is, en daarna het antwoord van de eerste
+keer (`overgeslagen`, of dezelfde afwijzing).
 Zodra de klant is toegepast (en na elk toegepast project, tot er geen voortgang meer is, en bij het
-starten van de receiver) verwerkt de pc de rijen, per project in één transactie: eerst de rij met titel en
-klant die het project maakt, dan de rest in revisievolgorde, per veld op (tijd, bron). Elke rij wordt dan
+starten van de receiver) verwerkt de pc de rijen, per project in één transactie. Ook een klantwijziging die
+als `overgeslagen` wordt beantwoord (een herhaling) probeert de wachtrij opnieuw, zodat een wachtend project
+na een tijdelijke opslagfout alsnog wordt gemaakt. Als aanmaakrij kiest de pc een rij met titel en een
+bekende, geldige klant (de laagste revisie eerst); een oudere rij die nog op een onbekende klant wacht houdt
+een nieuwere niet tegen en blijft liggen tot die klant er is. Daarna gaat de rest in revisievolgorde, per
+veld op (tijd, bron). Elke rij wordt dan
 opnieuw gecontroleerd; een rij die niet meer klopt wordt `afgewezen` gemarkeerd, met een registerrij
 `afgewezen`. Een rij wordt **nooit verwijderd**: afhandelen zet `verwerkt_op`, `verwerkt_uitkomst`
 (`toegepast`, `overgeslagen` of `afgewezen`) en `verwerkt_reden`, en de registerrij komt in dezelfde

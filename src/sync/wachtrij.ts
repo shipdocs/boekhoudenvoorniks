@@ -79,6 +79,11 @@ export class SyncWachtrij {
     return result.changes === 1 ? 'toegevoegd' : 'bestond';
   }
 
+  /** De rij met deze sleutel (apparaat, entiteit, uuid, revisie), verwerkt of niet. */
+  rij(deviceId: string, entiteit: string, uuid: string, revisie: number): WachtrijRij | undefined {
+    return this.db.prepare('SELECT * FROM sync_wachtrij WHERE apparaat_id = ? AND entiteit = ? AND uuid = ? AND revisie = ?').get(deviceId, entiteit, uuid, revisie) as WachtrijRij | undefined;
+  }
+
   /** Het aantal onverwerkte rijen van een apparaat: alleen die tellen mee voor de limiet. */
   aantalOnverwerkt(deviceId: string): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM sync_wachtrij WHERE apparaat_id = ? AND verwerkt_op IS NULL').get(deviceId) as { n: number }).n;

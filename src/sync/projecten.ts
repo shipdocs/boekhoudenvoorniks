@@ -8,7 +8,7 @@ import type { SyncResultaat } from './ontvangst';
 import type { SyncWachtrij, WachtrijBehandelaar, WachtrijRij } from './wachtrij';
 
 /** De melding bij een afwijzing die in het register staat (herhaling levert dezelfde afwijzing). */
-export const KLUS_GEKOPPELD_MELDING = 'De klant van dit project kan niet meer wijzigen: er hangen al facturen, aankopen, ritten of werkbonregels aan.';
+export const KLUS_GEKOPPELD_MELDING = 'De klant van dit project kan niet meer wijzigen: er hangen al een offerte, facturen, aankopen, ritten of werkbonregels aan.';
 
 export interface ProjectOntvangstOpties {
   now?: () => number;
@@ -82,6 +82,14 @@ export class ProjectOntvangst implements WachtrijBehandelaar {
       .get(deviceId, w.entiteit, w.uuid, w.revisie) as RegisterRij | undefined;
     if (bekend) return bekend.uitkomst === 'afgewezen' ? this.afwijzing(bekend.fout) : { status: 200, uitkomst: 'overgeslagen' };
 
+    // 1b. dezelfde sleutel staat al in de wachtrij (ook al afgehandeld): de eerst opgeslagen inhoud blijft leidend,
+    // de herhaling wordt niet toegepast en krijgt het antwoord van de eerste keer
+    const inWachtrij = this.wachtrij.rij(deviceId, w.entiteit, w.uuid, w.revisie);
+    if (inWachtrij) {
+      if (inWachtrij.verwerkt_op === null) return { status: 200, uitkomst: 'wacht' };
+      return inWachtrij.verwerkt_uitkomst === 'afgewezen' ? this.afwijzing(inWachtrij.verwerkt_reden) : { status: 200, uitkomst: 'overgeslagen' };
+    }
+
     // 2. elk veld los controleren in de kern
     const gelezen = leesProjectVelden(w.velden);
     if (!gelezen.ok) return { status: 400, fout: 'veld-ongeldig', veld: gelezen.veld, melding: gelezen.melding };
@@ -127,25 +135,41 @@ export class ProjectOntvangst implements WachtrijBehandelaar {
         voortgang = true;
       }
       const geldig = rijen.filter((r): r is typeof r & { w: Wijziging; velden: ProjectVelden } => r.fout === undefined);
+      const heeftMaakVelden = (r: { velden: ProjectVelden }) => Object.hasOwn(r.velden, 'title') && Object.hasOwn(r.velden, 'relation_id');
+      const afgehandeld = new Set<unknown>();
       let job = this.vindJob(uuid);
-      let rest = geldig;
+      let makerAfgewezen = false;
       if (!job) {
-        // eerst de rij die het project maakt: de laagste revisie met titel en klant
-        const maker = geldig.find((r) => Object.hasOwn(r.velden, 'title') && Object.hasOwn(r.velden, 'relation_id'));
-        if (!maker || !this.relations.vindOpSyncUuid(maker.velden.relation_id as string)) return voortgang;
-        const uitkomst = this.maakAan(maker.w, maker.velden, maker.rij.bron);
-        this.rondAf(maker.rij, maker.w, uitkomst);
-        voortgang = true;
-        rest = geldig.filter((r) => r !== maker);
-        job = this.vindJob(uuid);
+        // een rij met titel en een beschikbare klant maakt het project; een oudere rij die nog op een onbekende klant
+        // wacht houdt een nieuwere rij met een bekende klant niet tegen (de revisievolgorde is hier niet van belang)
+        for (const maker of geldig.filter(heeftMaakVelden)) {
+          if (this.klant(maker.velden.relation_id as string).soort === 'onbekend') continue;
+          const uitkomst = this.maakAan(maker.w, maker.velden, maker.rij.bron);
+          this.rondAf(maker.rij, maker.w, uitkomst);
+          afgehandeld.add(maker);
+          voortgang = true;
+          if (uitkomst.uitkomst === 'afgewezen') makerAfgewezen = true;
+          job = this.vindJob(uuid);
+          if (job) break;
+        }
       }
-      for (const r of rest) {
-        if (!job) break;
+      for (const r of geldig) {
+        if (afgehandeld.has(r) || !job) continue;
         // een rij die nog op een onbekende klant wacht blijft liggen; de rest gaat door
-        if (Object.hasOwn(r.velden, 'relation_id') && !this.relations.vindOpSyncUuid(r.velden.relation_id as string)) continue;
+        if (Object.hasOwn(r.velden, 'relation_id') && this.klant(r.velden.relation_id as string).soort === 'onbekend') continue;
         const uitkomst = this.pasToe(this.vindJob(uuid)!, r.w, r.velden, r.rij.bron);
         this.rondAf(r.rij, r.w, uitkomst);
+        afgehandeld.add(r);
         voortgang = true;
+      }
+      // het project is afgewezen (leverancier als klant) en er wacht niets meer dat het kan maken: de gedeeltelijke
+      // revisies erna hebben geen project om op te wachten en worden met dezelfde reden afgehandeld
+      if (!job && makerAfgewezen && !geldig.some((r) => !afgehandeld.has(r) && heeftMaakVelden(r))) {
+        for (const r of geldig) {
+          if (afgehandeld.has(r)) continue;
+          this.rondAf(r.rij, r.w, { uitkomst: 'afgewezen', fout: 'geen-klant' });
+          voortgang = true;
+        }
       }
       return voortgang;
     })();
@@ -199,17 +223,23 @@ export class ProjectOntvangst implements WachtrijBehandelaar {
       .run(deviceId, w.entiteit, w.uuid, w.revisie, w.tijd, this.now(), uitkomst, fout, route);
   }
 
-  /** De klant van de wijziging als id; een uuid die nergens bekend is (ook niet als alias) geeft undefined. */
-  private klantId(uuid: unknown): number | undefined {
-    return typeof uuid === 'string' ? this.relations.vindOpSyncUuid(uuid)?.id : undefined;
+  /**
+   * De klant van de wijziging: onbekend (ook niet als alias), een leverancier (geen klant, ook via een alias)
+   * of een klant (type klant of beide) met zijn id.
+   */
+  private klant(uuid: string): { soort: 'onbekend' } | { soort: 'geen-klant' } | { soort: 'klant'; id: number } {
+    const relatie = this.relations.vindOpSyncUuid(uuid);
+    if (!relatie) return { soort: 'onbekend' };
+    return relatie.type === 'leverancier' ? { soort: 'geen-klant' } : { soort: 'klant', id: relatie.id };
   }
 
   /** Maakt een nieuw project; de klant moet er zijn, anders wacht het. */
   private maakAan(w: Wijziging, velden: ProjectVelden, bron: string): Uitkomst {
     const klant = velden.relation_id as string;
-    const relationId = this.klantId(klant);
-    if (relationId === undefined) return { uitkomst: 'wacht', wachtOp: klant };
-    this.maakVanSync(w.uuid, { ...velden, relation_id: relationId }, w.tijd, bron);
+    const gevonden = this.klant(klant);
+    if (gevonden.soort === 'onbekend') return { uitkomst: 'wacht', wachtOp: klant };
+    if (gevonden.soort === 'geen-klant') return { uitkomst: 'afgewezen', fout: 'geen-klant' };
+    this.maakVanSync(w.uuid, { ...velden, relation_id: gevonden.id }, w.tijd, bron);
     return { uitkomst: 'toegepast' };
   }
 
@@ -232,15 +262,15 @@ export class ProjectOntvangst implements WachtrijBehandelaar {
     return id;
   }
 
-  /** Hangt er iets aan dit project dat de klant vastzet: facturen, aankopen, ritten of werkbonregels? */
+  /** Hangt er iets aan dit project dat de klant vastzet: een offerte, facturen, aankopen, ritten of werkbonregels? */
   private heeftKoppelingen(jobId: number): boolean {
     return Boolean(
       this.db
         .prepare(
-          `SELECT 1 WHERE EXISTS (SELECT 1 FROM invoices WHERE job_id = ?) OR EXISTS (SELECT 1 FROM purchase_invoices WHERE job_id = ?)
+          `SELECT 1 WHERE EXISTS (SELECT 1 FROM jobs WHERE id = ? AND quote_id IS NOT NULL) OR EXISTS (SELECT 1 FROM invoices WHERE job_id = ?) OR EXISTS (SELECT 1 FROM purchase_invoices WHERE job_id = ?)
              OR EXISTS (SELECT 1 FROM trips WHERE job_id = ?) OR EXISTS (SELECT 1 FROM job_work_items WHERE job_id = ?)`,
         )
-        .get(jobId, jobId, jobId, jobId),
+        .get(jobId, jobId, jobId, jobId, jobId),
     );
   }
 
@@ -253,17 +283,20 @@ export class ProjectOntvangst implements WachtrijBehandelaar {
    * toegepaste veldtijden. Bijzonder:
    * - een status van de telefoon wordt, ongeacht de tijd, overgeslagen als het project gefactureerd is of
    *   een factuur heeft; dat veld krijgt dan alleen een logregel;
-   * - de klant van een project met koppelingen wijzigt niet: de hele wijziging is dan afgewezen
+   * - de klant van een project met koppelingen (ook een offerte) wijzigt niet: de hele wijziging is dan afgewezen
    *   (klus-gekoppeld) en er wordt niets geschreven;
-   * - de klant in de wijziging moet bekend zijn; anders wacht de wijziging.
+   * - de klant in de wijziging moet bekend zijn; anders wacht de wijziging, en een leverancier is geen klant
+   *   (afgewezen, geen-klant, niets geschreven).
    */
   private pasToe(job: JobRij, w: Wijziging, velden: ProjectVelden, bron: string): Uitkomst {
     const tijd = w.tijd;
     const klantUuid = Object.hasOwn(velden, 'relation_id') ? (velden.relation_id as string) : undefined;
     let nieuweKlant: number | undefined;
     if (klantUuid !== undefined) {
-      nieuweKlant = this.klantId(klantUuid);
-      if (nieuweKlant === undefined) return { uitkomst: 'wacht', wachtOp: klantUuid };
+      const gevonden = this.klant(klantUuid);
+      if (gevonden.soort === 'onbekend') return { uitkomst: 'wacht', wachtOp: klantUuid };
+      if (gevonden.soort === 'geen-klant') return { uitkomst: 'afgewezen', fout: 'geen-klant' };
+      nieuweKlant = gevonden.id;
     }
     const ondergrens = veldOndergrens(job.created_at);
     const statusGeblokkeerd = Object.hasOwn(velden, 'status') && (job.status === 'gefactureerd' || Boolean(this.db.prepare('SELECT 1 FROM invoices WHERE job_id = ?').get(job.id)));
