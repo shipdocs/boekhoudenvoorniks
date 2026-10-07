@@ -9,6 +9,7 @@ import type { Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
 import { supplierKey as supplierKeyOf } from '../intake/supplier-memory';
 import { distanceMeters } from '../intake/exif';
+import { maakJobAan, wijzigJob } from './revisie';
 
 export type JobStatus = 'gepland' | 'bezig' | 'klaar' | 'gefactureerd' | 'geannuleerd';
 
@@ -34,6 +35,16 @@ export interface Job {
   invoices: { id: number; number: string | null; status: string; total: Cents }[];
   lat: number | null;
   lon: number | null;
+  /** sync-sleutel naast de interne id: willekeurige versie-4-uuid */
+  uuid: string | null;
+  /** pc-rij-revisie: begint op 1 en gaat een omhoog per echte wijziging (informatief) */
+  revisie: number;
+  /** bewerktijd van de laatste wijziging in milliseconden (informatief, nooit voor delta of sortering) */
+  gewijzigd_op: number;
+  /** 1 = gearchiveerd: de klus blijft bestaan maar staat niet meer in lijsten en voorstellen */
+  archived: number;
+  /** wijzigingsnummer uit de globale teller; de enige basis voor delta-sync */
+  sync_seq: number;
 }
 
 /** Resultaat van een klus in gewone taal (#32). Kosten komen uit de boekingen die aan de klus hangen. */
@@ -99,11 +110,7 @@ export class JobService {
   create(input: { relationId: number; title: string; address?: string | null; startDate?: IsoDate | null; notes?: string | null; quoteId?: number | null }): Job {
     this.relations.get(input.relationId);
     if (!input.title?.trim()) throw new ValidationError('Geef de klus een naam');
-    const id = Number(
-      this.db
-        .prepare('INSERT INTO jobs (relation_id, quote_id, title, address, start_date, notes) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(input.relationId, input.quoteId ?? null, input.title.trim(), input.address ?? null, input.startDate ?? null, input.notes ?? null).lastInsertRowid,
-    );
+    const id = maakJobAan(this.db, { relationId: input.relationId, quoteId: input.quoteId, title: input.title.trim(), address: input.address, startDate: input.startDate, notes: input.notes });
     return this.get(id);
   }
 
@@ -121,15 +128,22 @@ export class JobService {
 
   update(id: number, patch: Partial<{ title: string; address: string | null; startDate: IsoDate | null; endDate: IsoDate | null; notes: string | null }>): Job {
     const j = this.get(id);
-    this.db
-      .prepare('UPDATE jobs SET title = ?, address = ?, start_date = ?, end_date = ?, notes = ? WHERE id = ?')
-      .run(patch.title?.trim() || j.title, patch.address !== undefined ? patch.address : j.address, patch.startDate !== undefined ? patch.startDate : j.start_date, patch.endDate !== undefined ? patch.endDate : j.end_date, patch.notes !== undefined ? patch.notes : j.notes, id);
+    wijzigJob(this.db, id, {
+      title: patch.title?.trim() || j.title,
+      address: patch.address !== undefined ? patch.address : j.address,
+      start_date: patch.startDate !== undefined ? patch.startDate : j.start_date,
+      end_date: patch.endDate !== undefined ? patch.endDate : j.end_date,
+      notes: patch.notes !== undefined ? patch.notes : j.notes,
+    });
     return this.get(id);
   }
 
   setStatus(id: number, status: JobStatus): Job {
     if (!['gepland', 'bezig', 'klaar', 'gefactureerd', 'geannuleerd'].includes(status)) throw new ValidationError('Onbekende status');
-    this.db.prepare('UPDATE jobs SET status = ?, end_date = CASE WHEN ? = \'klaar\' AND end_date IS NULL THEN date(\'now\') ELSE end_date END WHERE id = ?').run(status, status, id);
+    const j = this.get(id);
+    // bij klaar krijgt een klus zonder einddatum vandaag (UTC-datum van SQLite, zoals voorheen)
+    const vandaag = (this.db.prepare(`SELECT date('now') AS d`).get() as { d: string }).d;
+    wijzigJob(this.db, id, { status, end_date: status === 'klaar' && j.end_date === null ? vandaag : j.end_date });
     return this.get(id);
   }
 
@@ -156,7 +170,8 @@ export class JobService {
         invoice = this.invoices.createDraft({ relationId: job.relation_id, reference: job.title, lines });
       }
       this.db.prepare('UPDATE invoices SET job_id = ? WHERE id = ?').run(id, invoice.id);
-      this.db.prepare(`UPDATE jobs SET status = 'gefactureerd', end_date = COALESCE(end_date, date('now')) WHERE id = ?`).run(id);
+      const vandaag = (this.db.prepare(`SELECT date('now') AS d`).get() as { d: string }).d;
+      wijzigJob(this.db, id, { status: 'gefactureerd', end_date: job.end_date ?? vandaag });
       return this.invoices.get(invoice.id);
     });
   }
@@ -302,7 +317,7 @@ export class JobService {
     const candidates = this.db
       .prepare(
         `SELECT j.id, j.title, j.status, j.start_date, j.end_date, j.lat, j.lon, r.name AS relation_name FROM jobs j JOIN relations r ON r.id = j.relation_id
-         WHERE j.status IN ('gepland','bezig') OR (j.status IN ('klaar','gefactureerd') AND COALESCE(j.end_date, j.start_date, date(j.created_at)) >= date(?, '-14 days'))`,
+         WHERE j.archived = 0 AND (j.status IN ('gepland','bezig') OR (j.status IN ('klaar','gefactureerd') AND COALESCE(j.end_date, j.start_date, date(j.created_at)) >= date(?, '-14 days')))`,
       )
       .all(input.date) as { id: number; title: string; status: JobStatus; start_date: string | null; end_date: string | null; lat: number | null; lon: number | null; relation_name: string }[];
     const key = input.supplier ? supplierKeyOf(input.supplier) : null;
@@ -349,9 +364,13 @@ export class JobService {
     this.db.prepare('DELETE FROM job_work_items WHERE id = ?').run(id);
   }
 
-  list(filter: { status?: JobStatus; active?: boolean } = {}): Job[] {
-    const where = filter.status ? 'WHERE status = ?' : filter.active ? `WHERE status IN ('gepland','bezig','klaar')` : '';
-    const rows = this.db.prepare(`SELECT id FROM jobs ${where} ORDER BY CASE status WHEN 'klaar' THEN 0 WHEN 'bezig' THEN 1 WHEN 'gepland' THEN 2 ELSE 3 END, id DESC`).all(...(filter.status ? [filter.status] : [])) as { id: number }[];
+  /** Gearchiveerde klussen staan er alleen in met includeArchived. */
+  list(filter: { status?: JobStatus; active?: boolean; includeArchived?: boolean } = {}): Job[] {
+    const where: string[] = [];
+    if (filter.status) where.push('status = ?');
+    else if (filter.active) where.push(`status IN ('gepland','bezig','klaar')`);
+    if (!filter.includeArchived) where.push('archived = 0');
+    const rows = this.db.prepare(`SELECT id FROM jobs ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY CASE status WHEN 'klaar' THEN 0 WHEN 'bezig' THEN 1 WHEN 'gepland' THEN 2 ELSE 3 END, id DESC`).all(...(filter.status ? [filter.status] : [])) as { id: number }[];
     return rows.map((r) => this.get(r.id));
   }
 }

@@ -141,6 +141,8 @@ describe('sync_ontvangen schema en de ondergrens voor velden', () => {
     const db = new Database(':memory:');
     migrate(db);
     db.prepare(`INSERT INTO sync_ontvangen (apparaat_id, entiteit, uuid, revisie, tijd, ontvangen_op, uitkomst) VALUES ('a', 'klant', 'u', 1, 1, 2, 'toegepast')`).run();
+    // latere migraties (klussen met sync-administratie en de wachtrij) horen bij deze oudere toestand niet aanwezig te zijn
+    db.exec('DROP TABLE sync_wachtrij; DROP TABLE job_changelog; DROP TABLE job_field_rev; DROP INDEX idx_jobs_uuid; DROP INDEX idx_jobs_sync_seq; ALTER TABLE jobs DROP COLUMN uuid; ALTER TABLE jobs DROP COLUMN revisie; ALTER TABLE jobs DROP COLUMN gewijzigd_op; ALTER TABLE jobs DROP COLUMN archived; ALTER TABLE jobs DROP COLUMN sync_seq');
     db.pragma(`user_version = ${i}`);
     migrate(db);
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_ontvangen').get()).toEqual({ n: 1 });

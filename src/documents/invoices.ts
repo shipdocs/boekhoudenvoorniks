@@ -18,6 +18,7 @@ export type InvoiceStatus = 'concept' | 'verzonden' | 'betaald';
 export type InvoiceDisplayStatus = 'concept' | 'openstaand' | 'vervallen' | 'betaald';
 
 import { buildInvoiceUbl } from './ubl-out';
+import { wijzigJob } from '../jobs/revisie';
 
 export interface InvoiceRow {
   id: number;
@@ -177,10 +178,9 @@ export class InvoiceService {
       const jobId = (this.db.prepare('SELECT job_id FROM invoices WHERE id = ?').get(id) as { job_id: number | null } | undefined)?.job_id ?? null;
       this.db.prepare('UPDATE job_work_items SET invoice_id = NULL WHERE invoice_id = ?').run(id);
       this.db.prepare('DELETE FROM invoices WHERE id = ?').run(id);
-      if (jobId) {
-        this.db
-          .prepare(`UPDATE jobs SET status = 'klaar' WHERE id = ? AND status = 'gefactureerd' AND NOT EXISTS (SELECT 1 FROM invoices WHERE job_id = ?)`)
-          .run(jobId, jobId);
+      if (jobId && !this.db.prepare('SELECT 1 FROM invoices WHERE job_id = ?').get(jobId)) {
+        const job = this.db.prepare('SELECT status FROM jobs WHERE id = ?').get(jobId) as { status: string } | undefined;
+        if (job?.status === 'gefactureerd') wijzigJob(this.db, jobId, { status: 'klaar' });
       }
     });
   }
