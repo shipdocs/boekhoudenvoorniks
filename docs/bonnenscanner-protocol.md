@@ -260,7 +260,9 @@ namaken; de telefoon gooit er daarom **nooit** een bon of de koppeling om weg.
 | 409 | `id-botst` | ja | dit `id` hoort al bij een bon met een andere inhoud | niet opnieuw; de bon bewaren en melden |
 | 413 | `te-groot` | ja | de foto's zijn samen groter dan 19 MiB | kleiner maken, of in twee bonnen |
 | 413 | `te-groot` | ja | de JSON is te groot voor dit soort bericht (boven 16 KiB; een `wijziging` boven 128 KiB) | niet opnieuw; de inhoud kleiner maken of opsplitsen |
-| 500 | `opslaan-mislukt` | ja | de pc kon de bon niet wegschrijven | bon bewaren, later opnieuw |
+| 400 | `veld-ongeldig` | ja | een klantveld klopt niet; `veld` en `melding` staan erbij (zie *Wat de pc met een wijziging doet*) | niet opnieuw; fout in de app |
+| 409 | `klant-onbekend` | ja | een klantwijziging zonder naam op een onbekende `uuid` | later opnieuw, na de klant met naam |
+| 500 | `opslaan-mislukt` | ja | de pc kon de bon of de wijziging niet wegschrijven | bewaren, later opnieuw |
 | 400 | `ongeldig` | nee | geen envelop van deze versie, of afgebroken | – |
 | 401 | `niet-gekoppeld` | nee | onbekende telefoon, ingetrokken of verlopen sleutel, of niet te ontsleutelen | "koppeling ingetrokken" tonen; bonnen bewaren tot de gebruiker opnieuw koppelt |
 | 404 / 405 | `onbekend` | nee | ander pad of andere methode | – |
@@ -474,15 +476,20 @@ Regels; wat er niet aan voldoet wordt geweigerd met `ongeldig`, voordat er iets 
   momentopname van de klantgegevens, past ruim binnen deze grenzen.)
 - Documenten (`factuur`, `bon`, `foto`) worden **nooit bewerkt**: zij hebben precies één revisie, dus
   alleen revisie 1. Klanten en projecten mogen vaker gewijzigd worden.
-- **Idempotent**: dezelfde uuid met dezelfde of een lagere revisie is een no-op (die had de pc al);
-  pas een hogere revisie, of een onbekende uuid, wordt toegepast.
+- **Idempotent**: de pc onthoudt per exacte sleutel (apparaat, entiteit, `uuid`, `revisie`) wat hij met
+  een wijziging deed (zie *Wat de pc met een wijziging doet*). Dezelfde sleutel nog eens sturen verandert
+  niets; een andere revisie van dezelfde `uuid` wordt toegepast, ook een lagere, per veld op tijd.
 
 Geen foto's achter dit bericht. De JSON van een `wijziging` mag tot 128 KiB; elk ander bericht blijft
-bij 16 KiB, en er bovenuit geeft `te-groot` (zie *Antwoorden*). Antwoord:
+bij 16 KiB, en er bovenuit geeft `te-groot` (zie *Antwoorden*). Het basisantwoord bevestigt precies
+deze change-set:
 
 ```text
 {"ok":true,"soort":"wijziging","entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1}
 ```
+
+Een pc die klantwijzigingen bewaart voegt daar `uitkomst` aan toe (en bij een afwijzing `fout`); zie het
+volgende deel.
 
 ### `stamgegevens`: om de stamgegevens vragen
 
@@ -499,12 +506,109 @@ Alleen `soort` en `tijd`, geen foto's. Het antwoord is voorlopig alleen een beve
 Welke stamgegevens (klanten, projecten) de pc teruggeeft volgt in een latere versie van dit document;
 tot die tijd gaat er niets uit de administratie terug.
 
-### Wat de pc ermee doet, en wat nog niet
+### Wat de pc met een wijziging doet
 
-De pc bevestigt een geldige `wijziging` of `stamgegevens`, maar bewaart of synchroniseert er in deze
-stap nog niets mee: er komt geen document bij, er staat niets in een wachtrij. Bewaren en
-synchroniseren volgen in een latere versie van dit document. Ook versie 2 staat achter dezelfde
-schakelaar als de rest: zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
+Alleen een wijziging van een **klant** wordt bewaard. De pc verwerkt elke wijziging in één
+databasetransactie: de controle in het register, het opzoeken, het toepassen, het wijzigingsnummer, het
+logboek en de registerrij lukken samen of helemaal niet. De pc **verwijdert nooit** iets en voegt
+**nooit stil samen**: twee `uuid`'s met dezelfde KvK, hetzelfde btw-nummer, hetzelfde e-mailadres of
+dezelfde naam blijven twee klanten. Een voorstel om dubbele klanten samen te voegen valt buiten deze
+stap.
+
+**Uitkomsten.** Het antwoord bevat het basisantwoord plus `uitkomst`:
+
+| HTTP | `uitkomst` / `fout` | Registerrij | Betekenis | Wat doet de telefoon |
+|---|---|---|---|---|
+| 200 | `toegepast` | ja | minstens één veld is toegepast (of de klant is nieuw) | wijziging opruimen |
+| 200 | `overgeslagen` | ja | alle velden waren ouder, of deze sleutel had de pc al | wijziging opruimen |
+| 200 | `afgewezen`, `fout: "geen-klant"` | ja | inhoudelijk geweigerd: de `uuid` hoort bij een leverancier | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
+| 200 | `niet-ondersteund` | **nee** | `project`, `factuur`, `bon` en `foto` worden nog niet opgeslagen; er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
+| 400 | `veld-ongeldig`, met `veld` en `melding` | nee | een veld buiten het schema, een ongeldige waarde, een te lange tekst, een lege naam | niet opnieuw; fout in de app |
+| 400 | `ongeldig` | nee | het formaat klopt niet, of het bewerkmoment ligt meer dan 5 minuten (het klokvenster) in de toekomst | niet opnieuw |
+| 409 | `klant-onbekend` | nee | een onbekende `uuid` zonder `naam` (ook niet via een alias): er is geen klant om aan te vullen | later opnieuw, nadat de klant met naam is afgeleverd |
+| 500 | `opslaan-mislukt` | nee | de pc kon niet opslaan; er is niets achtergebleven | wijziging bewaren, later opnieuw |
+
+```jsonl
+{"ok":true,"soort":"wijziging","entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"uitkomst":"toegepast"}
+{"ok":true,"soort":"wijziging","entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"uitkomst":"afgewezen","fout":"geen-klant"}
+{"ok":false,"fout":"veld-ongeldig","veld":"email","melding":"Het veld email klopt niet: Dit e-mailadres klopt niet: geen-email"}
+{"ok":false,"fout":"klant-onbekend"}
+```
+
+**Het register `sync_ontvangen`.** Idempotentie loopt uitsluitend via de exacte sleutel (`apparaat_id`
+(het apparaat-ID uit de envelop), `entiteit`, `uuid`, `revisie`), niet via de hoogste revisie en niet
+via de route waarlangs het bericht binnenkwam. Een rij bevat `tijd` (het bewerkmoment van de
+telefoon), `ontvangen_op` (de klok van de pc), `uitkomst` (die van de **eerste** verwerking:
+`toegepast`, `overgeslagen` of `afgewezen`), `fout` (bij `afgewezen`) en `route` (`netwerk`). Staat de
+sleutel er al, dan schrijft de pc niets: hij antwoordt `overgeslagen`, of bij een eerder afgewezen sleutel
+opnieuw `afgewezen` met dezelfde `fout` en zonder nieuwe rij. Is de sleutel nieuw, dan wordt de wijziging
+toegepast, ook als de revisie lager is dan een die de pc al kent. Veldfouten, `klant-onbekend`, `niet-ondersteund`
+en `opslaan-mislukt` laten geen registerrij achter, zodat dezelfde wijziging later gewoon opnieuw kan.
+
+**Toegestane klantvelden.** Alleen deze, met hun naam in de wijziging (een ander veld, ook `type`,
+`paid_with`, `id`, `uuid` of `revisie`, geeft `veld-ongeldig` met de veldnaam in de melding). Elk veld
+wordt los gecontroleerd, nooit in samenhang met de rest van de rij, zodat de volgorde van aankomst
+niets uitmaakt. Een optioneel veld mag `null` zijn; `naam` en `gearchiveerd` niet.
+
+| Veld | Kolom | Regel |
+|---|---|---|
+| `naam` | naam | verplicht bij een nieuwe klant; in een wijziging niet leeg; hooguit 200 tekens |
+| `contactpersoon`, `telefoon`, `plaats`, `postcode`, `land` | contactpersoon, telefoon, plaats, postcode, land | tekst, hooguit 200 tekens; `land` is twee letters (leeg wordt `NL`); een postcode wordt in hoofdletters bewaard |
+| `adres` | adres | tekst, hooguit 500 tekens |
+| `email` | e-mail | een geldig e-mailadres |
+| `btw_nummer`, `iban` | btw-nummer, rekeningnummer | een geldig btw-nummer, een geldige IBAN |
+| `kvk_nummer` | KvK-nummer | 8 cijfers bij Nederland, anders een geldig buitenlands handelsregisternummer; beoordeeld samen met `land` (zie hieronder) |
+| `betaaltermijn_dagen` | betaaltermijn | een geheel getal van 0 tot en met 365 |
+| `notities` | notities | tekst, hooguit 4000 tekens |
+| `gearchiveerd` | gearchiveerd | `0` of `1`; archiveren is dit veld, er wordt nooit een klant verwijderd |
+
+KvK-nummer en land: de telefoon volgt dezelfde regel als de pc. Bij Nederland (een leeg of ontbrekend
+`land` telt als `NL`) is een `kvk_nummer` precies 8 cijfers (spaties worden weggehaald); bij een
+buitenlands `land` is het een geldig buitenlands handelsregisternummer. Omdat de velden los van elkaar
+winnen, wordt de regel gecontroleerd op de uiteindelijke combinatie van `land` en `kvk_nummer`, zoals die
+na het toepassen van de winnende velden in de klant zou staan. Klopt die niet, dan wordt de hele wijziging
+geweigerd met `veld-ongeldig` (veld `kvk_nummer`, of `land` als het land de oorzaak is), en blijft er niets
+achter: geen klantrij, geen veldtijden, geen logboek, geen nieuw wijzigingsnummer, geen registerrij. De
+telefoon bewaart dus nooit een stand die de pc zelf zou weigeren. Stuur `land` en `kvk_nummer` die samen
+veranderen daarom in dezelfde wijziging; los gestuurd wordt een tussenstand die niet klopt geweigerd (een
+buitenlands nummer bij een Nederlandse klant, of een land NL bij een buitenlands nummer), ook als de
+andere wijziging later alsnog komt.
+
+**Een nieuwe klant.** Een wijziging met `naam` op een onbekende `uuid` maakt een nieuwe klant met die
+`uuid`: type klant en land `NL` tenzij het land is opgegeven. Een onbekende `uuid` zonder `naam` geeft
+`klant-onbekend`. Een `uuid` die niet als klant bekend is maar wel als **alias** (de pc legt een alias
+vast in `relation_aliases`) leidt naar de doelklant: die krijgt de
+wijziging en er komt geen nieuwe klant. De pc leest aliassen alleen; hij maakt ze niet aan. Een
+`uuid` van een leverancier wordt `afgewezen` (`geen-klant`); een klant van het type klant en van het
+type beide mag wel.
+
+**Samenvoegen per veld.** Elk veld heeft een tijd en een bron. De nieuwste `(tijd, bron)` wint: bij een
+nieuwere tijd wint de wijziging, bij een gelijke tijd de lexicografisch grootste bron (`pc` wint van
+`M1`, `M2` wint van `M1`), en bij gelijke tijd en bron de grootste waarde als tekst. Een veld met een
+oudere tijd wordt overgeslagen, zonder logregel. Het bewerkmoment van de telefoon bepaalt dus alleen wie
+per veld wint, nooit wat de telefoon ophaalt. Een veld dat wint wordt toegepast, ook als de waarde
+gelijk is, omdat de tijd van het veld anders van de volgorde zou afhangen. De bron is de **apparaatcode**
+(`M1`, `M2`, …, zie *De apparaatcode*), nooit het apparaat-ID. Een veld dat nog geen tijd heeft (een klant
+van vóór de sync) geldt als gewijzigd op het moment dat de klant is aangemaakt, door de `pc`: de
+**ondergrens**, `created_at` van de klant gelezen als UTC in milliseconden (`veldOndergrens` in
+`src/sync/ondergrens.ts`). Daardoor overschrijft een oudere telefoonwijziging geen gegevens van de pc.
+Bij een klant die de telefoon zelf aanmaakt krijgen de velden die hij niet meestuurt een lege tijd
+(0, bron leeg): niemand heeft ze gezet, dus een latere wijziging wint altijd, ook een oudere revisie die
+pas daarna aankomt. Van elke toegepaste wijziging gaat de revisie van de klant (de pc-revisie, alleen
+informatief) met één omhoog, en elk toegepast veld komt in het logboek (`relation_changelog`) en in de
+tijden per veld (`relation_field_rev`).
+
+**Het nummer `sync_seq`.** Elke toepassing waarbij minstens één veld echt wordt toegepast, geeft de klant
+een nieuw nummer uit de globale wijzigingsteller (`sync_teller`, rij `wijziging`), in dezelfde transactie.
+Een overgeslagen, afgewezen of ongeldige wijziging verhoogt de teller niet. Dit nummer is de **enige basis
+voor latere delta-sync**: een wijziging met een bewerkmoment van drie dagen geleden krijgt toch een
+nieuw, hoger nummer, zodat een andere telefoon die vanaf een hoger nummer vraagt haar nog ophaalt. De
+bewerktijd is nooit een cursor.
+
+**Wat nog niet.** `stamgegevens` krijgt voorlopig alleen een bevestiging: er komt niets uit de
+administratie terug. `project`, `factuur`, `bon` en `foto` worden niet opgeslagen en gelden niet als
+afgeleverd (`niet-ondersteund`, zonder registerrij). Ook versie 2 staat achter dezelfde schakelaar als
+de rest: zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
 
 ## Wat dit wel en niet beschermt
 
@@ -522,9 +626,10 @@ schakelaar als de rest: zolang `PHONE_SCANNER` uit staat, is er niets van te zie
 - **Geen forward secrecy**: lekt de sleutel later uit, dan zijn eerder onderschepte berichten van die
   telefoon te lezen. Voor bonnen op een thuisnetwerk is daar bewust voor gekozen; het houdt het
   protocol klein.
-- **Een gekoppelde telefoon kan alleen bonnen afleveren** (vanaf versie 2 ook wijzigingen melden en
-  om stamgegevens vragen, waar de pc voorlopig alleen "ontvangen" op zegt). Iets uit de administratie
-  opvragen kan niet.
+- **Een gekoppelde telefoon kan alleen bonnen afleveren** (vanaf versie 2 ook klantwijzigingen melden,
+  die per veld worden gecontroleerd en bewaard, en om stamgegevens vragen, waar de pc voorlopig alleen
+  "ontvangen" op zegt). Iets uit de administratie opvragen kan niet, en een telefoon kan nooit iets
+  verwijderen.
 
 ## Versies
 

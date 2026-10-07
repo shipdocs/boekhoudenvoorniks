@@ -17,6 +17,8 @@ import { ScannerPairing, type ScannerDevice } from './pairing';
 import { encodePairing, type PaymentMethod, type ReceiptMessage } from './protocol';
 import { ScannerReceiver } from './receiver';
 import { ReceiptSpool } from './spool';
+import { RelationsService } from '../relations/relations';
+import { SyncOntvangst } from '../sync/ontvangst';
 import { stripJpegGps } from './strip-gps';
 import { PHONE_SCANNER } from '../shared/phone-scanner';
 
@@ -112,6 +114,7 @@ export class Bonnenscanner {
       peerAllowed: deps.peerAllowed,
       now: deps.now,
       keepLocation: () => deps.settings.get().jobLocation,
+      sync: new SyncOntvangst(deps.db, new RelationsService(deps.db, deps.now), { now: deps.now, log: this.log }),
       onStored: () => void this.processSpool(),
       onActivity: () => deps.onChange?.(),
       log: this.log,
