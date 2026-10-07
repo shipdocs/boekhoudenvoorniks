@@ -1382,8 +1382,9 @@ export const migrations: string[] = [
   `
   -- Unieke apparaatcode (M1, M2, …) per koppeling: het volgnummer loopt nooit terug, dus een code
   -- wordt nooit hergebruikt. Ontkoppelen vult afgesloten_op en laat de rij staan. De sleutel van de
-  -- koppeling staat hier niet: die zit versleuteld in 'secrets'.
-  CREATE TABLE scanner_device_codes (
+  -- koppeling staat hier niet: die zit versleuteld in 'secrets'. IF NOT EXISTS omdat een test (en een
+  -- teruggezette administratie) de migraties op een al gevulde database opnieuw kan draaien.
+  CREATE TABLE IF NOT EXISTS scanner_device_codes (
     code TEXT PRIMARY KEY,
     volgnummer INTEGER NOT NULL UNIQUE,
     device_id TEXT,
