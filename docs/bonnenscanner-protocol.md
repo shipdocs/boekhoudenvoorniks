@@ -557,16 +557,22 @@ niets uitmaakt. Een optioneel veld mag `null` zijn; `naam` en `gearchiveerd` nie
 | `adres` | adres | tekst, hooguit 500 tekens |
 | `email` | e-mail | een geldig e-mailadres |
 | `btw_nummer`, `iban` | btw-nummer, rekeningnummer | een geldig btw-nummer, een geldige IBAN |
-| `kvk_nummer` | KvK-nummer | 8 cijfers, of een geldig buitenlands handelsregisternummer (zie hieronder) |
+| `kvk_nummer` | KvK-nummer | 8 cijfers bij Nederland, anders een geldig buitenlands handelsregisternummer; beoordeeld samen met `land` (zie hieronder) |
 | `betaaltermijn_dagen` | betaaltermijn | een geheel getal van 0 tot en met 365 |
 | `notities` | notities | tekst, hooguit 4000 tekens |
 | `gearchiveerd` | gearchiveerd | `0` of `1`; archiveren is dit veld, er wordt nooit een klant verwijderd |
 
-Afwijking bij het KvK-nummer: op de pc geldt een KvK-nummer van 8 cijfers alleen bij een Nederlands
-bedrijf en een handelsregisternummer bij een buitenlands bedrijf. De telefoon wordt per veld beoordeeld
-en kan het land in een andere wijziging sturen; daarom is een `kvk_nummer` van de telefoon geldig bij
-8 cijfers of bij een geldig buitenlands handelsregisternummer, los van het land. Een latere wijziging op
-de pc zelf blijft de strengere regel volgen.
+KvK-nummer en land: de telefoon volgt dezelfde regel als de pc. Bij Nederland (een leeg of ontbrekend
+`land` telt als `NL`) is een `kvk_nummer` precies 8 cijfers (spaties worden weggehaald); bij een
+buitenlands `land` is het een geldig buitenlands handelsregisternummer. Omdat de velden los van elkaar
+winnen, wordt de regel gecontroleerd op de uiteindelijke combinatie van `land` en `kvk_nummer`, zoals die
+na het toepassen van de winnende velden in de klant zou staan. Klopt die niet, dan wordt de hele wijziging
+geweigerd met `veld-ongeldig` (veld `kvk_nummer`, of `land` als het land de oorzaak is), en blijft er niets
+achter: geen klantrij, geen veldtijden, geen logboek, geen nieuw wijzigingsnummer, geen registerrij. De
+telefoon bewaart dus nooit een stand die de pc zelf zou weigeren. Stuur `land` en `kvk_nummer` die samen
+veranderen daarom in dezelfde wijziging; los gestuurd wordt een tussenstand die niet klopt geweigerd (een
+buitenlands nummer bij een Nederlandse klant, of een land NL bij een buitenlands nummer), ook als de
+andere wijziging later alsnog komt.
 
 **Een nieuwe klant.** Een wijziging met `naam` op een onbekende `uuid` maakt een nieuwe klant met die
 `uuid`: type klant en land `NL` tenzij het land is opgegeven. Een onbekende `uuid` zonder `naam` geeft

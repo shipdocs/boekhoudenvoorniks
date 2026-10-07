@@ -108,15 +108,43 @@ export function schoonPostcode(raw: string | null | undefined): string | null {
 }
 
 /**
- * Het KvK-nummer van een telefoonwijziging, beoordeeld zonder naar het land te kijken (dat kan in een
- * andere wijziging staan, in een andere volgorde): 8 cijfers, of een geldig buitenlands handelsregisternummer.
+ * De ene regel voor KvK en land, voor de pc (clean) en voor de telefoon (maakVanSync en pasVeldenToe):
+ * bij Nederland (een leeg of ontbrekend land telt als NL) precies 8 cijfers, spaties worden weggehaald;
+ * bij een buitenlands land een geldig handelsregisternummer. Geeft het bewaarde nummer terug (leeg wordt null).
  */
-export function controleerKvkVoorSync(raw: string | null | undefined): string | null {
+export function controleerKvkBijLand(kvkNummer: string | null | undefined, land: string | null | undefined): string | null {
+  if (!kvkNummer || !kvkNummer.trim()) return null;
+  const dutch = (countryCode(land && land.trim() ? land : 'NL') ?? 'NL') === 'NL';
+  const kvk = dutch ? kvkNummer.replace(/\s/g, '') : kvkNummer.trim();
+  if (dutch && !isValidKvk(kvk)) throw new ValidationError(`Dit KvK-nummer klopt niet (het heeft 8 cijfers): ${kvkNummer}`);
+  if (!dutch && !isValidForeignRegistration(kvk)) throw new ValidationError(`Dit handelsregisternummer klopt niet: ${kvkNummer}`);
+  return kvk;
+}
+
+/**
+ * Het KvK-nummer van een telefoonwijziging, los van het land (dat kan in een andere wijziging staan):
+ * alleen opschonen. Of het nummer klopt hangt van het land af en wordt bij het toepassen gecontroleerd
+ * op de uiteindelijke combinatie, met controleerKvkBijLand.
+ */
+function schoonKvkVoorSync(raw: string | null | undefined): string | null {
   if (!raw || !raw.trim()) return null;
   const zonderSpaties = raw.replace(/\s/g, '');
-  if (isValidKvk(zonderSpaties)) return zonderSpaties;
-  if (isValidForeignRegistration(raw)) return raw.trim();
-  throw new ValidationError(`Dit KvK-nummer of handelsregisternummer klopt niet (8 cijfers of een buitenlands nummer): ${raw}`);
+  return /^\d{8}$/.test(zonderSpaties) ? zonderSpaties : raw.trim();
+}
+
+/**
+ * Controleert de combinatie van land en KvK-nummer zoals die na een telefoonwijziging in de klant zou
+ * staan, met dezelfde regel als de pc. Gooit een KlantVeldFout met kvk_number als dat veld in de
+ * wijziging zit, anders met country (het land is dan de oorzaak).
+ */
+function controleerKvkLandCombinatie(kvk: unknown, land: unknown, kvkInWijziging: boolean): void {
+  try {
+    controleerKvkBijLand(kvk as string | null, land as string | null);
+  } catch (e) {
+    if (!(e instanceof ValidationError)) throw e;
+    if (kvkInWijziging) throw new KlantVeldFout('kvk_number', e.message);
+    throw new KlantVeldFout('country', `Het land past niet bij het KvK-nummer van deze klant (${kvk}). ${e.message}`);
+  }
 }
 
 /** Een klantveld van een telefoonwijziging dat niet klopt, met de kolom waar het om gaat. */
@@ -149,7 +177,7 @@ function normaliseerSyncVeld(kolom: SyncKolom, waarde: unknown): SyncWaarde {
     case 'vat_number':
       return controleerBtwNummer(w);
     case 'kvk_number':
-      return controleerKvkVoorSync(w);
+      return schoonKvkVoorSync(w);
     case 'postcode':
       return schoonPostcode(w);
     case 'country':
@@ -323,6 +351,7 @@ export class RelationsService {
   maakVanSync(uuid: string, velden: Record<string, unknown>, tijd: number, bron: string): Relation {
     const schoon = normaliseerSyncVelden(velden);
     if (typeof schoon.name !== 'string') throw new KlantVeldFout('name', 'Naam is verplicht voor een nieuwe klant');
+    if (schoon.kvk_number) controleerKvkLandCombinatie(schoon.kvk_number, schoon.country ?? 'NL', true);
     const kolommen = SYNC_KOLOMMEN.filter((k) => Object.hasOwn(schoon, k));
     const id = this.db.transaction(() => {
       const result = this.db
@@ -371,6 +400,11 @@ export class RelationsService {
         this.schrijfVeld(id, revisie, veld, rij[kolom], schoon[kolom], tijd, bron);
       }
       if (zetten.length === 0) return { toegepast, overgeslagen };
+      // de telefoon bewaart nooit een combinatie die update() zou weigeren: de uiteindelijke stand telt
+      if (zetten.includes('kvk_number') || zetten.includes('country')) {
+        const eind = (k: SyncKolom) => (zetten.includes(k) ? schoon[k] : rij[k]);
+        controleerKvkLandCombinatie(eind('kvk_number'), eind('country'), zetten.includes('kvk_number'));
+      }
       this.db
         .prepare(`UPDATE relations SET ${zetten.map((k) => `${k} = ?`).join(', ')}, revisie = ?, gewijzigd_op = ?, sync_seq = ? WHERE id = ?`)
         .run(...zetten.map((k) => schoon[k] ?? null), revisie, Math.max(bestaand.gewijzigd_op, tijd), volgendeSyncSeq(this.db), id);
@@ -399,11 +433,8 @@ export class RelationsService {
     const email = controleerEmail(input.email);
     const iban = controleerIban(input.iban);
     const vat = controleerBtwNummer(input.vat_number);
-    // KvK alleen bij een Nederlands bedrijf; een buitenlands bedrijf heeft een eigen handelsregisternummer
-    const dutch = (countryCode(input.country && input.country.trim() ? input.country : 'NL') ?? 'NL') === 'NL';
-    const kvk = input.kvk_number && input.kvk_number.trim() ? (dutch ? input.kvk_number.replace(/\s/g, '') : input.kvk_number.trim()) : null;
-    if (kvk && dutch && !isValidKvk(kvk)) throw new ValidationError(`Dit KvK-nummer klopt niet (het heeft 8 cijfers): ${input.kvk_number}`);
-    if (kvk && !dutch && !isValidForeignRegistration(kvk)) throw new ValidationError(`Dit handelsregisternummer klopt niet: ${input.kvk_number}`);
+    // KvK alleen bij een Nederlands bedrijf; een buitenlands bedrijf heeft een eigen handelsregisternummer (dezelfde regel als de telefoon)
+    const kvk = controleerKvkBijLand(input.kvk_number, input.country);
     const type = input.type ?? 'klant';
     if (!['klant', 'leverancier', 'beide'].includes(type)) throw new ValidationError('Kies klant, leverancier of allebei');
     const term = controleerBetaaltermijn(input.payment_term_days);

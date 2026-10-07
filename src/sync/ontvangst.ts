@@ -94,15 +94,22 @@ export class SyncOntvangst {
     const klant = this.relations.vindOpSyncUuid(w.uuid);
     let uitkomst: 'toegepast' | 'overgeslagen' | 'afgewezen';
     let fout: string | null = null;
-    if (!klant) {
-      if (!Object.hasOwn(velden, 'name')) return { status: 409, fout: 'klant-onbekend' };
-      this.relations.maakVanSync(w.uuid, velden, w.tijd, bron);
-      uitkomst = 'toegepast';
-    } else if (klant.type === 'leverancier') {
-      uitkomst = 'afgewezen';
-      fout = 'geen-klant';
-    } else {
-      uitkomst = this.relations.pasVeldenToe(klant.id, velden, w.tijd, bron).toegepast.length > 0 ? 'toegepast' : 'overgeslagen';
+    try {
+      if (!klant) {
+        if (!Object.hasOwn(velden, 'name')) return { status: 409, fout: 'klant-onbekend' };
+        this.relations.maakVanSync(w.uuid, velden, w.tijd, bron);
+        uitkomst = 'toegepast';
+      } else if (klant.type === 'leverancier') {
+        uitkomst = 'afgewezen';
+        fout = 'geen-klant';
+      } else {
+        uitkomst = this.relations.pasVeldenToe(klant.id, velden, w.tijd, bron).toegepast.length > 0 ? 'toegepast' : 'overgeslagen';
+      }
+    } catch (e) {
+      // een combinatie die de pc zelf zou weigeren (land met KvK-nummer): de transactie is teruggerold
+      if (!(e instanceof KlantVeldFout)) throw e;
+      const veld = veldnaamVanKolom(e.kolom);
+      return { status: 400, fout: 'veld-ongeldig', veld, melding: `Het veld ${veld} klopt niet: ${e.message}` };
     }
 
     // 4. registerrij: de uitkomst van de eerste verwerking

@@ -424,6 +424,8 @@ describe('idempotent en per veld samengevoegd', () => {
       const p = await koppel(t);
       const uuid = randomUUID();
       pcKlant(t, uuid);
+      // een klant die al in het buitenland zit: een buitenlands nummer past dan ook zonder dat het land eerst komt
+      t.db.prepare(`UPDATE relations SET country = 'DE' WHERE uuid = ?`).run(uuid);
       const nu = t.clock.now;
       const velden = { land: { land: 'de' }, kvk: { kvk_nummer: 'HRB 12345 B' } };
       for (const [i, x] of volgorde.entries()) expect((await p.wijziging({ uuid, revisie: i + 1, tijd: nu - 2000 + i, velden: velden[x] })).status).toBe(200);
