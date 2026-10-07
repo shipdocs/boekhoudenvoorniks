@@ -493,18 +493,83 @@ volgende deel.
 
 ### `stamgegevens`: om de stamgegevens vragen
 
+Dit is het enige bericht waarmee gegevens **uit de administratie** naar de telefoon gaan. Het werkt alleen
+voor een gekoppelde telefoon, in een versleutelde envelop van versie 2 (in een envelop van versie 1 geeft
+het `ongeldig`), en is **alleen lezen**: de pc schrijft er niets voor weg, behalve dat de telefoon als
+"laatst gezien" geldt en bij zijn eerste bericht zijn apparaatcode krijgt.
+
 ```text
 {"soort":"stamgegevens","tijd":1790848800000}
 ```
 
-Alleen `soort` en `tijd`, geen foto's. Het antwoord is voorlopig alleen een bevestiging:
+Verzoek: de sleutels `soort` en `tijd`, en optioneel `sinds` en `na`. Elke andere sleutel (ook `__proto__`)
+geeft versleuteld `400 ongeldig`, net als een `sinds` die geen geheel getal van 0 of meer is, een `na` dat
+geen tekst van hoogstens 200 tekens is, of een `null` voor een van beide (laat de sleutel dan weg). Geen
+foto's. Het verzoek blijft binnen 16 KiB.
 
-```text
-{"ok":true,"soort":"stamgegevens"}
+| Veld | Betekenis |
+|---|---|
+| `sinds` | een `seq` van de pc (zie hieronder): alleen items met een **strikt grotere** `seq`. Zonder `sinds` krijgt de telefoon alles |
+| `na` | de `volgende` uit het vorige antwoord, onveranderd teruggestuurd, voor de volgende pagina. Een cursor die de pc niet zelf gemaakt kan hebben (verknoeid, aangepast, te lang) geeft `400 ongeldig` |
+
+```jsonc
+{"soort":"stamgegevens","tijd":1790848800000,"sinds":412,"na":"eyJzIjoicCIsInQiOjQ4MCwidSI6IjFhMmIzYzRkLTVlNmYtNDA3MS04MjkzLWE0YjVjNmQ3ZThmOSJ9"}
 ```
 
-Welke stamgegevens (klanten, projecten) de pc teruggeeft volgt in een latere versie van dit document;
-tot die tijd gaat er niets uit de administratie terug.
+Het antwoord is een pagina uit één stroom: **eerst alle klanten, dan alle projecten**, samen hoogstens
+**100 items**. Binnen elke soort ligt de volgorde vast op (`seq`, `uuid`); er wordt nooit op bewerktijd of
+met een positie-teller (OFFSET) gepagineerd, dus elk item komt precies één keer langs. Een pagina wordt
+nooit afgekapt of dynamisch verkleind; met 100 items blijft het antwoord versleuteld onder 1 MiB bij velden
+tot hun maximumlengte (notities van 4000 tweebyte-tekens zijn gemeten).
+
+```text
+{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"volgende":null}
+```
+
+(Het voorbeeld toont een deel van de velden; het echte antwoord heeft bij elk item **alle** velden.)
+
+| Veld | Betekenis |
+|---|---|
+| `pcTijd` | de klok van de pc, zoals in het hallo-antwoord |
+| `apparaatcode` | de apparaatcode van **deze** telefoon; een ander gekoppeld apparaat krijgt dezelfde gegevens maar zijn eigen code |
+| `regels` | de versie van de btw-regeltabel (`RULES_VERSION`), gelijk aan die in het hallo-antwoord. De tabel zelf en de VIES-controledatum zitten niet in dit antwoord |
+| `klanten`, `projecten` | de items van deze pagina, zie hieronder |
+| `aliassen` | de samengevoegde klanten: `alias_uuid` (de oude uuid) en `klant` (de uuid van de klant die nu geldt). **Alleen op de eerste pagina** (zonder `na`), volledig, ook bij een `sinds`, en niet meegeteld in de 100 items; een vervolgpagina heeft een lege lijst |
+| `volgende` | de cursor voor de volgende pagina, of `null` als alles geleverd is |
+
+**Een item** heeft precies `uuid`, `seq`, `pc_revisie`, `gearchiveerd` en `velden`. `velden` bevat voor
+**elk** veld uit `KLANT_VELDEN` (klant) of `PROJECT_VELDEN` (project) in `packages/core` een object
+`{waarde, tijd, bron}`; het project draagt zijn klant als `uuid` in het veld `klant` (of `null`). De veldnamen
+komen uit de kern, niet uit dit document. `gearchiveerd` staat zowel als boolean op het item als (met zijn
+eigen tijd en bron, `0` of `1`) in `velden`; gearchiveerde klanten en projecten worden **gewoon geleverd**,
+want de pc verwijdert nooit iets.
+
+- `seq` is de wijzigingsteller van de pc (`sync_seq`) van die rij. Elke echte wijziging op de pc, ook een
+  die een telefoon heeft gemeld, geeft de rij een nieuwe, hogere `seq`; archiveren ook.
+- `pc_revisie` is het revisienummer van de rij op de pc. Het is **informatief**: de telefoon past een
+  pc-item per veld toe op (`tijd`, `bron`) en kijkt daarbij **nooit** naar de revisie. De revisie in een
+  `wijziging` van de telefoon is iets anders (de eigen revisie van de telefoon).
+- `tijd` en `bron` per veld zijn de opgeslagen waarden. Een veld waarvoor de pc niets heeft opgeslagen (een
+  klant of project van vóór de sync) krijgt als `tijd` het aanmaakmoment van de rij (omgerekend van UTC naar
+  milliseconden) en als `bron` `"pc"`: dus niet de wijzigingstijd en niet 0. Een veld dat de pc zelf al als
+  "nog door niemand gezet" bewaart (`tijd` 0, lege `bron`) wordt zo doorgegeven, zodat elke latere wijziging wint.
+
+**Delta.** De telefoon onthoudt het **hoogste `seq`** uit de volledig doorlopen stroom (tot en met de pagina
+met `volgende: null`) en stuurt dat de volgende keer als `sinds`. Dat is een getal van de pc, **nooit de klok
+van de telefoon en nooit `gewijzigd_op` of een bewerktijd**: een wijziging die een andere telefoon drie dagen
+geleden bewerkte maar nu pas aankomt, krijgt een nieuwe `seq` en komt dus gewoon in de delta. `sinds` levert
+items met een `seq` **strikt groter** dan `sinds`; een item met `seq` gelijk aan `sinds` komt niet mee.
+
+**Cursor.** `volgende` is base64url van JSON met precies de sleutels `s` (`"k"` klant of `"p"` project),
+`t` (de `seq` van het laatste item, een geheel getal van 0 of meer) en `u` (zijn `uuid`), hooguit 200 tekens.
+Hij is alleen bedoeld om onveranderd terug te sturen als `na`: de pc controleert hem streng en gebruikt hem
+nooit als SQL. `sinds` blijft bij elke volgende pagina hetzelfde.
+
+**Privacygrens.** Er gaat alleen deze whitelist uit de administratie: klanten van het type klant of beide
+en projecten, met precies de velden hierboven. Nooit leveranciers, het type, `paid_with`, interne id's,
+boekingen, facturen, bankgegevens van de administratie zelf, instellingen of geheimen. Een project dat aan
+een leverancier hangt wordt **niet** geleverd; een project zonder bekende klant wel (`klant` is `null`).
+(Het IBAN van een klant is een klantveld en gaat dus wel mee, het IBAN van de administratie zelf niet.)
 
 ### Wat de pc met een wijziging doet
 
@@ -671,8 +736,7 @@ transactie. Een fout halverwege laat de rij onverwerkt. Per apparaat tellen alle
 voor de limiet van 1000; is die bereikt, dan antwoordt de pc `wachtrij-vol` (503) zonder iets op te
 slaan. De groottegrens van een wijziging (128 KiB) geldt ook voor de wachtrij.
 
-**Wat nog niet.** `stamgegevens` krijgt voorlopig alleen een bevestiging: er komt niets uit de
-administratie terug (ook geen projecten). `factuur`, `bon` en `foto` worden niet opgeslagen en gelden niet
+**Wat nog niet.** `stamgegevens` bevat de btw-regeltabel en de VIES-controledatum nog niet. `factuur`, `bon` en `foto` worden niet opgeslagen en gelden niet
 als afgeleverd (`niet-ondersteund`, zonder registerrij). Ook versie 2 staat achter dezelfde schakelaar als
 de rest: zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
 
@@ -692,10 +756,10 @@ de rest: zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
 - **Geen forward secrecy**: lekt de sleutel later uit, dan zijn eerder onderschepte berichten van die
   telefoon te lezen. Voor bonnen op een thuisnetwerk is daar bewust voor gekozen; het houdt het
   protocol klein.
-- **Een gekoppelde telefoon kan alleen bonnen afleveren** (vanaf versie 2 ook klantwijzigingen melden,
-  die per veld worden gecontroleerd en bewaard, en om stamgegevens vragen, waar de pc voorlopig alleen
-  "ontvangen" op zegt). Iets uit de administratie opvragen kan niet, en een telefoon kan nooit iets
-  verwijderen.
+- **Een gekoppelde telefoon kan bonnen afleveren** (vanaf versie 2 ook klant- en projectwijzigingen melden,
+  die per veld worden gecontroleerd en bewaard) **en de stamgegevens ophalen**: alleen de whitelist van
+  *`stamgegevens`* hierboven, versleuteld en alleen lezen. Verder iets uit de administratie opvragen kan niet,
+  en een telefoon kan nooit iets verwijderen.
 
 ## Versies
 
