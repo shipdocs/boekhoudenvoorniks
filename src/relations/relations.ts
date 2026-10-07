@@ -216,7 +216,7 @@ export function normaliseerSyncVelden(velden: Record<string, unknown>): Record<s
  * grootste bron (pc wint van M1); bij gelijke tijd en bron de grootste waarde als tekst. Zo geeft elke
  * volgorde van aankomst dezelfde eindtoestand.
  */
-function wintVeld(nieuw: { tijd: number; bron: string; waarde: unknown }, huidig: { tijd: number; bron: string; waarde: unknown }): boolean {
+export function wintVeld(nieuw: { tijd: number; bron: string; waarde: unknown }, huidig: { tijd: number; bron: string; waarde: unknown }): boolean {
   if (nieuw.tijd !== huidig.tijd) return nieuw.tijd > huidig.tijd;
   if (nieuw.bron !== huidig.bron) return nieuw.bron > huidig.bron;
   const als = (v: unknown) => (v == null ? '' : String(v));
