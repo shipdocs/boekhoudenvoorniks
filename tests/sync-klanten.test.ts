@@ -757,3 +757,127 @@ describe('5 minuten vooruit en het wijzigingsnummer', () => {
     expect(n(t, 'SELECT COUNT(*) AS n FROM relations')).toBe(voor);
   });
 });
+
+describe('land en KvK-nummer: de telefoon volgt dezelfde regel als de pc', () => {
+  /** alles waar een wijziging iets achterlaat, plus de klantrij zelf */
+  const stand = (t: Admin) => ({
+    ...telling(t),
+    teller: teller(t),
+    rijen: t.db.prepare('SELECT * FROM relations ORDER BY id').all(),
+    velden: t.db.prepare('SELECT * FROM relation_field_rev ORDER BY relation_id, veld').all(),
+    log: t.db.prepare('SELECT * FROM relation_changelog ORDER BY id').all(),
+    register: t.db.prepare('SELECT * FROM sync_ontvangen ORDER BY rowid').all(),
+  });
+
+  it('een KvK-nummer van 7 cijfers bij een Nederlandse klant wordt geweigerd en laat niets achter', async () => {
+    const t = start();
+    const p = await koppel(t);
+    const uuid = randomUUID();
+    pcKlant(t, uuid);
+    const voor = stand(t);
+    const r = await p.wijziging({ uuid, revisie: 1, velden: { kvk_nummer: '1234567' } });
+    expect(r.status).toBe(400);
+    expect(r.json).toMatchObject({ fout: 'veld-ongeldig', veld: 'kvk_nummer' });
+    expect(String(r.json?.melding)).toMatch(/kvk_nummer.*8 cijfers/);
+    expect(stand(t)).toEqual(voor);
+  });
+
+  it('een geldig KvK-nummer bij een Nederlandse klant slaagt en de pc kan daarna alleen de woonplaats wijzigen', async () => {
+    const t = start();
+    const p = await koppel(t);
+    const uuid = randomUUID();
+    const id = pcKlant(t, uuid);
+    expect((await p.wijziging({ uuid, revisie: 1, velden: { kvk_nummer: '1234 5678' } })).json).toMatchObject({ uitkomst: 'toegepast' });
+    expect(klantRij(t, uuid)).toMatchObject({ country: 'NL', kvk_number: '12345678' });
+    expect(() => t.s.relations.update(id, { city: 'Utrecht' })).not.toThrow();
+    expect(klantRij(t, uuid)).toMatchObject({ city: 'Utrecht', kvk_number: '12345678' });
+  });
+
+  it('een buitenlands land met een buitenlands handelsregisternummer slaagt en de pc kan daarna alleen de woonplaats wijzigen', async () => {
+    const t = start();
+    const p = await koppel(t);
+    const uuid = randomUUID();
+    const r = await p.wijziging({ uuid, velden: { naam: 'Bau GmbH', land: 'DE', kvk_nummer: 'HRB 12345 B' } });
+    expect(r.json).toMatchObject({ uitkomst: 'toegepast' });
+    const id = klantRij(t, uuid)!.id as number;
+    expect(klantRij(t, uuid)).toMatchObject({ country: 'DE', kvk_number: 'HRB 12345 B' });
+    expect(() => t.s.relations.update(id, { city: 'Kleve' })).not.toThrow();
+    expect(klantRij(t, uuid)).toMatchObject({ city: 'Kleve', country: 'DE', kvk_number: 'HRB 12345 B' });
+  });
+
+  it('een buitenlands nummer bij een Nederlandse klant wordt geweigerd, ook als het land in dezelfde wijziging NL is of ontbreekt', async () => {
+    const t = start();
+    const p = await koppel(t);
+    const uuid = randomUUID();
+    pcKlant(t, uuid);
+    const voor = stand(t);
+    for (const velden of [{ kvk_nummer: 'HRB 12345 B' }, { land: 'NL', kvk_nummer: 'HRB 12345 B' }, { land: '', kvk_nummer: 'HRB 12345 B' }]) {
+      const r = await p.wijziging({ uuid, revisie: 1, velden });
+      expect(r.json).toMatchObject({ fout: 'veld-ongeldig', veld: 'kvk_nummer' });
+    }
+    expect(stand(t)).toEqual(voor);
+  });
+
+  it('volgorde: een landwijziging naar NL bij een buitenlands nummer wordt in beide volgorden geweigerd en laat niets achter', async () => {
+    const proef = async (volgorde: ('land' | 'plaats')[]) => {
+      const t = start();
+      t.clock.now = VAST;
+      const p = await koppel(t);
+      const uuid = randomUUID();
+      pcKlant(t, uuid);
+      t.db.prepare(`UPDATE relations SET country = 'DE', kvk_number = 'HRB 12345 B' WHERE uuid = ?`).run(uuid);
+      const nu = t.clock.now;
+      const velden = { land: { land: 'NL' }, plaats: { plaats: 'Zeist' } };
+      const uitkomsten: unknown[] = [];
+      for (const [i, x] of volgorde.entries()) {
+        const voor = stand(t);
+        const r = await p.wijziging({ uuid, revisie: i + 1, tijd: nu - 2000 + i, velden: velden[x] });
+        uitkomsten.push(r.json?.fout ?? r.json?.uitkomst);
+        if (x === 'land') {
+          expect(r.status).toBe(400);
+          expect(r.json).toMatchObject({ fout: 'veld-ongeldig', veld: 'land' });
+          expect(String(r.json?.melding)).toMatch(/land.*KvK|KvK.*land/is);
+          expect(stand(t)).toEqual(voor);
+        }
+      }
+      const { country, kvk_number, city } = klantRij(t, uuid)!;
+      return { uitkomsten, rest: { country, kvk_number, city } };
+    };
+    const a = await proef(['land', 'plaats']);
+    const b = await proef(['plaats', 'land']);
+    expect(a.rest).toMatchObject({ country: 'DE', kvk_number: 'HRB 12345 B', city: 'Zeist' });
+    expect(b.rest).toEqual(a.rest);
+  });
+
+  it('volgorde: land en KvK-nummer in een wijziging samen, ook als het land pas na het nummer wint, geven een geldige klant', async () => {
+    const t = start();
+    const p = await koppel(t);
+    const uuid = randomUUID();
+    const id = pcKlant(t, uuid);
+    // twee aparte wijzigingen op een Nederlandse klant: het nummer alleen komt eerst en wordt geweigerd
+    expect((await p.wijziging({ uuid, revisie: 1, tijd: t.clock.now + 1 * 1000, velden: { kvk_nummer: 'HRB 12345 B' } })).status).toBe(400);
+    // het land alleen mag wel, en daarna het nummer: de klant eindigt geldig
+    expect((await p.wijziging({ uuid, revisie: 2, tijd: t.clock.now + 2 * 1000, velden: { land: 'DE' } })).json).toMatchObject({ uitkomst: 'toegepast' });
+    expect((await p.wijziging({ uuid, revisie: 3, tijd: t.clock.now + 3 * 1000, velden: { kvk_nummer: 'HRB 12345 B' } })).json).toMatchObject({ uitkomst: 'toegepast' });
+    expect(() => t.s.relations.update(id, { city: 'Kleve' })).not.toThrow();
+    // en terug naar NL met het buitenlandse nummer is een ongeldige eindstand: geweigerd
+    expect((await p.wijziging({ uuid, revisie: 4, tijd: t.clock.now + 4 * 1000, velden: { land: 'NL' } })).json).toMatchObject({ fout: 'veld-ongeldig', veld: 'land' });
+    // in een wijziging samen kan het wel: land NL met een nummer van 8 cijfers
+    expect((await p.wijziging({ uuid, revisie: 5, tijd: t.clock.now + 5 * 1000, velden: { land: 'NL', kvk_nummer: '12345678' } })).json).toMatchObject({ uitkomst: 'toegepast' });
+    expect(klantRij(t, uuid)).toMatchObject({ country: 'NL', kvk_number: '12345678' });
+  });
+
+  it('een nieuwe klant met een ongeldige combinatie geeft 400 en er wordt niets bewaard', async () => {
+    const t = start();
+    const p = await koppel(t);
+    const voor = stand(t);
+    const uuid = randomUUID();
+    for (const velden of [{ naam: 'Nieuw BV', kvk_nummer: '1234567' }, { naam: 'Nieuw BV', land: 'NL', kvk_nummer: 'HRB 1' }, { naam: 'Nieuw BV', land: 'DE', kvk_nummer: '!' }]) {
+      const r = await p.wijziging({ uuid, velden });
+      expect(r.status).toBe(400);
+      expect(r.json).toMatchObject({ fout: 'veld-ongeldig', veld: 'kvk_nummer' });
+    }
+    expect(klantRij(t, uuid)).toBeUndefined();
+    expect(stand(t)).toEqual(voor);
+  });
+});
