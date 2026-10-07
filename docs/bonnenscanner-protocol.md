@@ -508,7 +508,7 @@ tot die tijd gaat er niets uit de administratie terug.
 
 ### Wat de pc met een wijziging doet
 
-Alleen een wijziging van een **klant** wordt bewaard. De pc verwerkt elke wijziging in één
+Een wijziging van een **klant** of een **project** wordt bewaard (een project is een klus op de pc). De pc verwerkt elke wijziging in één
 databasetransactie: de controle in het register, het opzoeken, het toepassen, het wijzigingsnummer, het
 logboek en de registerrij lukken samen of helemaal niet. De pc **verwijdert nooit** iets en voegt
 **nooit stil samen**: twee `uuid`'s met dezelfde KvK, hetzelfde btw-nummer, hetzelfde e-mailadres of
@@ -522,17 +522,24 @@ stap.
 | 200 | `toegepast` | ja | minstens één veld is toegepast (of de klant is nieuw) | wijziging opruimen |
 | 200 | `overgeslagen` | ja | alle velden waren ouder, of deze sleutel had de pc al | wijziging opruimen |
 | 200 | `afgewezen`, `fout: "geen-klant"` | ja | inhoudelijk geweigerd: de `uuid` hoort bij een leverancier | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
-| 200 | `niet-ondersteund` | **nee** | `project`, `factuur`, `bon` en `foto` worden nog niet opgeslagen; er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
-| 400 | `veld-ongeldig`, met `veld` en `melding` | nee | een veld buiten het schema, een ongeldige waarde, een te lange tekst, een lege naam | niet opnieuw; fout in de app |
+| 200 | `afgewezen`, `fout: "klus-gekoppeld"`, met `melding` | ja | inhoudelijk geweigerd: de klant van een project met facturen, aankopen, ritten of werkbonregels kan niet wisselen; er is niets geschreven in het project | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
+| 200 | `wacht` | **nee** (wel een rij in `sync_wachtrij`) | een project dat naar een nog onbekende klant verwijst; de pc bewaart de hele wijziging en past haar toe zodra die klant is afgeleverd | wijziging opruimen: de pc heeft haar; een klant die nog niet is afgeleverd moet de telefoon alsnog sturen |
+| 200 | `niet-ondersteund` | **nee** | `factuur`, `bon` en `foto` worden nog niet opgeslagen; er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
+| 400 | `veld-ongeldig`, met `veld` en `melding` | nee | een veld buiten het schema, een ongeldige waarde, een te lange tekst, een lege naam of titel | niet opnieuw; fout in de app |
 | 400 | `ongeldig` | nee | het formaat klopt niet, of het bewerkmoment ligt meer dan 5 minuten (het klokvenster) in de toekomst | niet opnieuw |
 | 409 | `klant-onbekend` | nee | een onbekende `uuid` zonder `naam` (ook niet via een alias): er is geen klant om aan te vullen | later opnieuw, nadat de klant met naam is afgeleverd |
+| 409 | `project-onbekend` | nee | een onbekende project-`uuid` zonder titel of zonder klant, en er wacht ook niets voor dit project: er is geen project om aan te vullen | later opnieuw, nadat het project met titel en klant is afgeleverd |
 | 500 | `opslaan-mislukt` | nee | de pc kon niet opslaan; er is niets achtergebleven | wijziging bewaren, later opnieuw |
+| 503 | `wachtrij-vol` | nee | er wachten al 1000 wijzigingen van dit apparaat in `sync_wachtrij`; deze is niet opgeslagen | wijziging bewaren, later opnieuw (herhaalbaar); de pc wijst een geldige wijziging nooit af |
 
 ```jsonl
 {"ok":true,"soort":"wijziging","entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"uitkomst":"toegepast"}
 {"ok":true,"soort":"wijziging","entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"uitkomst":"afgewezen","fout":"geen-klant"}
 {"ok":false,"fout":"veld-ongeldig","veld":"email","melding":"Het veld email klopt niet: Dit e-mailadres klopt niet: geen-email"}
 {"ok":false,"fout":"klant-onbekend"}
+{"ok":true,"soort":"wijziging","entiteit":"project","uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","revisie":1,"uitkomst":"wacht"}
+{"ok":false,"fout":"project-onbekend"}
+{"ok":false,"fout":"wachtrij-vol"}
 ```
 
 **Het register `sync_ontvangen`.** Idempotentie loopt uitsluitend via de exacte sleutel (`apparaat_id`
@@ -542,7 +549,7 @@ telefoon), `ontvangen_op` (de klok van de pc), `uitkomst` (die van de **eerste**
 `toegepast`, `overgeslagen` of `afgewezen`), `fout` (bij `afgewezen`) en `route` (`netwerk`). Staat de
 sleutel er al, dan schrijft de pc niets: hij antwoordt `overgeslagen`, of bij een eerder afgewezen sleutel
 opnieuw `afgewezen` met dezelfde `fout` en zonder nieuwe rij. Is de sleutel nieuw, dan wordt de wijziging
-toegepast, ook als de revisie lager is dan een die de pc al kent. Veldfouten, `klant-onbekend`, `niet-ondersteund`
+toegepast, ook als de revisie lager is dan een die de pc al kent. Veldfouten, `klant-onbekend`, `project-onbekend`, `wacht`, `wachtrij-vol`, `niet-ondersteund`
 en `opslaan-mislukt` laten geen registerrij achter, zodat dezelfde wijziging later gewoon opnieuw kan.
 
 **Toegestane klantvelden.** Alleen deze, met hun naam in de wijziging (een ander veld, ook `type`,
@@ -605,9 +612,54 @@ voor latere delta-sync**: een wijziging met een bewerkmoment van drie dagen gele
 nieuw, hoger nummer, zodat een andere telefoon die vanaf een hoger nummer vraagt haar nog ophaalt. De
 bewerktijd is nooit een cursor.
 
+**Projecten.** Een project is een klus op de pc (tabel `jobs`). Dezelfde regels als bij klanten gelden:
+idempotent op de registersleutel, per veld samengevoegd op (tijd, bron), een nieuw wijzigingsnummer
+`sync_seq` bij elke echt toegepaste wijziging, en elke wijziging in één transactie. De pc **verwijdert
+een project nooit**: archiveren is het veld `gearchiveerd`, en een gearchiveerd project blijft bestaan
+(facturen blijven ernaar verwijzen) maar staat niet meer in de lijsten en voorstellen. Alleen deze velden;
+elk ander veld (ook `quote_id`, `kosten`, `marge`, `lat`, `lon`, een kolomnaam, `__proto__`,
+`constructor` en `prototype`) geeft `veld-ongeldig`, en meer dan 16 velden in één wijziging ook.
+Een veld buiten het schema, een verkeerd type of een te lange tekst wordt nooit bewaard.
+
+| Veld | Kolom | Regel |
+|---|---|---|
+| `titel` | titel | verplicht bij een nieuw project; niet leeg; hooguit 200 tekens |
+| `adres` | adres | tekst of `null`, hooguit 300 tekens |
+| `startdatum`, `einddatum` | startdatum, einddatum | een bestaande datum `JJJJ-MM-DD` of `null` |
+| `notities` | notities | tekst of `null`, hooguit 4000 tekens |
+| `status` | status | `gepland`, `bezig`, `klaar` of `geannuleerd`; `gefactureerd` is een veldfout: dat zet alleen de pc, door een factuur te maken |
+| `klant` | klant | de `uuid` van een klant (kleine letters), ook als alias; niet `null` |
+| `gearchiveerd` | gearchiveerd | `0` of `1` |
+
+Een nieuw project (onbekende `uuid`) heeft `titel` en `klant` nodig. Een wijziging van een bestaand
+project mag elk veld los sturen. Twee regels die de pc zelf ook volgt:
+
+- Een `status` van de telefoon wordt, ongeacht de tijd, overgeslagen als het project de status
+  `gefactureerd` heeft of een factuur heeft. Dat veld krijgt dan alleen een regel in het logboek
+  (`job_changelog`); de overige velden van dezelfde wijziging worden gewoon verwerkt.
+- De `klant` van een bestaand project kan alleen wisselen zolang er niets aan hangt: geen factuur,
+  inkoopfactuur, rit of werkbonregel. Anders is de wijziging `afgewezen` met `fout: "klus-gekoppeld"` en
+  een `melding` in het Nederlands, met een registerrij en zonder iets te schrijven in het project.
+
+**De wachtrij `sync_wachtrij`.** Verwijst een project naar een klant die de pc nog niet kent (ook niet als
+alias), dan antwoordt de pc `wacht`: de hele wijziging wordt als JSON in een rij van `sync_wachtrij`
+bewaard (met `bron`, de tijd, en waar ze op wacht), zonder registerrij en zonder project. Staat er al een
+onverwerkte rij voor dezelfde `uuid` van welk apparaat dan ook en bestaat het project nog niet, dan wacht
+ook een latere revisie, ook zonder titel of klant. Zonder wachtende rij en zonder project geeft een
+revisie zonder titel of klant `project-onbekend` (409). Dezelfde wijziging nog eens sturen blijft één rij.
+Zodra de klant is toegepast (en na elk toegepast project, tot er geen voortgang meer is, en bij het
+starten van de receiver) verwerkt de pc de rijen, per project in één transactie: eerst de rij met titel en
+klant die het project maakt, dan de rest in revisievolgorde, per veld op (tijd, bron). Elke rij wordt dan
+opnieuw gecontroleerd; een rij die niet meer klopt wordt `afgewezen` gemarkeerd, met een registerrij
+`afgewezen`. Een rij wordt **nooit verwijderd**: afhandelen zet `verwerkt_op`, `verwerkt_uitkomst`
+(`toegepast`, `overgeslagen` of `afgewezen`) en `verwerkt_reden`, en de registerrij komt in dezelfde
+transactie. Een fout halverwege laat de rij onverwerkt. Per apparaat tellen alleen onverwerkte rijen mee
+voor de limiet van 1000; is die bereikt, dan antwoordt de pc `wachtrij-vol` (503) zonder iets op te
+slaan. De groottegrens van een wijziging (128 KiB) geldt ook voor de wachtrij.
+
 **Wat nog niet.** `stamgegevens` krijgt voorlopig alleen een bevestiging: er komt niets uit de
-administratie terug. `project`, `factuur`, `bon` en `foto` worden niet opgeslagen en gelden niet als
-afgeleverd (`niet-ondersteund`, zonder registerrij). Ook versie 2 staat achter dezelfde schakelaar als
+administratie terug (ook geen projecten). `factuur`, `bon` en `foto` worden niet opgeslagen en gelden niet
+als afgeleverd (`niet-ondersteund`, zonder registerrij). Ook versie 2 staat achter dezelfde schakelaar als
 de rest: zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
 
 ## Wat dit wel en niet beschermt
