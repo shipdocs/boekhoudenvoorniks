@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../db/database';
+import { veldOndergrens } from '../sync/ondergrens';
 import { volgendeSyncSeq } from '../sync/teller';
 import { isValidEmail, isValidForeignRegistration, isValidIban, isValidKvk, isValidVatNumber, normalizeIban, normalizeVatNumber, ValidationError } from '../shared/validation';
 import { countryCode } from '../shared/vat';
@@ -65,6 +66,139 @@ export const RELATIE_VELD_MAPPING = {
 
 /** Bron van een wijziging die op de pc zelf is gedaan (een telefoon heeft een apparaatcode, zoals M1). */
 const BRON_PC = 'pc';
+
+/**
+ * De regels per veld van een klant of leverancier, los van de rest van de rij. clean() roept ze aan in
+ * de oude volgorde (de meldingen zijn woordelijk gelijk gebleven) en het schrijfpad voor
+ * telefoonwijzigingen gebruikt dezelfde functies, zodat een veld op beide plekken hetzelfde wordt beoordeeld.
+ */
+const tekst = (v: unknown) => (typeof v === 'string' ? v.trim() || null : v ?? null);
+
+export function controleerEmail(raw: string | null | undefined): string | null {
+  const email = tekst(raw) as string | null;
+  if (email && !isValidEmail(email)) throw new ValidationError(`Dit e-mailadres klopt niet: ${email}`);
+  return email;
+}
+
+export function controleerIban(raw: string | null | undefined): string | null {
+  const iban = raw ? normalizeIban(raw) : null;
+  if (iban && !isValidIban(iban)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${raw}`);
+  return iban;
+}
+
+export function controleerBtwNummer(raw: string | null | undefined): string | null {
+  const vat = raw && raw.trim() ? normalizeVatNumber(raw) : null;
+  if (vat && !isValidVatNumber(vat)) throw new ValidationError(`Dit btw-nummer klopt niet: ${raw}`);
+  return vat;
+}
+
+export function controleerBetaaltermijn(term: number | null | undefined): number | null {
+  if (term != null && (!Number.isInteger(term) || term < 0 || term > 365)) throw new ValidationError('Betaaltermijn moet tussen 0 en 365 dagen liggen');
+  return term ?? null;
+}
+
+/** Een land als twee letters in hoofdletters; leeg wordt NL. */
+export function controleerLand(raw: string | null | undefined): string {
+  if (raw && raw.trim() && !countryCode(raw)) throw new ValidationError(`Dit land kennen we niet: ${raw}. Gebruik twee letters, bijvoorbeeld DE of US.`);
+  return (tekst(raw) as string | null)?.toUpperCase() ?? 'NL';
+}
+
+export function schoonPostcode(raw: string | null | undefined): string | null {
+  return raw ? raw.replace(/\s+/g, ' ').trim().toUpperCase() : null;
+}
+
+/**
+ * Het KvK-nummer van een telefoonwijziging, beoordeeld zonder naar het land te kijken (dat kan in een
+ * andere wijziging staan, in een andere volgorde): 8 cijfers, of een geldig buitenlands handelsregisternummer.
+ */
+export function controleerKvkVoorSync(raw: string | null | undefined): string | null {
+  if (!raw || !raw.trim()) return null;
+  const zonderSpaties = raw.replace(/\s/g, '');
+  if (isValidKvk(zonderSpaties)) return zonderSpaties;
+  if (isValidForeignRegistration(raw)) return raw.trim();
+  throw new ValidationError(`Dit KvK-nummer of handelsregisternummer klopt niet (8 cijfers of een buitenlands nummer): ${raw}`);
+}
+
+/** Een klantveld van een telefoonwijziging dat niet klopt, met de kolom waar het om gaat. */
+export class KlantVeldFout extends ValidationError {
+  constructor(
+    readonly kolom: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** De kolommen die een telefoon mag zetten, in vaste volgorde (type en paid_with niet). */
+const SYNC_KOLOMMEN = ['name', 'contact_name', 'email', 'phone', 'address', 'postcode', 'city', 'country', 'vat_number', 'kvk_number', 'iban', 'payment_term_days', 'notes', 'archived'] as const;
+type SyncKolom = (typeof SYNC_KOLOMMEN)[number];
+export type SyncWaarde = string | number | null;
+
+function normaliseerSyncVeld(kolom: SyncKolom, waarde: unknown): SyncWaarde {
+  const w = waarde as string | null;
+  switch (kolom) {
+    case 'name': {
+      const naam = typeof waarde === 'string' ? waarde.trim() : '';
+      if (!naam) throw new ValidationError('Naam is verplicht');
+      return naam;
+    }
+    case 'email':
+      return controleerEmail(w);
+    case 'iban':
+      return controleerIban(w);
+    case 'vat_number':
+      return controleerBtwNummer(w);
+    case 'kvk_number':
+      return controleerKvkVoorSync(w);
+    case 'postcode':
+      return schoonPostcode(w);
+    case 'country':
+      return controleerLand(w);
+    case 'payment_term_days':
+      return controleerBetaaltermijn(waarde as number | null);
+    case 'archived':
+      if (waarde !== 0 && waarde !== 1) throw new ValidationError('Gearchiveerd is 0 of 1');
+      return waarde;
+    default:
+      return tekst(waarde) as string | null;
+  }
+}
+
+/**
+ * Controleert en normaliseert de velden (per kolom) van een telefoonwijziging, ieder los van de rest.
+ * Gooit een KlantVeldFout met de kolom bij het eerste veld dat niet klopt. De uitkomst is een nieuw
+ * object zonder prototype.
+ */
+export function normaliseerSyncVelden(velden: Record<string, unknown>): Record<string, SyncWaarde> {
+  const uit = Object.create(null) as Record<string, SyncWaarde>;
+  for (const kolom of Object.keys(velden)) {
+    if (!(SYNC_KOLOMMEN as readonly string[]).includes(kolom)) throw new KlantVeldFout(kolom, 'Dit veld mag een telefoon niet wijzigen');
+    try {
+      uit[kolom] = normaliseerSyncVeld(kolom as SyncKolom, velden[kolom]);
+    } catch (e) {
+      if (e instanceof ValidationError) throw new KlantVeldFout(kolom, e.message);
+      throw e;
+    }
+  }
+  return uit;
+}
+
+/**
+ * Wint een nieuwe veldwaarde van de huidige? De nieuwste tijd wint; bij gelijke tijd de lexicografisch
+ * grootste bron (pc wint van M1); bij gelijke tijd en bron de grootste waarde als tekst. Zo geeft elke
+ * volgorde van aankomst dezelfde eindtoestand.
+ */
+function wintVeld(nieuw: { tijd: number; bron: string; waarde: unknown }, huidig: { tijd: number; bron: string; waarde: unknown }): boolean {
+  if (nieuw.tijd !== huidig.tijd) return nieuw.tijd > huidig.tijd;
+  if (nieuw.bron !== huidig.bron) return nieuw.bron > huidig.bron;
+  const als = (v: unknown) => (v == null ? '' : String(v));
+  return als(nieuw.waarde) > als(huidig.waarde);
+}
+
+/** UTC-tekst zoals SQLite die zelf schrijft (JJJJ-MM-DD UU:MM:SS). */
+function sqliteTijd(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
 
 /**
  * Administratie voor sync, bijgehouden voor elke lokale wijziging in dezelfde transactie als de
@@ -171,30 +305,102 @@ export class RelationsService {
     })();
   }
 
+  /** Zoekt een klant op de uuid van de sync: eerst in relations.uuid, daarna in relation_aliases (alleen lezen). */
+  vindOpSyncUuid(uuid: string): Relation | undefined {
+    const direct = this.db.prepare('SELECT * FROM relations WHERE uuid = ?').get(uuid) as Relation | undefined;
+    if (direct) return direct;
+    return this.db
+      .prepare('SELECT r.* FROM relation_aliases a JOIN relations r ON r.id = a.relation_id WHERE a.alias_uuid = ?')
+      .get(uuid) as Relation | undefined;
+  }
+
+  /**
+   * Maakt een nieuwe klant van een telefoonwijziging: type klant en land NL tenzij opgegeven, de uuid
+   * van de telefoon, revisie 1, een nieuw wijzigingsnummer, en per meegestuurd veld een tijdrij en een
+   * logregel met de apparaatcode als bron en de bewerktijd als tijd. Alles in een transactie. De
+   * velden zijn per kolom (zie KLANT_VELDEN); naam is verplicht. created_at is het aanmaakmoment van de
+   * telefoon (hoogstens nu): dat is de ondergrens voor velden die nog geen rij hebben, zodat een latere
+   * wijziging van dezelfde telefoon op zo'n veld niet door de aankomsttijd op de pc wordt overruled.
+   */
+  maakVanSync(uuid: string, velden: Record<string, unknown>, tijd: number, bron: string): Relation {
+    const schoon = normaliseerSyncVelden(velden);
+    if (typeof schoon.name !== 'string') throw new KlantVeldFout('name', 'Naam is verplicht voor een nieuwe klant');
+    const kolommen = SYNC_KOLOMMEN.filter((k) => Object.hasOwn(schoon, k));
+    const id = this.db.transaction(() => {
+      const result = this.db
+        .prepare(
+          `INSERT INTO relations (type, ${kolommen.join(', ')}, uuid, revisie, gewijzigd_op, sync_seq, created_at) VALUES ('klant', ${kolommen.map(() => '?').join(', ')}, ?, 1, ?, ?, ?)`,
+        )
+        .run(...kolommen.map((k) => schoon[k] ?? null), uuid, tijd, volgendeSyncSeq(this.db), sqliteTijd(Math.min(tijd, this.klok())));
+      const nieuwId = Number(result.lastInsertRowid);
+      for (const kolom of kolommen) this.schrijfVeld(nieuwId, 1, RELATIE_VELD_MAPPING[kolom], null, schoon[kolom], tijd, bron);
+      return nieuwId;
+    })();
+    return this.get(id);
+  }
+
+  /**
+   * Past velden van een telefoonwijziging toe op een bestaande klant, per veld op (tijd, bron): de
+   * nieuwste wint, bij gelijke tijd de lexicografisch grootste bron, en een veld met een oudere tijd
+   * wordt overgeslagen zonder logregel. Een veld zonder rij in relation_field_rev heeft als tijd de
+   * ondergrens uit created_at en als bron pc. Is minstens één veld toegepast, dan gaat de revisie met één
+   * omhoog, krijgt de klant een nieuw wijzigingsnummer en wordt gewijzigd_op de hoogste van de oude
+   * waarde en de toegepaste veldtijden; elk toegepast veld komt in relation_field_rev en relation_changelog.
+   * Een veld dat wint wordt ook toegepast als de waarde gelijk is: de veldtijd moet het resultaat
+   * bepalen, anders hangt de eindtoestand af van de volgorde. Alles in een transactie.
+   */
+  pasVeldenToe(id: number, velden: Record<string, unknown>, tijd: number, bron: string): { toegepast: string[]; overgeslagen: string[] } {
+    const schoon = normaliseerSyncVelden(velden);
+    return this.db.transaction(() => {
+      const bestaand = this.get(id);
+      const rij = bestaand as unknown as Record<string, unknown>;
+      const ondergrens = veldOndergrens(bestaand.created_at);
+      const revisie = bestaand.revisie + 1;
+      const toegepast: string[] = [];
+      const overgeslagen: string[] = [];
+      const zetten: SyncKolom[] = [];
+      for (const kolom of SYNC_KOLOMMEN) {
+        if (!Object.hasOwn(schoon, kolom)) continue;
+        const veld = RELATIE_VELD_MAPPING[kolom];
+        const opgeslagen = this.db.prepare('SELECT tijd, bron FROM relation_field_rev WHERE relation_id = ? AND veld = ?').get(id, veld) as { tijd: number; bron: string } | undefined;
+        const huidig = { ...(opgeslagen ?? { tijd: ondergrens, bron: BRON_PC }), waarde: rij[kolom] };
+        if (!wintVeld({ tijd, bron, waarde: schoon[kolom] }, huidig)) {
+          overgeslagen.push(veld);
+          continue;
+        }
+        toegepast.push(veld);
+        zetten.push(kolom);
+        this.schrijfVeld(id, revisie, veld, rij[kolom], schoon[kolom], tijd, bron);
+      }
+      if (zetten.length === 0) return { toegepast, overgeslagen };
+      this.db
+        .prepare(`UPDATE relations SET ${zetten.map((k) => `${k} = ?`).join(', ')}, revisie = ?, gewijzigd_op = ?, sync_seq = ? WHERE id = ?`)
+        .run(...zetten.map((k) => schoon[k] ?? null), revisie, Math.max(bestaand.gewijzigd_op, tijd), volgendeSyncSeq(this.db), id);
+      return { toegepast, overgeslagen };
+    })();
+  }
+
   /** De tijd per veld (een rij per klant en veld) en een logregel; oud en nieuw als tekst, null blijft NULL. */
-  private schrijfVeld(relationId: number, revisie: number, veld: string, oud: unknown, nieuw: unknown, tijd: number): void {
+  private schrijfVeld(relationId: number, revisie: number, veld: string, oud: unknown, nieuw: unknown, tijd: number, bron: string = BRON_PC): void {
     this.db
       .prepare(
         `INSERT INTO relation_field_rev (relation_id, veld, tijd, bron) VALUES (?, ?, ?, ?)
          ON CONFLICT(relation_id, veld) DO UPDATE SET tijd = excluded.tijd, bron = excluded.bron`,
       )
-      .run(relationId, veld, tijd, BRON_PC);
-    const tekst = (v: unknown) => (v == null ? null : String(v));
+      .run(relationId, veld, tijd, bron);
+    const naarTekst = (v: unknown) => (v == null ? null : String(v));
     this.db
       .prepare('INSERT INTO relation_changelog (relation_id, revisie, veld, oud, nieuw, tijd, bron) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(relationId, revisie, veld, tekst(oud), tekst(nieuw), tijd, BRON_PC);
+      .run(relationId, revisie, veld, naarTekst(oud), naarTekst(nieuw), tijd, bron);
   }
 
   private clean(input: RelationInput): Record<(typeof FIELDS)[number], unknown> {
     const name = input.name?.trim();
     if (!name) throw new ValidationError('Naam is verplicht');
-    const t = (v: unknown) => (typeof v === 'string' ? v.trim() || null : v ?? null);
-    const email = t(input.email) as string | null;
-    if (email && !isValidEmail(email)) throw new ValidationError(`Dit e-mailadres klopt niet: ${email}`);
-    const iban = input.iban ? normalizeIban(input.iban) : null;
-    if (iban && !isValidIban(iban)) throw new ValidationError(`Dit rekeningnummer klopt niet: ${input.iban}`);
-    const vat = input.vat_number && input.vat_number.trim() ? normalizeVatNumber(input.vat_number) : null;
-    if (vat && !isValidVatNumber(vat)) throw new ValidationError(`Dit btw-nummer klopt niet: ${input.vat_number}`);
+    const t = tekst;
+    const email = controleerEmail(input.email);
+    const iban = controleerIban(input.iban);
+    const vat = controleerBtwNummer(input.vat_number);
     // KvK alleen bij een Nederlands bedrijf; een buitenlands bedrijf heeft een eigen handelsregisternummer
     const dutch = (countryCode(input.country && input.country.trim() ? input.country : 'NL') ?? 'NL') === 'NL';
     const kvk = input.kvk_number && input.kvk_number.trim() ? (dutch ? input.kvk_number.replace(/\s/g, '') : input.kvk_number.trim()) : null;
@@ -202,9 +408,8 @@ export class RelationsService {
     if (kvk && !dutch && !isValidForeignRegistration(kvk)) throw new ValidationError(`Dit handelsregisternummer klopt niet: ${input.kvk_number}`);
     const type = input.type ?? 'klant';
     if (!['klant', 'leverancier', 'beide'].includes(type)) throw new ValidationError('Kies klant, leverancier of allebei');
-    const term = input.payment_term_days;
-    if (term != null && (!Number.isInteger(term) || term < 0 || term > 365)) throw new ValidationError('Betaaltermijn moet tussen 0 en 365 dagen liggen');
-    if (input.country && input.country.trim() && !countryCode(input.country)) throw new ValidationError(`Dit land kennen we niet: ${input.country}. Gebruik twee letters, bijvoorbeeld DE of US.`);
+    const term = controleerBetaaltermijn(input.payment_term_days);
+    const country = controleerLand(input.country);
     return {
       type,
       name,
@@ -212,13 +417,13 @@ export class RelationsService {
       email,
       phone: t(input.phone),
       address: t(input.address),
-      postcode: input.postcode ? input.postcode.replace(/\s+/g, ' ').trim().toUpperCase() : null,
+      postcode: schoonPostcode(input.postcode),
       city: t(input.city),
-      country: (t(input.country) as string | null)?.toUpperCase() ?? 'NL',
+      country,
       vat_number: vat,
       kvk_number: kvk,
       iban,
-      payment_term_days: term ?? null,
+      payment_term_days: term,
       notes: t(input.notes),
     };
   }

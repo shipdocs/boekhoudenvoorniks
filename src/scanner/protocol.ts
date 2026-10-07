@@ -67,6 +67,8 @@ export type ErrorCode =
   | 'lengte'
   | 'te-druk'
   | 'opslaan-mislukt'
+  | 'veld-ongeldig'
+  | 'klant-onbekend'
   | 'onbekend';
 
 export interface HelloMessage {

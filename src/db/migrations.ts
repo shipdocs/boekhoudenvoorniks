@@ -1450,4 +1450,24 @@ export const migrations: string[] = [
   );
   INSERT INTO sync_teller (naam, waarde) SELECT 'wijziging', COALESCE(MAX(id), 0) FROM relations WHERE true ON CONFLICT(naam) DO NOTHING;
   `,
+  `
+  -- Register van ontvangen telefoonwijzigingen: per (apparaat, entiteit, uuid, revisie) een rij met de
+  -- uitkomst van de eerste verwerking. Zo wordt dezelfde wijziging nooit twee keer toegepast, via welke
+  -- route ze ook binnenkomt. tijd is de bewerktijd van de telefoon, ontvangen_op de klok van de pc (beide in
+  -- milliseconden), uitkomst is toegepast, overgeslagen of afgewezen en fout bevat de reden van een afwijzing.
+  -- IF NOT EXISTS omdat een test (en een teruggezette administratie) de migraties op een al gevulde
+  -- database opnieuw kan draaien. Er worden geen rijen geschreven.
+  CREATE TABLE IF NOT EXISTS sync_ontvangen (
+    apparaat_id TEXT,
+    entiteit TEXT,
+    uuid TEXT,
+    revisie INTEGER,
+    tijd INTEGER,
+    ontvangen_op INTEGER,
+    uitkomst TEXT,
+    fout TEXT NULL,
+    route TEXT NOT NULL DEFAULT 'netwerk',
+    PRIMARY KEY (apparaat_id, entiteit, uuid, revisie)
+  );
+  `,
 ];
