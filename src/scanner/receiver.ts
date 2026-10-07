@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { ScannerPairing } from './pairing';
 import type { ReceiptSpool } from './spool';
+import type { Wijziging } from '@gratis-boekhouden/kern';
+import type { SyncResultaat } from '../sync/ontvangst';
 import { jpegInfo } from './jpeg-pdf';
 import { normalizeRemote, sameSubnet, type LocalInterface } from './network';
 import { CONTENT_TYPE, DIRECTION, ENDPOINT_PATH, HEADER_BYTES, LIMITS, PROTOCOL_VERSIONS, RULES_VERSION, TAG_BYTES, ProtocolError, openRequest, parseFrame, readHeader, sealResponse, toBase64Url, type ErrorCode } from './protocol';
@@ -8,6 +10,8 @@ import { CONTENT_TYPE, DIRECTION, ENDPOINT_PATH, HEADER_BYTES, LIMITS, PROTOCOL_
 export interface ReceiverOptions {
   pairing: ScannerPairing;
   spool: ReceiptSpool;
+  /** verwerkt een gecontroleerde wijziging in de administratie (SyncOntvangst); zonder deze opdracht wordt een wijziging alleen bevestigd */
+  sync?: { verwerk(deviceId: string, bron: string, wijziging: Wijziging, route?: string): SyncResult };
   /** de adressen waarop geluisterd wordt (alleen het lokale netwerk); tests geven hier 127.0.0.1 */
   interfaces: () => LocalInterface[];
   /** mag deze afzender? Standaard: alleen uit hetzelfde netwerk als het adres waarop hij binnenkomt. */
@@ -22,6 +26,8 @@ export interface ReceiverOptions {
   log?: (message: string) => void;
 }
 
+type SyncResult = SyncResultaat;
+
 const MAX_INFLIGHT = 3;
 const MAX_FAILURES = 20;
 const FAILURE_WINDOW_MS = 60_000;
@@ -35,8 +41,8 @@ const FAILURE_WINDOW_MS = 60_000;
  *   is, en geeft nooit iets uit de administratie terug: alleen "ontvangen" of een foutcode.
  * - Het begrijpt protocolversie 1 (hallo en bon) en, naast die, versie 2: daarbij zegt het
  *   hallo-antwoord van welke versie de btw-regeltabel is, en kan een telefoon een change-set
- *   (`wijziging`) sturen en om `stamgegevens` vragen. Die laatste twee worden in deze stap nog
- *   nergens bewaard of gesynchroniseerd; er gaat alleen een bevestiging terug.
+ *   (`wijziging`) sturen en om `stamgegevens` vragen. Een klantwijziging wordt bewaard door
+ *   SyncOntvangst (opdracht `sync`); `stamgegevens` krijgt voorlopig alleen een bevestiging.
  * - Alles wat binnenkomt is invoer van buiten: begrensd in grootte en op type gecontroleerd. De naam van
  *   het document maakt de app zelf; alleen het ID van de bon wordt (na controle dat het een UUID is) de
  *   naam van het tijdelijke bestand in de wachtrij.
@@ -298,12 +304,26 @@ export class ScannerReceiver {
     }
 
     if (msg.soort === 'wijziging') {
-      // Het formaat is gecontroleerd door de kern (change-set, met de idempotentieregel van
-      // packages/core). Bewaren en synchroniseren volgt in een latere stap: er gaat niets uit de
-      // administratie terug en er wordt niets weggeschreven.
+      // Het formaat is gecontroleerd door de kern (change-set); het bewaren doet SyncOntvangst. De
+      // apparaatcode (de bron van elk veld) bestaat pas na het eerste geldige bericht, dus eerst seen().
       this.opts.pairing.seen(deviceId);
       this.opts.onActivity?.();
-      return reply(200, { ok: true, soort: 'wijziging', entiteit: msg.wijziging.entiteit, uuid: msg.wijziging.uuid, revisie: msg.wijziging.revisie });
+      const w = msg.wijziging;
+      const eigen = { entiteit: w.entiteit, uuid: w.uuid, revisie: w.revisie };
+      if (!this.opts.sync) return reply(200, { ok: true, soort: 'wijziging', ...eigen });
+      let uitslag: SyncResult;
+      try {
+        const bron = this.opts.pairing.code(deviceId);
+        if (!bron) throw new Error('de telefoon heeft nog geen apparaatcode');
+        uitslag = this.opts.sync.verwerk(deviceId, bron, w, 'netwerk');
+      } catch (e) {
+        this.opts.log?.(`Wijziging van de telefoon opslaan mislukt: ${(e as Error).message}`);
+        return reply(500, { ok: false, fout: 'opslaan-mislukt' });
+      }
+      if (uitslag.status === 200) {
+        return reply(200, { ok: true, soort: 'wijziging', ...eigen, uitkomst: uitslag.uitkomst, ...(uitslag.fout ? { fout: uitslag.fout } : {}) });
+      }
+      return reply(uitslag.status, { ok: false, fout: uitslag.fout ?? 'opslaan-mislukt', ...(uitslag.veld ? { veld: uitslag.veld } : {}), ...(uitslag.melding ? { melding: uitslag.melding } : {}) });
     }
 
     if (msg.soort === 'stamgegevens') {

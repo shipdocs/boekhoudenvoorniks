@@ -13,7 +13,7 @@ import { besluitWijziging, leesWijziging, type WijzigingsFout } from '@gratis-bo
 // Protocol versie 2 naast versie 1 (docs/bonnenscanner-protocol.md): het hallo-antwoord van v2 noemt
 // de versie van de btw-regeltabel (rulesVersion) en de ondersteunde protocolversies, en de telefoon
 // kan een change-set (`wijziging`) sturen en om `stamgegevens` vragen. Van versie 1 verandert niets.
-// Er wordt in deze stap nog niets bewaard of gesynchroniseerd.
+// Klantwijzigingen worden bewaard (tests/sync-klanten.test.ts); stamgegevens, projecten, facturen, bonnen en foto's nog niet.
 
 const LOOPBACK = [{ address: '127.0.0.1', netmask: '255.0.0.0' }];
 
@@ -168,15 +168,18 @@ describe('bonnenscanner v2: versie 1 en versie 2 naast elkaar', () => {
 });
 
 describe('bonnenscanner v2: wijzigingen (change-sets)', () => {
-  it('een geldige change-set wordt bevestigd met alleen de eigen gegevens terug, en niets wordt bewaard', async () => {
+  it('een geldige change-set wordt bevestigd met de eigen gegevens en de uitkomst terug, en de klant wordt bewaard', async () => {
     const t = start();
     const p = await pair(t);
     const uuid = randomUUID();
     const r = await p.wijziging({ uuid, velden: { naam: 'Familie Jansen', email: 'jansen@example.nl' } });
-    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'wijziging', entiteit: 'klant', uuid, revisie: 1 } });
-    expect(Object.keys(r.json!).sort()).toEqual(['entiteit', 'ok', 'revisie', 'soort', 'uuid']);
+    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'wijziging', entiteit: 'klant', uuid, revisie: 1, uitkomst: 'toegepast' } });
+    expect(Object.keys(r.json!).sort()).toEqual(['entiteit', 'ok', 'revisie', 'soort', 'uitkomst', 'uuid']);
     expect(r.raw[4]).toBe(2);
-    // nog niets opslaan of synchroniseren: er is geen document, geen wachtrij en geen eigenaar van gegevens
+    // de klant staat in de administratie, met de uuid van de telefoon, en het register kent de wijziging
+    expect(t.db.prepare('SELECT type, name, email, country, revisie FROM relations WHERE uuid = ?').get(uuid)).toEqual({ type: 'klant', name: 'Familie Jansen', email: 'jansen@example.nl', country: 'NL', revisie: 1 });
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM sync_ontvangen WHERE uuid = ?').get(uuid)).toEqual({ n: 1 });
+    // een klant is geen document: er is geen document, geen bon en geen bestand in de wachtrij
     expect(t.documents()).toEqual([]);
     expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual({ n: 0 });
     expect(existsSync(t.spoolDir) ? readdirSync(t.spoolDir) : []).toEqual([]);
@@ -212,18 +215,27 @@ describe('bonnenscanner v2: wijzigingen (change-sets)', () => {
     expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual({ n: 0 });
   });
 
-  it('dezelfde wijziging nog een keer sturen verandert niets: geen fout, en nog steeds niets bewaard', async () => {
+  it('dezelfde wijziging nog een keer sturen verandert niets: geen fout, overgeslagen, en nog steeds een klant', async () => {
     const t = start();
     const p = await pair(t);
     const uuid = randomUUID();
     const eerste = await p.wijziging({ uuid, velden: { naam: 'Familie Jansen' } });
-    expect(eerste).toMatchObject({ status: 200, json: { ok: true, soort: 'wijziging', entiteit: 'klant', uuid, revisie: 1 } });
-    // dezelfde uuid met dezelfde revisie, en met een lagere: netjes bevestigd, niets aan de administratie
+    expect(eerste).toMatchObject({ status: 200, json: { ok: true, soort: 'wijziging', entiteit: 'klant', uuid, revisie: 1, uitkomst: 'toegepast' } });
+    const aantal = () => t.db.prepare('SELECT COUNT(*) AS n FROM relations WHERE uuid = ?').get(uuid);
+    const logboek = () => t.db.prepare('SELECT COUNT(*) AS n FROM relation_changelog').get();
+    const voor = logboek();
+    // dezelfde uuid met dezelfde revisie: netjes bevestigd als overgeslagen, niets aan de administratie
     const gelijk = await p.wijziging({ uuid, velden: { naam: 'Familie Jansen' } });
-    expect(gelijk).toMatchObject({ status: 200, json: { ok: true, soort: 'wijziging', uuid, revisie: 1 } });
-    const lager = await p.wijziging({ uuid, revisie: 1, velden: { naam: 'Familie Jansen' } });
-    expect(lager).toMatchObject({ status: 200, json: { ok: true, soort: 'wijziging', uuid, revisie: 1 } });
-    // er is nog steeds niets bewaard
+    expect(gelijk).toMatchObject({ status: 200, json: { ok: true, soort: 'wijziging', uuid, revisie: 1, uitkomst: 'overgeslagen' } });
+    expect(aantal()).toEqual({ n: 1 });
+    expect(logboek()).toEqual(voor);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM sync_ontvangen WHERE uuid = ?').get(uuid)).toEqual({ n: 1 });
+    // een hogere revisie met nieuwe inhoud wordt wel toegepast, en blijft dezelfde klant
+    const hoger = await p.wijziging({ uuid, revisie: 2, tijd: t.clock.now + 1, velden: { plaats: 'Utrecht' } });
+    expect(hoger).toMatchObject({ status: 200, json: { ok: true, uuid, revisie: 2, uitkomst: 'toegepast' } });
+    expect(aantal()).toEqual({ n: 1 });
+    expect(t.db.prepare('SELECT city FROM relations WHERE uuid = ?').get(uuid)).toEqual({ city: 'Utrecht' });
+    // er is geen document of bestand bijgekomen
     await t.scanner.processSpool();
     expect(t.documents()).toEqual([]);
     expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_documents').get()).toEqual({ n: 0 });
@@ -419,7 +431,8 @@ describe('bonnenscanner v2: grenzen van de berichtgrootte', () => {
     const json = {
       soort: 'wijziging',
       tijd: t.clock.now,
-      wijziging: { entiteit: 'klant', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'Grote mutatie', lijst: Array.from({ length: 400 }, () => 'x'.repeat(48)) } },
+      // entiteit project: de velden van een klant zijn sinds de opslag van klanten beperkt tot het klantveldschema
+      wijziging: { entiteit: 'project', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'Grote mutatie', lijst: Array.from({ length: 400 }, () => 'x'.repeat(48)) } },
     };
     const lengte = Buffer.byteLength(JSON.stringify(json), 'utf8');
     expect(lengte).toBeGreaterThan(LIMITS.maxJsonBytes);

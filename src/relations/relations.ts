@@ -195,11 +195,6 @@ function wintVeld(nieuw: { tijd: number; bron: string; waarde: unknown }, huidig
   return als(nieuw.waarde) > als(huidig.waarde);
 }
 
-/** UTC-tekst zoals SQLite die zelf schrijft (JJJJ-MM-DD UU:MM:SS). */
-function sqliteTijd(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
-}
-
 /**
  * Administratie voor sync, bijgehouden voor elke lokale wijziging in dezelfde transactie als de
  * schrijfactie zelf: uuid, revisie (een per echte wijziging), gewijzigd_op, sync_seq uit de globale
@@ -318,9 +313,12 @@ export class RelationsService {
    * Maakt een nieuwe klant van een telefoonwijziging: type klant en land NL tenzij opgegeven, de uuid
    * van de telefoon, revisie 1, een nieuw wijzigingsnummer, en per meegestuurd veld een tijdrij en een
    * logregel met de apparaatcode als bron en de bewerktijd als tijd. Alles in een transactie. De
-   * velden zijn per kolom (zie KLANT_VELDEN); naam is verplicht. created_at is het aanmaakmoment van de
-   * telefoon (hoogstens nu): dat is de ondergrens voor velden die nog geen rij hebben, zodat een latere
-   * wijziging van dezelfde telefoon op zo'n veld niet door de aankomsttijd op de pc wordt overruled.
+   * velden zijn per kolom (zie KLANT_VELDEN); naam is verplicht.
+   *
+   * De velden die de telefoon niet meestuurt krijgen een tijdrij met tijd 0 en een lege bron (zonder
+   * logregel): niemand heeft ze nog gezet, dus elke latere wijziging wint, ook een oudere revisie die
+   * pas na deze komt. Zonder die rijen zou de ondergrens uit created_at (het moment van aankomst op de pc)
+   * zo'n latere wijziging ten onrechte afwijzen, en hing de eindtoestand van de volgorde af.
    */
   maakVanSync(uuid: string, velden: Record<string, unknown>, tijd: number, bron: string): Relation {
     const schoon = normaliseerSyncVelden(velden);
@@ -328,12 +326,12 @@ export class RelationsService {
     const kolommen = SYNC_KOLOMMEN.filter((k) => Object.hasOwn(schoon, k));
     const id = this.db.transaction(() => {
       const result = this.db
-        .prepare(
-          `INSERT INTO relations (type, ${kolommen.join(', ')}, uuid, revisie, gewijzigd_op, sync_seq, created_at) VALUES ('klant', ${kolommen.map(() => '?').join(', ')}, ?, 1, ?, ?, ?)`,
-        )
-        .run(...kolommen.map((k) => schoon[k] ?? null), uuid, tijd, volgendeSyncSeq(this.db), sqliteTijd(Math.min(tijd, this.klok())));
+        .prepare(`INSERT INTO relations (type, ${kolommen.join(', ')}, uuid, revisie, gewijzigd_op, sync_seq) VALUES ('klant', ${kolommen.map(() => '?').join(', ')}, ?, 1, ?, ?)`)
+        .run(...kolommen.map((k) => schoon[k] ?? null), uuid, tijd, volgendeSyncSeq(this.db));
       const nieuwId = Number(result.lastInsertRowid);
       for (const kolom of kolommen) this.schrijfVeld(nieuwId, 1, RELATIE_VELD_MAPPING[kolom], null, schoon[kolom], tijd, bron);
+      const nogLeeg = this.db.prepare('INSERT INTO relation_field_rev (relation_id, veld, tijd, bron) VALUES (?, ?, 0, \'\') ON CONFLICT(relation_id, veld) DO NOTHING');
+      for (const kolom of SYNC_KOLOMMEN) if (!kolommen.includes(kolom)) nogLeeg.run(nieuwId, RELATIE_VELD_MAPPING[kolom]);
       return nieuwId;
     })();
     return this.get(id);
