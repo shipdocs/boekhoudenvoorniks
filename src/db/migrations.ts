@@ -1392,4 +1392,62 @@ export const migrations: string[] = [
     afgesloten_op TEXT NULL
   );
   `,
+  `
+  -- Sync-identiteit van klanten en leveranciers aan de pc-kant (voorbereiding telefoon-sync).
+  -- Alleen additief. De uuid is een willekeurige versie-4-uuid in kleine letters en mag NULL zijn:
+  -- een oudere app-versie die deze administratie daarna nog opent, schrijft rijen zonder uuid en met
+  -- sync_seq 0; het herstel bij het openen van de database vult die aan.
+  -- revisie: pc-rij-revisie (informatief). gewijzigd_op: bewerktijd van de laatste wijziging in
+  -- milliseconden (informatief, nooit voor delta of sortering). sync_seq: nummer uit de globale teller
+  -- sync_teller, de enige basis voor delta-sync.
+  -- Regel voor velden zonder rij in relation_field_rev: tijd = created_at van de klant in milliseconden
+  -- en bron 'pc' (niet gewijzigd_op en niet 0). Deze migratie schrijft daarom geen veldrijen.
+  ALTER TABLE relations ADD COLUMN uuid TEXT;
+  ALTER TABLE relations ADD COLUMN revisie INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE relations ADD COLUMN gewijzigd_op INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE relations ADD COLUMN sync_seq INTEGER NOT NULL DEFAULT 0;
+
+  UPDATE relations SET uuid = lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-'||substr('89ab',1+(abs(random())%4),1)||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6))) WHERE uuid IS NULL;
+  UPDATE relations SET gewijzigd_op = COALESCE(CAST(strftime('%s', created_at) AS INTEGER) * 1000, 0);
+  UPDATE relations SET sync_seq = id;
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_relations_uuid ON relations(uuid);
+  CREATE INDEX IF NOT EXISTS idx_relations_sync_seq ON relations(sync_seq);
+
+  -- IF NOT EXISTS omdat een test (en een teruggezette administratie) de migraties op een al gevulde
+  -- database opnieuw kan draaien.
+  CREATE TABLE IF NOT EXISTS relation_field_rev (
+    relation_id INTEGER NOT NULL REFERENCES relations(id),
+    veld TEXT NOT NULL,
+    tijd INTEGER NOT NULL,
+    bron TEXT NOT NULL,
+    PRIMARY KEY (relation_id, veld)
+  );
+
+  CREATE TABLE IF NOT EXISTS relation_changelog (
+    id INTEGER PRIMARY KEY,
+    relation_id INTEGER NOT NULL REFERENCES relations(id),
+    revisie INTEGER NOT NULL,
+    veld TEXT NOT NULL,
+    oud TEXT,
+    nieuw TEXT,
+    tijd INTEGER NOT NULL,
+    bron TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_relation_changelog_relation ON relation_changelog(relation_id);
+
+  -- Later voor samengevoegde klanten; hier alleen aangemaakt.
+  CREATE TABLE IF NOT EXISTS relation_aliases (
+    alias_uuid TEXT PRIMARY KEY,
+    relation_id INTEGER NOT NULL REFERENCES relations(id),
+    aangemaakt_op INTEGER NOT NULL
+  );
+
+  -- Globale wijzigingsteller; de rij 'wijziging' begint op het hoogste klantnummer (0 zonder klanten).
+  CREATE TABLE IF NOT EXISTS sync_teller (
+    naam TEXT PRIMARY KEY,
+    waarde INTEGER NOT NULL
+  );
+  INSERT INTO sync_teller (naam, waarde) SELECT 'wijziging', COALESCE(MAX(id), 0) FROM relations WHERE true ON CONFLICT(naam) DO NOTHING;
+  `,
 ];
