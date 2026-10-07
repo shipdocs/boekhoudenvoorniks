@@ -164,7 +164,7 @@ test('mislukte detailsynchronisatie importeert transacties zonder saldotaak; ont
   await page.getByRole('button', { name: 'Nu bijwerken' }).click();
   await page.getByRole('dialog', { name: 'Handmatig bijwerken via Ponto' }).getByRole('button', { name: 'Doorgaan en bijwerken' }).click();
   await expect.poll(async () => (await call<unknown[]>(page, 'bank.transactions')).length).toBe(before + 1);
-  await expect(page.getByText(/synchronization-error/)).toBeVisible();
+  await expect(page.getByText('Rekening: De bank gaf een fout bij het ophalen. Probeer het later opnieuw.')).toBeVisible();
   await nav(page, 'Vandaag');
   await expect(page.locator('.task', { hasText: 'saldo klopt niet' })).toHaveCount(0);
   await nav(page, 'Bank');
