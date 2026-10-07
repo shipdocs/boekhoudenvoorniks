@@ -1379,4 +1379,17 @@ export const migrations: string[] = [
   -- binnen één kalenderjaar (een periode over de jaargrens wordt in twee regels bewaard).
   ALTER TABLE time_entries ADD COLUMN period_end TEXT;
   `,
+  `
+  -- Unieke apparaatcode (M1, M2, …) per koppeling: het volgnummer loopt nooit terug, dus een code
+  -- wordt nooit hergebruikt. Ontkoppelen vult afgesloten_op en laat de rij staan. De sleutel van de
+  -- koppeling staat hier niet: die zit versleuteld in 'secrets'. IF NOT EXISTS omdat een test (en een
+  -- teruggezette administratie) de migraties op een al gevulde database opnieuw kan draaien.
+  CREATE TABLE IF NOT EXISTS scanner_device_codes (
+    code TEXT PRIMARY KEY,
+    volgnummer INTEGER NOT NULL UNIQUE,
+    device_id TEXT,
+    toegekend_op TEXT NOT NULL,
+    afgesloten_op TEXT NULL
+  );
+  `,
 ];

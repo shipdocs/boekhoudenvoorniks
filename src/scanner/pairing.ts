@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { Db } from '../db/database';
+import { tx, type Db } from '../db/database';
 import type { SecretStore } from '../integrations/types';
 import { DEVICE_ID_BYTES, KEY_BYTES, LIMITS, toBase64Url, fromBase64Url } from './protocol';
 
@@ -14,6 +14,8 @@ export interface ScannerDevice {
   lastSeenAt: string | null;
   /** de sleutel is nog te openen (niet meer na bv. een andere sleutelhanger of een teruggezette back-up) */
   usable: boolean;
+  /** de unieke apparaatcode (M1, M2, …), toegekend bij het eerste geldige bericht; null zolang de telefoon zich nog niet gemeld heeft */
+  code: string | null;
 }
 
 interface Row {
@@ -22,6 +24,7 @@ interface Row {
   expires_at: number | null;
   paired_at: string | null;
   last_seen_at: string | null;
+  code: string | null;
 }
 
 /** Zo lang blijft een QR-code geldig als de telefoon hem niet scant. */
@@ -93,14 +96,17 @@ export class ScannerPairing {
 
   private remove(deviceId: string): void {
     this.secrets.delete(secretName(deviceId));
+    // de code wordt nooit verwijderd en dus nooit hergebruikt: bij ontkoppelen wordt hij alleen
+    // afgesloten. Een QR-code die niemand heeft gebruikt had nog geen code, en dan gebeurt hier niets.
+    this.db.prepare('UPDATE scanner_device_codes SET afgesloten_op = ? WHERE device_id = ? AND afgesloten_op IS NULL').run(new Date(this.now()).toISOString(), deviceId);
     this.db.prepare('DELETE FROM scanner_nonces WHERE device_id = ?').run(deviceId);
     this.db.prepare('DELETE FROM scanner_devices WHERE id = ?').run(deviceId);
   }
 
   list(): ScannerDevice[] {
     this.expire();
-    const rows = this.db.prepare('SELECT id, name, expires_at, paired_at, last_seen_at FROM scanner_devices ORDER BY created_at, rowid').all() as Row[];
-    return rows.map((r) => ({ id: r.id, name: r.name, pending: r.paired_at === null, expiresAt: r.paired_at === null ? r.expires_at : null, pairedAt: r.paired_at, lastSeenAt: r.last_seen_at, usable: this.key(r.id) !== null }));
+    const rows = this.db.prepare('SELECT d.id, d.name, d.expires_at, d.paired_at, d.last_seen_at, c.code FROM scanner_devices d LEFT JOIN scanner_device_codes c ON c.device_id = d.id ORDER BY d.created_at, d.rowid').all() as Row[];
+    return rows.map((r) => ({ id: r.id, name: r.name, pending: r.paired_at === null, expiresAt: r.paired_at === null ? r.expires_at : null, pairedAt: r.paired_at, lastSeenAt: r.last_seen_at, usable: this.key(r.id) !== null, code: r.code ?? null }));
   }
 
   /** Is er (minstens) één telefoon waarvoor het ontvangstpunt aan moet staan? */
@@ -160,10 +166,37 @@ export class ScannerPairing {
     return this.db.prepare('INSERT OR IGNORE INTO scanner_nonces (device_id, nonce, seen_at) VALUES (?, ?, ?)').run(deviceId, toBase64Url(nonce), now).changes === 1;
   }
 
-  /** Een geldig bericht van deze telefoon: laatst gezien, en een telefoon die nog wachtte is nu gekoppeld. */
+  /** De apparaatcode van deze telefoon, of null als hij er nog geen heeft gekregen. */
+  code(deviceId: string): string | null {
+    const row = this.db.prepare('SELECT code FROM scanner_device_codes WHERE device_id = ?').get(deviceId) as { code: string } | undefined;
+    return row?.code ?? null;
+  }
+
+  /**
+   * Een geldig bericht van deze telefoon: laatst gezien, en een telefoon die nog wachtte is nu gekoppeld.
+   * Bij het eerste geldige bericht krijgt de telefoon ook zijn apparaatcode — niet in begin(), zodat een
+   * QR-code die niemand scant geen code krijgt en er geen gat in de reeks valt.
+   */
   seen(deviceId: string): void {
     const at = new Date(this.now()).toISOString();
-    this.db.prepare('UPDATE scanner_devices SET last_seen_at = ?, paired_at = COALESCE(paired_at, ?), expires_at = NULL WHERE id = ?').run(at, at, deviceId);
+    const updated = this.db.prepare('UPDATE scanner_devices SET last_seen_at = ?, paired_at = COALESCE(paired_at, ?), expires_at = NULL WHERE id = ?').run(at, at, deviceId);
+    if (updated.changes > 0) this.assignCode(deviceId, at);
+  }
+
+  /**
+   * De code toekennen als deze telefoon er nog geen heeft. Het volgnummer is MAX(volgnummer)+1 van de
+   * codetabel, gelezen in dezelfde transactie als de toekenning — nooit COUNT(*) van de koppelingen, dus
+   * een code wordt nooit hergebruikt. Ontkoppelen gooit de rij niet weg, hij zet hem alleen op afgesloten.
+   */
+  private assignCode(deviceId: string, at: string): string {
+    return tx(this.db, () => {
+      const bestaand = this.code(deviceId);
+      if (bestaand) return bestaand;
+      const volgnummer = (this.db.prepare('SELECT MAX(volgnummer) + 1 AS volgnummer FROM scanner_device_codes').get() as { volgnummer: number | null }).volgnummer ?? 1;
+      const code = `M${volgnummer}`;
+      this.db.prepare('INSERT INTO scanner_device_codes (code, volgnummer, device_id, toegekend_op) VALUES (?, ?, ?, ?)').run(code, volgnummer, deviceId, at);
+      return code;
+    });
   }
 
   rename(deviceId: string, name: string): void {

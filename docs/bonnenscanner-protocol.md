@@ -59,6 +59,27 @@ Regels:
   (Android Keystore). De sleutel komt nooit in een logboek of een back-up.
 - Ontkoppelen op de pc gooit de sleutel weg. Daarna krijgt de telefoon `niet-gekoppeld` (zie Antwoorden).
 - Er kunnen meerdere telefoons gekoppeld zijn (hooguit tien), elk met een eigen apparaat-ID en sleutel.
+- Bij het eerste geldige bericht kent de pc de telefoon een unieke apparaatcode toe (zie *De
+  apparaatcode*).
+
+## De apparaatcode
+
+Elke gekoppelde telefoon krijgt van de pc een unieke **apparaatcode**: `M` met een oplopend volgnummer
+(`M1`, `M2`, …). De code hoort bij de koppeling en is de basis voor de apparaatreeks van facturen. Ze
+staat in de lijst gekoppelde telefoons op de pc en in het hallo-antwoord van versie 2 (zie *Versie 2*).
+
+- De toekenning gebeurt bij het **eerste geldige bericht** van de telefoon (meestal de `hallo`), niet
+  al bij het tonen van de QR-code. Een QR-code die niemand scant, krijgt dus geen code.
+- Het volgnummer is het hoogste ooit uitgegeven nummer plus één. Een code wordt **nooit hergebruikt**,
+  ook niet na ontkoppelen.
+- Opnieuw installeren van de app is een **nieuwe koppeling** en krijgt altijd een nieuwe code. De pc
+  kan een herinstallatie niet herkennen: de oude code staat open tot de gebruiker de oude koppeling
+  ontkoppelt. Wat er daarna met de oude factuurreeks gebeurt (de reeks sluiten, ontbrekende nummers
+  bewaken) volgt in een latere versie van dit document.
+- Ontkoppelen **sluit de code af**: de code blijft in de administratie bewaard, maar wordt nooit meer
+  uitgegeven. Codes worden nooit verwijderd.
+- Bekende beperking: bij terugzetten van een oudere back-up valt het hoogste uitgegeven volgnummer
+  terug, en kan een eerder uitgegeven code opnieuw worden toegekend.
 
 ## De pc vinden
 
@@ -394,9 +415,9 @@ welke versie het is. Een `wijziging` of `stamgegevens` in een envelop van versie
 
 ### Het hallo-antwoord in versie 2
 
-Precies het oude antwoord, met erbij `regels` en `protocollen` (de voorbeelden in dit deel staan als
-tekst en worden gecontroleerd door `tests/bonnenscanner-v2.test.ts`; het uitgewerkte voorbeeld van
-versie 1 hierboven blijft byte voor byte in `tests/bonnenscanner.test.ts`):
+Precies het oude antwoord, met erbij `regels`, `protocollen` en de `apparaatcode` van deze telefoon
+(de voorbeelden in dit deel staan als tekst en worden gecontroleerd door `tests/bonnenscanner-v2.test.ts`;
+het uitgewerkte voorbeeld van versie 1 hierboven blijft byte voor byte in `tests/bonnenscanner.test.ts`).
 
 ```text
 {"ok":true,"soort":"hallo","pc":"oKGio6SlpqeoqaqrrK2urw","pcTijd":1790848800123,"limieten":{"fotos":10,"fotoBytes":19922944,"notitie":1000},"regels":1,"protocollen":[1,2]}
@@ -406,6 +427,7 @@ versie 1 hierboven blijft byte voor byte in `tests/bonnenscanner.test.ts`):
 |---|---|
 | `regels` | de regelsversie (in de code `rulesVersion`): het versienummer van de btw-regeltabel die bij deze pc hoort (nu 1). De tabel zelf volgt in een latere versie van dit document |
 | `protocollen` | alle protocolversies die deze pc begrijpt, van laag naar hoog (nu `[1,2]`) |
+| `apparaatcode` | de apparaatcode van deze telefoon (`M1`, `M2`, …), zoals bij *De apparaatcode* |
 
 Een hallo in een envelop van versie 1 krijgt precies het oude antwoord, zonder deze velden.
 

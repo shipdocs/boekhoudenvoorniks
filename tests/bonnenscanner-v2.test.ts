@@ -103,7 +103,7 @@ describe('bonnenscanner v2: het hallo-antwoord', () => {
     const p = await pair(t);
     const r = await p.hallo(2);
     expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'hallo', regels: RULES_VERSION, protocollen: [1, 2] } });
-    expect(Object.keys(r.json!).sort()).toEqual(['limieten', 'ok', 'pc', 'pcTijd', 'protocollen', 'regels', 'soort']);
+    expect(Object.keys(r.json!).sort()).toEqual(['apparaatcode', 'limieten', 'ok', 'pc', 'pcTijd', 'protocollen', 'regels', 'soort']);
     // het antwoord zelf is ook een envelop van versie 2
     expect(r.raw.subarray(0, 4).toString('ascii')).toBe('BVNS');
     expect(r.raw[4]).toBe(2);
