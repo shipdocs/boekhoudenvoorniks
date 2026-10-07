@@ -291,9 +291,9 @@ export class ScannerReceiver {
       this.opts.pairing.seen(deviceId);
       this.opts.pairing.rename(deviceId, msg.naam);
       this.opts.onActivity?.();
-      // Een telefoon van versie 2 krijgt ook de versie van de btw-regeltabel en de protocolversies die
-      // deze pc begrijpt; versie 1 krijgt precies het oude antwoord.
-      const extra = versie >= 2 ? { regels: RULES_VERSION, protocollen: [...PROTOCOL_VERSIONS] } : {};
+      // Een telefoon van versie 2 krijgt ook de versie van de btw-regeltabel, de protocolversies die
+      // deze pc begrijpt, en zijn apparaatcode; versie 1 krijgt precies het oude antwoord.
+      const extra = versie >= 2 ? { regels: RULES_VERSION, protocollen: [...PROTOCOL_VERSIONS], apparaatcode: this.opts.pairing.code(deviceId) } : {};
       return reply(200, { ok: true, soort: 'hallo', pc: this.opts.pairing.pcId(), pcTijd: now, limieten: { fotos: LIMITS.maxPhotos, fotoBytes: LIMITS.maxPhotoBytes, notitie: LIMITS.maxNoteChars }, ...extra });
     }
 

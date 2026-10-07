@@ -8,7 +8,9 @@ import { setup } from './helpers';
 import { makeJpeg } from './fixtures/jpeg';
 import { migrate } from '../src/db/database';
 import { migrations } from '../src/db/migrations';
+import { sanitizeForExchange } from '../src/exchange/exchange';
 import { Bonnenscanner, type ScannerDeps } from '../src/scanner/scanner';
+import { PAIRING_TTL_MS, ScannerPairing } from '../src/scanner/pairing';
 import { PHONE_SCANNER } from '../src/shared/phone-scanner';
 import { CONTENT_TYPE, ENDPOINT_PATH, decodePairing, encodeFrame, openResponse, sealRequest, type PairingPayload, type ProtocolVersion } from '../src/scanner/protocol';
 
@@ -99,6 +101,20 @@ async function pair(t: ReturnType<typeof start>) {
   return phone(decodePairing(started.payload), t.clock);
 }
 
+/** ScannerPairing rechtstreeks op de testdatabase, met een eigen klok; voor de toekenning- en lijsttests. */
+function direct() {
+  const t = setup();
+  const clock = { now: Date.now() };
+  return { t, clock, pairing: new ScannerPairing(t.db, t.secrets, () => clock.now) };
+}
+
+/** Koppelen alsof de telefoon zich meteen meldt: begin() plus het eerste geldige bericht. */
+function koppel(p: ScannerPairing, clock: { now: number }): string {
+  const { deviceId } = p.begin();
+  p.seen(deviceId);
+  return deviceId;
+}
+
 describe('apparaatcode: de migratie', () => {
   /** de migratie die scanner_device_codes maakt; welk nummer hij heeft doet er niet toe */
   const index = migrations.findIndex((m) => /CREATE TABLE scanner_device_codes\b/.test(m));
@@ -121,5 +137,120 @@ describe('apparaatcode: de migratie', () => {
     ]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM scanner_device_codes').get()).toEqual({ n: 0 });
     db.close();
+  });
+});
+
+describe('apparaatcode: toekenning bij het eerste geldige bericht', () => {
+  it('M1-M2-M3 na ontkoppelen', () => {
+    const { clock, pairing } = direct();
+    koppel(pairing, clock); // A
+    koppel(pairing, clock); // B
+    expect(pairing.list().map((d) => d.code)).toEqual(['M1', 'M2']);
+    pairing.unpair(pairing.list()[0]!.id); // A ontkoppeld
+    koppel(pairing, clock); // C: krijgt de eerstvolgende code, niet die van A
+    const codes = pairing.list().map((d) => d.code);
+    expect(codes).toEqual(['M2', 'M3']);
+    for (const code of [...codes, 'M1']) expect(code).toMatch(/^M[1-9][0-9]*$/);
+  });
+
+  it('verlopen QR geeft geen gat', () => {
+    const { t, clock, pairing } = direct();
+    pairing.begin(); // deze QR-code wordt nooit gescand
+    clock.now += PAIRING_TTL_MS + 1;
+    koppel(pairing, clock); // de volgende telefoon krijgt de eerste code: de verlopen QR had er geen
+    expect(t.db.prepare('SELECT code, volgnummer, afgesloten_op FROM scanner_device_codes ORDER BY volgnummer').all()).toEqual([
+      { code: 'M1', volgnummer: 1, afgesloten_op: null },
+    ]);
+  });
+
+  it('een tweede bericht van hetzelfde apparaat geeft dezelfde code (idempotent)', () => {
+    const { t, clock, pairing } = direct();
+    const a = koppel(pairing, clock);
+    const eerst = pairing.code(a);
+    expect(eerst).toMatch(/^M[1-9][0-9]*$/);
+    pairing.seen(a); // het tweede bericht
+    expect(pairing.code(a)).toBe(eerst);
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_device_codes').get()).toEqual({ n: 1 });
+  });
+
+  it('migratiepad zonder code: een al gekoppeld apparaat krijgt er een bij zijn volgende bericht', () => {
+    const { t, clock, pairing } = direct();
+    // een koppeling van vóór deze stap: gekoppeld, zonder rij in scanner_device_codes
+    t.db.prepare("INSERT INTO scanner_devices (id, name, created_at, expires_at, paired_at) VALUES ('oud-apparaat', 'Telefoon 1', ?, NULL, ?)").run(new Date(clock.now).toISOString(), new Date(clock.now).toISOString());
+    pairing.seen('oud-apparaat');
+    expect(pairing.code('oud-apparaat')).toMatch(/^M[1-9][0-9]*$/);
+    expect(pairing.code('oud-apparaat')).toBe('M1');
+  });
+
+  it('ontkoppelen laat rij staan met afgesloten_op gevuld', () => {
+    const { t, clock, pairing } = direct();
+    const a = koppel(pairing, clock);
+    clock.now += 5_000;
+    pairing.unpair(a);
+    expect(t.db.prepare('SELECT code, device_id, toegekend_op, afgesloten_op FROM scanner_device_codes WHERE device_id = ?').get(a)).toEqual({
+      code: 'M1',
+      device_id: a,
+      toegekend_op: new Date(clock.now - 5_000).toISOString(),
+      afgesloten_op: new Date(clock.now).toISOString(),
+    });
+    // het apparaat zelf is wel degelijk weg
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM scanner_devices WHERE id = ?').get(a)).toEqual({ n: 0 });
+  });
+
+  it('lijst heeft code', () => {
+    const { clock, pairing } = direct();
+    const wachtend = pairing.begin(); // nog niet gemeld: nog geen code
+    expect(pairing.list()).toEqual([expect.objectContaining({ id: wachtend.deviceId, pending: true, code: null })]);
+    koppel(pairing, clock);
+    expect(pairing.list().map((d) => [d.pending, d.code])).toEqual([
+      [true, null],
+      [false, 'M1'],
+    ]);
+  });
+
+  it('herinstallatie zonder ontkoppelen geeft M2 en M1 blijft open', () => {
+    const { t, clock, pairing } = direct();
+    koppel(pairing, clock); // de eerste installatie
+    koppel(pairing, clock); // opnieuw installeren is een nieuwe koppeling: de pc kan ze niet onderscheiden
+    expect(t.db.prepare('SELECT code, afgesloten_op FROM scanner_device_codes ORDER BY volgnummer').all()).toEqual([
+      { code: 'M1', afgesloten_op: null },
+      { code: 'M2', afgesloten_op: null },
+    ]);
+  });
+
+  it('sanitize valt niet terug', async () => {
+    const { t, clock, pairing } = direct();
+    koppel(pairing, clock);
+    koppel(pairing, clock);
+    const dir = mkdtempSync(join(tmpdir(), 'bvn-apparaatcode-kopie-'));
+    dirs.push(dir);
+    const kopiePad = join(dir, 'kopie.sqlite');
+    await t.db.backup(kopiePad);
+    const kopie = new Database(kopiePad);
+    try {
+      sanitizeForExchange(kopie);
+      // in de kopie voor de boekhouder zijn de koppelingen gewist, maar de codes staan er nog
+      expect(kopie.prepare('SELECT COUNT(*) AS n FROM scanner_devices').get()).toEqual({ n: 0 });
+      expect(kopie.prepare('SELECT code FROM scanner_device_codes ORDER BY volgnummer').all()).toEqual([{ code: 'M1' }, { code: 'M2' }]);
+    } finally {
+      kopie.close();
+    }
+    // de live database houdt zijn codes, en de volgende toekenning telt door op het hoogste volgnummer
+    koppel(pairing, clock);
+    expect((t.db.prepare('SELECT code FROM scanner_device_codes ORDER BY volgnummer').all() as { code: string }[]).map((r) => r.code)).toEqual(['M1', 'M2', 'M3']);
+  });
+
+  it('het v2-hallo-antwoord noemt de apparaatcode, het v1-antwoord niet', async () => {
+    const t = start();
+    const p = await pair(t);
+    const r = await p.hallo(2);
+    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'hallo', apparaatcode: 'M1' } });
+    expect(r.json!.apparaatcode).toMatch(/^M[1-9][0-9]*$/);
+    // versie 1 krijgt precies het oude antwoord
+    const v1 = await p.hallo(1);
+    expect(Object.keys(v1.json!)).not.toContain('apparaatcode');
+    // de volgende koppeling krijgt de volgende code
+    const q = await pair(t);
+    expect((await q.hallo(2)).json!.apparaatcode).toBe('M2');
   });
 });

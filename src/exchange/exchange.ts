@@ -401,5 +401,6 @@ export function sanitizeForExchange(db: Db): void {
     DELETE FROM scanner_devices;
     DELETE FROM scanner_nonces;
     DELETE FROM scanner_documents;
+    -- scanner_device_codes blijft staan: een uitgegeven apparaatcode wordt nooit gewist of hergebruikt
   `);
 }
