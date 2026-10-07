@@ -101,7 +101,7 @@ async function pair(t: ReturnType<typeof start>) {
 
 describe('apparaatcode: de migratie', () => {
   /** de migratie die scanner_device_codes maakt; welk nummer hij heeft doet er niet toe */
-  const index = migrations.findIndex((m) => m.includes('CREATE TABLE IF NOT EXISTS scanner_device_codes'));
+  const index = migrations.findIndex((m) => /CREATE TABLE scanner_device_codes\b/.test(m));
 
   it('migratie nieuwe tabel', () => {
     const db = new Database(':memory:');
