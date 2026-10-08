@@ -183,7 +183,8 @@ export class SyncOntvangst {
       return uitslag;
     } catch (e) {
       fotos.terugdraaien();
-      this.log(`Fotowijziging van de telefoon opslaan mislukt: ${(e as Error).message}`);
+      // de foutcode, nooit de melding: die kan een pad bevatten
+      this.log(`Fotowijziging van de telefoon opslaan mislukt: ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}`);
       return { status: 500, fout: 'opslaan-mislukt' };
     } finally {
       try {
