@@ -412,7 +412,7 @@ Een nieuw versienummer voor nieuwe berichtsoorten, en niet gewoon nieuwe JSON-ve
 die een berichtsoort niet kent hem moet **afwijzen** (hij mag geen "ontvangen" zeggen over iets dat
 hij niet gedaan heeft). Een telefoon moet dus vóór het sturen weten wat de pc begrijpt: het
 hallo-antwoord van versie 2 noemt de ondersteunde protocolversies, en de envelop draagt per bericht
-welke versie het is. Een `wijziging` of `stamgegevens` in een envelop van versie 1 wordt geweigerd
+welke versie het is. Een `wijziging`, `stamgegevens` of `bevestigingen` in een envelop van versie 1 wordt geweigerd
 (`ongeldig`); een `hallo` of `bon` mag in beide versies.
 
 ### Het hallo-antwoord in versie 2
@@ -655,6 +655,64 @@ en projecten, met precies de velden hierboven. Nooit leveranciers, het type, `pa
 boekingen, facturen, bankgegevens van de administratie zelf, instellingen of geheimen. Een project dat aan
 een leverancier hangt wordt **niet** geleverd; een project zonder bekende klant wel (`klant` is `null`).
 (Het IBAN van een klant is een klantveld en gaat dus wel mee, het IBAN van de administratie zelf niet.)
+
+### `bevestigingen`: horen wat er met een wachtende wijziging gebeurde
+
+Een wijziging (klant, project of factuur) die de pc niet meteen kan toepassen, krijgt het antwoord `wacht`: de pc
+bewaart hem in de **wachtrij** (`sync_wachtrij`) tot het object waar hij op wacht er is (bijvoorbeeld een factuur
+voor een klant of project dat de pc nog niet kent). Met `bevestigingen` hoort de telefoon later wat er met zo'n
+wijziging gebeurde. Een wijziging die direct een eindantwoord kreeg (`toegepast`, `overgeslagen` of `afgewezen`) heeft
+**geen** bevestiging nodig en komt hier ook niet voor. Net als `stamgegevens` is dit bericht alleen **lezen**
+(laatst gezien en de apparaatcode zijn het enige neveneffect), werkt het alleen voor een gekoppelde telefoon in een
+envelop van versie 2 (in versie 1: `400 ongeldig`) en blijft het verzoek binnen 16 KiB.
+
+```jsonc
+{"soort":"bevestigingen","tijd":1790848800000,"na":41}
+```
+
+Verzoek: de sleutels `soort` en `tijd`, en optioneel `na`: het hoogste bevestigingsnummer dat de telefoon al heeft (een
+geheel getal van 0 tot en met `Number.MAX_SAFE_INTEGER`; zonder `na` is het 0). Elke andere sleutel (ook `__proto__`) en
+een `na` dat negatief, niet geheel, te groot, tekst of `null` is, geeft versleuteld `400 ongeldig`; er wordt dan niets gelezen.
+Voor welk apparaat de pc antwoordt, volgt altijd uit de envelop, nooit uit het bericht.
+
+```jsonc
+{"ok":true,"soort":"bevestigingen","pcTijd":1790848800123,"apparaatcode":"M1","bevestigingen":[{"seq":42,"entiteit":"factuur","uuid":"5d2c8a14-7b3e-4f60-9a1d-3c4e5f6a7b8c","revisie":1,"uitkomst":"toegepast","fout":null},{"seq":43,"entiteit":"project","uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","revisie":1,"uitkomst":"afgewezen","fout":"veld-ongeldig"}],"volgende":null,"bevestigd_tot":43}
+```
+
+| Veld | Betekenis |
+|---|---|
+| `seq` | het **bevestigingsnummer** van deze bevestiging (zie onder) |
+| `entiteit`, `uuid`, `revisie` | welke wijziging het is: de sleutel waarmee de telefoon hem verstuurde |
+| `uitkomst` | `toegepast`, `overgeslagen` of `afgewezen` |
+| `fout` | bij `afgewezen` de foutcode (bijvoorbeeld `nummer-bezet`, `geen-klant`, `veld-ongeldig`), anders `null` |
+| `volgende` | het laatste `seq` van deze pagina als er meer volgt (vraag dan opnieuw met dat getal als `na`), anders `null` |
+| `bevestigd_tot` | het laatste getoonde `seq`, of `na` als er niets is |
+
+Een bevestiging hoort bij een rij in de wachtrij van **dit** apparaat die is afgehandeld en een bevestigingsnummer
+heeft, met een nummer groter dan `na`. Een antwoord heeft hoogstens **100** bevestigingen, oplopend op `seq`. Per
+bevestiging gaan precies deze zes velden mee; de bewaarde wijziging, het factuurnummer, de klant en alle andere
+gegevens verlaten de pc niet.
+
+**Het bevestigingsnummer.** Elke wachtrijrij krijgt een nummer uit een eigen teller op het moment dat hij wordt
+afgehandeld (`verwerkt_seq`, in dezelfde transactie). Het nummer wordt nooit hergebruikt, een teruggedraaide afhandeling
+geeft het terug, een rij die al is afgehandeld houdt zijn nummer, en de teller staat los van het wijzigingsnummer (`seq`)
+van de stamgegevens. Rijen die al waren afgehandeld voordat deze teller bestond hebben geen nummer en worden niet getoond.
+De pc verwijdert nooit bevestigingen. De telefoon bewaart het hoogste nummer dat hij verwerkt heeft zelf; een tweede
+vraag met hetzelfde `na` geeft hetzelfde antwoord (lezen verandert niets).
+
+**Stappen voor de Android-app.** De telefoon houdt een wijziging die het antwoord `wacht` kreeg bij, tot de pc hem
+bevestigt:
+
+1. Na elke sync (na de wijzigingen en de stamgegevens): stuur `bevestigingen` met `na` = het bewaarde hoogste
+   bevestigingsnummer (0 als er nog niets is).
+2. Verwerk de pagina: zoek per bevestiging de lokale wijziging op `entiteit`, `uuid` en `revisie`. Bij `toegepast` of
+   `overgeslagen` is de wijziging aangekomen en kan de telefoon het wachtende deel opruimen; bij `afgewezen` toont de
+   telefoon de `fout` aan de gebruiker en ruimt het wachtende deel ook op (de pc heeft de wijziging niet overgenomen).
+3. Is `volgende` een getal: stuur opnieuw met `na` = dat getal, tot `volgende` `null` is.
+4. Bewaar pas daarna `bevestigd_tot` als nieuw hoogste nummer. Faalt de ronde halverwege, dan blijft het oude nummer staan
+   en begint de volgende poging gewoon opnieuw (een bevestiging twee keer verwerken doet geen kwaad).
+5. Een wijziging die direct `toegepast`, `overgeslagen` of `afgewezen` terugkreeg, hoeft de telefoon niet te laten
+   bevestigen.
 
 ### Wat de pc met een wijziging doet
 
