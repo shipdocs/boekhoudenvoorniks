@@ -54,6 +54,7 @@ export function CustomerVatHint({ country, vatNumber, relationId }: { country: s
     case 'eu-particulier':
       return <div className="notice small">Particulier in {land}: je rekent gewoon Nederlandse btw, zolang je in totaal minder dan {formatEuro(EU_B2C_THRESHOLD)} per jaar aan particulieren in andere EU-landen verkoopt. Is dit een bedrijf? Vul dan het btw-nummer in.</div>;
     case 'buiten-eu':
+      if (country?.trim().toUpperCase() === 'XI') return <div className="notice small">Klant in Noord-Ierland: voor <strong>goederen</strong> geldt Noord-Ierland nog als EU-land. Kies bij spullen <strong>Goederen naar een bedrijf in een ander EU-land</strong> (rubriek 3b en opgaaf ICP, met een geldig btw-nummer dat met XI begint), niet uitvoer. Een <strong>dienst</strong> is een dienst aan een klant buiten de EU: kies <strong>Dienst aan een bedrijf buiten de EU</strong>. Twijfel je? Vraag je boekhouder.</div>;
       return <div className="notice small">Klant buiten de EU ({land}): spullen die de EU uitgaan zijn <strong>goederen buiten de EU (0%)</strong>. Een dienst aan een bedrijf buiten de EU is meestal niet in Nederland belast: kies dan <strong>Dienst aan een bedrijf buiten de EU</strong>; die komt niet in je aangifte. Werk je in Nederland voor deze klant, of is het een particulier? Vraag je boekhouder welke btw geldt.</div>;
     case 'onbekend':
       return <div className="notice warn small">Deze landcode kennen we niet. Gebruik twee letters, bijvoorbeeld DE of US.</div>;

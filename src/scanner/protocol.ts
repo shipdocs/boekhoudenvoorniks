@@ -112,7 +112,17 @@ export interface StamgegevensMessage {
   na?: string;
 }
 
-export type ScannerMessage = HelloMessage | ReceiptMessage | WijzigingMessage | StamgegevensMessage;
+/**
+ * Vraag om de bevestigingen van wijzigingen die eerst wachtten (alleen lezen). `na` is het hoogste
+ * bevestigingsnummer dat de telefoon al heeft (geheel getal, standaard 0).
+ */
+export interface BevestigingenMessage {
+  soort: 'bevestigingen';
+  tijd: number;
+  na?: number;
+}
+
+export type ScannerMessage = HelloMessage | ReceiptMessage | WijzigingMessage | StamgegevensMessage | BevestigingenMessage;
 
 export class ProtocolError extends Error {
   constructor(readonly code: ErrorCode, message: string) {
@@ -268,13 +278,13 @@ function cleanText(value: unknown, max: number, multiline: boolean): string | nu
  * en bereik gecontroleerd, en de foto's moeten precies de rest van het bericht vullen. Onbekende
  * velden worden genegeerd, zodat een nieuwere telefoon-app met een oudere pc blijft werken — behalve
  * bij `wijziging`: dat bericht heeft precies de sleutels soort, tijd en wijziging, precies één
- * change-set per bericht, en bij `stamgegevens`: daar zijn alleen soort, tijd, sinds en na toegestaan.
+ * change-set per bericht, en bij `stamgegevens`: daar zijn alleen soort, tijd, sinds en na toegestaan, en bij `bevestigingen`: alleen soort, tijd en na.
  *
  * De JSON van `hallo`, `bon` en `stamgegevens` is hooguit 16 KiB; alleen een `wijziging` in een
  * v2-envelop mag tot 128 KiB. Daarboven (en voor elk ander soort boven 16 KiB): `te-groot`.
  *
  * De protocolversie van de envelop bepaalt welke berichten erin kunnen: versie 1 kent alleen `hallo`
- * en `bon`; versie 2 kent daarnaast `wijziging` en `stamgegevens`.
+ * en `bon`; versie 2 kent daarnaast `wijziging`, `stamgegevens` en `bevestigingen`.
  */
 export function parseFrame(plain: Buffer, versie: ProtocolVersion = PROTOCOL_VERSION): ScannerMessage {
   if (plain.length < 4) bad('bericht te kort');
@@ -316,6 +326,18 @@ export function parseFrame(plain: Buffer, versie: ProtocolVersion = PROTOCOL_VER
       const na = raw.na;
       if (typeof na !== 'string' || na.length === 0 || na.length > MAX_CURSOR_TEKENS) bad('na moet een tekst van hoogstens 200 tekens zijn');
       bericht.na = na as string;
+    }
+    return bericht;
+  }
+  if (versie >= 2 && raw.soort === 'bevestigingen') {
+    if (rest.length > 0) bad('bij bevestigingen horen geen foto\'s');
+    // Streng: alleen soort, tijd en (optioneel) na; een onbekende sleutel, ook __proto__, geeft ongeldig.
+    for (const sleutel of Object.keys(raw)) if (!['soort', 'tijd', 'na'].includes(sleutel)) bad('een bevestigingen-bericht heeft alleen de sleutels soort, tijd en na');
+    const bericht: BevestigingenMessage = { soort: 'bevestigingen', tijd };
+    if (Object.hasOwn(raw, 'na')) {
+      const na = raw.na;
+      if (typeof na !== 'number' || !Number.isSafeInteger(na) || na < 0) bad('na moet een geheel getal van 0 of meer zijn');
+      bericht.na = na as number;
     }
     return bericht;
   }

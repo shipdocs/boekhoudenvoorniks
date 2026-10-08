@@ -1555,4 +1555,32 @@ export const migrations: string[] = [
   CREATE UNIQUE INDEX IF NOT EXISTS ux_invoices_uuid ON invoices(uuid) WHERE uuid IS NOT NULL;
   CREATE UNIQUE INDEX IF NOT EXISTS ux_invoices_reeks ON invoices(apparaat_code, reeks_jaar, reeks_volgnr) WHERE apparaat_code IS NOT NULL;
   `,
+  `
+  -- De route (netwerk, map of mail) waarmee een wachtende wijziging van de telefoon voor het eerst binnenkwam, zodat
+  -- de registerrij bij het later overnemen die route houdt. Bestaande wachtrijrijen blijven NULL en gelden dan als netwerk.
+  ALTER TABLE sync_wachtrij ADD COLUMN route TEXT;
+  `,
+  `
+  -- Reeksbewaking voor facturen van een telefoon: een volgnummer (M1-2026-0003) dat nooit meer komt, kan door de
+  -- gebruiker expliciet als vervallen worden gemarkeerd, met een reden. Een rij hoort bij een nummer van een reeks
+  -- (apparaat_code, reeks_jaar) en wordt nooit gewijzigd of weggehaald: markeren is een rij toevoegen. Alleen
+  -- additief; bestaande tabellen en rijen veranderen niet.
+  CREATE TABLE IF NOT EXISTS factuur_reeks_vervallen (
+    apparaat_code TEXT NOT NULL,
+    reeks_jaar INTEGER NOT NULL,
+    reeks_volgnr INTEGER NOT NULL,
+    reden TEXT NOT NULL CHECK (length(trim(reden)) > 0),
+    gemarkeerd_op TEXT NOT NULL,
+    PRIMARY KEY (apparaat_code, reeks_jaar, reeks_volgnr)
+  );
+  `,
+  `
+  -- Bevestigingen van de pc voor de telefoon: een wachtende wijziging die later is afgehandeld krijgt een
+  -- bevestigingsnummer (verwerkt_seq) uit een eigen teller (sync_teller, rij bevestiging). Het nummer wordt
+  -- nooit hergebruikt. Rijen die al waren afgehandeld voor deze migratie houden NULL en worden niet getoond.
+  -- Alleen additief; bestaande rijen veranderen niet.
+  ALTER TABLE sync_wachtrij ADD COLUMN verwerkt_seq INTEGER;
+  CREATE INDEX IF NOT EXISTS idx_sync_wachtrij_bevestiging ON sync_wachtrij(apparaat_id, verwerkt_seq) WHERE verwerkt_seq IS NOT NULL;
+  INSERT INTO sync_teller (naam, waarde) VALUES ('bevestiging', 0) ON CONFLICT(naam) DO NOTHING;
+  `,
 ];

@@ -1,5 +1,5 @@
 import { ValidationError } from '../shared/validation';
-import { EU_COUNTRIES, countryCode, isIcp, isOutsideEu, needsCustomerVatNumber } from '../shared/vat';
+import { EU_COUNTRIES, countryCode, isEuForGoods, isIcp, isOutsideEu, needsCustomerVatNumber } from '../shared/vat';
 
 /** Alleen de factuurregels die de wettelijke controles nodig hebben (gewone data, geen database). */
 export interface InvoiceRequirementsLine {
@@ -52,11 +52,15 @@ export function checkInvoiceRequirements(
     throw new ValidationError(`Bij btw verlegd moet het btw-nummer van ${relation.name} op de factuur staan. Vul het in bij de klant.`);
   }
   const country = countryCode(relation.country);
-  if (inv.lines.some((l) => isIcp(l.vat_code)) && (!country || country === 'NL' || !EU_COUNTRIES.has(country))) {
+  // Noord-Ierland (XI) geldt alleen voor goederen als EU-land (#317): 'icp' mag, 'icp-dienst' niet; bij 'export' hoort XI niet.
+  if (inv.lines.some((l) => isIcp(l.vat_code) && (!country || country === 'NL' || !(l.vat_code === 'icp' ? isEuForGoods(country) : EU_COUNTRIES.has(country))))) {
     throw new ValidationError(`"Bedrijf in een ander EU-land" is alleen voor klanten in een ander EU-land. Vul bij ${relation.name} het land in (bv. DE of BE)`);
   }
   if (inv.lines.some((l) => isOutsideEu(l.vat_code)) && (!country || EU_COUNTRIES.has(country))) {
     throw new ValidationError(`"Klant buiten de EU" is alleen voor klanten buiten de EU. Vul bij ${relation.name} het land in (bv. CH of US)`);
+  }
+  if (inv.lines.some((l) => l.vat_code === 'export') && country === 'XI') {
+    throw new ValidationError(`Goederen naar Noord-Ierland zijn voor de btw een levering binnen de EU: kies "Goederen aan een bedrijf in een ander EU-land" (rubriek 3b en opgaaf ICP) in plaats van uitvoer. Diensten aan ${relation.name} kies je als "Klant buiten de EU".`);
   }
   if (kor && inv.lines.some((l) => l.vat_percentage > 0)) {
     throw new ValidationError('Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw. Kies bij elke regel "Geen btw".');

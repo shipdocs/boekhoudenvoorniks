@@ -41,6 +41,7 @@ import type { FxRepair } from '../fx/repair';
 import type { StatementFolder } from '../import/statement-folder';
 import { statementHelp } from '../shared/bank-statement-help';
 import { BANK_FEED } from '../shared/bank-feed';
+import { ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD, reeksNummer } from '../sync/reeks';
 
 
 export type TaskKind =
@@ -72,6 +73,7 @@ export type TaskKind =
   | 'bank-statement'
   | 'bank-locked'
   | 'exchange-conflict'
+  | 'invoice-series-gap'
   | 'vat-suppletie'
   | 'supplier-auto'
   | 'vat-check'
@@ -134,7 +136,9 @@ export interface Task {
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
     proposal?: string;
     /** waar de vraag "dezelfde aankoop?" of "alleen als bewijs?" over gaat (#179); is dat intussen iets anders, dan gebeurt er niets */
-    candidate?: string };
+    candidate?: string;
+    /** het gat in de nummerreeks van een telefoon (invoice-series-gap) */
+    reeks?: { apparaat_code: string; jaar: number; van: number; tot: number } };
 }
 
 export interface BalanceOverviewRow {
@@ -1021,6 +1025,31 @@ export class InboxService {
       });
     }
 
+    // een gat in de nummerreeks van facturen van een telefoon: precies een melding per gat (zonder telefoonfacturen geen)
+    for (const g of new ReeksBewaking(this.db).gaten()) {
+      const eerste = reeksNummer(g.apparaat_code, g.reeks_jaar, g.van);
+      const enkel = g.van === g.tot;
+      const bereik = enkel ? eerste : `${eerste} tot en met ${reeksNummer(g.apparaat_code, g.reeks_jaar, g.tot)}`;
+      tasks.push({
+        key: `reeks-gat:${g.apparaat_code}-${g.reeks_jaar}-${g.van}-${g.tot}`,
+        kind: 'invoice-series-gap',
+        icon: '🔢',
+        title: enkel ? `Factuurnummer ${bereik} ontbreekt` : `Factuurnummers ${bereik} ontbreken (${g.tot - g.van + 1} nummers)`,
+        question:
+          `In de nummers van de facturen van je telefoon (${g.apparaat_code}, ${g.reeks_jaar}) ${enkel ? 'ontbreekt' : 'ontbreken'} ${enkel ? 'het nummer' : 'de nummers'} ${bereik}. ` +
+          `Misschien is ${enkel ? 'die factuur' : 'zijn die facturen'} nog niet verstuurd naar de pc, of ${enkel ? 'dit nummer is' : 'deze nummers zijn'} nooit gebruikt. ` +
+          (g.afgesloten ? `Deze telefoon is ontkoppeld en stuurt niets meer, dus ${enkel ? 'dit nummer komt' : 'deze nummers komen'} niet meer binnen. ` : '') +
+          `Weet je dat ${enkel ? 'het nummer' : 'de nummers'} nooit meer ${enkel ? 'komt' : 'komen'}, markeer ${enkel ? 'het' : 'ze'} dan als vervallen en zeg waarom. Zo blijft de reden bewaard.`,
+        priority: 2,
+        actions: [
+          { id: 'vervallen-niet-gebruikt', label: 'Nooit gebruikt', primary: true },
+          { id: 'vervallen-niet-verstuurd', label: 'Niet verstuurd of concept vervallen' },
+          { id: 'later', label: 'Later' },
+        ],
+        ref: { reeks: { apparaat_code: g.apparaat_code, jaar: g.reeks_jaar, van: g.van, tot: g.tot } },
+      });
+    }
+
     const lock = this.ledger.periodLock();
     for (const kind of ['afgesloten', 'uitwisseling'] as const) {
       const n = locked[kind];
@@ -1807,6 +1836,9 @@ export class InboxService {
       'document-review:bewijs': 'De bon wordt bij de betaling bewaard. Er komt geen nieuwe kosten- of btw-boeking bij.',
       'document-review:nee': 'Dit voorstel vervalt. Je controleert de bon daarna zoals een nieuwe aankoop.',
       'document-notice:klaar': 'De melding verdwijnt. Het document blijft bewaard.',
+      'invoice-series-gap:vervallen-niet-gebruikt': `Het nummer wordt bewaard als vervallen, met de reden "${REDEN_NIET_GEBRUIKT}". De melding verdwijnt. Er wordt niets verwijderd of geboekt.`,
+      'invoice-series-gap:vervallen-niet-verstuurd': `Het nummer wordt bewaard als vervallen, met de reden "${REDEN_NIET_VERSTUURD}". De melding verdwijnt. Er wordt niets verwijderd of geboekt.`,
+      'invoice-series-gap:later': 'Er verandert niets. De melding blijft staan tot het nummer binnenkomt of je het als vervallen markeert.',
       'document-review:prive': OWN_HINTS.prive,
       'document-review:vraag': OWN_HINTS.vraag,
       'bank-own-company:prive': OWN_HINTS.prive,

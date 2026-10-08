@@ -412,7 +412,7 @@ Een nieuw versienummer voor nieuwe berichtsoorten, en niet gewoon nieuwe JSON-ve
 die een berichtsoort niet kent hem moet **afwijzen** (hij mag geen "ontvangen" zeggen over iets dat
 hij niet gedaan heeft). Een telefoon moet dus vóór het sturen weten wat de pc begrijpt: het
 hallo-antwoord van versie 2 noemt de ondersteunde protocolversies, en de envelop draagt per bericht
-welke versie het is. Een `wijziging` of `stamgegevens` in een envelop van versie 1 wordt geweigerd
+welke versie het is. Een `wijziging`, `stamgegevens` of `bevestigingen` in een envelop van versie 1 wordt geweigerd
 (`ongeldig`); een `hallo` of `bon` mag in beide versies.
 
 ### Het hallo-antwoord in versie 2
@@ -427,7 +427,7 @@ het uitgewerkte voorbeeld van versie 1 hierboven blijft byte voor byte in `tests
 
 | Veld | Betekenis |
 |---|---|
-| `regels` | de regelsversie (in de code `rulesVersion`): het versienummer van de btw-regeltabel die bij deze pc hoort (nu 1). De tabel zelf volgt in een latere versie van dit document |
+| `regels` | de regelsversie (in de code `rulesVersion`): het versienummer van de btw-regeltabel die bij deze pc hoort (nu 1). De tabel zelf staat in het stamgegevens-antwoord (veld `regeltabel`, eerste pagina) en heeft een eigen `versie` |
 | `protocollen` | alle protocolversies die deze pc begrijpt, van laag naar hoog (nu `[1,2]`) |
 | `apparaatcode` | de apparaatcode van deze telefoon (`M1`, `M2`, …), zoals bij *De apparaatcode* |
 
@@ -525,7 +525,7 @@ tweebyte-tekens, is ongeveer 1,07 MiB en met driebyte-tekens in de notities onge
 moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 
 ```text
-{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"verborgen":[{"uuid":"3f1d2c4b-6a7e-4b8c-9d0e-1f2a3b4c5d6e","seq":497,"soort":"klant"}],"volgende":null,"nieuwe_sinds":500}
+{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"regeltabel":{"versie":"2026-1","geldig_vanaf":"2026-01-01","btw":[{"code":"hoog","label":"21% (hoog)","percentage":21,"rubriek":"1a","tekst":"21% btw"},{"code":"laag","label":"9% (laag)","percentage":9,"rubriek":"1b","tekst":"9% btw"},{"code":"nul","label":"0%","percentage":0,"rubriek":"1e","tekst":"0% btw"},{"code":"verlegd","label":"BTW verlegd","pickLabel":"Btw verlegd (je werkt als onderaannemer; je klant regelt de btw)","percentage":0,"rubriek":"1e","tekst":"btw verlegd"},{"code":"vrijgesteld","label":"Vrijgesteld / KOR","pickLabel":"Geen btw (vrijgesteld of KOR)","percentage":0,"rubriek":"-","tekst":"geen btw"},{"code":"icp","label":"Intracommunautaire levering (0%)","pickLabel":"Goederen naar een bedrijf in een ander EU-land (0%)","percentage":0,"rubriek":"3b","tekst":"goederen naar een bedrijf in de EU, 0% btw"},{"code":"icp-dienst","label":"Btw verlegd (dienst EU)","pickLabel":"Dienst aan een bedrijf in een ander EU-land (btw verlegd)","percentage":0,"rubriek":"3b","tekst":"dienst aan een bedrijf in de EU, btw verlegd"},{"code":"export","label":"Uitvoer goederen buiten de EU (0%)","pickLabel":"Goederen naar een klant buiten de EU (0%)","percentage":0,"rubriek":"3a","tekst":"goederen naar buiten de EU, 0% btw"},{"code":"dienst-buiten-eu","label":"Niet belast in Nederland","pickLabel":"Dienst aan een bedrijf buiten de EU (niet in de aangifte)","percentage":0,"rubriek":"-","tekst":"dienst aan een bedrijf buiten de EU, geen Nederlandse btw"}],"eu_landen":["AT","BE","BG","CY","CZ","DE","DK","EE","ES","FI","FR","GR","HR","HU","IE","IT","LT","LU","LV","MT","NL","PL","PT","RO","SE","SI","SK"],"eu_b2c_drempel":1000000,"teksten":{"icp":"Intracommunautaire levering, vrijgesteld van btw (art. 138 Btw-richtlijn)","icp_dienst":"Btw verlegd (reverse charge, art. 196 Btw-richtlijn)","buiten_eu_dienst":"Dienst niet belast in Nederland (plaats van dienst buiten de EU)","verlegd":"BTW verlegd"}},"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}},"vies":{"gecontroleerd_op":"2026-09-30T08:15:00.000Z","geldig":true}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"verborgen":[{"uuid":"3f1d2c4b-6a7e-4b8c-9d0e-1f2a3b4c5d6e","seq":497,"soort":"klant"}],"volgende":null,"nieuwe_sinds":500}
 ```
 
 (Het voorbeeld toont een deel van de velden; het echte antwoord heeft bij elk item **alle** velden.)
@@ -534,20 +534,29 @@ moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 |---|---|
 | `pcTijd` | de klok van de pc, zoals in het hallo-antwoord |
 | `apparaatcode` | de apparaatcode van **deze** telefoon; een ander gekoppeld apparaat krijgt dezelfde gegevens maar zijn eigen code |
-| `regels` | de versie van de btw-regeltabel (`RULES_VERSION`), gelijk aan die in het hallo-antwoord. De tabel zelf en de VIES-controledatum zitten niet in dit antwoord |
+| `regeltabel` | de **btw-regeltabel** zelf, zie De regeltabel hieronder. **Alleen op de eerste pagina** (zonder `na`), altijd, ook bij een `sinds` en ook als de delta leeg is; een vervolgpagina heeft dit veld niet. (Het veld `regels` in het antwoord is op elke pagina het versienummer `rulesVersion`, zoals in het hallo-antwoord.) |
 | `klanten`, `projecten` | de items van deze pagina, zie hieronder |
 | `aliassen` | de samengevoegde klanten: `alias_uuid` (de oude uuid) en `klant` (de uuid van de klant die nu geldt). **Alleen op de eerste pagina** (zonder `na`), volledig, ook bij een `sinds`, en niet meegeteld in de 100 items; een vervolgpagina heeft een lege lijst |
 | `verborgen` | items die voor de telefoon **niet meer zichtbaar** zijn, zie Verbergmeldingen hieronder. Elk is `{uuid, seq, soort}` met `soort` `"klant"` of `"project"`, en niets anders. Altijd aanwezig; bij `sinds` 0 leeg |
 | `volgende` | de cursor voor de volgende pagina, of `null` als alles geleverd is |
 | `nieuwe_sinds` | de bovengrens (`tot`) van deze **ronde**, in elk antwoord van de ronde gelijk. Na de laatste pagina (`volgende: null`) bewaart de telefoon dit getal als nieuwe `sinds`, **nooit** het hoogste `seq` van de ontvangen items (zie Ronde en delta) |
 
-**Een item** heeft precies `uuid`, `seq`, `pc_revisie`, `gearchiveerd` en `velden`. `velden` bevat voor
+**Een item** heeft precies `uuid`, `seq`, `pc_revisie`, `gearchiveerd` en `velden`; een **klant** heeft daarnaast
+`vies` (zie hieronder), een project niet. `velden` bevat voor
 **elk** veld uit `KLANT_VELDEN` (klant) of `PROJECT_VELDEN` (project) in `packages/core` een object
 `{waarde, tijd, bron}`; het project draagt zijn klant als `uuid` in het veld `klant` (of `null`). De veldnamen
 komen uit de kern, niet uit dit document. `gearchiveerd` staat zowel als boolean op het item als (met zijn
 eigen tijd en bron, `0` of `1`) in `velden`; gearchiveerde klanten en projecten worden **gewoon geleverd**,
 want de pc verwijdert nooit iets.
 
+- `vies` is `null` (de klant heeft geen btw-nummer, of dat nummer is nog nooit in VIES gecontroleerd) of
+  precies `{gecontroleerd_op, geldig}`: `gecontroleerd_op` is het tijdstip van de **laatste** controle van het
+  **huidige** btw-nummer van de klant (ISO 8601, UTC), `geldig` is `true`, `false` of `null` (geen uitslag,
+  bijvoorbeeld omdat de dienst van een land niet bereikbaar was). Een controle van een eerder btw-nummer
+  van de klant telt niet voor het nieuwe nummer. Alleen lezen: de naam, het adres en het bericht uit de
+  VIES-uitslag verlaten de pc nooit. Een nieuwe controle geeft de klant een nieuwe `seq` (en zijn projecten
+  dus ook, via het effectieve nummer), zodat hij in de volgende delta komt; dat is geen klantwijziging:
+  `pc_revisie` en de `tijd` van de velden blijven gelijk.
 - `seq` is de wijzigingsteller van de pc (`sync_seq`) van die rij. Elke echte wijziging op de pc, ook een
   die een telefoon heeft gemeld, geeft de rij een nieuwe, hogere `seq`; archiveren ook.
 - `pc_revisie` is het revisienummer van de rij op de pc. Het is **informatief**: de telefoon past een
@@ -557,6 +566,19 @@ want de pc verwijdert nooit iets.
   klant of project van vóór de sync) krijgt als `tijd` het aanmaakmoment van de rij (omgerekend van UTC naar
   milliseconden) en als `bron` `"pc"`: dus niet de wijzigingstijd en niet 0. Een veld dat de pc zelf al als
   "nog door niemand gezet" bewaart (`tijd` 0, lege `bron`) wordt zo doorgegeven, zodat elke latere wijziging wint.
+
+**De regeltabel (`regeltabel`).** De tabel staat in `packages/core/src/shared/regeltabel.ts` (`REGELTABEL`) en
+wordt **afgeleid** van de bestaande btw-constanten van de kern; de pc heeft dus geen tweede bron. Inhoud:
+`versie` (tekst `JJJJ-n`, nu `2026-1`), `geldig_vanaf` (ISO-datum), `btw` (per verkoop-btw-soort: `code`,
+`label`, eventueel `pickLabel`, `percentage`, `rubriek` en `tekst`), `eu_landen`, `eu_b2c_drempel` (centen) en
+`teksten` (de vaste vermeldingen `icp`, `icp_dienst`, `buiten_eu_dienst` en `verlegd`). Verandert de
+inhoud, dan gaat de `versie` omhoog; een test op een vingerafdruk van de inhoud dwingt dat af.
+De telefoon haalt de tabel dus uit de stamgegevens, niet uit het hallo-antwoord, en bewaart haar met de
+`versie`. Op een factuur zet hij als `regeltabel_versie` de `versie` van de tabel waarmee hij rekende.
+Vergelijken doet hij als tekst, gelijk of ongelijk (geen getal): is de `versie` in een nieuwe eerste pagina
+anders dan de bewaarde, dan vervangt hij de tabel voor **nieuwe** facturen. De pc dwingt gelijkheid van
+`regeltabel_versie` niet af: een factuur gemaakt met een oudere tabel blijft geldig en wordt
+gewoon overgenomen. (`rulesVersion` in het hallo-antwoord blijft het oude getal 1 en wordt hiervoor niet gebruikt.)
 
 **Ronde en delta.** Een ronde is het doorlopen van alle pagina's, van de eerste vraag (zonder `na`) tot en met
 de pagina met `volgende: null`. De pc legt bij de **eerste pagina** de bovengrens `tot` van de ronde vast:
@@ -634,6 +656,64 @@ boekingen, facturen, bankgegevens van de administratie zelf, instellingen of geh
 een leverancier hangt wordt **niet** geleverd; een project zonder bekende klant wel (`klant` is `null`).
 (Het IBAN van een klant is een klantveld en gaat dus wel mee, het IBAN van de administratie zelf niet.)
 
+### `bevestigingen`: horen wat er met een wachtende wijziging gebeurde
+
+Een wijziging (klant, project of factuur) die de pc niet meteen kan toepassen, krijgt het antwoord `wacht`: de pc
+bewaart hem in de **wachtrij** (`sync_wachtrij`) tot het object waar hij op wacht er is (bijvoorbeeld een factuur
+voor een klant of project dat de pc nog niet kent). Met `bevestigingen` hoort de telefoon later wat er met zo'n
+wijziging gebeurde. Een wijziging die direct een eindantwoord kreeg (`toegepast`, `overgeslagen` of `afgewezen`) heeft
+**geen** bevestiging nodig en komt hier ook niet voor. Net als `stamgegevens` is dit bericht alleen **lezen**
+(laatst gezien en de apparaatcode zijn het enige neveneffect), werkt het alleen voor een gekoppelde telefoon in een
+envelop van versie 2 (in versie 1: `400 ongeldig`) en blijft het verzoek binnen 16 KiB.
+
+```jsonc
+{"soort":"bevestigingen","tijd":1790848800000,"na":41}
+```
+
+Verzoek: de sleutels `soort` en `tijd`, en optioneel `na`: het hoogste bevestigingsnummer dat de telefoon al heeft (een
+geheel getal van 0 tot en met `Number.MAX_SAFE_INTEGER`; zonder `na` is het 0). Elke andere sleutel (ook `__proto__`) en
+een `na` dat negatief, niet geheel, te groot, tekst of `null` is, geeft versleuteld `400 ongeldig`; er wordt dan niets gelezen.
+Voor welk apparaat de pc antwoordt, volgt altijd uit de envelop, nooit uit het bericht.
+
+```jsonc
+{"ok":true,"soort":"bevestigingen","pcTijd":1790848800123,"apparaatcode":"M1","bevestigingen":[{"seq":42,"entiteit":"factuur","uuid":"5d2c8a14-7b3e-4f60-9a1d-3c4e5f6a7b8c","revisie":1,"uitkomst":"toegepast","fout":null},{"seq":43,"entiteit":"project","uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","revisie":1,"uitkomst":"afgewezen","fout":"veld-ongeldig"}],"volgende":null,"bevestigd_tot":43}
+```
+
+| Veld | Betekenis |
+|---|---|
+| `seq` | het **bevestigingsnummer** van deze bevestiging (zie onder) |
+| `entiteit`, `uuid`, `revisie` | welke wijziging het is: de sleutel waarmee de telefoon hem verstuurde |
+| `uitkomst` | `toegepast`, `overgeslagen` of `afgewezen` |
+| `fout` | bij `afgewezen` de foutcode (bijvoorbeeld `nummer-bezet`, `geen-klant`, `veld-ongeldig`), anders `null` |
+| `volgende` | het laatste `seq` van deze pagina als er meer volgt (vraag dan opnieuw met dat getal als `na`), anders `null` |
+| `bevestigd_tot` | het laatste getoonde `seq`, of `na` als er niets is |
+
+Een bevestiging hoort bij een rij in de wachtrij van **dit** apparaat die is afgehandeld en een bevestigingsnummer
+heeft, met een nummer groter dan `na`. Een antwoord heeft hoogstens **100** bevestigingen, oplopend op `seq`. Per
+bevestiging gaan precies deze zes velden mee; de bewaarde wijziging, het factuurnummer, de klant en alle andere
+gegevens verlaten de pc niet.
+
+**Het bevestigingsnummer.** Elke wachtrijrij krijgt een nummer uit een eigen teller op het moment dat hij wordt
+afgehandeld (`verwerkt_seq`, in dezelfde transactie). Het nummer wordt nooit hergebruikt, een teruggedraaide afhandeling
+geeft het terug, een rij die al is afgehandeld houdt zijn nummer, en de teller staat los van het wijzigingsnummer (`seq`)
+van de stamgegevens. Rijen die al waren afgehandeld voordat deze teller bestond hebben geen nummer en worden niet getoond.
+De pc verwijdert nooit bevestigingen. De telefoon bewaart het hoogste nummer dat hij verwerkt heeft zelf; een tweede
+vraag met hetzelfde `na` geeft hetzelfde antwoord (lezen verandert niets).
+
+**Stappen voor de Android-app.** De telefoon houdt een wijziging die het antwoord `wacht` kreeg bij, tot de pc hem
+bevestigt:
+
+1. Na elke sync (na de wijzigingen en de stamgegevens): stuur `bevestigingen` met `na` = het bewaarde hoogste
+   bevestigingsnummer (0 als er nog niets is).
+2. Verwerk de pagina: zoek per bevestiging de lokale wijziging op `entiteit`, `uuid` en `revisie`. Bij `toegepast` of
+   `overgeslagen` is de wijziging aangekomen en kan de telefoon het wachtende deel opruimen; bij `afgewezen` toont de
+   telefoon de `fout` aan de gebruiker en ruimt het wachtende deel ook op (de pc heeft de wijziging niet overgenomen).
+3. Is `volgende` een getal: stuur opnieuw met `na` = dat getal, tot `volgende` `null` is.
+4. Bewaar pas daarna `bevestigd_tot` als nieuw hoogste nummer. Faalt de ronde halverwege, dan blijft het oude nummer staan
+   en begint de volgende poging gewoon opnieuw (een bevestiging twee keer verwerken doet geen kwaad).
+5. Een wijziging die direct `toegepast`, `overgeslagen` of `afgewezen` terugkreeg, hoeft de telefoon niet te laten
+   bevestigen.
+
 ### Wat de pc met een wijziging doet
 
 Een wijziging van een **klant**, een **project** of een **factuur** wordt bewaard (een project is een klus op de pc). De pc verwerkt elke wijziging in één
@@ -651,13 +731,13 @@ stap.
 | 200 | `overgeslagen` | ja | alle velden waren ouder, of deze sleutel had de pc al | wijziging opruimen |
 | 200 | `afgewezen`, `fout: "geen-klant"` | ja | inhoudelijk geweigerd: de `uuid` hoort bij een leverancier | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `afgewezen`, `fout: "klus-gekoppeld"`, met `melding` | ja | inhoudelijk geweigerd: de klant van een project met een offerte, facturen, aankopen, ritten of werkbonregels kan niet wisselen; er is niets geschreven in het project | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
-| 200 | `wacht` | **nee** (wel een rij in `sync_wachtrij`) | een project dat naar een nog onbekende klant verwijst; de pc bewaart de hele wijziging en past haar toe zodra die klant is afgeleverd | wijziging opruimen: de pc heeft haar; een klant die nog niet is afgeleverd moet de telefoon alsnog sturen |
+| 200 | `wacht` | **nee** (wel een rij in `sync_wachtrij`) | een project dat naar een nog onbekende klant verwijst, of een **factuur** die naar een onbekende klant, een onbekend project of een onbekend origineel (creditnota) verwijst of nu niet geboekt kan worden (een periode die bij de boekhouder ligt); de pc bewaart de hele wijziging en past haar toe zodra het ontbrekende er is of de periode weer open is | wijziging opruimen: de pc heeft haar; iets dat nog niet is afgeleverd moet de telefoon alsnog sturen |
 | 200 | `niet-ondersteund` | **nee** | `bon` en `foto` worden nog niet opgeslagen; er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
 | 200 | `afgewezen`, `fout: "nummer-bezet"`, met `melding` | ja | een **factuur** waarvan het nummer al bij een andere factuur hoort; er is geen factuur bijgekomen | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
-| 200 | `afgewezen`, `fout: "origineel-onbekend"`, `"periode"` of `"factuur-geweigerd"`, met `melding` | ja | een **factuur** die de pc inhoudelijk weigert: een creditnota bij een onbekend origineel, een periode die bij de boekhouder ligt, of een andere reden (bijvoorbeeld een creditnota voor een andere klant dan het origineel) | wijziging opruimen en melden |
+| 200 | `afgewezen`, `fout: "factuur-geweigerd"`, met `melding` | ja | een **factuur** die de pc inhoudelijk weigert (bijvoorbeeld een creditnota voor een andere klant dan het origineel); dit kan ook pas bij het verwerken uit de wachtrij blijken | wijziging opruimen en melden |
 | 400 | `veld-ongeldig`, met `veld` en `melding` | nee | een veld buiten het schema, een ongeldige waarde, een te lange tekst, een lege naam of titel | niet opnieuw; fout in de app |
 | 400 | `ongeldig` | nee | het formaat klopt niet, de apparaatcode in een factuurnummer is niet die van het apparaat, of het bewerkmoment ligt meer dan 5 minuten (het klokvenster) in de toekomst | niet opnieuw |
-| 409 | `klant-onbekend` | nee | een onbekende `uuid` zonder `naam` (ook niet via een alias): er is geen klant om aan te vullen; bij een factuur: de `klant_uuid` is onbekend of hoort bij een leverancier | later opnieuw, nadat de klant met naam is afgeleverd |
+| 409 | `klant-onbekend` | nee | een onbekende `uuid` zonder `naam` (ook niet via een alias): er is geen klant om aan te vullen; een factuur met een onbekende klant wacht sinds stap 12b (200 `wacht`) | later opnieuw, nadat de klant met naam is afgeleverd |
 | 409 | `project-onbekend` | nee | een onbekende project-`uuid` zonder titel of zonder klant, en er wacht ook niets voor dit project: er is geen project om aan te vullen | later opnieuw, nadat het project met titel en klant is afgeleverd |
 | 500 | `opslaan-mislukt` | nee | de pc kon niet opslaan; er is niets achtergebleven | wijziging bewaren, later opnieuw |
 | 503 | `wachtrij-vol` | nee | er wachten al 1000 wijzigingen van dit apparaat in `sync_wachtrij`; deze is niet opgeslagen | wijziging bewaren, later opnieuw (herhaalbaar); de pc wijst een geldige wijziging nooit af |
@@ -680,11 +760,11 @@ doorgerekend (`veld-ongeldig` met `veld` en `melding`, zonder rijen; ook een hoe
 decimalen); (3) de apparaatcode in het `nummer` moet gelijk zijn aan die van het apparaat (anders 400 `ongeldig`,
 zonder rijen); (4) de klant wordt gezocht op `klant_uuid`, daarna via een alias van een samengevoegde klant,
 en een gearchiveerde klant telt gewoon; de factuur verwijst naar de doelklant, de klantmomentopname blijft die uit de
-wijziging; een onbekende klant of een leverancier geeft 409 `klant-onbekend` (herhaalbaar); (5) bestaat de `uuid`
+wijziging; een onbekende klant of een leverancier wacht (zie hieronder); (5) bestaat de `uuid`
 al als factuur, onder een andere revisie of met andere inhoud, dan is het antwoord `overgeslagen` en blijft de factuur
-ongewijzigd; (6) anders wordt de factuur overgenomen: `toegepast` bij een nieuwe factuur, `overgeslagen` als de pc hem
+ongewijzigd; (6) wacht de factuur niet op iets (zie hieronder), dan wordt ze overgenomen: `toegepast` bij een nieuwe factuur, `overgeslagen` als de pc hem
 al had, `afgewezen` met `nummer-bezet` als het nummer van een andere factuur is; (7) de registerrij staat in dezelfde
-transactie. De pc-teller voor factuurnummers wordt niet gebruikt: het nummer is dat van de telefoon. Een
+transactie (een wachtende factuur krijgt geen registerrij, wel een rij in `sync_wachtrij`). De pc-teller voor factuurnummers wordt niet gebruikt: het nummer is dat van de telefoon. Een
 creditnota hoort bij de klant van het origineel. Een databasefout geeft 500 `opslaan-mislukt` zonder halve rijen.
 De groottegrens van 128 KiB wordt op bytes getoetst (niet op tekens), nog voor de wijziging gelezen wordt.
 
@@ -693,7 +773,34 @@ De groottegrens van 128 KiB wordt op bytes getoetst (niet op tekens), nog voor d
 `creditnota-ongeldig`, `totalen`, `hoeveelheid`, `nummer-ongeldig`, `andere-weigering`), niet uit de Nederlandse tekst.
 `periode` komt uit de Ledger of de writeGuard van de boekhouderskopie; die guard geldt ook voor telefoonfacturen, omdat
 de app de eigen `InvoiceService` aan de ontvangst meegeeft. Naar de telefoon gaan alleen `nummer-bezet`,
-`origineel-onbekend`, `periode` en `factuur-geweigerd` (alle overige codes); de tekst blijft de `melding`.
+`factuur-geweigerd` (alle overige codes); de tekst blijft de `melding`. `origineel-onbekend` en `periode` zijn geen afwijzing
+meer: die factuur wacht (zie hieronder).
+
+**Een factuur die wacht.** Per factuur bepaalt de pc in deze volgorde waar ze op wacht: een creditnota op haar origineel
+(`wacht_op_entiteit` `factuur`, reden `origineel-onbekend`; dat origineel kan zelf nog wachten), daarna een onbekende klant of
+een leverancier (`klant`, `klant-onbekend`), daarna een onbekend `project_uuid` (`project`, `project-onbekend`) en ten slotte
+een afgesloten periode of de writeGuard van de boekhouderskopie (`periode`, reden `periode`; er is geen object om op te
+wachten, `wacht_op_uuid` is dan een lege tekst, want de kolom mag geen NULL zijn). Een bekend project van dezelfde klant
+geeft `invoices.job_id`; een project van een andere klant geeft een gewoon overgenomen factuur zonder `job_id`, nooit een
+afwijzing. Het antwoord is 200 `wacht`, met een rij in `sync_wachtrij` (met het factuurnummer in `nummer`), zonder factuur,
+boeking of registerrij. Is de wachtrij van het apparaat vol (1000 onverwerkte rijen), dan is het antwoord 503 `wachtrij-vol`
+zonder iets op te slaan; een geldige factuur wordt nooit afgewezen omdat de wachtrij vol is.
+
+**Hervatten.** Een wachtende factuur wordt opnieuw geprobeerd bij elke toegepaste klant, elk toegepast project en elke
+toegepaste factuur (een cascade: klant, project, origineel, creditnota), na elke wijziging van hetzelfde apparaat
+met onverwerkte facturen in de wachtrij, ongeacht de uitkomst of de statuscode (ook een die zelf wacht, 400, 409, 500, 503
+`wachtrij-vol` of `niet-ondersteund`, en ook voor de entiteiten bon en foto), zodat een heropende periode altijd wordt
+opgepikt, en bij het starten van de receiver. Het hervatten verandert het antwoord op de wijziging zelf nooit en laat het nooit
+falen. Een ongeldige wijziging van een niet-gekoppeld apparaat bereikt de ontvanger niet en hervat dus niets. De wijziging wordt
+dan opnieuw gelezen en gecontroleerd, ook de apparaatcode in het nummer; ze kan alsnog `afgewezen` worden (bijvoorbeeld een
+creditnota voor een andere klant dan het origineel): de rij krijgt dan `verwerkt_uitkomst` `afgewezen` met de foutcode als
+`verwerkt_reden` en een registerrij, en blijft niet hangen. Een ontkoppeld apparaat of een afgesloten apparaatcode is geen reden
+om een al ontvangen wijziging weg te gooien. Hervatten is herhaalbaar en idempotent: factuur, boeking en registerrij komen
+hoogstens één keer, en de wachtrijrij blijft altijd staan (alleen `verwerkt_op`, `verwerkt_uitkomst` en `verwerkt_reden`
+worden gevuld, in dezelfde transactie als de factuur). Een fout bij één factuur laat die rij onverwerkt zonder halve rijen en
+stopt de rest niet. De wachtrij bewaart de route van de eerste ontvangst (kolom `route`: `netwerk`, `map` of `mail`) en de
+registerrij van een uit de wachtrij verwerkte wijziging (factuur of project) krijgt die route; een rij zonder route (van voor
+die kolom) hervat met `netwerk`.
 
 **Het register `sync_ontvangen`.** Idempotentie loopt uitsluitend via de exacte sleutel (`apparaat_id`
 (het apparaat-ID uit de envelop), `entiteit`, `uuid`, `revisie`), niet via de hoogste revisie en niet
@@ -827,12 +934,54 @@ slaan. De groottegrens van een wijziging (128 KiB) geldt ook voor de wachtrij.
 **Wat nog niet.** `stamgegevens` bevat de btw-regeltabel en de VIES-controledatum nog niet. `bon` en `foto` worden niet opgeslagen en gelden niet
 als afgeleverd (`niet-ondersteund`, zonder registerrij).
 
-Open punten bij facturen (volgen in latere stappen): een factuur van een onbekende klant of een onbekend project wacht
-nog niet in de wachtrij (nu 409 `klant-onbekend`); `project_uuid` wordt nog niet naar een klus vertaald; een creditnota bij
-een onbekend origineel wordt nu `afgewezen` met `origineel-onbekend` in plaats van te wachten; een factuur in een periode
-bij de boekhouder wordt nu `afgewezen` met `periode`; hervatten na een onderbreking, de melding bij een ontbrekend nummer
-(reeksbewaking) en de bonnenmap- en e-mailroute voor facturen ontbreken nog. Ook versie 2 staat achter dezelfde schakelaar als
-de rest: zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
+Open punten bij facturen (volgen in latere stappen): de bonnenmap- en e-mailroute voor facturen, en een scherm dat de wachtende wijzigingen toont (nu is een
+wachtende factuur alleen in `sync_wachtrij` te zien). Ook versie 2 staat achter dezelfde schakelaar als de rest: zolang
+`PHONE_SCANNER` uit staat, is er niets van te zien.
+
+### Reeksbewaking: gaten in de factuurnummers van een telefoon
+
+De pc bewaakt de nummerreeks van de facturen van een telefoon. Een **reeks** is een apparaatcode met een
+jaar (`M1-2026`) en loopt vanaf 1 tot het hoogste volgnummer van een factuur die de pc heeft overgenomen.
+Een **gat** is een aaneengesloten bereik volgnummers in die reeks dat ontbreekt, bijvoorbeeld `M1-2026-0002`
+tot en met `M1-2026-0004` als alleen 0001 en 0005 er zijn. Een gat is geen fout van de pc en geen
+afwijzing: het is een vraag aan de gebruiker, want een nummer kan nog onderweg zijn (de telefoon heeft de
+factuur nog niet gestuurd), nooit zijn gebruikt, of horen bij een concept dat is vervallen.
+
+Een volgnummer telt als **bekend** als er een factuur met dat nummer is, als een onverwerkte rij in
+`sync_wachtrij` dat nummer draagt (de factuur wacht dan op een klant of project) of als de gebruiker het
+als vervallen heeft gemarkeerd. Wordt een wachtende rij afgewezen, dan is het nummer weer een gat. Komt een
+ontbrekende factuur alsnog binnen, dan verdwijnt het gat vanzelf, ook als dat nummer eerder als vervallen
+was gemarkeerd (die markering blijft als rij bestaan). Reeksen zijn onafhankelijk: een andere
+apparaatcode of een ander jaar heeft zijn eigen gaten. Een gat is er ook bij een ontkoppelde telefoon
+(`afgesloten_op` in `scanner_device_codes`); de melding zegt dan dat de telefoon niets meer stuurt.
+
+**Op Vandaag** staat per gat precies een melding (soort `invoice-series-gap`, sleutel
+`reeks-gat:<apparaatcode>-<jaar>-<van>-<tot>`, prioriteit 2). De berekening is idempotent: dezelfde stand
+geeft dezelfde melding, en een gat zonder telefoonfacturen bestaat niet. Er zijn drie knoppen:
+
+- **Nooit gebruikt** (`vervallen-niet-gebruikt`): het bereik wordt als vervallen bewaard met de reden
+  `Nummer nooit gebruikt`.
+- **Niet verstuurd of concept vervallen** (`vervallen-niet-verstuurd`): idem, met de reden
+  `Factuur niet verstuurd of concept vervallen`.
+- **Later** (`later`): er verandert niets en de melding blijft staan.
+
+In de kopie bij de boekhouder (de Vandaag-lijst is daar leeg) komt de melding niet. De berekening
+gebruikt SQL over bereiken en nooit een lijst van alle denkbare nummers: een telefoon die naar volgnummer
+999999999 springt, geeft een gat en een melding, geen duizenden. Hetzelfde geldt voor het markeren: een
+bereik van meer dan 10000 nummers in een keer wordt geweigerd, zodat de telefoon niet kan bepalen hoeveel
+werk de pc heeft.
+
+**Vervallen markeren** schrijft een rij per nummer in `factuur_reeks_vervallen` (apparaatcode, jaar,
+volgnummer, reden, tijdstip), in een transactie: alles of niets. Een lege reden (ook alleen spaties), een
+bereik dat een bestaande factuur, een wachtend nummer of een al vervallen nummer bevat, een bereik boven de
+reeks en een bereik van meer dan 10000 nummers geven een Nederlandse foutmelding en bewaren niets. **Er
+wordt nooit iets verwijderd of overschreven**: een markering is een rij erbij (`ON CONFLICT DO NOTHING`), en
+een factuur die later binnenkomt verandert niets aan de rij die er al stond. Het sluiten van een reeks bij
+ontkoppelen of herinstallatie bestaat al (`afgesloten_op`); de reeksbewaking leest dat alleen.
+
+**Nog niet vastgesteld door een boekhouder:** of een tweede nummerreeks voor facturen van de telefoon (naast
+die van de pc) fiscaal in orde is, is niet geverifieerd. Een boekhouder moet dat eerst bevestigen voordat
+dit onderdeel voor gebruikers aan gaat. Zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
 
 ## Wat dit wel en niet beschermt
 

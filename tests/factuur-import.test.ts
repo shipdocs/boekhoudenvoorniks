@@ -663,3 +663,32 @@ describe('importDefinitive: weigercodes', () => {
     expect(g.s.invoices.importDefinitive(inv(UUID_1, velden()), g.klant.id)).toMatchObject({ uitkomst: 'geweigerd', code: 'periode', reden: 'Alleen correctieboekingen.' });
   });
 });
+
+describe('migratie van de route in de wachtrij', () => {
+  const i = migrations.findIndex((m) => /ADD COLUMN route/.test(m));
+
+  it('er is precies een migratie die alleen de kolom route toevoegt (latere migraties mogen erachter komen)', () => {
+    expect(migrations.filter((m) => /ADD COLUMN route/.test(m))).toHaveLength(1);
+    expect(i).toBeGreaterThan(0);
+    expect(migrations[i]!.replace(/--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)).toEqual(['ALTER TABLE sync_wachtrij ADD COLUMN route TEXT']);
+    expect(migrations[i]!).not.toMatch(/TRIGGER|DROP|DELETE|RENAME/i);
+  });
+
+  it('bestaande wachtrijrijen overleven met route NULL en user_version is migrations.length', () => {
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    for (const m of migrations.slice(0, i)) db.exec(m);
+    db.pragma(`user_version = ${i}`);
+    db.exec(`INSERT INTO sync_wachtrij (apparaat_id, bron, entiteit, uuid, revisie, tijd, wijziging, wacht_op_entiteit, wacht_op_uuid, reden, ontvangen_op)
+      VALUES ('a', 'M1', 'factuur', 'u1', 1, 5, '{}', 'klant', 'k1', 'klant-onbekend', 6), ('a', 'M1', 'project', 'u2', 2, 7, '{}', 'klant', 'k2', 'klant-onbekend', 8)`);
+    migrate(db);
+    expect(db.pragma('user_version', { simple: true })).toBe(migrations.length);
+    const rijen = db.prepare('SELECT uuid, revisie, tijd, wijziging, route, verwerkt_op FROM sync_wachtrij ORDER BY id').all();
+    expect(rijen).toEqual([
+      { uuid: 'u1', revisie: 1, tijd: 5, wijziging: '{}', route: null, verwerkt_op: null },
+      { uuid: 'u2', revisie: 2, tijd: 7, wijziging: '{}', route: null, verwerkt_op: null },
+    ]);
+    const kolom = (db.prepare('PRAGMA table_info(sync_wachtrij)').all() as { name: string; type: string; notnull: number; dflt_value: string | null }[]).find((c) => c.name === 'route');
+    expect(kolom).toMatchObject({ type: 'TEXT', notnull: 0, dflt_value: null });
+  });
+});

@@ -161,6 +161,36 @@ describe('checkInvoiceRequirements (gedeelde kern)', () => {
     });
   });
 
+  describe('5b. Noord-Ierland (#317): alleen goederen zijn een EU-levering', () => {
+    const xi = { ...klant, country: 'XI', vat_number: 'XI123456789' };
+
+    it('voldaan: goederen (icp) aan een klant in Noord-Ierland', () => {
+      expect(() => checkInvoiceRequirements({ lines: [{ vat_code: 'icp', vat_percentage: 0 }] }, xi, false, bedrijf)).not.toThrow();
+    });
+
+    it('faalt: dienst binnen de EU (icp-dienst) aan Noord-Ierland', () => {
+      verwachtFout('"Bedrijf in een ander EU-land" is alleen voor klanten in een ander EU-land. Vul bij Klant BV het land in (bv. DE of BE)', () =>
+        checkInvoiceRequirements({ lines: [{ vat_code: 'icp-dienst', vat_percentage: 0 }] }, xi, false, bedrijf),
+      );
+    });
+
+    it('voldaan: dienst buiten de EU aan Noord-Ierland', () => {
+      expect(() => checkInvoiceRequirements({ lines: [{ vat_code: 'dienst-buiten-eu', vat_percentage: 0 }] }, xi, false, bedrijf)).not.toThrow();
+    });
+
+    it('faalt: uitvoer (export) van goederen naar Noord-Ierland', () => {
+      verwachtFout('Goederen naar Noord-Ierland zijn voor de btw een levering binnen de EU: kies "Goederen aan een bedrijf in een ander EU-land" (rubriek 3b en opgaaf ICP) in plaats van uitvoer. Diensten aan Klant BV kies je als "Klant buiten de EU".', () =>
+        checkInvoiceRequirements({ lines: [{ vat_code: 'export', vat_percentage: 0 }] }, xi, false, bedrijf),
+      );
+    });
+
+    it('Groot-Brittannië blijft een derde land: export mag, icp niet', () => {
+      const gb = { ...klant, country: 'GB', vat_number: 'GB123456789' };
+      expect(() => checkInvoiceRequirements({ lines: [{ vat_code: 'export', vat_percentage: 0 }] }, gb, false, bedrijf)).not.toThrow();
+      expect(() => checkInvoiceRequirements({ lines: [{ vat_code: 'icp', vat_percentage: 0 }] }, gb, false, bedrijf)).toThrow(ValidationError);
+    });
+  });
+
   describe('7. KOR rekent geen btw', () => {
     it('faalt: KOR met een regel van 21%', () => {
       verwachtFout('Je gebruikt de kleineondernemersregeling (KOR): je rekent geen btw. Kies bij elke regel "Geen btw".', () =>

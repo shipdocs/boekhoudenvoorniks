@@ -1,5 +1,6 @@
 import type { Db } from '../db/database';
 import type { Wijziging } from '@gratis-boekhouden/kern';
+import { volgendeBevestigingSeq } from './teller';
 
 /**
  * De wachtrij voor wijzigingen van een telefoon die verwijzen naar iets dat de pc nog niet kent (een
@@ -30,9 +31,13 @@ export interface WachtrijRij {
   verwerkt_op: number | null;
   verwerkt_uitkomst: string | null;
   verwerkt_reden: string | null;
+  /** de route van de eerste ontvangst (netwerk, map of mail); NULL bij rijen van voor deze kolom */
+  route: string | null;
+  /** het bevestigingsnummer bij het afhandelen; NULL bij rijen die voor die kolom al waren afgehandeld */
+  verwerkt_seq: number | null;
 }
 
-/** Wat per soort object nodig is om wachtende rijen te verwerken (voor nu: project). */
+/** Wat per soort object nodig is om wachtende rijen te verwerken (project en factuur). */
 export interface WachtrijBehandelaar {
   entiteit: string;
   /** Verwerkt de wachtende rijen van een object, in een transactie; geeft true als er minstens een rij is afgehandeld. */
@@ -63,19 +68,19 @@ export class SyncWachtrij {
   /**
    * Zet een wijziging in de wachtrij, ON CONFLICT DO NOTHING: dezelfde wijziging nog eens (zelfde apparaat,
    * entiteit, uuid en revisie) is nog steeds een rij en geeft 'bestond'. Is de wachtrij van dit apparaat
-   * vol, dan wordt er niets geschreven ('vol').
+   * vol, dan wordt er niets geschreven ('vol'). De route van de eerste ontvangst wordt bewaard voor de registerrij bij het later overnemen.
    */
-  zetIn(deviceId: string, bron: string, w: Wijziging, wacht: { entiteit: string; uuid: string; reden: string }): ZetInUitkomst {
+  zetIn(deviceId: string, bron: string, w: Wijziging, wacht: { entiteit: string; uuid: string; reden: string; nummer?: string | null }, route: string = 'netwerk'): ZetInUitkomst {
     const bestaat = this.db.prepare('SELECT 1 FROM sync_wachtrij WHERE apparaat_id = ? AND entiteit = ? AND uuid = ? AND revisie = ?').get(deviceId, w.entiteit, w.uuid, w.revisie);
     if (bestaat) return 'bestond';
     if (this.aantalOnverwerkt(deviceId) >= WACHTRIJ_LIMIET) return 'vol';
     const result = this.db
       .prepare(
-        `INSERT INTO sync_wachtrij (apparaat_id, bron, entiteit, uuid, revisie, tijd, wijziging, wacht_op_entiteit, wacht_op_uuid, reden, ontvangen_op)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sync_wachtrij (apparaat_id, bron, entiteit, uuid, revisie, tijd, wijziging, nummer, wacht_op_entiteit, wacht_op_uuid, reden, ontvangen_op, route)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(apparaat_id, entiteit, uuid, revisie) DO NOTHING`,
       )
-      .run(deviceId, bron, w.entiteit, w.uuid, w.revisie, w.tijd, JSON.stringify({ entiteit: w.entiteit, uuid: w.uuid, revisie: w.revisie, tijd: w.tijd, velden: w.velden }), wacht.entiteit, wacht.uuid, wacht.reden, this.now());
+      .run(deviceId, bron, w.entiteit, w.uuid, w.revisie, w.tijd, JSON.stringify({ entiteit: w.entiteit, uuid: w.uuid, revisie: w.revisie, tijd: w.tijd, velden: w.velden }), wacht.nummer ?? null, wacht.entiteit, wacht.uuid, wacht.reden, this.now(), route);
     return result.changes === 1 ? 'toegevoegd' : 'bestond';
   }
 
@@ -100,9 +105,30 @@ export class SyncWachtrij {
     return rij ? { entiteit: rij.wacht_op_entiteit, uuid: rij.wacht_op_uuid } : undefined;
   }
 
-  /** Markeert een rij als afgehandeld; een rij die al afgehandeld is blijft zoals ze is. Geeft false als er niets veranderde. */
+  /**
+   * Markeert een rij als afgehandeld en geeft haar een nieuw bevestigingsnummer; een rij die al afgehandeld is
+   * blijft zoals ze is, houdt haar nummer en verbruikt er geen. Geeft false als er niets veranderde. Het
+   * nummer komt uit de teller in de transactie van de aanroeper (geen eigen transactie), zodat een
+   * teruggerolde afhandeling zijn nummer teruggeeft.
+   */
   markeer(id: number, uitkomst: 'toegepast' | 'overgeslagen' | 'afgewezen', reden: string | null): boolean {
-    return this.db.prepare('UPDATE sync_wachtrij SET verwerkt_op = ?, verwerkt_uitkomst = ?, verwerkt_reden = ? WHERE id = ? AND verwerkt_op IS NULL').run(this.now(), uitkomst, reden, id).changes === 1;
+    const open = this.db.prepare('SELECT 1 FROM sync_wachtrij WHERE id = ? AND verwerkt_op IS NULL').get(id);
+    if (!open) return false;
+    const seq = volgendeBevestigingSeq(this.db);
+    return this.db.prepare('UPDATE sync_wachtrij SET verwerkt_op = ?, verwerkt_uitkomst = ?, verwerkt_reden = ?, verwerkt_seq = ? WHERE id = ? AND verwerkt_op IS NULL').run(this.now(), uitkomst, reden, seq, id).changes === 1;
+  }
+
+  /**
+   * Een rij die nog wacht blijft wachten, maar nu ergens anders op (de klant is er, het project nog niet):
+   * alleen de wachtkolommen veranderen, de rij zelf blijft. Een afgehandelde rij blijft zoals ze is.
+   */
+  herplan(id: number, wacht: { entiteit: string; uuid: string; reden: string }): boolean {
+    return this.db.prepare('UPDATE sync_wachtrij SET wacht_op_entiteit = ?, wacht_op_uuid = ?, reden = ? WHERE id = ? AND verwerkt_op IS NULL AND (wacht_op_entiteit <> ? OR wacht_op_uuid <> ? OR reden <> ?)').run(wacht.entiteit, wacht.uuid, wacht.reden, id, wacht.entiteit, wacht.uuid, wacht.reden).changes === 1;
+  }
+
+  /** Het aantal onverwerkte rijen van een entiteit voor een apparaat (om te zien of er iets te hervatten is). */
+  aantalOnverwerktVan(deviceId: string, entiteit: string): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM sync_wachtrij WHERE apparaat_id = ? AND entiteit = ? AND verwerkt_op IS NULL').get(deviceId, entiteit) as { n: number }).n;
   }
 
   /**
