@@ -236,6 +236,10 @@ function leesRegel(raw: unknown, index: number): FactuurRegel {
   if (typeof hoeveelheid !== 'number' || !Number.isFinite(hoeveelheid) || hoeveelheid === 0) {
     return afwijzen(`${pad}.hoeveelheid`, `Het veld ${pad}.hoeveelheid moet een getal zijn dat niet 0 is`);
   }
+  // dezelfde regel als normalizeLines op de pc (afronden op drie decimalen): een hoeveelheid die daar anders uitkomt, boekt op telefoon en pc verschillend
+  if (Math.round(hoeveelheid * 1000) / 1000 !== hoeveelheid) {
+    return afwijzen(`${pad}.hoeveelheid`, `Het veld ${pad}.hoeveelheid mag hoogstens drie decimalen hebben`);
+  }
   const prijs = bedrag(`${pad}.prijs`, raw.prijs);
   if (typeof raw.btw_soort !== 'string' || !isSalesVatCode(raw.btw_soort)) return afwijzen(`${pad}.btw_soort`, `Het veld ${pad}.btw_soort is geen bekende btw-soort`);
   const btw_soort = raw.btw_soort;

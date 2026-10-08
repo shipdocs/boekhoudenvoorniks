@@ -351,3 +351,20 @@ describe('factuurschema in de kern: ongeldige facturen', () => {
     expect(['regels[0].prijs', 'totalen']).toContain(r.veld);
   });
 });
+
+describe('factuurschema in de kern: hoeveelheden met hoogstens drie decimalen', () => {
+  // de pc rondt een hoeveelheid af op drie decimalen (normalizeLines); de kern moet dat afwijzen, niet doorlaten
+  it('weigert een hoeveelheid met vier decimalen, positief en negatief', () => {
+    for (const hoeveelheid of [1.0004, -1.0004, 0.0004, 2.0005]) {
+      const r = fout(maak([{ ...HOOG, hoeveelheid, prijs: 100000, btw_soort: 'hoog' }]));
+      expect(r.veld).toBe('regels[0].hoeveelheid');
+      expect(r.melding).toMatch(/drie decimalen/);
+    }
+  });
+
+  it('accepteert hoeveelheden met hoogstens drie decimalen', () => {
+    for (const hoeveelheid of [1, 2.5, 1.001, 0.001, -0.005, 1.005, 1234567.891]) {
+      expect(leesFactuurVelden(maak([{ ...HOOG, hoeveelheid }])).ok, String(hoeveelheid)).toBe(true);
+    }
+  });
+});

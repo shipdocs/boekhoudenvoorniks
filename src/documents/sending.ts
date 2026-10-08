@@ -84,6 +84,8 @@ export class DocumentSender {
     let inv = this.invoices.get(id);
     // de echte factuur staat in je vorige programma; hier alleen het openstaande bedrag
     if (inv.is_opening) throw new ValidationError('Deze factuur komt uit je vorige administratie. Stuur hem vanuit je vorige programma; een herinnering kan wel vanuit hier.');
+    // een telefoonfactuur (uuid) stuurt de telefoon zelf; de pc verstuurt hem nooit
+    if (inv.uuid) throw new ValidationError(`Factuur ${inv.number} komt van je telefoon en is daar al verstuurd. De pc verstuurt deze factuur niet opnieuw.`);
     const to = (opts.to ?? inv.relation_email ?? '').trim();
     if (!isValidEmail(to)) throw new ValidationError(`Geen geldig e-mailadres voor ${inv.relation_name}`);
     const mailer = await this.mailerFactory(); // faalt vroeg als SMTP niet is ingesteld
@@ -139,8 +141,8 @@ export class DocumentSender {
     const mailer = await this.mailerFactory();
     const s = this.settings.get();
     const values = this.invoiceValues(inv, s);
-    // factuur uit de vorige administratie: geen PDF uit deze app meesturen (die zou er anders uitzien dan het origineel)
-    const attachments: MailMessage['attachments'] = inv.is_opening ? [] : [{ ...(await this.invoicePdf(invoiceId)), contentType: 'application/pdf' }];
+    // factuur uit de vorige administratie of van de telefoon: geen PDF uit deze app meesturen (die zou er anders uitzien dan het origineel)
+    const attachments: MailMessage['attachments'] = inv.is_opening || inv.uuid ? [] : [{ ...(await this.invoicePdf(invoiceId)), contentType: 'application/pdf' }];
     await this.deliver(mailer, 'herinnering', invoiceId, {
       to,
       bcc: s.smtp.bcc || undefined,

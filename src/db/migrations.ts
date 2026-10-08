@@ -1542,4 +1542,17 @@ export const migrations: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_sync_wachtrij_wacht ON sync_wachtrij(verwerkt_op, wacht_op_entiteit, wacht_op_uuid);
   `,
+  `
+  -- Facturen van een telefoon op de pc: sync-identiteit en reeksgegevens. uuid is de sleutel van de
+  -- telefoon; apparaat_code, reeks_jaar en reeks_volgnr komen uit het nummer (M1-2026-0001); regeltabel_versie
+  -- is de versie van de btw-regeltabel waarmee de telefoon rekende. Een pc-factuur houdt overal NULL, dus
+  -- bestaande rijen veranderen niet en de unieke indexen gelden alleen voor telefoonfacturen.
+  ALTER TABLE invoices ADD COLUMN uuid TEXT;
+  ALTER TABLE invoices ADD COLUMN apparaat_code TEXT;
+  ALTER TABLE invoices ADD COLUMN reeks_jaar INTEGER;
+  ALTER TABLE invoices ADD COLUMN reeks_volgnr INTEGER;
+  ALTER TABLE invoices ADD COLUMN regeltabel_versie TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_invoices_uuid ON invoices(uuid) WHERE uuid IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_invoices_reeks ON invoices(apparaat_code, reeks_jaar, reeks_volgnr) WHERE apparaat_code IS NOT NULL;
+  `,
 ];
