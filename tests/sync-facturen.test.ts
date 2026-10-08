@@ -48,7 +48,7 @@ function velden(klantUuid: string, regels: Regel[] = [HOOG, LAAG], over: Record<
 
 function omgeving() {
   const t = setup();
-  const sync = new SyncOntvangst(t.db, new RelationsService(t.db), { now: () => Date.now() });
+  const sync = new SyncOntvangst(t.db, new RelationsService(t.db), { now: () => Date.now(), invoices: t.s.invoices });
   const klantUuid = randomUUID();
   const eerste = sync.verwerk(APPARAAT, BRON, { entiteit: 'klant', uuid: klantUuid, revisie: 1, tijd: Date.now() - 5 * DAG, velden: { naam: KLANT.name } });
   expect(eerste).toMatchObject({ status: 200, uitkomst: 'toegepast' });
@@ -193,7 +193,10 @@ describe('factuurwijziging van de telefoon op de pc', () => {
     expect(o.factuur(credit)).toMatchObject({ status: 200, uitkomst: 'afgewezen', fout: 'origineel-onbekend' });
     expect(telling(o.db).invoices).toBe(voor.invoices);
     // een periode bij de boekhouder is afgewezen met fout periode
-    o.s.periods.startExchange(iso(Date.now() - 2 * DAG), 7, [], iso(Date.now()));
+    // tot twee dagen geleden, maar nooit tot en met 31 december: dan vraagt de echte service om een jaarafsluitingsbevestiging
+    let tot = Date.now() - 2 * DAG;
+    while (iso(tot).slice(5) === '12-31') tot -= DAG;
+    o.s.periods.startExchange(iso(tot), 7, [], iso(Date.now()));
     const vast = o.factuur(velden(o.klantUuid, [HOOG], { nummer: nummer(3) }));
     expect(vast).toMatchObject({ status: 200, uitkomst: 'afgewezen', fout: 'periode' });
     expect(telling(o.db).invoices).toBe(voor.invoices);
@@ -288,5 +291,10 @@ describe('factuurwijziging van de telefoon op de pc', () => {
     expect(telling(g.db)).toEqual({ ...guardVoor, sync_ontvangen: guardVoor.sync_ontvangen + 1 });
     expect(n(g.db, 'SELECT COUNT(*) AS n FROM invoices')).toBe(0);
     expect(register(g.db, geweigerdUuid)).toEqual([{ uitkomst: 'afgewezen', fout: 'periode', route: 'netwerk' }]);
+    // zonder meegegeven factuurdienst (geen guard-bewuste Ledger) wordt er nooit geboekt: factuur blijft niet-ondersteund
+    const zonder = new SyncOntvangst(g.db, new RelationsService(g.db), { now: () => Date.now() });
+    const zonderVoor = telling(g.db);
+    expect(zonder.verwerk(APPARAAT, BRON, { entiteit: 'factuur', uuid: randomUUID(), revisie: 1, tijd: Date.now() - DAG, velden: velden(klant, [HOOG], { nummer: nummer(9) }) })).toEqual({ status: 200, uitkomst: 'niet-ondersteund' });
+    expect(telling(g.db)).toEqual(zonderVoor);
   });
 });

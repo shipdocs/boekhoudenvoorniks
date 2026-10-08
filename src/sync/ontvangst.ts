@@ -1,10 +1,7 @@
 import type { Db } from '../db/database';
 import { KLANT_VELDEN, leesKlantVelden, type Wijziging } from '@gratis-boekhouden/kern';
 import { KlantVeldFout, normaliseerSyncVelden, type RelationsService } from '../relations/relations';
-import { Ledger } from '../core-ledger/ledger';
-import { InvoiceService } from '../documents/invoices';
-import { TemplateService } from '../documents/templates';
-import { SettingsService } from '../settings/settings';
+import type { InvoiceService } from '../documents/invoices';
 import { FactuurOntvangst } from './facturen';
 import { ProjectOntvangst } from './projecten';
 import { SyncWachtrij } from './wachtrij';
@@ -27,7 +24,11 @@ export interface SyncOntvangstOpties {
   /** de pc-klok in milliseconden (voor ontvangen_op); standaard Date.now */
   now?: () => number;
   log?: (melding: string) => void;
-  /** de factuurdienst voor het overnemen van telefoonfacturen; standaard een eigen InvoiceService op dezelfde databank */
+  /**
+   * De factuurdienst voor het overnemen van telefoonfacturen: de InvoiceService van de app, met de gedeelde Ledger
+   * en dus de writeGuard van de boekhouderskopie. Ontbreekt hij, dan blijft factuur niet-ondersteund (er wordt
+   * niets geboekt): een eigen Ledger zou de guard omzeilen.
+   */
   invoices?: Pick<InvoiceService, 'importDefinitive'>;
 }
 
@@ -58,7 +59,7 @@ export class SyncOntvangst {
   private readonly now: () => number;
   private readonly log: (melding: string) => void;
   private readonly projecten: ProjectOntvangst;
-  private readonly facturen: FactuurOntvangst;
+  private readonly facturen: FactuurOntvangst | null;
   private readonly wachtrij: SyncWachtrij;
 
   constructor(
@@ -74,11 +75,7 @@ export class SyncOntvangst {
     this.wachtrij = new SyncWachtrij(db, behandelaars, wachtrijOpties);
     this.projecten = new ProjectOntvangst(db, relations, this.wachtrij, wachtrijOpties);
     behandelaars.push(this.projecten);
-    // Productie geeft de InvoiceService van de app mee: die boekt via de gedeelde Ledger met de writeGuard van de
-    // boekhouderskopie (exchange.ts). Een eigen Ledger heeft die guard niet en zou daar wel boeken. De terugval
-    // met een eigen InvoiceService is alleen voor tests en losse gebruik.
-    const invoices = opties.invoices ?? new InvoiceService(db, new Ledger(db), new SettingsService(db), relations, new TemplateService(db));
-    this.facturen = new FactuurOntvangst(db, relations, invoices, wachtrijOpties);
+    this.facturen = opties.invoices ? new FactuurOntvangst(db, relations, opties.invoices, wachtrijOpties) : null;
   }
 
   /**
@@ -92,7 +89,7 @@ export class SyncOntvangst {
     try {
       uitslag = this.db.transaction(() => {
         if (wijziging.entiteit === 'klant') return this.verwerkKlant(deviceId, bron, wijziging, route);
-        if (wijziging.entiteit === 'factuur') return this.facturen.verwerk(deviceId, bron, wijziging, route);
+        if (wijziging.entiteit === 'factuur') return this.facturen ? this.facturen.verwerk(deviceId, bron, wijziging, route) : { status: 200, uitkomst: 'niet-ondersteund' };
         return this.projecten.verwerk(deviceId, bron, wijziging, route);
       })();
     } catch (e) {
