@@ -327,6 +327,25 @@ describe('factuurschema in de kern: ongeldige facturen', () => {
     expect(fout(maak([HOOG], { bedrijf_momentopname: zonderKvk })).veld).toBe('bedrijf_momentopname.kvkNumber');
   });
 
+  it('ongeldig: verplichte gegevens met alleen spaties tellen als leeg (bedrijf en klant)', () => {
+    const leeg = '   ';
+    const bedrijf = leesFactuurVelden(maak([HOOG], { bedrijf_momentopname: { ...BEDRIJF, name: leeg, address: leeg, city: leeg, kvkNumber: leeg, vatNumber: leeg } }));
+    expect(bedrijf.ok).toBe(false);
+    if (!bedrijf.ok) expect(bedrijf.melding).toContain('Vul eerst je bedrijfsgegevens aan bij Instellingen');
+    const klantAdres = leesFactuurVelden(maak([HOOG], { klant_momentopname: { ...KLANT_NL, address: leeg, city: leeg } }));
+    expect(klantAdres.ok).toBe(false);
+    if (!klantAdres.ok) expect(klantAdres.melding).toContain('ontbreekt (verplicht op een factuur)');
+    // elk veld apart, zodat geen enkel veld door de mazen glipt
+    for (const veld of ['name', 'address', 'city', 'kvkNumber', 'vatNumber'] as const) {
+      expect(leesFactuurVelden(maak([HOOG], { bedrijf_momentopname: { ...BEDRIJF, [veld]: leeg } })).ok).toBe(false);
+    }
+    for (const veld of ['address', 'city'] as const) {
+      expect(leesFactuurVelden(maak([HOOG], { klant_momentopname: { ...KLANT_NL, [veld]: leeg } })).ok).toBe(false);
+    }
+    // btw-nummer van de klant bij verlegging
+    expect(leesFactuurVelden(maak([{ omschrijving: 'Onderaanneming', hoeveelheid: 1, prijs: 100000, btw_soort: 'verlegd' }], { klant_momentopname: { ...KLANT_NL, vat_number: leeg } })).ok).toBe(false);
+  });
+
   it('ongeldig: bedragen zo groot dat de som niet meer exact is', () => {
     const r = fout(maak([{ ...HOOG, hoeveelheid: 1e10, prijs: 9_000_000_000_000 }]));
     expect(['regels[0].prijs', 'totalen']).toContain(r.veld);

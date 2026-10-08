@@ -323,7 +323,9 @@ function lees(raw: unknown): FactuurVelden {
     return afwijzen('totalen', 'De totalen kloppen niet met de regels van de factuur');
   }
   try {
-    checkInvoiceRequirements({ lines: regels.map((r) => ({ vat_code: r.btw_soort, vat_percentage: r.btw_percentage })) }, klant, bedrijf.kor, bedrijf);
+    // checkInvoiceRequirements kijkt of een veld gevuld is; een veld met alleen spaties is leeg
+    const gevuld = <T extends object>(o: T): T => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])) as T;
+    checkInvoiceRequirements({ lines: regels.map((r) => ({ vat_code: r.btw_soort, vat_percentage: r.btw_percentage })) }, gevuld(klant), bedrijf.kor, gevuld(bedrijf));
   } catch (e) {
     if (e instanceof ValidationError) return afwijzen('factuur', e.message);
     throw e;
