@@ -414,9 +414,10 @@ describe('een bon als wijziging met bijlagen op de pc', () => {
     const sync2 = t.direct(spool2);
     const bestand = join(t.spoolDir, `${w2.uuid}.bon`);
     const rijenVoor = t.rijen();
-    // kan niet verwijderen: de spoolmap is niet schrijfbaar (niet als root; dan blijft het bestand staan door een
+    // kan niet verwijderen: de spoolmap is niet schrijfbaar (niet op Windows of als root; dan blijft het bestand staan door een
     // nagebootste fout van het verwijderen zelf, zie ReceiptSpool.verwijderBestand)
-    const root = typeof process.getuid === 'function' && process.getuid() === 0;
+    // Op Windows (en als root) houdt een alleen-lezen map het verwijderen niet tegen: daar wordt de fout nagebootst.
+    const root = process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0);
     const hersteld: (() => void)[] = [];
     const echtVerwijderen = spool2.verwijderBestand.bind(spool2);
     t.db.function('blokkeer_verwijderen', () => {
