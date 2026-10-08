@@ -31,6 +31,7 @@ export const COUNTRIES: { code: string; name: string }[] = [
   { code: 'SK', name: 'Slowakije' },
   // buiten de EU
   { code: 'GB', name: 'Verenigd Koninkrijk' },
+  { code: 'XI', name: 'Noord-Ierland' },
   { code: 'CH', name: 'Zwitserland' },
   { code: 'NO', name: 'Noorwegen' },
   { code: 'US', name: 'Verenigde Staten' },
