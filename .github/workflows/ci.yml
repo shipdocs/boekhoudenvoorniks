@@ -21,6 +21,34 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  financial-browser-smoke:
+    # Kleine, verplichte set kritieke schermflows; de volledige e2e-suite blijft lokaal.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npx playwright install --with-deps chromium
+      - run: npm run rebuild:node
+      - run: npm run build
+      - name: Kritieke boekhoudflows in de browser
+        run: npx playwright test e2e/factuur.spec.ts e2e/bank-bonnetjes.spec.ts e2e/periode-afsluiten.spec.ts
+      - name: Bewaar foutinformatie
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: financial-browser-smoke
+          path: |
+            e2e-results/
+            e2e-report/
+          retention-days: 7
+
   # De gegevensmap en het overzetten ervan (tests/data-dir.test.ts) gedragen zich op Windows anders:
   # bestandssloten, schijfletters en backslashes. Daarom draaien die tests ook daar, samen met die van de
   # Store-versie (tests/windows-store.test.ts: zelf een map kiezen, alleen-lezen openen, het manifest).
@@ -63,8 +91,7 @@ jobs:
       - run: npm ci
       - run: npm run check
 
-  # De browsertests (e2e) draaien niet hier maar lokaal vóór een pull request (`npm run e2e`): ze doen op
-  # GitHub hetzelfde als op de eigen computer en kostten vooral wachttijd. Zie docs/testen.md.
+  # De volledige browsertest-suite blijft lokaal; de kritieke financiële schermflows draaien hierboven ook in CI.
 
   # Verpakt de app en start hem echt: vangt ontbrekende runtime-afhankelijkheden in het installatiepakket.
   package-smoke:

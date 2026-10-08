@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hoe wij de software controleren | BoekhoudenVoorNiks</title>
+  <meta name="description" content="Lees hoe BoekhoudenVoorNiks boekingen, btw, bankverwerking, back-ups en releases controleert, en wat deze controles niet garanderen.">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/kwaliteit.html">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="./"><picture><source srcset="img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href="./#functies">Functies</a>
+        <a href="./#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="stukadoors.html">Stukadoors</a>
+            <a href="btw-stucwerk.html">Btw op stucwerk: 9% of 21%</a>
+            <a href="schilders.html">Schilders</a>
+            <a href="webdevelopers.html">Webdevelopers</a>
+            <a href="boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="waarom.html">Waarom</a>
+        <a href="wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="downloaden.html">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script src="menu.js" defer></script>
+
+  <main class="wrap notes">
+    <p class="eyebrow">Transparant over kwaliteit</p>
+    <h1>Hoe wij BoekhoudenVoorNiks controleren</h1>
+    <p class="lead">Je vertrouwt belangrijke financiële gegevens aan boekhoudsoftware toe. Daarom leggen we uit welke controles in de ontwikkeling zitten, en waar je zelf moet blijven opletten.</p>
+    <h2>Boekingen met vaste regels</h2>
+    <p>De boekhouding gebruikt vaste boekingsregels. Automatische tests controleren onder meer grootboeksaldi, debet en credit, btw-rubrieken, openstaande posten en dubbele verwerking.</p>
+    <h2>Een vaste proefadministratie</h2>
+    <p>Met een vaste set facturen, inkoopdocumenten en bankafschriften vergelijken we de uitkomsten met vooraf vastgelegde verwachtingen. Bij een afwijking moet eerst worden uitgezocht wat er veranderd is. De verwachte uitkomsten worden niet automatisch aan de software aangepast.</p>
+    <h2>Controles voor een nieuwe versie</h2>
+    <p>Bij pull requests draaien automatische controles op de rekenregels, de bouw van de app en de website-onderdelen. Daarnaast is er een beperkte browsertest voor belangrijke handelingen. Voor Windows en Linux zijn er afzonderlijke controles bij het publiceren van releases. Een geslaagde test bewijst dat de geteste scenario's werken, niet dat alle denkbare situaties zijn afgedekt.</p>
+    <h2>Je gegevens blijven bij jou</h2>
+    <p>De administratie staat standaard op je eigen computer. De app maakt back-ups en gebruikt externe koppelingen alleen wanneer je ze inschakelt. Een lokale administratie vraagt ook om eigen zorg: bewaar regelmatig een extra back-up op een andere veilige plek.</p>
+    <h2>Wat deze controles niet betekenen</h2>
+    <p>Deze controles zijn geen onafhankelijke accountantsverklaring, beveiligingscertificering of garantie dat iedere fiscale situatie correct wordt verwerkt. Controleer je gegevens en aangiften, zeker bij bijzondere transacties. Vraag zo nodig een boekhouder of belastingadviseur om advies.</p>
+    <p>Wie de technische details wil bekijken, kan terecht bij de <a href="https://github.com/shipdocs/boekhoudenvoorniks/blob/main/docs/testen.md">testdocumentatie op GitHub</a> en de <a href="wijzigingen.html">wijzigingsgeschiedenis</a>.</p>
+    <p><a class="btn" href="downloaden.html">BoekhoudenVoorNiks downloaden</a></p>
+  </main>
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="werkadministratie.html">Werkadministratie, geen boekhoudpakket</a></li>
+          <li><a href="./#functies">Functies</a></li>
+          <li><a href="./#prijzen">Prijzen</a></li>
+          <li><a href="./#overstappen">Overstappen</a></li>
+          <li><a href="bank-automatisch.html">Bank automatisch inlezen</a></li>
+          <li><a href="btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="zonder-abonnement.html">Zonder abonnement</a></li>
+          <li><a href="offline-boekhoudprogramma.html">Offline boekhoudprogramma</a></li>
+          <li><a href="gratis-boekhoudprogramma-downloaden.html">Gratis boekhoudprogramma downloaden</a></li>
+          <li><a href="./#vragen">Veelgestelde vragen</a></li>
+          <li><a href="wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="starters.html">Starters</a></li>
+          <li><a href="stukadoors.html">Stukadoors</a></li>
+          <li><a href="schilders.html">Schilders</a></li>
+          <li><a href="webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="waarom.html">Waarom we dit maakten</a></li>
+          <li><a href="kwaliteit.html" aria-current="page">Hoe wij de software controleren</a></li>
+          <li><a href="downloaden.html">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks">Vragen en feedback: mail ons</a></li>
+          <li><a href="voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a> · <button type="button" class="linkish" data-cookie-settings>Cookie-voorkeuren</button></p>
+    <div id="privacy-choice" role="dialog" aria-label="Meten van advertenties">
+      <p><strong>Mogen we meten of onze advertentie werkt?</strong> Met je toestemming laden we de Meta Pixel (Facebook en Instagram). Meta plaatst dan cookies en ziet dat je deze site bezocht. Zonder toestemming gaat er niets naar Meta. <a href="privacy.html#website">Meer uitleg</a></p>
+      <div class="row"><button type="button" class="btn small" data-choice="ja">Toestaan</button><button type="button" class="btn small ghost" data-choice="nee">Niet toestaan</button></div>
+    </div>
+    <script src="meta-pixel.js" defer></script>
+  </footer>
+</body>
+</html>
