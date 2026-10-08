@@ -100,6 +100,12 @@ export class ReceiptSpool {
    * (WAL), maar na deze regel krijgt de telefoon de bevestiging en ruimt hij de bon op.
    */
   private insert(id: string, deviceId: string, hash: string): void {
+    // Binnen een transactie kan SQLite de schrijfzekerheid niet wijzigen (PRAGMA synchronous mag dan niet): de
+    // aanroeper die de transactie opent (SyncOntvangst) zet haar zelf op FULL vóór de transactie.
+    if (this.db.inTransaction) {
+      this.db.prepare('INSERT INTO scanner_documents (id, device_id, content_hash) VALUES (?, ?, ?)').run(id, deviceId, hash);
+      return;
+    }
     const before = this.db.pragma('synchronous', { simple: true }) as number;
     this.db.pragma('synchronous = FULL');
     try {

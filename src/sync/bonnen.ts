@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { unlinkSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { leesBonVelden, leesFotoVelden, type BonFoto, type Wijziging } from '@gratis-boekhouden/kern';
 import type { Db } from '../db/database';
 import { jpegInfo } from '../scanner/jpeg-pdf';
@@ -58,36 +57,14 @@ export function controleerFoto(w: Wijziging, bijlagen: Buffer[]): SyncResultaat 
  * weg dat de spool al had neergezet, zodat een fout nooit een halve rij of een los bestand achterlaat en
  * dezelfde wijziging daarna gewoon opnieuw kan.
  */
-/**
- * De databank zoals de spool hem hier mag gebruiken: binnen een transactie. ReceiptSpool.insert zet de
- * schrijfzekerheid (PRAGMA synchronous) tijdelijk op FULL, en SQLite staat dat niet toe binnen een transactie.
- * SyncOntvangst zet die zekerheid daarom zelf vóór de transactie op FULL; deze doorgeefluik laat het instellen
- * ervan dan met rust. Al het andere gaat ongewijzigd door naar de echte databank.
- */
-function metVasteSchrijfzekerheid(db: Db): Db {
-  return new Proxy(db, {
-    get(doel, naam) {
-      if (naam === 'pragma') {
-        return (bron: string, opties?: { simple?: boolean }) => (/^\s*synchronous\s*=/i.test(bron) ? undefined : doel.pragma(bron, opties));
-      }
-      const waarde = Reflect.get(doel, naam, doel) as unknown;
-      return typeof waarde === 'function' ? (waarde as (...a: unknown[]) => unknown).bind(doel) : waarde;
-    },
-  });
-}
-
 export class BonOntvangst {
   /** het ID van de bon waarvan deze aanroep het bestand in de spool neerzette (en dat nog niet definitief is) */
   private nieuw: string | null = null;
-  /** dezelfde spool (zelfde map en regels), maar bruikbaar binnen de transactie van verwerk */
-  private readonly spoolInTransactie: ReceiptSpool;
-
   constructor(
     private readonly db: Db,
     private readonly spool: ReceiptSpool,
     private readonly opties: BonOntvangstOpties,
   ) {
-    this.spoolInTransactie = new ReceiptSpool(metVasteSchrijfzekerheid(db), dirname(spool.pathOf('00000000-0000-0000-0000-000000000000')));
   }
 
   verwerk(deviceId: string, w: Wijziging, route: string, bijlagen: Buffer[]): SyncResultaat {
@@ -107,7 +84,7 @@ export class BonOntvangst {
 
     // 3. opslaan in de spool: hetzelfde als bij het bon-bericht
     const bericht: ReceiptMessage = { soort: 'bon', tijd: w.tijd, id: w.uuid, betaalwijze: gelezen.velden.betaalwijze, notitie: gelezen.velden.notitie, locatie: gelezen.velden.locatie, fotos: bijlagen };
-    const spoel = this.spoolInTransactie.accept(bericht, deviceId, { keepLocation: this.opties.keepLocation?.() ?? false });
+    const spoel = this.spool.accept(bericht, deviceId, { keepLocation: this.opties.keepLocation?.() ?? false });
     if (spoel === 'nieuw') this.nieuw = w.uuid;
     const uitkomst = spoel === 'nieuw' ? 'toegepast' : spoel === 'al' ? 'overgeslagen' : 'afgewezen';
     const fout = spoel === 'botst' ? 'id-botst' : null;
