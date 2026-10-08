@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { leesFotoVelden, leesWijziging, type Wijziging } from '@gratis-boekhouden/kern';
 import type { Db } from '../db/database';
@@ -275,28 +275,40 @@ export class FotoOntvangst implements WachtrijBehandelaar {
     return false;
   }
 
-  /** Schrijft de bestanden, exclusief aangemaakt. Bestaat een bestand al, dan moet de inhoud gelijk zijn (anders een fout). */
+  /**
+   * Schrijft de bestanden via een tijdelijk bestand en een rename: een crash laat hoogstens een `.tmp` achter (dat een
+   * volgende poging gewoon overschrijft), nooit een half bestand onder de echte naam. Bestaat het echte bestand al, dan
+   * moet de inhoud gelijk zijn (anders een fout): het bestand wordt nooit overschreven.
+   */
   private schrijfBestanden(inhoud: Buffer[], items: Bewaard[]): void {
     inhoud.forEach((data, i) => {
       const pad = items[i]!.pad;
       const abs = resolveAttachmentPath(this.adminDir, pad);
       mkdirSync(dirname(abs), { recursive: true });
-      let fd: number;
-      try {
-        fd = openSync(abs, 'wx', 0o600);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-        // het bestand stond er al (een achtergebleven bestand of dezelfde foto van een ander apparaat): gelijk is goed
+      if (existsSync(abs)) {
+        // het bestand stond er al (een eerdere, volledige poging of dezelfde foto van een ander apparaat): gelijk is goed
         if (!readFileSync(abs).equals(data)) throw new Error('Een fotobestand met een andere inhoud staat er al');
         return;
       }
-      this.nieuw.push(pad);
+      const tmp = `${abs}.tmp`;
       try {
-        writeSync(fd, data);
-        fsyncSync(fd);
-      } finally {
-        closeSync(fd);
+        const fd = openSync(tmp, 'w', 0o600);
+        try {
+          writeSync(fd, data);
+          fsyncSync(fd);
+        } finally {
+          closeSync(fd);
+        }
+        renameSync(tmp, abs);
+      } catch (e) {
+        try {
+          unlinkSync(tmp);
+        } catch {
+          /* geen tijdelijk bestand */
+        }
+        throw e;
       }
+      this.nieuw.push(pad);
     });
   }
 

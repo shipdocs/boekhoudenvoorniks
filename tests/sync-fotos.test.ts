@@ -391,10 +391,17 @@ describe('een foto van de telefoon bij een project op de pc', () => {
     // nooit inhoud of een pad in het logboek
     expect(o.logs.length).toBeGreaterThanOrEqual(3);
     for (const regel of [...o.logs, ...kapot.logs]) expect(regel).not.toMatch(/geheime notitie|telefoon\/|bijlagen\//);
+    // een crash midden in het schrijven laat hoogstens een tijdelijk bestand achter (nooit een half bestand onder de
+    // echte naam), en dat blokkeert een volgende poging niet: het wordt gewoon overschreven
+    const staleMap = join(o.adminDir, 'bijlagen', 'telefoon', a.uuid);
+    mkdirSync(staleMap, { recursive: true });
+    writeFileSync(join(staleMap, '1.jpg.tmp'), 'half geschreven bij een crash');
     // daarna werkt dezelfde wijziging gewoon, precies een keer
     expect(o.foto(a.uuid, fotos, a.v)).toEqual({ status: 200, uitkomst: 'toegepast' });
     expect(o.foto(a.uuid, fotos, a.v)).toEqual({ status: 200, uitkomst: 'overgeslagen' });
     expect(o.telling()).toEqual({ job_photos: 2, bijlagen: 0, wachtrij: 0, register: 1, bestanden: 2 });
+    expect(readFileSync(join(staleMap, '1.jpg')).length).toBeGreaterThan(30);
+    expect(existsSync(join(staleMap, '1.jpg.tmp'))).toBe(false);
 
     // 5. het terugdraaien zelf mislukt: de bestanden kunnen niet verwijderd worden. Dat verdwijnt niet stil: ze blijven
     // staan zonder rij (nooit een foto), worden onthouden, en gaan weg zodra het kan
