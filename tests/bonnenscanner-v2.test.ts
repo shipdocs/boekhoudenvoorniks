@@ -253,7 +253,8 @@ describe('bonnenscanner v2: wijzigingen (change-sets)', () => {
     }
     // en de toegestane lijst is precies deze vijf
     for (const entiteit of ['klant'] as const) expect((await p.wijziging({ entiteit })).status, entiteit).toBe(200);
-    for (const entiteit of ['factuur', 'bon', 'foto'] as const) expect((await p.wijziging({ entiteit })).status, entiteit).toBe(200);
+    // factuur zit hier niet meer bij: een factuur wordt echt gevalideerd (willekeurige velden geven 400 veld-ongeldig); die dekking staat in tests/sync-facturen.test.ts
+    for (const entiteit of ['bon', 'foto'] as const) expect((await p.wijziging({ entiteit })).status, entiteit).toBe(200);
   });
 
   it('documenten worden nooit bewerkt: factuur, bon en foto krijgen alleen revisie 1', async () => {
@@ -263,8 +264,9 @@ describe('bonnenscanner v2: wijzigingen (change-sets)', () => {
       const r = await p.wijziging({ entiteit, revisie: 2 });
       expect(r.status, entiteit).toBe(400);
       expect(r.json, entiteit).toMatchObject({ ok: false, fout: 'ongeldig' });
-      // de eerste (en enige) revisie van een document mag wel
-      expect((await p.wijziging({ entiteit, revisie: 1 })).status, entiteit).toBe(200);
+      // de eerste (en enige) revisie van een document mag wel; dat geldt alleen voor bon en foto, want een factuur
+      // wordt echt gevalideerd (willekeurige velden geven 400 veld-ongeldig) en is in tests/sync-facturen.test.ts gedekt
+      if (entiteit !== 'factuur') expect((await p.wijziging({ entiteit, revisie: 1 })).status, entiteit).toBe(200);
     }
     // een klant mag juist wel vaker gewijzigd worden
     expect((await p.wijziging({ revisie: 3, velden: { naam: 'derde keer' } })).status).toBe(200);
@@ -456,9 +458,9 @@ describe('bonnenscanner v2: grenzen van de berichtgrootte', () => {
     const json = {
       soort: 'wijziging',
       tijd: t.clock.now,
-      // entiteit project: de velden van een klant zijn sinds de opslag van klanten beperkt tot het klantveldschema
-      // (sinds de opslag van projecten geldt dat ook voor project; factuur wordt nog niet opgeslagen en laat dit bericht dus ongemoeid)
-      wijziging: { entiteit: 'factuur', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'Grote mutatie', lijst: Array.from({ length: 400 }, () => 'x'.repeat(48)) } },
+      // entiteit bon: de velden van een klant, project en factuur worden echt gevalideerd (klantveldschema, projectschema,
+      // leesFactuurVelden); een bon wordt nog niet opgeslagen en laat dit bericht met willekeurige velden dus ongemoeid
+      wijziging: { entiteit: 'bon', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { naam: 'Grote mutatie', lijst: Array.from({ length: 400 }, () => 'x'.repeat(48)) } },
     };
     const lengte = Buffer.byteLength(JSON.stringify(json), 'utf8');
     expect(lengte).toBeGreaterThan(LIMITS.maxJsonBytes);

@@ -1,6 +1,8 @@
 import type { Db } from '../db/database';
 import { KLANT_VELDEN, leesKlantVelden, type Wijziging } from '@gratis-boekhouden/kern';
 import { KlantVeldFout, normaliseerSyncVelden, type RelationsService } from '../relations/relations';
+import type { InvoiceService } from '../documents/invoices';
+import { FactuurOntvangst } from './facturen';
 import { ProjectOntvangst } from './projecten';
 import { SyncWachtrij } from './wachtrij';
 
@@ -10,7 +12,7 @@ export interface SyncResultaat {
   status: number;
   /** bij 200: toegepast, overgeslagen, afgewezen, wacht (in de wachtrij) of niet-ondersteund */
   uitkomst?: 'toegepast' | 'overgeslagen' | 'afgewezen' | 'wacht' | 'niet-ondersteund';
-  /** bij afgewezen en bij elke fout: de reden als code (geen-klant, klus-gekoppeld, veld-ongeldig, klant-onbekend, project-onbekend, wachtrij-vol, opslaan-mislukt) */
+  /** bij afgewezen en bij elke fout: de reden als code (geen-klant, klus-gekoppeld, nummer-bezet, origineel-onbekend, periode, factuur-geweigerd, ongeldig, veld-ongeldig, klant-onbekend, project-onbekend, wachtrij-vol, opslaan-mislukt) */
   fout?: string;
   /** bij veld-ongeldig: het veld (Nederlandse naam) waar het om gaat */
   veld?: string;
@@ -22,6 +24,12 @@ export interface SyncOntvangstOpties {
   /** de pc-klok in milliseconden (voor ontvangen_op); standaard Date.now */
   now?: () => number;
   log?: (melding: string) => void;
+  /**
+   * De factuurdienst voor het overnemen van telefoonfacturen: de InvoiceService van de app, met de gedeelde Ledger
+   * en dus de writeGuard van de boekhouderskopie. Ontbreekt hij, dan blijft factuur niet-ondersteund (er wordt
+   * niets geboekt): een eigen Ledger zou de guard omzeilen.
+   */
+  invoices?: Pick<InvoiceService, 'importDefinitive'>;
 }
 
 interface RegisterRij {
@@ -36,7 +44,7 @@ function veldnaamVanKolom(kolom: string): string {
 }
 
 /**
- * Verwerkt wijzigingen van een telefoon in de administratie. Voor nu klanten en projecten; factuur, bon
+ * Verwerkt wijzigingen van een telefoon in de administratie. Voor nu klanten, projecten en facturen (het directe pad, zie src/sync/facturen.ts); bon
  * en foto geven niet-ondersteund en laten niets achter (de telefoon beschouwt dat als niet afgeleverd).
  *
  * Idempotent op de exacte registersleutel (apparaat_id, entiteit, uuid, revisie) in sync_ontvangen, per
@@ -51,6 +59,7 @@ export class SyncOntvangst {
   private readonly now: () => number;
   private readonly log: (melding: string) => void;
   private readonly projecten: ProjectOntvangst;
+  private readonly facturen: FactuurOntvangst | null;
   private readonly wachtrij: SyncWachtrij;
 
   constructor(
@@ -66,6 +75,7 @@ export class SyncOntvangst {
     this.wachtrij = new SyncWachtrij(db, behandelaars, wachtrijOpties);
     this.projecten = new ProjectOntvangst(db, relations, this.wachtrij, wachtrijOpties);
     behandelaars.push(this.projecten);
+    this.facturen = opties.invoices ? new FactuurOntvangst(db, relations, opties.invoices, wachtrijOpties) : null;
   }
 
   /**
@@ -74,19 +84,23 @@ export class SyncOntvangst {
    * @param route waar de wijziging vandaan kwam (netwerk, map of mail); alleen voor het register
    */
   verwerk(deviceId: string, bron: string, wijziging: Wijziging, route: string = 'netwerk'): SyncResultaat {
-    if (wijziging.entiteit !== 'klant' && wijziging.entiteit !== 'project') return { status: 200, uitkomst: 'niet-ondersteund' };
+    if (wijziging.entiteit !== 'klant' && wijziging.entiteit !== 'project' && wijziging.entiteit !== 'factuur') return { status: 200, uitkomst: 'niet-ondersteund' };
     let uitslag: SyncResultaat;
     try {
-      uitslag = this.db.transaction(() => (wijziging.entiteit === 'klant' ? this.verwerkKlant(deviceId, bron, wijziging, route) : this.projecten.verwerk(deviceId, bron, wijziging, route)))();
+      uitslag = this.db.transaction(() => {
+        if (wijziging.entiteit === 'klant') return this.verwerkKlant(deviceId, bron, wijziging, route);
+        if (wijziging.entiteit === 'factuur') return this.facturen ? this.facturen.verwerk(deviceId, bron, wijziging, route) : { status: 200, uitkomst: 'niet-ondersteund' as const };
+        return this.projecten.verwerk(deviceId, bron, wijziging, route);
+      })();
     } catch (e) {
-      this.log(`${wijziging.entiteit === 'klant' ? 'Klantwijziging' : 'Projectwijziging'} van de telefoon opslaan mislukt: ${(e as Error).message}`);
+      this.log(`${wijziging.entiteit === 'klant' ? 'Klantwijziging' : wijziging.entiteit === 'factuur' ? 'Factuurwijziging' : 'Projectwijziging'} van de telefoon opslaan mislukt: ${(e as Error).message}`);
       return { status: 500, fout: 'opslaan-mislukt' };
     }
     // een toegepaste klant of een toegepast project kan wachtende wijzigingen vrijmaken (een cascade);
     // dat gebeurt na de transactie van deze wijziging, zodat een fout daarin deze wijziging niet terugdraait.
     // Een klantwijziging die als overgeslagen wordt beantwoord (een herhaling) probeert de wachtrij ook opnieuw:
     // na een tijdelijke opslagfout kan de klant er al zijn terwijl het wachtende project nog ontbreekt.
-    if (uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant'))) this.verwerkWachtrij();
+    if (wijziging.entiteit !== 'factuur' && uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant'))) this.verwerkWachtrij();
     return uitslag;
   }
 
