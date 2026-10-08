@@ -8,6 +8,7 @@ import { makeJpeg } from './fixtures/jpeg';
 import { Bonnenscanner, type ScannerDeps } from '../src/scanner/scanner';
 import { PHONE_SCANNER } from '../src/shared/phone-scanner';
 import { CONTENT_TYPE, ENDPOINT_PATH, LIMITS, PROTOCOL_VERSIONS, RULES_VERSION, decodePairing, encodeFrame, openResponse, parseFrame, sealRequest, type PairingPayload, type ProtocolVersion } from '../src/scanner/protocol';
+import { leesCursor } from '../src/sync/stamgegevens';
 import { besluitWijziging, leesWijziging, type WijzigingsFout } from '@gratis-boekhouden/kern';
 
 // Protocol versie 2 naast versie 1 (docs/bonnenscanner-protocol.md): het hallo-antwoord van v2 noemt
@@ -283,16 +284,40 @@ describe('bonnenscanner v2: wijzigingen (change-sets)', () => {
 });
 
 describe('bonnenscanner v2: stamgegevens', () => {
-  it('een vraag om stamgegevens krijgt alleen een bevestiging, geen gegevens uit de administratie', async () => {
+  it('stamgegevens antwoord volgens afspraak', async () => {
     const t = start();
     const p = await pair(t);
+    const leverancier = t.s.relations.create({ name: 'Groothandel Geheim BV', type: 'leverancier', iban: 'NL02ABNA0123456789' });
+    const klus = t.s.jobs.create({ relationId: t.klant.id, title: 'Stucwerk woonkamer', notes: 'Eerst de gang' });
+    // de eerste vraag van een telefoon: zijn apparaatcode bestaat dan nog niet en wordt hier toegekend
     const r = await p.verstuur({ soort: 'stamgegevens', tijd: t.clock.now }, { versie: 2 });
-    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'stamgegevens' } });
-    expect(Object.keys(r.json!).sort()).toEqual(['ok', 'soort']);
-    // er komt niets uit de administratie: geen klanten, geen projecten, geen documenten
+    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'stamgegevens', pcTijd: t.clock.now, apparaatcode: 'M1', regels: RULES_VERSION, volgende: null, aliassen: [], verborgen: [] } });
+    expect(Object.keys(r.json!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'soort', 'verborgen', 'volgende']);
+    const klanten = r.json!.klanten as { uuid: string; seq: number; pc_revisie: number; gearchiveerd: boolean; velden: Record<string, { waarde: unknown; tijd: number; bron: string }> }[];
+    // de twee klanten van de testadministratie, niet de leverancier
+    expect(klanten.map((k) => k.velden.naam!.waarde).sort()).toEqual(['Bouwbedrijf De Vries BV', 'Familie Jansen']);
+    const jansen = klanten.find((k) => k.velden.naam!.waarde === 'Familie Jansen')!;
+    const rij = t.db.prepare('SELECT uuid, sync_seq, revisie, created_at FROM relations WHERE id = ?').get(t.klant.id) as { uuid: string; sync_seq: number; revisie: number; created_at: string };
+    expect(jansen).toMatchObject({ uuid: rij.uuid, seq: rij.sync_seq, pc_revisie: rij.revisie, gearchiveerd: false });
+    expect(jansen.velden.email).toEqual({ waarde: 'jansen@example.nl', tijd: expect.any(Number), bron: 'pc' });
+    expect(jansen.velden.gearchiveerd).toMatchObject({ waarde: 0, bron: 'pc' });
+    const projecten = r.json!.projecten as { uuid: string; seq: number; pc_revisie: number; velden: Record<string, { waarde: unknown; tijd: number; bron: string }> }[];
+    expect(projecten).toHaveLength(1);
+    const job = t.db.prepare('SELECT uuid, sync_seq, revisie FROM jobs WHERE id = ?').get(klus.id) as { uuid: string; sync_seq: number; revisie: number };
+    expect(projecten[0]).toMatchObject({ uuid: job.uuid, seq: job.sync_seq, pc_revisie: job.revisie });
+    // de klant van het project gaat als uuid mee, nooit als integer-id
+    expect(projecten[0]!.velden.klant!.waarde).toBe(rij.uuid);
+    expect(projecten[0]!.velden.titel!.waarde).toBe('Stucwerk woonkamer');
+    // geen leverancier en geen id's of interne velden, nergens in het antwoord
+    const tekst = JSON.stringify(r.json);
+    expect(tekst).not.toContain(leverancier.name);
+    expect(tekst).not.toContain('NL02ABNA0123456789');
+    // dezelfde vraag nog eens: dezelfde apparaatcode en dezelfde gegevens
+    const nog = await p.verstuur({ soort: 'stamgegevens', tijd: t.clock.now }, { versie: 2 });
+    expect(nog.json).toEqual(r.json);
+    // alleen lezen en geen documenten
     expect(t.documents()).toEqual([]);
-    // alleen de standaard testadministratie, onaangetast
-    expect(t.db.prepare('SELECT COUNT(*) AS n FROM relations').get()).toEqual({ n: 2 });
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM relations').get()).toEqual({ n: 3 });
   });
 });
 
@@ -610,10 +635,19 @@ describe('bonnenscanner v2: de voorbeelden in het document', () => {
     expect(antwoord('wijziging')).toEqual({ ok: true, soort: 'wijziging', entiteit: bericht.wijziging.entiteit, uuid: bericht.wijziging.uuid, revisie: bericht.wijziging.revisie });
   });
 
-  it('het stamgegevens-voorbeeld vraagt om niets meer dan soort en tijd, en krijgt alleen een bevestiging', () => {
+  it('het stamgegevens-voorbeeld: het verzoek is geldig, het antwoord heeft de afgesproken vorm', () => {
     expect(verzoek('stamgegevens')).toEqual({ soort: 'stamgegevens', tijd: 1790848800000 });
     expect(parseFrame(encodeFrame(verzoek('stamgegevens')), 2)).toEqual({ soort: 'stamgegevens', tijd: 1790848800000 });
     expect(() => parseFrame(encodeFrame(verzoek('stamgegevens')), 1)).toThrow();
-    expect(antwoord('stamgegevens')).toEqual({ ok: true, soort: 'stamgegevens' });
+    const voorbeeld = antwoord('stamgegevens');
+    expect(Object.keys(voorbeeld)).toEqual(['ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'verborgen', 'volgende', 'nieuwe_sinds']);
+    expect(voorbeeld.regels).toBe(RULES_VERSION);
+    for (const item of [...(voorbeeld.klanten as Record<string, unknown>[]), ...(voorbeeld.projecten as Record<string, unknown>[])]) {
+      expect(Object.keys(item)).toEqual(['uuid', 'seq', 'pc_revisie', 'gearchiveerd', 'velden']);
+    }
+    // de cursor in het tweede verzoek-voorbeeld is er een die de pc zelf zou maken
+    const metCursor = JSON.parse(doc.match(/```jsonc\n(\{"soort":"stamgegevens"[\s\S]*?)```/)![1]!) as { sinds: number; na: string };
+    expect(parseFrame(encodeFrame(metCursor), 2)).toMatchObject({ soort: 'stamgegevens', sinds: 412, na: metCursor.na });
+    expect(leesCursor(metCursor.na)).toEqual({ s: 'p', t: 480, u: '1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9', b: 500 });
   });
 });

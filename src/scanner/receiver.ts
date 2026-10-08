@@ -3,6 +3,8 @@ import type { ScannerPairing } from './pairing';
 import type { ReceiptSpool } from './spool';
 import type { Wijziging } from '@gratis-boekhouden/kern';
 import type { SyncResultaat } from '../sync/ontvangst';
+import type { Db } from '../db/database';
+import { OngeldigeCursor, leesCursor, leesStamgegevens, type Cursor } from '../sync/stamgegevens';
 import { jpegInfo } from './jpeg-pdf';
 import { normalizeRemote, sameSubnet, type LocalInterface } from './network';
 import { CONTENT_TYPE, DIRECTION, ENDPOINT_PATH, HEADER_BYTES, LIMITS, PROTOCOL_VERSIONS, RULES_VERSION, TAG_BYTES, ProtocolError, openRequest, parseFrame, readHeader, sealResponse, toBase64Url, type ErrorCode } from './protocol';
@@ -12,6 +14,8 @@ export interface ReceiverOptions {
   spool: ReceiptSpool;
   /** verwerkt een gecontroleerde wijziging in de administratie (SyncOntvangst); zonder deze opdracht wordt een wijziging alleen bevestigd */
   sync?: { verwerk(deviceId: string, bron: string, wijziging: Wijziging, route?: string): SyncResult };
+  /** de administratie waaruit `stamgegevens` leest (alleen lezen) */
+  database: Db;
   /** de adressen waarop geluisterd wordt (alleen het lokale netwerk); tests geven hier 127.0.0.1 */
   interfaces: () => LocalInterface[];
   /** mag deze afzender? Standaard: alleen uit hetzelfde netwerk als het adres waarop hij binnenkomt. */
@@ -38,11 +42,13 @@ const FAILURE_WINDOW_MS = 60_000;
  * - Het luistert alleen als er minstens één telefoon gekoppeld is (of een QR-code openstaat), alleen
  *   op de privé-adressen van deze computer, en neemt alleen verbindingen aan uit datzelfde netwerk.
  * - Het doet niets met een verzoek dat niet met de sleutel van een gekoppelde telefoon te ontsleutelen
- *   is, en geeft nooit iets uit de administratie terug: alleen "ontvangen" of een foutcode.
+ *   is, en geeft aan een onbekende nooit iets uit de administratie terug: alleen een foutcode. Uit de
+ *   administratie gaat alleen de whitelist van `stamgegevens` (src/sync/stamgegevens.ts), versleuteld en
+ *   alleen naar een gekoppelde telefoon in een envelop van versie 2.
  * - Het begrijpt protocolversie 1 (hallo en bon) en, naast die, versie 2: daarbij zegt het
  *   hallo-antwoord van welke versie de btw-regeltabel is, en kan een telefoon een change-set
  *   (`wijziging`) sturen en om `stamgegevens` vragen. Een klant- of projectwijziging wordt bewaard door
- *   SyncOntvangst (opdracht `sync`); `stamgegevens` krijgt voorlopig alleen een bevestiging.
+ *   SyncOntvangst (opdracht `sync`); `stamgegevens` krijgt een pagina klanten en projecten (alleen lezen).
  * - Alles wat binnenkomt is invoer van buiten: begrensd in grootte en op type gecontroleerd. De naam van
  *   het document maakt de app zelf; alleen het ID van de bon wordt (na controle dat het een UUID is) de
  *   naam van het tijdelijke bestand in de wachtrij.
@@ -327,11 +333,27 @@ export class ScannerReceiver {
     }
 
     if (msg.soort === 'stamgegevens') {
-      // Ook hier: alleen het bericht bestaat al. Welke stamgegevens de pc teruggeeft (klanten,
-      // projecten) volgt in een latere stap; nu krijgt de telefoon alleen een bevestiging.
+      // De cursor is invoer van buiten: een verknoeide of onbekende cursor is een vormfout (400
+      // ongeldig), nog voor er iets gelezen wordt. De cursor is nooit SQL; hij wordt alleen als parameter gebruikt.
+      let na: Cursor | null = null;
+      if (msg.na !== undefined) {
+        na = leesCursor(msg.na);
+        if (!na) return reply(400, { ok: false, fout: 'ongeldig' });
+      }
+      // Het enige neveneffect van dit bericht: laatst gezien en, bij het eerste bericht, de apparaatcode.
       this.opts.pairing.seen(deviceId);
       this.opts.onActivity?.();
-      return reply(200, { ok: true, soort: 'stamgegevens' });
+      let pagina;
+      try {
+        pagina = leesStamgegevens(this.opts.database, { sinds: msg.sinds ?? 0, na });
+      } catch (e) {
+        // een cursor die deze pc niet kan hebben gemaakt (bovengrens boven de teller of onder sinds) is een vormfout
+        if (e instanceof OngeldigeCursor) return reply(400, { ok: false, fout: 'ongeldig' });
+        // nooit details naar de telefoon; de melding staat alleen in het eigen logboek
+        this.opts.log?.(`Stamgegevens voor de telefoon lezen mislukt: ${(e as Error).message}`);
+        return reply(500, { ok: false, fout: 'opslaan-mislukt' });
+      }
+      return reply(200, { ok: true, soort: 'stamgegevens', pcTijd: now, apparaatcode: this.opts.pairing.code(deviceId), regels: RULES_VERSION, ...pagina });
     }
 
     // alleen echte JPEG's (aan de inhoud gecontroleerd, niet aan een naam of type dat de telefoon opgeeft)

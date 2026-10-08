@@ -15,7 +15,8 @@ import { leesWijziging, type Wijziging } from '@gratis-boekhouden/kern';
  * Versie 2 (naast versie 1, die blijft werken) voegt drie berichten toe: het hallo-antwoord zegt van
  * welke versie de btw-regeltabel is (rulesVersion) en welke protocolversies de pc begrijpt, een
  * `wijziging` draagt een change-set (het gedeelde wijzigingsformaat uit packages/core) en
- * `stamgegevens` vraagt om de stamgegevens van de administratie. De pc bewaart daar nog niets mee.
+ * `stamgegevens` vraagt om de stamgegevens van de administratie (klanten, projecten en aliassen, per
+ * pagina; zie src/sync/stamgegevens.ts).
  */
 export const PROTOCOL_VERSION = 1;
 /** De versies die deze pc begrijpt; een envelop met een ander versienummer wordt geweigerd. */
@@ -99,10 +100,16 @@ export interface WijzigingMessage {
   wijziging: Wijziging;
 }
 
-/** Vraag om de stamgegevens van de administratie; het formaat bestaat al, de gegevens volgen nog. */
+/**
+ * Vraag om de stamgegevens van de administratie. `sinds` is een sync_seq van de pc (items met een
+ * strikt groter nummer; ontbreekt het, dan alles) en `na` de cursor `volgende` uit het vorige
+ * antwoord. Een sleutel die niet is meegestuurd ontbreekt ook hier (nooit null).
+ */
 export interface StamgegevensMessage {
   soort: 'stamgegevens';
   tijd: number;
+  sinds?: number;
+  na?: string;
 }
 
 export type ScannerMessage = HelloMessage | ReceiptMessage | WijzigingMessage | StamgegevensMessage;
@@ -246,6 +253,9 @@ function bad(why: string): never {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+/** Hoeveel tekens een cursor (`na` in een stamgegevens-verzoek) hoogstens heeft. */
+const MAX_CURSOR_TEKENS = 200;
+
 /** Tekst van buiten: geen stuurtekens (wel regeleinden als dat mag), begrensd in lengte. */
 function cleanText(value: unknown, max: number, multiline: boolean): string | null {
   if (typeof value !== 'string') return null;
@@ -258,7 +268,7 @@ function cleanText(value: unknown, max: number, multiline: boolean): string | nu
  * en bereik gecontroleerd, en de foto's moeten precies de rest van het bericht vullen. Onbekende
  * velden worden genegeerd, zodat een nieuwere telefoon-app met een oudere pc blijft werken — behalve
  * bij `wijziging`: dat bericht heeft precies de sleutels soort, tijd en wijziging, precies één
- * change-set per bericht.
+ * change-set per bericht, en bij `stamgegevens`: daar zijn alleen soort, tijd, sinds en na toegestaan.
  *
  * De JSON van `hallo`, `bon` en `stamgegevens` is hooguit 16 KiB; alleen een `wijziging` in een
  * v2-envelop mag tot 128 KiB. Daarboven (en voor elk ander soort boven 16 KiB): `te-groot`.
@@ -293,7 +303,21 @@ export function parseFrame(plain: Buffer, versie: ProtocolVersion = PROTOCOL_VER
   }
   if (versie >= 2 && raw.soort === 'stamgegevens') {
     if (rest.length > 0) bad('bij stamgegevens horen geen foto\'s');
-    return { soort: 'stamgegevens', tijd };
+    // Streng: alleen soort, tijd en (optioneel) sinds en na. Een onbekende sleutel, ook __proto__, geeft
+    // ongeldig. Of `na` een echte cursor is controleert de pc bij het antwoorden (src/sync/stamgegevens.ts).
+    const bericht: StamgegevensMessage = { soort: 'stamgegevens', tijd };
+    for (const sleutel of Object.keys(raw)) if (!['soort', 'tijd', 'sinds', 'na'].includes(sleutel)) bad('een stamgegevens-bericht heeft alleen de sleutels soort, tijd, sinds en na');
+    if (Object.hasOwn(raw, 'sinds')) {
+      const sinds = raw.sinds;
+      if (typeof sinds !== 'number' || !Number.isSafeInteger(sinds) || sinds < 0) bad('sinds moet een geheel getal van 0 of meer zijn');
+      bericht.sinds = sinds as number;
+    }
+    if (Object.hasOwn(raw, 'na')) {
+      const na = raw.na;
+      if (typeof na !== 'string' || na.length === 0 || na.length > MAX_CURSOR_TEKENS) bad('na moet een tekst van hoogstens 200 tekens zijn');
+      bericht.na = na as string;
+    }
+    return bericht;
   }
   if (versie >= 2 && raw.soort === 'wijziging') {
     if (rest.length > 0) bad('bij een wijziging horen geen foto\'s');
