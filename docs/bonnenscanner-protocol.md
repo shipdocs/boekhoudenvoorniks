@@ -854,10 +854,54 @@ slaan. De groottegrens van een wijziging (128 KiB) geldt ook voor de wachtrij.
 **Wat nog niet.** `stamgegevens` bevat de btw-regeltabel en de VIES-controledatum nog niet. `bon` en `foto` worden niet opgeslagen en gelden niet
 als afgeleverd (`niet-ondersteund`, zonder registerrij).
 
-Open punten bij facturen (volgen in latere stappen): de melding op Vandaag bij een ontbrekend factuurnummer
-(reeksbewaking, s13), de bonnenmap- en e-mailroute voor facturen, en een scherm dat de wachtende wijzigingen toont (nu is een
+Open punten bij facturen (volgen in latere stappen): de bonnenmap- en e-mailroute voor facturen, en een scherm dat de wachtende wijzigingen toont (nu is een
 wachtende factuur alleen in `sync_wachtrij` te zien). Ook versie 2 staat achter dezelfde schakelaar als de rest: zolang
 `PHONE_SCANNER` uit staat, is er niets van te zien.
+
+### Reeksbewaking: gaten in de factuurnummers van een telefoon
+
+De pc bewaakt de nummerreeks van de facturen van een telefoon. Een **reeks** is een apparaatcode met een
+jaar (`M1-2026`) en loopt vanaf 1 tot het hoogste volgnummer van een factuur die de pc heeft overgenomen.
+Een **gat** is een aaneengesloten bereik volgnummers in die reeks dat ontbreekt, bijvoorbeeld `M1-2026-0002`
+tot en met `M1-2026-0004` als alleen 0001 en 0005 er zijn. Een gat is geen fout van de pc en geen
+afwijzing: het is een vraag aan de gebruiker, want een nummer kan nog onderweg zijn (de telefoon heeft de
+factuur nog niet gestuurd), nooit zijn gebruikt, of horen bij een concept dat is vervallen.
+
+Een volgnummer telt als **bekend** als er een factuur met dat nummer is, als een onverwerkte rij in
+`sync_wachtrij` dat nummer draagt (de factuur wacht dan op een klant of project) of als de gebruiker het
+als vervallen heeft gemarkeerd. Wordt een wachtende rij afgewezen, dan is het nummer weer een gat. Komt een
+ontbrekende factuur alsnog binnen, dan verdwijnt het gat vanzelf, ook als dat nummer eerder als vervallen
+was gemarkeerd (die markering blijft als rij bestaan). Reeksen zijn onafhankelijk: een andere
+apparaatcode of een ander jaar heeft zijn eigen gaten. Een gat is er ook bij een ontkoppelde telefoon
+(`afgesloten_op` in `scanner_device_codes`); de melding zegt dan dat de telefoon niets meer stuurt.
+
+**Op Vandaag** staat per gat precies een melding (soort `invoice-series-gap`, sleutel
+`reeks-gat:<apparaatcode>-<jaar>-<van>-<tot>`, prioriteit 2). De berekening is idempotent: dezelfde stand
+geeft dezelfde melding, en een gat zonder telefoonfacturen bestaat niet. Er zijn drie knoppen:
+
+- **Nooit gebruikt** (`vervallen-niet-gebruikt`): het bereik wordt als vervallen bewaard met de reden
+  `Nummer nooit gebruikt`.
+- **Niet verstuurd of concept vervallen** (`vervallen-niet-verstuurd`): idem, met de reden
+  `Factuur niet verstuurd of concept vervallen`.
+- **Later** (`later`): er verandert niets en de melding blijft staan.
+
+In de kopie bij de boekhouder (de Vandaag-lijst is daar leeg) komt de melding niet. De berekening
+gebruikt SQL over bereiken en nooit een lijst van alle denkbare nummers: een telefoon die naar volgnummer
+999999999 springt, geeft een gat en een melding, geen duizenden. Hetzelfde geldt voor het markeren: een
+bereik van meer dan 10000 nummers in een keer wordt geweigerd, zodat de telefoon niet kan bepalen hoeveel
+werk de pc heeft.
+
+**Vervallen markeren** schrijft een rij per nummer in `factuur_reeks_vervallen` (apparaatcode, jaar,
+volgnummer, reden, tijdstip), in een transactie: alles of niets. Een lege reden (ook alleen spaties), een
+bereik dat een bestaande factuur, een wachtend nummer of een al vervallen nummer bevat, een bereik boven de
+reeks en een bereik van meer dan 10000 nummers geven een Nederlandse foutmelding en bewaren niets. **Er
+wordt nooit iets verwijderd of overschreven**: een markering is een rij erbij (`ON CONFLICT DO NOTHING`), en
+een factuur die later binnenkomt verandert niets aan de rij die er al stond. Het sluiten van een reeks bij
+ontkoppelen of herinstallatie bestaat al (`afgesloten_op`); de reeksbewaking leest dat alleen.
+
+**Nog niet vastgesteld door een boekhouder:** of een tweede nummerreeks voor facturen van de telefoon (naast
+die van de pc) fiscaal in orde is, is niet geverifieerd. Een boekhouder moet dat eerst bevestigen voordat
+dit onderdeel voor gebruikers aan gaat. Zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
 
 ## Wat dit wel en niet beschermt
 
