@@ -97,7 +97,7 @@ function redenTekst(soorten: string[]): string {
 
 /** Een id uit de interface: een geheel getal groter dan 0, anders een Nederlandse fout. */
 function controleerId(waarde: unknown, wat: string): number {
-  if (typeof waarde !== 'number' || !Number.isInteger(waarde) || waarde <= 0) throw new ValidationError(`${wat} klopt niet`);
+  if (typeof waarde !== 'number' || !Number.isSafeInteger(waarde) || waarde <= 0) throw new ValidationError(`${wat} klopt niet`);
   return waarde;
 }
 

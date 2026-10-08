@@ -66,7 +66,7 @@ import { PHONE_SCANNER } from '../shared/phone-scanner';
 import { BANK_FEED } from '../shared/bank-feed';
 import { telefoonKlantenZonderControle, viesTaakKey } from '../btw/vies';
 import { MAX_VERVALLEN_PER_MARKERING, ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD } from '../sync/reeks';
-import { dubbelTaakKey, huidigVoorstel, openVoorstellen, voegVoorstelSamen, wijsVoorstelAf, type SamenvoegUitslag } from '../relations/dubbelen';
+import { dubbelTaakKey, huidigVoorstel, openVoorstellen, voegVoorstelSamen, wijsVoorstelAf, zoekDubbelen, type SamenvoegUitslag } from '../relations/dubbelen';
 import { SyncOntvangst } from '../sync/ontvangst';
 import { YEAR_END_KINDS, type YearEndKind } from '../closing/year-end';
 
@@ -1031,7 +1031,15 @@ export function createApi(s: Services, host: HostContext) {
       update: (id: number, input: Partial<RelationInput>) => s.relations.update(id, input),
       archive: (id: number) => s.relations.archive(id),
       /** Voorstellen voor dubbele klanten die op een keuze wachten (hoogstens 50, oudste eerst); alleen veilige velden. */
-      duplicates: () => openVoorstellen(s.db).voorstellen.map((v) => ({ id: v.id, reden: v.reden, a: v.a, b: v.b })),
+      duplicates: () => {
+        // eerst zoeken (schrijft alleen voorstellen, voegt nooit samen); een fout daarin laat de lijst gewoon zien wat er staat
+        try {
+          zoekDubbelen(s.db);
+        } catch {
+          /* de lijst hieronder toont wat er al staat */
+        }
+        return openVoorstellen(s.db).voorstellen.map((v) => ({ id: v.id, reden: v.reden, a: v.a, b: v.b }));
+      },
       /** Voegt de twee klanten van een voorstel samen op de gekozen klant. Alleen deze expliciete aanroep voegt ooit samen. */
       mergeDuplicate: (proposalId: number, doelId: number) => voegDubbeleSamen(proposalId, doelId),
       /** "Verschillend": dit paar wordt niet meer voorgesteld. */
