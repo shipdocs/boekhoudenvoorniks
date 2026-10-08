@@ -475,6 +475,7 @@ function initServices(): void {
     secrets,
     intake: services.intake,
     settings: services.settings,
+    invoices: services.invoices,
     spoolDir: scannerSpoolDir(dataDir()),
     protectedDirs: [rootDir(), app.getPath('userData')],
     homeDir: app.getPath('home'),

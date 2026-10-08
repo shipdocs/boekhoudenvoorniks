@@ -688,6 +688,13 @@ transactie. De pc-teller voor factuurnummers wordt niet gebruikt: het nummer is 
 creditnota hoort bij de klant van het origineel. Een databasefout geeft 500 `opslaan-mislukt` zonder halve rijen.
 De groottegrens van 128 KiB wordt op bytes getoetst (niet op tekens), nog voor de wijziging gelezen wordt.
 
+**Weigercodes van de factuurdienst.** De pc bepaalt de foutcode van een geweigerde factuur uit de code die
+`InvoiceService.importDefinitive` teruggeeft (`nummer-bezet`, `origineel-onbekend`, `periode`, `andere-klant`,
+`creditnota-ongeldig`, `totalen`, `hoeveelheid`, `nummer-ongeldig`, `andere-weigering`), niet uit de Nederlandse tekst.
+`periode` komt uit de Ledger of de writeGuard van de boekhouderskopie; die guard geldt ook voor telefoonfacturen, omdat
+de app de eigen `InvoiceService` aan de ontvangst meegeeft. Naar de telefoon gaan alleen `nummer-bezet`,
+`origineel-onbekend`, `periode` en `factuur-geweigerd` (alle overige codes); de tekst blijft de `melding`.
+
 **Het register `sync_ontvangen`.** Idempotentie loopt uitsluitend via de exacte sleutel (`apparaat_id`
 (het apparaat-ID uit de envelop), `entiteit`, `uuid`, `revisie`), niet via de hoogste revisie en niet
 via de route waarlangs het bericht binnenkwam. Een rij bevat `tijd` (het bewerkmoment van de

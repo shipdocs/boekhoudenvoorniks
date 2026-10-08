@@ -625,3 +625,41 @@ describe('sendInvoice en telefoonfacturen', () => {
     expect(verstuurd.sent_at).not.toBeNull();
   });
 });
+
+describe('importDefinitive: weigercodes', () => {
+  it('geeft bij elke weigering een stabiele code en bij nieuw, al_aanwezig en conflict null', () => {
+    const { s, klant } = setup();
+    const nieuw = s.invoices.importDefinitive(inv(UUID_1, velden([HOOG])), klant.id);
+    expect(nieuw).toMatchObject({ uitkomst: 'nieuw', code: null });
+    expect(s.invoices.importDefinitive(inv(UUID_1, velden([HOOG])), klant.id)).toMatchObject({ uitkomst: 'al_aanwezig', code: null });
+    expect(s.invoices.importDefinitive(inv(UUID_1, velden([{ ...HOOG, prijs: 5000 }])), klant.id)).toMatchObject({ uitkomst: 'conflict', code: null });
+    expect(s.invoices.importDefinitive(inv(UUID_2, velden([LAAG])), klant.id)).toMatchObject({ uitkomst: 'geweigerd', code: 'nummer-bezet' });
+    expect(s.invoices.importDefinitive(inv(UUID_2, velden([{ ...HOOG, hoeveelheid: -2 }], { nummer: 'M1-2026-0002', creditnota_van: UUID_ONBEKEND })), klant.id)).toMatchObject({ uitkomst: 'geweigerd', code: 'origineel-onbekend' });
+    const totalen = velden([HOOG], { nummer: 'M1-2026-0003' });
+    expect(s.invoices.importDefinitive(inv(UUID_2, { ...totalen, totalen: { ...totalen.totalen, totaal: totalen.totalen.totaal + 1 } }), klant.id)).toMatchObject({ uitkomst: 'geweigerd', code: 'totalen' });
+    // de kern weigert vier decimalen al; importDefinitive controleert het zelf nog een keer (verdediging in de diepte)
+    const decimalen = velden([HOOG], { nummer: 'M1-2026-0004' });
+    const kapot = { ...decimalen, regels: [{ ...decimalen.regels[0], hoeveelheid: 1.0004 }] } as FactuurVelden;
+    expect(s.invoices.importDefinitive(inv(UUID_2, kapot), klant.id)).toMatchObject({ uitkomst: 'geweigerd', code: 'hoeveelheid' });
+    const nummerKapot = { ...velden([HOOG]), nummer: 'kapot' } as FactuurVelden;
+    expect(s.invoices.importDefinitive(inv(UUID_2, nummerKapot), klant.id)).toMatchObject({ uitkomst: 'geweigerd', code: 'nummer-ongeldig' });
+  });
+
+  it('een creditnota op een factuur van een andere klant geeft andere-klant', () => {
+    const { s, klant } = setup();
+    const andere = s.relations.create({ type: 'klant', name: 'Andere Klant' });
+    s.invoices.importDefinitive(inv(UUID_1, velden([HOOG])), andere.id);
+    const r = s.invoices.importDefinitive(inv(UUID_2, velden([{ ...HOOG, hoeveelheid: -2 }], { nummer: 'M1-2026-0002', creditnota_van: UUID_1 })), klant.id);
+    expect(r).toMatchObject({ uitkomst: 'geweigerd', code: 'andere-klant' });
+  });
+
+  it('een periode bij de boekhouder en een writeGuard geven periode', () => {
+    const { s, klant } = setup();
+    s.invoices.importDefinitive(inv(UUID_2, velden([LAAG], { nummer: 'M1-2026-0007', datum: '2026-05-02', vervaldatum: '2026-06-01' })), klant.id);
+    s.periods.startExchange('2026-03-31', 7, [], ASOF);
+    expect(s.invoices.importDefinitive(inv(UUID_1, velden()), klant.id)).toMatchObject({ uitkomst: 'geweigerd', code: 'periode' });
+    const g = setup();
+    g.s.ledger.setWriteGuard(() => 'Alleen correctieboekingen.');
+    expect(g.s.invoices.importDefinitive(inv(UUID_1, velden()), g.klant.id)).toMatchObject({ uitkomst: 'geweigerd', code: 'periode', reden: 'Alleen correctieboekingen.' });
+  });
+});

@@ -1,6 +1,6 @@
 import type { Db } from '../db/database';
 import { leesFactuurVelden, type Wijziging } from '@gratis-boekhouden/kern';
-import type { InvoiceService } from '../documents/invoices';
+import type { ImportDefinitiefResultaat, InvoiceService } from '../documents/invoices';
 import type { RelationsService } from '../relations/relations';
 import type { SyncResultaat } from './ontvangst';
 
@@ -71,7 +71,7 @@ export class FactuurOntvangst {
       const r = this.invoices.importDefinitive({ uuid: w.uuid, velden: f }, klant.id, null);
       if (r.uitkomst === 'nieuw') uitkomst = { uitkomst: 'toegepast' };
       else if (r.uitkomst === 'al_aanwezig' || r.uitkomst === 'conflict') uitkomst = { uitkomst: 'overgeslagen' };
-      else uitkomst = this.afwijzing(r.reden ?? '', f.nummer);
+      else uitkomst = this.afwijzing(r);
     }
 
     // 7. registerrij in dezelfde transactie: de uitkomst van de eerste verwerking
@@ -86,11 +86,12 @@ export class FactuurOntvangst {
     return { status: 200, uitkomst: 'afgewezen', fout: uitkomst.fout, ...(uitkomst.melding ? { melding: uitkomst.melding } : {}) };
   }
 
-  /** Vertaalt de weigering van importDefinitive (een Nederlandse tekst) naar een foutcode. */
-  private afwijzing(reden: string, nummer: string): Uitkomst {
-    if (reden === `Factuurnummer ${nummer} bestaat al bij een andere factuur.`) return { uitkomst: 'afgewezen', fout: 'nummer-bezet', melding: reden };
-    if (reden === 'De creditnota hoort bij een factuur die de pc niet kent.') return { uitkomst: 'afgewezen', fout: 'origineel-onbekend', melding: reden };
-    if (/\bperiode\b|boekhouder/i.test(reden)) return { uitkomst: 'afgewezen', fout: 'periode', melding: reden };
-    return { uitkomst: 'afgewezen', fout: 'factuur-geweigerd', melding: reden };
+  /** Vertaalt de weigercode van importDefinitive naar een foutcode voor de telefoon (de reden-tekst wordt alleen als melding doorgegeven). */
+  private afwijzing(r: ImportDefinitiefResultaat): Uitkomst {
+    const melding = r.reden ?? '';
+    if (r.code === 'nummer-bezet') return { uitkomst: 'afgewezen', fout: 'nummer-bezet', melding };
+    if (r.code === 'origineel-onbekend') return { uitkomst: 'afgewezen', fout: 'origineel-onbekend', melding };
+    if (r.code === 'periode') return { uitkomst: 'afgewezen', fout: 'periode', melding };
+    return { uitkomst: 'afgewezen', fout: 'factuur-geweigerd', melding };
   }
 }

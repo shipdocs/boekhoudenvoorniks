@@ -6,6 +6,7 @@ import type { Db } from '../db/database';
 import type { SecretStore } from '../integrations/types';
 import type { IntakeService } from '../intake/intake';
 import type { SettingsService } from '../settings/settings';
+import type { InvoiceService } from '../documents/invoices';
 import { isPathInside } from '../main/path-security';
 import { today } from '../shared/dates';
 import type { PaidWith } from '../shared/paid-with';
@@ -28,6 +29,8 @@ export interface ScannerDeps {
   secrets: SecretStore;
   intake: Pick<IntakeService, 'add' | 'notify'>;
   settings: SettingsService;
+  /** de factuurdienst van de app (met de writeGuard van de boekhouderskopie); zonder valt de ontvangst terug op een eigen dienst */
+  invoices?: Pick<InvoiceService, 'importDefinitive'>;
   /** map van de open administratie waarin ontvangen bonnen wachten tot ze in de inbox staan */
   spoolDir: string;
   /** mappen van de app zelf: daar mag de bonnenmap niet in liggen */
@@ -106,7 +109,7 @@ export class Bonnenscanner {
   constructor(private readonly deps: ScannerDeps) {
     this.log = deps.log ?? (() => undefined);
     this.pairing = new ScannerPairing(deps.db, deps.secrets, deps.now);
-    this.sync = new SyncOntvangst(deps.db, new RelationsService(deps.db, deps.now), { now: deps.now, log: this.log });
+    this.sync = new SyncOntvangst(deps.db, new RelationsService(deps.db, deps.now), { now: deps.now, log: this.log, invoices: deps.invoices });
     this.spool = new ReceiptSpool(deps.db, deps.spoolDir);
     this.receiver = new ScannerReceiver({
       pairing: this.pairing,

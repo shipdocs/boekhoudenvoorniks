@@ -1,6 +1,6 @@
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
-import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
+import { Ledger, PeriodLockedError, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS, SALES_ACCOUNTS } from '../core-ledger/accounts';
 import { checkInvoiceRequirements, leesFactuurNummer, type FactuurVelden } from '@gratis-boekhouden/kern';
 import type { SettingsService } from '../settings/settings';
@@ -122,8 +122,22 @@ export interface ImportDefinitiefInvoer {
   velden: FactuurVelden;
 }
 
+/** Waarom importDefinitive een factuur weigert, als stabiele code (de aanroeper leest niet de Nederlandse tekst). */
+export type ImportDefinitiefCode =
+  | 'nummer-bezet'
+  | 'origineel-onbekend'
+  | 'periode'
+  | 'andere-klant'
+  | 'creditnota-ongeldig'
+  | 'totalen'
+  | 'hoeveelheid'
+  | 'nummer-ongeldig'
+  | 'andere-weigering';
+
 export interface ImportDefinitiefResultaat {
   uitkomst: 'nieuw' | 'al_aanwezig' | 'conflict' | 'geweigerd';
+  /** bij geweigerd altijd gevuld; null bij nieuw, al_aanwezig en conflict */
+  code: ImportDefinitiefCode | null;
   /** Nederlandse uitleg bij conflict of geweigerd, anders null */
   reden: string | null;
   factuurId: number | null;
@@ -277,25 +291,26 @@ export class InvoiceService {
       } catch (e) {
         this.db.exec('ROLLBACK TO import_definitief');
         this.db.exec('RELEASE import_definitief');
-        if (e instanceof ValidationError) return { uitkomst: 'geweigerd', reden: e.message, factuurId: null, boekingsdatum_verschoven: false, boekingsdatum: null };
+        // een PeriodLockedError komt uit de Ledger of de writeGuard (afgesloten periode, kopie bij de boekhouder)
+        if (e instanceof ValidationError) return { uitkomst: 'geweigerd', code: e instanceof PeriodLockedError ? 'periode' : 'andere-weigering', reden: e.message, factuurId: null, boekingsdatum_verschoven: false, boekingsdatum: null };
         throw e;
       }
     });
   }
 
   private importDefinitiefBinnenTx(uuid: string, f: FactuurVelden, relationId: number, jobId: number | null): ImportDefinitiefResultaat {
-    const geweigerd = (reden: string): ImportDefinitiefResultaat => ({ uitkomst: 'geweigerd', reden, factuurId: null, boekingsdatum_verschoven: false, boekingsdatum: null });
+    const geweigerd = (code: ImportDefinitiefCode, reden: string): ImportDefinitiefResultaat => ({ uitkomst: 'geweigerd', code, reden, factuurId: null, boekingsdatum_verschoven: false, boekingsdatum: null });
     const reeks = leesFactuurNummer(f.nummer);
-    if (!reeks.ok) return geweigerd(reeks.melding);
+    if (!reeks.ok) return geweigerd('nummer-ongeldig', reeks.melding);
     const delivery = normalizeDelivery(f.leverdatum, f.leverdatum_tot);
     // dezelfde afronding als normalizeLines (createDraft): een afwijkende hoeveelheid zou anders anders boeken dan op de pc
     for (const r of f.regels) {
-      if (Math.round(r.hoeveelheid * 1000) / 1000 !== r.hoeveelheid) return geweigerd('Een hoeveelheid op de factuur heeft meer dan drie decimalen.');
+      if (Math.round(r.hoeveelheid * 1000) / 1000 !== r.hoeveelheid) return geweigerd('hoeveelheid', 'Een hoeveelheid op de factuur heeft meer dan drie decimalen.');
     }
     const lines = f.regels.map((r) => ({ description: r.omschrijving, quantity: r.hoeveelheid, unit: r.eenheid, unitPrice: r.prijs, vatCode: r.btw_soort, vatPercentage: r.btw_percentage }));
     const totals = computeTotals(lines);
     if (totals.subtotal !== f.totalen.subtotaal || totals.vatTotal !== f.totalen.btw || totals.total !== f.totalen.totaal) {
-      return geweigerd('De totalen van de factuur kloppen niet met de regels.');
+      return geweigerd('totalen', 'De totalen van de factuur kloppen niet met de regels.');
     }
 
     // dezelfde uuid: dezelfde inhoud is al binnen, afwijkende inhoud is een conflict
@@ -329,19 +344,19 @@ export class InvoiceService {
           JSON.stringify(lines.map((l) => [l.description, l.quantity, l.unit ?? null, l.unitPrice, l.vatCode, l.vatPercentage]));
       const boekingsdatum = entry?.entry_date ?? null;
       return gelijk
-        ? { uitkomst: 'al_aanwezig', reden: null, factuurId: bestaand.id, boekingsdatum_verschoven: boekingsdatum !== null && boekingsdatum !== bestaand.invoice_date, boekingsdatum }
-        : { uitkomst: 'conflict', reden: `Factuur ${f.nummer} is al eerder ontvangen, maar met andere gegevens. De pc laat de bestaande factuur ongemoeid.`, factuurId: bestaand.id, boekingsdatum_verschoven: false, boekingsdatum };
+        ? { uitkomst: 'al_aanwezig', code: null, reden: null, factuurId: bestaand.id, boekingsdatum_verschoven: boekingsdatum !== null && boekingsdatum !== bestaand.invoice_date, boekingsdatum }
+        : { uitkomst: 'conflict', code: null, reden: `Factuur ${f.nummer} is al eerder ontvangen, maar met andere gegevens. De pc laat de bestaande factuur ongemoeid.`, factuurId: bestaand.id, boekingsdatum_verschoven: false, boekingsdatum };
     }
-    if (this.db.prepare('SELECT 1 FROM invoices WHERE number = ?').get(f.nummer)) return geweigerd(`Factuurnummer ${f.nummer} bestaat al bij een andere factuur.`);
+    if (this.db.prepare('SELECT 1 FROM invoices WHERE number = ?').get(f.nummer)) return geweigerd('nummer-bezet', `Factuurnummer ${f.nummer} bestaat al bij een andere factuur.`);
 
     let creditOf: number | null = null;
     if (f.creditnota_van) {
       const origineel = this.db.prepare('SELECT id, status, credit_of_invoice_id, relation_id, total FROM invoices WHERE uuid = ?').get(f.creditnota_van) as { id: number; status: InvoiceStatus; credit_of_invoice_id: number | null; relation_id: number; total: Cents | null } | undefined;
-      if (!origineel) return geweigerd('De creditnota hoort bij een factuur die de pc niet kent.');
-      if (origineel.credit_of_invoice_id) return geweigerd('De factuur waarvoor deze creditnota is gemaakt, is zelf al een creditnota.');
-      if (this.db.prepare('SELECT 1 FROM invoices WHERE credit_of_invoice_id = ?').get(origineel.id)) return geweigerd('De factuur waarvoor deze creditnota is gemaakt, is al teruggedraaid.');
+      if (!origineel) return geweigerd('origineel-onbekend', 'De creditnota hoort bij een factuur die de pc niet kent.');
+      if (origineel.credit_of_invoice_id) return geweigerd('creditnota-ongeldig', 'De factuur waarvoor deze creditnota is gemaakt, is zelf al een creditnota.');
+      if (this.db.prepare('SELECT 1 FROM invoices WHERE credit_of_invoice_id = ?').get(origineel.id)) return geweigerd('creditnota-ongeldig', 'De factuur waarvoor deze creditnota is gemaakt, is al teruggedraaid.');
       const reden = this.creditnotaReden(origineel.relation_id, origineel.total, relationId, totals.total);
-      if (reden) return geweigerd(reden);
+      if (reden) return geweigerd(origineel.relation_id !== relationId ? 'andere-klant' : 'creditnota-ongeldig', reden);
       creditOf = origineel.id;
     }
 
@@ -365,7 +380,7 @@ export class InvoiceService {
     this.db.prepare('UPDATE invoices SET journal_entry_id = ? WHERE id = ?').run(entryId, id);
     if (creditOf) this.settleCreditAgainstOriginal(id, creditOf);
     const boekingsdatum = (this.db.prepare('SELECT entry_date FROM journal_entries WHERE id = ?').get(entryId) as { entry_date: IsoDate }).entry_date;
-    return { uitkomst: 'nieuw', reden: null, factuurId: id, boekingsdatum_verschoven: boekingsdatum !== f.datum, boekingsdatum };
+    return { uitkomst: 'nieuw', code: null, reden: null, factuurId: id, boekingsdatum_verschoven: boekingsdatum !== f.datum, boekingsdatum };
   }
 
   /**

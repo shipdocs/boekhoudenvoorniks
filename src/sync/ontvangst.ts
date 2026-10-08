@@ -74,7 +74,9 @@ export class SyncOntvangst {
     this.wachtrij = new SyncWachtrij(db, behandelaars, wachtrijOpties);
     this.projecten = new ProjectOntvangst(db, relations, this.wachtrij, wachtrijOpties);
     behandelaars.push(this.projecten);
-    // zonder meegegeven dienst: een eigen InvoiceService op dezelfde databank (hij schrijft alleen via importDefinitive)
+    // Productie geeft de InvoiceService van de app mee: die boekt via de gedeelde Ledger met de writeGuard van de
+    // boekhouderskopie (exchange.ts). Een eigen Ledger heeft die guard niet en zou daar wel boeken. De terugval
+    // met een eigen InvoiceService is alleen voor tests en losse gebruik.
     const invoices = opties.invoices ?? new InvoiceService(db, new Ledger(db), new SettingsService(db), relations, new TemplateService(db));
     this.facturen = new FactuurOntvangst(db, relations, invoices, wachtrijOpties);
   }

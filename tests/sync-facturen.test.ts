@@ -273,5 +273,20 @@ describe('factuurwijziging van de telefoon op de pc', () => {
     o.db.exec('DROP TRIGGER forceer_fout');
     expect(o.factuur(velden(o.klantUuid), { uuid })).toEqual({ status: 200, uitkomst: 'toegepast' });
     expect(telling(o.db).invoices).toBe(voor.invoices + 1);
+
+    // uitbreiding (boekhouderskopie): een meegegeven InvoiceService met een writeGuard laat de factuur niet boeken;
+    // de afhandeling is die van een periode-weigering: 200 afgewezen met fout periode, geen factuurrijen, wel een registerrij
+    const g = setup();
+    const gesloten = new SyncOntvangst(g.db, new RelationsService(g.db), { now: () => Date.now(), invoices: g.s.invoices });
+    const klant = randomUUID();
+    expect(gesloten.verwerk(APPARAAT, BRON, { entiteit: 'klant', uuid: klant, revisie: 1, tijd: Date.now() - 5 * DAG, velden: { naam: KLANT.name } })).toMatchObject({ uitkomst: 'toegepast' });
+    g.s.ledger.setWriteGuard(() => 'In de kopie voor de boekhouder kun je alleen correctieboekingen maken.');
+    const geweigerdUuid = randomUUID();
+    const guardVoor = telling(g.db);
+    const uitslag = gesloten.verwerk(APPARAAT, BRON, { entiteit: 'factuur', uuid: geweigerdUuid, revisie: 1, tijd: Date.now() - DAG, velden: velden(klant) }, 'netwerk');
+    expect(uitslag).toMatchObject({ status: 200, uitkomst: 'afgewezen', fout: 'periode' });
+    expect(telling(g.db)).toEqual({ ...guardVoor, sync_ontvangen: guardVoor.sync_ontvangen + 1 });
+    expect(n(g.db, 'SELECT COUNT(*) AS n FROM invoices')).toBe(0);
+    expect(register(g.db, geweigerdUuid)).toEqual([{ uitkomst: 'afgewezen', fout: 'periode', route: 'netwerk' }]);
   });
 });
