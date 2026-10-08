@@ -266,7 +266,7 @@ describe('reeksbewaking van telefoonfacturen', () => {
     expect(o.gatTaken()).toEqual([]);
   });
 
-  it('REEKS-11 grote sprong: 0001 en 9999 geven een melding voor 0002 tot en met 9998 (geen duizenden meldingen) en het hele bereik in een keer als vervallen markeren werkt in een transactie', () => {
+  it('REEKS-11 grote sprong: 0001 en 9999 geven een melding voor 0002 tot en met 9998 (geen duizenden meldingen) en het hele bereik in een keer als vervallen markeren werkt in een transactie', async () => {
     const o = omgeving();
     o.factuur(1);
     o.factuur(9999);
@@ -300,6 +300,14 @@ describe('reeksbewaking van telefoonfacturen', () => {
     // precies 10000 nummers kan wel, en laat de rest van het gat staan
     expect(groot.reeks.markeerVervallen('M1', JAAR, 2, 10001, 'Reden')).toBe(10000);
     expect(groot.reeks.gaten()).toEqual([gat(10002, 99999998)]);
+    // de knop op Vandaag markeert een enorm gat in delen van hoogstens 10000: het restant blijft als nieuwe melding staan
+    const kleiner = omgeving();
+    kleiner.factuur(1);
+    kleiner.factuur(25001);
+    const [eerste] = kleiner.gatTaken();
+    await kleiner.api().home.act(eerste!, 'vervallen-niet-gebruikt');
+    expect(vervallenAantal(kleiner.db)).toBe(10000);
+    expect(kleiner.gatTaken().map((x) => x.key)).toEqual([`reeks-gat:M1-${JAAR}-10002-25000`]);
   });
 
   it('REEKS-12 migratie en nooit verwijderen: de migratie is relatief getest (oude toestand uit migrations.slice, bestaande rijen overleven, user_version gelijk aan migrations.length) en er staat geen DELETE in de nieuwe code', () => {
