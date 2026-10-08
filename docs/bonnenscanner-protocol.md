@@ -516,7 +516,7 @@ foto's. Het verzoek blijft binnen 16 KiB.
 {"soort":"stamgegevens","tijd":1790848800000,"sinds":412,"na":"eyJzIjoicCIsInQiOjQ4MCwidSI6IjFhMmIzYzRkLTVlNmYtNDA3MS04MjkzLWE0YjVjNmQ3ZThmOSIsImIiOjUwMH0"}
 ```
 
-Het antwoord is een pagina uit één stroom: **eerst alle klanten, dan alle projecten**, samen hoogstens
+Het antwoord is een pagina uit één stroom: **eerst alle klanten, dan alle projecten, dan de verbergmeldingen**, samen hoogstens
 **100 items**. Binnen elke soort ligt de volgorde vast op (`seq`, `uuid`); er wordt nooit op bewerktijd of
 met een positie-teller (OFFSET) gepagineerd, dus elk item komt precies één keer langs. Een pagina wordt
 nooit afgekapt of dynamisch verkleind. Gemeten: 100 klanten met notities van 4000 tweebyte-tekens zijn
@@ -525,7 +525,7 @@ tweebyte-tekens, is ongeveer 1,07 MiB en met driebyte-tekens in de notities onge
 moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 
 ```text
-{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"volgende":null,"nieuwe_sinds":500}
+{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"verborgen":[{"uuid":"3f1d2c4b-6a7e-4b8c-9d0e-1f2a3b4c5d6e","seq":497,"soort":"klant"}],"volgende":null,"nieuwe_sinds":500}
 ```
 
 (Het voorbeeld toont een deel van de velden; het echte antwoord heeft bij elk item **alle** velden.)
@@ -537,6 +537,7 @@ moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 | `regels` | de versie van de btw-regeltabel (`RULES_VERSION`), gelijk aan die in het hallo-antwoord. De tabel zelf en de VIES-controledatum zitten niet in dit antwoord |
 | `klanten`, `projecten` | de items van deze pagina, zie hieronder |
 | `aliassen` | de samengevoegde klanten: `alias_uuid` (de oude uuid) en `klant` (de uuid van de klant die nu geldt). **Alleen op de eerste pagina** (zonder `na`), volledig, ook bij een `sinds`, en niet meegeteld in de 100 items; een vervolgpagina heeft een lege lijst |
+| `verborgen` | items die voor de telefoon **niet meer zichtbaar** zijn, zie Verbergmeldingen hieronder. Elk is `{uuid, seq, soort}` met `soort` `"klant"` of `"project"`, en niets anders. Altijd aanwezig; bij `sinds` 0 leeg |
 | `volgende` | de cursor voor de volgende pagina, of `null` als alles geleverd is |
 | `nieuwe_sinds` | de bovengrens (`tot`) van deze **ronde**, in elk antwoord van de ronde gelijk. Na de laatste pagina (`volgende: null`) bewaart de telefoon dit getal als nieuwe `sinds`, **nooit** het hoogste `seq` van de ontvangen items (zie Ronde en delta) |
 
@@ -583,17 +584,44 @@ al bij de projecten stond toen een klant wijzigde.
   archiveren), dan komen zijn projecten opnieuw mee in de delta, ook die nu pas zichtbaar worden. Een project
   zonder bekende klant heeft zijn eigen nummer.
 
+**Verbergmeldingen (`verborgen`).** Wordt een klant op de pc een leverancier, dan verdwijnt hij met zijn
+projecten uit `klanten` en `projecten`. Zonder verdere melding bleven ze op de telefoon staan; daarom
+meldt de pc ze in `verborgen`.
+
+- **Wanneer.** Een klant staat in `verborgen` als hij nu type leverancier is **en** ooit klant of beide was,
+  en elk project van zo'n klant ook. De pc leidt dat af uit het wijzigingslogboek van de klant
+  (`relation_changelog`, veld `type`: elke typewijziging schrijft daar het oude en nieuwe type, in dezelfde
+  transactie als de wijziging zelf). Een relatie die altijd leverancier was komt **nooit** in `verborgen`: dat zou
+  het bestaan van een leverancier verraden. Het huidige type beslist, dus een item staat nooit tegelijk in
+  `klanten`/`projecten` en in `verborgen`. Wordt de relatie weer klant of beide, dan komt hij als gewone klant
+  (met zijn projecten) terug in de delta en staat hij niet meer in `verborgen`.
+- **Inhoud.** Alleen `uuid`, `seq` en `soort`; nooit een naam, type of veld. `seq` is hetzelfde
+  effectieve nummer als bij klanten en projecten (een klant: zijn eigen `seq`; een project: het grootste van
+  project en klant), dus de melding valt in de delta op het moment van de typewijziging.
+- **Ronde en paginering.** Verbergmeldingen zijn de derde soort in dezelfde stroom (cursorsoort `v`), na alle
+  klanten en projecten, met dezelfde bovengrens `tot`, dezelfde volgorde (`seq`, `uuid`) en dezelfde grens van
+  100 items per pagina. Een typewijziging tijdens de ronde krijgt een `seq` boven `tot` en komt in de volgende ronde.
+- **Wat de telefoon ermee doet.** Verberg (of verwijder lokaal) de klant of het project met die `uuid`. De pc
+  verwijdert zelf nooit iets, en een lokale wijziging die de telefoon nog niet heeft verstuurd blijft staan
+  tot de gebruiker beslist. Een melding voor een `uuid` die de telefoon niet kent negeer je. Verwerk binnen
+  een pagina eerst `klanten` en `projecten`, dan `verborgen`; komt hetzelfde item later weer in `klanten` of
+  `projecten`, dan is het weer zichtbaar.
+- **`sinds` 0.** Bij `sinds` 0 (of zonder `sinds`) is `verborgen` leeg: de volledige export bevat alleen wat
+  nu zichtbaar is. Een telefoon die opnieuw begint (nieuwe installatie, `sinds` 0 na een teruggezette pc) **wist
+  eerst zijn lokale stamgegevens** en vult ze dan met de export, zodat er niets achterblijft. Een cursor van
+  soort `v` bij `sinds` 0 geeft `400 ongeldig`.
+
 **Zo doorloopt de Android-app een ronde.**
 
 1. Lees de bewaarde `sinds` (nog niets bewaard: 0).
-2. Stuur `stamgegevens` met `sinds` en **zonder** `na`. Verwerk `klanten`, `projecten` en (alleen nu) `aliassen`.
+2. Stuur `stamgegevens` met `sinds` en **zonder** `na`. Is `sinds` 0 (of nog niets bewaard), wis dan eerst de lokale stamgegevens. Verwerk `klanten`, `projecten` en (alleen nu) `aliassen`, en `verborgen` (alleen bij `sinds` > 0).
 3. Is `volgende` een tekst: stuur hetzelfde verzoek met dezelfde `sinds` en `na` = die tekst, onveranderd, en verwerk
-   de pagina; herhaal tot `volgende` `null` is. Onderweg wordt `sinds` niet gewijzigd en niets bewaard.
+   de pagina (inclusief `verborgen`); herhaal tot `volgende` `null` is. Onderweg wordt `sinds` niet gewijzigd en niets bewaard.
 4. Pas als `volgende` `null` is en alles is verwerkt: bewaar `nieuwe_sinds` als `sinds`. Faalt de ronde
    halverwege, dan blijft de oude `sinds` staan en begint de volgende poging gewoon opnieuw.
 5. Kreeg je `400 ongeldig` op een `na`, dan begin je de ronde opnieuw zonder `na`.
 
-**Cursor.** `volgende` is base64url van JSON met precies de sleutels `s` (`"k"` klant of `"p"` project),
+**Cursor.** `volgende` is base64url van JSON met precies de sleutels `s` (`"k"` klant, `"p"` project of `"v"` verbergmelding),
 `t` (het `seq` van het laatste item, een geheel getal van 0 of meer), `u` (zijn `uuid`) en `b` (de bovengrens
 `tot` van de ronde, minstens `t`), hooguit 200 tekens. Hij is alleen bedoeld om onveranderd terug te sturen als
 `na`: de pc controleert hem streng en gebruikt hem nooit als SQL. Een `b` boven de stand van de teller van de
