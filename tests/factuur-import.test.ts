@@ -419,7 +419,7 @@ describe('onveranderlijk', () => {
     s.invoices.deleteDraft(andereKlant.id); // een origineel heeft hoogstens een creditnota tegelijk
 
     const groter = s.invoices.createCreditNote(id);
-    const regels = s.invoices.get(groter.id).lines.map((l) => ({ description: l.description, quantity: l.quantity * 2, unit: l.unit, unitPrice: l.unit_price, vatCode: l.vat_code, vatPercentage: l.vat_percentage }));
+    const regels: LineInput[] = s.invoices.get(groter.id).lines.map((l) => ({ description: l.description, quantity: l.quantity * 2, unit: l.unit, unitPrice: l.unit_price, vatCode: l.vat_code as LineInput['vatCode'], vatPercentage: l.vat_percentage }));
     s.invoices.updateDraft(groter.id, { lines: regels });
     expect(() => s.invoices.finalize(groter.id)).toThrow(/groter dan de factuur/);
 
