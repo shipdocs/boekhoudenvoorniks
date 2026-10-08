@@ -999,7 +999,9 @@ bij de aangifte. In de kopie bij de boekhouder komt de melding niet.
 **Precies een melding per klant en btw-nummer**, niet per factuur: key `vies-klant:<klant>-<toestand>-<btw-nummer>`
 met toestand `onbekend` of `ongeldig`. De tekst noemt het aantal en de nummers van de telefoonfacturen. Verandert
 de toestand of het btw-nummer van de klant, dan is het een nieuwe melding. De lijst is begrensd: hoogstens 50
-meldingen, de rest staat als telling in de laatste.
+meldingen, de rest staat als telling in de laatste. De begrenzing komt pas nadat alles is weggelaten wat niet meer
+telt: klanten met een geldige uitslag en meldingen die de gebruiker met **Gezien** heeft weggeklikt tellen niet mee,
+dus ook de klanten daarna komen aan de beurt. Er is geen vaste grens op het aantal bekeken klanten.
 
 **Er gaat niets automatisch naar VIES.** Vandaag opbouwen leest alleen de eigen databank. Een btw-nummer gaat
 alleen naar ec.europa.eu als de gebruiker op de knop **Controleer in VIES** drukt; dan gaat precies dat nummer

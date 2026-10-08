@@ -1054,10 +1054,9 @@ export class InboxService {
 
     // een telefoonfactuur met een EU-regel (icp, icp-dienst) naar een klant wiens btw-nummer niet als geldig in VIES staat:
     // een melding met een knop. Hier gaat NOOIT een verzoek naar VIES; alleen de knop doet dat (src/main/api.ts).
-    const vies = telefoonKlantenZonderControle(this.db);
+    const vies = telefoonKlantenZonderControle(this.db, { overslaan: (k) => this.isSkipped(viesTaakKey(k)) });
     vies.klanten.forEach((k, i) => {
       const key = viesTaakKey(k);
-      if (this.isSkipped(key)) return;
       const facturen = `${k.aantal} ${k.aantal === 1 ? 'telefoonfactuur' : 'telefoonfacturen'} (${k.nummers.join(', ')}${k.aantal > k.nummers.length ? ' en meer' : ''})`;
       const rest = i === vies.klanten.length - 1 && vies.meer > 0 ? ` Er wachten nog ${vies.meer} andere klanten met hetzelfde probleem; die komen aan de beurt zodra deze zijn afgehandeld.` : '';
       const ongeldig = k.toestand === 'ongeldig';

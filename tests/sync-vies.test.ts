@@ -5,7 +5,7 @@ import { setup } from './helpers';
 import { createApi, type HostContext } from '../src/main/api';
 import { RelationsService } from '../src/relations/relations';
 import { SyncOntvangst } from '../src/sync/ontvangst';
-import { VIES_API } from '../src/btw/vies';
+import { VIES_API, telefoonKlantenZonderControle } from '../src/btw/vies';
 import type { Task } from '../src/inbox/inbox';
 
 // De VIES-nacontrole op Vandaag (s14c): een melding met een knop, nooit een automatische controle. Echte databank,
@@ -149,6 +149,24 @@ describe('VIES-nacontrole op Vandaag', () => {
     await o.api().home.get();
     expect(o.net.urls).toHaveLength(0);
     expect(n(o.db, 'SELECT COUNT(*) AS n FROM vies_checks')).toBe(0);
+
+    // veel klanten: 5000 met een geldige uitslag mogen klant 5001 zonder uitslag niet verbergen, en Vandaag blijft snel
+    const g = omgeving();
+    const { laatste } = bulk(g.db, 5001, 5000);
+    const start = performance.now();
+    const selectie = telefoonKlantenZonderControle(g.db);
+    const vandaag = g.taken();
+    const duur = performance.now() - start;
+    expect(selectie).toMatchObject({ meer: 0, klanten: [{ relationId: laatste, toestand: 'onbekend', vatNumber: 'DE100005001', aantal: 1 }] });
+    expect(telefoonKlantenZonderControle(g.db, { relationId: laatste }).klanten.map((x) => x.relationId)).toEqual([laatste]);
+    expect(vandaag.map((x) => x.key)).toEqual([`vies-klant:${laatste}-onbekend-DE100005001`]);
+    expect(duur).toBeLessThan(8000);
+    expect(g.net.urls).toHaveLength(0);
+    // de knop controleert klant 5001 (nagebootste VIES: geldig) en de taak verdwijnt
+    await g.api().home.act(vandaag[0]!, 'controleer');
+    expect(g.net.urls).toEqual([`${VIES_API}/DE/vat/100005001`]);
+    expect(g.taken()).toEqual([]);
+    expect(telefoonKlantenZonderControle(g.db)).toEqual({ klanten: [], meer: 0 });
   });
 
   it('VIESN-06 knop controleer: de actie roept ViesService.check aan met het btw-nummer en de klant, stuurt precies een verzoek met alleen dat nummer naar de VIES-url, bewaart de uitslag en laat bij geldig de taak verdwijnen.', async () => {
@@ -204,6 +222,22 @@ describe('VIES-nacontrole op Vandaag', () => {
     // het btw-nummer van de klant verandert: weer een nieuwe key
     o.s.relations.update(k.id, { vat_number: 'FR98765432109' });
     expect(o.taken().map((x) => x.key)).toEqual([`vies-klant:${k.id}-onbekend-FR98765432109`]);
+
+    // voorbij de grens: bij 51 klanten laat gezien op de eerste 50 klant 51 zien; gezien op alle 51 laat niets over
+    const o2 = omgeving();
+    const klanten = Array.from({ length: 51 }, (_, i) => o2.klant(`Klant ${i}`, `DE6000000${String(i).padStart(2, '0')}`));
+    klanten.forEach((k) => o2.factuur(k.uuid));
+    const eerste = o2.taken();
+    expect(eerste).toHaveLength(50);
+    expect(eerste[49]!.question).toContain('nog 1 andere klant');
+    for (const taak of eerste) await o2.api().home.act(taak, 'gezien');
+    const rest = o2.taken();
+    expect(rest.map((x) => x.ref.relationId)).toEqual([klanten[50]!.id]);
+    expect(rest[0]!.question).not.toContain('andere klanten');
+    expect(o2.s.inbox.home().tasks.filter((x) => x.kind === 'vies-nacontrole')).toEqual(rest);
+    await o2.api().home.act(rest[0]!, 'gezien');
+    expect(o2.taken()).toEqual([]);
+    expect(o2.net.urls).toHaveLength(0);
   });
 
   it('VIESN-09 btw-nummer gewijzigd: een controle van een eerder btw-nummer van de klant telt niet voor het nieuwe nummer; een klant zonder btw-nummer geeft geen taak.', async () => {
@@ -246,6 +280,36 @@ describe('VIES-nacontrole op Vandaag', () => {
     expect(o.net.urls).toEqual([]);
   });
 });
+
+/**
+ * Veel klanten tegelijk, rechtstreeks in de databank (bulk): elke klant krijgt een btw-nummer en een verzonden
+ * telefoonfactuur met een icp-regel. Met `geldigTot` krijgen de eerste klanten een geldige VIES-uitslag.
+ * Geeft het id van de eerste en de laatste klant.
+ */
+function bulk(db: ReturnType<typeof omgeving>['db'], aantal: number, geldigTot: number): { eerste: number; laatste: number } {
+  const vorig = n(db, 'SELECT COALESCE(MAX(id), 0) AS n FROM relations');
+  db.transaction(() => {
+    db.prepare(
+      `WITH RECURSIVE t(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM t WHERE x < ?)
+       INSERT INTO relations (id, type, name, vat_number) SELECT ? + x, 'klant', 'Bulk ' || x, 'DE' || (100000000 + x) FROM t`,
+    ).run(aantal, vorig);
+    db.prepare(
+      `WITH RECURSIVE t(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM t WHERE x < ?)
+       INSERT INTO invoices (id, relation_id, number, invoice_date, due_date, status, apparaat_code, reeks_jaar, reeks_volgnr)
+       SELECT ? + x, ? + x, 'B-' || x, ?, ?, 'verzonden', 'M9', 2000, x FROM t`,
+    ).run(aantal, vorig, vorig, DATUM, DATUM);
+    db.prepare(
+      `WITH RECURSIVE t(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM t WHERE x < ?)
+       INSERT INTO invoice_lines (invoice_id, position, description, quantity, unit_price, vat_code, vat_percentage)
+       SELECT ? + x, 0, 'Bulk', 1, 1000, 'icp', 0 FROM t`,
+    ).run(aantal, vorig);
+    db.prepare(
+      `WITH RECURSIVE t(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM t WHERE x < ?)
+       INSERT INTO vies_checks (vat_number, relation_id, valid) SELECT 'DE' || (100000000 + x), ? + x, 1 FROM t`,
+    ).run(geldigTot, vorig);
+  })();
+  return { eerste: vorig + 1, laatste: vorig + aantal };
+}
 
 function n(db: ReturnType<typeof omgeving>['db'], sql: string, ...p: unknown[]): number {
   return (db.prepare(sql).get(...p) as { n: number }).n;
