@@ -583,6 +583,18 @@ describe('sendInvoice en telefoonfacturen', () => {
     expect(momentopname(db, r.factuurId!)).toBe(voor);
   });
 
+  it('een betalingsherinnering voor een openstaande telefoonfactuur mag wel, zonder eigen PDF als bijlage', async () => {
+    const { s, sent, klant } = setup();
+    const r = s.invoices.importDefinitive(inv(UUID_1, velden([HOOG])), klant.id);
+    await s.sender.sendReminder(r.factuurId!);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.attachments ?? []).toHaveLength(0);
+    const pc = pcFactuur(s, klant.id, PC_REGELS);
+    await s.sender.sendInvoice(pc.id);
+    await s.sender.sendReminder(pc.id);
+    expect(sent[sent.length - 1]!.attachments ?? []).toHaveLength(1);
+  });
+
   it('een pc-factuur wordt nog gewoon verstuurd', async () => {
     const { s, sent, klant } = setup();
     const pc = pcFactuur(s, klant.id, PC_REGELS);

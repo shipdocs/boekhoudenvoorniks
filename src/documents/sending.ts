@@ -141,8 +141,8 @@ export class DocumentSender {
     const mailer = await this.mailerFactory();
     const s = this.settings.get();
     const values = this.invoiceValues(inv, s);
-    // factuur uit de vorige administratie: geen PDF uit deze app meesturen (die zou er anders uitzien dan het origineel)
-    const attachments: MailMessage['attachments'] = inv.is_opening ? [] : [{ ...(await this.invoicePdf(invoiceId)), contentType: 'application/pdf' }];
+    // factuur uit de vorige administratie of van de telefoon: geen PDF uit deze app meesturen (die zou er anders uitzien dan het origineel)
+    const attachments: MailMessage['attachments'] = inv.is_opening || inv.uuid ? [] : [{ ...(await this.invoicePdf(invoiceId)), contentType: 'application/pdf' }];
     await this.deliver(mailer, 'herinnering', invoiceId, {
       to,
       bcc: s.smtp.bcc || undefined,
