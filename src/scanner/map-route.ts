@@ -117,8 +117,14 @@ interface Staat {
 }
 
 const standaardBestanden: MapBestanden = {
+  // Via een tijdelijk bestand en een rename: een crash laat hoogstens een `.tmp` achter (dat een volgende poging overschrijft),
+  // nooit een half antwoord onder de echte naam. Bestaat het echte bestand al, dan geldt dat als een botsing (EEXIST).
   async schrijfNieuw(pad, data) {
-    await writeFile(pad, data, { flag: 'wx' });
+    const bestaat = await lstat(pad).then(() => true, () => false);
+    if (bestaat) throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
+    const tmp = `${pad}.tmp`;
+    await writeFile(tmp, data);
+    await rename(tmp, pad);
   },
   async verplaats(van, naar) {
     await rename(van, naar);

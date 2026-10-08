@@ -201,7 +201,11 @@ describe('de bonnenmap als tweede route', () => {
     const o = await omgeving();
     const p = await koppel(o);
     const uuid = randomUUID();
-    const v = p.schrijf(klantBericht('Bakkerij De Korst', { uuid }));
+    const m = p.maak(klantBericht('Bakkerij De Korst', { uuid }));
+    const v = { ...m, naam: `${m.nonce.toString('hex')}.bvns` };
+    // een crash midden in het schrijven van een antwoord laat hoogstens een tijdelijk bestand achter: dat blokkeert niets
+    writeFileSync(`${p.antwoordPad(v.nonce)}.tmp`, 'half geschreven bij een crash');
+    p.schrijfBytes(v.naam, v.body);
     expect(o.lijst(o.van)).toEqual([v.naam, 'verwerkt'].sort());
     await o.draai(() => existsSync(p.antwoordPad(v.nonce)));
     // het antwoord: dezelfde envelop als bij het netwerk, in de versie van het verzoek, gebonden aan de nonce van het verzoek
