@@ -406,6 +406,28 @@ describe('onveranderlijk', () => {
     expect(s.invoices.get(id)).toMatchObject({ open_amount: 0, status: 'betaald' });
   });
 
+  it('een pc-creditnota op een telefoonfactuur: andere klant of groter dan het origineel wordt bij finalize geweigerd', () => {
+    const { s, db, id } = met();
+    const ander = s.relations.create({ name: 'Andere klant', address: 'Straat 1', postcode: '1011AA', city: 'Amsterdam', country: 'NL', email: 'a@example.nl' });
+    const voor = momentopname(db, id);
+    const tegoed = () => s.invoices.overpaidCustomers();
+
+    const andereKlant = s.invoices.createCreditNote(id);
+    s.invoices.updateDraft(andereKlant.id, { relationId: ander.id });
+    expect(() => s.invoices.finalize(andereKlant.id)).toThrow(/andere klant/);
+    expect(s.invoices.get(andereKlant.id).status).toBe('concept');
+    s.invoices.deleteDraft(andereKlant.id); // een origineel heeft hoogstens een creditnota tegelijk
+
+    const groter = s.invoices.createCreditNote(id);
+    const regels = s.invoices.get(groter.id).lines.map((l) => ({ description: l.description, quantity: l.quantity * 2, unit: l.unit, unitPrice: l.unit_price, vatCode: l.vat_code, vatPercentage: l.vat_percentage }));
+    s.invoices.updateDraft(groter.id, { lines: regels });
+    expect(() => s.invoices.finalize(groter.id)).toThrow(/groter dan de factuur/);
+
+    expect(momentopname(db, id)).toBe(voor);
+    expect(tegoed()).toEqual([]);
+    expect(s.invoices.get(groter.id).status).toBe('concept');
+  });
+
   it('markSent laat een gevulde sent_at van een telefoonfactuur ongemoeid, bij een pc-factuur werkt het nog', () => {
     const { s, db, id, klant } = met();
     const voor = momentopname(db, id);

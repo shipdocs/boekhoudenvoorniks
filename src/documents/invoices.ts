@@ -222,6 +222,14 @@ export class InvoiceService {
       const s = this.settings.get();
       const relation = this.relations.get(inv.relation_id);
       checkInvoiceRequirements(inv, relation, s.kor, s.company);
+      // een pc-creditnota op een telefoonfactuur: dezelfde klant- en bedragcontrole als bij het importeren
+      if (inv.credit_of_invoice_id) {
+        const origineel = this.db.prepare('SELECT uuid, relation_id, total FROM invoices WHERE id = ?').get(inv.credit_of_invoice_id) as { uuid: string | null; relation_id: number; total: Cents | null } | undefined;
+        if (origineel?.uuid) {
+          const reden = this.creditnotaReden(origineel.relation_id, origineel.total, inv.relation_id, inv.totals.total);
+          if (reden) throw new ValidationError(reden);
+        }
+      }
 
       const key = counterKey('factuur', s.invoiceNumberFormat, inv.invoice_date);
       const seq = this.settings.nextCounter(key);
@@ -332,10 +340,8 @@ export class InvoiceService {
       if (!origineel) return geweigerd('De creditnota hoort bij een factuur die de pc niet kent.');
       if (origineel.credit_of_invoice_id) return geweigerd('De factuur waarvoor deze creditnota is gemaakt, is zelf al een creditnota.');
       if (this.db.prepare('SELECT 1 FROM invoices WHERE credit_of_invoice_id = ?').get(origineel.id)) return geweigerd('De factuur waarvoor deze creditnota is gemaakt, is al teruggedraaid.');
-      if (origineel.relation_id !== relationId) return geweigerd('De creditnota hoort bij een factuur van een andere klant dan de creditnota zelf.');
-      // zoals createCreditNote: een creditnota draait (een deel van) het origineel terug, nooit meer dan het origineel
-      if (totals.total >= 0) return geweigerd('Een creditnota moet een negatief totaal hebben.');
-      if ((origineel.total ?? 0) <= 0 || -totals.total > (origineel.total ?? 0)) return geweigerd('De creditnota is groter dan de factuur waarvoor hij is gemaakt.');
+      const reden = this.creditnotaReden(origineel.relation_id, origineel.total, relationId, totals.total);
+      if (reden) return geweigerd(reden);
       creditOf = origineel.id;
     }
 
@@ -403,6 +409,18 @@ export class InvoiceService {
   }
 
   /** Verrekent een creditfactuur met de openstaande originele factuur (zonder geldstroom). */
+  /**
+   * Waarom een creditnota niet bij dit origineel past (Nederlandse uitleg), of null. Zoals createCreditNote: een
+   * creditnota hoort bij dezelfde klant en draait (een deel van) het origineel terug, nooit meer dan het origineel.
+   * Gedeeld door importDefinitive en finalize (een pc-creditnota op een telefoonfactuur).
+   */
+  private creditnotaReden(origineelKlant: number, origineelTotaal: Cents | null, creditKlant: number, creditTotaal: Cents): string | null {
+    if (origineelKlant !== creditKlant) return 'De creditnota hoort bij een factuur van een andere klant dan de creditnota zelf.';
+    if (creditTotaal >= 0) return 'Een creditnota moet een negatief totaal hebben.';
+    if ((origineelTotaal ?? 0) <= 0 || -creditTotaal > (origineelTotaal ?? 0)) return 'De creditnota is groter dan de factuur waarvoor hij is gemaakt.';
+    return null;
+  }
+
   private settleCreditAgainstOriginal(creditId: number, originalId: number): void {
     const credit = this.row(creditId);
     const original = this.row(originalId);
