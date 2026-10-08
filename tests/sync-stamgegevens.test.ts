@@ -73,6 +73,7 @@ interface Pagina {
   projecten: Item[];
   aliassen: { alias_uuid: string; klant: string }[];
   volgende: string | null;
+  nieuwe_sinds: number;
 }
 
 function phone(pairing: PairingPayload, t: T) {
@@ -348,7 +349,7 @@ describe('stamgegevens: strenge controle van het verzoek', () => {
   it('verzoek met onbekende sleutel, sinds als tekst of negatief, of te lange na geeft 400 ongeldig', async () => {
     const t = start();
     const p = await pair(t);
-    const geldig = maakCursor({ s: 'k', t: 1, u: randomUUID() });
+    const geldig = maakCursor({ s: 'k', t: 1, u: randomUUID(), b: 1 });
     const slecht: Record<string, unknown>[] = [
       { limiet: 5 },
       { extra: 'x', sinds: 0 },
@@ -404,11 +405,12 @@ describe('stamgegevens: strenge controle van het verzoek', () => {
 
   it('de cursor is streng: alleen wat de pc zelf maakt komt erdoor', () => {
     const u = randomUUID();
-    const c = maakCursor({ s: 'p', t: 7, u });
-    expect(leesCursor(c)).toEqual({ s: 'p', t: 7, u });
+    const c = maakCursor({ s: 'p', t: 7, u, b: 9 });
+    expect(leesCursor(c)).toEqual({ s: 'p', t: 7, u, b: 9 });
     expect(c.length).toBeLessThanOrEqual(CURSOR_MAX_TEKENS);
-    expect(Buffer.from(c, 'base64url').toString('utf8')).toBe(JSON.stringify({ s: 'p', t: 7, u }));
-    for (const slecht of [undefined, null, 5, '', 'x'.repeat(CURSOR_MAX_TEKENS + 1), `${c}==`, c.toUpperCase(), Buffer.from(JSON.stringify({ s: 'p', t: 7, u, w: 1 })).toString('base64url')]) {
+    expect(Buffer.from(c, 'base64url').toString('utf8')).toBe(JSON.stringify({ s: 'p', t: 7, u, b: 9 }));
+    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    for (const slecht of [undefined, null, 5, '', 'x'.repeat(CURSOR_MAX_TEKENS + 1), `${c}==`, c.toUpperCase(), b64({ s: 'p', t: 7, u, b: 9, w: 1 }), b64({ s: 'p', t: 7, u }), b64({ s: 'p', t: 7, u, b: 6 }), b64({ s: 'p', t: 7, u, b: '9' }), b64({ s: 'p', t: 7, u, b: 1.5 }), b64({ s: 'p', t: 7, u, b: Number.MAX_SAFE_INTEGER + 2 }), b64({ b: 9, s: 'p', t: 7, u })]) {
       expect(leesCursor(slecht)).toBeNull();
     }
   });
@@ -452,7 +454,7 @@ describe('stamgegevens: privacygrens', () => {
     const [uuid] = maakKlanten(t, 1, t.clock.now, 'een notitie');
     t.s.relations.update(rij<{ id: number }>(t, 'SELECT id FROM relations WHERE uuid = ?', uuid).id, { phone: '06-12345678' });
     const alle = await p.alles();
-    expect(Object.keys(alle.paginas[0]!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'ok', 'pcTijd', 'projecten', 'regels', 'soort', 'volgende']);
+    expect(Object.keys(alle.paginas[0]!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'soort', 'volgende']);
     expect(alle.klanten.length).toBeGreaterThan(0);
     expect(alle.projecten.length).toBe(2);
     const itemSleutels = ['gearchiveerd', 'pc_revisie', 'seq', 'uuid', 'velden'];
@@ -467,7 +469,7 @@ describe('stamgegevens: privacygrens', () => {
       for (const v of Object.values(pr.velden)) expect(Object.keys(v).sort()).toEqual(['bron', 'tijd', 'waarde']);
     }
     // nergens, op geen enkel niveau, een sleutel buiten de whitelist (type, paid_with, id's, bedrijfsgegevens, ...)
-    const toegestaan = new Set([...itemSleutels, ...Object.keys(KLANT_VELDEN), ...Object.keys(PROJECT_VELDEN), 'bron', 'tijd', 'waarde', 'ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'volgende', 'alias_uuid', 'klant']);
+    const toegestaan = new Set([...itemSleutels, ...Object.keys(KLANT_VELDEN), ...Object.keys(PROJECT_VELDEN), 'bron', 'tijd', 'waarde', 'ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'volgende', 'nieuwe_sinds', 'alias_uuid', 'klant']);
     const sleutels = new Set<string>();
     const loop = (x: unknown) => {
       if (Array.isArray(x)) x.forEach(loop);
@@ -684,5 +686,168 @@ describe('stamgegevens: aliassen, apparaatcode en gegevens per rij', () => {
     const opnieuw = (await p.alles()).klanten.find((k) => k.uuid === uuid)!;
     expect(opnieuw.velden.telefoon).toEqual({ waarde: '010-5555555', tijd: vroeger + 5000, bron: 'M7' });
     expect(opnieuw.velden.email).toMatchObject({ tijd: vroeger, bron: 'pc' });
+  });
+});
+
+// ---------- de ronde met een vaste bovengrens (tot) ----------
+
+/** wat de pc nu als wijzigingsteller heeft: de bovengrens die een nieuwe ronde vastlegt */
+const teller = (t: T) => rij<{ waarde: number }>(t, `SELECT waarde FROM sync_teller WHERE naam = 'wijziging'`).waarde;
+
+interface Toestand {
+  sinds: number;
+  klanten: Map<string, Item>;
+  projecten: Map<string, Item>;
+}
+const nieuweToestand = (): Toestand => ({ sinds: 0, klanten: new Map(), projecten: new Map() });
+
+/**
+ * Een telefoon die de ronde volgens het document doorloopt: `sinds` meegeven, pagina's volgen tot volgende
+ * null is en pas dan `nieuwe_sinds` bewaren. `tussendoor(n)` draait na pagina n en laat de pc wijzigen.
+ */
+async function doorloop(p: ReturnType<typeof phone>, st: Toestand, tussendoor?: (n: number) => void): Promise<Pagina[]> {
+  const paginas: Pagina[] = [];
+  let na: string | undefined;
+  for (let n = 0; n < 50; n++) {
+    const pg = await p.pagina({ sinds: st.sinds, ...(na ? { na } : {}) });
+    paginas.push(pg);
+    for (const k of pg.klanten) st.klanten.set(k.uuid, k);
+    for (const pr of pg.projecten) st.projecten.set(pr.uuid, pr);
+    if (pg.volgende === null) {
+      st.sinds = pg.nieuwe_sinds;
+      return paginas;
+    }
+    na = pg.volgende;
+    tussendoor?.(n);
+  }
+  throw new Error('de ronde eindigt niet');
+}
+
+/** de telefoon is gelijk aan een volledige export van de pc */
+async function gelijkAanPc(p: ReturnType<typeof phone>, st: Toestand) {
+  const pc = await p.alles();
+  const vorm = (items: Item[]) => Object.fromEntries(items.map((i) => [i.uuid, JSON.stringify([i.seq, i.pc_revisie, i.gearchiveerd, i.velden])]));
+  expect(Object.fromEntries([...st.klanten].map(([u, i]) => [u, JSON.stringify([i.seq, i.pc_revisie, i.gearchiveerd, i.velden])]))).toEqual(vorm(pc.klanten));
+  expect(Object.fromEntries([...st.projecten].map(([u, i]) => [u, JSON.stringify([i.seq, i.pc_revisie, i.gearchiveerd, i.velden])]))).toEqual(vorm(pc.projecten));
+}
+
+describe('stamgegevens: de ronde heeft een vaste bovengrens', () => {
+  const klantId = (t: T, uuid: string) => rij<{ id: number }>(t, 'SELECT id FROM relations WHERE uuid = ?', uuid).id;
+  const projectId = (t: T, titel: string) => rij<{ id: number }>(t, 'SELECT id FROM jobs WHERE title = ?', titel).id;
+
+  it('een klantwijziging terwijl de cursor bij de projecten staat gaat niet verloren', async () => {
+    const t = start();
+    const p = await pair(t);
+    const uuids = maakKlanten(t, 130, t.clock.now);
+    maakProjecten(t, 120, t.klant.id);
+    const st = nieuweToestand();
+    const totBegin = teller(t);
+    let klantSeq = 0;
+    let projectSeq = 0;
+    // na twee pagina's staat de cursor bij de projecten: dan wijzigt een klant (103-achtig) en daarna een project
+    const paginas = await doorloop(p, st, (n) => {
+      if (n !== 1) return;
+      t.s.relations.update(klantId(t, uuids[5]!), { notes: 'Midden in de ronde' });
+      klantSeq = rij<{ sync_seq: number }>(t, 'SELECT sync_seq FROM relations WHERE uuid = ?', uuids[5]!).sync_seq;
+      t.s.jobs.update(projectId(t, 'Project 7'), { notes: 'Ook midden in de ronde' });
+      projectSeq = rij<{ sync_seq: number }>(t, 'SELECT sync_seq FROM jobs WHERE title = ?', 'Project 7').sync_seq;
+    });
+    expect(paginas.length).toBeGreaterThanOrEqual(3);
+    expect(paginas.at(-1)!.volgende).toBeNull();
+    // elk antwoord geeft dezelfde bovengrens terug: de stand van de teller bij de eerste pagina
+    expect(paginas.map((x) => x.nieuwe_sinds)).toEqual(paginas.map(() => totBegin));
+    expect(klantSeq).toBeGreaterThan(totBegin);
+    expect(projectSeq).toBe(klantSeq + 1);
+    // de telefoon bewaarde de bovengrens, niet het hoogste seq van wat hij kreeg
+    expect(st.sinds).toBe(totBegin);
+    // niets uit deze ronde heeft een nummer boven de bovengrens
+    expect([...st.klanten.values(), ...st.projecten.values()].every((i) => i.seq <= totBegin)).toBe(true);
+    // de volgende ronde brengt beide wijzigingen
+    const volgende = await doorloop(p, st);
+    expect(volgende.flatMap((x) => x.klanten).map((k) => k.uuid)).toEqual([uuids[5]]);
+    expect(volgende.flatMap((x) => x.klanten)[0]!.seq).toBe(klantSeq);
+    expect(volgende.flatMap((x) => x.projecten).map((k) => k.velden.titel!.waarde)).toEqual(['Project 7']);
+    await gelijkAanPc(p, st);
+  });
+
+  it('een wijziging van een nog niet geleverd item tijdens de ronde komt in de volgende ronde, niet dubbel en niet verloren', async () => {
+    const t = start();
+    const p = await pair(t);
+    const uuids = maakKlanten(t, 150, t.clock.now);
+    const st = nieuweToestand();
+    const eerste = await doorloop(p, st, (n) => {
+      // de laatste klant is nog niet geleverd en wijzigt nu: hij krijgt een nummer boven de bovengrens
+      if (n === 0) t.s.relations.update(klantId(t, uuids.at(-1)!), { notes: 'Nog niet geleverd' });
+    });
+    expect(eerste.flatMap((x) => x.klanten).map((k) => k.uuid)).not.toContain(uuids.at(-1));
+    expect(new Set(eerste.flatMap((x) => x.klanten).map((k) => k.uuid)).size).toBe(eerste.flatMap((x) => x.klanten).length);
+    const tweede = await doorloop(p, st);
+    expect(tweede.flatMap((x) => x.klanten).map((k) => k.uuid)).toEqual([uuids.at(-1)]);
+    await gelijkAanPc(p, st);
+  });
+
+  it('herhaalde rondes met wijzigingen tussen de pagina\'s: na een rustige ronde is de telefoon gelijk aan de pc', async () => {
+    const t = start();
+    const p = await pair(t);
+    const uuids = maakKlanten(t, 140, t.clock.now);
+    maakProjecten(t, 130, t.klant.id);
+    const st = nieuweToestand();
+    let teken = 0;
+    for (let ronde = 0; ronde < 4; ronde++) {
+      await doorloop(p, st, (n) => {
+        teken++;
+        t.s.relations.update(klantId(t, uuids[(teken * 7) % uuids.length]!), { notes: `wijziging ${teken}` });
+        t.s.jobs.update(projectId(t, `Project ${(teken * 11) % 130}`), { notes: `wijziging ${teken}` });
+        if (n === 0) t.s.relations.update(klantId(t, uuids[(teken * 13 + 1) % uuids.length]!), { notes: `vooraan ${teken}` });
+        if (n === 1) maakKlanten(t, 1, t.clock.now);
+        if (n === 2) t.s.relations.archive(klantId(t, uuids[(teken * 3) % uuids.length]!));
+      });
+    }
+    // een rustige ronde: alles wat tijdens de rondes veranderde komt nu aan
+    await doorloop(p, st);
+    await gelijkAanPc(p, st);
+    // en nog een rustige ronde levert niets meer
+    const stil = await doorloop(p, st);
+    expect(stil.flatMap((x) => [...x.klanten, ...x.projecten])).toEqual([]);
+  });
+
+  it('sinds boven de bovengrens geeft een leeg antwoord met het lagere nummer, waarna de telefoon vanaf daar opnieuw begint', async () => {
+    const t = start();
+    const p = await pair(t);
+    maakKlanten(t, 3, t.clock.now);
+    const tot = teller(t);
+    const pg = await p.pagina({ sinds: tot + 500 });
+    expect(pg).toMatchObject({ klanten: [], projecten: [], volgende: null, nieuwe_sinds: tot });
+    // vanaf dat nummer begint de telefoon opnieuw: een nieuwe wijziging komt dan mee
+    const [uuid] = maakKlanten(t, 1, t.clock.now);
+    const st = nieuweToestand();
+    st.sinds = pg.nieuwe_sinds;
+    const ronde = await doorloop(p, st);
+    expect(ronde.flatMap((x) => x.klanten).map((k) => k.uuid)).toEqual([uuid]);
+    // sinds precies gelijk aan de stand van de teller is gewoon een lege delta
+    expect(await p.pagina({ sinds: teller(t) })).toMatchObject({ klanten: [], projecten: [], volgende: null, nieuwe_sinds: teller(t) });
+  });
+
+  it('de cursor met bovengrens is strikt: een andere of ontbrekende bovengrens geeft 400', async () => {
+    const t = start();
+    const p = await pair(t);
+    maakKlanten(t, 120, t.clock.now);
+    const echt = (await p.pagina()).volgende!;
+    const c = leesCursor(echt)!;
+    expect(c.b).toBe(teller(t));
+    expect(c.b).toBeGreaterThanOrEqual(c.t);
+    expect((await p.vraag({ na: echt })).status).toBe(200);
+    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    const slecht = [
+      b64({ s: c.s, t: c.t, u: c.u }), // zonder bovengrens
+      b64({ s: c.s, t: c.t, u: c.u, b: c.b, x: 1 }), // aangevuld
+      b64({ s: c.s, t: c.t, u: c.u, b: c.t - 1 }), // bovengrens onder het item
+      b64({ s: c.s, t: c.t, u: c.u, b: c.b + 1000 }), // bovengrens boven de teller van de pc
+      b64({ s: c.s, t: c.t, u: c.u, b: String(c.b) }),
+      echt.slice(0, -2),
+    ];
+    for (const na of slecht) expect(await p.vraag({ na }), na).toMatchObject({ status: 400, sealed: true, json: { ok: false, fout: 'ongeldig' } });
+    // sinds boven de bovengrens van de cursor kan deze pc niet gemaakt hebben
+    expect(await p.vraag({ na: echt, sinds: c.b + 1 })).toMatchObject({ status: 400 });
   });
 });

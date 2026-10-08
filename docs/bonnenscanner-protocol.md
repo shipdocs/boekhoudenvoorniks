@@ -513,7 +513,7 @@ foto's. Het verzoek blijft binnen 16 KiB.
 | `na` | de `volgende` uit het vorige antwoord, onveranderd teruggestuurd, voor de volgende pagina. Een cursor die de pc niet zelf gemaakt kan hebben (verknoeid, aangepast, te lang) geeft `400 ongeldig` |
 
 ```jsonc
-{"soort":"stamgegevens","tijd":1790848800000,"sinds":412,"na":"eyJzIjoicCIsInQiOjQ4MCwidSI6IjFhMmIzYzRkLTVlNmYtNDA3MS04MjkzLWE0YjVjNmQ3ZThmOSJ9"}
+{"soort":"stamgegevens","tijd":1790848800000,"sinds":412,"na":"eyJzIjoicCIsInQiOjQ4MCwidSI6IjFhMmIzYzRkLTVlNmYtNDA3MS04MjkzLWE0YjVjNmQ3ZThmOSIsImIiOjUwMH0"}
 ```
 
 Het antwoord is een pagina uit één stroom: **eerst alle klanten, dan alle projecten**, samen hoogstens
@@ -525,7 +525,7 @@ tweebyte-tekens, is ongeveer 1,07 MiB en met driebyte-tekens in de notities onge
 moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 
 ```text
-{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"volgende":null}
+{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"volgende":null,"nieuwe_sinds":500}
 ```
 
 (Het voorbeeld toont een deel van de velden; het echte antwoord heeft bij elk item **alle** velden.)
@@ -538,6 +538,7 @@ moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 | `klanten`, `projecten` | de items van deze pagina, zie hieronder |
 | `aliassen` | de samengevoegde klanten: `alias_uuid` (de oude uuid) en `klant` (de uuid van de klant die nu geldt). **Alleen op de eerste pagina** (zonder `na`), volledig, ook bij een `sinds`, en niet meegeteld in de 100 items; een vervolgpagina heeft een lege lijst |
 | `volgende` | de cursor voor de volgende pagina, of `null` als alles geleverd is |
+| `nieuwe_sinds` | de bovengrens (`tot`) van deze **ronde**, in elk antwoord van de ronde gelijk. Na de laatste pagina (`volgende: null`) bewaart de telefoon dit getal als nieuwe `sinds`, **nooit** het hoogste `seq` van de ontvangen items (zie Ronde en delta) |
 
 **Een item** heeft precies `uuid`, `seq`, `pc_revisie`, `gearchiveerd` en `velden`. `velden` bevat voor
 **elk** veld uit `KLANT_VELDEN` (klant) of `PROJECT_VELDEN` (project) in `packages/core` een object
@@ -556,16 +557,44 @@ want de pc verwijdert nooit iets.
   milliseconden) en als `bron` `"pc"`: dus niet de wijzigingstijd en niet 0. Een veld dat de pc zelf al als
   "nog door niemand gezet" bewaart (`tijd` 0, lege `bron`) wordt zo doorgegeven, zodat elke latere wijziging wint.
 
-**Delta.** De telefoon onthoudt het **hoogste `seq`** uit de volledig doorlopen stroom (tot en met de pagina
-met `volgende: null`) en stuurt dat de volgende keer als `sinds`. Dat is een getal van de pc, **nooit de klok
-van de telefoon en nooit `gewijzigd_op` of een bewerktijd**: een wijziging die een andere telefoon drie dagen
-geleden bewerkte maar nu pas aankomt, krijgt een nieuwe `seq` en komt dus gewoon in de delta. `sinds` levert
-items met een `seq` **strikt groter** dan `sinds`; een item met `seq` gelijk aan `sinds` komt niet mee.
+**Ronde en delta.** Een ronde is het doorlopen van alle pagina's, van de eerste vraag (zonder `na`) tot en met
+de pagina met `volgende: null`. De pc legt bij de **eerste pagina** de bovengrens `tot` van de ronde vast:
+de stand van haar wijzigingsteller op dat moment (`sync_teller`, de teller waaruit elk `seq` komt; elk
+nieuw `seq` is groter dan de stand van dat moment). `tot` zit in de cursor en komt in elk antwoord terug als
+`nieuwe_sinds`. Alleen items met `sinds` < `seq` <= `tot` horen bij de ronde, ook op vervolgpagina's. Een
+klant of project dat tijdens de ronde wijzigt krijgt een `seq` boven `tot`, komt dus niet meer in deze ronde
+en komt zeker in de volgende ronde: een wijziging kan nooit tussen twee rondes vallen, ook niet als de cursor
+al bij de projecten stond toen een klant wijzigde.
+
+- De telefoon bewaart na de laatste pagina **`nieuwe_sinds`** (dus `tot`) als `sinds` voor de volgende ronde.
+  Het hoogste `seq` van de ontvangen items is **niet** geschikt: een klant die tijdens de ronde wijzigt kan een
+  lager nummer hebben dan een project dat de telefoon al kreeg, en zou dan nooit meer aankomen.
+- `sinds` is een getal van de pc, **nooit de klok van de telefoon en nooit `gewijzigd_op` of een bewerktijd**:
+  een wijziging die een andere telefoon drie dagen geleden bewerkte maar nu pas aankomt, krijgt een nieuwe
+  `seq` en komt dus gewoon in de delta. `sinds` levert items met een `seq` **strikt groter** dan `sinds`.
+- Een item dat tijdens de ronde na levering opnieuw wijzigt komt in de volgende ronde nog eens; de telefoon
+  past een pc-item per veld toe op (`tijd`, `bron`), dus dubbel leveren schaadt niet.
+- **`sinds` boven `tot`** (de pc staat op een lager nummer, bijvoorbeeld na een teruggezette back-up):
+  het antwoord is leeg (`volgende: null`, nog wel met de aliassen) en `nieuwe_sinds` is het lagere `tot`.
+  De telefoon bewaart dat lagere nummer en begint daar opnieuw; items met een nummer boven dat `tot` komen
+  dan alsnog mee. Wie zeker wil zijn dat hij gelijk is aan de pc, vraagt een ronde met `sinds` 0 (of zonder `sinds`).
+
+**Zo doorloopt de Android-app een ronde.**
+
+1. Lees de bewaarde `sinds` (nog niets bewaard: 0).
+2. Stuur `stamgegevens` met `sinds` en **zonder** `na`. Verwerk `klanten`, `projecten` en (alleen nu) `aliassen`.
+3. Is `volgende` een tekst: stuur hetzelfde verzoek met dezelfde `sinds` en `na` = die tekst, onveranderd, en verwerk
+   de pagina; herhaal tot `volgende` `null` is. Onderweg wordt `sinds` niet gewijzigd en niets bewaard.
+4. Pas als `volgende` `null` is en alles is verwerkt: bewaar `nieuwe_sinds` als `sinds`. Faalt de ronde
+   halverwege, dan blijft de oude `sinds` staan en begint de volgende poging gewoon opnieuw.
+5. Kreeg je `400 ongeldig` op een `na`, dan begin je de ronde opnieuw zonder `na`.
 
 **Cursor.** `volgende` is base64url van JSON met precies de sleutels `s` (`"k"` klant of `"p"` project),
-`t` (de `seq` van het laatste item, een geheel getal van 0 of meer) en `u` (zijn `uuid`), hooguit 200 tekens.
-Hij is alleen bedoeld om onveranderd terug te sturen als `na`: de pc controleert hem streng en gebruikt hem
-nooit als SQL. `sinds` blijft bij elke volgende pagina hetzelfde.
+`t` (het `seq` van het laatste item, een geheel getal van 0 of meer), `u` (zijn `uuid`) en `b` (de bovengrens
+`tot` van de ronde, minstens `t`), hooguit 200 tekens. Hij is alleen bedoeld om onveranderd terug te sturen als
+`na`: de pc controleert hem streng en gebruikt hem nooit als SQL. Een `b` boven de stand van de teller van de
+pc of onder `sinds` kan de pc niet gemaakt hebben en geeft `400 ongeldig`. `sinds` blijft bij elke volgende
+pagina hetzelfde.
 
 **Privacygrens.** Er gaat alleen deze whitelist uit de administratie: klanten van het type klant of beide
 en projecten, met precies de velden hierboven. Nooit leveranciers, het type, `paid_with`, interne id's,

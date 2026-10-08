@@ -4,7 +4,7 @@ import type { ReceiptSpool } from './spool';
 import type { Wijziging } from '@gratis-boekhouden/kern';
 import type { SyncResultaat } from '../sync/ontvangst';
 import type { Db } from '../db/database';
-import { leesCursor, leesStamgegevens, type Cursor } from '../sync/stamgegevens';
+import { OngeldigeCursor, leesCursor, leesStamgegevens, type Cursor } from '../sync/stamgegevens';
 import { jpegInfo } from './jpeg-pdf';
 import { normalizeRemote, sameSubnet, type LocalInterface } from './network';
 import { CONTENT_TYPE, DIRECTION, ENDPOINT_PATH, HEADER_BYTES, LIMITS, PROTOCOL_VERSIONS, RULES_VERSION, TAG_BYTES, ProtocolError, openRequest, parseFrame, readHeader, sealResponse, toBase64Url, type ErrorCode } from './protocol';
@@ -347,6 +347,8 @@ export class ScannerReceiver {
       try {
         pagina = leesStamgegevens(this.opts.database, { sinds: msg.sinds ?? 0, na });
       } catch (e) {
+        // een cursor die deze pc niet kan hebben gemaakt (bovengrens boven de teller of onder sinds) is een vormfout
+        if (e instanceof OngeldigeCursor) return reply(400, { ok: false, fout: 'ongeldig' });
         // nooit details naar de telefoon; de melding staat alleen in het eigen logboek
         this.opts.log?.(`Stamgegevens voor de telefoon lezen mislukt: ${(e as Error).message}`);
         return reply(500, { ok: false, fout: 'opslaan-mislukt' });

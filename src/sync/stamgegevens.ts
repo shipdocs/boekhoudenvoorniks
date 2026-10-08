@@ -20,6 +20,13 @@ import { veldOndergrens } from './ondergrens';
  *   telefoonwijziging aan een andere telefoon voorbij.
  * - Keyset-paginering op (sync_seq, uuid), eerst alle klanten, dan alle projecten. De cursor is geen
  *   SQL maar een gecontroleerd tupel dat alleen als parameter wordt gebruikt.
+ * - Een ronde heeft een vaste bovengrens. De eerste pagina (zonder cursor) legt `tot` vast: de stand van
+ *   de globale teller sync_teller 'wijziging'. Elk wijzigingsnummer is ooit uit die teller gekomen en
+ *   elk nieuw nummer is groter dan de stand van dat moment, dus 'tot' is een veilige bovengrens (de teller
+ *   en niet MAX(sync_seq): die ligt nooit lager, en weerspiegelt ook een teruggezette back-up). Alleen items
+ *   met sinds < seq <= tot horen bij de ronde, ook op vervolgpagina's. Een wijziging tijdens de ronde krijgt
+ *   een nummer boven `tot` en komt in de volgende ronde. De telefoon bewaart na de laatste pagina `tot`
+ *   (veld `nieuwe_sinds`), niet het hoogste nummer van de ontvangen items.
  *
  * Kolomnamen in de SQL komen uitsluitend uit de vaste lijsten van de kern (KLANT_VELDEN en
  * PROJECT_VELDEN), nooit uit het verzoek.
@@ -40,6 +47,8 @@ export interface Cursor {
   t: number;
   /** de uuid van dat item */
   u: string;
+  /** de bovengrens (tot) van deze ronde: de stand van de pc-teller bij de eerste pagina */
+  b: number;
 }
 
 export interface StamgegevensVraag {
@@ -73,18 +82,31 @@ export interface StamgegevensAntwoord {
   projecten: StamItem[];
   aliassen: StamAlias[];
   volgende: string | null;
+  /**
+   * De bovengrens van deze ronde (`tot`). Na de laatste pagina (volgende: null) bewaart de telefoon
+   * dit getal als nieuwe `sinds`, nooit het hoogste `seq` van de ontvangen items. Staat `sinds` boven
+   * de stand van de teller (een teruggezette back-up), dan is het antwoord leeg en is dit het lagere nummer.
+   */
+  nieuwe_sinds: number;
+}
+
+/** De cursor wijst naar niets wat deze pc kan hebben gemaakt (bijvoorbeeld een bovengrens boven de teller). */
+export class OngeldigeCursor extends Error {
+  constructor() {
+    super('ongeldige cursor');
+  }
 }
 
 const UUID_KLEIN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** De cursor als tekst: base64url van JSON met precies de sleutels s, t en u (in die volgorde). */
+/** De cursor als tekst: base64url van JSON met precies de sleutels s, t, u en b (in die volgorde). */
 export function maakCursor(cursor: Cursor): string {
-  return Buffer.from(JSON.stringify({ s: cursor.s, t: cursor.t, u: cursor.u }), 'utf8').toString('base64url');
+  return Buffer.from(JSON.stringify({ s: cursor.s, t: cursor.t, u: cursor.u, b: cursor.b }), 'utf8').toString('base64url');
 }
 
 /**
  * Leest een cursor streng terug. Null bij alles wat niet exact zo gemaakt is door maakCursor: te
- * lang, geen strikte base64url, geen JSON, geen object met precies s, t en u, een verkeerd type of
+ * lang, geen strikte base64url, geen JSON, geen object met precies s, t, u en b, een verkeerd type of
  * bereik, of een andere schrijfwijze van dezelfde inhoud. Gooit nooit.
  */
 export function leesCursor(tekst: unknown): Cursor | null {
@@ -97,12 +119,14 @@ export function leesCursor(tekst: unknown): Cursor | null {
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
   const sleutels = Object.keys(raw);
-  if (sleutels.length !== 3 || !sleutels.includes('s') || !sleutels.includes('t') || !sleutels.includes('u')) return null;
-  const { s, t, u } = raw as { s: unknown; t: unknown; u: unknown };
+  if (sleutels.length !== 4 || !['s', 't', 'u', 'b'].every((k) => sleutels.includes(k))) return null;
+  const { s, t, u, b } = raw as { s: unknown; t: unknown; u: unknown; b: unknown };
   if (s !== 'k' && s !== 'p') return null;
   if (typeof t !== 'number' || !Number.isSafeInteger(t) || t < 0) return null;
   if (typeof u !== 'string' || !UUID_KLEIN.test(u)) return null;
-  const cursor: Cursor = { s, t, u };
+  // de bovengrens van de ronde ligt nooit onder het laatste item
+  if (typeof b !== 'number' || !Number.isSafeInteger(b) || b < t) return null;
+  const cursor: Cursor = { s, t, u, b };
   // alleen de canonieke schrijfwijze: een gewijzigde of aangevulde cursor wijst naar niets
   return maakCursor(cursor) === tekst ? cursor : null;
 }
@@ -117,7 +141,7 @@ const PROJECT_KOLOMMEN = PROJECT_NAMEN.map((n) => PROJECT_VELDEN[n].kolom);
 const KLANT_SQL = `SELECT r.id, r.uuid, r.sync_seq, r.revisie, r.created_at, ${KLANT_KOLOMMEN.map((k) => `r.${k} AS ${k}`).join(', ')}
   FROM relations r
   WHERE r.type IN ('klant', 'beide') AND r.uuid IS NOT NULL AND r.sync_seq > 0
-    AND r.sync_seq > ? AND (r.sync_seq > ? OR (r.sync_seq = ? AND r.uuid > ?))
+    AND r.sync_seq > ? AND r.sync_seq <= ? AND (r.sync_seq > ? OR (r.sync_seq = ? AND r.uuid > ?))
   ORDER BY r.sync_seq, r.uuid
   LIMIT ?`;
 
@@ -128,7 +152,7 @@ const PROJECT_SQL = `SELECT j.id, j.uuid, j.sync_seq, j.revisie, j.created_at, k
   FROM jobs j
   LEFT JOIN relations k ON k.id = j.relation_id
   WHERE (k.id IS NULL OR k.type IN ('klant', 'beide')) AND j.uuid IS NOT NULL AND j.sync_seq > 0
-    AND j.sync_seq > ? AND (j.sync_seq > ? OR (j.sync_seq = ? AND j.uuid > ?))
+    AND j.sync_seq > ? AND j.sync_seq <= ? AND (j.sync_seq > ? OR (j.sync_seq = ? AND j.uuid > ?))
   ORDER BY j.sync_seq, j.uuid
   LIMIT ?`;
 
@@ -196,26 +220,32 @@ function bouwProject(rij: Rij, tijden: Tijden): StamItem {
   return { uuid: rij.uuid, seq: rij.sync_seq, pc_revisie: rij.revisie, gearchiveerd: rij.archived === 1, velden };
 }
 
-function cursorVan(soort: Soort, item: StamItem): string {
-  return maakCursor({ s: soort, t: item.seq, u: item.uuid });
+function cursorVan(soort: Soort, item: StamItem, tot: number): string {
+  return maakCursor({ s: soort, t: item.seq, u: item.uuid, b: tot });
 }
 
 /**
  * Eén pagina van de stroom. Alleen lezen. Eerst klanten, dan projecten, samen hoogstens
  * STAMGEGEVENS_PAGINA items; `volgende` is de cursor van het laatste item als er nog meer volgt, anders
- * null. De aliassen staan alleen op de eerste pagina (zonder cursor), onafhankelijk van `sinds`.
+ * null. `nieuwe_sinds` is de bovengrens van de ronde. De aliassen staan alleen op de eerste pagina (zonder cursor), onafhankelijk van `sinds`.
  */
 export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): StamgegevensAntwoord {
   return db
     .transaction((): StamgegevensAntwoord => {
       const cursor = vraag.na;
+      const teller = (db.prepare(`SELECT waarde FROM sync_teller WHERE naam = 'wijziging'`).get() as { waarde: number } | undefined)?.waarde;
+      if (teller === undefined) throw new Error('De wijzigingsteller ontbreekt in deze administratie');
+      // Eerste pagina: de bovengrens van de ronde is de stand van de teller nu. Vervolgpagina: die uit de
+      // cursor, die niet boven de teller kan liggen en niet onder `sinds` (dat kan deze pc niet gemaakt hebben).
+      if (cursor && (cursor.b > teller || cursor.b < vraag.sinds)) throw new OngeldigeCursor();
+      const tot = cursor ? cursor.b : teller;
       const grens = STAMGEGEVENS_PAGINA + 1; // een extra item om te weten of er nog meer volgt
       const nulpunt = { t: 0, u: '' };
 
       let klanten: StamItem[] = [];
       if (!cursor || cursor.s === 'k') {
         const van = cursor ?? nulpunt;
-        const rijen = db.prepare(KLANT_SQL).all(vraag.sinds, van.t, van.t, van.u, grens) as Rij[];
+        const rijen = db.prepare(KLANT_SQL).all(vraag.sinds, tot, van.t, van.t, van.u, grens) as Rij[];
         const tijden = leesTijden(db, 'relation_field_rev', rijen.map((r) => r.id));
         klanten = rijen.map((r) => bouwKlant(r, tijden));
       }
@@ -224,7 +254,7 @@ export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): Stamgegevens
       const over = grens - klanten.length;
       if (over > 0) {
         const van = cursor && cursor.s === 'p' ? cursor : nulpunt;
-        const rijen = db.prepare(PROJECT_SQL).all(vraag.sinds, van.t, van.t, van.u, over) as Rij[];
+        const rijen = db.prepare(PROJECT_SQL).all(vraag.sinds, tot, van.t, van.t, van.u, over) as Rij[];
         const tijden = leesTijden(db, 'job_field_rev', rijen.map((r) => r.id));
         projecten = rijen.map((r) => bouwProject(r, tijden));
       }
@@ -234,16 +264,16 @@ export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): Stamgegevens
       if (totaal > STAMGEGEVENS_PAGINA) {
         if (projecten.length > 0) {
           projecten = projecten.slice(0, projecten.length - 1);
-          const laatste = projecten.length > 0 ? cursorVan('p', projecten[projecten.length - 1]!) : cursorVan('k', klanten[klanten.length - 1]!);
+          const laatste = projecten.length > 0 ? cursorVan('p', projecten[projecten.length - 1]!, tot) : cursorVan('k', klanten[klanten.length - 1]!, tot);
           volgende = laatste;
         } else {
           klanten = klanten.slice(0, STAMGEGEVENS_PAGINA);
-          volgende = cursorVan('k', klanten[klanten.length - 1]!);
+          volgende = cursorVan('k', klanten[klanten.length - 1]!, tot);
         }
       }
 
       const aliassen = cursor ? [] : (db.prepare(ALIAS_SQL).all() as StamAlias[]).map((a) => ({ alias_uuid: a.alias_uuid, klant: a.klant }));
-      return { klanten, projecten, aliassen, volgende };
+      return { klanten, projecten, aliassen, volgende, nieuwe_sinds: tot };
     })
     .deferred();
 }

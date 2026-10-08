@@ -292,7 +292,7 @@ describe('bonnenscanner v2: stamgegevens', () => {
     // de eerste vraag van een telefoon: zijn apparaatcode bestaat dan nog niet en wordt hier toegekend
     const r = await p.verstuur({ soort: 'stamgegevens', tijd: t.clock.now }, { versie: 2 });
     expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'stamgegevens', pcTijd: t.clock.now, apparaatcode: 'M1', regels: RULES_VERSION, volgende: null, aliassen: [] } });
-    expect(Object.keys(r.json!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'ok', 'pcTijd', 'projecten', 'regels', 'soort', 'volgende']);
+    expect(Object.keys(r.json!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'soort', 'volgende']);
     const klanten = r.json!.klanten as { uuid: string; seq: number; pc_revisie: number; gearchiveerd: boolean; velden: Record<string, { waarde: unknown; tijd: number; bron: string }> }[];
     // de twee klanten van de testadministratie, niet de leverancier
     expect(klanten.map((k) => k.velden.naam!.waarde).sort()).toEqual(['Bouwbedrijf De Vries BV', 'Familie Jansen']);
@@ -640,7 +640,7 @@ describe('bonnenscanner v2: de voorbeelden in het document', () => {
     expect(parseFrame(encodeFrame(verzoek('stamgegevens')), 2)).toEqual({ soort: 'stamgegevens', tijd: 1790848800000 });
     expect(() => parseFrame(encodeFrame(verzoek('stamgegevens')), 1)).toThrow();
     const voorbeeld = antwoord('stamgegevens');
-    expect(Object.keys(voorbeeld)).toEqual(['ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'volgende']);
+    expect(Object.keys(voorbeeld)).toEqual(['ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'volgende', 'nieuwe_sinds']);
     expect(voorbeeld.regels).toBe(RULES_VERSION);
     for (const item of [...(voorbeeld.klanten as Record<string, unknown>[]), ...(voorbeeld.projecten as Record<string, unknown>[])]) {
       expect(Object.keys(item)).toEqual(['uuid', 'seq', 'pc_revisie', 'gearchiveerd', 'velden']);
@@ -648,6 +648,6 @@ describe('bonnenscanner v2: de voorbeelden in het document', () => {
     // de cursor in het tweede verzoek-voorbeeld is er een die de pc zelf zou maken
     const metCursor = JSON.parse(doc.match(/```jsonc\n(\{"soort":"stamgegevens"[\s\S]*?)```/)![1]!) as { sinds: number; na: string };
     expect(parseFrame(encodeFrame(metCursor), 2)).toMatchObject({ soort: 'stamgegevens', sinds: 412, na: metCursor.na });
-    expect(leesCursor(metCursor.na)).toEqual({ s: 'p', t: 480, u: '1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9' });
+    expect(leesCursor(metCursor.na)).toEqual({ s: 'p', t: 480, u: '1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9', b: 500 });
   });
 });
