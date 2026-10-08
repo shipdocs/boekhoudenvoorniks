@@ -64,6 +64,7 @@ import QRCode from 'qrcode';
 import type { Bonnenscanner } from '../scanner/scanner';
 import { PHONE_SCANNER } from '../shared/phone-scanner';
 import { BANK_FEED } from '../shared/bank-feed';
+import { ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD } from '../sync/reeks';
 import { YEAR_END_KINDS, type YearEndKind } from '../closing/year-end';
 
 const PONTO_DASHBOARD_URL = 'https://dashboard.myponto.com';
@@ -444,6 +445,16 @@ export function createApi(s: Services, host: HostContext) {
       case 'mail-online:klaar':
       case 'mail-customer:klaar':
         s.inbox.skipTask(task.key, 'gezien');
+        return;
+      case 'invoice-series-gap:vervallen-niet-gebruikt':
+      case 'invoice-series-gap:vervallen-niet-verstuurd': {
+        // alleen het gat markeren; de reden hoort bij de knop en komt nooit uit de taak van de interface
+        const g = r.reeks;
+        if (!g) throw new ValidationError('Dit gat in de nummers is intussen veranderd. Bekijk Vandaag opnieuw.');
+        new ReeksBewaking(s.db).markeerVervallen(g.apparaat_code, g.jaar, g.van, g.tot, actionId === 'vervallen-niet-gebruikt' ? REDEN_NIET_GEBRUIKT : REDEN_NIET_VERSTUURD);
+        return;
+      }
+      case 'invoice-series-gap:later':
         return;
       case 'exchange-conflict:klaar':
         s.inbox.skipTask(task.key, 'afgehandeld');
