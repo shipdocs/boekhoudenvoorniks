@@ -718,7 +718,7 @@ bevestigt:
 
 ### Wat de pc met een wijziging doet
 
-Een wijziging van een **klant**, een **project**, een **factuur** of een **bon** wordt bewaard (een project is een klus op de pc; een bon gaat naar de spool, zie *Een bon als wijziging, met bijlagen*). De pc verwerkt elke wijziging in één
+Een wijziging van een **klant**, een **project**, een **factuur**, een **bon** of een **foto** wordt bewaard (een project is een klus op de pc; een bon gaat naar de spool, zie *Een bon als wijziging, met bijlagen*; een foto hoort bij een project, zie *Een foto bij een project*). De pc verwerkt elke wijziging in één
 databasetransactie: de controle in het register, het opzoeken, het toepassen, het wijzigingsnummer, het
 logboek en de registerrij lukken samen of helemaal niet. De pc **verwijdert nooit** iets en voegt
 **nooit stil samen**: twee `uuid`'s met dezelfde KvK, hetzelfde btw-nummer, hetzelfde e-mailadres of
@@ -734,7 +734,7 @@ stap.
 | 200 | `afgewezen`, `fout: "geen-klant"` | ja | inhoudelijk geweigerd: de `uuid` hoort bij een leverancier | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `afgewezen`, `fout: "klus-gekoppeld"`, met `melding` | ja | inhoudelijk geweigerd: de klant van een project met een offerte, facturen, aankopen, ritten of werkbonregels kan niet wisselen; er is niets geschreven in het project | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `wacht` | **nee** (wel een rij in `sync_wachtrij`) | een project dat naar een nog onbekende klant verwijst, of een **factuur** die naar een onbekende klant, een onbekend project of een onbekend origineel (creditnota) verwijst of nu niet geboekt kan worden (een periode die bij de boekhouder ligt); de pc bewaart de hele wijziging en past haar toe zodra het ontbrekende er is of de periode weer open is | wijziging opruimen: de pc heeft haar; iets dat nog niet is afgeleverd moet de telefoon alsnog sturen |
-| 200 | `niet-ondersteund` | **nee** | `foto` wordt nog niet opgeslagen (een `bon` ook niet, op een pc zonder spool); er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
+| 200 | `niet-ondersteund` | **nee** | een `foto` op een pc zonder administratiemap, of een `bon` op een pc zonder spool; er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
 | 200 | `afgewezen`, `fout: "id-botst"` | ja | een **bon** waarvan de `uuid` al in de spool staat met een andere inhoud (een andere foto of andere velden); de eerst opgeslagen bon blijft leidend | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `afgewezen`, `fout: "nummer-bezet"`, met `melding` | ja | een **factuur** waarvan het nummer al bij een andere factuur hoort; er is geen factuur bijgekomen | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `afgewezen`, `fout: "factuur-geweigerd"`, met `melding` | ja | een **factuur** die de pc inhoudelijk weigert (bijvoorbeeld een creditnota voor een andere klant dan het origineel); dit kan ook pas bij het verwerken uit de wachtrij blijken | wijziging opruimen en melden |
@@ -994,11 +994,8 @@ eerst, de rij in `scanner_documents` en de registerrij daarna samen in één dat
 de transactie teruggedraaid en haalt de pc het bestand weg dat hij zojuist neerzette (en een half geschreven tijdelijk
 bestand). Een bestand van een eerdere, bevestigde bon blijft altijd staan.
 
-**Entiteit `foto`.** De bijlagen worden ook bij een wijziging met entiteit `foto` aangenomen en gecontroleerd, met
-dezelfde vorm; in de velden staat `project_uuid` (een UUID in kleine letters, verplicht) in plaats van
-`betaalwijze`, en `notitie` en `fotos` zoals hierboven (de kern heeft er `leesFotoVelden` voor). De uitkomst blijft
-200 `niet-ondersteund` zonder iets te bewaren: het opslaan bij een project komt in een volgende stap. Zonder
-bijlagen is er niets te lezen en geeft `foto` altijd `niet-ondersteund`.
+**Entiteit `foto`.** Een wijziging met entiteit `foto` heeft dezelfde vorm, met `project_uuid` in plaats van
+`betaalwijze`; wat de pc ermee doet staat in *Een foto bij een project*.
 
 **Stappenlijst voor de Android-app.**
 
@@ -1009,6 +1006,77 @@ bijlagen is er niets te lezen en geeft `foto` altijd `niet-ondersteund`.
    versie 2, en stuur het.
 5. `toegepast` en `overgeslagen` zijn bevestigingen: de bon mag van de telefoon. `afgewezen` met `id-botst`: melden.
    `niet-ondersteund` (alleen bij `foto`) en 500 of 503: bewaren en later opnieuw; 400 en 413: niet opnieuw.
+
+### Een foto bij een project
+
+Een foto van de telefoon (een of meer JPEG's) hoort bij een project en wordt bewaard bij die klus op de pc. De
+wijziging heeft entiteit `foto`, revisie 1 en de bijlagen direct achter de JSON, precies zoals bij de bon (zie
+*Een bon als wijziging, met bijlagen*). Voorbeeld van de JSON (de bijlage is één JPEG van 751 bytes; het voorbeeld
+wordt gecontroleerd door `tests/sync-fotos.test.ts`):
+
+```jsonc
+{"soort":"wijziging","tijd":1790848800000,"wijziging":{"entiteit":"foto","uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","revisie":1,"tijd":1790848790000,"velden":{"project_uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","notitie":"Muur voor het schilderen","fotos":[{"grootte":751,"sha256":"e4e731cb4b43157668cf3fad52ee2aad283f0f23a19455907cb6ad6ae11d726c"}]}}}
+```
+
+| Veld in `velden` | Verplicht | Betekenis |
+|---|---|---|
+| `project_uuid` | ja | het project (UUID, kleine letters) waar de foto's bij horen; een gearchiveerd project telt gewoon |
+| `notitie` | nee | tekst zonder stuurtekens, hooguit 1000 tekens; hoort bij alle foto's van deze wijziging |
+| `fotos` | ja | 1 tot 10 objecten met precies `grootte` en `sha256`, in de volgorde van de bijlagen |
+
+De controles en de grenzen zijn die van de bon, op elke route (`netwerk`, `map` en `mail`) en op de ruwe velden: de
+`grootte` en `sha256` moeten bij de bijlage passen, elke bijlage moet aan de inhoud een JPEG zijn, de bijlagen samen
+hooguit 19 MiB, de JSON hooguit 128 KiB. Een foto heeft alleen revisie 1: een foto wordt nooit bewerkt en nooit
+verwijderd, niet door de telefoon en niet door de pc.
+
+**Bestanden.** De pc bewaart elke foto als `bijlagen/telefoon/<uuid van de wijziging>/<volgnummer>.jpg` in de
+administratie, dus mee bij verhuizen en in de back-up, en legt een rij per foto vast bij het project (`job_photos`:
+klus, wijziging, volgnummer, relatief pad, `sha256` en grootte van het bewaarde bestand, notitie, bewerkmoment van de
+telefoon). Een bestand wordt exclusief aangemaakt: staat er al een bestand, dan moet de inhoud gelijk zijn. Het
+beeld wordt niet opnieuw gecomprimeerd. **De locatie** (GPS in de EXIF en in een XMP-blok) gaat uit de JPEG, tenzij de
+gebruiker op de pc heeft toegestaan locatie te bewaren. Daardoor kan de `sha256` van het bewaarde bestand verschillen van
+die in de velden: de `sha256` in de velden is die van wat de telefoon stuurde (daarmee controleert de pc de bijlage),
+die in de pc is die van wat is bewaard. De pc vergelijkt een herhaling met en zonder locatie als dezelfde foto.
+
+**Een onbekend project wacht.** Kent de pc het project (nog) niet, dan antwoordt hij `wacht`, net als bij een
+factuur voor een onbekend project: er komt een rij in de wachtrij (`sync_wachtrij`, wacht op het project, reden
+`project-onbekend`, met de route van de eerste ontvangst), maar geen registerrij en geen foto. De bestanden staan dan al
+op schijf, met per bestand een verwijzing in `sync_wachtrij_bijlagen`; de wachtrij bewaart nooit de bytes zelf. Zodra
+het project er is, bij elk toegepast project of toegepaste klant en bij het starten van de pc, leest de pc de wijziging
+opnieuw, controleert hij de bewaarde bestanden opnieuw (aantal, grootte, `sha256`, JPEG) en neemt hij de foto's over:
+de bestanden blijven waar ze staan en `job_photos` wijst ernaar. Een project dat zelf nog op zijn klant wacht houdt de
+foto ook wachtend; komt de klant, dan zijn project en foto beide toegepast. Is een bestand intussen beschadigd of weg,
+dan is de uitkomst `afgewezen` met `ongeldig`. Een afgehandelde wachtende foto staat in de `bevestigingen` van die
+telefoon (zes velden, nooit een pad), ook als de telefoon intussen is ontkoppeld. Een volle wachtrij (1000 onverwerkte
+rijen per apparaat) geeft 503 `wachtrij-vol`, zonder rij en zonder bestanden; de foto komt dan later opnieuw.
+
+| HTTP | `uitkomst` / `fout` | Registerrij | Betekenis |
+|---|---|---|---|
+| 200 | `toegepast` | ja | de foto's staan nu bij het project |
+| 200 | `overgeslagen` | ja of al aanwezig | deze registersleutel had de pc al (ook via een andere route), of dezelfde foto stond er al |
+| 200 | `wacht` | nee | het project is nog onbekend; wacht op de `bevestigingen` |
+| 200 | `afgewezen`, `fout: "id-botst"` | ja | dezelfde `uuid` met een andere inhoud dan de bewaarde foto; de eerst opgeslagen inhoud blijft |
+| 200 | `afgewezen`, `fout: "ongeldig"` of `"veld-ongeldig"` | ja | alleen bij een wachtende foto die bij het verwerken niet meer klopt |
+| 400 | `ongeldig`, `veld-ongeldig` | nee | revisie anders dan 1, een bijlage die niet klopt, of een veld dat niet klopt (zoals bij de bon) |
+| 413 | `te-groot` | nee | de grenzen van de bon |
+| 503 | `wachtrij-vol` | nee | de wachtrij van dit apparaat is vol; herhaalbaar |
+| 500 | `opslaan-mislukt` | nee | de pc kon niet opslaan: geen rij, geen registerrij en geen los bestand; dezelfde wijziging opnieuw sturen werkt gewoon |
+
+**Atomair.** Net als bij de bon draait de pc de rijen (`job_photos`, of de wachtrij met haar verwijzingen, en het
+register) in een transactie en haalt hij de bestanden weg die hij net neerzette als er iets misgaat. Lukt het
+verwijderen zelf niet, dan onthoudt de pc het bestand, probeert hij het later opnieuw en wordt het nooit een foto.
+Zonder administratiemap in de ontvanger van de pc blijft `foto` `niet-ondersteund`.
+
+**Stappenlijst voor de Android-app.**
+
+1. Kies de `uuid` van de wijziging (UUID, kleine letters) en houd hem gelijk bij elke nieuwe poging.
+2. Neem de `uuid` van het project (dat de pc kent uit de stamgegevens of dat de telefoon zelf maakte) als `project_uuid`.
+3. Bereken per JPEG de `sha256` en de `grootte`; zet ze in `velden.fotos`, in volgorde (1 tot 10 foto's).
+4. Bouw de change-set (entiteit `foto`, revisie 1, het bewerkmoment van de foto) en stuur hem met de JPEG's direct achter de
+   JSON, in een envelop van versie 2.
+5. `toegepast`, `overgeslagen` en `afgewezen` zijn eindantwoorden: de foto mag van de telefoon (bij `afgewezen` eerst melden).
+   `wacht` is geen eindantwoord: bewaar de foto tot de `bevestigingen` een uitkomst geven. 500 en 503: bewaren en later
+   opnieuw; 400 en 413: niet opnieuw.
 
 ### Reeksbewaking: gaten in de factuurnummers van een telefoon
 
