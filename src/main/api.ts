@@ -68,6 +68,12 @@ import { telefoonKlantenZonderControle, viesTaakKey } from '../btw/vies';
 import { MAX_VERVALLEN_PER_MARKERING, ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD } from '../sync/reeks';
 import { YEAR_END_KINDS, type YearEndKind } from '../closing/year-end';
 
+/** Een id van buiten (het scherm): een veilig geheel getal groter dan 0, anders een Nederlandse fout. */
+function photoInt(value: unknown, naam: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) throw new ValidationError(`${naam} moet een geheel getal groter dan 0 zijn`);
+  return value;
+}
+
 const PONTO_DASHBOARD_URL = 'https://dashboard.myponto.com';
 
 /** Functies die alleen het Electron-hoofdproces kan leveren (dialogen, bestanden, geheimen). */
@@ -1068,6 +1074,18 @@ export function createApi(s: Services, host: HostContext) {
       workItems: (id: number) => s.jobs.workItems(id),
       addWorkItem: (id: number, item: { date: IsoDate; description: string; quantity: number; unit?: string | null; unitPrice: Cents; vatCode: string }) => s.jobs.addWorkItem(id, item),
       removeWorkItem: (itemId: number) => s.jobs.removeWorkItem(itemId),
+      /**
+       * De foto's van de telefoon bij een klus: hoogstens `limiet` (standaard en maximaal 200) vanaf `offset`, met het
+       * totaal. Alleen lezen; nooit het pad of de controlesom. Werkt ook in de kopie bij de boekhouder.
+       */
+      photos: (id: number, opties?: { limiet?: number; offset?: number }) => {
+        const jobId = photoInt(id, 'Het klusnummer');
+        if (opties !== undefined && (typeof opties !== 'object' || opties === null || Array.isArray(opties))) throw new ValidationError('De opties moeten een object zijn');
+        const { limiet, offset } = opties ?? {};
+        return { fotos: s.jobPhotos.list(jobId, { limiet, offset }), totaal: s.jobPhotos.count(jobId) };
+      },
+      /** Eén foto als { mimeType, base64 }, gelezen via de veilige bijlageroute van de host. Alleen lezen. */
+      photo: (photoId: number) => s.jobPhotos.read(photoInt(photoId, 'Het fotonummer'), (p) => host.readAttachment(p)),
     },
     documents: {
       add: (name: string, data: Uint8Array) => s.intake.add(name, data),
