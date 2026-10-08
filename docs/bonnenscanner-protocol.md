@@ -427,7 +427,7 @@ het uitgewerkte voorbeeld van versie 1 hierboven blijft byte voor byte in `tests
 
 | Veld | Betekenis |
 |---|---|
-| `regels` | de regelsversie (in de code `rulesVersion`): het versienummer van de btw-regeltabel die bij deze pc hoort (nu 1). De tabel zelf volgt in een latere versie van dit document |
+| `regels` | de regelsversie (in de code `rulesVersion`): het versienummer van de btw-regeltabel die bij deze pc hoort (nu 1). De tabel zelf staat in het stamgegevens-antwoord (veld `regeltabel`, eerste pagina) en heeft een eigen `versie` |
 | `protocollen` | alle protocolversies die deze pc begrijpt, van laag naar hoog (nu `[1,2]`) |
 | `apparaatcode` | de apparaatcode van deze telefoon (`M1`, `M2`, …), zoals bij *De apparaatcode* |
 
@@ -525,7 +525,7 @@ tweebyte-tekens, is ongeveer 1,07 MiB en met driebyte-tekens in de notities onge
 moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 
 ```text
-{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"verborgen":[{"uuid":"3f1d2c4b-6a7e-4b8c-9d0e-1f2a3b4c5d6e","seq":497,"soort":"klant"}],"volgende":null,"nieuwe_sinds":500}
+{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"regeltabel":{"versie":"2026-1","geldig_vanaf":"2026-01-01","btw":[{"code":"hoog","label":"21% (hoog)","percentage":21,"rubriek":"1a","tekst":"21% btw"},{"code":"laag","label":"9% (laag)","percentage":9,"rubriek":"1b","tekst":"9% btw"},{"code":"nul","label":"0%","percentage":0,"rubriek":"1e","tekst":"0% btw"},{"code":"verlegd","label":"BTW verlegd","pickLabel":"Btw verlegd (je werkt als onderaannemer; je klant regelt de btw)","percentage":0,"rubriek":"1e","tekst":"btw verlegd"},{"code":"vrijgesteld","label":"Vrijgesteld / KOR","pickLabel":"Geen btw (vrijgesteld of KOR)","percentage":0,"rubriek":"-","tekst":"geen btw"},{"code":"icp","label":"Intracommunautaire levering (0%)","pickLabel":"Goederen naar een bedrijf in een ander EU-land (0%)","percentage":0,"rubriek":"3b","tekst":"goederen naar een bedrijf in de EU, 0% btw"},{"code":"icp-dienst","label":"Btw verlegd (dienst EU)","pickLabel":"Dienst aan een bedrijf in een ander EU-land (btw verlegd)","percentage":0,"rubriek":"3b","tekst":"dienst aan een bedrijf in de EU, btw verlegd"},{"code":"export","label":"Uitvoer goederen buiten de EU (0%)","pickLabel":"Goederen naar een klant buiten de EU (0%)","percentage":0,"rubriek":"3a","tekst":"goederen naar buiten de EU, 0% btw"},{"code":"dienst-buiten-eu","label":"Niet belast in Nederland","pickLabel":"Dienst aan een bedrijf buiten de EU (niet in de aangifte)","percentage":0,"rubriek":"-","tekst":"dienst aan een bedrijf buiten de EU, geen Nederlandse btw"}],"eu_landen":["AT","BE","BG","CY","CZ","DE","DK","EE","ES","FI","FR","GR","HR","HU","IE","IT","LT","LU","LV","MT","NL","PL","PT","RO","SE","SI","SK"],"eu_b2c_drempel":1000000,"teksten":{"icp":"Intracommunautaire levering, vrijgesteld van btw (art. 138 Btw-richtlijn)","icp_dienst":"Btw verlegd (reverse charge, art. 196 Btw-richtlijn)","buiten_eu_dienst":"Dienst niet belast in Nederland (plaats van dienst buiten de EU)","verlegd":"BTW verlegd"}},"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}},"vies":{"gecontroleerd_op":"2026-09-30T08:15:00.000Z","geldig":true}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"verborgen":[{"uuid":"3f1d2c4b-6a7e-4b8c-9d0e-1f2a3b4c5d6e","seq":497,"soort":"klant"}],"volgende":null,"nieuwe_sinds":500}
 ```
 
 (Het voorbeeld toont een deel van de velden; het echte antwoord heeft bij elk item **alle** velden.)
@@ -534,20 +534,29 @@ moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 |---|---|
 | `pcTijd` | de klok van de pc, zoals in het hallo-antwoord |
 | `apparaatcode` | de apparaatcode van **deze** telefoon; een ander gekoppeld apparaat krijgt dezelfde gegevens maar zijn eigen code |
-| `regels` | de versie van de btw-regeltabel (`RULES_VERSION`), gelijk aan die in het hallo-antwoord. De tabel zelf en de VIES-controledatum zitten niet in dit antwoord |
+| `regeltabel` | de **btw-regeltabel** zelf, zie De regeltabel hieronder. **Alleen op de eerste pagina** (zonder `na`), altijd, ook bij een `sinds` en ook als de delta leeg is; een vervolgpagina heeft dit veld niet. (Het veld `regels` in het antwoord is op elke pagina het versienummer `rulesVersion`, zoals in het hallo-antwoord.) |
 | `klanten`, `projecten` | de items van deze pagina, zie hieronder |
 | `aliassen` | de samengevoegde klanten: `alias_uuid` (de oude uuid) en `klant` (de uuid van de klant die nu geldt). **Alleen op de eerste pagina** (zonder `na`), volledig, ook bij een `sinds`, en niet meegeteld in de 100 items; een vervolgpagina heeft een lege lijst |
 | `verborgen` | items die voor de telefoon **niet meer zichtbaar** zijn, zie Verbergmeldingen hieronder. Elk is `{uuid, seq, soort}` met `soort` `"klant"` of `"project"`, en niets anders. Altijd aanwezig; bij `sinds` 0 leeg |
 | `volgende` | de cursor voor de volgende pagina, of `null` als alles geleverd is |
 | `nieuwe_sinds` | de bovengrens (`tot`) van deze **ronde**, in elk antwoord van de ronde gelijk. Na de laatste pagina (`volgende: null`) bewaart de telefoon dit getal als nieuwe `sinds`, **nooit** het hoogste `seq` van de ontvangen items (zie Ronde en delta) |
 
-**Een item** heeft precies `uuid`, `seq`, `pc_revisie`, `gearchiveerd` en `velden`. `velden` bevat voor
+**Een item** heeft precies `uuid`, `seq`, `pc_revisie`, `gearchiveerd` en `velden`; een **klant** heeft daarnaast
+`vies` (zie hieronder), een project niet. `velden` bevat voor
 **elk** veld uit `KLANT_VELDEN` (klant) of `PROJECT_VELDEN` (project) in `packages/core` een object
 `{waarde, tijd, bron}`; het project draagt zijn klant als `uuid` in het veld `klant` (of `null`). De veldnamen
 komen uit de kern, niet uit dit document. `gearchiveerd` staat zowel als boolean op het item als (met zijn
 eigen tijd en bron, `0` of `1`) in `velden`; gearchiveerde klanten en projecten worden **gewoon geleverd**,
 want de pc verwijdert nooit iets.
 
+- `vies` is `null` (de klant heeft geen btw-nummer, of dat nummer is nog nooit in VIES gecontroleerd) of
+  precies `{gecontroleerd_op, geldig}`: `gecontroleerd_op` is het tijdstip van de **laatste** controle van het
+  **huidige** btw-nummer van de klant (ISO 8601, UTC), `geldig` is `true`, `false` of `null` (geen uitslag,
+  bijvoorbeeld omdat de dienst van een land niet bereikbaar was). Een controle van een eerder btw-nummer
+  van de klant telt niet voor het nieuwe nummer. Alleen lezen: de naam, het adres en het bericht uit de
+  VIES-uitslag verlaten de pc nooit. Een nieuwe controle geeft de klant een nieuwe `seq` (en zijn projecten
+  dus ook, via het effectieve nummer), zodat hij in de volgende delta komt; dat is geen klantwijziging:
+  `pc_revisie` en de `tijd` van de velden blijven gelijk.
 - `seq` is de wijzigingsteller van de pc (`sync_seq`) van die rij. Elke echte wijziging op de pc, ook een
   die een telefoon heeft gemeld, geeft de rij een nieuwe, hogere `seq`; archiveren ook.
 - `pc_revisie` is het revisienummer van de rij op de pc. Het is **informatief**: de telefoon past een
@@ -557,6 +566,19 @@ want de pc verwijdert nooit iets.
   klant of project van vóór de sync) krijgt als `tijd` het aanmaakmoment van de rij (omgerekend van UTC naar
   milliseconden) en als `bron` `"pc"`: dus niet de wijzigingstijd en niet 0. Een veld dat de pc zelf al als
   "nog door niemand gezet" bewaart (`tijd` 0, lege `bron`) wordt zo doorgegeven, zodat elke latere wijziging wint.
+
+**De regeltabel (`regeltabel`).** De tabel staat in `packages/core/src/shared/regeltabel.ts` (`REGELTABEL`) en
+wordt **afgeleid** van de bestaande btw-constanten van de kern; de pc heeft dus geen tweede bron. Inhoud:
+`versie` (tekst `JJJJ-n`, nu `2026-1`), `geldig_vanaf` (ISO-datum), `btw` (per verkoop-btw-soort: `code`,
+`label`, eventueel `pickLabel`, `percentage`, `rubriek` en `tekst`), `eu_landen`, `eu_b2c_drempel` (centen) en
+`teksten` (de vaste vermeldingen `icp`, `icp_dienst`, `buiten_eu_dienst` en `verlegd`). Verandert de
+inhoud, dan gaat de `versie` omhoog; een test op een vingerafdruk van de inhoud dwingt dat af.
+De telefoon haalt de tabel dus uit de stamgegevens, niet uit het hallo-antwoord, en bewaart haar met de
+`versie`. Op een factuur zet hij als `regeltabel_versie` de `versie` van de tabel waarmee hij rekende.
+Vergelijken doet hij als tekst, gelijk of ongelijk (geen getal): is de `versie` in een nieuwe eerste pagina
+anders dan de bewaarde, dan vervangt hij de tabel voor **nieuwe** facturen. De pc dwingt gelijkheid van
+`regeltabel_versie` niet af: een factuur gemaakt met een oudere tabel blijft geldig en wordt
+gewoon overgenomen. (`rulesVersion` in het hallo-antwoord blijft het oude getal 1 en wordt hiervoor niet gebruikt.)
 
 **Ronde en delta.** Een ronde is het doorlopen van alle pagina's, van de eerste vraag (zonder `na`) tot en met
 de pagina met `volgende: null`. De pc legt bij de **eerste pagina** de bovengrens `tot` van de ronde vast:

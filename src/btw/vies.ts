@@ -1,6 +1,7 @@
 import type { Db } from '../db/database';
 import type { FetchLike } from '../integrations/types';
 import { normalizeVatNumber, ValidationError } from '../shared/validation';
+import { volgendeSyncSeq } from '../sync/teller';
 
 /**
  * Controle van een btw-nummer in VIES, de EU-dienst van de Europese Commissie (gratis, zonder sleutel).
@@ -58,8 +59,37 @@ export class ViesService {
     } finally {
       clearTimeout(timer);
     }
-    this.db.prepare('INSERT INTO vies_checks (vat_number, relation_id, valid, name, address, message) VALUES (?, ?, ?, ?, ?, ?)').run(vatNumber, relationId, valid === null ? null : valid ? 1 : 0, name, address, message);
+    // Controle en wijzigingsnummers in een transactie: slaagt het nummeren niet, dan is ook de controle niet bewaard.
+    this.db.transaction(() => {
+      this.db.prepare('INSERT INTO vies_checks (vat_number, relation_id, valid, name, address, message) VALUES (?, ?, ?, ?, ?, ?)').run(vatNumber, relationId, valid === null ? null : valid ? 1 : 0, name, address, message);
+      this.meldAanTelefoon(vatNumber);
+    })();
     return this.latest(vatNumber)!;
+  }
+
+  /**
+   * Een nieuwe VIES-controle moet bij de telefoons terechtkomen (de stamgegevens dragen per klant de
+   * controledatum), maar is GEEN klantwijziging. Daarom krijgt elke klant (type klant of beide) met een uuid
+   * en dit btw-nummer, zoals bij elke wijziging, een nieuw nummer uit de globale teller (volgendeSyncSeq, in
+   * dezelfde transactie als de controle), en alleen relations.sync_seq verandert. Revisie, gewijzigd_op,
+   * relation_changelog en relation_field_rev blijven onaangeroerd, dus er ontstaat geen nieuwe veldtijd en
+   * geen conflict met een telefoonwijziging.
+   *
+   * Veilig voor de teller (R3): het nummer komt uit dezelfde teller als alle andere, dus strikt oplopend en
+   * nooit hergebruikt; het komt pas na commit zichtbaar, en de bovengrens `tot` van een ronde is de stand van
+   * de teller, dus een nummer dat tijdens een ronde wordt uitgegeven ligt erboven en komt in de volgende
+   * ronde. Er ontstaan geen gaten onder `tot`. Een relatie zonder uuid of met sync_seq 0 (oudere
+   * administratie, nog niet genummerd) wordt overgeslagen zonder fout; dan wordt de teller ook niet geraakt.
+   * Het zoeken is begrensd door het aantal klanten met een btw-nummer, een keer per handmatige controle.
+   */
+  private meldAanTelefoon(vatNumber: string): void {
+    const kandidaten = this.db
+      .prepare(`SELECT id, vat_number FROM relations WHERE type IN ('klant', 'beide') AND uuid IS NOT NULL AND sync_seq > 0 AND vat_number IS NOT NULL AND vat_number <> '' ORDER BY id`)
+      .all() as { id: number; vat_number: string }[];
+    const zet = this.db.prepare('UPDATE relations SET sync_seq = ? WHERE id = ?');
+    for (const k of kandidaten) {
+      if (normalizeVatNumber(k.vat_number) === vatNumber) zet.run(volgendeSyncSeq(this.db), k.id);
+    }
   }
 }
 
