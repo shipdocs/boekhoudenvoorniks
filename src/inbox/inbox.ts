@@ -41,6 +41,7 @@ import type { FxRepair } from '../fx/repair';
 import type { StatementFolder } from '../import/statement-folder';
 import { statementHelp } from '../shared/bank-statement-help';
 import { BANK_FEED } from '../shared/bank-feed';
+import { telefoonKlantenZonderControle, viesTaakKey } from '../btw/vies';
 import { ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD, reeksNummer } from '../sync/reeks';
 
 
@@ -74,6 +75,7 @@ export type TaskKind =
   | 'bank-locked'
   | 'exchange-conflict'
   | 'invoice-series-gap'
+  | 'vies-nacontrole'
   | 'vat-suppletie'
   | 'supplier-auto'
   | 'vat-check'
@@ -1050,6 +1052,28 @@ export class InboxService {
       });
     }
 
+    // een telefoonfactuur met een EU-regel (icp, icp-dienst) naar een klant wiens btw-nummer niet als geldig in VIES staat:
+    // een melding met een knop. Hier gaat NOOIT een verzoek naar VIES; alleen de knop doet dat (src/main/api.ts).
+    const vies = telefoonKlantenZonderControle(this.db, { overslaan: (k) => this.isSkipped(viesTaakKey(k)) });
+    vies.klanten.forEach((k, i) => {
+      const key = viesTaakKey(k);
+      const facturen = `${k.aantal} ${k.aantal === 1 ? 'telefoonfactuur' : 'telefoonfacturen'} (${k.nummers.join(', ')}${k.aantal > k.nummers.length ? ' en meer' : ''})`;
+      const rest = i === vies.klanten.length - 1 && vies.meer > 0 ? ` Er wachten nog ${vies.meer} andere klanten met hetzelfde probleem; die komen aan de beurt zodra deze zijn afgehandeld.` : '';
+      const ongeldig = k.toestand === 'ongeldig';
+      tasks.push({
+        key,
+        kind: 'vies-nacontrole',
+        icon: '🇪🇺',
+        title: ongeldig ? `${k.naam}: VIES kent btw-nummer ${k.vatNumber} niet` : `${k.naam}: btw-nummer ${k.vatNumber} is nog niet in VIES gecontroleerd`,
+        question: ongeldig
+          ? `Je telefoon heeft ${facturen} zonder btw gestuurd aan ${k.naam}, maar VIES kent het btw-nummer ${k.vatNumber} niet (of het is niet actief). Een levering zonder btw naar een ander EU-land is alleen juist met een geldig btw-nummer van de klant; anders kan de Belastingdienst de btw alsnog naheffen. Vraag de klant om het juiste nummer en reken tot die tijd Nederlandse btw.${rest}`
+          : `Je telefoon heeft ${facturen} zonder btw gestuurd aan ${k.naam}. Een levering zonder btw naar een ander EU-land is alleen juist met een geldig btw-nummer van de klant, en dat is nog niet in VIES gecontroleerd. De uitslag met datum bewaar je als bewijs. De app controleert niets zelf: dat gebeurt alleen als je op de knop drukt.${rest}`,
+        priority: 2,
+        actions: [{ id: 'controleer', label: 'Controleer in VIES', primary: true }, { id: 'open', label: 'Klant openen' }, { id: 'gezien', label: 'Gezien' }],
+        ref: { relationId: k.relationId },
+      });
+    });
+
     const lock = this.ledger.periodLock();
     for (const kind of ['afgesloten', 'uitwisseling'] as const) {
       const n = locked[kind];
@@ -1839,6 +1863,9 @@ export class InboxService {
       'invoice-series-gap:vervallen-niet-gebruikt': `Het nummer wordt bewaard als vervallen, met de reden "${REDEN_NIET_GEBRUIKT}". De melding verdwijnt. Er wordt niets verwijderd of geboekt.`,
       'invoice-series-gap:vervallen-niet-verstuurd': `Het nummer wordt bewaard als vervallen, met de reden "${REDEN_NIET_VERSTUURD}". De melding verdwijnt. Er wordt niets verwijderd of geboekt.`,
       'invoice-series-gap:later': 'Er verandert niets. De melding blijft staan tot het nummer binnenkomt of je het als vervallen markeert.',
+      'vies-nacontrole:controleer': 'Het btw-nummer van deze klant gaat nu naar ec.europa.eu (VIES, de EU-dienst) en niets anders. De uitslag met datum wordt bewaard als bewijs. Is het nummer geldig, dan verdwijnt de melding.',
+      'vies-nacontrole:open': 'Je gaat naar de klant; daar kun je het btw-nummer nakijken of aanpassen. Er wordt niets naar VIES gestuurd.',
+      'vies-nacontrole:gezien': 'De melding verdwijnt voor dit btw-nummer. Er wordt niets naar VIES gestuurd en niets gewijzigd. Verandert het btw-nummer, dan komt de melding opnieuw.',
       'document-review:prive': OWN_HINTS.prive,
       'document-review:vraag': OWN_HINTS.vraag,
       'bank-own-company:prive': OWN_HINTS.prive,

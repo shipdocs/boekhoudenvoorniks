@@ -98,3 +98,89 @@ function clean(v: string | undefined): string | null {
   const t = (v ?? '').split('\n').map((x) => x.trim()).filter(Boolean).join(', ');
   return !t || t === '---' ? null : t;
 }
+
+/** Hoeveel klanten Vandaag hoogstens als taak krijgt; de rest staat in een telling. */
+export const MAX_VIES_TAKEN = 50;
+/** Hoeveel factuurnummers hoogstens in de tekst van een taak komen. */
+const VIES_MAX_NUMMERS = 5;
+
+export interface ViesKlantZonderControle {
+  relationId: number;
+  naam: string;
+  /** genormaliseerd zoals ViesService.latest dat doet */
+  vatNumber: string;
+  toestand: 'onbekend' | 'ongeldig';
+  /** het aantal telefoonfacturen met een icp- of icp-dienst-regel voor deze klant */
+  aantal: number;
+  /** de eerste nummers daarvan (hoogstens VIES_MAX_NUMMERS) */
+  nummers: string[];
+}
+
+/**
+ * Klanten met een telefoonfactuur (apparaat_code gevuld, geen concept, geen creditnota) met minstens een icp- of
+ * icp-dienst-regel, waarvan het btw-nummer in VIES nog niet als geldig is gecontroleerd. Doet NOOIT een verzoek
+ * naar VIES: het leest alleen de eigen databank (vies_checks). Per klant een rij, op volgorde van klant-id.
+ *
+ * Een begrenzing beslist nooit voordat alles is weggelaten wat niet meer telt: eerst valt weg wat al geldig is
+ * (voorfilter in SQL en definitieve toets in JS) en wat de gebruiker heeft overgeslagen (`overslaan`, bv. 'Gezien');
+ * pas daarna telt `klanten` (hoogstens MAX_VIES_TAKEN, met factuurnummers opgezocht) en telt `meer` de klanten die
+ * echt een taak zouden zijn geweest. Er is dus geen vaste grens op het aantal bekeken klanten.
+ *
+ * Waarom Vandaag hierdoor niet traag wordt: dit is een enkele, gestreamde query (een keer groeperen per klant, in
+ * klant-id-volgorde), dus de kosten zijn begrensd door het aantal klanten met telefoonfacturen met een EU-regel,
+ * niet door het aantal rondes. Klanten met een geldige uitslag komen er in SQL al uit (NOT EXISTS-achtig op de
+ * via de index op vies_checks.vat_number). Per klant die een taak wordt, komen er hoogstens MAX_VIES_TAKEN extra
+ * kleine opzoekingen bij; voor de rest is het alleen tellen. Gemeten (VIESN-05): 5001 klanten kosten tientallen ms.
+ * Met `relationId` wordt alleen die ene klant bekeken (voor de knop: opnieuw uit de databank).
+ */
+export function telefoonKlantenZonderControle(
+  db: Db,
+  opties: { relationId?: number; overslaan?: (k: Pick<ViesKlantZonderControle, 'relationId' | 'toestand' | 'vatNumber'>) => boolean } = {},
+): { klanten: ViesKlantZonderControle[]; meer: number } {
+  const gevonden: ViesKlantZonderControle[] = [];
+  let meer = 0;
+  // Het voorfilter normaliseert in SQL zwakker dan normalizeVatNumber (spaties, punten en streepjes eruit, hoofdletters):
+  // het laat hooguit te veel klanten door, nooit te weinig; de JS-controle hieronder blijft de definitieve toets.
+  const ronde = db.prepare(
+    `SELECT i.relation_id AS relation_id, r.name AS naam, r.vat_number AS vat_number, COUNT(DISTINCT i.id) AS aantal
+       FROM invoices i
+       JOIN relations r ON r.id = i.relation_id
+       JOIN invoice_lines l ON l.invoice_id = i.id AND l.vat_code IN ('icp', 'icp-dienst')
+      WHERE i.apparaat_code IS NOT NULL AND i.status <> 'concept' AND i.credit_of_invoice_id IS NULL
+        AND r.vat_number IS NOT NULL AND TRIM(r.vat_number) <> ''
+        AND (? IS NULL OR i.relation_id = ?)
+      GROUP BY i.relation_id
+     HAVING (SELECT v.valid FROM vies_checks v
+              WHERE v.vat_number = UPPER(REPLACE(REPLACE(REPLACE(REPLACE(r.vat_number, ' ', ''), '.', ''), '-', ''), CHAR(9), '')) AND v.valid IS NOT NULL
+              ORDER BY v.id DESC LIMIT 1) IS NOT 1
+      ORDER BY i.relation_id`,
+  );
+  const uitslag = db.prepare('SELECT valid FROM vies_checks WHERE vat_number = ? AND valid IS NOT NULL ORDER BY id DESC LIMIT 1');
+  const nummers = db.prepare(
+    `SELECT DISTINCT i.number AS number FROM invoices i
+      WHERE i.relation_id = ? AND i.apparaat_code IS NOT NULL AND i.status <> 'concept' AND i.credit_of_invoice_id IS NULL
+        AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.vat_code IN ('icp', 'icp-dienst'))
+      ORDER BY i.id LIMIT ?`,
+  );
+  const rel = opties.relationId ?? null;
+  for (const r of ronde.iterate(rel, rel) as Iterable<{ relation_id: number; naam: string; vat_number: string; aantal: number }>) {
+    const vat = normalizeVatNumber(r.vat_number);
+    if (!vat) continue;
+    const u = uitslag.get(vat) as { valid: number } | undefined;
+    if (u?.valid === 1) continue;
+    const toestand = u ? 'ongeldig' : 'onbekend';
+    if (opties.overslaan?.({ relationId: r.relation_id, toestand, vatNumber: vat })) continue;
+    if (gevonden.length >= MAX_VIES_TAKEN) {
+      meer += 1;
+      continue;
+    }
+    const lijst = (nummers.all(r.relation_id, VIES_MAX_NUMMERS) as { number: string | null }[]).map((x) => x.number).filter((x): x is string => !!x);
+    gevonden.push({ relationId: r.relation_id, naam: r.naam, vatNumber: vat, toestand, aantal: r.aantal, nummers: lijst });
+  }
+  return { klanten: gevonden, meer };
+}
+
+/** De key van de taak voor deze klant, toestand en dit (genormaliseerde) btw-nummer. */
+export function viesTaakKey(k: Pick<ViesKlantZonderControle, 'relationId' | 'toestand' | 'vatNumber'>): string {
+  return `vies-klant:${k.relationId}-${k.toestand}-${k.vatNumber}`;
+}

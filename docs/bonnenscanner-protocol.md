@@ -983,6 +983,38 @@ ontkoppelen of herinstallatie bestaat al (`afgesloten_op`); de reeksbewaking lee
 die van de pc) fiscaal in orde is, is niet geverifieerd. Een boekhouder moet dat eerst bevestigen voordat
 dit onderdeel voor gebruikers aan gaat. Zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
 
+### VIES-nacontrole van het btw-nummer: een melding op Vandaag, op verzoek
+
+Een factuur van de telefoon met een `icp`- of `icp-dienst`-regel (levering of dienst aan een bedrijf in een
+ander EU-land, zonder btw) is alleen juist als het btw-nummer van de klant geldig is. Daarom meldt de pc op
+**Vandaag** een klant bij wie dat nummer nog niet in VIES is gecontroleerd, of bij wie VIES het nummer niet
+kent.
+
+**Wanneer de melding verschijnt.** Er is een telefoonfactuur (`apparaat_code` gevuld, geen concept, geen
+creditnota) met minstens een regel `icp` of `icp-dienst`, en de laatste uitslag in `vies_checks` van het
+(genormaliseerde) btw-nummer van de klant is niet "geldig". Een controle zonder uitslag (VIES onbereikbaar)
+telt als nog niet gecontroleerd. Een gewone pc-factuur geeft deze melding niet; die valt onder de btw-controle
+bij de aangifte. In de kopie bij de boekhouder komt de melding niet.
+
+**Precies een melding per klant en btw-nummer**, niet per factuur: key `vies-klant:<klant>-<toestand>-<btw-nummer>`
+met toestand `onbekend` of `ongeldig`. De tekst noemt het aantal en de nummers van de telefoonfacturen. Verandert
+de toestand of het btw-nummer van de klant, dan is het een nieuwe melding. De lijst is begrensd: hoogstens 50
+meldingen, de rest staat als telling in de laatste. De begrenzing komt pas nadat alles is weggelaten wat niet meer
+telt: klanten met een geldige uitslag en meldingen die de gebruiker met **Gezien** heeft weggeklikt tellen niet mee,
+dus ook de klanten daarna komen aan de beurt. Er is geen vaste grens op het aantal bekeken klanten.
+
+**Er gaat niets automatisch naar VIES.** Vandaag opbouwen leest alleen de eigen databank. Een btw-nummer gaat
+alleen naar ec.europa.eu als de gebruiker op de knop **Controleer in VIES** drukt; dan gaat precies dat nummer
+mee. De uitslag met datum wordt bewaard als bewijs (zoals bij "Controleer nu in VIES" bij de klant) en komt bij
+het volgende antwoord van `stamgegevens` bij de telefoon. Geeft VIES geen uitslag, dan toont de pc de reden en
+blijft de melding staan.
+
+**Wat de gebruiker doet.** Op **Controleer in VIES** drukken (bij een geldig nummer verdwijnt de melding), de
+klant openen om het btw-nummer na te kijken of aan te passen, of op **Gezien** drukken om de melding voor dit
+nummer te laten verdwijnen. Is het nummer ongeldig, vraag de klant dan om het juiste nummer en reken tot die tijd
+Nederlandse btw. De pc haalt klant en btw-nummer bij elke knop opnieuw uit de databank; is de melding intussen
+verouderd, dan volgt een nette foutmelding.
+
 ## Wat dit wel en niet beschermt
 
 - **Meelezen en aanpassen op het netwerk**: niet mogelijk zonder de sleutel. De inhoud (foto's,

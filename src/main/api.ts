@@ -64,6 +64,7 @@ import QRCode from 'qrcode';
 import type { Bonnenscanner } from '../scanner/scanner';
 import { PHONE_SCANNER } from '../shared/phone-scanner';
 import { BANK_FEED } from '../shared/bank-feed';
+import { telefoonKlantenZonderControle, viesTaakKey } from '../btw/vies';
 import { MAX_VERVALLEN_PER_MARKERING, ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD } from '../sync/reeks';
 import { YEAR_END_KINDS, type YearEndKind } from '../closing/year-end';
 
@@ -459,6 +460,19 @@ export function createApi(s: Services, host: HostContext) {
       }
       case 'invoice-series-gap:later':
         return;
+      case 'vies-nacontrole:controleer':
+      case 'vies-nacontrole:gezien': {
+        // klant, btw-nummer en toestand komen opnieuw uit de databank; de taak van de interface is alleen een aanwijzing
+        const k = r.relationId ? telefoonKlantenZonderControle(s.db, { relationId: r.relationId }).klanten[0] : undefined;
+        if (!k || viesTaakKey(k) !== task.key) throw new ValidationError('Dit btw-nummer is intussen veranderd. Bekijk Vandaag opnieuw.');
+        if (actionId === 'gezien') {
+          s.inbox.skipTask(task.key, 'gezien');
+          return;
+        }
+        const uitslag = await s.vies.check(k.vatNumber, k.relationId);
+        if (uitslag.valid === null) throw new ValidationError(uitslag.message ?? 'VIES gaf geen uitslag. Probeer het later opnieuw.');
+        return;
+      }
       case 'exchange-conflict:klaar':
         s.inbox.skipTask(task.key, 'afgehandeld');
         return;
@@ -607,6 +621,7 @@ export function createApi(s: Services, host: HostContext) {
           'bank-locked': ['bank', undefined],
           'purchase-due': ['aankopen', r.purchaseId],
           'purchase-awaiting-bank': ['aankopen', r.purchaseId],
+          'vies-nacontrole': ['klant', r.relationId],
           'exchange-conflict': r.invoiceId ? ['factuur', r.invoiceId] : ['aankopen', r.purchaseId],
           'fx-repair': ['aankopen', undefined],
           'recurring-invoice': ['bewijs', r.bankTransactionId],
