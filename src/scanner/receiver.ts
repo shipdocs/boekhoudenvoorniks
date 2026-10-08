@@ -347,7 +347,7 @@ export class ScannerReceiver {
       try {
         const bron = this.opts.pairing.code(deviceId);
         if (!bron) throw new Error('de telefoon heeft nog geen apparaatcode');
-        uitslag = this.opts.sync.verwerk(deviceId, bron, w, 'netwerk', bijlagen);
+        uitslag = this.opts.sync.verwerk(deviceId, bron, w, route, bijlagen);
       } catch (e) {
         this.opts.log?.(`Wijziging van de telefoon opslaan mislukt: ${(e as Error).message}`);
         return reply(500, { ok: false, fout: 'opslaan-mislukt' });

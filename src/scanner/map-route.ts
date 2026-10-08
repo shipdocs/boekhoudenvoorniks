@@ -72,7 +72,10 @@ export interface MapRouteOptions {
   behandel: (deviceId: string, kop: { versie: ProtocolVersion; nonce: Buffer }, plaintext: Buffer, route: 'map') => Behandeld;
   /** de gekozen bonnenmap, of null (niet gekozen, niet toegestaan of de route staat uit) */
   folder: () => Promise<string | null>;
+  /** de tijd voor de regels in het probleemregister (de klok van de administratie) */
   now?: () => number;
+  /** de klok voor stabiele grootte en terugval (ms); standaard de echte klok, tests geven een eigen klok */
+  klok?: () => number;
   pollMs?: number;
   stableMs?: number;
   bestanden?: Partial<MapBestanden>;
@@ -134,11 +137,13 @@ export class MapRoute {
   private bereikbaar = false;
   private readonly bestanden: MapBestanden;
   private readonly now: () => number;
+  private readonly klok: () => number;
   private readonly pollMs: number;
   private readonly stableMs: number;
 
   constructor(private readonly opts: MapRouteOptions) {
     this.now = opts.now ?? Date.now;
+    this.klok = opts.klok ?? Date.now;
     this.pollMs = opts.pollMs ?? 2_000;
     this.stableMs = opts.stableMs ?? 3_000;
     this.bestanden = { ...standaardBestanden, ...opts.bestanden };
@@ -237,7 +242,7 @@ export class MapRoute {
     // oudste eerst, zodat de volgorde van de telefoon zoveel mogelijk blijft
     kandidaten.sort((a, b) => a.mtime - b.mtime || (a.naam < b.naam ? -1 : a.naam > b.naam ? 1 : 0));
 
-    const nu = Date.now();
+    const nu = this.klok();
     let aangepakt = 0;
     for (const k of kandidaten) {
       if (this.stopped || aangepakt >= MAP_MAX_PER_RONDE) break;
@@ -445,7 +450,7 @@ export class MapRoute {
   /** Rustige terugval: de wachttijd verdubbelt per poging, van een poll tot hoogstens een minuut. */
   private uitstellen(staat: Staat): void {
     staat.pogingen++;
-    staat.volgende = Date.now() + Math.min(MAX_TERUGVAL_MS, this.pollMs * 2 ** Math.min(staat.pogingen, 12));
+    staat.volgende = this.klok() + Math.min(MAX_TERUGVAL_MS, this.pollMs * 2 ** Math.min(staat.pogingen, 12));
   }
 }
 
