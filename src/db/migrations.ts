@@ -1560,4 +1560,18 @@ export const migrations: string[] = [
   -- de registerrij bij het later overnemen die route houdt. Bestaande wachtrijrijen blijven NULL en gelden dan als netwerk.
   ALTER TABLE sync_wachtrij ADD COLUMN route TEXT;
   `,
+  `
+  -- Reeksbewaking voor facturen van een telefoon: een volgnummer (M1-2026-0003) dat nooit meer komt, kan door de
+  -- gebruiker expliciet als vervallen worden gemarkeerd, met een reden. Een rij hoort bij een nummer van een reeks
+  -- (apparaat_code, reeks_jaar) en wordt nooit gewijzigd of weggehaald: markeren is een rij toevoegen. Alleen
+  -- additief; bestaande tabellen en rijen veranderen niet.
+  CREATE TABLE IF NOT EXISTS factuur_reeks_vervallen (
+    apparaat_code TEXT NOT NULL,
+    reeks_jaar INTEGER NOT NULL,
+    reeks_volgnr INTEGER NOT NULL,
+    reden TEXT NOT NULL CHECK (length(trim(reden)) > 0),
+    gemarkeerd_op TEXT NOT NULL,
+    PRIMARY KEY (apparaat_code, reeks_jaar, reeks_volgnr)
+  );
+  `,
 ];
