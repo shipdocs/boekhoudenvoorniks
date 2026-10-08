@@ -636,7 +636,7 @@ een leverancier hangt wordt **niet** geleverd; een project zonder bekende klant 
 
 ### Wat de pc met een wijziging doet
 
-Een wijziging van een **klant** of een **project** wordt bewaard (een project is een klus op de pc). De pc verwerkt elke wijziging in één
+Een wijziging van een **klant**, een **project** of een **factuur** wordt bewaard (een project is een klus op de pc). De pc verwerkt elke wijziging in één
 databasetransactie: de controle in het register, het opzoeken, het toepassen, het wijzigingsnummer, het
 logboek en de registerrij lukken samen of helemaal niet. De pc **verwijdert nooit** iets en voegt
 **nooit stil samen**: twee `uuid`'s met dezelfde KvK, hetzelfde btw-nummer, hetzelfde e-mailadres of
@@ -652,16 +652,19 @@ stap.
 | 200 | `afgewezen`, `fout: "geen-klant"` | ja | inhoudelijk geweigerd: de `uuid` hoort bij een leverancier | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `afgewezen`, `fout: "klus-gekoppeld"`, met `melding` | ja | inhoudelijk geweigerd: de klant van een project met een offerte, facturen, aankopen, ritten of werkbonregels kan niet wisselen; er is niets geschreven in het project | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `wacht` | **nee** (wel een rij in `sync_wachtrij`) | een project dat naar een nog onbekende klant verwijst; de pc bewaart de hele wijziging en past haar toe zodra die klant is afgeleverd | wijziging opruimen: de pc heeft haar; een klant die nog niet is afgeleverd moet de telefoon alsnog sturen |
-| 200 | `niet-ondersteund` | **nee** | `factuur`, `bon` en `foto` worden nog niet opgeslagen; er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
+| 200 | `niet-ondersteund` | **nee** | `bon` en `foto` worden nog niet opgeslagen; er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
+| 200 | `afgewezen`, `fout: "nummer-bezet"`, met `melding` | ja | een **factuur** waarvan het nummer al bij een andere factuur hoort; er is geen factuur bijgekomen | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
+| 200 | `afgewezen`, `fout: "origineel-onbekend"`, `"periode"` of `"factuur-geweigerd"`, met `melding` | ja | een **factuur** die de pc inhoudelijk weigert: een creditnota bij een onbekend origineel, een periode die bij de boekhouder ligt, of een andere reden (bijvoorbeeld een creditnota voor een andere klant dan het origineel) | wijziging opruimen en melden |
 | 400 | `veld-ongeldig`, met `veld` en `melding` | nee | een veld buiten het schema, een ongeldige waarde, een te lange tekst, een lege naam of titel | niet opnieuw; fout in de app |
-| 400 | `ongeldig` | nee | het formaat klopt niet, of het bewerkmoment ligt meer dan 5 minuten (het klokvenster) in de toekomst | niet opnieuw |
-| 409 | `klant-onbekend` | nee | een onbekende `uuid` zonder `naam` (ook niet via een alias): er is geen klant om aan te vullen | later opnieuw, nadat de klant met naam is afgeleverd |
+| 400 | `ongeldig` | nee | het formaat klopt niet, de apparaatcode in een factuurnummer is niet die van het apparaat, of het bewerkmoment ligt meer dan 5 minuten (het klokvenster) in de toekomst | niet opnieuw |
+| 409 | `klant-onbekend` | nee | een onbekende `uuid` zonder `naam` (ook niet via een alias): er is geen klant om aan te vullen; bij een factuur: de `klant_uuid` is onbekend of hoort bij een leverancier | later opnieuw, nadat de klant met naam is afgeleverd |
 | 409 | `project-onbekend` | nee | een onbekende project-`uuid` zonder titel of zonder klant, en er wacht ook niets voor dit project: er is geen project om aan te vullen | later opnieuw, nadat het project met titel en klant is afgeleverd |
 | 500 | `opslaan-mislukt` | nee | de pc kon niet opslaan; er is niets achtergebleven | wijziging bewaren, later opnieuw |
 | 503 | `wachtrij-vol` | nee | er wachten al 1000 wijzigingen van dit apparaat in `sync_wachtrij`; deze is niet opgeslagen | wijziging bewaren, later opnieuw (herhaalbaar); de pc wijst een geldige wijziging nooit af |
 
 ```jsonl
 {"ok":true,"soort":"wijziging","entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"uitkomst":"toegepast"}
+{"ok":true,"soort":"wijziging","entiteit":"factuur","uuid":"5b0f4e2a-8d1c-4a3e-9f6b-2c7d8e9f0a1b","revisie":1,"uitkomst":"afgewezen","fout":"nummer-bezet","melding":"Factuurnummer M1-2026-0001 bestaat al bij een andere factuur."}
 {"ok":true,"soort":"wijziging","entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"uitkomst":"afgewezen","fout":"geen-klant"}
 {"ok":false,"fout":"veld-ongeldig","veld":"email","melding":"Het veld email klopt niet: Dit e-mailadres klopt niet: geen-email"}
 {"ok":false,"fout":"klant-onbekend"}
@@ -669,6 +672,21 @@ stap.
 {"ok":false,"fout":"project-onbekend"}
 {"ok":false,"fout":"wachtrij-vol"}
 ```
+
+**Een factuur ontvangen.** Een wijziging met entiteit `factuur` is een definitieve factuur van de telefoon,
+met precies één revisie (de pc bewerkt een ontvangen factuur nooit). Per wijziging, in één databasetransactie:
+(1) staat de registersleutel er al, dan herhaalt de pc de eerste uitkomst; (2) de velden worden gecontroleerd en
+doorgerekend (`veld-ongeldig` met `veld` en `melding`, zonder rijen; ook een hoeveelheid met meer dan drie
+decimalen); (3) de apparaatcode in het `nummer` moet gelijk zijn aan die van het apparaat (anders 400 `ongeldig`,
+zonder rijen); (4) de klant wordt gezocht op `klant_uuid`, daarna via een alias van een samengevoegde klant,
+en een gearchiveerde klant telt gewoon; de factuur verwijst naar de doelklant, de klantmomentopname blijft die uit de
+wijziging; een onbekende klant of een leverancier geeft 409 `klant-onbekend` (herhaalbaar); (5) bestaat de `uuid`
+al als factuur, onder een andere revisie of met andere inhoud, dan is het antwoord `overgeslagen` en blijft de factuur
+ongewijzigd; (6) anders wordt de factuur overgenomen: `toegepast` bij een nieuwe factuur, `overgeslagen` als de pc hem
+al had, `afgewezen` met `nummer-bezet` als het nummer van een andere factuur is; (7) de registerrij staat in dezelfde
+transactie. De pc-teller voor factuurnummers wordt niet gebruikt: het nummer is dat van de telefoon. Een
+creditnota hoort bij de klant van het origineel. Een databasefout geeft 500 `opslaan-mislukt` zonder halve rijen.
+De groottegrens van 128 KiB wordt op bytes getoetst (niet op tekens), nog voor de wijziging gelezen wordt.
 
 **Het register `sync_ontvangen`.** Idempotentie loopt uitsluitend via de exacte sleutel (`apparaat_id`
 (het apparaat-ID uit de envelop), `entiteit`, `uuid`, `revisie`), niet via de hoogste revisie en niet
@@ -799,8 +817,14 @@ transactie. Een fout halverwege laat de rij onverwerkt. Per apparaat tellen alle
 voor de limiet van 1000; is die bereikt, dan antwoordt de pc `wachtrij-vol` (503) zonder iets op te
 slaan. De groottegrens van een wijziging (128 KiB) geldt ook voor de wachtrij.
 
-**Wat nog niet.** `stamgegevens` bevat de btw-regeltabel en de VIES-controledatum nog niet. `factuur`, `bon` en `foto` worden niet opgeslagen en gelden niet
-als afgeleverd (`niet-ondersteund`, zonder registerrij). Ook versie 2 staat achter dezelfde schakelaar als
+**Wat nog niet.** `stamgegevens` bevat de btw-regeltabel en de VIES-controledatum nog niet. `bon` en `foto` worden niet opgeslagen en gelden niet
+als afgeleverd (`niet-ondersteund`, zonder registerrij).
+
+Open punten bij facturen (volgen in latere stappen): een factuur van een onbekende klant of een onbekend project wacht
+nog niet in de wachtrij (nu 409 `klant-onbekend`); `project_uuid` wordt nog niet naar een klus vertaald; een creditnota bij
+een onbekend origineel wordt nu `afgewezen` met `origineel-onbekend` in plaats van te wachten; een factuur in een periode
+bij de boekhouder wordt nu `afgewezen` met `periode`; hervatten na een onderbreking, de melding bij een ontbrekend nummer
+(reeksbewaking) en de bonnenmap- en e-mailroute voor facturen ontbreken nog. Ook versie 2 staat achter dezelfde schakelaar als
 de rest: zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
 
 ## Wat dit wel en niet beschermt
