@@ -336,6 +336,10 @@ function cleanText(value: unknown, max: number, multiline: boolean): string | nu
  * De JSON van `hallo`, `bon` en `stamgegevens` is hooguit 16 KiB; alleen een `wijziging` in een
  * v2-envelop mag tot 128 KiB. Daarboven (en voor elk ander soort boven 16 KiB): `te-groot`.
  *
+ * Een `wijziging` met entiteit `bon` of `foto` heeft daarnaast bijlagen (de JPEG's) direct achter de JSON, in de
+ * volgorde van `velden.fotos`: de groottes en sha256 daarin worden hier vergeleken met de echte bijlage
+ * (verkeerd = `ongeldig`, samen boven maxPhotoBytes = `te-groot`); bij elke andere entiteit zijn bijlagen een vormfout.
+ *
  * De protocolversie van de envelop bepaalt welke berichten erin kunnen: versie 1 kent alleen `hallo`
  * en `bon`; versie 2 kent daarnaast `wijziging`, `stamgegevens` en `bevestigingen`.
  */

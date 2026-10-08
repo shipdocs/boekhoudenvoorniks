@@ -480,7 +480,9 @@ Regels; wat er niet aan voldoet wordt geweigerd met `ongeldig`, voordat er iets 
   een wijziging deed (zie *Wat de pc met een wijziging doet*). Dezelfde sleutel nog eens sturen verandert
   niets; een andere revisie van dezelfde `uuid` wordt toegepast, ook een lagere, per veld op tijd.
 
-Geen foto's achter dit bericht. De JSON van een `wijziging` mag tot 128 KiB; elk ander bericht blijft
+Geen foto's achter dit bericht, behalve bij de entiteiten `bon` en `foto`: die hebben JPEG's als bijlage (zie
+*Een bon als wijziging, met bijlagen*). Bij elke andere entiteit (klant, project, factuur) is een bijlage een
+vormfout (`ongeldig`). De JSON van een `wijziging` mag tot 128 KiB; elk ander bericht blijft
 bij 16 KiB, en er bovenuit geeft `te-groot` (zie *Antwoorden*). Het basisantwoord bevestigt precies
 deze change-set:
 
@@ -716,7 +718,7 @@ bevestigt:
 
 ### Wat de pc met een wijziging doet
 
-Een wijziging van een **klant**, een **project** of een **factuur** wordt bewaard (een project is een klus op de pc). De pc verwerkt elke wijziging in één
+Een wijziging van een **klant**, een **project**, een **factuur** of een **bon** wordt bewaard (een project is een klus op de pc; een bon gaat naar de spool, zie *Een bon als wijziging, met bijlagen*). De pc verwerkt elke wijziging in één
 databasetransactie: de controle in het register, het opzoeken, het toepassen, het wijzigingsnummer, het
 logboek en de registerrij lukken samen of helemaal niet. De pc **verwijdert nooit** iets en voegt
 **nooit stil samen**: twee `uuid`'s met dezelfde KvK, hetzelfde btw-nummer, hetzelfde e-mailadres of
@@ -732,7 +734,8 @@ stap.
 | 200 | `afgewezen`, `fout: "geen-klant"` | ja | inhoudelijk geweigerd: de `uuid` hoort bij een leverancier | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `afgewezen`, `fout: "klus-gekoppeld"`, met `melding` | ja | inhoudelijk geweigerd: de klant van een project met een offerte, facturen, aankopen, ritten of werkbonregels kan niet wisselen; er is niets geschreven in het project | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `wacht` | **nee** (wel een rij in `sync_wachtrij`) | een project dat naar een nog onbekende klant verwijst, of een **factuur** die naar een onbekende klant, een onbekend project of een onbekend origineel (creditnota) verwijst of nu niet geboekt kan worden (een periode die bij de boekhouder ligt); de pc bewaart de hele wijziging en past haar toe zodra het ontbrekende er is of de periode weer open is | wijziging opruimen: de pc heeft haar; iets dat nog niet is afgeleverd moet de telefoon alsnog sturen |
-| 200 | `niet-ondersteund` | **nee** | `bon` en `foto` worden nog niet opgeslagen; er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
+| 200 | `niet-ondersteund` | **nee** | `foto` wordt nog niet opgeslagen (een `bon` ook niet, op een pc zonder spool); er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
+| 200 | `afgewezen`, `fout: "id-botst"` | ja | een **bon** waarvan de `uuid` al in de spool staat met een andere inhoud (een andere foto of andere velden); de eerst opgeslagen bon blijft leidend | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `afgewezen`, `fout: "nummer-bezet"`, met `melding` | ja | een **factuur** waarvan het nummer al bij een andere factuur hoort; er is geen factuur bijgekomen | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `afgewezen`, `fout: "factuur-geweigerd"`, met `melding` | ja | een **factuur** die de pc inhoudelijk weigert (bijvoorbeeld een creditnota voor een andere klant dan het origineel); dit kan ook pas bij het verwerken uit de wachtrij blijken | wijziging opruimen en melden |
 | 400 | `veld-ongeldig`, met `veld` en `melding` | nee | een veld buiten het schema, een ongeldige waarde, een te lange tekst, een lege naam of titel | niet opnieuw; fout in de app |
@@ -937,6 +940,74 @@ als afgeleverd (`niet-ondersteund`, zonder registerrij).
 Open punten bij facturen (volgen in latere stappen): de bonnenmap- en e-mailroute voor facturen, en een scherm dat de wachtende wijzigingen toont (nu is een
 wachtende factuur alleen in `sync_wachtrij` te zien). Ook versie 2 staat achter dezelfde schakelaar als de rest: zolang
 `PHONE_SCANNER` uit staat, is er niets van te zien.
+
+### Een bon als wijziging, met bijlagen
+
+Naast het bericht `bon` (hierboven) kan een bon ook binnenkomen als `wijziging` met entiteit `bon`: de bonnenmap-
+en e-mailroute van een volgende stap gebruiken dit formaat, en de pc legt er een registerrij voor vast. Het
+`bon`-bericht blijft ongewijzigd werken, in versie 1 en 2. Een wijziging met entiteit `bon` of `foto` in een
+envelop van versie 1 wordt geweigerd (`ongeldig`): versie 1 kent alleen `hallo` en `bon`.
+
+De JSON is de gewone change-set (entiteit `bon`, `uuid` = het ID van de bon, revisie 1, bewerkmoment, `velden`).
+Direct na de JSON, net als bij het bon-bericht, staan de **bijlagen**: de JPEG's in de volgorde van `velden.fotos`,
+samen precies zo groot als de som van de `grootte`'s. Voorbeeld van de JSON (de bijlage is één JPEG van 751 bytes;
+het voorbeeld wordt gecontroleerd door `tests/sync-bonnen.test.ts`):
+
+```jsonc
+{"soort":"wijziging","tijd":1790848800000,"wijziging":{"entiteit":"bon","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"tijd":1790848790000,"velden":{"betaalwijze":"contant","notitie":"Schroeven voor de klus bij Jansen","fotos":[{"grootte":751,"sha256":"e4e731cb4b43157668cf3fad52ee2aad283f0f23a19455907cb6ad6ae11d726c"}]}}}
+```
+
+| Veld in `velden` | Verplicht | Betekenis |
+|---|---|---|
+| `betaalwijze` | ja | `"pin"`, `"contant"`, `"prive"` of `"later"` |
+| `notitie` | nee | tekst zonder stuurtekens (regeleinden mogen), hooguit 1000 tekens; langer is een fout (`veld-ongeldig`), de pc kapt hier niet af |
+| `locatie` | nee | `{"lat": -90…90, "lon": -180…180}`, precies die twee sleutels |
+| `fotos` | ja | 1 tot 10 objecten met precies `grootte` (bytes, vanaf 1) en `sha256` (64 kleine hexcijfers van die foto) |
+
+Andere velden (ook `__proto__`) zijn een fout. De kern (`leesBonVelden` in `packages/core`) controleert de vorm
+zuiver en zonder Node; de pc vergelijkt daarna de bijlagen met de velden: elke grootte en elke `sha256` moeten
+kloppen met de echte bijlage, en elke bijlage moet aan de inhoud een JPEG zijn (zoals bij het bon-bericht).
+
+**Uitkomsten.** De bon wordt opgeslagen via dezelfde spool als het bon-bericht (`ReceiptSpool.accept`): dezelfde
+bestanden en rijen, met de `uuid` als ID van de bon, en de locatie (ook die in de JPEG zelf) alleen bewaard als de
+gebruiker dat op de pc heeft toegestaan. Daarna loopt de bon door de inbox zoals elke andere bon. Er komt geen rij in
+`sync_wachtrij`, en de wijzigingsteller en de factuurteller van de pc worden niet gebruikt. Een factuurwijziging
+(of klant of project) met een bijlage is en blijft een vormfout.
+
+| HTTP | `uitkomst` / `fout` | Registerrij | Betekenis |
+|---|---|---|---|
+| 200 | `toegepast` | ja (route `netwerk`) | de bon staat nu in de spool |
+| 200 | `overgeslagen` | ja of al aanwezig | deze registersleutel had de pc al (ook via een andere route, `map` of `mail`; de route in het register blijft die van de eerste), of de spool had deze bon al met dezelfde inhoud |
+| 200 | `afgewezen`, `fout: "id-botst"` | ja | de `uuid` is al gebruikt voor een andere bon (bijvoorbeeld eerder als `bon`-bericht); de eerst opgeslagen inhoud blijft |
+| 400 | `ongeldig` | nee | revisie anders dan 1, een grootte of `sha256` die niet bij de bijlage past, te veel of te weinig bytes, meer dan 10 foto's, of een bijlage die geen JPEG is |
+| 400 | `veld-ongeldig`, met `veld` en `melding` | nee | een veld buiten het schema, een ongeldige waarde, een lege lijst `fotos` |
+| 413 | `te-groot` | nee | de foto's samen meer dan 19 MiB (19.922.944 bytes), zoals bij het bon-bericht; het hele bericht blijft binnen de 20 MiB van de envelop |
+| 500 | `opslaan-mislukt` | nee | de pc kon niet opslaan; er is geen rij, geen registerrij en geen los bestand achtergebleven; dezelfde wijziging opnieuw sturen werkt gewoon |
+
+De registersleutel is (apparaat, entiteit, `uuid`, revisie): dezelfde sleutel met andere inhoud is dus een
+herhaling (`overgeslagen`) en geen botsing; een botsing ontstaat bij hetzelfde ID via een andere weg (het
+bon-bericht, of een ander apparaat).
+
+**Atomair.** Het bestand in de spool en de databank zijn niet één transactie. De pc schrijft daarom het bestand
+eerst, de rij in `scanner_documents` en de registerrij daarna samen in één databasetransactie; mislukt iets, dan wordt
+de transactie teruggedraaid en haalt de pc het bestand weg dat hij zojuist neerzette (en een half geschreven tijdelijk
+bestand). Een bestand van een eerdere, bevestigde bon blijft altijd staan.
+
+**Entiteit `foto`.** De bijlagen worden ook bij een wijziging met entiteit `foto` aangenomen en gecontroleerd, met
+dezelfde vorm; in de velden staat `project_uuid` (een UUID in kleine letters, verplicht) in plaats van
+`betaalwijze`, en `notitie` en `fotos` zoals hierboven (de kern heeft er `leesFotoVelden` voor). De uitkomst blijft
+200 `niet-ondersteund` zonder iets te bewaren: het opslaan bij een project komt in een volgende stap. Zonder
+bijlagen is er niets te lezen en geeft `foto` altijd `niet-ondersteund`.
+
+**Stappenlijst voor de Android-app.**
+
+1. Kies het ID van de bon (UUID, kleine letters) en houd het gelijk bij elke nieuwe poging.
+2. Bereken per JPEG de `sha256` (kleine hexcijfers) en de `grootte` in bytes; zet ze in `velden.fotos`, in volgorde.
+3. Bouw de change-set: entiteit `bon`, `uuid`, revisie 1, het bewerkmoment en de `velden`.
+4. Zet het bericht (`soort`, `tijd`, `wijziging`) in een frame met de JPEG's direct achter de JSON, in een envelop van
+   versie 2, en stuur het.
+5. `toegepast` en `overgeslagen` zijn bevestigingen: de bon mag van de telefoon. `afgewezen` met `id-botst`: melden.
+   `niet-ondersteund` (alleen bij `foto`) en 500 of 503: bewaren en later opnieuw; 400 en 413: niet opnieuw.
 
 ### Reeksbewaking: gaten in de factuurnummers van een telefoon
 

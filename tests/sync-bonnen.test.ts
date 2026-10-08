@@ -125,6 +125,15 @@ describe('een bon als wijziging met bijlagen op de pc', () => {
     expect(viaWijziging).toMatchObject({ soort: 'bon', id: uuid, betaalwijze: 'contant', notitie: 'Schroeven voor de klus', locatie: null });
     expect({ ...viaWijziging, id: '', tijd: 0 }).toEqual({ ...viaBericht, id: '', tijd: 0 });
     expect((viaWijziging as { fotos: Buffer[] }).fotos.map((f) => f.equals(fotos[0]!) || f.equals(fotos[1]!))).toEqual([true, true]);
+    // het jsonc-voorbeeld in het document is precies zo'n bericht, met de JPEG van 751 bytes als bijlage
+    const doc = readFileSync(join(__dirname, '..', 'docs', 'bonnenscanner-protocol.md'), 'utf8').replace(/\r\n/g, '\n');
+    const voorbeeld = JSON.parse(doc.match(/```jsonc\n(\{"soort":"wijziging"[^\n]*"entiteit":"bon"[^\n]*)\n```/)![1]!) as Record<string, unknown>;
+    const voorbeeldFoto = makeJpeg('voorbeeld');
+    const gelezen = parseFrame(encodeFrame(voorbeeld, [voorbeeldFoto]), 2);
+    expect(gelezen).toMatchObject({ soort: 'wijziging', wijziging: { entiteit: 'bon', revisie: 1 }, bijlagen: [voorbeeldFoto] });
+    expect(voorbeeldFoto.length).toBe(751);
+    if (gelezen.soort !== 'wijziging') throw new Error('onverwacht: geen wijziging');
+    expect(leesBonVelden(gelezen.wijziging.velden)).toMatchObject({ ok: true, velden: { betaalwijze: 'contant', fotos: [{ grootte: 751, sha256: sha(voorbeeldFoto) }] } });
     expect(t.db.prepare('SELECT apparaat_id, entiteit, uuid, revisie, uitkomst, fout, route FROM sync_ontvangen').all()).toEqual([
       { apparaat_id: p.apparaat, entiteit: 'bon', uuid, revisie: 1, uitkomst: 'toegepast', fout: null, route: 'netwerk' },
     ]);
