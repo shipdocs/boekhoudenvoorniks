@@ -11,7 +11,7 @@ import type { TaxOverviewService } from './overview';
  * bijzondere aftrekposten zitten er niet in.
  *
  * De tarieven staan per jaar in een aparte tabel. `checked` betekent dat de parameters tegen
- * officiële bronnen zijn gecontroleerd (docs/fiscale-review-44.md), niet dat een fiscalist
+ * officiële bronnen zijn gecontroleerd (issue #44), niet dat een fiscalist
  * de gehele applicatie heeft goedgekeurd.
  */
 
@@ -50,7 +50,7 @@ export interface IncomeTaxRules {
 export const INCOME_TAX_RULES: IncomeTaxRules[] = [
   {
     year: 2025,
-    checked: true, // tariefparameters gecontroleerd, 2026-10-05; docs/fiscale-review-44.md
+    checked: true, // tariefparameters gecontroleerd, 2026-10-05; issue #44
     brackets: [[38441, 0.3582], [76817, 0.3748], [null, 0.495]],
     zelfstandigenaftrek: 2470,
     mkbWinstvrijstelling: 0.127,

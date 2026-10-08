@@ -783,7 +783,7 @@ uitlegbare regels; herkenning en AI doen alleen voorstellen.
 
 ### Belangrijk om te weten
 - De buitenland-rubrieken en de tarieventabel van de inkomstenbelasting zijn nog niet door een
-  fiscalist gecontroleerd; de app zegt dat erbij. Zie #44 en `docs/fiscale-review.md`.
+  fiscalist gecontroleerd; de app zegt dat erbij. Zie #44.
 - De database wordt bij de eerste start automatisch bijgewerkt. Maak voor de
   zekerheid eerst een back-up (Instellingen → Back-up & updates).
 

@@ -13,7 +13,7 @@ const balance = (s: S, rgs: string) =>
   (s.db.prepare(`SELECT COALESCE(SUM(l.debit - l.credit), 0) AS b FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE a.rgs_code = ?`).get(rgs) as { b: number }).b;
 
 /**
- * Regressietests uit de fiscale review (docs/fiscale-review.md, hoofdstuk 4). Elke test noemt het
+ * Regressietests uit de fiscale review (issue #44, hoofdstuk 4). Elke test noemt het
  * vraagnummer uit dat document.
  */
 
