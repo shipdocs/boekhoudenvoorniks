@@ -1555,4 +1555,9 @@ export const migrations: string[] = [
   CREATE UNIQUE INDEX IF NOT EXISTS ux_invoices_uuid ON invoices(uuid) WHERE uuid IS NOT NULL;
   CREATE UNIQUE INDEX IF NOT EXISTS ux_invoices_reeks ON invoices(apparaat_code, reeks_jaar, reeks_volgnr) WHERE apparaat_code IS NOT NULL;
   `,
+  `
+  -- De route (netwerk, map of mail) waarmee een wachtende wijziging van de telefoon voor het eerst binnenkwam, zodat
+  -- de registerrij bij het later overnemen die route houdt. Bestaande wachtrijrijen blijven NULL en gelden dan als netwerk.
+  ALTER TABLE sync_wachtrij ADD COLUMN route TEXT;
+  `,
 ];

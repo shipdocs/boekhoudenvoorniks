@@ -651,13 +651,13 @@ stap.
 | 200 | `overgeslagen` | ja | alle velden waren ouder, of deze sleutel had de pc al | wijziging opruimen |
 | 200 | `afgewezen`, `fout: "geen-klant"` | ja | inhoudelijk geweigerd: de `uuid` hoort bij een leverancier | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
 | 200 | `afgewezen`, `fout: "klus-gekoppeld"`, met `melding` | ja | inhoudelijk geweigerd: de klant van een project met een offerte, facturen, aankopen, ritten of werkbonregels kan niet wisselen; er is niets geschreven in het project | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
-| 200 | `wacht` | **nee** (wel een rij in `sync_wachtrij`) | een project dat naar een nog onbekende klant verwijst; de pc bewaart de hele wijziging en past haar toe zodra die klant is afgeleverd | wijziging opruimen: de pc heeft haar; een klant die nog niet is afgeleverd moet de telefoon alsnog sturen |
+| 200 | `wacht` | **nee** (wel een rij in `sync_wachtrij`) | een project dat naar een nog onbekende klant verwijst, of een **factuur** die naar een onbekende klant, een onbekend project of een onbekend origineel (creditnota) verwijst of nu niet geboekt kan worden (een periode die bij de boekhouder ligt); de pc bewaart de hele wijziging en past haar toe zodra het ontbrekende er is of de periode weer open is | wijziging opruimen: de pc heeft haar; iets dat nog niet is afgeleverd moet de telefoon alsnog sturen |
 | 200 | `niet-ondersteund` | **nee** | `bon` en `foto` worden nog niet opgeslagen; er blijft niets achter | **niet** als afgeleverd beschouwen; bewaren |
 | 200 | `afgewezen`, `fout: "nummer-bezet"`, met `melding` | ja | een **factuur** waarvan het nummer al bij een andere factuur hoort; er is geen factuur bijgekomen | wijziging opruimen en melden; opnieuw sturen geeft dezelfde afwijzing |
-| 200 | `afgewezen`, `fout: "origineel-onbekend"`, `"periode"` of `"factuur-geweigerd"`, met `melding` | ja | een **factuur** die de pc inhoudelijk weigert: een creditnota bij een onbekend origineel, een periode die bij de boekhouder ligt, of een andere reden (bijvoorbeeld een creditnota voor een andere klant dan het origineel) | wijziging opruimen en melden |
+| 200 | `afgewezen`, `fout: "factuur-geweigerd"`, met `melding` | ja | een **factuur** die de pc inhoudelijk weigert (bijvoorbeeld een creditnota voor een andere klant dan het origineel); dit kan ook pas bij het verwerken uit de wachtrij blijken | wijziging opruimen en melden |
 | 400 | `veld-ongeldig`, met `veld` en `melding` | nee | een veld buiten het schema, een ongeldige waarde, een te lange tekst, een lege naam of titel | niet opnieuw; fout in de app |
 | 400 | `ongeldig` | nee | het formaat klopt niet, de apparaatcode in een factuurnummer is niet die van het apparaat, of het bewerkmoment ligt meer dan 5 minuten (het klokvenster) in de toekomst | niet opnieuw |
-| 409 | `klant-onbekend` | nee | een onbekende `uuid` zonder `naam` (ook niet via een alias): er is geen klant om aan te vullen; bij een factuur: de `klant_uuid` is onbekend of hoort bij een leverancier | later opnieuw, nadat de klant met naam is afgeleverd |
+| 409 | `klant-onbekend` | nee | een onbekende `uuid` zonder `naam` (ook niet via een alias): er is geen klant om aan te vullen; een factuur met een onbekende klant wacht sinds stap 12b (200 `wacht`) | later opnieuw, nadat de klant met naam is afgeleverd |
 | 409 | `project-onbekend` | nee | een onbekende project-`uuid` zonder titel of zonder klant, en er wacht ook niets voor dit project: er is geen project om aan te vullen | later opnieuw, nadat het project met titel en klant is afgeleverd |
 | 500 | `opslaan-mislukt` | nee | de pc kon niet opslaan; er is niets achtergebleven | wijziging bewaren, later opnieuw |
 | 503 | `wachtrij-vol` | nee | er wachten al 1000 wijzigingen van dit apparaat in `sync_wachtrij`; deze is niet opgeslagen | wijziging bewaren, later opnieuw (herhaalbaar); de pc wijst een geldige wijziging nooit af |
@@ -680,11 +680,11 @@ doorgerekend (`veld-ongeldig` met `veld` en `melding`, zonder rijen; ook een hoe
 decimalen); (3) de apparaatcode in het `nummer` moet gelijk zijn aan die van het apparaat (anders 400 `ongeldig`,
 zonder rijen); (4) de klant wordt gezocht op `klant_uuid`, daarna via een alias van een samengevoegde klant,
 en een gearchiveerde klant telt gewoon; de factuur verwijst naar de doelklant, de klantmomentopname blijft die uit de
-wijziging; een onbekende klant of een leverancier geeft 409 `klant-onbekend` (herhaalbaar); (5) bestaat de `uuid`
+wijziging; een onbekende klant of een leverancier wacht (zie hieronder); (5) bestaat de `uuid`
 al als factuur, onder een andere revisie of met andere inhoud, dan is het antwoord `overgeslagen` en blijft de factuur
-ongewijzigd; (6) anders wordt de factuur overgenomen: `toegepast` bij een nieuwe factuur, `overgeslagen` als de pc hem
+ongewijzigd; (6) wacht de factuur niet op iets (zie hieronder), dan wordt ze overgenomen: `toegepast` bij een nieuwe factuur, `overgeslagen` als de pc hem
 al had, `afgewezen` met `nummer-bezet` als het nummer van een andere factuur is; (7) de registerrij staat in dezelfde
-transactie. De pc-teller voor factuurnummers wordt niet gebruikt: het nummer is dat van de telefoon. Een
+transactie (een wachtende factuur krijgt geen registerrij, wel een rij in `sync_wachtrij`). De pc-teller voor factuurnummers wordt niet gebruikt: het nummer is dat van de telefoon. Een
 creditnota hoort bij de klant van het origineel. Een databasefout geeft 500 `opslaan-mislukt` zonder halve rijen.
 De groottegrens van 128 KiB wordt op bytes getoetst (niet op tekens), nog voor de wijziging gelezen wordt.
 
@@ -693,7 +693,34 @@ De groottegrens van 128 KiB wordt op bytes getoetst (niet op tekens), nog voor d
 `creditnota-ongeldig`, `totalen`, `hoeveelheid`, `nummer-ongeldig`, `andere-weigering`), niet uit de Nederlandse tekst.
 `periode` komt uit de Ledger of de writeGuard van de boekhouderskopie; die guard geldt ook voor telefoonfacturen, omdat
 de app de eigen `InvoiceService` aan de ontvangst meegeeft. Naar de telefoon gaan alleen `nummer-bezet`,
-`origineel-onbekend`, `periode` en `factuur-geweigerd` (alle overige codes); de tekst blijft de `melding`.
+`factuur-geweigerd` (alle overige codes); de tekst blijft de `melding`. `origineel-onbekend` en `periode` zijn geen afwijzing
+meer: die factuur wacht (zie hieronder).
+
+**Een factuur die wacht.** Per factuur bepaalt de pc in deze volgorde waar ze op wacht: een creditnota op haar origineel
+(`wacht_op_entiteit` `factuur`, reden `origineel-onbekend`; dat origineel kan zelf nog wachten), daarna een onbekende klant of
+een leverancier (`klant`, `klant-onbekend`), daarna een onbekend `project_uuid` (`project`, `project-onbekend`) en ten slotte
+een afgesloten periode of de writeGuard van de boekhouderskopie (`periode`, reden `periode`; er is geen object om op te
+wachten, `wacht_op_uuid` is dan een lege tekst, want de kolom mag geen NULL zijn). Een bekend project van dezelfde klant
+geeft `invoices.job_id`; een project van een andere klant geeft een gewoon overgenomen factuur zonder `job_id`, nooit een
+afwijzing. Het antwoord is 200 `wacht`, met een rij in `sync_wachtrij` (met het factuurnummer in `nummer`), zonder factuur,
+boeking of registerrij. Is de wachtrij van het apparaat vol (1000 onverwerkte rijen), dan is het antwoord 503 `wachtrij-vol`
+zonder iets op te slaan; een geldige factuur wordt nooit afgewezen omdat de wachtrij vol is.
+
+**Hervatten.** Een wachtende factuur wordt opnieuw geprobeerd bij elke toegepaste klant, elk toegepast project en elke
+toegepaste factuur (een cascade: klant, project, origineel, creditnota), na elke wijziging van hetzelfde apparaat
+met onverwerkte facturen in de wachtrij, ongeacht de uitkomst of de statuscode (ook een die zelf wacht, 400, 409, 500, 503
+`wachtrij-vol` of `niet-ondersteund`, en ook voor de entiteiten bon en foto), zodat een heropende periode altijd wordt
+opgepikt, en bij het starten van de receiver. Het hervatten verandert het antwoord op de wijziging zelf nooit en laat het nooit
+falen. Een ongeldige wijziging van een niet-gekoppeld apparaat bereikt de ontvanger niet en hervat dus niets. De wijziging wordt
+dan opnieuw gelezen en gecontroleerd, ook de apparaatcode in het nummer; ze kan alsnog `afgewezen` worden (bijvoorbeeld een
+creditnota voor een andere klant dan het origineel): de rij krijgt dan `verwerkt_uitkomst` `afgewezen` met de foutcode als
+`verwerkt_reden` en een registerrij, en blijft niet hangen. Een ontkoppeld apparaat of een afgesloten apparaatcode is geen reden
+om een al ontvangen wijziging weg te gooien. Hervatten is herhaalbaar en idempotent: factuur, boeking en registerrij komen
+hoogstens één keer, en de wachtrijrij blijft altijd staan (alleen `verwerkt_op`, `verwerkt_uitkomst` en `verwerkt_reden`
+worden gevuld, in dezelfde transactie als de factuur). Een fout bij één factuur laat die rij onverwerkt zonder halve rijen en
+stopt de rest niet. De wachtrij bewaart de route van de eerste ontvangst (kolom `route`: `netwerk`, `map` of `mail`) en de
+registerrij van een uit de wachtrij verwerkte wijziging (factuur of project) krijgt die route; een rij zonder route (van voor
+die kolom) hervat met `netwerk`.
 
 **Het register `sync_ontvangen`.** Idempotentie loopt uitsluitend via de exacte sleutel (`apparaat_id`
 (het apparaat-ID uit de envelop), `entiteit`, `uuid`, `revisie`), niet via de hoogste revisie en niet
@@ -827,12 +854,10 @@ slaan. De groottegrens van een wijziging (128 KiB) geldt ook voor de wachtrij.
 **Wat nog niet.** `stamgegevens` bevat de btw-regeltabel en de VIES-controledatum nog niet. `bon` en `foto` worden niet opgeslagen en gelden niet
 als afgeleverd (`niet-ondersteund`, zonder registerrij).
 
-Open punten bij facturen (volgen in latere stappen): een factuur van een onbekende klant of een onbekend project wacht
-nog niet in de wachtrij (nu 409 `klant-onbekend`); `project_uuid` wordt nog niet naar een klus vertaald; een creditnota bij
-een onbekend origineel wordt nu `afgewezen` met `origineel-onbekend` in plaats van te wachten; een factuur in een periode
-bij de boekhouder wordt nu `afgewezen` met `periode`; hervatten na een onderbreking, de melding bij een ontbrekend nummer
-(reeksbewaking) en de bonnenmap- en e-mailroute voor facturen ontbreken nog. Ook versie 2 staat achter dezelfde schakelaar als
-de rest: zolang `PHONE_SCANNER` uit staat, is er niets van te zien.
+Open punten bij facturen (volgen in latere stappen): de melding op Vandaag bij een ontbrekend factuurnummer
+(reeksbewaking, s13), de bonnenmap- en e-mailroute voor facturen, en een scherm dat de wachtende wijzigingen toont (nu is een
+wachtende factuur alleen in `sync_wachtrij` te zien). Ook versie 2 staat achter dezelfde schakelaar als de rest: zolang
+`PHONE_SCANNER` uit staat, is er niets van te zien.
 
 ## Wat dit wel en niet beschermt
 

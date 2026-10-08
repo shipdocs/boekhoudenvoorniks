@@ -4,7 +4,7 @@ import { KlantVeldFout, normaliseerSyncVelden, type RelationsService } from '../
 import type { InvoiceService } from '../documents/invoices';
 import { FactuurOntvangst } from './facturen';
 import { ProjectOntvangst } from './projecten';
-import { SyncWachtrij } from './wachtrij';
+import { SyncWachtrij, type WachtrijBehandelaar } from './wachtrij';
 
 /** De uitkomst van het verwerken van een wijziging, in de ene vorm voor alle routes. */
 export interface SyncResultaat {
@@ -12,7 +12,7 @@ export interface SyncResultaat {
   status: number;
   /** bij 200: toegepast, overgeslagen, afgewezen, wacht (in de wachtrij) of niet-ondersteund */
   uitkomst?: 'toegepast' | 'overgeslagen' | 'afgewezen' | 'wacht' | 'niet-ondersteund';
-  /** bij afgewezen en bij elke fout: de reden als code (geen-klant, klus-gekoppeld, nummer-bezet, origineel-onbekend, periode, factuur-geweigerd, ongeldig, veld-ongeldig, klant-onbekend, project-onbekend, wachtrij-vol, opslaan-mislukt) */
+  /** bij afgewezen en bij elke fout: de reden als code (geen-klant, klus-gekoppeld, nummer-bezet, factuur-geweigerd, veld-ongeldig, ongeldig, veld-ongeldig, klant-onbekend, project-onbekend, wachtrij-vol, opslaan-mislukt) */
   fout?: string;
   /** bij veld-ongeldig: het veld (Nederlandse naam) waar het om gaat */
   veld?: string;
@@ -44,7 +44,7 @@ function veldnaamVanKolom(kolom: string): string {
 }
 
 /**
- * Verwerkt wijzigingen van een telefoon in de administratie. Voor nu klanten, projecten en facturen (het directe pad, zie src/sync/facturen.ts); bon
+ * Verwerkt wijzigingen van een telefoon in de administratie. Voor nu klanten, projecten en facturen (src/sync/facturen.ts); bon
  * en foto geven niet-ondersteund en laten niets achter (de telefoon beschouwt dat als niet afgeleverd).
  *
  * Idempotent op de exacte registersleutel (apparaat_id, entiteit, uuid, revisie) in sync_ontvangen, per
@@ -53,7 +53,7 @@ function veldnaamVanKolom(kolom: string): string {
  * helemaal niet. Er wordt nooit iets verwijderd of stil samengevoegd. Schrijven naar relations gaat
  * uitsluitend via RelationsService.maakVanSync en pasVeldenToe; projecten gaan via ProjectOntvangst
  * (src/sync/projecten.ts), met de wachtrij (src/sync/wachtrij.ts) voor projecten van een onbekende klant.
- * Na elke toegepaste klant en elk toegepast project wordt de wachtrij verwerkt.
+ * Na elke toegepaste klant, elk toegepast project en elke toegepaste factuur wordt de wachtrij verwerkt, en bij elke volgende wijziging van een apparaat met wachtende facturen.
  */
 export class SyncOntvangst {
   private readonly now: () => number;
@@ -71,11 +71,12 @@ export class SyncOntvangst {
     this.log = opties.log ?? (() => undefined);
     const wachtrijOpties = { now: this.now, log: this.log };
     // de wachtrij en de projectontvangst kennen elkaar: de wachtrij roept de ontvangst aan om rijen te verwerken
-    const behandelaars: ProjectOntvangst[] = [];
+    const behandelaars: WachtrijBehandelaar[] = [];
     this.wachtrij = new SyncWachtrij(db, behandelaars, wachtrijOpties);
     this.projecten = new ProjectOntvangst(db, relations, this.wachtrij, wachtrijOpties);
     behandelaars.push(this.projecten);
-    this.facturen = opties.invoices ? new FactuurOntvangst(db, relations, opties.invoices, wachtrijOpties) : null;
+    this.facturen = opties.invoices ? new FactuurOntvangst(db, relations, opties.invoices, this.wachtrij, wachtrijOpties) : null;
+    if (this.facturen) behandelaars.push(this.facturen);
   }
 
   /**
@@ -84,10 +85,21 @@ export class SyncOntvangst {
    * @param route waar de wijziging vandaan kwam (netwerk, map of mail); alleen voor het register
    */
   verwerk(deviceId: string, bron: string, wijziging: Wijziging, route: string = 'netwerk'): SyncResultaat {
+    const uitslag = this.verwerkEen(deviceId, bron, wijziging, route);
+    // een toegepaste klant, project of factuur kan wachtende wijzigingen vrijmaken (een cascade); dat gebeurt na de
+    // transactie van deze wijziging, zodat een fout daarin deze wijziging niet terugdraait. Een klantwijziging die als
+    // overgeslagen wordt beantwoord (een herhaling) probeert de wachtrij ook opnieuw: na een tijdelijke opslagfout kan
+    // de klant er al zijn terwijl het wachtende project nog ontbreekt. Verder hervat elke wijziging van een apparaat met
+    // wachtende facturen de wachtrij (bv. nadat de boekhouder de periode heeft heropend), ongeacht de uitkomst of de
+    // statuscode (ook 503 wachtrij-vol, 400, 409, 500) en ook voor bon en foto. Het antwoord verandert daar nooit door.
+    if ((uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant'))) || this.heeftWachtendeFacturen(deviceId)) this.verwerkWachtrij();
+    return uitslag;
+  }
+
+  private verwerkEen(deviceId: string, bron: string, wijziging: Wijziging, route: string): SyncResultaat {
     if (wijziging.entiteit !== 'klant' && wijziging.entiteit !== 'project' && wijziging.entiteit !== 'factuur') return { status: 200, uitkomst: 'niet-ondersteund' };
-    let uitslag: SyncResultaat;
     try {
-      uitslag = this.db.transaction(() => {
+      return this.db.transaction(() => {
         if (wijziging.entiteit === 'klant') return this.verwerkKlant(deviceId, bron, wijziging, route);
         if (wijziging.entiteit === 'factuur') return this.facturen ? this.facturen.verwerk(deviceId, bron, wijziging, route) : { status: 200, uitkomst: 'niet-ondersteund' as const };
         return this.projecten.verwerk(deviceId, bron, wijziging, route);
@@ -96,12 +108,14 @@ export class SyncOntvangst {
       this.log(`${wijziging.entiteit === 'klant' ? 'Klantwijziging' : wijziging.entiteit === 'factuur' ? 'Factuurwijziging' : 'Projectwijziging'} van de telefoon opslaan mislukt: ${(e as Error).message}`);
       return { status: 500, fout: 'opslaan-mislukt' };
     }
-    // een toegepaste klant of een toegepast project kan wachtende wijzigingen vrijmaken (een cascade);
-    // dat gebeurt na de transactie van deze wijziging, zodat een fout daarin deze wijziging niet terugdraait.
-    // Een klantwijziging die als overgeslagen wordt beantwoord (een herhaling) probeert de wachtrij ook opnieuw:
-    // na een tijdelijke opslagfout kan de klant er al zijn terwijl het wachtende project nog ontbreekt.
-    if (wijziging.entiteit !== 'factuur' && uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant'))) this.verwerkWachtrij();
-    return uitslag;
+  }
+
+  private heeftWachtendeFacturen(deviceId: string): boolean {
+    try {
+      return this.wachtrij.aantalOnverwerktVan(deviceId, 'factuur') > 0;
+    } catch {
+      return false;
+    }
   }
 
   /** Verwerkt wat in de wachtrij kan worden verwerkt (ook bij het starten van de receiver). Gooit nooit. */

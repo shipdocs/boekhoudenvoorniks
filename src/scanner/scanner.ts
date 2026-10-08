@@ -29,7 +29,7 @@ export interface ScannerDeps {
   secrets: SecretStore;
   intake: Pick<IntakeService, 'add' | 'notify'>;
   settings: SettingsService;
-  /** de factuurdienst van de app (met de writeGuard van de boekhouderskopie); zonder valt de ontvangst terug op een eigen dienst */
+  /** de factuurdienst van de app (met de writeGuard van de boekhouderskopie); zonder blijft factuur niet-ondersteund (geen eigen Ledger: dat omzeilt de guard) */
   invoices?: Pick<InvoiceService, 'importDefinitive'>;
   /** map van de open administratie waarin ontvangen bonnen wachten tot ze in de inbox staan */
   spoolDir: string;
@@ -150,7 +150,7 @@ export class Bonnenscanner {
   async start(): Promise<void> {
     this.stopped = false;
     this.spool.recover();
-    // wijzigingen die op een klant wachtten (bv. toen de app werd afgesloten) opnieuw proberen
+    // wijzigingen die op een klant, project, origineel of open periode wachtten (bv. toen de app werd afgesloten) opnieuw proberen
     this.sync.verwerkWachtrij();
     await this.refresh();
     // intussen gestopt (bv. meteen een andere administratie geopend): niets meer aanzetten
