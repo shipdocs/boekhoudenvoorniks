@@ -1574,4 +1574,13 @@ export const migrations: string[] = [
     PRIMARY KEY (apparaat_code, reeks_jaar, reeks_volgnr)
   );
   `,
+  `
+  -- Bevestigingen van de pc voor de telefoon: een wachtende wijziging die later is afgehandeld krijgt een
+  -- bevestigingsnummer (verwerkt_seq) uit een eigen teller (sync_teller, rij bevestiging). Het nummer wordt
+  -- nooit hergebruikt. Rijen die al waren afgehandeld voor deze migratie houden NULL en worden niet getoond.
+  -- Alleen additief; bestaande rijen veranderen niet.
+  ALTER TABLE sync_wachtrij ADD COLUMN verwerkt_seq INTEGER;
+  CREATE INDEX IF NOT EXISTS idx_sync_wachtrij_bevestiging ON sync_wachtrij(apparaat_id, verwerkt_seq) WHERE verwerkt_seq IS NOT NULL;
+  INSERT INTO sync_teller (naam, waarde) VALUES ('bevestiging', 0) ON CONFLICT(naam) DO NOTHING;
+  `,
 ];
