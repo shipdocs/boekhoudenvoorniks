@@ -665,10 +665,10 @@ describe('importDefinitive: weigercodes', () => {
 });
 
 describe('migratie van de route in de wachtrij', () => {
-  const i = migrations.findIndex((m) => /ADD COLUMN route/.test(m));
+  const i = migrations.findIndex((m) => /ALTER TABLE sync_wachtrij ADD COLUMN route/.test(m));
 
   it('er is precies een migratie die alleen de kolom route toevoegt (latere migraties mogen erachter komen)', () => {
-    expect(migrations.filter((m) => /ADD COLUMN route/.test(m))).toHaveLength(1);
+    expect(migrations.filter((m) => /ALTER TABLE sync_wachtrij ADD COLUMN route/.test(m))).toHaveLength(1);
     expect(i).toBeGreaterThan(0);
     expect(migrations[i]!.replace(/--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)).toEqual(['ALTER TABLE sync_wachtrij ADD COLUMN route TEXT']);
     expect(migrations[i]!).not.toMatch(/TRIGGER|DROP|DELETE|RENAME/i);
