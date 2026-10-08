@@ -7,6 +7,8 @@ export const ATTACHMENTS_DIR = 'bijlagen';
 const COLUMNS = [
   { table: 'documents', column: 'file_path' },
   { table: 'purchase_invoices', column: 'attachment_path' },
+  // foto's van de telefoon bij een project (bijlagen/telefoon/<wijziging>/<volgnr>.jpg)
+  { table: 'job_photos', column: 'file_path' },
 ] as const;
 
 /**

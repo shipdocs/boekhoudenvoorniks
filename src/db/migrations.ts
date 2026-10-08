@@ -1583,4 +1583,33 @@ export const migrations: string[] = [
   CREATE INDEX IF NOT EXISTS idx_sync_wachtrij_bevestiging ON sync_wachtrij(apparaat_id, verwerkt_seq) WHERE verwerkt_seq IS NOT NULL;
   INSERT INTO sync_teller (naam, waarde) VALUES ('bevestiging', 0) ON CONFLICT(naam) DO NOTHING;
   `,
+  `
+  -- Foto's van de telefoon bij een project (stap foto-opslag): job_photos bewaart per foto een rij met een relatief pad
+  -- onder bijlagen/ van de administratie (zodat verhuizen en een back-up het bestand meenemen), de sha256 en grootte van
+  -- het bewaarde bestand (na het strippen van de locatie), de notitie en de bewerktijd van de telefoon. sync_wachtrij_bijlagen
+  -- bewaart voor een foto die op een nog onbekend project wacht alleen de verwijzing naar de bestanden (nooit de bytes).
+  -- Alleen additief; rijen worden nooit gewijzigd of weggehaald.
+  CREATE TABLE IF NOT EXISTS job_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL REFERENCES jobs(id),
+    wijziging_uuid TEXT NOT NULL,
+    volgnr INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    notitie TEXT,
+    tijd INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (wijziging_uuid, volgnr)
+  );
+  CREATE INDEX IF NOT EXISTS idx_job_photos_job ON job_photos(job_id, id);
+  CREATE TABLE IF NOT EXISTS sync_wachtrij_bijlagen (
+    wachtrij_id INTEGER NOT NULL REFERENCES sync_wachtrij(id),
+    volgnr INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    PRIMARY KEY (wachtrij_id, volgnr)
+  );
+  `,
 ];
