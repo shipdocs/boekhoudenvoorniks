@@ -1612,4 +1612,23 @@ export const migrations: string[] = [
     PRIMARY KEY (wachtrij_id, volgnr)
   );
   `,
+  `
+  -- Voorstellen voor dubbele klanten (stap dubbele klanten): de pc zoekt klanten met hetzelfde KvK-nummer, btw-nummer,
+  -- e-mailadres of dezelfde naam en bewaart per paar een voorstel. Een paar staat er hoogstens een keer in
+  -- (relation_a is altijd het kleinste id) en een beslist paar komt nooit terug. Voorstellen worden nooit gewist:
+  -- samenvoegen of afwijzen zet alleen de status en de beslistijd. De tijden zijn milliseconden, zoals bij relation_aliases.
+  -- Alleen additief; bestaande rijen veranderen niet.
+  CREATE TABLE IF NOT EXISTS klant_dubbel_voorstellen (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    relation_a INTEGER NOT NULL REFERENCES relations(id),
+    relation_b INTEGER NOT NULL REFERENCES relations(id),
+    reden TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'voorgesteld' CHECK (status IN ('voorgesteld', 'samengevoegd', 'afgewezen')),
+    gemaakt_op INTEGER NOT NULL,
+    beslist_op INTEGER,
+    CHECK (relation_a < relation_b),
+    UNIQUE (relation_a, relation_b)
+  );
+  CREATE INDEX IF NOT EXISTS idx_klant_dubbel_voorstellen_status ON klant_dubbel_voorstellen(status, id);
+  `,
 ];

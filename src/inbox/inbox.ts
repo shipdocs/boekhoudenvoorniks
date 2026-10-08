@@ -42,6 +42,7 @@ import type { StatementFolder } from '../import/statement-folder';
 import { statementHelp } from '../shared/bank-statement-help';
 import { BANK_FEED } from '../shared/bank-feed';
 import { telefoonKlantenZonderControle, viesTaakKey } from '../btw/vies';
+import { dubbelTaakKey, openVoorstellen, zoekDubbelen, type DubbelVoorstelMetKlanten } from '../relations/dubbelen';
 import { ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD, reeksNummer } from '../sync/reeks';
 
 
@@ -76,6 +77,7 @@ export type TaskKind =
   | 'exchange-conflict'
   | 'invoice-series-gap'
   | 'vies-nacontrole'
+  | 'klant-dubbel'
   | 'vat-suppletie'
   | 'supplier-auto'
   | 'vat-check'
@@ -140,7 +142,9 @@ export interface Task {
     /** waar de vraag "dezelfde aankoop?" of "alleen als bewijs?" over gaat (#179); is dat intussen iets anders, dan gebeurt er niets */
     candidate?: string;
     /** het gat in de nummerreeks van een telefoon (invoice-series-gap) */
-    reeks?: { apparaat_code: string; jaar: number; van: number; tot: number } };
+    reeks?: { apparaat_code: string; jaar: number; van: number; tot: number };
+    /** het voorstel voor twee dubbele klanten (klant-dubbel); de actie haalt de klanten opnieuw uit de databank */
+    dubbelId?: number };
 }
 
 export interface BalanceOverviewRow {
@@ -1074,6 +1078,8 @@ export class InboxService {
       });
     });
 
+    tasks.push(...this.dubbeleKlantTaken());
+
     const lock = this.ledger.periodLock();
     for (const kind of ['afgesloten', 'uitwisseling'] as const) {
       const n = locked[kind];
@@ -1909,10 +1915,59 @@ export class InboxService {
     for (const a of t.actions) a.hint ??= hints[`${t.kind}:${a.id}`];
   }
 
+  /**
+   * Voorstellen voor dubbele klanten (src/relations/dubbelen.ts): per voorstel een melding met een expliciete keuze. Het
+   * zoeken schrijft alleen voorstellen en voegt nooit samen; samenvoegen gebeurt alleen op de knop (src/main/api.ts). Een
+   * fout in het zoeken (bijvoorbeeld een databank die alleen gelezen mag worden) laat Vandaag gewoon verder gaan.
+   */
+  private dubbeleKlantTaken(): Task[] {
+    let lijst: ReturnType<typeof openVoorstellen>;
+    try {
+      zoekDubbelen(this.db);
+      lijst = openVoorstellen(this.db);
+    } catch {
+      return [];
+    }
+    const kort = (t: string, max: number) => {
+      const schoon = t.replace(/\s+/g, ' ').trim();
+      return schoon.length > max ? `${schoon.slice(0, max - 1)}…` : schoon;
+    };
+    const beschrijf = (k: DubbelVoorstelMetKlanten['a']) =>
+      `${kort(k.naam, 80)}${k.plaats ? ` in ${kort(k.plaats, 40)}` : ''} (${k.facturen} ${k.facturen === 1 ? 'factuur' : 'facturen'} en ${k.klussen} ${k.klussen === 1 ? 'klus' : 'klussen'})`;
+    return lijst.voorstellen.map((v, i) => {
+      // dezelfde naam twee keer (een dubbele klant heet vaak hetzelfde): dan houden nummer 1 en 2 uit de vraag ze uit elkaar
+      const gelijk = kort(v.a.naam, 40) === kort(v.b.naam, 40);
+      const a = gelijk ? `${kort(v.a.naam, 40)} (1)` : kort(v.a.naam, 40);
+      const b = gelijk ? `${kort(v.b.naam, 40)} (2)` : kort(v.b.naam, 40);
+      const rest = i === lijst.voorstellen.length - 1 && lijst.meer > 0 ? ` Er wachten nog ${lijst.meer} andere voorstellen voor dubbele klanten; die komen aan de beurt zodra deze zijn afgehandeld.` : '';
+      const samenvoegHint = (blijft: string, weg: string) =>
+        `${weg} wordt gearchiveerd en je telefoon wijst daarna naar ${blijft}. Facturen, klussen, offertes en documenten van ${weg} blijven bij ${weg} staan: er verhuist en verdwijnt niets. Dit kun je niet ongedaan maken.`;
+      return {
+        key: dubbelTaakKey(v),
+        kind: 'klant-dubbel' as const,
+        icon: '👥',
+        title: `Dubbele klant? ${a} en ${b}`,
+        question:
+          `Deze twee klanten lijken dezelfde te zijn (${v.reden}): 1. ${beschrijf(v.a)} en 2. ${beschrijf(v.b)}. ` +
+          `Als je ze samenvoegt, blijft de klant die je kiest staan. De andere wordt gearchiveerd en je telefoon wijst daarna naar de klant die blijft. ` +
+          `Facturen, klussen, offertes en documenten van de gearchiveerde klant verhuizen niet en blijven bij die klant staan. Samenvoegen kun je niet ongedaan maken. ` +
+          `Zijn het twee verschillende klanten, kies dan "Verschillend": de app stelt dit paar dan niet meer voor.${rest}`,
+        priority: 2 as const,
+        actions: [
+          { id: 'samenvoegen-op-a', label: `Samenvoegen op ${a}`, hint: samenvoegHint(a, b) },
+          { id: 'samenvoegen-op-b', label: `Samenvoegen op ${b}`, hint: samenvoegHint(b, a) },
+          { id: 'verschillend', label: 'Verschillend', hint: 'Er verandert niets aan de klanten. De app stelt dit paar niet meer voor.' },
+          { id: 'later', label: 'Later', hint: 'Er verandert niets. De melding blijft staan.' },
+        ],
+        ref: { dubbelId: v.id },
+      };
+    });
+  }
+
   /** Legt vast dat de gebruiker een taak heeft afgehandeld (voor "door jou gecontroleerd", #29). */
   recordUserAction(task: Task, actionId: string): void {
     const action = task.actions.find((a) => a.id === actionId);
-    if (!action || actionId === 'open' || actionId === 'anders') return; // alleen afgehandelde beslissingen tellen
+    if (!action || actionId === 'open' || actionId === 'anders' || (task.kind === 'klant-dubbel' && actionId === 'later')) return; // alleen afgehandelde beslissingen tellen
     logAutomation(this.db, { kind: 'gebruiker', ref_id: null, summary: `${task.title}: ${action.label.toLowerCase()}`, reason: task.question, actor: 'gebruiker' });
   }
 
