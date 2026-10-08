@@ -91,13 +91,15 @@ describe('Klantidentiteit', () => {
     nieuweKlant(db, 'B');
     const c = nieuweKlant(db, 'C');
     migrate(db);
-    expect(db.prepare('SELECT naam, waarde FROM sync_teller').all()).toEqual([{ naam: 'wijziging', waarde: c }]);
+    expect(db.prepare("SELECT naam, waarde FROM sync_teller WHERE naam = 'wijziging'").all()).toEqual([{ naam: 'wijziging', waarde: c }]);
   });
 
   it('migratie: zonder klanten begint de wijzigingsteller op 0', () => {
     const db = oudeToestand();
     migrate(db);
-    expect(db.prepare('SELECT naam, waarde FROM sync_teller').all()).toEqual([{ naam: 'wijziging', waarde: 0 }]);
+    expect(db.prepare("SELECT naam, waarde FROM sync_teller WHERE naam = 'wijziging'").all()).toEqual([{ naam: 'wijziging', waarde: 0 }]);
+    // latere migraties voegen eigen tellers toe (bevestiging); die beginnen ook op 0
+    expect(db.prepare('SELECT naam, waarde FROM sync_teller ORDER BY naam').all()).toEqual([{ naam: 'bevestiging', waarde: 0 }, { naam: 'wijziging', waarde: 0 }]);
     expect(db.pragma('user_version', { simple: true })).toBe(migrations.length);
   });
 

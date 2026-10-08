@@ -4,6 +4,7 @@ import type { ReceiptSpool } from './spool';
 import type { Wijziging } from '@gratis-boekhouden/kern';
 import type { SyncResultaat } from '../sync/ontvangst';
 import type { Db } from '../db/database';
+import { leesBevestigingen } from '../sync/bevestigingen';
 import { OngeldigeCursor, leesCursor, leesStamgegevens, type Cursor } from '../sync/stamgegevens';
 import { jpegInfo } from './jpeg-pdf';
 import { normalizeRemote, sameSubnet, type LocalInterface } from './network';
@@ -354,6 +355,21 @@ export class ScannerReceiver {
         return reply(500, { ok: false, fout: 'opslaan-mislukt' });
       }
       return reply(200, { ok: true, soort: 'stamgegevens', pcTijd: now, apparaatcode: this.opts.pairing.code(deviceId), regels: RULES_VERSION, ...pagina });
+    }
+
+    if (msg.soort === 'bevestigingen') {
+      // Alleen lezen: het enige neveneffect is hetzelfde als bij stamgegevens (laatst gezien, apparaatcode).
+      // Het apparaat komt uit de envelop (deviceId), nooit uit het bericht.
+      this.opts.pairing.seen(deviceId);
+      this.opts.onActivity?.();
+      let pagina;
+      try {
+        pagina = leesBevestigingen(this.opts.database, deviceId, msg.na ?? 0);
+      } catch (e) {
+        this.opts.log?.(`Bevestigingen voor de telefoon lezen mislukt: ${(e as Error).message}`);
+        return reply(500, { ok: false, fout: 'opslaan-mislukt' });
+      }
+      return reply(200, { ok: true, soort: 'bevestigingen', pcTijd: now, apparaatcode: this.opts.pairing.code(deviceId), ...pagina });
     }
 
     // alleen echte JPEG's (aan de inhoud gecontroleerd, niet aan een naam of type dat de telefoon opgeeft)

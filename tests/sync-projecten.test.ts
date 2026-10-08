@@ -88,7 +88,7 @@ describe('projecten-migratie', () => {
     const db = new Database(':memory:');
     migrate(db);
     const k = kolommen(db, 'sync_wachtrij');
-    expect(k.map((c) => c.name)).toEqual(['id', 'apparaat_id', 'bron', 'entiteit', 'uuid', 'revisie', 'tijd', 'wijziging', 'nummer', 'wacht_op_entiteit', 'wacht_op_uuid', 'reden', 'ontvangen_op', 'verwerkt_op', 'verwerkt_uitkomst', 'verwerkt_reden', 'route']);
+    expect(k.map((c) => c.name)).toEqual(['id', 'apparaat_id', 'bron', 'entiteit', 'uuid', 'revisie', 'tijd', 'wijziging', 'nummer', 'wacht_op_entiteit', 'wacht_op_uuid', 'reden', 'ontvangen_op', 'verwerkt_op', 'verwerkt_uitkomst', 'verwerkt_reden', 'route', 'verwerkt_seq']);
     expect(k.find((c) => c.name === 'id')).toMatchObject({ type: 'INTEGER', pk: 1 });
     expect(k.find((c) => c.name === 'nummer')?.notnull).toBe(0);
     expect(k.find((c) => c.name === 'verwerkt_op')?.notnull).toBe(0);
