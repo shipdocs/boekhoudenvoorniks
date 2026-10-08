@@ -18,7 +18,7 @@ import { veldOndergrens } from './ondergrens';
  * - Delta op de pc-teller. `sinds` is een sync_seq en levert items met een strikt groter nummer; de
  *   bewerktijd (tijd per veld) speelt bij het kiezen van items nooit mee, anders ging een late
  *   telefoonwijziging aan een andere telefoon voorbij.
- * - Keyset-paginering op (sync_seq, uuid), eerst alle klanten, dan alle projecten. De cursor is geen
+ * - Keyset-paginering op (sync_seq, uuid), eerst alle klanten, dan alle projecten, dan de verbergmeldingen. De cursor is geen
  *   SQL maar een gecontroleerd tupel dat alleen als parameter wordt gebruikt.
  * - Een ronde heeft een vaste bovengrens. De eerste pagina (zonder cursor) legt `tot` vast: de stand van
  *   de globale teller sync_teller 'wijziging'. Elk wijzigingsnummer is ooit uit die teller gekomen en
@@ -27,6 +27,9 @@ import { veldOndergrens } from './ondergrens';
  *   met sinds < seq <= tot horen bij de ronde, ook op vervolgpagina's. Een wijziging tijdens de ronde krijgt
  *   een nummer boven `tot` en komt in de volgende ronde. De telefoon bewaart na de laatste pagina `tot`
  *   (veld `nieuwe_sinds`), niet het hoogste nummer van de ontvangen items.
+ * - Een item dat niet meer zichtbaar is (klant die leverancier werd, met zijn projecten) komt als
+ *   verbergmelding { uuid, seq, soort } in `verborgen`, zie leesStamgegevens. Daarna is het item uit
+ *   klanten/projecten verdwenen; de pc verwijdert nooit iets.
  * - Een project heeft een effectief nummer: het grootste van zijn eigen sync_seq en dat van zijn klant.
  *   Verandert de klant (ook van type: leverancier naar beide), dan komen zijn projecten mee in de delta.
  *
@@ -39,11 +42,12 @@ export const STAMGEGEVENS_PAGINA = 100;
 /** De langste cursor (tekens); een langere is verknoeid. */
 export const CURSOR_MAX_TEKENS = 200;
 
-export type Soort = 'k' | 'p';
+/** k: klant, p: project, v: verbergmelding (na alle klanten en projecten) */
+export type Soort = 'k' | 'p' | 'v';
 
 /** De positie in de stroom: het laatste item van de vorige pagina. */
 export interface Cursor {
-  /** k: klant, p: project */
+  /** k: klant, p: project, v: verbergmelding */
   s: Soort;
   /** de sync_seq van dat item */
   t: number;
@@ -79,10 +83,22 @@ export interface StamAlias {
   klant: string;
 }
 
+/**
+ * Een item dat voor de telefoon niet meer zichtbaar is: uitsluitend uuid, seq en soort. Geen naam, type
+ * of veld: de telefoon verbergt het lokaal, de pc verwijdert nooit iets.
+ */
+export interface VerborgenItem {
+  uuid: string;
+  seq: number;
+  soort: 'klant' | 'project';
+}
+
 export interface StamgegevensAntwoord {
   klanten: StamItem[];
   projecten: StamItem[];
   aliassen: StamAlias[];
+  /** items die de telefoon moet verbergen (alleen bij een delta, sinds > 0); zie het docblok */
+  verborgen: VerborgenItem[];
   volgende: string | null;
   /**
    * De bovengrens van deze ronde (`tot`). Na de laatste pagina (volgende: null) bewaart de telefoon
@@ -123,7 +139,7 @@ export function leesCursor(tekst: unknown): Cursor | null {
   const sleutels = Object.keys(raw);
   if (sleutels.length !== 4 || !['s', 't', 'u', 'b'].every((k) => sleutels.includes(k))) return null;
   const { s, t, u, b } = raw as { s: unknown; t: unknown; u: unknown; b: unknown };
-  if (s !== 'k' && s !== 'p') return null;
+  if (s !== 'k' && s !== 'p' && s !== 'v') return null;
   if (typeof t !== 'number' || !Number.isSafeInteger(t) || t < 0) return null;
   if (typeof u !== 'string' || !UUID_KLEIN.test(u)) return null;
   // de bovengrens van de ronde ligt nooit onder het laatste item
@@ -160,6 +176,28 @@ const PROJECT_SQL = `SELECT * FROM (
 ) p
   WHERE p.sync_seq > ? AND p.sync_seq <= ? AND (p.sync_seq > ? OR (p.sync_seq = ? AND p.uuid > ?))
   ORDER BY p.sync_seq, p.uuid
+  LIMIT ?`;
+
+// Verbergmeldingen: relaties die nu leverancier zijn maar ooit klant of beide waren, en hun projecten.
+// De bron is relation_changelog (veld 'type'): RelationsService.update() schrijft bij elke typewijziging
+// een regel met het oude type. Een relatie die nu leverancier is en ooit zichtbaar was, heeft dus een regel
+// met oud klant/beide; een relatie die altijd leverancier was heeft die regel nooit. Het huidige type alleen
+// is niet genoeg (verraadt de leverancier) en gewijzigd_op/sync_seq zeggen niets over het vorige type.
+// Het begintype staat niet altijd in de log (telefoon-klanten en klanten van voor de migratie), maar elke
+// latere verandering wel, en alleen die telt voor wie nu leverancier is.
+const WAS_ZICHTBAAR = `EXISTS (SELECT 1 FROM relation_changelog c WHERE c.relation_id = k.id AND c.veld = 'type'
+    AND (c.oud IN ('klant', 'beide') OR c.nieuw IN ('klant', 'beide')))`;
+const VERBORGEN_SQL = `SELECT * FROM (
+  SELECT k.uuid AS uuid, k.sync_seq AS sync_seq, 'klant' AS soort
+  FROM relations k
+  WHERE k.type = 'leverancier' AND k.uuid IS NOT NULL AND k.sync_seq > 0 AND ${WAS_ZICHTBAAR}
+  UNION ALL
+  SELECT j.uuid AS uuid, MAX(j.sync_seq, k.sync_seq) AS sync_seq, 'project' AS soort
+  FROM jobs j JOIN relations k ON k.id = j.relation_id
+  WHERE k.type = 'leverancier' AND j.uuid IS NOT NULL AND j.sync_seq > 0 AND ${WAS_ZICHTBAAR}
+) v
+  WHERE v.sync_seq > ? AND v.sync_seq <= ? AND (v.sync_seq > ? OR (v.sync_seq = ? AND v.uuid > ?))
+  ORDER BY v.sync_seq, v.uuid
   LIMIT ?`;
 
 const ALIAS_SQL = `SELECT a.alias_uuid AS alias_uuid, r.uuid AS klant
@@ -226,14 +264,22 @@ function bouwProject(rij: Rij, tijden: Tijden): StamItem {
   return { uuid: rij.uuid, seq: rij.sync_seq, pc_revisie: rij.revisie, gearchiveerd: rij.archived === 1, velden };
 }
 
-function cursorVan(soort: Soort, item: StamItem, tot: number): string {
+function cursorVan(soort: Soort, item: { seq: number; uuid: string }, tot: number): string {
   return maakCursor({ s: soort, t: item.seq, u: item.uuid, b: tot });
 }
 
 /**
- * Eén pagina van de stroom. Alleen lezen. Eerst klanten, dan projecten, samen hoogstens
- * STAMGEGEVENS_PAGINA items; `volgende` is de cursor van het laatste item als er nog meer volgt, anders
- * null. `nieuwe_sinds` is de bovengrens van de ronde. De aliassen staan alleen op de eerste pagina (zonder cursor), onafhankelijk van `sinds`.
+ * Eén pagina van de stroom. Alleen lezen. Eerst klanten, dan projecten, dan (alleen bij een delta)
+ * verbergmeldingen, samen hoogstens STAMGEGEVENS_PAGINA items; `volgende` is de cursor van het laatste item
+ * als er nog meer volgt, anders null. `nieuwe_sinds` is de bovengrens van de ronde. De aliassen staan alleen
+ * op de eerste pagina (zonder cursor), onafhankelijk van `sinds`.
+ *
+ * Verbergmeldingen (`verborgen`): een klant die nu leverancier is en ooit klant of beide was, en elk project
+ * van zo'n klant, krijgt { uuid, seq, soort } met hetzelfde effectieve nummer als in de klanten/projecten-
+ * stroom, zodat de melding in de delta valt op het moment van de typewijziging. Een item staat nooit
+ * tegelijk in klanten/projecten en in verborgen (het huidige type beslist), en een relatie die altijd
+ * leverancier was komt er nooit in. Bij `sinds` 0 is de lijst leeg: de telefoon begint dan leeg en wist
+ * zijn lokale stamgegevens eerst; een verborgen item komt in de volledige export gewoon niet voor.
  */
 export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): StamgegevensAntwoord {
   return db
@@ -244,6 +290,8 @@ export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): Stamgegevens
       // Eerste pagina: de bovengrens van de ronde is de stand van de teller nu. Vervolgpagina: die uit de
       // cursor, die niet boven de teller kan liggen en niet onder `sinds` (dat kan deze pc niet gemaakt hebben).
       if (cursor && (cursor.b > teller || cursor.b < vraag.sinds)) throw new OngeldigeCursor();
+      // verbergmeldingen bestaan alleen bij een delta; bij sinds 0 kan geen pagina van die soort bestaan
+      if (cursor && cursor.s === 'v' && vraag.sinds === 0) throw new OngeldigeCursor();
       const tot = cursor ? cursor.b : teller;
       const grens = STAMGEGEVENS_PAGINA + 1; // een extra item om te weten of er nog meer volgt
       const nulpunt = { t: 0, u: '' };
@@ -257,29 +305,40 @@ export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): Stamgegevens
       }
 
       let projecten: StamItem[] = [];
-      const over = grens - klanten.length;
-      if (over > 0) {
+      const overProjecten = grens - klanten.length;
+      if (overProjecten > 0 && (!cursor || cursor.s !== 'v')) {
         const van = cursor && cursor.s === 'p' ? cursor : nulpunt;
-        const rijen = db.prepare(PROJECT_SQL).all(vraag.sinds, tot, van.t, van.t, van.u, over) as Rij[];
+        const rijen = db.prepare(PROJECT_SQL).all(vraag.sinds, tot, van.t, van.t, van.u, overProjecten) as Rij[];
         const tijden = leesTijden(db, 'job_field_rev', rijen.map((r) => r.id));
         projecten = rijen.map((r) => bouwProject(r, tijden));
       }
 
-      const totaal = klanten.length + projecten.length;
+      let verborgen: VerborgenItem[] = [];
+      const overVerborgen = grens - klanten.length - projecten.length;
+      if (overVerborgen > 0 && vraag.sinds > 0) {
+        const van = cursor && cursor.s === 'v' ? cursor : nulpunt;
+        const rijen = db.prepare(VERBORGEN_SQL).all(vraag.sinds, tot, van.t, van.t, van.u, overVerborgen) as { uuid: string; sync_seq: number; soort: 'klant' | 'project' }[];
+        // alleen deze drie sleutels verlaten de pc, nooit een databaserij
+        verborgen = rijen.map((r) => ({ uuid: r.uuid, seq: r.sync_seq, soort: r.soort }));
+      }
+
+      // Eén stroom in vaste volgorde; de eerste STAMGEGEVENS_PAGINA items vormen de pagina.
       let volgende: string | null = null;
-      if (totaal > STAMGEGEVENS_PAGINA) {
-        if (projecten.length > 0) {
-          projecten = projecten.slice(0, projecten.length - 1);
-          const laatste = projecten.length > 0 ? cursorVan('p', projecten[projecten.length - 1]!, tot) : cursorVan('k', klanten[klanten.length - 1]!, tot);
-          volgende = laatste;
-        } else {
-          klanten = klanten.slice(0, STAMGEGEVENS_PAGINA);
-          volgende = cursorVan('k', klanten[klanten.length - 1]!, tot);
-        }
+      if (klanten.length + projecten.length + verborgen.length > STAMGEGEVENS_PAGINA) {
+        const stroom = [
+          ...klanten.map((i) => ({ s: 'k' as const, i })),
+          ...projecten.map((i) => ({ s: 'p' as const, i })),
+          ...verborgen.map((i) => ({ s: 'v' as const, i })),
+        ].slice(0, STAMGEGEVENS_PAGINA);
+        const laatste = stroom[stroom.length - 1]!;
+        volgende = cursorVan(laatste.s, laatste.i, tot);
+        klanten = klanten.slice(0, STAMGEGEVENS_PAGINA);
+        projecten = projecten.slice(0, Math.max(0, STAMGEGEVENS_PAGINA - klanten.length));
+        verborgen = verborgen.slice(0, Math.max(0, STAMGEGEVENS_PAGINA - klanten.length - projecten.length));
       }
 
       const aliassen = cursor ? [] : (db.prepare(ALIAS_SQL).all() as StamAlias[]).map((a) => ({ alias_uuid: a.alias_uuid, klant: a.klant }));
-      return { klanten, projecten, aliassen, volgende, nieuwe_sinds: tot };
+      return { klanten, projecten, aliassen, verborgen, volgende, nieuwe_sinds: tot };
     })
     .deferred();
 }

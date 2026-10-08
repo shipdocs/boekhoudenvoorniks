@@ -72,6 +72,7 @@ interface Pagina {
   klanten: Item[];
   projecten: Item[];
   aliassen: { alias_uuid: string; klant: string }[];
+  verborgen: { uuid: string; seq: number; soort: string }[];
   volgende: string | null;
   nieuwe_sinds: number;
 }
@@ -107,7 +108,7 @@ function phone(pairing: PairingPayload, t: T) {
       if (p.volgende === null) break;
       na = p.volgende;
     }
-    return { paginas, klanten: paginas.flatMap((p) => p.klanten), projecten: paginas.flatMap((p) => p.projecten) };
+    return { paginas, klanten: paginas.flatMap((p) => p.klanten), projecten: paginas.flatMap((p) => p.projecten), verborgen: paginas.flatMap((p) => p.verborgen) };
   };
   const hallo = () => verstuur({ soort: 'hallo', tijd: t.clock.now, naam: 'Pixel van Piet', app: '1.0.0' });
   /** een klant- of projectwijziging van deze telefoon; `tijd` is het bewerkmoment */
@@ -454,7 +455,7 @@ describe('stamgegevens: privacygrens', () => {
     const [uuid] = maakKlanten(t, 1, t.clock.now, 'een notitie');
     t.s.relations.update(rij<{ id: number }>(t, 'SELECT id FROM relations WHERE uuid = ?', uuid).id, { phone: '06-12345678' });
     const alle = await p.alles();
-    expect(Object.keys(alle.paginas[0]!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'soort', 'volgende']);
+    expect(Object.keys(alle.paginas[0]!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'soort', 'verborgen', 'volgende']);
     expect(alle.klanten.length).toBeGreaterThan(0);
     expect(alle.projecten.length).toBe(2);
     const itemSleutels = ['gearchiveerd', 'pc_revisie', 'seq', 'uuid', 'velden'];
@@ -469,7 +470,7 @@ describe('stamgegevens: privacygrens', () => {
       for (const v of Object.values(pr.velden)) expect(Object.keys(v).sort()).toEqual(['bron', 'tijd', 'waarde']);
     }
     // nergens, op geen enkel niveau, een sleutel buiten de whitelist (type, paid_with, id's, bedrijfsgegevens, ...)
-    const toegestaan = new Set([...itemSleutels, ...Object.keys(KLANT_VELDEN), ...Object.keys(PROJECT_VELDEN), 'bron', 'tijd', 'waarde', 'ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'volgende', 'nieuwe_sinds', 'alias_uuid', 'klant']);
+    const toegestaan = new Set([...itemSleutels, ...Object.keys(KLANT_VELDEN), ...Object.keys(PROJECT_VELDEN), 'bron', 'tijd', 'waarde', 'ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'verborgen', 'volgende', 'nieuwe_sinds', 'alias_uuid', 'klant']);
     const sleutels = new Set<string>();
     const loop = (x: unknown) => {
       if (Array.isArray(x)) x.forEach(loop);
@@ -935,5 +936,175 @@ describe('stamgegevens: zichtbaarheid van projecten in de delta', () => {
     const delta = await p.alles(0);
     expect(JSON.stringify(delta.paginas)).not.toContain('Geheim leveranciersproject');
     expect(JSON.stringify(delta.paginas)).not.toContain('Blijft leverancier');
+  });
+});
+
+describe('stamgegevens: verbergmeldingen (klant wordt leverancier)', () => {
+  const uuidVan = (t: T, id: number) => rij<{ uuid: string }>(t, 'SELECT uuid FROM relations WHERE id = ?', id).uuid;
+  const jobUuids = (t: T, relationId: number) => (t.db.prepare('SELECT uuid FROM jobs WHERE relation_id = ? ORDER BY id').all(relationId) as { uuid: string }[]).map((r) => r.uuid);
+  const tellerNu = (t: T) => rij<{ waarde: number }>(t, `SELECT waarde FROM sync_teller WHERE naam = 'wijziging'`).waarde;
+
+  it('klant met projecten wordt leverancier: een lege delta bevat een melding voor de klant en elk project, met niets anders', async () => {
+    const t = start();
+    const p = await pair(t);
+    const klant = t.s.relations.create({ name: 'Geheime Wisselaar BV', type: 'klant', email: 'wissel@example.nl' });
+    maakProjecten(t, 3, klant.id);
+    const sinds = (await p.alles()).paginas.at(-1)!.nieuwe_sinds;
+    t.s.relations.update(klant.id, { type: 'leverancier' });
+    const delta = await p.alles(sinds);
+    expect(delta.klanten).toEqual([]);
+    expect(delta.projecten).toEqual([]);
+    const seq = rij<{ sync_seq: number }>(t, 'SELECT sync_seq FROM relations WHERE id = ?', klant.id).sync_seq;
+    const verwacht = [uuidVan(t, klant.id), ...jobUuids(t, klant.id)].map((uuid) => ({ uuid, seq, soort: uuid === uuidVan(t, klant.id) ? 'klant' : 'project' }));
+    expect([...delta.verborgen].sort((a, b) => a.uuid.localeCompare(b.uuid))).toEqual(verwacht.sort((a, b) => a.uuid.localeCompare(b.uuid)));
+    for (const v of delta.verborgen) expect(Object.keys(v).sort()).toEqual(['seq', 'soort', 'uuid']);
+    // de pc verwijdert niets
+    expect(rij<{ n: number }>(t, 'SELECT COUNT(*) AS n FROM jobs WHERE relation_id = ?', klant.id).n).toBe(3);
+  });
+
+  it('een relatie die altijd leverancier was komt nooit in verborgen, ook niet bij wijziging', async () => {
+    const t = start();
+    const p = await pair(t);
+    const lev = t.s.relations.create({ name: 'Altijd Leverancier', type: 'leverancier' });
+    maakProjecten(t, 2, lev.id);
+    const sinds = tellerNu(t) - 1;
+    t.s.relations.update(lev.id, { notes: 'andere notitie', phone: '010-1234567' });
+    t.s.relations.archive(lev.id);
+    t.s.jobs.update(rij<{ id: number }>(t, 'SELECT id FROM jobs WHERE relation_id = ? LIMIT 1', lev.id).id, { notes: 'x' });
+    const delta = await p.alles(Math.max(0, sinds - 5));
+    expect(delta.verborgen).toEqual([]);
+    expect(JSON.stringify(delta.paginas)).not.toContain(uuidVan(t, lev.id));
+    for (const u of jobUuids(t, lev.id)) expect(JSON.stringify(delta.paginas)).not.toContain(u);
+  });
+
+  it('een klant van de telefoon (zonder type in de log) die leverancier wordt, wordt verborgen', async () => {
+    const t = start();
+    const p = await pair(t);
+    const [uuid] = maakKlanten(t, 1, t.clock.now);
+    const id = rij<{ id: number }>(t, 'SELECT id FROM relations WHERE uuid = ?', uuid).id;
+    const sinds = tellerNu(t);
+    t.s.relations.update(id, { type: 'leverancier' });
+    const delta = await p.alles(sinds);
+    expect(delta.verborgen).toEqual([{ uuid, seq: tellerNu(t), soort: 'klant' }]);
+  });
+
+  it('sinds 0: de volledige export bevat geen verbergmeldingen', async () => {
+    const t = start();
+    const p = await pair(t);
+    const klant = t.s.relations.create({ name: 'Was klant', type: 'klant' });
+    maakProjecten(t, 2, klant.id);
+    t.s.relations.update(klant.id, { type: 'leverancier' });
+    for (const sinds of [undefined, 0]) {
+      const volledig = await p.alles(sinds);
+      expect(volledig.paginas.every((x) => Array.isArray(x.verborgen) && x.verborgen.length === 0)).toBe(true);
+      expect(JSON.stringify(volledig.paginas)).not.toContain('Was klant');
+    }
+  });
+
+  it('klant naar leverancier naar klant tussen twee rondes: niet tegelijk zichtbaar en verborgen', async () => {
+    const t = start();
+    const p = await pair(t);
+    const klant = t.s.relations.create({ name: 'Heen en weer', type: 'klant' });
+    maakProjecten(t, 2, klant.id);
+    const sinds = (await p.alles()).paginas.at(-1)!.nieuwe_sinds;
+    t.s.relations.update(klant.id, { type: 'leverancier' });
+    t.s.relations.update(klant.id, { type: 'klant' });
+    const terug = await p.alles(sinds);
+    expect(terug.verborgen).toEqual([]);
+    expect(terug.klanten.map((k) => k.uuid)).toEqual([uuidVan(t, klant.id)]);
+    expect(terug.projecten).toHaveLength(2);
+    // en weer leverancier: nu alleen nog verborgen
+    const sinds2 = terug.paginas.at(-1)!.nieuwe_sinds;
+    t.s.relations.update(klant.id, { type: 'leverancier' });
+    const weg = await p.alles(sinds2);
+    expect(weg.klanten).toEqual([]);
+    expect(weg.projecten).toEqual([]);
+    expect(weg.verborgen).toHaveLength(3);
+    const zichtbaar = new Set([...weg.klanten, ...weg.projecten].map((i) => i.uuid));
+    expect(weg.verborgen.some((v) => zichtbaar.has(v.uuid))).toBe(false);
+  });
+
+  it('meer dan 100 verborgen items komen in meerdere pagina\'s, zonder dubbele of verloren meldingen', async () => {
+    const t = start();
+    const p = await pair(t);
+    const klant = t.s.relations.create({ name: 'Veel projecten', type: 'klant' });
+    maakProjecten(t, 250, klant.id);
+    const sinds = (await p.alles()).paginas.at(-1)!.nieuwe_sinds;
+    t.s.relations.update(klant.id, { type: 'leverancier' });
+    const delta = await p.alles(sinds);
+    expect(delta.paginas.length).toBe(3); // 251 meldingen
+    expect(delta.paginas.every((x) => x.verborgen.length <= STAMGEGEVENS_PAGINA)).toBe(true);
+    expect(delta.paginas.map((x) => x.verborgen.length)).toEqual([100, 100, 51]);
+    expect(new Set(delta.verborgen.map((v) => v.uuid)).size).toBe(251);
+    expect(delta.verborgen.filter((v) => v.soort === 'klant')).toHaveLength(1);
+    // de pagina's zijn gelijk: dezelfde bovengrens en de cursor met soort v
+    expect(new Set(delta.paginas.map((x) => x.nieuwe_sinds)).size).toBe(1);
+    expect(leesCursor(delta.paginas[0]!.volgende)!.s).toBe('v');
+  });
+
+  it('een typewijziging tijdens de ronde valt in de volgende ronde, niet ertussen', async () => {
+    const t = start();
+    const p = await pair(t);
+    const a = t.s.relations.create({ name: 'Eerste wisselaar', type: 'klant' });
+    const b = t.s.relations.create({ name: 'Tweede wisselaar', type: 'klant' });
+    maakProjecten(t, 130, a.id);
+    const sinds = (await p.alles()).paginas.at(-1)!.nieuwe_sinds;
+    t.s.relations.update(a.id, { type: 'leverancier' });
+    const eerste = await p.pagina({ sinds });
+    expect(eerste.volgende).not.toBeNull();
+    // tijdens de ronde wordt ook b leverancier
+    t.s.relations.update(b.id, { type: 'leverancier' });
+    const rest = await p.pagina({ sinds, na: eerste.volgende! });
+    const ronde1 = [...eerste.verborgen, ...rest.verborgen].map((v) => v.uuid);
+    expect(ronde1).not.toContain(uuidVan(t, b.id));
+    expect(ronde1).toHaveLength(131);
+    expect(rest.volgende).toBeNull();
+    const ronde2 = await p.alles(rest.nieuwe_sinds);
+    expect(ronde2.verborgen.map((v) => v.uuid)).toEqual([uuidVan(t, b.id)]);
+  });
+
+  it('privacy: een verbergmelding heeft alleen uuid, seq en soort, en lekt geen naam of type in de ruwe bytes', async () => {
+    const t = start();
+    const p = await pair(t);
+    const klant = t.s.relations.create({ name: 'Zeer Herkenbare Naam', type: 'klant', email: 'herkenbaar@example.nl', iban: 'NL91ABNA0417164300' });
+    maakJobAan(t.db, { relationId: klant.id, title: 'Herkenbare projecttitel' }, () => t.clock.now);
+    const lev = t.s.relations.create({ name: 'Nooit Zichtbare Leverancier', type: 'leverancier', email: 'lev@example.nl' });
+    maakJobAan(t.db, { relationId: lev.id, title: 'Leverancierstitel' }, () => t.clock.now);
+    const sinds = tellerNu(t);
+    t.s.relations.update(klant.id, { type: 'leverancier' });
+    t.s.relations.update(lev.id, { notes: 'wijziging' });
+    const r = await p.vraag({ sinds });
+    expect(r.status).toBe(200);
+    const antwoord = r.json as unknown as Pagina;
+    expect(antwoord.verborgen).toHaveLength(2);
+    for (const v of antwoord.verborgen) expect(Object.keys(v).sort()).toEqual(['seq', 'soort', 'uuid']);
+    const tekst = JSON.stringify(antwoord);
+    for (const verboden of ['Zeer Herkenbare Naam', 'herkenbaar@example.nl', 'NL91ABNA0417164300', 'Herkenbare projecttitel', 'leverancier', 'Nooit Zichtbare', 'lev@example.nl', 'Leverancierstitel', uuidVan(t, lev.id)]) {
+      expect(tekst).not.toContain(verboden);
+    }
+    expect(r.raw.toString('utf8')).not.toContain('Zeer Herkenbare');
+  });
+
+  it('de cursor met soort v is strikt', async () => {
+    const t = start();
+    const p = await pair(t);
+    const klant = t.s.relations.create({ name: 'Cursor klant', type: 'klant' });
+    maakProjecten(t, 120, klant.id);
+    const sinds = (await p.alles()).paginas.at(-1)!.nieuwe_sinds;
+    t.s.relations.update(klant.id, { type: 'leverancier' });
+    const eerste = await p.pagina({ sinds });
+    const goed = eerste.volgende!;
+    const c = leesCursor(goed)!;
+    expect(c.s).toBe('v');
+    expect(maakCursor(c)).toBe(goed);
+    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    for (const slecht of [b64({ s: 'x', t: c.t, u: c.u, b: c.b }), b64({ s: 'v', t: c.t, u: c.u, b: c.b, extra: 1 }), b64({ s: 'v', t: c.t, u: c.u }), `${goed}A`, goed.slice(0, -2)]) {
+      expect((await p.vraag({ sinds, na: slecht })).status).toBe(400);
+    }
+    // een cursor van de soort v bij sinds 0 kan de pc niet gemaakt hebben
+    expect((await p.vraag({ sinds: 0, na: goed })).status).toBe(400);
+    expect((await p.vraag({ na: goed })).status).toBe(400);
+    // de echte cursor werkt
+    expect((await p.vraag({ sinds, na: goed })).status).toBe(200);
   });
 });
