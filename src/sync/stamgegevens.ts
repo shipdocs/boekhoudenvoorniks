@@ -1,5 +1,5 @@
 import type { Db } from '../db/database';
-import { KLANT_VELDEN, PROJECT_VELDEN } from '@gratis-boekhouden/kern';
+import { KLANT_VELDEN, PROJECT_VELDEN, REGELTABEL, normalizeVatNumber, type Regeltabel } from '@gratis-boekhouden/kern';
 import { JOB_VELD_MAPPING, BRON_PC, type JobKolom } from '../jobs/revisie';
 import { RELATIE_VELD_MAPPING } from '../relations/relations';
 import { veldOndergrens } from './ondergrens';
@@ -32,6 +32,12 @@ import { veldOndergrens } from './ondergrens';
  *   klanten/projecten verdwenen; de pc verwijdert nooit iets.
  * - Een project heeft een effectief nummer: het grootste van zijn eigen sync_seq en dat van zijn klant.
  *   Verandert de klant (ook van type: leverancier naar beide), dan komen zijn projecten mee in de delta.
+ *
+ * - De btw-regeltabel (`regels`) staat op de eerste pagina (zonder cursor), altijd, onafhankelijk van
+ *   `sinds` en van de inhoud van de delta; vervolgpagina's hebben het veld niet. De tabel komt uit de kern.
+ * - Elke klant draagt `vies`: null of { gecontroleerd_op, geldig }. Dat is de laatste VIES-controle van het
+ *   HUIDIGE btw-nummer van de klant (genormaliseerd zoals ViesService.latest). Alleen deze twee velden
+ *   verlaten de pc; naam, adres en bericht uit vies_checks worden niet eens gelezen.
  *
  * Kolomnamen in de SQL komen uitsluitend uit de vaste lijsten van de kern (KLANT_VELDEN en
  * PROJECT_VELDEN), nooit uit het verzoek.
@@ -78,6 +84,18 @@ export interface StamItem {
   velden: Record<string, VeldWaarde>;
 }
 
+/** De VIES-controle van het btw-nummer van een klant: alleen het tijdstip en de uitslag (null: geen uitslag). */
+export interface ViesMelding {
+  /** ISO-tijdstip (UTC) van de controle */
+  gecontroleerd_op: string;
+  geldig: boolean | null;
+}
+
+/** Een klant in het antwoord: een StamItem plus de VIES-controle. */
+export interface StamKlant extends StamItem {
+  vies: ViesMelding | null;
+}
+
 export interface StamAlias {
   alias_uuid: string;
   klant: string;
@@ -94,7 +112,9 @@ export interface VerborgenItem {
 }
 
 export interface StamgegevensAntwoord {
-  klanten: StamItem[];
+  /** de btw-regeltabel; alleen op de eerste pagina (zonder cursor), nooit op een vervolgpagina */
+  regels?: Regeltabel;
+  klanten: StamKlant[];
   projecten: StamItem[];
   aliassen: StamAlias[];
   /** items die de telefoon moet verbergen (alleen bij een delta, sinds > 0); zie het docblok */
@@ -222,6 +242,40 @@ interface VeldRij {
   bron: string;
 }
 
+interface ViesRij {
+  vat_number: string;
+  valid: number | null;
+  checked_at: string;
+}
+
+/** SQLite-tijd (UTC, 'JJJJ-MM-DD UU:MM:SS') als ISO-tekst; null als het geen tijd is. */
+function isoTijd(sqlite: string): string | null {
+  const ms = Date.parse(`${sqlite.replace(' ', 'T')}Z`);
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
+
+/**
+ * De laatste VIES-controle per (genormaliseerd) btw-nummer voor deze rijen. Alleen vat_number, valid en
+ * checked_at worden gelezen: naam, adres en bericht blijven in de database. Hoogstens één zoekopdracht per
+ * pagina met hoogstens STAMGEGEVENS_PAGINA + 1 nummers.
+ */
+function leesVies(db: Db, rijen: Rij[]): Map<string, ViesMelding> {
+  const uit = new Map<string, ViesMelding>();
+  const nummers = [...new Set(rijen.map((r) => (typeof r.vat_number === 'string' ? normalizeVatNumber(r.vat_number) : '')).filter((n) => n !== ''))];
+  if (nummers.length === 0) return uit;
+  const gevonden = db
+    .prepare(
+      `SELECT v.vat_number AS vat_number, v.valid AS valid, v.checked_at AS checked_at FROM vies_checks v
+       WHERE v.id IN (SELECT MAX(id) FROM vies_checks WHERE vat_number IN (${nummers.map(() => '?').join(', ')}) GROUP BY vat_number)`,
+    )
+    .all(...nummers) as ViesRij[];
+  for (const r of gevonden) {
+    const op = isoTijd(r.checked_at);
+    if (op !== null) uit.set(r.vat_number, { gecontroleerd_op: op, geldig: r.valid === null ? null : r.valid === 1 });
+  }
+  return uit;
+}
+
 type Tijden = Map<number, Map<string, { tijd: number; bron: string }>>;
 
 /** De opgeslagen tijd en bron per veld voor deze rijen; rijen zonder veldrij blijven buiten de map. */
@@ -243,14 +297,15 @@ function veldTijd(tijden: Tijden, id: number, veld: string, createdAt: string): 
   return tijden.get(id)?.get(veld) ?? { tijd: veldOndergrens(createdAt), bron: BRON_PC };
 }
 
-function bouwKlant(rij: Rij, tijden: Tijden): StamItem {
+function bouwKlant(rij: Rij, tijden: Tijden, vies: Map<string, ViesMelding>): StamKlant {
   const velden: Record<string, VeldWaarde> = {};
   for (const naam of KLANT_NAMEN) {
     const kolom = KLANT_VELDEN[naam].kolom;
     const waarde = rij[kolom] as string | number | null;
     velden[naam] = { waarde: waarde ?? null, ...veldTijd(tijden, rij.id, RELATIE_VELD_MAPPING[kolom], rij.created_at) };
   }
-  return { uuid: rij.uuid, seq: rij.sync_seq, pc_revisie: rij.revisie, gearchiveerd: rij.archived === 1, velden };
+  const nummer = typeof rij.vat_number === 'string' ? normalizeVatNumber(rij.vat_number) : '';
+  return { uuid: rij.uuid, seq: rij.sync_seq, pc_revisie: rij.revisie, gearchiveerd: rij.archived === 1, velden, vies: nummer ? (vies.get(nummer) ?? null) : null };
 }
 
 function bouwProject(rij: Rij, tijden: Tijden): StamItem {
@@ -296,12 +351,13 @@ export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): Stamgegevens
       const grens = STAMGEGEVENS_PAGINA + 1; // een extra item om te weten of er nog meer volgt
       const nulpunt = { t: 0, u: '' };
 
-      let klanten: StamItem[] = [];
+      let klanten: StamKlant[] = [];
       if (!cursor || cursor.s === 'k') {
         const van = cursor ?? nulpunt;
         const rijen = db.prepare(KLANT_SQL).all(vraag.sinds, tot, van.t, van.t, van.u, grens) as Rij[];
         const tijden = leesTijden(db, 'relation_field_rev', rijen.map((r) => r.id));
-        klanten = rijen.map((r) => bouwKlant(r, tijden));
+        const vies = leesVies(db, rijen);
+        klanten = rijen.map((r) => bouwKlant(r, tijden, vies));
       }
 
       let projecten: StamItem[] = [];
@@ -338,7 +394,8 @@ export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): Stamgegevens
       }
 
       const aliassen = cursor ? [] : (db.prepare(ALIAS_SQL).all() as StamAlias[]).map((a) => ({ alias_uuid: a.alias_uuid, klant: a.klant }));
-      return { klanten, projecten, aliassen, verborgen, volgende, nieuwe_sinds: tot };
+      // de regeltabel alleen op de eerste pagina, altijd (een kopie: het antwoord deelt geen object met de kern)
+      return { ...(cursor ? {} : { regels: structuredClone(REGELTABEL) }), klanten, projecten, aliassen, verborgen, volgende, nieuwe_sinds: tot };
     })
     .deferred();
 }
