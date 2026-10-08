@@ -188,17 +188,17 @@ describe('factuurwijziging van de telefoon op de pc', () => {
     // een herhaling levert dezelfde afwijzing zonder nieuwe rijen
     expect(o.factuur(velden(o.klantUuid, [LAAG]), { uuid })).toMatchObject({ status: 200, uitkomst: 'afgewezen', fout: 'nummer-bezet' });
     expect(telling(o.db)).toEqual({ ...voor, sync_ontvangen: voor.sync_ontvangen + 1 });
-    // een creditnota bij een onbekend origineel is in deze stap afgewezen met origineel-onbekend
+    // een creditnota bij een onbekend origineel wacht sinds s12b in de wachtrij (reden origineel-onbekend)
     const credit = velden(o.klantUuid, [{ ...HOOG, hoeveelheid: -2 }], { nummer: nummer(2), creditnota_van: randomUUID() });
-    expect(o.factuur(credit)).toMatchObject({ status: 200, uitkomst: 'afgewezen', fout: 'origineel-onbekend' });
+    expect(o.factuur(credit)).toMatchObject({ status: 200, uitkomst: 'wacht' });
     expect(telling(o.db).invoices).toBe(voor.invoices);
-    // een periode bij de boekhouder is afgewezen met fout periode
+    // een periode bij de boekhouder wacht sinds s12b (reden periode)
     // tot twee dagen geleden, maar nooit tot en met 31 december: dan vraagt de echte service om een jaarafsluitingsbevestiging
     let tot = Date.now() - 2 * DAG;
     while (iso(tot).slice(5) === '12-31') tot -= DAG;
     o.s.periods.startExchange(iso(tot), 7, [], iso(Date.now()));
     const vast = o.factuur(velden(o.klantUuid, [HOOG], { nummer: nummer(3) }));
-    expect(vast).toMatchObject({ status: 200, uitkomst: 'afgewezen', fout: 'periode' });
+    expect(vast).toMatchObject({ status: 200, uitkomst: 'wacht' });
     expect(telling(o.db).invoices).toBe(voor.invoices);
   });
 
@@ -232,13 +232,13 @@ describe('factuurwijziging van de telefoon op de pc', () => {
     expect(o.factuur(velden(o.klantUuid), { uuid })).toEqual({ status: 200, uitkomst: 'toegepast' });
     expect(factuurRij(o.db, uuid)).toMatchObject({ number: nummer(1), status: 'verzonden' });
     expect(n(o.db, 'SELECT archived AS n FROM relations WHERE uuid = ?', o.klantUuid)).toBe(1);
-    // een onbekende klant en een leverancier geven 409 klant-onbekend zonder rijen
+    // een onbekende klant en een leverancier wachten sinds s12b in de wachtrij: geen factuur, geen registerrij
     const voor = telling(o.db);
-    expect(o.factuur(velden(randomUUID(), [HOOG], { nummer: nummer(2) }))).toMatchObject({ status: 409, fout: 'klant-onbekend' });
+    expect(o.factuur(velden(randomUUID(), [HOOG], { nummer: nummer(2) }))).toMatchObject({ status: 200, uitkomst: 'wacht' });
     const leverancier = randomUUID();
     o.db.prepare(`INSERT INTO relations (type, name, uuid) VALUES ('leverancier', 'Groothandel', ?)`).run(leverancier);
-    expect(o.factuur(velden(leverancier, [HOOG], { nummer: nummer(3) }))).toMatchObject({ status: 409, fout: 'klant-onbekend' });
-    expect(telling(o.db)).toEqual(voor);
+    expect(o.factuur(velden(leverancier, [HOOG], { nummer: nummer(3) }))).toMatchObject({ status: 200, uitkomst: 'wacht' });
+    expect(telling(o.db)).toEqual({ ...voor, sync_wachtrij: voor.sync_wachtrij + 2 });
   });
 
   it('FACT-10 pc-teller en register: de waarde van counter:factuur:<jaar> is voor en na gelijk, en per verwerkte factuur staat er een registerrij in dezelfde transactie', () => {
@@ -278,7 +278,7 @@ describe('factuurwijziging van de telefoon op de pc', () => {
     expect(telling(o.db).invoices).toBe(voor.invoices + 1);
 
     // uitbreiding (boekhouderskopie): een meegegeven InvoiceService met een writeGuard laat de factuur niet boeken;
-    // de afhandeling is die van een periode-weigering: 200 afgewezen met fout periode, geen factuurrijen, wel een registerrij
+    // de afhandeling is die van een periode-weigering: 200 wacht, geen factuurrijen, geen registerrij, wel een wachtrijrij
     const g = setup();
     const gesloten = new SyncOntvangst(g.db, new RelationsService(g.db), { now: () => Date.now(), invoices: g.s.invoices });
     const klant = randomUUID();
@@ -287,10 +287,10 @@ describe('factuurwijziging van de telefoon op de pc', () => {
     const geweigerdUuid = randomUUID();
     const guardVoor = telling(g.db);
     const uitslag = gesloten.verwerk(APPARAAT, BRON, { entiteit: 'factuur', uuid: geweigerdUuid, revisie: 1, tijd: Date.now() - DAG, velden: velden(klant) }, 'netwerk');
-    expect(uitslag).toMatchObject({ status: 200, uitkomst: 'afgewezen', fout: 'periode' });
-    expect(telling(g.db)).toEqual({ ...guardVoor, sync_ontvangen: guardVoor.sync_ontvangen + 1 });
+    expect(uitslag).toMatchObject({ status: 200, uitkomst: 'wacht' });
+    expect(telling(g.db)).toEqual({ ...guardVoor, sync_wachtrij: guardVoor.sync_wachtrij + 1 });
     expect(n(g.db, 'SELECT COUNT(*) AS n FROM invoices')).toBe(0);
-    expect(register(g.db, geweigerdUuid)).toEqual([{ uitkomst: 'afgewezen', fout: 'periode', route: 'netwerk' }]);
+    expect(register(g.db, geweigerdUuid)).toEqual([]);
     // zonder meegegeven factuurdienst (geen guard-bewuste Ledger) wordt er nooit geboekt: factuur blijft niet-ondersteund
     const zonder = new SyncOntvangst(g.db, new RelationsService(g.db), { now: () => Date.now() });
     const zonderVoor = telling(g.db);
