@@ -66,6 +66,16 @@ export function isPurchaseVatCode(code: string): code is PurchaseVatCode {
 /** EU-lidstaten (landcode zoals in adressen en IBAN; Griekenland = GR, in btw-nummers EL). */
 export const EU_COUNTRIES = new Set(['AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK']);
 
+/**
+ * Noord-Ierland (XI) is voor de btw geen EU-land meer, behalve bij levering van goederen (Belastingdienst, toelichting
+ * opgaaf ICP OB1291, 2026): die gaat in rubriek 3b en de opgaaf ICP. Daarom staat XI bewust niet in EU_COUNTRIES (diensten,
+ * afstandsverkopen en OSS blijven daar buiten), maar in deze aparte controle voor goederen.
+ */
+export function isEuForGoods(country: string | null | undefined): boolean {
+  const c = countryCode(country);
+  return !!c && (EU_COUNTRIES.has(c) || c === 'XI');
+}
+
 /** Genormaliseerde landcode (2 letters, hoofdletters) of null als het geen geldige code is. */
 export function countryCode(input: string | null | undefined): string | null {
   const c = (input ?? '').trim().toUpperCase();
