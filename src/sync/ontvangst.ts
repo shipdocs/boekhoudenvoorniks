@@ -89,7 +89,7 @@ export class SyncOntvangst {
     try {
       uitslag = this.db.transaction(() => {
         if (wijziging.entiteit === 'klant') return this.verwerkKlant(deviceId, bron, wijziging, route);
-        if (wijziging.entiteit === 'factuur') return this.facturen ? this.facturen.verwerk(deviceId, bron, wijziging, route) : { status: 200, uitkomst: 'niet-ondersteund' };
+        if (wijziging.entiteit === 'factuur') return this.facturen ? this.facturen.verwerk(deviceId, bron, wijziging, route) : { status: 200, uitkomst: 'niet-ondersteund' as const };
         return this.projecten.verwerk(deviceId, bron, wijziging, route);
       })();
     } catch (e) {
