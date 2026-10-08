@@ -851,3 +851,89 @@ describe('stamgegevens: de ronde heeft een vaste bovengrens', () => {
     expect(await p.vraag({ na: echt, sinds: c.b + 1 })).toMatchObject({ status: 400 });
   });
 });
+
+describe('stamgegevens: zichtbaarheid van projecten in de delta', () => {
+  const relId = (t: T, id: number) => rij<{ uuid: string }>(t, 'SELECT uuid FROM relations WHERE id = ?', id).uuid;
+
+  it('een leverancier die type beide wordt brengt zijn projecten mee in de delta, gelijk aan een volledige export', async () => {
+    const t = start();
+    const p = await pair(t);
+    const lev = t.s.relations.create({ name: 'Leverancier die klant wordt', type: 'leverancier' });
+    maakJobAan(t.db, { relationId: lev.id, title: 'Verborgen project' }, () => t.clock.now);
+    maakJobAan(t.db, { relationId: lev.id, title: 'Tweede verborgen project' }, () => t.clock.now);
+    // de telefoon heeft alles wat zichtbaar is; het project van de leverancier ontbreekt
+    const st = nieuweToestand();
+    await doorloop(p, st);
+    expect([...st.projecten.values()].map((x) => x.velden.titel!.waarde)).not.toContain('Verborgen project');
+    const sindsVoor = st.sinds;
+    // de leverancier wordt klant en leverancier: zijn projecten worden exporteerbaar
+    t.s.relations.update(lev.id, { type: 'beide' });
+    const volledig = await p.alles();
+    expect(volledig.projecten.map((x) => x.velden.titel!.waarde)).toEqual(expect.arrayContaining(['Verborgen project', 'Tweede verborgen project']));
+    // de delta met sinds ver voorbij het oude nummer van de projecten bevat ze ook
+    const delta = await p.alles(sindsVoor);
+    expect(delta.projecten.map((x) => x.velden.titel!.waarde).sort()).toEqual(['Tweede verborgen project', 'Verborgen project']);
+    expect(delta.klanten.map((k) => k.uuid)).toEqual([relId(t, lev.id)]);
+    // het seq van het project is het effectieve nummer: dat van de klant, die later wijzigde
+    const klantSeq = rij<{ sync_seq: number }>(t, 'SELECT sync_seq FROM relations WHERE id = ?', lev.id).sync_seq;
+    expect(delta.projecten.every((x) => x.seq === klantSeq)).toBe(true);
+    expect(delta.projecten[0]!.seq).toBeGreaterThan(sindsVoor);
+    // de telefoon die de delta toepast is gelijk aan de pc
+    await doorloop(p, st);
+    await gelijkAanPc(p, st);
+  });
+
+  it('klant naar leverancier: weg uit de export, er wordt niets verwijderd, en terug naar klant levert alles weer', async () => {
+    const t = start();
+    const p = await pair(t);
+    const klant = t.s.relations.create({ name: 'Wisselaar', type: 'klant' });
+    maakJobAan(t.db, { relationId: klant.id, title: 'Project van wisselaar' }, () => t.clock.now);
+    const projectenVoor = rij<{ n: number }>(t, 'SELECT COUNT(*) AS n FROM jobs').n;
+    expect((await p.alles()).projecten.map((x) => x.velden.titel!.waarde)).toContain('Project van wisselaar');
+    t.s.relations.update(klant.id, { type: 'leverancier' });
+    const weg = await p.alles();
+    expect(JSON.stringify(weg.paginas)).not.toContain('Wisselaar');
+    expect(JSON.stringify(weg.paginas)).not.toContain('Project van wisselaar');
+    expect((await p.alles(0)).klanten.map((k) => k.uuid)).not.toContain(relId(t, klant.id));
+    // de pc heeft niets verwijderd
+    expect(rij<{ n: number }>(t, 'SELECT COUNT(*) AS n FROM jobs').n).toBe(projectenVoor);
+    expect(rij<{ n: number }>(t, 'SELECT COUNT(*) AS n FROM relations WHERE id = ?', klant.id).n).toBe(1);
+    // terug naar klant: klant en project komen in de delta
+    const sinds = teller(t);
+    t.s.relations.update(klant.id, { type: 'klant' });
+    const terug = await p.alles(sinds);
+    expect(terug.klanten.map((k) => k.velden.naam!.waarde)).toEqual(['Wisselaar']);
+    expect(terug.projecten.map((x) => x.velden.titel!.waarde)).toEqual(['Project van wisselaar']);
+  });
+
+  it('een gewijzigde klant levert zijn projecten opnieuw mee, een project wijzigen alleen dat project', async () => {
+    const t = start();
+    const p = await pair(t);
+    const klant = t.s.relations.create({ name: 'Klant met klussen', type: 'klant' });
+    maakJobAan(t.db, { relationId: klant.id, title: 'Klus A' }, () => t.clock.now);
+    maakJobAan(t.db, { relationId: klant.id, title: 'Klus B' }, () => t.clock.now);
+    const st = nieuweToestand();
+    await doorloop(p, st);
+    t.s.relations.update(klant.id, { phone: '030-0000000' });
+    const delta = await doorloop(p, st);
+    expect(delta.flatMap((x) => x.projecten).map((x) => x.velden.titel!.waarde).sort()).toEqual(['Klus A', 'Klus B']);
+    await gelijkAanPc(p, st);
+    // alleen een projectwijziging: alleen dat project
+    t.s.jobs.update(rij<{ id: number }>(t, `SELECT id FROM jobs WHERE title = 'Klus A'`).id, { notes: 'anders' });
+    const alleen = await doorloop(p, st);
+    expect(alleen.flatMap((x) => x.projecten).map((x) => x.velden.titel!.waarde)).toEqual(['Klus A']);
+    expect(alleen.flatMap((x) => x.klanten)).toEqual([]);
+    await gelijkAanPc(p, st);
+  });
+
+  it('een leverancier en zijn projecten blijven uitgesloten, ook in de delta', async () => {
+    const t = start();
+    const p = await pair(t);
+    const lev = t.s.relations.create({ name: 'Blijft leverancier', type: 'leverancier' });
+    maakJobAan(t.db, { relationId: lev.id, title: 'Geheim leveranciersproject' }, () => t.clock.now);
+    t.s.relations.update(lev.id, { notes: 'iets anders' });
+    const delta = await p.alles(0);
+    expect(JSON.stringify(delta.paginas)).not.toContain('Geheim leveranciersproject');
+    expect(JSON.stringify(delta.paginas)).not.toContain('Blijft leverancier');
+  });
+});

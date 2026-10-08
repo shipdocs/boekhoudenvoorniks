@@ -27,6 +27,8 @@ import { veldOndergrens } from './ondergrens';
  *   met sinds < seq <= tot horen bij de ronde, ook op vervolgpagina's. Een wijziging tijdens de ronde krijgt
  *   een nummer boven `tot` en komt in de volgende ronde. De telefoon bewaart na de laatste pagina `tot`
  *   (veld `nieuwe_sinds`), niet het hoogste nummer van de ontvangen items.
+ * - Een project heeft een effectief nummer: het grootste van zijn eigen sync_seq en dat van zijn klant.
+ *   Verandert de klant (ook van type: leverancier naar beide), dan komen zijn projecten mee in de delta.
  *
  * Kolomnamen in de SQL komen uitsluitend uit de vaste lijsten van de kern (KLANT_VELDEN en
  * PROJECT_VELDEN), nooit uit het verzoek.
@@ -146,14 +148,18 @@ const KLANT_SQL = `SELECT r.id, r.uuid, r.sync_seq, r.revisie, r.created_at, ${K
   LIMIT ?`;
 
 // Een project dat aan een leverancier hangt wordt niet geleverd; een project zonder bekende relatie wel.
-const PROJECT_SQL = `SELECT j.id, j.uuid, j.sync_seq, j.revisie, j.created_at, k.uuid AS klant_uuid, ${PROJECT_KOLOMMEN.filter((k) => k !== 'relation_id')
-  .map((k) => `j.${k} AS ${k}`)
-  .join(', ')}
+// Het effectieve nummer (eff) is het grootste van het project en zijn klant: selectie, volgorde en cursor
+// gebruiken alleen eff, en eff is ook het `seq` in het antwoord.
+const PROJECT_SQL = `SELECT * FROM (
+  SELECT j.id, j.uuid, MAX(j.sync_seq, COALESCE(k.sync_seq, 0)) AS sync_seq, j.revisie, j.created_at, k.uuid AS klant_uuid, ${PROJECT_KOLOMMEN.filter((k) => k !== 'relation_id')
+    .map((k) => `j.${k} AS ${k}`)
+    .join(', ')}
   FROM jobs j
   LEFT JOIN relations k ON k.id = j.relation_id
   WHERE (k.id IS NULL OR k.type IN ('klant', 'beide')) AND j.uuid IS NOT NULL AND j.sync_seq > 0
-    AND j.sync_seq > ? AND j.sync_seq <= ? AND (j.sync_seq > ? OR (j.sync_seq = ? AND j.uuid > ?))
-  ORDER BY j.sync_seq, j.uuid
+) p
+  WHERE p.sync_seq > ? AND p.sync_seq <= ? AND (p.sync_seq > ? OR (p.sync_seq = ? AND p.uuid > ?))
+  ORDER BY p.sync_seq, p.uuid
   LIMIT ?`;
 
 const ALIAS_SQL = `SELECT a.alias_uuid AS alias_uuid, r.uuid AS klant

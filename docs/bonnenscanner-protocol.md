@@ -578,6 +578,10 @@ al bij de projecten stond toen een klant wijzigde.
   het antwoord is leeg (`volgende: null`, nog wel met de aliassen) en `nieuwe_sinds` is het lagere `tot`.
   De telefoon bewaart dat lagere nummer en begint daar opnieuw; items met een nummer boven dat `tot` komen
   dan alsnog mee. Wie zeker wil zijn dat hij gelijk is aan de pc, vraagt een ronde met `sinds` 0 (of zonder `sinds`).
+- **`seq` van een project is het effectieve nummer**: het grootste van het eigen `sync_seq` van het project en
+  dat van zijn klant. Wijzigt de klant (ook van type, bijvoorbeeld een leverancier die `beide` wordt, of
+  archiveren), dan komen zijn projecten opnieuw mee in de delta, ook die nu pas zichtbaar worden. Een project
+  zonder bekende klant heeft zijn eigen nummer.
 
 **Zo doorloopt de Android-app een ronde.**
 
