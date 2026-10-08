@@ -356,3 +356,86 @@ describe('importDefinitive', () => {
     expect(aantallen(db)).toEqual(voor);
   });
 });
+
+describe('onveranderlijk', () => {
+  function met() {
+    const ctx = setup();
+    const r = ctx.s.invoices.importDefinitive(inv(UUID_1, velden([HOOG, LAAG])), ctx.klant.id);
+    return { ...ctx, id: r.factuurId! };
+  }
+
+  it('updateDraft weigert een telefoonfactuur en laat rij en regels ongemoeid', () => {
+    const { s, db, id, aannemer } = met();
+    const voor = momentopname(db, id);
+    expect(() => s.invoices.updateDraft(id, { relationId: aannemer.id, reference: 'anders', lines: [{ description: 'x', quantity: 1, unitPrice: 1, vatCode: 'hoog' }] })).toThrow(/niet meer aanpassen/);
+    expect(momentopname(db, id)).toBe(voor);
+  });
+
+  it('deleteDraft weigert een telefoonfactuur en laat rij en regels ongemoeid', () => {
+    const { s, db, id } = met();
+    const voor = momentopname(db, id);
+    expect(() => s.invoices.deleteDraft(id)).toThrow(/niet verwijderen/);
+    expect(momentopname(db, id)).toBe(voor);
+  });
+
+  it('finalize weigert een telefoonfactuur en laat de teller ongemoeid', () => {
+    const { s, db, id } = met();
+    const voor = momentopname(db, id);
+    const instellingen = db.prepare('SELECT key, value FROM settings ORDER BY key').all();
+    expect(() => s.invoices.finalize(id)).toThrow(/al definitief/);
+    expect(momentopname(db, id)).toBe(voor);
+    expect(db.prepare('SELECT key, value FROM settings ORDER BY key').all()).toEqual(instellingen);
+  });
+
+  it('createCreditNote werkt en laat het origineel ongewijzigd; de creditnota krijgt bij finalize een pc-nummer', () => {
+    const { s, db, id } = met();
+    const voor = momentopname(db, id);
+    const credit = s.invoices.createCreditNote(id);
+    expect(credit).toMatchObject({ status: 'concept', credit_of_invoice_id: id, uuid: null, apparaat_code: null });
+    expect(momentopname(db, id)).toBe(voor);
+    const definitief = s.invoices.finalize(credit.id);
+    expect(definitief.number).not.toMatch(/^M\d/);
+    expect(definitief.number).toBeTruthy();
+    // alleen de verrekening raakt het origineel: amount_paid, status en paid_at
+    const strip = (json: string) => {
+      const o = JSON.parse(json) as { rij: Record<string, unknown>; regels: unknown[] };
+      for (const k of ['amount_paid', 'status', 'paid_at']) delete o.rij[k];
+      return o;
+    };
+    expect(strip(momentopname(db, id))).toEqual(strip(voor));
+    expect(s.invoices.get(id)).toMatchObject({ open_amount: 0, status: 'betaald' });
+  });
+
+  it('markSent laat een gevulde sent_at van een telefoonfactuur ongemoeid, bij een pc-factuur werkt het nog', () => {
+    const { s, db, id, klant } = met();
+    const voor = momentopname(db, id);
+    s.invoices.markSent(id);
+    expect(momentopname(db, id)).toBe(voor);
+    expect(s.invoices.get(id).sent_at).toBe('2026-03-15 10:30:00');
+    const pc = pcFactuur(s, klant.id, PC_REGELS);
+    db.prepare(`UPDATE invoices SET sent_at = '2000-01-01 00:00:00' WHERE id = ?`).run(pc.id);
+    s.invoices.markSent(pc.id);
+    expect(s.invoices.get(pc.id).sent_at).not.toBe('2000-01-01 00:00:00');
+  });
+
+  it('een betaling wijzigt alleen amount_paid, status en paid_at', () => {
+    const { s, db, id } = met();
+    const voor = JSON.parse(momentopname(db, id)) as { rij: Record<string, unknown>; regels: unknown[] };
+    s.invoices.registerPayment(id, { amount: 20000, date: '2026-03-25' });
+    s.invoices.registerPayment(id, { amount: s.invoices.get(id).open_amount, date: '2026-03-26' });
+    const na = JSON.parse(momentopname(db, id)) as { rij: Record<string, unknown>; regels: unknown[] };
+    const verschil = Object.keys(na.rij).filter((k) => JSON.stringify(na.rij[k]) !== JSON.stringify(voor.rij[k]));
+    expect(verschil.sort()).toEqual(['amount_paid', 'paid_at', 'status']);
+    expect(na.rij).toMatchObject({ status: 'betaald', paid_at: '2026-03-26' });
+    expect(na.regels).toEqual(voor.regels);
+  });
+
+  it('een afschrijving of verrekening laat de vaste velden van een telefoonfactuur staan', () => {
+    const { s, db, id } = met();
+    const voor = JSON.parse(momentopname(db, id)) as { rij: Record<string, unknown>; regels: unknown[] };
+    s.invoices.writeOffBadDebt(id, '2026-06-01');
+    const na = JSON.parse(momentopname(db, id)) as { rij: Record<string, unknown>; regels: unknown[] };
+    for (const k of ['number', 'uuid', 'apparaat_code', 'reeks_jaar', 'reeks_volgnr', 'invoice_date', 'due_date', 'relation_snapshot', 'company_snapshot', 'subtotal', 'vat_total', 'total']) expect(na.rij[k]).toEqual(voor.rij[k]);
+    expect(na.regels).toEqual(voor.regels);
+  });
+});

@@ -581,7 +581,8 @@ export class InvoiceService {
   }
 
   markSent(id: number): void {
-    this.db.prepare(`UPDATE invoices SET sent_at = datetime('now') WHERE id = ?`).run(id);
+    // het tijdstip van een telefoonfactuur komt van de telefoon en blijft staan
+    this.db.prepare(`UPDATE invoices SET sent_at = datetime('now') WHERE id = ? AND (uuid IS NULL OR sent_at IS NULL)`).run(id);
   }
 
   recordReminder(id: number): void {
