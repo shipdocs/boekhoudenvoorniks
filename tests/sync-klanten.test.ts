@@ -617,12 +617,12 @@ describe('idempotent en per veld samengevoegd', () => {
     expect(n(t, `SELECT COUNT(*) AS n FROM relations WHERE name = 'Dubbel BV' AND archived = 0`)).toBe(2);
   });
 
-  it('niet-ondersteund: bon en foto geven 200 en laten 0 rijen in relations en sync_ontvangen achter', async () => {
+  it('niet-ondersteund: foto geeft 200 en laten 0 rijen in relations en sync_ontvangen achter', async () => {
     const t = start();
     const p = await koppel(t);
     const voor = telling(t);
     const seq = teller(t);
-    for (const entiteit of ['bon', 'foto']) {
+    for (const entiteit of ['foto']) {
       const r = await p.wijziging({ entiteit, velden: { naam: 'Iets', titel: 'x' } });
       expect(r, entiteit).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'wijziging', entiteit, revisie: 1, uitkomst: 'niet-ondersteund' } });
     }
@@ -702,7 +702,7 @@ describe('5 minuten vooruit en het wijzigingsnummer', () => {
     expect((await p.wijziging({ uuid, revisie: 3, velden: { email: 'kapot' } })).status).toBe(400);
     expect((await p.wijziging({ uuid: randomUUID(), velden: { plaats: 'x' } })).status).toBe(409);
     expect((await p.wijziging({ uuid, revisie: 4, tijd: nu + 6 * MINUUT })).status).toBe(400);
-    expect((await p.wijziging({ entiteit: 'bon' })).json).toMatchObject({ uitkomst: 'niet-ondersteund' });
+    expect((await p.wijziging({ entiteit: 'foto' })).json).toMatchObject({ uitkomst: 'niet-ondersteund' });
     expect(teller(t)).toBe(seq);
     expect(klantRij(t, uuid)!.sync_seq).toBe(klantSeq);
   });

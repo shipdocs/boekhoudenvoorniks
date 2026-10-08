@@ -1291,12 +1291,12 @@ describe('projecten-receiver', () => {
     expect((await p.project({ titel: 'Wel', klant: t.klantUuid })).json).toMatchObject({ uitkomst: 'toegepast' });
   });
 
-  it('de entiteiten bon en foto blijven 200 niet-ondersteund zonder rijen', async () => {
+  it('de entiteit foto blijft 200 niet-ondersteund zonder rijen', async () => {
     const t = startReceiver();
     const p = await koppel(t);
     const voor = telling(t.db);
     const voorBonnen = n(t.db, 'SELECT COUNT(*) AS n FROM scanner_documents');
-    for (const entiteit of ['bon', 'foto']) {
+    for (const entiteit of ['foto']) {
       const r = await p.verstuur({ soort: 'wijziging', tijd: t.clock.now, wijziging: { entiteit, uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { titel: 'x', klant: t.klantUuid } } });
       expect(r, entiteit).toMatchObject({ status: 200, json: { ok: true, entiteit, uitkomst: 'niet-ondersteund' } });
     }

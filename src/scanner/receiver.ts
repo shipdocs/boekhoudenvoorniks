@@ -14,7 +14,7 @@ export interface ReceiverOptions {
   pairing: ScannerPairing;
   spool: ReceiptSpool;
   /** verwerkt een gecontroleerde wijziging in de administratie (SyncOntvangst); zonder deze opdracht wordt een wijziging alleen bevestigd */
-  sync?: { verwerk(deviceId: string, bron: string, wijziging: Wijziging, route?: string): SyncResult };
+  sync?: { verwerk(deviceId: string, bron: string, wijziging: Wijziging, route?: string, bijlagen?: Buffer[]): SyncResult };
   /** de administratie waaruit `stamgegevens` leest (alleen lezen) */
   database: Db;
   /** de adressen waarop geluisterd wordt (alleen het lokale netwerk); tests geven hier 127.0.0.1 */
@@ -317,18 +317,25 @@ export class ScannerReceiver {
       this.opts.onActivity?.();
       const w = msg.wijziging;
       const eigen = { entiteit: w.entiteit, uuid: w.uuid, revisie: w.revisie };
+      const bijlagen = msg.bijlagen ?? [];
+      // alleen echte JPEG's (aan de inhoud, zoals bij het bon-bericht); groottes en sha256 zijn al in parseFrame vergeleken
+      if (bijlagen.some((f) => !jpegInfo(f))) return reply(400, { ok: false, fout: 'ongeldig' });
       if (!this.opts.sync) return reply(200, { ok: true, soort: 'wijziging', ...eigen });
       let uitslag: SyncResult;
       try {
         const bron = this.opts.pairing.code(deviceId);
         if (!bron) throw new Error('de telefoon heeft nog geen apparaatcode');
-        uitslag = this.opts.sync.verwerk(deviceId, bron, w, 'netwerk');
+        uitslag = this.opts.sync.verwerk(deviceId, bron, w, 'netwerk', bijlagen);
       } catch (e) {
         this.opts.log?.(`Wijziging van de telefoon opslaan mislukt: ${(e as Error).message}`);
         return reply(500, { ok: false, fout: 'opslaan-mislukt' });
       }
       if (uitslag.status === 200) {
-        return reply(200, { ok: true, soort: 'wijziging', ...eigen, uitkomst: uitslag.uitkomst, ...(uitslag.fout ? { fout: uitslag.fout } : {}), ...(uitslag.melding ? { melding: uitslag.melding } : {}) });
+        // een nieuwe bon ligt in de spool: op naar de inbox, net als bij het bon-bericht
+        const nieuweBon = w.entiteit === 'bon' && uitslag.uitkomst === 'toegepast';
+        reply(200, { ok: true, soort: 'wijziging', ...eigen, uitkomst: uitslag.uitkomst, ...(uitslag.fout ? { fout: uitslag.fout } : {}), ...(uitslag.melding ? { melding: uitslag.melding } : {}) });
+        if (nieuweBon) this.opts.onStored?.();
+        return;
       }
       return reply(uitslag.status, { ok: false, fout: uitslag.fout ?? 'opslaan-mislukt', ...(uitslag.veld ? { veld: uitslag.veld } : {}), ...(uitslag.melding ? { melding: uitslag.melding } : {}) });
     }

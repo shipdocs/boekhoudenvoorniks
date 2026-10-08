@@ -2,6 +2,8 @@ import type { Db } from '../db/database';
 import { KLANT_VELDEN, leesKlantVelden, type Wijziging } from '@gratis-boekhouden/kern';
 import { KlantVeldFout, normaliseerSyncVelden, type RelationsService } from '../relations/relations';
 import type { InvoiceService } from '../documents/invoices';
+import type { ReceiptSpool } from '../scanner/spool';
+import { BonOntvangst, controleerFoto } from './bonnen';
 import { FactuurOntvangst } from './facturen';
 import { ProjectOntvangst } from './projecten';
 import { SyncWachtrij, type WachtrijBehandelaar } from './wachtrij';
@@ -12,7 +14,7 @@ export interface SyncResultaat {
   status: number;
   /** bij 200: toegepast, overgeslagen, afgewezen, wacht (in de wachtrij) of niet-ondersteund */
   uitkomst?: 'toegepast' | 'overgeslagen' | 'afgewezen' | 'wacht' | 'niet-ondersteund';
-  /** bij afgewezen en bij elke fout: de reden als code (geen-klant, klus-gekoppeld, nummer-bezet, factuur-geweigerd, veld-ongeldig, ongeldig, veld-ongeldig, klant-onbekend, project-onbekend, wachtrij-vol, opslaan-mislukt) */
+  /** bij afgewezen en bij elke fout: de reden als code (id-botst, geen-klant, klus-gekoppeld, nummer-bezet, factuur-geweigerd, veld-ongeldig, ongeldig, veld-ongeldig, klant-onbekend, project-onbekend, wachtrij-vol, opslaan-mislukt) */
   fout?: string;
   /** bij veld-ongeldig: het veld (Nederlandse naam) waar het om gaat */
   veld?: string;
@@ -30,6 +32,13 @@ export interface SyncOntvangstOpties {
    * niets geboekt): een eigen Ledger zou de guard omzeilen.
    */
   invoices?: Pick<InvoiceService, 'importDefinitive'>;
+  /**
+   * De spool van de bonnenscanner (src/scanner/spool.ts) voor het opslaan van een bon die als wijziging binnenkomt.
+   * Ontbreekt hij, dan blijft bon niet-ondersteund (er wordt niets bewaard).
+   */
+  spool?: ReceiptSpool;
+  /** mag de locatie van een bon bewaard worden? (opt-in van #32; standaard niet) */
+  keepLocation?: () => boolean;
 }
 
 interface RegisterRij {
@@ -44,8 +53,8 @@ function veldnaamVanKolom(kolom: string): string {
 }
 
 /**
- * Verwerkt wijzigingen van een telefoon in de administratie. Voor nu klanten, projecten en facturen (src/sync/facturen.ts); bon
- * en foto geven niet-ondersteund en laten niets achter (de telefoon beschouwt dat als niet afgeleverd).
+ * Verwerkt wijzigingen van een telefoon in de administratie. Voor nu klanten, projecten, facturen (src/sync/facturen.ts) en bonnen (src/sync/bonnen.ts, met
+ * bijlagen); foto geeft niet-ondersteund en laat niets achter (de telefoon beschouwt dat als niet afgeleverd).
  *
  * Idempotent op de exacte registersleutel (apparaat_id, entiteit, uuid, revisie) in sync_ontvangen, per
  * veld samengevoegd op (tijd, bron) door RelationsService, en per wijziging één databasetransactie:
@@ -61,6 +70,7 @@ export class SyncOntvangst {
   private readonly projecten: ProjectOntvangst;
   private readonly facturen: FactuurOntvangst | null;
   private readonly wachtrij: SyncWachtrij;
+  private readonly bonnen: BonOntvangst | null;
 
   constructor(
     private readonly db: Db,
@@ -77,15 +87,17 @@ export class SyncOntvangst {
     behandelaars.push(this.projecten);
     this.facturen = opties.invoices ? new FactuurOntvangst(db, relations, opties.invoices, this.wachtrij, wachtrijOpties) : null;
     if (this.facturen) behandelaars.push(this.facturen);
+    this.bonnen = opties.spool ? new BonOntvangst(db, opties.spool, { now: this.now, keepLocation: opties.keepLocation, log: this.log }) : null;
   }
 
   /**
    * @param deviceId het apparaat-ID van de telefoon (base64url), de sleutel in het register
    * @param bron de apparaatcode van de telefoon (M1, M2, ...), de bron van elk veld; nooit het deviceId
    * @param route waar de wijziging vandaan kwam (netwerk, map of mail); alleen voor het register
+   * @param bijlagen de JPEG's achter een bon- of fotowijziging, in volgorde (anders leeg)
    */
-  verwerk(deviceId: string, bron: string, wijziging: Wijziging, route: string = 'netwerk'): SyncResultaat {
-    const uitslag = this.verwerkEen(deviceId, bron, wijziging, route);
+  verwerk(deviceId: string, bron: string, wijziging: Wijziging, route: string = 'netwerk', bijlagen: Buffer[] = []): SyncResultaat {
+    const uitslag = this.verwerkEen(deviceId, bron, wijziging, route, bijlagen);
     // een toegepaste klant, project of factuur kan wachtende wijzigingen vrijmaken (een cascade); dat gebeurt na de
     // transactie van deze wijziging, zodat een fout daarin deze wijziging niet terugdraait. Een klantwijziging die als
     // overgeslagen wordt beantwoord (een herhaling) probeert de wachtrij ook opnieuw: na een tijdelijke opslagfout kan
@@ -96,8 +108,13 @@ export class SyncOntvangst {
     return uitslag;
   }
 
-  private verwerkEen(deviceId: string, bron: string, wijziging: Wijziging, route: string): SyncResultaat {
-    if (wijziging.entiteit !== 'klant' && wijziging.entiteit !== 'project' && wijziging.entiteit !== 'factuur') return { status: 200, uitkomst: 'niet-ondersteund' };
+  private verwerkEen(deviceId: string, bron: string, wijziging: Wijziging, route: string, bijlagen: Buffer[]): SyncResultaat {
+    if (wijziging.entiteit === 'foto') {
+      // Een foto met bijlagen wordt wel gelezen en gecontroleerd, maar nog niet bewaard; zonder bijlagen is er niets te lezen.
+      return (bijlagen.length > 0 ? controleerFoto(wijziging, bijlagen) : null) ?? { status: 200, uitkomst: 'niet-ondersteund' };
+    }
+    if (wijziging.entiteit === 'bon' && !this.bonnen) return { status: 200, uitkomst: 'niet-ondersteund' };
+    if (wijziging.entiteit === 'bon') return this.verwerkBon(deviceId, wijziging, route, bijlagen);
     try {
       return this.db.transaction(() => {
         if (wijziging.entiteit === 'klant') return this.verwerkKlant(deviceId, bron, wijziging, route);
@@ -107,6 +124,33 @@ export class SyncOntvangst {
     } catch (e) {
       this.log(`${wijziging.entiteit === 'klant' ? 'Klantwijziging' : wijziging.entiteit === 'factuur' ? 'Factuurwijziging' : 'Projectwijziging'} van de telefoon opslaan mislukt: ${(e as Error).message}`);
       return { status: 500, fout: 'opslaan-mislukt' };
+    }
+  }
+
+  /**
+   * Een bon: het bestand in de spool en de rijen (spool en register) horen bij elkaar. De rijen gaan in één
+   * transactie, met volle schrijfzekerheid zoals bij het bon-bericht (de telefoon ruimt de bon op zodra hij
+   * de bevestiging heeft); lukt het niet, dan gaat ook het bestand weg en blijft er niets achter.
+   */
+  private verwerkBon(deviceId: string, w: Wijziging, route: string, bijlagen: Buffer[]): SyncResultaat {
+    const bonnen = this.bonnen!;
+    bonnen.opruimen(); // bestanden van eerdere mislukte ontvangsten alsnog weg
+    const voor = this.db.pragma('synchronous', { simple: true }) as number;
+    try {
+      this.db.pragma('synchronous = FULL');
+      const uitslag = this.db.transaction(() => bonnen.verwerk(deviceId, w, route, bijlagen))();
+      bonnen.afgerond();
+      return uitslag;
+    } catch (e) {
+      bonnen.terugdraaien(w.uuid);
+      this.log(`Bonwijziging van de telefoon opslaan mislukt: ${(e as Error).message}`);
+      return { status: 500, fout: 'opslaan-mislukt' };
+    } finally {
+      try {
+        this.db.pragma(`synchronous = ${voor}`);
+      } catch {
+        /* de administratie gaat net dicht */
+      }
     }
   }
 
@@ -120,6 +164,7 @@ export class SyncOntvangst {
 
   /** Verwerkt wat in de wachtrij kan worden verwerkt (ook bij het starten van de receiver). Gooit nooit. */
   verwerkWachtrij(): void {
+    this.bonnen?.opruimen();
     try {
       this.wachtrij.verwerk();
     } catch (e) {

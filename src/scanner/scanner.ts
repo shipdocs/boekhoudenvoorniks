@@ -109,8 +109,15 @@ export class Bonnenscanner {
   constructor(private readonly deps: ScannerDeps) {
     this.log = deps.log ?? (() => undefined);
     this.pairing = new ScannerPairing(deps.db, deps.secrets, deps.now);
-    this.sync = new SyncOntvangst(deps.db, new RelationsService(deps.db, deps.now), { now: deps.now, log: this.log, invoices: deps.invoices });
     this.spool = new ReceiptSpool(deps.db, deps.spoolDir);
+    this.sync = new SyncOntvangst(deps.db, new RelationsService(deps.db, deps.now), {
+      now: deps.now,
+      log: this.log,
+      invoices: deps.invoices,
+      // een bon als wijziging gaat door dezelfde spool en met dezelfde instelling voor de locatie als het bon-bericht
+      spool: this.spool,
+      keepLocation: () => deps.settings.get().jobLocation,
+    });
     this.receiver = new ScannerReceiver({
       pairing: this.pairing,
       spool: this.spool,

@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { leesWijziging, type Wijziging } from '@gratis-boekhouden/kern';
 
 /**
@@ -98,6 +98,12 @@ export interface WijzigingMessage {
   soort: 'wijziging';
   tijd: number;
   wijziging: Wijziging;
+  /**
+   * De JPEG's achter de JSON, in volgorde; alleen bij entiteit bon en foto. Hun groottes en sha256 zijn
+   * hier al vergeleken met `velden.fotos` van de wijziging (wat de pc wel kan controleren zonder de
+   * velden verder te lezen); de velden zelf controleert de kern. Ontbreekt de sleutel, dan waren er geen bijlagen.
+   */
+  bijlagen?: Buffer[];
 }
 
 /**
@@ -261,6 +267,53 @@ function bad(why: string): never {
   throw new ProtocolError('ongeldig', why);
 }
 
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/**
+ * Knipt de bijlagen van een bon- of fotowijziging uit de rest van het bericht, op de groottes in
+ * `velden.fotos`, en vergelijkt elke sha256 met de echte bijlage. Het bericht moet precies vol zijn:
+ * te weinig of te veel bytes is een vormfout (`ongeldig`), meer dan 10 foto's ook, en samen meer dan
+ * maxPhotoBytes is `te-groot` (zoals bij het bon-bericht). Is de lijst niet te lezen of leeg, dan is er
+ * niets te knippen: de velden zijn dan een zaak van de kern (veld-ongeldig), maar bijlagen mogen er dan
+ * niet zijn. Geeft undefined als er geen bijlagen zijn.
+ */
+function leesBijlagen(lijst: unknown, rest: Buffer): Buffer[] | undefined {
+  const maten: number[] = [];
+  const hashes: unknown[] = [];
+  let leesbaar = Array.isArray(lijst) && lijst.length > 0;
+  if (leesbaar) {
+    if ((lijst as unknown[]).length > LIMITS.maxPhotos) bad(`een bon heeft 1 tot ${LIMITS.maxPhotos} foto's`);
+    for (const f of lijst as unknown[]) {
+      const grootte = typeof f === 'object' && f !== null && !Array.isArray(f) ? (f as { grootte?: unknown }).grootte : undefined;
+      if (typeof grootte !== 'number' || !Number.isSafeInteger(grootte) || grootte < 1) {
+        leesbaar = false;
+        break;
+      }
+      maten.push(grootte);
+      hashes.push((f as { sha256?: unknown }).sha256);
+    }
+  }
+  if (!leesbaar) {
+    if (rest.length > 0) bad('de groottes van de foto\'s kloppen niet');
+    return undefined;
+  }
+  const bijlagen: Buffer[] = [];
+  let offset = 0;
+  for (const grootte of maten) {
+    if (offset + grootte > rest.length) bad('de groottes van de foto\'s kloppen niet');
+    bijlagen.push(rest.subarray(offset, offset + grootte));
+    offset += grootte;
+  }
+  if (offset !== rest.length) bad('er staat meer in het bericht dan de foto\'s');
+  if (offset > LIMITS.maxPhotoBytes) throw new ProtocolError('te-groot', 'de foto\'s zijn samen te groot');
+  bijlagen.forEach((b, i) => {
+    const sha = hashes[i];
+    // een sha256 die geen 64 hexcijfers is, geeft veld-ongeldig bij de kern; hier alleen vergelijken wat te vergelijken is
+    if (typeof sha === 'string' && SHA256.test(sha) && createHash('sha256').update(b).digest('hex') !== sha) bad('de sha256 van een foto klopt niet');
+  });
+  return bijlagen;
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Hoeveel tekens een cursor (`na` in een stamgegevens-verzoek) hoogstens heeft. */
@@ -282,6 +335,10 @@ function cleanText(value: unknown, max: number, multiline: boolean): string | nu
  *
  * De JSON van `hallo`, `bon` en `stamgegevens` is hooguit 16 KiB; alleen een `wijziging` in een
  * v2-envelop mag tot 128 KiB. Daarboven (en voor elk ander soort boven 16 KiB): `te-groot`.
+ *
+ * Een `wijziging` met entiteit `bon` of `foto` heeft daarnaast bijlagen (de JPEG's) direct achter de JSON, in de
+ * volgorde van `velden.fotos`: de groottes en sha256 daarin worden hier vergeleken met de echte bijlage
+ * (verkeerd = `ongeldig`, samen boven maxPhotoBytes = `te-groot`); bij elke andere entiteit zijn bijlagen een vormfout.
  *
  * De protocolversie van de envelop bepaalt welke berichten erin kunnen: versie 1 kent alleen `hallo`
  * en `bon`; versie 2 kent daarnaast `wijziging`, `stamgegevens` en `bevestigingen`.
@@ -342,7 +399,6 @@ export function parseFrame(plain: Buffer, versie: ProtocolVersion = PROTOCOL_VER
     return bericht;
   }
   if (versie >= 2 && raw.soort === 'wijziging') {
-    if (rest.length > 0) bad('bij een wijziging horen geen foto\'s');
     // Precies één wijziging per bericht: naast `soort` en `tijd` hoort alleen de sleutel `wijziging`,
     // met daarbinnen de change-set in het vijf-velden-formaat (die haar eigen, oudere `tijd` mag
     // dragen). De controle van die change-set doet de kern.
@@ -350,7 +406,14 @@ export function parseFrame(plain: Buffer, versie: ProtocolVersion = PROTOCOL_VER
     if (sleutels.length !== 3 || !sleutels.includes('wijziging')) bad('een wijziging-bericht heeft precies de sleutels soort, tijd en wijziging');
     const gelezen = leesWijziging(raw.wijziging);
     if (!gelezen.ok) bad('ongeldige change-set');
-    return { soort: 'wijziging', tijd, wijziging: gelezen.wijziging };
+    const w = gelezen.wijziging;
+    // Alleen een bon en een foto hebben bijlagen (de JPEG's, zoals bij het bon-bericht); bij elke andere entiteit niet.
+    if (w.entiteit !== 'bon' && w.entiteit !== 'foto') {
+      if (rest.length > 0) bad('bij een wijziging horen geen foto\'s');
+      return { soort: 'wijziging', tijd, wijziging: w };
+    }
+    const bijlagen = leesBijlagen(w.velden.fotos, rest);
+    return bijlagen ? { soort: 'wijziging', tijd, wijziging: w, bijlagen } : { soort: 'wijziging', tijd, wijziging: w };
   }
   if (raw.soort !== 'bon') bad('onbekend soort bericht');
 

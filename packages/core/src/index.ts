@@ -14,4 +14,5 @@ export * from './documents/invoices';
 export * from './sync/changeset';
 export * from './sync/velden';
 export * from './sync/factuur';
+export * from './sync/bon';
 export * from './shared/regeltabel';
