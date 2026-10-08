@@ -872,7 +872,7 @@ describe('de bonnenmap als tweede route', () => {
     expect(oud.prepare('SELECT name, uuid FROM relations').all()).toEqual([{ name: 'Oude klant', uuid: 'u-oud' }]);
     expect(oud.prepare('SELECT uuid, route FROM sync_ontvangen').all()).toEqual([{ uuid: 'u-oud', route: 'netwerk' }]);
     const kolommen = (oud.prepare('PRAGMA table_info(sync_map_problemen)').all() as { name: string }[]).map((k) => k.name);
-    expect(kolommen).toEqual(['id', 'bestandsnaam', 'apparaat_id', 'soort', 'fout', 'veld', 'tijd', 'gezien_op']);
+    expect(kolommen).toEqual(['id', 'bestandsnaam', 'apparaat_id', 'soort', 'fout', 'veld', 'tijd', 'gezien_op', 'route']);
     const voeg = (soort: string) => oud.prepare(`INSERT INTO sync_map_problemen (bestandsnaam, soort, tijd) VALUES ('x.bvns', ?, 1)`).run(soort);
     expect(voeg('onleesbaar').changes).toBe(1);
     expect(() => voeg('iets-anders')).toThrow();
