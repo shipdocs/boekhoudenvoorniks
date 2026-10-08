@@ -3,7 +3,7 @@ import type { LlmClassifier } from './classify';
 
 /**
  * Online hulp bij categorievoorstellen: JEV (`typesafe/jev`) via onze assistent-Worker op Cloudflare
- * (#132, docs/jev-assistent.md). Alleen met een actief abonnement en als de gebruiker het aanzette.
+ * (#132; het ontwerp staat in de privé-repo boekhoudenvoorniks-server). Alleen met een actief abonnement en als de gebruiker het aanzette.
  *
  * Er gaat alleen de leveranciersnaam, maximaal 15 korte artikelomschrijvingen (zonder bedragen, IBAN of
  * e-mailadressen) en de lijst met categorieën van deze administratie mee. JEV kiest uitsluitend een
