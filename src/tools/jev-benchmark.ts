@@ -6,7 +6,7 @@
  *   npm run benchmark:jev                               # alleen de vaste regels
  *   OLLAMA_URL=http://127.0.0.1:11434 OLLAMA_MODEL=qwen2.5:3b npm run benchmark:jev
  *   JEV_ACCOUNT_ID=… JEV_API_TOKEN=… npm run benchmark:jev   # JEV rechtstreeks via de Workers AI REST-API
- *   JEV_PROXY_URL=http://localhost:8799 npm run benchmark:jev  # via een tijdelijke Worker (zie docs/jev-assistent.md)
+ *   JEV_PROXY_URL=http://localhost:8799 npm run benchmark:jev  # via een tijdelijke Worker (zie het ontwerp in de privé-repo boekhoudenvoorniks-server)
  *
  * Alleen met de synthetische set (tests/fixtures/jev-benchmark.json); nooit met echte klantdocumenten.
  * Het API-token is alleen voor deze meting en hoort nooit in de app. Optioneel tweede argument: een pad
@@ -63,7 +63,7 @@ function jevInput(supplier: string | null, lines: string[], categories: Category
   };
 }
 
-/** REST-API met een token, of een tijdelijke Worker via `wrangler dev --remote` (docs/jev-assistent.md). */
+/** REST-API met een token, of een tijdelijke Worker via `wrangler dev --remote` (ontwerp in de privé-repo boekhoudenvoorniks-server). */
 type JevTarget = { url: string; token?: string };
 
 async function jevRaw(target: JevTarget, supplier: string | null, lines: string[], categories: Category[]) {

@@ -35,7 +35,7 @@ Gebruik Node 22 ook als de systeemversie ouder is. Met de lokale nvm-installatie
 zo:
 
 ```bash
-PATH=/home/martin/.nvm/versions/node/v22.22.0/bin:$PATH npm test
+PATH="$HOME/.nvm/versions/node/v22.22.0/bin:$PATH" npm test
 ```
 
 ## Vaste proefadministratie
