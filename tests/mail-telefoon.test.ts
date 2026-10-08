@@ -314,7 +314,7 @@ describe('de mailroute van de telefoon', () => {
     // niet te ontsleutelen: nooit verwerkt, wel definitief afgesloten met een regel in het probleemregister
     const goed = p.maak(klantBericht('Moet niet binnenkomen'));
     const aangepast = Buffer.from(goed.body);
-    aangepast[aangepast.length - 5] ^= 0xff;
+    aangepast[aangepast.length - 5] = aangepast[aangepast.length - 5]! ^ 0xff;
     const kapot = [
       att('onbekend.bvns', p.maak(klantBericht('Onbekend apparaat'), [], { deviceId: randomBytes(16), sleutel: randomBytes(32) }).body),
       att('sleutel.bvns', p.maak(klantBericht('Verkeerde sleutel'), [], { sleutel: randomBytes(32) }).body),
