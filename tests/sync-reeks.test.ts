@@ -409,7 +409,8 @@ describe('reeksbewaking van telefoonfacturen', () => {
     o.factuur(2);
     const zonderGat = o.s.inbox.tasks();
     expect(zonderGat.some((x) => x.kind === 'invoice-series-gap')).toBe(false);
-    expect(zonderGat.map((x) => x.kind).filter((k) => !voor.some((v) => v.kind === k))).toEqual(['vat-due']);
+    // gewone facturen kunnen een btw-taak geven (afhankelijk van de datum van vandaag); verder verandert er niets
+    expect(zonderGat.filter((x) => x.kind !== 'vat-due').map((x) => x.key)).toEqual(voor.filter((x) => x.kind !== 'vat-due').map((x) => x.key));
     // met een gat is er een extra taak, en alleen die
     o.factuur(4);
     const met = o.s.inbox.tasks();
