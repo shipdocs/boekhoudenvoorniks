@@ -64,6 +64,7 @@ const FOOTER = [
     title: 'Over',
     items: [
       { href: 'waarom.html', label: 'Waarom we dit maakten' },
+      { href: 'kwaliteit.html', label: 'Hoe wij de software controleren' },
       { href: DOWNLOAD, label: 'Downloaden' },
       { href: GITHUB, label: 'Broncode (AGPL-3.0-or-later)' },
       { href: 'mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks', label: 'Vragen en feedback: mail ons' },
