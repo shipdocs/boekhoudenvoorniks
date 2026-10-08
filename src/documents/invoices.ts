@@ -20,8 +20,17 @@ export type InvoiceDisplayStatus = 'concept' | 'openstaand' | 'vervallen' | 'bet
 import { buildInvoiceUbl } from './ubl-out';
 import { wijzigJob } from '../jobs/revisie';
 
+/** JSON met alfabetisch gesorteerde sleutels: twee gelijke objecten geven dezelfde tekst, ongeacht de volgorde. */
+function canoniek(waarde: unknown): string {
+  const sorteer = (w: unknown): unknown => (Array.isArray(w) ? w.map(sorteer) : w && typeof w === 'object' ? Object.fromEntries(Object.entries(w).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => [k, sorteer(v)])) : w);
+  return JSON.stringify(sorteer(waarde));
+}
+
 export interface InvoiceRow {
   id: number;
+  /** alleen gevuld bij een factuur die van de telefoon is overgenomen */
+  uuid: string | null;
+  regeltabel_versie: string | null;
   relation_id: number;
   quote_id: number | null;
   credit_of_invoice_id: number | null;
@@ -271,6 +280,10 @@ export class InvoiceService {
     const reeks = leesFactuurNummer(f.nummer);
     if (!reeks.ok) return geweigerd(reeks.melding);
     const delivery = normalizeDelivery(f.leverdatum, f.leverdatum_tot);
+    // dezelfde afronding als normalizeLines (createDraft): een afwijkende hoeveelheid zou anders anders boeken dan op de pc
+    for (const r of f.regels) {
+      if (Math.round(r.hoeveelheid * 1000) / 1000 !== r.hoeveelheid) return geweigerd('Een hoeveelheid op de factuur heeft meer dan drie decimalen.');
+    }
     const lines = f.regels.map((r) => ({ description: r.omschrijving, quantity: r.hoeveelheid, unit: r.eenheid, unitPrice: r.prijs, vatCode: r.btw_soort, vatPercentage: r.btw_percentage }));
     const totals = computeTotals(lines);
     if (totals.subtotal !== f.totalen.subtotaal || totals.vatTotal !== f.totalen.btw || totals.total !== f.totalen.totaal) {
@@ -281,13 +294,30 @@ export class InvoiceService {
     const bestaand = this.db.prepare('SELECT * FROM invoices WHERE uuid = ?').get(uuid) as InvoiceRow | undefined;
     if (bestaand) {
       const entry = bestaand.journal_entry_id ? (this.db.prepare('SELECT entry_date FROM journal_entries WHERE id = ?').get(bestaand.journal_entry_id) as { entry_date: IsoDate } | undefined) : undefined;
+      // alle vaste inhoud telt mee, canoniek vergeleken (sleutelvolgorde van een momentopname doet er niet toe).
+      // Het jobId telt bewust NIET mee: dat is een uitkomst van de aanroeper (welke klus bij het project hoort), geen
+      // inhoud van de factuur. Een herhaling met een ander jobId is dus al_aanwezig en wijzigt de factuur niet.
+      const creditUuid = bestaand.credit_of_invoice_id ? ((this.db.prepare('SELECT uuid FROM invoices WHERE id = ?').get(bestaand.credit_of_invoice_id) as { uuid: string | null } | undefined)?.uuid ?? null) : null;
+      const inhoud = (o: unknown) => canoniek(o);
       const gelijk =
+        bestaand.relation_id === relationId &&
         bestaand.number === f.nummer &&
         bestaand.invoice_date === f.datum &&
+        bestaand.due_date === f.vervaldatum &&
+        (bestaand.delivery_date ?? null) === (delivery.from ?? null) &&
+        (bestaand.delivery_date_to ?? null) === (delivery.to ?? null) &&
+        (bestaand.reference ?? null) === (f.referentie ?? null) &&
+        (bestaand.intro ?? null) === (f.intro ?? null) &&
+        (bestaand.notes ?? null) === (f.opmerking ?? null) &&
+        inhoud(JSON.parse(bestaand.relation_snapshot ?? 'null')) === inhoud(f.klant_momentopname) &&
+        inhoud(JSON.parse(bestaand.company_snapshot ?? 'null')) === inhoud(f.bedrijf_momentopname) &&
+        creditUuid === (f.creditnota_van ?? null) &&
+        bestaand.sent_at === f.verzonden_op &&
+        bestaand.regeltabel_versie === f.regeltabel_versie &&
         bestaand.subtotal === totals.subtotal &&
         bestaand.vat_total === totals.vatTotal &&
         bestaand.total === totals.total &&
-        JSON.stringify(readLines(this.db, 'invoice_lines', 'invoice_id', bestaand.id).map((l) => [l.description, l.quantity, l.unit, l.unit_price, l.vat_code, l.vat_percentage])) ===
+        JSON.stringify(readLines(this.db, 'invoice_lines', 'invoice_id', bestaand.id).map((l) => [l.description, l.quantity, l.unit ?? null, l.unit_price, l.vat_code, l.vat_percentage])) ===
           JSON.stringify(lines.map((l) => [l.description, l.quantity, l.unit ?? null, l.unitPrice, l.vatCode, l.vatPercentage]));
       const boekingsdatum = entry?.entry_date ?? null;
       return gelijk
@@ -298,10 +328,14 @@ export class InvoiceService {
 
     let creditOf: number | null = null;
     if (f.creditnota_van) {
-      const origineel = this.db.prepare('SELECT id, status, credit_of_invoice_id FROM invoices WHERE uuid = ?').get(f.creditnota_van) as { id: number; status: InvoiceStatus; credit_of_invoice_id: number | null } | undefined;
+      const origineel = this.db.prepare('SELECT id, status, credit_of_invoice_id, relation_id, total FROM invoices WHERE uuid = ?').get(f.creditnota_van) as { id: number; status: InvoiceStatus; credit_of_invoice_id: number | null; relation_id: number; total: Cents | null } | undefined;
       if (!origineel) return geweigerd('De creditnota hoort bij een factuur die de pc niet kent.');
       if (origineel.credit_of_invoice_id) return geweigerd('De factuur waarvoor deze creditnota is gemaakt, is zelf al een creditnota.');
       if (this.db.prepare('SELECT 1 FROM invoices WHERE credit_of_invoice_id = ?').get(origineel.id)) return geweigerd('De factuur waarvoor deze creditnota is gemaakt, is al teruggedraaid.');
+      if (origineel.relation_id !== relationId) return geweigerd('De creditnota hoort bij een factuur van een andere klant dan de creditnota zelf.');
+      // zoals createCreditNote: een creditnota draait (een deel van) het origineel terug, nooit meer dan het origineel
+      if (totals.total >= 0) return geweigerd('Een creditnota moet een negatief totaal hebben.');
+      if ((origineel.total ?? 0) <= 0 || -totals.total > (origineel.total ?? 0)) return geweigerd('De creditnota is groter dan de factuur waarvoor hij is gemaakt.');
       creditOf = origineel.id;
     }
 

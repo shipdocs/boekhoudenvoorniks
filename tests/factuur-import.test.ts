@@ -457,3 +457,137 @@ describe('dateWarnings', () => {
     expect(w[0]).toContain('latere datum');
   });
 });
+
+describe('importDefinitive: strengere controles na review', () => {
+  it('een creditnota van een andere klant op een factuur van klant A wordt geweigerd; het grootboek van A blijft staan', () => {
+    const { s, db, klant, aannemer } = setup();
+    const orig = s.invoices.importDefinitive(inv(UUID_1, velden([HOOG])), klant.id);
+    const voor = aantallen(db);
+    const origVoor = momentopname(db, orig.factuurId!);
+    const r = s.invoices.importDefinitive(inv(UUID_2, velden([{ ...HOOG, hoeveelheid: -2 }], { nummer: 'M1-2026-0002', datum: '2026-03-20', vervaldatum: '2026-04-19', creditnota_van: UUID_1 })), aannemer.id);
+    expect(r).toMatchObject({ uitkomst: 'geweigerd', factuurId: null });
+    expect(r.reden).toMatch(/andere klant/);
+    expect(aantallen(db)).toEqual(voor);
+    expect(momentopname(db, orig.factuurId!)).toBe(origVoor);
+    expect(s.invoices.get(orig.factuurId!).open_amount).toBe(11011);
+    expect(s.invoices.overpaidCustomers()).toEqual([]);
+  });
+
+  it('een creditnota die groter is dan het origineel, of geen negatief bedrag heeft, wordt geweigerd', () => {
+    const { s, db, klant } = setup();
+    s.invoices.importDefinitive(inv(UUID_1, velden([HOOG])), klant.id);
+    const voor = aantallen(db);
+    const teGroot = s.invoices.importDefinitive(inv(UUID_2, velden([{ ...HOOG, hoeveelheid: -3 }], { nummer: 'M1-2026-0002', creditnota_van: UUID_1 })), klant.id);
+    expect(teGroot).toMatchObject({ uitkomst: 'geweigerd', factuurId: null });
+    expect(teGroot.reden).toMatch(/groter dan/);
+    const positief = s.invoices.importDefinitive(inv(UUID_3, velden([HOOG], { nummer: 'M1-2026-0003', creditnota_van: UUID_1 })), klant.id);
+    expect(positief).toMatchObject({ uitkomst: 'geweigerd', factuurId: null });
+    expect(positief.reden).toMatch(/negatief/);
+    expect(aantallen(db)).toEqual(voor);
+  });
+
+  it('een deelcreditnota binnen het origineel blijft mogelijk', () => {
+    const { s, klant } = setup();
+    const orig = s.invoices.importDefinitive(inv(UUID_1, velden([HOOG])), klant.id);
+    const r = s.invoices.importDefinitive(inv(UUID_2, velden([{ ...HOOG, hoeveelheid: -1 }], { nummer: 'M1-2026-0002', creditnota_van: UUID_1 })), klant.id);
+    expect(r.uitkomst).toBe('nieuw');
+    expect(s.invoices.get(orig.factuurId!).open_amount).toBe(5505);
+  });
+
+  const EU_REGEL: Regel = { omschrijving: 'Advies', hoeveelheid: 1, prijs: 100000, btw_soort: 'icp-dienst' };
+  const EU_OVER = { datum: '2026-04-10', vervaldatum: '2026-05-10', leverdatum: '2026-03-20', klant_momentopname: { ...KLANT_DE } };
+  const eu = () => {
+    const ctx = setup();
+    const de = ctx.s.relations.create({ name: 'Brot GmbH', address: 'Hauptstraße 1', postcode: '10115', city: 'Berlin', country: 'DE', vat_number: 'DE123456789', email: 'info@brot.example' });
+    const eerste = ctx.s.invoices.importDefinitive(inv(UUID_1, velden([EU_REGEL], EU_OVER)), de.id);
+    return { ...ctx, de, eerste };
+  };
+
+  it('dezelfde uuid met een andere leverdatum is een conflict en wijzigt niets; een exacte herhaling blijft al_aanwezig', () => {
+    const { s, db, de, eerste } = eu();
+    expect(eerste.uitkomst).toBe('nieuw');
+    const voor = momentopname(db, eerste.factuurId!);
+    const tellers = aantallen(db);
+    const ander = s.invoices.importDefinitive(inv(UUID_1, velden([EU_REGEL], { ...EU_OVER, leverdatum: '2026-04-10' })), de.id);
+    expect(ander).toMatchObject({ uitkomst: 'conflict', factuurId: eerste.factuurId });
+    expect(s.invoices.importDefinitive(inv(UUID_1, velden([EU_REGEL], EU_OVER)), de.id)).toMatchObject({ uitkomst: 'al_aanwezig', factuurId: eerste.factuurId });
+    expect(momentopname(db, eerste.factuurId!)).toBe(voor);
+    expect(aantallen(db)).toEqual(tellers);
+  });
+
+  it('elke afwijking in de vaste inhoud van dezelfde uuid is een conflict', () => {
+    const { s, db, de, eerste } = eu();
+    const ander = s.relations.create({ name: 'Andere klant', email: 'a@example.nl' });
+    const voor = momentopname(db, eerste.factuurId!);
+    const afwijkingen: [string, Record<string, unknown>][] = [
+      ['vervaldatum', { vervaldatum: '2026-05-11' }],
+      ['leverdatum_tot', { leverdatum_tot: '2026-03-25' }],
+      ['referentie', { referentie: 'Order 7' }],
+      ['intro', { intro: 'Hallo' }],
+      ['opmerking', { opmerking: 'Let op' }],
+      ['klantmomentopname', { klant_momentopname: { ...KLANT_DE, city: 'Hamburg' } }],
+      ['bedrijfsmomentopname', { bedrijf_momentopname: { ...BEDRIJF, city: 'Zwolle-Zuid' } }],
+      ['verzonden_op', { verzonden_op: '2026-04-10 11:00:00' }],
+      ['regeltabel_versie', { regeltabel_versie: '2026-2' }],
+    ];
+    for (const [naam, over] of afwijkingen) {
+      const r = s.invoices.importDefinitive(inv(UUID_1, velden([EU_REGEL], { ...EU_OVER, ...over })), de.id);
+      expect(r.uitkomst, naam).toBe('conflict');
+    }
+    expect(s.invoices.importDefinitive(inv(UUID_1, velden([EU_REGEL], EU_OVER)), ander.id).uitkomst).toBe('conflict');
+    expect(s.invoices.importDefinitive(inv(UUID_1, velden([{ ...EU_REGEL, eenheid: 'uur' }], EU_OVER)), de.id).uitkomst).toBe('conflict');
+    expect(momentopname(db, eerste.factuurId!)).toBe(voor);
+  });
+
+  it('een herhaling met een volgorde-afwijkende momentopname maar gelijke inhoud en een ander jobId is al_aanwezig en wijzigt niets', () => {
+    const { s, db, de, eerste } = eu();
+    const voor = momentopname(db, eerste.factuurId!);
+    const omgekeerd = Object.fromEntries(Object.entries(KLANT_DE).reverse());
+    const r = s.invoices.importDefinitive(inv(UUID_1, velden([EU_REGEL], { ...EU_OVER, klant_momentopname: omgekeerd })), de.id, 12345);
+    expect(r).toMatchObject({ uitkomst: 'al_aanwezig', factuurId: eerste.factuurId });
+    expect(momentopname(db, eerste.factuurId!)).toBe(voor);
+  });
+
+  it('een creditnota_van die afwijkt is een conflict bij dezelfde uuid', () => {
+    const { s, klant } = setup();
+    s.invoices.importDefinitive(inv(UUID_1, velden([HOOG])), klant.id);
+    const c = velden([{ ...HOOG, hoeveelheid: -2 }], { nummer: 'M1-2026-0002', creditnota_van: UUID_1 });
+    expect(s.invoices.importDefinitive(inv(UUID_2, c), klant.id).uitkomst).toBe('nieuw');
+    expect(s.invoices.importDefinitive(inv(UUID_2, c), klant.id).uitkomst).toBe('al_aanwezig');
+    const zonder = velden([{ ...HOOG, hoeveelheid: -2 }], { nummer: 'M1-2026-0002' });
+    expect(s.invoices.importDefinitive(inv(UUID_2, zonder), klant.id).uitkomst).toBe('conflict');
+  });
+
+  it('een hoeveelheid met meer dan drie decimalen wordt geweigerd zonder halve rijen, ook als de kern hem niet gezien heeft', () => {
+    const { s, db, klant } = setup();
+    const regel = { omschrijving: 'Materiaal', hoeveelheid: 1.0004, prijs: 100000, btw_soort: 'hoog', btw_percentage: 21, eenheid: null };
+    const t = computeTotals([{ description: 'Materiaal', quantity: 1.0004, unitPrice: 100000, vatCode: 'hoog' }]);
+    const basis = velden([HOOG]);
+    const v = { ...basis, regels: [regel], totalen: { subtotaal: t.subtotal, btw: t.vatTotal, totaal: t.total } } as unknown as FactuurVelden;
+    const voor = aantallen(db);
+    const r = s.invoices.importDefinitive(inv(UUID_1, v), klant.id);
+    expect(r).toMatchObject({ uitkomst: 'geweigerd', factuurId: null });
+    expect(r.reden).toMatch(/drie decimalen/);
+    expect(aantallen(db)).toEqual(voor);
+  });
+});
+
+describe('sendInvoice en telefoonfacturen', () => {
+  it('de pc verstuurt een telefoonfactuur nooit: geweigerd, geen mail, niets gewijzigd', async () => {
+    const { s, db, sent, klant } = setup();
+    const r = s.invoices.importDefinitive(inv(UUID_1, velden([HOOG])), klant.id);
+    const voor = momentopname(db, r.factuurId!);
+    await expect(s.sender.sendInvoice(r.factuurId!)).rejects.toThrow(/telefoon/);
+    expect(sent).toHaveLength(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM email_log').get()).toEqual({ n: 0 });
+    expect(momentopname(db, r.factuurId!)).toBe(voor);
+  });
+
+  it('een pc-factuur wordt nog gewoon verstuurd', async () => {
+    const { s, sent, klant } = setup();
+    const pc = pcFactuur(s, klant.id, PC_REGELS);
+    const verstuurd = await s.sender.sendInvoice(pc.id);
+    expect(sent).toHaveLength(1);
+    expect(verstuurd.sent_at).not.toBeNull();
+  });
+});
