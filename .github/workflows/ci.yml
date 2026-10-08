@@ -38,7 +38,7 @@ jobs:
       - run: npm run rebuild:node
       - run: npm run build
       - name: Kritieke boekhoudflows in de browser
-        run: npx playwright test e2e/factuur.spec.ts e2e/bank-bonnetjes.spec.ts e2e/periode-afsluiten.spec.ts --project=chromium
+        run: npx playwright test e2e/factuur.spec.ts e2e/bank-bonnetjes.spec.ts e2e/periode-afsluiten.spec.ts
       - name: Bewaar foutinformatie
         if: failure()
         uses: actions/upload-artifact@v4
