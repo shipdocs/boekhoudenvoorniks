@@ -124,14 +124,13 @@ export interface ViesKlantZonderControle {
  * icp-dienst-regel, waarvan het btw-nummer in VIES nog niet als geldig is gecontroleerd. Doet NOOIT een verzoek
  * naar VIES: het leest alleen de eigen databank (vies_checks). Per klant een rij, op volgorde van klant-id.
  *
- * Begrensd: het zoeken leest de klanten per ronde (parameters, nooit samengestelde SQL) en stopt zodra er
- * MAX_VIES_TAKEN + 1 gevonden zijn of na VIES_ZOEK_MAX_RONDES rondes. `klanten` heeft hoogstens MAX_VIES_TAKEN
- * rijen; `meer` telt de gevonden klanten die daar niet meer bij pasten (bij een afgekapt zoeken is het een
- * ondergrens). Met `relationId` wordt alleen die ene klant bekeken (voor de knop: opnieuw uit de databank).
+ * Begrensd: het zoeken leest de klanten per ronde van 200 (parameters, nooit samengestelde SQL), hoogstens
+ * VIES_ZOEK_MAX_RONDES rondes (5000 klanten). `klanten` heeft hoogstens MAX_VIES_TAKEN rijen, met factuurnummers
+ * opgezocht; `meer` telt alleen de klanten daarna (bij een afgekapt zoeken is het een ondergrens). Met `relationId` wordt alleen die ene klant bekeken (voor de knop: opnieuw uit de databank).
  */
 export function telefoonKlantenZonderControle(db: Db, opties: { relationId?: number } = {}): { klanten: ViesKlantZonderControle[]; meer: number } {
   const gevonden: ViesKlantZonderControle[] = [];
-  const genoeg = MAX_VIES_TAKEN + 1;
+  let meer = 0;
   const ronde = db.prepare(
     `SELECT i.relation_id AS relation_id, r.name AS naam, r.vat_number AS vat_number, COUNT(DISTINCT i.id) AS aantal
        FROM invoices i
@@ -153,7 +152,7 @@ export function telefoonKlantenZonderControle(db: Db, opties: { relationId?: num
   );
   const rel = opties.relationId ?? null;
   let na = 0;
-  for (let i = 0; i < VIES_ZOEK_MAX_RONDES && gevonden.length < genoeg; i++) {
+  for (let i = 0; i < VIES_ZOEK_MAX_RONDES; i++) {
     const rijen = ronde.all(na, rel, rel, VIES_ZOEK_PER_RONDE) as { relation_id: number; naam: string; vat_number: string; aantal: number }[];
     for (const r of rijen) {
       na = r.relation_id;
@@ -161,13 +160,16 @@ export function telefoonKlantenZonderControle(db: Db, opties: { relationId?: num
       if (!vat) continue;
       const u = uitslag.get(vat) as { valid: number } | undefined;
       if (u?.valid === 1) continue;
-      if (gevonden.length >= genoeg) break;
+      if (gevonden.length >= MAX_VIES_TAKEN) {
+        meer += 1;
+        continue;
+      }
       const lijst = (nummers.all(r.relation_id, VIES_MAX_NUMMERS) as { number: string | null }[]).map((x) => x.number).filter((x): x is string => !!x);
       gevonden.push({ relationId: r.relation_id, naam: r.naam, vatNumber: vat, toestand: u ? 'ongeldig' : 'onbekend', aantal: r.aantal, nummers: lijst });
     }
     if (rijen.length < VIES_ZOEK_PER_RONDE) break;
   }
-  return { klanten: gevonden.slice(0, MAX_VIES_TAKEN), meer: Math.max(0, gevonden.length - MAX_VIES_TAKEN) };
+  return { klanten: gevonden, meer };
 }
 
 /** De key van de taak voor deze klant, toestand en dit (genormaliseerde) btw-nummer. */
