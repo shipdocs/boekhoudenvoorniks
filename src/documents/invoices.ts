@@ -2,7 +2,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS, SALES_ACCOUNTS } from '../core-ledger/accounts';
-import { checkInvoiceRequirements } from '@gratis-boekhouden/kern';
+import { checkInvoiceRequirements, leesFactuurNummer, type FactuurVelden } from '@gratis-boekhouden/kern';
 import type { SettingsService } from '../settings/settings';
 import type { RelationsService, Relation } from '../relations/relations';
 import type { TemplateService } from './templates';
@@ -107,6 +107,23 @@ export interface PaymentInput {
   description?: string;
 }
 
+/** Een factuur van de telefoon zoals de pc hem overneemt: de uuid van de wijziging en de gecontroleerde velden. */
+export interface ImportDefinitiefInvoer {
+  uuid: string;
+  velden: FactuurVelden;
+}
+
+export interface ImportDefinitiefResultaat {
+  uitkomst: 'nieuw' | 'al_aanwezig' | 'conflict' | 'geweigerd';
+  /** Nederlandse uitleg bij conflict of geweigerd, anders null */
+  reden: string | null;
+  factuurId: number | null;
+  /** waar als de boeking op een andere dag staat dan de factuurdatum (een gewoon afgesloten periode) */
+  boekingsdatum_verschoven: boolean;
+  /** de datum waarop de boeking werkelijk staat */
+  boekingsdatum: IsoDate | null;
+}
+
 export class InvoiceService {
   constructor(
     private readonly db: Db,
@@ -204,19 +221,7 @@ export class InvoiceService {
         throw new ValidationError(`Factuurnummer ${number} bestaat al. Pas je factuurnummer aan bij Instellingen → Facturen & offertes`);
       }
       const totals = inv.totals;
-      const serviceDate = inv.delivery_date_to ?? inv.delivery_date ?? inv.invoice_date;
-      const icpService = inv.lines.some((l) => l.vat_code === 'icp-dienst');
-      if (icpService && serviceDate.slice(0, 7) !== inv.invoice_date.slice(0, 7) && inv.lines.some((l) => l.vat_code !== 'icp-dienst')) {
-        throw new ValidationError('Deze EU-dienst hoort in een ander btw-tijdvak dan de andere regels. Maak aparte facturen voor de EU-dienst en de overige leveringen, met hun eigen leverdatum.');
-      }
-      const entryId = this.ledger.post({
-        date: inv.invoice_date,
-        ...(icpService && serviceDate !== inv.invoice_date ? { vatDate: serviceDate } : {}),
-        description: `${totals.total < 0 ? 'Creditfactuur' : 'Factuur'} ${number} ${relation.name}`,
-        source: 'factuur',
-        sourceRef: `invoice:${id}`,
-        lines: this.journalLines(totals, relation.id, number),
-      });
+      const entryId = this.postInvoice(id, inv.invoice_date, this.vatDateOption(inv.lines.map((l) => l.vat_code), inv.invoice_date, inv.delivery_date, inv.delivery_date_to), totals, relation.id, relation.name, number);
       this.db
         .prepare(
           `UPDATE invoices SET number = ?, status = 'verzonden', subtotal = ?, vat_total = ?, total = ?,
@@ -226,6 +231,126 @@ export class InvoiceService {
 
       if (inv.credit_of_invoice_id) this.settleCreditAgainstOriginal(id, inv.credit_of_invoice_id);
       return this.get(id);
+    });
+  }
+
+  /**
+   * Neemt een definitieve factuur van de telefoon over als verzonden factuur, met dezelfde boeking en
+   * btw als een pc-factuur (journalLines, btw-datum en weigerregel zijn gedeeld met finalize). Het nummer
+   * (M1-2026-0001) is dat van de telefoon: de pc-teller wordt niet gebruikt en geen instelling wijzigt.
+   * `invoer` is de uuid van de wijziging met de velden uit leesFactuurVelden. Alles in een transactie met een terugdraaipunt: een geweigerde
+   * of mislukte import laat geen halve rijen achter. De factuur wordt hierna nooit meer bewerkt.
+   *
+   * Dezelfde uuid met dezelfde inhoud is al_aanwezig, met afwijkende inhoud conflict (er verandert niets);
+   * een bestaand nummer van een andere factuur of een onbekende creditnota_van is geweigerd. Een periode
+   * bij de boekhouder of een beginbalans-slot geeft ook geweigerd; een gewoon afgesloten periode schuift de
+   * boeking naar de eerste open dag. Het zoeken van project_uuid naar een klus is aan de aanroeper: jobId.
+   */
+  importDefinitive(invoer: ImportDefinitiefInvoer, relationId: number, jobId: number | null = null): ImportDefinitiefResultaat {
+    return tx(this.db, () => {
+      this.db.exec('SAVEPOINT import_definitief');
+      try {
+        const resultaat = this.importDefinitiefBinnenTx(invoer.uuid, invoer.velden, relationId, jobId);
+        if (resultaat.uitkomst === 'nieuw') this.db.exec('RELEASE import_definitief');
+        else {
+          this.db.exec('ROLLBACK TO import_definitief');
+          this.db.exec('RELEASE import_definitief');
+        }
+        return resultaat;
+      } catch (e) {
+        this.db.exec('ROLLBACK TO import_definitief');
+        this.db.exec('RELEASE import_definitief');
+        if (e instanceof ValidationError) return { uitkomst: 'geweigerd', reden: e.message, factuurId: null, boekingsdatum_verschoven: false, boekingsdatum: null };
+        throw e;
+      }
+    });
+  }
+
+  private importDefinitiefBinnenTx(uuid: string, f: FactuurVelden, relationId: number, jobId: number | null): ImportDefinitiefResultaat {
+    const geweigerd = (reden: string): ImportDefinitiefResultaat => ({ uitkomst: 'geweigerd', reden, factuurId: null, boekingsdatum_verschoven: false, boekingsdatum: null });
+    const reeks = leesFactuurNummer(f.nummer);
+    if (!reeks.ok) return geweigerd(reeks.melding);
+    const delivery = normalizeDelivery(f.leverdatum, f.leverdatum_tot);
+    const lines = f.regels.map((r) => ({ description: r.omschrijving, quantity: r.hoeveelheid, unit: r.eenheid, unitPrice: r.prijs, vatCode: r.btw_soort, vatPercentage: r.btw_percentage }));
+    const totals = computeTotals(lines);
+    if (totals.subtotal !== f.totalen.subtotaal || totals.vatTotal !== f.totalen.btw || totals.total !== f.totalen.totaal) {
+      return geweigerd('De totalen van de factuur kloppen niet met de regels.');
+    }
+
+    // dezelfde uuid: dezelfde inhoud is al binnen, afwijkende inhoud is een conflict
+    const bestaand = this.db.prepare('SELECT * FROM invoices WHERE uuid = ?').get(uuid) as InvoiceRow | undefined;
+    if (bestaand) {
+      const entry = bestaand.journal_entry_id ? (this.db.prepare('SELECT entry_date FROM journal_entries WHERE id = ?').get(bestaand.journal_entry_id) as { entry_date: IsoDate } | undefined) : undefined;
+      const gelijk =
+        bestaand.number === f.nummer &&
+        bestaand.invoice_date === f.datum &&
+        bestaand.subtotal === totals.subtotal &&
+        bestaand.vat_total === totals.vatTotal &&
+        bestaand.total === totals.total &&
+        JSON.stringify(readLines(this.db, 'invoice_lines', 'invoice_id', bestaand.id).map((l) => [l.description, l.quantity, l.unit, l.unit_price, l.vat_code, l.vat_percentage])) ===
+          JSON.stringify(lines.map((l) => [l.description, l.quantity, l.unit ?? null, l.unitPrice, l.vatCode, l.vatPercentage]));
+      const boekingsdatum = entry?.entry_date ?? null;
+      return gelijk
+        ? { uitkomst: 'al_aanwezig', reden: null, factuurId: bestaand.id, boekingsdatum_verschoven: boekingsdatum !== null && boekingsdatum !== bestaand.invoice_date, boekingsdatum }
+        : { uitkomst: 'conflict', reden: `Factuur ${f.nummer} is al eerder ontvangen, maar met andere gegevens. De pc laat de bestaande factuur ongemoeid.`, factuurId: bestaand.id, boekingsdatum_verschoven: false, boekingsdatum };
+    }
+    if (this.db.prepare('SELECT 1 FROM invoices WHERE number = ?').get(f.nummer)) return geweigerd(`Factuurnummer ${f.nummer} bestaat al bij een andere factuur.`);
+
+    let creditOf: number | null = null;
+    if (f.creditnota_van) {
+      const origineel = this.db.prepare('SELECT id, status, credit_of_invoice_id FROM invoices WHERE uuid = ?').get(f.creditnota_van) as { id: number; status: InvoiceStatus; credit_of_invoice_id: number | null } | undefined;
+      if (!origineel) return geweigerd('De creditnota hoort bij een factuur die de pc niet kent.');
+      if (origineel.credit_of_invoice_id) return geweigerd('De factuur waarvoor deze creditnota is gemaakt, is zelf al een creditnota.');
+      if (this.db.prepare('SELECT 1 FROM invoices WHERE credit_of_invoice_id = ?').get(origineel.id)) return geweigerd('De factuur waarvoor deze creditnota is gemaakt, is al teruggedraaid.');
+      creditOf = origineel.id;
+    }
+
+    const relation = this.relations.get(relationId);
+    const vatDate = this.vatDateOption(lines.map((l) => l.vatCode), f.datum, delivery.from, delivery.to);
+    const id = Number(
+      this.db
+        .prepare(
+          `INSERT INTO invoices (relation_id, credit_of_invoice_id, number, invoice_date, due_date, delivery_date, delivery_date_to, status, reference, intro, notes,
+             subtotal, vat_total, total, relation_snapshot, company_snapshot, sent_at, job_id, uuid, apparaat_code, reeks_jaar, reeks_volgnr, regeltabel_versie)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'verzonden', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          relation.id, creditOf, f.nummer, f.datum, f.vervaldatum, delivery.from, delivery.to, f.referentie, f.intro, f.opmerking,
+          totals.subtotal, totals.vatTotal, totals.total, JSON.stringify(f.klant_momentopname), JSON.stringify(f.bedrijf_momentopname), f.verzonden_op, jobId,
+          uuid, reeks.apparaat_code, reeks.reeks_jaar, reeks.reeks_volgnr, f.regeltabel_versie,
+        ).lastInsertRowid,
+    );
+    writeLines(this.db, 'invoice_lines', 'invoice_id', id, lines);
+    const entryId = this.postInvoice(id, f.datum, vatDate, totals, relation.id, f.klant_momentopname.name, f.nummer);
+    this.db.prepare('UPDATE invoices SET journal_entry_id = ? WHERE id = ?').run(entryId, id);
+    if (creditOf) this.settleCreditAgainstOriginal(id, creditOf);
+    const boekingsdatum = (this.db.prepare('SELECT entry_date FROM journal_entries WHERE id = ?').get(entryId) as { entry_date: IsoDate }).entry_date;
+    return { uitkomst: 'nieuw', reden: null, factuurId: id, boekingsdatum_verschoven: boekingsdatum !== f.datum, boekingsdatum };
+  }
+
+  /**
+   * De btw-datum van een EU-dienst (icp-dienst): de dienst valt in het tijdvak van de leverdatum. Staat
+   * die dienst in een ander tijdvak dan de andere regels van de factuur, dan weigert dit: dat zijn twee
+   * facturen. Gedeeld door finalize en importDefinitive, zodat een pc- en een telefoonfactuur gelijk boeken.
+   */
+  private vatDateOption(vatCodes: readonly string[], invoiceDate: IsoDate, deliveryDate: IsoDate | null, deliveryDateTo: IsoDate | null): { vatDate?: IsoDate } {
+    const serviceDate = deliveryDateTo ?? deliveryDate ?? invoiceDate;
+    const icpService = vatCodes.some((c) => c === 'icp-dienst');
+    if (icpService && serviceDate.slice(0, 7) !== invoiceDate.slice(0, 7) && vatCodes.some((c) => c !== 'icp-dienst')) {
+      throw new ValidationError('Deze EU-dienst hoort in een ander btw-tijdvak dan de andere regels. Maak aparte facturen voor de EU-dienst en de overige leveringen, met hun eigen leverdatum.');
+    }
+    return icpService && serviceDate !== invoiceDate ? { vatDate: serviceDate } : {};
+  }
+
+  /** Boekt een definitieve factuur (debiteuren aan omzet en btw); gedeeld door finalize en importDefinitive. */
+  private postInvoice(id: number, invoiceDate: IsoDate, vatDate: { vatDate?: IsoDate }, totals: DocumentTotals, relationId: number, relationName: string, number: string): number {
+    return this.ledger.post({
+      date: invoiceDate,
+      ...vatDate,
+      description: `${totals.total < 0 ? 'Creditfactuur' : 'Factuur'} ${number} ${relationName}`,
+      source: 'factuur',
+      sourceRef: `invoice:${id}`,
+      lines: this.journalLines(totals, relationId, number),
     });
   }
 
