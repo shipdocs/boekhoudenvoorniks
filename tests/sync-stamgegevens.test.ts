@@ -7,7 +7,7 @@ import { setup } from './helpers';
 import { Bonnenscanner, type ScannerDeps } from '../src/scanner/scanner';
 import { PHONE_SCANNER } from '../src/shared/phone-scanner';
 import { CONTENT_TYPE, ENDPOINT_PATH, RULES_VERSION, decodePairing, encodeFrame, openResponse, sealRequest, type PairingPayload, type ProtocolVersion } from '../src/scanner/protocol';
-import { KLANT_VELDEN, PROJECT_VELDEN } from '@gratis-boekhouden/kern';
+import { KLANT_VELDEN, PROJECT_VELDEN, REGELTABEL } from '@gratis-boekhouden/kern';
 import { veldOndergrens } from '../src/sync/ondergrens';
 import { volgendeSyncSeq } from '../src/sync/teller';
 import { CURSOR_MAX_TEKENS, STAMGEGEVENS_PAGINA, leesCursor, maakCursor } from '../src/sync/stamgegevens';
@@ -68,7 +68,7 @@ interface Pagina {
   soort: string;
   pcTijd: number;
   apparaatcode: string;
-  regels: number;
+  regels: unknown;
   klanten: Item[];
   projecten: Item[];
   aliassen: { alias_uuid: string; klant: string }[];
@@ -460,7 +460,7 @@ describe('stamgegevens: privacygrens', () => {
     expect(alle.projecten.length).toBe(2);
     const itemSleutels = ['gearchiveerd', 'pc_revisie', 'seq', 'uuid', 'velden'];
     for (const k of alle.klanten) {
-      expect(Object.keys(k).sort()).toEqual(itemSleutels);
+      expect(Object.keys(k).sort()).toEqual([...itemSleutels, 'vies'].sort());
       expect(Object.keys(k.velden).sort()).toEqual(Object.keys(KLANT_VELDEN).sort());
       for (const v of Object.values(k.velden)) expect(Object.keys(v).sort()).toEqual(['bron', 'tijd', 'waarde']);
     }
@@ -470,7 +470,9 @@ describe('stamgegevens: privacygrens', () => {
       for (const v of Object.values(pr.velden)) expect(Object.keys(v).sort()).toEqual(['bron', 'tijd', 'waarde']);
     }
     // nergens, op geen enkel niveau, een sleutel buiten de whitelist (type, paid_with, id's, bedrijfsgegevens, ...)
-    const toegestaan = new Set([...itemSleutels, ...Object.keys(KLANT_VELDEN), ...Object.keys(PROJECT_VELDEN), 'bron', 'tijd', 'waarde', 'ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'verborgen', 'volgende', 'nieuwe_sinds', 'alias_uuid', 'klant']);
+    const toegestaan = new Set([...itemSleutels, ...Object.keys(KLANT_VELDEN), ...Object.keys(PROJECT_VELDEN), 'bron', 'tijd', 'waarde', 'ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'verborgen', 'volgende', 'nieuwe_sinds', 'alias_uuid', 'klant',
+      // s14a: vies op klanten en de sleutels van de regeltabel
+      'vies', 'gecontroleerd_op', 'geldig', 'versie', 'geldig_vanaf', 'btw', 'code', 'label', 'pickLabel', 'percentage', 'rubriek', 'tekst', 'eu_landen', 'eu_b2c_drempel', 'teksten', 'icp', 'icp_dienst', 'buiten_eu_dienst', 'verlegd']);
     const sleutels = new Set<string>();
     const loop = (x: unknown) => {
       if (Array.isArray(x)) x.forEach(loop);
@@ -617,11 +619,11 @@ describe('stamgegevens: aliassen, apparaatcode en gegevens per rij', () => {
     // dezelfde gegevens, alleen de apparaatcode verschilt
     const zonder = (x: Pagina) => ({ ...x, apparaatcode: undefined });
     expect(zonder(pa)).toEqual(zonder(pb));
-    // pcTijd en regels zijn gelijk aan het hallo-antwoord
+    // pcTijd is gelijk aan het hallo-antwoord; regels is op de eerste pagina de tabel (s14a), het hallo-antwoord houdt zijn versienummer
     expect(pa.pcTijd).toBe(helloA.pcTijd);
     expect(pb.pcTijd).toBe(helloB.pcTijd);
-    expect(pa.regels).toBe(RULES_VERSION);
-    expect(pa.regels).toBe(((await a.verstuur({ soort: 'hallo', tijd: t.clock.now, naam: 'x', app: '1' }, 2)).json!.regels as number));
+    expect(pa.regels).toEqual(REGELTABEL);
+    expect((await a.verstuur({ soort: 'hallo', tijd: t.clock.now, naam: 'x', app: '1' }, 2)).json!.regels).toBe(RULES_VERSION);
     expect(pa.pcTijd).toBe(t.clock.now);
   });
 
