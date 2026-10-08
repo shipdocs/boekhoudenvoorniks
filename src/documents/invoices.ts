@@ -498,7 +498,8 @@ export class InvoiceService {
 
   /**
    * Waarschuwingen bij de datum van een nieuwe of aangepaste factuur: een datum in de toekomst of vóór de
-   * datum van de vorige definitieve factuur (de nummers lopen dan niet in datumvolgorde). Alleen een signaal.
+   * datum van de vorige definitieve factuur (de nummers lopen dan niet in datumvolgorde). Alleen een signaal. Een telefoonfactuur heeft een eigen
+   * nummerreeks en telt hier niet mee.
    */
   dateWarnings(invoiceDate: IsoDate, excludeId?: number, asOf: IsoDate = today()): string[] {
     assertIsoDate(invoiceDate, 'factuurdatum');
@@ -507,7 +508,7 @@ export class InvoiceService {
       out.push(`De factuurdatum (${formatDateNl(invoiceDate)}) ligt in de toekomst. De omzet en de btw komen dan pas in die periode. Klopt het jaar en de maand?`);
     }
     const last = this.db
-      .prepare(`SELECT number, invoice_date FROM invoices WHERE status <> 'concept' AND number IS NOT NULL AND is_opening = 0 AND credit_of_invoice_id IS NULL AND id IS NOT ? ORDER BY invoice_date DESC, id DESC LIMIT 1`)
+      .prepare(`SELECT number, invoice_date FROM invoices WHERE status <> 'concept' AND number IS NOT NULL AND is_opening = 0 AND credit_of_invoice_id IS NULL AND apparaat_code IS NULL AND id IS NOT ? ORDER BY invoice_date DESC, id DESC LIMIT 1`)
       .get(excludeId ?? null) as { number: string; invoice_date: IsoDate } | undefined;
     if (last && invoiceDate < last.invoice_date) {
       out.push(`Factuur ${last.number} heeft een latere datum (${formatDateNl(last.invoice_date)}). Je nieuwe factuur krijgt een hoger nummer maar een eerdere datum; dat mag, maar controleer of de datum klopt.`);

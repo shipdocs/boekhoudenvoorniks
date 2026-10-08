@@ -439,3 +439,21 @@ describe('onveranderlijk', () => {
     expect(na.regels).toEqual(voor.regels);
   });
 });
+
+describe('dateWarnings', () => {
+  it('een telefoonfactuur met een latere datum geeft geen latere-datum-waarschuwing op een nieuwe pc-factuur', () => {
+    const { s, klant } = setup();
+    s.invoices.importDefinitive(inv(UUID_1, velden([HOOG], { datum: '2026-05-20', vervaldatum: '2026-06-19' })), klant.id);
+    expect(s.invoices.dateWarnings('2026-03-01', undefined, ASOF)).toEqual([]);
+  });
+
+  it('de waarschuwing tussen pc-facturen werkt ongewijzigd, ook met een telefoonfactuur ertussen', () => {
+    const { s, klant } = setup();
+    const pc = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-05-20', lines: PC_REGELS }).id);
+    s.invoices.importDefinitive(inv(UUID_1, velden([HOOG], { datum: '2026-07-01', vervaldatum: '2026-07-31' })), klant.id);
+    const w = s.invoices.dateWarnings('2026-03-01', undefined, ASOF);
+    expect(w).toHaveLength(1);
+    expect(w[0]).toContain(pc.number!);
+    expect(w[0]).toContain('latere datum');
+  });
+});
