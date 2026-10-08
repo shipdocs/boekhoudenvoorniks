@@ -87,7 +87,7 @@ export class SyncOntvangst {
     behandelaars.push(this.projecten);
     this.facturen = opties.invoices ? new FactuurOntvangst(db, relations, opties.invoices, this.wachtrij, wachtrijOpties) : null;
     if (this.facturen) behandelaars.push(this.facturen);
-    this.bonnen = opties.spool ? new BonOntvangst(db, opties.spool, { now: this.now, keepLocation: opties.keepLocation }) : null;
+    this.bonnen = opties.spool ? new BonOntvangst(db, opties.spool, { now: this.now, keepLocation: opties.keepLocation, log: this.log }) : null;
   }
 
   /**
@@ -134,6 +134,7 @@ export class SyncOntvangst {
    */
   private verwerkBon(deviceId: string, w: Wijziging, route: string, bijlagen: Buffer[]): SyncResultaat {
     const bonnen = this.bonnen!;
+    bonnen.opruimen(); // bestanden van eerdere mislukte ontvangsten alsnog weg
     const voor = this.db.pragma('synchronous', { simple: true }) as number;
     try {
       this.db.pragma('synchronous = FULL');
@@ -163,6 +164,7 @@ export class SyncOntvangst {
 
   /** Verwerkt wat in de wachtrij kan worden verwerkt (ook bij het starten van de receiver). Gooit nooit. */
   verwerkWachtrij(): void {
+    this.bonnen?.opruimen();
     try {
       this.wachtrij.verwerk();
     } catch (e) {

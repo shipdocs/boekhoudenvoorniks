@@ -982,7 +982,8 @@ gebruiker dat op de pc heeft toegestaan. Daarna loopt de bon door de inbox zoals
 | 400 | `ongeldig` | nee | revisie anders dan 1, een grootte of `sha256` die niet bij de bijlage past, te veel of te weinig bytes, meer dan 10 foto's, of een bijlage die geen JPEG is |
 | 400 | `veld-ongeldig`, met `veld` en `melding` | nee | een veld buiten het schema, een ongeldige waarde, een lege lijst `fotos` |
 | 413 | `te-groot` | nee | de foto's samen meer dan 19 MiB (19.922.944 bytes), zoals bij het bon-bericht; het hele bericht blijft binnen de 20 MiB van de envelop |
-| 500 | `opslaan-mislukt` | nee | de pc kon niet opslaan; er is geen rij, geen registerrij en geen los bestand achtergebleven; dezelfde wijziging opnieuw sturen werkt gewoon |
+| 413 | `te-groot` | nee | de JSON van de wijziging (entiteit, uuid, revisie, tijd, velden) boven 128 KiB, of JSON plus bijlagen boven 20 MiB. Dit geldt op elke route, ook `map` en `mail`, en op de ruwe velden: een notitie van spaties, die de pc daarna zou trimmen, telt voluit mee |
+| 500 | `opslaan-mislukt` | nee | de pc kon niet opslaan; er is geen rij, geen registerrij en geen los bestand achtergebleven; dezelfde wijziging opnieuw sturen werkt gewoon. Lukt het verwijderen van een neergezet bestand zelf niet, dan onthoudt de pc het, probeert het later opnieuw en maakt er nooit een bon van |
 
 De registersleutel is (apparaat, entiteit, `uuid`, revisie): dezelfde sleutel met andere inhoud is dus een
 herhaling (`overgeslagen`) en geen botsing; een botsing ontstaat bij hetzelfde ID via een andere weg (het

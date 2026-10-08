@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BON_BETAALWIJZEN, BON_LIMIETEN, leesBonVelden, leesFotoVelden, type Wijziging } from '@gratis-boekhouden/kern';
@@ -245,6 +245,30 @@ describe('een bon als wijziging met bijlagen op de pc', () => {
     const helft = opvulling(Math.ceil((LIMITS.maxPhotoBytes + 1) / 2));
     expect(await p.bon([helft, helft])).toMatchObject({ status: 413, json: { fout: 'te-groot' } });
     expect(t.rijen()).toEqual({ ...voor, spool: voor.spool + 1, register: voor.register + 1, bestanden: voor.bestanden + 1 });
+    // Dezelfde grenzen gelden voor wie SyncOntvangst rechtstreeks aanroept (map, mail): het bericht is er niet
+    // eerder netwerk-klein gemaakt. Een notitie van spaties wordt door de kern getrimd en mag de grens niet omzeilen.
+    const sync = t.direct();
+    const foto = makeJpeg('map grens');
+    const wijz = (velden: Record<string, unknown>): Wijziging => ({ entiteit: 'bon', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden });
+    for (const route of ['map', 'mail']) {
+      const heleBody = sync.verwerk(p.apparaat, 'M1', wijz(bonVelden([foto], { notitie: ' '.repeat(LIMITS.maxBodyBytes + 1) })), route, [foto]);
+      expect(heleBody, route).toMatchObject({ status: 413, fout: 'te-groot' });
+      const jsonGroot = sync.verwerk(p.apparaat, 'M1', wijz(bonVelden([foto], { notitie: 'a'.repeat(LIMITS.maxWijzigingJsonBytes) })), route, [foto]);
+      expect(jsonGroot, route).toMatchObject({ status: 413, fout: 'te-groot' });
+      const somTeGroot = sync.verwerk(p.apparaat, 'M1', wijz(bonVelden([eroverheen])), route, [eroverheen]);
+      expect(somTeGroot, route).toMatchObject({ status: 413, fout: 'te-groot' });
+      const tweeTeGroot = sync.verwerk(p.apparaat, 'M1', wijz(bonVelden([helft, helft])), route, [helft, helft]);
+      expect(tweeTeGroot, route).toMatchObject({ status: 413, fout: 'te-groot' });
+      expect(sync.verwerk(p.apparaat, 'M1', wijz(bonVelden(elf)), route, elf), route).toMatchObject({ status: 400 });
+      expect(sync.verwerk(p.apparaat, 'M1', wijz(bonVelden(elf)), route, tien), route).toMatchObject({ status: 400 });
+      expect(sync.verwerk(p.apparaat, 'M1', wijz(bonVelden([])), route, []), route).toMatchObject({ status: 400, fout: 'veld-ongeldig', veld: 'fotos' });
+    }
+    // ook een fotowijziging (nog niet ondersteund, wel gecontroleerd) houdt zich aan de grens
+    const fotoW: Wijziging = { entiteit: 'foto', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: { project_uuid: randomUUID(), fotos: fotoVelden([eroverheen]) } };
+    expect(sync.verwerk(p.apparaat, 'M1', fotoW, 'map', [eroverheen])).toMatchObject({ status: 413, fout: 'te-groot' });
+    // een notitie van precies de toegestane lengte (met spaties eromheen binnen de JSON-grens) blijft gewoon kunnen
+    expect(sync.verwerk(p.apparaat, 'M1', wijz(bonVelden([foto], { notitie: `  ${'a'.repeat(LIMITS.maxNoteChars)}  ` })), 'map', [foto])).toMatchObject({ status: 200, uitkomst: 'toegepast' });
+    expect(t.rijen()).toEqual({ ...voor, spool: voor.spool + 2, register: voor.register + 2, bestanden: voor.bestanden + 2 });
   });
 
   it('BON-07 velden: onbekend veld, __proto__, onbekende betaalwijze, stuurtekens, lange notitie, ongeldige locatie en lege fotos geven 400 veld-ongeldig met het veld; de kern is zuiver en heeft de grenzen van LIMITS', () => {
@@ -352,7 +376,7 @@ describe('een bon als wijziging met bijlagen op de pc', () => {
     expect(t.rijen()).toEqual({ spool: 0, register: 0, wachtrij: 0, bestanden: 0 });
   });
 
-  it('BON-11 halve rijen: een fout in de databank of in het bestand geeft 500 opslaan-mislukt zonder rij, registerrij of los bestand, en daarna werkt dezelfde wijziging', () => {
+  it('BON-11 halve rijen: een fout in de databank of in het bestand geeft 500 opslaan-mislukt zonder rij, registerrij of los bestand, en daarna werkt dezelfde wijziging', async () => {
     const t = start();
     const apparaat = randomUUID();
     const fotos = [makeJpeg('half'), makeJpeg('half 2')];
@@ -382,6 +406,55 @@ describe('een bon als wijziging met bijlagen op de pc', () => {
     expect(sync.verwerk(apparaat, 'M1', w, 'netwerk', fotos)).toEqual({ status: 200, uitkomst: 'toegepast' });
     expect(sync.verwerk(apparaat, 'M1', w, 'netwerk', fotos)).toEqual({ status: 200, uitkomst: 'overgeslagen' });
     expect(t.rijen()).toEqual({ spool: 1, register: 1, wachtrij: 0, bestanden: 1 });
+
+    // 4. de rollback zelf mislukt: het bestand kan niet verwijderd worden. Dat verdwijnt niet stil: het bestand wordt
+    // onthouden, geen herstel (recover) importeert het ooit als bon, en zodra het kan gaat het alsnog weg.
+    const w2: Wijziging = { entiteit: 'bon', uuid: randomUUID(), revisie: 1, tijd: t.clock.now, velden: bonVelden(fotos, { notitie: 'tweede geheime notitie' }) };
+    const spool2 = new ReceiptSpool(t.db, t.spoolDir);
+    const sync2 = t.direct(spool2);
+    const bestand = join(t.spoolDir, `${w2.uuid}.bon`);
+    const rijenVoor = t.rijen();
+    // kan niet verwijderen: de spoolmap is niet schrijfbaar (niet als root; dan blijft het bestand staan door een
+    // nagebootste fout van het verwijderen zelf, zie ReceiptSpool.verwijderBestand)
+    const root = typeof process.getuid === 'function' && process.getuid() === 0;
+    const hersteld: (() => void)[] = [];
+    const echtVerwijderen = spool2.verwijderBestand.bind(spool2);
+    t.db.function('blokkeer_verwijderen', () => {
+      if (!root) {
+        chmodSync(t.spoolDir, 0o500);
+        hersteld.push(() => chmodSync(t.spoolDir, 0o700));
+      } else {
+        spool2.verwijderBestand = () => {
+          throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+        };
+      }
+      return 1;
+    });
+    t.db.exec(`CREATE TRIGGER test_register_kapot2 BEFORE INSERT ON sync_ontvangen BEGIN SELECT blokkeer_verwijderen(); SELECT RAISE(ABORT, 'kapot'); END`);
+    try {
+      expect(sync2.verwerk(apparaat, 'M1', w2, 'map', fotos)).toEqual({ status: 500, fout: 'opslaan-mislukt' });
+      // de rijen zijn teruggedraaid; het bestand staat nog, maar is gemarkeerd als te verwijderen
+      expect(t.rijen()).toEqual({ ...rijenVoor, bestanden: rijenVoor.bestanden + 1 });
+      expect(existsSync(bestand)).toBe(true);
+      expect(t.logs.some((r) => /verwijder/i.test(r))).toBe(true);
+      for (const regel of t.logs) expect(regel).not.toMatch(/geheime notitie/);
+    } finally {
+      for (const f of hersteld) f();
+      spool2.verwijderBestand = echtVerwijderen;
+      t.db.exec('DROP TRIGGER test_register_kapot2');
+    }
+    // zelfs met herstelde rechten: recover en de inbox maken er nooit een bon van, en het bestand gaat weg
+    spool2.recover();
+    t.geefVrij();
+    await t.scanner.processSpool();
+    // alleen de eerdere, echte bon (uit stap 1 tot 3) is in de inbox gekomen; zijn kopie in de spool is daarna weg
+    expect(t.rijen()).toEqual({ ...rijenVoor, bestanden: 0 });
+    expect(existsSync(bestand)).toBe(false);
+    expect(t.n('SELECT COUNT(*) AS n FROM scanner_documents WHERE id = ?', w2.uuid)).toBe(0);
+    expect(t.documents()).toHaveLength(1);
+    // en dezelfde wijziging komt daarna gewoon binnen, precies een keer
+    expect(sync2.verwerk(apparaat, 'M1', w2, 'map', fotos)).toEqual({ status: 200, uitkomst: 'toegepast' });
+    expect(t.rijen()).toEqual({ ...rijenVoor, spool: rijenVoor.spool + 1, register: rijenVoor.register + 1, bestanden: 1 });
   });
 
   it('BON-12 bevestiging en aansluiting: toegepast en afgewezen veroorzaken geen wachtrijrij; de bon staat in de inbox zoals een bon uit het bon-bericht en de tellers blijven staan', async () => {
