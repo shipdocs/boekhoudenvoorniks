@@ -138,7 +138,7 @@ function vulAfgehandeld(t: T, apparaatId: string, aantal: number): string[] {
   t.db.transaction(() => {
     for (let i = 0; i < aantal; i++) {
       const uuid = randomUUID();
-      const w = { entiteit: 'project', uuid, revisie: 1, tijd: t.clock.now - DAG, velden: { titel: `Klus ${i}` } };
+      const w = { entiteit: 'project' as const, uuid, revisie: 1, tijd: t.clock.now - DAG, velden: { titel: `Klus ${i}` } };
       expect(wachtrij.zetIn(apparaatId, 'M1', w, { entiteit: 'klant', uuid: randomUUID(), reden: 'klant-onbekend' })).toBe('toegevoegd');
       const rij = wachtrij.rij(apparaatId, 'project', uuid, 1)!;
       expect(wachtrij.markeer(rij.id, 'toegepast', null)).toBe(true);
