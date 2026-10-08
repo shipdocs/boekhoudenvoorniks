@@ -664,10 +664,11 @@ describe('de mailroute van de telefoon', () => {
   });
 
   it('MAILTEL-12 migratie en nooit verwijderen: de migratie (kolom route op sync_map_problemen, ALTER TABLE ADD COLUMN, bestaande rijen krijgen NULL en gelden als map) is relatief getest (oude toestand uit migrations.slice, findIndex op een zoektekst uit de nieuwe migratie), bestaande rijen overleven, user_version klopt; geen DELETE in de nieuwe code; de CHECK op mail_messages.outcome wordt niet aangeraakt (geen tabel opnieuw opbouwen)', () => {
-    const zoek = 'ALTER TABLE sync_map_problemen ADD COLUMN route';
+    const zoek = 'ALTER TABLE sync_map_problemen';
     const i = migrations.findIndex((m) => m.includes(zoek));
     expect(i).toBeGreaterThan(0);
     expect(migrations.filter((m) => m.includes(zoek))).toHaveLength(1);
+    expect(migrations[i]!).toMatch(/ALTER TABLE sync_map_problemen\s+ADD COLUMN\s+route TEXT/);
     expect(migrations[i]!).not.toMatch(/TRIGGER|DROP|DELETE|RENAME/i);
     expect(migrations[i]!).not.toMatch(/CREATE TABLE/i);
     const oud = new Database(':memory:');
