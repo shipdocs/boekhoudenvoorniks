@@ -6,7 +6,7 @@ import { escapeHtml } from '../documents/render';
  * Genereert een XBRL-instance voor de aangifte omzetbelasting (SBR / Nederlandse Taxonomie).
  *
  * STATUS: voorbereiding voor fase 3 (directe aangifte via Digipoort). De elementnamen volgen de
- * NT20-concepten en het entrypoint voor OB 2026 (docs/fiscale-review-44.md). De volledige instance MOET gevalideerd
+ * NT20-concepten en het entrypoint voor OB 2026 (issue #44). De volledige instance MOET gevalideerd
  * worden tegen de actuele NT-release en de Belastingdienst-testomgeving voordat dit gebruikt wordt
  * (zie GitHub-issue "Digipoort/SBR aansluiting"). Tot die tijd: alleen export, niet indienen.
  */
