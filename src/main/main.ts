@@ -493,6 +493,8 @@ function initServices(): void {
     log: (message) => console.error(message),
   });
   // alleen bekijken: de bonnenmap wordt niet bijgehouden en er komt niets binnen
+  // telefoonberichten per e-mail (.bvns-bijlagen) gaan door dezelfde afhandeling als de bonnenmap; alleen als koppelen aanstaat
+  if (!readOnly) services.mail.setTelefoonHandler(scanner.mailHandler());
   if (!SMOKE_TEST && !readOnly) void scanner.start().catch((e) => console.error('Bonnenscanner starten mislukt', e));
   api = createApi(services, {
     async saveFile(defaultName, content, filters) {

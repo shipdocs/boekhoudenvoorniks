@@ -50,24 +50,24 @@ import { ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD, reeksNummer }
 /** De woorden bij een soort probleem van de bonnenmap, in gewone taal (geen paden en geen inhoud). */
 const MAP_PROBLEEM_TEKST: Record<(typeof MAP_SOORTEN)[number], { een: string; meer: string; vraag: string }> = {
   onleesbaar: {
-    een: 'bestand van je telefoon in de bonnenmap was niet te lezen',
-    meer: 'bestanden van je telefoon in de bonnenmap waren niet te lezen',
-    vraag: 'De app kon deze bestanden niet openen: ze zijn beschadigd, onvolledig, aangepast of van een andere versie. Er is niets mee gedaan.',
+    een: 'bericht van je telefoon (bonnenmap of e-mail) was niet te lezen',
+    meer: 'berichten van je telefoon (bonnenmap of e-mail) waren niet te lezen',
+    vraag: 'De app kon deze berichten niet openen: ze zijn beschadigd, onvolledig, aangepast of van een andere versie. Er is niets mee gedaan.',
   },
   'onbekend-apparaat': {
-    een: 'bestand in de bonnenmap komt van een telefoon die niet (meer) gekoppeld is',
-    meer: 'bestanden in de bonnenmap komen van een telefoon die niet (meer) gekoppeld is',
-    vraag: 'Deze bestanden zijn gemaakt door een telefoon die niet gekoppeld is, bijvoorbeeld omdat je hem hebt ontkoppeld. Er is niets mee gedaan en de telefoon krijgt geen antwoord.',
+    een: 'bericht in de bonnenmap of e-mail komt van een telefoon die niet (meer) gekoppeld is',
+    meer: 'berichten in de bonnenmap of e-mail komen van een telefoon die niet (meer) gekoppeld is',
+    vraag: 'Deze berichten zijn gemaakt door een telefoon die niet gekoppeld is, bijvoorbeeld omdat je hem hebt ontkoppeld. Er is niets mee gedaan en de telefoon krijgt geen antwoord.',
   },
   afgewezen: {
     een: 'wijziging van je telefoon is afgewezen',
     meer: 'wijzigingen van je telefoon zijn afgewezen',
-    vraag: 'De pc heeft deze wijzigingen gelezen maar niet overgenomen, bijvoorbeeld omdat een factuurnummer al bezet is. De telefoon krijgt hier bericht van.',
+    vraag: 'De pc heeft deze wijzigingen gelezen maar niet overgenomen, bijvoorbeeld omdat een factuurnummer al bezet is. Via de bonnenmap krijgt de telefoon hier bericht van; over de e-mail krijgt hij nooit een antwoord.',
   },
   'veld-ongeldig': {
     een: 'wijziging van je telefoon bevat een veld dat niet klopt',
     meer: 'wijzigingen van je telefoon bevatten een veld dat niet klopt',
-    vraag: 'De pc heeft deze wijzigingen niet overgenomen omdat een veld niet klopt. De telefoon krijgt hier bericht van en kan het corrigeren.',
+    vraag: 'De pc heeft deze wijzigingen niet overgenomen omdat een veld niet klopt. Via de bonnenmap krijgt de telefoon hier bericht van en kan hij het corrigeren; over de e-mail krijgt hij nooit een antwoord.',
   },
   'schrijven-mislukt': {
     een: 'keer lukte het niet iets in de bonnenmap te schrijven of te verplaatsen',
@@ -1952,7 +1952,7 @@ export class InboxService {
   }
 
   /**
-   * Problemen met bestanden van de telefoon in de bonnenmap (src/scanner/map-route.ts): precies een melding per soort
+   * Problemen met berichten van de telefoon in de bonnenmap of per e-mail (src/scanner/map-route.ts, src/mail/mail-intake.ts): precies een melding per soort
    * probleem, met een telling van de ongeziene regels. Eerst wordt alles weggelaten wat al gezien is en pas daarna begrensd
    * (per soort de nieuwste MAP_MAX_ONGEZIEN regels), zodat een berg geziene regels of een volle soort nooit een nieuw probleem verbergt. Geen inhoud en geen pad.
    */
@@ -1978,7 +1978,7 @@ export class InboxService {
         kind: 'telefoon-map-problemen',
         icon: '📂',
         title: `${aantal} ${een ? tekst.een : tekst.meer}`,
-        question: `${tekst.vraag} Het gaat om ${aantal} ${een ? 'bestand' : 'bestanden'} in de bonnenmap. Er is niets verloren gegaan en de bestanden blijven bewaard in de submap verwerkt van de bonnenmap. Heb je het bekeken, meld het dan als gezien.`,
+        question: `${tekst.vraag} Het gaat om ${aantal} ${een ? 'bericht' : 'berichten'} in de bonnenmap of per e-mail. Er is niets verloren gegaan: bestanden blijven bewaard in de submap verwerkt van de bonnenmap en e-mails staan in je verwerkt-map of blijven in je mailbox. Heb je het bekeken, meld het dan als gezien.`,
         priority: 2,
         actions: [
           { id: 'gezien', label: 'Gezien', primary: true },
