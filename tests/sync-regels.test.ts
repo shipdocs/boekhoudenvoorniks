@@ -97,13 +97,13 @@ describe('btw-regeltabel en VIES in de stamgegevens', () => {
     const t = start();
     for (let i = 0; i < STAMGEGEVENS_PAGINA + 20; i++) maakKlant(t, `Klant ${i}`);
     const eerste = pagina(t);
-    expect(eerste.regels).toEqual(REGELTABEL);
+    expect(eerste.regeltabel).toEqual(REGELTABEL);
     expect(eerste.volgende).not.toBeNull();
     const tweede = pagina(t, 0, leesCursor(eerste.volgende));
     expect(Object.hasOwn(tweede, 'regels')).toBe(false);
     expect(tweede.klanten.length).toBeGreaterThan(0);
     // het antwoord deelt geen object met de kern: knoeien met het antwoord verandert de tabel niet
-    (eerste.regels as { btw: unknown[] }).btw.length = 0;
+    (eerste.regeltabel as { btw: unknown[] }).btw.length = 0;
     expect(REGELTABEL.btw.length).toBe(Object.keys(SALES_VAT_RATES).length);
   });
 
@@ -114,14 +114,14 @@ describe('btw-regeltabel en VIES in de stamgegevens', () => {
     // een lege delta
     const leeg = pagina(t, tot);
     expect(leeg.klanten).toEqual([]);
-    expect(leeg.regels).toEqual(REGELTABEL);
+    expect(leeg.regeltabel).toEqual(REGELTABEL);
     // een delta met een klant
     const nieuw = maakKlant(t, 'Tweede');
     const delta = pagina(t, tot);
     expect(delta.klanten.map((k) => k.uuid)).toEqual([nieuw.uuid]);
-    expect(delta.regels).toEqual(REGELTABEL);
+    expect(delta.regeltabel).toEqual(REGELTABEL);
     // een sinds boven de teller (teruggezette back-up) heeft de tabel ook
-    expect(pagina(t, teller(t) + 1000).regels).toEqual(REGELTABEL);
+    expect(pagina(t, teller(t) + 1000).regeltabel).toEqual(REGELTABEL);
     expect(rij<{ n: number }>(t, 'SELECT COUNT(*) AS n FROM relations WHERE uuid IS NOT NULL').n).toBeGreaterThan(1);
   });
 
@@ -301,7 +301,7 @@ describe('btw-regeltabel en VIES in de stamgegevens', () => {
     const delta = ronde(t, tot2);
     expect(delta.verborgen).toEqual([{ uuid: wisselaar.uuid, seq: teller(t), soort: 'klant' }]);
     expect(delta.klanten).toEqual([]);
-    expect(delta.paginas[0]!.regels).toEqual(REGELTABEL);
+    expect(delta.paginas[0]!.regeltabel).toEqual(REGELTABEL);
     // het wijzigingsnummer blijft strikt oplopend, ook na een controle
     expect(volgendeSyncSeq(t.db)).toBe(teller(t));
   });

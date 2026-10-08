@@ -68,7 +68,7 @@ interface Pagina {
   soort: string;
   pcTijd: number;
   apparaatcode: string;
-  regels: unknown;
+  regeltabel: unknown;
   klanten: Item[];
   projecten: Item[];
   aliassen: { alias_uuid: string; klant: string }[];
@@ -455,7 +455,7 @@ describe('stamgegevens: privacygrens', () => {
     const [uuid] = maakKlanten(t, 1, t.clock.now, 'een notitie');
     t.s.relations.update(rij<{ id: number }>(t, 'SELECT id FROM relations WHERE uuid = ?', uuid).id, { phone: '06-12345678' });
     const alle = await p.alles();
-    expect(Object.keys(alle.paginas[0]!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'soort', 'verborgen', 'volgende']);
+    expect(Object.keys(alle.paginas[0]!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'regeltabel', 'soort', 'verborgen', 'volgende']);
     expect(alle.klanten.length).toBeGreaterThan(0);
     expect(alle.projecten.length).toBe(2);
     const itemSleutels = ['gearchiveerd', 'pc_revisie', 'seq', 'uuid', 'velden'];
@@ -470,7 +470,7 @@ describe('stamgegevens: privacygrens', () => {
       for (const v of Object.values(pr.velden)) expect(Object.keys(v).sort()).toEqual(['bron', 'tijd', 'waarde']);
     }
     // nergens, op geen enkel niveau, een sleutel buiten de whitelist (type, paid_with, id's, bedrijfsgegevens, ...)
-    const toegestaan = new Set([...itemSleutels, ...Object.keys(KLANT_VELDEN), ...Object.keys(PROJECT_VELDEN), 'bron', 'tijd', 'waarde', 'ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'verborgen', 'volgende', 'nieuwe_sinds', 'alias_uuid', 'klant',
+    const toegestaan = new Set([...itemSleutels, ...Object.keys(KLANT_VELDEN), ...Object.keys(PROJECT_VELDEN), 'bron', 'tijd', 'waarde', 'ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'regeltabel', 'klanten', 'projecten', 'aliassen', 'verborgen', 'volgende', 'nieuwe_sinds', 'alias_uuid', 'klant',
       // s14a: vies op klanten en de sleutels van de regeltabel
       'vies', 'gecontroleerd_op', 'geldig', 'versie', 'geldig_vanaf', 'btw', 'code', 'label', 'pickLabel', 'percentage', 'rubriek', 'tekst', 'eu_landen', 'eu_b2c_drempel', 'teksten', 'icp', 'icp_dienst', 'buiten_eu_dienst', 'verlegd']);
     const sleutels = new Set<string>();
@@ -622,7 +622,7 @@ describe('stamgegevens: aliassen, apparaatcode en gegevens per rij', () => {
     // pcTijd is gelijk aan het hallo-antwoord; regels is op de eerste pagina de tabel (s14a), het hallo-antwoord houdt zijn versienummer
     expect(pa.pcTijd).toBe(helloA.pcTijd);
     expect(pb.pcTijd).toBe(helloB.pcTijd);
-    expect(pa.regels).toEqual(REGELTABEL);
+    expect(pa.regeltabel).toEqual(REGELTABEL);
     expect((await a.verstuur({ soort: 'hallo', tijd: t.clock.now, naam: 'x', app: '1' }, 2)).json!.regels).toBe(RULES_VERSION);
     expect(pa.pcTijd).toBe(t.clock.now);
   });

@@ -33,7 +33,7 @@ import { veldOndergrens } from './ondergrens';
  * - Een project heeft een effectief nummer: het grootste van zijn eigen sync_seq en dat van zijn klant.
  *   Verandert de klant (ook van type: leverancier naar beide), dan komen zijn projecten mee in de delta.
  *
- * - De btw-regeltabel (`regels`) staat op de eerste pagina (zonder cursor), altijd, onafhankelijk van
+ * - De btw-regeltabel (`regeltabel`) staat op de eerste pagina (zonder cursor), altijd, onafhankelijk van
  *   `sinds` en van de inhoud van de delta; vervolgpagina's hebben het veld niet. De tabel komt uit de kern.
  * - Elke klant draagt `vies`: null of { gecontroleerd_op, geldig }. Dat is de laatste VIES-controle van het
  *   HUIDIGE btw-nummer van de klant (genormaliseerd zoals ViesService.latest). Alleen deze twee velden
@@ -113,7 +113,7 @@ export interface VerborgenItem {
 
 export interface StamgegevensAntwoord {
   /** de btw-regeltabel; alleen op de eerste pagina (zonder cursor), nooit op een vervolgpagina */
-  regels?: Regeltabel;
+  regeltabel?: Regeltabel;
   klanten: StamKlant[];
   projecten: StamItem[];
   aliassen: StamAlias[];
@@ -395,7 +395,7 @@ export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): Stamgegevens
 
       const aliassen = cursor ? [] : (db.prepare(ALIAS_SQL).all() as StamAlias[]).map((a) => ({ alias_uuid: a.alias_uuid, klant: a.klant }));
       // de regeltabel alleen op de eerste pagina, altijd (een kopie: het antwoord deelt geen object met de kern)
-      return { ...(cursor ? {} : { regels: structuredClone(REGELTABEL) }), klanten, projecten, aliassen, verborgen, volgende, nieuwe_sinds: tot };
+      return { ...(cursor ? {} : { regeltabel: structuredClone(REGELTABEL) }), klanten, projecten, aliassen, verborgen, volgende, nieuwe_sinds: tot };
     })
     .deferred();
 }

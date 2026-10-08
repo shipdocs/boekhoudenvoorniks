@@ -293,8 +293,8 @@ describe('bonnenscanner v2: stamgegevens', () => {
     const klus = t.s.jobs.create({ relationId: t.klant.id, title: 'Stucwerk woonkamer', notes: 'Eerst de gang' });
     // de eerste vraag van een telefoon: zijn apparaatcode bestaat dan nog niet en wordt hier toegekend
     const r = await p.verstuur({ soort: 'stamgegevens', tijd: t.clock.now }, { versie: 2 });
-    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'stamgegevens', pcTijd: t.clock.now, apparaatcode: 'M1', regels: REGELTABEL, volgende: null, aliassen: [], verborgen: [] } });
-    expect(Object.keys(r.json!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'soort', 'verborgen', 'volgende']);
+    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'stamgegevens', pcTijd: t.clock.now, apparaatcode: 'M1', regels: RULES_VERSION, regeltabel: REGELTABEL, volgende: null, aliassen: [], verborgen: [] } });
+    expect(Object.keys(r.json!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'regeltabel', 'soort', 'verborgen', 'volgende']);
     const klanten = r.json!.klanten as { uuid: string; seq: number; pc_revisie: number; gearchiveerd: boolean; velden: Record<string, { waarde: unknown; tijd: number; bron: string }> }[];
     // de twee klanten van de testadministratie, niet de leverancier
     expect(klanten.map((k) => k.velden.naam!.waarde).sort()).toEqual(['Bouwbedrijf De Vries BV', 'Familie Jansen']);
@@ -642,8 +642,8 @@ describe('bonnenscanner v2: de voorbeelden in het document', () => {
     expect(parseFrame(encodeFrame(verzoek('stamgegevens')), 2)).toEqual({ soort: 'stamgegevens', tijd: 1790848800000 });
     expect(() => parseFrame(encodeFrame(verzoek('stamgegevens')), 1)).toThrow();
     const voorbeeld = antwoord('stamgegevens');
-    expect(Object.keys(voorbeeld)).toEqual(['ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'klanten', 'projecten', 'aliassen', 'verborgen', 'volgende', 'nieuwe_sinds']);
-    expect(voorbeeld.regels).toMatchObject({ versie: REGELTABEL_VERSIE });
+    expect(Object.keys(voorbeeld)).toEqual(['ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'regeltabel', 'klanten', 'projecten', 'aliassen', 'verborgen', 'volgende', 'nieuwe_sinds']);
+    expect(voorbeeld.regeltabel).toMatchObject({ versie: REGELTABEL_VERSIE });
     for (const item of voorbeeld.klanten as Record<string, unknown>[]) {
       expect(Object.keys(item)).toEqual(['uuid', 'seq', 'pc_revisie', 'gearchiveerd', 'velden', 'vies']);
     }
