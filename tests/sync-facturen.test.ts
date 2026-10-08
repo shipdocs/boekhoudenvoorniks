@@ -518,7 +518,7 @@ describe('factuurwijziging van de telefoon op de pc', () => {
     expect([a.code, b.code]).toEqual(['M1', 'M2']);
     const klant = randomUUID();
     const uuid = randomUUID();
-    const w = { entiteit: 'factuur', uuid, revisie: 1, tijd: Date.now() - DAG, velden: velden(klant, [HOOG], { nummer: nummer(1, a.code) }) };
+    const w: Wijziging = { entiteit: 'factuur', uuid, revisie: 1, tijd: Date.now() - DAG, velden: velden(klant, [HOOG], { nummer: nummer(1, a.code) }) };
     expect(o.sync.verwerk(a.deviceId, a.code, w)).toEqual({ status: 200, uitkomst: 'wacht' });
     pairing.unpair(a.deviceId);
     expect(n(o.db, 'SELECT COUNT(*) AS n FROM scanner_devices WHERE id = ?', a.deviceId)).toBe(0);
