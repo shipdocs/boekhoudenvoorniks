@@ -13,3 +13,4 @@ export * from './documents/render';
 export * from './documents/invoices';
 export * from './sync/changeset';
 export * from './sync/velden';
+export * from './sync/factuur';
