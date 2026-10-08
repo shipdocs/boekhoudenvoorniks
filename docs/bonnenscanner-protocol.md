@@ -1039,6 +1039,8 @@ die in de velden: de `sha256` in de velden is die van wat de telefoon stuurde (d
 die in de pc is die van wat is bewaard. De pc vergelijkt een herhaling met en zonder locatie als dezelfde foto, ook als de instelling tussentijds is veranderd: het al bewaarde bestand blijft leidend en de rijen
 wijzen naar wat daadwerkelijk bewaard is.
 
+**Zichtbaar op de pc.** De foto's van de telefoon zijn op de pc alleen lezen te bekijken bij de klus (onder *Foto's van de telefoon* in het klusscherm, op volgorde van het bewerkmoment, ook bij een gearchiveerde of gefactureerde klus), zonder pad, `sha256` of wijziging-uuid. Er is geen functie om een foto te wijzigen of te verwijderen, en een foto komt niet in een factuur of rapport.
+
 **Een onbekend project wacht.** Kent de pc het project (nog) niet, dan antwoordt hij `wacht`, net als bij een
 factuur voor een onbekend project: er komt een rij in de wachtrij (`sync_wachtrij`, wacht op het project, reden
 `project-onbekend`, met de route van de eerste ontvangst), maar geen registerrij en geen foto. De bestanden staan dan al

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, useAction, useApp, useLoad } from '../ui';
 import type { JobCostItem, WorkItem } from '../../jobs/jobs';
+import { JobPhotosSection } from './JobPhotos';
 
 export function Jobs() {
   const { go } = useApp();
@@ -223,6 +224,8 @@ export function JobDetail({ id }: { id: number }) {
       <WorkOrder jobId={id} items={work.data ?? []} onChanged={() => void work.reload()} readOnly={j.status === 'gefactureerd' || j.status === 'geannuleerd'} />
 
       <JobCosts jobId={id} onChanged={() => void job.reload()} />
+
+      <JobPhotosSection jobId={id} />
 
       {j.invoices.length > 0 && (
         <>
