@@ -84,6 +84,8 @@ export class DocumentSender {
     let inv = this.invoices.get(id);
     // de echte factuur staat in je vorige programma; hier alleen het openstaande bedrag
     if (inv.is_opening) throw new ValidationError('Deze factuur komt uit je vorige administratie. Stuur hem vanuit je vorige programma; een herinnering kan wel vanuit hier.');
+    // een telefoonfactuur (uuid) stuurt de telefoon zelf; de pc verstuurt hem nooit
+    if (inv.uuid) throw new ValidationError(`Factuur ${inv.number} komt van je telefoon en is daar al verstuurd. De pc verstuurt deze factuur niet opnieuw.`);
     const to = (opts.to ?? inv.relation_email ?? '').trim();
     if (!isValidEmail(to)) throw new ValidationError(`Geen geldig e-mailadres voor ${inv.relation_name}`);
     const mailer = await this.mailerFactory(); // faalt vroeg als SMTP niet is ingesteld
