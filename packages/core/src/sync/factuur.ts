@@ -19,7 +19,7 @@ export const FACTUUR_LIMIETEN = {
   maxRegels: 200,
   /** omschrijving van een regel, en elk tekstveld in een momentopname */
   maxTekst: 200,
-  maxEenheid: 50,
+  maxEenheid: 20,
   maxReferentie: 200,
   maxRegeltabelVersie: 64,
   /** intro en opmerking */
