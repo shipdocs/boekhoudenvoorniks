@@ -98,3 +98,79 @@ function clean(v: string | undefined): string | null {
   const t = (v ?? '').split('\n').map((x) => x.trim()).filter(Boolean).join(', ');
   return !t || t === '---' ? null : t;
 }
+
+/** Hoeveel klanten Vandaag hoogstens als taak krijgt; de rest staat in een telling. */
+export const MAX_VIES_TAKEN = 50;
+/** Hoeveel klanten per ronde uit de databank worden gelezen, en hoeveel rondes hoogstens (begrenst het zoeken). */
+const VIES_ZOEK_PER_RONDE = 200;
+const VIES_ZOEK_MAX_RONDES = 25;
+/** Hoeveel factuurnummers hoogstens in de tekst van een taak komen. */
+const VIES_MAX_NUMMERS = 5;
+
+export interface ViesKlantZonderControle {
+  relationId: number;
+  naam: string;
+  /** genormaliseerd zoals ViesService.latest dat doet */
+  vatNumber: string;
+  toestand: 'onbekend' | 'ongeldig';
+  /** het aantal telefoonfacturen met een icp- of icp-dienst-regel voor deze klant */
+  aantal: number;
+  /** de eerste nummers daarvan (hoogstens VIES_MAX_NUMMERS) */
+  nummers: string[];
+}
+
+/**
+ * Klanten met een telefoonfactuur (apparaat_code gevuld, geen concept, geen creditnota) met minstens een icp- of
+ * icp-dienst-regel, waarvan het btw-nummer in VIES nog niet als geldig is gecontroleerd. Doet NOOIT een verzoek
+ * naar VIES: het leest alleen de eigen databank (vies_checks). Per klant een rij, op volgorde van klant-id.
+ *
+ * Begrensd: het zoeken leest de klanten per ronde (parameters, nooit samengestelde SQL) en stopt zodra er
+ * MAX_VIES_TAKEN + 1 gevonden zijn of na VIES_ZOEK_MAX_RONDES rondes. `klanten` heeft hoogstens MAX_VIES_TAKEN
+ * rijen; `meer` telt de gevonden klanten die daar niet meer bij pasten (bij een afgekapt zoeken is het een
+ * ondergrens). Met `relationId` wordt alleen die ene klant bekeken (voor de knop: opnieuw uit de databank).
+ */
+export function telefoonKlantenZonderControle(db: Db, opties: { relationId?: number } = {}): { klanten: ViesKlantZonderControle[]; meer: number } {
+  const gevonden: ViesKlantZonderControle[] = [];
+  const genoeg = MAX_VIES_TAKEN + 1;
+  const ronde = db.prepare(
+    `SELECT i.relation_id AS relation_id, r.name AS naam, r.vat_number AS vat_number, COUNT(DISTINCT i.id) AS aantal
+       FROM invoices i
+       JOIN relations r ON r.id = i.relation_id
+      WHERE i.apparaat_code IS NOT NULL AND i.status <> 'concept' AND i.credit_of_invoice_id IS NULL
+        AND r.vat_number IS NOT NULL AND TRIM(r.vat_number) <> ''
+        AND i.relation_id > ? AND (? IS NULL OR i.relation_id = ?)
+        AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.vat_code IN ('icp', 'icp-dienst'))
+      GROUP BY i.relation_id
+      ORDER BY i.relation_id
+      LIMIT ?`,
+  );
+  const uitslag = db.prepare('SELECT valid FROM vies_checks WHERE vat_number = ? AND valid IS NOT NULL ORDER BY id DESC LIMIT 1');
+  const nummers = db.prepare(
+    `SELECT DISTINCT i.number AS number FROM invoices i
+      WHERE i.relation_id = ? AND i.apparaat_code IS NOT NULL AND i.status <> 'concept' AND i.credit_of_invoice_id IS NULL
+        AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.vat_code IN ('icp', 'icp-dienst'))
+      ORDER BY i.id LIMIT ?`,
+  );
+  const rel = opties.relationId ?? null;
+  let na = 0;
+  for (let i = 0; i < VIES_ZOEK_MAX_RONDES && gevonden.length < genoeg; i++) {
+    const rijen = ronde.all(na, rel, rel, VIES_ZOEK_PER_RONDE) as { relation_id: number; naam: string; vat_number: string; aantal: number }[];
+    for (const r of rijen) {
+      na = r.relation_id;
+      const vat = normalizeVatNumber(r.vat_number);
+      if (!vat) continue;
+      const u = uitslag.get(vat) as { valid: number } | undefined;
+      if (u?.valid === 1) continue;
+      if (gevonden.length >= genoeg) break;
+      const lijst = (nummers.all(r.relation_id, VIES_MAX_NUMMERS) as { number: string | null }[]).map((x) => x.number).filter((x): x is string => !!x);
+      gevonden.push({ relationId: r.relation_id, naam: r.naam, vatNumber: vat, toestand: u ? 'ongeldig' : 'onbekend', aantal: r.aantal, nummers: lijst });
+    }
+    if (rijen.length < VIES_ZOEK_PER_RONDE) break;
+  }
+  return { klanten: gevonden.slice(0, MAX_VIES_TAKEN), meer: Math.max(0, gevonden.length - MAX_VIES_TAKEN) };
+}
+
+/** De key van de taak voor deze klant, toestand en dit (genormaliseerde) btw-nummer. */
+export function viesTaakKey(k: Pick<ViesKlantZonderControle, 'relationId' | 'toestand' | 'vatNumber'>): string {
+  return `vies-klant:${k.relationId}-${k.toestand}-${k.vatNumber}`;
+}
