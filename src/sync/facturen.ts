@@ -84,7 +84,7 @@ export class FactuurOntvangst implements WachtrijBehandelaar {
     const uitkomst = this.probeer(w.uuid, f);
     if (uitkomst.uitkomst === 'wacht') {
       // zonder registerrij en zonder factuur: alleen een wachtrijrij; een volle wachtrij geeft 503 (herhaalbaar), nooit een afwijzing
-      const r = this.wachtrij.zetIn(deviceId, bron, w, { ...uitkomst.wacht, nummer: f.nummer });
+      const r = this.wachtrij.zetIn(deviceId, bron, w, { ...uitkomst.wacht, nummer: f.nummer }, route);
       return r === 'vol' ? { status: 503, fout: 'wachtrij-vol' } : { status: 200, uitkomst: 'wacht' };
     }
 
@@ -120,7 +120,7 @@ export class FactuurOntvangst implements WachtrijBehandelaar {
           continue;
         }
         const reden = uitkomst.uitkomst === 'afgewezen' ? uitkomst.fout : null;
-        this.schrijfRegister(rij.apparaat_id, { entiteit: 'factuur', uuid, revisie: rij.revisie, tijd: rij.tijd }, uitkomst, 'netwerk');
+        this.schrijfRegister(rij.apparaat_id, { entiteit: 'factuur', uuid, revisie: rij.revisie, tijd: rij.tijd }, uitkomst, rij.route ?? 'netwerk');
         if (this.wachtrij.markeer(rij.id, uitkomst.uitkomst, reden)) voortgang = true;
       }
       return voortgang;

@@ -707,16 +707,20 @@ boeking of registerrij. Is de wachtrij van het apparaat vol (1000 onverwerkte ri
 zonder iets op te slaan; een geldige factuur wordt nooit afgewezen omdat de wachtrij vol is.
 
 **Hervatten.** Een wachtende factuur wordt opnieuw geprobeerd bij elke toegepaste klant, elk toegepast project en elke
-toegepaste factuur (een cascade: klant, project, origineel, creditnota), bij elke volgende wijziging van hetzelfde apparaat
-(ook een die zelf wacht, zodat een heropende periode wordt opgepikt) en bij het starten van de receiver. De wijziging wordt
+toegepaste factuur (een cascade: klant, project, origineel, creditnota), na elke wijziging van hetzelfde apparaat
+met onverwerkte facturen in de wachtrij, ongeacht de uitkomst of de statuscode (ook een die zelf wacht, 400, 409, 500, 503
+`wachtrij-vol` of `niet-ondersteund`, en ook voor de entiteiten bon en foto), zodat een heropende periode altijd wordt
+opgepikt, en bij het starten van de receiver. Het hervatten verandert het antwoord op de wijziging zelf nooit en laat het nooit
+falen. Een ongeldige wijziging van een niet-gekoppeld apparaat bereikt de ontvanger niet en hervat dus niets. De wijziging wordt
 dan opnieuw gelezen en gecontroleerd, ook de apparaatcode in het nummer; ze kan alsnog `afgewezen` worden (bijvoorbeeld een
 creditnota voor een andere klant dan het origineel): de rij krijgt dan `verwerkt_uitkomst` `afgewezen` met de foutcode als
 `verwerkt_reden` en een registerrij, en blijft niet hangen. Een ontkoppeld apparaat of een afgesloten apparaatcode is geen reden
 om een al ontvangen wijziging weg te gooien. Hervatten is herhaalbaar en idempotent: factuur, boeking en registerrij komen
 hoogstens één keer, en de wachtrijrij blijft altijd staan (alleen `verwerkt_op`, `verwerkt_uitkomst` en `verwerkt_reden`
 worden gevuld, in dezelfde transactie als de factuur). Een fout bij één factuur laat die rij onverwerkt zonder halve rijen en
-stopt de rest niet. De route van de registerrij van een uit de wachtrij verwerkte wijziging is `netwerk` (de wachtrij bewaart de
-route niet).
+stopt de rest niet. De wachtrij bewaart de route van de eerste ontvangst (kolom `route`: `netwerk`, `map` of `mail`) en de
+registerrij van een uit de wachtrij verwerkte wijziging (factuur of project) krijgt die route; een rij zonder route (van voor
+die kolom) hervat met `netwerk`.
 
 **Het register `sync_ontvangen`.** Idempotentie loopt uitsluitend via de exacte sleutel (`apparaat_id`
 (het apparaat-ID uit de envelop), `entiteit`, `uuid`, `revisie`), niet via de hoogste revisie en niet

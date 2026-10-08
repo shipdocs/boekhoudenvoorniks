@@ -88,7 +88,7 @@ describe('projecten-migratie', () => {
     const db = new Database(':memory:');
     migrate(db);
     const k = kolommen(db, 'sync_wachtrij');
-    expect(k.map((c) => c.name)).toEqual(['id', 'apparaat_id', 'bron', 'entiteit', 'uuid', 'revisie', 'tijd', 'wijziging', 'nummer', 'wacht_op_entiteit', 'wacht_op_uuid', 'reden', 'ontvangen_op', 'verwerkt_op', 'verwerkt_uitkomst', 'verwerkt_reden']);
+    expect(k.map((c) => c.name)).toEqual(['id', 'apparaat_id', 'bron', 'entiteit', 'uuid', 'revisie', 'tijd', 'wijziging', 'nummer', 'wacht_op_entiteit', 'wacht_op_uuid', 'reden', 'ontvangen_op', 'verwerkt_op', 'verwerkt_uitkomst', 'verwerkt_reden', 'route']);
     expect(k.find((c) => c.name === 'id')).toMatchObject({ type: 'INTEGER', pk: 1 });
     expect(k.find((c) => c.name === 'nummer')?.notnull).toBe(0);
     expect(k.find((c) => c.name === 'verwerkt_op')?.notnull).toBe(0);
@@ -1472,6 +1472,26 @@ describe('projecten-herstel', () => {
     a.sync.verwerk('dev-1', 'M1', w);
     return w.uuid;
   };
+
+  it('een wachtend project houdt de route van de eerste ontvangst in de registerrij, ook als het later uit de wachtrij wordt overgenomen', () => {
+    const a = admin();
+    for (const route of ['map', 'mail']) {
+      const klant = randomUUID();
+      const w = projectWijziging(a, {}, { klant });
+      expect(a.sync.verwerk('dev-1', 'M1', w, route)).toEqual({ status: 200, uitkomst: 'wacht' });
+      expect(wachtrij(a.db, w.uuid)[0]).toMatchObject({ route });
+      expect(a.sync.verwerk('dev-1', 'M1', klantWijziging(klant), 'netwerk')).toEqual({ status: 200, uitkomst: 'toegepast' });
+      expect(job(a.db, w.uuid)).toMatchObject({ title: 'Badkamer' });
+      expect((a.db.prepare(`SELECT uitkomst, route FROM sync_ontvangen WHERE entiteit = 'project' AND uuid = ?`).all(w.uuid) as { uitkomst: string; route: string }[]).map((r) => [r.uitkomst, r.route])).toEqual([['toegepast', route]]);
+    }
+    // een rij van voor de migratie heeft geen route en hervat met netwerk
+    const klant = randomUUID();
+    const w = projectWijziging(a, {}, { klant });
+    expect(a.sync.verwerk('dev-1', 'M1', w, 'map')).toEqual({ status: 200, uitkomst: 'wacht' });
+    a.db.prepare('UPDATE sync_wachtrij SET route = NULL WHERE uuid = ?').run(w.uuid);
+    a.sync.verwerk('dev-1', 'M1', klantWijziging(klant), 'map');
+    expect((a.db.prepare(`SELECT uitkomst, route FROM sync_ontvangen WHERE entiteit = 'project' AND uuid = ?`).all(w.uuid) as { uitkomst: string; route: string }[]).map((r) => [r.uitkomst, r.route])).toEqual([['toegepast', 'netwerk']]);
+  });
 
   it('na een tijdelijke opslagfout verwerkt een herhaling van dezelfde klantwijziging (overgeslagen) de wachtrij alsnog', () => {
     const a = admin();

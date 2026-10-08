@@ -30,6 +30,8 @@ export interface WachtrijRij {
   verwerkt_op: number | null;
   verwerkt_uitkomst: string | null;
   verwerkt_reden: string | null;
+  /** de route van de eerste ontvangst (netwerk, map of mail); NULL bij rijen van voor deze kolom */
+  route: string | null;
 }
 
 /** Wat per soort object nodig is om wachtende rijen te verwerken (project en factuur). */
@@ -63,19 +65,19 @@ export class SyncWachtrij {
   /**
    * Zet een wijziging in de wachtrij, ON CONFLICT DO NOTHING: dezelfde wijziging nog eens (zelfde apparaat,
    * entiteit, uuid en revisie) is nog steeds een rij en geeft 'bestond'. Is de wachtrij van dit apparaat
-   * vol, dan wordt er niets geschreven ('vol').
+   * vol, dan wordt er niets geschreven ('vol'). De route van de eerste ontvangst wordt bewaard voor de registerrij bij het later overnemen.
    */
-  zetIn(deviceId: string, bron: string, w: Wijziging, wacht: { entiteit: string; uuid: string; reden: string; nummer?: string | null }): ZetInUitkomst {
+  zetIn(deviceId: string, bron: string, w: Wijziging, wacht: { entiteit: string; uuid: string; reden: string; nummer?: string | null }, route: string = 'netwerk'): ZetInUitkomst {
     const bestaat = this.db.prepare('SELECT 1 FROM sync_wachtrij WHERE apparaat_id = ? AND entiteit = ? AND uuid = ? AND revisie = ?').get(deviceId, w.entiteit, w.uuid, w.revisie);
     if (bestaat) return 'bestond';
     if (this.aantalOnverwerkt(deviceId) >= WACHTRIJ_LIMIET) return 'vol';
     const result = this.db
       .prepare(
-        `INSERT INTO sync_wachtrij (apparaat_id, bron, entiteit, uuid, revisie, tijd, wijziging, nummer, wacht_op_entiteit, wacht_op_uuid, reden, ontvangen_op)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sync_wachtrij (apparaat_id, bron, entiteit, uuid, revisie, tijd, wijziging, nummer, wacht_op_entiteit, wacht_op_uuid, reden, ontvangen_op, route)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(apparaat_id, entiteit, uuid, revisie) DO NOTHING`,
       )
-      .run(deviceId, bron, w.entiteit, w.uuid, w.revisie, w.tijd, JSON.stringify({ entiteit: w.entiteit, uuid: w.uuid, revisie: w.revisie, tijd: w.tijd, velden: w.velden }), wacht.nummer ?? null, wacht.entiteit, wacht.uuid, wacht.reden, this.now());
+      .run(deviceId, bron, w.entiteit, w.uuid, w.revisie, w.tijd, JSON.stringify({ entiteit: w.entiteit, uuid: w.uuid, revisie: w.revisie, tijd: w.tijd, velden: w.velden }), wacht.nummer ?? null, wacht.entiteit, wacht.uuid, wacht.reden, this.now(), route);
     return result.changes === 1 ? 'toegevoegd' : 'bestond';
   }
 

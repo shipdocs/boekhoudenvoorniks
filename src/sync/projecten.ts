@@ -113,7 +113,7 @@ export class ProjectOntvangst implements WachtrijBehandelaar {
     }
 
     // 4. wachten: in de wachtrij, zonder registerrij
-    if (uitkomst.uitkomst === 'wacht') return this.zetInWachtrij(deviceId, bron, w, uitkomst.wachtOp);
+    if (uitkomst.uitkomst === 'wacht') return this.zetInWachtrij(deviceId, bron, w, uitkomst.wachtOp, route);
 
     // 5. registerrij: de uitkomst van de eerste verwerking
     this.schrijfRegister(deviceId, w, uitkomst.uitkomst, uitkomst.uitkomst === 'afgewezen' ? uitkomst.fout : null, route);
@@ -129,7 +129,7 @@ export class ProjectOntvangst implements WachtrijBehandelaar {
       // een rij die bij het verwerken niet meer klopt wordt afgewezen, ook als de klant er nog niet is
       for (const r of rijen) {
         if (r.fout === undefined) continue;
-        this.schrijfRegister(r.rij.apparaat_id, { entiteit: 'project', uuid, revisie: r.rij.revisie, tijd: r.rij.tijd }, 'afgewezen', 'veld-ongeldig', 'netwerk');
+        this.schrijfRegister(r.rij.apparaat_id, { entiteit: 'project', uuid, revisie: r.rij.revisie, tijd: r.rij.tijd }, 'afgewezen', 'veld-ongeldig', r.rij.route ?? 'netwerk');
         this.wachtrij.markeer(r.rij.id, 'afgewezen', 'veld-ongeldig');
         this.log(`Wachtende projectwijziging afgewezen bij het verwerken (${r.fout})`);
         voortgang = true;
@@ -200,12 +200,12 @@ export class ProjectOntvangst implements WachtrijBehandelaar {
   private rondAf(rij: WachtrijRij, w: Wijziging, uitkomst: Uitkomst): void {
     if (uitkomst.uitkomst === 'wacht') return;
     const reden = uitkomst.uitkomst === 'afgewezen' ? uitkomst.fout : null;
-    this.schrijfRegister(rij.apparaat_id, w, uitkomst.uitkomst, reden, 'netwerk');
+    this.schrijfRegister(rij.apparaat_id, w, uitkomst.uitkomst, reden, rij.route ?? 'netwerk');
     this.wachtrij.markeer(rij.id, uitkomst.uitkomst, reden);
   }
 
-  private zetInWachtrij(deviceId: string, bron: string, w: Wijziging, wachtOpKlant: string): SyncResultaat {
-    const r = this.wachtrij.zetIn(deviceId, bron, w, { entiteit: 'klant', uuid: wachtOpKlant, reden: 'klant-onbekend' });
+  private zetInWachtrij(deviceId: string, bron: string, w: Wijziging, wachtOpKlant: string, route: string): SyncResultaat {
+    const r = this.wachtrij.zetIn(deviceId, bron, w, { entiteit: 'klant', uuid: wachtOpKlant, reden: 'klant-onbekend' }, route);
     if (r === 'vol') return { status: 503, fout: 'wachtrij-vol' };
     return { status: 200, uitkomst: 'wacht' };
   }
