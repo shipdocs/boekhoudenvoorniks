@@ -1631,4 +1631,21 @@ export const migrations: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_klant_dubbel_voorstellen_status ON klant_dubbel_voorstellen(status, id);
   `,
+  `
+  -- Probleemregister van de bonnenmap (stap bonnenmaproute): een bestand van de telefoon dat de pc niet kon of mocht
+  -- verwerken, of een wijziging die inhoudelijk werd afgewezen, krijgt hier een regel. Alleen de naam van het bestand
+  -- (nooit het pad) en nooit de inhoud van een wijziging. De regels worden nooit gewist: "gezien" zet alleen gezien_op.
+  -- De tijden zijn milliseconden. Alleen additief; bestaande rijen veranderen niet.
+  CREATE TABLE IF NOT EXISTS sync_map_problemen (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bestandsnaam TEXT NOT NULL,
+    apparaat_id TEXT,
+    soort TEXT NOT NULL CHECK (soort IN ('onleesbaar', 'onbekend-apparaat', 'afgewezen', 'veld-ongeldig', 'schrijven-mislukt')),
+    fout TEXT,
+    veld TEXT,
+    tijd INTEGER NOT NULL,
+    gezien_op INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_sync_map_problemen_open ON sync_map_problemen(gezien_op, soort, id);
+  `,
 ];
