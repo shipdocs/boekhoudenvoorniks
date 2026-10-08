@@ -1279,6 +1279,49 @@ Er worden hoogstens 1000 ongeziene regels per soort probleem bijgehouden (een vo
 5. Een `wacht`-antwoord is definitief afgeleverd; de uitkomst volgt later via `bevestigingen`. Een antwoord met `afgewezen` of `veld-ongeldig` kan de telefoon aan de gebruiker tonen.
 6. Ruim antwoorden en verwerkte verzoeken zelf op wanneer je zeker weet dat ze zijn aangekomen; de pc doet dat nooit.
 
+### De e-mailroute: een wijziging per mail
+
+Een derde route, alleen van telefoon naar pc: de telefoon stuurt een **afzonderlijke mail** naar de administratie-mailbox (de inbox die de app al
+via IMAP leest, zie *Instellingen → E-mail*) met de versleutelde envelop als bijlage. Het is dezelfde envelop als bij het netwerk en de bonnenmap
+(BVNS, versie 2, AES-GCM met de koppelsleutel), dus de klant of een ander die meeleest kan de inhoud niet lezen en niet vervalsen. Alle
+wijzigingen werken (klant, project, factuur, bon en foto, met bijlagen); de pc-kant van een factuurwijziging is dezelfde als over het netwerk
+(`SyncOntvangst.verwerk`), alleen met route `mail` in het register.
+
+**Geen BCC met de klant, geen antwoord.** De machineleesbare inhoud gaat nooit mee in een mail aan de klant. De factuur-PDF voor de klant is een andere mail,
+alleen aan de klant; de pc haalt de factuur uit de wijziging en niet uit een PDF-kopie (een kopie van een eigen factuur wordt als eigen kopie herkend en genegeerd).
+De pc stuurt nooit een mail terug en schrijft niets naar de mailbox behalve het verplaatsen van een afgehandelde mail naar de verwerkt-map (zoals bij gewone mail). Er is dus
+geen pc-naar-telefoon via e-mail: `hallo`, `stamgegevens` en `bevestigingen` hebben een antwoord nodig en zijn over de mail niet ondersteund (`niet-ondersteund-via-mail`):
+ze worden definitief afgesloten met een regel in het probleemregister, zonder iets te lezen of te wijzigen. Stamgegevens en bevestigingen haalt de telefoon over het netwerk of de bonnenmap op.
+
+**Herkenning.** Een bijlage telt als telefoonbericht als de naam eindigt op `.bvns` (hoofdletterongevoelig) of het contenttype `application/vnd.boekhoudenvoorniks.scanner` is,
+en alleen als de telefoonroute aanstaat (`PHONE_SCANNER`) en de scanner er is. Dit gaat vóór de takken eigen adres en klant: het apparaat komt uitsluitend uit de kop van de envelop en de koppeling,
+nooit uit het afzenderadres, het onderwerp of de tekst. Een envelop die niet te openen is (onbekend apparaat, verkeerde sleutel, aangepast, afgekapt) wordt nooit verwerkt. Staat er naast de `.bvns` een gewone bijlage
+(bijvoorbeeld een PDF) in dezelfde mail, dan telt alleen de `.bvns`; er komt geen tweede document in de inbox. Staat de route uit, dan is een `.bvns` een onbekende bijlage zoals elke andere.
+
+**Grenzen.** Een `.bvns` is hoogstens `maxBodyBytes` (20 MiB), apart van de grens voor gewone bijlagen (`MAIL_LIMITS.maxAttachmentBytes`, 10 MiB); groter wordt definitief afgewezen zonder de inhoud te lezen.
+Hoogstens 10 `.bvns`-bijlagen per mail worden verwerkt, op volgorde; de rest wordt als probleem vastgelegd (`te-veel-bijlagen`). Een mail die zo groot is dat de mailimport hem niet inleest
+(meer dan 100 MiB) komt zonder bijlagen binnen. Per ophaalronde worden hoogstens 200 berichten bekeken en er staat nooit meer dan één mail tegelijk in het geheugen.
+
+**Gedrag per uitkomst** (kolom *Bonnenmap en e-mail* van de uitkomstentabel):
+
+- *Definitief* (200, 400, 413, een envelop die niet te openen is): de mail wordt vastgelegd (uitkomst `overig`, notitie `telefoonbericht`, nooit de inhoud) samen met eventuele probleemregels, en daarna naar de verwerkt-map verplaatst.
+- *Herhaalbaar* (503 `wachtrij-vol`, 500 `opslaan-mislukt`, 409 `klant-onbekend` of `project-onbekend`, `niet-ondersteund`): de mail blijft onverwerkt in de mailbox, wordt niet vastgelegd en de mailmap gaat bij dit bericht niet verder.
+  Bij de volgende ophaalronde wordt hij opnieuw geprobeerd. Daarvoor is een eigen, ruimere teller (200 pogingen, bewaard in `mail_folders`) naast de grens van 3 voor gewone mail. Na die grens wordt de mail als probleem vastgelegd (uitkomst `fout`, regel `te-vaak-geprobeerd`),
+  blijft hij in de mailbox staan en gaat de map verder. Zijn er al bijlagen toegepast, dan telt dat niet dubbel (het register van de ontvangst).
+- Dezelfde wijziging via het netwerk, de bonnenmap en de mail geeft precies een effect: het register bewaart de route van de eerste ontvangst en de tweede levert `overgeslagen` op.
+- Er is geen klokvenster en geen nonce-controle: een mail van dagen geleden wordt gewoon verwerkt. De controle van vijf minuten op de bewerktijd van de wijziging geldt wel.
+
+**Probleemregister en Vandaag.** Dezelfde tabel `sync_map_problemen`, met de kolom `route` (`NULL` of `map` voor de bonnenmap, `mail` voor de mail). De bestandsnaam is de schoongemaakte naam van de bijlage (zonder pad, nooit het onderwerp of de inhoud).
+Vandaag toont per soort één melding met de telling van map en mail samen.
+
+**Stappenlijst voor de Android-app.**
+
+1. Maak het verzoek zoals voor het netwerk (zelfde envelop, versie 2, willekeurige nonce van 12 bytes) met een wijziging.
+2. Stuur de `.bvns` in een eigen mail naar de administratie-mailbox, met de envelop als bijlage met naam `<nonce-hex>.bvns`. Zet er geen klant in de ontvangers en geen factuur-PDF in dezelfde mail.
+3. Stuur de factuur-PDF alleen aan de klant, in een aparte mail zonder machineleesbare inhoud (geen BCC naar de administratie-mailbox met de `.bvns`).
+4. Verwacht geen antwoord. De uitkomst volgt via `bevestigingen` over het netwerk of de bonnenmap. Is de mail niet zeker aangekomen, dan mag je dezelfde bytes opnieuw mailen: dat is idempotent.
+5. Hoogstens 10 `.bvns` per mail en elk hoogstens 20 MiB.
+
 ## Wat dit wel en niet beschermt
 
 - **Meelezen en aanpassen op het netwerk**: niet mogelijk zonder de sleutel. De inhoud (foto's,
