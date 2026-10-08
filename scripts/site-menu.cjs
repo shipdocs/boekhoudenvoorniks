@@ -129,7 +129,7 @@ ${cols}
   </footer>`;
 }
 
-const HEADER_RE = /(?:[ \t]*<!-- Menu en voettekst[^\n]*-->\n)?[ \t]*<header class="top">[\s\S]*?<\/header>(?:\n[ \t]*<script>\n[ \t]*\(function \(\) \{\n[ \t]*var top = document\.querySelector\('\.top'\)[\s\S]*?<\/script>)?/;
+const HEADER_RE = /(?:[ \t]*<!-- Menu en voettekst[^\n]*-->\n)?[ \t]*<header class="top">[\s\S]*?<\/header>(?:\n[ \t]*<script src="menu\.js" defer><\/script>)?(?:\n[ \t]*<script>\n[ \t]*\(function \(\) \{\n[ \t]*var top = document\.querySelector\('\.top'\)[\s\S]*?<\/script>)?/;
 const FOOTER_RE = /[ \t]*<footer class="wrap foot">[\s\S]*?<\/footer>/;
 
 let changed = 0;
