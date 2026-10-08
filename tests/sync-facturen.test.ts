@@ -366,6 +366,24 @@ describe('factuurwijziging van de telefoon op de pc', () => {
     expect(rijen[0]!.verwerkt_op).toEqual(expect.any(Number));
     expect(register(o.db, uuid)).toEqual([{ uitkomst: 'toegepast', fout: null, route: 'netwerk' }]);
     expect(telling(o.db)).toEqual({ ...voor, invoices: voor.invoices + 1, invoice_lines: voor.invoice_lines + 2, journal_entries: voor.journal_entries + 1, sync_ontvangen: voor.sync_ontvangen + 1 });
+
+    // de registerrij houdt de route van de eerste ontvangst, ook als de factuur pas later uit de wachtrij wordt overgenomen
+    for (const route of ['map', 'mail'] as const) {
+      const k = randomUUID();
+      const u = randomUUID();
+      expect(o.factuur(velden(k, [HOOG], { nummer: nummer(20 + (route === 'map' ? 0 : 1)) }), { uuid: u }, route)).toMatchObject({ uitkomst: 'wacht' });
+      expect(wachtrij(o.db, u)[0]).toMatchObject({ route });
+      expect(klantWijz(o, k)).toEqual({ status: 200, uitkomst: 'toegepast' });
+      expect(factuurRij(o.db, u)).toMatchObject({ status: 'verzonden' });
+      expect(register(o.db, u)).toEqual([{ uitkomst: 'toegepast', fout: null, route }]);
+    }
+    // een wachtrijrij van voor de migratie heeft geen route en hervat met netwerk
+    const oud = randomUUID();
+    const oudeKlant = randomUUID();
+    expect(o.factuur(velden(oudeKlant, [HOOG], { nummer: nummer(30) }), { uuid: oud }, 'map')).toMatchObject({ uitkomst: 'wacht' });
+    o.db.prepare('UPDATE sync_wachtrij SET route = NULL WHERE uuid = ?').run(oud);
+    expect(klantWijz(o, oudeKlant)).toMatchObject({ uitkomst: 'toegepast' });
+    expect(register(o.db, oud)).toEqual([{ uitkomst: 'toegepast', fout: null, route: 'netwerk' }]);
   });
 
   it('FACT-15 creditnota wacht op origineel: wacht_op_entiteit factuur, reden origineel-onbekend; komt het origineel, dan wordt de creditnota opgepakt en verrekend, en een creditnota met een origineel van een andere klant wordt afgewezen', () => {
@@ -503,6 +521,41 @@ describe('factuurwijziging van de telefoon op de pc', () => {
       expect(factuurRij(o.db, tweede)).toMatchObject({ number: nummer(2), status: 'verzonden' });
     });
     expect(wachtrij(o.db, tweede)[0]).toMatchObject({ verwerkt_uitkomst: 'toegepast' });
+
+    // een volle wachtrij: 1000 geldige facturen van het apparaat wachten op de periode; na heropenen hervat ook een
+    // wijziging die zelf 503 wachtrij-vol krijgt (hervatten gebeurt na elke wijziging, ongeacht de uitkomst)
+    sluitPeriode(o, 9);
+    const vol = o.db.prepare(
+      `INSERT INTO sync_wachtrij (apparaat_id, bron, entiteit, uuid, revisie, tijd, wijziging, nummer, wacht_op_entiteit, wacht_op_uuid, reden, ontvangen_op) VALUES (?, ?, 'factuur', ?, 1, ?, ?, ?, 'periode', '', 'periode', 0)`,
+    );
+    const wachtenden: string[] = [];
+    o.db.transaction(() => {
+      for (let i = 0; i < 1000; i++) {
+        const uuid = randomUUID();
+        const tijd = Date.now() - DAG;
+        wachtenden.push(uuid);
+        vol.run(APPARAAT, BRON, uuid, tijd, JSON.stringify({ entiteit: 'factuur', uuid, revisie: 1, tijd, velden: velden(o.klantUuid, [HOOG], { nummer: nummer(100 + i) }) }), nummer(100 + i));
+      }
+    })();
+    const voorVol = n(o.db, 'SELECT COUNT(*) AS n FROM invoices');
+    o.s.periods.abortExchange();
+    expect(n(o.db, 'SELECT COUNT(*) AS n FROM invoices')).toBe(voorVol);
+    expect(o.factuur(velden(randomUUID(), [HOOG], { nummer: nummer(2000) }), { uuid: randomUUID() })).toEqual({ status: 503, fout: 'wachtrij-vol' });
+    expect(n(o.db, 'SELECT COUNT(*) AS n FROM invoices')).toBe(voorVol + 1000);
+    expect(n(o.db, `SELECT COUNT(*) AS n FROM sync_wachtrij WHERE entiteit = 'factuur' AND wacht_op_entiteit = 'periode' AND verwerkt_op IS NULL`)).toBe(0);
+    expect(wachtrij(o.db, wachtenden[999]!)[0]).toMatchObject({ verwerkt_uitkomst: 'toegepast' });
+
+    // ook een wijziging van entiteit bon of foto hervat de wachtende facturen (en blijft niet-ondersteund)
+    for (const entiteit of ['bon', 'foto'] as const) {
+      sluitPeriode(o, entiteit === 'bon' ? 10 : 11);
+      const uuid = randomUUID();
+      expect(o.factuur(velden(o.klantUuid, [HOOG], { nummer: nummer(3000 + (entiteit === 'bon' ? 0 : 1)) }), { uuid })).toMatchObject({ uitkomst: 'wacht' });
+      o.s.periods.abortExchange();
+      expect(factuurRij(o.db, uuid)).toBeUndefined();
+      expect(o.sync.verwerk(APPARAAT, BRON, { entiteit, uuid: randomUUID(), revisie: 1, tijd: Date.now() - DAG, velden: {} })).toEqual({ status: 200, uitkomst: 'niet-ondersteund' });
+      expect(factuurRij(o.db, uuid)).toMatchObject({ status: 'verzonden' });
+      expect(wachtrij(o.db, uuid)[0]).toMatchObject({ verwerkt_uitkomst: 'toegepast' });
+    }
   });
 
   it('FACT-20 ontkoppeld na wachten: de factuur wacht, het apparaat wordt ontkoppeld, de klant komt binnen en de factuur wordt alsnog overgenomen', () => {

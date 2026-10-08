@@ -85,10 +85,21 @@ export class SyncOntvangst {
    * @param route waar de wijziging vandaan kwam (netwerk, map of mail); alleen voor het register
    */
   verwerk(deviceId: string, bron: string, wijziging: Wijziging, route: string = 'netwerk'): SyncResultaat {
+    const uitslag = this.verwerkEen(deviceId, bron, wijziging, route);
+    // een toegepaste klant, project of factuur kan wachtende wijzigingen vrijmaken (een cascade); dat gebeurt na de
+    // transactie van deze wijziging, zodat een fout daarin deze wijziging niet terugdraait. Een klantwijziging die als
+    // overgeslagen wordt beantwoord (een herhaling) probeert de wachtrij ook opnieuw: na een tijdelijke opslagfout kan
+    // de klant er al zijn terwijl het wachtende project nog ontbreekt. Verder hervat elke wijziging van een apparaat met
+    // wachtende facturen de wachtrij (bv. nadat de boekhouder de periode heeft heropend), ongeacht de uitkomst of de
+    // statuscode (ook 503 wachtrij-vol, 400, 409, 500) en ook voor bon en foto. Het antwoord verandert daar nooit door.
+    if ((uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant'))) || this.heeftWachtendeFacturen(deviceId)) this.verwerkWachtrij();
+    return uitslag;
+  }
+
+  private verwerkEen(deviceId: string, bron: string, wijziging: Wijziging, route: string): SyncResultaat {
     if (wijziging.entiteit !== 'klant' && wijziging.entiteit !== 'project' && wijziging.entiteit !== 'factuur') return { status: 200, uitkomst: 'niet-ondersteund' };
-    let uitslag: SyncResultaat;
     try {
-      uitslag = this.db.transaction(() => {
+      return this.db.transaction(() => {
         if (wijziging.entiteit === 'klant') return this.verwerkKlant(deviceId, bron, wijziging, route);
         if (wijziging.entiteit === 'factuur') return this.facturen ? this.facturen.verwerk(deviceId, bron, wijziging, route) : { status: 200, uitkomst: 'niet-ondersteund' as const };
         return this.projecten.verwerk(deviceId, bron, wijziging, route);
@@ -97,14 +108,6 @@ export class SyncOntvangst {
       this.log(`${wijziging.entiteit === 'klant' ? 'Klantwijziging' : wijziging.entiteit === 'factuur' ? 'Factuurwijziging' : 'Projectwijziging'} van de telefoon opslaan mislukt: ${(e as Error).message}`);
       return { status: 500, fout: 'opslaan-mislukt' };
     }
-    // een toegepaste klant of een toegepast project kan wachtende wijzigingen vrijmaken (een cascade);
-    // dat gebeurt na de transactie van deze wijziging, zodat een fout daarin deze wijziging niet terugdraait.
-    // Een klantwijziging die als overgeslagen wordt beantwoord (een herhaling) probeert de wachtrij ook opnieuw:
-    // na een tijdelijke opslagfout kan de klant er al zijn terwijl het wachtende project nog ontbreekt.
-    // Ook een toegepaste factuur (een creditnota wacht op haar origineel) en elke volgende wijziging van een apparaat
-    // met wachtende facturen (bv. nadat de boekhouder de periode heeft heropend) probeert de wachtrij opnieuw.
-    if (uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant') || this.heeftWachtendeFacturen(deviceId))) this.verwerkWachtrij();
-    return uitslag;
   }
 
   private heeftWachtendeFacturen(deviceId: string): boolean {
