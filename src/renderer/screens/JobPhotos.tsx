@@ -131,6 +131,7 @@ export function JobPhotosSection({ jobId }: { jobId: number }) {
   const eerste = useLoad(() => api.jobs.photos(jobId), [jobId]);
   const [extra, setExtra] = useState<Foto[]>([]);
   const [meerFout, setMeerFout] = useState<string | null>(null);
+  const [meerBezig, setMeerBezig] = useState(false);
   const [open, setOpen] = useState<Foto | null>(null);
   const knoppen = useRef(new Map<number, HTMLButtonElement>());
   const laatsteOpen = useRef<number | null>(null);
@@ -145,12 +146,21 @@ export function JobPhotosSection({ jobId }: { jobId: number }) {
     if (id !== null) setTimeout(() => knoppen.current.get(id)?.focus(), 0);
   };
   const meer = async () => {
+    // geen tweede aanroep zolang de eerste loopt (een dubbelklik gaf dezelfde foto's twee keer)
+    if (meerBezig) return;
+    setMeerBezig(true);
     setMeerFout(null);
     try {
       const r = await api.jobs.photos(jobId, { offset: fotos.length });
-      setExtra((e) => [...e, ...r.fotos]);
+      // alleen wat er nog niet staat: een foto die intussen binnenkwam kan de volgorde verschuiven
+      setExtra((e) => {
+        const bekend = new Set([...eerste.data!.fotos, ...e].map((f) => f.id));
+        return [...e, ...r.fotos.filter((f) => !bekend.has(f.id))];
+      });
     } catch (e) {
       setMeerFout((e as Error).message);
+    } finally {
+      setMeerBezig(false);
     }
   };
   return (
@@ -172,7 +182,7 @@ export function JobPhotosSection({ jobId }: { jobId: number }) {
       </div>
       {fotos.length < totaal && (
         <div style={{ marginTop: 10 }}>
-          <Button onClick={() => void meer()}>Meer foto's tonen ({totaal - fotos.length} te gaan)</Button>
+          <Button disabled={meerBezig} onClick={() => void meer()}>Meer foto's tonen ({totaal - fotos.length} te gaan)</Button>
         </div>
       )}
       <ErrorBox error={meerFout} />
