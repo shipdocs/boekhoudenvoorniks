@@ -41,13 +41,22 @@ const n = (db: Database.Database, sql: string, ...p: unknown[]) => (db.prepare(s
 
 const dirs: string[] = [];
 const scanners: Bonnenscanner[] = [];
+const databanken: Database.Database[] = [];
 beforeEach(() => {
   PHONE_SCANNER.available = true;
 });
 afterEach(async () => {
   PHONE_SCANNER.available = false;
   for (const s of scanners.splice(0)) await s.stop();
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  // Windows verwijdert een bestand niet zolang de databank het nog open heeft: eerst sluiten
+  for (const db of databanken.splice(0)) {
+    try {
+      db.close();
+    } catch {
+      /* al gesloten */
+    }
+  }
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 function tijdelijkeMap(voorvoegsel: string): string {
@@ -73,6 +82,7 @@ function bestandenIn(dir: string): string[] {
 function omgeving(opties: { keepLocation?: boolean; zonderAdminDir?: boolean; bestandsdatabank?: boolean } = {}) {
   const adminDir = tijdelijkeMap('bvn-sync-fotos-');
   const t = setup(opties.bestandsdatabank ? { db: new Database(join(adminDir, 'boekhouding.sqlite')) } : {});
+  databanken.push(t.db);
   const logs: string[] = [];
   const blokkeer = { aan: false };
   const sync = new SyncOntvangst(t.db, new RelationsService(t.db), {
