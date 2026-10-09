@@ -428,6 +428,28 @@ describe('onveranderlijk', () => {
     expect(s.invoices.get(groter.id).status).toBe('concept');
   });
 
+  it('een creditnota op een gewone pc-factuur: andere klant of groter dan het origineel wordt bij finalize geweigerd', () => {
+    const { s, klant } = setup();
+    const ander = s.relations.create({ name: 'Andere klant', address: 'Straat 1', postcode: '1011AA', city: 'Amsterdam', country: 'NL', email: 'a@example.nl' });
+    const orig = pcFactuur(s, klant.id, PC_REGELS);
+
+    const andereKlant = s.invoices.createCreditNote(orig.id);
+    s.invoices.updateDraft(andereKlant.id, { relationId: ander.id });
+    expect(() => s.invoices.finalize(andereKlant.id)).toThrow(/andere klant/);
+    s.invoices.deleteDraft(andereKlant.id);
+
+    const groter = s.invoices.createCreditNote(orig.id);
+    const regels: LineInput[] = s.invoices.get(groter.id).lines.map((l) => ({ description: l.description, quantity: l.quantity * 2, unit: l.unit, unitPrice: l.unit_price, vatCode: l.vat_code as LineInput['vatCode'], vatPercentage: l.vat_percentage }));
+    s.invoices.updateDraft(groter.id, { lines: regels });
+    expect(() => s.invoices.finalize(groter.id)).toThrow(/groter dan de factuur/);
+    expect(s.invoices.get(groter.id).status).toBe('concept');
+    expect(s.invoices.overpaidCustomers()).toEqual([]);
+
+    // terug naar het bedrag van het origineel: dan lukt afronden wel
+    s.invoices.updateDraft(groter.id, { lines: regels.map((r) => ({ ...r, quantity: r.quantity / 2 })) });
+    expect(s.invoices.finalize(groter.id).status).toBe('betaald');
+  });
+
   it('markSent laat een gevulde sent_at van een telefoonfactuur ongemoeid, bij een pc-factuur werkt het nog', () => {
     const { s, db, id, klant } = met();
     const voor = momentopname(db, id);
