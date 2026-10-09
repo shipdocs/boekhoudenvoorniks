@@ -368,8 +368,11 @@ describe('de mailroute van de telefoon', () => {
     ];
     for (const x of herhaalbaar) h.opgelegd.set(x.m.nonce.toString('hex'), x.opleg);
     const voor = o.mails().length;
+    const blijftLiggen = () => o.problemen().filter((r) => r.fout === 'telefoonbericht-blijft-liggen');
     for (let ronde = 1; ronde <= 5; ronde++) {
-      await o.poll();
+      // elke poging telt als fout, en de mail legt na meldNa pogingen eenmalig een probleemregel (geen nieuwe bij elke poging)
+      expect((await o.poll()).errors, `ronde ${ronde}`).toBe(1);
+      expect(blijftLiggen(), `ronde ${ronde}`).toHaveLength(ronde < MAIL_TELEFOON_LIMITS.meldNa ? 0 : 1);
       // meer dan de 3 pogingen van gewone mail, en toch niet vastgelegd, niet verplaatst en niet verder
       expect(h.keren(herhaalbaar[0]!.m), `ronde ${ronde}`).toBe(ronde);
       expect(h.keren(herhaalbaar[1]!.m), `ronde ${ronde}`).toBe(0);
@@ -377,6 +380,7 @@ describe('de mailroute van de telefoon', () => {
       expect(o.box.moved).toHaveLength(voor);
     }
     expect(o.rijen('SELECT failed_uid, failed_count, telefoon_uid, telefoon_pogingen FROM mail_folders')).toEqual([{ failed_uid: null, failed_count: 0, telefoon_uid: herhaalbaar[0]!.m.uid, telefoon_pogingen: 5 }]);
+    expect(blijftLiggen()).toMatchObject([{ soort: 'schrijven-mislukt', route: 'mail', gezien_op: null }]);
     // na herstel van elk van de drie: precies een keer verwerkt, in volgorde
     for (const x of herhaalbaar) {
       h.opgelegd.delete(x.m.nonce.toString('hex'));
@@ -392,12 +396,20 @@ describe('de mailroute van de telefoon', () => {
     const erachter = mail(klantBericht('Staat erachter'));
     h.opgelegd.set(vast.nonce.toString('hex'), { status: 500, json: { ok: false, fout: 'opslaan-mislukt' } });
     let rondes = 0;
+    let fouten = 0;
+    const meldingenVoor = blijftLiggen().length;
     await wacht(async () => {
       rondes++;
-      await o.poll();
+      fouten += (await o.poll()).errors;
       return o.rijen('SELECT 1 FROM mail_messages WHERE uid = ?', vast.uid).length > 0;
     });
     expect(rondes).toBe(MAIL_TELEFOON_LIMITS.maxPogingen);
+    // de grens is ongeveer twaalf uur bij een ophaalronde per kwartier, de melding komt na ongeveer een uur
+    expect(MAIL_TELEFOON_LIMITS.maxPogingen).toBe(48);
+    expect(MAIL_TELEFOON_LIMITS.meldNa).toBe(4);
+    // elke poging telde als fout (ook de laatste) en er kwam voor deze mail precies een melding bij
+    expect(fouten).toBe(MAIL_TELEFOON_LIMITS.maxPogingen);
+    expect(blijftLiggen()).toHaveLength(meldingenVoor + 1);
     expect(MAIL_TELEFOON_LIMITS.maxPogingen).toBeGreaterThan(MAIL_LIMITS.maxAttempts);
     expect(h.keren(vast)).toBe(MAIL_TELEFOON_LIMITS.maxPogingen);
     // als probleem vastgelegd (de mail blijft in de mailbox) en de map ging door met wat erachter stond
@@ -452,6 +464,23 @@ describe('de mailroute van de telefoon', () => {
     expect(taken()).toHaveLength(2);
     expect(o.problemen()).toHaveLength(5);
     expect(o.problemen().filter((r) => r.gezien_op !== null).map((r) => r.soort)).toEqual(['onleesbaar', 'onleesbaar']);
+
+    // een telefoonbericht dat blijft liggen houdt de map tegen: na meldNa pogingen staat er eenmalig een melding op Vandaag
+    const h = eigenHandler(o);
+    const vast = p.maak(klantBericht('Blijft liggen'));
+    h.opgelegd.set(vast.nonce.toString('hex'), { status: 200, json: { ok: true, soort: 'wijziging', uitkomst: 'niet-ondersteund' } });
+    o.stuur([att(vast.naam, vast.body)], { subject: 'Geheim onderwerp 2' });
+    const liggen = () => taken().filter((t) => t.key.endsWith(':schrijven-mislukt'));
+    for (let ronde = 1; ronde <= MAIL_TELEFOON_LIMITS.meldNa + 2; ronde++) {
+      expect((await o.poll()).errors).toBe(1);
+      expect(liggen(), `ronde ${ronde}`).toHaveLength(ronde < MAIL_TELEFOON_LIMITS.meldNa ? 0 : 1);
+    }
+    expect(o.problemen().filter((r) => r.fout === 'telefoonbericht-blijft-liggen')).toHaveLength(1);
+    expect(liggen()[0]!.title).toMatch(/^1 /);
+    const uitleg = `${liggen()[0]!.title} ${liggen()[0]!.question}`;
+    expect(uitleg).toMatch(/telefoonbericht in je mailbox kon niet worden verwerkt/);
+    expect(uitleg).toMatch(/andere mail wacht daarop/);
+    expect(JSON.stringify(liggen())).not.toMatch(/Geheim onderwerp 2|Blijft liggen/);
   });
 
   it('MAILTEL-06 meerdere bijlagen: een mail met meerdere .bvns-bijlagen (hoogstens 10) verwerkt ze op volgorde; faalt er een herhaalbaar, dan blijft de mail liggen en worden de al toegepaste bijlagen bij de volgende poging niet dubbel toegepast (register); een mail met zowel een .bvns als een gewone PDF verwerkt de .bvns en negeert de PDF (de factuur komt via de wijziging; geen tweede document)', async () => {
