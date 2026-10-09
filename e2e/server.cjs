@@ -318,6 +318,8 @@ function init(fresh) {
     intake: services.intake,
     settings: services.settings,
     spoolDir: path.join(path.dirname(file), 'bonnenscanner'),
+    // zoals in de app: de map van de administratie, waar foto's van de telefoon onder bijlagen/ komen
+    adminDir: path.dirname(file),
     protectedDirs: [dir],
     interfaces: () => [{ address: '127.0.0.1', netmask: '255.0.0.0' }],
     platform: scannerPlatform,

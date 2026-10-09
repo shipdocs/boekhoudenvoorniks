@@ -37,6 +37,7 @@ import { Classifier, type LlmClassifier } from './intake/classify';
 import { IntakeService } from './intake/intake';
 import type { OcrProvider } from './intake/ocr';
 import { JobService } from './jobs/jobs';
+import { JobPhotos } from './jobs/photos';
 import { InboxService } from './inbox/inbox';
 import { ChecklistService } from './onboarding/checklist';
 import { SwitchoverService } from './onboarding/switchover';
@@ -141,6 +142,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const taxOverview = new TaxOverviewService(db, settings, assets, mileage, hours);
   const incomeTax = new IncomeTaxService(db, settings, { assets, overview: taxOverview });
   const jobs = new JobService(db, quotes, invoices, relations);
+  const jobPhotos = new JobPhotos(db);
   const investments = new InvestmentCheck(db, purchases, bank);
   const mail = new MailIntakeService(db, settings, intake, async (html) => new Uint8Array(await deps.pdf(html)));
   const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases, recurring, categories, investments, mail);
@@ -179,7 +181,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, ownCompany, statementFolder, vies, periods, yearEnd, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed };
+  return { db, ownCompany, statementFolder, vies, periods, yearEnd, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, jobPhotos, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed };
 }
 
 export type Services = ReturnType<typeof createServices>;
