@@ -1048,7 +1048,10 @@ de bestanden blijven waar ze staan en `job_photos` wijst ernaar. Een project dat
 foto ook wachtend; komt de klant, dan zijn project en foto beide toegepast. Is een bestand intussen beschadigd of weg,
 dan is de uitkomst `afgewezen` met `ongeldig`. Een afgehandelde wachtende foto staat in de `bevestigingen` van die
 telefoon (zes velden, nooit een pad), ook als de telefoon intussen is ontkoppeld. Een volle wachtrij (1000 onverwerkte
-rijen per apparaat) geeft 503 `wachtrij-vol`, zonder rij en zonder bestanden; de foto komt dan later opnieuw.
+rijen per apparaat, of samen meer dan 256 MiB aan bestanden van onverwerkte wachtende foto's van dat apparaat) geeft
+503 `wachtrij-vol`, zonder rij en zonder bestanden; de foto komt dan later opnieuw. Afgehandelde rijen tellen niet mee.
+Is het project door de pc afgewezen (bijvoorbeeld de klant is een leverancier, `geen-klant`), dan wordt de wachtende foto
+afgewezen met `project-afgewezen`; de bestanden blijven staan.
 
 | HTTP | `uitkomst` / `fout` | Registerrij | Betekenis |
 |---|---|---|---|
@@ -1057,6 +1060,7 @@ rijen per apparaat) geeft 503 `wachtrij-vol`, zonder rij en zonder bestanden; de
 | 200 | `wacht` | nee | het project is nog onbekend; wacht op de `bevestigingen` |
 | 200 | `afgewezen`, `fout: "id-botst"` | ja | dezelfde `uuid` met een andere inhoud dan de bewaarde foto; de eerst opgeslagen inhoud blijft |
 | 200 | `afgewezen`, `fout: "ongeldig"` of `"veld-ongeldig"` | ja | alleen bij een wachtende foto die bij het verwerken niet meer klopt |
+| 200 | `afgewezen`, `fout: "project-afgewezen"` | ja | alleen bij een wachtende foto waarvan het project door de pc is afgewezen; niet opnieuw sturen |
 | 400 | `ongeldig`, `veld-ongeldig` | nee | revisie anders dan 1, een bijlage die niet klopt, of een veld dat niet klopt (zoals bij de bon) |
 | 413 | `te-groot` | nee | de grenzen van de bon |
 | 503 | `wachtrij-vol` | nee | de wachtrij van dit apparaat is vol; herhaalbaar |

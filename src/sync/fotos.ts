@@ -36,6 +36,14 @@ interface Bewaard {
 type Klaar = { uitkomst: 'toegepast' | 'overgeslagen' } | { uitkomst: 'afgewezen'; fout: string };
 type Uitkomst = Klaar | { uitkomst: 'wacht' };
 
+/**
+ * Het totaal aan bytes van de onverwerkte wachtende foto's (sync_wachtrij_bijlagen) dat een apparaat op schijf mag
+ * hebben: 256 MiB. De rijenlimiet van de wachtrij alleen is niet genoeg (een wachtende foto kan 19 MiB zijn). Is dit
+ * bereikt, dan antwoordt de pc 503 wachtrij-vol zonder rij en zonder bestanden; de telefoon probeert het later opnieuw.
+ * Alleen onverwerkte rijen tellen mee: na afhandelen (de bestanden blijven staan) is er weer ruimte.
+ */
+export const WACHT_BYTES_LIMIET = 256 * 1024 * 1024;
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const sha = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex');
 
@@ -134,7 +142,8 @@ export class FotoOntvangst implements WachtrijBehandelaar {
     // 4. het project: onbekend wacht (bestanden al op schijf, verwijzingen in de wachtrij), bekend bewaart
     const job = this.db.prepare('SELECT id FROM jobs WHERE uuid = ?').get(velden.project_uuid) as { id: number } | undefined;
     if (!job) {
-      // zonder registerrij en zonder foto: alleen een wachtrijrij; een volle wachtrij geeft 503 (herhaalbaar) zonder rij en zonder bestanden
+      // zonder registerrij en zonder foto: alleen een wachtrijrij; een volle wachtrij (rijen of bytes) geeft 503 (herhaalbaar) zonder rij en zonder bestanden
+      if (this.wachtendeBytes(deviceId) + items.reduce((som, it) => som + it.bytes, 0) > WACHT_BYTES_LIMIET) return { status: 503, fout: 'wachtrij-vol' };
       const r = this.wachtrij.zetIn(deviceId, bron, w, { entiteit: 'project', uuid: velden.project_uuid, reden: 'project-onbekend' }, route);
       if (r === 'vol') return { status: 503, fout: 'wachtrij-vol' };
       const rij = this.wachtrij.rij(deviceId, w.entiteit, w.uuid, w.revisie)!;
@@ -147,6 +156,11 @@ export class FotoOntvangst implements WachtrijBehandelaar {
     const uitkomst = this.voegToe(job.id, w.uuid, items, velden.notitie, w.tijd);
     this.schrijfRegister(deviceId, w, uitkomst, route);
     return { status: 200, uitkomst: uitkomst.uitkomst };
+  }
+
+  /** Het totaal aan bytes van de onverwerkte wachtende foto's van dit apparaat. */
+  private wachtendeBytes(deviceId: string): number {
+    return (this.db.prepare('SELECT COALESCE(SUM(b.bytes), 0) AS n FROM sync_wachtrij_bijlagen b JOIN sync_wachtrij q ON q.id = b.wachtrij_id WHERE q.apparaat_id = ? AND q.verwerkt_op IS NULL').get(deviceId) as { n: number }).n;
   }
 
   /** De transactie is gelukt: de bestanden die deze aanroep neerzette zijn nu definitief. */
@@ -226,14 +240,21 @@ export class FotoOntvangst implements WachtrijBehandelaar {
       } catch (e) {
         // een bestand dat er niet is, is weg; een andere leesfout (bv. tijdelijk in gebruik) is later opnieuw proberen
         if ((e as NodeJS.ErrnoException).code === 'ENOENT') return this.afwijzing('bijlage ontbreekt');
-        if (!(e as NodeJS.ErrnoException).code) return this.afwijzing('bijlage-pad');
-        throw e;
+        const code = (e as NodeJS.ErrnoException).code;
+        if (!code) return this.afwijzing('bijlage-pad');
+        // alleen de foutcode, nooit de melding: die bevat het absolute pad van het bestand
+        throw new Error(code);
       }
       if (data.length !== r.bytes || sha(data) !== r.sha256 || !jpegInfo(data)) return this.afwijzing('bijlage klopt niet');
     }
 
     const job = this.db.prepare('SELECT id FROM jobs WHERE uuid = ?').get(velden.velden.project_uuid) as { id: number } | undefined;
-    if (!job) return { uitkomst: 'wacht' };
+    if (!job) {
+      // het project is door de pc afgewezen (bv. de klant is een leverancier) en komt dus nooit: de foto wacht niet eeuwig
+      // (de bestanden blijven staan, maar de afgehandelde rij telt niet meer mee voor de limieten)
+      const afgewezen = this.db.prepare(`SELECT 1 FROM sync_ontvangen WHERE apparaat_id = ? AND entiteit = 'project' AND uuid = ? AND uitkomst = 'afgewezen' LIMIT 1`).get(rij.apparaat_id, velden.velden.project_uuid);
+      return afgewezen ? { uitkomst: 'afgewezen', fout: 'project-afgewezen' } : { uitkomst: 'wacht' };
+    }
     return this.voegToe(job.id, rij.uuid, refs.map((r) => ({ pad: r.file_path, sha256: r.sha256, bytes: r.bytes })), velden.velden.notitie, w.wijziging.tijd);
   }
 

@@ -20,6 +20,7 @@ import { ReceiptSpool } from '../src/scanner/spool';
 import { PHONE_SCANNER } from '../src/shared/phone-scanner';
 import { CONTENT_TYPE, ENDPOINT_PATH, LIMITS, decodePairing, encodeFrame, openResponse, parseFrame, sealRequest } from '../src/scanner/protocol';
 import { leesBevestigingen } from '../src/sync/bevestigingen';
+import { WACHT_BYTES_LIMIET } from '../src/sync/fotos';
 import { SyncOntvangst } from '../src/sync/ontvangst';
 import { WACHTRIJ_LIMIET } from '../src/sync/wachtrij';
 
@@ -223,6 +224,28 @@ describe('een foto van de telefoon bij een project op de pc', () => {
     // dezelfde wijziging nog eens: nog steeds een rij en geen nieuwe bestanden
     expect(o.foto(uuid, fotos, v)).toEqual({ status: 200, uitkomst: 'wacht' });
     expect(o.telling()).toEqual({ job_photos: 0, bijlagen: 2, wachtrij: 1, register: 0, bestanden: 2 });
+
+    // de wachtende bestanden zijn ook in bytes begrensd (per apparaat): een apparaat dat de limiet vol zet krijgt 503
+    // zonder rij en zonder bestanden, een ander apparaat niet; na afhandelen (het project komt) is er weer ruimte
+    const klantUuid = randomUUID();
+    const vulProject = randomUUID();
+    o.db.prepare(`INSERT INTO sync_wachtrij (apparaat_id, bron, entiteit, uuid, revisie, tijd, wijziging, wacht_op_entiteit, wacht_op_uuid, reden, ontvangen_op) VALUES (?, ?, 'project', ?, 1, 5, '{}', 'klant', ?, 'klant-onbekend', 6)`).run(APPARAAT, BRON, vulProject, klantUuid);
+    const vulId = o.db.prepare('SELECT id FROM sync_wachtrij WHERE uuid = ?').pluck().get(vulProject) as number;
+    const eigen = fotos.reduce((som, f) => som + f.length, 0);
+    o.db.prepare('INSERT INTO sync_wachtrij_bijlagen (wachtrij_id, volgnr, file_path, sha256, bytes) VALUES (?, 1, ?, ?, ?)').run(vulId, 'bijlagen/telefoon/vulling/1.jpg', 'x'.repeat(64), WACHT_BYTES_LIMIET - eigen);
+    const voorBytes = o.telling();
+    const extra = [makeJpeg('past net niet')];
+    const volUuid = randomUUID();
+    expect(o.foto(volUuid, extra, velden(randomUUID(), extra))).toEqual({ status: 503, fout: 'wachtrij-vol' });
+    expect(o.wachtrij(volUuid)).toHaveLength(0);
+    expect(o.telling()).toEqual(voorBytes);
+    // een ander apparaat heeft zijn eigen ruimte
+    const ander = randomUUID();
+    expect(o.foto(ander, extra, velden(randomUUID(), extra), { apparaat: 'apparaat-2' })).toEqual({ status: 200, uitkomst: 'wacht' });
+    // de klant komt: de vulrij wordt afgehandeld en de wachtende bytes tellen niet meer mee
+    expect(o.klant(klantUuid)).toMatchObject({ uitkomst: 'toegepast' });
+    expect(o.db.prepare('SELECT verwerkt_op FROM sync_wachtrij WHERE id = ?').pluck().get(vulId)).not.toBeNull();
+    expect(o.foto(volUuid, extra, velden(randomUUID(), extra))).toEqual({ status: 200, uitkomst: 'wacht' });
   });
 
   it('FOTO-04 project komt binnen: zodra het project is toegepast wordt de wachtende foto in dezelfde verwerking overgenomen (job_photos, registerrij toegepast, wachtrijrij afgehandeld met bevestigingsnummer) zonder dat de bestanden verplaatst of gedupliceerd worden', () => {
@@ -358,7 +381,7 @@ describe('een foto van de telefoon bij een project op de pc', () => {
   });
 
   it('FOTO-08 atomair: een geforceerde fout bij het opslaan (databank of bestand) geeft 500 opslaan-mislukt en laat geen rij en geen los bestand achter; mislukt het verwijderen van het bestand bij het terugdraaien, dan wordt het onthouden en nooit een foto; daarna werkt dezelfde wijziging gewoon', () => {
-    const { o, projectUuid } = metProject();
+    const { o, projectUuid, klantUuid } = metProject();
     const fotos = [makeJpeg('half 1'), makeJpeg('half 2')];
     const w = () => ({ uuid: randomUUID(), v: velden(projectUuid, fotos, { notitie: 'geheime notitie' }) });
     const mislukt = { status: 500, fout: 'opslaan-mislukt' };
@@ -443,6 +466,23 @@ describe('een foto van de telefoon bij een project op de pc', () => {
     expect(o.foto(d.uuid, fotos, d.v)).toEqual(mislukt);
     expect(readFileSync(join(o.adminDir, ...pad(d.uuid, 1).split('/')), 'utf8')).toBe('iets anders');
     expect(o.fotoRijen(d.uuid)).toHaveLength(0);
+
+
+    // 6. een leesfout bij het overnemen van een wachtende foto (hier: de map van het bestand is een bestand geworden)
+    // komt in het logboek met alleen de foutcode, nooit met het absolute pad van het bestand
+    const wachtUuid = randomUUID();
+    const wachtProject = randomUUID();
+    expect(o.foto(wachtUuid, fotos, velden(wachtProject, fotos))).toEqual({ status: 200, uitkomst: 'wacht' });
+    const wachtMap = join(o.adminDir, 'bijlagen', 'telefoon', wachtUuid);
+    rmSync(wachtMap, { recursive: true, force: true });
+    writeFileSync(wachtMap, 'geen map');
+    o.logs.length = 0;
+    o.project(wachtProject, klantUuid);
+    for (const regel of o.logs) {
+      expect(regel).not.toContain(o.adminDir);
+      expect(regel).not.toMatch(/telefoon\/|bijlagen\/|'\//);
+    }
+    expect(o.fotoRijen(wachtUuid)).toHaveLength(0);
   });
 
   it('FOTO-09 locatie: GPS in de JPEG wordt gestript tenzij keepLocation; de sha256 in de velden is die van wat de telefoon stuurde, de sha256 in job_photos die van wat is bewaard', () => {
@@ -581,6 +621,24 @@ describe('een foto van de telefoon bij een project op de pc', () => {
     expect(kort(uuidKapot)).toEqual([{ entiteit: 'foto', revisie: 1, uitkomst: 'afgewezen', fout: 'ongeldig' }]);
     for (const x of pagina.bevestigingen) expect(Object.keys(x).sort()).toEqual(['entiteit', 'fout', 'revisie', 'seq', 'uitkomst', 'uuid']);
     expect(leesBevestigingen(o.db, b.deviceId, 0).bevestigingen.filter((x) => x.entiteit === 'foto')).toHaveLength(0);
+
+    // een wachtende foto voor een project dat nooit komt omdat het is afgewezen (de klant is een leverancier): de foto
+    // wordt afgewezen met project-afgewezen, met registerrij en bevestiging; de bestanden blijven staan
+    const leverancier = o.s.relations.create({ name: 'Bouwmarkt', type: 'leverancier' });
+    const leverancierUuid = o.db.prepare('SELECT uuid FROM relations WHERE id = ?').pluck().get(leverancier.id) as string;
+    const afgewezenProject = randomUUID();
+    const uuidAfgewezen = randomUUID();
+    const bijProject = [makeJpeg('project afgewezen')];
+    expect(stuur(b, uuidAfgewezen, bijProject, afgewezenProject)).toEqual({ status: 200, uitkomst: 'wacht' });
+    expect(o.project(afgewezenProject, leverancierUuid, b.deviceId)).toEqual({ status: 200, uitkomst: 'afgewezen', fout: 'geen-klant' });
+    expect(o.fotoRijen(uuidAfgewezen)).toHaveLength(0);
+    expect(o.register(uuidAfgewezen)).toEqual([{ apparaat_id: b.deviceId, uitkomst: 'afgewezen', fout: 'project-afgewezen', route: 'netwerk' }]);
+    expect(o.wachtrij(uuidAfgewezen)[0]).toMatchObject({ verwerkt_uitkomst: 'afgewezen', verwerkt_reden: 'project-afgewezen' });
+    expect(o.wachtrij(uuidAfgewezen)[0]!.verwerkt_seq).not.toBeNull();
+    expect(leesBevestigingen(o.db, b.deviceId, 0).bevestigingen.filter((x) => x.entiteit === 'foto').map((x) => ({ uuid: x.uuid, uitkomst: x.uitkomst, fout: x.fout }))).toEqual([{ uuid: uuidAfgewezen, uitkomst: 'afgewezen', fout: 'project-afgewezen' }]);
+    expect(o.bestanden()).toContain(pad(uuidAfgewezen, 1));
+    // een herhaling herhaalt de afwijzing
+    expect(stuur(b, uuidAfgewezen, bijProject, afgewezenProject)).toEqual({ status: 200, uitkomst: 'afgewezen', fout: 'project-afgewezen' });
 
     // een volle wachtrij: 503 wachtrij-vol, zonder rij en zonder bestanden
     const voor = o.telling();

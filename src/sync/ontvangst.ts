@@ -15,7 +15,7 @@ export interface SyncResultaat {
   status: number;
   /** bij 200: toegepast, overgeslagen, afgewezen, wacht (in de wachtrij) of niet-ondersteund */
   uitkomst?: 'toegepast' | 'overgeslagen' | 'afgewezen' | 'wacht' | 'niet-ondersteund';
-  /** bij afgewezen en bij elke fout: de reden als code (id-botst, geen-klant, klus-gekoppeld, nummer-bezet, factuur-geweigerd, veld-ongeldig, ongeldig, veld-ongeldig, klant-onbekend, project-onbekend, wachtrij-vol, opslaan-mislukt) */
+  /** bij afgewezen en bij elke fout: de reden als code (id-botst, geen-klant, klus-gekoppeld, nummer-bezet, factuur-geweigerd, veld-ongeldig, ongeldig, veld-ongeldig, klant-onbekend, project-onbekend, project-afgewezen, wachtrij-vol, opslaan-mislukt) */
   fout?: string;
   /** bij veld-ongeldig: het veld (Nederlandse naam) waar het om gaat */
   veld?: string;
@@ -116,7 +116,7 @@ export class SyncOntvangst {
     // de klant er al zijn terwijl het wachtende project nog ontbreekt. Verder hervat elke wijziging van een apparaat met
     // wachtende facturen de wachtrij (bv. nadat de boekhouder de periode heeft heropend), ongeacht de uitkomst of de
     // statuscode (ook 503 wachtrij-vol, 400, 409, 500) en ook voor bon en foto. Het antwoord verandert daar nooit door.
-    if ((uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant'))) || this.heeftWachtendeFacturen(deviceId)) this.verwerkWachtrij();
+    if ((uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant') || (uitslag.uitkomst === 'afgewezen' && wijziging.entiteit === 'project'))) || this.heeftWachtendeFacturen(deviceId)) this.verwerkWachtrij();
     return uitslag;
   }
 
