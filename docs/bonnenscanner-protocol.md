@@ -854,6 +854,11 @@ wijziging en er komt geen nieuwe klant. De alias wordt eerst gezocht en pas daar
 `uuid` van een leverancier wordt `afgewezen` (`geen-klant`); een klant van het type klant en van het
 type beide mag wel.
 
+Landt een klantwijziging via een alias op de doelklant (de `uuid` in de wijziging is niet die van de gevonden klant),
+dan wordt het veld `gearchiveerd` genegeerd: een telefoon die de samengevoegde bron als gearchiveerd kent, kan het doel
+zo nooit archiveren. De overige velden worden per veld samengevoegd zoals altijd. Een wijziging voor de `uuid` van het
+doel zelf kan `gearchiveerd` wel zetten.
+
 **Samenvoegen per veld.** Elk veld heeft een tijd en een bron. De nieuwste `(tijd, bron)` wint: bij een
 nieuwere tijd wint de wijziging, bij een gelijke tijd de lexicografisch grootste bron (`pc` wint van
 `M1`, `M2` wint van `M1`), en bij gelijke tijd en bron de grootste waarde als tekst. Een veld met een

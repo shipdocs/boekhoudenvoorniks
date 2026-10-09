@@ -246,7 +246,7 @@ export class SyncOntvangst {
         uitkomst = 'afgewezen';
         fout = 'geen-klant';
       } else {
-        uitkomst = this.relations.pasVeldenToe(klant.id, velden, w.tijd, bron).toegepast.length > 0 ? 'toegepast' : 'overgeslagen';
+        uitkomst = this.relations.pasVeldenToe(klant.id, velden, w.tijd, bron, { viaAlias: klant.uuid !== w.uuid }).toegepast.length > 0 ? 'toegepast' : 'overgeslagen';
       }
     } catch (e) {
       // een combinatie die de pc zelf zou weigeren (land met KvK-nummer): de transactie is teruggerold

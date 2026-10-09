@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { migrate } from '../src/db/database';
 import { migrations } from '../src/db/migrations';
 import { createApi, type HostContext } from '../src/main/api';
 import { RelationsService, type RelationInput } from '../src/relations/relations';
-import { MAX_NIEUWE_VOORSTELLEN, MAX_ZICHTBARE_VOORSTELLEN, openVoorstellen, voegVoorstelSamen, wijsVoorstelAf, zoekDubbelen } from '../src/relations/dubbelen';
+import { MAX_KLANTEN_PER_SLEUTEL, MAX_NIEUWE_VOORSTELLEN, MAX_ZICHTBARE_VOORSTELLEN, openVoorstellen, voegVoorstelSamen, wijsVoorstelAf, zoekDubbelen } from '../src/relations/dubbelen';
 import { SyncOntvangst } from '../src/sync/ontvangst';
 import { leesBevestigingen } from '../src/sync/bevestigingen';
 import { leesStamgegevens } from '../src/sync/stamgegevens';
@@ -334,6 +334,14 @@ describe('dubbele klanten: zoeken, voorstellen en samenvoegen op bevestiging', (
     expect(o.sync.verwerk(APPARAAT, BRON, { entiteit: 'klant', uuid: doel.uuid!, revisie: 1, tijd: tijd + 1000, velden: { notities: 'Bel eerst' } })).toEqual({ status: 200, uitkomst: 'toegepast' });
     expect(relatie(o.db, doel.id).notes).toBe('Bel eerst');
     expect(n(o.db, 'SELECT COUNT(*) AS n FROM relations')).toBe(klanten);
+
+    // een offline wijziging voor de bron-uuid archiveert het doel nooit; de overige velden van dezelfde wijziging worden wel toegepast
+    expect(o.sync.verwerk(APPARAAT, BRON, { entiteit: 'klant', uuid: bronUuid, revisie: 8, tijd: tijd + 5000, velden: { gearchiveerd: 1, notities: 'Via de oude uuid' } })).toEqual({ status: 200, uitkomst: 'toegepast' });
+    expect(relatie(o.db, doel.id)).toMatchObject({ archived: 0, notes: 'Via de oude uuid' });
+    expect(rijen(o.db, `SELECT 1 FROM relation_field_rev WHERE relation_id = ? AND veld = 'archived' AND bron = ?`, doel.id, BRON)).toEqual([]);
+    // een wijziging voor de doel-uuid zelf kan archived wel zetten
+    expect(o.sync.verwerk(APPARAAT, BRON, { entiteit: 'klant', uuid: doel.uuid!, revisie: 2, tijd: tijd + 6000, velden: { gearchiveerd: 1 } })).toEqual({ status: 200, uitkomst: 'toegepast' });
+    expect(relatie(o.db, doel.id).archived).toBe(1);
   });
 
   it('DUBBEL-08 wachtende wijzigingen: een factuur of project dat op de klant wachtte (de bron-uuid, of een uuid die nu een alias is) wordt na het samenvoegen in dezelfde actie opnieuw verwerkt en overgenomen met de doelklant, de wachtrijrij is afgehandeld (nooit verwijderd) en de bevestiging ligt klaar', async () => {
@@ -575,6 +583,37 @@ describe('dubbele klanten: zoeken, voorstellen en samenvoegen op bevestiging', (
     expect(d.sync.verwerk(APPARAAT, BRON, { entiteit: 'factuur', uuid: factuurUuid, revisie: 1, tijd: Date.now() - DAG, velden: factuurVelden(aliasUuid, 1) })).toEqual({ status: 200, uitkomst: 'toegepast' });
     expect(rijen(d.db, 'SELECT relation_id FROM invoices WHERE uuid = ?', factuurUuid)).toEqual([{ relation_id: doel.id }]);
     expect(n(d.db, 'SELECT COUNT(*) AS n FROM relations')).toBe(klanten);
+
+    // een gedeelde sleutel schaalt niet kwadratisch: 2000 klanten met hetzelfde e-mailadres geven een beperkt aantal voorstellen, snel
+    const veel = omgeving();
+    const vulVeel = veel.db.prepare(`INSERT INTO relations (type, name, email, uuid) VALUES ('klant', ?, 'placeholder@voorbeeld.nl', ?)`);
+    veel.db.transaction(() => {
+      for (let i = 0; i < 2000; i++) vulVeel.run(`Veelvoud ${i} Naam`, randomUUID());
+    })();
+    const begin = Date.now();
+    const nieuw = zoekDubbelen(veel.db);
+    expect(Date.now() - begin).toBeLessThan(3000);
+    expect(nieuw).toBeGreaterThan(0);
+    expect(nieuw).toBeLessThanOrEqual((MAX_KLANTEN_PER_SLEUTEL * (MAX_KLANTEN_PER_SLEUTEL - 1)) / 2);
+    expect(n(veel.db, 'SELECT COUNT(*) AS n FROM klant_dubbel_voorstellen')).toBe(nieuw);
+    const begin2 = Date.now();
+    zoekDubbelen(veel.db);
+    expect(Date.now() - begin2).toBeLessThan(3000);
+
+    // een echte fout in het zoeken breekt Vandaag niet en komt met alleen de foutmelding in het logboek
+    const stuk = omgeving();
+    stuk.db.exec('DROP TABLE klant_dubbel_voorstellen');
+    const spion = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(() => stuk.s.inbox.tasks()).not.toThrow();
+      expect(stuk.dubbelTaken()).toEqual([]);
+      const regels = spion.mock.calls.filter((c) => String(c[0]).includes('ubbele klanten'));
+      expect(regels.length).toBeGreaterThan(0);
+      expect(regels[0]).toHaveLength(2);
+      expect(String(regels[0]![1])).toContain('klant_dubbel_voorstellen');
+    } finally {
+      spion.mockRestore();
+    }
   });
 });
 

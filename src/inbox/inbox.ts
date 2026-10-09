@@ -1925,7 +1925,9 @@ export class InboxService {
     try {
       zoekDubbelen(this.db);
       lijst = openVoorstellen(this.db);
-    } catch {
+    } catch (e) {
+      // Vandaag blijft werken, maar een echte fout (SQL, schema) mag niet stil blijven
+      console.error('Zoeken naar dubbele klanten mislukt', (e as Error).message);
       return [];
     }
     const kort = (t: string, max: number) => {

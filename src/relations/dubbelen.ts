@@ -14,6 +14,11 @@ import type { RelationsService } from './relations';
 
 /** Hoeveel nieuwe voorstellen een zoekronde hoogstens bewaart; een volgende ronde gaat verder met de rest. */
 export const MAX_NIEUWE_VOORSTELLEN = 200;
+/**
+ * Hoeveel klanten per sleutel (zelfde e-mailadres, KvK-nummer enzovoort) hoogstens meedoen aan het maken van paren: de
+ * eerste op id. Zo groeit het werk bij een gedeelde sleutel (een placeholder) niet kwadratisch met het aantal klanten.
+ */
+export const MAX_KLANTEN_PER_SLEUTEL = 20;
 /** Hoeveel voorstellen er hoogstens tegelijk op Vandaag en in de lijst staan; de rest komt als telling. */
 export const MAX_ZICHTBARE_VOORSTELLEN = 50;
 
@@ -39,18 +44,26 @@ const SOORTEN: Record<string, { volgorde: number; tekst: string }> = {
 /**
  * Alle nog niet beslagen en nog niet bewaarde paren, met de soorten overeenkomst. Per soort een gelijke sleutel
  * (self-join op de sleutel), alleen klanten van type klant of beide die niet gearchiveerd zijn en een niet-lege sleutel
- * hebben. Paren die al een voorstel hebben (welke status ook) vallen in de query zelf weg, dus vóór de grens.
+ * hebben. Het werk is begrensd vóór er paren ontstaan: alleen sleutels met meer dan één klant tellen en per sleutel doen
+ * hoogstens MAX_KLANTEN_PER_SLEUTEL klanten mee. Paren die al een voorstel hebben (welke status ook) vallen in de query zelf weg, dus vóór de grens.
  */
 const ZOEK_SQL = `
 WITH k AS (
   SELECT id, trim(kvk_number) AS kvk, ${BTW_SQL} AS btw, lower(trim(email)) AS mail, ${NAAM_SQL} AS naam
   FROM relations
   WHERE archived = 0 AND type IN ('klant', 'beide')
-), s AS (
+), s0 AS (
   SELECT id, 'kvk' AS soort, kvk AS sleutel FROM k WHERE kvk <> ''
   UNION ALL SELECT id, 'btw', btw FROM k WHERE btw <> ''
   UNION ALL SELECT id, 'email', mail FROM k WHERE mail <> ''
   UNION ALL SELECT id, 'naam', naam FROM k WHERE length(naam) >= 3 AND naam NOT IN (${ALGEMENE_NAMEN.map(sqlTekst).join(', ')})
+), gedeeld AS (
+  SELECT soort, sleutel FROM s0 GROUP BY soort, sleutel HAVING COUNT(*) > 1
+), s AS (
+  SELECT id, soort, sleutel FROM (
+    SELECT s0.id, s0.soort, s0.sleutel, ROW_NUMBER() OVER (PARTITION BY s0.soort, s0.sleutel ORDER BY s0.id) AS rang
+    FROM s0 JOIN gedeeld g ON g.soort = s0.soort AND g.sleutel = s0.sleutel
+  ) WHERE rang <= ${MAX_KLANTEN_PER_SLEUTEL}
 )
 SELECT a.id AS a, b.id AS b, group_concat(a.soort) AS soorten
 FROM s a JOIN s b ON b.soort = a.soort AND b.sleutel = a.sleutel AND b.id > a.id

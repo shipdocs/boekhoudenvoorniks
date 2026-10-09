@@ -429,9 +429,10 @@ export class RelationsService {
    * omhoog, krijgt de klant een nieuw wijzigingsnummer en wordt gewijzigd_op de hoogste van de oude
    * waarde en de toegepaste veldtijden; elk toegepast veld komt in relation_field_rev en relation_changelog.
    * Een veld dat wint wordt ook toegepast als de waarde gelijk is: de veldtijd moet het resultaat
-   * bepalen, anders hangt de eindtoestand af van de volgorde. Alles in een transactie.
+   * bepalen, anders hangt de eindtoestand af van de volgorde. Met `viaAlias` (de wijziging was voor een andere uuid dan
+   * die van deze klant) blijft het veld archived buiten beschouwing. Alles in een transactie.
    */
-  pasVeldenToe(id: number, velden: Record<string, unknown>, tijd: number, bron: string): { toegepast: string[]; overgeslagen: string[] } {
+  pasVeldenToe(id: number, velden: Record<string, unknown>, tijd: number, bron: string, opties: { viaAlias?: boolean } = {}): { toegepast: string[]; overgeslagen: string[] } {
     const schoon = normaliseerSyncVelden(velden);
     return this.db.transaction(() => {
       const bestaand = this.get(id);
@@ -443,6 +444,8 @@ export class RelationsService {
       const zetten: SyncKolom[] = [];
       for (const kolom of SYNC_KOLOMMEN) {
         if (!Object.hasOwn(schoon, kolom)) continue;
+        // een wijziging die via een alias op het doel landt (de telefoon kent de samengevoegde bron) archiveert het doel nooit
+        if (opties.viaAlias && kolom === 'archived') continue;
         const veld = RELATIE_VELD_MAPPING[kolom];
         const opgeslagen = this.db.prepare('SELECT tijd, bron FROM relation_field_rev WHERE relation_id = ? AND veld = ?').get(id, veld) as { tijd: number; bron: string } | undefined;
         const huidig = { ...(opgeslagen ?? { tijd: ondergrens, bron: BRON_PC }), waarde: rij[kolom] };
