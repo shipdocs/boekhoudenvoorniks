@@ -8,7 +8,7 @@ import { leesBevestigingen } from '../sync/bevestigingen';
 import { OngeldigeCursor, leesCursor, leesStamgegevens, type Cursor } from '../sync/stamgegevens';
 import { jpegInfo } from './jpeg-pdf';
 import { normalizeRemote, sameSubnet, type LocalInterface } from './network';
-import { CONTENT_TYPE, DIRECTION, ENDPOINT_PATH, HEADER_BYTES, LIMITS, PROTOCOL_VERSIONS, RULES_VERSION, TAG_BYTES, ProtocolError, openRequest, parseFrame, readHeader, sealResponse, toBase64Url, type ErrorCode } from './protocol';
+import { CONTENT_TYPE, DIRECTION, ENDPOINT_PATH, HEADER_BYTES, LIMITS, PROTOCOL_VERSIONS, RULES_VERSION, TAG_BYTES, ProtocolError, openRequest, parseFrame, readHeader, sealResponse, toBase64Url, type ErrorCode, type ProtocolVersion } from './protocol';
 
 export interface ReceiverOptions {
   pairing: ScannerPairing;
@@ -32,6 +32,14 @@ export interface ReceiverOptions {
 }
 
 type SyncResult = SyncResultaat;
+
+/** De uitkomst van `behandel`: wat het antwoord is, en wat daarna nog moet gebeuren. */
+export interface Behandeld {
+  status: number;
+  json: Record<string, unknown>;
+  /** pas na het versturen of opslaan van het antwoord (een nieuwe bon naar de inbox) */
+  na?: () => void;
+}
 
 const MAX_INFLIGHT = 3;
 const MAX_FAILURES = 20;
@@ -279,13 +287,27 @@ export class ScannerReceiver {
     }
 
     // Vanaf hier weten we dat het bericht van een gekoppelde telefoon komt: antwoorden gaan versleuteld terug,
-    // in dezelfde protocolversie als het verzoek.
-    const versie = head.versie;
-    const reply = (status: number, json: Record<string, unknown>): void => {
-      const out = sealResponse(head.deviceId, key, head.nonce, json, undefined, versie);
-      res.writeHead(status, this.headers(CONTENT_TYPE, out.length));
-      res.end(out);
-    };
+    // in dezelfde protocolversie als het verzoek. De afhandeling zelf is dezelfde functie als voor de bonnenmap.
+    const uitkomst = this.behandel(deviceId, head, plaintext, 'netwerk');
+    const out = sealResponse(head.deviceId, key, head.nonce, uitkomst.json, undefined, head.versie);
+    res.writeHead(uitkomst.status, this.headers(CONTENT_TYPE, out.length));
+    res.end(out);
+    uitkomst.na?.();
+  }
+
+  /**
+   * De afhandeling van een geopend verzoek van een gekoppelde telefoon, voor alle routes: geeft de status en het
+   * antwoord (JSON) terug en verstuurt zelf niets. De HTTP-kant (`handle`) ontvangt en versleutelt het antwoord;
+   * de bonnenmap (src/scanner/map-route.ts) schrijft het versleutelde antwoord als bestand. `na` is wat pas ná
+   * het antwoord moet gebeuren (een nieuwe bon naar de inbox).
+   *
+   * De klokcontrole op de verzendtijd (403) en de nonce (409 herhaald) zijn eigen aan het netwerk: een bestand
+   * in de bonnenmap kan uren later binnenkomen, en een herhaling is daar idempotent via het register van
+   * SyncOntvangst. De controle op de bewerktijd van een wijziging is een vormregel van de wijziging zelf en geldt voor alle routes.
+   */
+  behandel(deviceId: string, kop: { versie: ProtocolVersion; nonce: Buffer }, plaintext: Buffer, route: 'netwerk' | 'map'): Behandeld {
+    const versie = kop.versie;
+    const reply = (status: number, json: Record<string, unknown>, na?: () => void): Behandeld => ({ status, json, ...(na ? { na } : {}) });
     const now = this.now();
     let msg;
     try {
@@ -293,12 +315,12 @@ export class ScannerReceiver {
     } catch (e) {
       return reply(e instanceof ProtocolError && e.code === 'te-groot' ? 413 : 400, { ok: false, fout: e instanceof ProtocolError ? e.code : 'ongeldig' });
     }
-    if (Math.abs(msg.tijd - now) > LIMITS.clockWindowMs) return reply(403, { ok: false, fout: 'klok', pcTijd: now });
+    if (route === 'netwerk' && Math.abs(msg.tijd - now) > LIMITS.clockWindowMs) return reply(403, { ok: false, fout: 'klok', pcTijd: now });
     // Het bewerkmoment van een change-set (wijziging.tijd) mag willekeurig oud zijn — de wijziging kan
     // offline gemaakt zijn — maar niet verder in de toekomst dan het klokvenster. Dit is de enige
     // plek waar die regel staat; de kern controleert alleen de vorm van de tijd.
     if (msg.soort === 'wijziging' && msg.wijziging.tijd > now + LIMITS.clockWindowMs) return reply(400, { ok: false, fout: 'ongeldig' });
-    if (!this.opts.pairing.useNonce(deviceId, head.nonce)) return reply(409, { ok: false, fout: 'herhaald' });
+    if (route === 'netwerk' && !this.opts.pairing.useNonce(deviceId, kop.nonce)) return reply(409, { ok: false, fout: 'herhaald' });
 
     if (msg.soort === 'hallo') {
       this.opts.pairing.seen(deviceId);
@@ -325,7 +347,7 @@ export class ScannerReceiver {
       try {
         const bron = this.opts.pairing.code(deviceId);
         if (!bron) throw new Error('de telefoon heeft nog geen apparaatcode');
-        uitslag = this.opts.sync.verwerk(deviceId, bron, w, 'netwerk', bijlagen);
+        uitslag = this.opts.sync.verwerk(deviceId, bron, w, route, bijlagen);
       } catch (e) {
         this.opts.log?.(`Wijziging van de telefoon opslaan mislukt: ${(e as Error).message}`);
         return reply(500, { ok: false, fout: 'opslaan-mislukt' });
@@ -333,9 +355,7 @@ export class ScannerReceiver {
       if (uitslag.status === 200) {
         // een nieuwe bon ligt in de spool: op naar de inbox, net als bij het bon-bericht
         const nieuweBon = w.entiteit === 'bon' && uitslag.uitkomst === 'toegepast';
-        reply(200, { ok: true, soort: 'wijziging', ...eigen, uitkomst: uitslag.uitkomst, ...(uitslag.fout ? { fout: uitslag.fout } : {}), ...(uitslag.melding ? { melding: uitslag.melding } : {}) });
-        if (nieuweBon) this.opts.onStored?.();
-        return;
+        return reply(200, { ok: true, soort: 'wijziging', ...eigen, uitkomst: uitslag.uitkomst, ...(uitslag.fout ? { fout: uitslag.fout } : {}), ...(uitslag.melding ? { melding: uitslag.melding } : {}) }, nieuweBon ? () => this.opts.onStored?.() : undefined);
       }
       return reply(uitslag.status, { ok: false, fout: uitslag.fout ?? 'opslaan-mislukt', ...(uitslag.veld ? { veld: uitslag.veld } : {}), ...(uitslag.melding ? { melding: uitslag.melding } : {}) });
     }
@@ -392,8 +412,7 @@ export class ScannerReceiver {
     this.opts.pairing.seen(deviceId);
     this.opts.onActivity?.();
     if (outcome === 'botst') return reply(409, { ok: false, fout: 'id-botst', id: msg.id });
-    reply(200, { ok: true, soort: 'bon', id: msg.id, al: outcome === 'al' });
-    if (outcome === 'nieuw') this.opts.onStored?.();
+    return reply(200, { ok: true, soort: 'bon', id: msg.id, al: outcome === 'al' }, outcome === 'nieuw' ? () => this.opts.onStored?.() : undefined);
   }
 }
 

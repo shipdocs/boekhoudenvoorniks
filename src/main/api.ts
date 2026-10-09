@@ -61,6 +61,7 @@ import { storeFallbackHint } from './windows-store';
 import { proposedPaidWith } from '../shared/paid-with';
 import { dueOf, purchaseSupplierName } from '../documents/bank-purchase-match';
 import QRCode from 'qrcode';
+import { MAP_SOORTEN } from '../scanner/map-route';
 import type { Bonnenscanner } from '../scanner/scanner';
 import { PHONE_SCANNER } from '../shared/phone-scanner';
 import { BANK_FEED } from '../shared/bank-feed';
@@ -519,6 +520,15 @@ export function createApi(s: Services, host: HostContext) {
         return;
       }
       case 'klant-dubbel:later':
+        return;
+      case 'telefoon-map-problemen:gezien': {
+        // alleen de soort en het hoogste regelnummer uit de taak; beide worden strikt gecontroleerd, en de regels blijven bewaard
+        const m = r.mapProbleem;
+        if (!m || !(MAP_SOORTEN as readonly string[]).includes(m.soort) || !Number.isSafeInteger(m.totId) || m.totId < 1 || task.key !== `telefoon-map-problemen:${m.soort}`) throw new ValidationError('Deze melding is intussen veranderd. Bekijk Vandaag opnieuw.');
+        s.db.prepare('UPDATE sync_map_problemen SET gezien_op = ? WHERE soort = ? AND id <= ? AND gezien_op IS NULL').run(Date.now(), m.soort, m.totId);
+        return;
+      }
+      case 'telefoon-map-problemen:later':
         return;
       case 'exchange-conflict:klaar':
         s.inbox.skipTask(task.key, 'afgehandeld');

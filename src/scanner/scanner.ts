@@ -12,6 +12,7 @@ import { today } from '../shared/dates';
 import type { PaidWith } from '../shared/paid-with';
 import { ReceiptFolderWatch, type FolderStatus } from './folder-watch';
 import { jpegsToPdf } from './jpeg-pdf';
+import { MapRoute, type MapBestanden, type MapStatus } from './map-route';
 import type { Advertiser } from './mdns';
 import { localInterfaces, type LocalInterface } from './network';
 import { ScannerPairing, type ScannerDevice } from './pairing';
@@ -51,6 +52,8 @@ export interface ScannerDeps {
   log?: (message: string) => void;
   folderPollMs?: number;
   folderStableMs?: number;
+  /** bestandsacties van de maproute (schrijven en verplaatsen); alleen tests vervangen ze om een mislukking na te bootsen */
+  mapBestanden?: Partial<MapBestanden>;
 }
 
 export interface ScannerStatus {
@@ -70,6 +73,8 @@ export interface ScannerStatus {
   /** bonnen die niet in de inbox gezet konden worden; ze blijven bewaard op deze plek */
   failed: { id: string; path: string; error: string | null }[];
   folder: FolderStatus;
+  /** de bonnenmap als route voor berichten van de telefoon (van-telefoon/ en van-pc/): aantallen, nooit paden of inhoud */
+  map: MapStatus;
 }
 
 export interface PairingStart {
@@ -102,6 +107,7 @@ export class Bonnenscanner {
   private readonly spool: ReceiptSpool;
   private readonly receiver: ScannerReceiver;
   private readonly watch: ReceiptFolderWatch;
+  private readonly map: MapRoute;
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
   private draining: Promise<void> = Promise.resolve();
@@ -147,6 +153,19 @@ export class Bonnenscanner {
       stableMs: deps.folderStableMs,
       onProcessed: () => deps.onChange?.(),
     });
+    // dezelfde afhandeling als het netwerk (route map), in dezelfde gekozen bonnenmap; zolang koppelen uit staat gebeurt er niets
+    this.map = new MapRoute({
+      db: deps.db,
+      pairing: this.pairing,
+      behandel: (deviceId, kop, plaintext, route) => this.receiver.behandel(deviceId, kop, plaintext, route),
+      folder: () => (PHONE_SCANNER.available ? this.watchedFolder() : Promise.resolve(null)),
+      now: deps.now,
+      pollMs: deps.folderPollMs,
+      stableMs: deps.folderStableMs,
+      bestanden: deps.mapBestanden,
+      onProcessed: () => deps.onChange?.(),
+      log: this.log,
+    });
   }
 
   /**
@@ -174,6 +193,8 @@ export class Bonnenscanner {
     // intussen gestopt (bv. meteen een andere administratie geopend): niets meer aanzetten
     if (this.stopped) return;
     this.watch.start();
+    // wat er al in van-telefoon/ ligt (ook herhaalbare bestanden van voor het afsluiten) wordt nu opgepakt
+    this.map.start();
     void this.processSpool();
     this.timer = setInterval(() => {
       void this.refresh();
@@ -192,6 +213,8 @@ export class Bonnenscanner {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.watch.stop();
+    // een verzoekbestand dat al in behandeling is wordt eerst afgemaakt: er blijft niets half achter
+    await this.map.stop();
     this.deps.advertiser?.stop();
     await this.receiver.stop();
   }
@@ -223,6 +246,7 @@ export class Bonnenscanner {
       waiting: this.spool.waiting().length,
       failed: this.spool.failed().map((r) => ({ id: r.id, path: this.spool.pathOf(r.id), error: r.error })),
       folder: this.watch.status(),
+      map: this.map.status(),
     };
   }
 
@@ -334,13 +358,20 @@ export class Bonnenscanner {
       this.deps.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(FOLDER_KEY, JSON.stringify(real));
     }
     this.watch.reset();
+    this.map.reset();
     await this.watch.scan();
+    await this.map.scan();
     return this.watch.status();
   }
 
   /** Nu in de bonnenmap kijken (ook gebruikt door tests). */
   scanFolder(): Promise<void> {
     return this.watch.scan();
+  }
+
+  /** Nu in van-telefoon/ kijken (ook gebruikt door tests). */
+  scanMap(): Promise<void> {
+    return this.map.scan();
   }
 
   // ---------- van de wachtrij naar de inbox ----------

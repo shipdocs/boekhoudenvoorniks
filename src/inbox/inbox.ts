@@ -43,8 +43,38 @@ import { statementHelp } from '../shared/bank-statement-help';
 import { BANK_FEED } from '../shared/bank-feed';
 import { telefoonKlantenZonderControle, viesTaakKey } from '../btw/vies';
 import { dubbelTaakKey, openVoorstellen, zoekDubbelen, type DubbelVoorstelMetKlanten } from '../relations/dubbelen';
+import { MAP_MAX_ONGEZIEN, MAP_SOORTEN } from '../scanner/map-route';
 import { ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD, reeksNummer } from '../sync/reeks';
 
+
+/** De woorden bij een soort probleem van de bonnenmap, in gewone taal (geen paden en geen inhoud). */
+const MAP_PROBLEEM_TEKST: Record<(typeof MAP_SOORTEN)[number], { een: string; meer: string; vraag: string }> = {
+  onleesbaar: {
+    een: 'bestand van je telefoon in de bonnenmap was niet te lezen',
+    meer: 'bestanden van je telefoon in de bonnenmap waren niet te lezen',
+    vraag: 'De app kon deze bestanden niet openen: ze zijn beschadigd, onvolledig, aangepast of van een andere versie. Er is niets mee gedaan.',
+  },
+  'onbekend-apparaat': {
+    een: 'bestand in de bonnenmap komt van een telefoon die niet (meer) gekoppeld is',
+    meer: 'bestanden in de bonnenmap komen van een telefoon die niet (meer) gekoppeld is',
+    vraag: 'Deze bestanden zijn gemaakt door een telefoon die niet gekoppeld is, bijvoorbeeld omdat je hem hebt ontkoppeld. Er is niets mee gedaan en de telefoon krijgt geen antwoord.',
+  },
+  afgewezen: {
+    een: 'wijziging van je telefoon is afgewezen',
+    meer: 'wijzigingen van je telefoon zijn afgewezen',
+    vraag: 'De pc heeft deze wijzigingen gelezen maar niet overgenomen, bijvoorbeeld omdat een factuurnummer al bezet is. De telefoon krijgt hier bericht van.',
+  },
+  'veld-ongeldig': {
+    een: 'wijziging van je telefoon bevat een veld dat niet klopt',
+    meer: 'wijzigingen van je telefoon bevatten een veld dat niet klopt',
+    vraag: 'De pc heeft deze wijzigingen niet overgenomen omdat een veld niet klopt. De telefoon krijgt hier bericht van en kan het corrigeren.',
+  },
+  'schrijven-mislukt': {
+    een: 'keer lukte het niet iets in de bonnenmap te schrijven of te verplaatsen',
+    meer: 'keer lukte het niet iets in de bonnenmap te schrijven of te verplaatsen',
+    vraag: 'De app kon een antwoord niet schrijven of een bestand niet verplaatsen, bijvoorbeeld omdat de map vol is, alleen gelezen mag worden of er al een ander bestand met die naam staat. Het verzoek wordt opnieuw geprobeerd.',
+  },
+};
 
 export type TaskKind =
   | 'setup'
@@ -78,6 +108,7 @@ export type TaskKind =
   | 'invoice-series-gap'
   | 'vies-nacontrole'
   | 'klant-dubbel'
+  | 'telefoon-map-problemen'
   | 'vat-suppletie'
   | 'supplier-auto'
   | 'vat-check'
@@ -144,7 +175,9 @@ export interface Task {
     /** het gat in de nummerreeks van een telefoon (invoice-series-gap) */
     reeks?: { apparaat_code: string; jaar: number; van: number; tot: number };
     /** het voorstel voor twee dubbele klanten (klant-dubbel); de actie haalt de klanten opnieuw uit de databank */
-    dubbelId?: number };
+    dubbelId?: number;
+    /** de problemen van de bonnenmap (telefoon-map-problemen): de soort en het hoogste regelnummer dat de melding telde; 'gezien' markeert hoogstens tot dat nummer */
+    mapProbleem?: { soort: string; totId: number } };
 }
 
 export interface BalanceOverviewRow {
@@ -1079,6 +1112,7 @@ export class InboxService {
     });
 
     tasks.push(...this.dubbeleKlantTaken());
+    tasks.push(...this.mapProbleemTaken());
 
     const lock = this.ledger.periodLock();
     for (const kind of ['afgesloten', 'uitwisseling'] as const) {
@@ -1870,6 +1904,8 @@ export class InboxService {
       'invoice-series-gap:vervallen-niet-verstuurd': `Het nummer wordt bewaard als vervallen, met de reden "${REDEN_NIET_VERSTUURD}". De melding verdwijnt. Er wordt niets verwijderd of geboekt.`,
       'invoice-series-gap:later': 'Er verandert niets. De melding blijft staan tot het nummer binnenkomt of je het als vervallen markeert.',
       'vies-nacontrole:controleer': 'Het btw-nummer van deze klant gaat nu naar ec.europa.eu (VIES, de EU-dienst) en niets anders. De uitslag met datum wordt bewaard als bewijs. Is het nummer geldig, dan verdwijnt de melding.',
+      'telefoon-map-problemen:gezien': 'De melding verdwijnt voor deze regels. Er wordt niets gewijzigd, geboekt of verwijderd; de regels blijven bewaard. Komt er later iets nieuws binnen, dan krijg je weer een melding.',
+      'telefoon-map-problemen:later': 'Er verandert niets. De melding blijft staan.',
       'vies-nacontrole:open': 'Je gaat naar de klant; daar kun je het btw-nummer nakijken of aanpassen. Er wordt niets naar VIES gestuurd.',
       'vies-nacontrole:gezien': 'De melding verdwijnt voor dit btw-nummer. Er wordt niets naar VIES gestuurd en niets gewijzigd. Verandert het btw-nummer, dan komt de melding opnieuw.',
       'document-review:prive': OWN_HINTS.prive,
@@ -1913,6 +1949,45 @@ export class InboxService {
       'bank-balance:negeren': 'Er verandert niets in je boekhouding. De app vraagt er pas weer naar als het verschil verandert.',
     };
     for (const a of t.actions) a.hint ??= hints[`${t.kind}:${a.id}`];
+  }
+
+  /**
+   * Problemen met bestanden van de telefoon in de bonnenmap (src/scanner/map-route.ts): precies een melding per soort
+   * probleem, met een telling van de ongeziene regels. Eerst wordt alles weggelaten wat al gezien is en pas daarna begrensd
+   * (per soort de nieuwste MAP_MAX_ONGEZIEN regels), zodat een berg geziene regels of een volle soort nooit een nieuw probleem verbergt. Geen inhoud en geen pad.
+   */
+  private mapProbleemTaken(): Task[] {
+    let rijen: { soort: string; n: number; tot: number }[];
+    try {
+      rijen = this.db
+        .prepare(`SELECT soort, COUNT(*) AS n, MAX(id) AS tot FROM (SELECT id, soort, ROW_NUMBER() OVER (PARTITION BY soort ORDER BY id DESC) AS rang FROM sync_map_problemen WHERE gezien_op IS NULL) WHERE rang <= ? GROUP BY soort`)
+        .all(MAP_MAX_ONGEZIEN) as { soort: string; n: number; tot: number }[];
+    } catch {
+      return [];
+    }
+    const per = new Map(rijen.map((r) => [r.soort, r] as const));
+    const tasks: Task[] = [];
+    for (const soort of MAP_SOORTEN) {
+      const r = per.get(soort);
+      if (!r) continue;
+      const aantal = r.n >= MAP_MAX_ONGEZIEN ? `${MAP_MAX_ONGEZIEN} of meer` : String(r.n);
+      const een = r.n === 1;
+      const tekst = MAP_PROBLEEM_TEKST[soort];
+      tasks.push({
+        key: `telefoon-map-problemen:${soort}`,
+        kind: 'telefoon-map-problemen',
+        icon: '📂',
+        title: `${aantal} ${een ? tekst.een : tekst.meer}`,
+        question: `${tekst.vraag} Het gaat om ${aantal} ${een ? 'bestand' : 'bestanden'} in de bonnenmap. Er is niets verloren gegaan en de bestanden blijven bewaard in de submap verwerkt van de bonnenmap. Heb je het bekeken, meld het dan als gezien.`,
+        priority: 2,
+        actions: [
+          { id: 'gezien', label: 'Gezien', primary: true },
+          { id: 'later', label: 'Later' },
+        ],
+        ref: { mapProbleem: { soort, totId: r.tot } },
+      });
+    }
+    return tasks;
   }
 
   /**

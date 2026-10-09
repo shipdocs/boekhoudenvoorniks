@@ -944,8 +944,8 @@ slaan. De groottegrens van een wijziging (128 KiB) geldt ook voor de wachtrij.
 **Wat nog niet.** `stamgegevens` bevat de btw-regeltabel en de VIES-controledatum nog niet. `bon` en `foto` worden niet opgeslagen en gelden niet
 als afgeleverd (`niet-ondersteund`, zonder registerrij).
 
-Open punten bij facturen (volgen in latere stappen): de bonnenmap- en e-mailroute voor facturen, en een scherm dat de wachtende wijzigingen toont (nu is een
-wachtende factuur alleen in `sync_wachtrij` te zien). Ook versie 2 staat achter dezelfde schakelaar als de rest: zolang
+Open punten bij facturen (volgen in latere stappen): de e-mailroute voor facturen, en een scherm dat de wachtende wijzigingen toont (nu is een
+wachtende factuur alleen in `sync_wachtrij` te zien). De bonnenmaproute voor facturen staat onder *De bonnenmap in twee richtingen*. Ook versie 2 staat achter dezelfde schakelaar als de rest: zolang
 `PHONE_SCANNER` uit staat, is er niets van te zien.
 
 ### Een bon als wijziging, met bijlagen
@@ -1214,6 +1214,71 @@ bron en wijst een klant die hij onder de oude `uuid` kent voortaan naar het doel
 van de bron blijven aan de bron hangen; een telefoonwijziging die een bestaand project met koppelingen naar het
 doel zou verhuizen, wordt zoals altijd afgewezen met `klus-gekoppeld`.
 
+### De bonnenmap in twee richtingen
+
+Dezelfde versleutelde berichten als over het netwerk kunnen ook als bestanden door de bonnenmap reizen (de map die de
+gebruiker bij *Instellingen → Telefoon & bonnenmap* kiest en met Syncthing of een andere dienst gelijk houdt). Het zijn
+dezelfde bytes: de envelop uit *De envelop* (BVNS, versie, richting, apparaat-ID, nonce, AES-GCM met de koppelsleutel). Dat is
+ook de ondertekening: een bestand zonder de sleutel is niet te vervalsen of aan te passen. Alle berichtsoorten werken:
+`hallo`, `bon`, `wijziging` (klant, project, factuur, bon en foto, met bijlagen), `stamgegevens` en `bevestigingen`. De pc-kant van een
+factuurwijziging is dus dezelfde als over het netwerk (`SyncOntvangst.verwerk`), alleen met route `map` in het register.
+
+**Mappen en namen.** In de gekozen bonnenmap maakt de pc zelf drie mappen aan als ze ontbreken. Elke kant schrijft alleen in zijn eigen map.
+
+```
+<bonnenmap>/van-telefoon/                  verzoeken, door de telefoon geschreven
+<bonnenmap>/van-telefoon/verwerkt/         afgehandelde verzoeken, door de pc verplaatst
+<bonnenmap>/van-pc/                        antwoorden, door de pc geschreven
+```
+
+- Een verzoek heet `<nonce in hexadecimaal>.bvns` (24 tekens). De naam is door de telefoon gekozen en de pc vertrouwt hem nooit: het apparaat, de
+  sleutel en de nonce komen uit de kop van de envelop.
+- Het antwoord heet `<nonce in hexadecimaal>.antwoord.bvns`, met de nonce uit de kop van het verzoek. De pc kiest die naam, en maakt het bestand
+  exclusief aan: een antwoord dat er al staat wordt nooit overschreven. Het is het antwoord zoals het netwerk het ook geeft (`sealResponse`,
+  gebonden aan de nonce van het verzoek, in de protocolversie van het verzoek). De telefoon zoekt het antwoord dus op nonce.
+- Stamgegevens en bevestigingen werken met dezelfde paginering als over het netwerk: de pc schrijft de pagina als antwoordbestand; voor de volgende
+  pagina schrijft de telefoon een nieuw verzoekbestand met `na` uit het antwoord. Geen kant schrijft ooit in de map van de ander.
+- De pc verwijdert en overschrijft nooit iets. Een verwerkt verzoek gaat naar `van-telefoon/verwerkt/`; bestaat de naam daar al, dan wordt het `naam (2).bvns`.
+  Het opruimen van oude antwoorden is aan de telefoon of de gebruiker.
+
+**Welke bestanden de pc oppakt.** Alleen gewone bestanden direct in `van-telefoon/` met de extensie `.bvns`: geen submappen, geen snelkoppelingen,
+geen verborgen bestanden (naam begint met `.` of `~`) en geen tijdelijke bestanden (`.tmp`, `.part`, `.partial`, `.crdownload`, `.download`).
+Net als bij de bonnenmap moet de grootte een tijd gelijk blijven (standaard drie seconden) en een leeg bestand wacht. Per rondgang (standaard elke twee seconden)
+verwerkt de pc hoogstens 20 bestanden, oudste eerst. Een bestand groter dan 20 MiB (`maxBodyBytes`) wordt niet eens ingelezen. Bij het opstarten van de scanner wordt verwerkt wat er al ligt.
+Zolang koppelen uit staat (`PHONE_SCANNER`) en zonder gekozen of toegestane bonnenmap doet de pc hier niets, en maakt hij ook de mappen niet aan.
+
+**Gedrag per uitkomst** (kolom *Bonnenmap en e-mail* van de uitkomstentabel):
+
+- *Definitief*: `toegepast`, `overgeslagen`, `wacht` en `afgewezen` (200), een veldfout of vormfout (400) en `te-groot` (413), en `id-botst` (409, een bon-id met andere
+  inhoud). De pc schrijft het antwoordbestand en verplaatst daarna het verzoek naar `verwerkt/`. Bij `afgewezen`, `id-botst` en een veldfout komt er ook een regel in het probleemregister en een melding op Vandaag.
+- *Herhaalbaar*: 503 `wachtrij-vol`, 500 `opslaan-mislukt`, 409 `klant-onbekend` of `project-onbekend`, de uitkomst `niet-ondersteund`, en elke fout bij het verwerken. Het verzoek blijft
+  staan, er komt geen antwoordbestand en de pc probeert het later opnieuw, met een rustige terugval (de wachttijd verdubbelt per poging, tot hoogstens een minuut). Het register van de
+  ontvangst maakt dat veilig: een verzoek heeft nooit een dubbel effect, ook niet na een herstart van de app.
+- *Geen antwoord mogelijk*: een bestand dat niet te lezen is (te kort, te groot, geen envelop of een versie die de pc niet kent), niet te openen is (verkeerde sleutel, aangepast) of van een niet (meer)
+  gekoppeld apparaat komt, krijgt geen antwoord: de pc heeft dan geen sleutel om mee te antwoorden. Het gaat definitief naar `verwerkt/` met een regel in het probleemregister.
+- Lukt het schrijven van het antwoord of het verplaatsen niet (map vol, geen rechten, bestand nog vast bij de synchronisatie), dan blijft het verzoek staan en volgt een nieuwe poging
+  zonder het verzoek opnieuw te verwerken. Na drie mislukte pogingen komt er een regel `schrijven-mislukt`. Staat er onder de naam van het antwoord al iets anders dan een echt antwoord op dit verzoek,
+  dan blijft dat staan en komt er een regel `schrijven-mislukt` (`antwoord-bestaat-al`); een echt antwoord dat er al staat (na een onderbreking) blijft zoals het is.
+
+**Wat de map niet controleert, en waarom.** De klokcontrole op de verzendtijd (403 `klok`) en de nonce-controle (409 `herhaald`) gelden alleen over het netwerk: een bestand kan uren later binnenkomen,
+en een herhaling is idempotent via het register van de ontvangst (`apparaat_id`, `entiteit`, `uuid`, `revisie`), dus levert hij `overgeslagen` op en geen tweede effect. De nonce moet wel uniek
+zijn per verzoek: de naam van het antwoord is de nonce. De controle van vijf minuten op de bewerktijd van een wijziging (`wijziging.tijd`) is een vormregel van de wijziging zelf en geldt ook hier: te ver
+in de toekomst geeft `ongeldig` (400). Dezelfde wijziging via het netwerk en via de map geeft samen precies een effect, met in het register de route van de eerste ontvangst; een wachtende wijziging komt niet dubbel in de wachtrij.
+
+**Probleemregister en Vandaag.** Problemen komen in de tabel `sync_map_problemen` (bestandsnaam zonder pad, apparaat-ID, soort `onleesbaar`, `onbekend-apparaat`, `afgewezen`, `veld-ongeldig` of `schrijven-mislukt`,
+foutcode, veld, tijd en `gezien_op`), nooit met de inhoud van een wijziging. Vandaag toont per soort een melding met een telling van de ongeziene regels (`telefoon-map-problemen`, acties *Gezien* en *Later*). *Gezien* zet alleen `gezien_op`; er wordt niets verwijderd.
+Er worden hoogstens 1000 ongeziene regels per soort probleem bijgehouden (een volle soort verbergt een andere soort niet); daarboven toont de melding "1000 of meer". In de kopie bij de boekhouder komt de melding niet. De pc schrijft een antwoord eerst naar een tijdelijk bestand met een willekeurige naam (`<nonce-hex>.antwoord.bvns.<8 hexcijfers>.tmp`, exclusief aangemaakt) en hernoemt het daarna; een `.tmp` dat na een crash achterblijft verwijdert de pc niet, dat kun je zelf opruimen. De status van de scanner toont de maproute als aantallen (wachtend, herhaalt, verwerkt, problemen), nooit paden of inhoud.
+
+**Stappenlijst voor de Android-app.**
+
+1. Maak het verzoek zoals voor het netwerk (zelfde envelop, zelfde berichten, versie 2) met een nieuwe, willekeurige nonce van 12 bytes.
+2. Schrijf het eerst naar `van-telefoon/<nonce-hex>.bvns.tmp` en hernoem het pas als het helemaal geschreven en gesloten is naar `<nonce-hex>.bvns`. Zo ziet de pc nooit een half bestand; de pc negeert `.tmp`.
+3. Wacht op `van-pc/<nonce-hex>.antwoord.bvns`. Lees antwoorden op nonce, niet op bestandsnaam van het verzoek, en open ze met `openResponse` (sleutel, nonce van het verzoek). Een antwoord dat niet opent
+   (nog niet helemaal gesynchroniseerd) probeer je later opnieuw; een antwoord dat blijvend niet opent, behandel je als geen antwoord.
+4. Is er na een tijd geen antwoord, dan mag je hetzelfde verzoek (dezelfde bytes) opnieuw neerzetten: dat is idempotent. Een nieuw bestand met dezelfde nonce maar andere inhoud mag niet.
+5. Een `wacht`-antwoord is definitief afgeleverd; de uitkomst volgt later via `bevestigingen`. Een antwoord met `afgewezen` of `veld-ongeldig` kan de telefoon aan de gebruiker tonen.
+6. Ruim antwoorden en verwerkte verzoeken zelf op wanneer je zeker weet dat ze zijn aangekomen; de pc doet dat nooit.
+
 ## Wat dit wel en niet beschermt
 
 - **Meelezen en aanpassen op het netwerk**: niet mogelijk zonder de sleutel. De inhoud (foto's,
@@ -1259,6 +1324,7 @@ bonnenmap*. Daar is geen protocol voor nodig, wel deze afspraken:
 - Na verwerking verplaatst de pc het bestand naar de submap `verwerkt/`. Bestaat de naam daar al, dan
   wordt het `naam (2).jpg`. De pc verwijdert of overschrijft nooit iets.
 - Hetzelfde bestand twee keer (zelfde inhoud) geeft één document: de pc herkent het aan de hash.
+- De mappen `van-telefoon/` en `van-pc/` van de maproute voor berichten (zie *De bonnenmap in twee richtingen*) liggen in dezelfde map; omdat het submappen zijn, pakt deze bewaking de bestanden daarin nooit op.
 - Betaalwijze, notitie en locatie gaan langs deze weg niet mee.
 - Een bestand uit de bonnenmap verandert de pc niet: het is een eigen bestand van de gebruiker, net als
   een bestand dat hij in de app sleept. Wat erin staat (ook een positie in de EXIF) blijft dus staan, in
