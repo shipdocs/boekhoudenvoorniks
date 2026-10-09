@@ -33,6 +33,8 @@ export interface ScannerDeps {
   invoices?: Pick<InvoiceService, 'importDefinitive'>;
   /** map van de open administratie waarin ontvangen bonnen wachten tot ze in de inbox staan */
   spoolDir: string;
+  /** de map van de open administratie (met bijlagen/ erin) voor foto's van de telefoon bij een project; zonder blijft foto niet-ondersteund */
+  adminDir?: string;
   /** mappen van de app zelf: daar mag de bonnenmap niet in liggen */
   protectedDirs?: string[];
   homeDir?: string;
@@ -117,6 +119,7 @@ export class Bonnenscanner {
       // een bon als wijziging gaat door dezelfde spool en met dezelfde instelling voor de locatie als het bon-bericht
       spool: this.spool,
       keepLocation: () => deps.settings.get().jobLocation,
+      adminDir: deps.adminDir,
     });
     this.receiver = new ScannerReceiver({
       pairing: this.pairing,

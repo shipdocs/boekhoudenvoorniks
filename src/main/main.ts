@@ -477,6 +477,7 @@ function initServices(): void {
     settings: services.settings,
     invoices: services.invoices,
     spoolDir: scannerSpoolDir(dataDir()),
+    adminDir: dataDir(),
     protectedDirs: [rootDir(), app.getPath('userData')],
     homeDir: app.getPath('home'),
     broadDirs: (['desktop', 'documents', 'downloads', 'pictures'] as const).flatMap((name) => {

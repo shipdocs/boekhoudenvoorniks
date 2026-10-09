@@ -5,6 +5,7 @@ import type { InvoiceService } from '../documents/invoices';
 import type { ReceiptSpool } from '../scanner/spool';
 import { BonOntvangst, controleerFoto } from './bonnen';
 import { FactuurOntvangst } from './facturen';
+import { FotoOntvangst } from './fotos';
 import { ProjectOntvangst } from './projecten';
 import { SyncWachtrij, type WachtrijBehandelaar } from './wachtrij';
 
@@ -14,7 +15,7 @@ export interface SyncResultaat {
   status: number;
   /** bij 200: toegepast, overgeslagen, afgewezen, wacht (in de wachtrij) of niet-ondersteund */
   uitkomst?: 'toegepast' | 'overgeslagen' | 'afgewezen' | 'wacht' | 'niet-ondersteund';
-  /** bij afgewezen en bij elke fout: de reden als code (id-botst, geen-klant, klus-gekoppeld, nummer-bezet, factuur-geweigerd, veld-ongeldig, ongeldig, veld-ongeldig, klant-onbekend, project-onbekend, wachtrij-vol, opslaan-mislukt) */
+  /** bij afgewezen en bij elke fout: de reden als code (id-botst, geen-klant, klus-gekoppeld, nummer-bezet, factuur-geweigerd, veld-ongeldig, ongeldig, veld-ongeldig, klant-onbekend, project-onbekend, project-afgewezen, wachtrij-vol, opslaan-mislukt) */
   fout?: string;
   /** bij veld-ongeldig: het veld (Nederlandse naam) waar het om gaat */
   veld?: string;
@@ -39,6 +40,13 @@ export interface SyncOntvangstOpties {
   spool?: ReceiptSpool;
   /** mag de locatie van een bon bewaard worden? (opt-in van #32; standaard niet) */
   keepLocation?: () => boolean;
+  /**
+   * De map van de administratie (de map met bijlagen/ erin) voor het bewaren van foto's van de telefoon bij een project.
+   * Ontbreekt hij, dan blijft foto niet-ondersteund (er wordt niets bewaard).
+   */
+  adminDir?: string;
+  /** Verwijdert één fotobestand bij het terugdraaien van een mislukte ontvangst; alleen voor tests die een mislukte verwijdering nabootsen. */
+  fotoVerwijderBestand?: (pad: string) => void;
 }
 
 interface RegisterRij {
@@ -54,7 +62,8 @@ function veldnaamVanKolom(kolom: string): string {
 
 /**
  * Verwerkt wijzigingen van een telefoon in de administratie. Voor nu klanten, projecten, facturen (src/sync/facturen.ts) en bonnen (src/sync/bonnen.ts, met
- * bijlagen); foto geeft niet-ondersteund en laat niets achter (de telefoon beschouwt dat als niet afgeleverd).
+ * bijlagen) en foto's bij een project (src/sync/fotos.ts, met bijlagen en de wachtrij voor een nog onbekend project); zonder
+ * spool blijft bon, zonder administratiemap blijft foto niet-ondersteund en laat niets achter (de telefoon beschouwt dat als niet afgeleverd).
  *
  * Idempotent op de exacte registersleutel (apparaat_id, entiteit, uuid, revisie) in sync_ontvangen, per
  * veld samengevoegd op (tijd, bron) door RelationsService, en per wijziging één databasetransactie:
@@ -71,6 +80,7 @@ export class SyncOntvangst {
   private readonly facturen: FactuurOntvangst | null;
   private readonly wachtrij: SyncWachtrij;
   private readonly bonnen: BonOntvangst | null;
+  private readonly fotos: FotoOntvangst | null;
 
   constructor(
     private readonly db: Db,
@@ -87,6 +97,8 @@ export class SyncOntvangst {
     behandelaars.push(this.projecten);
     this.facturen = opties.invoices ? new FactuurOntvangst(db, relations, opties.invoices, this.wachtrij, wachtrijOpties) : null;
     if (this.facturen) behandelaars.push(this.facturen);
+    this.fotos = opties.adminDir ? new FotoOntvangst(db, opties.adminDir, this.wachtrij, { ...wachtrijOpties, keepLocation: opties.keepLocation, verwijderBestand: opties.fotoVerwijderBestand }) : null;
+    if (this.fotos) behandelaars.push(this.fotos);
     this.bonnen = opties.spool ? new BonOntvangst(db, opties.spool, { now: this.now, keepLocation: opties.keepLocation, log: this.log }) : null;
   }
 
@@ -104,13 +116,14 @@ export class SyncOntvangst {
     // de klant er al zijn terwijl het wachtende project nog ontbreekt. Verder hervat elke wijziging van een apparaat met
     // wachtende facturen de wachtrij (bv. nadat de boekhouder de periode heeft heropend), ongeacht de uitkomst of de
     // statuscode (ook 503 wachtrij-vol, 400, 409, 500) en ook voor bon en foto. Het antwoord verandert daar nooit door.
-    if ((uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant'))) || this.heeftWachtendeFacturen(deviceId)) this.verwerkWachtrij();
+    if ((uitslag.status === 200 && (uitslag.uitkomst === 'toegepast' || (uitslag.uitkomst === 'overgeslagen' && wijziging.entiteit === 'klant') || (uitslag.uitkomst === 'afgewezen' && wijziging.entiteit === 'project'))) || this.heeftWachtendeFacturen(deviceId)) this.verwerkWachtrij();
     return uitslag;
   }
 
   private verwerkEen(deviceId: string, bron: string, wijziging: Wijziging, route: string, bijlagen: Buffer[]): SyncResultaat {
+    if (wijziging.entiteit === 'foto' && this.fotos) return this.verwerkFoto(deviceId, bron, wijziging, route, bijlagen);
     if (wijziging.entiteit === 'foto') {
-      // Een foto met bijlagen wordt wel gelezen en gecontroleerd, maar nog niet bewaard; zonder bijlagen is er niets te lezen.
+      // Zonder administratiemap: een foto met bijlagen wordt wel gelezen en gecontroleerd, maar nog niet bewaard; zonder bijlagen is er niets te lezen.
       return (bijlagen.length > 0 ? controleerFoto(wijziging, bijlagen) : null) ?? { status: 200, uitkomst: 'niet-ondersteund' };
     }
     if (wijziging.entiteit === 'bon' && !this.bonnen) return { status: 200, uitkomst: 'niet-ondersteund' };
@@ -154,6 +167,34 @@ export class SyncOntvangst {
     }
   }
 
+  /**
+   * Een foto: de bestanden onder bijlagen/ en de rijen (job_photos, register of wachtrij) horen bij elkaar. Zelfde
+   * werkwijze als bij een bon: de rijen gaan in één transactie met volle schrijfzekerheid; lukt het niet, dan gaan ook de
+   * bestanden weg die deze ontvangst neerzette en blijft er niets achter.
+   */
+  private verwerkFoto(deviceId: string, bron: string, w: Wijziging, route: string, bijlagen: Buffer[]): SyncResultaat {
+    const fotos = this.fotos!;
+    fotos.opruimen(); // bestanden van eerdere mislukte ontvangsten alsnog weg
+    const voor = this.db.pragma('synchronous', { simple: true }) as number;
+    try {
+      this.db.pragma('synchronous = FULL');
+      const uitslag = this.db.transaction(() => fotos.verwerk(deviceId, bron, w, route, bijlagen))();
+      fotos.afgerond();
+      return uitslag;
+    } catch (e) {
+      fotos.terugdraaien();
+      // de foutcode, nooit de melding: die kan een pad bevatten
+      this.log(`Fotowijziging van de telefoon opslaan mislukt: ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}`);
+      return { status: 500, fout: 'opslaan-mislukt' };
+    } finally {
+      try {
+        this.db.pragma(`synchronous = ${voor}`);
+      } catch {
+        /* de administratie gaat net dicht */
+      }
+    }
+  }
+
   private heeftWachtendeFacturen(deviceId: string): boolean {
     try {
       return this.wachtrij.aantalOnverwerktVan(deviceId, 'factuur') > 0;
@@ -165,6 +206,7 @@ export class SyncOntvangst {
   /** Verwerkt wat in de wachtrij kan worden verwerkt (ook bij het starten van de receiver). Gooit nooit. */
   verwerkWachtrij(): void {
     this.bonnen?.opruimen();
+    this.fotos?.opruimen();
     try {
       this.wachtrij.verwerk();
     } catch (e) {
