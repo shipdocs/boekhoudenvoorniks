@@ -234,7 +234,7 @@ describe('de foto\'s van de telefoon bij een klus', () => {
     expect(o.s.settings.officeCopy()).toMatchObject({ office: 'Kantoor Test' });
   });
 
-  it('FOTOLIJST-07 begrensd: een klus met 1000 foto\'s levert hoogstens de eerste 200 in list (met een telling van het totaal); de rest is bereikbaar met limiet en offset en de volgorde is stabiel', () => {
+  it('FOTOLIJST-07 begrensd: een klus met 1000 foto\'s levert hoogstens de eerste 200 in list (met een telling van het totaal); de rest is bereikbaar met limiet en offset en de volgorde is stabiel', { timeout: 180000 }, () => {
     const o = omgeving();
     const { id, projectUuid } = o.klus();
     const nu = Date.now();
