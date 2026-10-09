@@ -236,10 +236,12 @@ export class InvoiceService {
       const s = this.settings.get();
       const relation = this.relations.get(inv.relation_id);
       checkInvoiceRequirements(inv, relation, s.kor, s.company);
-      // een pc-creditnota op een telefoonfactuur: dezelfde klant- en bedragcontrole als bij het importeren
+      // een creditnota (ook een van de pc op een gewone factuur): dezelfde klant- en bedragcontrole als bij het importeren.
+      // Het concept kan na het aanmaken zijn aangepast (andere klant, grotere bedragen); zonder deze controle zou de
+      // verrekening de factuur van de ene klant sluiten terwijl het tegoed bij een andere klant in het grootboek komt (#352).
       if (inv.credit_of_invoice_id) {
-        const origineel = this.db.prepare('SELECT uuid, relation_id, total FROM invoices WHERE id = ?').get(inv.credit_of_invoice_id) as { uuid: string | null; relation_id: number; total: Cents | null } | undefined;
-        if (origineel?.uuid) {
+        const origineel = this.db.prepare('SELECT relation_id, total FROM invoices WHERE id = ?').get(inv.credit_of_invoice_id) as { relation_id: number; total: Cents | null } | undefined;
+        if (origineel) {
           const reden = this.creditnotaReden(origineel.relation_id, origineel.total, inv.relation_id, inv.totals.total);
           if (reden) throw new ValidationError(reden);
         }
@@ -427,7 +429,7 @@ export class InvoiceService {
   /**
    * Waarom een creditnota niet bij dit origineel past (Nederlandse uitleg), of null. Zoals createCreditNote: een
    * creditnota hoort bij dezelfde klant en draait (een deel van) het origineel terug, nooit meer dan het origineel.
-   * Gedeeld door importDefinitive en finalize (een pc-creditnota op een telefoonfactuur).
+   * Gedeeld door importDefinitive en finalize (elke creditnota die op de pc wordt afgerond).
    */
   private creditnotaReden(origineelKlant: number, origineelTotaal: Cents | null, creditKlant: number, creditTotaal: Cents): string | null {
     if (origineelKlant !== creditKlant) return 'De creditnota hoort bij een factuur van een andere klant dan de creditnota zelf.';
