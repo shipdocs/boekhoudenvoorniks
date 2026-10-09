@@ -70,9 +70,9 @@ const MAP_PROBLEEM_TEKST: Record<(typeof MAP_SOORTEN)[number], { een: string; me
     vraag: 'De pc heeft deze wijzigingen niet overgenomen omdat een veld niet klopt. Via de bonnenmap krijgt de telefoon hier bericht van en kan hij het corrigeren; over de e-mail krijgt hij nooit een antwoord.',
   },
   'schrijven-mislukt': {
-    een: 'keer lukte het niet iets in de bonnenmap te schrijven of te verplaatsen',
-    meer: 'keer lukte het niet iets in de bonnenmap te schrijven of te verplaatsen',
-    vraag: 'De app kon een antwoord niet schrijven of een bestand niet verplaatsen, bijvoorbeeld omdat de map vol is, alleen gelezen mag worden of er al een ander bestand met die naam staat. Het verzoek wordt opnieuw geprobeerd.',
+    een: 'keer lukte het niet een telefoonbericht te verwerken of iets in de bonnenmap te schrijven of te verplaatsen',
+    meer: 'keer lukte het niet een telefoonbericht te verwerken of iets in de bonnenmap te schrijven of te verplaatsen',
+    vraag: 'Een telefoonbericht in je mailbox kon niet worden verwerkt; andere mail wacht daarop tot het lukt of de app het opgeeft. Of de app kon een antwoord niet schrijven of een bestand niet verplaatsen, bijvoorbeeld omdat de map vol is, alleen gelezen mag worden of er al een ander bestand met die naam staat. Het verzoek wordt opnieuw geprobeerd.',
   },
 };
 

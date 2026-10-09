@@ -101,12 +101,19 @@ export const MAIL_LIMITS = {
  * - een mail zo groot dat ImapSource hem niet inleest (MAIL_LIMITS.maxAttachmentBytes x maxAttachmentsPerMail) komt zonder bijlagen binnen;
  * - een herhaalbaar bericht (wachtrij vol, opslaan mislukt, nog onbekende klant of project, niet ondersteund) blijft liggen en wordt bij
  *   de volgende ophaalronde opnieuw geprobeerd; pas na zoveel pogingen wordt de mail als probleem vastgelegd en overgeslagen.
+ *   Zolang hij blijft liggen wacht de rest van de hoofdmap (dat schrijft het contract voor), dus de grens is niet ruim: bij een ronde per
+ *   kwartier (FIFTEEN_MINUTES in main.ts) houdt 48 pogingen een kapot bericht hoogstens ongeveer twaalf uur op (200 was meer dan twee dagen).
+ * - elke poging telt als fout in het resultaat van de ophaalronde; na meldNa pogingen (ongeveer een uur) komt er eenmalig een probleemregel
+ *   (route mail, zonder inhoud) zodat Vandaag laat zien dat een telefoonbericht niet verwerkt kon worden en andere mail daarop wacht.
  */
 export const MAIL_TELEFOON_LIMITS = {
   maxBvnsBytes: LIMITS.maxBodyBytes,
   maxBvnsPerMail: 10,
-  maxPogingen: 200,
+  maxPogingen: 48,
+  meldNa: 4,
 };
+/** De fout van de probleemregel die meldt dat een telefoonbericht blijft liggen (zonder inhoud). */
+export const TELEFOON_BLIJFT_LIGGEN = 'telefoonbericht-blijft-liggen';
 /** De notitie bij een vastgelegde mail met telefoonberichten (nooit de inhoud). */
 export const TELEFOON_NOTE = 'telefoonbericht';
 const BVNS_TYPE = 'application/vnd.boekhoudenvoorniks.scanner';
@@ -653,6 +660,11 @@ export class MailIntakeService {
     const pogingen = (rij.telefoon_uid === uid ? rij.telefoon_pogingen : 0) + 1;
     if (herhaal && pogingen < MAIL_TELEFOON_LIMITS.maxPogingen) {
       this.db.prepare('UPDATE mail_folders SET telefoon_uid = ?, telefoon_pogingen = ? WHERE folder = ?').run(uid, pogingen, folder);
+      result.errors++;
+      // eenmalig (precies bij de meldNa-ste poging, ook niet opnieuw na "gezien"): andere mail wacht op dit bericht
+      if (pogingen === MAIL_TELEFOON_LIMITS.meldNa) {
+        legProbleem(this.db, { soort: 'schrijven-mislukt', apparaat: null, fout: TELEFOON_BLIJFT_LIGGEN, veld: null }, bijlageNaam(alle[0]!), 'mail', Date.now());
+      }
       return 'opnieuw';
     }
     if (herhaal) problemen.push({ naam: bijlageNaam(alle[0]!), probleem: { soort: 'afgewezen', apparaat: null, fout: 'te-vaak-geprobeerd', veld: null } });
