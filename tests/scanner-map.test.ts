@@ -221,7 +221,9 @@ describe('de bonnenmap als tweede route', () => {
     await o.draai(() => o.lijst(o.verwerkt).length === 1);
     expect(o.lijst(o.van)).toEqual(['verwerkt']);
     expect(readFileSync(join(o.verwerkt, v.naam)).equals(v.body)).toBe(true);
-    expect(o.lijst(o.naar)).toEqual([`${v.nonce.toString('hex')}.antwoord.bvns`]);
+    // het achtergebleven tijdelijke bestand blijft staan (de pc verwijdert niets; de gebruiker kan het zelf opruimen)
+    expect(o.lijst(o.naar)).toEqual([`${v.nonce.toString('hex')}.antwoord.bvns`, `${v.nonce.toString('hex')}.antwoord.bvns.tmp`]);
+    expect(readFileSync(`${p.antwoordPad(v.nonce)}.tmp`, 'utf8')).toBe('half geschreven bij een crash');
     expect(o.problemen()).toEqual([]);
   });
 
