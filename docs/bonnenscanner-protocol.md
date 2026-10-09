@@ -1322,6 +1322,30 @@ Vandaag toont per soort één melding met de telling van map en mail samen.
 4. Verwacht geen antwoord. De uitkomst volgt via `bevestigingen` over het netwerk of de bonnenmap. Is de mail niet zeker aangekomen, dan mag je dezelfde bytes opnieuw mailen: dat is idempotent.
 5. Hoogstens 10 `.bvns` per mail en elk hoogstens 20 MiB.
 
+### Eén wijziging, drie routes: wat bewezen is
+
+Een telefoon mag dezelfde wijziging (klant, project, factuur, bon of foto) langs het netwerk, de bonnenmap en de e-mail sturen, in elke volgorde, vaker dan een keer en
+zelfs door elkaar heen. De garantie is: **precies één effect per wijziging**. Het is idempotent op de registersleutel (`apparaat_id`, `entiteit`, `uuid`, `revisie`) in `sync_ontvangen`, ongeacht de route:
+
+- Er komt één registerrij, met de route van de **eerste** ontvangst (`netwerk`, `map` of `mail`); elke herhaling via welke route ook is `overgeslagen` en verandert niets.
+- Er komt één klant, één klus, één factuur met één boeking (de pc-teller `counter:factuur` blijft staan), één bon (één rij in `scanner_documents`, één document in de inbox) of één set foto's (de bestanden onder `bijlagen/telefoon/<uuid>/` en de rijen in `job_photos` staan één keer).
+- Een wijziging die wacht (een factuur of project voor een nog onbekende klant, een foto voor een nog onbekend project) heeft één rij in `sync_wachtrij`, ook als dezelfde wijziging via een andere route nog eens binnenkomt. Komt de klant, via welke route ook, dan wordt de wachtende wijziging één keer toegepast, met één registerrij (de route van de eerste ontvangst) en één bevestiging.
+- Dezelfde uuid met afwijkende inhoud verandert niets aan wat er al stond: de eerst opgeslagen inhoud blijft leidend. Klant, project, factuur en bon geven `overgeslagen` (de registersleutel is al gezien); een foto wordt afgewezen met `id-botst`.
+- Dezelfde wijziging terwijl de routes door elkaar heen lopen geeft één effect en nooit een databasefout aan de telefoon; een netwerkverzoek is hoogstens herhaalbaar (`te-druk`, bijvoorbeeld een tweede verzoek van hetzelfde adres terwijl het eerste nog binnenkomt). Wat dit bewijst is **interleaving binnen één proces**: de verwerking zelf (`receiver.behandel` met de synchrone SQLite-aanroepen) is synchroon, dus twee routes kunnen elkaar nooit midden in een verwerking onderbreken en een echte parallelle race bestaat niet. Wat wisselt is de volgorde waarin de routes aan de beurt komen.
+- Een echte bewerking (een nieuwere revisie van een klant of project, via een andere route dan de vorige revisie) volgt de gewone regels: per veld wint de laatste wijziging op tijd, ongeacht de aankomstvolgorde of route; er komt geen tweede klant of klus, het wijzigingsnummer loopt alleen op bij een toegepaste wijziging en elke revisie krijgt een eigen registerrij met de route waarlangs zij binnenkwam. Een creditnota (`creditnota_van`) volgt haar origineel over elke combinatie van routes, ook als zij eerder aankomt (dan wacht zij).
+- Een envelop van een ontkoppeld of onbekend apparaat, of met een verkeerde sleutel, heeft over geen enkele route effect: het netwerk geeft 401, de map en de mail leggen een regel in het probleemregister en antwoorden niet.
+
+Bewezen met `tests/sync-routes.test.ts`: de echte ontvangers van de drie routes (de receiver op 127.0.0.1, de bonnenmap met een tijdelijke map en de mailimport met een nagebootste mailbox), alle vijf de entiteiten in alle zes volgorden van de routes, met herhalingen (dezelfde bytes en een nieuwe envelop), wachtend over routes, afwijkende inhoud, bewerkingen, creditnota's, interleaving van de routes en twee apparaten.
+
+**Bekende beperkingen** (zo gedraagt het zich, het is niet veranderd):
+
+- De bon via het oude bon-bericht en de bon via een wijziging delen de spool (`scanner_documents`, dus nooit twee documenten), maar niet het register: het bon-bericht schrijft geen registerrij. Komt dezelfde bon eerst als bon-bericht en daarna als wijziging, dan is de wijziging `overgeslagen` met een eigen registerrij; komt de wijziging eerst, dan antwoordt het bon-bericht met `al: true`. Een afwijkend bon-bericht onder hetzelfde id geeft `id-botst` (409).
+- Het register is per apparaat: dezelfde uuid van twee verschillende telefoons is twee registerrijen. Er komt geen tweede klus of factuur, maar bij een klant of klus met dezelfde inhoud van een tweede telefoon wint de hogere apparaatcode de gelijkstand op tijd: die wijziging is `toegepast` en geeft een nieuw wijzigingsnummer, zonder nieuwe rij. Een tweede telefoon met dezelfde factuuruuid heeft een eigen apparaatcode in het nummer nodig (anders `ongeldig`) en is `overgeslagen`.
+- Een apparaat ziet alleen zijn eigen bevestigingen, ook via de bonnenmap; via de mail is `bevestigingen` niet ondersteund.
+- Dezelfde uuid met afwijkende inhoud wordt bij klant, project, factuur en bon niet op inhoud beoordeeld: de registersleutel (apparaat, entiteit, uuid, revisie) is al gezien en de herhaling is `overgeslagen`. Alleen een foto vergelijkt de inhoud en geeft `id-botst`. Een andere inhoud hoort dus onder een nieuwe revisie te komen.
+- De interleaving is bewezen binnen één proces, niet als parallelle race (zie hierboven). Welke route een gelijktijdige wijziging wint, is niet vastgelegd; bewezen is dat het er precies één is.
+- Het bestand in de spool bestaat maar kort: zodra de bon in de inbox staat, wordt het opgeruimd.
+
 ## Wat dit wel en niet beschermt
 
 - **Meelezen en aanpassen op het netwerk**: niet mogelijk zonder de sleutel. De inhoud (foto's,
