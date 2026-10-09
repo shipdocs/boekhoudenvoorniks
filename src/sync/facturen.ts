@@ -161,7 +161,7 @@ export class FactuurOntvangst implements WachtrijBehandelaar {
       return { uitkomst: 'wacht', wacht: { entiteit: 'factuur', uuid: f.creditnota_van, reden: 'origineel-onbekend' } };
     }
 
-    // de klant: eerst de uuid zelf, dan een alias; een gearchiveerde klant telt gewoon. Een onbekende klant of een
+    // de klant: eerst een alias (een samengevoegde bron wijst naar zijn doel), dan de uuid zelf; een gearchiveerde klant telt gewoon. Een onbekende klant of een
     // leverancier: wachten (een leverancier is geen klant, maar wordt nooit stil weggegooid)
     const klant = this.relations.vindOpSyncUuid(f.klant_uuid);
     if (!klant || klant.type === 'leverancier') return { uitkomst: 'wacht', wacht: { entiteit: 'klant', uuid: f.klant_uuid, reden: 'klant-onbekend' } };

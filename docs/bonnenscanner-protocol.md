@@ -761,7 +761,7 @@ met precies één revisie (de pc bewerkt een ontvangen factuur nooit). Per wijzi
 (1) staat de registersleutel er al, dan herhaalt de pc de eerste uitkomst; (2) de velden worden gecontroleerd en
 doorgerekend (`veld-ongeldig` met `veld` en `melding`, zonder rijen; ook een hoeveelheid met meer dan drie
 decimalen); (3) de apparaatcode in het `nummer` moet gelijk zijn aan die van het apparaat (anders 400 `ongeldig`,
-zonder rijen); (4) de klant wordt gezocht op `klant_uuid`, daarna via een alias van een samengevoegde klant,
+zonder rijen); (4) de klant wordt gezocht op `klant_uuid` via een alias van een samengevoegde klant (de alias gaat voor), daarna direct op de `uuid`,
 en een gearchiveerde klant telt gewoon; de factuur verwijst naar de doelklant, de klantmomentopname blijft die uit de
 wijziging; een onbekende klant of een leverancier wacht (zie hieronder); (5) bestaat de `uuid`
 al als factuur, onder een andere revisie of met andere inhoud, dan is het antwoord `overgeslagen` en blijft de factuur
@@ -846,11 +846,18 @@ andere wijziging later alsnog komt.
 
 **Een nieuwe klant.** Een wijziging met `naam` op een onbekende `uuid` maakt een nieuwe klant met die
 `uuid`: type klant en land `NL` tenzij het land is opgegeven. Een onbekende `uuid` zonder `naam` geeft
-`klant-onbekend`. Een `uuid` die niet als klant bekend is maar wel als **alias** (de pc legt een alias
-vast in `relation_aliases`) leidt naar de doelklant: die krijgt de
-wijziging en er komt geen nieuwe klant. De pc leest aliassen alleen; hij maakt ze niet aan. Een
+`klant-onbekend`. Een `uuid` die als **alias** bekend is (de pc legt een alias
+vast in `relation_aliases` als de gebruiker twee klanten samenvoegt, zie
+[Dubbele klanten](#dubbele-klanten-voorstel-alias-en-samenvoegen-op-bevestiging)) leidt naar de doelklant, ook als de
+`uuid` zelf nog een gearchiveerde klant is: die krijgt de
+wijziging en er komt geen nieuwe klant. De alias wordt eerst gezocht en pas daarna de `uuid` zelf. Een
 `uuid` van een leverancier wordt `afgewezen` (`geen-klant`); een klant van het type klant en van het
 type beide mag wel.
+
+Landt een klantwijziging via een alias op de doelklant (de `uuid` in de wijziging is niet die van de gevonden klant),
+dan wordt het veld `gearchiveerd` genegeerd: een telefoon die de samengevoegde bron als gearchiveerd kent, kan het doel
+zo nooit archiveren. De overige velden worden per veld samengevoegd zoals altijd. Een wijziging voor de `uuid` van het
+doel zelf kan `gearchiveerd` wel zetten.
 
 **Samenvoegen per veld.** Elk veld heeft een tijd en een bron. De nieuwste `(tijd, bron)` wint: bij een
 nieuwere tijd wint de wijziging, bij een gelijke tijd de lexicografisch grootste bron (`pc` wint van
@@ -1162,6 +1169,50 @@ klant openen om het btw-nummer na te kijken of aan te passen, of op **Gezien** d
 nummer te laten verdwijnen. Is het nummer ongeldig, vraag de klant dan om het juiste nummer en reken tot die tijd
 Nederlandse btw. De pc haalt klant en btw-nummer bij elke knop opnieuw uit de databank; is de melding intussen
 verouderd, dan volgt een nette foutmelding.
+
+### Dubbele klanten: voorstel, alias en samenvoegen op bevestiging
+
+De telefoon kan een klant aanmaken die de pc al kende. De pc zoekt zulke dubbele klanten, stelt een samenvoeging
+voor op **Vandaag** en voegt **nooit stil** samen: alleen een expliciete keuze van de gebruiker voert uit.
+
+**Zoeken.** Twee klanten (type klant of beide, niet gearchiveerd; een leverancier nooit) zijn een kandidaat als ze
+hetzelfde KvK-nummer hebben, hetzelfde btw-nummer (genormaliseerd: hoofdletters, zonder spaties, punten en
+streepjes), hetzelfde e-mailadres (hoofdletterongevoelig) of dezelfde naam (hoofdletters, spaties en leestekens
+genegeerd). Een leeg veld matcht nooit. Een naam telt alleen als hij minstens 3 tekens heeft en niet alleen uit een
+algemeen woord bestaat (zoals "particulier" of "klant"). Het zoeken is SQL met parameters (een self-join op de
+sleutel per soort overeenkomst), nooit alle paren in het geheugen, en begrensd: per ronde komen er hoogstens 200 nieuwe
+voorstellen bij; een volgende ronde gaat verder.
+
+**Voorstellen.** Elk paar staat hoogstens een keer in de tabel `klant_dubbel_voorstellen` (`relation_a` is het
+kleinste id, `reden`, `status` voorgesteld, samengevoegd of afgewezen, `gemaakt_op`, `beslist_op`). Een paar wordt met
+`ON CONFLICT DO NOTHING` aangemaakt bij het opbouwen van Vandaag; een samengevoegd of afgewezen paar komt nooit
+terug, ook niet als een klant daarna verandert. Rijen worden nooit verwijderd.
+
+**Vandaag.** Per voorstel precies een melding (kind `klant-dubbel`, key `klant-dubbel:<id a>-<id b>`, prioriteit 2) met
+beide klanten in gewone taal (naam, plaats, aantal facturen en klussen) en de reden. De knoppen: **Samenvoegen op
+A**, **Samenvoegen op B**, **Verschillend** (het paar wordt afgewezen) en **Later** (er verandert niets). Hoogstens
+50 meldingen; de rest staat als telling in de laatste. Voorstellen die niet meer openstaan worden weggelaten vóór die
+grens. In de kopie bij de boekhouder komt de melding niet. De pc haalt het voorstel en de klanten bij elke knop
+opnieuw uit de databank en vertrouwt de melding uit het scherm niet. De api heeft dezelfde keuzes:
+`relations.duplicates()`, `relations.mergeDuplicate(voorstelId, doelId)` en `relations.rejectDuplicate(voorstelId)`.
+
+**Samenvoegen** (`RelationsService.voegSamen`, in een transactie): de bron-klant wordt gearchiveerd via de gewone
+archiefroute (revisie, nieuw wijzigingsnummer, tijd per veld en een logregel; plus een logregel met de reden
+samengevoegd), de `uuid` van de bron wordt een **alias** van het doel in `relation_aliases`, aliassen die al naar de
+bron wezen gaan naar het doel, en het doel krijgt een nieuw wijzigingsnummer. Aliassen worden alleen toegevoegd of
+naar een ander doel verlegd, nooit verwijderd. **Facturen, offertes, klussen, betalingen en documenten van de bron
+blijven bij de bron staan**: er verhuist niets en er verdwijnt niets. Samenvoegen is in deze stap niet ongedaan
+te maken; de melding en de knop zeggen dat in gewone taal. Daarna verwerkt de pc de wachtrij opnieuw: een factuur of
+project dat op de klant wachtte (de `uuid` van de bron of een alias) wordt via de alias op het doel overgenomen,
+de wachtrijrij is afgehandeld (nooit verwijderd) en de bevestiging ligt klaar voor `bevestigingen`.
+
+**Wat de telefoon ziet en doet.** In het antwoord van `stamgegevens` staat de bron als klant met
+`gearchiveerd: true` en het doel met een hoger `seq`, zodat de delta beide meeneemt; `aliassen` (alleen op de eerste
+pagina) bevat `{alias_uuid: <uuid van de bron>, klant: <uuid van het doel>}`. De telefoon verbergt de gearchiveerde
+bron en wijst een klant die hij onder de oude `uuid` kent voortaan naar het doel. Wijzigingen voor de oude `uuid`
+(klant, project of factuur) landen op het doel; er ontstaat geen tweede klant. De bestaande projecten en facturen
+van de bron blijven aan de bron hangen; een telefoonwijziging die een bestaand project met koppelingen naar het
+doel zou verhuizen, wordt zoals altijd afgewezen met `klus-gekoppeld`.
 
 ## Wat dit wel en niet beschermt
 

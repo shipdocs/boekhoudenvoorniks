@@ -233,7 +233,7 @@ export class SyncOntvangst {
       return { status: 400, fout: 'veld-ongeldig', veld, melding: `Het veld ${veld} klopt niet: ${e.message}` };
     }
 
-    // 3. opzoeken: eerst de uuid zelf, dan een alias; een bekende klant krijgt de wijziging
+    // 3. opzoeken: eerst een alias (een samengevoegde, gearchiveerde bron wijst naar zijn doel), dan de uuid zelf; een bekende klant krijgt de wijziging
     const klant = this.relations.vindOpSyncUuid(w.uuid);
     let uitkomst: 'toegepast' | 'overgeslagen' | 'afgewezen';
     let fout: string | null = null;
@@ -246,7 +246,7 @@ export class SyncOntvangst {
         uitkomst = 'afgewezen';
         fout = 'geen-klant';
       } else {
-        uitkomst = this.relations.pasVeldenToe(klant.id, velden, w.tijd, bron).toegepast.length > 0 ? 'toegepast' : 'overgeslagen';
+        uitkomst = this.relations.pasVeldenToe(klant.id, velden, w.tijd, bron, { viaAlias: klant.uuid !== w.uuid }).toegepast.length > 0 ? 'toegepast' : 'overgeslagen';
       }
     } catch (e) {
       // een combinatie die de pc zelf zou weigeren (land met KvK-nummer): de transactie is teruggerold

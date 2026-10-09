@@ -66,6 +66,8 @@ import { PHONE_SCANNER } from '../shared/phone-scanner';
 import { BANK_FEED } from '../shared/bank-feed';
 import { telefoonKlantenZonderControle, viesTaakKey } from '../btw/vies';
 import { MAX_VERVALLEN_PER_MARKERING, ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD } from '../sync/reeks';
+import { dubbelTaakKey, huidigVoorstel, openVoorstellen, voegVoorstelSamen, wijsVoorstelAf, zoekDubbelen, type SamenvoegUitslag } from '../relations/dubbelen';
+import { SyncOntvangst } from '../sync/ontvangst';
 import { YEAR_END_KINDS, type YearEndKind } from '../closing/year-end';
 
 /** Een id van buiten (het scherm): een veilig geheel getal groter dan 0, anders een Nederlandse fout. */
@@ -318,6 +320,30 @@ export function createApi(s: Services, host: HostContext) {
     return current;
   };
 
+  /**
+   * Verwerkt de wachtrij van de telefoon opnieuw, bijvoorbeeld nadat twee klanten zijn samengevoegd: wachtende facturen en
+   * projecten landen dan via de alias op de klant die bleef. Met een bonnenscanner gebeurt dat daar; zonder (bijvoorbeeld in
+   * tests of buiten de app) met een eigen ontvangst op dezelfde databank en dezelfde factuurdienst. Gooit nooit.
+   */
+  const verwerkWachtrijOpnieuw = (): void => {
+    try {
+      if (host.scanner) host.scanner.service().verwerkWachtrij();
+      else new SyncOntvangst(s.db, s.relations, { invoices: s.invoices }).verwerkWachtrij();
+    } catch {
+      /* de samenvoeging staat; de wachtrij wordt bij de volgende wijziging of bij het starten van het ontvangstpunt hervat */
+    }
+  };
+
+  /** Alleen de veilige velden van een samenvoeging voor de interface: geen uuid's, rekeningnummers of e-mailadressen. */
+  const veiligeUitslag = (u: SamenvoegUitslag) => ({ voorstelId: u.voorstelId, doel: { id: u.doel.id, naam: u.doel.naam }, bron: { id: u.bron.id, naam: u.bron.naam }, aliasGeschreven: u.aliasGeschreven });
+
+  /** Voert een samenvoeging uit na een expliciete keuze en verwerkt daarna de wachtrij. */
+  const voegDubbeleSamen = (voorstelId: unknown, doelId: unknown) => {
+    const uitslag = voegVoorstelSamen(s.db, s.relations, voorstelId, doelId);
+    verwerkWachtrijOpnieuw();
+    return veiligeUitslag(uitslag);
+  };
+
   /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
   const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
     const r = task.ref;
@@ -479,6 +505,21 @@ export function createApi(s: Services, host: HostContext) {
         if (uitslag.valid === null) throw new ValidationError(uitslag.message ?? 'VIES gaf geen uitslag. Probeer het later opnieuw.');
         return;
       }
+      case 'klant-dubbel:samenvoegen-op-a':
+      case 'klant-dubbel:samenvoegen-op-b':
+      case 'klant-dubbel:verschillend': {
+        // het voorstel en de twee klanten komen opnieuw uit de databank; de taak van de interface is alleen een aanwijzing
+        const v = huidigVoorstel(s.db, r.dubbelId);
+        if (dubbelTaakKey(v) !== task.key) throw new ValidationError('Dit voorstel is intussen veranderd. Bekijk Vandaag opnieuw.');
+        if (actionId === 'verschillend') {
+          wijsVoorstelAf(s.db, v.id);
+          return;
+        }
+        voegDubbeleSamen(v.id, actionId === 'samenvoegen-op-a' ? v.relation_a : v.relation_b);
+        return;
+      }
+      case 'klant-dubbel:later':
+        return;
       case 'exchange-conflict:klaar':
         s.inbox.skipTask(task.key, 'afgehandeld');
         return;
@@ -989,6 +1030,23 @@ export function createApi(s: Services, host: HostContext) {
       create: (input: RelationInput) => s.relations.create(input),
       update: (id: number, input: Partial<RelationInput>) => s.relations.update(id, input),
       archive: (id: number) => s.relations.archive(id),
+      /** Voorstellen voor dubbele klanten die op een keuze wachten (hoogstens 50, oudste eerst); alleen veilige velden. */
+      duplicates: () => {
+        // eerst zoeken (schrijft alleen voorstellen, voegt nooit samen); een fout daarin laat de lijst gewoon zien wat er staat
+        try {
+          zoekDubbelen(s.db);
+        } catch {
+          /* de lijst hieronder toont wat er al staat */
+        }
+        return openVoorstellen(s.db).voorstellen.map((v) => ({ id: v.id, reden: v.reden, a: v.a, b: v.b }));
+      },
+      /** Voegt de twee klanten van een voorstel samen op de gekozen klant. Alleen deze expliciete aanroep voegt ooit samen. */
+      mergeDuplicate: (proposalId: number, doelId: number) => voegDubbeleSamen(proposalId, doelId),
+      /** "Verschillend": dit paar wordt niet meer voorgesteld. */
+      rejectDuplicate: (proposalId: number) => {
+        const v = wijsVoorstelAf(s.db, proposalId);
+        return { voorstelId: v.id, status: v.status };
+      },
     },
     quotes: {
       list: (filter?: { status?: QuoteStatus; search?: string }) => s.quotes.list(filter),

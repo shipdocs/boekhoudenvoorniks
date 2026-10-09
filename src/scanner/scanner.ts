@@ -149,6 +149,14 @@ export class Bonnenscanner {
     });
   }
 
+  /**
+   * Verwerkt de wachtrij van de telefoon opnieuw (wachtende facturen en projecten), bijvoorbeeld nadat twee klanten
+   * zijn samengevoegd. Werkt ook zonder luisterend ontvangstpunt en gooit nooit.
+   */
+  verwerkWachtrij(): void {
+    this.sync.verwerkWachtrij();
+  }
+
   /** In de demo en in de kopie bij de boekhouder komt er niets binnen. */
   blocked(): string | null {
     if (this.deps.settings.get().demoMode) return `In de demo kun je ${PHONE_SCANNER.available ? 'geen telefoon koppelen en ' : ''}geen bonnenmap gebruiken. Wis de demo om echt te beginnen.`;

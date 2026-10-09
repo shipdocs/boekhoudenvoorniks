@@ -328,13 +328,68 @@ export class RelationsService {
     })();
   }
 
-  /** Zoekt een klant op de uuid van de sync: eerst in relations.uuid, daarna in relation_aliases (alleen lezen). */
+  /**
+   * Zoekt een klant op de uuid van de sync: eerst in relation_aliases, daarna direct in relations.uuid (alleen lezen).
+   * De alias gaat voor: na het samenvoegen houdt de gearchiveerde bron zijn eigen uuid, maar de telefoon moet dan
+   * bij het doel uitkomen en niet bij de bron. Een uuid die geen alias is, wordt zoals altijd direct gevonden.
+   */
   vindOpSyncUuid(uuid: string): Relation | undefined {
-    const direct = this.db.prepare('SELECT * FROM relations WHERE uuid = ?').get(uuid) as Relation | undefined;
-    if (direct) return direct;
-    return this.db
+    const viaAlias = this.db
       .prepare('SELECT r.* FROM relation_aliases a JOIN relations r ON r.id = a.relation_id WHERE a.alias_uuid = ?')
       .get(uuid) as Relation | undefined;
+    if (viaAlias) return viaAlias;
+    return this.db.prepare('SELECT * FROM relations WHERE uuid = ?').get(uuid) as Relation | undefined;
+  }
+
+  /**
+   * Schrijft een alias: de uuid die de telefoon kent wijst naar een klant van de pc. Een alias wordt alleen
+   * toegevoegd of naar een ander doel verlegd, nooit verwijderd. Bestaat de alias al met hetzelfde doel, dan
+   * verandert er niets. Geeft true als er een rij is toegevoegd of verlegd.
+   */
+  schrijfAlias(aliasUuid: string, relationId: number, tijd: number = this.klok()): boolean {
+    return (
+      this.db
+        .prepare(
+          `INSERT INTO relation_aliases (alias_uuid, relation_id, aangemaakt_op) VALUES (?, ?, ?)
+           ON CONFLICT(alias_uuid) DO UPDATE SET relation_id = excluded.relation_id WHERE relation_aliases.relation_id <> excluded.relation_id`,
+        )
+        .run(aliasUuid, relationId, tijd).changes === 1
+    );
+  }
+
+  /**
+   * Voegt twee klanten samen na een expliciete keuze van de gebruiker (deze methode beslist niets zelf): de bron wordt
+   * gearchiveerd via archive() (revisie, nieuw wijzigingsnummer, tijd per veld en logregel), krijgt een extra logregel met
+   * de reden, en de uuid van de bron wordt een alias van het doel zodat de telefoon voortaan naar het doel wijst. Aliassen
+   * die al naar de bron wezen gaan naar het doel. Het doel krijgt een nieuw wijzigingsnummer, zodat de delta van een
+   * telefoon het doel en de alias meeneemt. Facturen, offertes, klussen, betalingen en documenten van de bron blijven
+   * bij de bron: er verhuist en verdwijnt niets. Alles in een transactie; bij een weigering is niets gewijzigd.
+   */
+  voegSamen(bronId: number, doelId: number, reden: string = 'samengevoegd'): { aliasGeschreven: boolean } {
+    if (!Number.isInteger(bronId) || bronId <= 0 || !Number.isInteger(doelId) || doelId <= 0) throw new ValidationError('Kies twee klanten om samen te voegen');
+    if (bronId === doelId) throw new ValidationError('Een klant kun je niet met zichzelf samenvoegen');
+    return this.db.transaction(() => {
+      const bron = this.get(bronId);
+      const doel = this.get(doelId);
+      for (const k of [bron, doel]) {
+        if (k.type === 'leverancier') throw new ValidationError(`${k.name} is een leverancier en geen klant; leveranciers voeg je niet samen`);
+        if (k.archived === 1) throw new ValidationError(`${k.name} is al gearchiveerd; een gearchiveerde klant voeg je niet samen`);
+      }
+      if (bron.uuid) {
+        const bestaand = this.db.prepare('SELECT relation_id FROM relation_aliases WHERE alias_uuid = ?').get(bron.uuid) as { relation_id: number } | undefined;
+        if (bestaand?.relation_id === doel.id) throw new ValidationError(`${bron.name} is al samengevoegd met ${doel.name}`);
+      }
+      this.archive(bron.id);
+      const tijd = this.klok();
+      const gearchiveerd = this.get(bron.id);
+      this.db
+        .prepare('INSERT INTO relation_changelog (relation_id, revisie, veld, oud, nieuw, tijd, bron) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(bron.id, gearchiveerd.revisie, 'samengevoegd', null, `klant ${doel.id}: ${reden}`, tijd, BRON_PC);
+      this.db.prepare('UPDATE relation_aliases SET relation_id = ? WHERE relation_id = ?').run(doel.id, bron.id);
+      const aliasGeschreven = bron.uuid ? this.schrijfAlias(bron.uuid, doel.id, tijd) : false;
+      this.db.prepare('UPDATE relations SET sync_seq = ? WHERE id = ?').run(volgendeSyncSeq(this.db), doel.id);
+      return { aliasGeschreven };
+    })();
   }
 
   /**
@@ -374,9 +429,10 @@ export class RelationsService {
    * omhoog, krijgt de klant een nieuw wijzigingsnummer en wordt gewijzigd_op de hoogste van de oude
    * waarde en de toegepaste veldtijden; elk toegepast veld komt in relation_field_rev en relation_changelog.
    * Een veld dat wint wordt ook toegepast als de waarde gelijk is: de veldtijd moet het resultaat
-   * bepalen, anders hangt de eindtoestand af van de volgorde. Alles in een transactie.
+   * bepalen, anders hangt de eindtoestand af van de volgorde. Met `viaAlias` (de wijziging was voor een andere uuid dan
+   * die van deze klant) blijft het veld archived buiten beschouwing. Alles in een transactie.
    */
-  pasVeldenToe(id: number, velden: Record<string, unknown>, tijd: number, bron: string): { toegepast: string[]; overgeslagen: string[] } {
+  pasVeldenToe(id: number, velden: Record<string, unknown>, tijd: number, bron: string, opties: { viaAlias?: boolean } = {}): { toegepast: string[]; overgeslagen: string[] } {
     const schoon = normaliseerSyncVelden(velden);
     return this.db.transaction(() => {
       const bestaand = this.get(id);
@@ -388,6 +444,8 @@ export class RelationsService {
       const zetten: SyncKolom[] = [];
       for (const kolom of SYNC_KOLOMMEN) {
         if (!Object.hasOwn(schoon, kolom)) continue;
+        // een wijziging die via een alias op het doel landt (de telefoon kent de samengevoegde bron) archiveert het doel nooit
+        if (opties.viaAlias && kolom === 'archived') continue;
         const veld = RELATIE_VELD_MAPPING[kolom];
         const opgeslagen = this.db.prepare('SELECT tijd, bron FROM relation_field_rev WHERE relation_id = ? AND veld = ?').get(id, veld) as { tijd: number; bron: string } | undefined;
         const huidig = { ...(opgeslagen ?? { tijd: ondergrens, bron: BRON_PC }), waarde: rij[kolom] };
