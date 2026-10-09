@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { closeSync, existsSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, ftruncateSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { computeTotals, type LineInput } from '@gratis-boekhouden/kern';
@@ -524,6 +524,32 @@ describe('de bonnenmap als tweede route', () => {
     expect(o.lijst(o.folder)).toEqual(['van-pc', 'van-telefoon']);
     expect(readFileSync(buiten).equals(body)).toBe(true);
     expect(o.lijst(o.data).filter((nm) => nm !== 'bonnenscanner' && nm !== 'buiten.bvns')).toEqual([]);
+
+    // het tijdelijke bestand heeft een onvoorspelbare naam en wordt exclusief aangemaakt: de oude, voorspelbare naam
+    // (<nonce>.antwoord.bvns.tmp, de nonce staat in het verzoek) wordt niet gebruikt, niet overschreven en niet gevolgd
+    const doelBuiten = join(o.data, 'gebruikersbestand.txt');
+    writeFileSync(doelBuiten, 'van de gebruiker');
+    const sym = p.maak(klantBericht('Symlink tmp'));
+    const symTmp = `${p.antwoordPad(sym.nonce)}.tmp`;
+    let gelinkt = true;
+    try {
+      symlinkSync(doelBuiten, symTmp);
+    } catch {
+      gelinkt = false; // geen rechten voor symlinks (Windows): dan alleen het gewone bestand hieronder
+    }
+    const gewoon = p.maak(klantBericht('Gewoon tmp'));
+    const gewoonTmp = `${p.antwoordPad(gewoon.nonce)}.tmp`;
+    writeFileSync(gewoonTmp, 'staat er al');
+    p.schrijfBytes(`${sym.nonce.toString('hex')}.bvns`, sym.body);
+    p.schrijfBytes(`${gewoon.nonce.toString('hex')}.bvns`, gewoon.body);
+    await o.draai(() => existsSync(p.antwoordPad(sym.nonce)) && existsSync(p.antwoordPad(gewoon.nonce)));
+    expect(p.antwoord(sym.nonce)).toMatchObject({ ok: true, uitkomst: 'toegepast' });
+    expect(p.antwoord(gewoon.nonce)).toMatchObject({ ok: true, uitkomst: 'toegepast' });
+    expect(readFileSync(doelBuiten, 'utf8')).toBe('van de gebruiker');
+    expect(readFileSync(gewoonTmp, 'utf8')).toBe('staat er al');
+    if (gelinkt) expect(lstatSync(symTmp).isSymbolicLink()).toBe(true);
+    // de rondgang negeert achtergebleven tijdelijke bestanden (ook die van een crash): geen verzoek, geen regel
+    expect(o.problemen()).toEqual([]);
   });
 
   it('MAP-07 nooit overschrijven of verwijderen: een antwoordbestand dat al bestaat wordt niet overschreven (exclusief aanmaken; bij een botsing met andere inhoud een melding in het probleemregister); het verplaatsen naar verwerkt/ botst nooit met een bestaand bestand (uniek maken); een mislukte verplaatsing of schrijfactie laat het verzoek staan en wordt herhaald zonder dubbel effect; er staat geen unlink of rm van verzoek- of antwoordbestanden in de nieuwe code', async () => {

@@ -1,4 +1,5 @@
-import { lstat, mkdir, open, readdir, rename, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, rename } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { join, parse } from 'node:path';
 import type { Db } from '../db/database';
 import type { ScannerPairing } from './pairing';
@@ -117,13 +118,26 @@ interface Staat {
 }
 
 const standaardBestanden: MapBestanden = {
-  // Via een tijdelijk bestand en een rename: een crash laat hoogstens een `.tmp` achter (dat een volgende poging overschrijft),
-  // nooit een half antwoord onder de echte naam. Bestaat het echte bestand al, dan geldt dat als een botsing (EEXIST).
+  // Via een tijdelijk bestand met een onvoorspelbare naam (<antwoordnaam>.<8 willekeurige hexcijfers>.tmp) dat exclusief wordt
+  // aangemaakt (vlag 'wx': volgt geen symlink en faalt met EEXIST als de naam bezet is), daarna fsync en rename: een crash laat
+  // hoogstens zo'n `.tmp` achter, nooit een half antwoord onder de echte naam. Een achtergebleven `.tmp` blokkeert nooit een
+  // volgende poging (die kiest een nieuwe naam), de rondgang negeert hem (isTijdelijk) en de pc ruimt hem niet op: de gebruiker
+  // kan zulke bestanden zelf weggooien. Bestaat het echte bestand al, dan geldt dat als een botsing (EEXIST).
+  // Restrisico: rename is geen exclusieve aanmaak; verschijnt het echte bestand in de paar milliseconden tussen lstat en rename,
+  // dan vervangt rename het. Dat kan alleen door een ander proces met schrijfrechten, niet door de eigen rondgang (die loopt per proces na elkaar).
   async schrijfNieuw(pad, data) {
     const bestaat = await lstat(pad).then(() => true, () => false);
     if (bestaat) throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
-    const tmp = `${pad}.tmp`;
-    await writeFile(tmp, data);
+    const tmp = `${pad}.${randomBytes(4).toString('hex')}.tmp`;
+    const h = await open(tmp, 'wx');
+    try {
+      await h.writeFile(data);
+      await h.sync();
+    } finally {
+      await h.close();
+    }
+    const nogSteedsNieuw = await lstat(pad).then(() => false, () => true);
+    if (!nogSteedsNieuw) throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
     await rename(tmp, pad);
   },
   async verplaats(van, naar) {
