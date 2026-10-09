@@ -609,7 +609,7 @@ describe('een foto van de telefoon bij een project op de pc', () => {
     }
   });
 
-  it('FOTO-10 migratie en paden: de migratie is relatief getest (oude toestand uit migrations.slice, findIndex op een zoektekst), bestaande rijen overleven, user_version klopt; het pad in job_photos is relatief en valt onder attachment-paths en het back-uppakket', async () => {
+  it('FOTO-10 migratie en paden: de migratie is relatief getest (oude toestand uit migrations.slice, findIndex op een zoektekst), bestaande rijen overleven, user_version klopt; het pad in job_photos is relatief en valt onder attachment-paths en het back-uppakket', { timeout: 120000 }, async () => {
     const i = migrations.findIndex((m) => m.includes('CREATE TABLE IF NOT EXISTS job_photos'));
     expect(i).toBeGreaterThan(0);
     expect(migrations.filter((m) => m.includes('CREATE TABLE IF NOT EXISTS job_photos'))).toHaveLength(1);

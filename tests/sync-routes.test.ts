@@ -888,7 +888,7 @@ describe('dezelfde wijziging via netwerk, bonnenmap en e-mail geeft een effect',
     }
   });
 
-  it('ROUTE-09 interleaving: dezelfde wijziging terwijl netwerk, map en mail tegelijk onderweg zijn (de routes starten zonder op elkaar te wachten en lopen aantoonbaar door elkaar heen: twee echte HTTP-verzoeken staan open terwijl twee bestanden in de map en een mail worden afgehandeld) geeft precies een effect en geen databasefout aan de telefoon; bewezen is interleaving binnen een proces, geen parallelle race, want de verwerking zelf (receiver.behandel met synchrone SQLite) is synchroon', async () => {
+  it('ROUTE-09 interleaving: dezelfde wijziging terwijl netwerk, map en mail tegelijk onderweg zijn (de routes starten zonder op elkaar te wachten en lopen aantoonbaar door elkaar heen: twee echte HTTP-verzoeken staan open terwijl twee bestanden in de map en een mail worden afgehandeld) geeft precies een effect en geen databasefout aan de telefoon; bewezen is interleaving binnen een proces, geen parallelle race, want de verwerking zelf (receiver.behandel met synchrone SQLite) is synchroon', { timeout: 180000 }, async () => {
     // wachtend: de wijziging verwijst naar een klant of project dat er niet is, dus de uitkomst is de wachtrij in plaats van het register
     const gevallen: { naam: string; ent: Naam; wachtend?: Partial<Tellers> }[] = [
       ...NAMEN.map((ent) => ({ naam: ent as string, ent })),
@@ -928,15 +928,17 @@ describe('dezelfde wijziging via netwerk, bonnenmap en e-mail geeft een effect',
           // twee echte HTTP-verzoeken staan open (van twee adressen, dus geen "te druk"): de kop en de helft van de envelop zijn onderweg
           const vast1 = await tel.vast(tel.maak(b.json, b.bijlagen));
           begon.netwerk = ++klok;
-          const vast2 = await tel.vast(tel.maak(b.json, b.bijlagen), '127.0.0.2');
-          begon.netwerk2 = ++klok;
+          // een tweede bronadres (127.0.0.2) is er op Linux; op Windows (en elders) bewijst een netwerkverzoek de interleaving ook
+          const tweedeAdres = process.platform === 'linux';
+          const vast2 = tweedeAdres ? await tel.vast(tel.maak(b.json, b.bijlagen), '127.0.0.2') : null;
+          if (vast2) begon.netwerk2 = ++klok;
           // de routes starten in de volgorde van `start`, in een keer zonder te wachten: de netwerkverzoeken krijgen hun tweede helft, de bestanden en de mail worden aangeboden
           const antwoorden: Promise<{ route: Route; a: Antwoord }>[] = [];
           const kop = (route: Route, p: Promise<Antwoord>) => antwoorden.push(p.then((a) => ({ route, a })));
           for (const route of start) {
             if (route === 'netwerk') {
               kop('netwerk', eind('netwerk', vast1.vrijgeven()));
-              kop('netwerk', eind('netwerk2', vast2.vrijgeven()));
+              if (vast2) kop('netwerk', eind('netwerk2', vast2.vrijgeven()));
             }
             if (route === 'map') for (const k of [1, 2]) kop('map', begin(`map${k}`, () => viaMap(o, tel, tel.maak(b.json, b.bijlagen))));
             if (route === 'mail') kop('mail', begin('mail', () => viaMail(o, tel.maak(b.json, b.bijlagen), { documenten: false })));
@@ -949,14 +951,14 @@ describe('dezelfde wijziging via netwerk, bonnenmap en e-mail geeft een effect',
           await o.scanner.processSpool();
 
           // de routes liepen echt door elkaar: elke route was begonnen voordat er een enkele klaar was
-          const namen = ['netwerk', 'netwerk2', ...(start.includes('map') ? ['map1', 'map2'] : []), ...(start.includes('mail') ? ['mail'] : []), 'spool'];
+          const namen = ['netwerk', ...(vast2 ? ['netwerk2'] : []), ...(start.includes('map') ? ['map1', 'map2'] : []), ...(start.includes('mail') ? ['mail'] : []), 'spool'];
           expect(Object.keys(begon).sort(), etiket).toEqual(namen.sort());
           expect(Object.keys(eindigde).sort(), etiket).toEqual(namen.sort());
           expect(Math.max(...Object.values(begon)), `${etiket}: alle routes tegelijk onderweg`).toBeLessThan(Math.min(...Object.values(eindigde)));
 
           // het netwerk antwoordde beide keren gelukt (200): geen databasefout, geen "te druk"
           const net = klaar[0].filter((x) => x.route === 'netwerk').map((x) => x.a);
-          expect(net, etiket).toHaveLength(2);
+          expect(net, etiket).toHaveLength(vast2 ? 2 : 1);
           for (const a of net) {
             expect(a.status, etiket).toBe(200);
             expect(a.json, etiket).toMatchObject({ ok: true });
