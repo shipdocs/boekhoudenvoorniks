@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { setup } from './helpers';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
-import { computeTotals } from '../src/documents/totals';
+import { computeTotals, type LineInput } from '../src/documents/totals';
 import { formatDocumentNumber } from '../src/documents/numbering';
 import { renderTemplate } from '../src/documents/render';
 
@@ -89,6 +89,36 @@ describe('facturen', () => {
     expect(s.ledger.balance(ACCOUNTS.debiteuren)).toBe(0);
     expect(s.ledger.balance(ACCOUNTS.omzetHoog)).toBe(0);
     expect(s.invoices.renderHtml(final.id)).toContain('Creditfactuur');
+  });
+
+  it('een creditnota blijft bij de klant en binnen het bedrag van het origineel (#352)', () => {
+    const { s, klant } = setup();
+    const ander = s.relations.create({ name: 'Andere klant', address: 'Straat 1', postcode: '1011AA', city: 'Amsterdam', country: 'NL', email: 'a@example.nl' });
+    const inv = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-05-01', lines: [stucwerk] }).id);
+    const schaal = (id: number, factor: number): LineInput[] =>
+      s.invoices.get(id).lines.map((l) => ({ description: l.description, quantity: l.quantity * factor, unit: l.unit, unitPrice: l.unit_price, vatCode: l.vat_code as LineInput['vatCode'], vatPercentage: l.vat_percentage }));
+
+    // andere klant: geweigerd, het concept blijft concept en het origineel blijft open
+    const verkeerd = s.invoices.createCreditNote(inv.id);
+    s.invoices.updateDraft(verkeerd.id, { relationId: ander.id });
+    expect(() => s.invoices.finalize(verkeerd.id)).toThrow(/andere klant/);
+    expect(s.invoices.get(verkeerd.id).status).toBe('concept');
+    expect(s.invoices.get(inv.id).status).toBe('verzonden');
+    s.invoices.deleteDraft(verkeerd.id); // een origineel heeft hoogstens een creditnota tegelijk
+
+    // groter dan het origineel: geweigerd
+    const groot = s.invoices.createCreditNote(inv.id);
+    s.invoices.updateDraft(groot.id, { lines: schaal(groot.id, 2) });
+    expect(() => s.invoices.finalize(groot.id)).toThrow(/groter dan de factuur/);
+    expect(s.invoices.get(inv.id).status).toBe('verzonden');
+    s.invoices.deleteDraft(groot.id);
+
+    // een deel van het origineel kan wel (deelcreditnota)
+    const deel = s.invoices.createCreditNote(inv.id);
+    s.invoices.updateDraft(deel.id, { lines: schaal(deel.id, 0.5) });
+    const klaar = s.invoices.finalize(deel.id);
+    expect(klaar.status).toBe('betaald');
+    expect(s.invoices.get(inv.id).open_amount).toBeGreaterThan(0);
   });
 
   it('deelbetalingen en afboeken van een klein verschil', () => {
