@@ -1267,7 +1267,7 @@ in de toekomst geeft `ongeldig` (400). Dezelfde wijziging via het netwerk en via
 
 **Probleemregister en Vandaag.** Problemen komen in de tabel `sync_map_problemen` (bestandsnaam zonder pad, apparaat-ID, soort `onleesbaar`, `onbekend-apparaat`, `afgewezen`, `veld-ongeldig` of `schrijven-mislukt`,
 foutcode, veld, tijd en `gezien_op`), nooit met de inhoud van een wijziging. Vandaag toont per soort een melding met een telling van de ongeziene regels (`telefoon-map-problemen`, acties *Gezien* en *Later*). *Gezien* zet alleen `gezien_op`; er wordt niets verwijderd.
-Er worden hoogstens 1000 ongeziene regels bijgehouden; daarboven toont de melding "1000 of meer". In de kopie bij de boekhouder komt de melding niet. De status van de scanner toont de maproute als aantallen (wachtend, herhaalt, verwerkt, problemen), nooit paden of inhoud.
+Er worden hoogstens 1000 ongeziene regels per soort probleem bijgehouden (een volle soort verbergt een andere soort niet); daarboven toont de melding "1000 of meer". In de kopie bij de boekhouder komt de melding niet. De pc schrijft een antwoord eerst naar een tijdelijk bestand met een willekeurige naam (`<nonce-hex>.antwoord.bvns.<8 hexcijfers>.tmp`, exclusief aangemaakt) en hernoemt het daarna; een `.tmp` dat na een crash achterblijft verwijdert de pc niet, dat kun je zelf opruimen. De status van de scanner toont de maproute als aantallen (wachtend, herhaalt, verwerkt, problemen), nooit paden of inhoud.
 
 **Stappenlijst voor de Android-app.**
 

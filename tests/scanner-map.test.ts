@@ -758,14 +758,24 @@ describe('de bonnenmap als tweede route', () => {
       for (let i = 0; i < MAP_MAX_ONGEZIEN + 50; i++) vul.run(`veel-${i}`, 3, null);
     })();
     expect(taken().find((t) => t.key.endsWith(':schrijven-mislukt'))!.title).toContain(`${MAP_MAX_ONGEZIEN} of meer`);
-    const ongezien = () => o.n('SELECT COUNT(*) AS n FROM sync_map_problemen WHERE gezien_op IS NULL');
+    const ongeziend = (soort: string) => o.n('SELECT COUNT(*) AS n FROM sync_map_problemen WHERE gezien_op IS NULL AND soort = ?', soort);
+    // de grens geldt per soort: een volle soort verbergt een andere soort niet (ook niet wat de aanvaller of een ontkoppelde telefoon blijft schrijven)
+    const vulOnleesbaar = o.t.db.prepare(`INSERT INTO sync_map_problemen (bestandsnaam, soort, tijd, gezien_op) VALUES (?, 'onleesbaar', ?, NULL)`);
+    o.t.db.transaction(() => {
+      for (let i = ongeziend('onleesbaar'); i < MAP_MAX_ONGEZIEN; i++) vulOnleesbaar.run(`stroom-${i}`, 4);
+    })();
+    expect(ongeziend('onleesbaar')).toBe(MAP_MAX_ONGEZIEN);
     p.schrijfBytes('kapot-5.bvns', randomBytes(304));
     await o.draai(() => existsSync(join(o.verwerkt, 'kapot-5.bvns')));
-    const voor = ongezien();
-    expect(voor).toBeGreaterThanOrEqual(MAP_MAX_ONGEZIEN);
-    p.schrijfBytes('kapot-6.bvns', randomBytes(305));
-    await o.draai(() => existsSync(join(o.verwerkt, 'kapot-6.bvns')));
-    expect(ongezien()).toBe(voor);
+    expect(ongeziend('onleesbaar')).toBe(MAP_MAX_ONGEZIEN); // de volle soort groeit niet meer
+    const afgewezenVoor = ongeziend('afgewezen');
+    const nieuw = await p.viaMap(factuurBericht(klant, 1));
+    expect(nieuw.json).toMatchObject({ uitkomst: 'afgewezen', fout: 'nummer-bezet' });
+    expect(ongeziend('afgewezen')).toBe(afgewezenVoor + 1); // een nieuwe soort probleem krijgt altijd een regel
+    const melding = taken().find((t) => t.key.endsWith(':afgewezen'))!;
+    expect(melding.title).toMatch(new RegExp(`^${afgewezenVoor + 1} `));
+    expect(taken().find((t) => t.key.endsWith(':onleesbaar'))!.title).toContain(`${MAP_MAX_ONGEZIEN} of meer`);
+    expect(taken().find((t) => t.key.endsWith(':schrijven-mislukt'))!.title).toContain(`${MAP_MAX_ONGEZIEN} of meer`);
 
     // in de kopie bij de boekhouder komt de melding niet
     o.t.s.settings.markOfficeCopy({ office: 'Kantoor Test', exchange: 1, endDate: iso(Date.now() - 30 * DAG) });

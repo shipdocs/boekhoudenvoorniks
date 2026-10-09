@@ -447,8 +447,9 @@ export class MapRoute {
       .prepare(`SELECT 1 FROM sync_map_problemen WHERE gezien_op IS NULL AND bestandsnaam = ? AND soort = ? AND COALESCE(fout, '') = COALESCE(?, '') AND COALESCE(veld, '') = COALESCE(?, '') AND COALESCE(apparaat_id, '') = COALESCE(?, '')`)
       .get(bestandsnaam, p.soort, fout, veld, p.apparaat);
     if (bestaat) return;
-    // begrensd: meer dan dit aantal ongeziene regels wordt niet bijgehouden (de melding toont dan een telling)
-    const ongezien = (db.prepare('SELECT COUNT(*) AS n FROM sync_map_problemen WHERE gezien_op IS NULL').get() as { n: number }).n;
+    // begrensd per soort: meer dan dit aantal ongeziene regels van dezelfde soort wordt niet bijgehouden (de melding toont dan een
+    // telling); een nieuwe soort probleem krijgt zo altijd een regel, ook als een andere soort de grens al bereikt heeft
+    const ongezien = (db.prepare('SELECT COUNT(*) AS n FROM sync_map_problemen WHERE gezien_op IS NULL AND soort = ?').get(p.soort) as { n: number }).n;
     if (ongezien >= MAP_MAX_ONGEZIEN) return;
     db.prepare('INSERT INTO sync_map_problemen (bestandsnaam, apparaat_id, soort, fout, veld, tijd) VALUES (?, ?, ?, ?, ?, ?)').run(bestandsnaam, p.apparaat, p.soort, fout, veld, this.now());
   }

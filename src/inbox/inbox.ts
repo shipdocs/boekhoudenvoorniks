@@ -1954,13 +1954,13 @@ export class InboxService {
   /**
    * Problemen met bestanden van de telefoon in de bonnenmap (src/scanner/map-route.ts): precies een melding per soort
    * probleem, met een telling van de ongeziene regels. Eerst wordt alles weggelaten wat al gezien is en pas daarna begrensd
-   * (de nieuwste MAP_MAX_ONGEZIEN regels), zodat een berg geziene regels nooit een nieuw probleem verbergt. Geen inhoud en geen pad.
+   * (per soort de nieuwste MAP_MAX_ONGEZIEN regels), zodat een berg geziene regels of een volle soort nooit een nieuw probleem verbergt. Geen inhoud en geen pad.
    */
   private mapProbleemTaken(): Task[] {
     let rijen: { soort: string; n: number; tot: number }[];
     try {
       rijen = this.db
-        .prepare(`SELECT soort, COUNT(*) AS n, MAX(id) AS tot FROM (SELECT id, soort FROM sync_map_problemen WHERE gezien_op IS NULL ORDER BY id DESC LIMIT ?) GROUP BY soort`)
+        .prepare(`SELECT soort, COUNT(*) AS n, MAX(id) AS tot FROM (SELECT id, soort, ROW_NUMBER() OVER (PARTITION BY soort ORDER BY id DESC) AS rang FROM sync_map_problemen WHERE gezien_op IS NULL) WHERE rang <= ? GROUP BY soort`)
         .all(MAP_MAX_ONGEZIEN) as { soort: string; n: number; tot: number }[];
     } catch {
       return [];
