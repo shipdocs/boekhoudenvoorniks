@@ -302,10 +302,10 @@ export class ScannerReceiver {
    * het antwoord moet gebeuren (een nieuwe bon naar de inbox).
    *
    * De klokcontrole op de verzendtijd (403) en de nonce (409 herhaald) zijn eigen aan het netwerk: een bestand
-   * in de bonnenmap kan uren later binnenkomen, en een herhaling is daar idempotent via het register van
+   * in de bonnenmap of een mail kan uren later binnenkomen, en een herhaling is daar idempotent via het register van
    * SyncOntvangst. De controle op de bewerktijd van een wijziging is een vormregel van de wijziging zelf en geldt voor alle routes.
    */
-  behandel(deviceId: string, kop: { versie: ProtocolVersion; nonce: Buffer }, plaintext: Buffer, route: 'netwerk' | 'map'): Behandeld {
+  behandel(deviceId: string, kop: { versie: ProtocolVersion; nonce: Buffer }, plaintext: Buffer, route: 'netwerk' | 'map' | 'mail'): Behandeld {
     const versie = kop.versie;
     const reply = (status: number, json: Record<string, unknown>, na?: () => void): Behandeld => ({ status, json, ...(na ? { na } : {}) });
     const now = this.now();
@@ -315,6 +315,9 @@ export class ScannerReceiver {
     } catch (e) {
       return reply(e instanceof ProtocolError && e.code === 'te-groot' ? 413 : 400, { ok: false, fout: e instanceof ProtocolError ? e.code : 'ongeldig' });
     }
+    // Over de e-mail antwoordt de pc nooit: een bericht dat een antwoord nodig heeft (hallo, stamgegevens, bevestigingen) is daar
+    // niet ondersteund en wordt definitief afgesloten, zonder iets te lezen of te wijzigen.
+    if (route === 'mail' && (msg.soort === 'hallo' || msg.soort === 'stamgegevens' || msg.soort === 'bevestigingen')) return reply(400, { ok: false, fout: 'niet-ondersteund-via-mail' });
     if (route === 'netwerk' && Math.abs(msg.tijd - now) > LIMITS.clockWindowMs) return reply(403, { ok: false, fout: 'klok', pcTijd: now });
     // Het bewerkmoment van een change-set (wijziging.tijd) mag willekeurig oud zijn — de wijziging kan
     // offline gemaakt zijn — maar niet verder in de toekomst dan het klokvenster. Dit is de enige

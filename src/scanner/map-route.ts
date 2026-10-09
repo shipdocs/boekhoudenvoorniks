@@ -70,7 +70,7 @@ export interface MapRouteOptions {
   db: Db;
   pairing: Pick<ScannerPairing, 'key'>;
   /** de gedeelde afhandeling van het netwerk (ScannerReceiver.behandel) */
-  behandel: (deviceId: string, kop: { versie: ProtocolVersion; nonce: Buffer }, plaintext: Buffer, route: 'map') => Behandeld;
+  behandel: BehandelFunctie;
   /** de gekozen bonnenmap, of null (niet gekozen, niet toegestaan of de route staat uit) */
   folder: () => Promise<string | null>;
   /** de tijd voor de regels in het probleemregister (de klok van de administratie) */
@@ -84,14 +84,18 @@ export interface MapRouteOptions {
   log?: (message: string) => void;
 }
 
-interface Probleem {
+export interface Probleem {
   soort: MapProbleemSoort;
   apparaat: string | null;
   fout: string | null;
   veld: string | null;
 }
 
-interface Antwoord {
+/** De routes waarlangs een versleuteld bericht van de telefoon zonder netwerkverbinding binnenkomt. */
+export type BerichtRoute = 'map' | 'mail';
+export type BehandelFunctie = (deviceId: string, kop: { versie: ProtocolVersion; nonce: Buffer }, plaintext: Buffer, route: BerichtRoute) => Behandeld;
+
+export interface Antwoord {
   deviceId: Buffer;
   nonce: Buffer;
   versie: ProtocolVersion;
@@ -100,9 +104,16 @@ interface Antwoord {
 }
 
 /** Wat er na het afhandelen van één verzoekbestand nog moet gebeuren; staat vast zodra de pc het bestand heeft afgehandeld. */
-interface Afronding {
+export interface Afronding {
   probleem?: Probleem;
   antwoord?: Antwoord;
+}
+
+/** Het resultaat van het openen en afhandelen van één versleuteld bericht: wat er nog met bestand of mail en register moet gebeuren. */
+export interface BerichtAfhandeling {
+  afronding: Afronding;
+  /** pas nadat het bericht is afgehandeld (een nieuwe bon naar de inbox) */
+  na?: () => void;
 }
 
 interface Staat {
@@ -308,11 +319,10 @@ export class MapRoute {
    * Leest en handelt één verzoekbestand af. Geeft de afronding (wat er nog met bestanden en register moet gebeuren) terug, of
    * 'herhaal' als het later opnieuw moet. Het bestand wordt niet langer open gehouden dan nodig is (op Windows is een open bestand niet te verplaatsen).
    */
-  private async lees(pad: string, size: number): Promise<'groeit' | 'weg' | 'herhaal' | { afronding: Afronding; na?: () => void }> {
-    const onleesbaar = (fout: string, apparaat: string | null = null, soort: MapProbleemSoort = 'onleesbaar') => ({ afronding: { probleem: { soort, apparaat, fout, veld: null } } });
+  private async lees(pad: string, size: number): Promise<'groeit' | 'weg' | 'herhaal' | BerichtAfhandeling> {
     // nooit meer in het geheugen nemen dan het netwerk aanneemt, en niets dat te kort is om een envelop te zijn
-    if (size < HEADER_BYTES + TAG_BYTES) return onleesbaar('te-kort');
-    if (size > LIMITS.maxBodyBytes) return onleesbaar('te-groot');
+    const grootte = grootteFout(size);
+    if (grootte) return onleesbaar(grootte);
     let data: Buffer;
     try {
       const handle = await open(pad, 'r');
@@ -330,33 +340,7 @@ export class MapRoute {
     }
     // tijdens het lezen toch nog veranderd: de volgende rondgang opnieuw
     if (data.length !== size) return 'groeit';
-
-    // het apparaat en zijn sleutel komen uit de kop van de envelop, nooit uit de bestandsnaam of het bericht
-    const kop = readHeader(data, DIRECTION.request);
-    if (!kop) return onleesbaar('geen-envelop');
-    const apparaat = toBase64Url(kop.deviceId);
-    let sleutel: Buffer | null;
-    try {
-      sleutel = this.opts.pairing.key(apparaat);
-    } catch {
-      // de administratie gaat net dicht
-      return 'herhaal';
-    }
-    if (!sleutel) return onleesbaar('niet-gekoppeld', apparaat, 'onbekend-apparaat');
-    const plaintext = openRequest(data, sleutel);
-    if (!plaintext) return onleesbaar('niet-te-openen', apparaat);
-
-    let uitkomst: Behandeld;
-    try {
-      uitkomst = this.opts.behandel(apparaat, { versie: kop.versie, nonce: kop.nonce }, plaintext, 'map');
-    } catch (e) {
-      this.opts.log?.(`Bonnenmap: een verzoek afhandelen mislukt (${codeVan(e)})`);
-      return 'herhaal';
-    }
-    const soort = classificeer(uitkomst);
-    if (soort === 'herhaal') return 'herhaal';
-    const antwoord: Antwoord = { deviceId: Buffer.from(kop.deviceId), nonce: Buffer.from(kop.nonce), versie: kop.versie, status: uitkomst.status, json: uitkomst.json };
-    return { afronding: { antwoord, ...(soort.probleem ? { probleem: { ...soort.probleem, apparaat } } : {}) }, na: uitkomst.na };
+    return openEnBehandel(data, this.opts, 'map');
   }
 
   /** Antwoordbestand, probleemregel en verplaatsen; lukt iets niet, dan blijft het verzoek staan en volgt een nieuwe poging. */
@@ -437,21 +421,9 @@ export class MapRoute {
     }
   }
 
-  /** Een regel in het probleemregister: alleen de naam van het bestand, nooit het pad of de inhoud, en nooit twee keer dezelfde ongeziene regel. */
+  /** Een regel in het probleemregister (zie legProbleem). */
   private leg(p: Probleem, naam: string): void {
-    const db = this.opts.db;
-    const bestandsnaam = schoonNaam(naam);
-    const fout = p.fout === null ? null : p.fout.slice(0, 100);
-    const veld = p.veld === null ? null : p.veld.slice(0, 100);
-    const bestaat = db
-      .prepare(`SELECT 1 FROM sync_map_problemen WHERE gezien_op IS NULL AND bestandsnaam = ? AND soort = ? AND COALESCE(fout, '') = COALESCE(?, '') AND COALESCE(veld, '') = COALESCE(?, '') AND COALESCE(apparaat_id, '') = COALESCE(?, '')`)
-      .get(bestandsnaam, p.soort, fout, veld, p.apparaat);
-    if (bestaat) return;
-    // begrensd per soort: meer dan dit aantal ongeziene regels van dezelfde soort wordt niet bijgehouden (de melding toont dan een
-    // telling); een nieuwe soort probleem krijgt zo altijd een regel, ook als een andere soort de grens al bereikt heeft
-    const ongezien = (db.prepare('SELECT COUNT(*) AS n FROM sync_map_problemen WHERE gezien_op IS NULL AND soort = ?').get(p.soort) as { n: number }).n;
-    if (ongezien >= MAP_MAX_ONGEZIEN) return;
-    db.prepare('INSERT INTO sync_map_problemen (bestandsnaam, apparaat_id, soort, fout, veld, tijd) VALUES (?, ?, ?, ?, ?, ?)').run(bestandsnaam, p.apparaat, p.soort, fout, veld, this.now());
+    legProbleem(this.opts.db, p, naam, 'map', this.now());
   }
 
   /** Een schrijf- of verplaatsactie mislukte: onthouden, later opnieuw, en na een paar keer een regel in het probleemregister. */
@@ -475,9 +447,96 @@ export class MapRoute {
   }
 }
 
+/** Een bericht dat te kort is om een envelop te zijn of groter dan het netwerk aanneemt; dan wordt de inhoud niet eens gelezen. */
+export function grootteFout(size: number): 'te-kort' | 'te-groot' | null {
+  if (size < HEADER_BYTES + TAG_BYTES) return 'te-kort';
+  if (size > LIMITS.maxBodyBytes) return 'te-groot';
+  return null;
+}
+
+/** Een bericht dat nooit zal lukken: definitief, met een regel in het probleemregister en zonder antwoord. */
+export function onleesbaar(fout: string, apparaat: string | null = null, soort: MapProbleemSoort = 'onleesbaar'): BerichtAfhandeling {
+  return { afronding: { probleem: { soort, apparaat, fout, veld: null } } };
+}
+
 /**
- * Wat betekent een uitkomst van de gedeelde afhandeling voor een bestand? Herhaalbaar blijft liggen; definitief krijgt een
- * antwoord en gaat naar verwerkt/, met een regel voor een afgewezen wijziging of een veldfout.
+ * Het gedeelde stuk van de bonnenmap en de e-mail: één versleutelde envelop openen en afhandelen. Het apparaat en zijn sleutel
+ * komen uit de kop van de envelop, nooit uit een bestandsnaam, afzender of onderwerp. Een envelop die niet te openen is (onbekend
+ * apparaat, verkeerde sleutel, aangepast, afgekapt) wordt nooit verwerkt. Daarna volgt dezelfde gedeelde afhandeling als het
+ * netwerk (`behandel`) met de route erbij. Geeft 'herhaal' als het later opnieuw moet, anders de afronding (een definitieve uitkomst).
+ * Alleen de bonnenmap schrijft een antwoord; over de e-mail wordt nooit geantwoord.
+ */
+export function openEnBehandel(data: Buffer, opts: { pairing: Pick<ScannerPairing, 'key'>; behandel: BehandelFunctie; log?: (message: string) => void }, route: BerichtRoute): 'herhaal' | BerichtAfhandeling {
+  const grootte = grootteFout(data.length);
+  if (grootte) return onleesbaar(grootte);
+  const kop = readHeader(data, DIRECTION.request);
+  if (!kop) return onleesbaar('geen-envelop');
+  const apparaat = toBase64Url(kop.deviceId);
+  let sleutel: Buffer | null;
+  try {
+    sleutel = opts.pairing.key(apparaat);
+  } catch {
+    // de administratie gaat net dicht
+    return 'herhaal';
+  }
+  if (!sleutel) return onleesbaar('niet-gekoppeld', apparaat, 'onbekend-apparaat');
+  const plaintext = openRequest(data, sleutel);
+  if (!plaintext) return onleesbaar('niet-te-openen', apparaat);
+
+  let uitkomst: Behandeld;
+  try {
+    uitkomst = opts.behandel(apparaat, { versie: kop.versie, nonce: kop.nonce }, plaintext, route);
+  } catch (e) {
+    opts.log?.(`${route === 'map' ? 'Bonnenmap' : 'E-mailroute'}: een bericht afhandelen mislukt (${codeVan(e)})`);
+    return 'herhaal';
+  }
+  const soort = classificeer(uitkomst);
+  if (soort === 'herhaal') return 'herhaal';
+  const probleem = soort.probleem ? { ...soort.probleem, apparaat } : undefined;
+  const antwoord: Antwoord | undefined = route === 'map' ? { deviceId: Buffer.from(kop.deviceId), nonce: Buffer.from(kop.nonce), versie: kop.versie, status: uitkomst.status, json: uitkomst.json } : undefined;
+  return { afronding: { ...(antwoord ? { antwoord } : {}), ...(probleem ? { probleem } : {}) }, ...(uitkomst.na ? { na: uitkomst.na } : {}) };
+}
+
+/** Wat de mailimport van de scanner nodig heeft (zie MailIntakeService.setTelefoonHandler). */
+export interface TelefoonHandler {
+  /** mag de mailimport telefoonberichten herkennen? (de telefoonroute staat aan en de scanner is niet geblokkeerd) */
+  actief(): boolean;
+  /** opent en handelt één .bvns-bijlage af met route mail; 'herhaal' = later opnieuw, anders definitief (eventueel met een probleem) */
+  verwerk(data: Buffer): 'herhaal' | { probleem?: Probleem; na?: () => void };
+}
+
+export function maakTelefoonHandler(opts: { pairing: Pick<ScannerPairing, 'key'>; behandel: BehandelFunctie; actief: () => boolean; log?: (message: string) => void }): TelefoonHandler {
+  return {
+    actief: opts.actief,
+    verwerk(data) {
+      const r = openEnBehandel(data, opts, 'mail');
+      return r === 'herhaal' ? r : { ...(r.afronding.probleem ? { probleem: r.afronding.probleem } : {}), ...(r.na ? { na: r.na } : {}) };
+    },
+  };
+}
+
+/**
+ * Een regel in het probleemregister: alleen een schone naam van het bestand of de bijlage (nooit een pad, onderwerp of inhoud van
+ * de wijziging), de route erbij, en nooit twee keer dezelfde ongeziene regel. Begrensd op MAP_MAX_ONGEZIEN ongeziene regels per soort.
+ */
+export function legProbleem(db: Db, p: Probleem, naam: string, route: BerichtRoute, nu: number): void {
+  const bestandsnaam = schoonNaam(naam);
+  const fout = p.fout === null ? null : p.fout.slice(0, 100);
+  const veld = p.veld === null ? null : p.veld.slice(0, 100);
+  const bestaat = db
+    .prepare(`SELECT 1 FROM sync_map_problemen WHERE gezien_op IS NULL AND bestandsnaam = ? AND soort = ? AND COALESCE(fout, '') = COALESCE(?, '') AND COALESCE(veld, '') = COALESCE(?, '') AND COALESCE(apparaat_id, '') = COALESCE(?, '') AND COALESCE(route, 'map') = ?`)
+    .get(bestandsnaam, p.soort, fout, veld, p.apparaat, route);
+  if (bestaat) return;
+  // begrensd per soort: meer dan dit aantal ongeziene regels van dezelfde soort wordt niet bijgehouden (de melding toont dan een
+  // telling); een nieuwe soort probleem krijgt zo altijd een regel, ook als een andere soort de grens al bereikt heeft
+  const ongezien = (db.prepare('SELECT COUNT(*) AS n FROM sync_map_problemen WHERE gezien_op IS NULL AND soort = ?').get(p.soort) as { n: number }).n;
+  if (ongezien >= MAP_MAX_ONGEZIEN) return;
+  db.prepare('INSERT INTO sync_map_problemen (bestandsnaam, apparaat_id, soort, fout, veld, tijd, route) VALUES (?, ?, ?, ?, ?, ?, ?)').run(bestandsnaam, p.apparaat, p.soort, fout, veld, nu, route);
+}
+
+/**
+ * Wat betekent een uitkomst van de gedeelde afhandeling voor een bericht? Herhaalbaar blijft liggen; definitief krijgt (bij de map) een
+ * antwoord en gaat naar verwerkt/ of Verwerkt, met een regel voor een afgewezen wijziging of een veldfout.
  */
 function classificeer(u: Behandeld): 'herhaal' | { probleem?: Omit<Probleem, 'apparaat'> } {
   const fout = typeof u.json.fout === 'string' ? u.json.fout : null;
@@ -486,6 +545,8 @@ function classificeer(u: Behandeld): 'herhaal' | { probleem?: Omit<Probleem, 'ap
     if (u.json.uitkomst === 'afgewezen') return { probleem: { soort: 'afgewezen', fout, veld: null } };
     return {};
   }
+  // een soort bericht dat over de e-mail nooit beantwoord kan worden: definitief, nooit later opnieuw
+  if (u.status === 400 && fout === 'niet-ondersteund-via-mail') return { probleem: { soort: 'afgewezen', fout, veld: null } };
   if (u.status === 400) return fout === 'veld-ongeldig' ? { probleem: { soort: 'veld-ongeldig', fout, veld: typeof u.json.veld === 'string' ? u.json.veld : null } } : {};
   if (u.status === 413) return {};
   // dezelfde bon-id met andere inhoud komt nooit goed door opnieuw te proberen
@@ -499,7 +560,7 @@ function isTijdelijk(naam: string): boolean {
 }
 
 /** Alleen de naam, zonder stuurtekens en niet te lang. */
-function schoonNaam(naam: string): string {
+export function schoonNaam(naam: string): string {
   return naam.replace(/[\u0000-\u001f\u007f]/g, '_').slice(0, 120);
 }
 

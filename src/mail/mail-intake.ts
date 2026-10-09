@@ -4,6 +4,9 @@ import { tx } from '../db/database';
 import type { IntakeService } from '../intake/intake';
 import type { SettingsService } from '../settings/settings';
 import { diffDays, today, type IsoDate } from '../shared/dates';
+import { PHONE_SCANNER } from '../shared/phone-scanner';
+import { legProbleem, onleesbaar, schoonNaam, type Probleem, type TelefoonHandler } from '../scanner/map-route';
+import { LIMITS } from '../scanner/protocol';
 
 /** Eén bijlage uit een e-mail. */
 export interface MailAttachment {
@@ -89,6 +92,41 @@ export const MAIL_LIMITS = {
   /** zo vaak opnieuw proberen als een bericht niet te lezen is; daarna overslaan (als "fout") */
   maxAttempts: 3,
 };
+
+/**
+ * De mailroute van de telefoon (stap mailroute): een afzonderlijke mail met een versleutelde .bvns-bijlage (dezelfde envelop als bij
+ * het netwerk en de bonnenmap). Deze grenzen staan los van die voor gewone bijlagen (MAIL_LIMITS.maxAttachmentBytes):
+ * - een .bvns is hoogstens zo groot als het netwerk aanneemt (LIMITS.maxBodyBytes); groter wordt definitief afgewezen zonder de inhoud te lezen;
+ * - hoogstens zoveel .bvns-bijlagen per mail worden verwerkt; de rest wordt als probleem vastgelegd;
+ * - een mail zo groot dat ImapSource hem niet inleest (MAIL_LIMITS.maxAttachmentBytes x maxAttachmentsPerMail) komt zonder bijlagen binnen;
+ * - een herhaalbaar bericht (wachtrij vol, opslaan mislukt, nog onbekende klant of project, niet ondersteund) blijft liggen en wordt bij
+ *   de volgende ophaalronde opnieuw geprobeerd; pas na zoveel pogingen wordt de mail als probleem vastgelegd en overgeslagen.
+ *   Zolang hij blijft liggen wacht de rest van de hoofdmap (dat schrijft het contract voor), dus de grens is niet ruim: bij een ronde per
+ *   kwartier (FIFTEEN_MINUTES in main.ts) houdt 48 pogingen een kapot bericht hoogstens ongeveer twaalf uur op (200 was meer dan twee dagen).
+ * - elke poging telt als fout in het resultaat van de ophaalronde; na meldNa pogingen (ongeveer een uur) komt er eenmalig een probleemregel
+ *   (route mail, zonder inhoud) zodat Vandaag laat zien dat een telefoonbericht niet verwerkt kon worden en andere mail daarop wacht.
+ */
+export const MAIL_TELEFOON_LIMITS = {
+  maxBvnsBytes: LIMITS.maxBodyBytes,
+  maxBvnsPerMail: 10,
+  maxPogingen: 48,
+  meldNa: 4,
+};
+/** De fout van de probleemregel die meldt dat een telefoonbericht blijft liggen (zonder inhoud). */
+export const TELEFOON_BLIJFT_LIGGEN = 'telefoonbericht-blijft-liggen';
+/** De notitie bij een vastgelegde mail met telefoonberichten (nooit de inhoud). */
+export const TELEFOON_NOTE = 'telefoonbericht';
+const BVNS_TYPE = 'application/vnd.boekhoudenvoorniks.scanner';
+
+/** De bijlagen die telefoonberichten zijn: de naam eindigt op .bvns of het contenttype is dat van de scanner. */
+export function telefoonBijlagen(attachments: MailAttachment[]): MailAttachment[] {
+  return attachments.filter((a) => a.filename.toLowerCase().endsWith('.bvns') || a.contentType.toLowerCase().split(';')[0]!.trim() === BVNS_TYPE);
+}
+
+/** Alleen de naam van de bijlage, zonder mappen of stuurtekens, voor het probleemregister. */
+function bijlageNaam(a: MailAttachment): string {
+  return schoonNaam(a.filename.split(/[\\/]/).pop() ?? '') || 'bijlage.bvns';
+}
 
 const EMAIL = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;
 
@@ -262,8 +300,15 @@ export class MailIntakeService {
     private pdf: ((html: string) => Promise<Uint8Array>) | null = null,
   ) {}
 
+  /** De scanner voor telefoonberichten per mail (alleen als koppelen aanstaat); null of zonder handler blijft alles zoals bij gewone mail. */
+  private telefoon: TelefoonHandler | null = null;
+
   setPdfRenderer(pdf: ((html: string) => Promise<Uint8Array>) | null): void {
     this.pdf = pdf;
+  }
+
+  setTelefoonHandler(handler: TelefoonHandler | null): void {
+    this.telefoon = handler;
   }
 
   /** De mailtekst als PDF-bon toevoegen (wacht op controle, nooit vanzelf geboekt). */
@@ -330,7 +375,7 @@ export class MailIntakeService {
    */
   async saveAsReceipt(source: MailSource, id: number, asOf: IsoDate = today()): Promise<MailRecord> {
     const rec = this.get(id);
-    if (!['overig', 'online-factuur'].includes(rec.outcome)) throw new Error('Deze mail is al verwerkt, of komt van een klant');
+    if (!['overig', 'online-factuur'].includes(rec.outcome) || rec.note === TELEFOON_NOTE) throw new Error('Deze mail is al verwerkt, of komt van een klant');
     const box = await source.open(rec.folder);
     if (!box) throw new Error(`De map "${rec.folder}" bestaat niet meer`);
     const m = await source.fetch(rec.uid);
@@ -449,6 +494,8 @@ export class MailIntakeService {
     const since = /^\d{4}-\d{2}-\d{2}$/.test(cfg.since) ? cfg.since : null;
     const folders = [cfg.folder || 'INBOX', ...cfg.extraFolders.filter((f) => f && f !== cfg.folder && f !== cfg.processedFolder)];
     let budget = MAIL_LIMITS.maxMessagesPerPoll;
+    // telefoonberichten worden alleen herkend als de route aanstaat en de scanner er is
+    const telefoon = PHONE_SCANNER.available && this.telefoon?.actief() ? this.telefoon : null;
 
     for (const [index, folder] of folders.entries()) {
       const main = index === 0;
@@ -503,6 +550,11 @@ export class MailIntakeService {
         }
         const from = normalizeAddress(m.fromAddress);
         try {
+          if (telefoon && telefoonBijlagen(m.attachments).length > 0) {
+            // een telefoonbericht gaat vóór de takken eigen adres en klant: de afzender, het onderwerp en de tekst tellen niet
+            if ((await this.telefoonMail(telefoon, source, folder, main, uid, key, m, setLast, result)) === 'opnieuw') break;
+            continue;
+          }
           if (own.has(from) && this.isOwnDocument(m)) {
             // een kopie (bcc) van je eigen factuur of offerte: geen inkoop
             this.record(key, folder, uid, m, 'eigen');
@@ -550,6 +602,90 @@ export class MailIntakeService {
       }
     }
     return result;
+  }
+
+  /**
+   * Een mail met telefoonberichten (.bvns-bijlagen): elke bijlage gaat door dezelfde functie als de bonnenmap (route mail). Het register van
+   * de synchronisatie zorgt dat een bijlage die bij een eerdere poging al was toegepast niet dubbel telt.
+   * - Definitief (ook een probleem): de mail en de probleemregels worden samen vastgelegd, daarna gaat de mail naar de verwerkt-map.
+   * - Herhaalbaar: de mail blijft onverwerkt (niet vastgelegd, niet verplaatst) en de map gaat niet verder; er is een eigen, ruimere teller
+   *   (MAIL_TELEFOON_LIMITS.maxPogingen) naast de teller van gewone mail. Na de grens wordt de mail als probleem vastgelegd (en blijft hij
+   *   in de mailbox staan) en gaat de map verder.
+   * De pc antwoordt nooit per mail en schrijft niets naar de mailbox behalve het verplaatsen.
+   */
+  private async telefoonMail(
+    handler: TelefoonHandler,
+    source: MailSource,
+    folder: string,
+    main: boolean,
+    uid: number,
+    key: string,
+    m: MailMessage,
+    setLast: (uid: number) => void,
+    result: PollResult,
+  ): Promise<'klaar' | 'opnieuw' | 'overgeslagen'> {
+    const alle = telefoonBijlagen(m.attachments);
+    const problemen: { naam: string; probleem: Probleem }[] = [];
+    let herhaal = false;
+    for (const a of alle.slice(0, MAIL_TELEFOON_LIMITS.maxBvnsPerMail)) {
+      const naam = bijlageNaam(a);
+      if (a.content.length > MAIL_TELEFOON_LIMITS.maxBvnsBytes) {
+        // te groot: definitief afgewezen zonder de inhoud te verwerken
+        problemen.push({ naam, probleem: onleesbaar('te-groot').afronding.probleem! });
+        continue;
+      }
+      let uitslag: ReturnType<TelefoonHandler['verwerk']>;
+      try {
+        uitslag = handler.verwerk(Buffer.from(a.content.buffer, a.content.byteOffset, a.content.byteLength));
+      } catch {
+        uitslag = 'herhaal';
+      }
+      if (uitslag === 'herhaal') {
+        herhaal = true;
+        break;
+      }
+      try {
+        uitslag.na?.();
+      } catch {
+        /* een nieuwe bon naar de inbox kan later nog */
+      }
+      if (uitslag.probleem) problemen.push({ naam, probleem: uitslag.probleem });
+    }
+    if (!herhaal && alle.length > MAIL_TELEFOON_LIMITS.maxBvnsPerMail) {
+      // meer dan de grens: de rest wordt niet verwerkt maar wel vastgelegd
+      problemen.push({ naam: bijlageNaam(alle[MAIL_TELEFOON_LIMITS.maxBvnsPerMail]!), probleem: { soort: 'afgewezen', apparaat: null, fout: 'te-veel-bijlagen', veld: null } });
+    }
+
+    const rij = this.db.prepare('SELECT telefoon_uid, telefoon_pogingen FROM mail_folders WHERE folder = ?').get(folder) as { telefoon_uid: number | null; telefoon_pogingen: number };
+    const pogingen = (rij.telefoon_uid === uid ? rij.telefoon_pogingen : 0) + 1;
+    if (herhaal && pogingen < MAIL_TELEFOON_LIMITS.maxPogingen) {
+      this.db.prepare('UPDATE mail_folders SET telefoon_uid = ?, telefoon_pogingen = ? WHERE folder = ?').run(uid, pogingen, folder);
+      result.errors++;
+      // eenmalig (precies bij de meldNa-ste poging, ook niet opnieuw na "gezien"): andere mail wacht op dit bericht
+      if (pogingen === MAIL_TELEFOON_LIMITS.meldNa) {
+        legProbleem(this.db, { soort: 'schrijven-mislukt', apparaat: null, fout: TELEFOON_BLIJFT_LIGGEN, veld: null }, bijlageNaam(alle[0]!), 'mail', Date.now());
+      }
+      return 'opnieuw';
+    }
+    if (herhaal) problemen.push({ naam: bijlageNaam(alle[0]!), probleem: { soort: 'afgewezen', apparaat: null, fout: 'te-vaak-geprobeerd', veld: null } });
+
+    // mail en probleemregels samen; bij een mislukking (bv. de administratie gaat dicht) blijft alles onverwerkt
+    const nu = Date.now();
+    tx(this.db, () => {
+      for (const { naam, probleem } of problemen) legProbleem(this.db, probleem, naam, 'mail', nu);
+      this.record(key, folder, uid, m, herhaal ? 'fout' : 'overig', { note: herhaal ? `${TELEFOON_NOTE}: te vaak opnieuw geprobeerd` : TELEFOON_NOTE });
+      this.db.prepare('UPDATE mail_folders SET telefoon_uid = NULL, telefoon_pogingen = 0 WHERE folder = ?').run(folder);
+    });
+    if (herhaal) {
+      // de mail blijft in de mailbox staan; de map gaat verder
+      result.errors++;
+    } else {
+      const movedTo = await this.moveProcessed(source, uid, main);
+      if (movedTo) this.db.prepare('UPDATE mail_messages SET moved_to = ? WHERE message_key = ?').run(movedTo, key);
+      result.other++;
+    }
+    setLast(uid);
+    return herhaal ? 'overgeslagen' : 'klaar';
   }
 
   private record(

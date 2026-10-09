@@ -12,7 +12,7 @@ import { today } from '../shared/dates';
 import type { PaidWith } from '../shared/paid-with';
 import { ReceiptFolderWatch, type FolderStatus } from './folder-watch';
 import { jpegsToPdf } from './jpeg-pdf';
-import { MapRoute, type MapBestanden, type MapStatus } from './map-route';
+import { MapRoute, maakTelefoonHandler, type MapBestanden, type MapStatus, type TelefoonHandler } from './map-route';
 import type { Advertiser } from './mdns';
 import { localInterfaces, type LocalInterface } from './network';
 import { ScannerPairing, type ScannerDevice } from './pairing';
@@ -164,6 +164,19 @@ export class Bonnenscanner {
       stableMs: deps.folderStableMs,
       bestanden: deps.mapBestanden,
       onProcessed: () => deps.onChange?.(),
+      log: this.log,
+    });
+  }
+
+  /**
+   * Wat de mailimport nodig heeft om een .bvns-bijlage van de telefoon te verwerken (route mail): dezelfde functie als de
+   * bonnenmap voor "envelop openen en afhandelen". Actief zolang koppelen aanstaat (PHONE_SCANNER) en de scanner niet geblokkeerd is.
+   */
+  mailHandler(): TelefoonHandler {
+    return maakTelefoonHandler({
+      pairing: this.pairing,
+      behandel: (deviceId, kop, plaintext, route) => this.receiver.behandel(deviceId, kop, plaintext, route),
+      actief: () => PHONE_SCANNER.available && !this.blocked(),
       log: this.log,
     });
   }

@@ -1648,4 +1648,13 @@ export const migrations: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_sync_map_problemen_open ON sync_map_problemen(gezien_op, soort, id);
   `,
+  `
+  -- Telefoonberichten per e-mail (stap mailroute): het probleemregister van de bonnenmap krijgt de route waarlangs het
+  -- bericht kwam (NULL = bonnenmap, zo blijven bestaande regels kloppen; verder map of mail). De mailmap onthoudt per
+  -- map welk telefoonbericht bleef liggen en hoe vaak het al opnieuw is geprobeerd, apart van de teller voor gewone mail.
+  -- Alleen additief: er wordt geen tabel opnieuw opgebouwd en niets gewijzigd aan bestaande rijen.
+  ALTER TABLE sync_map_problemen ADD COLUMN route TEXT;
+  ALTER TABLE mail_folders ADD COLUMN telefoon_uid INTEGER;
+  ALTER TABLE mail_folders ADD COLUMN telefoon_pogingen INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
