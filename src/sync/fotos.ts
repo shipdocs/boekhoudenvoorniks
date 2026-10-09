@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { leesFotoVelden, leesWijziging, type Wijziging } from '@gratis-boekhouden/kern';
 import type { Db } from '../db/database';
@@ -142,6 +142,12 @@ export class FotoOntvangst implements WachtrijBehandelaar {
     // 4. het project: onbekend wacht (bestanden al op schijf, verwijzingen in de wachtrij), bekend bewaart
     const job = this.db.prepare('SELECT id FROM jobs WHERE uuid = ?').get(velden.project_uuid) as { id: number } | undefined;
     if (!job) {
+      // het project is al door de pc afgewezen (zelfde apparaat): direct afwijzen, zonder wachtrijrij en zonder bestanden
+      if (this.projectAfgewezen(deviceId, velden.project_uuid)) {
+        const afgewezen: Klaar = { uitkomst: 'afgewezen', fout: 'project-afgewezen' };
+        this.schrijfRegister(deviceId, w, afgewezen, route);
+        return { status: 200, uitkomst: 'afgewezen', fout: 'project-afgewezen' };
+      }
       // zonder registerrij en zonder foto: alleen een wachtrijrij; een volle wachtrij (rijen of bytes) geeft 503 (herhaalbaar) zonder rij en zonder bestanden
       if (this.wachtendeBytes(deviceId) + items.reduce((som, it) => som + it.bytes, 0) > WACHT_BYTES_LIMIET) return { status: 503, fout: 'wachtrij-vol' };
       const r = this.wachtrij.zetIn(deviceId, bron, w, { entiteit: 'project', uuid: velden.project_uuid, reden: 'project-onbekend' }, route);
@@ -252,10 +258,14 @@ export class FotoOntvangst implements WachtrijBehandelaar {
     if (!job) {
       // het project is door de pc afgewezen (bv. de klant is een leverancier) en komt dus nooit: de foto wacht niet eeuwig
       // (de bestanden blijven staan, maar de afgehandelde rij telt niet meer mee voor de limieten)
-      const afgewezen = this.db.prepare(`SELECT 1 FROM sync_ontvangen WHERE apparaat_id = ? AND entiteit = 'project' AND uuid = ? AND uitkomst = 'afgewezen' LIMIT 1`).get(rij.apparaat_id, velden.velden.project_uuid);
-      return afgewezen ? { uitkomst: 'afgewezen', fout: 'project-afgewezen' } : { uitkomst: 'wacht' };
+      return this.projectAfgewezen(rij.apparaat_id, velden.velden.project_uuid) ? { uitkomst: 'afgewezen', fout: 'project-afgewezen' } : { uitkomst: 'wacht' };
     }
     return this.voegToe(job.id, rij.uuid, refs.map((r) => ({ pad: r.file_path, sha256: r.sha256, bytes: r.bytes })), velden.velden.notitie, w.wijziging.tijd);
+  }
+
+  /** Heeft de pc het project van dit apparaat afgewezen (bv. de klant is een leverancier)? Dan komt het nooit. */
+  private projectAfgewezen(deviceId: string, projectUuid: string): boolean {
+    return Boolean(this.db.prepare(`SELECT 1 FROM sync_ontvangen WHERE apparaat_id = ? AND entiteit = 'project' AND uuid = ? AND uitkomst = 'afgewezen' LIMIT 1`).get(deviceId, projectUuid));
   }
 
   private afwijzing(reden: string): Uitkomst {
@@ -297,8 +307,8 @@ export class FotoOntvangst implements WachtrijBehandelaar {
   }
 
   /**
-   * Schrijft de bestanden via een tijdelijk bestand en een rename: een crash laat hoogstens een `.tmp` achter (dat een
-   * volgende poging gewoon overschrijft), nooit een half bestand onder de echte naam. Bestaat het echte bestand al, dan
+   * Schrijft de bestanden via een tijdelijk bestand met een willekeurige naam en een rename: een crash laat hoogstens een `.tmp`
+   * achter (dat niets blokkeert: elke poging kiest een nieuwe naam), nooit een half bestand onder de echte naam. Bestaat het echte bestand al, dan
    * moet de inhoud gelijk zijn (anders een fout): het bestand wordt nooit overschreven.
    */
   private schrijfBestanden(inhoud: Buffer[], items: Bewaard[]): void {
@@ -306,26 +316,39 @@ export class FotoOntvangst implements WachtrijBehandelaar {
       const pad = items[i]!.pad;
       const abs = resolveAttachmentPath(this.adminDir, pad);
       mkdirSync(dirname(abs), { recursive: true });
-      if (existsSync(abs)) {
-        // het bestand stond er al (een eerdere, volledige poging of dezelfde foto van een ander apparaat): gelijk is goed
-        if (!readFileSync(abs).equals(data)) throw new Error('Een fotobestand met een andere inhoud staat er al');
+      const bestaand = lstatSync(abs, { throwIfNoEntry: false });
+      if (bestaand) {
+        // het bestand stond er al (een eerdere, volledige poging of dezelfde foto van een ander apparaat): gelijk is
+        // goed, ook met of zonder locatie (de locatie-instelling kan intussen veranderd zijn); het bestaande bestand
+        // blijft leidend en de rij wijst naar wat daadwerkelijk bewaard is
+        if (!bestaand.isFile()) throw new Error('Een fotobestand met een andere inhoud staat er al');
+        const staat = readFileSync(abs);
+        if (!stripJpegGps(staat).equals(stripJpegGps(data))) throw new Error('Een fotobestand met een andere inhoud staat er al');
+        items[i] = { pad, sha256: sha(staat), bytes: staat.length };
         return;
       }
-      const tmp = `${abs}.tmp`;
+      // een onvoorspelbare tijdelijke naam, exclusief aangemaakt ('wx' volgt geen symlink en overschrijft niets)
+      const tmp = `${abs}.${randomBytes(4).toString('hex')}.tmp`;
+      let aangemaakt = false;
       try {
-        const fd = openSync(tmp, 'w', 0o600);
+        const fd = openSync(tmp, 'wx', 0o600);
+        aangemaakt = true;
         try {
           writeSync(fd, data);
           fsyncSync(fd);
         } finally {
           closeSync(fd);
         }
+        if (lstatSync(abs, { throwIfNoEntry: false })) throw new Error('Een fotobestand met een andere inhoud staat er al');
         renameSync(tmp, abs);
       } catch (e) {
-        try {
-          unlinkSync(tmp);
-        } catch {
-          /* geen tijdelijk bestand */
+        // alleen een tijdelijk bestand dat wij zelf aanmaakten wordt weggehaald
+        if (aangemaakt) {
+          try {
+            unlinkSync(tmp);
+          } catch {
+            /* geen tijdelijk bestand */
+          }
         }
         throw e;
       }

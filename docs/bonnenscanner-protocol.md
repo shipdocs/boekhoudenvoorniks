@@ -1036,7 +1036,8 @@ telefoon). Een bestand wordt exclusief aangemaakt: staat er al een bestand, dan 
 beeld wordt niet opnieuw gecomprimeerd. **De locatie** (GPS in de EXIF en in een XMP-blok) gaat uit de JPEG, tenzij de
 gebruiker op de pc heeft toegestaan locatie te bewaren. Daardoor kan de `sha256` van het bewaarde bestand verschillen van
 die in de velden: de `sha256` in de velden is die van wat de telefoon stuurde (daarmee controleert de pc de bijlage),
-die in de pc is die van wat is bewaard. De pc vergelijkt een herhaling met en zonder locatie als dezelfde foto.
+die in de pc is die van wat is bewaard. De pc vergelijkt een herhaling met en zonder locatie als dezelfde foto, ook als de instelling tussentijds is veranderd: het al bewaarde bestand blijft leidend en de rijen
+wijzen naar wat daadwerkelijk bewaard is.
 
 **Een onbekend project wacht.** Kent de pc het project (nog) niet, dan antwoordt hij `wacht`, net als bij een
 factuur voor een onbekend project: er komt een rij in de wachtrij (`sync_wachtrij`, wacht op het project, reden
@@ -1051,7 +1052,8 @@ telefoon (zes velden, nooit een pad), ook als de telefoon intussen is ontkoppeld
 rijen per apparaat, of samen meer dan 256 MiB aan bestanden van onverwerkte wachtende foto's van dat apparaat) geeft
 503 `wachtrij-vol`, zonder rij en zonder bestanden; de foto komt dan later opnieuw. Afgehandelde rijen tellen niet mee.
 Is het project door de pc afgewezen (bijvoorbeeld de klant is een leverancier, `geen-klant`), dan wordt de wachtende foto
-afgewezen met `project-afgewezen`; de bestanden blijven staan.
+afgewezen met `project-afgewezen`; de bestanden blijven staan. Komt de foto pas na die afwijzing binnen (van hetzelfde
+apparaat), dan wordt ze direct afgewezen met `project-afgewezen`, zonder wachtrijrij en zonder bestanden.
 
 | HTTP | `uitkomst` / `fout` | Registerrij | Betekenis |
 |---|---|---|---|

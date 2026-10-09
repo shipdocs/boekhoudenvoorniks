@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { leesFotoVelden, type Wijziging } from '@gratis-boekhouden/kern';
@@ -246,6 +246,24 @@ describe('een foto van de telefoon bij een project op de pc', () => {
     expect(o.klant(klantUuid)).toMatchObject({ uitkomst: 'toegepast' });
     expect(o.db.prepare('SELECT verwerkt_op FROM sync_wachtrij WHERE id = ?').pluck().get(vulId)).not.toBeNull();
     expect(o.foto(volUuid, extra, velden(randomUUID(), extra))).toEqual({ status: 200, uitkomst: 'wacht' });
+
+    // een foto die NA de afwijzing van het project aankomt, wacht niet: direct afgewezen met een registerrij, zonder
+    // wachtrijrij en zonder bestanden; een ander apparaat voor dezelfde project-uuid blijft wachten
+    const leverancier = o.s.relations.create({ name: 'Bouwmarkt', type: 'leverancier' });
+    const leverancierUuid = o.db.prepare('SELECT uuid FROM relations WHERE id = ?').pluck().get(leverancier.id) as string;
+    const afgewezenProject = randomUUID();
+    expect(o.project(afgewezenProject, leverancierUuid)).toEqual({ status: 200, uitkomst: 'afgewezen', fout: 'geen-klant' });
+    const laat = [makeJpeg('na afwijzing')];
+    const laatUuid = randomUUID();
+    const voorLaat = o.telling();
+    expect(o.foto(laatUuid, laat, velden(afgewezenProject, laat))).toEqual({ status: 200, uitkomst: 'afgewezen', fout: 'project-afgewezen' });
+    expect(o.register(laatUuid)).toEqual([{ apparaat_id: APPARAAT, uitkomst: 'afgewezen', fout: 'project-afgewezen', route: 'netwerk' }]);
+    expect(o.wachtrij(laatUuid)).toHaveLength(0);
+    expect(o.telling()).toEqual({ ...voorLaat, register: voorLaat.register + 1 });
+    expect(o.bestanden().some((b) => b.includes(laatUuid))).toBe(false);
+    expect(o.foto(laatUuid, laat, velden(afgewezenProject, laat))).toEqual({ status: 200, uitkomst: 'afgewezen', fout: 'project-afgewezen' });
+    expect(o.telling()).toEqual({ ...voorLaat, register: voorLaat.register + 1 });
+    expect(o.foto(randomUUID(), laat, velden(afgewezenProject, laat), { apparaat: 'apparaat-2' })).toEqual({ status: 200, uitkomst: 'wacht' });
   });
 
   it('FOTO-04 project komt binnen: zodra het project is toegepast wordt de wachtende foto in dezelfde verwerking overgenomen (job_photos, registerrij toegepast, wachtrijrij afgehandeld met bevestigingsnummer) zonder dat de bestanden verplaatst of gedupliceerd worden', () => {
@@ -415,16 +433,18 @@ describe('een foto van de telefoon bij een project op de pc', () => {
     expect(o.logs.length).toBeGreaterThanOrEqual(3);
     for (const regel of [...o.logs, ...kapot.logs]) expect(regel).not.toMatch(/geheime notitie|telefoon\/|bijlagen\//);
     // een crash midden in het schrijven laat hoogstens een tijdelijk bestand achter (nooit een half bestand onder de
-    // echte naam), en dat blokkeert een volgende poging niet: het wordt gewoon overschreven
+    // echte naam), en dat blokkeert een volgende poging niet: de nieuwe poging kiest een eigen, willekeurige tijdelijke naam
+    // (het achtergebleven bestand blijft ongemoeid staan)
     const staleMap = join(o.adminDir, 'bijlagen', 'telefoon', a.uuid);
     mkdirSync(staleMap, { recursive: true });
     writeFileSync(join(staleMap, '1.jpg.tmp'), 'half geschreven bij een crash');
     // daarna werkt dezelfde wijziging gewoon, precies een keer
     expect(o.foto(a.uuid, fotos, a.v)).toEqual({ status: 200, uitkomst: 'toegepast' });
     expect(o.foto(a.uuid, fotos, a.v)).toEqual({ status: 200, uitkomst: 'overgeslagen' });
-    expect(o.telling()).toEqual({ job_photos: 2, bijlagen: 0, wachtrij: 0, register: 1, bestanden: 2 });
+    expect(o.telling()).toEqual({ job_photos: 2, bijlagen: 0, wachtrij: 0, register: 1, bestanden: 3 });
     expect(readFileSync(join(staleMap, '1.jpg')).length).toBeGreaterThan(30);
-    expect(existsSync(join(staleMap, '1.jpg.tmp'))).toBe(false);
+    expect(readFileSync(join(staleMap, '1.jpg.tmp'), 'utf8')).toBe('half geschreven bij een crash');
+    expect(bestandenIn(staleMap).filter((f) => f.endsWith('.tmp'))).toEqual(['1.jpg.tmp']);
 
     // 5. het terugdraaien zelf mislukt: de bestanden kunnen niet verwijderd worden. Dat verdwijnt niet stil: ze blijven
     // staan zonder rij (nooit een foto), worden onthouden, en gaan weg zodra het kan
@@ -483,6 +503,28 @@ describe('een foto van de telefoon bij een project op de pc', () => {
       expect(regel).not.toMatch(/telefoon\/|bijlagen\/|'\//);
     }
     expect(o.fotoRijen(wachtUuid)).toHaveLength(0);
+
+    // 7. het tijdelijke bestand heeft een onvoorspelbare naam en volgt nooit een symlink: een symlink op de oude,
+    // voorspelbare naam <foto>.tmp naar een bestand buiten de fotomap laat dat bestand ongemoeid en de foto komt gewoon binnen
+    const doel = join(tijdelijkeMap('bvn-sync-fotos-buiten-'), 'doel.txt');
+    writeFileSync(doel, 'niet aanraken');
+    const linkUuid = randomUUID();
+    const linkFoto = [makeJpeg('symlink')];
+    const linkAbs = resolveAttachmentPath(o.adminDir, pad(linkUuid, 1));
+    mkdirSync(join(linkAbs, '..'), { recursive: true });
+    let linkGelegd = true;
+    try {
+      symlinkSync(doel, `${linkAbs}.tmp`);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EPERM') throw e;
+      linkGelegd = false; // Windows zonder symlink-recht: alleen de unieke naam testen
+    }
+    expect(o.foto(linkUuid, linkFoto, velden(projectUuid, linkFoto))).toEqual({ status: 200, uitkomst: 'toegepast' });
+    expect(readFileSync(doel, 'utf8')).toBe('niet aanraken');
+    expect(o.inhoud(pad(linkUuid, 1)).equals(linkFoto[0]!)).toBe(true);
+    expect(lstatSync(linkAbs).isSymbolicLink()).toBe(false);
+    const restanten = readdirSync(join(linkAbs, '..')).filter((f) => f.endsWith('.tmp'));
+    expect(restanten).toEqual(linkGelegd ? ['1.jpg.tmp'] : []);
   });
 
   it('FOTO-09 locatie: GPS in de JPEG wordt gestript tenzij keepLocation; de sha256 in de velden is die van wat de telefoon stuurde, de sha256 in job_photos die van wat is bewaard', () => {
@@ -521,6 +563,40 @@ describe('een foto van de telefoon bij een project op de pc', () => {
     const gps = readJpegGps(bewaard3)!;
     expect(gps.lat).toBeCloseTo(GPS_POSITION.lat, 3);
     expect(gps.lon).toBeCloseTo(GPS_POSITION.lon, 3);
+
+    // dezelfde foto van een tweede apparaat na een wijziging van de locatie-instelling: het bestaande bestand blijft
+    // leidend (beide richtingen), er komt een registerrij voor het tweede apparaat en de sha256 in job_photos / de wachtrij
+    // is die van wat echt bewaard is
+    for (const eerst of [false, true]) {
+      const opties = { keepLocation: eerst };
+      const { o, projectUuid } = metProject(opties);
+      const uuid = randomUUID();
+      const v = velden(projectUuid, [foto]);
+      expect(o.foto(uuid, [foto], v)).toEqual({ status: 200, uitkomst: 'toegepast' });
+      const bewaard = o.inhoud(pad(uuid, 1));
+      opties.keepLocation = !eerst;
+      expect(o.foto(uuid, [foto], v, { apparaat: 'apparaat-2' })).toEqual({ status: 200, uitkomst: 'overgeslagen' });
+      expect(o.register(uuid)).toEqual([
+        { apparaat_id: APPARAAT, uitkomst: 'toegepast', fout: null, route: 'netwerk' },
+        { apparaat_id: 'apparaat-2', uitkomst: 'overgeslagen', fout: null, route: 'netwerk' },
+      ]);
+      expect(o.inhoud(pad(uuid, 1)).equals(bewaard)).toBe(true);
+      expect(o.fotoRijen(uuid).map((r) => ({ sha256: r.sha256, bytes: r.bytes }))).toEqual([{ sha256: sha(bewaard), bytes: bewaard.length }]);
+      // wachtend: apparaat A (onbekend project) en daarna apparaat B met de andere instelling
+      const wachtUuid = randomUUID();
+      const onbekend = randomUUID();
+      opties.keepLocation = eerst;
+      expect(o.foto(wachtUuid, [foto], velden(onbekend, [foto]))).toEqual({ status: 200, uitkomst: 'wacht' });
+      const eerste = o.inhoud(pad(wachtUuid, 1));
+      opties.keepLocation = !eerst;
+      expect(o.foto(wachtUuid, [foto], velden(onbekend, [foto]), { apparaat: 'apparaat-2' })).toEqual({ status: 200, uitkomst: 'wacht' });
+      expect(o.inhoud(pad(wachtUuid, 1)).equals(eerste)).toBe(true);
+      const verwijzingen = o.db.prepare('SELECT sha256, bytes FROM sync_wachtrij_bijlagen b JOIN sync_wachtrij q ON q.id = b.wachtrij_id WHERE q.uuid = ? ORDER BY q.apparaat_id').all(wachtUuid);
+      expect(verwijzingen).toEqual([1, 2].map(() => ({ sha256: sha(eerste), bytes: eerste.length })));
+      // een echt ander bestand blijft een fout
+      const andere = [makeJpeg('echt anders')];
+      expect(o.foto(uuid, andere, velden(projectUuid, andere), { apparaat: 'apparaat-3' })).toEqual({ status: 200, uitkomst: 'afgewezen', fout: 'id-botst' });
+    }
   });
 
   it('FOTO-10 migratie en paden: de migratie is relatief getest (oude toestand uit migrations.slice, findIndex op een zoektekst), bestaande rijen overleven, user_version klopt; het pad in job_photos is relatief en valt onder attachment-paths en het back-uppakket', async () => {
