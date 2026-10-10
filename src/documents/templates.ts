@@ -7,6 +7,7 @@ import { ICP_SERVICE_TEXT, ICP_TEXT, OUTSIDE_EU_SERVICE_TEXT, isIcp, type SalesV
 import { computeTotals, lineNet } from './totals';
 import type { CompanySettings } from '../settings/settings';
 import { formatIban } from '../shared/validation';
+import { BEDRIJF_LIMIETEN } from '@gratis-boekhouden/kern';
 
 export type TemplateType = 'factuur' | 'offerte';
 
@@ -45,7 +46,8 @@ interface Row extends Omit<DocumentTemplate, 'colors' | 'text_blocks'> {
 }
 
 const COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
-const MAX_LOGO_BYTES = 1_500_000;
+// dezelfde grens als het blok bedrijf in de sync: één bron in de kern
+const MAX_LOGO_BYTES = BEDRIJF_LIMIETEN.maxLogoBytes;
 
 export class TemplateService {
   constructor(private readonly db: Db) {}
