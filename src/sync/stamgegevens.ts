@@ -342,7 +342,7 @@ function cursorVan(soort: Soort, item: { seq: number; uuid: string }, tot: numbe
  * leverancier was komt er nooit in. Bij `sinds` 0 is de lijst leeg: de telefoon begint dan leeg en wist
  * zijn lokale stamgegevens eerst; een verborgen item komt in de volledige export gewoon niet voor.
  */
-export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): StamgegevensAntwoord {
+export function leesStamgegevens(db: Db, vraag: StamgegevensVraag, log?: (melding: string) => void): StamgegevensAntwoord {
   return db
     .transaction((): StamgegevensAntwoord => {
       const cursor = vraag.na;
@@ -402,7 +402,7 @@ export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): Stamgegevens
       const aliassen = cursor ? [] : (db.prepare(ALIAS_SQL).all() as StamAlias[]).map((a) => ({ alias_uuid: a.alias_uuid, klant: a.klant }));
       // de regeltabel alleen op de eerste pagina, altijd (een kopie: het antwoord deelt geen object met de kern)
       // het blok bedrijf ook alleen op de eerste pagina, altijd; uit dezelfde leestransactie
-      return { ...(cursor ? {} : { regeltabel: structuredClone(REGELTABEL), bedrijf: bouwBedrijf(db) }), klanten, projecten, aliassen, verborgen, volgende, nieuwe_sinds: tot };
+      return { ...(cursor ? {} : { regeltabel: structuredClone(REGELTABEL), bedrijf: bouwBedrijf(db, log) }), klanten, projecten, aliassen, verborgen, volgende, nieuwe_sinds: tot };
     })
     .deferred();
 }

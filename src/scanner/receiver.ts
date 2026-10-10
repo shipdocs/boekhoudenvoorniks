@@ -376,7 +376,7 @@ export class ScannerReceiver {
       this.opts.onActivity?.();
       let pagina;
       try {
-        pagina = leesStamgegevens(this.opts.database, { sinds: msg.sinds ?? 0, na });
+        pagina = leesStamgegevens(this.opts.database, { sinds: msg.sinds ?? 0, na }, this.opts.log);
       } catch (e) {
         // een cursor die deze pc niet kan hebben gemaakt (bovengrens boven de teller of onder sinds) is een vormfout
         if (e instanceof OngeldigeCursor) return reply(400, { ok: false, fout: 'ongeldig' });

@@ -282,12 +282,6 @@ describe('blok bedrijf: versie, kor, betaaltermijn en sjabloon', () => {
     t.s.templates.update(standaard(t).id, { html_template: html });
     expect(blok(t).factuur.html_template).toBe(html);
   });
-
-  it('een bedrijfsgegeven buiten de grenzen geeft een duidelijke fout, en lekt niets weg', () => {
-    const t = start();
-    t.s.settings.update({ company: { ...t.s.settings.get().company, name: 'x'.repeat(BEDRIJF_LIMIETEN.maxTekens + 1) } });
-    expect(() => eerste(t)).toThrow(/blok bedrijf.*gegevens\.naam is te lang/);
-  });
 });
 
 describe('blok bedrijf: de strikte lezer leesBedrijf', () => {
@@ -476,5 +470,139 @@ describe('blok bedrijf: het uitgewerkte voorbeeld in het protocoldocument', () =
     expect(doc).toContain('BEDRIJF_LIMIETEN');
     expect(doc).toMatch(/Privacygrens\.\*\*[^]*?blok `bedrijf`[^]*?op de enige plek na/);
     expect(doc).not.toContain('het IBAN van de administratie zelf niet');
+  });
+});
+
+describe('blok bedrijf: veerkracht bij bestaande waarden die de strengere lezer afwijst', () => {
+  // De instellingen en sjablonen van de pc zijn ruimer dan de lezer; deze waarden komen dus rechtstreeks in
+  // de databank (zoals een oudere versie ze kan hebben opgeslagen). Het antwoord moet er nooit door falen.
+  const schrijfBedrijf = (t: T, patch: Record<string, unknown>) => {
+    const huidig = t.s.settings.get().company;
+    t.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('company', JSON.stringify({ ...huidig, ...patch }));
+  };
+  const schrijfSjabloon = (t: T, kolommen: Record<string, string | null>) => {
+    for (const [kolom, waarde] of Object.entries(kolommen)) t.db.prepare(`UPDATE templates SET ${kolom} = ? WHERE type = 'factuur' AND is_default = 1`).run(waarde);
+  };
+  const metLog = (t: T) => {
+    const regels: string[] = [];
+    const a = leesStamgegevens(t.db, { sinds: 0, na: null }, (m) => regels.push(m));
+    return { a, b: a.bedrijf!, regels };
+  };
+
+  it('een te lange bedrijfsnaam wordt afgekapt op de grens, het adres op zijn eigen grens', () => {
+    const t = start();
+    schrijfBedrijf(t, { name: 'n'.repeat(5000), address: 'a'.repeat(5000), iban: 'i'.repeat(300) });
+    const { b, regels } = metLog(t);
+    expect(b.gegevens.naam).toBe('n'.repeat(BEDRIJF_LIMIETEN.maxTekens));
+    expect(b.gegevens.adres).toBe('a'.repeat(BEDRIJF_LIMIETEN.maxAdresTekens));
+    expect(b.gegevens.iban.length).toBe(BEDRIJF_LIMIETEN.maxTekens);
+    expect(leesBedrijf(b).ok).toBe(true);
+    // het logboek noemt de aanpassing, nooit de inhoud
+    expect(regels).toHaveLength(1);
+    expect(regels[0]).toContain('gegeven-afgekapt');
+    expect(regels[0]).not.toContain('nnnn');
+  });
+
+  it('afkappen knipt geen emoji doormidden', () => {
+    const t = start();
+    schrijfBedrijf(t, { name: 'x'.repeat(BEDRIJF_LIMIETEN.maxTekens - 1) + '\u{1F600}' });
+    const naam = blok(t).gegevens.naam;
+    expect(naam).toBe('x'.repeat(BEDRIJF_LIMIETEN.maxTekens - 1));
+  });
+
+  it('een ongeldige kleur wordt de standaardkleur, de andere kleuren blijven', () => {
+    const t = start();
+    schrijfSjabloon(t, { colors: JSON.stringify({ primary: '#12345', text: 'rood', muted: '#abcdef', accentBg: '#1234567' }) });
+    const { b, regels } = metLog(t);
+    expect(b.factuur.kleuren).toEqual({ primary: DEFAULT_COLORS.primary, text: DEFAULT_COLORS.text, muted: '#abcdef', accentBg: DEFAULT_COLORS.accentBg });
+    expect(regels[0]).toContain('kleur-vervangen');
+  });
+
+  it('een ongeldig lettertype wordt het standaardlettertype', () => {
+    const t = start();
+    schrijfSjabloon(t, { font: 'Arial; } body { display:none' });
+    expect(blok(t).factuur.lettertype).toBe('Helvetica, Arial, sans-serif');
+  });
+
+  it('een logo met een verkeerde vorm of te groot wordt null', () => {
+    const t = start();
+    schrijfSjabloon(t, { logo: 'https://example.nl/logo.png' });
+    const { b, regels } = metLog(t);
+    expect(b.factuur.logo).toBeNull();
+    expect(regels[0]).toContain('logo-genegeerd');
+    const kop = 'data:image/png;base64,';
+    schrijfSjabloon(t, { logo: kop + 'A'.repeat(BEDRIJF_LIMIETEN.maxLogoBytes) });
+    expect(blok(t).factuur.logo).toBeNull();
+    // een geldig logo blijft
+    schrijfSjabloon(t, { logo: PNG });
+    expect(blok(t).factuur.logo).toBe(PNG);
+  });
+
+  it('een html-sjabloon boven de grens wordt null, een sjabloon op de grens blijft', () => {
+    const t = start();
+    schrijfSjabloon(t, { html_template: 'x'.repeat(BEDRIJF_LIMIETEN.maxHtmlTekens + 1) });
+    const { b, regels } = metLog(t);
+    expect(b.factuur.html_template).toBeNull();
+    expect(regels[0]).toContain('sjabloon-genegeerd');
+    schrijfSjabloon(t, { html_template: 'x'.repeat(BEDRIJF_LIMIETEN.maxHtmlTekens) });
+    expect(blok(t).factuur.html_template?.length).toBe(BEDRIJF_LIMIETEN.maxHtmlTekens);
+  });
+
+  it('te veel of te lange tekstblokken worden afgekapt op de grens', () => {
+    const t = start();
+    const veel = Array.from({ length: BEDRIJF_LIMIETEN.maxTekstblokken + 5 }, (_, i) => ({ title: `Blok ${i}`, text: 'tekst' }));
+    veel[0] = { title: 't'.repeat(500), text: 'x'.repeat(9000) };
+    schrijfSjabloon(t, { text_blocks: JSON.stringify(veel) });
+    const { b, regels } = metLog(t);
+    expect(b.factuur.tekstblokken).toHaveLength(BEDRIJF_LIMIETEN.maxTekstblokken);
+    expect(b.factuur.tekstblokken[0]).toEqual({ titel: 't'.repeat(BEDRIJF_LIMIETEN.maxTitelTekens), tekst: 'x'.repeat(BEDRIJF_LIMIETEN.maxBlokTekens) });
+    expect(b.factuur.tekstblokken[1]!.titel).toBe('Blok 1');
+    expect(regels[0]).toContain('tekstblokken-afgekapt');
+    expect(regels[0]).toContain('tekstblok-afgekapt');
+  });
+
+  it('een betaaltermijn buiten 0 tot 365 wordt 14', () => {
+    const t = start();
+    for (const waarde of [-5, 366, 1.5, 'veertien']) {
+      t.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('paymentTermDays', JSON.stringify(waarde));
+      expect(blok(t).betaaltermijn_dagen, String(waarde)).toBe(14);
+    }
+  });
+
+  it('een onleesbaar sjabloon (kapotte JSON) geeft de standaardopmaak en het antwoord blijft compleet', () => {
+    const t = start();
+    t.s.relations.create({ name: 'Klant', type: 'klant' });
+    schrijfSjabloon(t, { colors: '{kapot', text_blocks: 'ook kapot' });
+    const { a, b } = metLog(t);
+    expect(a.klanten.length).toBeGreaterThan(0);
+    expect(b.factuur).toEqual({ kleuren: DEFAULT_COLORS, lettertype: 'Helvetica, Arial, sans-serif', logo: null, tekstblokken: [], html_template: null });
+  });
+
+  it('alles tegelijk te streng: leesStamgegevens gooit niet, levert klanten en een geldig blok, en de versie hoort bij de herstelde inhoud', () => {
+    const t = start();
+    const klant = t.s.relations.create({ name: 'Blijft geleverd', type: 'klant' });
+    schrijfBedrijf(t, { name: 'n'.repeat(9000), email: 'e'.repeat(9000) });
+    schrijfSjabloon(t, { colors: JSON.stringify({ primary: '#1' }), logo: 'geen-logo', html_template: 'h'.repeat(BEDRIJF_LIMIETEN.maxHtmlTekens * 2), font: '<>' });
+    t.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('paymentTermDays', '9999');
+    let a!: StamgegevensAntwoord;
+    expect(() => (a = leesStamgegevens(t.db, { sinds: 0, na: null }))).not.toThrow();
+    expect(a.klanten.map((k) => k.velden.naam!.waarde)).toContain('Blijft geleverd');
+    const b = a.bedrijf!;
+    expect(leesBedrijf(JSON.parse(JSON.stringify(b)))).toEqual({ ok: true, bedrijf: b });
+    const { versie, ...inhoud } = b;
+    expect(bedrijfVersie(inhoud)).toBe(versie);
+    expect(klant.id).toBeGreaterThan(0);
+  });
+
+  it('een geldige administratie meldt niets in het logboek', () => {
+    expect(metLog(start()).regels).toEqual([]);
+  });
+
+  it('de telefoon merkt het niet: het blok heeft dezelfde sleutels als zonder aanpassing', () => {
+    const t = start();
+    const normaal = Object.keys(blok(t).factuur);
+    schrijfSjabloon(t, { logo: 'kapot', html_template: 'h'.repeat(BEDRIJF_LIMIETEN.maxHtmlTekens + 1) });
+    expect(Object.keys(blok(t))).toEqual(['versie', 'gegevens', 'kor', 'betaaltermijn_dagen', 'factuur']);
+    expect(Object.keys(blok(t).factuur)).toEqual(normaal);
   });
 });

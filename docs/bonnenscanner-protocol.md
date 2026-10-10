@@ -605,6 +605,21 @@ dat op de grenzen zit, met vier-byte-tekens, blijft ver onder `maxBodyBytes` (20
 eerste pagina niet van 1 MiB uitgaan. De lezer wijst een onbekende of ontbrekende sleutel, een verkeerd type, een
 ongeldige kleur of logo-vorm en een waarde buiten de grenzen af, met een gewone Nederlandse melding.
 
+**Een te grote of ongeldige waarde op de pc.** De instellingen en sjablonen van de pc zijn ruimer dan de lezer
+(een oudere versie kan bijvoorbeeld een bedrijfsnaam van 300 tekens of een kleur als `#12345` hebben bewaard). Het
+blok laat het antwoord op `stamgegevens` daardoor **nooit** mislukken: de pc past zo'n waarde zelf aan voordat hij het
+blok verstuurt, en de telefoon krijgt altijd een blok dat `leesBedrijf` aanneemt. Per onderdeel: een tekst boven de
+grens wordt afgekapt op de grens; een ongeldige kleur wordt de standaardkleur van de pc (`#1f4e79`, `#1d1d1f`,
+`#6b6b70`, `#f2f6fa`); een ongeldig `lettertype` wordt `Helvetica, Arial, sans-serif`; een `logo` dat niet aan de vorm
+of de grootte voldoet wordt `null`; een `html_template` boven de grens wordt `null` (de telefoon gebruikt dan de
+standaardlay-out); meer dan 20 tekstblokken: de rest valt weg, en te lange titels of teksten worden afgekapt;
+een `betaaltermijn_dagen` buiten 0 tot 365 wordt 14. Lukt een herstel op veldniveau onverwacht niet, dan gaat het hele
+onderdeel (`gegevens` of `factuur`) terug naar standaardwaarden, en als laatste redmiddel het hele blok. De `versie`
+wordt over de aangepaste inhoud berekend. **De telefoon merkt hier niets van:** het blok heeft geen extra veld
+(zoals een lijst waarschuwingen) en dezelfde sleutels als altijd. Dat is bewust, want het blok heeft precies de
+sleutels hierboven en een telefoon kan met een melding niets doen; de pc schrijft alleen in zijn eigen logboek welke
+onderdelen zijn aangepast (korte codes, nooit de inhoud), zodat de gebruiker het kan oplossen.
+
 Hoe de telefoon het gebruikt: hij bewaart het blok **met zijn `versie`**. Is de `versie` in een nieuwe eerste pagina
 anders dan de bewaarde (vergelijken als tekst), dan vervangt hij het blok. Voor een **nieuwe** factuur maakt hij de
 opmaak met de gedeelde renderfuncties van de kern, met `gegevens` als bedrijf, het `factuur`-sjabloon als opmaak en
