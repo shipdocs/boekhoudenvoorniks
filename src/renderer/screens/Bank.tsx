@@ -2,10 +2,10 @@ import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
 import type { CsvMapping } from '../../import/csv';
-import { saleVatText, type PurchaseVatCode, type SalesVatCode } from '../../shared/vat';
+import { isReverseCharge, saleVatText, type PurchaseVatCode, type SalesVatCode } from '../../shared/vat';
 import { selectedBusinessPct } from '../../shared/business-share';
 import { referenceIn } from '../../shared/references';
-import { InvestmentHint, investmentInfo } from './Purchases';
+import { InvestmentHint, ReverseRateField, investmentInfo } from './Purchases';
 import { CategoryChips } from './Categories';
 import { PaymentDetails, PaymentEvidence } from './PaymentDetails';
 import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
@@ -654,7 +654,7 @@ function CsvMappingDialog({ headers, rows, suggested, onClose, onConfirm }: { he
 }
 
 /** Categoriekeuze in mensentaal (kosten + overige bestemmingen). */
-export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { initial?: string; onPick: (categoryKey: string, vatCode: string, businessPct?: number) => void; incoming?: boolean; /** betaald bedrag (positief), voor de investeringshint */ amount?: number; /** de betaling: voor het zakelijke deel dat eerder voor deze tegenpartij is opgegeven */ txId?: number }) {
+export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { initial?: string; onPick: (categoryKey: string, vatCode: string, businessPct?: number, vatRate?: 9 | 21) => void; incoming?: boolean; /** betaald bedrag (positief), voor de investeringshint */ amount?: number; /** de betaling: voor het zakelijke deel dat eerder voor deze tegenpartij is opgegeven */ txId?: number }) {
   const { meta } = useApp();
   const share = useLoad(() => (txId !== undefined && !incoming ? api.bank.businessShare(txId) : Promise.resolve(null)), [txId]);
   const [pctInput, setPctInput] = useState<string | null>(null);
@@ -663,6 +663,7 @@ export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { in
   const pctOk = Number.isInteger(pctNumber) && pctNumber >= 1 && pctNumber <= 100;
   const [cat, setCat] = useState(initial ?? 'materiaal');
   const [vat, setVat] = useState<PurchaseVatCode>(meta.expenseCategories.find((c) => c.key === (initial ?? 'materiaal'))?.defaultVat ?? 'hoog');
+  const [vatRate, setVatRate] = useState<9 | 21>(21);
   return (
     <div className="grid">
       <Field label={incoming ? 'Waar was dit geld voor?' : 'Waar was deze betaling voor?'}>
@@ -674,6 +675,7 @@ export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { in
           {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
         </select>
       </Field>
+      {!incoming && <ReverseRateField vatCode={vat} value={vatRate} onChange={setVatRate} />}
       {txId !== undefined && !incoming && (
         <Field label="Hoeveel daarvan is zakelijk?" hint={pctNumber < 100 && pctOk ? `Het privédeel (${100 - pctNumber}%) telt niet als kosten en de btw erover trek je niet af. De app onthoudt dit voor ${share.data?.name ?? 'deze partij'}.` : 'Laat je 100 ongewijzigd, dan gebruikt de app je algemene instellingen voor telefoon en internet. Vul een percentage in om voor deze betaling een eigen keuze vast te leggen.'}>
           <span className="row" style={{ gap: 6, alignItems: 'center' }}>
@@ -681,7 +683,7 @@ export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { in
           </span>
         </Field>
       )}
-      <div className="row end"><Button kind="primary" disabled={!pctOk} onClick={() => onPick(cat, vat, selectedBusinessPct(pctInput === null ? null : pctNumber, share.data?.pct))}>Opslaan</Button></div>
+      <div className="row end"><Button kind="primary" disabled={!pctOk} onClick={() => onPick(cat, vat, selectedBusinessPct(pctInput === null ? null : pctNumber, share.data?.pct), !incoming && isReverseCharge(vat) ? vatRate : undefined)}>Opslaan</Button></div>
     </div>
   );
 }
@@ -928,7 +930,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
           )}
           {recat && (
             <div style={{ marginTop: 12 }}>
-              <CategoryPicker txId={t.id} amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode, businessPct) => void done(api.bank.reclassify(t.id, categoryKey, vatCode, businessPct), inv(categoryKey, vatCode))} />
+              <CategoryPicker txId={t.id} amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode, businessPct, vatRate) => void done(api.bank.reclassify(t.id, categoryKey, vatCode, businessPct, vatRate), inv(categoryKey, vatCode))} />
               <p className="small muted">De app draait de oude keuze terug en verwerkt de nieuwe. Had je de btw-aangifte al gedaan? Dan komt het verschil vanzelf in je volgende aangifte.</p>
             </div>
           )}
@@ -1057,7 +1059,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
                     const s = (suggestions.data ?? []).find((x) => x.kind === 'rekening');
                     return s && s.kind === 'rekening' ? (meta.expenseCategories.find((c) => c.account === s.account && !c.key.startsWith('eigen-')) ?? meta.expenseCategories.find((c) => c.account === s.account))?.key : undefined;
                   })()}
-                  onPick={(categoryKey, vatCode, businessPct) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode, businessPct }), inv(categoryKey, vatCode))}
+                  onPick={(categoryKey, vatCode, businessPct, vatRate) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode, businessPct, vatRate }), inv(categoryKey, vatCode))}
                 />
               </div>
               <div className="choice" style={{ marginTop: 12 }}>

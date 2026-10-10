@@ -54,6 +54,14 @@ describe('Verlegd tarief 9% of 21% (#316)', () => {
     expect(rub(s, '2026-Q3')['4b']!.omzet).toBe(0);
   });
 
+  it('de vraag op Vandaag (inbox) neemt het gekozen tarief mee naar de bankboeking', () => {
+    const { s } = setup();
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-07-03', amount: -10000, description: 'Boekendienst' }] });
+    const t = s.bank.list()[0]!;
+    s.inbox.answerBank(t.id, { business: true, categoryKey: 'software', vatCode: 'eu', vatRate: 9 });
+    expect(rub(s, '2026-Q3')['4b']).toMatchObject({ omzet: 10000, btw: 900 });
+  });
+
   it('een aankoop zonder tarief blijft 21% (oude boekingen ongewijzigd)', () => {
     const { s } = setup();
     s.purchases.create({ invoiceDate: '2026-07-01', description: 'Oud', lines: [{ account: 'WBedKanSof', netAmount: 10000, vatCode: 'eu' }] });
