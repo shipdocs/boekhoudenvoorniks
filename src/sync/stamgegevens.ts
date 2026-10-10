@@ -1,8 +1,9 @@
 import type { Db } from '../db/database';
-import { KLANT_VELDEN, PROJECT_VELDEN, REGELTABEL, normalizeVatNumber, type Regeltabel } from '@gratis-boekhouden/kern';
+import { KLANT_VELDEN, PROJECT_VELDEN, REGELTABEL, normalizeVatNumber, type Bedrijf, type Regeltabel } from '@gratis-boekhouden/kern';
 import { JOB_VELD_MAPPING, BRON_PC, type JobKolom } from '../jobs/revisie';
 import { RELATIE_VELD_MAPPING } from '../relations/relations';
 import { veldOndergrens } from './ondergrens';
+import { bouwBedrijf } from './bedrijf';
 
 /**
  * De stamgegevens die de pc aan een gekoppelde telefoon teruggeeft: klanten en projecten, plus de
@@ -12,7 +13,7 @@ import { veldOndergrens } from './ondergrens';
  * - Whitelist boven blacklist. Elk item wordt veld voor veld opgebouwd uit KLANT_VELDEN en
  *   PROJECT_VELDEN (de kern) plus uuid, seq, pc_revisie en gearchiveerd; er wordt nooit een
  *   databaserij doorgegeven. Leveranciers, integer-id's, type, paid_with, boekingen, facturen,
- *   bankgegevens van de administratie zelf en instellingen komen er niet in.
+ *   instellingen en de bankgegevens van de administratie komen er niet in, op het IBAN in het blok bedrijf na.
  * - Alleen lezen. Deze module bevat geen schrijfopdracht; de enige leesbron is de database zelf, in
  *   een leestransactie zodat een pagina uit één momentopname komt.
  * - Delta op de pc-teller. `sinds` is een sync_seq en levert items met een strikt groter nummer; de
@@ -38,6 +39,9 @@ import { veldOndergrens } from './ondergrens';
  * - Elke klant draagt `vies`: null of { gecontroleerd_op, geldig }. Dat is de laatste VIES-controle van het
  *   HUIDIGE btw-nummer van de klant (genormaliseerd zoals ViesService.latest). Alleen deze twee velden
  *   verlaten de pc; naam, adres en bericht uit vies_checks worden niet eens gelezen.
+ *
+ * - Het blok `bedrijf` (bedrijfsgegevens, KOR, betaaltermijn en het standaard factuursjabloon, zie bedrijf.ts)
+ *   staat net als de regeltabel alleen op de eerste pagina, altijd, onafhankelijk van `sinds` en van de delta.
  *
  * Kolomnamen in de SQL komen uitsluitend uit de vaste lijsten van de kern (KLANT_VELDEN en
  * PROJECT_VELDEN), nooit uit het verzoek.
@@ -114,6 +118,8 @@ export interface VerborgenItem {
 export interface StamgegevensAntwoord {
   /** de btw-regeltabel; alleen op de eerste pagina (zonder cursor), nooit op een vervolgpagina */
   regeltabel?: Regeltabel;
+  /** de bedrijfsgegevens en het standaard factuursjabloon; alleen op de eerste pagina (zonder cursor), nooit op een vervolgpagina */
+  bedrijf?: Bedrijf;
   klanten: StamKlant[];
   projecten: StamItem[];
   aliassen: StamAlias[];
@@ -336,7 +342,7 @@ function cursorVan(soort: Soort, item: { seq: number; uuid: string }, tot: numbe
  * leverancier was komt er nooit in. Bij `sinds` 0 is de lijst leeg: de telefoon begint dan leeg en wist
  * zijn lokale stamgegevens eerst; een verborgen item komt in de volledige export gewoon niet voor.
  */
-export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): StamgegevensAntwoord {
+export function leesStamgegevens(db: Db, vraag: StamgegevensVraag, log?: (melding: string) => void): StamgegevensAntwoord {
   return db
     .transaction((): StamgegevensAntwoord => {
       const cursor = vraag.na;
@@ -395,7 +401,8 @@ export function leesStamgegevens(db: Db, vraag: StamgegevensVraag): Stamgegevens
 
       const aliassen = cursor ? [] : (db.prepare(ALIAS_SQL).all() as StamAlias[]).map((a) => ({ alias_uuid: a.alias_uuid, klant: a.klant }));
       // de regeltabel alleen op de eerste pagina, altijd (een kopie: het antwoord deelt geen object met de kern)
-      return { ...(cursor ? {} : { regeltabel: structuredClone(REGELTABEL) }), klanten, projecten, aliassen, verborgen, volgende, nieuwe_sinds: tot };
+      // het blok bedrijf ook alleen op de eerste pagina, altijd; uit dezelfde leestransactie
+      return { ...(cursor ? {} : { regeltabel: structuredClone(REGELTABEL), bedrijf: bouwBedrijf(db, log) }), klanten, projecten, aliassen, verborgen, volgende, nieuwe_sinds: tot };
     })
     .deferred();
 }

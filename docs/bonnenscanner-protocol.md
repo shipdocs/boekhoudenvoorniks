@@ -527,7 +527,7 @@ tweebyte-tekens, is ongeveer 1,07 MiB en met driebyte-tekens in de notities onge
 moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 
 ```text
-{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"regeltabel":{"versie":"2026-1","geldig_vanaf":"2026-01-01","btw":[{"code":"hoog","label":"21% (hoog)","percentage":21,"rubriek":"1a","tekst":"21% btw"},{"code":"laag","label":"9% (laag)","percentage":9,"rubriek":"1b","tekst":"9% btw"},{"code":"nul","label":"0%","percentage":0,"rubriek":"1e","tekst":"0% btw"},{"code":"verlegd","label":"BTW verlegd","pickLabel":"Btw verlegd (je werkt als onderaannemer; je klant regelt de btw)","percentage":0,"rubriek":"1e","tekst":"btw verlegd"},{"code":"vrijgesteld","label":"Vrijgesteld / KOR","pickLabel":"Geen btw (vrijgesteld of KOR)","percentage":0,"rubriek":"-","tekst":"geen btw"},{"code":"icp","label":"Intracommunautaire levering (0%)","pickLabel":"Goederen naar een bedrijf in een ander EU-land (0%)","percentage":0,"rubriek":"3b","tekst":"goederen naar een bedrijf in de EU, 0% btw"},{"code":"icp-dienst","label":"Btw verlegd (dienst EU)","pickLabel":"Dienst aan een bedrijf in een ander EU-land (btw verlegd)","percentage":0,"rubriek":"3b","tekst":"dienst aan een bedrijf in de EU, btw verlegd"},{"code":"export","label":"Uitvoer goederen buiten de EU (0%)","pickLabel":"Goederen naar een klant buiten de EU (0%)","percentage":0,"rubriek":"3a","tekst":"goederen naar buiten de EU, 0% btw"},{"code":"dienst-buiten-eu","label":"Niet belast in Nederland","pickLabel":"Dienst aan een bedrijf buiten de EU (niet in de aangifte)","percentage":0,"rubriek":"-","tekst":"dienst aan een bedrijf buiten de EU, geen Nederlandse btw"}],"eu_landen":["AT","BE","BG","CY","CZ","DE","DK","EE","ES","FI","FR","GR","HR","HU","IE","IT","LT","LU","LV","MT","NL","PL","PT","RO","SE","SI","SK"],"eu_b2c_drempel":1000000,"teksten":{"icp":"Intracommunautaire levering, vrijgesteld van btw (art. 138 Btw-richtlijn)","icp_dienst":"Btw verlegd (reverse charge, art. 196 Btw-richtlijn)","buiten_eu_dienst":"Dienst niet belast in Nederland (plaats van dienst buiten de EU)","verlegd":"BTW verlegd"}},"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}},"vies":{"gecontroleerd_op":"2026-09-30T08:15:00.000Z","geldig":true}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"verborgen":[{"uuid":"3f1d2c4b-6a7e-4b8c-9d0e-1f2a3b4c5d6e","seq":497,"soort":"klant"}],"volgende":null,"nieuwe_sinds":500}
+{"ok":true,"soort":"stamgegevens","pcTijd":1790848800123,"apparaatcode":"M1","regels":1,"regeltabel":{"versie":"2026-1","geldig_vanaf":"2026-01-01","btw":[{"code":"hoog","label":"21% (hoog)","percentage":21,"rubriek":"1a","tekst":"21% btw"},{"code":"laag","label":"9% (laag)","percentage":9,"rubriek":"1b","tekst":"9% btw"},{"code":"nul","label":"0%","percentage":0,"rubriek":"1e","tekst":"0% btw"},{"code":"verlegd","label":"BTW verlegd","pickLabel":"Btw verlegd (je werkt als onderaannemer; je klant regelt de btw)","percentage":0,"rubriek":"1e","tekst":"btw verlegd"},{"code":"vrijgesteld","label":"Vrijgesteld / KOR","pickLabel":"Geen btw (vrijgesteld of KOR)","percentage":0,"rubriek":"-","tekst":"geen btw"},{"code":"icp","label":"Intracommunautaire levering (0%)","pickLabel":"Goederen naar een bedrijf in een ander EU-land (0%)","percentage":0,"rubriek":"3b","tekst":"goederen naar een bedrijf in de EU, 0% btw"},{"code":"icp-dienst","label":"Btw verlegd (dienst EU)","pickLabel":"Dienst aan een bedrijf in een ander EU-land (btw verlegd)","percentage":0,"rubriek":"3b","tekst":"dienst aan een bedrijf in de EU, btw verlegd"},{"code":"export","label":"Uitvoer goederen buiten de EU (0%)","pickLabel":"Goederen naar een klant buiten de EU (0%)","percentage":0,"rubriek":"3a","tekst":"goederen naar buiten de EU, 0% btw"},{"code":"dienst-buiten-eu","label":"Niet belast in Nederland","pickLabel":"Dienst aan een bedrijf buiten de EU (niet in de aangifte)","percentage":0,"rubriek":"-","tekst":"dienst aan een bedrijf buiten de EU, geen Nederlandse btw"}],"eu_landen":["AT","BE","BG","CY","CZ","DE","DK","EE","ES","FI","FR","GR","HR","HU","IE","IT","LT","LU","LV","MT","NL","PL","PT","RO","SE","SI","SK"],"eu_b2c_drempel":1000000,"teksten":{"icp":"Intracommunautaire levering, vrijgesteld van btw (art. 138 Btw-richtlijn)","icp_dienst":"Btw verlegd (reverse charge, art. 196 Btw-richtlijn)","buiten_eu_dienst":"Dienst niet belast in Nederland (plaats van dienst buiten de EU)","verlegd":"BTW verlegd"}},"bedrijf":{"versie":"73a1eb49f9b59e53","gegevens":{"naam":"Stukadoorsbedrijf Piet","adres":"Kalkweg 1","postcode":"1234 AB","plaats":"Utrecht","land":"NL","email":"piet@example.nl","telefoon":"06-12345678","website":"","kvk_nummer":"12345678","btw_nummer":"NL123456789B01","iban":"NL91ABNA0417164300","bic":""},"kor":false,"betaaltermijn_dagen":14,"factuur":{"kleuren":{"primary":"#1f4e79","text":"#1d1d1f","muted":"#6b6b70","accentBg":"#f2f6fa"},"lettertype":"Helvetica, Arial, sans-serif","logo":null,"tekstblokken":[{"titel":"Voorwaarden","tekst":"Op al onze werkzaamheden zijn onze algemene voorwaarden van toepassing."}],"html_template":null}},"klanten":[{"uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","seq":5,"pc_revisie":1,"gearchiveerd":false,"velden":{"naam":{"waarde":"Familie Jansen","tijd":1790800000000,"bron":"pc"},"email":{"waarde":"jansen@example.nl","tijd":1790800000000,"bron":"pc"},"gearchiveerd":{"waarde":0,"tijd":1790800000000,"bron":"pc"}},"vies":{"gecontroleerd_op":"2026-09-30T08:15:00.000Z","geldig":true}}],"projecten":[{"uuid":"1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9","seq":9,"pc_revisie":2,"gearchiveerd":false,"velden":{"titel":{"waarde":"Stucwerk woonkamer","tijd":1790840000000,"bron":"M1"},"klant":{"waarde":"7c9e6679-7425-40de-944b-e07fc1f90ae7","tijd":1790800000000,"bron":"pc"}}}],"aliassen":[{"alias_uuid":"0b5f3a52-9d4e-4c1b-8a7e-2f6d1c9e8b34","klant":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}],"verborgen":[{"uuid":"3f1d2c4b-6a7e-4b8c-9d0e-1f2a3b4c5d6e","seq":497,"soort":"klant"}],"volgende":null,"nieuwe_sinds":500}
 ```
 
 (Het voorbeeld toont een deel van de velden; het echte antwoord heeft bij elk item **alle** velden.)
@@ -537,6 +537,7 @@ moet dus tot `maxBodyBytes` (20 MiB) aankunnen en mag niet van 1 MiB uitgaan.
 | `pcTijd` | de klok van de pc, zoals in het hallo-antwoord |
 | `apparaatcode` | de apparaatcode van **deze** telefoon; een ander gekoppeld apparaat krijgt dezelfde gegevens maar zijn eigen code |
 | `regeltabel` | de **btw-regeltabel** zelf, zie De regeltabel hieronder. **Alleen op de eerste pagina** (zonder `na`), altijd, ook bij een `sinds` en ook als de delta leeg is; een vervolgpagina heeft dit veld niet. (Het veld `regels` in het antwoord is op elke pagina het versienummer `rulesVersion`, zoals in het hallo-antwoord.) |
+| `bedrijf` | de bedrijfsgegevens en het standaard factuursjabloon, zie Het blok bedrijf hieronder. **Alleen op de eerste pagina** (zonder `na`), altijd, ook bij een `sinds` en ook als de delta leeg is; een vervolgpagina heeft dit veld niet |
 | `klanten`, `projecten` | de items van deze pagina, zie hieronder |
 | `aliassen` | de samengevoegde klanten: `alias_uuid` (de oude uuid) en `klant` (de uuid van de klant die nu geldt). **Alleen op de eerste pagina** (zonder `na`), volledig, ook bij een `sinds`, en niet meegeteld in de 100 items; een vervolgpagina heeft een lege lijst |
 | `verborgen` | items die voor de telefoon **niet meer zichtbaar** zijn, zie Verbergmeldingen hieronder. Elk is `{uuid, seq, soort}` met `soort` `"klant"` of `"project"`, en niets anders. Altijd aanwezig; bij `sinds` 0 leeg |
@@ -581,6 +582,93 @@ Vergelijken doet hij als tekst, gelijk of ongelijk (geen getal): is de `versie` 
 anders dan de bewaarde, dan vervangt hij de tabel voor **nieuwe** facturen. De pc dwingt gelijkheid van
 `regeltabel_versie` niet af: een factuur gemaakt met een oudere tabel blijft geldig en wordt
 gewoon overgenomen. (`rulesVersion` in het hallo-antwoord blijft het oude getal 1 en wordt hiervoor niet gebruikt.)
+
+**Het blok bedrijf (`bedrijf`).** Met dit blok kan de telefoon een factuur-pdf maken met de eigen bedrijfsgegevens en
+het factuursjabloon van de pc. Het staat net als de `regeltabel` **alleen op de eerste pagina** (zonder `na`), altijd,
+ook bij een `sinds` en ook als de delta leeg is; een vervolgpagina heeft het niet. Het is een uitbreiding van het
+antwoord op `stamgegevens` (`PROTOCOL_VERSION` blijft gelijk); een telefoon met een strikte lezer moet dus bijgewerkt
+worden. De kern heeft er een strikte lezer voor: `leesBedrijf` en de grenzen `BEDRIJF_LIMIETEN` in
+`packages/core/src/sync/bedrijf.ts`. Het blok heeft precies deze sleutels, en niets anders:
+
+| Sleutel | Inhoud |
+|---|---|
+| `versie` | tekst van 16 hexcijfers (kleine letters): de eerste 16 van de sha256 over de canonieke JSON (sleutels alfabetisch gesorteerd, zonder spaties) van de rest van het blok. Dezelfde inhoud geeft dezelfde `versie`, elke wijziging een andere |
+| `gegevens` | precies `naam`, `adres`, `postcode`, `plaats`, `land`, `email`, `telefoon`, `website`, `kvk_nummer`, `btw_nummer`, `iban` en `bic`, allemaal tekst (leeg is een lege tekst). Het omzetbelastingnummer voor contact met de Belastingdienst gaat **niet** mee |
+| `kor` | `true` of `false`: geldt de kleineondernemersregeling, zoals de pc die bij het opmaken van een factuur meegeeft (`kor` in de instellingen) |
+| `betaaltermijn_dagen` | de standaard betaaltermijn voor nieuwe facturen, een geheel getal van 0 tot en met 365 (de instelling van de administratie; een klant kan zelf een eigen `betaaltermijn_dagen` hebben, dat is een klantveld en gaat voor) |
+| `factuur` | het standaard factuursjabloon (type factuur): `kleuren` (precies `primary`, `text`, `muted`, `accentBg`, elk `#rgb`, `#rgba`, `#rrggbb` of `#rrggbbaa`), `lettertype`, `logo` (`null` of een data-URL `data:image/(png\|jpeg\|svg+xml\|webp);base64,...`), `tekstblokken` (lijst van `{titel, tekst}`) en `html_template` (`null` voor de standaardlay-out, anders een eigen HTML-sjabloon). Geen offertesjabloon en geen andere sjablonen |
+
+Grenzen (`BEDRIJF_LIMIETEN`): elk gegeven hoogstens 200 tekens (`adres` 500); het logo hoogstens 1.500.000 tekens (gelijk
+aan de grens waarmee de pc een logo opslaat); een `html_template` hoogstens 262.144 tekens; hoogstens 20 tekstblokken met een
+titel van hoogstens 200 en een tekst van hoogstens 4000 tekens; een `lettertype` van hoogstens 200 tekens. Een blok
+dat op de grenzen zit, met vier-byte-tekens, blijft ver onder `maxBodyBytes` (20 MiB), maar een telefoon mag voor de
+eerste pagina niet van 1 MiB uitgaan. De lezer wijst een onbekende of ontbrekende sleutel, een verkeerd type, een
+ongeldige kleur of logo-vorm en een waarde buiten de grenzen af, met een gewone Nederlandse melding.
+
+**Een te grote of ongeldige waarde op de pc.** De instellingen en sjablonen van de pc zijn ruimer dan de lezer
+(een oudere versie kan bijvoorbeeld een bedrijfsnaam van 300 tekens of een kleur als `#12345` hebben bewaard). Het
+blok laat het antwoord op `stamgegevens` daardoor **nooit** mislukken: de pc past zo'n waarde zelf aan voordat hij het
+blok verstuurt, en de telefoon krijgt altijd een blok dat `leesBedrijf` aanneemt. Per onderdeel: een tekst boven de
+grens wordt afgekapt op de grens; een ongeldige kleur wordt de standaardkleur van de pc (`#1f4e79`, `#1d1d1f`,
+`#6b6b70`, `#f2f6fa`); een ongeldig `lettertype` wordt `Helvetica, Arial, sans-serif`; een `logo` dat niet aan de vorm
+of de grootte voldoet wordt `null`; een `html_template` boven de grens wordt `null` (de telefoon gebruikt dan de
+standaardlay-out); meer dan 20 tekstblokken: de rest valt weg, en te lange titels of teksten worden afgekapt;
+een `betaaltermijn_dagen` buiten 0 tot 365 wordt 14. Lukt een herstel op veldniveau onverwacht niet, dan gaat het hele
+onderdeel (`gegevens` of `factuur`) terug naar standaardwaarden, en als laatste redmiddel het hele blok. De `versie`
+wordt over de aangepaste inhoud berekend. **De telefoon merkt hier niets van:** het blok heeft geen extra veld
+(zoals een lijst waarschuwingen) en dezelfde sleutels als altijd. Dat is bewust, want het blok heeft precies de
+sleutels hierboven en een telefoon kan met een melding niets doen; de pc schrijft alleen in zijn eigen logboek welke
+onderdelen zijn aangepast (korte codes, nooit de inhoud), zodat de gebruiker het kan oplossen.
+
+Hoe de telefoon het gebruikt: hij bewaart het blok **met zijn `versie`**. Is de `versie` in een nieuwe eerste pagina
+anders dan de bewaarde (vergelijken als tekst), dan vervangt hij het blok. Voor een **nieuwe** factuur maakt hij de
+opmaak met de gedeelde renderfuncties van de kern, met `gegevens` als bedrijf, het `factuur`-sjabloon als opmaak en
+`kor` als opmaakoptie, en rekent hij de vervaldatum met `betaaltermijn_dagen` (tenzij de klant een eigen termijn heeft).
+Een factuur die al gemaakt is verandert niet als het blok later verandert. De `versie` is geen beveiliging maar een
+herkenningsteken: de telefoon rekent haar niet na.
+
+Een uitgewerkt voorbeeld (hetzelfde blok staat in het volledige antwoord hierboven; `tests/sync-bedrijf.test.ts` leest
+dit voorbeeld, laat het door `leesBedrijf` lezen, rekent de `versie` na en bouwt hetzelfde blok uit een administratie
+met deze gegevens):
+
+```jsonc
+{
+  "versie": "73a1eb49f9b59e53",
+  "gegevens": {
+    "naam": "Stukadoorsbedrijf Piet",
+    "adres": "Kalkweg 1",
+    "postcode": "1234 AB",
+    "plaats": "Utrecht",
+    "land": "NL",
+    "email": "piet@example.nl",
+    "telefoon": "06-12345678",
+    "website": "",
+    "kvk_nummer": "12345678",
+    "btw_nummer": "NL123456789B01",
+    "iban": "NL91ABNA0417164300",
+    "bic": ""
+  },
+  "kor": false,
+  "betaaltermijn_dagen": 14,
+  "factuur": {
+    "kleuren": {
+      "primary": "#1f4e79",
+      "text": "#1d1d1f",
+      "muted": "#6b6b70",
+      "accentBg": "#f2f6fa"
+    },
+    "lettertype": "Helvetica, Arial, sans-serif",
+    "logo": null,
+    "tekstblokken": [
+      {
+        "titel": "Voorwaarden",
+        "tekst": "Op al onze werkzaamheden zijn onze algemene voorwaarden van toepassing."
+      }
+    ],
+    "html_template": null
+  }
+}
+```
 
 **Ronde en delta.** Een ronde is het doorlopen van alle pagina's, van de eerste vraag (zonder `na`) tot en met
 de pagina met `volgende: null`. De pc legt bij de **eerste pagina** de bovengrens `tot` van de ronde vast:
@@ -653,10 +741,13 @@ pc of onder `sinds` kan de pc niet gemaakt hebben en geeft `400 ongeldig`. `sind
 pagina hetzelfde.
 
 **Privacygrens.** Er gaat alleen deze whitelist uit de administratie: klanten van het type klant of beide
-en projecten, met precies de velden hierboven. Nooit leveranciers, het type, `paid_with`, interne id's,
-boekingen, facturen, bankgegevens van de administratie zelf, instellingen of geheimen. Een project dat aan
-een leverancier hangt wordt **niet** geleverd; een project zonder bekende klant wel (`klant` is `null`).
-(Het IBAN van een klant is een klantveld en gaat dus wel mee, het IBAN van de administratie zelf niet.)
+en projecten, met precies de velden hierboven; de regeltabel; de aliassen; en, alleen op de eerste pagina, het
+blok `bedrijf` met precies de sleutels hierboven. Nooit leveranciers, het type, `paid_with`, interne id's,
+boekingen, facturen, instellingen of geheimen (mail, koppelingen, licentie, betalingsgegevens), en niet de
+bankgegevens van de administratie, **op de enige plek na**: het IBAN en de BIC in het blok `bedrijf`, want die
+staan op elke factuur. Ook het omzetbelastingnummer gaat niet mee. Een project dat aan een leverancier hangt
+wordt **niet** geleverd; een project zonder bekende klant wel (`klant` is `null`). (Het IBAN van een klant is
+een klantveld en gaat dus wel mee.)
 
 ### `bevestigingen`: horen wat er met een wachtende wijziging gebeurde
 
