@@ -440,8 +440,8 @@ describe('stamgegevens: privacygrens', () => {
     return [
       'GEHEIMLEVERANCIER', 'inkoop@geheimleverancier.example', 'NL02ABNA0123456789', 'NL851234567B01', 'GEHEIMNOTITIE', 'PRIVELEVERANCIER', 'NL86INGB0002445588', 'INKOOPREF-77', 'GEHEIMINKOOP', 'FACTUURNR-9001',
       'FACTREF-ZEER-GEHEIM', 'FACTUURNOTITIE', 'GEHEIMEBANK', 'NL91RABO0315273637', 'GEHEIMTEGENPARTIJ', 'BANKOMSCHRIJVING-GEHEIM', 'GEHEIMBOEKING',
-      // de administratie zelf (bedrijfsgegevens en instellingen uit setup())
-      'Stukadoorsbedrijf Piet', 'Kalkweg 1', 'piet@example.nl', 'NL123456789B01', 'NL91ABNA0417164300',
+      // De bedrijfsgegevens van de administratie zelf (naam, adres, e-mail, btw-nummer, IBAN) staan in het
+      // blok bedrijf van de eerste pagina; dat toetst tests/sync-bedrijf.test.ts. Hier blijft het overige.
     ];
   }
 
@@ -455,7 +455,7 @@ describe('stamgegevens: privacygrens', () => {
     const [uuid] = maakKlanten(t, 1, t.clock.now, 'een notitie');
     t.s.relations.update(rij<{ id: number }>(t, 'SELECT id FROM relations WHERE uuid = ?', uuid).id, { phone: '06-12345678' });
     const alle = await p.alles();
-    expect(Object.keys(alle.paginas[0]!).sort()).toEqual(['aliassen', 'apparaatcode', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'regeltabel', 'soort', 'verborgen', 'volgende']);
+    expect(Object.keys(alle.paginas[0]!).sort()).toEqual(['aliassen', 'apparaatcode', 'bedrijf', 'klanten', 'nieuwe_sinds', 'ok', 'pcTijd', 'projecten', 'regels', 'regeltabel', 'soort', 'verborgen', 'volgende']);
     expect(alle.klanten.length).toBeGreaterThan(0);
     expect(alle.projecten.length).toBe(2);
     const itemSleutels = ['gearchiveerd', 'pc_revisie', 'seq', 'uuid', 'velden'];
@@ -472,7 +472,9 @@ describe('stamgegevens: privacygrens', () => {
     // nergens, op geen enkel niveau, een sleutel buiten de whitelist (type, paid_with, id's, bedrijfsgegevens, ...)
     const toegestaan = new Set([...itemSleutels, ...Object.keys(KLANT_VELDEN), ...Object.keys(PROJECT_VELDEN), 'bron', 'tijd', 'waarde', 'ok', 'soort', 'pcTijd', 'apparaatcode', 'regels', 'regeltabel', 'klanten', 'projecten', 'aliassen', 'verborgen', 'volgende', 'nieuwe_sinds', 'alias_uuid', 'klant',
       // s14a: vies op klanten en de sleutels van de regeltabel
-      'vies', 'gecontroleerd_op', 'geldig', 'versie', 'geldig_vanaf', 'btw', 'code', 'label', 'pickLabel', 'percentage', 'rubriek', 'tekst', 'eu_landen', 'eu_b2c_drempel', 'teksten', 'icp', 'icp_dienst', 'buiten_eu_dienst', 'verlegd']);
+      'vies', 'gecontroleerd_op', 'geldig', 'versie', 'geldig_vanaf', 'btw', 'code', 'label', 'pickLabel', 'percentage', 'rubriek', 'tekst', 'eu_landen', 'eu_b2c_drempel', 'teksten', 'icp', 'icp_dienst', 'buiten_eu_dienst', 'verlegd',
+      // s20: het blok bedrijf
+      'bedrijf', 'gegevens', 'kor', 'betaaltermijn_dagen', 'factuur', 'kleuren', 'primary', 'text', 'muted', 'accentBg', 'lettertype', 'logo', 'tekstblokken', 'titel', 'html_template', 'website', 'bic']);
     const sleutels = new Set<string>();
     const loop = (x: unknown) => {
       if (Array.isArray(x)) x.forEach(loop);
@@ -509,7 +511,7 @@ describe('stamgegevens: privacygrens', () => {
     for (const waarde of geheim) {
       for (const bytes of gezien) expect(bytes.includes(Buffer.from(waarde, 'utf8')), waarde).toBe(false);
     }
-    // het IBAN van een klant is een klantveld en mag wel, dat van de administratie zelf niet
+    // het IBAN van een klant is een klantveld en mag wel (dat van de administratie staat alleen in het blok bedrijf)
     expect(gezien[0]!.toString('utf8')).toContain('NL44RABO0123456789');
   });
 
@@ -1068,7 +1070,7 @@ describe('stamgegevens: verbergmeldingen (klant wordt leverancier)', () => {
   it('privacy: een verbergmelding heeft alleen uuid, seq en soort, en lekt geen naam of type in de ruwe bytes', async () => {
     const t = start();
     const p = await pair(t);
-    const klant = t.s.relations.create({ name: 'Zeer Herkenbare Naam', type: 'klant', email: 'herkenbaar@example.nl', iban: 'NL91ABNA0417164300' });
+    const klant = t.s.relations.create({ name: 'Zeer Herkenbare Naam', type: 'klant', email: 'herkenbaar@example.nl', iban: 'NL02ABNA0123456789' });
     maakJobAan(t.db, { relationId: klant.id, title: 'Herkenbare projecttitel' }, () => t.clock.now);
     const lev = t.s.relations.create({ name: 'Nooit Zichtbare Leverancier', type: 'leverancier', email: 'lev@example.nl' });
     maakJobAan(t.db, { relationId: lev.id, title: 'Leverancierstitel' }, () => t.clock.now);
@@ -1081,7 +1083,7 @@ describe('stamgegevens: verbergmeldingen (klant wordt leverancier)', () => {
     expect(antwoord.verborgen).toHaveLength(2);
     for (const v of antwoord.verborgen) expect(Object.keys(v).sort()).toEqual(['seq', 'soort', 'uuid']);
     const tekst = JSON.stringify(antwoord);
-    for (const verboden of ['Zeer Herkenbare Naam', 'herkenbaar@example.nl', 'NL91ABNA0417164300', 'Herkenbare projecttitel', 'leverancier', 'Nooit Zichtbare', 'lev@example.nl', 'Leverancierstitel', uuidVan(t, lev.id)]) {
+    for (const verboden of ['Zeer Herkenbare Naam', 'herkenbaar@example.nl', 'NL02ABNA0123456789', 'Herkenbare projecttitel', 'leverancier', 'Nooit Zichtbare', 'lev@example.nl', 'Leverancierstitel', uuidVan(t, lev.id)]) {
       expect(tekst).not.toContain(verboden);
     }
     expect(r.raw.toString('utf8')).not.toContain('Zeer Herkenbare');
