@@ -124,6 +124,8 @@ interface OpzetOpties {
   zonderSleutel?: boolean;
   /** een eigen licentiedienst voor de scanner (om te bewijzen wat hij wel en niet opvraagt) */
   license?: ScannerDeps['license'];
+  /** de kalenderdatum volgens de klok van de computer, voor de scanner (om een teruggezette klok na te bootsen); de licentiedienst zelf is de echte */
+  vandaag?: () => string;
 }
 
 async function opzet(opties: OpzetOpties = {}) {
@@ -140,7 +142,7 @@ async function opzet(opties: OpzetOpties = {}) {
     secrets: t.secrets,
     intake: t.s.intake,
     settings: t.s.settings,
-    license: opties.license ?? t.s.license,
+    license: opties.license ?? (opties.vandaag ? { status: () => t.s.license.status(opties.vandaag!()) } : t.s.license),
     invoices: t.s.invoices,
     spoolDir: join(data, 'bonnenscanner'),
     adminDir,
@@ -702,6 +704,45 @@ describe('telefoon en abonnement: een nieuwe koppeling', () => {
       await expect(api.scanner.checkSubscription()).rejects.toThrow(/kan nog niet/);
       expect(opgehaald).toHaveLength(3);
       PHONE_SCANNER.available = true;
+    } finally {
+      await ruim(o);
+    }
+  });
+
+  it('ABO-23 abonnement verlopen en daarna de klok van de computer terug: koppelen blijft geweigerd, het hallo zegt nee en stamgegevens blijft geen-abonnement', async () => {
+    // dezelfde ondertekende licentie, geldig tot en met over vijf dagen; de scanner krijgt de datum van een klok die de test verzet
+    const klok = { vandaag: VANDAAG };
+    const tot = addDays(VANDAAG, 5);
+    const o = await opzet({ vandaag: () => klok.vandaag });
+    try {
+      o.t.s.license.install(await o.licentie(tot), VANDAAG);
+      klok.vandaag = tot;
+      const tel = await koppel(o);
+      expect((await tel.hallo()).json).toMatchObject({ abonnement: true });
+      expect((await tel.netwerk(tel.maak(stamgegevens(o)))).status).toBe(200);
+      // de dag erna: verlopen
+      klok.vandaag = addDays(tot, 1);
+      expect(o.scanner.abonnement()).toEqual({ toegestaan: false, verlopenOp: tot });
+      await expect(o.scanner.pair()).rejects.toThrow(`Je abonnement liep tot ${formatDateNl(tot)}.`);
+      expect((await tel.netwerk(tel.maak(stamgegevens(o)))).json).toEqual({ ok: false, fout: 'geen-abonnement' });
+      // de klok terug naar de laatste geldige dag, en verder terug: er verandert niets
+      for (const terug of [tot, VANDAAG, addDays(VANDAAG, -40)]) {
+        klok.vandaag = terug;
+        expect(o.scanner.abonnement(), terug).toEqual({ toegestaan: false, verlopenOp: tot });
+        expect(o.scanner.status().abonnement, terug).toEqual({ toegestaan: false, verlopenOp: tot });
+        await expect(o.scanner.pair(), terug).rejects.toThrow(ValidationError);
+        expect((await tel.hallo()).json, terug).toMatchObject({ ok: true, abonnement: false });
+        const r = await tel.netwerk(tel.maak(stamgegevens(o)));
+        expect(r, terug).toEqual({ status: 403, versleuteld: true, json: { ok: false, fout: 'geen-abonnement' } });
+        expect((await viaMap(o, tel, tel.maak(stamgegevens(o)))).json, terug).toEqual({ ok: false, fout: 'geen-abonnement' });
+      }
+      expect(o.apparaten()).toHaveLength(1);
+      // ontvangen blijft werken, ook nu
+      expect((await tel.netwerk(tel.maak(klantBericht(U.klant, 'Familie Bakker')))).json).toMatchObject({ ok: true, uitkomst: 'toegepast' });
+      // een verlengde licentie herstelt alles, zonder opnieuw koppelen
+      o.t.s.license.install(await o.licentie(addDays(tot, 30)), klok.vandaag);
+      expect((await tel.hallo()).json).toMatchObject({ abonnement: true });
+      expect((await tel.netwerk(tel.maak(stamgegevens(o)))).status).toBe(200);
     } finally {
       await ruim(o);
     }

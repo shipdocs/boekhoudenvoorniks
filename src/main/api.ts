@@ -118,8 +118,12 @@ export interface HostContext {
   licenseApi?: {
     /** `bedrag` exclusief btw (`btw: 'exclusief'`); `proefMaanden`: gratis maanden bij een eerste abonnement */
     price(): Promise<{ bedrag: string; valuta: string; per: string; inclusiefBtw?: string; btw?: string; proefMaanden?: number } | null>;
-    /** de ondertekende licentie voor deze administratie, of null als er (nog) geen betaald abonnement is */
-    fetch(administrationId: string, managementKey: string): Promise<string | null>;
+    /**
+     * de ondertekende licentie voor deze administratie, of null als er (nog) geen betaald abonnement is. Met `serverDate`: de
+     * datum van de licentieserver uit hetzelfde antwoord (voor de laatst geziene datum van de licentiecontrole); alleen de
+     * licentie als tekst mag ook, dan is er geen serverdatum
+     */
+    fetch(administrationId: string, managementKey: string): Promise<string | { token: string; serverDate?: IsoDate | null } | null>;
     /** eerste betaling bij Mollie klaarzetten; geeft de betaallink, of `al` als er al een abonnement loopt */
     start(input: { administratie: string; email: string; bedrijf: LicenseBilling; managementKey: string; voorwaarden: string; zakelijk: true }): Promise<{ checkout?: string; al?: boolean }>;
     /** het abonnement stoppen; de betaalde periode loopt af */
@@ -709,13 +713,24 @@ export function createApi(s: Services, host: HostContext) {
   /** mailservers weigeren vaak grotere bijlagen */
   const MAIL_LIMIT = 20 * 1024 * 1024;
 
+  /**
+   * De licentie ophalen bij de licentieserver: de licentie en, als het antwoord die had, de datum van de server. Die datum
+   * gaat alleen samen met de licentie uit hetzelfde antwoord naar install(), dat de licentie eerst controleert.
+   */
+  const fetchLicense = async (managementKey: string): Promise<{ token: string; serverDate: IsoDate | null } | null> => {
+    const r = await host.licenseApi!.fetch(s.settings.administrationId(), managementKey);
+    if (!r) return null;
+    if (typeof r === 'string') return { token: r, serverDate: null };
+    return r.token ? { token: r.token, serverDate: r.serverDate ?? null } : null;
+  };
+
   /** Is er geen geldige licentie, dan eerst proberen hem op te halen (net betaald of verlengd). Gooit nooit. */
   const fetchLicenseIfNeeded = async () => {
     const st = s.license.status(today());
     if (st.state !== 'uit' && st.state !== 'actief' && host.licenseApi) {
       try {
-        const token = await host.licenseApi.fetch(s.settings.administrationId(), s.license.managementKey());
-        if (token) s.license.install(token, today());
+        const fetched = await fetchLicense(s.license.managementKey());
+        if (fetched) s.license.install(fetched.token, today(), fetched.serverDate);
       } catch {
         /* offline of nog niet betaald: dan de melding van de functie die het abonnement vraagt */
       }
@@ -896,15 +911,15 @@ export function createApi(s: Services, host: HostContext) {
         if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
         const managementKey = s.license.managementKey();
         await host.licenseApi.cancel(s.settings.administrationId(), managementKey);
-        const token = await host.licenseApi.fetch(s.settings.administrationId(), managementKey);
-        return token ? s.license.install(token, today()) : s.license.status(today());
+        const fetched = await fetchLicense(managementKey);
+        return fetched ? s.license.install(fetched.token, today(), fetched.serverDate) : s.license.status(today());
       },
       /** na het betalen of verlengen: de licentie ophalen */
       refresh: async () => {
         if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
-        const token = await host.licenseApi.fetch(s.settings.administrationId(), s.license.managementKey());
-        if (!token) throw new Error('Nog geen betaald abonnement gevonden. Is de betaling net gedaan? Probeer het over een minuut opnieuw.');
-        return s.license.install(token, today());
+        const fetched = await fetchLicense(s.license.managementKey());
+        if (!fetched) throw new Error('Nog geen betaald abonnement gevonden. Is de betaling net gedaan? Probeer het over een minuut opnieuw.');
+        return s.license.install(fetched.token, today(), fetched.serverDate);
       },
     },
     /** meerdere administraties op deze computer (bv. bv en eenmanszaak, of een boekhouder met kopieën van klanten) */
