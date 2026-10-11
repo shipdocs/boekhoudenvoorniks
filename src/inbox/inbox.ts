@@ -584,6 +584,7 @@ export class InboxService {
   autoProcess(asOf: IsoDate = today()): { matched: number; booked: number } {
     // de kopie bij de boekhouder boekt niets zelf
     if (this.settings.officeCopy()) return { matched: 0, booked: 0 };
+    this.bank.ignoreZeroAmounts(); // een regel van nul euro (kaartcontrole) heeft niets om te boeken en vraagt niets
     this.recurring.detect(); // vaste lasten herkennen (alleen voorstellen, niets boeken)
     const level = this.settings.get().autopilot;
     // dubbel geboekte aankopen herstellen: geen nieuwe beslissing, dus ook bij "voorzichtig"
@@ -842,6 +843,7 @@ export class InboxService {
     const held = this.bank.heldAsDouble(doubles);
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
       if (held.has(t.id)) continue;
+      if (t.amount === 0) continue; // nul euro: niets te boeken, dus ook geen vraag
       if (firstOpen && t.transaction_date < firstOpen) {
         locked[this.ledger.periodLockFor(t.transaction_date)?.kind ?? 'afgesloten']++;
         continue;

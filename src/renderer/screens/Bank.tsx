@@ -893,7 +893,12 @@ export function CategorizeTransaction({ id }: { id: number }) {
           </div>
         </div>
       )}
-      {t.status !== 'nieuw' ? (
+      {t.status === 'genegeerd' && t.amount === 0 && !t.duplicate_of ? (
+        <div className="card" data-testid="nul-euro">
+          <StatusPill status={t.status} />
+          <p className="small">Deze regel is € 0,00, bijvoorbeeld een controle van je betaalkaart. Er valt niets te boeken: de app heeft hem daarom zelf genegeerd en je hoeft niets te doen.</p>
+        </div>
+      ) : t.status !== 'nieuw' ? (
         <div className="card">
           <StatusPill status={t.status} />
           <p className="muted small">Verkeerd verwerkt, of stond het bij "weet ik nog niet"? Maak het ongedaan; de app draait het netjes terug en je kiest hieronder meteen wat het wel was.</p>
