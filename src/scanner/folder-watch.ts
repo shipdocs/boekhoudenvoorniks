@@ -51,7 +51,7 @@ function isTemporary(name: string): boolean {
 }
 
 /**
- * Bonnenmap (#48): nieuwe bestanden (jpg, png, pdf, xml) in de gekozen map gaan de inbox in en worden
+ * Bonnenmap: nieuwe bestanden (jpg, png, pdf, xml) in de gekozen map gaan de inbox in en worden
  * daarna verplaatst naar de submap `verwerkt/`. Er wordt nooit iets verwijderd of overschreven. Een
  * bestand dat nog geschreven wordt (bv. door Syncthing of Google Drive) blijft liggen tot de grootte
  * een paar seconden gelijk is. Alleen bestanden direct in de map; submappen en snelkoppelingen niet.

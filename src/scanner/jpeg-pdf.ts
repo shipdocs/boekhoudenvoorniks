@@ -1,5 +1,5 @@
 /**
- * Foto's van de bonnenscanner (#48): controleren dat het echt JPEG is, en een bon van meerdere foto's
+ * Foto's van de bonnenscanner: controleren dat het echt JPEG is, en een bon van meerdere foto's
  * samenvoegen tot één PDF (één pagina per foto). De JPEG-gegevens gaan ongewijzigd de PDF in; er wordt
  * niets opnieuw gecomprimeerd en er is geen beeldbibliotheek nodig.
  */

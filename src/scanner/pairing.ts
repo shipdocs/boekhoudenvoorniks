@@ -34,7 +34,7 @@ export const MAX_DEVICES = 10;
 const secretName = (deviceId: string) => `scanner:key:${deviceId}`;
 
 /**
- * Gekoppelde telefoons van de bonnenscanner (#48). Elke telefoon heeft een eigen sleutel; die staat
+ * Gekoppelde telefoons van de bonnenscanner. Elke telefoon heeft een eigen sleutel; die staat
  * alleen in de versleutelde geheimenopslag (zoals het SMTP-wachtwoord), nooit leesbaar in de database
  * of in een logboek. Ontkoppelen gooit de sleutel weg: daarna is geen bericht van die telefoon meer
  * te ontsleutelen.

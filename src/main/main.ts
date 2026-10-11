@@ -58,7 +58,7 @@ let services: Services;
 let api: Api;
 let secrets: SafeStorageSecretStore;
 let localOcr: LocalOcrRuntime;
-/** Bonnenscanner (#48) van de open administratie: ontvangstpunt, mDNS en bonnenmap. */
+/** Bonnenscanner van de open administratie: ontvangstpunt, mDNS en bonnenmap. */
 let scanner: Bonnenscanner | null = null;
 
 /** De versie uit de Microsoft Store (MSIX); in de gewone Windows-versie en op Linux altijd onwaar. */

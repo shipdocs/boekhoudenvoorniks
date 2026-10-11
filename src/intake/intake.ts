@@ -54,9 +54,9 @@ export interface IntakeDocument {
   decisions: Decision[] | null;
   /** dit document is een kopie van een eerder document (#31) */
   duplicate_of_document_id: number | null;
-  /** notitie die op de telefoon bij de bon is getypt (bonnenscanner, #48) */
+  /** notitie die op de telefoon bij de bon is getypt (bonnenscanner) */
   note: string | null;
-  /** betaalwijze die op de telefoon is gekozen: het voorstel bij het bevestigen (#48) */
+  /** betaalwijze die op de telefoon is gekozen: het voorstel bij het bevestigen */
   proposed_paid_with: PaidWith | null;
   created_at: string;
   bank_match: BankTransaction | null;

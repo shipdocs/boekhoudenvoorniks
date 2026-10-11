@@ -105,7 +105,7 @@ const COMMON_FOLDERS = ['Desktop', 'Documents', 'Downloads', 'Pictures', 'OneDri
 const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
 
 /**
- * De bonnenscanner aan de kant van de desktop (#48): telefoons koppelen, het ontvangstpunt op het
+ * De bonnenscanner aan de kant van de desktop: telefoons koppelen, het ontvangstpunt op het
  * lokale netwerk, vindbaar via mDNS, en de bonnenmap als uitwijk. Staat standaard uit: zonder
  * gekoppelde telefoon luistert er niets, en zonder gekozen map wordt er nergens gekeken.
  *

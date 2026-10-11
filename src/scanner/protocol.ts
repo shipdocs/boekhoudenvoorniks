@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { leesWijziging, type Wijziging } from '@gratis-boekhouden/kern';
 
 /**
- * Het protocol tussen de bonnenscanner (telefoon) en de desktop-app (#48). Dit bestand is de
+ * Het protocol tussen de bonnenscanner (telefoon) en de desktop-app. Dit bestand is de
  * uitvoerbare versie van het protocol; de voorbeelden staan als vaste testgegevens in
  * tests/fixtures/protocol/. Wie hier iets verandert, past ook die testgegevens en de volledige
  * technische beschrijving aan (die wordt intern bijgehouden) en hoogt bij een onverenigbare wijziging

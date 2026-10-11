@@ -51,7 +51,7 @@ const MAX_FAILURES = 20;
 const FAILURE_WINDOW_MS = 60_000;
 
 /**
- * Het ontvangstpunt van de bonnenscanner (#48): een klein HTTP-punt in het hoofdproces.
+ * Het ontvangstpunt van de bonnenscanner: een klein HTTP-punt in het hoofdproces.
  *
  * - Het luistert alleen als er minstens één telefoon gekoppeld is (of een QR-code openstaat), alleen
  *   op de privé-adressen van deze computer, en neemt alleen verbindingen aan uit datzelfde netwerk.

@@ -8,7 +8,7 @@ const awaitsDebit = (doc: Proposal): boolean => Boolean(doc.bank_match && doc.ba
 
 /**
  * Het voorstel voor "Hoe betaald?" bij een bon. De betaalwijze die op de telefoon is gekozen
- * (bonnenscanner, #48) gaat voor bij contant of privé; anders telt of er een betaling op de bank bij
+ * (bonnenscanner) gaat voor bij contant of privé; anders telt of er een betaling op de bank bij
  * gevonden is. Zegt de telefoon contant of privé, maar staat er ook een afschrijving op een eigen rekening
  * die erbij past op bedrag, leverancier en datum (#222), dan blijft de aankoop open ("later"): bij die
  * betaling vraagt de app of hij erbij hoort. Past alleen het bedrag (een andere naam op het afschrift), dan

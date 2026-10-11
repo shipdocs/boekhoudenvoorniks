@@ -8,7 +8,7 @@ Dit is de korte beschrijving voor gebruikers. De volledige technische beschrijvi
 bijgehouden. De code van de computerkant staat in `src/scanner/` en `src/sync/`.
 
 **Stand:** de kant van de computer is gebouwd en getest, maar staat in de uitgebrachte app nog uit tot
-de scanner-app voor Android er is (#49). Zolang dat zo is, zie je in Instellingen niets van koppelen,
+de scanner-app voor Android er is. Zolang dat zo is, zie je in Instellingen niets van koppelen,
 weigert de app te koppelen en luistert de computer nergens naar. De bonnenmap voor gewone bestanden
 (onderaan dit document) werkt wel.
 

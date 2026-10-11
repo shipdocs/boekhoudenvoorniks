@@ -16,8 +16,8 @@ function when(iso: string | null): string {
 }
 
 /**
- * Instellingen → Bonnenmap (#48): een map waaruit bonnen vanzelf de inbox in gaan. Zodra telefoon
- * koppelen beschikbaar is (shared/phone-scanner.ts, #49) heet het tabblad "Telefoon & bonnenmap" en
+ * Instellingen → Bonnenmap: een map waaruit bonnen vanzelf de inbox in gaan. Zodra telefoon
+ * koppelen beschikbaar is (shared/phone-scanner.ts) heet het tabblad "Telefoon & bonnenmap" en
  * staat hier ook de kaart om een telefoon te koppelen met een QR-code. Alles staat standaard uit.
  */
 export function ScannerSettings() {
