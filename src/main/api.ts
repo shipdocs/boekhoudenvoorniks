@@ -868,7 +868,7 @@ export function createApi(s: Services, host: HostContext) {
       },
       reopenAnswer: () => s.exchange.reopenAnswer(),
     },
-    /** abonnement voor de uitwisseling met de boekhouder */
+    /** abonnement: de uitwisseling met de boekhouder en (regel in license/telefoon.ts) de koppeling met de telefoon */
     license: {
       status: () => s.license.status(today()),
       price: async () => {

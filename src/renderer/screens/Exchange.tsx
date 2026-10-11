@@ -3,6 +3,7 @@ import { api } from '../api';
 import { Button, DropZone, ErrorBox, Field, Modal, readAsBytes, useAction, useApp, useLoad } from '../ui';
 import { formatDateNl } from '../../shared/dates';
 import { TERMS_PDF_URL, TERMS_URL, TERMS_VERSION } from '../../shared/legal';
+import { subscriptionText } from '../../shared/subscription-text';
 import { PeriodPicker, usePeriodChoice } from './PeriodClose';
 
 /**
@@ -171,11 +172,13 @@ export function ExchangeCard({ onChange, subscription = false }: { onChange?: ()
 type LicenseState = Awaited<ReturnType<typeof api.license.status>>;
 
 /**
- * Het abonnement: alleen versturen naar de boekhouder vraagt het. Niets te zien zolang licenties uit
- * staan (geen sleutel in de app).
+ * Het abonnement: versturen naar de boekhouder vraagt het, en (zodra telefoon koppelen beschikbaar is) een
+ * telefoon koppelen en gegevens naar de telefoon sturen. De tekst staat in shared/subscription-text.ts.
+ * Niets te zien zolang licenties uit staan (geen sleutel in de app).
  */
 function Subscription({ status, onChange }: { status: LicenseState; onChange: () => void }) {
-  const { settings, toast } = useApp();
+  const { settings, toast, meta } = useApp();
+  const text = subscriptionText(meta.phoneScanner);
   const price = useLoad(() => api.license.price(), [status.state]);
   const { run, busy } = useAction();
   const [email, setEmail] = useState(settings.company.email);
@@ -215,7 +218,7 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
         {status.cancelled ? (
           <div className="grid" style={{ gap: 6 }}>
             <div className="row" style={{ alignItems: 'center', gap: 10 }}>
-              <span className="muted">Abonnement opgezegd: je kunt versturen t/m {formatDateNl(status.validUntil)}; er wordt niets meer afgeschreven.</span>
+              <span className="muted">{text.cancelled(status.validUntil)}</span>
               <Button small disabled={busy || !agreed} onClick={() => void checkout()}>Opnieuw afsluiten</Button>
             </div>
             {consent}
@@ -228,14 +231,14 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
         )}
         {cancelling && (
           <Modal title="Abonnement opzeggen?" onClose={() => setCancelling(false)}>
-            <p>Er wordt daarna niets meer afgeschreven. Je kunt nog naar je boekhouder versturen tot het eind van de maand waarvoor je betaald hebt; een antwoord inlezen kan altijd.</p>
+            <p>{text.cancelling}</p>
             <div className="row end">
               <Button onClick={() => setCancelling(false)}>Niet opzeggen</Button>
               <Button kind="danger" disabled={busy} onClick={async () => {
                 const r = await run(() => api.license.cancel());
                 setCancelling(false);
                 if (r) {
-                  toast(r.state === 'actief' ? `Opgezegd; versturen kan nog t/m ${formatDateNl(r.validUntil)}` : 'Opgezegd');
+                  toast(r.state === 'actief' ? text.cancelledToast(r.validUntil) : 'Opgezegd');
                   onChange();
                 }
               }}>Opzeggen</Button>
@@ -253,9 +256,9 @@ function Subscription({ status, onChange }: { status: LicenseState; onChange: ()
   return (
     <div className="notice grid" data-testid="abonnement">
       <div>
-        <strong>{status.state === 'verlopen' ? `Je abonnement liep tot ${formatDateNl(status.validUntil)}.` : 'Versturen naar je boekhouder is een extra functie van het abonnement.'}</strong>{' '}
+        <strong>{status.state === 'verlopen' ? `Je abonnement liep tot ${formatDateNl(status.validUntil)}.` : text.lead}</strong>{' '}
         {trial > 0 && <><strong>De eerste {trial} maanden zijn gratis.</strong>{' '}</>}
-        {amount ? `${trial > 0 ? 'Daarna kost het' : 'Het kost'} ${amount}, per maand opzegbaar. ` : 'Per maand opzegbaar. '}Met het abonnement steun je de verdere ontwikkeling en krijg je de extra functies. Koppelen, een antwoord inlezen en het pakket voor je boekhouder blijven gratis; alleen het versturen vraagt een abonnement.{' '}
+        {amount ? `${trial > 0 ? 'Daarna kost het' : 'Het kost'} ${amount}, per maand opzegbaar. ` : 'Per maand opzegbaar. '}{text.body}{' '}
         {trial > 0
           ? 'Bij het afsluiten betaal je via Mollie alleen € 0,01 met iDEAL, voor de machtiging. De eerste incasso is na de gratis maanden; zeg je daarvoor op, dan betaal je niets. Van elke betaalde maand krijg je een factuur op naam van je bedrijf.'
           : 'Je betaalt via Mollie (iDEAL, daarna automatische incasso) en krijgt elke maand een factuur op naam van je bedrijf.'}

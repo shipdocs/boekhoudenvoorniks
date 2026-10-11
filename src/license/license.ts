@@ -1,7 +1,9 @@
 import { createPublicKey, randomBytes, verify } from 'node:crypto';
 import type { Db } from '../db/database';
 import type { SettingsService } from '../settings/settings';
-import { formatDateNl, isIsoDate, toIsoDate, type IsoDate } from '../shared/dates';
+import { isIsoDate, toIsoDate, type IsoDate } from '../shared/dates';
+import { PHONE_SCANNER } from '../shared/phone-scanner';
+import { subscriptionText } from '../shared/subscription-text';
 import { ValidationError } from '../shared/validation';
 
 /**
@@ -201,7 +203,8 @@ export class LicenseService {
   requireActive(today: IsoDate): void {
     const s = this.status(today);
     if (s.state === 'uit' || s.state === 'actief') return;
-    if (s.state === 'verlopen') throw new ValidationError(`Je abonnement liep tot ${formatDateNl(s.validUntil)}. Verleng het om weer naar je boekhouder te versturen; een antwoord inlezen kan altijd.`);
-    throw new ValidationError('Versturen naar je boekhouder is een extra functie van het abonnement. Neem een abonnement, of haal je licentie op als je al betaald hebt; een antwoord inlezen kan altijd, en het pakket voor je boekhouder kun je altijd zelf sturen.');
+    // de tekst staat op één plek (shared/subscription-text.ts); de telefoon wordt alleen genoemd als koppelen beschikbaar is
+    const text = subscriptionText(PHONE_SCANNER.available);
+    throw new ValidationError(s.state === 'verlopen' ? text.expired(s.validUntil) : text.refused);
   }
 }
