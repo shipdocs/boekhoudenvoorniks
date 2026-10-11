@@ -1,0 +1,2 @@
+== wijziging ==
+{"soort":"wijziging","tijd":1790848800000,"wijziging":{"entiteit":"bon","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"tijd":1790848790000,"velden":{"betaalwijze":"contant","notitie":"Schroeven voor de klus bij Jansen","fotos":[{"grootte":751,"sha256":"e4e731cb4b43157668cf3fad52ee2aad283f0f23a19455907cb6ad6ae11d726c"}]}}}

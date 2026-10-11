@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { migrate, openDatabase } from '../src/db/database';
 import { migrations } from '../src/db/migrations';
 import { setup } from './helpers';
+import { protocolVoorbeelden } from './fixtures/protocol';
 import { ACCOUNTS } from '../src/core-ledger/accounts';
 import { herstelJobUuids } from '../src/jobs/herstel';
 import { veldOndergrens } from '../src/sync/ondergrens';
@@ -1334,7 +1335,8 @@ describe('projecten-receiver', () => {
   });
 
   it('de protocolbeschrijving noemt de projectvelden, de codes en dat de pc een project nooit verwijdert', () => {
-    const docs = readFileSync(join(import.meta.dirname, '..', 'docs', 'bonnenscanner-protocol.md'), 'utf8');
+    // de stukken van de beschrijving over projecten als vaste testgegevens (tests/fixtures/protocol/projecten.txt)
+    const docs = Object.values(protocolVoorbeelden('projecten')).join('\n');
     for (const tekst of ['project-onbekend', 'wachtrij-vol', 'klus-gekoppeld', 'wacht', 'titel', 'startdatum', 'einddatum', 'gearchiveerd']) expect(docs, tekst).toContain(tekst);
     expect(docs).toMatch(/nooit[^.]*verwijder/i);
   });

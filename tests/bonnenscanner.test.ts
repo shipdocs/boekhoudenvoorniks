@@ -10,6 +10,7 @@ import QRCode from 'qrcode';
 import { decode as decodeDns, encode as encodeDns } from 'dns-packet';
 import { setup } from './helpers';
 import { makeJpeg } from './fixtures/jpeg';
+import { protocolVoorbeelden } from './fixtures/protocol';
 import { createApi, type HostContext } from '../src/main/api';
 import { sanitizeForExchange } from '../src/exchange/exchange';
 import { Bonnenscanner, type ScannerDeps } from '../src/scanner/scanner';
@@ -778,8 +779,8 @@ describe('bonnenscanner: ontvangen via wifi (#48)', () => {
   });
 });
 
-describe('bonnenscanner: protocol (docs/bonnenscanner-protocol.md)', () => {
-  // De waarden uit het uitgewerkte voorbeeld in het document, uitgerekend met een andere
+describe('bonnenscanner: protocol', () => {
+  // De waarden uit het uitgewerkte voorbeeld van het protocol, uitgerekend met een andere
   // AES-GCM-implementatie (Python, cryptography) dan die van de app.
   const key = Buffer.from('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f', 'hex');
   const deviceId = Buffer.from('a0a1a2a3a4a5a6a7a8a9aaabacadaeaf', 'hex');
@@ -839,10 +840,12 @@ describe('bonnenscanner: protocol (docs/bonnenscanner-protocol.md)', () => {
     expect(t.scanner.status().devices).toMatchObject([{ name: 'Pixel van Piet', pending: false }]);
   });
 
-  it('de voorbeelden in het document zijn geldig en gelijk aan wat hier getest wordt', () => {
-    // op Windows kan het bestand met \r\n uitgecheckt zijn
-    const doc = readFileSync(join(__dirname, '..', 'docs', 'bonnenscanner-protocol.md'), 'utf8').replace(/\r\n/g, '\n');
-    const blocks = [...doc.matchAll(/```(json|text)\n([\s\S]*?)```/g)].map((m) => ({ lang: m[1]!, body: m[2]!.trim() }));
+  it('de voorbeelden in de testgegevens zijn geldig en gelijk aan wat hier getest wordt', () => {
+    // de voorbeelden van versie 1 als vaste testgegevens (tests/fixtures/protocol/versie-1.txt): de berichten als JSON,
+    // de rest (de waarden en de hexadecimale blokken van het uitgewerkte voorbeeld, de grenzen) als tekst
+    const teksten = Object.values(protocolVoorbeelden('versie-1'));
+    const doc = teksten.join('\n');
+    const blocks = teksten.map((body) => ({ lang: body.startsWith('{') ? 'json' : 'text', body }));
     const examples = blocks.filter((b) => b.lang === 'json').map((b) => JSON.parse(b.body) as Record<string, unknown>);
     // de QR-code
     const qr = examples.find((e) => e.bvn === 'scanner')!;
@@ -862,7 +865,7 @@ describe('bonnenscanner: protocol (docs/bonnenscanner-protocol.md)', () => {
     expect(doc).toContain(key.toString('base64url'));
     expect(doc).toContain(deviceId.toString('base64url'));
     expect(hex).toContain(Buffer.concat([Buffer.from('0000004c', 'hex'), Buffer.from(json, 'utf8')]).toString('hex'));
-    // de grenzen die het document noemt
+    // de grenzen die de beschrijving noemt
     expect(doc).toContain(`${LIMITS.maxBodyBytes.toLocaleString('nl-NL')} bytes`);
     expect(doc).toContain(`${LIMITS.maxPhotoBytes.toLocaleString('nl-NL')} bytes`);
     expect(doc).toContain(`"fotoBytes":${LIMITS.maxPhotoBytes}`);

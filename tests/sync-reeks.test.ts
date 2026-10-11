@@ -13,7 +13,7 @@ import { SyncOntvangst } from '../src/sync/ontvangst';
 import { SyncWachtrij } from '../src/sync/wachtrij';
 import { ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD } from '../src/sync/reeks';
 
-// Reeksbewaking op de pc (docs/bonnenscanner-protocol.md): gaten in de factuurnummers van een telefoon, vervallen
+// Reeksbewaking op de pc (het protocol van de bonnenscanner): gaten in de factuurnummers van een telefoon, vervallen
 // markeren met een reden en de melding op Vandaag. Echte databank, echte klassen, relatieve datums.
 
 const DAG = 24 * 60 * 60 * 1000;

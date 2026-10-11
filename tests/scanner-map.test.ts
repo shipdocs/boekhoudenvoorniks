@@ -20,7 +20,7 @@ import { ReceiptSpool } from '../src/scanner/spool';
 import { PHONE_SCANNER } from '../src/shared/phone-scanner';
 import { SyncOntvangst } from '../src/sync/ontvangst';
 
-// De bonnenmap als tweede route (docs/bonnenscanner-protocol.md): dezelfde versleutelde berichten als over het netwerk reizen
+// De bonnenmap als tweede route (het protocol van de bonnenscanner): dezelfde versleutelde berichten als over het netwerk reizen
 // als bestanden door van-telefoon/ en van-pc/. Echte databank, echte bestanden in tijdelijke mappen, de echte receiver, SyncOntvangst
 // en InvoiceService, een eigen payload-bouwer en relatieve datums. De rondgang wordt met scanMap() zelf gedraaid (stabiele grootte
 // 0 ms): de test wacht op een toestand, nooit een vaste tijd. Bestandsfouten worden nagebootst via de opties van de scanner (ook op Windows).
