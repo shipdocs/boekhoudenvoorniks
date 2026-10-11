@@ -584,6 +584,7 @@ export class InboxService {
   autoProcess(asOf: IsoDate = today()): { matched: number; booked: number } {
     // de kopie bij de boekhouder boekt niets zelf
     if (this.settings.officeCopy()) return { matched: 0, booked: 0 };
+    this.bank.ignoreZeroAmounts(); // een regel van nul euro (kaartcontrole) heeft niets om te boeken en vraagt niets
     this.recurring.detect(); // vaste lasten herkennen (alleen voorstellen, niets boeken)
     const level = this.settings.get().autopilot;
     // dubbel geboekte aankopen herstellen: geen nieuwe beslissing, dus ook bij "voorzichtig"

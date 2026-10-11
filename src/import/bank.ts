@@ -233,6 +233,9 @@ export interface PreviousSale {
 
 export { splitGross } from '../core-ledger/rules';
 
+/** Een bankregel van nul euro: er valt niets te boeken. */
+export const ZERO_AMOUNT_MESSAGE = 'Deze regel is € 0,00, bijvoorbeeld een controle van je betaalkaart. Er valt niets te boeken; de regel telt niet mee in je boekhouding.';
+
 export class BankService {
   constructor(
     private readonly db: Db,
@@ -865,6 +868,7 @@ export class BankService {
         .map((k) => period.get(...k.split('|').map(Number)) as { from: string; to: string } | undefined)
         .filter((p): p is { from: string; to: string } => !!p)
         .sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+      this.ignoreZeroAmounts();
       return { batchId, periods, imported, duplicates, skipped, addedInKnownPeriod, knownFrom, warnings: result.warnings };
     });
   }
@@ -1440,9 +1444,18 @@ export class BankService {
     };
   }
 
-  private assertOpen(t: BankTransaction): void {
+  private assertOpen(t: BankTransaction, zeroAllowed = false): void {
     if (t.status === 'gematcht') throw new ValidationError('Deze betaling is al verwerkt');
     if (t.duplicate_of) throw new ValidationError('Deze regel is uit je boekhouding gehaald omdat het bedrag er dubbel in stond. Zet hem eerst terug: open hem en kies "Ongedaan maken".');
+    if (t.amount === 0 && !zeroAllowed) throw new ValidationError(ZERO_AMOUNT_MESSAGE);
+  }
+
+  /**
+   * Een regel van nul euro (bijvoorbeeld de controle van een betaalkaart) heeft niets om te boeken: hij gaat vanzelf op
+   * 'genegeerd' en vraagt de gebruiker niets. Ook voor regels die al waren ingelezen. Geeft het aantal regels terug.
+   */
+  ignoreZeroAmounts(): number {
+    return this.db.prepare(`UPDATE bank_transactions SET status = 'genegeerd' WHERE amount = 0 AND status = 'nieuw' AND duplicate_of IS NULL`).run().changes;
   }
 
   // ---------- verwerken ----------
@@ -1523,6 +1536,7 @@ export class BankService {
    */
   bookSale(txId: number, input: SaleInput): number {
     const t = this.get(txId);
+    if (t.amount === 0) throw new ValidationError(ZERO_AMOUNT_MESSAGE);
     if (t.amount <= 0) throw new ValidationError('Een verkoop is geld dat binnenkomt');
     if (!isSalesVatCode(input.vatCode)) throw new ValidationError('Kies een btw-tarief');
     const channel = input.channel?.trim() || null;
@@ -1695,7 +1709,7 @@ export class BankService {
   ignore(txId: number, duplicateOf?: number | null): void {
     if (duplicateOf) return this.markDuplicate(txId, duplicateOf);
     const t = this.get(txId);
-    this.assertOpen(t);
+    this.assertOpen(t, true);
     this.db.prepare(`UPDATE bank_transactions SET status = 'genegeerd' WHERE id = ?`).run(txId);
   }
 
