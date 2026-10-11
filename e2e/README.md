@@ -29,6 +29,8 @@ versleutelde verzoeken. "Map kiezen…" krijgt de map die de test via `POST /__s
 `POST /__reset {"scannerPlatform":"win32"}` doet de server alsof de app op Windows draait. Telefoon koppelen
 staat in de app nog uit (`src/shared/phone-scanner.ts`); de tests van het koppelen zetten het zelf aan met
 `POST /__reset {"phoneScanner":true}`, en één test controleert de app zoals hij nu is (alleen de bonnenmap).
+Eén test zet daarbij ook de licenties aan (`{"phoneScanner":true,"licenses":true}`): de uitleg en de melding
+bij koppelen zonder abonnement, en koppelen na het afsluiten.
 
 De E2E-tests bewijzen de bediening in de echte schermen. De aparte
 [proefadministratie](../tests/proefadministratie/README.md) controleert aanvullend dat één vaste set
