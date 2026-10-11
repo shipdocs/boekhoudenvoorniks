@@ -14,7 +14,7 @@ import { CONTENT_TYPE, ENDPOINT_PATH, decodePairing, encodeFrame, openResponse, 
 import { BEVESTIGINGEN_PAGINA, leesBevestigingen } from '../src/sync/bevestigingen';
 import { SyncWachtrij } from '../src/sync/wachtrij';
 
-// Het bericht `bevestigingen` van de pc (docs/bonnenscanner-protocol.md): wat er gebeurde met wijzigingen die
+// Het bericht `bevestigingen` van de pc (het protocol van de bonnenscanner): wat er gebeurde met wijzigingen die
 // eerst het antwoord wacht kregen. Alles tegen een echte databank, de echte receiver en de echte
 // SyncOntvangst, SyncWachtrij en InvoiceService; datums zijn relatief aan vandaag.
 

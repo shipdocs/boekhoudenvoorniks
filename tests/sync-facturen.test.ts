@@ -13,7 +13,7 @@ import { Bonnenscanner } from '../src/scanner/scanner';
 import { ScannerPairing } from '../src/scanner/pairing';
 import { LIMITS, ProtocolError, encodeFrame, parseFrame } from '../src/scanner/protocol';
 
-// De pc-kant van een factuurwijziging van de telefoon (docs/bonnenscanner-protocol.md): direct aannemen via
+// De pc-kant van een factuurwijziging van de telefoon (het protocol van de bonnenscanner): direct aannemen via
 // SyncOntvangst.verwerk en FactuurOntvangst, met een echte databank, echte klassen en relatieve datums.
 
 const APPARAAT = 'apparaat-1';

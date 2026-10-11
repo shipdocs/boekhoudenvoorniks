@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { BON_BETAALWIJZEN, BON_LIMIETEN, leesBonVelden, leesFotoVelden, type Wijziging } from '@gratis-boekhouden/kern';
 import { setup } from './helpers';
 import { makeJpeg, makeJpegWithGps } from './fixtures/jpeg';
+import { protocolVoorbeeld } from './fixtures/protocol';
 import { readJpegGps } from '../src/intake/exif';
 import { RelationsService } from '../src/relations/relations';
 import { Bonnenscanner } from '../src/scanner/scanner';
@@ -14,7 +15,7 @@ import { ReceiptSpool } from '../src/scanner/spool';
 import { CONTENT_TYPE, ENDPOINT_PATH, LIMITS, PAYMENT_METHODS, decodePairing, encodeFrame, openResponse, parseFrame, sealRequest, type PairingPayload, type ProtocolVersion } from '../src/scanner/protocol';
 import { SyncOntvangst } from '../src/sync/ontvangst';
 
-// De pc-kant van een bon als v2-wijziging (docs/bonnenscanner-protocol.md): entiteit bon, revisie 1, de JPEG's als
+// De pc-kant van een bon als v2-wijziging (het protocol van de bonnenscanner): entiteit bon, revisie 1, de JPEG's als
 // bijlage achter de JSON met grootte en sha256 per foto. De tests gebruiken een echte databank, de echte spool, de echte
 // SyncOntvangst en de echte receiver (HTTP over loopback), en relatieve datums.
 
@@ -125,9 +126,8 @@ describe('een bon als wijziging met bijlagen op de pc', () => {
     expect(viaWijziging).toMatchObject({ soort: 'bon', id: uuid, betaalwijze: 'contant', notitie: 'Schroeven voor de klus', locatie: null });
     expect({ ...viaWijziging, id: '', tijd: 0 }).toEqual({ ...viaBericht, id: '', tijd: 0 });
     expect((viaWijziging as { fotos: Buffer[] }).fotos.map((f) => f.equals(fotos[0]!) || f.equals(fotos[1]!))).toEqual([true, true]);
-    // het jsonc-voorbeeld in het document is precies zo'n bericht, met de JPEG van 751 bytes als bijlage
-    const doc = readFileSync(join(__dirname, '..', 'docs', 'bonnenscanner-protocol.md'), 'utf8').replace(/\r\n/g, '\n');
-    const voorbeeld = JSON.parse(doc.match(/```jsonc\n(\{"soort":"wijziging"[^\n]*"entiteit":"bon"[^\n]*)\n```/)![1]!) as Record<string, unknown>;
+    // het voorbeeld van het protocol (tests/fixtures/protocol/bon.txt) is precies zo'n bericht, met de JPEG van 751 bytes als bijlage
+    const voorbeeld = JSON.parse(protocolVoorbeeld('bon', 'wijziging').match(/^(\{"soort":"wijziging"[^\n]*"entiteit":"bon"[^\n]*)$/)![1]!) as Record<string, unknown>;
     const voorbeeldFoto = makeJpeg('voorbeeld');
     const gelezen = parseFrame(encodeFrame(voorbeeld, [voorbeeldFoto]), 2);
     expect(gelezen).toMatchObject({ soort: 'wijziging', wijziging: { entiteit: 'bon', revisie: 1 }, bijlagen: [voorbeeldFoto] });

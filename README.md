@@ -56,7 +56,7 @@ src/
   btw/           BTW-berekening uit journal_lines → rubrieken, controles, VIES (op klik), periode-afsluiting, XBRL (voorbereiding)
   bankfeed/      Ponto-bankfeed: veilige credentials, rekeningkoppeling, ophaalronde met bewezen dekking, handmatig bijwerken; vlag `BANK_FEED.available` (`src/shared/bank-feed.ts`, aan sinds 1.2.0)
   jobs/          klussen (offerte → klus → factuur)
-  scanner/       bonnenmap (bestanden uit een map naar de inbox); ontvanger voor de bonnenscanner op Android (koppelen, ontvangstpunt, mDNS), uit tot die app er is: shared/phone-scanner.ts, docs/bonnenscanner-protocol.md
+  scanner/       bonnenmap (bestanden uit een map naar de inbox); ontvanger voor de bonnenscanner op Android (koppelen, ontvangstpunt, mDNS), uit tot die app er is: shared/phone-scanner.ts; korte beschrijving in docs/bonnenscanner-protocol.md, voorbeelden van het protocol als testgegevens in tests/fixtures/protocol/
   inbox/         "Ben ik bij?": taken, automatisch verwerken, geld-overzicht
   onboarding/    "Aan de slag"-lijstje en de overstap-hulp (instapdatum, startbalans, controles)
   dashboard/     read-only overzichten
