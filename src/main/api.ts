@@ -172,7 +172,7 @@ export interface HostContext {
     /** "Toch als bon bewaren": de tekst van een mail die bleef liggen als PDF-bon */
     saveAsReceipt(id: number): Promise<unknown>;
   };
-  /** bonnenscanner (#48): telefoons koppelen, ontvangstpunt en bonnenmap; ontbreekt buiten de app (bv. de koppeling met --mcp) */
+  /** bonnenscanner: telefoons koppelen, ontvangstpunt en bonnenmap; ontbreekt buiten de app (bv. de koppeling met --mcp) */
   scanner?: {
     service(): Bonnenscanner;
     /** de gebruiker wijst zelf een map aan in het venster van het besturingssysteem */
@@ -868,7 +868,7 @@ export function createApi(s: Services, host: HostContext) {
       },
       reopenAnswer: () => s.exchange.reopenAnswer(),
     },
-    /** abonnement voor de uitwisseling met de boekhouder */
+    /** abonnement: de uitwisseling met de boekhouder en (regel in license/telefoon.ts) de koppeling met de telefoon */
     license: {
       status: () => s.license.status(today()),
       price: async () => {
@@ -1035,14 +1035,14 @@ export function createApi(s: Services, host: HostContext) {
       },
     },
     /**
-     * Bonnenscanner (#48): de bonnenmap, en (zodra PHONE_SCANNER aan staat) telefoon koppelen met een
+     * Bonnenscanner: de bonnenmap, en (zodra PHONE_SCANNER aan staat) telefoon koppelen met een
      * QR-code. De sleutel van een telefoon komt alleen als QR-code naar het scherm, en alleen op het
      * moment van koppelen.
      */
     scanner: {
       status: () => (host.scanner ? host.scanner.service().status() : null),
       pair: async () => {
-        // tot de Android-app er is (#49) weigert de api te koppelen: het ontvangstpunt en mDNS starten dan nooit
+        // tot de Android-app er is weigert de api te koppelen: het ontvangstpunt en mDNS starten dan nooit
         if (!PHONE_SCANNER.available) throw new ValidationError('Een telefoon koppelen kan nog niet: de scanner-app voor Android is er nog niet.');
         // Een nieuwe koppeling hoort bij het abonnement (src/license/telefoon.ts); de scanner weigert zelf. Hier wordt de licentie
         // niet opgehaald: dat is de aparte stap checkSubscription, zodat het ontvangstpunt nooit start in dezelfde aanroep waarin

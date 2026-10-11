@@ -31,7 +31,7 @@ const LOOPBACK = [{ address: '127.0.0.1', netmask: '255.0.0.0' }];
 
 const open: Bonnenscanner[] = [];
 const dirs: string[] = [];
-// Telefoon koppelen staat in de app nog uit (tot de Android-app er is, #49). Deze tests zetten het zelf
+// Telefoon koppelen staat in de app nog uit (tot de Android-app er is). Deze tests zetten het zelf
 // aan; "telefoon koppelen staat uit" onderaan test de app zoals hij nu is.
 beforeEach(() => {
   PHONE_SCANNER.available = true;
@@ -122,7 +122,7 @@ function listening(port: number): Promise<boolean> {
   });
 }
 
-describe('bonnenscanner: koppelen (#48)', () => {
+describe('bonnenscanner: koppelen', () => {
   it('zonder gekoppelde telefoon staat het ontvangstpunt uit', async () => {
     const t = start();
     await t.scanner.start();
@@ -299,7 +299,7 @@ describe('bonnenscanner: koppelen (#48)', () => {
   });
 });
 
-describe('bonnenscanner: ontvangen via wifi (#48)', () => {
+describe('bonnenscanner: ontvangen via wifi', () => {
   it('een geldige bon staat één keer in de inbox, met notitie en betaalwijze als voorstel', async () => {
     const t = start();
     const p = await pair(t);

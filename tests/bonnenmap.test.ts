@@ -57,7 +57,7 @@ function start(opts: { realClock?: boolean; homeDir?: string; broadDirs?: string
 
 const ubl = () => readFileSync(join(__dirname, 'fixtures', 'ubl-invoice.xml'));
 
-describe('bonnenmap (#48)', () => {
+describe('bonnenmap', () => {
   it('zonder gekozen map gebeurt er niets', async () => {
     const t = start();
     await t.scanner.start();
