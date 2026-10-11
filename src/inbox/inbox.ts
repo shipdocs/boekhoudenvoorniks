@@ -687,14 +687,14 @@ export class InboxService {
     return n;
   }
 
-  private bookCategory(t: BankTransaction, categoryKey: string, vatCode: string, business: boolean, learn: boolean, businessPct?: number): void {
+  private bookCategory(t: BankTransaction, categoryKey: string, vatCode: string, business: boolean, learn: boolean, businessPct?: number, vatRate?: 9 | 21): void {
     const name = t.counter_name ?? t.description;
     if (!business) {
       this.bank.bookToAccount(t.id, { account: t.amount < 0 ? ACCOUNTS.priveOpnamen : ACCOUNTS.priveStortingen, description: `Privé: ${name}` });
     } else {
       const category = this.categories.find(categoryKey);
       if (!category) throw new Error(`Onbekende categorie ${categoryKey}`);
-      this.bank.bookToAccount(t.id, { account: category.account, vatCode, description: `${category.label} — ${name}`, ...(businessPct !== undefined ? { businessPct } : {}) });
+      this.bank.bookToAccount(t.id, { account: category.account, vatCode, description: `${category.label} — ${name}`, ...(businessPct !== undefined ? { businessPct } : {}), ...(vatRate !== undefined ? { vatRate } : {}) });
     }
     if (learn && t.counter_name) this.memory.learn(t.counter_name, { categoryKey, vatCode, business });
   }
@@ -760,13 +760,13 @@ export class InboxService {
   }
 
   /** De gebruiker beantwoordt een vraag uit de inbox. */
-  answerBank(bankTransactionId: number, answer: { business: boolean; categoryKey?: string; vatCode?: string; businessPct?: number }): void {
+  answerBank(bankTransactionId: number, answer: { business: boolean; categoryKey?: string; vatCode?: string; businessPct?: number; vatRate?: 9 | 21 }): void {
     const t = this.bank.get(bankTransactionId);
     const category = answer.categoryKey ?? 'overig';
     // betaling aan je eigen bedrijf, privé: al afgehandeld met de factuur erbij; je eigen bedrijf wordt niet onthouden
     if (this.guardBank(t, answer.business ? this.categories.find(category)?.account : ACCOUNTS.priveOpnamen) === 'gedaan') return;
     const vatCode = answer.vatCode ?? this.categories.find(category)?.defaultVat ?? 'hoog';
-    this.bookCategory(t, category, vatCode, answer.business, true, answer.businessPct);
+    this.bookCategory(t, category, vatCode, answer.business, true, answer.businessPct, answer.vatRate);
   }
 
   /** Met een privéauto zijn autokosten (tanken, parkeren, onderhoud) privé: je krijgt een bedrag per zakelijke km. */

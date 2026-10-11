@@ -346,7 +346,7 @@ export function createApi(s: Services, host: HostContext) {
   };
 
   /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
-  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
+  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number; vatRate?: 9 | 21 }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
     const r = task.ref;
     // een vastgehouden regel heeft geen eigen taak; kwam de knop van een lijst van vóór de melding, dan eerst die vraag
     if (r.bankTransactionId && task.kind.startsWith('bank-')) notHeld(r.bankTransactionId);
@@ -393,7 +393,7 @@ export function createApi(s: Services, host: HostContext) {
       // falls through
       case 'bank-category:anders':
         if (payload?.categoryKey) {
-          s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: payload.categoryKey, vatCode: payload.vatCode, businessPct: payload.businessPct });
+          s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: payload.categoryKey, vatCode: payload.vatCode, businessPct: payload.businessPct, vatRate: payload.vatRate });
           return;
         }
         return { navigate: { screen: 'categorie', id: r.bankTransactionId } };
@@ -1108,7 +1108,7 @@ export function createApi(s: Services, host: HostContext) {
         return s.inbox.home();
       },
       /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
-      act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
+      act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number; vatRate?: 9 | 21 }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
         const current = currentFeedTask(task, actionId);
         const result = await doAct(current, actionId, payload);
         if (!result?.navigate) s.inbox.recordUserAction(current, actionId);
@@ -1550,14 +1550,14 @@ export function createApi(s: Services, host: HostContext) {
       /** negeren; met `duplicateOf` als dubbele regel van die betaling: dan telt hij ook in het saldo niet mee (#225) */
       ignore: (txId: number, duplicateOf?: number | null) => s.bank.ignore(txId, duplicateOf),
       /** Andere categorie voor een al geboekte betaling: tegenboeking + nieuwe boeking (#19), en leren. */
-      reclassify: (txId: number, categoryKey: string, vatCode: string, businessPct?: number) => {
+      reclassify: (txId: number, categoryKey: string, vatCode: string, businessPct?: number, vatRate?: 9 | 21) => {
         const category = s.categories.find(categoryKey);
         if (!category) throw new Error('Onbekende categorie');
         // lijkt er een aankoop bij te horen die er al staat, dan eerst die vraag: anders tellen de kosten twee keer
         s.bookedPayments.assertNoDouble(Number(txId));
         // boeken en leren in één transactie: nooit een gewijzigde boeking met een mislukte leerstap
         return tx(s.db, () => {
-          const entryId = s.bank.reclassify(txId, { account: category.account, vatCode, ...(businessPct !== undefined ? { businessPct } : {}) }, `categorie gewijzigd naar ${category.label.toLowerCase()}`);
+          const entryId = s.bank.reclassify(txId, { account: category.account, vatCode, ...(businessPct !== undefined ? { businessPct } : {}), ...(vatRate !== undefined ? { vatRate } : {}) }, `categorie gewijzigd naar ${category.label.toLowerCase()}`);
           const t = s.bank.get(txId);
           if (t.counter_name && supplierKey(t.counter_name)) s.memory.learn(t.counter_name, { categoryKey, vatCode, business: true });
           return entryId;
