@@ -249,3 +249,42 @@ test('abonnement zonder telefoon koppelen: zolang koppelen uit staat is er in de
   await expect(page.getByTestId('uitwisseling')).toBeVisible();
   await expect(page.getByTestId('abonnement')).toHaveCount(0);
 });
+
+test('Windows, net betaald: Telefoon koppelen haalt de licentie op en toont eerst de uitleg over de firewall, voordat er iets gaat luisteren', async ({ page, request }) => {
+  await request.post('/__reset', { data: { scannerPlatform: 'win32', phoneScanner: true, licenses: true } });
+  await onboard(page);
+  await openScannerSettings(page, true);
+  const status = () => call<{ running: boolean; port: number | null; firewallHint: boolean; devices: unknown[]; abonnement: { toegestaan: boolean } }>(page, 'scanner.status');
+  expect(await status()).toMatchObject({ running: false, firewallHint: true, devices: [], abonnement: { toegestaan: false } });
+
+  // zonder abonnement: de melding, en geen uitleg over de firewall (er wordt niet gekoppeld)
+  await page.getByRole('button', { name: 'Telefoon koppelen' }).click();
+  await expect(page.locator('.toasts').getByText(/horen bij het abonnement.*komt altijd aan/)).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Eerst even dit' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Telefoon koppelen' })).toHaveCount(0);
+
+  // afsluiten en betalen; de app heeft de licentie nog niet opgehaald
+  await page.getByTestId('telefoon-abonnement').getByRole('button', { name: 'Naar het abonnement' }).click();
+  const abonnement = page.getByTestId('uitwisseling').getByTestId('abonnement');
+  await abonnement.getByRole('checkbox', { name: /Ik sluit dit abonnement af voor mijn bedrijf/ }).check();
+  await abonnement.getByRole('button', { name: '4 maanden gratis beginnen' }).click();
+  await expect(page.locator('.toasts').getByText('De betaalpagina is geopend in je browser')).toBeVisible();
+  await request.post('/__pay');
+  await openScannerSettings(page, true);
+  expect((await status()).abonnement.toegestaan).toBe(false);
+
+  // Telefoon koppelen: de licentie komt binnen, en eerst staat de uitleg er. Er is nog geen QR-code en er luistert niets.
+  await page.getByRole('button', { name: 'Telefoon koppelen' }).click();
+  const uitleg = page.getByRole('dialog', { name: 'Eerst even dit' });
+  await expect(uitleg.getByText('Klik op "Toestaan" bij de melding van Windows.')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Telefoon koppelen' })).toHaveCount(0);
+  expect(await status()).toMatchObject({ running: false, port: null, firewallHint: true, devices: [], abonnement: { toegestaan: true } });
+  await expect(page.getByTestId('telefoon-abonnement')).toHaveCount(0);
+
+  // pas na Verder begint het koppelen
+  await uitleg.getByRole('button', { name: 'Verder' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Telefoon koppelen' });
+  await expect(dlg.getByAltText('QR-code om je telefoon te koppelen')).toBeVisible();
+  expect(await status()).toMatchObject({ running: true, firewallHint: false, abonnement: { toegestaan: true } });
+  await dlg.getByRole('button', { name: 'Annuleren' }).click();
+});

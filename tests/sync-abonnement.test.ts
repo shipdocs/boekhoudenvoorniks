@@ -634,7 +634,7 @@ describe('telefoon en abonnement: een nieuwe koppeling', () => {
     }
   });
 
-  it('ABO-08 Telefoon koppelen in de app haalt eerst de licentie op (net betaald of verlengd) en weigert pas daarna; met abonnement, in de demo en bij een geslaagde koppeling geen extra verzoek', async () => {
+  it('ABO-08 de stap voor het koppelen (checkSubscription) haalt de licentie op en start niets; koppelen zelf haalt nooit iets op en weigert zonder abonnement', async () => {
     const o = await opzet();
     try {
       let geleverd: string | null = null;
@@ -654,35 +654,54 @@ describe('telefoon en abonnement: een nieuwe koppeling', () => {
         },
       } as unknown as HostContext);
       const id = o.t.s.settings.administrationId();
+      const niets = () => {
+        expect(o.apparaten()).toEqual([]);
+        expect(o.scanner.status()).toMatchObject({ running: false, port: null, devices: [] });
+      };
 
-      // geen abonnement en de licentieserver kent er ook geen: geweigerd, niets gekoppeld
+      // koppelen zonder abonnement: geweigerd, en er gaat niets naar de licentieserver
       await expect(api.scanner.pair()).rejects.toThrow('horen bij het abonnement');
+      expect(opgehaald).toEqual([]);
+      niets();
+      // de stap ervoor haalt de licentie op; de licentieserver kent er geen: niet toegestaan, niets gestart
+      expect(await api.scanner.checkSubscription()).toEqual({ toegestaan: false, verlopenOp: null });
       expect(opgehaald).toEqual([id]);
-      expect(o.apparaten()).toEqual([]);
-      // verlopen en geen verbinding: de melding met de datum, geen andere fout
+      niets();
+      // verlopen en geen verbinding: de stand met de datum, geen andere fout
       await o.zet('verlopen');
       offline = true;
-      await expect(api.scanner.pair()).rejects.toThrow(`Je abonnement liep tot ${formatDateNl(GISTEREN)}.`);
+      expect(await api.scanner.checkSubscription()).toEqual({ toegestaan: false, verlopenOp: GISTEREN });
       expect(opgehaald).toEqual([id, id]);
-      expect(o.apparaten()).toEqual([]);
+      await expect(api.scanner.pair()).rejects.toThrow(`Je abonnement liep tot ${formatDateNl(GISTEREN)}.`);
+      niets();
       // in de demo weigert de scanner toch al: dan gaat er niets naar de licentieserver
       o.t.s.settings.update({ demoMode: true });
+      expect((await api.scanner.checkSubscription()).toegestaan).toBe(false);
       await expect(api.scanner.pair()).rejects.toThrow(/In de demo/);
       o.t.s.settings.update({ demoMode: false });
       expect(opgehaald).toHaveLength(2);
-      // net verlengd: de licentie wordt opgehaald en het koppelen gaat door
+      // net verlengd: de stap haalt de licentie op en zegt dat het mag, maar start zelf niets (geen sleutel, geen QR-code, er luistert niets)
       offline = false;
       geleverd = await o.licentie(OVER_EEN_MAAND);
-      const p = await api.scanner.pair();
-      expect(p.svg).toContain('<svg');
+      expect(await api.scanner.checkSubscription()).toEqual({ toegestaan: true, verlopenOp: null });
       expect(opgehaald).toHaveLength(3);
       expect(o.t.s.license.status(today()).state).toBe('actief');
-      expect(o.scanner.status().devices).toMatchObject([{ id: p.deviceId, pending: true }]);
+      niets();
+      // pas het koppelen zelf start het ontvangstpunt
+      const p = await api.scanner.pair();
+      expect(p.svg).toContain('<svg');
+      expect(o.scanner.status()).toMatchObject({ running: true, devices: [{ id: p.deviceId, pending: true }] });
       await api.scanner.cancelPairing(p.deviceId);
-      // met een actief abonnement wordt er niets opgehaald
+      // met een actief abonnement wordt er niets opgehaald, ook niet door de stap ervoor
+      expect((await api.scanner.checkSubscription()).toegestaan).toBe(true);
       const q = await api.scanner.pair();
       expect(opgehaald).toHaveLength(3);
       await api.scanner.cancelPairing(q.deviceId);
+      // zolang telefoon koppelen uit staat bestaat de stap niet
+      PHONE_SCANNER.available = false;
+      await expect(api.scanner.checkSubscription()).rejects.toThrow(/kan nog niet/);
+      expect(opgehaald).toHaveLength(3);
+      PHONE_SCANNER.available = true;
     } finally {
       await ruim(o);
     }

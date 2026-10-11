@@ -1029,14 +1029,23 @@ export function createApi(s: Services, host: HostContext) {
       pair: async () => {
         // tot de Android-app er is (#49) weigert de api te koppelen: het ontvangstpunt en mDNS starten dan nooit
         if (!PHONE_SCANNER.available) throw new ValidationError('Een telefoon koppelen kan nog niet: de scanner-app voor Android is er nog niet.');
-        const service = scanner();
-        // Een nieuwe koppeling hoort bij het abonnement (src/license/telefoon.ts); de scanner weigert zelf. Hier alleen, zoals bij
-        // versturen naar de boekhouder: eerst proberen de licentie op te halen. Niet in de demo of in de kopie bij de boekhouder:
-        // daar weigert de scanner toch al, en gaat er niets naar buiten.
-        if (!service.blocked() && !service.abonnement().toegestaan) await fetchLicenseIfNeeded();
-        const p = await service.pair();
+        // Een nieuwe koppeling hoort bij het abonnement (src/license/telefoon.ts); de scanner weigert zelf. Hier wordt de licentie
+        // niet opgehaald: dat is de aparte stap checkSubscription, zodat het ontvangstpunt nooit start in dezelfde aanroep waarin
+        // de licentie binnenkomt (het scherm toont op Windows eerst de uitleg over de firewall).
+        const p = await scanner().pair();
         const svg = await QRCode.toString(p.payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
         return { deviceId: p.deviceId, expiresAt: p.expiresAt, addresses: p.addresses, port: p.port, svg };
+      },
+      /**
+       * De stap vóór het koppelen bij een niet toegestaan abonnement: eerst proberen de licentie op te halen (net betaald of
+       * verlengd), zoals bij versturen naar de boekhouder. Start niets en koppelt niets; geeft alleen de stand terug. Niet in de
+       * demo of in de kopie bij de boekhouder: daar weigert de scanner toch al, en gaat er niets naar buiten.
+       */
+      checkSubscription: async () => {
+        if (!PHONE_SCANNER.available) throw new ValidationError('Een telefoon koppelen kan nog niet: de scanner-app voor Android is er nog niet.');
+        const service = scanner();
+        if (!service.blocked() && !service.abonnement().toegestaan) await fetchLicenseIfNeeded();
+        return service.abonnement();
       },
       cancelPairing: (deviceId: string) => scanner().cancelPairing(String(deviceId)),
       unpair: (deviceId: string) => scanner().unpair(String(deviceId)),

@@ -74,6 +74,23 @@ function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) 
     await reload();
   };
 
+  /**
+   * De knop Telefoon koppelen. Staat het abonnement koppelen niet toe, dan haalt de app eerst de licentie op (voor wie net
+   * betaald of verlengd heeft); dat is een eigen stap die niets start. Pas daarna, en op Windows pas na de uitleg over de
+   * firewall, begint het koppelen. Is het nog steeds niet toegestaan, dan geeft het koppelen de melding.
+   */
+  const begin = async () => {
+    let toegestaan = st.abonnement.toegestaan;
+    if (!toegestaan) {
+      const a = await run(() => api.scanner.checkSubscription());
+      if (!a) return;
+      await reload();
+      toegestaan = a.toegestaan;
+    }
+    if (toegestaan && st.firewallHint) return setFirewall(true);
+    await startPairing();
+  };
+
   return (
     <div className="card grid">
       <h3 style={{ margin: 0 }}>Telefoon koppelen</h3>
@@ -124,8 +141,7 @@ function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) 
         </div>
       )}
       <div className="row">
-        {/* zonder abonnement geeft de knop de melding (de app haalt eerst de licentie op, voor wie net betaald heeft); dan geen uitleg over de firewall vooraf */}
-        <Button kind="primary" disabled={busy || Boolean(st.blocked)} onClick={() => (st.firewallHint && st.abonnement.toegestaan ? setFirewall(true) : void startPairing())}>Telefoon koppelen</Button>
+        <Button kind="primary" disabled={busy || Boolean(st.blocked)} onClick={() => void begin()}>Telefoon koppelen</Button>
       </div>
 
       {firewall && (
