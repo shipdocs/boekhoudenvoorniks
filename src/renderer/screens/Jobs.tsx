@@ -264,6 +264,7 @@ export function JobResultCard({ id }: { id: number }) {
           <tr className="total"><td>Verdiend</td><td><Euro cents={r.margin} />{r.marginPct !== null && <span className="muted"> ({String(r.marginPct).replace('.', ',')}%)</span>}</td></tr>
         </tbody>
       </table>
+      {r.hourlyRate !== null && <p className="small muted" style={{ marginBottom: 0 }}>Je eigen tijd: {String(Math.round(r.ownHours * 100) / 100).replace('.', ',')} uur op de werkbon, ongeveer <Euro cents={r.hourlyRate} /> per uur. Alleen een indicatie; het staat niet in je boekhouding.</p>}
     </div>
   );
 }

@@ -59,6 +59,10 @@ export interface JobResult {
   margin: Cents;
   /** marge in procenten van het gefactureerde, of null als er nog niets gefactureerd is */
   marginPct: number | null;
+  /** uren op de werkbon (eenheid "uur"); alleen een indicatie, geen boeking */
+  ownHours: number;
+  /** verdiend gedeeld door de uren op de werkbon, of null zonder uren; alleen een indicatie */
+  hourlyRate: Cents | null;
 }
 
 /** Eén kostenpost op een klus: een aankoop, een direct geboekte betaling of iets anders (bv. kilometers). */
@@ -249,6 +253,7 @@ export class JobService {
     const costs = this.costLines(id);
     const totalCosts = costs.reduce((s, c) => s + c.amount, 0);
     const margin = j.invoiced - totalCosts;
+    const ownHours = this.workItems(id).filter((w) => w.unit?.trim().toLowerCase() === 'uur').reduce((h, w) => h + w.quantity, 0);
     return {
       jobId: id,
       title: j.title,
@@ -259,6 +264,8 @@ export class JobService {
       totalCosts,
       margin,
       marginPct: j.invoiced > 0 ? Math.round((margin / j.invoiced) * 1000) / 10 : null,
+      ownHours,
+      hourlyRate: ownHours > 0 ? Math.round(margin / ownHours) : null,
     };
   }
 
