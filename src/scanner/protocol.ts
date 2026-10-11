@@ -3,8 +3,10 @@ import { leesWijziging, type Wijziging } from '@gratis-boekhouden/kern';
 
 /**
  * Het protocol tussen de bonnenscanner (telefoon) en de desktop-app (#48). Dit bestand is de
- * uitvoerbare versie van docs/bonnenscanner-protocol.md: wie hier iets verandert, past ook dat
- * document aan (en hoogt bij een onverenigbare wijziging PROTOCOL_VERSION op).
+ * uitvoerbare versie van het protocol; de voorbeelden staan als vaste testgegevens in
+ * tests/fixtures/protocol/. Wie hier iets verandert, past ook die testgegevens en de volledige
+ * technische beschrijving aan (die wordt intern bijgehouden) en hoogt bij een onverenigbare wijziging
+ * PROTOCOL_VERSION op. De korte beschrijving voor gebruikers staat in de map docs/.
  *
  * Verzoek (telefoon → pc), de hele HTTP-body:
  *   "BVNS" | versie (1 of 2) | richting (1 = verzoek) | apparaat-ID (16) | nonce (12) | cijfertekst | tag (16)
