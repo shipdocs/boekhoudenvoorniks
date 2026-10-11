@@ -18,6 +18,16 @@ type S = ReturnType<typeof world>['s'];
 
 const lees = (s: S, regels: { amount: number; name: string }[]) =>
   s.bank.import({ source: 'csv', warnings: [], transactions: regels.map((r, i) => ({ date: `2026-10-0${i + 1}`, amount: r.amount, description: `${r.name} kaart`, counterName: r.name })) });
+/** Een regel die er met een eerdere versie al in kwam, uit een ander afschrift (zoals in tests/dubbele-betaling.test.ts). */
+function oudeImport(s: S, accountId: number, source: 'csv' | 'camt', t: { date: string; amount: number; name: string; text: string }): number {
+  const batch = Number(s.db.prepare('INSERT INTO import_batches (filename, source, kind) VALUES (?, ?, ?)').run(`oud.${source}`, source, source).lastInsertRowid);
+  s.db.prepare('INSERT INTO import_batch_accounts (batch_id, bank_account_id, period_from, period_to, transactions, imported, duplicates) VALUES (?, ?, ?, ?, 1, 1, 0)').run(batch, accountId, t.date, t.date);
+  return Number(
+    s.db
+      .prepare('INSERT INTO bank_transactions (bank_account_id, transaction_date, amount, counter_iban, counter_name, description, source, import_batch_id, dedup_hash) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)')
+      .run(accountId, t.date, t.amount, t.name, t.text, source, batch, `oud-${batch}-${t.amount}`).lastInsertRowid,
+  );
+}
 const boekingen = (s: S) => (s.db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get() as { n: number }).n;
 const bankTaken = (s: S) => s.inbox.tasks('2026-10-11').filter((t) => t.kind.startsWith('bank-'));
 
@@ -44,7 +54,8 @@ describe('bankregel van nul euro', () => {
       const nul = s.bank.list()[0]!;
       // zoals een regel die een eerdere versie van de app heeft ingelezen
       s.db.prepare(`UPDATE bank_transactions SET status = 'nieuw' WHERE id = ?`).run(nul.id);
-      expect(bankTaken(s)).toHaveLength(1);
+      // ook vóór de eerstvolgende verwerking komt er geen vraag over
+      expect(bankTaken(s)).toEqual([]);
       s.inbox.autoProcess('2026-10-11');
       expect(s.bank.get(nul.id).status, autopilot).toBe('genegeerd');
       expect(bankTaken(s), autopilot).toEqual([]);
@@ -73,6 +84,39 @@ describe('bankregel van nul euro', () => {
     // negeren zelf blijft kunnen
     api.bank.ignore(nul.id);
     expect(s.bank.get(nul.id).status).toBe('genegeerd');
+  });
+
+  it('twee nul-regels uit verschillende imports: geen melding "staat er twee keer in", en een behouden of teruggezette nul-regel blijft genegeerd', () => {
+    const { s, api } = world();
+    // dezelfde kaartcontrole uit twee afschriften van een eerdere versie van de app; ter controle ook een gewoon bedrag dat zo wél als dubbel wordt gemeld
+    lees(s, [{ amount: -100, name: 'Voorbeeld Kantoorwinkel' }]);
+    const rekening = s.bank.list()[0]!.bank_account_id;
+    for (const bron of ['csv', 'camt'] as const) {
+      for (const amount of [0, -2500]) oudeImport(s, rekening, bron, { date: '2026-10-01', amount, name: 'Voorbeeld Softwarehuis', text: 'Voorbeeld Softwarehuis kaart' });
+    }
+    expect(s.bank.list().filter((t) => t.amount === -2500)).toHaveLength(2);
+    expect(s.bank.paymentDoubles().map((d) => d.amount)).toEqual([-2500]);
+    s.db.prepare(`UPDATE bank_transactions SET status = 'genegeerd' WHERE amount IN (-2500, -100)`).run();
+    const [eerste, tweede] = s.bank.list().filter((t) => t.amount === 0).sort((a, b) => a.id - b.id);
+    expect(eerste && tweede).toBeTruthy();
+    // zoals regels die een eerdere versie van de app heeft ingelezen
+    s.db.prepare(`UPDATE bank_transactions SET status = 'nieuw' WHERE amount = 0`).run();
+    s.inbox.autoProcess('2026-10-11');
+    expect(s.bank.paymentDoubles().filter((d) => d.amount === 0)).toEqual([]);
+    const nulIds = new Set(s.bank.list().filter((t) => t.amount === 0).map((t) => t.id));
+    const taken = () => s.inbox.tasks('2026-10-11').filter((t) => (t.ref.bankTransactionId !== undefined && nulIds.has(t.ref.bankTransactionId)) || /0,00/.test(t.title));
+    expect(taken()).toEqual([]);
+    // de gebruiker wijst zelf de tweede aan als dubbele regel van de eerste: de behouden regel wordt niet weer een vraag
+    api.bank.ignore(tweede!.id, eerste!.id);
+    expect(s.bank.get(eerste!.id).status).toBe('genegeerd');
+    expect(s.bank.get(tweede!.id)).toMatchObject({ status: 'genegeerd', duplicate_of: eerste!.id });
+    expect(taken()).toEqual([]);
+    // en terugzetten maakt er ook geen vraag van, zonder tussentijdse automatische verwerking
+    s.bank.restoreDuplicate(tweede!.id);
+    expect(s.bank.get(tweede!.id)).toMatchObject({ status: 'genegeerd', duplicate_of: null });
+    expect(s.bank.get(eerste!.id).status).toBe('genegeerd');
+    expect(taken()).toEqual([]);
+    expect(boekingen(s)).toBe(0);
   });
 
   it('nul euro telt niet mee in het saldo en een dubbele regel van nul euro blijft een dubbele regel', () => {

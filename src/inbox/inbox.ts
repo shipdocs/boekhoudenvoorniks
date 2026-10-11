@@ -843,6 +843,7 @@ export class InboxService {
     const held = this.bank.heldAsDouble(doubles);
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
       if (held.has(t.id)) continue;
+      if (t.amount === 0) continue; // nul euro: niets te boeken, dus ook geen vraag
       if (firstOpen && t.transaction_date < firstOpen) {
         locked[this.ledger.periodLockFor(t.transaction_date)?.kind ?? 'afgesloten']++;
         continue;

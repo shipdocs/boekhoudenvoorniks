@@ -1088,7 +1088,8 @@ export class BankService {
    */
   paymentDoubles(bankAccountId?: number, only?: { amount: Cents }): PaymentDouble[] {
     type Row = DoubleSide & { account: number; counter_iban: string | null; counter_name: string | null; source: string; bankId: string | null; batch: number | null; kind: string | null; accountName: string };
-    const scope = `t.duplicate_of IS NULL AND t.batch_ref IS NULL ${bankAccountId ? 'AND t.bank_account_id = @account' : ''} ${only ? 'AND t.amount = @amount' : ''}`;
+    // een regel van nul euro (kaartcontrole) is nooit "dezelfde betaling": er is geen bedrag dat dubbel kan tellen
+    const scope = `t.duplicate_of IS NULL AND t.batch_ref IS NULL AND t.amount <> 0 ${bankAccountId ? 'AND t.bank_account_id = @account' : ''} ${only ? 'AND t.amount = @amount' : ''}`;
     // alleen bedragen die op één rekening uit meer dan één import komen
     const rows = this.db
       .prepare(
@@ -1228,6 +1229,7 @@ export class BankService {
       // was hij al genegeerd, dan is hij dat na terugzetten weer
       if (t.status === 'genegeerd') this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'was genegeerd') ON CONFLICT(task_key) DO NOTHING`).run(BankService.ignoredKey(txId));
       this.db.prepare(`UPDATE bank_transactions SET status = 'nieuw' WHERE id = ? AND status = 'genegeerd' AND duplicate_of IS NULL`).run(keptId);
+      this.ignoreZeroAmounts(); // een behouden regel van nul euro blijft genegeerd
     });
   }
 
@@ -1260,6 +1262,7 @@ export class BankService {
         const ignored = this.db.prepare(`DELETE FROM task_skips WHERE task_key = ?`).run(BankService.ignoredKey(t.id)).changes > 0;
         this.db.prepare(`UPDATE bank_transactions SET status = ?, duplicate_of = NULL WHERE id = ?`).run(ignored ? 'genegeerd' : 'nieuw', t.id);
         this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'teruggezet') ON CONFLICT(task_key) DO NOTHING`).run(BankService.sameKey(t.id, t.duplicate_of!));
+        this.ignoreZeroAmounts(); // een teruggezette regel van nul euro blijft genegeerd
         return;
       }
       // de melding hoort bij de regel en de eerste deelpost: zoek welke van de twee kanten dit was
@@ -1271,6 +1274,7 @@ export class BankService {
       }
       const [lineId, firstPartId] = siblings[0]!.batch_ref ? [t.duplicate_of!, siblings[0]!.id] : [siblings[0]!.id, t.duplicate_of!];
       this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'teruggezet') ON CONFLICT(task_key) DO NOTHING`).run(BankService.doubleKey(lineId, firstPartId));
+      this.ignoreZeroAmounts(); // een teruggezette regel van nul euro blijft genegeerd
     });
   }
 
