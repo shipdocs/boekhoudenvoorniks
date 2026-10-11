@@ -57,7 +57,7 @@ describe('klussen als dossier (#32)', () => {
     expect(s.jobs.result(job.id)).toMatchObject({ ownHours: 0, hourlyRate: null });
     s.purchases.create({ invoiceDate: '2026-09-02', description: 'Gips', jobId: job.id, lines: [{ account: ACCOUNTS.inkoopMaterialen, netAmount: 20000, vatCode: 'hoog' }] });
     s.jobs.addWorkItem(job.id, { date: '2026-09-10', description: 'Stucwerk', quantity: 6, unit: 'uur', unitPrice: 4800, vatCode: 'laag' });
-    s.jobs.addWorkItem(job.id, { date: '2026-09-11', description: 'Stucwerk', quantity: 2, unit: 'Uur', unitPrice: 4800, vatCode: 'laag' });
+    s.jobs.addWorkItem(job.id, { date: '2026-09-11', description: 'Stucwerk', quantity: 2, unit: ' Uren ', unitPrice: 4800, vatCode: 'laag' });
     s.jobs.addWorkItem(job.id, { date: '2026-09-11', description: 'Materiaal', quantity: 5, unit: 'stuk', unitPrice: 100, vatCode: 'hoog' });
     s.jobs.makeInvoice(job.id);
     const r = s.jobs.result(job.id);

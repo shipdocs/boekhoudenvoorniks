@@ -95,6 +95,8 @@ export interface JobSuggestion {
   reason: string;
 }
 
+/** Eenheden die als uren tellen; gelijk aan de urenlijst voor het urencriterium (WORK_UNIT in tax/mileage.ts). */
+const HOUR_UNITS = new Set(['uur', 'uren', 'u', 'hr', 'h']);
 const COST_LABEL = (rgs: string) => (rgs === 'WKprInkMat' ? 'Materiaal' : rgs === 'WKprKuwKuw' ? 'Uitbesteed werk' : 'Overige kosten');
 /** Binnen deze afstand van de kluslocatie telt een foto als "op de klus". */
 export const NEAR_JOB_METERS = 300;
@@ -253,7 +255,7 @@ export class JobService {
     const costs = this.costLines(id);
     const totalCosts = costs.reduce((s, c) => s + c.amount, 0);
     const margin = j.invoiced - totalCosts;
-    const ownHours = this.workItems(id).filter((w) => w.unit?.trim().toLowerCase() === 'uur').reduce((h, w) => h + w.quantity, 0);
+    const ownHours = this.workItems(id).filter((w) => HOUR_UNITS.has((w.unit ?? '').trim().toLowerCase())).reduce((h, w) => h + w.quantity, 0);
     return {
       jobId: id,
       title: j.title,

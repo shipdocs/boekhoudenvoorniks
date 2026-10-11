@@ -218,7 +218,7 @@ export function JobDetail({ id }: { id: number }) {
 
       <div className="grid cols-2" style={{ marginTop: 14 }}>
         <div className="card flat"><div className="muted small">Offerte</div><div className="big-number" style={{ fontSize: 22 }}><Euro cents={j.quoted} /></div>{j.quote_number && <a href="#" onClick={(e) => { e.preventDefault(); go({ screen: 'offerte', id: j.quote_id! }); }}>{j.quote_number}</a>}</div>
-        <JobResultCard id={id} />
+        <JobResultCard id={id} refreshKey={work.data} />
       </div>
 
       <WorkOrder jobId={id} items={work.data ?? []} onChanged={() => void work.reload()} readOnly={j.status === 'gefactureerd' || j.status === 'geannuleerd'} />
@@ -252,8 +252,8 @@ export function JobDetail({ id }: { id: number }) {
 }
 
 /** Klusresultaat in gewone taal (#32): gefactureerd, kosten per soort, verdiend. */
-export function JobResultCard({ id }: { id: number }) {
-  const r = useLoad(() => api.jobs.result(id), [id]).data;
+export function JobResultCard({ id, refreshKey }: { id: number; /** verandert er iets (bv. de werkbon), dan wordt het resultaat opnieuw geladen */ refreshKey?: unknown }) {
+  const r = useLoad(() => api.jobs.result(id), [id, refreshKey]).data;
   if (!r) return <div className="card flat" />;
   return (
     <div className="card flat">
