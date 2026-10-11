@@ -149,6 +149,8 @@ export function createServices(db: Db, deps: ServiceDeps) {
   // vreemde valuta in wat er al stond (#74): bonnen en aankopen van vóór 0.3.9 omrekenen
   const fxRepair = new FxRepair(db, fx, intake, purchases, bank);
   inbox.setFxRepair(fxRepair);
+  // een gekoppelde telefoon zonder abonnement: een melding op Vandaag (src/license/telefoon.ts)
+  inbox.setLicense(license);
   // aankoop en afschrijving die dezelfde uitgave zijn (bv. de betaling al als kosten geboekt via een gemengde rekening)
   const bookedPayments = new BookedPayments(db, purchases, intake, relations, bank);
   quick.setBookedPayments(bookedPayments);

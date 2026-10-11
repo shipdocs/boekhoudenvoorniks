@@ -530,6 +530,15 @@ export function createApi(s: Services, host: HostContext) {
       }
       case 'telefoon-map-problemen:later':
         return;
+      case 'telefoon-abonnement:open':
+        return { navigate: { screen: 'overzicht', extra: { abonnement: true } } };
+      case 'telefoon-abonnement:gezien': {
+        // de melding komt opnieuw uit de databank; de taak van de interface is alleen een aanwijzing
+        const huidig = s.inbox.telefoonAbonnementTaak(today());
+        if (!huidig || huidig.key !== task.key) throw new ValidationError('Deze melding is intussen veranderd. Bekijk Vandaag opnieuw.');
+        s.inbox.skipTask(huidig.key, 'gezien');
+        return;
+      }
       case 'exchange-conflict:klaar':
         s.inbox.skipTask(task.key, 'afgehandeld');
         return;
@@ -700,17 +709,22 @@ export function createApi(s: Services, host: HostContext) {
   /** mailservers weigeren vaak grotere bijlagen */
   const MAIL_LIMIT = 20 * 1024 * 1024;
 
-  /** Vóór versturen: is er een geldige licentie? Zo niet, eerst proberen hem op te halen (net betaald of verlengd). */
-  const ensureLicense = async () => {
+  /** Is er geen geldige licentie, dan eerst proberen hem op te halen (net betaald of verlengd). Gooit nooit. */
+  const fetchLicenseIfNeeded = async () => {
     const st = s.license.status(today());
     if (st.state !== 'uit' && st.state !== 'actief' && host.licenseApi) {
       try {
         const token = await host.licenseApi.fetch(s.settings.administrationId(), s.license.managementKey());
         if (token) s.license.install(token, today());
       } catch {
-        /* offline of nog niet betaald: dan de melding van requireActive */
+        /* offline of nog niet betaald: dan de melding van de functie die het abonnement vraagt */
       }
     }
+  };
+
+  /** Vóór versturen: is er een geldige licentie? Zo niet, eerst proberen hem op te halen (net betaald of verlengd). */
+  const ensureLicense = async () => {
+    await fetchLicenseIfNeeded();
     s.license.requireActive(today());
   };
 
@@ -1015,7 +1029,12 @@ export function createApi(s: Services, host: HostContext) {
       pair: async () => {
         // tot de Android-app er is (#49) weigert de api te koppelen: het ontvangstpunt en mDNS starten dan nooit
         if (!PHONE_SCANNER.available) throw new ValidationError('Een telefoon koppelen kan nog niet: de scanner-app voor Android is er nog niet.');
-        const p = await scanner().pair();
+        const service = scanner();
+        // Een nieuwe koppeling hoort bij het abonnement (src/license/telefoon.ts); de scanner weigert zelf. Hier alleen, zoals bij
+        // versturen naar de boekhouder: eerst proberen de licentie op te halen. Niet in de demo of in de kopie bij de boekhouder:
+        // daar weigert de scanner toch al, en gaat er niets naar buiten.
+        if (!service.blocked() && !service.abonnement().toegestaan) await fetchLicenseIfNeeded();
+        const p = await service.pair();
         const svg = await QRCode.toString(p.payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
         return { deviceId: p.deviceId, expiresAt: p.expiresAt, addresses: p.addresses, port: p.port, svg };
       },
