@@ -17,6 +17,11 @@ export interface ReceiverOptions {
   sync?: { verwerk(deviceId: string, bron: string, wijziging: Wijziging, route?: string, bijlagen?: Buffer[]): SyncResult };
   /** de administratie waaruit `stamgegevens` leest (alleen lezen) */
   database: Db;
+  /**
+   * Mag deze pc gegevens naar de telefoon sturen (zie src/license/telefoon.ts)? Alleen gevraagd bij een hallo van versie 2 en
+   * bij `stamgegevens`, nooit bij iets wat de telefoon aflevert. Een toets zonder verbinding; zonder deze opdracht is het toegestaan.
+   */
+  abonnement?: () => boolean;
   /** de adressen waarop geluisterd wordt (alleen het lokale netwerk); tests geven hier 127.0.0.1 */
   interfaces: () => LocalInterface[];
   /** mag deze afzender? Standaard: alleen uit hetzelfde netwerk als het adres waarop hij binnenkomt. */
@@ -58,6 +63,9 @@ const FAILURE_WINDOW_MS = 60_000;
  *   hallo-antwoord van welke versie de btw-regeltabel is, en kan een telefoon een change-set
  *   (`wijziging`) sturen en om `stamgegevens` vragen. Een klant- of projectwijziging wordt bewaard door
  *   SyncOntvangst (opdracht `sync`); `stamgegevens` krijgt een pagina klanten en projecten (alleen lezen).
+ * - Gegevens naar de telefoon horen bij het abonnement (opdracht `abonnement`): zonder krijgt `stamgegevens` de fout
+ *   `geen-abonnement` en wordt er niets uit de administratie gelezen. Het hallo-antwoord van versie 2 zegt het vooraf.
+ *   Ontvangen hangt er nooit van af: bon, wijziging en bevestigingen vragen het abonnement niet op.
  * - Alles wat binnenkomt is invoer van buiten: begrensd in grootte en op type gecontroleerd. De naam van
  *   het document maakt de app zelf; alleen het ID van de bon wordt (na controle dat het een UUID is) de
  *   naam van het tijdelijke bestand in de wachtrij.
@@ -295,6 +303,11 @@ export class ScannerReceiver {
     uitkomst.na?.();
   }
 
+  /** Mag deze pc gegevens naar de telefoon sturen? Zonder de opdracht `abonnement` is het toegestaan. */
+  private magSturen(): boolean {
+    return this.opts.abonnement ? this.opts.abonnement() : true;
+  }
+
   /**
    * De afhandeling van een geopend verzoek van een gekoppelde telefoon, voor alle routes: geeft de status en het
    * antwoord (JSON) terug en verstuurt zelf niets. De HTTP-kant (`handle`) ontvangt en versleutelt het antwoord;
@@ -330,8 +343,9 @@ export class ScannerReceiver {
       this.opts.pairing.rename(deviceId, msg.naam);
       this.opts.onActivity?.();
       // Een telefoon van versie 2 krijgt ook de versie van de btw-regeltabel, de protocolversies die
-      // deze pc begrijpt, en zijn apparaatcode; versie 1 krijgt precies het oude antwoord.
-      const extra = versie >= 2 ? { regels: RULES_VERSION, protocollen: [...PROTOCOL_VERSIONS], apparaatcode: this.opts.pairing.code(deviceId) } : {};
+      // deze pc begrijpt, zijn apparaatcode, en of hij de stamgegevens mag ophalen (abonnement); versie 1
+      // krijgt precies het oude antwoord. Het hallo zelf wordt altijd beantwoord.
+      const extra = versie >= 2 ? { regels: RULES_VERSION, protocollen: [...PROTOCOL_VERSIONS], apparaatcode: this.opts.pairing.code(deviceId), abonnement: this.magSturen() } : {};
       return reply(200, { ok: true, soort: 'hallo', pc: this.opts.pairing.pcId(), pcTijd: now, limieten: { fotos: LIMITS.maxPhotos, fotoBytes: LIMITS.maxPhotoBytes, notitie: LIMITS.maxNoteChars }, ...extra });
     }
 
@@ -374,6 +388,10 @@ export class ScannerReceiver {
       // Het enige neveneffect van dit bericht: laatst gezien en, bij het eerste bericht, de apparaatcode.
       this.opts.pairing.seen(deviceId);
       this.opts.onActivity?.();
+      // Gegevens naar de telefoon horen bij het abonnement. Zonder: een versleuteld antwoord dat de telefoon kan vertrouwen, en
+      // er wordt niets uit de administratie gelezen of gestuurd. Definitief: opnieuw vragen heeft pas zin als het hallo-antwoord
+      // weer `abonnement: true` zegt.
+      if (!this.magSturen()) return reply(403, { ok: false, fout: 'geen-abonnement' });
       let pagina;
       try {
         pagina = leesStamgegevens(this.opts.database, { sinds: msg.sinds ?? 0, na }, this.opts.log);

@@ -1,2 +1,5 @@
 == verzoek ==
 {"soort":"stamgegevens","tijd":1790848800000,"sinds":412,"na":"eyJzIjoicCIsInQiOjQ4MCwidSI6IjFhMmIzYzRkLTVlNmYtNDA3MS04MjkzLWE0YjVjNmQ3ZThmOSIsImIiOjUwMH0"}
+
+== geen-abonnement ==
+{"ok":false,"fout":"geen-abonnement"}

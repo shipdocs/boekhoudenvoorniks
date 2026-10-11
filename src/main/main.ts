@@ -475,6 +475,8 @@ function initServices(): void {
     secrets,
     intake: services.intake,
     settings: services.settings,
+    // koppelen en gegevens naar de telefoon horen bij het abonnement; de scanner kijkt alleen naar de bewaarde licentie
+    license: services.license,
     invoices: services.invoices,
     spoolDir: scannerSpoolDir(dataDir()),
     adminDir: dataDir(),

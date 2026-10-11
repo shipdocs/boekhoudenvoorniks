@@ -16,7 +16,7 @@ import type { Behandeld } from './receiver';
  *   map) en schrijft het versleutelde antwoord als nieuw bestand in `van-pc/` (naam: `<nonce-hex>.antwoord.bvns`).
  * - Elke kant schrijft alleen in zijn eigen map. Verwerkte verzoeken gaan naar `van-telefoon/verwerkt/`. De pc maakt
  *   nooit iets weg en overschrijft nooit iets: een bestand dat al bestaat blijft zoals het is.
- * - Definitief (200, 400, 413 en een bestand dat nooit zal lukken): antwoordbestand waar dat kan, verzoek naar
+ * - Definitief (200, 400, 413, 403 geen-abonnement en een bestand dat nooit zal lukken): antwoordbestand waar dat kan, verzoek naar
  *   verwerkt/. Herhaalbaar (503, 500, 409 klant-/project-onbekend, niet-ondersteund): het verzoek blijft liggen en
  *   wordt na een rustige terugval opnieuw geprobeerd; het register van SyncOntvangst maakt dat zonder dubbel effect.
  * - Bestanden die niet te lezen zijn, niet van een gekoppeld apparaat komen of zijn aangepast, krijgen geen antwoord
@@ -549,6 +549,8 @@ function classificeer(u: Behandeld): 'herhaal' | { probleem?: Omit<Probleem, 'ap
   if (u.status === 400 && fout === 'niet-ondersteund-via-mail') return { probleem: { soort: 'afgewezen', fout, veld: null } };
   if (u.status === 400) return fout === 'veld-ongeldig' ? { probleem: { soort: 'veld-ongeldig', fout, veld: typeof u.json.veld === 'string' ? u.json.veld : null } } : {};
   if (u.status === 413) return {};
+  // stamgegevens zonder abonnement: een definitief antwoord, geen herhaling en geen regel in het probleemregister
+  if (u.status === 403 && fout === 'geen-abonnement') return {};
   // dezelfde bon-id met andere inhoud komt nooit goed door opnieuw te proberen
   if (u.status === 409 && fout === 'id-botst') return { probleem: { soort: 'afgewezen', fout, veld: null } };
   return 'herhaal';

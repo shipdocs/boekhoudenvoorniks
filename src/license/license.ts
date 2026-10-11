@@ -9,6 +9,7 @@ import { ValidationError } from '../shared/validation';
  * ondertekent (privé-repo shipdocs/boekhoudenvoorniks-server) en dat de app offline controleert met de publieke sleutel hieronder.
  * Alleen *versturen naar je boekhouder* vraagt een licentie; een antwoord inlezen werkt altijd, zodat
  * een klant nooit met een vergrendelde periode blijft zitten. De kantoorkant is gratis.
+ * De koppeling met de telefoon valt onder dezelfde licentie; die regel staat in ./telefoon.ts.
  */
 
 /** Waar de app het abonnement start en de licentie ophaalt. */
