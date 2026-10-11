@@ -7,6 +7,8 @@ import type { SecretStore } from '../integrations/types';
 import type { IntakeService } from '../intake/intake';
 import type { SettingsService } from '../settings/settings';
 import type { InvoiceService } from '../documents/invoices';
+import type { LicenseService } from '../license/license';
+import { eisTelefoonAbonnement, telefoonAbonnement, type TelefoonAbonnement } from '../license/telefoon';
 import { isPathInside } from '../main/path-security';
 import { today } from '../shared/dates';
 import type { PaidWith } from '../shared/paid-with';
@@ -30,6 +32,12 @@ export interface ScannerDeps {
   secrets: SecretStore;
   intake: Pick<IntakeService, 'add' | 'notify'>;
   settings: SettingsService;
+  /**
+   * Het abonnement (zie src/license/telefoon.ts): een nieuwe telefoon koppelen en gegevens naar de telefoon sturen vragen het,
+   * ontvangen nooit. Alleen de toestand zoals ze in de administratie staat; de scanner maakt hiervoor geen verbinding.
+   * Zonder deze dienst gelden licenties als uit (zoals in tests).
+   */
+  license?: Pick<LicenseService, 'status'>;
   /** de factuurdienst van de app (met de writeGuard van de boekhouderskopie); zonder blijft factuur niet-ondersteund (geen eigen Ledger: dat omzeilt de guard) */
   invoices?: Pick<InvoiceService, 'importDefinitive'>;
   /** map van de open administratie waarin ontvangen bonnen wachten tot ze in de inbox staan */
@@ -68,6 +76,8 @@ export interface ScannerStatus {
   firewallHint: boolean;
   /** telefoon koppelen is beschikbaar (zie shared/phone-scanner.ts); anders alleen de bonnenmap */
   phoneAvailable: boolean;
+  /** mogen een nieuwe telefoon koppelen en gegevens naar de telefoon sturen (zie src/license/telefoon.ts)? Ontvangen hangt hier niet van af. */
+  abonnement: TelefoonAbonnement;
   /** bonnen van de telefoon die nog naar de inbox moeten */
   waiting: number;
   /** bonnen die niet in de inbox gezet konden worden; ze blijven bewaard op deze plek */
@@ -137,6 +147,7 @@ export class Bonnenscanner {
       keepLocation: () => deps.settings.get().jobLocation,
       sync: this.sync,
       database: deps.db,
+      abonnement: () => this.abonnement().toegestaan,
       onStored: () => void this.processSpool(),
       onActivity: () => deps.onChange?.(),
       log: this.log,
@@ -187,6 +198,14 @@ export class Bonnenscanner {
    */
   verwerkWachtrij(): void {
     this.sync.verwerkWachtrij();
+  }
+
+  /**
+   * Mogen een nieuwe telefoon koppelen en gegevens naar de telefoon sturen? De regel staat in src/license/telefoon.ts; hier
+   * alleen de toestand van vandaag. Ontvangen (bon, foto, klant, project, factuur en de bevestigingen) vraagt dit nooit op.
+   */
+  abonnement(): TelefoonAbonnement {
+    return telefoonAbonnement(this.deps.license ? this.deps.license.status(today()) : { state: 'uit' });
   }
 
   /** In de demo en in de kopie bij de boekhouder komt er niets binnen. */
@@ -256,6 +275,7 @@ export class Bonnenscanner {
       devices,
       firewallHint: (this.deps.platform ?? process.platform) === 'win32' && !this.pairing.firewallSeen(),
       phoneAvailable: PHONE_SCANNER.available,
+      abonnement: this.abonnement(),
       waiting: this.spool.waiting().length,
       failed: this.spool.failed().map((r) => ({ id: r.id, path: this.spool.pathOf(r.id), error: r.error })),
       folder: this.watch.status(),
@@ -272,11 +292,15 @@ export class Bonnenscanner {
    * Telefoon koppelen: nieuwe sleutel, ontvangstpunt aan, en de gegevens voor de QR-code. Meldt de
    * telefoon zich niet binnen tien minuten, dan vervalt de sleutel en gaat het ontvangstpunt weer uit
    * (als er verder geen telefoon gekoppeld is).
+   *
+   * Een nieuwe koppeling hoort bij het abonnement: zonder wordt er geen sleutel gemaakt en gaat er niets aan.
+   * Bestaande koppelingen blijven zoals ze zijn, en ontkoppelen kan altijd.
    */
   async pair(): Promise<PairingStart> {
     if (!PHONE_SCANNER.available) throw new Error('Een telefoon koppelen kan nog niet: de scanner-app voor Android is er nog niet.');
     const blocked = this.blocked();
     if (blocked) throw new Error(blocked);
+    eisTelefoonAbonnement(this.abonnement());
     const { deviceId, key, expiresAt } = this.pairing.begin();
     await this.refresh();
     const port = this.receiver.port;

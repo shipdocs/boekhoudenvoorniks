@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { Button, DropZone, ErrorBox, Field, Modal, readAsBytes, useAction, useApp, useLoad } from '../ui';
 import { formatDateNl } from '../../shared/dates';
@@ -9,7 +9,7 @@ import { PeriodPicker, usePeriodChoice } from './PeriodClose';
  * Uitwisseling met de boekhouder (docs/uitwisseling.md). De klant stuurt een periode, de boekhouder
  * corrigeert in zijn kopie, de klant leest het antwoord in. Niets gaat via een server van ons.
  */
-export function ExchangeCard({ onChange }: { onChange?: () => void }) {
+export function ExchangeCard({ onChange, subscription = false }: { onChange?: () => void; /** geopend vanaf een verwijzing naar het abonnement: het abonnement tonen, ook zonder gekoppelde boekhouder, en hierheen schuiven */ subscription?: boolean }) {
   const { toast } = useApp();
   const status = useLoad(() => api.exchange.status());
   const choice = usePeriodChoice();
@@ -20,7 +20,14 @@ export function ExchangeCard({ onChange }: { onChange?: () => void }) {
   const license = useLoad(() => api.license.status());
   const [result, setResult] = useState<{ office: string; count: number; summaries: string[]; closedUntil: string; conflicts: { kind: string; label: string }[] } | null>(null);
   const st = status.data;
+  const card = useRef<HTMLDivElement>(null);
+  const shown = Boolean(st && !st.copy);
+  useEffect(() => {
+    if (subscription && shown) card.current?.scrollIntoView({ block: 'start' });
+  }, [subscription, shown]);
   if (!st || st.copy) return null;
+  // het abonnement staat al bij "Sturen t/m" (gekoppeld, geen lopende uitwisseling); anders alleen na een verwijzing ernaar
+  const subscriptionApart = subscription && !(st.partner && !st.running);
 
   const changed = async () => {
     await Promise.all([status.reload(), choice.reload()]);
@@ -39,9 +46,10 @@ export function ExchangeCard({ onChange }: { onChange?: () => void }) {
   };
 
   return (
-    <div className="card grid" data-testid="uitwisseling">
+    <div className="card grid" data-testid="uitwisseling" ref={card}>
       <h2 style={{ margin: 0 }}>🤝 Uitwisseling met je boekhouder</h2>
       <ErrorBox error={status.error ?? choice.error} />
+      {subscriptionApart && license.data && <Subscription status={license.data} onChange={() => void license.reload()} />}
 
       {!st.partner && (
         <>

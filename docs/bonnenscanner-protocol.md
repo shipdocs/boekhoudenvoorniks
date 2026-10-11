@@ -23,6 +23,14 @@ weigert de app te koppelen en luistert de computer nergens naar. De bonnenmap vo
 - Met **Ontkoppelen** trek je de toegang van een telefoon in. Die telefoon kan daarna niets meer
   sturen of ophalen.
 
+## Abonnement
+
+Een nieuwe telefoon koppelen en het bijwerken van je klanten, projecten en btw-regels op de telefoon
+horen bij het abonnement van BoekhoudenVoorNiks. Ontvangen blijft altijd werken: een telefoon die al
+gekoppeld is, blijft gekoppeld, en de bonnen, foto's, klant- en projectwijzigingen en facturen die hij
+stuurt, komen altijd aan en worden bevestigd, ook zonder abonnement. Ontkoppelen kan altijd. Is er weer
+een abonnement, dan werkt alles meteen weer, zonder opnieuw te koppelen.
+
 ## Versleuteld, zonder cloud
 
 - Alles gaat over je eigen netwerk, van de telefoon rechtstreeks naar de computer. Er is geen server
@@ -48,7 +56,7 @@ Een gekoppelde telefoon kan bonnen, foto's bij een project, klant- en projectwij
 aanleveren. De computer controleert alles wat binnenkomt, en een telefoon kan nooit iets verwijderen.
 
 Om onderweg een factuur te kunnen maken haalt de telefoon een beperkte set gegevens op. Dat is
-alleen lezen, altijd versleuteld, en alleen voor een gekoppelde telefoon.
+alleen lezen, altijd versleuteld, en alleen voor een gekoppelde telefoon (zie *Abonnement*).
 
 **Wel:**
 

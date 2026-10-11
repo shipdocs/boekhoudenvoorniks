@@ -104,8 +104,9 @@ describe('bonnenscanner v2: het hallo-antwoord', () => {
     const t = start();
     const p = await pair(t);
     const r = await p.hallo(2);
-    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'hallo', regels: RULES_VERSION, protocollen: [1, 2] } });
-    expect(Object.keys(r.json!).sort()).toEqual(['apparaatcode', 'limieten', 'ok', 'pc', 'pcTijd', 'protocollen', 'regels', 'soort']);
+    // abonnement: mag de telefoon de stamgegevens ophalen (hier staan licenties uit, dus ja; de staten staan in tests/sync-abonnement.test.ts)
+    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'hallo', regels: RULES_VERSION, protocollen: [1, 2], abonnement: true } });
+    expect(Object.keys(r.json!).sort()).toEqual(['abonnement', 'apparaatcode', 'limieten', 'ok', 'pc', 'pcTijd', 'protocollen', 'regels', 'soort']);
     // het antwoord zelf is ook een envelop van versie 2
     expect(r.raw.subarray(0, 4).toString('ascii')).toBe('BVNS');
     expect(r.raw[4]).toBe(2);
@@ -608,7 +609,7 @@ describe('bonnenscanner v2: de voorbeelden van het protocol', () => {
   const verzoek = (soort: string) => voorbeelden.find((v) => v.soort === soort && v.ok === undefined)!;
   const antwoord = (soort: string) => voorbeelden.find((v) => v.soort === soort && v.ok === true)!;
 
-  it('het hallo-antwoord noemt precies wat de code zegt: regels en protocollen, met de oude velden', () => {
+  it('het hallo-antwoord noemt precies wat de code zegt: regels, protocollen, apparaatcode en abonnement, met de oude velden', () => {
     expect(voorbeelden).toHaveLength(5);
     expect(antwoord('hallo')).toEqual({
       ok: true,
@@ -618,6 +619,8 @@ describe('bonnenscanner v2: de voorbeelden van het protocol', () => {
       limieten: { fotos: LIMITS.maxPhotos, fotoBytes: LIMITS.maxPhotoBytes, notitie: LIMITS.maxNoteChars },
       regels: RULES_VERSION,
       protocollen: [...PROTOCOL_VERSIONS],
+      apparaatcode: 'M1',
+      abonnement: true,
     });
   });
 

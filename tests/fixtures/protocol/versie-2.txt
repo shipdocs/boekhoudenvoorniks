@@ -1,5 +1,5 @@
 == hallo-antwoord ==
-{"ok":true,"soort":"hallo","pc":"oKGio6SlpqeoqaqrrK2urw","pcTijd":1790848800123,"limieten":{"fotos":10,"fotoBytes":19922944,"notitie":1000},"regels":1,"protocollen":[1,2]}
+{"ok":true,"soort":"hallo","pc":"oKGio6SlpqeoqaqrrK2urw","pcTijd":1790848800123,"limieten":{"fotos":10,"fotoBytes":19922944,"notitie":1000},"regels":1,"protocollen":[1,2],"apparaatcode":"M1","abonnement":true}
 
 == wijziging ==
 {"soort":"wijziging","tijd":1790848800000,"wijziging":{"entiteit":"klant","uuid":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","revisie":1,"tijd":1790848800000,"velden":{"naam":"Familie Jansen"}}}

@@ -18,7 +18,9 @@ import { leesWijziging, type Wijziging } from '@gratis-boekhouden/kern';
  * welke versie de btw-regeltabel is (rulesVersion) en welke protocolversies de pc begrijpt, een
  * `wijziging` draagt een change-set (het gedeelde wijzigingsformaat uit packages/core) en
  * `stamgegevens` vraagt om de stamgegevens van de administratie (klanten, projecten en aliassen, per
- * pagina; zie src/sync/stamgegevens.ts).
+ * pagina; zie src/sync/stamgegevens.ts). Het hallo-antwoord van versie 2 zegt ook of de telefoon de
+ * stamgegevens mag ophalen (veld `abonnement`); mag dat niet, dan geeft `stamgegevens` de fout
+ * `geen-abonnement`. Wat de telefoon stuurt wordt altijd aangenomen (zie src/license/telefoon.ts).
  */
 export const PROTOCOL_VERSION = 1;
 /** De versies die deze pc begrijpt; een envelop met een ander versienummer wordt geweigerd. */
@@ -74,6 +76,7 @@ export type ErrorCode =
   | 'klant-onbekend'
   | 'project-onbekend'
   | 'wachtrij-vol'
+  | 'geen-abonnement'
   | 'onbekend';
 
 export interface HelloMessage {

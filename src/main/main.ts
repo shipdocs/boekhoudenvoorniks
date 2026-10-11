@@ -41,7 +41,7 @@ import { STORE_LLAMA_CPP } from '../ocr-runtime/manifest';
 import { Administrations, readAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
 import { generateOfficeKeys } from '../exchange/crypto';
-import { LICENSE_API_URL } from '../license/license';
+import { httpDateToIso, LICENSE_API_URL } from '../license/license';
 import { today } from '../shared/dates';
 import Database from 'better-sqlite3';
 import { Bonnenscanner, scannerSpoolDir } from '../scanner/scanner';
@@ -475,6 +475,8 @@ function initServices(): void {
     secrets,
     intake: services.intake,
     settings: services.settings,
+    // koppelen en gegevens naar de telefoon horen bij het abonnement; de scanner kijkt alleen naar de bewaarde licentie
+    license: services.license,
     invoices: services.invoices,
     spoolDir: scannerSpoolDir(dataDir()),
     adminDir: dataDir(),
@@ -678,7 +680,8 @@ function initServices(): void {
         const res = await fetch(`${LICENSE_API_URL}/licentie?administratie=${encodeURIComponent(administrationId)}`, { headers: { authorization: `Bearer ${managementKey}` }, signal: AbortSignal.timeout(15_000) });
         if (res.status === 404) return null;
         if (!res.ok) throw new Error(`De licentieserver gaf een fout (${res.status}); probeer het later opnieuw`);
-        return ((await res.json()) as { token: string }).token;
+        // de datum van de server (HTTP Date) uit hetzelfde antwoord als de licentie, voor de laatst geziene datum van de controle
+        return { token: ((await res.json()) as { token: string }).token, serverDate: httpDateToIso(res.headers.get('date')) };
       },
       start: (input) => postLicense<{ checkout?: string; al?: boolean }>('/start', input),
       cancel: (administrationId, managementKey) => postLicense<{ betaaldTot: string; geldigTot: string }>('/opzeggen', { administratie: administrationId }, managementKey),

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, useAction, useLoad } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, useAction, useApp, useLoad } from '../ui';
 import { formatEuro } from '../../shared/money';
 import { AccountantPackageCard } from './AccountantPackage';
 import { PeriodCloseCard } from './PeriodClose';
@@ -54,6 +54,7 @@ function RevenueChart({ data }: { data: { month: string; label: string; revenue:
 }
 
 export function Overview() {
+  const { route } = useApp();
   const d = useLoad(() => api.dashboard.get());
   // na versturen of inlezen bij de uitwisseling: de kaart voor afsluiten opnieuw laden
   const [periodVersion, setPeriodVersion] = useState(0);
@@ -100,7 +101,7 @@ export function Overview() {
       <CostComparison />
       <FixedCosts />
       <div style={{ marginTop: 14 }}><AccountantPackageCard /></div>
-      <div style={{ marginTop: 14 }}><ExchangeCard onChange={() => setPeriodVersion((v) => v + 1)} /></div>
+      <div style={{ marginTop: 14 }}><ExchangeCard onChange={() => setPeriodVersion((v) => v + 1)} subscription={route.extra?.abonnement === true} /></div>
       <div style={{ marginTop: 14 }}><PeriodCloseCard key={periodVersion} /></div>
     </div>
   );

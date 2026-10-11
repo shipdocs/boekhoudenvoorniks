@@ -317,6 +317,8 @@ function init(fresh) {
     secrets: secretsFor(file),
     intake: services.intake,
     settings: services.settings,
+    // zoals in de app: koppelen en gegevens naar de telefoon horen bij het abonnement (alleen merkbaar met {"licenses":true})
+    license: services.license,
     spoolDir: path.join(path.dirname(file), 'bonnenscanner'),
     // zoals in de app: de map van de administratie, waar foto's van de telefoon onder bijlagen/ komen
     adminDir: path.dirname(file),

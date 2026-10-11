@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { Button, Modal, useAction, useApp, useLoad } from '../ui';
+import { formatDateNl } from '../../shared/dates';
 
 type Status = NonNullable<Awaited<ReturnType<typeof api.scanner.status>>>;
 type Pairing = Awaited<ReturnType<typeof api.scanner.pair>>;
@@ -40,6 +41,27 @@ export function ScannerSettings() {
   );
 }
 
+/**
+ * Een nieuwe telefoon koppelen en gegevens naar de telefoon sturen horen bij het abonnement; ontvangen niet. Deze uitleg
+ * staat er alleen als het abonnement dat nu niet toestaat (de regel zelf staat in src/license/telefoon.ts).
+ */
+function SubscriptionNotice({ abonnement }: { abonnement: Status['abonnement'] }) {
+  const { go } = useApp();
+  if (abonnement.toegestaan) return null;
+  return (
+    <div className="notice grid" data-testid="telefoon-abonnement" style={{ margin: 0 }}>
+      <div>
+        {abonnement.verlopenOp && <><strong>Je abonnement liep tot {formatDateNl(abonnement.verlopenOp)}.</strong>{' '}</>}
+        Een nieuwe telefoon koppelen en het bijwerken van klanten, projecten en btw-regels op je telefoon horen bij het abonnement.
+        Wat een gekoppelde telefoon stuurt (bonnen, foto's, klanten, projecten en facturen), komt altijd aan.
+      </div>
+      <div className="row">
+        <Button small onClick={() => go({ screen: 'overzicht', extra: { abonnement: true } })}>Naar het abonnement</Button>
+      </div>
+    </div>
+  );
+}
+
 function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) {
   const { run, busy } = useAction();
   const [firewall, setFirewall] = useState(false);
@@ -52,6 +74,23 @@ function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) 
     await reload();
   };
 
+  /**
+   * De knop Telefoon koppelen. Staat het abonnement koppelen niet toe, dan haalt de app eerst de licentie op (voor wie net
+   * betaald of verlengd heeft); dat is een eigen stap die niets start. Pas daarna, en op Windows pas na de uitleg over de
+   * firewall, begint het koppelen. Is het nog steeds niet toegestaan, dan geeft het koppelen de melding.
+   */
+  const begin = async () => {
+    let toegestaan = st.abonnement.toegestaan;
+    if (!toegestaan) {
+      const a = await run(() => api.scanner.checkSubscription());
+      if (!a) return;
+      await reload();
+      toegestaan = a.toegestaan;
+    }
+    if (toegestaan && st.firewallHint) return setFirewall(true);
+    await startPairing();
+  };
+
   return (
     <div className="card grid">
       <h3 style={{ margin: 0 }}>Telefoon koppelen</h3>
@@ -59,6 +98,7 @@ function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) 
         Met de scanner-app op je Android-telefoon maak je onderweg een foto van een bon. Ben je thuis op de wifi, dan staat hij vanzelf bij Aankopen &amp; bonnetjes.
         De foto gaat versleuteld van je telefoon rechtstreeks naar deze computer: niet via internet en niet via een cloud.
       </p>
+      <SubscriptionNotice abonnement={st.abonnement} />
 
       {paired.length > 0 && (
         <table className="list small">
@@ -101,7 +141,7 @@ function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) 
         </div>
       )}
       <div className="row">
-        <Button kind="primary" disabled={busy || Boolean(st.blocked)} onClick={() => (st.firewallHint ? setFirewall(true) : void startPairing())}>Telefoon koppelen</Button>
+        <Button kind="primary" disabled={busy || Boolean(st.blocked)} onClick={() => void begin()}>Telefoon koppelen</Button>
       </div>
 
       {firewall && (
