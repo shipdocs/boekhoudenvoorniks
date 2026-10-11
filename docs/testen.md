@@ -19,6 +19,7 @@ Node-versie voordat Vitest start.
 | Eén unit- of integratietest | `npx vitest run tests/btw.test.ts` | Eén testbestand, zonder rebuild |
 | Alle unit- en integratietests | `npm test` | Alle bestanden onder `tests/`, inclusief de proefadministratie |
 | Alleen de vaste proefadministratie | `npm run test:proefadministratie` | XAF, UBL, CAMT en de daaruit volgende boekhouding |
+| Testgegevens van het telefoonprotocol tegen het document | `BVN_PROTOCOL_DOC=<pad> npx vitest run tests/protocol-document.test.ts` | Optioneel: vergelijkt `tests/fixtures/protocol/` met de volledige technische beschrijving; zonder de variabele overgeslagen |
 | TypeScript controleren | `npm run typecheck` | Productiecode en tests |
 | Alle browserflows | `npm run e2e` | Build plus Playwright tegen een tijdelijke database |
 | Browserflows zonder nieuwe build | `npm run e2e:only` | Alleen Playwright |
