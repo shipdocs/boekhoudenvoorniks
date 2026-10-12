@@ -1113,7 +1113,7 @@ export const migrations: string[] = [
      AND id IN (SELECT document_id FROM document_link_migration WHERE result IN ('onzeker','conflict'))
      AND NOT EXISTS (SELECT 1 FROM document_links k WHERE k.document_id = documents.id);
   `,
-  /* 28: bonnenscanner (#48): gekoppelde telefoons, ontvangen bonnen, en notitie en betaalwijze bij een document */ `
+  /* 28: bonnenscanner: gekoppelde telefoons, ontvangen bonnen, en notitie en betaalwijze bij een document */ `
   -- Gekoppelde telefoons. De sleutel staat hier niet: die zit versleuteld in 'secrets' (scanner:key:<id>).
   -- expires_at (ms) alleen zolang de telefoon de QR-code nog niet gescand heeft.
   CREATE TABLE scanner_devices (

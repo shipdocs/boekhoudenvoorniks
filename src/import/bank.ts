@@ -233,6 +233,9 @@ export interface PreviousSale {
 
 export { splitGross } from '../core-ledger/rules';
 
+/** Een bankregel van nul euro: er valt niets te boeken. */
+export const ZERO_AMOUNT_MESSAGE = 'Deze regel is € 0,00, bijvoorbeeld een controle van je betaalkaart. Er valt niets te boeken; de regel telt niet mee in je boekhouding.';
+
 export class BankService {
   constructor(
     private readonly db: Db,
@@ -865,6 +868,7 @@ export class BankService {
         .map((k) => period.get(...k.split('|').map(Number)) as { from: string; to: string } | undefined)
         .filter((p): p is { from: string; to: string } => !!p)
         .sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+      this.ignoreZeroAmounts();
       return { batchId, periods, imported, duplicates, skipped, addedInKnownPeriod, knownFrom, warnings: result.warnings };
     });
   }
@@ -1084,7 +1088,8 @@ export class BankService {
    */
   paymentDoubles(bankAccountId?: number, only?: { amount: Cents }): PaymentDouble[] {
     type Row = DoubleSide & { account: number; counter_iban: string | null; counter_name: string | null; source: string; bankId: string | null; batch: number | null; kind: string | null; accountName: string };
-    const scope = `t.duplicate_of IS NULL AND t.batch_ref IS NULL ${bankAccountId ? 'AND t.bank_account_id = @account' : ''} ${only ? 'AND t.amount = @amount' : ''}`;
+    // een regel van nul euro (kaartcontrole) is nooit "dezelfde betaling": er is geen bedrag dat dubbel kan tellen
+    const scope = `t.duplicate_of IS NULL AND t.batch_ref IS NULL AND t.amount <> 0 ${bankAccountId ? 'AND t.bank_account_id = @account' : ''} ${only ? 'AND t.amount = @amount' : ''}`;
     // alleen bedragen die op één rekening uit meer dan één import komen
     const rows = this.db
       .prepare(
@@ -1224,6 +1229,7 @@ export class BankService {
       // was hij al genegeerd, dan is hij dat na terugzetten weer
       if (t.status === 'genegeerd') this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'was genegeerd') ON CONFLICT(task_key) DO NOTHING`).run(BankService.ignoredKey(txId));
       this.db.prepare(`UPDATE bank_transactions SET status = 'nieuw' WHERE id = ? AND status = 'genegeerd' AND duplicate_of IS NULL`).run(keptId);
+      this.ignoreZeroAmounts(); // een behouden regel van nul euro blijft genegeerd
     });
   }
 
@@ -1256,6 +1262,7 @@ export class BankService {
         const ignored = this.db.prepare(`DELETE FROM task_skips WHERE task_key = ?`).run(BankService.ignoredKey(t.id)).changes > 0;
         this.db.prepare(`UPDATE bank_transactions SET status = ?, duplicate_of = NULL WHERE id = ?`).run(ignored ? 'genegeerd' : 'nieuw', t.id);
         this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'teruggezet') ON CONFLICT(task_key) DO NOTHING`).run(BankService.sameKey(t.id, t.duplicate_of!));
+        this.ignoreZeroAmounts(); // een teruggezette regel van nul euro blijft genegeerd
         return;
       }
       // de melding hoort bij de regel en de eerste deelpost: zoek welke van de twee kanten dit was
@@ -1267,6 +1274,7 @@ export class BankService {
       }
       const [lineId, firstPartId] = siblings[0]!.batch_ref ? [t.duplicate_of!, siblings[0]!.id] : [siblings[0]!.id, t.duplicate_of!];
       this.db.prepare(`INSERT INTO task_skips (task_key, fingerprint, reason) VALUES (?, 'x', 'teruggezet') ON CONFLICT(task_key) DO NOTHING`).run(BankService.doubleKey(lineId, firstPartId));
+      this.ignoreZeroAmounts(); // een teruggezette regel van nul euro blijft genegeerd
     });
   }
 
@@ -1440,9 +1448,18 @@ export class BankService {
     };
   }
 
-  private assertOpen(t: BankTransaction): void {
+  private assertOpen(t: BankTransaction, zeroAllowed = false): void {
     if (t.status === 'gematcht') throw new ValidationError('Deze betaling is al verwerkt');
     if (t.duplicate_of) throw new ValidationError('Deze regel is uit je boekhouding gehaald omdat het bedrag er dubbel in stond. Zet hem eerst terug: open hem en kies "Ongedaan maken".');
+    if (t.amount === 0 && !zeroAllowed) throw new ValidationError(ZERO_AMOUNT_MESSAGE);
+  }
+
+  /**
+   * Een regel van nul euro (bijvoorbeeld de controle van een betaalkaart) heeft niets om te boeken: hij gaat vanzelf op
+   * 'genegeerd' en vraagt de gebruiker niets. Ook voor regels die al waren ingelezen. Geeft het aantal regels terug.
+   */
+  ignoreZeroAmounts(): number {
+    return this.db.prepare(`UPDATE bank_transactions SET status = 'genegeerd' WHERE amount = 0 AND status = 'nieuw' AND duplicate_of IS NULL`).run().changes;
   }
 
   // ---------- verwerken ----------
@@ -1523,6 +1540,7 @@ export class BankService {
    */
   bookSale(txId: number, input: SaleInput): number {
     const t = this.get(txId);
+    if (t.amount === 0) throw new ValidationError(ZERO_AMOUNT_MESSAGE);
     if (t.amount <= 0) throw new ValidationError('Een verkoop is geld dat binnenkomt');
     if (!isSalesVatCode(input.vatCode)) throw new ValidationError('Kies een btw-tarief');
     const channel = input.channel?.trim() || null;
@@ -1695,7 +1713,7 @@ export class BankService {
   ignore(txId: number, duplicateOf?: number | null): void {
     if (duplicateOf) return this.markDuplicate(txId, duplicateOf);
     const t = this.get(txId);
-    this.assertOpen(t);
+    this.assertOpen(t, true);
     this.db.prepare(`UPDATE bank_transactions SET status = 'genegeerd' WHERE id = ?`).run(txId);
   }
 

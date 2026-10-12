@@ -21,7 +21,7 @@ import { ReceiptSpool } from '../src/scanner/spool';
 import { PHONE_SCANNER } from '../src/shared/phone-scanner';
 import { SyncOntvangst } from '../src/sync/ontvangst';
 
-// De mailroute van de telefoon naar de pc (docs/bonnenscanner-protocol.md): een afzonderlijke mail met een versleutelde .bvns-bijlage,
+// De mailroute van de telefoon naar de pc (het protocol van de bonnenscanner): een afzonderlijke mail met een versleutelde .bvns-bijlage,
 // dezelfde envelop als bij het netwerk en de bonnenmap. Echte databank, de echte mailimport, scanner, receiver, SyncOntvangst en
 // InvoiceService; een nep-mailbox (de mailbox zelf is extern), een eigen payload-bouwer en relatieve datums. Niets wacht op een vaste tijd.
 

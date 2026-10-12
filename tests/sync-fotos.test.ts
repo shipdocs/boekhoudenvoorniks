@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { leesFotoVelden, type Wijziging } from '@gratis-boekhouden/kern';
 import { setup } from './helpers';
 import { makeJpeg, makeJpegWithGps, GPS_POSITION } from './fixtures/jpeg';
+import { protocolVoorbeeld } from './fixtures/protocol';
 import { migrate } from '../src/db/database';
 import { migrations } from '../src/db/migrations';
 import { isStoredAttachmentPath, relativizeAttachmentPaths, storedAttachmentPaths } from '../src/db/attachment-paths';
@@ -24,7 +25,7 @@ import { WACHT_BYTES_LIMIET } from '../src/sync/fotos';
 import { SyncOntvangst } from '../src/sync/ontvangst';
 import { WACHTRIJ_LIMIET } from '../src/sync/wachtrij';
 
-// De pc-kant van een foto van de telefoon bij een project (docs/bonnenscanner-protocol.md): entiteit foto, revisie 1,
+// De pc-kant van een foto van de telefoon bij een project (het protocol van de bonnenscanner): entiteit foto, revisie 1,
 // de JPEG's als bijlage. Echte databank, echte SyncOntvangst, SyncWachtrij en ProjectOntvangst, echte bestanden in een
 // tijdelijke administratiemap, een eigen payload-bouwer en relatieve datums.
 
@@ -181,9 +182,8 @@ describe('een foto van de telefoon bij een project op de pc', () => {
     expect(o.bestanden()).toEqual([`bijlagen/telefoon/${uuid}/1.jpg`, `bijlagen/telefoon/${uuid}/2.jpg`]);
     expect(o.register(uuid)).toEqual([{ apparaat_id: telefoon.apparaat, uitkomst: 'toegepast', fout: null, route: 'netwerk' }]);
     expect(o.telling()).toMatchObject({ job_photos: 2, bijlagen: 0, wachtrij: 0, register: 1, bestanden: 2 });
-    // het jsonc-voorbeeld in het protocoldocument is precies zo'n bericht, met de JPEG van 751 bytes als bijlage
-    const doc = readFileSync(join(__dirname, '..', 'docs', 'bonnenscanner-protocol.md'), 'utf8').replace(/\r\n/g, '\n');
-    const voorbeeld = JSON.parse(doc.match(/```jsonc\n(\{"soort":"wijziging"[^\n]*"entiteit":"foto"[^\n]*)\n```/)![1]!) as Record<string, unknown>;
+    // het voorbeeld van het protocol (tests/fixtures/protocol/foto.txt) is precies zo'n bericht, met de JPEG van 751 bytes als bijlage
+    const voorbeeld = JSON.parse(protocolVoorbeeld('foto', 'wijziging').match(/^(\{"soort":"wijziging"[^\n]*"entiteit":"foto"[^\n]*)$/)![1]!) as Record<string, unknown>;
     const voorbeeldFoto = makeJpeg('voorbeeld');
     const gelezen = parseFrame(encodeFrame(voorbeeld, [voorbeeldFoto]), 2);
     if (gelezen.soort !== 'wijziging') throw new Error('onverwacht: geen wijziging');

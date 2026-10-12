@@ -118,8 +118,12 @@ export interface HostContext {
   licenseApi?: {
     /** `bedrag` exclusief btw (`btw: 'exclusief'`); `proefMaanden`: gratis maanden bij een eerste abonnement */
     price(): Promise<{ bedrag: string; valuta: string; per: string; inclusiefBtw?: string; btw?: string; proefMaanden?: number } | null>;
-    /** de ondertekende licentie voor deze administratie, of null als er (nog) geen betaald abonnement is */
-    fetch(administrationId: string, managementKey: string): Promise<string | null>;
+    /**
+     * de ondertekende licentie voor deze administratie, of null als er (nog) geen betaald abonnement is. Met `serverDate`: de
+     * datum van de licentieserver uit hetzelfde antwoord (voor de laatst geziene datum van de licentiecontrole); alleen de
+     * licentie als tekst mag ook, dan is er geen serverdatum
+     */
+    fetch(administrationId: string, managementKey: string): Promise<string | { token: string; serverDate?: IsoDate | null } | null>;
     /** eerste betaling bij Mollie klaarzetten; geeft de betaallink, of `al` als er al een abonnement loopt */
     start(input: { administratie: string; email: string; bedrijf: LicenseBilling; managementKey: string; voorwaarden: string; zakelijk: true }): Promise<{ checkout?: string; al?: boolean }>;
     /** het abonnement stoppen; de betaalde periode loopt af */
@@ -168,7 +172,7 @@ export interface HostContext {
     /** "Toch als bon bewaren": de tekst van een mail die bleef liggen als PDF-bon */
     saveAsReceipt(id: number): Promise<unknown>;
   };
-  /** bonnenscanner (#48): telefoons koppelen, ontvangstpunt en bonnenmap; ontbreekt buiten de app (bv. de koppeling met --mcp) */
+  /** bonnenscanner: telefoons koppelen, ontvangstpunt en bonnenmap; ontbreekt buiten de app (bv. de koppeling met --mcp) */
   scanner?: {
     service(): Bonnenscanner;
     /** de gebruiker wijst zelf een map aan in het venster van het besturingssysteem */
@@ -530,6 +534,15 @@ export function createApi(s: Services, host: HostContext) {
       }
       case 'telefoon-map-problemen:later':
         return;
+      case 'telefoon-abonnement:open':
+        return { navigate: { screen: 'overzicht', extra: { abonnement: true } } };
+      case 'telefoon-abonnement:gezien': {
+        // de melding komt opnieuw uit de databank; de taak van de interface is alleen een aanwijzing
+        const huidig = s.inbox.telefoonAbonnementTaak(today());
+        if (!huidig || huidig.key !== task.key) throw new ValidationError('Deze melding is intussen veranderd. Bekijk Vandaag opnieuw.');
+        s.inbox.skipTask(huidig.key, 'gezien');
+        return;
+      }
       case 'exchange-conflict:klaar':
         s.inbox.skipTask(task.key, 'afgehandeld');
         return;
@@ -700,17 +713,33 @@ export function createApi(s: Services, host: HostContext) {
   /** mailservers weigeren vaak grotere bijlagen */
   const MAIL_LIMIT = 20 * 1024 * 1024;
 
-  /** Vóór versturen: is er een geldige licentie? Zo niet, eerst proberen hem op te halen (net betaald of verlengd). */
-  const ensureLicense = async () => {
+  /**
+   * De licentie ophalen bij de licentieserver: de licentie en, als het antwoord die had, de datum van de server. Die datum
+   * gaat alleen samen met de licentie uit hetzelfde antwoord naar install(), dat de licentie eerst controleert.
+   */
+  const fetchLicense = async (managementKey: string): Promise<{ token: string; serverDate: IsoDate | null } | null> => {
+    const r = await host.licenseApi!.fetch(s.settings.administrationId(), managementKey);
+    if (!r) return null;
+    if (typeof r === 'string') return { token: r, serverDate: null };
+    return r.token ? { token: r.token, serverDate: r.serverDate ?? null } : null;
+  };
+
+  /** Is er geen geldige licentie, dan eerst proberen hem op te halen (net betaald of verlengd). Gooit nooit. */
+  const fetchLicenseIfNeeded = async () => {
     const st = s.license.status(today());
     if (st.state !== 'uit' && st.state !== 'actief' && host.licenseApi) {
       try {
-        const token = await host.licenseApi.fetch(s.settings.administrationId(), s.license.managementKey());
-        if (token) s.license.install(token, today());
+        const fetched = await fetchLicense(s.license.managementKey());
+        if (fetched) s.license.install(fetched.token, today(), fetched.serverDate);
       } catch {
-        /* offline of nog niet betaald: dan de melding van requireActive */
+        /* offline of nog niet betaald: dan de melding van de functie die het abonnement vraagt */
       }
     }
+  };
+
+  /** Vóór versturen: is er een geldige licentie? Zo niet, eerst proberen hem op te halen (net betaald of verlengd). */
+  const ensureLicense = async () => {
+    await fetchLicenseIfNeeded();
     s.license.requireActive(today());
   };
 
@@ -839,7 +868,7 @@ export function createApi(s: Services, host: HostContext) {
       },
       reopenAnswer: () => s.exchange.reopenAnswer(),
     },
-    /** abonnement voor de uitwisseling met de boekhouder */
+    /** abonnement: de uitwisseling met de boekhouder en (regel in license/telefoon.ts) de koppeling met de telefoon */
     license: {
       status: () => s.license.status(today()),
       price: async () => {
@@ -882,15 +911,15 @@ export function createApi(s: Services, host: HostContext) {
         if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
         const managementKey = s.license.managementKey();
         await host.licenseApi.cancel(s.settings.administrationId(), managementKey);
-        const token = await host.licenseApi.fetch(s.settings.administrationId(), managementKey);
-        return token ? s.license.install(token, today()) : s.license.status(today());
+        const fetched = await fetchLicense(managementKey);
+        return fetched ? s.license.install(fetched.token, today(), fetched.serverDate) : s.license.status(today());
       },
       /** na het betalen of verlengen: de licentie ophalen */
       refresh: async () => {
         if (!host.licenseApi) throw new Error('Kan alleen in de app zelf');
-        const token = await host.licenseApi.fetch(s.settings.administrationId(), s.license.managementKey());
-        if (!token) throw new Error('Nog geen betaald abonnement gevonden. Is de betaling net gedaan? Probeer het over een minuut opnieuw.');
-        return s.license.install(token, today());
+        const fetched = await fetchLicense(s.license.managementKey());
+        if (!fetched) throw new Error('Nog geen betaald abonnement gevonden. Is de betaling net gedaan? Probeer het over een minuut opnieuw.');
+        return s.license.install(fetched.token, today(), fetched.serverDate);
       },
     },
     /** meerdere administraties op deze computer (bv. bv en eenmanszaak, of een boekhouder met kopieën van klanten) */
@@ -1006,18 +1035,32 @@ export function createApi(s: Services, host: HostContext) {
       },
     },
     /**
-     * Bonnenscanner (#48): de bonnenmap, en (zodra PHONE_SCANNER aan staat) telefoon koppelen met een
+     * Bonnenscanner: de bonnenmap, en (zodra PHONE_SCANNER aan staat) telefoon koppelen met een
      * QR-code. De sleutel van een telefoon komt alleen als QR-code naar het scherm, en alleen op het
      * moment van koppelen.
      */
     scanner: {
       status: () => (host.scanner ? host.scanner.service().status() : null),
       pair: async () => {
-        // tot de Android-app er is (#49) weigert de api te koppelen: het ontvangstpunt en mDNS starten dan nooit
+        // tot de Android-app er is weigert de api te koppelen: het ontvangstpunt en mDNS starten dan nooit
         if (!PHONE_SCANNER.available) throw new ValidationError('Een telefoon koppelen kan nog niet: de scanner-app voor Android is er nog niet.');
+        // Een nieuwe koppeling hoort bij het abonnement (src/license/telefoon.ts); de scanner weigert zelf. Hier wordt de licentie
+        // niet opgehaald: dat is de aparte stap checkSubscription, zodat het ontvangstpunt nooit start in dezelfde aanroep waarin
+        // de licentie binnenkomt (het scherm toont op Windows eerst de uitleg over de firewall).
         const p = await scanner().pair();
         const svg = await QRCode.toString(p.payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
         return { deviceId: p.deviceId, expiresAt: p.expiresAt, addresses: p.addresses, port: p.port, svg };
+      },
+      /**
+       * De stap vóór het koppelen bij een niet toegestaan abonnement: eerst proberen de licentie op te halen (net betaald of
+       * verlengd), zoals bij versturen naar de boekhouder. Start niets en koppelt niets; geeft alleen de stand terug. Niet in de
+       * demo of in de kopie bij de boekhouder: daar weigert de scanner toch al, en gaat er niets naar buiten.
+       */
+      checkSubscription: async () => {
+        if (!PHONE_SCANNER.available) throw new ValidationError('Een telefoon koppelen kan nog niet: de scanner-app voor Android is er nog niet.');
+        const service = scanner();
+        if (!service.blocked() && !service.abonnement().toegestaan) await fetchLicenseIfNeeded();
+        return service.abonnement();
       },
       cancelPairing: (deviceId: string) => scanner().cancelPairing(String(deviceId)),
       unpair: (deviceId: string) => scanner().unpair(String(deviceId)),

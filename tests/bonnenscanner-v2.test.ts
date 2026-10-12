@@ -1,17 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setup } from './helpers';
 import { makeJpeg } from './fixtures/jpeg';
+import { protocolVoorbeeld, protocolVoorbeelden } from './fixtures/protocol';
 import { Bonnenscanner, type ScannerDeps } from '../src/scanner/scanner';
 import { PHONE_SCANNER } from '../src/shared/phone-scanner';
 import { CONTENT_TYPE, ENDPOINT_PATH, LIMITS, PROTOCOL_VERSIONS, RULES_VERSION, decodePairing, encodeFrame, openResponse, parseFrame, sealRequest, type PairingPayload, type ProtocolVersion } from '../src/scanner/protocol';
 import { leesCursor } from '../src/sync/stamgegevens';
 import { REGELTABEL, REGELTABEL_VERSIE, besluitWijziging, leesWijziging, type WijzigingsFout } from '@gratis-boekhouden/kern';
 
-// Protocol versie 2 naast versie 1 (docs/bonnenscanner-protocol.md): het hallo-antwoord van v2 noemt
+// Protocol versie 2 naast versie 1 (het protocol van de bonnenscanner): het hallo-antwoord van v2 noemt
 // de versie van de btw-regeltabel (rulesVersion) en de ondersteunde protocolversies, en de telefoon
 // kan een change-set (`wijziging`) sturen en om `stamgegevens` vragen. Van versie 1 verandert niets.
 // Klantwijzigingen worden bewaard (tests/sync-klanten.test.ts); stamgegevens, projecten, facturen, bonnen en foto's nog niet.
@@ -103,8 +104,9 @@ describe('bonnenscanner v2: het hallo-antwoord', () => {
     const t = start();
     const p = await pair(t);
     const r = await p.hallo(2);
-    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'hallo', regels: RULES_VERSION, protocollen: [1, 2] } });
-    expect(Object.keys(r.json!).sort()).toEqual(['apparaatcode', 'limieten', 'ok', 'pc', 'pcTijd', 'protocollen', 'regels', 'soort']);
+    // abonnement: mag de telefoon de stamgegevens ophalen (hier staan licenties uit, dus ja; de staten staan in tests/sync-abonnement.test.ts)
+    expect(r).toMatchObject({ status: 200, sealed: true, json: { ok: true, soort: 'hallo', regels: RULES_VERSION, protocollen: [1, 2], abonnement: true } });
+    expect(Object.keys(r.json!).sort()).toEqual(['abonnement', 'apparaatcode', 'limieten', 'ok', 'pc', 'pcTijd', 'protocollen', 'regels', 'soort']);
     // het antwoord zelf is ook een envelop van versie 2
     expect(r.raw.subarray(0, 4).toString('ascii')).toBe('BVNS');
     expect(r.raw[4]).toBe(2);
@@ -597,19 +599,17 @@ describe('bonnenscanner v2: het wijzigingsformaat in de kern (packages/core, zui
   });
 });
 
-describe('bonnenscanner v2: de voorbeelden in het document', () => {
-  // Het v2-deel van docs/bonnenscanner-protocol.md noemt dit bestand als zijn controle (de json-blokken
-  // van versie 1 horen bij tests/bonnenscanner.test.ts). De voorbeeldberichtjes van versie 2 staan er
-  // als tekst in; hier worden ze gelezen zoals de telefoon ze ziet.
-  const doc = readFileSync(join(__dirname, '..', 'docs', 'bonnenscanner-protocol.md'), 'utf8').replace(/\r\n/g, '\n');
-  const voorbeelden = [...doc.matchAll(/```text\n([\s\S]*?)```/g)]
-    .map((m) => m[1]!.trim())
+describe('bonnenscanner v2: de voorbeelden van het protocol', () => {
+  // De voorbeeldberichtjes van versie 2 staan als vaste testgegevens in tests/fixtures/protocol/versie-2.txt
+  // (die van versie 1 horen bij tests/bonnenscanner.test.ts). Ze staan er als tekst in; hier worden ze
+  // gelezen zoals de telefoon ze ziet.
+  const voorbeelden = Object.values(protocolVoorbeelden('versie-2'))
     .filter((body) => body.startsWith('{'))
     .map((body) => JSON.parse(body) as Record<string, unknown>);
   const verzoek = (soort: string) => voorbeelden.find((v) => v.soort === soort && v.ok === undefined)!;
   const antwoord = (soort: string) => voorbeelden.find((v) => v.soort === soort && v.ok === true)!;
 
-  it('het hallo-antwoord noemt precies wat de code zegt: regels en protocollen, met de oude velden', () => {
+  it('het hallo-antwoord noemt precies wat de code zegt: regels, protocollen, apparaatcode en abonnement, met de oude velden', () => {
     expect(voorbeelden).toHaveLength(5);
     expect(antwoord('hallo')).toEqual({
       ok: true,
@@ -619,6 +619,8 @@ describe('bonnenscanner v2: de voorbeelden in het document', () => {
       limieten: { fotos: LIMITS.maxPhotos, fotoBytes: LIMITS.maxPhotoBytes, notitie: LIMITS.maxNoteChars },
       regels: RULES_VERSION,
       protocollen: [...PROTOCOL_VERSIONS],
+      apparaatcode: 'M1',
+      abonnement: true,
     });
   });
 
@@ -653,7 +655,7 @@ describe('bonnenscanner v2: de voorbeelden in het document', () => {
       expect(Object.keys(item)).toEqual(['uuid', 'seq', 'pc_revisie', 'gearchiveerd', 'velden']);
     }
     // de cursor in het tweede verzoek-voorbeeld is er een die de pc zelf zou maken
-    const metCursor = JSON.parse(doc.match(/```jsonc\n(\{"soort":"stamgegevens"[\s\S]*?)```/)![1]!) as { sinds: number; na: string };
+    const metCursor = JSON.parse(protocolVoorbeeld('stamgegevens-vervolg', 'verzoek')) as { sinds: number; na: string };
     expect(parseFrame(encodeFrame(metCursor), 2)).toMatchObject({ soort: 'stamgegevens', sinds: 412, na: metCursor.na });
     expect(leesCursor(metCursor.na)).toEqual({ s: 'p', t: 480, u: '1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9', b: 500 });
   });

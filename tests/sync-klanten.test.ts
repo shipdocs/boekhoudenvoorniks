@@ -14,7 +14,7 @@ import { RelationsService } from '../src/relations/relations';
 import { SyncOntvangst } from '../src/sync/ontvangst';
 import { veldOndergrens } from '../src/sync/ondergrens';
 
-// Klantwijzigingen van de telefoon worden bewaard (docs/bonnenscanner-protocol.md): per veld
+// Klantwijzigingen van de telefoon worden bewaard (het protocol van de bonnenscanner): per veld
 // gecontroleerd, idempotent op (apparaat, entiteit, uuid, revisie), per veld samengevoegd op tijd en
 // bron, en in een transactie opgeslagen. De tests lopen via de receiver (versleutelde berichten over
 // het loopback-netwerk) en kijken daarna in de database.

@@ -1,6 +1,6 @@
 /**
- * De plek waar een foto gemaakt is uit een JPEG halen, zonder het beeld aan te raken (bonnenscanner,
- * #48; locatie is opt-in, #32). Het beeld wordt niet opnieuw gecomprimeerd: alleen de gegevens vóór
+ * De plek waar een foto gemaakt is uit een JPEG halen, zonder het beeld aan te raken (bonnenscanner;
+ * locatie is opt-in, #32). Het beeld wordt niet opnieuw gecomprimeerd: alleen de gegevens vóór
  * de beelddata veranderen.
  *
  * Wat eruit gaat:

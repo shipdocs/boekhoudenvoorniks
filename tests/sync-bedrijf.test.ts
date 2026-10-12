@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setup } from './helpers';
+import { protocolVoorbeelden } from './fixtures/protocol';
 import {
   BEDRIJF_GEGEVENS_SLEUTELS,
   BEDRIJF_LIMIETEN,
@@ -429,18 +430,21 @@ describe('blok bedrijf: grootte', () => {
       },
     };
     expect(leesBedrijf(JSON.parse(JSON.stringify(max))).ok).toBe(true);
-    // een eerste pagina met 100 klanten en projecten blijft hooguit zo'n 1,5 MiB (zie het protocoldocument); reken ruim 3 MiB
+    // een eerste pagina met 100 klanten en projecten blijft hooguit zo'n 1,5 MiB (gemeten bij het protocol); reken ruim 3 MiB
     const bytes = Buffer.byteLength(JSON.stringify({ bedrijf: max }), 'utf8');
     expect(bytes).toBeLessThan(LIMITS.maxBodyBytes - 3 * 1024 * 1024);
     expect(bytes).toBeLessThan(3 * 1024 * 1024);
   });
 });
 
-describe('blok bedrijf: het uitgewerkte voorbeeld in het protocoldocument', () => {
-  const doc = readFileSync(join(__dirname, '..', 'docs', 'bonnenscanner-protocol.md'), 'utf8').replace(/\r\n/g, '\n');
-  const uitgewerkt = JSON.parse(/```jsonc\n(\{\n {2}"versie"[\s\S]*?\n\})\n```/.exec(doc)![1]!) as unknown;
+describe('blok bedrijf: het uitgewerkte voorbeeld van het protocol', () => {
+  // de vaste testgegevens van het blok (tests/fixtures/protocol/bedrijf.txt): het uitgewerkte voorbeeld en de
+  // stukken van de beschrijving die het blok, de lezer met zijn grenzen en de privacygrens noemen
+  const bedrijf = protocolVoorbeelden('bedrijf');
+  const doc = Object.values(bedrijf).join('\n');
+  const uitgewerkt = JSON.parse(/^(\{\n {2}"versie"[\s\S]*?\n\})$/.exec(bedrijf.blok!)![1]!) as unknown;
   const inAntwoord = (() => {
-    const blokken = [...doc.matchAll(/```text\n([\s\S]*?)```/g)].map((m) => m[1]!.trim()).filter((b) => b.startsWith('{"ok":true,"soort":"stamgegevens"'));
+    const blokken = Object.values(protocolVoorbeelden('versie-2')).filter((b) => b.startsWith('{"ok":true,"soort":"stamgegevens"'));
     return (JSON.parse(blokken[0]!) as { bedrijf: unknown }).bedrijf;
   })();
 
@@ -464,7 +468,7 @@ describe('blok bedrijf: het uitgewerkte voorbeeld in het protocoldocument', () =
     expect(blok(t)).toEqual(uitgewerkt);
   });
 
-  it('het document noemt het blok bedrijf, de grenzen en de aangepaste privacygrens', () => {
+  it('de beschrijving noemt het blok bedrijf, de grenzen en de aangepaste privacygrens', () => {
     expect(doc).toContain('**Het blok bedrijf (`bedrijf`).**');
     expect(doc).toContain('leesBedrijf');
     expect(doc).toContain('BEDRIJF_LIMIETEN');

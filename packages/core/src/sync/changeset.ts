@@ -1,7 +1,8 @@
 /**
- * Het gedeelde wijzigingsformaat (change-set) van het bonnenscanner-protocol versie 2: zo meldt de
- * telefoon een wijziging aan de pc, en zo kan een latere Android-app hetzelfde doen. Dit bestand is
- * puur formaat en regels, zonder Node of database: het bewaren en synchroniseren zelf hoort elders.
+ * Het gedeelde wijzigingsformaat (change-set) van versie 2 van het protocol van de bonnenscanner: zo
+ * meldt de telefoon een wijziging aan de pc, en zo kan een latere Android-app hetzelfde doen. Dit
+ * bestand is puur formaat en regels, zonder Node of database: het bewaren en synchroniseren zelf hoort
+ * elders.
  *
  * Een wijziging beschrijft precies één entiteit:
  * - `entiteit` — wat het is: klant, project, factuur, bon of foto;

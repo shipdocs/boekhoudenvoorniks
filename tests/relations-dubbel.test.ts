@@ -15,7 +15,7 @@ import { leesBevestigingen } from '../src/sync/bevestigingen';
 import { leesStamgegevens } from '../src/sync/stamgegevens';
 import type { Task } from '../src/inbox/inbox';
 
-// Dubbele klanten op de pc (docs/bonnenscanner-protocol.md): zoeken, voorstellen op Vandaag en alleen na een
+// Dubbele klanten op de pc (het protocol van de bonnenscanner): zoeken, voorstellen op Vandaag en alleen na een
 // expliciete keuze samenvoegen via een alias. Echte databank, echte klassen, relatieve datums, geen mocks.
 
 const DAG = 24 * 60 * 60 * 1000;

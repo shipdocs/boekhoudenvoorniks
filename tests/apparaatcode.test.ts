@@ -16,7 +16,7 @@ import { CONTENT_TYPE, ENDPOINT_PATH, decodePairing, encodeFrame, openResponse, 
 
 // De apparaatcode (M1, M2, …): door de pc toegekend aan elke nieuwe koppeling, nooit hergebruikt
 // (ook niet na ontkoppelen: dan wordt hij alleen afgesloten), en terug te zien in het hallo-antwoord
-// van versie 2 (docs/bonnenscanner-protocol.md). Het harnas hieronder is gekopieerd uit
+// van versie 2 (het protocol van de bonnenscanner). Het harnas hieronder is gekopieerd uit
 // bonnenscanner-v2.test.ts.
 
 const LOOPBACK = [{ address: '127.0.0.1', netmask: '255.0.0.0' }];

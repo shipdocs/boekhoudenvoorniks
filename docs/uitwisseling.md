@@ -339,8 +339,16 @@ Een klant zonder boekhouder kan een jaar zelf afsluiten: hetzelfde slot, zonder 
 - Alleen **versturen naar de boekhouder** vraagt een licentie. Een antwoord inlezen werkt altijd, zodat
   een klant nooit met een vergrendelde periode blijft zitten. Koppelen en alles aan de kant van het
   kantoor is gratis.
+- De koppeling met de telefoon valt onder dezelfde licentie (`src/license/telefoon.ts`): een nieuwe
+  telefoon koppelen en gegevens naar de telefoon sturen vragen haar; wat een gekoppelde telefoon stuurt,
+  wordt altijd aangenomen. Zie `docs/bonnenscanner-protocol.md`.
 - De licentie wordt offline gecontroleerd; de details van de licentieserver staan niet in deze repo.
   Wie nooit een licentie had, maakt geen verbinding.
+- De controle rekent met de **laatst geziene datum**: de laatste van de datum van vandaag en de datum
+  die bij een eerdere controle in de administratie is bewaard. Die bewaarde datum gaat alleen omhoog.
+  Alleen een licentie die bij de licentieserver wordt opgehaald, zet hem op de datum van de server uit
+  dat antwoord. In de demo, in de kopie bij de boekhouder en in een administratie die alleen gelezen
+  kan worden, bewaart de controle niets en rekent ze met wat er staat.
 - Opzetten en deployen: `licentie/README.md` in de privé-repo `shipdocs/boekhoudenvoorniks-server`.
 
 ## Buiten de scope van de eerste versie

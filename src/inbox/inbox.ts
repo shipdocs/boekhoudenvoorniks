@@ -45,6 +45,9 @@ import { telefoonKlantenZonderControle, viesTaakKey } from '../btw/vies';
 import { dubbelTaakKey, openVoorstellen, zoekDubbelen, type DubbelVoorstelMetKlanten } from '../relations/dubbelen';
 import { MAP_MAX_ONGEZIEN, MAP_SOORTEN } from '../scanner/map-route';
 import { ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_NIET_VERSTUURD, reeksNummer } from '../sync/reeks';
+import type { LicenseService } from '../license/license';
+import { telefoonAbonnement } from '../license/telefoon';
+import { PHONE_SCANNER } from '../shared/phone-scanner';
 
 
 /** De woorden bij een soort probleem van de bonnenmap, in gewone taal (geen paden en geen inhoud). */
@@ -109,6 +112,7 @@ export type TaskKind =
   | 'vies-nacontrole'
   | 'klant-dubbel'
   | 'telefoon-map-problemen'
+  | 'telefoon-abonnement'
   | 'vat-suppletie'
   | 'supplier-auto'
   | 'vat-check'
@@ -329,6 +333,12 @@ export class InboxService {
   private booked: BookedPayments | null = null;
   setBookedPayments(booked: BookedPayments): void {
     this.booked = booked;
+  }
+
+  /** het abonnement, voor de melding bij een gekoppelde telefoon (alleen de toestand zoals ze in de administratie staat) */
+  private license: Pick<LicenseService, 'status'> | null = null;
+  setLicense(license: Pick<LicenseService, 'status'>): void {
+    this.license = license;
   }
 
   private statements: StatementFolder | null = null;
@@ -574,6 +584,7 @@ export class InboxService {
   autoProcess(asOf: IsoDate = today()): { matched: number; booked: number } {
     // de kopie bij de boekhouder boekt niets zelf
     if (this.settings.officeCopy()) return { matched: 0, booked: 0 };
+    this.bank.ignoreZeroAmounts(); // een regel van nul euro (kaartcontrole) heeft niets om te boeken en vraagt niets
     this.recurring.detect(); // vaste lasten herkennen (alleen voorstellen, niets boeken)
     const level = this.settings.get().autopilot;
     // dubbel geboekte aankopen herstellen: geen nieuwe beslissing, dus ook bij "voorzichtig"
@@ -832,6 +843,7 @@ export class InboxService {
     const held = this.bank.heldAsDouble(doubles);
     for (const t of this.bank.list({ status: 'nieuw', limit: 200 })) {
       if (held.has(t.id)) continue;
+      if (t.amount === 0) continue; // nul euro: niets te boeken, dus ook geen vraag
       if (firstOpen && t.transaction_date < firstOpen) {
         locked[this.ledger.periodLockFor(t.transaction_date)?.kind ?? 'afgesloten']++;
         continue;
@@ -1113,6 +1125,8 @@ export class InboxService {
 
     tasks.push(...this.dubbeleKlantTaken());
     tasks.push(...this.mapProbleemTaken());
+    const abonnement = this.telefoonAbonnementTaak(asOf);
+    if (abonnement) tasks.push(abonnement);
 
     const lock = this.ledger.periodLock();
     for (const kind of ['afgesloten', 'uitwisseling'] as const) {
@@ -1906,6 +1920,8 @@ export class InboxService {
       'vies-nacontrole:controleer': 'Het btw-nummer van deze klant gaat nu naar ec.europa.eu (VIES, de EU-dienst) en niets anders. De uitslag met datum wordt bewaard als bewijs. Is het nummer geldig, dan verdwijnt de melding.',
       'telefoon-map-problemen:gezien': 'De melding verdwijnt voor deze regels. Er wordt niets gewijzigd, geboekt of verwijderd; de regels blijven bewaard. Komt er later iets nieuws binnen, dan krijg je weer een melding.',
       'telefoon-map-problemen:later': 'Er verandert niets. De melding blijft staan.',
+      'telefoon-abonnement:open': 'Je gaat naar het abonnement. Er verandert niets tot je daar zelf iets kiest.',
+      'telefoon-abonnement:gezien': 'De melding verdwijnt. Er verandert niets: wat je telefoon stuurt, blijft aankomen.',
       'vies-nacontrole:open': 'Je gaat naar de klant; daar kun je het btw-nummer nakijken of aanpassen. Er wordt niets naar VIES gestuurd.',
       'vies-nacontrole:gezien': 'De melding verdwijnt voor dit btw-nummer. Er wordt niets naar VIES gestuurd en niets gewijzigd. Verandert het btw-nummer, dan komt de melding opnieuw.',
       'document-review:prive': OWN_HINTS.prive,
@@ -1949,6 +1965,42 @@ export class InboxService {
       'bank-balance:negeren': 'Er verandert niets in je boekhouding. De app vraagt er pas weer naar als het verschil verandert.',
     };
     for (const a of t.actions) a.hint ??= hints[`${t.kind}:${a.id}`];
+  }
+
+  /**
+   * Een gekoppelde telefoon terwijl het abonnement geen gegevens naar de telefoon toestaat (de regel: src/license/telefoon.ts):
+   * hoogstens een melding, die de gebruiker kan wegklikken. Ze komt alleen terug bij een andere toestand (een abonnement dat op
+   * een andere dag afliep). Niets te zien zolang telefoon koppelen uit staat, zonder gekoppelde telefoon of als het is toegestaan.
+   */
+  telefoonAbonnementTaak(asOf: IsoDate = today()): Task | null {
+    if (!PHONE_SCANNER.available || !this.license || this.settings.officeCopy()) return null;
+    const a = telefoonAbonnement(this.license.status(asOf));
+    if (a.toegestaan) return null;
+    let gekoppeld: number;
+    try {
+      gekoppeld = (this.db.prepare('SELECT COUNT(*) AS n FROM scanner_devices WHERE paired_at IS NOT NULL').get() as { n: number }).n;
+    } catch {
+      return null;
+    }
+    if (gekoppeld === 0) return null;
+    const key = `telefoon-abonnement:${a.verlopenOp ?? 'geen'}`;
+    if (this.isSkipped(key)) return null;
+    return {
+      key,
+      kind: 'telefoon-abonnement',
+      icon: '📱',
+      title: 'Je telefoon wordt niet meer bijgewerkt',
+      question:
+        `${a.verlopenOp ? `Je abonnement liep tot ${formatDateNl(a.verlopenOp)}. ` : ''}` +
+        `Het bijwerken van klanten, projecten en btw-regels op je telefoon en het koppelen van een nieuwe telefoon horen bij het abonnement. ` +
+        `Wat je gekoppelde telefoon stuurt (bonnen, foto's, klanten, projecten en facturen), komt altijd aan.`,
+      priority: 3,
+      actions: [
+        { id: 'open', label: 'Naar het abonnement', primary: true },
+        { id: 'gezien', label: 'Gezien' },
+      ],
+      ref: {},
+    };
   }
 
   /**

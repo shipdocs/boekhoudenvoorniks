@@ -20,7 +20,7 @@ import { ReceiptSpool } from '../src/scanner/spool';
 import { PHONE_SCANNER } from '../src/shared/phone-scanner';
 import { SyncOntvangst } from '../src/sync/ontvangst';
 
-// De bonnenmap als tweede route (docs/bonnenscanner-protocol.md): dezelfde versleutelde berichten als over het netwerk reizen
+// De bonnenmap als tweede route (het protocol van de bonnenscanner): dezelfde versleutelde berichten als over het netwerk reizen
 // als bestanden door van-telefoon/ en van-pc/. Echte databank, echte bestanden in tijdelijke mappen, de echte receiver, SyncOntvangst
 // en InvoiceService, een eigen payload-bouwer en relatieve datums. De rondgang wordt met scanMap() zelf gedraaid (stabiele grootte
 // 0 ms): de test wacht op een toestand, nooit een vaste tijd. Bestandsfouten worden nagebootst via de opties van de scanner (ook op Windows).
@@ -907,7 +907,8 @@ describe('de bonnenmap als tweede route', () => {
     expect(p.antwoord(later.nonce)).toMatchObject({ uitkomst: 'toegepast' });
     expect(o.rijen('SELECT name, city FROM relations WHERE uuid = ?', klant)).toEqual([{ name: 'Familie Bakker', city: 'Utrecht' }]);
     expect(o.register().filter((r) => r.uuid === klant)).toHaveLength(2);
-    // de status: aantallen, nooit paden of inhoud
+    // de status: aantallen, nooit paden of inhoud. De tellers lopen een fractie achter op het verplaatsen van het bestand; wacht tot ze zijn bijgewerkt
+    await wacht(() => tweede.status().map.verwerkt === 2 && tweede.status().map.wachtend === 0);
     const status = tweede.status().map;
     expect(Object.keys(status).sort()).toEqual(['actief', 'bereikbaar', 'herhaalt', 'problemen', 'verwerkt', 'wachtend']);
     expect(status).toMatchObject({ actief: true, bereikbaar: true, wachtend: 0, herhaalt: 0, verwerkt: 2, problemen: 0 });

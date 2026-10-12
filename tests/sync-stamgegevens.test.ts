@@ -13,7 +13,7 @@ import { volgendeSyncSeq } from '../src/sync/teller';
 import { CURSOR_MAX_TEKENS, STAMGEGEVENS_PAGINA, leesCursor, maakCursor } from '../src/sync/stamgegevens';
 import { maakJobAan } from '../src/jobs/revisie';
 
-// Het stamgegevens-antwoord van de pc (docs/bonnenscanner-protocol.md, deel `stamgegevens`): klanten en
+// Het stamgegevens-antwoord van de pc (het protocol van de bonnenscanner, bericht `stamgegevens`): klanten en
 // projecten per pagina, delta op de pc-teller sync_seq, de aliassen op de eerste pagina, alleen lezen en
 // alleen de whitelist uit de administratie. De vervanger van de oude bevestigingstest staat in
 // tests/bonnenscanner-v2.test.ts.
