@@ -55,7 +55,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
   const checksLoad = useLoad(async () => ({ key: selected, list: selected ? await api.vat.checks(selected) : [] }), [selected]);
   const checks = { data: checksLoad.data && checksLoad.data.key === selected ? checksLoad.data.list : undefined, reload: checksLoad.reload };
   const [details, setDetails] = useState(false);
-  /** vakken waarvan je een bedrag hebt gekopieerd; alleen een geheugensteun op dit scherm (#322) */
+  /** vakken (per periode) waarvan je een bedrag hebt gekopieerd; alleen een geheugensteun op dit scherm (#322) */
   const [copied, setCopied] = useState<ReadonlySet<string>>(new Set());
   const [detail, setDetail] = useState<{ code: string; title: string } | null>(null);
   const [checkLines, setCheckLines] = useState<{ account: string; upTo?: string; title: string; hint: string } | null>(null);
@@ -80,7 +80,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
   const r = report.data;
   const copy = (value: number | null, code?: string) => {
     if (value === null) return;
-    if (code) setCopied((c) => new Set(c).add(code));
+    if (code && r) setCopied((c) => new Set(c).add(`${r.period.key}:${code}`));
     void navigator.clipboard.writeText(String(value));
     toast(`${value} gekopieerd`);
   };
@@ -217,7 +217,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
               <div className="rubriek small muted"><span>Vak</span><span /><span className="num">Omzet</span><span className="num">Btw</span></div>
               {r.rubrieken.filter((x) => x.code !== '5c' && !(/^[34]/.test(x.code) && !x.omzet && !x.btw)).map((x) => (
                 <div key={x.code} className="rubriek">
-                  <strong>{x.code}{copied.has(x.code) && <span title="Bedrag gekopieerd"> ✓</span>}</strong>
+                  <strong>{x.code}{copied.has(`${r.period.key}:${x.code}`) && <span title="Bedrag gekopieerd"> ✓</span>}</strong>
                   <span>
                     {x.label}{RUBRIEK_UITLEG[x.code] && <span className="small muted"> · {RUBRIEK_UITLEG[x.code]}</span>}
                     {x.code !== '5g' && (x.omzet || x.btw) ? <> <button className="linklike small" title="Welke boekingen zitten hierin?" onClick={() => setDetail({ code: x.code, title: `Vak ${x.code}: ${RUBRIEK_UITLEG[x.code] ?? x.label}` })}>🔍 details</button></> : null}
