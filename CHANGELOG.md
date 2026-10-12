@@ -3,6 +3,7 @@
 ## Nog niet uitgebracht
 
 ### Verbeterd
+- **Klusresultaat: indicatie van je eigen uurloon.** Staan er uren (eenheid "uur") op de werkbon van een klus, dan zie je onder het resultaat "ongeveer € X per uur". Het is alleen een indicatie: uren zijn geen kosten en het klusresultaat en je boekhouding veranderen niet (#326).
 - **Bankregel van € 0,00 vraagt niets meer.** Een regel van nul euro op je afschrift, bijvoorbeeld de controle van een betaalkaart, heeft niets om te boeken. De app zet zo'n regel nu zelf op genegeerd: hij komt niet meer als vraag "zakelijk of privé" op Vandaag en bij Bank staat erbij waarom. Wie zo'n regel toch probeerde in te delen kreeg een technische foutmelding; dat is nu een gewone uitleg.
 - **Verlegde btw bij een banktransactie: kies 9% of 21%.** Boek je een betaling als aankoop met verlegde btw (via Bank of de vraag op Vandaag), dan verschijnt nu ook daar de keuze "Tarief van wat je kocht" (standaard 21%).
 - **Goederen aan Noord-Ierland zijn een levering binnen de EU.** Voor de btw blijft Noord-Ierland bij goederen een EU-land (Belastingdienst, toelichting opgaaf ICP 2026). Een klant met land Noord-Ierland (XI) kun je nu kiezen en de keuze "Goederen aan een bedrijf in een ander EU-land" is toegestaan: rubriek 3b en opgaaf ICP met landcode XI. Uitvoer (rubriek 3a) van goederen naar Noord-Ierland weigert de app nu met een uitleg. Diensten aan Noord-Ierland blijven "klant buiten de EU"; Groot-Brittannië blijft een derde land. Bestaande facturen veranderen niet (#317).
