@@ -373,9 +373,19 @@ describe('bonnenmap', () => {
     expect(t.scanner.folder()).toBeNull();
   });
 
+  it('zonder gekoppelde telefoon komen er geen mappen van-telefoon/ en van-pc/ in de bonnenmap', async () => {
+    expect(PHONE_SCANNER.available).toBe(true);
+    const t = start();
+    await t.scanner.setFolder(t.folder);
+    writeFileSync(join(t.folder, 'bon.jpg'), makeJpeg('zonder telefoon'));
+    await t.settle();
+    await t.scanner.scanMap();
+    expect(t.files()).toEqual(['verwerkt']);
+  });
+
   it('een foto met GPS uit de bonnenmap blijft zoals hij is: het is je eigen bestand, de app verandert er niets aan', async () => {
-    // de bonnenmap werkt terwijl telefoon koppelen uit staat
-    expect(PHONE_SCANNER.available).toBe(false);
+    // de bonnenmap werkt zonder gekoppelde telefoon (koppelen staat aan sinds 1.4.0)
+    expect(PHONE_SCANNER.available).toBe(true);
     const t = start();
     const stored: Buffer[] = [];
     const add = t.s.intake.add.bind(t.s.intake);
