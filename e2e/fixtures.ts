@@ -48,6 +48,7 @@ export const test = base.extend<{ problems: Problems }>({
         if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fromJson(x)]));
         return v;
       };
+      const listeners = new Set<(event: string, payload: unknown) => void>();
       (window as unknown as { bridge: unknown }).bridge = {
         call: async (method: string, args: unknown[]) => {
           const r = await (await fetch('/api', { method: 'POST', body: JSON.stringify({ method, args: toJson(args) }) })).json();
@@ -57,8 +58,13 @@ export const test = base.extend<{ problems: Problems }>({
           }
           return fromJson(r.ok);
         },
-        onEvent: () => () => undefined,
+        onEvent: (listener: (event: string, payload: unknown) => void) => {
+          listeners.add(listener);
+          return () => void listeners.delete(listener);
+        },
       };
+      // de testserver meldt zelf geen gebeurtenissen; een test bootst er een na met emit()
+      (window as unknown as { __e2eEmit: (event: string, payload: unknown) => void }).__e2eEmit = (event, payload) => listeners.forEach((l) => l(event, payload));
     });
     await use(problems);
     if (problems.apiErrors.length) await testInfo.attach('api-fouten', { body: JSON.stringify(problems.apiErrors, null, 2), contentType: 'application/json' });
@@ -72,6 +78,11 @@ export { expect };
 /** Roept de api direct aan (zoals de app zelf doet), bv. om snel gegevens klaar te zetten. */
 export async function call<T = unknown>(page: Page, method: string, ...args: unknown[]): Promise<T> {
   return page.evaluate(([m, a]) => (window as unknown as { bridge: { call: (m: string, a: unknown[]) => Promise<unknown> } }).bridge.call(m as string, a as unknown[]), [method, args] as const) as Promise<T>;
+}
+
+/** Bootst een gebeurtenis van het hoofdproces na (bv. 'auto-processed': er is op de achtergrond iets verwerkt of gelezen). */
+export async function emit(page: Page, event: string, payload: unknown = {}) {
+  await page.evaluate(([e, p]) => (window as unknown as { __e2eEmit: (event: string, payload: unknown) => void }).__e2eEmit(e as string, p), [event, payload] as const);
 }
 
 /** Naar een scherm via het menu links. */

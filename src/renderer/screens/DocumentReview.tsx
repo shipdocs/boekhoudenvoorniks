@@ -14,7 +14,8 @@ import { formatDateNl } from '../../shared/dates';
 import type { IntakeDocument, PendingProposal } from '../../intake/intake';
 import { DOCUMENT_OUTCOME_LABEL } from '../../shared/document-outcome';
 import { TargetDetails } from './UploadOutcome';
-import { paidWithNote, proposedPaidWith } from '../../shared/paid-with';
+import { paidWithNote } from '../../shared/paid-with';
+import { formKey, proposedForm, reloadAfterRead, type ReviewForm } from '../../shared/review-form';
 import { futureDateIssue } from '../../intake/validation';
 
 // pdf.js gebruikt Map.getOrInsertComputed, dat oudere Chromium-versies (bv. die van de e2e-tests) nog niet kennen
@@ -155,16 +156,17 @@ export function DocumentReview({ id }: { id: number }) {
   const { go, meta, settings, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
   // openen kan de bon opnieuw beoordelen (koers, oude tekstkoppeling): daarna pas kijken welke vraag er openstaat (#179)
-  const view = useLoad(async () => {
+  const loadView = async () => {
     const opened = await api.documents.open(id);
     return { doc: opened, pending: await api.documents.pending(id) };
-  }, [id]);
+  };
+  const view = useLoad(loadView, [id]);
   const doc = { data: view.data?.doc, error: view.error, reload: view.reload };
   const jobs = useLoad(() => api.jobs.list({ active: true }));
   const jobSuggestion = useLoad(() => api.jobs.suggestForDocument(id), [id]);
   const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
-  const [form, setForm] = useState<{ supplier: string; date: string; total: number | null; invoiceNumber: string; vatAmount: number | null; categoryKey: string; vatCode: PurchaseVatCode; vatRate: 9 | 21; business: boolean; businessPct: number | null; paidWith: 'bank' | 'kas' | 'prive' | 'later'; jobId: number | null; splits: { categoryKey: string; gross: number; vatRate?: number }[] | null } | null>(null);
+  const [form, setForm] = useState<ReviewForm | null>(null);
   // de verbeterde gegevens lijken op een aankoop of bon die er al staat (#224): eerst de vraag, pas na "Toch boeken" verwerken
   const [duplicate, setDuplicate] = useState<{ entry: string; lead: string } | null>(null);
 
@@ -172,44 +174,35 @@ export function DocumentReview({ id }: { id: number }) {
   const [readMeanwhile, setReadMeanwhile] = useState(false);
   /** het formulier zoals de app het voorstelde; de klus telt niet mee, die vult de app zelf nog in */
   const proposed = useRef<string | null>(null);
-  type FormState = NonNullable<typeof form>;
-  const formKey = (f: FormState) => JSON.stringify({ ...f, jobId: null });
+  /** het formulier en de bon zoals ze nu op het scherm staan, voor wie er na een wachtpunt naar kijkt */
+  const shown = useRef({ id, form });
+  shown.current = { id, form };
+  /** de klus die blijft staan als het formulier opnieuw gevuld wordt */
+  const keptJob = useRef<number | null>(null);
 
   const d = doc.data;
   // een bon die op de achtergrond gelezen wordt: de stand bijhouden, en als hij gelezen is de gegevens tonen
   useAppEvent('auto-processed', () => {
     if (!d || !form || d.extraction_source !== 'geen') return;
-    const untouched = formKey(form) === proposed.current;
-    void (async () => {
-      const now = await api.documents.get(id).catch(() => null);
-      if (!now) return;
-      if (now.extraction_source !== 'geen') {
-        if (untouched) setForm(null);
-        else setReadMeanwhile(true);
-      }
-      await view.reload();
-    })();
+    void reloadAfterRead({
+      current: () => ({ form: shown.current.form, proposed: proposed.current }),
+      // intussen een andere bon geopend: dan hoort dit antwoord niet meer op het scherm
+      load: () => loadView().then((next) => (shown.current.id === id ? next : null), () => null),
+      apply: (next) => {
+        view.set(next.view);
+        if (next.form) {
+          proposed.current = formKey(next.form);
+          setForm(next.form);
+          setReadMeanwhile(false);
+        } else if (next.readMeanwhile) setReadMeanwhile(true);
+      },
+    });
   });
   useEffect(() => {
     if (!d || form) return;
-    const r = d.result;
     setReadMeanwhile(false);
-    const next: FormState = {
-      supplier: r?.supplier?.value ?? '',
-      date: r?.invoiceDate?.value ?? '',
-      total: r?.total?.value ?? null,
-      invoiceNumber: r?.invoiceNumber?.value ?? '',
-      vatAmount: null,
-      categoryKey: d.classification?.categoryKey ?? 'materiaal',
-      vatCode: (d.classification?.vatCode ?? 'hoog') as PurchaseVatCode,
-      vatRate: 21,
-      business: d.classification?.business ?? true,
-      businessPct: null,
-      // de betaalwijze die op de telefoon is gekozen (bonnenscanner) is het voorstel
-      paidWith: proposedPaidWith(d),
-      jobId: null,
-      splits: null,
-    };
+    const next: ReviewForm = { ...proposedForm(d), jobId: keptJob.current };
+    keptJob.current = null;
     proposed.current = formKey(next);
     setForm(next);
   }, [d, form]);
@@ -250,9 +243,11 @@ export function DocumentReview({ id }: { id: number }) {
   // de datum is in de toekomst gelezen (#224): de waarschuwing blijft staan tot de datum is aangepast
   const futureIssue = d.status === 'controle' ? futureDateIssue(d.issues) : null;
   const futureDate = futureIssue && form.date === (r?.invoiceDate?.value ?? '') ? futureIssue : null;
+  // eerst de nieuwe gegevens, dan pas het formulier leegmaken: anders vult het zich weer uit de oude. Een gekozen klus blijft staan.
   const refresh = async () => {
-    setForm(null);
+    keptJob.current = shown.current.form?.jobId ?? null;
     await view.reload();
+    setForm(null);
   };
   // de vraag geldt voor de gegevens zoals ze er toen stonden; verandert de gebruiker iets, dan kijkt de app opnieuw
   const entry = `${form.supplier.trim()}|${form.date}|${form.total}|${form.invoiceNumber.trim()}|${form.business}`;
@@ -290,7 +285,7 @@ export function DocumentReview({ id }: { id: number }) {
           {r?.foreign && <ForeignNotice foreign={r.foreign} euro={form.total ?? r.total?.value ?? null} />}
           {/* nog niet uitgelezen (geen herkenning): hier kiezen hoe de app bonnen mag lezen */}
           {unread && d.reading && <div className="notice" data-testid="wordt-gelezen">{shownMessage(d.reading, WAITING_TO_READ_MESSAGE)}</div>}
-          {unread && !d.reading && <ReaderChoice context="bon" reason={unreadReason(d)} onDone={async () => { setForm(null); await doc.reload(); }} />}
+          {unread && !d.reading && <ReaderChoice context="bon" reason={unreadReason(d)} onDone={refresh} />}
           {readMeanwhile && (
             <div className="notice" data-testid="intussen-gelezen">
               De app heeft deze bon intussen gelezen. Wat je zelf hebt ingevuld is blijven staan.{' '}
