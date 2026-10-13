@@ -122,10 +122,15 @@ export interface PidRecord {
 /** Hoe lang een gestopte server de tijd krijgt om zelf te eindigen voordat hij hard wordt beëindigd. */
 const STOP_GRACE_MS = 2000;
 
-/** Zoveel mag het begin van een proces afwijken van wat is vastgelegd (macOS geeft het in hele seconden). */
-const START_MARGIN_MS = 2000;
-
-const sameStart = (a: ProcessStart, b: ProcessStart): boolean => (a.boot ?? null) === (b.boot ?? null) && Math.abs(a.at - b.at) <= START_MARGIN_MS;
+/**
+ * Hetzelfde begin: precies gelijk, zonder marge. Vastleggen en nakijken vragen het begin op dezelfde
+ * manier op, met dezelfde precisie; elk verschil betekent dus een ander proces.
+ *
+ * Wat hiermee niet te onderscheiden is: op macOS geeft `ps` het begin in hele seconden. Twee processen
+ * die in dezelfde seconde na elkaar hetzelfde proces-ID krijgen, zien er daar gelijk uit. Linux
+ * (honderdsten van een seconde) en Windows (milliseconden) hebben hetzelfde, in een kleiner venster.
+ */
+const sameStart = (a: ProcessStart, b: ProcessStart): boolean => (a.boot ?? null) === (b.boot ?? null) && a.at === b.at;
 
 const validStart = (s: unknown): s is ProcessStart => {
   const v = s as ProcessStart | null;
@@ -682,16 +687,29 @@ export class LocalOcrRuntime {
       const server = await this.info(record.pid);
       // alleen als het proces zelf klopt, hoeft bekend te zijn of het programma dat het startte nog draait
       const starter = server && server !== 'weg' ? await this.info(record.app.pid) : null;
-      const verdict = leftoverVerdict({ record, server, starter, dir: this.dir, platform });
-      if (verdict === 'laten') continue;
+      let verdict = leftoverVerdict({ record, server, starter, dir: this.dir, platform });
       if (verdict === 'stoppen') {
-        try {
-          kill(record.pid, 'SIGKILL');
-          stopped = true;
-        } catch {
-          /* net zelf gestopt */
+        // Het opzoeken van de starter kostte tijd; in die tijd kan de server geëindigd zijn en een ander
+        // proces zijn proces-ID hebben gekregen. Daarom als laatste stap opnieuw naar de server kijken:
+        // alleen als het nog precies hetzelfde proces is, wordt het gestopt, direct daarna.
+        //
+        // Wat overblijft: stoppen gaat op proces-ID, en tussen het antwoord op deze laatste vraag en het
+        // stopsignaal zit geen wachtpunt meer, maar wel de tijd die het besturingssysteem nodig had om
+        // te antwoorden (Linux: het lezen van /proc; macOS en Windows: een hulpprogramma, tot ongeveer
+        // een seconde). Eindigt de server precies daarin en krijgt een ander proces meteen zijn
+        // proces-ID, dan treft het signaal dat proces. Dat is zonder een vaste verwijzing naar het
+        // proces (die Node niet biedt) niet uit te sluiten.
+        verdict = leftoverVerdict({ record, server: await this.info(record.pid), starter, dir: this.dir, platform });
+        if (verdict === 'stoppen') {
+          try {
+            kill(record.pid, 'SIGKILL');
+            stopped = true;
+          } catch {
+            /* net zelf gestopt */
+          }
         }
       }
+      if (verdict === 'laten') continue;
       this.forgetPid(record.pid, record.started);
     }
     return stopped;

@@ -55,11 +55,15 @@ start nog (het programma is bijvoorbeeld hard afgebroken), dan stopt de app het 
 alles klopt:
 
 - het programma achter dat proces-ID is de `llama-server` uit de eigen `ocr/`-map;
-- het proces begon op het moment dat is vastgelegd (een proces-ID wordt opnieuw uitgegeven, het begin niet);
+- het proces begon precies op het moment dat is vastgelegd, zonder marge (een proces-ID wordt opnieuw
+  uitgegeven, het begin niet);
 - het proces is van dezelfde gebruiker;
 - het programma dat de server startte, draait niet meer. Draait het nog, dan is het zijn server.
 
-Is een van deze dingen niet vast te stellen, dan gebeurt er niets. Het begin en de eigenaar komen op Linux
+Is een van deze dingen niet vast te stellen, dan gebeurt er niets. Vlak vóór het stoppen kijkt de app
+nog een keer of het proces hetzelfde is. Stoppen gaat op proces-ID; eindigt de server precies tussen die
+laatste blik en het stopsignaal en krijgt een ander proces direct zijn proces-ID, dan is dat niet uit te
+sluiten. Op macOS is het begin van een proces alleen in hele seconden bekend. Het begin en de eigenaar komen op Linux
 uit `/proc`, op macOS uit `ps` en op Windows uit PowerShell (`Win32_Process`). Een pid-bestand van een
 eerdere versie (zonder het begin van het proces) wordt niet gebruikt. Opruimen en starten gebeuren na
 elkaar, nooit door elkaar; stopt het programma terwijl de server nog aan het starten is, dan komt er

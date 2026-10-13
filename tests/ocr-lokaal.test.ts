@@ -492,6 +492,57 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     expect(gestopt).toEqual([]);
   });
 
+  it('krijgt een ander proces het proces-ID terwijl de app nog aan het nakijken is, dan wordt dat niet gestopt', async () => {
+    // de server klopt bij de eerste blik; tijdens het opzoeken van de app die hem startte eindigt hij en
+    // krijgt een ander proces zijn proces-ID. Vlak vóór het stoppen wordt daarom opnieuw gekeken.
+    const wissel = async (worden: (serverPath: string) => ProcessLookup) => {
+      const gestopt: number[] = [];
+      const t = await geinstalleerd({ kill: (pid) => void gestopt.push(pid) });
+      t.achtergelaten(4_000_060);
+      t.draait(4_000_060);
+      const basis = t.deps.processInfo!;
+      const gevraagd: number[] = [];
+      const rt = new LocalOcrRuntime(t.dir, {
+        ...t.deps,
+        processInfo: async (pid) => {
+          gevraagd.push(pid);
+          const antwoord = await basis(pid);
+          // tijdens het opzoeken van de starter (proces 4.900.000) wisselt het proces achter het proces-ID van de server
+          if (pid === 4_900_000) t.processen.tabel.set(4_000_060, worden(t.serverPath));
+          return antwoord;
+        },
+      });
+      return { gestopt, gevraagd, uitkomst: await rt.stopLeftover(), t };
+    };
+    // een heel ander programma
+    let r = await wissel(() => ({ path: '/usr/bin/unrelated', started: { at: 99_000, boot: 'opstart-1' }, sameUser: true }));
+    expect(r.gestopt).toEqual([]);
+    expect(r.uitkomst).toBe(false);
+    // de server is als laatste nog een keer bekeken, ná de starter
+    expect(r.gevraagd).toEqual([4_000_060, 4_900_000, 4_000_060]);
+    // het proces van toen is er niet meer: de regel is weg
+    expect(existsSync(r.t.pidFile)).toBe(false);
+    // een andere llama-server uit dezelfde map, een tel later begonnen
+    r = await wissel((serverPath) => ({ path: serverPath, started: { at: 77_010, boot: 'opstart-1' }, sameUser: true }));
+    expect(r.gestopt).toEqual([]);
+    // hetzelfde programma en hetzelfde begin, maar intussen van een andere gebruiker: niets doen, de regel blijft
+    r = await wissel((serverPath) => ({ path: serverPath, started: { at: 77_000, boot: 'opstart-1' }, sameUser: false }));
+    expect(r.gestopt).toEqual([]);
+    expect(r.t.vastgelegd()).toHaveLength(1);
+    // niet meer vast te stellen: niets doen en de regel laten staan
+    r = await wissel(() => null);
+    expect(r.gestopt).toEqual([]);
+    expect(r.t.vastgelegd()).toHaveLength(1);
+    // intussen weg: niets te stoppen
+    r = await wissel(() => 'weg');
+    expect(r.gestopt).toEqual([]);
+    expect(existsSync(r.t.pidFile)).toBe(false);
+    // nog precies hetzelfde proces: de achterblijver stopt
+    r = await wissel((serverPath) => ({ path: serverPath, started: { at: 77_000, boot: 'opstart-1' }, sameUser: true }));
+    expect(r.gestopt).toEqual([4_000_060]);
+    expect(r.uitkomst).toBe(true);
+  });
+
   it('is iets niet vast te stellen, of is het proces van een andere gebruiker, dan gebeurt er niets', async () => {
     const gestopt: number[] = [];
     const kill = (pid: number) => void gestopt.push(pid);
@@ -545,9 +596,14 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     const server: ProcessInfo = { path: serverPath, started: { at: 1_000, boot: 'a' }, sameUser: true };
     const oordeel = (over: Partial<Parameters<typeof leftoverVerdict>[0]> = {}) => leftoverVerdict({ record, server, starter: 'weg', dir, platform: 'linux', ...over });
     expect(oordeel()).toBe('stoppen');
-    // een kleine marge in het begin mag (macOS geeft het begin in hele seconden); meer niet
-    expect(oordeel({ server: { ...server, started: { at: 2_900, boot: 'a' } } })).toBe('stoppen');
-    expect(oordeel({ server: { ...server, started: { at: 3_100, boot: 'a' } } })).toBe('vergeten');
+    // het begin moet precies gelijk zijn: vastleggen en nakijken meten op dezelfde manier, dus elk verschil is een ander proces
+    expect(oordeel({ server: { ...server, started: { at: 1_001, boot: 'a' } } })).toBe('vergeten');
+    expect(oordeel({ server: { ...server, started: { at: 2_900, boot: 'a' } } })).toBe('vergeten');
+    expect(oordeel({ server: { ...server, started: { at: 999, boot: 'a' } } })).toBe('vergeten');
+    // hetzelfde proces-ID binnen een seconde opnieuw uitgegeven aan een andere llama-server uit dezelfde map
+    expect(leftoverVerdict({ record: { ...record, started: { at: 10_000, boot: 'a' } }, server: { ...server, started: { at: 11_000, boot: 'a' } }, starter: 'weg', dir, platform: 'linux' })).toBe('vergeten');
+    // ook bij de app die hem startte: een ander begin is een ander programma, dus die app is weg
+    expect(oordeel({ starter: { path: '/app', started: { at: 501, boot: 'a' }, sameUser: true } })).toBe('stoppen');
     expect(oordeel({ server: { ...server, started: { at: 1_000, boot: 'b' } } })).toBe('vergeten');
     expect(oordeel({ server: { ...server, started: { at: 1_000 } } })).toBe('vergeten');
     expect(oordeel({ server: 'weg' })).toBe('vergeten');
