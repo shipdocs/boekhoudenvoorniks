@@ -43,6 +43,7 @@ const FOOTER = [
       { href: './#overstappen', label: 'Overstappen' },
       { href: 'bank-automatisch.html', label: 'Bank automatisch inlezen' },
       { href: 'btw-aangifte.html', label: 'Btw-aangifte zelf doen' },
+      { href: 'buitenlandse-facturen.html', label: 'Buitenlandse facturen verwerken' },
       { href: 'zonder-abonnement.html', label: 'Zonder abonnement' },
       { href: 'offline-boekhoudprogramma.html', label: 'Offline boekhoudprogramma' },
       { href: 'gratis-boekhoudprogramma-downloaden.html', label: 'Gratis boekhoudprogramma downloaden' },
