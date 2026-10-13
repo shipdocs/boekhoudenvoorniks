@@ -15,7 +15,7 @@ import type { IntakeDocument, PendingProposal } from '../../intake/intake';
 import { DOCUMENT_OUTCOME_LABEL } from '../../shared/document-outcome';
 import { TargetDetails } from './UploadOutcome';
 import { paidWithNote } from '../../shared/paid-with';
-import { formKey, proposedForm, reloadAfterRead, type ReviewForm } from '../../shared/review-form';
+import { afterDecision, afterReaderDone, formKey, proposedForm, reloadAfterRead, showReadData, type ReloadIo, type ReviewForm } from '../../shared/review-form';
 import { futureDateIssue } from '../../intake/validation';
 
 // pdf.js gebruikt Map.getOrInsertComputed, dat oudere Chromium-versies (bv. die van de e2e-tests) nog niet kennen
@@ -175,34 +175,38 @@ export function DocumentReview({ id }: { id: number }) {
   /** het formulier zoals de app het voorstelde; de klus telt niet mee, die vult de app zelf nog in */
   const proposed = useRef<string | null>(null);
   /** het formulier en de bon zoals ze nu op het scherm staan, voor wie er na een wachtpunt naar kijkt */
-  const shown = useRef({ id, form });
-  shown.current = { id, form };
-  /** de klus die blijft staan als het formulier opnieuw gevuld wordt */
-  const keptJob = useRef<number | null>(null);
-
   const d = doc.data;
+  const shown = useRef({ id, form, doc: d });
+  shown.current = { id, form, doc: d };
+
+  /**
+   * Opnieuw laden zonder invoer kwijt te raken. Wat er na het laden met het formulier en de klus gebeurt,
+   * beslist `src/shared/review-form.ts`, met het formulier zoals het er ná het laden staat; hier wordt
+   * na een wachtpunt nergens anders het formulier gezet.
+   */
+  const reloadIo = (shownDoc: IntakeDocument): ReloadIo<NonNullable<typeof view.data>> => ({
+    current: () => ({ form: shown.current.form, proposed: proposed.current, doc: shown.current.doc ?? shownDoc }),
+    // intussen een andere bon geopend: dan hoort dit antwoord niet meer op het scherm. Lukt het laden niet, dan toont het scherm de fout.
+    load: () => loadView().then((next) => (shown.current.id === id ? next : null), () => (void view.reload(), null)),
+    apply: (next) => {
+      view.set(next.view);
+      if (next.form) {
+        proposed.current = formKey(next.form);
+        setForm(next.form);
+        setReadMeanwhile(false);
+      } else if (next.readMeanwhile) setReadMeanwhile(true);
+    },
+  });
   // een bon die op de achtergrond gelezen wordt: de stand bijhouden, en als hij gelezen is de gegevens tonen
   useAppEvent('auto-processed', () => {
     if (!d || !form || d.extraction_source !== 'geen') return;
-    void reloadAfterRead({
-      current: () => ({ form: shown.current.form, proposed: proposed.current }),
-      // intussen een andere bon geopend: dan hoort dit antwoord niet meer op het scherm
-      load: () => loadView().then((next) => (shown.current.id === id ? next : null), () => null),
-      apply: (next) => {
-        view.set(next.view);
-        if (next.form) {
-          proposed.current = formKey(next.form);
-          setForm(next.form);
-          setReadMeanwhile(false);
-        } else if (next.readMeanwhile) setReadMeanwhile(true);
-      },
-    });
+    void reloadAfterRead(reloadIo(d));
   });
+  // het formulier vullen als het er nog niet is (de bon gaat open)
   useEffect(() => {
     if (!d || form) return;
     setReadMeanwhile(false);
-    const next: ReviewForm = { ...proposedForm(d), jobId: keptJob.current };
-    keptJob.current = null;
+    const next = proposedForm(d);
     proposed.current = formKey(next);
     setForm(next);
   }, [d, form]);
@@ -243,12 +247,8 @@ export function DocumentReview({ id }: { id: number }) {
   // de datum is in de toekomst gelezen (#224): de waarschuwing blijft staan tot de datum is aangepast
   const futureIssue = d.status === 'controle' ? futureDateIssue(d.issues) : null;
   const futureDate = futureIssue && form.date === (r?.invoiceDate?.value ?? '') ? futureIssue : null;
-  // eerst de nieuwe gegevens, dan pas het formulier leegmaken: anders vult het zich weer uit de oude. Een gekozen klus blijft staan.
-  const refresh = async () => {
-    keptJob.current = shown.current.form?.jobId ?? null;
-    await view.reload();
-    setForm(null);
-  };
+  // na een keuze bij de bon: het nieuwe voorstel komt in het formulier, tenzij de gebruiker zelf iets had veranderd
+  const refresh = () => afterDecision(reloadIo(d));
   // de vraag geldt voor de gegevens zoals ze er toen stonden; verandert de gebruiker iets, dan kijkt de app opnieuw
   const entry = `${form.supplier.trim()}|${form.date}|${form.total}|${form.invoiceNumber.trim()}|${form.business}`;
   const shownDuplicate = duplicate?.entry === entry ? duplicate : null;
@@ -285,11 +285,11 @@ export function DocumentReview({ id }: { id: number }) {
           {r?.foreign && <ForeignNotice foreign={r.foreign} euro={form.total ?? r.total?.value ?? null} />}
           {/* nog niet uitgelezen (geen herkenning): hier kiezen hoe de app bonnen mag lezen */}
           {unread && d.reading && <div className="notice" data-testid="wordt-gelezen">{shownMessage(d.reading, WAITING_TO_READ_MESSAGE)}</div>}
-          {unread && !d.reading && <ReaderChoice context="bon" reason={unreadReason(d)} onDone={refresh} />}
+          {unread && !d.reading && <ReaderChoice context="bon" reason={unreadReason(d)} onDone={() => afterReaderDone(reloadIo(d))} />}
           {readMeanwhile && (
             <div className="notice" data-testid="intussen-gelezen">
               De app heeft deze bon intussen gelezen. Wat je zelf hebt ingevuld is blijven staan.{' '}
-              <Button small onClick={() => void refresh()}>Gelezen gegevens tonen</Button>
+              <Button small onClick={() => void showReadData(reloadIo(d))}>Gelezen gegevens tonen</Button>
             </div>
           )}
           {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document') && !(proposal && i.field === proposal.kind) && !(own && i.field === 'own-company')).map((i) => (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formKey, proposedForm, reloadAfterRead, type ReviewForm } from '../src/shared/review-form';
+import { afterDecision, afterReaderDone, formKey, proposedForm, reloadAfterRead, showReadData, type ReviewForm } from '../src/shared/review-form';
 
 /**
  * Het scherm "bon bekijken" terwijl de bon op de achtergrond gelezen wordt: wat de gebruiker intussen
@@ -27,10 +27,13 @@ function scherm(doc: Doc = ONGELEZEN) {
     /** hoe vaak het scherm is bijgewerkt, en of document en formulier daarbij samen zijn vervangen */
     bijgewerkt: [] as { doc: boolean; form: boolean }[],
   };
-  /** de bon is veranderd; `tijdensLaden` gebeurt terwijl de nieuwe gegevens onderweg zijn */
-  const gebeurtenis = (nieuw: Doc | null, tijdensLaden: () => void = () => undefined) =>
-    reloadAfterRead({
-      current: () => ({ form: s.form, proposed: s.proposed }),
+  /**
+   * De bon is veranderd; `tijdensLaden` gebeurt terwijl de nieuwe gegevens onderweg zijn. `route`: langs
+   * welke weg het scherm opnieuw laadt (standaard: de melding dat er op de achtergrond iets gelezen is).
+   */
+  const gebeurtenis = (nieuw: Doc | null, tijdensLaden: () => void = () => undefined, route: typeof reloadAfterRead = reloadAfterRead) =>
+    route({
+      current: () => ({ form: s.form, proposed: s.proposed, doc: s.doc }),
       load: async () => {
         await Promise.resolve();
         tijdensLaden();
@@ -102,7 +105,7 @@ describe('bon bekijken terwijl hij op de achtergrond gelezen wordt', () => {
     const form = s.form;
     await gebeurtenis(bezig);
     expect(s.doc).toBe(bezig);
-    expect(s.form).toBe(form);
+    expect(s.form).toEqual(form);
     expect(s.intussenGelezen).toBe(false);
   });
 
@@ -116,6 +119,78 @@ describe('bon bekijken terwijl hij op de achtergrond gelezen wordt', () => {
     });
     expect(s.form).toBeNull();
     expect(s.intussenGelezen).toBe(false);
+  });
+
+  it('"Nu lezen" bij de bon zelf: wie tijdens het lezen invult, houdt zijn invoer als het lezen klaar is', async () => {
+    // de keuze om te lezen roept na afloop vanzelf het opnieuw laden aan; dat is geen verzoek om de invoer te vervangen
+    const { s, gebeurtenis } = scherm();
+    s.form = { ...s.form!, supplier: 'Hornbach', total: 5000 };
+    const ingevuld = s.form;
+    await gebeurtenis(GELEZEN, undefined, afterReaderDone);
+    expect(s.form).toBe(ingevuld);
+    expect(s.intussenGelezen).toBe(true);
+    expect(s.doc).toBe(GELEZEN);
+    // ook wie pas tijdens het ophalen van de gelezen gegevens begint te typen
+    const tweede = scherm();
+    await tweede.gebeurtenis(GELEZEN, () => {
+      tweede.s.form = { ...tweede.s.form!, supplier: 'Gamma' };
+    }, afterReaderDone);
+    expect(tweede.s.form).toMatchObject({ supplier: 'Gamma', total: null });
+    expect(tweede.s.intussenGelezen).toBe(true);
+    // niets ingevuld: de gelezen gegevens komen in het formulier
+    const derde = scherm();
+    await derde.gebeurtenis(GELEZEN, undefined, afterReaderDone);
+    expect(derde.s.form).toMatchObject({ supplier: 'Bouwmaat', total: 12100 });
+    expect(derde.s.intussenGelezen).toBe(false);
+  });
+
+  it('wisselt de gebruiker tijdens het laden van klus 7 naar klus 9, dan blijft klus 9 staan', async () => {
+    for (const route of [reloadAfterRead, afterReaderDone, showReadData, afterDecision]) {
+      const { s, gebeurtenis } = scherm();
+      s.form = { ...s.form!, jobId: 7 };
+      await gebeurtenis(GELEZEN, () => {
+        s.form = { ...s.form!, jobId: 9 };
+      }, route);
+      expect(s.form, route.name).toMatchObject({ supplier: 'Bouwmaat', jobId: 9 });
+    }
+  });
+
+  it('"Gelezen gegevens tonen" vervangt wat er bij het klikken stond, niet wat de gebruiker daarna nog intypt', async () => {
+    // de gebruiker had zelf ingevuld, de bon is intussen gelezen en hij kiest ervoor de gelezen gegevens te zien
+    const { s, gebeurtenis } = scherm();
+    s.form = { ...s.form!, supplier: 'Hornbach', total: 5000, jobId: 3 };
+    await gebeurtenis(GELEZEN);
+    expect(s.intussenGelezen).toBe(true);
+    await gebeurtenis(GELEZEN, undefined, showReadData);
+    expect(s.form).toMatchObject({ supplier: 'Bouwmaat', total: 12100, jobId: 3 });
+    expect(s.intussenGelezen).toBe(false);
+    expect(s.proposed).toBe(formKey(s.form!));
+
+    // na de klik, terwijl de gegevens onderweg zijn, typt hij nog iets: dat blijft staan en de keuze blijft aangeboden
+    const tweede = scherm();
+    tweede.s.form = { ...tweede.s.form!, supplier: 'Hornbach' };
+    await tweede.gebeurtenis(GELEZEN);
+    await tweede.gebeurtenis(GELEZEN, () => {
+      tweede.s.form = { ...tweede.s.form!, supplier: 'Hornbach Zwolle', total: 4200 };
+    }, showReadData);
+    expect(tweede.s.form).toMatchObject({ supplier: 'Hornbach Zwolle', total: 4200 });
+    expect(tweede.s.intussenGelezen).toBe(true);
+    expect(tweede.s.doc).toBe(GELEZEN);
+  });
+
+  it('na een keuze bij de bon (bv. "Nee, een gewone aankoop"): het nieuwe voorstel komt in het formulier, tenzij de gebruiker zelf iets had veranderd', async () => {
+    const ander = { ...GELEZEN, classification: { categoryKey: 'kantoor', vatCode: 'hoog', business: true } } as unknown as Doc;
+    const { s, gebeurtenis } = scherm(GELEZEN);
+    await gebeurtenis(ander, undefined, afterDecision);
+    expect(s.form).toMatchObject({ supplier: 'Bouwmaat', categoryKey: 'kantoor' });
+    // zelf iets veranderd (ook tijdens het laden): dat blijft staan, zonder de melding over lezen
+    const tweede = scherm(GELEZEN);
+    await tweede.gebeurtenis(ander, () => {
+      tweede.s.form = { ...tweede.s.form!, total: 9900 };
+    }, afterDecision);
+    expect(tweede.s.form).toMatchObject({ total: 9900, categoryKey: 'gereedschap' });
+    expect(tweede.s.intussenGelezen).toBe(false);
+    expect(tweede.s.doc).toBe(ander);
   });
 
   it('het voorstel van de app: leeg bij een ongelezen bon, de gelezen gegevens bij een gelezen bon', () => {
