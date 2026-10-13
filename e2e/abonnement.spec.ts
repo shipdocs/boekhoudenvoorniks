@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { call, nav, onboard, test } from './fixtures';
+import { TERMS_VERSION } from '../src/shared/legal';
 
 /**
  * Het abonnement met licenties AAN, zoals na de release (e2e/server.cjs bootst de licentie-Worker na,
@@ -73,7 +74,7 @@ test('abonnement: zonder abonnement geweigerd, proefperiode afsluiten, licentie 
 
   // betaald (webhook): de bedrijfsgegevens voor de factuur gingen mee
   const accounts = (await (await request.post('/__pay')).json()).ok as { email: string; bedrijf: Record<string, string> }[];
-  expect(accounts).toEqual([expect.objectContaining({ email: 'piet@example.nl', voorwaarden: '2026-09-30', zakelijk: true, bedrijf: expect.objectContaining({ naam: 'Stukadoorsbedrijf Piet', kvk: '12345678', land: 'NL' }) })]);
+  expect(accounts).toEqual([expect.objectContaining({ email: 'piet@example.nl', voorwaarden: TERMS_VERSION, zakelijk: true, bedrijf: expect.objectContaining({ naam: 'Stukadoorsbedrijf Piet', kvk: '12345678', land: 'NL' }) })]);
   await abonnement.getByRole('button', { name: 'Ik heb betaald: licentie ophalen' }).click();
   await expect(page.locator('.toasts').getByText(/Abonnement actief t\/m/)).toBeVisible();
   await expect(card.getByText(/Abonnement actief; de maandelijkse factuur krijg je per e-mail/)).toBeVisible();
