@@ -49,10 +49,21 @@ Eén leesverzoek (één foto) mag vier minuten duren; daarna breekt de app het a
 staat bij de bon dat het lezen te lang duurde. Bonnen van de telefoon en uit de bonnenmap staan meteen
 in de inbox en worden daarna op de achtergrond gelezen, één tegelijk.
 
-De server stopt als je het programma afsluit. Welk proces de app startte staat in `ocr/llama-server.pid`.
-Draait dat proces bij een volgende start nog (het programma is bijvoorbeeld hard afgebroken), dan stopt
-de app het alsnog, maar alleen als het programma achter dat proces-ID de `llama-server` uit de eigen
-`ocr/`-map is.
+De server stopt als je het programma afsluit. Welk proces de app startte staat in `ocr/llama-server.pid`,
+met het moment waarop dat proces begon en welk programma het startte. Draait dat proces bij een volgende
+start nog (het programma is bijvoorbeeld hard afgebroken), dan stopt de app het alsnog, maar alleen als
+alles klopt:
+
+- het programma achter dat proces-ID is de `llama-server` uit de eigen `ocr/`-map;
+- het proces begon op het moment dat is vastgelegd (een proces-ID wordt opnieuw uitgegeven, het begin niet);
+- het proces is van dezelfde gebruiker;
+- het programma dat de server startte, draait niet meer. Draait het nog, dan is het zijn server.
+
+Is een van deze dingen niet vast te stellen, dan gebeurt er niets. Het begin en de eigenaar komen op Linux
+uit `/proc`, op macOS uit `ps` en op Windows uit PowerShell (`Win32_Process`). Een pid-bestand van een
+eerdere versie (zonder het begin van het proces) wordt niet gebruikt. Opruimen en starten gebeuren na
+elkaar, nooit door elkaar; stopt het programma terwijl de server nog aan het starten is, dan komt er
+geen server meer bij.
 
 Niet ondersteund door de ingebouwde herkenning, met een duidelijke melding:
 
