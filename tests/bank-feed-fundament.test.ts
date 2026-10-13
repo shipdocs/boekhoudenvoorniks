@@ -95,7 +95,7 @@ describe('Ponto WP1: fundament (#243)', () => {
       const api = createApi(setupMinimal(), { appVersion: () => '0.0.0', hasSmtpPassword: () => false } as unknown as HostContext);
       const meta = api.app.meta();
       expect(meta.bankFeed).toBe(true);
-      expect(meta.phoneScanner).toBe(false);
+      expect(meta.phoneScanner).toBe(true);
     });
   });
 

@@ -95,8 +95,8 @@ function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) 
     <div className="card grid">
       <h3 style={{ margin: 0 }}>Telefoon koppelen</h3>
       <p className="small muted" style={{ margin: 0 }}>
-        Met de scanner-app op je Android-telefoon maak je onderweg een foto van een bon. Ben je thuis op de wifi, dan staat hij vanzelf bij Aankopen &amp; bonnetjes.
-        De foto gaat versleuteld van je telefoon rechtstreeks naar deze computer: niet via internet en niet via een cloud.
+        Met de app BoekhoudenVoorNiks voor Android (in Google Play) leg je onderweg bonnen, foto's van een klus, klanten en facturen vast. Zit je telefoon op dezelfde wifi als deze computer, dan staat het vanzelf in je administratie.
+        Alles gaat versleuteld van je telefoon rechtstreeks naar deze computer: niet via internet en niet via een cloud.
       </p>
       <SubscriptionNotice abonnement={st.abonnement} />
 
@@ -210,7 +210,7 @@ function PairingDialog({ pairing, onClose, onAgain }: { pairing: Pairing; onClos
         <div className="grid">
           <ol style={{ margin: 0, paddingLeft: 20 }}>
             <li>Zorg dat je telefoon op dezelfde wifi zit als deze computer (niet het gastnetwerk).</li>
-            <li>Open de scanner-app en kies <strong>Koppelen met pc</strong>.</li>
+            <li>Open de app BoekhoudenVoorNiks op je telefoon en tik op <strong>Koppelen met de pc</strong>, daarna op <strong>QR scannen</strong>.</li>
             <li>Scan deze code.</li>
           </ol>
           <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(pairing.svg)}`} alt="QR-code om je telefoon te koppelen" width={280} height={280} style={{ justifySelf: 'center', background: '#fff', borderRadius: 8 }} />

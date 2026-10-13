@@ -224,7 +224,7 @@ describe('licentie: de laatst geziene datum', () => {
     const o = opzet();
     expect(o.s.license.status(dag(40))).toEqual({ state: 'geen' });
     expect(o.s.license.status(VANDAAG)).toEqual({ state: 'geen' });
-    expect(() => o.s.license.requireActive(VANDAAG)).toThrow(/extra functie van het abonnement/);
+    expect(() => o.s.license.requireActive(VANDAAG)).toThrow(/extra functies van het abonnement/);
     expect(o.s.license.needsRefresh(VANDAAG)).toBe(false);
     expect(o.bewaard()).toBeNull();
     // een licentie die niet klopt blijft ongeldig, op welke datum ook

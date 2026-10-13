@@ -1,21 +1,19 @@
 # Bonnenscanner: de telefoon koppelen met de pc
 
-Met de bonnenscanner maak je onderweg een foto van een bon en staat die daarna in de inbox van
-BoekhoudenVoorNiks op je computer. Je koppelt je telefoon één keer met een QR-code; daarna stuurt de
-telefoon zijn bonnen rechtstreeks naar je computer.
+Met de app BoekhoudenVoorNiks voor Android leg je onderweg bonnen, foto's van een klus, klanten en
+facturen vast; ze staan daarna in BoekhoudenVoorNiks op je computer. Je koppelt je telefoon één keer met
+een QR-code; daarna stuurt de telefoon wat je vastlegt rechtstreeks naar je computer.
 
 Dit is de korte beschrijving voor gebruikers. De volledige technische beschrijving wordt intern
 bijgehouden. De code van de computerkant staat in `src/scanner/` en `src/sync/`.
 
-**Stand:** de kant van de computer is gebouwd en getest, maar staat in de uitgebrachte app nog uit tot
-de scanner-app voor Android er is. Zolang dat zo is, zie je in Instellingen niets van koppelen,
-weigert de app te koppelen en luistert de computer nergens naar. De bonnenmap voor gewone bestanden
-(onderaan dit document) werkt wel.
+**Stand:** telefoon koppelen staat aan sinds versie 1.4.0. De bonnenmap voor gewone bestanden
+(onderaan dit document) staat daar los van.
 
 ## Koppelen
 
 - Op de computer kies je *Instellingen → Telefoon & bonnenmap → Telefoon koppelen*. Er verschijnt een
-  QR-code, die je met de scanner-app op je telefoon scant.
+  QR-code, die je met de app op je telefoon scant.
 - Een QR-code is voor **één telefoon** en **tien minuten** geldig. Scan je hem niet op tijd, of sluit je
   het venster, dan vervalt hij.
 - Je kunt meerdere telefoons koppelen (hooguit tien). Per telefoon zie je op de computer de naam en

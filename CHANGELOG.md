@@ -1,6 +1,16 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 1.4.0 — de app voor Android: bonnen, foto's en facturen vanaf je telefoon
+
+Bij deze versie hoort de app BoekhoudenVoorNiks voor Android (Google Play). Je koppelt je telefoon één keer met een QR-code; wat je onderweg vastlegt, staat daarna in je administratie op je computer.
+
+### Nieuw
+- **Telefoon koppelen** (Instellingen → Telefoon & bonnenmap). Koppel je Android-telefoon met een QR-code. Alles gaat versleuteld van je telefoon rechtstreeks naar je computer, over je eigen wifi: niet via internet en niet via een cloud. Je kunt meerdere telefoons koppelen en een telefoon altijd weer ontkoppelen.
+- **Bonnen en foto's van een klus vanaf je telefoon.** Een bon die je op je telefoon scant, staat bij Aankopen & bonnetjes, met de betaalwijze en de notitie die je op de telefoon koos. Een foto die je bij een klus maakt, zie je bij die klus.
+- **Klanten en klussen op je telefoon.** Je klanten en klussen staan ook op je telefoon. Maak je er onderweg een aan of wijzig je er een, dan neemt je computer dat over. Lijkt een nieuwe klant op een klant die je al had, dan stelt de app op Vandaag voor om ze samen te voegen; dat gebeurt alleen als jij daarvoor kiest.
+- **Facturen maken op je telefoon.** Een factuur of creditnota die je op je telefoon definitief maakt, neemt je computer over als verzonden factuur. De telefoon rekent met dezelfde rekenregels als je computer en heeft een eigen nummerreeks (bijvoorbeeld M1-2026-0001), zodat nummers nooit dubbel voorkomen. Ontbreekt er een nummer in die reeks, dan meldt de app dat.
+- **Ook per e-mail.** Zit je telefoon niet op dezelfde wifi, dan kun je wat nog wacht als versleutelde bijlage naar de mailbox van je administratie sturen; de app leest het in bij het ophalen van je mail.
+- **Hoort bij het abonnement.** Een telefoon koppelen en het bijwerken van klanten, klussen en btw-regels op je telefoon horen bij het abonnement. Wat een gekoppelde telefoon stuurt, komt altijd aan, ook zonder abonnement.
 
 ### Verbeterd
 - **Klusresultaat: indicatie van je eigen uurloon.** Staan er uren (eenheid "uur") op de werkbon van een klus, dan zie je onder het resultaat "ongeveer € X per uur". Het is alleen een indicatie: uren zijn geen kosten en het klusresultaat en je boekhouding veranderen niet (#326).

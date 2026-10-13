@@ -164,12 +164,13 @@ export class Bonnenscanner {
       stableMs: deps.folderStableMs,
       onProcessed: () => deps.onChange?.(),
     });
-    // dezelfde afhandeling als het netwerk (route map), in dezelfde gekozen bonnenmap; zolang koppelen uit staat gebeurt er niets
+    // dezelfde afhandeling als het netwerk (route map), in dezelfde gekozen bonnenmap; zolang koppelen uit staat of er geen
+    // telefoon is gekoppeld gebeurt er niets (ook geen mappen van-telefoon/ en van-pc/ in de bonnenmap van iemand zonder telefoon)
     this.map = new MapRoute({
       db: deps.db,
       pairing: this.pairing,
       behandel: (deviceId, kop, plaintext, route) => this.receiver.behandel(deviceId, kop, plaintext, route),
-      folder: () => (PHONE_SCANNER.available ? this.watchedFolder() : Promise.resolve(null)),
+      folder: () => (PHONE_SCANNER.available && this.pairing.hasActive() ? this.watchedFolder() : Promise.resolve(null)),
       now: deps.now,
       pollMs: deps.folderPollMs,
       stableMs: deps.folderStableMs,
@@ -310,6 +311,8 @@ export class Bonnenscanner {
       throw new Error('Je computer zit nu niet op een thuis- of kantoornetwerk (wifi of kabel). Verbind hem eerst en probeer het opnieuw.');
     }
     const addresses = this.receiver.addresses.slice(0, 4);
+    // vanaf nu telt de bonnenmap ook als route: meteen kijken, niet pas bij de volgende rondgang
+    await this.map.scan();
     this.deps.onChange?.();
     return { deviceId, expiresAt, addresses, port, payload: encodePairing({ pc: this.pairing.pcId(), apparaat: deviceId, sleutel: key.toString('base64url'), poort: port, adressen: addresses }) };
   }

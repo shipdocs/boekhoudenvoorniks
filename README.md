@@ -153,7 +153,8 @@ hulp bij categorievoorstellen is sinds 0.7.4 beschikbaar voor abonnees, standaar
 gedeelde gegevensmap met een eigen mapkeuze, het blokkeren van dubbele bonnen en het inlezen van
 bankafschriften zonder dubbele betalingen. Versie 1.2.0 voegde de optionele Ponto-bankkoppeling toe en versie 1.3.0 (oktober 2026)
 de uitkomsten van een boekhoudreview: bijtelling auto, oninbare facturen, jaarafsluiting, KOR-herziening en de VIES-controle
-(zie [CHANGELOG.md](CHANGELOG.md) en issue #44). Openstaand werk staat als issue in GitHub,
+(zie [CHANGELOG.md](CHANGELOG.md) en issue #44). Versie 1.4.0 (oktober 2026) zette het koppelen met de app voor Android aan:
+bonnen, foto's, klanten, klussen en facturen vanaf je telefoon. Openstaand werk staat als issue in GitHub,
 met labels voor prioriteit en omvang; milestones gebruiken we niet.
 
 Het rekeningschema gebruikt de officiële RGS-referentiecodes (taxonomie-release 20251210, `src/core-ledger/rgs-codes.json`).

@@ -743,8 +743,8 @@ describe('een foto van de telefoon bij een project op de pc', () => {
   });
 
   it('FOTO-12 gedragsneutraal: zonder foto-optie (geen administratiemap) blijft foto niet-ondersteund; de bon en alle andere routes werken ongewijzigd; het antwoord en de bevestigingen bevatten nooit het pad of de inhoud', () => {
-    // de echte waarde van het koppelen blijft uit (de test zet hem zelf aan en daarna weer uit)
-    expect(readFileSync(join(__dirname, '..', 'src', 'shared', 'phone-scanner.ts'), 'utf8')).toMatch(/available: *false/);
+    // koppelen staat aan sinds 1.4.0 (de test zet hem zelf aan en daarna weer uit)
+    expect(readFileSync(join(__dirname, '..', 'src', 'shared', 'phone-scanner.ts'), 'utf8')).toMatch(/available: *true/);
     const zonder = omgeving({ zonderAdminDir: true });
     const klant = randomUUID();
     const project = randomUUID();
