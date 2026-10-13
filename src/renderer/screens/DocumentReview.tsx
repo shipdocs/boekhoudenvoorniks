@@ -15,7 +15,7 @@ import type { IntakeDocument, PendingProposal } from '../../intake/intake';
 import { DOCUMENT_OUTCOME_LABEL } from '../../shared/document-outcome';
 import { TargetDetails } from './UploadOutcome';
 import { paidWithNote } from '../../shared/paid-with';
-import { afterDecision, afterReaderDone, formKey, proposedForm, reloadAfterRead, showReadData, type ReloadIo, type ReviewForm } from '../../shared/review-form';
+import { afterDecision, afterReaderDone, formKey, loadTurn, openReview, reloadAfterRead, showReadData, type ReloadIo, type ReviewForm } from '../../shared/review-form';
 import { futureDateIssue } from '../../intake/validation';
 
 // pdf.js gebruikt Map.getOrInsertComputed, dat oudere Chromium-versies (bv. die van de e2e-tests) nog niet kennen
@@ -155,13 +155,9 @@ function extractionSourceLabel(source: string | null): string {
 export function DocumentReview({ id }: { id: number }) {
   const { go, meta, settings, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
-  // openen kan de bon opnieuw beoordelen (koers, oude tekstkoppeling): daarna pas kijken welke vraag er openstaat (#179)
-  const loadView = async () => {
-    const opened = await api.documents.open(id);
-    return { doc: opened, pending: await api.documents.pending(id) };
-  };
-  const view = useLoad(loadView, [id]);
-  const doc = { data: view.data?.doc, error: view.error, reload: view.reload };
+  // de bon en de vraag die erbij openstaat, zoals ze nu op het scherm staan; ze komen er alleen via `reloadIo` (zie daar)
+  const [view, setView] = useState<{ doc: IntakeDocument; pending: PendingProposal | null }>();
+  const [loadError, setLoadError] = useState<string | null>(null);
   const jobs = useLoad(() => api.jobs.list({ active: true }));
   const jobSuggestion = useLoad(() => api.jobs.suggestForDocument(id), [id]);
   const jobSuggested = useRef(false);
@@ -175,41 +171,47 @@ export function DocumentReview({ id }: { id: number }) {
   /** het formulier zoals de app het voorstelde; de klus telt niet mee, die vult de app zelf nog in */
   const proposed = useRef<string | null>(null);
   /** het formulier en de bon zoals ze nu op het scherm staan, voor wie er na een wachtpunt naar kijkt */
-  const d = doc.data;
-  const shown = useRef({ id, form, doc: d });
-  shown.current = { id, form, doc: d };
+  const d = view?.doc;
+  const shown = useRef({ form, doc: d });
+  shown.current = { form, doc: d };
+  /** één teller voor alle laadacties van dit scherm: alleen het antwoord van de laatst gestarte komt op het scherm */
+  const turn = useRef(loadTurn()).current;
 
   /**
-   * Opnieuw laden zonder invoer kwijt te raken. Wat er na het laden met het formulier en de klus gebeurt,
-   * beslist `src/shared/review-form.ts`, met het formulier zoals het er ná het laden staat; hier wordt
-   * na een wachtpunt nergens anders het formulier gezet.
+   * Alle laadacties van dit scherm: openen, een andere bon, opnieuw laden, een tweede poging na een
+   * fout. Wat er na het laden met document, formulier en klus gebeurt, beslist
+   * `src/shared/review-form.ts`, met het formulier zoals het er ná het laden staat. Document en formulier
+   * komen nergens anders op het scherm.
    */
-  const reloadIo = (shownDoc: IntakeDocument): ReloadIo<NonNullable<typeof view.data>> => ({
-    current: () => ({ form: shown.current.form, proposed: proposed.current, doc: shown.current.doc ?? shownDoc }),
-    // intussen een andere bon geopend: dan hoort dit antwoord niet meer op het scherm. Lukt het laden niet, dan toont het scherm de fout.
-    load: () => loadView().then((next) => (shown.current.id === id ? next : null), () => (void view.reload(), null)),
+  const reloadIo = (): ReloadIo<NonNullable<typeof view>> => ({
+    turn,
+    current: () => ({ form: shown.current.form, proposed: proposed.current, doc: shown.current.doc ?? null }),
+    // openen kan de bon opnieuw beoordelen (koers, oude tekstkoppeling): daarna pas kijken welke vraag er openstaat (#179)
+    load: async () => {
+      const opened = await api.documents.open(id);
+      return { doc: opened, pending: await api.documents.pending(id) };
+    },
     apply: (next) => {
-      view.set(next.view);
+      setView(next.view);
+      setLoadError(null);
       if (next.form) {
         proposed.current = formKey(next.form);
         setForm(next.form);
         setReadMeanwhile(false);
       } else if (next.readMeanwhile) setReadMeanwhile(true);
     },
+    failed: setLoadError,
   });
+  // de bon gaat open (ook: een andere bon op dit scherm)
+  useEffect(() => {
+    void openReview(reloadIo());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   // een bon die op de achtergrond gelezen wordt: de stand bijhouden, en als hij gelezen is de gegevens tonen
   useAppEvent('auto-processed', () => {
     if (!d || !form || d.extraction_source !== 'geen') return;
-    void reloadAfterRead(reloadIo(d));
+    void reloadAfterRead(reloadIo());
   });
-  // het formulier vullen als het er nog niet is (de bon gaat open)
-  useEffect(() => {
-    if (!d || form) return;
-    setReadMeanwhile(false);
-    const next = proposedForm(d);
-    proposed.current = formKey(next);
-    setForm(next);
-  }, [d, form]);
 
   // Klus-voorstel (#32): bij één actieve klus of een locatiematch alvast invullen
   useEffect(() => {
@@ -219,7 +221,7 @@ export function DocumentReview({ id }: { id: number }) {
     if (!second || best.score - second.score >= 40) setForm({ ...form, jobId: best.job.id });
   }, [jobSuggestion.data, form, d]);
 
-  if (!d || !form) return <div className="page"><ErrorBox error={doc.error} /></div>;
+  if (!d || !form) return <div className="page"><ErrorBox error={loadError} /></div>;
   const r = d.result;
   const unread = d.extraction_source === 'geen' && (d.status === 'nieuw' || d.status === 'controle');
   const issueFor = (field: string) => d.issues.find((i) => i.field === field || i.field.startsWith(`${field}.`));
@@ -239,7 +241,7 @@ export function DocumentReview({ id }: { id: number }) {
   const showVat = form.business && !form.splits && (form.vatCode === 'hoog' || form.vatCode === 'laag');
   const activeField = fields.find((f) => f.key === active)?.field ?? (active?.startsWith('line-') ? r?.lines?.[Number(active.slice(5))] ?? null : null);
   // de vraag die eerst een antwoord nodig heeft: "dezelfde aankoop?" of "alleen als bewijs koppelen?"
-  const proposal = d.status === 'controle' ? view.data?.pending ?? null : null;
+  const proposal = d.status === 'controle' ? view?.pending ?? null : null;
   // na een keuze opnieuw laden: het formulier begint dan weer met wat de app nu voorstelt
   // factuur van je eigen bedrijf (#205): alleen privé of "weet ik nog niet"; bij twijfel eerst de vraag
   const ownIssue = !proposal && d.status === 'controle' ? d.issues.find((i) => i.field === 'own-company') : undefined;
@@ -248,7 +250,7 @@ export function DocumentReview({ id }: { id: number }) {
   const futureIssue = d.status === 'controle' ? futureDateIssue(d.issues) : null;
   const futureDate = futureIssue && form.date === (r?.invoiceDate?.value ?? '') ? futureIssue : null;
   // na een keuze bij de bon: het nieuwe voorstel komt in het formulier, tenzij de gebruiker zelf iets had veranderd
-  const refresh = () => afterDecision(reloadIo(d));
+  const refresh = () => afterDecision(reloadIo());
   // de vraag geldt voor de gegevens zoals ze er toen stonden; verandert de gebruiker iets, dan kijkt de app opnieuw
   const entry = `${form.supplier.trim()}|${form.date}|${form.total}|${form.invoiceNumber.trim()}|${form.business}`;
   const shownDuplicate = duplicate?.entry === entry ? duplicate : null;
@@ -263,6 +265,7 @@ export function DocumentReview({ id }: { id: number }) {
         </div>
         <Button kind="ghost" onClick={() => go({ screen: 'aankopen' })}>← Aankopen</Button>
       </div>
+      <ErrorBox error={loadError} />
       <div className="split">
         <DocumentView id={d.id} mime={d.mime_type} highlight={activeField} pageSizes={r?.pageSizes} />
         <div>
@@ -285,11 +288,11 @@ export function DocumentReview({ id }: { id: number }) {
           {r?.foreign && <ForeignNotice foreign={r.foreign} euro={form.total ?? r.total?.value ?? null} />}
           {/* nog niet uitgelezen (geen herkenning): hier kiezen hoe de app bonnen mag lezen */}
           {unread && d.reading && <div className="notice" data-testid="wordt-gelezen">{shownMessage(d.reading, WAITING_TO_READ_MESSAGE)}</div>}
-          {unread && !d.reading && <ReaderChoice context="bon" reason={unreadReason(d)} onDone={() => afterReaderDone(reloadIo(d))} />}
+          {unread && !d.reading && <ReaderChoice context="bon" reason={unreadReason(d)} onDone={() => afterReaderDone(reloadIo())} />}
           {readMeanwhile && (
             <div className="notice" data-testid="intussen-gelezen">
               De app heeft deze bon intussen gelezen. Wat je zelf hebt ingevuld is blijven staan.{' '}
-              <Button small onClick={() => void showReadData(reloadIo(d))}>Gelezen gegevens tonen</Button>
+              <Button small onClick={() => void showReadData(reloadIo())}>Gelezen gegevens tonen</Button>
             </div>
           )}
           {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document') && !(proposal && i.field === proposal.kind) && !(own && i.field === 'own-company')).map((i) => (

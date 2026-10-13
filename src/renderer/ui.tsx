@@ -49,7 +49,7 @@ export const useApp = () => useContext(Ctx);
 // ---------- data laden ----------
 
 /** Laadt data via de API, met herlaadfunctie en foutmelding. */
-export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []): { data: T | undefined; error: string | null; reload: () => Promise<void>; loading: boolean; /** de gegevens vervangen door wat al elders is opgehaald */ set: (data: T) => void } {
+export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []): { data: T | undefined; error: string | null; reload: () => Promise<void>; loading: boolean } {
   const [data, setData] = useState<T>();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,7 +70,7 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []): { data: 
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
-  return { data, error, reload, loading, set: setData };
+  return { data, error, reload, loading };
 }
 
 /** Doet iets telkens als het hoofdproces een gebeurtenis meldt (bv. er kwam een bon binnen of een bon is gelezen). */

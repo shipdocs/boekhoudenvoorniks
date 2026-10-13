@@ -5,7 +5,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn as echtProces, type ChildProcess } from 'node:child_process';
-import { LocalOcrRuntime, leftoverVerdict, parsePsInfo, parseWindowsInfo, processInfo, type DownloadFetch, type PidRecord, type ProcessInfo, type ProcessLookup, type RuntimeDeps } from '../src/ocr-runtime/runtime';
+import { LocalOcrRuntime, leftoverKillCommand, leftoverVerdict, parsePsInfo, parseWindowsInfo, processInfo, type DownloadFetch, type PidRecord, type ProcessInfo, type ProcessLookup, type RuntimeDeps } from '../src/ocr-runtime/runtime';
 import { GLM_OCR, llamaAssetPattern, type OcrModel } from '../src/ocr-runtime/manifest';
 import { LlamaCppOcrProvider, OCR_REQUEST_TIMEOUT_MS, OcrTimeoutError, textToItems, OCR_MAX_PIXELS, ocrSize, type ImageShrinker } from '../src/intake/ocr-llamacpp';
 import { READ_CONNECTION_MESSAGE, READ_TIMEOUT_MESSAGE } from '../src/shared/reading';
@@ -576,6 +576,8 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     t.draait(4_000_030);
     t.processen.tabel.set(4_900_000, { path: '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', started: { at: 60_000, boot: 'opstart-1' }, sameUser: true });
     expect(await t.rt.stopLeftover()).toBe(false);
+    // de server van een programma dat nog draait is geen overgeslagen achterblijver
+    expect(t.rt.status().skippedLeftovers).toBe(0);
     // ook een nieuwe start laat hem met rust, en legt de eigen server ernaast vast
     await lees(t.rt);
     expect(gestopt).toEqual([]);
@@ -588,9 +590,60 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     t.processen.tabel.set(4_900_000, { path: '/usr/bin/firefox', started: { at: 900_000, boot: 'opstart-1' }, sameUser: true });
     expect(await t.rt.stopLeftover()).toBe(false);
     expect(gestopt).toEqual([]);
+    // dat is te zien in de status: er is een achterblijver overgeslagen
+    expect(t.rt.status().skippedLeftovers).toBe(1);
+    // een volgende poging (hier: vóór een serverstart) telt opnieuw; hij staat er nog
+    await lees(t.rt);
+    expect(t.rt.status().skippedLeftovers).toBe(1);
+    t.rt.stopNow();
     t.processen.tabel.delete(4_900_000);
     expect(await t.rt.stopLeftover()).toBe(true);
     expect(gestopt).toEqual([4_000_030]);
+    expect(t.rt.status().skippedLeftovers).toBe(0);
+  });
+
+  it('Windows: een achterblijver stoppen gaat met taskkill, dat zelf op de naam van het programma filtert', async () => {
+    // de opdracht
+    const record: PidRecord = { pid: 4321, serverPath: 'C:\\Data\\ocr\\llama\\b1\\llama-server.exe', started: { at: 1 }, app: { pid: 1, started: { at: 1 } } };
+    expect(leftoverKillCommand('win32', record)).toEqual({ cmd: 'taskkill', args: ['/PID', '4321', '/F', '/FI', 'IMAGENAME eq llama-server.exe'] });
+    expect(leftoverKillCommand('win32', { ...record, serverPath: 'C:/Data/ocr/LLAMA-SERVER.EXE' })).toEqual({ cmd: 'taskkill', args: ['/PID', '4321', '/F', '/FI', 'IMAGENAME eq llama-server.exe'] });
+    // een andere naam dan het eigen programma: geen opdracht, er wordt dan niets gestopt
+    expect(leftoverKillCommand('win32', { ...record, serverPath: 'C:\\Data\\ocr\\iets" /T anders.exe' })).toBeNull();
+    expect(leftoverKillCommand('win32', { ...record, pid: 1.5 })).toBeNull();
+    // Linux en macOS: een signaal aan het proces-ID
+    expect(leftoverKillCommand('linux', record)).toBe('signaal');
+    expect(leftoverKillCommand('darwin', record)).toBe('signaal');
+
+    // de route: op Windows gaat het stoppen via de opdracht, niet via een signaal
+    const signalen: number[] = [];
+    const opdrachten: { cmd: string; args: string[] }[] = [];
+    const t = await geinstalleerd({ platform: 'linux', kill: (pid) => void signalen.push(pid) });
+    const exe = `${t.serverPath}.exe`;
+    const win = new LocalOcrRuntime(t.dir, {
+      ...t.deps,
+      platform: 'win32',
+      execKill: async (cmd, args) => {
+        opdrachten.push({ cmd, args });
+        t.processen.tabel.set(4_000_070, 'weg');
+      },
+    });
+    t.achtergelaten(4_000_070, { serverPath: exe });
+    t.draait(4_000_070, { path: exe });
+    expect(await win.stopLeftover()).toBe(true);
+    expect(opdrachten).toEqual([{ cmd: 'taskkill', args: ['/PID', '4000070', '/F', '/FI', 'IMAGENAME eq llama-server.exe'] }]);
+    expect(signalen).toEqual([]);
+    expect(existsSync(t.pidFile)).toBe(false);
+
+    // de opdracht filterde het proces weg (het is er nog, of de opdracht mislukte): niets gestopt, de regel blijft staan
+    const niets = new LocalOcrRuntime(t.dir, { ...t.deps, platform: 'win32', execKill: async () => undefined });
+    t.achtergelaten(4_000_071, { serverPath: exe });
+    t.draait(4_000_071, { path: exe });
+    expect(await niets.stopLeftover()).toBe(false);
+    expect(t.vastgelegd()).toHaveLength(1);
+    const kapot = new LocalOcrRuntime(t.dir, { ...t.deps, platform: 'win32', execKill: async () => { throw new Error('taskkill ontbreekt'); } });
+    expect(await kapot.stopLeftover()).toBe(false);
+    expect(t.vastgelegd()).toHaveLength(1);
+    expect(signalen).toEqual([]);
   });
 
   it('de regel waarmee een achterblijver wordt herkend', () => {
@@ -606,8 +659,9 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     expect(oordeel({ server: { ...server, started: { at: 999, boot: 'a' } } })).toBe('vergeten');
     // hetzelfde proces-ID binnen een seconde opnieuw uitgegeven aan een andere llama-server uit dezelfde map
     expect(leftoverVerdict({ record: { ...record, started: { at: 10_000, boot: 'a' } }, server: { ...server, started: { at: 11_000, boot: 'a' } }, starter: 'weg', dir, platform: 'linux' })).toBe('vergeten');
-    // bestaat er een proces met het proces-ID van de starter, dan gebeurt er niets, ook bij een ander begin
-    expect(oordeel({ starter: { path: '/app', started: { at: 501, boot: 'a' }, sameUser: true } })).toBe('laten');
+    // bestaat er een proces met het proces-ID van de starter, dan gebeurt er niets. Bij hetzelfde begin is het de starter
+    // zelf ('laten'); bij een ander begin of als het niet vast te stellen is, blijft er mogelijk een achterblijver staan ('overgeslagen')
+    expect(oordeel({ starter: { path: '/app', started: { at: 501, boot: 'a' }, sameUser: true } })).toBe('overgeslagen');
     expect(oordeel({ server: { ...server, started: { at: 1_000, boot: 'b' } } })).toBe('vergeten');
     expect(oordeel({ server: { ...server, started: { at: 1_000 } } })).toBe('vergeten');
     expect(oordeel({ server: 'weg' })).toBe('vergeten');
@@ -616,9 +670,9 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     expect(oordeel({ server: { ...server, path: '/usr/bin/llama-server' } })).toBe('vergeten');
     expect(oordeel({ server: { ...server, path: '/data/ocr/llama/b1/iets-anders' }, record: { ...record, serverPath: '/data/ocr/llama/b1/iets-anders' } })).toBe('vergeten');
     // de app die hem startte
-    expect(oordeel({ starter: null })).toBe('laten');
+    expect(oordeel({ starter: null })).toBe('overgeslagen');
     expect(oordeel({ starter: { path: '/app', started: { at: 500, boot: 'a' }, sameUser: true } })).toBe('laten');
-    expect(oordeel({ starter: { path: '/app', started: { at: 9_500, boot: 'a' }, sameUser: true } })).toBe('laten');
+    expect(oordeel({ starter: { path: '/app', started: { at: 9_500, boot: 'a' }, sameUser: true } })).toBe('overgeslagen');
     // Windows: hoofdletters in het pad maken niet uit
     const win = 'C:\\Data\\ocr\\llama\\b1\\llama-server.exe';
     expect(leftoverVerdict({ record: { ...record, serverPath: win }, server: { ...server, path: win.toUpperCase() }, starter: 'weg', dir: 'C:\\Data\\ocr', platform: 'win32' })).toBe(process.platform === 'win32' ? 'stoppen' : 'vergeten');

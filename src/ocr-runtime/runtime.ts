@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs';
-import { basename, join, dirname, relative, isAbsolute, resolve } from 'node:path';
+import { basename, join, dirname, relative, isAbsolute, resolve, win32 } from 'node:path';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { cpus } from 'node:os';
@@ -29,6 +29,11 @@ export type RuntimeState = 'niet-geinstalleerd' | 'downloaden' | 'geinstalleerd'
 
 export interface RuntimeStatus {
   state: RuntimeState;
+  /**
+   * Hoeveel servers van een vorige keer bij de laatste opruimpoging zijn blijven staan omdat niet
+   * vaststond dat het programma dat ze startte weg is (zie leftoverVerdict, 'overgeslagen').
+   */
+  skippedLeftovers: number;
   /** voortgang van het downloaden, in bytes */
   progress: { done: number; total: number; file: string } | null;
   error: string | null;
@@ -79,6 +84,8 @@ export interface RuntimeDeps {
   processInfo?: (pid: number) => Promise<ProcessLookup>;
   /** een proces stoppen op proces-ID (standaard process.kill); alleen tests vervangen dit */
   kill?: (pid: number, signal: NodeJS.Signals) => void;
+  /** voert de opdracht uit waarmee Windows een achterblijver stopt (zie leftoverKillCommand); alleen tests vervangen dit */
+  execKill?: (cmd: string, args: string[]) => Promise<unknown>;
   /** tijdslimiet van één leesverzoek; standaard OCR_REQUEST_TIMEOUT_MS */
   requestTimeoutMs?: number;
   /** verkleint een foto voor de herkenning (hoofdproces: Electron); zonder gaat de foto zoals hij is */
@@ -226,9 +233,15 @@ function isOwnServer(dir: string, actual: string, recorded: string, platform: st
  * startte. Bestaat dat nog (een
  * tweede programma op dezelfde gegevensmap, of een andere runtime in dit programma), dan is het zijn
  * server. 'vergeten': het proces van toen is er niet meer, de regel kan weg. 'laten': niet vast te
- * stellen, er gebeurt niets en de regel blijft staan.
+ * stellen of de server van een programma dat nog draait; er gebeurt niets en de regel blijft staan.
+ *
+ * 'overgeslagen': net als 'laten' gebeurt er niets, maar hier is het proces wél de eigen server van
+ * toen en staat niet vast dat zijn starter nog draait: er bestaat een proces met het proces-ID van de
+ * starter, maar met een ander begin (dat proces-ID is dus opnieuw uitgegeven aan een ander programma),
+ * of er is niets over vast te stellen. Dan blijft er waarschijnlijk een achterblijver staan; de
+ * runtime telt die (`skippedLeftovers`) zodat het te zien is.
  */
-export function leftoverVerdict(input: { record: PidRecord; server: ProcessLookup; starter: ProcessLookup; dir: string; platform: string }): 'stoppen' | 'vergeten' | 'laten' {
+export function leftoverVerdict(input: { record: PidRecord; server: ProcessLookup; starter: ProcessLookup; dir: string; platform: string }): 'stoppen' | 'vergeten' | 'laten' | 'overgeslagen' {
   const { record, server, starter } = input;
   if (server === 'weg') return 'vergeten';
   if (!server) return 'laten';
@@ -240,7 +253,27 @@ export function leftoverVerdict(input: { record: PidRecord; server: ProcessLooku
   // Er bestaat een proces met het proces-ID van de starter (of het is niet vast te stellen): niets doen. Ook bij
   // een ander begin: dat wijst op een ander programma, maar het is veiliger een achterblijver te laten staan
   // tot de volgende start dan de server van een programma dat nog draait te stoppen op een meetverschil.
-  return 'laten';
+  return starter && sameStart(starter.started, record.app.started) ? 'laten' : 'overgeslagen';
+}
+
+/**
+ * Hoe een achterblijver gestopt wordt, nadat `leftoverVerdict` 'stoppen' gaf.
+ *
+ * Windows: `taskkill /PID <pid> /F /FI "IMAGENAME eq llama-server.exe"`. Die opdracht kijkt zelf, op
+ * het moment van beëindigen, of het proces met dat proces-ID llama-server.exe heet; is het proces-ID
+ * intussen van een ander programma, dan doet hij niets. Het venster is daar dus niet de duur van een
+ * PowerShell-opvraag. Wat taskkill niet onderscheidt: een ándere llama-server.exe die precies in die
+ * tijd hetzelfde proces-ID kreeg. Heet het vastgelegde programma anders, dan is er geen opdracht (null)
+ * en wordt er niets gestopt.
+ *
+ * Linux en macOS ('signaal'): een signaal aan het proces-ID, direct na de laatste controle.
+ */
+export function leftoverKillCommand(platform: string, record: Pick<PidRecord, 'pid' | 'serverPath'>): { cmd: string; args: string[] } | 'signaal' | null {
+  if (platform !== 'win32') return 'signaal';
+  if (!Number.isInteger(record.pid) || record.pid <= 0) return null;
+  const image = win32.basename(record.serverPath).toLowerCase();
+  if (image !== 'llama-server.exe') return null;
+  return { cmd: 'taskkill', args: ['/PID', String(record.pid), '/F', '/FI', `IMAGENAME eq ${image}`] };
 }
 
 /**
@@ -324,7 +357,9 @@ async function freePort(): Promise<number> {
 }
 
 export class LocalOcrRuntime {
-  private status_: RuntimeStatus;
+  private status_: Omit<RuntimeStatus, 'skippedLeftovers'>;
+  /** achterblijvers die bij de laatste opruimpoging zijn blijven staan omdat niet vaststond dat het programma dat ze startte weg is */
+  private skipped = 0;
   private process: ChildProcess | null = null;
   private url: string | null = null;
   private starting: Promise<string> | null = null;
@@ -395,7 +430,7 @@ export class LocalOcrRuntime {
   }
 
   status(): RuntimeStatus {
-    return { ...this.status_, progress: this.status_.progress ? { ...this.status_.progress } : null };
+    return { ...this.status_, progress: this.status_.progress ? { ...this.status_.progress } : null, skippedLeftovers: this.skipped };
   }
 
   /** Start het downloaden op de achtergrond; de voortgang is te volgen via status(). */
@@ -685,6 +720,7 @@ export class LocalOcrRuntime {
     const kill = this.deps.kill ?? ((pid: number, signal: NodeJS.Signals) => void process.kill(pid, signal));
     const platform = this.deps.platform ?? process.platform;
     let stopped = false;
+    let skipped = 0;
     for (const record of this.readPids()) {
       const server = await this.info(record.pid);
       // alleen als het proces zelf klopt, hoeft bekend te zijn of het programma dat het startte nog draait
@@ -695,25 +731,39 @@ export class LocalOcrRuntime {
         // proces zijn proces-ID hebben gekregen. Daarom als laatste stap opnieuw naar de server kijken:
         // alleen als het nog precies hetzelfde proces is, wordt het gestopt, direct daarna.
         //
-        // Wat overblijft: stoppen gaat op proces-ID, en tussen het antwoord op deze laatste vraag en het
-        // stopsignaal zit geen wachtpunt meer, maar wel de tijd die het besturingssysteem nodig had om
-        // te antwoorden (Linux: het lezen van /proc; macOS en Windows: een hulpprogramma, tot ongeveer
-        // een seconde). Eindigt de server precies daarin en krijgt een ander proces meteen zijn
-        // proces-ID, dan treft het signaal dat proces. Dat is zonder een vaste verwijzing naar het
-        // proces (die Node niet biedt) niet uit te sluiten.
+        // Wat overblijft: stoppen gaat op proces-ID. Nodejs biedt geen vaste verwijzing naar een proces,
+        // dus uit te sluiten is het niet dat het proces-ID tussen deze laatste controle en het stoppen
+        // opnieuw wordt uitgegeven.
+        // - Linux: het antwoord komt uit /proc (geen hulpprogramma) en het signaal volgt zonder
+        //   wachtpunt; het venster is de tijd tussen die twee stappen in dit programma.
+        // - macOS: het antwoord komt van `ps`; het venster is de looptijd van `ps` nadat het het proces
+        //   bekeek (tienden van een seconde), en het signaal volgt daarna zonder wachtpunt.
+        // - Windows: het stoppen zelf filtert op de naam van het programma (zie leftoverKillCommand), dus
+        //   de duur van de PowerShell-opvraag telt niet mee; een andere llama-server.exe die precies dan
+        //   hetzelfde proces-ID kreeg, wordt niet onderscheiden.
         verdict = leftoverVerdict({ record, server: await this.info(record.pid), starter, dir: this.dir, platform });
         if (verdict === 'stoppen') {
-          try {
-            kill(record.pid, 'SIGKILL');
+          const how = leftoverKillCommand(platform, record);
+          if (how === 'signaal') {
+            try {
+              kill(record.pid, 'SIGKILL');
+              stopped = true;
+            } catch {
+              /* net zelf gestopt */
+            }
+          } else {
+            // de opdracht zegt niet betrouwbaar of hij iets stopte (hij filtert zelf): daarna kijken of het proces weg is
+            if (how) await (this.deps.execKill ?? ((cmd, args) => run(cmd, args, { timeout: 15_000, windowsHide: true })))(how.cmd, how.args).catch(() => undefined);
+            if (!how || (await this.info(record.pid)) !== 'weg') continue;
             stopped = true;
-          } catch {
-            /* net zelf gestopt */
           }
         }
       }
-      if (verdict === 'laten') continue;
+      if (verdict === 'overgeslagen') skipped++;
+      if (verdict === 'laten' || verdict === 'overgeslagen') continue;
       this.forgetPid(record.pid, record.started);
     }
+    this.skipped = skipped;
     return stopped;
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { afterDecision, afterReaderDone, formKey, proposedForm, reloadAfterRead, showReadData, type ReviewForm } from '../src/shared/review-form';
+import { afterDecision, afterReaderDone, formKey, loadTurn, openReview, proposedForm, reloadAfterRead, showReadData, type ReviewForm } from '../src/shared/review-form';
 
 /**
  * Het scherm "bon bekijken" terwijl de bon op de achtergrond gelezen wordt: wat de gebruiker intussen
@@ -24,33 +24,58 @@ function scherm(doc: Doc = ONGELEZEN) {
     form: proposedForm(doc) as ReviewForm | null,
     proposed: formKey(proposedForm(doc)) as string | null,
     intussenGelezen: false,
+    fout: null as string | null,
     /** hoe vaak het scherm is bijgewerkt, en of document en formulier daarbij samen zijn vervangen */
     bijgewerkt: [] as { doc: boolean; form: boolean }[],
   };
+  /** één teller voor alle laadacties van het scherm */
+  const turn = loadTurn();
   /**
    * De bon is veranderd; `tijdensLaden` gebeurt terwijl de nieuwe gegevens onderweg zijn. `route`: langs
    * welke weg het scherm opnieuw laadt (standaard: de melding dat er op de achtergrond iets gelezen is).
    */
-  const gebeurtenis = (nieuw: Doc | null, tijdensLaden: () => void = () => undefined, route: typeof reloadAfterRead = reloadAfterRead) =>
+  const gebeurtenis = (nieuw: Doc | null, tijdensLaden: () => void = () => undefined, route: Route = reloadAfterRead) =>
+    laad(route, async () => {
+      await Promise.resolve();
+      tijdensLaden();
+      if (!nieuw) throw new Error('geen verbinding');
+      return { doc: nieuw };
+    });
+  /** het scherm laadt langs deze weg; `haal` levert de gegevens (of mislukt) */
+  const laad = (route: Route, haal: () => Promise<{ doc: Doc }>) =>
     route({
+      turn,
       current: () => ({ form: s.form, proposed: s.proposed, doc: s.doc }),
-      load: async () => {
-        await Promise.resolve();
-        tijdensLaden();
-        return nieuw ? { doc: nieuw } : null;
-      },
+      load: haal,
       apply: (next) => {
         s.bijgewerkt.push({ doc: true, form: !!next.form });
         s.doc = next.view.doc;
+        s.fout = null;
         if (next.form) {
           s.form = next.form;
           s.proposed = formKey(next.form);
           s.intussenGelezen = false;
         } else if (next.readMeanwhile) s.intussenGelezen = true;
       },
+      failed: (melding) => void (s.fout = melding),
     });
-  return { s, gebeurtenis };
+  return { s, gebeurtenis, laad };
 }
+
+type Route = typeof reloadAfterRead;
+
+/** Een laadactie waarvan de test bepaalt wanneer het antwoord komt. */
+function uitgesteld() {
+  let klaar: (doc: Doc) => void = () => undefined;
+  let mislukt: (fout: Error) => void = () => undefined;
+  const antwoord = new Promise<{ doc: Doc }>((resolve, reject) => {
+    klaar = (doc) => resolve({ doc });
+    mislukt = reject;
+  });
+  return { haal: () => antwoord, klaar, mislukt };
+}
+/** alles wat al klaarstaat laten gebeuren */
+const even = () => new Promise((r) => setTimeout(r, 0));
 
 describe('bon bekijken terwijl hij op de achtergrond gelezen wordt', () => {
   it('niets ingevuld: de gelezen gegevens komen in het formulier, samen met het nieuwe document', async () => {
@@ -109,16 +134,91 @@ describe('bon bekijken terwijl hij op de achtergrond gelezen wordt', () => {
     expect(s.intussenGelezen).toBe(false);
   });
 
-  it('laden mislukt, of het formulier is intussen weg (er wordt al opnieuw geladen): er verandert niets', async () => {
+  it('laden mislukt ook bij de tweede poging: er verandert niets, het scherm krijgt de foutmelding', async () => {
     const { s, gebeurtenis } = scherm();
+    const form = s.form;
     await gebeurtenis(null);
     expect(s.bijgewerkt).toEqual([]);
-    // het formulier verdwijnt tijdens het laden (bv. na een keuze van de gebruiker): het scherm vult het zelf uit de nieuwe gegevens
-    await gebeurtenis(GELEZEN, () => {
-      s.form = null;
-    });
-    expect(s.form).toBeNull();
-    expect(s.intussenGelezen).toBe(false);
+    expect(s.form).toBe(form);
+    expect(s.fout).toBe('geen verbinding');
+    // een volgende laadactie die lukt haalt de melding weer weg
+    await gebeurtenis(GELEZEN);
+    expect(s.fout).toBeNull();
+    expect(s.form).toMatchObject({ supplier: 'Bouwmaat' });
+  });
+
+  it('laden mislukt één keer: de tweede poging gaat langs dezelfde bewaking, dus de gelezen gegevens komen in het formulier', async () => {
+    // een ongelezen bon staat open; het ophalen na de melding "gelezen" mislukt eenmalig en lukt daarna
+    const eenmalig = (doc: Doc) => {
+      let keer = 0;
+      return async () => {
+        if (keer++ === 0) throw new Error('even geen verbinding');
+        return { doc };
+      };
+    };
+    const { s, laad } = scherm();
+    await laad(reloadAfterRead, eenmalig(GELEZEN));
+    expect(s.doc).toBe(GELEZEN);
+    expect(s.form).toMatchObject({ supplier: 'Bouwmaat', total: 12100 });
+    expect(s.fout).toBeNull();
+    // had de gebruiker zelf iets ingevuld, dan blijft dat staan en verschijnt "Gelezen gegevens tonen"
+    const tweede = scherm();
+    tweede.s.form = { ...tweede.s.form!, supplier: 'Hornbach' };
+    await tweede.laad(reloadAfterRead, eenmalig(GELEZEN));
+    expect(tweede.s.form).toMatchObject({ supplier: 'Hornbach' });
+    expect(tweede.s.intussenGelezen).toBe(true);
+    expect(tweede.s.doc).toBe(GELEZEN);
+  });
+
+  it('een ouder laadantwoord dat later binnenkomt, draait het nieuwere leesresultaat niet terug', async () => {
+    // twee meldingen kort na elkaar: de eerste laadactie haalde nog de ongelezen bon op en wacht; de tweede levert de gelezen bon
+    const { s, laad } = scherm();
+    const eerste = uitgesteld();
+    const tweede = uitgesteld();
+    const a = laad(reloadAfterRead, eerste.haal);
+    const b = laad(reloadAfterRead, tweede.haal);
+    tweede.klaar(GELEZEN);
+    await b;
+    expect(s.form).toMatchObject({ supplier: 'Bouwmaat', total: 12100 });
+    eerste.klaar({ ...ONGELEZEN, reading: 'bezig' } as unknown as Doc);
+    await a;
+    expect(s.doc).toBe(GELEZEN);
+    expect(s.form).toMatchObject({ supplier: 'Bouwmaat', total: 12100 });
+    expect(s.bijgewerkt).toHaveLength(1);
+    // ook een oudere laadactie die mislukt en het opnieuw probeert, komt er niet meer tussen
+    const derde = uitgesteld();
+    const c = laad(reloadAfterRead, derde.haal);
+    await laad(afterDecision, async () => ({ doc: GELEZEN }));
+    derde.mislukt(new Error('te laat'));
+    await c;
+    expect(s.fout).toBeNull();
+    expect(s.bijgewerkt).toHaveLength(2);
+  });
+
+  it('wisselt de gebruiker naar een andere bon terwijl de vorige nog laadt, dan komt het antwoord van de vorige niet meer op het scherm', async () => {
+    const ANDERE = { ...GELEZEN, result: { ...(GELEZEN.result as object), supplier: veld('Gamma'), total: veld(4500) } } as unknown as Doc;
+    const { s, laad } = scherm();
+    const vorige = uitgesteld();
+    const a = laad(reloadAfterRead, vorige.haal);
+    // de andere bon gaat open: het formulier begint met wat de app voor díe bon voorstelt
+    s.form = { ...s.form!, supplier: 'Nog van de vorige bon', jobId: 5 };
+    await laad(openReview, async () => ({ doc: ANDERE }));
+    expect(s.form).toMatchObject({ supplier: 'Gamma', total: 4500, jobId: null });
+    vorige.klaar(GELEZEN);
+    await a;
+    expect(s.doc).toBe(ANDERE);
+    expect(s.form).toMatchObject({ supplier: 'Gamma', total: 4500 });
+    // en andersom: het openen duurt lang, intussen niets anders; het antwoord komt gewoon aan
+    const traag = uitgesteld();
+    const open = scherm();
+    open.s.form = null;
+    const b = open.laad(openReview, traag.haal);
+    await even();
+    expect(open.s.form).toBeNull();
+    traag.klaar(GELEZEN);
+    await b;
+    expect(open.s.form).toMatchObject({ supplier: 'Bouwmaat' });
+    expect(open.s.proposed).toBe(formKey(open.s.form!));
   });
 
   it('"Nu lezen" bij de bon zelf: wie tijdens het lezen invult, houdt zijn invoer als het lezen klaar is', async () => {

@@ -342,7 +342,7 @@ describe('lokale OCR in de Store-versie', () => {
   it('in het scherm: "op deze computer" kan pas na een uitdrukkelijk ja', async () => {
     const rt = storeRuntime(join(tempDir(), 'ocr'));
     const { s, api, installs } = apiWith(rt, true);
-    expect(api.reader.options().local).toMatchObject({ consentNeeded: true, runtimeVersion: 'b1234' });
+    expect(api.reader.options().local).toMatchObject({ consentNeeded: true, runtimeVersion: 'b1234', skippedLeftovers: 0 });
     expect(api.localOcr.info()).toMatchObject({ consentNeeded: true, runtimeVersion: 'b1234' });
     expect(() => api.reader.choose('lokaal')).toThrow(/Geef eerst toestemming/);
     expect(() => api.localOcr.install()).toThrow(/Geef eerst toestemming/);
