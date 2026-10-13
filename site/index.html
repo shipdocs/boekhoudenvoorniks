@@ -57,6 +57,7 @@
           "Bankafschriften inlezen: CSV, MT940 en CAMT.053",
           "Bank optioneel automatisch ophalen met Ponto (vanaf versie 1.2.0), rechtstreeks tussen de app en Ponto; afschriften blijven de basis",
           "Automatisch betalingen koppelen aan facturen",
+          "Buitenlandse inkoopfacturen omrekenen naar euro’s, passende bankbetalingen koppelen en kleine koersverschillen boeken",
           "Btw-aangifte per kwartaal met rubrieken 1a, 1b, 1e, 2a en 5b",
           "Btw verlegd en kleineondernemersregeling (KOR)",
           "Betalingsherinneringen",
@@ -105,6 +106,14 @@
         "@id": "https://boekhoudenvoorniks.nl/#faq",
         "inLanguage": "nl-NL",
         "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Kan ik buitenlandse facturen in dollars verwerken?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja. De app herkent vreemde valuta, rekent inkoopfacturen om naar euro’s en zoekt een passende eurobetaling. Een klein koersverschil bij een later gekoppelde betaling wordt apart geboekt. Voor buitenlandse btw doet de app een voorstel; bij twijfel controleer je het. Dit hoort bij het gratis programma. Bekijk het dollarvoorbeeld."
+            }
+          },
           {
             "@type": "Question",
             "name": "Is BoekhoudenVoorNiks echt gratis?",
@@ -408,6 +417,7 @@
         <div><h3>Offertes & facturen</h3><p>Doorlopende nummering, BTW per regel (21%, 9%, 0%, verlegd, KOR), creditfacturen en automatische herinneringen.</p></div>
         <div><h3>Eigen opmaak</h3><p>Logo, kleuren, lettertype en vaste teksten, met live voorbeeld.</p></div>
         <div><h3>Bonnetjes & e-facturen</h3><p>UBL/XML gaat altijd voor, dan de PDF-tekst, en pas daarna lokale tekstherkenning. Twijfel? Dan zie je waar op de bon we het bedrag lazen.</p></div>
+        <div><h3>Buitenlandse facturen &amp; betalingen</h3><p>Een factuur in dollars, een afschrijving in euro’s: automatisch omrekenen, een passende betaling koppelen en kleine koersverschillen boeken. Met een voorstel voor de btw en controle bij twijfel. Ook dit is gratis. <a href="buitenlandse-facturen.html">Zo werkt het met buitenlandse facturen</a></p></div>
         <div><h3>Alle Nederlandse banken</h3><p>CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos en Revolut, plus MT940 en CAMT.053. Het saldo per bankrekening staat op je startscherm, handig bij meer rekeningen.</p></div>
         <div><h3>Bank automatisch inlezen <span class="soon">nieuw in 1.2.0</span></h3><p>Download je afschrift en de app leest het na één klik in vanuit een map, of laat je bank je betalingen ophalen met Ponto. Het saldo per rekening staat op je startscherm. <a href="bank-automatisch.html">Hoe het werkt</a></p></div>
         <div><h3>Webshop & betalingen</h3><p>WooCommerce en Shopify worden facturen; Mollie Facturen ook. Mollie- en Stripe-uitbetalingen kloppen vanzelf met je bank.</p></div>
@@ -599,6 +609,7 @@
         <details><summary>Werkt het met btw verlegd en de kleineondernemersregeling (KOR)?</summary><p>Ja. Per factuurregel kies je 21%, 9%, 0%, btw verlegd of vrijgesteld (KOR). Bij btw verlegd controleert het programma of het btw-nummer van je klant op de factuur staat. Met de KOR telt de btw op je inkopen bij de kosten, en verlegde btw die je toch moet betalen staat per kwartaal op het btw-scherm.</p></details>
         <details><summary>Kan ik overstappen vanuit een ander boekhoudprogramma?</summary><p>Ja. Kies een instapdatum en lees een auditfile (XAF) uit je vorige programma in, of het overzicht van je boekhouder (kolommen- of saldibalans en openstaande facturen). Heb je een auditfile per jaar, dan zet je ze allemaal tegelijk neer. De app vult je startbalans in; jij kijkt het na.</p></details>
         <details><summary>Kan mijn bank automatisch worden opgehaald?</summary><p>Ja, vanaf versie 1.2.0 en optioneel, met Ponto: een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit, met je eigen Client ID en Client Secret. De app haalt je betalingen dan zelf op, rechtstreeks bij Ponto; ShipDocs ziet je bankgegevens niet. Een wizard leidt je in vijf stappen langs Ponto. Wat Ponto kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto. De app zegt tot welke datum de betalingen volledig zijn bijgewerkt, en afschriften inlezen blijft de basis en terugval.</p></details>
+        <details><summary>Kan ik buitenlandse facturen in dollars verwerken?</summary><p>Ja. De app herkent vreemde valuta, rekent inkoopfacturen om naar euro’s en zoekt een passende eurobetaling. Een klein koersverschil bij een later gekoppelde betaling wordt apart geboekt. Voor buitenlandse btw doet de app een voorstel; bij twijfel controleer je het. Dit hoort bij het gratis programma. <a href="buitenlandse-facturen.html">Bekijk het dollarvoorbeeld</a>.</p></details>
         <details><summary>Welke banken worden ondersteund?</summary><p>Elke bank: lees je afschrift in als CAMT.053 of MT940. Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf; bij andere banken geef je één keer aan welke kolom wat is. Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes. Vanaf versie 1.2.0 kun je optioneel ook je bank laten ophalen met Ponto, een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit; welke banken die ondersteunt, bepaalt Ponto. Afschriften blijven de basis en terugval.</p></details>
         <details><summary>Heb ik boekhoudkennis nodig?</summary><p>Nee. Je werkt met klanten, klussen, offertes, facturen en bonnetjes. Het programma maakt daar automatisch een dubbele boekhouding van en vraagt alleen iets als het niet zeker is.</p></details>
         <details><summary>Waar staat mijn administratie?</summary><p>Op je eigen computer, in een lokaal databasebestand. Er is geen cloud nodig. Elke dag wordt automatisch een back-up gemaakt en je kunt zelf een kopie maken op een USB-stick.</p></details>
@@ -644,6 +655,7 @@
           <li><a href="./#overstappen">Overstappen</a></li>
           <li><a href="bank-automatisch.html">Bank automatisch inlezen</a></li>
           <li><a href="btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="buitenlandse-facturen.html">Buitenlandse facturen verwerken</a></li>
           <li><a href="zonder-abonnement.html">Zonder abonnement</a></li>
           <li><a href="offline-boekhoudprogramma.html">Offline boekhoudprogramma</a></li>
           <li><a href="gratis-boekhoudprogramma-downloaden.html">Gratis boekhoudprogramma downloaden</a></li>
