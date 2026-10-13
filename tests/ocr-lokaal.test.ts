@@ -583,8 +583,12 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     t.rt.stopNow();
     expect(t.vastgelegd()).toEqual([regel]);
 
-    // dat proces-ID is intussen van een ander programma (het begon op een ander moment): de app van toen is weg, de server is een achterblijver
+    // dat proces-ID is intussen van een ander programma (het begon op een ander moment): zolang er een proces met dat
+    // ID bestaat gebeurt er niets; pas als het weg is, is de server een achterblijver
     t.processen.tabel.set(4_900_000, { path: '/usr/bin/firefox', started: { at: 900_000, boot: 'opstart-1' }, sameUser: true });
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(gestopt).toEqual([]);
+    t.processen.tabel.delete(4_900_000);
     expect(await t.rt.stopLeftover()).toBe(true);
     expect(gestopt).toEqual([4_000_030]);
   });
@@ -602,8 +606,8 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     expect(oordeel({ server: { ...server, started: { at: 999, boot: 'a' } } })).toBe('vergeten');
     // hetzelfde proces-ID binnen een seconde opnieuw uitgegeven aan een andere llama-server uit dezelfde map
     expect(leftoverVerdict({ record: { ...record, started: { at: 10_000, boot: 'a' } }, server: { ...server, started: { at: 11_000, boot: 'a' } }, starter: 'weg', dir, platform: 'linux' })).toBe('vergeten');
-    // ook bij de app die hem startte: een ander begin is een ander programma, dus die app is weg
-    expect(oordeel({ starter: { path: '/app', started: { at: 501, boot: 'a' }, sameUser: true } })).toBe('stoppen');
+    // bestaat er een proces met het proces-ID van de starter, dan gebeurt er niets, ook bij een ander begin
+    expect(oordeel({ starter: { path: '/app', started: { at: 501, boot: 'a' }, sameUser: true } })).toBe('laten');
     expect(oordeel({ server: { ...server, started: { at: 1_000, boot: 'b' } } })).toBe('vergeten');
     expect(oordeel({ server: { ...server, started: { at: 1_000 } } })).toBe('vergeten');
     expect(oordeel({ server: 'weg' })).toBe('vergeten');
@@ -614,7 +618,7 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     // de app die hem startte
     expect(oordeel({ starter: null })).toBe('laten');
     expect(oordeel({ starter: { path: '/app', started: { at: 500, boot: 'a' }, sameUser: true } })).toBe('laten');
-    expect(oordeel({ starter: { path: '/app', started: { at: 9_500, boot: 'a' }, sameUser: true } })).toBe('stoppen');
+    expect(oordeel({ starter: { path: '/app', started: { at: 9_500, boot: 'a' }, sameUser: true } })).toBe('laten');
     // Windows: hoofdletters in het pad maken niet uit
     const win = 'C:\\Data\\ocr\\llama\\b1\\llama-server.exe';
     expect(leftoverVerdict({ record: { ...record, serverPath: win }, server: { ...server, path: win.toUpperCase() }, starter: 'weg', dir: 'C:\\Data\\ocr', platform: 'win32' })).toBe(process.platform === 'win32' ? 'stoppen' : 'vergeten');

@@ -222,7 +222,8 @@ function isOwnServer(dir: string, actual: string, recorded: string, platform: st
 /**
  * Wat er met een regel uit het pid-bestand gebeurt. Het proces wordt alleen gestopt ('stoppen') als
  * álles klopt: het is de llama-server uit de eigen map, het begon op het moment dat is vastgelegd, het
- * is van dezelfde gebruiker, en het programma dat het startte draait niet meer. Draait dat nog (een
+ * is van dezelfde gebruiker, en er bestaat geen proces meer met het proces-ID van het programma dat het
+ * startte. Bestaat dat nog (een
  * tweede programma op dezelfde gegevensmap, of een andere runtime in dit programma), dan is het zijn
  * server. 'vergeten': het proces van toen is er niet meer, de regel kan weg. 'laten': niet vast te
  * stellen, er gebeurt niets en de regel blijft staan.
@@ -236,9 +237,10 @@ export function leftoverVerdict(input: { record: PidRecord; server: ProcessLooku
   if (!sameStart(server.started, record.started)) return 'vergeten';
   if (!server.sameUser) return 'laten';
   if (starter === 'weg') return 'stoppen';
-  if (!starter) return 'laten';
-  // hetzelfde proces-ID maar een ander begin: het programma van toen is weg
-  return sameStart(starter.started, record.app.started) ? 'laten' : 'stoppen';
+  // Er bestaat een proces met het proces-ID van de starter (of het is niet vast te stellen): niets doen. Ook bij
+  // een ander begin: dat wijst op een ander programma, maar het is veiliger een achterblijver te laten staan
+  // tot de volgende start dan de server van een programma dat nog draait te stoppen op een meetverschil.
+  return 'laten';
 }
 
 /**
