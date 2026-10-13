@@ -1,5 +1,5 @@
 import { runBackgroundFeeds } from './background-feeds';
-import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -26,6 +26,8 @@ import { JevClassifier } from '../intake/llm-jev';
 import { ONLINE_HELP } from '../shared/online-help';
 import type { FetchLike } from '../integrations/types';
 import { ImapSource } from '../mail/imap-source';
+import { ocrSize } from '../intake/ocr-llamacpp';
+import { jpegInfo } from '../scanner/jpeg-pdf';
 import { autoUpdater } from 'electron-updater';
 import { Updates } from './updates';
 import { startMcp } from '../mcp/start';
@@ -69,6 +71,23 @@ const STORE = isWindowsStore();
  * map is dan alleen-lezen geopend; de app schrijft er niets in.
  */
 let readOnly = false;
+
+/**
+ * Een verkleinde kopie van een foto voor de tekstherkenning (zie OCR_MAX_PIXELS). Alleen jpg zonder draaiing
+ * in de EXIF en png: een gedraaide foto gaat zoals hij is, want bij het verkleinen gaat de draairichting verloren.
+ */
+function shrinkForOcr(input: { data: Uint8Array; mimeType: string }): { data: Uint8Array; mimeType: string } | null {
+  if (input.mimeType === 'image/jpeg') {
+    const info = jpegInfo(input.data);
+    if (!info || info.orientation !== 1) return null;
+  } else if (input.mimeType !== 'image/png') return null;
+  const image = nativeImage.createFromBuffer(Buffer.from(input.data.buffer, input.data.byteOffset, input.data.byteLength));
+  if (image.isEmpty()) return null;
+  const { width, height } = image.getSize();
+  const size = ocrSize(width, height);
+  if (!size) return null;
+  return { data: image.resize({ ...size, quality: 'best' }).toJPEG(88), mimeType: 'image/jpeg' };
+}
 
 function assertWritable(): void {
   if (readOnly) throw new Error(READ_ONLY_MESSAGE);
@@ -466,6 +485,7 @@ function initServices(): void {
   });
   localOcr = new LocalOcrRuntime(join(rootDir(), 'ocr'), {
     fetch: (url, init) => fetch(url, init) as never,
+    shrinkImage: shrinkForOcr,
     // Store-versie: alleen de vaste build, pas na toestemming, en bij een fout een verwijzing naar de gewone versie
     ...(STORE ? { pinned: STORE_LLAMA_CPP, failureHint: storeFallbackHint('het lezen van bonnen op deze computer') } : {}),
   });

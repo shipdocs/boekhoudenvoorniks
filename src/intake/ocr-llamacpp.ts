@@ -20,6 +20,26 @@ export class OcrTimeoutError extends Error {
   }
 }
 
+/**
+ * Zoveel beeldpunten gaan hoogstens naar de herkenning. Het rekenwerk groeit met het aantal beeldpunten; een
+ * foto van een telefoon (tot 2560 punten per zijde) is vele malen groter dan nodig om een bon te lezen. Het
+ * bewaarde document blijft zoals het is: alleen de kopie voor de herkenning wordt verkleind.
+ */
+export const OCR_MAX_PIXELS = 1_200_000;
+
+/** De afmeting waarop een foto naar de herkenning gaat, met dezelfde verhouding; null als hij al klein genoeg is. */
+export function ocrSize(width: number, height: number, maxPixels = OCR_MAX_PIXELS): { width: number; height: number } | null {
+  if (!(width > 0) || !(height > 0) || width * height <= maxPixels) return null;
+  const factor = Math.sqrt(maxPixels / (width * height));
+  return { width: Math.max(1, Math.round(width * factor)), height: Math.max(1, Math.round(height * factor)) };
+}
+
+/**
+ * Verkleint een foto voor de herkenning. Geeft null als verkleinen niet nodig is of niet kan; dan gaat de
+ * foto zoals hij is. De echte verkleiner komt van het hoofdproces (Electron); tests geven een eigen.
+ */
+export type ImageShrinker = (input: { data: Uint8Array; mimeType: string }) => { data: Uint8Array; mimeType: string } | null;
+
 /** Afbeeldingen die llama.cpp (stb_image) kan lezen. */
 const SUPPORTED = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/gif'];
 
@@ -68,6 +88,7 @@ export class LlamaCppOcrProvider implements OcrProvider {
     private readonly prompt = 'Text Recognition:',
     label?: string,
     private readonly timeoutMs = OCR_REQUEST_TIMEOUT_MS,
+    private readonly shrink?: ImageShrinker,
   ) {
     const u = new URL(baseUrl);
     if (!['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) throw new Error('Slimme herkenning moet op deze computer draaien (localhost)');
@@ -97,6 +118,13 @@ export class LlamaCppOcrProvider implements OcrProvider {
     // eigen tijdslimiet die het verzoek ook echt afbreekt; zonder zou fetch pas na vijf minuten opgeven
     const abort = new AbortController();
     let timedOut = false;
+    // de herkenning krijgt een verkleinde kopie; lukt verkleinen niet, dan de foto zelf
+    let beeld: { data: Uint8Array; mimeType: string } = input;
+    try {
+      beeld = this.shrink?.(input) ?? input;
+    } catch {
+      beeld = input;
+    }
     const timer = setTimeout(() => {
       timedOut = true;
       abort.abort();
@@ -113,7 +141,7 @@ export class LlamaCppOcrProvider implements OcrProvider {
             {
               role: 'user',
               content: [
-                { type: 'image_url', image_url: { url: `data:${input.mimeType};base64,${Buffer.from(input.data).toString('base64')}` } },
+                { type: 'image_url', image_url: { url: `data:${beeld.mimeType};base64,${Buffer.from(beeld.data).toString('base64')}` } },
                 { type: 'text', text: this.prompt },
               ],
             },

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { spawn as echtProces, type ChildProcess } from 'node:child_process';
 import { LocalOcrRuntime, type DownloadFetch, type RuntimeDeps } from '../src/ocr-runtime/runtime';
 import { GLM_OCR, llamaAssetPattern, type OcrModel } from '../src/ocr-runtime/manifest';
-import { LlamaCppOcrProvider, OCR_REQUEST_TIMEOUT_MS, OcrTimeoutError, textToItems } from '../src/intake/ocr-llamacpp';
+import { LlamaCppOcrProvider, OCR_REQUEST_TIMEOUT_MS, OcrTimeoutError, textToItems, OCR_MAX_PIXELS, ocrSize, type ImageShrinker } from '../src/intake/ocr-llamacpp';
 import { READ_CONNECTION_MESSAGE, READ_TIMEOUT_MESSAGE } from '../src/shared/reading';
 import { parseDocumentText } from '../src/intake/text-parser';
 import { setup } from './helpers';
@@ -237,6 +237,28 @@ describe('ingebouwde tekstherkenning: gebruiken (#9)', () => {
     expect(r.source).toBe('ocr:glm-ocr');
     expect(r.result.total?.value).toBe(1790);
     expect(r.result.invoiceDate?.value).toBe('2026-09-12');
+  });
+
+  it('een grote foto gaat verkleind naar de herkenning; een kleine, of een die niet te verkleinen is, gaat zoals hij is', async () => {
+    // de rekenregel: zelfde verhouding, hoogstens OCR_MAX_PIXELS beeldpunten
+    expect(ocrSize(1000, 1000)).toBeNull();
+    expect(ocrSize(1920, 2560)).toEqual({ width: 949, height: 1265 });
+    expect(ocrSize(2560, 1920)).toEqual({ width: 1265, height: 949 });
+    const lang = ocrSize(800, 2560)!;
+    expect(lang.width * lang.height).toBeLessThanOrEqual(OCR_MAX_PIXELS * 1.01);
+    expect(Math.abs(lang.height / lang.width - 3.2)).toBeLessThan(0.02);
+    expect(ocrSize(0, 100)).toBeNull();
+
+    const gestuurd: string[] = [];
+    const fetch = fakeFetch({ chat: (b) => { gestuurd.push((b as { messages: { content: { image_url?: { url: string } }[] }[] }).messages[0]!.content[0]!.image_url!.url); return 'Totaal 1,00'; } });
+    const klein = new Uint8Array([9, 9, 9]);
+    const maak = (shrink: ImageShrinker) => new LlamaCppOcrProvider('glm-ocr', 'http://127.0.0.1:9', fetch as never, undefined, undefined, undefined, shrink);
+    await maak(() => ({ data: klein, mimeType: 'image/jpeg' })).recognize({ data: new Uint8Array([1, 2, 3, 4]), mimeType: 'image/png', filename: 'groot.png' });
+    expect(gestuurd.at(-1)).toBe(`data:image/jpeg;base64,${Buffer.from(klein).toString('base64')}`);
+    await maak(() => null).recognize({ data: new Uint8Array([1, 2, 3, 4]), mimeType: 'image/png', filename: 'klein.png' });
+    expect(gestuurd.at(-1)).toBe(`data:image/png;base64,${Buffer.from([1, 2, 3, 4]).toString('base64')}`);
+    await maak(() => { throw new Error('kapot'); }).recognize({ data: new Uint8Array([5]), mimeType: 'image/png', filename: 'fout.png' });
+    expect(gestuurd.at(-1)).toBe(`data:image/png;base64,${Buffer.from([5]).toString('base64')}`);
   });
 
   it('markdown en HTML van het model worden gewone regels', () => {

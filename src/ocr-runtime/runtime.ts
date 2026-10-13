@@ -6,7 +6,7 @@ import { createServer } from 'node:net';
 import { cpus } from 'node:os';
 import { promisify } from 'node:util';
 import { GLM_OCR, LLAMA_CPP, llamaAssetPattern, type ModelFile, type OcrModel, type PinnedRuntime } from './manifest';
-import { LlamaCppOcrProvider, OcrTimeoutError } from '../intake/ocr-llamacpp';
+import { LlamaCppOcrProvider, OcrTimeoutError, type ImageShrinker } from '../intake/ocr-llamacpp';
 import type { OcrOutput, OcrProvider } from '../intake/ocr';
 
 /**
@@ -78,6 +78,8 @@ export interface RuntimeDeps {
   kill?: (pid: number, signal: NodeJS.Signals) => void;
   /** tijdslimiet van één leesverzoek; standaard OCR_REQUEST_TIMEOUT_MS */
   requestTimeoutMs?: number;
+  /** verkleint een foto voor de herkenning (hoofdproces: Electron); zonder gaat de foto zoals hij is */
+  shrinkImage?: ImageShrinker;
   /** hoe lang een gestopte server de tijd krijgt om zelf te eindigen; standaard STOP_GRACE_MS */
   stopGraceMs?: number;
 }
@@ -594,7 +596,7 @@ export class LocalOcrRuntime {
         const url = await self.ensureStarted();
         self.touch();
         try {
-          return await new LlamaCppOcrProvider(self.model.id, url, fetchImpl, self.model.prompt, undefined, self.deps.requestTimeoutMs).recognize(input);
+          return await new LlamaCppOcrProvider(self.model.id, url, fetchImpl, self.model.prompt, undefined, self.deps.requestTimeoutMs, self.deps.shrinkImage).recognize(input);
         } catch (e) {
           // te lang bezig: de server stoppen, zodat hij niet doorrekent aan een bon waar niemand meer op wacht
           if (e instanceof OcrTimeoutError) self.stop();
