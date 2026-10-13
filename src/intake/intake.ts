@@ -480,12 +480,15 @@ export class IntakeService {
     const doc = this.get(id);
     const result = doc.result;
     if (!this.fx || !result?.foreign || result.foreign.rate !== null || result.total || doc.status === 'verwerkt' || doc.status === 'genegeerd') return doc;
+    const before = this.handledState(id);
     const fx = await Promise.race([
       this.fx.rateFor(result.foreign.currency, rateDate(result)),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
     ]);
     if (!fx) return doc;
-    result.total = { value: toEuro(result.foreign.total, fx.rate), confidence: 0.9, source: result.currency?.source ?? 'gebruiker' };
+    // tijdens het ophalen van de koers afgehandeld of veranderd (bv. zelf het bedrag ingevuld en geboekt): dan blijft dat staan
+    if (this.handledState(id) !== before) return this.get(id);
+    result.total ={ value: toEuro(result.foreign.total, fx.rate), confidence: 0.9, source: result.currency?.source ?? 'gebruiker' };
     result.foreign = { ...result.foreign, rate: fx.rate, rateDate: fx.date, source: 'ecb' };
     this.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(result), id);
     // de melding "koers kon niet opgehaald worden" vervalt; de rest opnieuw beoordelen, nooit zelf boeken
@@ -772,6 +775,7 @@ export class IntakeService {
    *
    * Lezen kan minuten duren. Heeft de gebruiker de bon intussen zelf ingevuld, bevestigd of weggelegd,
    * of zegt `cancelled` dat het niet meer hoeft (de administratie gaat dicht), dan verandert er niets.
+   * Dat geldt tot en met het vastleggen: ook tijdens het beoordelen (dat op de classificatie wacht).
    */
   async reread(id: number, data: Uint8Array, asOf: IsoDate = today(), opts: { cancelled?: () => boolean } = {}): Promise<IntakeDocument> {
     const unreadOpen = (d: IntakeDocument) => d.extraction_source === 'geen' && d.status !== 'verwerkt' && d.status !== 'genegeerd';
@@ -788,8 +792,8 @@ export class IntakeService {
       this.db.prepare('UPDATE documents SET issues = ? WHERE id = ?').run(JSON.stringify(issues), id);
       return this.get(id);
     }
-    this.db.prepare('UPDATE documents SET extraction_source = ?, result = ? WHERE id = ?').run(source, JSON.stringify(result), id);
-    await this.evaluate(id, issues, asOf, { autoConfirm: false });
+    // wat er gelezen is en de beoordeling ervan komen samen in het document, of geen van beide (zie evaluate)
+    await this.evaluate(id, issues, asOf, { autoConfirm: false, cancelled: opts.cancelled, read: { source, result } });
     return this.get(id);
   }
 
@@ -977,14 +981,35 @@ export class IntakeService {
     });
   }
 
+  /**
+   * Alles waaraan te zien is dat een document intussen is afgehandeld of veranderd: de stand, wat er
+   * gelezen is, waar het bij hoort. Gelijk vóór en na een wachtpunt = niemand kwam ertussen.
+   */
+  handledState(id: number): string {
+    const row = this.db.prepare('SELECT status, extraction_source, result, purchase_invoice_id, duplicate_of_document_id FROM documents WHERE id = ?').get(id);
+    return JSON.stringify([row ?? null, row ? this.links.forDocument(id) ?? null : null]);
+  }
+
   /** CLASSIFICATIE + VALIDATIE + CONFIDENCE, en bij HIGH direct verwerken. */
   /**
    * autoConfirm: false = nooit zelf boeken, altijd eerst laten controleren (bv. binnengekomen per e-mail).
    * ask: true = ook een zekere kopie eerst vragen (na een keuze van de gebruiker gebeurt er niets vanzelf).
+   * read: het document is net (opnieuw) gelezen; wat er gelezen is wordt samen met de beoordeling vastgelegd.
+   * cancelled: het hoeft niet meer (de administratie gaat dicht); dan wordt er niets vastgelegd.
+   *
+   * De classificatie kan even duren (bv. online hulp). Is het document in die tijd door iemand anders
+   * veranderd (bevestigd, weggelegd, gekoppeld, verbeterd), dan legt deze beoordeling niets meer vast:
+   * de controle daarop en het vastleggen gebeuren in één transactie, zonder wachtpunt ertussen.
    */
-  async evaluate(id: number, extraIssues: Issue[] = [], asOf: IsoDate = today(), opts: { autoConfirm?: boolean; ask?: boolean } = {}): Promise<IntakeDocument> {
+  async evaluate(id: number, extraIssues: Issue[] = [], asOf: IsoDate = today(), opts: { autoConfirm?: boolean; ask?: boolean; cancelled?: () => boolean; read?: { source: string | null; result: DocumentResult } } = {}): Promise<IntakeDocument> {
     const doc = this.get(id);
-    const result = doc.result ?? emptyResult();
+    const result = opts.read?.result ?? doc.result ?? emptyResult();
+    const source = opts.read?.source ?? doc.extraction_source;
+    const storeRead = () => {
+      if (opts.read) this.db.prepare('UPDATE documents SET extraction_source = ?, result = ? WHERE id = ?').run(opts.read.source, JSON.stringify(opts.read.result), id);
+    };
+    // er is al iets vastgelegd dat op deze beoordeling rekent (zie hieronder): dan maakt hij het ook af
+    let committed = false;
     // Een bon die bij het bijwerken van zijn oude tekstkoppeling af is gehaald: die melding blijft staan
     // tot hij ergens bij hoort of geboekt is, en de betalingen die de tekst noemde tellen mee als vraag.
     const migrated = doc.issues.find((i) => i.field === MIGRATION_ISSUE);
@@ -994,11 +1019,14 @@ export class IntakeService {
     let duplicate = this.findDuplicate(id, result);
     if (duplicate?.strength === 'zeker' && !opts.ask) {
       const original = duplicate.documentId ? this.get(duplicate.documentId) : null;
-      if (original && original.status !== 'verwerkt' && !this.targetOf(duplicate) && evidenceRank(doc.extraction_source) > evidenceRank(original.extraction_source)) {
+      if (original && original.status !== 'verwerkt' && !this.targetOf(duplicate) && evidenceRank(source) > evidenceRank(original.extraction_source)) {
         // geen van beide is geboekt en het nieuwe is beter gelezen: daarmee gaat de app verder, het oude wordt de kopie
+        storeRead();
         this.markDuplicate(original.id, { documentId: id, purchaseId: null }, 'automatisch');
+        committed = true;
         duplicate = null;
       } else {
+        storeRead();
         this.markDuplicate(id, duplicate, 'automatisch');
         return this.get(id);
       }
@@ -1016,57 +1044,68 @@ export class IntakeService {
       // document is dan hooguit het bewijsstuk. Nooit stil koppelen en nooit nog een keer boeken: eerst vragen.
       const label = `${formatEuro(-alreadyBooked.amount)} op ${formatDateNl(alreadyBooked.transaction_date)}${alreadyBooked.counter_name ? ` aan ${alreadyBooked.counter_name}` : ''}`;
       const issue: Issue = { field: 'evidence', severity: 'fout', message: EVIDENCE_QUESTION, suggestion: { bankTransactionId: alreadyBooked.id, label } };
+      storeRead();
       this.db
         .prepare(`UPDATE documents SET status = 'controle', confidence = 'LOW', issues = ?, classification = NULL, decisions = NULL WHERE id = ?`)
         .run(JSON.stringify([...extraIssues, issue]), id);
       return this.get(id);
     }
-    let classification = await this.classifier.classify(result);
-    if (PRIVATE_CAR_CATEGORIES.includes(classification.categoryKey) && classification.business && this.carUse() === 'prive') {
-      // privéauto: bon van tanken/parkeren is privé (aftrek via de kilometers)
-      classification = { ...classification, business: false, automatic: false, reasons: [...classification.reasons, 'privéauto: tanken, parkeren en onderhoud zijn privé; zakelijke km vul je apart in'] };
-    }
-    const issues = [...extraIssues, ...validateDocument(result, asOf)];
-    const outlier = this.amountOutlier(result);
-    if (outlier) issues.push(outlier);
-    if (duplicate) {
-      issues.push({ field: 'duplicate', severity: 'fout', message: `${duplicateLead(duplicate)} Is dit dezelfde aankoop?`, suggestion: duplicate });
-    } else {
-      // de betaling waar deze bon vroeger bij stond, hoort intussen bij een aankoop: die aankoop is er dus al
-      const purchase = legacy?.purchases.map((p) => this.links.describe({ kind: 'aankoop', id: p })).find((p) => p && !rejected.has(`aankoop:${p.id}`));
-      if (purchase) {
-        const match: DuplicateMatch = { strength: 'mogelijk', documentId: this.links.forTarget({ kind: 'aankoop', id: purchase.id })[0]?.document_id ?? null, purchaseId: purchase.id, label: purchase.label, reason: 'nummer' };
-        issues.push({ field: 'duplicate', severity: 'fout', message: `De betaling waar deze bon bij stond, hoort nu bij ${purchase.label}. Is dit dezelfde aankoop?`, suggestion: match });
+    const before = this.handledState(id);
+    const classified = await this.classifier.classify(result);
+    const judged = tx(this.db, () => {
+      // tijdens het wachten afgehandeld of veranderd, of het hoeft niet meer: niets vastleggen
+      if ((opts.cancelled?.() && !committed) || this.handledState(id) !== before) return null;
+      storeRead();
+      let classification = classified;
+      if (PRIVATE_CAR_CATEGORIES.includes(classification.categoryKey) && classification.business && this.carUse() === 'prive') {
+        // privéauto: bon van tanken/parkeren is privé (aftrek via de kilometers)
+        classification = { ...classification, business: false, automatic: false, reasons: [...classification.reasons, 'privéauto: tanken, parkeren en onderhoud zijn privé; zakelijke km vul je apart in'] };
       }
-    }
-    // van vóór de instapdatum: hoort bij de vorige administratie, niet als nieuwe (open) aankoop
-    const start = this.startDate();
-    if (start && result.invoiceDate && result.invoiceDate.value < start) {
-      issues.push({ field: 'invoiceDate', severity: 'fout', message: `Deze factuur is van ${formatDateNl(result.invoiceDate.value)}, van vóór je instapdatum (${formatDateNl(start)}). Die hoort bij je vorige administratie. Zocht je de factuur bij een betaling van dit jaar? Kijk dan naar jaar en maand in het factuurnummer.` });
-    }
-    const bankMatch = this.findBankMatch(result);
-    // vreemde munt: wat de bank afschreef is het echte bedrag in euro's (en daarmee de echte koers)
-    if (bankMatch && result.foreign && result.total && -bankMatch.amount !== result.total.value) {
-      const eur = -bankMatch.amount;
-      const factor = eur / result.total.value;
-      scaleMoney(result, (c) => Math.round(c * factor));
-      result.total = { ...result.total!, value: eur, confidence: 0.99 };
-      result.foreign = { ...result.foreign, rate: result.foreign.total / eur, rateDate: bankMatch.transaction_date, source: 'bank' };
-      this.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(result), id);
-    }
-    // geschat met de dagkoers en nog geen betaling: niet vanzelf verwerken, eerst even laten kijken
-    if (result.foreign && !bankMatch) issues.push({ field: 'total', severity: 'waarschuwing', message: `Omgerekend met de koers van de ECB. Komt de betaling later op de bank, dan rekent de app het verschil vanzelf af.` });
-    const assessed = assessConfidence({ document: result, issues, classification, bankMatch: !!bankMatch });
-    const rule = this.memory.get(result.supplier?.value);
-    const { decisions, signals } = documentDecisions({ doc: result, issues, classification, bankMatch, rule, level: this.autopilot(), categoryLabel: this.categories.label(classification.categoryKey) });
-    // HIGH alleen als álle velden en beslissingen boven hun drempel zitten (#21)
-    // Gemengde bon (bv. materiaal + werkbroek): nooit automatisch, eerst vragen of we splitsen (#23)
-    const split = suggestSplit(result);
-    if (split) issues.push({ field: 'lines', severity: 'waarschuwing', message: splitQuestion(split, (k) => this.categories.label(k)), suggestion: split });
-    const level: ConfidenceLevel = assessed.level === 'HIGH' && (!allCertain(decisions) || split) ? 'MEDIUM' : assessed.level;
-    this.db
-      .prepare(`UPDATE documents SET classification = ?, confidence = ?, issues = ?, decisions = ?, status = 'controle' WHERE id = ?`)
-      .run(JSON.stringify(classification), level, JSON.stringify(issues), JSON.stringify(decisions), id);
+      const issues = [...extraIssues, ...validateDocument(result, asOf)];
+      const outlier = this.amountOutlier(result);
+      if (outlier) issues.push(outlier);
+      if (duplicate) {
+        issues.push({ field: 'duplicate', severity: 'fout', message: `${duplicateLead(duplicate)} Is dit dezelfde aankoop?`, suggestion: duplicate });
+      } else {
+        // de betaling waar deze bon vroeger bij stond, hoort intussen bij een aankoop: die aankoop is er dus al
+        const purchase = legacy?.purchases.map((p) => this.links.describe({ kind: 'aankoop', id: p })).find((p) => p && !rejected.has(`aankoop:${p.id}`));
+        if (purchase) {
+          const match: DuplicateMatch = { strength: 'mogelijk', documentId: this.links.forTarget({ kind: 'aankoop', id: purchase.id })[0]?.document_id ?? null, purchaseId: purchase.id, label: purchase.label, reason: 'nummer' };
+          issues.push({ field: 'duplicate', severity: 'fout', message: `De betaling waar deze bon bij stond, hoort nu bij ${purchase.label}. Is dit dezelfde aankoop?`, suggestion: match });
+        }
+      }
+      // van vóór de instapdatum: hoort bij de vorige administratie, niet als nieuwe (open) aankoop
+      const start = this.startDate();
+      if (start && result.invoiceDate && result.invoiceDate.value < start) {
+        issues.push({ field: 'invoiceDate', severity: 'fout', message: `Deze factuur is van ${formatDateNl(result.invoiceDate.value)}, van vóór je instapdatum (${formatDateNl(start)}). Die hoort bij je vorige administratie. Zocht je de factuur bij een betaling van dit jaar? Kijk dan naar jaar en maand in het factuurnummer.` });
+      }
+      const bankMatch = this.findBankMatch(result);
+      // vreemde munt: wat de bank afschreef is het echte bedrag in euro's (en daarmee de echte koers)
+      if (bankMatch && result.foreign && result.total && -bankMatch.amount !== result.total.value) {
+        const eur = -bankMatch.amount;
+        const factor = eur / result.total.value;
+        scaleMoney(result, (c) => Math.round(c * factor));
+        result.total = { ...result.total!, value: eur, confidence: 0.99 };
+        result.foreign = { ...result.foreign, rate: result.foreign.total / eur, rateDate: bankMatch.transaction_date, source: 'bank' };
+        this.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(result), id);
+      }
+      // geschat met de dagkoers en nog geen betaling: niet vanzelf verwerken, eerst even laten kijken
+      if (result.foreign && !bankMatch) issues.push({ field: 'total', severity: 'waarschuwing', message: `Omgerekend met de koers van de ECB. Komt de betaling later op de bank, dan rekent de app het verschil vanzelf af.` });
+      const assessed = assessConfidence({ document: result, issues, classification, bankMatch: !!bankMatch });
+      const rule = this.memory.get(result.supplier?.value);
+      const { decisions, signals } = documentDecisions({ doc: result, issues, classification, bankMatch, rule, level: this.autopilot(), categoryLabel: this.categories.label(classification.categoryKey) });
+      // HIGH alleen als álle velden en beslissingen boven hun drempel zitten (#21)
+      // Gemengde bon (bv. materiaal + werkbroek): nooit automatisch, eerst vragen of we splitsen (#23)
+      const split = suggestSplit(result);
+      if (split) issues.push({ field: 'lines', severity: 'waarschuwing', message: splitQuestion(split, (k) => this.categories.label(k)), suggestion: split });
+      const level: ConfidenceLevel = assessed.level === 'HIGH' && (!allCertain(decisions) || split) ? 'MEDIUM' : assessed.level;
+      this.db
+        .prepare(`UPDATE documents SET classification = ?, confidence = ?, issues = ?, decisions = ?, status = 'controle' WHERE id = ?`)
+        .run(JSON.stringify(classification), level, JSON.stringify(issues), JSON.stringify(decisions), id);
+      return { classification, level, decisions, signals, bankMatch };
+    });
+    if (!judged) return this.get(id);
+    const { classification, level, decisions, signals, bankMatch } = judged;
     if (opts.autoConfirm !== false && level === 'HIGH' && allCertain(decisions) && result.supplier && result.total && result.invoiceDate) {
       this.confirm(id, {
         supplier: result.supplier.value,
