@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BoekhoudenVoorNiks for Android: walkthrough for app review</title>
+  <meta name="description" content="Walkthrough with screenshots of the BoekhoudenVoorNiks companion app for Android, for app review.">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .review { max-width: 900px; padding-top: 32px; padding-bottom: 60px; }
+    .review h1 { font-size: clamp(26px, 4vw, 38px); }
+    .review h2 { font-size: 22px; margin-top: 40px; }
+    .review .step { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 24px; align-items: start; margin-top: 24px; padding-top: 24px; border-top: 1px solid rgba(128, 128, 128, .3); }
+    .review .step.wide { grid-template-columns: 1fr; }
+    .review .step img { width: 100%; height: auto; border: 1px solid rgba(128, 128, 128, .4); }
+    .review .step h3 { margin: 0 0 8px; font-size: 18px; }
+    .review .facts li { margin-bottom: 6px; }
+    @media (max-width: 640px) { .review .step { grid-template-columns: 1fr; } .review .step img { max-width: 320px; } }
+  </style>
+</head>
+<body>
+  <main class="wrap review">
+    <p><a href="./"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="220"></a></p>
+    <h1>BoekhoudenVoorNiks for Android: walkthrough for app review</h1>
+    <p class="muted">App version 1.0.1 · package <code>nl.boekhoudenvoorniks.app</code> · publisher ShipDocs, the Netherlands · contact <a href="mailto:info@shipdocs.app">info@shipdocs.app</a></p>
+
+    <h2>What this app is</h2>
+    <p>BoekhoudenVoorNiks for Android is a <strong>companion app</strong>. It belongs to BoekhoudenVoorNiks, a free Dutch accounting program for self-employed people that runs on the user's own computer (Windows and Linux, <a href="https://boekhoudenvoorniks.nl/">boekhoudenvoorniks.nl</a>). With the phone the user records receipts, project photos, customers, projects and invoices on the road. The app sends them to the program on the user's own computer.</p>
+    <ul class="facts">
+      <li>The app has <strong>no account, no sign-in and no server</strong> of its own.</li>
+      <li>Data goes from the phone directly to the user's own computer over the local Wi-Fi network, encrypted with a key from a QR code. Nothing is sent to the publisher.</li>
+      <li>The app contains no ads and no in-app purchases.</li>
+      <li>The app is in Dutch. The first screen explains in Dutch and in English that it is a companion app.</li>
+    </ul>
+
+    <h2>Why you cannot get past the first screen without the computer program</h2>
+    <p>The app must be paired once with the program on the user's computer. The program shows a QR code. That QR code is generated on that computer, holds a one-time key, is valid for ten minutes and only works on the same local network. For that reason there is <strong>no static QR code, test account or demo login</strong> that we can provide. The screenshots below show the complete flow instead, including pairing.</p>
+    <p>If you want to test the app yourself: install the program from <a href="https://boekhoudenvoorniks.nl/downloaden.html">boekhoudenvoorniks.nl/downloaden.html</a> (version 1.4.0 or later) on a Windows or Linux computer on the same Wi-Fi network as the phone, and follow steps 1 to 3 below. Pairing a phone is part of the program&#39;s subscription; please contact us at <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> and we will arrange access for review.</p>
+
+    <h2>The flow, step by step</h2>
+
+    <div class="step">
+      <div>
+        <h3>1. First start: the app is not paired yet</h3>
+        <p>The pairing screen explains in Dutch and in English that this is the companion app for the BoekhoudenVoorNiks accounting program and that it does nothing on its own. It then lists the three steps: open the QR code in the program on the computer, make sure phone and computer are on the same Wi-Fi network, and tap "QR scannen" (scan QR).</p>
+      </div>
+      <img src="img/android/telefoon-8-koppelen.jpg" alt="Pairing screen of the app with the explanation in Dutch and English and three steps" width="540" height="960" loading="lazy">
+    </div>
+
+    <div class="step wide">
+      <div>
+        <h3>2. On the computer: Settings, "Telefoon &amp; bonnenmap", "Telefoon koppelen"</h3>
+        <p>In the program on the computer the user opens Settings and the tab "Telefoon &amp; bonnenmap" (phone and receipts folder), and clicks "Telefoon koppelen" (pair phone).</p>
+      </div>
+      <img src="img/android/pc-1-instellingen.jpg" alt="Settings of the desktop program with the card Telefoon koppelen" width="1280" height="800" loading="lazy">
+    </div>
+
+    <div class="step wide">
+      <div>
+        <h3>3. The computer shows a one-time QR code; the phone scans it</h3>
+        <p>The QR code is for one phone and is valid for ten minutes. The phone scans it with the camera. From then on the phone and the computer share a key; every message between them is encrypted with it. The QR code in this screenshot comes from a test installation and no longer works.</p>
+      </div>
+      <img src="img/android/pc-2-qr.jpg" alt="Dialog in the desktop program with a QR code to pair the phone" width="1280" height="800" loading="lazy">
+    </div>
+
+    <div class="step">
+      <div>
+        <h3>4. Home screen after pairing</h3>
+        <p>The home screen shows that the phone is paired, when it last synchronised, and how many items are on their way to the computer, confirmed or rejected. The two large buttons start the main tasks: "Bon scannen" (scan a receipt) and "Projectfoto" (photo for a project).</p>
+      </div>
+      <img src="img/android/telefoon-1-home.jpg" alt="Home screen of the app after pairing" width="540" height="960" loading="lazy">
+    </div>
+
+    <div class="step">
+      <div>
+        <h3>5. Scanning a receipt</h3>
+        <p>The user scans one or more pages of a receipt with the camera (the Google ML Kit document scanner), chooses how it was paid (cash, card, private, paid later) and may add a note. This is why the app asks for the camera permission.</p>
+      </div>
+      <img src="img/android/telefoon-2-bon-formulier.jpg" alt="Form for a scanned receipt with the payment method" width="540" height="960" loading="lazy">
+    </div>
+
+    <div class="step">
+      <div>
+        <h3>6. What was recorded and where it is</h3>
+        <p>The list "Vastgelegd" (recorded) shows every receipt and project photo with its status: waiting, sent, confirmed by the computer, or rejected. Photos are removed from the phone once the computer has confirmed them.</p>
+      </div>
+      <img src="img/android/telefoon-3-vastgelegd.jpg" alt="List of recorded receipts and project photos with their status" width="540" height="960" loading="lazy">
+    </div>
+
+    <div class="step">
+      <div>
+        <h3>7. Customers and projects</h3>
+        <p>Customers and projects come from the program on the computer. The user can view them, add new ones and change them on the phone; the computer takes over the changes.</p>
+      </div>
+      <img src="img/android/telefoon-6-relaties-klanten.jpg" alt="List of customers in the app" width="540" height="960" loading="lazy">
+    </div>
+
+    <div class="step">
+      <div>
+        <h3>8. A project</h3>
+        <p>A project belongs to a customer. Photos taken for a project are shown with that project in the program on the computer.</p>
+      </div>
+      <img src="img/android/telefoon-7-project.jpg" alt="A project in the app" width="540" height="960" loading="lazy">
+    </div>
+
+    <div class="step">
+      <div>
+        <h3>9. Invoices</h3>
+        <p>The user can draw up an invoice or credit note on the phone, make it final and get a PDF. The list shows drafts and final invoices with their status.</p>
+      </div>
+      <img src="img/android/telefoon-4-facturen.jpg" alt="List of invoices in the app" width="540" height="960" loading="lazy">
+    </div>
+
+    <div class="step">
+      <div>
+        <h3>10. One invoice: mail it, view or share the PDF</h3>
+        <p>"Mailen" opens the phone's own mail app with a prepared message and the PDF attached; the user sends it. The app itself does not send e-mail and stores no mailbox password. "Pdf delen" (share PDF) uses the Android share sheet.</p>
+      </div>
+      <img src="img/android/telefoon-5-factuur.jpg" alt="A final invoice in the app with the buttons to mail, view and share the PDF" width="540" height="960" loading="lazy">
+    </div>
+
+    <h2>Permissions</h2>
+    <ul class="facts">
+      <li><strong>Camera</strong>: scanning the pairing QR code, scanning receipts and taking project photos.</li>
+      <li><strong>Internet, Wi-Fi state, network state, Wi-Fi multicast</strong>: finding the user's own computer on the local network (mDNS) and sending to it. The app only sends to private (local network) addresses.</li>
+    </ul>
+
+    <h2>Data</h2>
+    <p>The data the user records stays on the phone and on the user's own computer. The publisher receives nothing. The Google ML Kit scanners used for the QR code and for receipts collect diagnostics and device identifiers, as described in Google's ML Kit data disclosure; this is declared in the Data safety form. The privacy policy is at <a href="https://boekhoudenvoorniks.nl/privacy.html#android">boekhoudenvoorniks.nl/privacy.html</a>.</p>
+  </main>
+</body>
+</html>
