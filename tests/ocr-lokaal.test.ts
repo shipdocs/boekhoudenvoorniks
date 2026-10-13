@@ -10,6 +10,8 @@ import { GLM_OCR, llamaAssetPattern, type OcrModel } from '../src/ocr-runtime/ma
 import { LlamaCppOcrProvider, textToItems } from '../src/intake/ocr-llamacpp';
 import { parseDocumentText } from '../src/intake/text-parser';
 import { setup } from './helpers';
+import { makeJpeg } from './fixtures/jpeg';
+import { jpegsToPdf, pdfJpegs } from '../src/scanner/jpeg-pdf';
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 const MODEL_A = Buffer.from('model-a'.repeat(1000));
@@ -202,6 +204,27 @@ describe('ingebouwde tekstherkenning: gebruiken (#9)', () => {
     expect(r.source).toBe('geen');
     expect(r.issues[0]!.message).toMatch(/jpg of png/);
     expect(() => new LlamaCppOcrProvider('x', 'http://example.com', fetch as never)).toThrow(/deze computer/);
+  });
+
+  it('een bon van de telefoon met meerdere pagina\'s (een PDF van foto\'s) wordt per pagina als jpg gelezen', async () => {
+    const fotos = [makeJpeg('pagina een'), makeJpeg('pagina twee')];
+    const pdf = jpegsToPdf(fotos);
+    // de foto's komen er byte voor byte en in volgorde weer uit; elke andere PDF geeft null
+    expect(pdfJpegs(pdf)!.map((f) => Buffer.from(f).toString('hex'))).toEqual(fotos.map((f) => Buffer.from(f).toString('hex')));
+    expect(pdfJpegs(new Uint8Array(Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n', 'latin1')))).toBeNull();
+    expect(pdfJpegs(pdf.subarray(0, pdf.length - 400))).toBeNull();
+    expect(pdfJpegs(new Uint8Array([1, 2, 3]))).toBeNull();
+
+    const gevraagd: string[] = [];
+    const teksten = ['BOUWMAAT UTRECHT\nDatum: 12-09-2026\nGipsplaat 17,90', 'Totaal 17,90\nPin 17,90'];
+    const fetch = fakeFetch({ chat: (b) => { gevraagd.push((b as { messages: { content: { image_url?: { url: string } }[] }[] }).messages[0]!.content[0]!.image_url!.url.slice(0, 23)); return teksten[gevraagd.length - 1]!; } });
+    const provider = new LlamaCppOcrProvider('glm-ocr', 'http://127.0.0.1:9', fetch as never);
+    const { s } = setup({ ocr: provider });
+    const r = await s.intake.extract('bon-telefoon-2026-10-13-88b216dd.pdf', pdf);
+    expect(gevraagd).toEqual(['data:image/jpeg;base64,', 'data:image/jpeg;base64,']);
+    expect(r.source).toBe('ocr:glm-ocr');
+    expect(r.result.total?.value).toBe(1790);
+    expect(r.result.invoiceDate?.value).toBe('2026-09-12');
   });
 
   it('markdown en HTML van het model worden gewone regels', () => {

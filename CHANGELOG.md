@@ -5,6 +5,9 @@
 ### Verbeterd
 - **Voorwaarden bijgewerkt (versie 2026-10-13).** Artikel 8 noemt nu als lijst wat je met het abonnement extra krijgt: de app voor Android, de uitwisseling met je boekhouder en de online hulp bij categorievoorstellen, en wat altijd blijft werken. De prijs en de vier gratis maanden zijn niet veranderd. Het programma vraagt je één keer opnieuw om akkoord.
 
+### Opgelost
+- **Bon van je telefoon met meerdere pagina's wordt nu gelezen.** Een bon met meer dan één pagina kwam als PDF in je administratie en bleef op "nog niet uitgelezen" staan: de tekstherkenning leest foto's, geen PDF van foto's. De app leest nu elke pagina apart. Bonnen die er al staan, lees je alsnog met "Nu lezen".
+
 ## 1.4.0 — de app voor Android: bonnen, foto's en facturen vanaf je telefoon
 
 Bij deze versie hoort de app BoekhoudenVoorNiks voor Android (Google Play). Je koppelt je telefoon één keer met een QR-code; wat je onderweg vastlegt, staat daarna in je administratie op je computer.

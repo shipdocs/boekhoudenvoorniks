@@ -25,7 +25,8 @@ import { assessConfidence } from './confidence';
 import { PROPOSED_BY_LABEL, type Classifier, type Classification } from './classify';
 import type { SupplierMemory } from './supplier-memory';
 import { supplierKey } from './supplier-memory';
-import type { OcrProvider } from './ocr';
+import type { OcrOutput, OcrProvider } from './ocr';
+import { pdfJpegs } from '../scanner/jpeg-pdf';
 import type { ConfidenceLevel, DocumentResult, Issue } from './types';
 import { splitGross } from '../import/bank';
 import type { FxService } from '../fx/fx';
@@ -138,6 +139,22 @@ export interface Confirmation {
 type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'bank_match_strong' | 'decisions' | 'link' | 'outcome'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
 
 const MIME: Record<string, string> = { pdf: 'application/pdf', xml: 'application/xml', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
+
+/**
+ * Leest de foto's van een bon met meerdere pagina's een voor een (als jpg) en voegt de regels samen, met
+ * het paginanummer erbij. Gestructureerde velden komen van de eerste pagina die ze geeft.
+ */
+async function recognizePages(ocr: OcrProvider, fotos: Uint8Array[], filename: string): Promise<OcrOutput> {
+  const naam = filename.replace(/\.pdf$/i, '');
+  const uit: OcrOutput = { items: [] };
+  for (let i = 0; i < fotos.length; i++) {
+    const r = await ocr.recognize({ data: fotos[i]!, mimeType: 'image/jpeg', filename: `${naam}-pagina-${i + 1}.jpg` });
+    uit.items.push(...r.items.map((item) => ({ ...item, page: i + Math.max(1, item.page) })));
+    if (r.pageSizes) uit.pageSizes = [...(uit.pageSizes ?? []), ...r.pageSizes];
+    if (r.structured && !uit.structured) uit.structured = r.structured;
+  }
+  return uit;
+}
 
 export function mimeFor(filename: string): string {
   const ext = filename.toLowerCase().split('.').pop() ?? '';
@@ -497,7 +514,9 @@ export class IntakeService {
     }
     let out;
     try {
-      out = await this.ocr.recognize({ data, mimeType: mime, filename });
+      // een bon van de telefoon met meerdere pagina's is een PDF van foto's: elke foto apart lezen
+      const fotos = mime === 'application/pdf' ? pdfJpegs(data) : null;
+      out = fotos ? await recognizePages(this.ocr, fotos, filename) : await this.ocr.recognize({ data, mimeType: mime, filename });
     } catch (e) {
       // herkenning mislukt: document blijft bewaard, de gebruiker vult zelf in
       return { result: emptyResult(), source: 'geen', issues: [{ field: 'document', severity: 'fout', message: (e as Error).message || 'Tekstherkenning mislukt. Vul de gegevens zelf in.' }] };
