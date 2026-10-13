@@ -73,6 +73,15 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []): { data: 
   return { data, error, reload, loading };
 }
 
+/** Doet iets telkens als het hoofdproces een gebeurtenis meldt (bv. er kwam een bon binnen of een bon is gelezen). */
+export function useAppEvent(name: string, handler: () => void): void {
+  const ref = useRef(handler);
+  ref.current = handler;
+  useEffect(() => window.bridge.onEvent((event) => {
+    if (event === name) ref.current();
+  }), [name]);
+}
+
 /** Voert een actie uit met toast bij fout; retourneert het resultaat of undefined. */
 export function useAction() {
   const { toast } = useApp();

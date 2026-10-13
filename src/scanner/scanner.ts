@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join, parse } from 'node:path';
 import type { Db } from '../db/database';
 import type { SecretStore } from '../integrations/types';
-import type { IntakeService } from '../intake/intake';
+import type { IntakeDocument, IntakeService } from '../intake/intake';
 import type { SettingsService } from '../settings/settings';
 import type { InvoiceService } from '../documents/invoices';
 import type { LicenseService } from '../license/license';
@@ -30,7 +30,7 @@ export interface ScannerDeps {
   db: Db;
   /** dezelfde versleutelde opslag als voor het SMTP-wachtwoord */
   secrets: SecretStore;
-  intake: Pick<IntakeService, 'add' | 'notify'>;
+  intake: Pick<IntakeService, 'add' | 'notify' | 'get' | 'awaitsReading' | 'waitingToRead' | 'readLater' | 'readingIdle'>;
   settings: SettingsService;
   /**
    * Het abonnement (zie src/license/telefoon.ts): een nieuwe telefoon koppelen en gegevens naar de telefoon sturen vragen het,
@@ -44,6 +44,11 @@ export interface ScannerDeps {
   spoolDir: string;
   /** de map van de open administratie (met bijlagen/ erin) voor foto's van de telefoon bij een project; zonder blijft foto niet-ondersteund */
   adminDir?: string;
+  /**
+   * Leest een bewaarde bijlage (het pad uit de database). Nodig om na een herstart bonnen te lezen die nog
+   * op de tekstherkenning wachtten; zonder worden die pas gelezen met "Nu lezen".
+   */
+  readAttachment?: (path: string) => Uint8Array;
   /** mappen van de app zelf: daar mag de bonnenmap niet in liggen */
   protectedDirs?: string[];
   homeDir?: string;
@@ -157,6 +162,7 @@ export class Bonnenscanner {
       configured: () => (this.blocked() ? null : this.folder()),
       add: async (name, data) => {
         const doc = await this.toInbox(() => this.addToInbox(safeFileName(name), data, 'bonnenmap', name));
+        this.readInBackground(doc, 'bonnenmap', data);
         return { documentId: doc.id, duplicate: doc.already_present };
       },
       now: deps.now,
@@ -228,6 +234,7 @@ export class Bonnenscanner {
     this.watch.start();
     // wat er al in van-telefoon/ ligt (ook herhaalbare bestanden van voor het afsluiten) wordt nu opgepakt
     this.map.start();
+    this.resumeReading();
     void this.processSpool();
     this.timer = setInterval(() => {
       void this.refresh();
@@ -438,6 +445,8 @@ export class Bonnenscanner {
         this.applyHints(doc.id, msg);
         this.spool.done(row.id, doc.id);
         this.deps.onChange?.();
+        // de bon staat er nu; het lezen (dat minuten kan duren) houdt de volgende bon niet tegen
+        this.readInBackground(doc, 'telefoon', data);
       } catch (e) {
         if (this.stopped) return;
         this.log(`Bon van de telefoon in de inbox zetten mislukt: ${(e as Error).message}`);
@@ -450,19 +459,70 @@ export class Bonnenscanner {
    * Net als bonnen uit de mail: nooit vanzelf boeken, altijd eerst laten controleren. Stond precies dit
    * bestand er al in, of is het dezelfde bon als een eerdere (#179), dan komt er geen tweede aankoop;
    * de gebruiker krijgt daar een melding van op Vandaag, want hij was er niet bij toen het binnenkwam.
+   *
+   * De bon staat meteen in de inbox. Moet de tekstherkenning hem nog lezen, dan gebeurt dat daarna op de
+   * achtergrond (zie readInBackground); e-facturen en PDF's met tekst zijn hier al gelezen.
    */
   private async addToInbox(name: string, data: Uint8Array, source: 'telefoon' | 'bonnenmap', shownName: string) {
-    const doc = await this.deps.intake.add(name, data, today(), { autoConfirm: false });
-    const purchaseId = doc.link?.target.kind === 'aankoop' ? doc.link.target.id : null;
-    if (doc.already_present) this.deps.intake.notify({ kind: 'stond-er-al', originalName: shownName, source, existingDocumentId: doc.id, purchaseId });
-    else if (doc.outcome === 'dubbel') this.deps.intake.notify({ kind: 'dubbel', originalName: shownName, source, existingDocumentId: doc.duplicate_of_document_id ?? doc.id, purchaseId });
+    const doc = await this.deps.intake.add(name, data, today(), { autoConfirm: false, deferOcr: true });
+    if (doc.already_present) this.deps.intake.notify({ kind: 'stond-er-al', originalName: shownName, source, existingDocumentId: doc.id, purchaseId: purchaseOf(doc) });
+    else this.notifyDuplicate(doc, source, shownName);
     return doc;
+  }
+
+  private notifyDuplicate(doc: IntakeDocument, source: 'telefoon' | 'bonnenmap', shownName: string): void {
+    if (doc.outcome === 'dubbel') this.deps.intake.notify({ kind: 'dubbel', originalName: shownName, source, existingDocumentId: doc.duplicate_of_document_id ?? doc.id, purchaseId: purchaseOf(doc) });
+  }
+
+  /**
+   * Laat de tekstherkenning een bon lezen die al in de inbox staat: achteraan in de rij van de inbox, één
+   * bon tegelijk (dezelfde rij als "Nu lezen"). Blijkt het na het lezen dezelfde bon als een eerdere, dan
+   * komt de melding daarvan alsnog op Vandaag. Doet niets als de bon niet op lezen wacht.
+   */
+  private readInBackground(doc: IntakeDocument, source: 'telefoon' | 'bonnenmap', data?: Uint8Array): void {
+    if (this.stopped || !this.deps.intake.awaitsReading(doc)) return;
+    // het bestand komt van schijf als dat kan: dan blijven de foto's van wachtende bonnen niet in het geheugen staan
+    const read = this.deps.readAttachment;
+    const load = read ? () => read(doc.file_path) : data ? bytesOf(data) : null;
+    if (!load) return;
+    void this.deps.intake
+      .readLater(doc.id, {
+        data: load,
+        cancelled: () => this.stopped,
+        // "wacht op lezen" wordt "wordt gelezen": het scherm mag verversen
+        onStart: () => this.deps.onChange?.(),
+      })
+      .then((after) => {
+        if (this.stopped) return;
+        this.notifyDuplicate(after, source, doc.original_name);
+        this.deps.onChange?.();
+      })
+      .catch((e) => {
+        if (!this.stopped) this.log(`Bon lezen op de achtergrond mislukt: ${(e as Error).message}`);
+      });
+  }
+
+  /** Na een herstart: bonnen die nog op de tekstherkenning wachtten, alsnog lezen. */
+  private resumeReading(): void {
+    if (!this.deps.readAttachment) return;
+    try {
+      for (const d of this.deps.intake.waitingToRead()) {
+        this.readInBackground(this.deps.intake.get(d.id), this.spool.hasDocument(d.id) ? 'telefoon' : 'bonnenmap');
+      }
+    } catch (e) {
+      this.log(`Wachtende bonnen lezen mislukt: ${(e as Error).message}`);
+    }
+  }
+
+  /** Klaar zodra er geen bon meer gelezen wordt of op lezen wacht (ook gebruikt door tests). */
+  whenRead(): Promise<void> {
+    return this.deps.intake.readingIdle();
   }
 
   /**
    * Eén bestand tegelijk naar de inbox: telefoon en bonnenmap zitten elkaar zo niet in de weg (de inbox
-   * zelf laat hetzelfde bestand ook al niet twee keer tegelijk toe), en de tekstherkenning krijgt de
-   * bonnen na elkaar.
+   * zelf laat hetzelfde bestand ook al niet twee keer tegelijk toe). Dit duurt kort: het lezen door de
+   * tekstherkenning gebeurt daarna, in de rij van de inbox.
    */
   private toInbox<T>(work: () => Promise<T>): Promise<T> {
     const run = this.inboxQueue.then(work, work);
@@ -483,6 +543,10 @@ export class Bonnenscanner {
     }
   }
 }
+
+const bytesOf = (data: Uint8Array) => () => data;
+
+const purchaseOf = (doc: IntakeDocument): number | null => (doc.link?.target.kind === 'aankoop' ? doc.link.target.id : null);
 
 /** Naam van een bestand uit de bonnenmap: zonder map of stuurtekens, niet te lang, extensie behouden. */
 function safeFileName(name: string): string {

@@ -15,6 +15,8 @@ import { createApi, type HostContext } from '../src/main/api';
 import { sanitizeForExchange } from '../src/exchange/exchange';
 import { Bonnenscanner, type ScannerDeps } from '../src/scanner/scanner';
 import { PHONE_SCANNER } from '../src/shared/phone-scanner';
+import { NOT_READ_MESSAGE, READING_NOW_MESSAGE, READ_CONNECTION_MESSAGE, READ_TIMEOUT_MESSAGE, WAITING_TO_READ_MESSAGE } from '../src/shared/reading';
+import { OcrTimeoutError } from '../src/intake/ocr-llamacpp';
 import { stripJpegGps } from '../src/scanner/strip-gps';
 import { makeJpegWithGps as makeMinimalGpsJpeg, readJpegGps } from '../src/intake/exif';
 import { makeJpegWithGps, GPS_POSITION } from './fixtures/jpeg';
@@ -343,6 +345,8 @@ describe('bonnenscanner: ontvangen via wifi', () => {
     const p = await pair(t);
     await p.bon({ betaalwijze: 'contant' });
     await t.scanner.processSpool();
+    // de bon staat er al; het lezen gebeurt daarna op de achtergrond
+    await t.scanner.whenRead();
     const doc = t.s.intake.get(t.documents()[0]!.id);
     expect(doc.status).toBe('controle');
     expect(doc.result?.total?.value).toBe(12100);
@@ -1204,5 +1208,195 @@ describe('bonnenscanner: de plek van de foto (GPS) gaat eruit als locatie uit st
     expect((await p.bon({}, [makeJpegWithGps('boven 2'), makeJpegWithGps('onder 2')])).status).toBe(200);
     await t.scanner.processSpool();
     expect(stored[1]!.includes(LAT)).toBe(true);
+  });
+});
+
+/**
+ * Een tekstherkenning die pas antwoordt als de test dat zegt: zo is na te bootsen dat het lezen van een bon
+ * minuten duurt (of blijft hangen), zoals met de ingebouwde herkenning op een trage computer.
+ */
+function trageHerkenning() {
+  const verzoeken: { filename: string; klaar: (regels: string[]) => void; mislukt: (fout: Error) => void }[] = [];
+  const ocr = {
+    id: 'traag',
+    label: 'Trage test-OCR',
+    available: async () => true,
+    recognize: (input: { filename: string }) =>
+      new Promise<{ items: { text: string; page: number; bbox: [number, number, number, number]; confidence: number }[] }>((resolve, reject) => {
+        verzoeken.push({
+          filename: input.filename,
+          klaar: (regels) => resolve({ items: regels.map((text, i) => ({ text, page: 1, bbox: [10, 20 + i * 20, 300, 34 + i * 20], confidence: 0.97 })) }),
+          mislukt: reject,
+        });
+      }),
+  };
+  /** wacht tot de herkenning het zoveelste verzoek heeft gekregen */
+  const verzoek = async (n: number) => {
+    for (let i = 0; i < 200 && verzoeken.length < n; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(verzoeken.length, `de herkenning kreeg verzoek ${n}`).toBeGreaterThanOrEqual(n);
+    return verzoeken[n - 1]!;
+  };
+  return { ocr, verzoeken, verzoek };
+}
+
+const bonRegels = (winkel: string, totaal: string) => [winkel, `Datum: ${today().split('-').reverse().join('-')}`, `Gips ${totaal}`, `Totaal ${totaal}`];
+
+describe('bonnenscanner: een bon staat meteen in de inbox, het lezen gebeurt op de achtergrond', () => {
+  it('met een trage tekstherkenning staan beide bonnen er direct; ze worden daarna een voor een gelezen', async () => {
+    const traag = trageHerkenning();
+    let gewijzigd = 0;
+    const t = start({ onChange: () => void gewijzigd++ });
+    t.s.intake.setOcrProvider(traag.ocr);
+    const p = await pair(t);
+    await p.bon({ betaalwijze: 'contant', notitie: 'eerste bon' }, [makeJpeg('bon een')]);
+    await p.bon({ betaalwijze: 'pin', notitie: 'tweede bon' }, [makeJpeg('bon twee')]);
+    // de wachtrij is leeg zonder dat de herkenning één bon heeft afgemaakt
+    await t.scanner.processSpool();
+    expect(t.scanner.status().waiting).toBe(0);
+    const docs = t.documents();
+    expect(docs).toMatchObject([
+      { status: 'controle', note: 'eerste bon', proposed_paid_with: 'kas' },
+      { status: 'controle', note: 'tweede bon', proposed_paid_with: 'bank' },
+    ]);
+    expect(t.db.prepare(`SELECT state FROM scanner_documents ORDER BY rowid`).all()).toEqual([{ state: 'verwerkt' }, { state: 'verwerkt' }]);
+    // één bon tegelijk: de eerste wordt gelezen, de tweede wacht
+    await traag.verzoek(1);
+    expect(traag.verzoeken).toHaveLength(1);
+    expect(t.s.intake.get(docs[0]!.id)).toMatchObject({ reading: 'bezig', extraction_source: 'geen' });
+    expect(t.s.intake.get(docs[1]!.id)).toMatchObject({ reading: 'wacht', extraction_source: 'geen' });
+    // zichtbaar bij Aankopen & bonnetjes en op Vandaag, met de stand erbij
+    expect(t.s.intake.list('controle').map((d) => d.id).sort()).toEqual(docs.map((d) => d.id));
+    const vragen = t.s.inbox.home().tasks.filter((x) => x.kind === 'document-review').map((x) => x.question);
+    expect(vragen).toEqual(expect.arrayContaining([READING_NOW_MESSAGE, WAITING_TO_READ_MESSAGE]));
+
+    traag.verzoeken[0]!.klaar(bonRegels('Bouwmaat Utrecht', '121,00'));
+    await traag.verzoek(2);
+    expect(t.s.intake.get(docs[0]!.id)).toMatchObject({ reading: null, extraction_source: 'ocr:traag', status: 'controle', result: { total: { value: 12100 } } });
+    expect(t.s.intake.get(docs[1]!.id).reading).toBe('bezig');
+    const voor = gewijzigd;
+    traag.verzoeken[1]!.klaar(bonRegels('Gamma Zeist', '45,00'));
+    await t.scanner.whenRead();
+    expect(t.s.intake.get(docs[1]!.id)).toMatchObject({ reading: null, result: { total: { value: 4500 } } });
+    // het scherm krijgt een seintje als een bon gelezen is
+    expect(gewijzigd).toBeGreaterThan(voor);
+    // notitie en betaalwijze van de telefoon staan er nog, en er is niets vanzelf geboekt
+    expect(t.documents()).toMatchObject([{ note: 'eerste bon', proposed_paid_with: 'kas' }, { note: 'tweede bon', proposed_paid_with: 'bank' }]);
+    expect(t.s.purchases.list()).toHaveLength(0);
+  });
+
+  it('vult de gebruiker de bon zelf in terwijl hij gelezen wordt, dan overschrijft het lezen dat niet', async () => {
+    const traag = trageHerkenning();
+    const t = start();
+    t.s.intake.setOcrProvider(traag.ocr);
+    const p = await pair(t);
+    await p.bon({ betaalwijze: 'contant' });
+    await t.scanner.processSpool();
+    const id = t.documents()[0]!.id;
+    await traag.verzoek(1);
+    t.s.intake.confirm(id, { supplier: 'Hornbach', date: today(), total: 5000, invoiceNumber: null, categoryKey: 'materiaal', vatCode: 'hoog', business: true, paidWith: 'kas' });
+    const bevestigd = t.db.prepare('SELECT status, extraction_source, result, issues, purchase_invoice_id FROM documents WHERE id = ?').get(id);
+    traag.verzoeken[0]!.klaar(bonRegels('Bouwmaat Utrecht', '121,00'));
+    await t.scanner.whenRead();
+    expect(t.db.prepare('SELECT status, extraction_source, result, issues, purchase_invoice_id FROM documents WHERE id = ?').get(id)).toEqual(bevestigd);
+    expect(t.s.intake.get(id)).toMatchObject({ status: 'verwerkt', reading: null });
+    expect(t.s.purchases.list().map((x) => x.total)).toEqual([5000]);
+  });
+
+  it('duurt het lezen te lang, dan staat dat in het Nederlands bij de bon en leest "Nu lezen" hem alsnog', async () => {
+    const traag = trageHerkenning();
+    const t = start();
+    t.s.intake.setOcrProvider(traag.ocr);
+    const p = await pair(t);
+    const foto = makeJpeg('te lang');
+    await p.bon({ notitie: 'duurt lang' }, [foto]);
+    await t.scanner.processSpool();
+    const id = t.documents()[0]!.id;
+    (await traag.verzoek(1)).mislukt(new OcrTimeoutError());
+    await t.scanner.whenRead();
+    const doc = t.s.intake.get(id);
+    expect(doc).toMatchObject({ reading: null, extraction_source: 'geen', status: 'controle', note: 'duurt lang' });
+    expect(doc.issues.filter((i) => i.field === 'document').map((i) => i.message)).toEqual([READ_TIMEOUT_MESSAGE]);
+    expect(READ_TIMEOUT_MESSAGE).toBe('Het lezen van deze bon duurde te lang. Probeer het opnieuw met Nu lezen, of vul de gegevens zelf in.');
+    // mislukt is niet "wacht op lezen": na een herstart begint de app er niet vanzelf opnieuw aan
+    expect(t.s.intake.waitingToRead()).toEqual([]);
+    // "Nu lezen" gebruikt dezelfde rij
+    const api = createApi(t.s, { readAttachment: () => Buffer.from(foto) } as unknown as HostContext);
+    const lezen = api.reader.rereadPending();
+    (await traag.verzoek(2)).klaar(bonRegels('Bouwmaat Utrecht', '121,00'));
+    expect(await lezen).toEqual({ read: 1, total: 1 });
+    expect(t.s.intake.get(id).result?.total?.value).toBe(12100);
+  });
+
+  it('sluit de app af tijdens het lezen, dan blijft de bon op lezen wachten en gaat het na de start verder', async () => {
+    const traag = trageHerkenning();
+    const t = start();
+    t.s.intake.setOcrProvider(traag.ocr);
+    const p = await pair(t);
+    const foto = makeJpeg('afsluiten');
+    await p.bon({ notitie: 'voor het afsluiten' }, [foto]);
+    await t.scanner.processSpool();
+    const id = t.documents()[0]!.id;
+    await traag.verzoek(1);
+    await t.scanner.stop();
+    // de herkenning is bij het afsluiten gestopt: het verzoek mislukt, maar bij de bon verandert niets meer
+    traag.verzoeken[0]!.mislukt(new Error(READ_CONNECTION_MESSAGE));
+    await t.s.intake.readingIdle().catch(() => undefined);
+    expect(t.s.intake.get(id).issues.filter((i) => i.field === 'document').map((i) => i.message)).toEqual([WAITING_TO_READ_MESSAGE]);
+    expect(t.s.intake.waitingToRead().map((d) => d.id)).toEqual([id]);
+
+    // de volgende start: een nieuwe scanner op dezelfde administratie leest de bon van schijf
+    const gelezenPaden: string[] = [];
+    const opnieuw = new Bonnenscanner({ db: t.db, secrets: t.secrets, intake: t.s.intake, settings: t.s.settings, spoolDir: t.spoolDir, interfaces: () => LOOPBACK, readAttachment: (path) => (gelezenPaden.push(path), foto) });
+    open.push(opnieuw);
+    await opnieuw.start();
+    (await traag.verzoek(2)).klaar(bonRegels('Bouwmaat Utrecht', '121,00'));
+    await opnieuw.whenRead();
+    expect(gelezenPaden).toEqual([t.s.intake.get(id).file_path]);
+    expect(t.s.intake.get(id)).toMatchObject({ reading: null, extraction_source: 'ocr:traag', note: 'voor het afsluiten', result: { total: { value: 12100 } } });
+  });
+
+  it('blijkt een bon na het lezen dezelfde als een eerdere, dan komt de melding alsnog op Vandaag', async () => {
+    const traag = trageHerkenning();
+    const t = start();
+    t.s.intake.setOcrProvider(traag.ocr);
+    const p = await pair(t);
+    const regels = ['Bouwmaat Utrecht', 'Factuurnummer: 2026-0042', ...bonRegels('', '121,00').slice(1)];
+    await p.bon({}, [makeJpeg('foto een')]);
+    await p.bon({}, [makeJpeg('foto twee van dezelfde bon')]);
+    await t.scanner.processSpool();
+    // exact hetzelfde bestand wordt nog steeds meteen herkend (de hash), ook terwijl de eerste bon nog gelezen wordt
+    await p.bon({}, [makeJpeg('foto een')]);
+    await t.scanner.processSpool();
+    expect(t.documents()).toHaveLength(2);
+    expect(t.s.intake.notices().map((n) => n.kind)).toEqual(['stond-er-al']);
+    (await traag.verzoek(1)).klaar(regels);
+    (await traag.verzoek(2)).klaar(regels);
+    await t.scanner.whenRead();
+    const [eerste, tweede] = t.documents();
+    expect(t.s.intake.get(tweede!.id)).toMatchObject({ outcome: 'dubbel', duplicate_of_document_id: eerste!.id });
+    expect(t.s.intake.notices().filter((n) => n.kind === 'dubbel')).toMatchObject([{ source: 'telefoon', existing_document_id: eerste!.id }]);
+    expect(traag.verzoeken).toHaveLength(2);
+  });
+
+  it('een e-factuur of een PDF met tekst heeft geen tekstherkenning nodig en is meteen gelezen', async () => {
+    const traag = trageHerkenning();
+    const t = start();
+    t.s.intake.setOcrProvider(traag.ocr);
+    const doc = await t.s.intake.add('factuur.xml', readFileSync(join(__dirname, 'fixtures', 'ubl-invoice.xml')), today(), { autoConfirm: false, deferOcr: true });
+    expect(doc).toMatchObject({ extraction_source: 'ubl', reading: null, result: { total: { value: 12100 } } });
+    expect(t.s.intake.awaitsReading(doc)).toBe(false);
+    expect(traag.verzoeken).toHaveLength(0);
+  });
+
+  it('zonder gekozen tekstherkenning verandert er niets: de bon staat er en vraagt hoe hij gelezen mag worden', async () => {
+    const t = start();
+    const p = await pair(t);
+    await p.bon();
+    await t.scanner.processSpool();
+    await t.scanner.whenRead();
+    const doc = t.s.intake.get(t.documents()[0]!.id);
+    expect(doc.reading).toBeNull();
+    expect(doc.issues.find((i) => i.field === 'document')!.message).toBe(NOT_READ_MESSAGE);
+    expect(t.s.intake.waitingToRead()).toEqual([]);
   });
 });

@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs';
+import { basename, join, dirname, relative, isAbsolute } from 'node:path';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { cpus } from 'node:os';
 import { promisify } from 'node:util';
 import { GLM_OCR, LLAMA_CPP, llamaAssetPattern, type ModelFile, type OcrModel, type PinnedRuntime } from './manifest';
-import { LlamaCppOcrProvider } from '../intake/ocr-llamacpp';
+import { LlamaCppOcrProvider, OcrTimeoutError, type ImageShrinker } from '../intake/ocr-llamacpp';
 import type { OcrOutput, OcrProvider } from '../intake/ocr';
 
 /**
@@ -16,6 +16,10 @@ import type { OcrOutput, OcrProvider } from '../intake/ocr';
  * Instellingen; elk bestand wordt tegen een sha256 gecontroleerd, een afgebroken download gaat
  * verder waar hij was. De server draait op 127.0.0.1 op een vrije poort, wordt pas gestart bij de
  * eerste bon en stopt weer na een tijd zonder gebruik (scheelt werkgeheugen).
+ *
+ * De server stopt ook als de app afsluit (`stopNow`). Welk proces de app startte staat in
+ * `llama-server.pid`; draait dat bij een volgende start nog (de app is bv. hard afgebroken), dan wordt
+ * het alsnog gestopt, maar alleen als vaststaat dat het de eigen llama-server uit deze map is.
  */
 
 export type RuntimeState = 'niet-geinstalleerd' | 'downloaden' | 'geinstalleerd' | 'starten' | 'actief' | 'fout';
@@ -68,6 +72,51 @@ export interface RuntimeDeps {
   pinned?: PinnedRuntime;
   /** zin achter een foutmelding (in de Store-versie: het kan wel met de gewone Windows-versie) */
   failureHint?: string;
+  /** het volledige pad van het programma achter een proces-ID, of null als het proces er niet is of het pad niet te bepalen is */
+  processPath?: (pid: number) => Promise<string | null>;
+  /** een proces stoppen op proces-ID (standaard process.kill); alleen tests vervangen dit */
+  kill?: (pid: number, signal: NodeJS.Signals) => void;
+  /** tijdslimiet van één leesverzoek; standaard OCR_REQUEST_TIMEOUT_MS */
+  requestTimeoutMs?: number;
+  /** verkleint een foto voor de herkenning (hoofdproces: Electron); zonder gaat de foto zoals hij is */
+  shrinkImage?: ImageShrinker;
+  /** hoe lang een gestopte server de tijd krijgt om zelf te eindigen; standaard STOP_GRACE_MS */
+  stopGraceMs?: number;
+}
+
+/** Wat er in `llama-server.pid` staat: het proces dat deze app startte. */
+interface PidFile {
+  pid: number;
+  serverPath: string;
+}
+
+/** Hoe lang een gestopte server de tijd krijgt om zelf te eindigen voordat hij hard wordt beëindigd. */
+const STOP_GRACE_MS = 2000;
+
+/**
+ * Het programma achter een proces-ID. Linux: de koppeling /proc/<pid>/exe; macOS: ps; Windows: PowerShell.
+ * Lukt het niet (proces weg, geen rechten, hulpprogramma ontbreekt), dan null: er wordt dan niets gestopt.
+ */
+async function defaultProcessPath(pid: number): Promise<string | null> {
+  try {
+    if (process.platform === 'linux') return readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, '');
+    if (process.platform === 'win32') {
+      const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid} -ErrorAction Stop).Path`], { timeout: 10_000, windowsHide: true });
+      return stdout.trim() || null;
+    }
+    const { stdout } = await run('ps', ['-p', String(pid), '-o', 'comm='], { timeout: 10_000 });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function realOr(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 /** Vastgelegde toestemming (alleen in de Store-versie): voor welke build, en wanneer. */
@@ -132,6 +181,8 @@ export class LocalOcrRuntime {
   private url: string | null = null;
   private starting: Promise<string> | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
+  /** gestopte servers die nog niet weg zijn (ze krijgen even de tijd); bij afsluiten gaan ze meteen */
+  private readonly stopping = new Set<ChildProcess>();
   private readonly model: OcrModel;
 
   constructor(
@@ -342,6 +393,8 @@ export class LocalOcrRuntime {
       this.status_ = { ...this.status_, state: 'fout', error: this.withHint('llama-server is gewijzigd sinds het downloaden (controlegetal klopt niet) en wordt niet gestart. Verwijder de herkenning en installeer hem opnieuw.') };
       throw new Error(this.status_.error!);
     }
+    // een server van een vorige keer (de app is toen niet netjes afgesloten) mag niet naast de nieuwe blijven rekenen
+    await this.stopLeftover();
     this.status_.state = 'starten';
     const port = await freePort();
     const [model, mmproj] = inst.files.map((f) => join(this.dir, 'models', f));
@@ -355,6 +408,9 @@ export class LocalOcrRuntime {
       stderr = (stderr + d.toString()).slice(-2000);
     });
     this.process = child;
+    if (typeof child.pid === 'number') this.writePid({ pid: child.pid, serverPath: inst.serverPath });
+    // het proces is weg (ook na stop of een crash): dan hoort het pid-bestand er niet meer te zijn
+    child.once?.('exit', () => this.clearPid(child.pid));
     const url = `http://127.0.0.1:${port}`;
     const deadline = Date.now() + 180_000;
     while (Date.now() < deadline) {
@@ -378,13 +434,121 @@ export class LocalOcrRuntime {
     throw new Error(this.withHint('De herkenning start niet (time-out).'));
   }
 
+  private pidFile(): string {
+    return join(this.dir, 'llama-server.pid');
+  }
+
+  private writePid(pid: PidFile): void {
+    try {
+      writeFileSync(this.pidFile(), JSON.stringify(pid));
+    } catch {
+      /* zonder pid-bestand werkt alles, alleen het opruimen na een harde afbreking niet */
+    }
+  }
+
+  private readPid(): PidFile | null {
+    try {
+      const p = JSON.parse(readFileSync(this.pidFile(), 'utf8')) as PidFile;
+      return Number.isInteger(p.pid) && p.pid > 0 && typeof p.serverPath === 'string' ? p : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Haalt het pid-bestand weg; met `pid` alleen als het nog over dat proces gaat. */
+  private clearPid(pid?: number): void {
+    if (pid !== undefined && this.readPid()?.pid !== pid) return;
+    rmSync(this.pidFile(), { force: true });
+  }
+
+  /**
+   * Stopt een llama-server die een vorige keer door de app is gestart en nog draait. Alleen als het
+   * proces uit het pid-bestand er nog is én het programma erachter de llama-server uit deze map is: een
+   * ander programma dat intussen hetzelfde proces-ID kreeg, blijft met rust. Geeft terug of er iets gestopt is.
+   */
+  async stopLeftover(): Promise<boolean> {
+    const recorded = this.readPid();
+    if (!recorded) return false;
+    // de server die deze app nu zelf heeft draaien is geen achterblijver
+    if (this.process && this.process.pid === recorded.pid && this.process.exitCode === null) return false;
+    const kill = this.deps.kill ?? ((pid: number, signal: NodeJS.Signals) => void process.kill(pid, signal));
+    const path = await (this.deps.processPath ?? defaultProcessPath)(recorded.pid);
+    if (path === null) {
+      // proces weg: opruimen. Proces er nog wel maar pad onbekend: niets doen, ook het bestand laten staan.
+      try {
+        process.kill(recorded.pid, 0);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'ESRCH') this.clearPid(recorded.pid);
+      }
+      return false;
+    }
+    const own = this.isOwnServer(path, recorded.serverPath);
+    if (own) {
+      try {
+        kill(recorded.pid, 'SIGKILL');
+      } catch {
+        /* net zelf gestopt */
+      }
+    }
+    this.clearPid(recorded.pid);
+    return own;
+  }
+
+  /** Is dit het programma dat de app startte: llama-server, in deze map, en hetzelfde bestand als toen? */
+  private isOwnServer(actual: string, recorded: string): boolean {
+    const win = (this.deps.platform ?? process.platform) === 'win32';
+    const norm = (p: string) => (win ? realOr(p).toLowerCase() : realOr(p));
+    const a = norm(actual);
+    if (a !== norm(recorded)) return false;
+    if (!['llama-server', 'llama-server.exe'].includes(basename(a))) return false;
+    const rel = relative(norm(this.dir), a);
+    return !!rel && !rel.startsWith('..') && !isAbsolute(rel);
+  }
+
+  /**
+   * Stopt de server. Hij krijgt eerst de kans om zelf te eindigen; rekent hij nog aan een bon, dan kan
+   * dat lang duren, dus na korte tijd wordt hij hard beëindigd.
+   */
   stop(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
-    if (this.process && this.process.exitCode === null) this.process.kill();
+    const child = this.process;
+    if (child && child.exitCode === null) {
+      child.kill();
+      if (child.exitCode === null) {
+        this.stopping.add(child);
+        const timer = setTimeout(() => {
+          if (child.exitCode === null) child.kill('SIGKILL');
+        }, this.deps.stopGraceMs ?? STOP_GRACE_MS);
+        timer.unref?.();
+        child.once?.('exit', () => {
+          clearTimeout(timer);
+          this.stopping.delete(child);
+        });
+      }
+    }
     this.process = null;
     this.url = null;
     if (this.status_.state === 'actief' || this.status_.state === 'starten') this.status_.state = 'geinstalleerd';
+  }
+
+  /**
+   * De app sluit af: de server meteen hard beëindigen, zonder te wachten. Er is geen tijd meer om te
+   * kijken of hij zelf stopt, en hij heeft niets te bewaren.
+   */
+  stopNow(): void {
+    this.stop();
+    for (const child of this.stopping) {
+      if (child.exitCode === null) {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          /* al weg */
+        }
+      }
+      this.clearPid(child.pid);
+    }
+    this.stopping.clear();
   }
 
   /** Stopt de server en wacht tot het proces echt weg is (Windows houdt bestanden anders vast). */
@@ -432,7 +596,11 @@ export class LocalOcrRuntime {
         const url = await self.ensureStarted();
         self.touch();
         try {
-          return await new LlamaCppOcrProvider(self.model.id, url, fetchImpl, self.model.prompt).recognize(input);
+          return await new LlamaCppOcrProvider(self.model.id, url, fetchImpl, self.model.prompt, undefined, self.deps.requestTimeoutMs, self.deps.shrinkImage).recognize(input);
+        } catch (e) {
+          // te lang bezig: de server stoppen, zodat hij niet doorrekent aan een bon waar niemand meer op wacht
+          if (e instanceof OcrTimeoutError) self.stop();
+          throw e;
         } finally {
           self.touch();
         }

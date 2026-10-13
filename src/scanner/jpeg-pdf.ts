@@ -113,3 +113,30 @@ export function jpegsToPdf(photos: Uint8Array[]): Buffer {
   parts.push(Buffer.from(xref.join(''), 'latin1'));
   return Buffer.concat(parts);
 }
+
+const BEELD_KOP = /\/Type \/XObject \/Subtype \/Image [^>]*\/Filter \/DCTDecode \/Length (\d+) >>\nstream\n/g;
+
+/**
+ * Het omgekeerde van {@link jpegsToPdf}: de foto's uit een PDF die deze app zelf van foto's maakte, in de
+ * volgorde van de pagina's en byte voor byte zoals ze erin gingen. Null bij elke andere PDF (ook een scan
+ * van een ander programma): alleen het eigen formaat wordt herkend, er wordt geen PDF ontleed.
+ */
+export function pdfJpegs(data: Uint8Array): Uint8Array[] | null {
+  const b = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  if (b.toString('latin1', 0, 9) !== '%PDF-1.4\n') return null;
+  const tekst = b.toString('latin1');
+  const aantal = /\/Type \/Pages \/Kids \[[^\]]*\] \/Count (\d+) >>/.exec(tekst);
+  if (!aantal) return null;
+  const fotos: Uint8Array[] = [];
+  BEELD_KOP.lastIndex = 0;
+  for (let m = BEELD_KOP.exec(tekst); m; m = BEELD_KOP.exec(tekst)) {
+    const begin = m.index + m[0].length;
+    const eind = begin + Number(m[1]);
+    if (eind > b.length || tekst.slice(eind, eind + 10) !== '\nendstream') return null;
+    const foto = b.subarray(begin, eind);
+    if (!jpegInfo(foto)) return null;
+    fotos.push(foto);
+    BEELD_KOP.lastIndex = eind;
+  }
+  return fotos.length > 0 && fotos.length === Number(aantal[1]) ? fotos : null;
+}

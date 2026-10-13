@@ -1768,11 +1768,12 @@ export function createApi(s: Services, host: HostContext) {
       rereadPending: async () => {
         let read = 0;
         const docs = s.intake.unread();
-        for (const d of docs) {
+        // dezelfde rij als de bonnen die op de achtergrond gelezen worden: één bon tegelijk, en nooit dezelfde bon twee keer
+        const jobs = docs.map((d) => s.intake.readLater(d.id, { data: () => host.readAttachment(d.file_path) }));
+        for (const job of jobs) {
           // één bon die niet lukt (bv. bestand weg) houdt de rest niet tegen
           try {
-            const after = await s.intake.reread(d.id, host.readAttachment(d.file_path));
-            if (after.extraction_source !== 'geen') read++;
+            if ((await job).extraction_source !== 'geen') read++;
           } catch {
             /* telt als niet gelezen; de bon blijft staan om zelf in te vullen */
           }

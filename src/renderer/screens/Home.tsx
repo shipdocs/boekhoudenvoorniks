@@ -1,6 +1,6 @@
 import { lazy, Suspense, useRef, useState } from 'react';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, Modal, readAsBytes, useAction, useApp, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, Modal, readAsBytes, useAction, useApp, useAppEvent, useLoad } from '../ui';
 import type { Task } from '../../inbox/inbox';
 import type { AutomationEntry } from '../../inbox/automation-log';
 import { formatDateNl } from '../../shared/dates';
@@ -21,6 +21,8 @@ const DocumentPreview = lazy(() => import('./DocumentReview').then((m) => ({ def
 export function Home() {
   const { go, settings, refreshBadge, toast, showInvestmentSaved } = useApp();
   const { data, error, reload } = useLoad(() => api.home.get());
+  // er kwam een bon binnen (telefoon, bonnenmap) of een bon is op de achtergrond gelezen
+  useAppEvent('auto-processed', () => void reload());
   const ib = useLoad(() => api.incomeTax.estimate());
   const { run, busy } = useAction();
   const [picking, setPicking] = useState<Task | null>(null);

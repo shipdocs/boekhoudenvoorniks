@@ -12,7 +12,7 @@ const mb = (n: number) => (n >= 1_000_000_000 ? `${(n / 1_000_000_000).toLocaleS
  * met je eigen Claude Code of Codex (geen download, maar de foto gaat naar Anthropic/OpenAI), of zelf
  * invullen.
  */
-export function ReaderChoice({ context, onDone, onToolsChanged }: { context: 'bon' | 'instellingen'; onDone?: () => void | Promise<void>; onToolsChanged?: () => void }) {
+export function ReaderChoice({ context, reason, onDone, onToolsChanged }: { context: 'bon' | 'instellingen'; /** bij een bon: waarom hij niet gelezen is (bv. het lezen duurde te lang) */ reason?: string; onDone?: () => void | Promise<void>; onToolsChanged?: () => void }) {
   const { reloadSettings, toast } = useApp();
   const { run, busy } = useAction();
   const opts = useLoad(() => api.reader.options());
@@ -110,7 +110,7 @@ export function ReaderChoice({ context, onDone, onToolsChanged }: { context: 'bo
     if (selected === 'zelf') return null;
     return (
       <div className="notice">
-        Deze bon is nog niet uitgelezen.{' '}
+        {reason ?? 'Deze bon is nog niet uitgelezen.'}{' '}
         <Button small disabled={busy || reading} onClick={() => void readPending()}>{reading ? 'Bezig met lezen…' : 'Nu lezen'}</Button>
         {error && <div className="small" style={{ marginTop: 6 }}>{error}</div>}
       </div>
@@ -139,7 +139,7 @@ export function ReaderChoice({ context, onDone, onToolsChanged }: { context: 'bo
           <LocalProgress />
         </div>
       )}
-      {reading && <p className="small">Bezig met lezen… dit kan een halve minuut per bon duren.</p>}
+      {reading && <p className="small">Bezig met lezen… dit kan een paar minuten per bon duren.</p>}
       {error && <div className="notice warn small">{error}</div>}
       {askConsent && <LocalOcrConsent downloadSize={o.local.downloadSize} runtimeVersion={o.local.runtimeVersion} onCancel={() => setAskConsent(false)} onAgree={() => void choose('lokaal', true)} />}
       <p className="small muted" style={{ marginTop: 8 }}>

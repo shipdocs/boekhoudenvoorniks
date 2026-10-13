@@ -1,5 +1,5 @@
 import { runBackgroundFeeds } from './background-feeds';
-import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -26,6 +26,8 @@ import { JevClassifier } from '../intake/llm-jev';
 import { ONLINE_HELP } from '../shared/online-help';
 import type { FetchLike } from '../integrations/types';
 import { ImapSource } from '../mail/imap-source';
+import { ocrSize } from '../intake/ocr-llamacpp';
+import { jpegInfo } from '../scanner/jpeg-pdf';
 import { autoUpdater } from 'electron-updater';
 import { Updates } from './updates';
 import { startMcp } from '../mcp/start';
@@ -69,6 +71,23 @@ const STORE = isWindowsStore();
  * map is dan alleen-lezen geopend; de app schrijft er niets in.
  */
 let readOnly = false;
+
+/**
+ * Een verkleinde kopie van een foto voor de tekstherkenning (zie OCR_MAX_PIXELS). Alleen jpg zonder draaiing
+ * in de EXIF en png: een gedraaide foto gaat zoals hij is, want bij het verkleinen gaat de draairichting verloren.
+ */
+function shrinkForOcr(input: { data: Uint8Array; mimeType: string }): { data: Uint8Array; mimeType: string } | null {
+  if (input.mimeType === 'image/jpeg') {
+    const info = jpegInfo(input.data);
+    if (!info || info.orientation !== 1) return null;
+  } else if (input.mimeType !== 'image/png') return null;
+  const image = nativeImage.createFromBuffer(Buffer.from(input.data.buffer, input.data.byteOffset, input.data.byteLength));
+  if (image.isEmpty()) return null;
+  const { width, height } = image.getSize();
+  const size = ocrSize(width, height);
+  if (!size) return null;
+  return { data: image.resize({ ...size, quality: 'best' }).toJPEG(88), mimeType: 'image/jpeg' };
+}
 
 function assertWritable(): void {
   if (readOnly) throw new Error(READ_ONLY_MESSAGE);
@@ -466,9 +485,12 @@ function initServices(): void {
   });
   localOcr = new LocalOcrRuntime(join(rootDir(), 'ocr'), {
     fetch: (url, init) => fetch(url, init) as never,
+    shrinkImage: shrinkForOcr,
     // Store-versie: alleen de vaste build, pas na toestemming, en bij een fout een verwijzing naar de gewone versie
     ...(STORE ? { pinned: STORE_LLAMA_CPP, failureHint: storeFallbackHint('het lezen van bonnen op deze computer') } : {}),
   });
+  // draait er nog een llama-server van een vorige keer (de app is toen niet netjes afgesloten), dan stopt die nu
+  if (!SMOKE_TEST && !readOnly) void localOcr.stopLeftover().catch((e) => console.error('Oude tekstherkenning stoppen mislukt', e));
   configureLocalAi();
   scanner = new Bonnenscanner({
     db,
@@ -480,6 +502,8 @@ function initServices(): void {
     invoices: services.invoices,
     spoolDir: scannerSpoolDir(dataDir()),
     adminDir: dataDir(),
+    // bonnen die bij het afsluiten nog op de tekstherkenning wachtten, worden na de start alsnog gelezen
+    readAttachment: (path) => readFileSync(resolveAttachmentPath(dataDir(), path)),
     protectedDirs: [rootDir(), app.getPath('userData')],
     homeDir: app.getPath('home'),
     broadDirs: (['desktop', 'documents', 'downloads', 'pictures'] as const).flatMap((name) => {
@@ -650,6 +674,7 @@ function initServices(): void {
         });
         if (confirm.response !== 1) return false;
         await dailyBackup(db, join(dataDir(), 'backups'), dataDir());
+        localOcr.stopNow();
         await scanner?.stop();
         db.close();
         if (complete) restoreCompleteBackup(backupData, dbPath(), dataDir());
@@ -743,7 +768,7 @@ function initServices(): void {
             if (plan.action !== folderPlan.action) throw new Error('De map is veranderd sinds je hem koos. Kies hem opnieuw.');
             // het wisselen zelf gebeurt bij de volgende start, vóór er een database open is (zie switchFolderIfAsked)
             writeSwitchRequest(app.getPath('home'), plan.dir, plan.action);
-            localOcr.stop();
+            localOcr.stopNow();
             await scanner?.stop();
             db.close();
             app.relaunch();
@@ -1289,10 +1314,14 @@ if (MCP_MODE) {
     if (process.platform !== 'darwin') app.quit();
   });
 
+  // app.exit() (bv. opnieuw starten na het terugzetten van een back-up) slaat will-quit over: ook dan stopt de tekstherkenning
+  process.on('exit', () => localOcr?.stopNow());
+
   app.on('will-quit', () => {
     statementWatch.stop();
-    localOcr?.stop();
+    // eerst de scanner (het lezen op de achtergrond schrijft dan niets meer), dan de tekstherkenning meteen weg
     void scanner?.stop();
+    localOcr?.stopNow();
     try {
       db?.close();
     } catch {

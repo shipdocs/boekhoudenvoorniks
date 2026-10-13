@@ -5,6 +5,13 @@
 ### Verbeterd
 - **Voorwaarden bijgewerkt (versie 2026-10-13).** Artikel 8 noemt nu als lijst wat je met het abonnement extra krijgt: de app voor Android, de uitwisseling met je boekhouder en de online hulp bij categorievoorstellen, en wat altijd blijft werken. De prijs en de vier gratis maanden zijn niet veranderd. Het programma vraagt je één keer opnieuw om akkoord.
 
+### Opgelost
+- **Bon van je telefoon met meerdere pagina's wordt nu gelezen.** Een bon met meer dan één pagina kwam als PDF in je administratie en bleef op "nog niet uitgelezen" staan: de tekstherkenning leest foto's, geen PDF van foto's. De app leest nu elke pagina apart. Bonnen die er al staan, lees je alsnog met "Nu lezen".
+- **Bon van je telefoon of uit de bonnenmap staat er meteen.** Een bon kwam pas in beeld als de tekstherkenning hem gelezen had; duurde dat minuten, dan was hij al die tijd nergens te zien en wachtten de volgende bonnen erachter. De bon staat nu direct bij Aankopen & bonnetjes en op Vandaag, met erbij "Wacht op lezen" of "Wordt gelezen…". Het lezen gebeurt daarna op de achtergrond, één bon tegelijk. Vul je de bon intussen zelf in, dan blijft dat staan. Sluit je het programma af tijdens het lezen, dan gaat het de volgende keer vanzelf verder.
+- **Lezen dat te lang duurt, stopt met een duidelijke melding.** Na vier minuten per foto breekt de app het lezen af en staat bij de bon: "Het lezen van deze bon duurde te lang. Probeer het opnieuw met Nu lezen, of vul de gegevens zelf in." Eerder stond er na vijf minuten alleen "fetch failed".
+- **De tekstherkenning stopt als je het programma afsluit.** Het leesprogramma op je computer (llama-server) kon na het afsluiten blijven doorrekenen. Het stopt nu meteen bij afsluiten. Draait er bij het starten nog een van een vorige keer, dan stopt de app dat ook; alleen het eigen leesprogramma uit de eigen map, nooit een ander programma.
+- **Bonnen lezen op je eigen computer gaat sneller bij grote foto's.** Een foto van je telefoon ging op volle grootte naar de tekstherkenning. De herkenning krijgt nu een verkleinde kopie; de bon in je administratie blijft zoals hij is.
+
 ## 1.4.0 — de app voor Android: bonnen, foto's en facturen vanaf je telefoon
 
 Bij deze versie hoort de app BoekhoudenVoorNiks voor Android (Google Play). Je koppelt je telefoon één keer met een QR-code; wat je onderweg vastlegt, staat daarna in je administratie op je computer.
