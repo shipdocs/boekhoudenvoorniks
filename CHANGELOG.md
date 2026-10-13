@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Verbeterd
+- **Voorwaarden bijgewerkt (versie 2026-10-13).** Artikel 8 noemt nu als lijst wat je met het abonnement extra krijgt: de app voor Android, de uitwisseling met je boekhouder en de online hulp bij categorievoorstellen, en wat altijd blijft werken. De prijs en de vier gratis maanden zijn niet veranderd. Het programma vraagt je één keer opnieuw om akkoord.
+
 ## 1.4.0 — de app voor Android: bonnen, foto's en facturen vanaf je telefoon
 
 Bij deze versie hoort de app BoekhoudenVoorNiks voor Android (Google Play). Je koppelt je telefoon één keer met een QR-code; wat je onderweg vastlegt, staat daarna in je administratie op je computer.

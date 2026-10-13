@@ -12,7 +12,8 @@ op basis van RGS, zodat een boekhouder of accountant de administratie zo kan ove
 Desktop-app (Electron) voor Windows en Linux. De administratie staat in een SQLite-bestand op de
 eigen computer, zonder account en zonder cloud. Het programma is gratis. Met een optioneel
 abonnement (voor ondernemers, de eerste 4 maanden gratis, daarna € 9 per maand excl. btw) steun je
-de verdere ontwikkeling en krijg je de extra functies; nu is dat de uitwisseling met je boekhouder.
+de verdere ontwikkeling en krijg je de extra functies; nu zijn dat de app voor Android, de uitwisseling met je
+boekhouder en de online hulp bij categorievoorstellen.
 Zie [boekhoudenvoorniks.nl](https://boekhoudenvoorniks.nl) en de [voorwaarden](https://boekhoudenvoorniks.nl/voorwaarden.html).
 
 **Vragen of feedback?** Mail naar [info@shipdocs.app](mailto:info@shipdocs.app), of gebruik in de app
