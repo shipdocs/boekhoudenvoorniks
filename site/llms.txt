@@ -4,7 +4,7 @@
 
 Belangrijke feiten:
 
-- Prijs: het programma is gratis. Optioneel abonnement (steun de ontwikkeling en krijg de extra functies, nu de uitwisseling met je boekhouder): de eerste 4 maanden gratis (bij het afsluiten € 0,01 via iDEAL voor de machtiging), daarna € 9 per maand exclusief btw (€ 10,89 inclusief), per maand opzegbaar in de app, betalen via Mollie (iDEAL, daarna SEPA-incasso), maandelijkse factuur. Voor boekhoudkantoren gratis.
+- Prijs: het programma is gratis. Optioneel abonnement (steun de ontwikkeling en krijg de extra functies: de app voor Android, de uitwisseling met je boekhouder en de online hulp bij categorievoorstellen): de eerste 4 maanden gratis (bij het afsluiten € 0,01 via iDEAL voor de machtiging), daarna € 9 per maand exclusief btw (€ 10,89 inclusief), per maand opzegbaar in de app, betalen via Mollie (iDEAL, daarna SEPA-incasso), maandelijkse factuur. Voor boekhoudkantoren gratis.
 - Licentie: open source, AGPL-3.0-or-later.
 - Platform: Windows en Linux (Electron). Werkt offline; gegevens in een lokale SQLite-database met dagelijkse automatische back-up.
 - Taal en markt: Nederlands, Nederlandse btw-regels.
@@ -18,6 +18,7 @@ Belangrijke feiten:
 - Koppelingen: WooCommerce, Shopify, Mollie Facturen (leest betaalde facturen), Mollie (uitbetalingen), Stripe.
 - Overstappen: overstap-hulp met instapdatum; inlezen van auditfiles (XAF, ook meerdere tegelijk, één per boekjaar), kolommen- of saldibalans en lijsten met openstaande facturen. Auditfiles zonder beginbalans (zoals DigiBoox) worden per jaar opgeteld. Bedrijfsmiddelen krijgen hun aankoopdatum uit oudere auditfiles.
 - Fiscaal: KOR (btw op inkopen naar de kosten, omzetgrens en herziening van btw-aftrek), oninbare facturen (btw terug), begeleide jaarafsluiting (vooruitbetaald, nog te betalen, voorraad, onderhanden werk), btw-nummer controleren in VIES (op klik), ICP-opgaaf met goederen en diensten apart, aftrekposten (afschrijving, KIA, kilometers, representatie, starters- en zelfstandigenaftrek) en een schatting van de inkomstenbelasting. Altijd laten controleren door een boekhouder.
+- App voor Android (vanaf versie 1.4.0, Google Play): facturen en creditnota's maken, bonnen scannen, foto's bij een klus en klanten en klussen bijhouden op de telefoon. De telefoon wordt één keer met een QR-code aan het programma gekoppeld; alles gaat versleuteld over het eigen wifi rechtstreeks naar de eigen computer (of als versleutelde bijlage per e-mail), niet via servers van de maker. Koppelen hoort bij het abonnement; wat een gekoppelde telefoon stuurt, komt altijd aan.
 - Uitwisseling met de boekhouder: de klant stuurt een periode (kwartaal of jaar) versleuteld naar het kantoor van zijn boekhouder (uitnodiging met controlecode, alleen dat kantoor kan het openen), de boekhouder corrigeert in BoekhoudenVoorNiks (correctieboekingen, terugdraaien, grootboekrekeningen) en stuurt een antwoord terug; bij het inlezen is de periode afgesloten en blijft het werk van daarna staan. Loopt niet via servers van de maker.
 - Periode afsluiten en meerdere administraties op één computer.
 - Huidige versie: 1.1.1. Release notes: https://boekhoudenvoorniks.nl/wijzigingen.html
