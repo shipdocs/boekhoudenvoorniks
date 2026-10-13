@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ChildProcess } from 'node:child_process';
-import { LocalOcrRuntime, type DownloadFetch } from '../src/ocr-runtime/runtime';
+import { spawn as echtProces, type ChildProcess } from 'node:child_process';
+import { LocalOcrRuntime, type DownloadFetch, type RuntimeDeps } from '../src/ocr-runtime/runtime';
 import { GLM_OCR, llamaAssetPattern, type OcrModel } from '../src/ocr-runtime/manifest';
-import { LlamaCppOcrProvider, textToItems } from '../src/intake/ocr-llamacpp';
+import { LlamaCppOcrProvider, OCR_REQUEST_TIMEOUT_MS, OcrTimeoutError, textToItems } from '../src/intake/ocr-llamacpp';
+import { READ_CONNECTION_MESSAGE, READ_TIMEOUT_MESSAGE } from '../src/shared/reading';
 import { parseDocumentText } from '../src/intake/text-parser';
 import { setup } from './helpers';
 import { makeJpeg } from './fixtures/jpeg';
@@ -68,20 +69,31 @@ const fakeExtract = async (_archive: string, dest: string) => {
   writeFileSync(join(dest, 'build', 'bin', 'llama-server'), '#!/bin/sh\n');
 };
 
+/** Een nagebootst proces: onthoudt welke signalen het kreeg; met `negeertStop` eindigt het alleen op SIGKILL. */
+type NepKind = ChildProcess & { exitCode: number | null; signalen: string[]; negeertStop: boolean };
+
 function fakeSpawn() {
   const spawned: { cmd: string; args: string[] }[] = [];
+  const kinderen: NepKind[] = [];
   const spawn = (cmd: string, args: string[]) => {
     spawned.push({ cmd, args });
-    const child = new EventEmitter() as unknown as ChildProcess & { exitCode: number | null };
-    (child as { exitCode: number | null }).exitCode = null;
+    const child = new EventEmitter() as unknown as NepKind;
+    child.exitCode = null;
+    child.signalen = [];
+    child.negeertStop = false;
+    (child as { pid: number }).pid = 3_000_000 + kinderen.length;
     (child as unknown as { stderr: EventEmitter }).stderr = new EventEmitter();
-    (child as unknown as { kill: () => boolean }).kill = () => {
-      (child as { exitCode: number | null }).exitCode = 0;
+    (child as unknown as { kill: (signal?: string) => boolean }).kill = (signal = 'SIGTERM') => {
+      child.signalen.push(signal);
+      if (child.exitCode !== null || (child.negeertStop && signal !== 'SIGKILL')) return true;
+      child.exitCode = 0;
+      child.emit('exit', 0, signal);
       return true;
     };
+    kinderen.push(child);
     return child;
   };
-  return { spawn, spawned };
+  return { spawn, spawned, kinderen };
 }
 
 describe('ingebouwde tekstherkenning: installeren (#9)', () => {
@@ -234,5 +246,203 @@ describe('ingebouwde tekstherkenning: gebruiken (#9)', () => {
       'Verf 12,50',
       'Totaal 12,50',
     ]);
+  });
+});
+
+/** Een geïnstalleerde runtime in een eigen map, met een nagebootst proces. */
+async function geinstalleerd(extra: Partial<RuntimeDeps> = {}, fetch: DownloadFetch = fakeFetch()) {
+  const dir = mkdtempSync(join(tmpdir(), 'ocr-'));
+  const nep = fakeSpawn();
+  const rt = new LocalOcrRuntime(dir, { fetch, extract: fakeExtract, spawn: nep.spawn as never, platform: 'linux', arch: 'x64', model, ...extra });
+  await rt.install();
+  const serverPath = join(dir, 'llama', 'b9999', 'build', 'bin', 'llama-server');
+  return { dir, rt, serverPath, pidFile: join(dir, 'llama-server.pid'), ...nep };
+}
+
+/** Een leesverzoek dat nooit antwoord krijgt, zoals een herkenning die blijft rekenen; het stopt alleen als het wordt afgebroken. */
+function hangendeFetch(basis: DownloadFetch = fakeFetch()) {
+  const signalen: AbortSignal[] = [];
+  const fetch = ((url: string, init?: { signal?: AbortSignal }) => {
+    if (!url.endsWith('/v1/chat/completions')) return basis(url, init as never);
+    return new Promise((_resolve, reject) => {
+      signalen.push(init!.signal!);
+      init!.signal!.addEventListener('abort', () => reject(new DOMException('This operation was aborted', 'AbortError')));
+    });
+  }) as unknown as DownloadFetch;
+  return { fetch, signalen };
+}
+
+describe('ingebouwde tekstherkenning: tijdslimiet en melding', () => {
+  it('de tijdslimiet is korter dan de vijf minuten waarna fetch zelf opgeeft', () => {
+    expect(OCR_REQUEST_TIMEOUT_MS).toBe(240_000);
+    expect(OCR_REQUEST_TIMEOUT_MS).toBeLessThan(300_000);
+  });
+
+  it('een leesverzoek dat blijft hangen wordt afgebroken, met een Nederlandse melding bij de bon', async () => {
+    const { fetch, signalen } = hangendeFetch();
+    const provider = new LlamaCppOcrProvider('glm-ocr', 'http://127.0.0.1:9', fetch as never, undefined, undefined, 40);
+    const fout = await provider.recognize({ data: makeJpeg(), mimeType: 'image/jpeg', filename: 'bon.jpg' }).catch((e: Error) => e);
+    expect(fout).toBeInstanceOf(OcrTimeoutError);
+    expect((fout as Error).message).toBe('Het lezen van deze bon duurde te lang. Probeer het opnieuw met Nu lezen, of vul de gegevens zelf in.');
+    // het verzoek zelf is echt afgebroken, niet alleen losgelaten
+    expect(signalen.map((s) => s.aborted)).toEqual([true]);
+    // en zo komt het bij de gebruiker: het document staat er, met die melding
+    const { s } = setup({ ocr: provider });
+    const doc = await s.intake.add('bon.jpg', makeJpeg('hangt'), '2026-10-13');
+    expect(doc).toMatchObject({ status: 'controle', extraction_source: 'geen' });
+    expect(doc.issues.find((i) => i.field === 'document')!.message).toBe(READ_TIMEOUT_MESSAGE);
+  });
+
+  it('een verbroken verbinding met de lokale server geeft geen kale "fetch failed"', async () => {
+    // de server leek er te zijn, maar het leesverzoek zelf krijgt geen antwoord (zoals fetch na vijf minuten deed)
+    const weg = (async (url: string) => {
+      if (url.endsWith('/health')) return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+      throw new TypeError('fetch failed');
+    }) as never;
+    const provider = new LlamaCppOcrProvider('glm-ocr', 'http://127.0.0.1:9', weg);
+    await expect(provider.recognize({ data: makeJpeg(), mimeType: 'image/jpeg', filename: 'bon.jpg' })).rejects.toThrow(READ_CONNECTION_MESSAGE);
+    // ook als de verbinding wegvalt terwijl het antwoord binnenkomt
+    const halverwege = (async () => ({ ok: true, status: 200, json: async () => { throw new TypeError('terminated'); }, text: async () => '' })) as never;
+    await expect(new LlamaCppOcrProvider('glm-ocr', 'http://127.0.0.1:9', halverwege).recognize({ data: makeJpeg(), mimeType: 'image/jpeg', filename: 'bon.jpg' })).rejects.toThrow(READ_CONNECTION_MESSAGE);
+    const { s } = setup({ ocr: provider });
+    const doc = await s.intake.add('bon.jpg', makeJpeg('weg'), '2026-10-13');
+    expect(doc.issues.map((i) => i.message).join(' ')).not.toMatch(/fetch failed/);
+    expect(doc.issues.find((i) => i.field === 'document')!.message).toBe(READ_CONNECTION_MESSAGE);
+    // een foutcode van de server houdt zijn eigen melding
+    const stuk = (async () => ({ ok: false, status: 500, json: async () => ({}), text: async () => '' })) as never;
+    await expect(new LlamaCppOcrProvider('glm-ocr', 'http://127.0.0.1:9', stuk).recognize({ data: makeJpeg(), mimeType: 'image/jpeg', filename: 'bon.jpg' })).rejects.toThrow(/fout 500/);
+  });
+
+  it('na de tijdslimiet stopt de server, zodat hij niet doorrekent; de volgende bon start hem opnieuw', async () => {
+    const hangend = hangendeFetch();
+    const t = await geinstalleerd({ requestTimeoutMs: 40 }, hangend.fetch);
+    const provider = t.rt.provider(hangend.fetch as never);
+    await expect(provider.recognize({ data: makeJpeg(), mimeType: 'image/jpeg', filename: 'bon.jpg' })).rejects.toThrow(READ_TIMEOUT_MESSAGE);
+    expect(t.spawned).toHaveLength(1);
+    expect(t.kinderen[0]!.signalen.length).toBeGreaterThan(0);
+    expect(t.rt.status().state).toBe('geinstalleerd');
+    await expect(provider.recognize({ data: makeJpeg(), mimeType: 'image/jpeg', filename: 'bon.jpg' })).rejects.toThrow(READ_TIMEOUT_MESSAGE);
+    expect(t.spawned).toHaveLength(2);
+    t.rt.stopNow();
+  });
+});
+
+describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
+  const lees = (rt: LocalOcrRuntime, fetch: DownloadFetch = fakeFetch()) => rt.provider(fetch as never).recognize({ data: makeJpeg(), mimeType: 'image/jpeg', filename: 'bon.jpg' });
+
+  it('bij afsluiten wordt de server meteen hard beëindigd, ook als hij op een gewoon stopsignaal niet reageert', async () => {
+    // een server die midden in een bon zit, reageert niet op het gewone stopsignaal
+    const t = await geinstalleerd();
+    await lees(t.rt);
+    const kind = t.kinderen[0]!;
+    kind.negeertStop = true;
+    expect(JSON.parse(readFileSync(t.pidFile, 'utf8'))).toEqual({ pid: kind.pid, serverPath: t.serverPath });
+    t.rt.stopNow();
+    expect(kind.signalen).toContain('SIGKILL');
+    expect(kind.exitCode).not.toBeNull();
+    expect(existsSync(t.pidFile)).toBe(false);
+    expect(t.rt.status().state).toBe('geinstalleerd');
+  });
+
+  it('een gewone stop (bv. na een tijd zonder bonnen) wacht kort en beëindigt de server dan hard', async () => {
+    const t = await geinstalleerd({ stopGraceMs: 30 });
+    await lees(t.rt);
+    const kind = t.kinderen[0]!;
+    kind.negeertStop = true;
+    t.rt.stop();
+    expect(kind.signalen).toEqual(['SIGTERM']);
+    await new Promise((r) => setTimeout(r, 90));
+    expect(kind.signalen).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(existsSync(t.pidFile)).toBe(false);
+  });
+
+  it('sluit de app af terwijl een gestopte server nog niet weg is, dan gaat die ook meteen', async () => {
+    const t = await geinstalleerd({ stopGraceMs: 60_000 });
+    await lees(t.rt);
+    const kind = t.kinderen[0]!;
+    kind.negeertStop = true;
+    t.rt.stop();
+    expect(kind.exitCode).toBeNull();
+    t.rt.stopNow();
+    expect(kind.signalen).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(existsSync(t.pidFile)).toBe(false);
+  });
+
+  it('een server van een vorige keer wordt bij de start gestopt, maar alleen als het de eigen llama-server is', async () => {
+    const gestopt: [number, string][] = [];
+    const kill = (pid: number, signal: NodeJS.Signals) => void gestopt.push([pid, signal]);
+    // 1. het proces uit het pid-bestand is de llama-server uit de eigen map: stoppen
+    let t = await geinstalleerd({ kill, processPath: async () => t.serverPath });
+    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_001, serverPath: t.serverPath }));
+    expect(await t.rt.stopLeftover()).toBe(true);
+    expect(gestopt).toEqual([[4_000_001, 'SIGKILL']]);
+    expect(existsSync(t.pidFile)).toBe(false);
+
+    // 2. hetzelfde proces-ID hoort intussen bij een ander programma: met rust laten
+    gestopt.length = 0;
+    t = await geinstalleerd({ kill, processPath: async () => '/usr/bin/firefox' });
+    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_002, serverPath: t.serverPath }));
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(gestopt).toEqual([]);
+    expect(existsSync(t.pidFile)).toBe(false);
+
+    // 3. een llama-server van iemand anders (zelfde naam, andere map), ook als het pid-bestand daarnaar wijst: met rust laten
+    t = await geinstalleerd({ kill, processPath: async () => '/opt/eigen/llama-server' });
+    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_003, serverPath: '/opt/eigen/llama-server' }));
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(gestopt).toEqual([]);
+
+    // 4. het proces is er niet meer: alleen het bestand opruimen
+    t = await geinstalleerd({ kill, processPath: async () => null });
+    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_004, serverPath: t.serverPath }));
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(gestopt).toEqual([]);
+    expect(existsSync(t.pidFile)).toBe(false);
+
+    // 5. geen pid-bestand, of onzin erin: niets doen
+    t = await geinstalleerd({ kill, processPath: async () => t.serverPath });
+    expect(await t.rt.stopLeftover()).toBe(false);
+    writeFileSync(t.pidFile, '{"pid":"alles"}');
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(gestopt).toEqual([]);
+  });
+
+  it('de server die nu zelf draait is geen achterblijver; een nieuwe start ruimt eerst een oude op', async () => {
+    const gestopt: number[] = [];
+    const t = await geinstalleerd({ kill: (pid) => void gestopt.push(pid), processPath: async () => t.serverPath });
+    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_005, serverPath: t.serverPath }));
+    await lees(t.rt);
+    expect(gestopt).toEqual([4_000_005]);
+    expect(JSON.parse(readFileSync(t.pidFile, 'utf8')).pid).toBe(t.kinderen[0]!.pid);
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(gestopt).toEqual([4_000_005]);
+    t.rt.stopNow();
+  });
+
+  it.runIf(process.platform === 'linux')('met een echt proces: de eigen achterblijver stopt, een ander proces met hetzelfde ID niet', async () => {
+    const t = await geinstalleerd();
+    // een echt programma op de plek van llama-server (de nagebootste download is een script)
+    copyFileSync('/bin/sleep', t.serverPath);
+    chmodSync(t.serverPath, 0o755);
+    const weg = (kind: ChildProcess) => new Promise<void>((resolve) => (kind.exitCode !== null || kind.signalCode !== null ? resolve() : kind.once('exit', () => resolve())));
+    const eigen = echtProces(t.serverPath, ['60'], { stdio: 'ignore' });
+    const ander = echtProces('/bin/sleep', ['60'], { stdio: 'ignore' });
+    try {
+      // het pid-bestand wijst naar een ander programma: dat blijft draaien
+      writeFileSync(t.pidFile, JSON.stringify({ pid: ander.pid, serverPath: t.serverPath }));
+      expect(await t.rt.stopLeftover()).toBe(false);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(ander.exitCode).toBeNull();
+      expect(ander.signalCode).toBeNull();
+      // het pid-bestand wijst naar de eigen llama-server van een vorige keer: die stopt
+      writeFileSync(t.pidFile, JSON.stringify({ pid: eigen.pid, serverPath: t.serverPath }));
+      expect(await t.rt.stopLeftover()).toBe(true);
+      await weg(eigen);
+      expect(eigen.signalCode).toBe('SIGKILL');
+      expect(existsSync(t.pidFile)).toBe(false);
+    } finally {
+      eigen.kill('SIGKILL');
+      ander.kill('SIGKILL');
+    }
   });
 });

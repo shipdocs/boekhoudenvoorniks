@@ -16,6 +16,7 @@ import { documentDecisions } from './decisions';
 import { computeLinesBasis, splitQuestion, suggestSplit } from './line-items';
 import { readJpegGps } from './exif';
 import { ValidationError } from '../shared/validation';
+import { NOT_READ_MESSAGE, WAITING_TO_READ_MESSAGE, type ReadingState } from '../shared/reading';
 import { isUbl, parseUbl, findEmbeddedUbl } from './ubl';
 import { extractPdf } from './pdf-text';
 import { parseDocumentText } from './text-parser';
@@ -70,6 +71,8 @@ export interface IntakeDocument {
   link: DocumentLink | null;
   /** wat er met het document gebeurd is: geboekt, alleen bewijs, dubbel, of nog controleren */
   outcome: DocumentOutcome;
+  /** de tekstherkenning leest deze bon op de achtergrond: `wacht` (in de rij) of `bezig`; anders null */
+  reading: ReadingState;
 }
 
 /**
@@ -136,7 +139,7 @@ export interface Confirmation {
   allowDuplicate?: boolean;
 }
 
-type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'bank_match_strong' | 'decisions' | 'link' | 'outcome'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
+type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'bank_match_strong' | 'decisions' | 'link' | 'outcome' | 'reading'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
 
 const MIME: Record<string, string> = { pdf: 'application/pdf', xml: 'application/xml', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
 
@@ -428,6 +431,18 @@ export class IntakeService {
     this.ocr = provider;
   }
 
+  /** de tekstherkenning krijgt één bon tegelijk, ook als er langs meerdere wegen bonnen binnenkomen */
+  private ocrTurn: Promise<unknown> = Promise.resolve();
+  private oneAtATime<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.ocrTurn.then(work, work);
+    this.ocrTurn = run.catch(() => undefined);
+    return run;
+  }
+
+  /** bonnen die op de achtergrond gelezen worden of daarop wachten (zie readLater) */
+  private readonly readJobs = new Map<number, { state: Exclude<ReadingState, null>; done: Promise<IntakeDocument> }>();
+  private readChain: Promise<unknown> = Promise.resolve();
+
   private fx: FxService | null = null;
   setFx(fx: FxService | null): void {
     this.fx = fx;
@@ -479,8 +494,8 @@ export class IntakeService {
 
   /** EXTRACTIE: wat staat er op het document? */
   /** Uitlezen, zonder je eigen btw-nummer als dat van de leverancier. */
-  async extract(filename: string, data: Uint8Array): Promise<{ result: DocumentResult; source: string; issues: Issue[] }> {
-    const out = await this.extractRaw(filename, data);
+  async extract(filename: string, data: Uint8Array, opts: { deferOcr?: boolean } = {}): Promise<{ result: DocumentResult; source: string; issues: Issue[] }> {
+    const out = await this.extractRaw(filename, data, opts);
     // factuur van het eigen bedrijf (#205): vastleggen vóórdat het eigen btw-nummer als leveranciersnummer vervalt
     if (out.source !== 'geen') out.result.ownCompany = this.detectOwn(out.result);
     const own = this.ownVatNumber().replace(/[\s.]/g, '').toUpperCase();
@@ -488,7 +503,11 @@ export class IntakeService {
     return out;
   }
 
-  async extractRaw(filename: string, data: Uint8Array): Promise<{ result: DocumentResult; source: string; issues: Issue[] }> {
+  /**
+   * `deferOcr`: is er tekstherkenning nodig (foto of scan), dan nu niet lezen maar teruggeven dat de bon
+   * op lezen wacht. E-facturen en PDF's met tekst worden altijd meteen gelezen: dat kost geen tijd.
+   */
+  async extractRaw(filename: string, data: Uint8Array, opts: { deferOcr?: boolean } = {}): Promise<{ result: DocumentResult; source: string; issues: Issue[] }> {
     const mime = mimeFor(filename);
     if (mime === 'application/xml') {
       const xml = Buffer.from(data).toString('utf8');
@@ -509,22 +528,24 @@ export class IntakeService {
       return {
         result: emptyResult(),
         source: 'geen',
-        issues: [{ field: 'document', severity: 'fout', message: 'Deze bon is nog niet uitgelezen. Kies hoe de app bonnen mag lezen, of vul de gegevens zelf in.' }],
+        issues: [{ field: 'document', severity: 'fout', message: NOT_READ_MESSAGE }],
       };
     }
+    if (opts.deferOcr) return { result: emptyResult(), source: 'geen', issues: [{ field: 'document', severity: 'fout', message: WAITING_TO_READ_MESSAGE }] };
+    const ocr = this.ocr;
     let out;
     try {
       // een bon van de telefoon met meerdere pagina's is een PDF van foto's: elke foto apart lezen
       const fotos = mime === 'application/pdf' ? pdfJpegs(data) : null;
-      out = fotos ? await recognizePages(this.ocr, fotos, filename) : await this.ocr.recognize({ data, mimeType: mime, filename });
+      out = await this.oneAtATime(() => (fotos ? recognizePages(ocr, fotos, filename) : ocr.recognize({ data, mimeType: mime, filename })));
     } catch (e) {
       // herkenning mislukt: document blijft bewaard, de gebruiker vult zelf in
       return { result: emptyResult(), source: 'geen', issues: [{ field: 'document', severity: 'fout', message: (e as Error).message || 'Tekstherkenning mislukt. Vul de gegevens zelf in.' }] };
     }
-    const result = { ...parseDocumentText(out.items, `ocr:${this.ocr.id}`), ...(out.structured ?? {}) } as DocumentResult;
+    const result = { ...parseDocumentText(out.items, `ocr:${ocr.id}`), ...(out.structured ?? {}) } as DocumentResult;
     if (out.structured?.lines) result.linesBasis = computeLinesBasis(result);
     result.pageSizes = out.pageSizes;
-    return { result, source: `ocr:${this.ocr.id}`, issues: [] };
+    return { result, source: `ocr:${ocr.id}`, issues: [] };
   }
 
   /** Per bestand één toevoeging tegelijk: twee keer hetzelfde bestand (ook tegelijk) wordt één document. */
@@ -560,10 +581,10 @@ export class IntakeService {
    * document kwam er intussen langs een andere weg al in; dan is dat het document en blijft er geen
    * tweede bestand staan.
    */
-  private async ingest(filename: string, data: Uint8Array, sha: string): Promise<{ id: number; issues: Issue[]; existed: boolean }> {
+  private async ingest(filename: string, data: Uint8Array, sha: string, opts: { deferOcr?: boolean } = {}): Promise<{ id: number; issues: Issue[]; existed: boolean }> {
     const mime = mimeFor(filename);
     // eerst lezen, dan pas bewaren: kan het bestand niet (bv. geen e-factuur), dan blijft er geen los bestand achter
-    const { result, source, issues: extracted } = await this.extract(filename, data);
+    const { result, source, issues: extracted } = await this.extract(filename, data, opts);
     const issues = [...extracted, ...(await this.toEuros(result))];
     const path = await this.storeFile(filename, data);
     let id: number;
@@ -586,12 +607,17 @@ export class IntakeService {
     return { id, issues, existed: false };
   }
 
-  /** Voegt een document toe en verwerkt het zo ver als verantwoord is. */
-  async add(filename: string, data: Uint8Array, asOf: IsoDate = today(), opts: { autoConfirm?: boolean } = {}): Promise<UploadResult> {
+  /**
+   * Voegt een document toe en verwerkt het zo ver als verantwoord is.
+   *
+   * `deferOcr` (bonnen die zonder de gebruiker binnenkomen): het document staat er meteen, ook als de
+   * tekstherkenning er nog aan moet beginnen. Het lezen zelf gebeurt daarna met `readLater`.
+   */
+  async add(filename: string, data: Uint8Array, asOf: IsoDate = today(), opts: { autoConfirm?: boolean; deferOcr?: boolean } = {}): Promise<UploadResult> {
     return this.exclusive(data, async (sha) => {
       const existing = this.bySha(sha);
       if (existing !== null) return this.alreadyPresent(existing, null);
-      const { id, issues, existed } = await this.ingest(filename, data, sha);
+      const { id, issues, existed } = await this.ingest(filename, data, sha, { deferOcr: opts.deferOcr });
       if (existed) return this.alreadyPresent(id, null);
       await this.evaluate(id, issues, asOf, opts);
       return { ...this.get(id), already_present: false, blocked: null, linkable: false };
@@ -743,12 +769,20 @@ export class IntakeService {
   /**
    * Opnieuw lezen, bv. nadat de gebruiker een manier koos om bonnen te laten lezen. Alleen voor een
    * bon die nog niet uitgelezen en niet verwerkt is; daarna altijd eerst controleren (nooit zelf boeken).
+   *
+   * Lezen kan minuten duren. Heeft de gebruiker de bon intussen zelf ingevuld, bevestigd of weggelegd,
+   * of zegt `cancelled` dat het niet meer hoeft (de administratie gaat dicht), dan verandert er niets.
    */
-  async reread(id: number, data: Uint8Array, asOf: IsoDate = today()): Promise<IntakeDocument> {
+  async reread(id: number, data: Uint8Array, asOf: IsoDate = today(), opts: { cancelled?: () => boolean } = {}): Promise<IntakeDocument> {
+    const unreadOpen = (d: IntakeDocument) => d.extraction_source === 'geen' && d.status !== 'verwerkt' && d.status !== 'genegeerd';
     const doc = this.get(id);
-    if (doc.extraction_source !== 'geen' || doc.status === 'verwerkt' || doc.status === 'genegeerd') return doc;
+    if (!unreadOpen(doc)) return doc;
     const { result, source, issues: extracted } = await this.extract(doc.original_name, data);
+    if (opts.cancelled?.()) return doc;
     const issues = [...extracted, ...(await this.toEuros(result))];
+    if (opts.cancelled?.()) return doc;
+    const now = this.get(id);
+    if (!unreadOpen(now)) return now;
     if (source === 'geen') {
       // lukte weer niet: alleen de melding bijwerken
       this.db.prepare('UPDATE documents SET issues = ? WHERE id = ?').run(JSON.stringify(issues), id);
@@ -757,6 +791,62 @@ export class IntakeService {
     this.db.prepare('UPDATE documents SET extraction_source = ?, result = ? WHERE id = ?').run(source, JSON.stringify(result), id);
     await this.evaluate(id, issues, asOf, { autoConfirm: false });
     return this.get(id);
+  }
+
+  /** Wacht deze bon op lezen op de achtergrond (zie `add` met `deferOcr`)? Blijft zo na een herstart. */
+  awaitsReading(doc: Pick<IntakeDocument, 'extraction_source' | 'status' | 'issues'>): boolean {
+    return doc.extraction_source === 'geen' && (doc.status === 'nieuw' || doc.status === 'controle') && doc.issues.some((i) => i.field === 'document' && i.message === WAITING_TO_READ_MESSAGE);
+  }
+
+  /** Bonnen die op lezen wachten, oudste eerst; na een herstart om het lezen te hervatten. */
+  waitingToRead(): { id: number; file_path: string; original_name: string }[] {
+    return this.unread().filter((d) => this.awaitsReading(this.get(d.id)));
+  }
+
+  /**
+   * Leest een bon op de achtergrond: achteraan in de rij, één bon tegelijk. Dezelfde bon staat er nooit
+   * twee keer in; een tweede aanvraag (bv. "Nu lezen" terwijl hij al in de rij staat) wacht op de eerste.
+   * `data` levert het bestand pas als de bon aan de beurt is. `onStart`: de bon is nu aan de beurt.
+   * Mislukt het lezen, dan staat de reden als melding bij de bon. Na `cancelled` verandert er niets meer.
+   */
+  readLater(id: number, opts: { data: () => Uint8Array; cancelled?: () => boolean; onStart?: () => void }): Promise<IntakeDocument> {
+    const queued = this.readJobs.get(id);
+    if (queued) return queued.done;
+    const work = async (): Promise<IntakeDocument> => {
+      try {
+        if (opts.cancelled?.()) return this.get(id);
+        job.state = 'bezig';
+        opts.onStart?.();
+        try {
+          return await this.reread(id, opts.data(), today(), { cancelled: opts.cancelled });
+        } catch (e) {
+          if (opts.cancelled?.()) throw e;
+          // bv. het bestand is weg: de bon blijft staan om zelf in te vullen, en wordt niet telkens opnieuw geprobeerd
+          const doc = this.get(id);
+          if (doc.extraction_source === 'geen' && (doc.status === 'nieuw' || doc.status === 'controle')) {
+            const issue: Issue = { field: 'document', severity: 'fout', message: `Deze bon kon niet gelezen worden (${(e as Error).message}). Vul de gegevens zelf in.` };
+            this.db.prepare('UPDATE documents SET issues = ? WHERE id = ?').run(JSON.stringify([...doc.issues.filter((i) => i.field !== 'document'), issue]), id);
+          }
+          return doc;
+        }
+      } finally {
+        this.readJobs.delete(id);
+      }
+    };
+    const done = this.readChain.then(work, work).then((doc) => this.get(doc.id));
+    const job: { state: Exclude<ReadingState, null>; done: Promise<IntakeDocument> } = { state: 'wacht', done };
+    this.readChain = done.catch(() => undefined);
+    this.readJobs.set(id, job);
+    return done;
+  }
+
+  /** Klaar zodra er op de achtergrond niets meer gelezen wordt en er niets meer in de rij staat. */
+  async readingIdle(): Promise<void> {
+    let chain: Promise<unknown>;
+    do {
+      chain = this.readChain;
+      await chain;
+    } while (chain !== this.readChain);
   }
 
   /** Meldingen die bij het bestand zelf horen (niet uitgelezen, geen koers) en bij opnieuw beoordelen blijven staan. */
@@ -1418,6 +1508,7 @@ export class IntakeService {
       result,
       classification: row.classification ? JSON.parse(row.classification) : null,
       issues,
+      reading: this.readJobs.get(id)?.state ?? null,
       decisions: row.decisions ? (JSON.parse(row.decisions) as Decision[]) : null,
       bank_match: bankMatch,
       // dezelfde maatstaf als `awaitsDebit` bij het boeken: bedrag, leverancier en datum

@@ -12,6 +12,7 @@ import { EVIDENCE_QUESTION, OWN_INVOICE_NOTE, type IntakeDocument, type IntakeSe
 import type { OwnCompanyPayments } from '../documents/own-company';
 import type { IntegrationService } from '../integrations/integrations';
 import { ALREADY_PRESENT, VIEW_EXISTING } from '../shared/document-outcome';
+import { shownMessage } from '../shared/reading';
 import { PROPOSED_BY_LABEL, type Classification } from '../intake/classify';
 import { futureDateIssue } from '../intake/validation';
 import { autoAfterConfirmations, supplierKey, type SupplierMemory } from '../intake/supplier-memory';
@@ -1267,7 +1268,7 @@ export class InboxService {
         kind: 'document-review',
         icon: '📷',
         title: `${name}${d.result?.total ? ' ' + formatEuro(d.result.total.value) : ''}`,
-        question: pending?.kind === 'evidence' ? `${paid}${EVIDENCE_QUESTION}` : own?.suggestion.level === 'zeker' ? `${own.message} Kies wat het was.` : bad ? bad.message : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}.${paidWithNote(d)}${d.note ? ` Notitie: "${d.note.replace(/\s+/g, ' ').slice(0, 120)}".` : ''} Alles klopt?` : 'Even controleren?',
+        question: pending?.kind === 'evidence' ? `${paid}${EVIDENCE_QUESTION}` : own?.suggestion.level === 'zeker' ? `${own.message} Kies wat het was.` : bad ? shownMessage(d.reading, bad.message) : d.classification ? `We denken: ${this.categories.label(d.classification!.categoryKey)}${d.classification.business ? '' : ' (privé)'}${proposalNote(d.classification)}.${paidWithNote(d)}${d.note ? ` Notitie: "${d.note.replace(/\s+/g, ' ').slice(0, 120)}".` : ''} Alles klopt?` : 'Even controleren?',
         amount: d.result?.total?.value,
         actions: pending
           ? [{ id: pending.kind === 'evidence' ? 'bewijs' : 'dubbel', label: pending.kind === 'evidence' ? 'Ja, alleen als bewijs' : 'Ja, dezelfde aankoop', primary: true }, { id: 'nee', label: 'Nee, andere aankoop' }, { id: 'open', label: 'Bekijken' }]

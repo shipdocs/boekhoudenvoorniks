@@ -188,6 +188,11 @@ export class ReceiptSpool {
     }
   }
 
+  /** Kwam dit document van de telefoon? */
+  hasDocument(documentId: number): boolean {
+    return !!this.db.prepare('SELECT 1 FROM scanner_documents WHERE document_id = ?').get(documentId);
+  }
+
   /** In de inbox gezet: de kopie in de wachtrij kan weg. */
   done(id: string, documentId: number): void {
     this.db.prepare(`UPDATE scanner_documents SET state = 'verwerkt', document_id = ?, error = NULL WHERE id = ?`).run(documentId, id);

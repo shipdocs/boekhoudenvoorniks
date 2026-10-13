@@ -18,6 +18,8 @@
  *                      {"phoneScanner":true} = telefoon koppelen aan (staat standaard uit, zoals in de app)
  * POST /__scanner      bonnenscanner: body {"folder": "..."} = de map die "Map kiezen…" oplevert; geeft de tekst van
  *                      de laatst getoonde QR-code terug, zodat de test zich als telefoon kan melden
+ * POST /__ocr          een trage tekstherkenning nabootsen: body {"traag":true} = bonnen lezen duurt tot de test het zegt;
+ *                      {"klaar":["regel", ...]} = het lopende leesverzoek geeft deze regels terug
  * alles anders         bestanden uit dist/renderer
  */
 const http = require('node:http');
@@ -63,6 +65,8 @@ let scanner = null;
 let lastPairing = null;
 let pickedFolder = null;
 let scannerPlatform = 'linux';
+/** leesverzoeken van de trage test-OCR (zie /__ocr) die nog op antwoord wachten */
+let ocrPending = [];
 /** testschakelaar voor veilige opslag (#249): null = zoals de host zelf (standaard aan) */
 let secureStorageSwitch = null;
 const datePlus = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
@@ -320,6 +324,7 @@ function init(fresh) {
     // zoals in de app: koppelen en gegevens naar de telefoon horen bij het abonnement (alleen merkbaar met {"licenses":true})
     license: services.license,
     spoolDir: path.join(path.dirname(file), 'bonnenscanner'),
+    readAttachment: (p) => fs.readFileSync(resolveAttachmentPath(path.dirname(file), p)),
     // zoals in de app: de map van de administratie, waar foto's van de telefoon onder bijlagen/ komen
     adminDir: path.dirname(file),
     protectedDirs: [dir],
@@ -498,6 +503,7 @@ http
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         resetFolders();
         await scanner?.stop();
+        ocrPending = [];
         lastPairing = null;
         pickedFolder = null;
         scannerPlatform = (body && JSON.parse(body).scannerPlatform) || 'linux';
@@ -551,6 +557,19 @@ http
           if (input.pick?.kind === 'vol') fs.writeFileSync(path.join(folders.pick, 'vakantie.jpg'), 'foto');
         }
         return res.end(JSON.stringify({ ok: { applied: folders.applied, root: folders.root } }));
+      }
+      if (req.url === '/__ocr') {
+        const input = body ? JSON.parse(body) : {};
+        if (input.traag) {
+          services.intake.setOcrProvider({
+            id: 'traag',
+            label: 'Trage test-OCR',
+            available: async () => true,
+            recognize: () => new Promise((resolve) => ocrPending.push(resolve)),
+          });
+        }
+        if (input.klaar) ocrPending.shift()?.({ items: input.klaar.map((text, i) => ({ text, page: 1, bbox: [10, 20 + i * 20, 300, 34 + i * 20], confidence: 0.97 })) });
+        return res.end(JSON.stringify({ ok: { wachtend: ocrPending.length } }));
       }
       if (req.url === '/__scanner') {
         if (body && 'folder' in JSON.parse(body)) pickedFolder = JSON.parse(body).folder;

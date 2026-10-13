@@ -469,6 +469,8 @@ function initServices(): void {
     // Store-versie: alleen de vaste build, pas na toestemming, en bij een fout een verwijzing naar de gewone versie
     ...(STORE ? { pinned: STORE_LLAMA_CPP, failureHint: storeFallbackHint('het lezen van bonnen op deze computer') } : {}),
   });
+  // draait er nog een llama-server van een vorige keer (de app is toen niet netjes afgesloten), dan stopt die nu
+  if (!SMOKE_TEST && !readOnly) void localOcr.stopLeftover().catch((e) => console.error('Oude tekstherkenning stoppen mislukt', e));
   configureLocalAi();
   scanner = new Bonnenscanner({
     db,
@@ -480,6 +482,8 @@ function initServices(): void {
     invoices: services.invoices,
     spoolDir: scannerSpoolDir(dataDir()),
     adminDir: dataDir(),
+    // bonnen die bij het afsluiten nog op de tekstherkenning wachtten, worden na de start alsnog gelezen
+    readAttachment: (path) => readFileSync(resolveAttachmentPath(dataDir(), path)),
     protectedDirs: [rootDir(), app.getPath('userData')],
     homeDir: app.getPath('home'),
     broadDirs: (['desktop', 'documents', 'downloads', 'pictures'] as const).flatMap((name) => {
@@ -650,6 +654,7 @@ function initServices(): void {
         });
         if (confirm.response !== 1) return false;
         await dailyBackup(db, join(dataDir(), 'backups'), dataDir());
+        localOcr.stopNow();
         await scanner?.stop();
         db.close();
         if (complete) restoreCompleteBackup(backupData, dbPath(), dataDir());
@@ -743,7 +748,7 @@ function initServices(): void {
             if (plan.action !== folderPlan.action) throw new Error('De map is veranderd sinds je hem koos. Kies hem opnieuw.');
             // het wisselen zelf gebeurt bij de volgende start, vóór er een database open is (zie switchFolderIfAsked)
             writeSwitchRequest(app.getPath('home'), plan.dir, plan.action);
-            localOcr.stop();
+            localOcr.stopNow();
             await scanner?.stop();
             db.close();
             app.relaunch();
@@ -1289,10 +1294,14 @@ if (MCP_MODE) {
     if (process.platform !== 'darwin') app.quit();
   });
 
+  // app.exit() (bv. opnieuw starten na het terugzetten van een back-up) slaat will-quit over: ook dan stopt de tekstherkenning
+  process.on('exit', () => localOcr?.stopNow());
+
   app.on('will-quit', () => {
     statementWatch.stop();
-    localOcr?.stop();
+    // eerst de scanner (het lezen op de achtergrond schrijft dan niets meer), dan de tekstherkenning meteen weg
     void scanner?.stop();
+    localOcr?.stopNow();
     try {
       db?.close();
     } catch {

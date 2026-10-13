@@ -170,6 +170,49 @@ test('bonnenmap: een bestand in de map staat binnen 10 seconden in de inbox en g
   }
 });
 
+test('een bon staat er meteen, ook als het lezen lang duurt: eerst "Wordt gelezen…", daarna de gelezen gegevens', async ({ page, request }) => {
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), 'bvn-e2e-bonnen-')));
+  try {
+    await onboard(page);
+    await request.post('/__ocr', { data: { traag: true } });
+    await openScannerSettings(page);
+    await request.post('/__scanner', { data: { folder } });
+    await page.getByRole('button', { name: 'Map kiezen…' }).click();
+    writeFileSync(join(folder, 'eerste.jpg'), makeJpeg('eerste bon'));
+    await expect(page.getByText(/1 bestand opgehaald sinds de app open is/)).toBeVisible({ timeout: 10_000 });
+    writeFileSync(join(folder, 'tweede.jpg'), makeJpeg('tweede bon'));
+    // de tweede bon is binnen zonder dat de eerste gelezen is
+    await expect(page.getByText(/2 bestanden opgehaald sinds de app open is/)).toBeVisible({ timeout: 10_000 });
+
+    await nav(page, 'Aankopen & bonnetjes');
+    const rij = (naam: string) => page.locator('.task', { hasText: naam });
+    await expect(rij('eerste.jpg').getByTestId('leesstand')).toHaveText('Wordt gelezen…');
+    await expect(rij('eerste.jpg')).toContainText('Deze bon wordt nu gelezen.');
+    await expect(rij('tweede.jpg').getByTestId('leesstand')).toHaveText('Wacht op lezen');
+    await expect(rij('tweede.jpg')).toContainText('Deze bon wacht op lezen.');
+    // ook op Vandaag
+    await nav(page, 'Vandaag');
+    await expect(page.getByText('Deze bon wordt nu gelezen.')).toBeVisible();
+
+    // de bon openen terwijl hij gelezen wordt: de stand staat erbij, zelf invullen kan
+    await nav(page, 'Aankopen & bonnetjes');
+    await rij('eerste.jpg').getByRole('button', { name: 'Bekijken' }).click();
+    await expect(page.getByTestId('wordt-gelezen')).toContainText('Deze bon wordt nu gelezen.');
+    await expect(page.getByTestId('leesstand')).toHaveText('Wordt gelezen…');
+    await expect(page.getByRole('button', { name: 'Nu lezen' })).toHaveCount(0);
+
+    // het lezen is klaar: de gegevens staan bij de bon
+    const vandaag = new Date().toLocaleDateString('nl-NL', { timeZone: 'Europe/Amsterdam', day: '2-digit', month: '2-digit', year: 'numeric' });
+    await request.post('/__ocr', { data: { klaar: ['Bouwmaat Utrecht', `Datum: ${vandaag}`, 'Gips 121,00', 'Totaal 121,00'] } });
+    await nav(page, 'Aankopen & bonnetjes');
+    await expect(rij('Bouwmaat')).toContainText('121,00');
+    await expect(rij('Bouwmaat').getByTestId('leesstand')).toHaveCount(0);
+    await expect(rij('tweede.jpg').getByTestId('leesstand')).toHaveText('Wordt gelezen…');
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test('zoals de app nu is: alleen de bonnenmap, telefoon koppelen is nergens te vinden en de api weigert het', async ({ page }) => {
   await onboard(page);
   await nav(page, 'Instellingen');

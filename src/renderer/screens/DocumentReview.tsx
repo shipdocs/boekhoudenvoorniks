@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useAppEvent, useLoad } from '../ui';
+import { NOT_READ_MESSAGE, READING_LABEL, WAITING_TO_READ_MESSAGE, shownMessage } from '../../shared/reading';
 import { BusinessShareField, CategoryChoice, InvestmentHint, ReverseRateField, SupplierInput, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
 import { isReverseCharge, type PurchaseVatCode } from '../../shared/vat';
@@ -133,6 +134,12 @@ function DocumentView({ id, mime, highlight, pageSizes }: { id: number; mime: st
   );
 }
 
+/** Waarom een bon niet gelezen is, als dat iets anders is dan "nog geen manier van lezen gekozen" (bv. het lezen duurde te lang). */
+function unreadReason(d: IntakeDocument): string | undefined {
+  const message = d.issues.find((i) => i.field === 'document')?.message;
+  return message && message !== NOT_READ_MESSAGE && message !== WAITING_TO_READ_MESSAGE ? message : undefined;
+}
+
 /** Waar de gegevens vandaan komen, om te kunnen controleren of Claude Code (en niet de lokale herkenning) het gelezen heeft. */
 function extractionSourceLabel(source: string | null): string {
   if (source === 'ubl') return 'Gelezen uit e-factuur (UBL)';
@@ -161,11 +168,33 @@ export function DocumentReview({ id }: { id: number }) {
   // de verbeterde gegevens lijken op een aankoop of bon die er al staat (#224): eerst de vraag, pas na "Toch boeken" verwerken
   const [duplicate, setDuplicate] = useState<{ entry: string; lead: string } | null>(null);
 
+  // de tekstherkenning las de bon terwijl de gebruiker al aan het invullen was: zijn invoer blijft staan
+  const [readMeanwhile, setReadMeanwhile] = useState(false);
+  /** het formulier zoals de app het voorstelde; de klus telt niet mee, die vult de app zelf nog in */
+  const proposed = useRef<string | null>(null);
+  type FormState = NonNullable<typeof form>;
+  const formKey = (f: FormState) => JSON.stringify({ ...f, jobId: null });
+
   const d = doc.data;
+  // een bon die op de achtergrond gelezen wordt: de stand bijhouden, en als hij gelezen is de gegevens tonen
+  useAppEvent('auto-processed', () => {
+    if (!d || !form || d.extraction_source !== 'geen') return;
+    const untouched = formKey(form) === proposed.current;
+    void (async () => {
+      const now = await api.documents.get(id).catch(() => null);
+      if (!now) return;
+      if (now.extraction_source !== 'geen') {
+        if (untouched) setForm(null);
+        else setReadMeanwhile(true);
+      }
+      await view.reload();
+    })();
+  });
   useEffect(() => {
     if (!d || form) return;
     const r = d.result;
-    setForm({
+    setReadMeanwhile(false);
+    const next: FormState = {
       supplier: r?.supplier?.value ?? '',
       date: r?.invoiceDate?.value ?? '',
       total: r?.total?.value ?? null,
@@ -180,7 +209,9 @@ export function DocumentReview({ id }: { id: number }) {
       paidWith: proposedPaidWith(d),
       jobId: null,
       splits: null,
-    });
+    };
+    proposed.current = formKey(next);
+    setForm(next);
   }, [d, form]);
 
   // Klus-voorstel (#32): bij één actieve klus of een locatiematch alvast invullen
@@ -233,7 +264,7 @@ export function DocumentReview({ id }: { id: number }) {
         <div>
           <h1>{form.supplier || d.original_name}</h1>
           <p className="sub" data-testid="uitkomst">{d.outcome !== 'controle' ? DOCUMENT_OUTCOME_LABEL[d.outcome] : proposal ? 'Nog controleren' : d.confidence === 'LOW' ? 'We weten het niet zeker — kijk even mee.' : 'Klopt alles?'}</p>
-          <p className="small muted">{extractionSourceLabel(d.extraction_source)}</p>
+          <p className="small muted" data-testid="leesstand">{unread && d.reading ? READING_LABEL[d.reading] : extractionSourceLabel(d.extraction_source)}</p>
         </div>
         <Button kind="ghost" onClick={() => go({ screen: 'aankopen' })}>← Aankopen</Button>
       </div>
@@ -258,7 +289,14 @@ export function DocumentReview({ id }: { id: number }) {
           {d.note && <div className="notice small" style={{ whiteSpace: 'pre-wrap' }}><strong>Notitie van je telefoon:</strong> {d.note}</div>}
           {r?.foreign && <ForeignNotice foreign={r.foreign} euro={form.total ?? r.total?.value ?? null} />}
           {/* nog niet uitgelezen (geen herkenning): hier kiezen hoe de app bonnen mag lezen */}
-          {unread && <ReaderChoice context="bon" onDone={async () => { setForm(null); await doc.reload(); }} />}
+          {unread && d.reading && <div className="notice" data-testid="wordt-gelezen">{shownMessage(d.reading, WAITING_TO_READ_MESSAGE)}</div>}
+          {unread && !d.reading && <ReaderChoice context="bon" reason={unreadReason(d)} onDone={async () => { setForm(null); await doc.reload(); }} />}
+          {readMeanwhile && (
+            <div className="notice" data-testid="intussen-gelezen">
+              De app heeft deze bon intussen gelezen. Wat je zelf hebt ingevuld is blijven staan.{' '}
+              <Button small onClick={() => void refresh()}>Gelezen gegevens tonen</Button>
+            </div>
+          )}
           {d.issues.filter((i) => (i.severity === 'fout' || i.field === 'duplicate') && !(unread && i.field === 'document') && !(proposal && i.field === proposal.kind) && !(own && i.field === 'own-company')).map((i) => (
             <div key={i.field + i.message} className="notice warn">{i.message}</div>
           ))}

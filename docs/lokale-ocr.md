@@ -45,6 +45,15 @@ werkgeheugen als je hem niet nodig hebt. Hij draait op een vrije poort op 127.0.
 terugkomt gaat door dezelfde parser, validatie en zekerheidsinschatting als elk ander document. OCR
 bepaalt alleen *wat er staat*; boeken gebeurt altijd met vaste regels.
 
+Eén leesverzoek (één foto) mag vier minuten duren; daarna breekt de app het af, stopt de server en
+staat bij de bon dat het lezen te lang duurde. Bonnen van de telefoon en uit de bonnenmap staan meteen
+in de inbox en worden daarna op de achtergrond gelezen, één tegelijk.
+
+De server stopt als je het programma afsluit. Welk proces de app startte staat in `ocr/llama-server.pid`.
+Draait dat proces bij een volgende start nog (het programma is bijvoorbeeld hard afgebroken), dan stopt
+de app het alsnog, maar alleen als het programma achter dat proces-ID de `llama-server` uit de eigen
+`ocr/`-map is.
+
 Niet ondersteund door de ingebouwde herkenning, met een duidelijke melding:
 
 - gescande PDF's zonder tekstlaag: maak een foto;

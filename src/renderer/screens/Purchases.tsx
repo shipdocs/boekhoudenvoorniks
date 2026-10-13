@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useLoad, type InvestmentSavedInfo } from '../ui';
+import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useAppEvent, useLoad, type InvestmentSavedInfo } from '../ui';
+import { READING_LABEL, shownMessage } from '../../shared/reading';
 import { diffDays, formatDateNl, today } from '../../shared/dates';
 import { isReverseCharge, type PurchaseVatCode } from '../../shared/vat';
 import { mightBeInvestment, netAmount } from '../../shared/investment';
@@ -20,6 +21,8 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   // wat er met de net toegevoegde bestanden gebeurd is: geboekt, alleen bewijs, dubbel, of nog controleren (#179)
   const [added, setAdded] = useState<{ name: string; result: UploadResult }[]>([]);
   const docs = useLoad(() => api.documents.list('controle'));
+  // er kwam een bon binnen (telefoon, bonnenmap) of een bon is op de achtergrond gelezen
+  useAppEvent('auto-processed', () => void docs.reload());
   const purchases = useLoad(() => api.purchases.list());
   // zoeken op leverancier, omschrijving of bedrag ("19,36")
   const [search, setSearch] = useState('');
@@ -95,8 +98,9 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                 <div className="icon">📷</div>
                 <div className="grow">
                   <div className="title">{d.result?.supplier?.value ?? d.original_name} {d.result?.total && <Euro cents={d.result.total.value} />}</div>
-                  <div className="q">{d.issues.find((i) => i.severity === 'fout')?.message ?? 'Klopt alles?'}</div>
+                  <div className="q">{shownMessage(d.reading, d.issues.find((i) => i.severity === 'fout')?.message ?? 'Klopt alles?')}</div>
                 </div>
+                {d.reading && <span className="small muted" data-testid="leesstand">{READING_LABEL[d.reading]}</span>}
                 <Button kind="primary" small onClick={() => go({ screen: 'document', id: d.id })}>Bekijken</Button>
               </div>
             ))}
