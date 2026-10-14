@@ -279,7 +279,7 @@ export function DocumentReview({ id }: { id: number }) {
                   <span className="muted small" style={{ width: 130 }}>{f.label}</span>
                   <span className="grow">{f.show}</span>
                   {settings.advancedMode && decision && <span className="small muted mono">{Math.round(decision.confidence * 100)}%</span>}
-                  {issue || doubt ? <span className="warn" title={issue?.message ?? 'Hier twijfelen we over'}>?</span> : f.field ? <span className="ok">✓</span> : <span className="muted">—</span>}
+                  {issue || doubt ? <span className="warn" title={issue?.message ?? 'Hier twijfelen we over'}>?</span> : f.field && f.show !== '?' ? <span className="ok">✓</span> : <span className="muted">—</span>}
                 </div>
               );
             })}
