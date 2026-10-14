@@ -13,6 +13,7 @@
 - **Lezen dat te lang duurt, stopt met een duidelijke melding.** Na vier minuten per foto breekt de app het lezen af en staat bij de bon: "Het lezen van deze bon duurde te lang. Probeer het opnieuw met Nu lezen, of vul de gegevens zelf in." Eerder stond er na vijf minuten alleen "fetch failed".
 - **De tekstherkenning stopt als je het programma afsluit.** Het leesprogramma op je computer (llama-server) kon na het afsluiten blijven doorrekenen. Het stopt nu meteen bij afsluiten. Draait er bij het starten nog een van een vorige keer, dan stopt de app dat ook; alleen het eigen leesprogramma uit de eigen map, nooit een ander programma.
 - **Bonnen lezen op je eigen computer gaat sneller bij grote foto's.** Een foto van je telefoon ging op volle grootte naar de tekstherkenning. De herkenning krijgt nu een verkleinde kopie; de bon in je administratie blijft zoals hij is.
+- **Bon bekijken: geen groen vinkje meer bij een leeg veld.** Bleef je eigen invoer staan nadat het lezen klaar was, dan stond bij een veld dat leeg was een vraagteken met een groen vinkje erachter.
 
 ## 1.4.0 — de app voor Android: bonnen, foto's en facturen vanaf je telefoon
 

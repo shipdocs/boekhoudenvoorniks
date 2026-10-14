@@ -98,4 +98,4 @@ export function llamaAssetPattern(platform: string, arch: string): RegExp | null
 export const DOWNLOAD_SIZE = GLM_OCR.files.reduce((s, f) => s + f.size, 0) + LLAMA_CPP.approxSize;
 
 /** Minimale eisen (CPU, geen videokaart nodig). */
-export const REQUIREMENTS = '64-bit Windows 10/11, macOS 12+ of Linux (x64); minstens 4 GB werkgeheugen (8 GB aanbevolen) en 2 GB vrije schijfruimte. Een videokaart is niet nodig. Een bon duurt op een gewone laptop enkele seconden tot een halve minuut.';
+export const REQUIREMENTS = '64-bit Windows 10/11, macOS 12+ of Linux (x64); minstens 4 GB werkgeheugen (8 GB aanbevolen) en 2 GB vrije schijfruimte. Een videokaart is niet nodig. Reken op ongeveer een minuut per foto; de bon staat er meteen en wordt op de achtergrond gelezen.';

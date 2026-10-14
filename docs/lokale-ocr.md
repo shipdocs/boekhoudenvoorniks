@@ -105,7 +105,7 @@ PDF's met tekst en e-facturen hebben geen OCR nodig.
 
 - 64-bit Windows 10/11, macOS 12+ (Apple Silicon of Intel) of Linux x64.
 - Minstens 4 GB werkgeheugen (8 GB aanbevolen) en 2 GB vrije schijfruimte.
-- Een videokaart is niet nodig. Op een gewone laptop duurt een bon enkele seconden tot een halve minuut.
+- Een videokaart is niet nodig. Reken op ongeveer een minuut per foto (gemeten op een gewone pc met 8 kernen: 58 tot 73 seconden voor een kassabon); de bon staat er meteen en wordt op de achtergrond gelezen.
 
 ## Licenties
 
