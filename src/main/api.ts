@@ -1739,7 +1739,8 @@ export function createApi(s: Services, host: HostContext) {
         return {
           current: ocr.engine === 'ingebouwd' ? (consentNeeded ? 'geen' : 'ingebouwd') : ocr.engine === 'claude-code' || ocr.engine === 'codex' ? ocr.engine : ocr.url ? 'eigen' : 'geen',
           asked: ocr.askedReader,
-          local: { state: local.state, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS, consentNeeded, runtimeVersion: host.localOcr.consent?.runtimeVersion ?? null },
+          // skippedLeftovers: een leesprogramma van een vorige keer dat bij het opruimen is blijven staan (zie LocalOcrRuntime)
+          local: { state: local.state, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS, consentNeeded, runtimeVersion: host.localOcr.consent?.runtimeVersion ?? null, skippedLeftovers: local.skippedLeftovers ?? 0 },
           claudeCode: storedCli('claude-code'),
           codex: storedCli('codex'),
           searched: ocr.assistantsSearched,

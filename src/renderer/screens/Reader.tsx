@@ -132,6 +132,11 @@ export function ReaderChoice({ context, reason, onDone, onToolsChanged }: { cont
           </button>
         ))}
       </div>
+      {context === 'instellingen' && o.local.skippedLeftovers > 0 && (
+        <p className="small muted" data-testid="achterblijver">
+          Er draait mogelijk nog een leesprogramma (llama-server) van een vorige keer. De app kon niet zeker genoeg vaststellen dat het een achterblijver is en heeft het daarom laten staan. De app kijkt opnieuw als je het programma start en telkens als de tekstherkenning opnieuw start; na het opnieuw opstarten van je computer is het in elk geval weg.
+        </p>
+      )}
       <AssistantFinder onChange={async () => { await opts.reload(); onToolsChanged?.(); }} />
       {downloading && (
         <div style={{ marginTop: 10 }}>

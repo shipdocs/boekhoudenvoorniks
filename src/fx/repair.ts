@@ -129,11 +129,14 @@ export class FxRepair {
       const doc = this.intake.get(id);
       const found = detectForeign(doc.result);
       if (!doc.result || !found) continue;
+      const before = this.intake.handledState(id);
       if (opts.needRate && !(await this.fx.rateFor(found.currency, doc.result.invoiceDate?.value ?? asOf))) continue;
       const result: DocumentResult = { ...doc.result, currency: { value: found.currency, confidence: 0.9, source: doc.result.currency?.source ?? 'pdf-text' } };
       const issues = await this.intake.toEuros(result);
-      this.db.prepare('UPDATE documents SET result = ? WHERE id = ?').run(JSON.stringify(result), id);
-      await this.intake.evaluate(id, issues, asOf, { autoConfirm: false });
+      // tijdens het ophalen van de koers door de gebruiker afgehandeld of veranderd: dan blijft dat staan
+      if (this.intake.handledState(id) !== before) continue;
+      // het omgerekende bedrag en de beoordeling komen samen in het document (zie evaluate)
+      await this.intake.evaluate(id, issues, asOf, { autoConfirm: false, read: { source: doc.extraction_source, result } });
       n++;
     }
     return n;

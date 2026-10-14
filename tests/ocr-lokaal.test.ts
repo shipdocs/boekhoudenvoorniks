@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn as echtProces, type ChildProcess } from 'node:child_process';
-import { LocalOcrRuntime, type DownloadFetch, type RuntimeDeps } from '../src/ocr-runtime/runtime';
+import { LocalOcrRuntime, leftoverKillCommand, leftoverVerdict, parsePsInfo, parseWindowsInfo, processInfo, type DownloadFetch, type PidRecord, type ProcessInfo, type ProcessLookup, type RuntimeDeps } from '../src/ocr-runtime/runtime';
 import { GLM_OCR, llamaAssetPattern, type OcrModel } from '../src/ocr-runtime/manifest';
 import { LlamaCppOcrProvider, OCR_REQUEST_TIMEOUT_MS, OcrTimeoutError, textToItems, OCR_MAX_PIXELS, ocrSize, type ImageShrinker } from '../src/intake/ocr-llamacpp';
 import { READ_CONNECTION_MESSAGE, READ_TIMEOUT_MESSAGE } from '../src/shared/reading';
@@ -271,14 +271,45 @@ describe('ingebouwde tekstherkenning: gebruiken (#9)', () => {
   });
 });
 
+/** Het programma dat de app zelf is, zoals de nagebootste processenlijst het kent. */
+const ZELF: ProcessInfo = { path: process.execPath, started: { at: 5_000, boot: 'opstart-1' }, sameUser: true };
+
+/**
+ * Een nagebootste processenlijst. Wat er niet in staat bestaat niet ('weg'), behalve het eigen programma
+ * en de nagebootste servers (proces-ID vanaf 3.000.000): die draaien, als llama-server uit de eigen map.
+ */
+function nepProcessen(serverPath: () => string) {
+  const tabel = new Map<number, ProcessLookup>();
+  const info = async (pid: number): Promise<ProcessLookup> => {
+    if (tabel.has(pid)) return tabel.get(pid)!;
+    if (pid === process.pid) return ZELF;
+    if (pid >= 3_000_000 && pid < 4_000_000) return { path: serverPath(), started: { at: pid, boot: 'opstart-1' }, sameUser: true };
+    return 'weg';
+  };
+  return { tabel, info };
+}
+
 /** Een geïnstalleerde runtime in een eigen map, met een nagebootst proces. */
 async function geinstalleerd(extra: Partial<RuntimeDeps> = {}, fetch: DownloadFetch = fakeFetch()) {
   const dir = mkdtempSync(join(tmpdir(), 'ocr-'));
   const nep = fakeSpawn();
-  const rt = new LocalOcrRuntime(dir, { fetch, extract: fakeExtract, spawn: nep.spawn as never, platform: 'linux', arch: 'x64', model, ...extra });
-  await rt.install();
   const serverPath = join(dir, 'llama', 'b9999', 'build', 'bin', 'llama-server');
-  return { dir, rt, serverPath, pidFile: join(dir, 'llama-server.pid'), ...nep };
+  const processen = nepProcessen(() => serverPath);
+  const deps: RuntimeDeps = { fetch, extract: fakeExtract, spawn: nep.spawn as never, platform: 'linux', arch: 'x64', model, processInfo: processen.info, ...extra };
+  const rt = new LocalOcrRuntime(dir, deps);
+  await rt.install();
+  const pidFile = join(dir, 'llama-server.pid');
+  /** wat er in het pid-bestand staat */
+  const vastgelegd = (): PidRecord[] => (existsSync(pidFile) ? (JSON.parse(readFileSync(pidFile, 'utf8')) as { servers: PidRecord[] }).servers : []);
+  /** een pid-bestand zoals een eerdere start van de app het achterliet; die app (proces 4.900.000) is er niet meer */
+  const achtergelaten = (pid: number, over: Partial<PidRecord> = {}) => {
+    const record: PidRecord = { pid, serverPath, started: { at: 77_000, boot: 'opstart-1' }, app: { pid: 4_900_000, started: { at: 60_000, boot: 'opstart-1' } }, ...over };
+    writeFileSync(pidFile, JSON.stringify({ version: 2, servers: [record] }));
+    return record;
+  };
+  /** het proces dat bij zo'n pid-bestand hoort, zoals het nu draait */
+  const draait = (pid: number, over: Partial<ProcessInfo> = {}) => void processen.tabel.set(pid, { path: serverPath, started: { at: 77_000, boot: 'opstart-1' }, sameUser: true, ...over });
+  return { dir, rt, deps, serverPath, pidFile, vastgelegd, achtergelaten, draait, processen, ...nep };
 }
 
 /** Een leesverzoek dat nooit antwoord krijgt, zoals een herkenning die blijft rekenen; het stopt alleen als het wordt afgebroken. */
@@ -358,7 +389,8 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     await lees(t.rt);
     const kind = t.kinderen[0]!;
     kind.negeertStop = true;
-    expect(JSON.parse(readFileSync(t.pidFile, 'utf8'))).toEqual({ pid: kind.pid, serverPath: t.serverPath });
+    // vastgelegd: welk proces, wanneer het begon, en welk programma het startte
+    expect(t.vastgelegd()).toEqual([{ pid: kind.pid, serverPath: t.serverPath, started: { at: kind.pid, boot: 'opstart-1' }, app: { pid: process.pid, started: ZELF.started } }]);
     t.rt.stopNow();
     expect(kind.signalen).toContain('SIGKILL');
     expect(kind.exitCode).not.toBeNull();
@@ -390,80 +422,478 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     expect(existsSync(t.pidFile)).toBe(false);
   });
 
-  it('een server van een vorige keer wordt bij de start gestopt, maar alleen als het de eigen llama-server is', async () => {
+  it('een server van een vorige keer wordt bij de start gestopt, maar alleen als alles klopt', async () => {
     const gestopt: [number, string][] = [];
     const kill = (pid: number, signal: NodeJS.Signals) => void gestopt.push([pid, signal]);
-    // 1. het proces uit het pid-bestand is de llama-server uit de eigen map: stoppen
-    let t = await geinstalleerd({ kill, processPath: async () => t.serverPath });
-    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_001, serverPath: t.serverPath }));
+    // 1. de llama-server uit de eigen map, begonnen op het vastgelegde moment, van dezelfde gebruiker, en de app die hem startte is weg: stoppen
+    let t = await geinstalleerd({ kill });
+    t.achtergelaten(4_000_001);
+    t.draait(4_000_001);
     expect(await t.rt.stopLeftover()).toBe(true);
     expect(gestopt).toEqual([[4_000_001, 'SIGKILL']]);
     expect(existsSync(t.pidFile)).toBe(false);
 
     // 2. hetzelfde proces-ID hoort intussen bij een ander programma: met rust laten
     gestopt.length = 0;
-    t = await geinstalleerd({ kill, processPath: async () => '/usr/bin/firefox' });
-    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_002, serverPath: t.serverPath }));
+    t = await geinstalleerd({ kill });
+    t.achtergelaten(4_000_002);
+    t.draait(4_000_002, { path: '/usr/bin/firefox' });
     expect(await t.rt.stopLeftover()).toBe(false);
     expect(gestopt).toEqual([]);
     expect(existsSync(t.pidFile)).toBe(false);
 
     // 3. een llama-server van iemand anders (zelfde naam, andere map), ook als het pid-bestand daarnaar wijst: met rust laten
-    t = await geinstalleerd({ kill, processPath: async () => '/opt/eigen/llama-server' });
-    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_003, serverPath: '/opt/eigen/llama-server' }));
+    t = await geinstalleerd({ kill });
+    t.achtergelaten(4_000_003, { serverPath: '/opt/eigen/llama-server' });
+    t.draait(4_000_003, { path: '/opt/eigen/llama-server' });
     expect(await t.rt.stopLeftover()).toBe(false);
     expect(gestopt).toEqual([]);
 
     // 4. het proces is er niet meer: alleen het bestand opruimen
-    t = await geinstalleerd({ kill, processPath: async () => null });
-    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_004, serverPath: t.serverPath }));
+    t = await geinstalleerd({ kill });
+    t.achtergelaten(4_000_004);
     expect(await t.rt.stopLeftover()).toBe(false);
     expect(gestopt).toEqual([]);
     expect(existsSync(t.pidFile)).toBe(false);
 
     // 5. geen pid-bestand, of onzin erin: niets doen
-    t = await geinstalleerd({ kill, processPath: async () => t.serverPath });
+    t = await geinstalleerd({ kill });
     expect(await t.rt.stopLeftover()).toBe(false);
     writeFileSync(t.pidFile, '{"pid":"alles"}');
     expect(await t.rt.stopLeftover()).toBe(false);
     expect(gestopt).toEqual([]);
   });
 
+  it('een andere uitvoering van hetzelfde programma met hetzelfde proces-ID is geen achterblijver', async () => {
+    const gestopt: number[] = [];
+    const kill = (pid: number) => void gestopt.push(pid);
+    // het pid-bestand is oud: het proces van toen is weg en het proces-ID is opnieuw uitgegeven aan een
+    // llama-server uit dezelfde map die later begon. Pad en map kloppen dus; het begin niet.
+    let t = await geinstalleerd({ kill });
+    t.achtergelaten(4_000_010);
+    t.draait(4_000_010, { started: { at: 77_000 + 60_000, boot: 'opstart-1' } });
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(gestopt).toEqual([]);
+    // het proces van toen bestaat niet meer: de regel mag weg
+    expect(existsSync(t.pidFile)).toBe(false);
+
+    // zelfde tikken, maar de computer is intussen opnieuw opgestart: een ander proces
+    t = await geinstalleerd({ kill });
+    t.achtergelaten(4_000_011);
+    t.draait(4_000_011, { started: { at: 77_000, boot: 'opstart-2' } });
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(gestopt).toEqual([]);
+
+    // een pid-bestand zonder begin van het proces (zoals een eerdere versie het schreef) bewijst niets
+    t = await geinstalleerd({ kill });
+    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_012, serverPath: t.serverPath }));
+    t.draait(4_000_012);
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(gestopt).toEqual([]);
+  });
+
+  it('krijgt een ander proces het proces-ID terwijl de app nog aan het nakijken is, dan wordt dat niet gestopt', async () => {
+    // de server klopt bij de eerste blik; tijdens het opzoeken van de app die hem startte eindigt hij en
+    // krijgt een ander proces zijn proces-ID. Vlak vóór het stoppen wordt daarom opnieuw gekeken.
+    const wissel = async (worden: (serverPath: string) => ProcessLookup) => {
+      const gestopt: number[] = [];
+      const t = await geinstalleerd({ kill: (pid) => void gestopt.push(pid) });
+      t.achtergelaten(4_000_060);
+      t.draait(4_000_060);
+      const basis = t.deps.processInfo!;
+      const gevraagd: number[] = [];
+      const rt = new LocalOcrRuntime(t.dir, {
+        ...t.deps,
+        processInfo: async (pid) => {
+          gevraagd.push(pid);
+          const antwoord = await basis(pid);
+          // tijdens het opzoeken van de starter (proces 4.900.000) wisselt het proces achter het proces-ID van de server
+          if (pid === 4_900_000) t.processen.tabel.set(4_000_060, worden(t.serverPath));
+          return antwoord;
+        },
+      });
+      return { gestopt, gevraagd, uitkomst: await rt.stopLeftover(), t };
+    };
+    // een heel ander programma
+    let r = await wissel(() => ({ path: '/usr/bin/unrelated', started: { at: 99_000, boot: 'opstart-1' }, sameUser: true }));
+    expect(r.gestopt).toEqual([]);
+    expect(r.uitkomst).toBe(false);
+    // de server is als laatste nog een keer bekeken, ná de starter
+    expect(r.gevraagd).toEqual([4_000_060, 4_900_000, 4_000_060]);
+    // het proces van toen is er niet meer: de regel is weg
+    expect(existsSync(r.t.pidFile)).toBe(false);
+    // een andere llama-server uit dezelfde map, een tel later begonnen
+    r = await wissel((serverPath) => ({ path: serverPath, started: { at: 77_010, boot: 'opstart-1' }, sameUser: true }));
+    expect(r.gestopt).toEqual([]);
+    // hetzelfde programma en hetzelfde begin, maar intussen van een andere gebruiker: niets doen, de regel blijft
+    r = await wissel((serverPath) => ({ path: serverPath, started: { at: 77_000, boot: 'opstart-1' }, sameUser: false }));
+    expect(r.gestopt).toEqual([]);
+    expect(r.t.vastgelegd()).toHaveLength(1);
+    // niet meer vast te stellen: niets doen en de regel laten staan
+    r = await wissel(() => null);
+    expect(r.gestopt).toEqual([]);
+    expect(r.t.vastgelegd()).toHaveLength(1);
+    // intussen weg: niets te stoppen
+    r = await wissel(() => 'weg');
+    expect(r.gestopt).toEqual([]);
+    expect(existsSync(r.t.pidFile)).toBe(false);
+    // nog precies hetzelfde proces: de achterblijver stopt
+    r = await wissel((serverPath) => ({ path: serverPath, started: { at: 77_000, boot: 'opstart-1' }, sameUser: true }));
+    expect(r.gestopt).toEqual([4_000_060]);
+    expect(r.uitkomst).toBe(true);
+  });
+
+  it('is iets niet vast te stellen, of is het proces van een andere gebruiker, dan gebeurt er niets', async () => {
+    const gestopt: number[] = [];
+    const kill = (pid: number) => void gestopt.push(pid);
+    // van een andere gebruiker
+    let t = await geinstalleerd({ kill });
+    const regel = t.achtergelaten(4_000_020);
+    t.draait(4_000_020, { sameUser: false });
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(t.vastgelegd()).toEqual([regel]);
+    // het proces is er, maar pad, begin of eigenaar is niet op te vragen
+    t = await geinstalleerd({ kill });
+    t.achtergelaten(4_000_021);
+    t.processen.tabel.set(4_000_021, null);
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(t.vastgelegd()).toHaveLength(1);
+    // van de app die hem startte is niet vast te stellen of hij nog draait
+    t = await geinstalleerd({ kill });
+    t.achtergelaten(4_000_022);
+    t.draait(4_000_022);
+    t.processen.tabel.set(4_900_000, null);
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(t.vastgelegd()).toHaveLength(1);
+    expect(gestopt).toEqual([]);
+  });
+
+  it('draait het programma dat de server startte nog, dan is het zijn server en geen achterblijver', async () => {
+    // twee programma's gebruiken dezelfde gegevensmap: het ene mag de actieve server van het andere niet beëindigen
+    const gestopt: number[] = [];
+    const t = await geinstalleerd({ kill: (pid) => void gestopt.push(pid) });
+    const regel = t.achtergelaten(4_000_030);
+    t.draait(4_000_030);
+    t.processen.tabel.set(4_900_000, { path: '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', started: { at: 60_000, boot: 'opstart-1' }, sameUser: true });
+    expect(await t.rt.stopLeftover()).toBe(false);
+    // de server van een programma dat nog draait is geen overgeslagen achterblijver
+    expect(t.rt.status().skippedLeftovers).toBe(0);
+    // ook een nieuwe start laat hem met rust, en legt de eigen server ernaast vast
+    await lees(t.rt);
+    expect(gestopt).toEqual([]);
+    expect(t.vastgelegd()).toEqual([regel, expect.objectContaining({ pid: t.kinderen[0]!.pid })]);
+    t.rt.stopNow();
+    expect(t.vastgelegd()).toEqual([regel]);
+
+    // dat proces-ID is intussen van een ander programma (het begon op een ander moment): zolang er een proces met dat
+    // ID bestaat gebeurt er niets; pas als het weg is, is de server een achterblijver
+    t.processen.tabel.set(4_900_000, { path: '/usr/bin/firefox', started: { at: 900_000, boot: 'opstart-1' }, sameUser: true });
+    expect(await t.rt.stopLeftover()).toBe(false);
+    expect(gestopt).toEqual([]);
+    // dat is te zien in de status: er is een achterblijver overgeslagen
+    expect(t.rt.status().skippedLeftovers).toBe(1);
+    // een volgende poging (hier: vóór een serverstart) telt opnieuw; hij staat er nog
+    await lees(t.rt);
+    expect(t.rt.status().skippedLeftovers).toBe(1);
+    t.rt.stopNow();
+    t.processen.tabel.delete(4_900_000);
+    expect(await t.rt.stopLeftover()).toBe(true);
+    expect(gestopt).toEqual([4_000_030]);
+    expect(t.rt.status().skippedLeftovers).toBe(0);
+  });
+
+  it('Windows: een achterblijver stoppen gaat met taskkill, dat zelf op de naam van het programma filtert', async () => {
+    // de opdracht
+    const record: PidRecord = { pid: 4321, serverPath: 'C:\\Data\\ocr\\llama\\b1\\llama-server.exe', started: { at: 1 }, app: { pid: 1, started: { at: 1 } } };
+    expect(leftoverKillCommand('win32', record)).toEqual({ cmd: 'taskkill', args: ['/PID', '4321', '/F', '/FI', 'IMAGENAME eq llama-server.exe'] });
+    expect(leftoverKillCommand('win32', { ...record, serverPath: 'C:/Data/ocr/LLAMA-SERVER.EXE' })).toEqual({ cmd: 'taskkill', args: ['/PID', '4321', '/F', '/FI', 'IMAGENAME eq llama-server.exe'] });
+    // een andere naam dan het eigen programma: geen opdracht, er wordt dan niets gestopt
+    expect(leftoverKillCommand('win32', { ...record, serverPath: 'C:\\Data\\ocr\\iets" /T anders.exe' })).toBeNull();
+    expect(leftoverKillCommand('win32', { ...record, pid: 1.5 })).toBeNull();
+    // Linux en macOS: een signaal aan het proces-ID
+    expect(leftoverKillCommand('linux', record)).toBe('signaal');
+    expect(leftoverKillCommand('darwin', record)).toBe('signaal');
+
+    // de route: op Windows gaat het stoppen via de opdracht, niet via een signaal
+    const signalen: number[] = [];
+    const opdrachten: { cmd: string; args: string[] }[] = [];
+    const t = await geinstalleerd({ platform: 'linux', kill: (pid) => void signalen.push(pid) });
+    const exe = `${t.serverPath}.exe`;
+    const win = new LocalOcrRuntime(t.dir, {
+      ...t.deps,
+      platform: 'win32',
+      execKill: async (cmd, args) => {
+        opdrachten.push({ cmd, args });
+        t.processen.tabel.set(4_000_070, 'weg');
+      },
+    });
+    t.achtergelaten(4_000_070, { serverPath: exe });
+    t.draait(4_000_070, { path: exe });
+    expect(await win.stopLeftover()).toBe(true);
+    expect(opdrachten).toEqual([{ cmd: 'taskkill', args: ['/PID', '4000070', '/F', '/FI', 'IMAGENAME eq llama-server.exe'] }]);
+    expect(signalen).toEqual([]);
+    expect(existsSync(t.pidFile)).toBe(false);
+
+    // de opdracht filterde het proces weg (het is er nog, of de opdracht mislukte): niets gestopt, de regel blijft staan
+    const niets = new LocalOcrRuntime(t.dir, { ...t.deps, platform: 'win32', execKill: async () => undefined });
+    t.achtergelaten(4_000_071, { serverPath: exe });
+    t.draait(4_000_071, { path: exe });
+    expect(await niets.stopLeftover()).toBe(false);
+    expect(t.vastgelegd()).toHaveLength(1);
+    const kapot = new LocalOcrRuntime(t.dir, { ...t.deps, platform: 'win32', execKill: async () => { throw new Error('taskkill ontbreekt'); } });
+    expect(await kapot.stopLeftover()).toBe(false);
+    expect(t.vastgelegd()).toHaveLength(1);
+    expect(signalen).toEqual([]);
+  });
+
+  it('de regel waarmee een achterblijver wordt herkend', () => {
+    const dir = '/data/ocr';
+    const serverPath = '/data/ocr/llama/b1/llama-server';
+    const record: PidRecord = { pid: 10, serverPath, started: { at: 1_000, boot: 'a' }, app: { pid: 20, started: { at: 500, boot: 'a' } } };
+    const server: ProcessInfo = { path: serverPath, started: { at: 1_000, boot: 'a' }, sameUser: true };
+    const oordeel = (over: Partial<Parameters<typeof leftoverVerdict>[0]> = {}) => leftoverVerdict({ record, server, starter: 'weg', dir, platform: 'linux', ...over });
+    expect(oordeel()).toBe('stoppen');
+    // het begin moet precies gelijk zijn: vastleggen en nakijken meten op dezelfde manier, dus elk verschil is een ander proces
+    expect(oordeel({ server: { ...server, started: { at: 1_001, boot: 'a' } } })).toBe('vergeten');
+    expect(oordeel({ server: { ...server, started: { at: 2_900, boot: 'a' } } })).toBe('vergeten');
+    expect(oordeel({ server: { ...server, started: { at: 999, boot: 'a' } } })).toBe('vergeten');
+    // hetzelfde proces-ID binnen een seconde opnieuw uitgegeven aan een andere llama-server uit dezelfde map
+    expect(leftoverVerdict({ record: { ...record, started: { at: 10_000, boot: 'a' } }, server: { ...server, started: { at: 11_000, boot: 'a' } }, starter: 'weg', dir, platform: 'linux' })).toBe('vergeten');
+    // bestaat er een proces met het proces-ID van de starter, dan gebeurt er niets. Bij hetzelfde begin is het de starter
+    // zelf ('laten'); bij een ander begin of als het niet vast te stellen is, blijft er mogelijk een achterblijver staan ('overgeslagen')
+    expect(oordeel({ starter: { path: '/app', started: { at: 501, boot: 'a' }, sameUser: true } })).toBe('overgeslagen');
+    expect(oordeel({ server: { ...server, started: { at: 1_000, boot: 'b' } } })).toBe('vergeten');
+    expect(oordeel({ server: { ...server, started: { at: 1_000 } } })).toBe('vergeten');
+    expect(oordeel({ server: 'weg' })).toBe('vergeten');
+    expect(oordeel({ server: null })).toBe('laten');
+    expect(oordeel({ server: { ...server, sameUser: false } })).toBe('laten');
+    expect(oordeel({ server: { ...server, path: '/usr/bin/llama-server' } })).toBe('vergeten');
+    expect(oordeel({ server: { ...server, path: '/data/ocr/llama/b1/iets-anders' }, record: { ...record, serverPath: '/data/ocr/llama/b1/iets-anders' } })).toBe('vergeten');
+    // de app die hem startte
+    expect(oordeel({ starter: null })).toBe('overgeslagen');
+    expect(oordeel({ starter: { path: '/app', started: { at: 500, boot: 'a' }, sameUser: true } })).toBe('laten');
+    expect(oordeel({ starter: { path: '/app', started: { at: 9_500, boot: 'a' }, sameUser: true } })).toBe('overgeslagen');
+    // Windows: hoofdletters in het pad maken niet uit
+    const win = 'C:\\Data\\ocr\\llama\\b1\\llama-server.exe';
+    expect(leftoverVerdict({ record: { ...record, serverPath: win }, server: { ...server, path: win.toUpperCase() }, starter: 'weg', dir: 'C:\\Data\\ocr', platform: 'win32' })).toBe(process.platform === 'win32' ? 'stoppen' : 'vergeten');
+  });
+
   it('de server die nu zelf draait is geen achterblijver; een nieuwe start ruimt eerst een oude op', async () => {
     const gestopt: number[] = [];
-    const t = await geinstalleerd({ kill: (pid) => void gestopt.push(pid), processPath: async () => t.serverPath });
-    writeFileSync(t.pidFile, JSON.stringify({ pid: 4_000_005, serverPath: t.serverPath }));
+    const t = await geinstalleerd({ kill: (pid) => void gestopt.push(pid) });
+    t.achtergelaten(4_000_005);
+    t.draait(4_000_005);
     await lees(t.rt);
     expect(gestopt).toEqual([4_000_005]);
-    expect(JSON.parse(readFileSync(t.pidFile, 'utf8')).pid).toBe(t.kinderen[0]!.pid);
+    expect(t.vastgelegd().map((r) => r.pid)).toEqual([t.kinderen[0]!.pid]);
     expect(await t.rt.stopLeftover()).toBe(false);
     expect(gestopt).toEqual([4_000_005]);
     t.rt.stopNow();
   });
 
-  it.runIf(process.platform === 'linux')('met een echt proces: de eigen achterblijver stopt, een ander proces met hetzelfde ID niet', async () => {
+  it('een tweede runtime op dezelfde map (bv. na het wisselen van administratie) laat de actieve server van de eerste met rust', async () => {
+    const gestopt: number[] = [];
+    const t = await geinstalleerd({ kill: (pid) => void gestopt.push(pid) });
+    await lees(t.rt);
+    const eerste = t.kinderen[0]!;
+    const tweede = new LocalOcrRuntime(t.dir, t.deps);
+    expect(await tweede.stopLeftover()).toBe(false);
+    await lees(tweede);
+    expect(gestopt).toEqual([]);
+    expect(eerste.signalen).toEqual([]);
+    expect(t.kinderen).toHaveLength(2);
+    expect(t.vastgelegd().map((r) => r.pid)).toEqual([eerste.pid, t.kinderen[1]!.pid]);
+    // ieder stopt zijn eigen server en haalt alleen zijn eigen regel weg
+    t.rt.stopNow();
+    expect(eerste.exitCode).not.toBeNull();
+    expect(t.kinderen[1]!.signalen).toEqual([]);
+    expect(t.vastgelegd().map((r) => r.pid)).toEqual([t.kinderen[1]!.pid]);
+    tweede.stopNow();
+    expect(existsSync(t.pidFile)).toBe(false);
+  });
+
+  it('wordt de runtime gestopt terwijl hij aan het starten is, dan start er geen server meer', async () => {
+    // de app sluit af (of wisselt van administratie) terwijl de start nog op het opruimen of een vrije poort wacht
     const t = await geinstalleerd();
+    const start = lees(t.rt);
+    t.rt.stopNow();
+    await expect(start).rejects.toThrow('De tekstherkenning is gestopt.');
+    expect(t.spawned).toHaveLength(0);
+    expect(existsSync(t.pidFile)).toBe(false);
+    expect(t.rt.status().state).toBe('geinstalleerd');
+    // daarna werkt hij gewoon weer
+    await lees(t.rt);
+    expect(t.spawned).toHaveLength(1);
+    t.rt.stopNow();
+  });
+
+  it('ook een stop tijdens het opruimen van een achterblijver, of tijdens het wachten op de server, breekt de start af', async () => {
+    // 1. het opruimen wacht op de processenlijst; intussen stopt de runtime
+    let klaar: (i: ProcessLookup) => void = () => undefined;
+    const bezig = new Promise<ProcessLookup>((r) => (klaar = r));
+    let gevraagd: () => void = () => undefined;
+    const vraag = new Promise<void>((r) => (gevraagd = r));
+    const gestopt: number[] = [];
+    let t = await geinstalleerd({ kill: (pid) => void gestopt.push(pid), processInfo: async (pid) => (pid === 4_000_040 ? (gevraagd(), bezig) : 'weg') });
+    t.achtergelaten(4_000_040);
+    const start = lees(t.rt);
+    await vraag;
+    t.rt.stopNow();
+    klaar({ path: t.serverPath, started: { at: 77_000, boot: 'opstart-1' }, sameUser: true });
+    await expect(start).rejects.toThrow('De tekstherkenning is gestopt.');
+    expect(t.spawned).toHaveLength(0);
+
+    // 2. de server is gestart maar nog niet klaar (het model laadt); een stop beëindigt hem en de start geeft geen adres meer
+    const fetch = fakeFetch({ health: false });
+    t = await geinstalleerd({}, fetch);
+    const laden = lees(t.rt, fetch);
+    for (let i = 0; i < 200 && t.kinderen.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(t.kinderen).toHaveLength(1);
+    t.rt.stopNow();
+    await expect(laden).rejects.toThrow('De tekstherkenning is gestopt.');
+    expect(t.kinderen[0]!.exitCode).not.toBeNull();
+    expect(t.rt.status()).toMatchObject({ state: 'geinstalleerd', error: null });
+    expect(existsSync(t.pidFile)).toBe(false);
+  });
+
+  it('opruimen en starten kruisen elkaar niet: twee runtimes op dezelfde map doen het na elkaar', async () => {
+    // de eerste is bezig met opruimen (wacht op de processenlijst); de tweede start pas als de eerste klaar is
+    let klaar: (i: ProcessLookup) => void = () => undefined;
+    const bezig = new Promise<ProcessLookup>((r) => (klaar = r));
+    let gevraagd: () => void = () => undefined;
+    const vraag = new Promise<void>((r) => (gevraagd = r));
+    const t = await geinstalleerd();
+    t.achtergelaten(4_000_050);
+    const basis = t.deps.processInfo!;
+    const eerste = new LocalOcrRuntime(t.dir, { ...t.deps, kill: () => undefined, processInfo: async (pid) => (pid === 4_000_050 ? (gevraagd(), bezig) : basis(pid)) });
+    const opruimen = eerste.stopLeftover();
+    await vraag;
+    const start = lees(t.rt);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(t.spawned).toHaveLength(0);
+    klaar({ path: t.serverPath, started: { at: 77_000, boot: 'opstart-1' }, sameUser: true });
+    expect(await opruimen).toBe(true);
+    await start;
+    expect(t.spawned).toHaveLength(1);
+    expect(t.vastgelegd().map((r) => r.pid)).toEqual([t.kinderen[0]!.pid]);
+    t.rt.stopNow();
+  });
+
+  it('het begin en de eigenaar van een proces uit de uitvoer van ps (macOS) en PowerShell (Windows)', () => {
+    // macOS: ps -p <pid> -o uid= -o lstart= -o comm=, met LC_ALL=C en TZ=UTC
+    expect(parsePsInfo('  501 Tue Oct 13 22:04:04 2026 /Users/piet/Library/Application Support/BoekhoudenVoorNiks/ocr/llama/b1/llama-server\n', 501)).toEqual({
+      path: '/Users/piet/Library/Application Support/BoekhoudenVoorNiks/ocr/llama/b1/llama-server',
+      started: { at: Date.UTC(2026, 9, 13, 22, 4, 4) },
+      sameUser: true,
+    });
+    expect(parsePsInfo('    0 Sat Oct  3 08:00:00 2026 /usr/sbin/cupsd\n', 501)).toEqual({ path: '/usr/sbin/cupsd', started: { at: Date.UTC(2026, 9, 3, 8, 0, 0) }, sameUser: false });
+    expect(parsePsInfo('', 501)).toBeNull();
+    expect(parsePsInfo('  501 gisteren /bin/sh', 501)).toBeNull();
+    // Windows: begin als FILETIME (100 ns sinds 1601), eigen proces ja/nee, pad
+    const filetime = (BigInt(Date.UTC(2026, 9, 13, 22, 4, 4)) + 11_644_473_600_000n) * 10_000n;
+    expect(parseWindowsInfo(`${filetime}|True|C:\\Users\\Piet\\AppData\\Roaming\\BoekhoudenVoorNiks\\ocr\\llama\\b1\\llama-server.exe\r\n`)).toEqual({
+      path: 'C:\\Users\\Piet\\AppData\\Roaming\\BoekhoudenVoorNiks\\ocr\\llama\\b1\\llama-server.exe',
+      started: { at: Date.UTC(2026, 9, 13, 22, 4, 4) },
+      sameUser: true,
+    });
+    expect(parseWindowsInfo(`${filetime}|False|C:\\x\\llama-server.exe`)).toMatchObject({ sameUser: false });
+    expect(parseWindowsInfo(`${filetime}|True|`)).toBeNull();
+    expect(parseWindowsInfo('|True|C:\\x.exe')).toBeNull();
+    expect(parseWindowsInfo('')).toBeNull();
+  });
+
+  it.runIf(process.platform === 'linux')('met echte processen: het begin en de eigenaar van een proces zijn op te vragen', async () => {
+    const zelf = await processInfo(process.pid);
+    expect(zelf).toMatchObject({ path: realpathSync(process.execPath), sameUser: true });
+    const begin = (zelf as ProcessInfo).started;
+    expect(begin.boot).toMatch(/^[0-9a-f-]{36}$/);
+    // twee keer vragen geeft hetzelfde begin; een ander proces een ander
+    expect((await processInfo(process.pid) as ProcessInfo).started).toEqual(begin);
+    await new Promise((r) => setTimeout(r, 30));
+    const kind = echtProces('/bin/sleep', ['60'], { stdio: 'ignore' });
+    try {
+      const k = await processInfo(kind.pid!) as ProcessInfo;
+      expect(k.path).toBe(realpathSync('/bin/sleep'));
+      expect(k.started.at).toBeGreaterThan(begin.at);
+      expect(k.sameUser).toBe(true);
+    } finally {
+      kind.kill('SIGKILL');
+    }
+    await new Promise<void>((resolve) => kind.once('exit', () => resolve()));
+    expect(await processInfo(kind.pid!)).toBe('weg');
+    // een proces van een andere gebruiker (proces 1, als de tests niet als beheerder draaien): niets vast te stellen, dus nooit stoppen
+    if (process.getuid?.() !== 0) expect(await processInfo(1)).toBeNull();
+  });
+
+  it.runIf(process.platform === 'linux')('met een echt proces: de start legt het begin van de server en van het eigen programma vast', async () => {
+    const t = await geinstalleerd({ spawn: undefined, processInfo: undefined });
+    // een programma dat blijft draaien op de plek van llama-server
+    writeFileSync(t.serverPath, '#!/bin/sh\nexec sleep 60\n');
+    await lees(t.rt);
+    const [regel] = t.vastgelegd();
+    try {
+      const server = await processInfo(regel!.pid) as ProcessInfo;
+      const zelf = await processInfo(process.pid) as ProcessInfo;
+      expect(regel).toEqual({ pid: regel!.pid, serverPath: t.serverPath, started: server.started, app: { pid: process.pid, started: zelf.started } });
+      // de app draait nog: haar eigen server is geen achterblijver, ook niet voor een tweede runtime op dezelfde map
+      expect(await new LocalOcrRuntime(t.dir, { ...t.deps, spawn: undefined, processInfo: undefined }).stopLeftover()).toBe(false);
+      expect(await processInfo(regel!.pid)).not.toBe('weg');
+    } finally {
+      t.rt.stopNow();
+    }
+    for (let i = 0; i < 200 && (await processInfo(regel!.pid)) !== 'weg'; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(await processInfo(regel!.pid)).toBe('weg');
+    expect(existsSync(t.pidFile)).toBe(false);
+  });
+
+  it.runIf(process.platform === 'linux')('met echte processen: alleen de eigen achterblijver stopt', async () => {
+    const t = await geinstalleerd({ processInfo: undefined });
     // een echt programma op de plek van llama-server (de nagebootste download is een script)
     copyFileSync('/bin/sleep', t.serverPath);
     chmodSync(t.serverPath, 0o755);
     const weg = (kind: ChildProcess) => new Promise<void>((resolve) => (kind.exitCode !== null || kind.signalCode !== null ? resolve() : kind.once('exit', () => resolve())));
-    const eigen = echtProces(t.serverPath, ['60'], { stdio: 'ignore' });
-    const ander = echtProces('/bin/sleep', ['60'], { stdio: 'ignore' });
-    try {
-      // het pid-bestand wijst naar een ander programma: dat blijft draaien
-      writeFileSync(t.pidFile, JSON.stringify({ pid: ander.pid, serverPath: t.serverPath }));
-      expect(await t.rt.stopLeftover()).toBe(false);
+    const draaitNog = async (kind: ChildProcess) => {
       await new Promise((r) => setTimeout(r, 100));
-      expect(ander.exitCode).toBeNull();
-      expect(ander.signalCode).toBeNull();
-      // het pid-bestand wijst naar de eigen llama-server van een vorige keer: die stopt
-      writeFileSync(t.pidFile, JSON.stringify({ pid: eigen.pid, serverPath: t.serverPath }));
+      return kind.exitCode === null && kind.signalCode === null;
+    };
+    // een programma dat er niet meer is, als de app van een vorige keer
+    const vorige = echtProces('/bin/sleep', ['60'], { stdio: 'ignore' });
+    const vorigeApp = { pid: vorige.pid!, started: (await processInfo(vorige.pid!) as ProcessInfo).started };
+    vorige.kill('SIGKILL');
+    await weg(vorige);
+    const eigen = echtProces(t.serverPath, ['60'], { stdio: 'ignore' });
+    const tweede = echtProces(t.serverPath, ['60'], { stdio: 'ignore' });
+    const ander = echtProces('/bin/sleep', ['60'], { stdio: 'ignore' });
+    const schrijf = (record: PidRecord) => writeFileSync(t.pidFile, JSON.stringify({ version: 2, servers: [record] }));
+    try {
+      const begin = (await processInfo(eigen.pid!) as ProcessInfo).started;
+      // 1. het pid-bestand wijst naar een ander programma: dat blijft draaien
+      schrijf({ pid: ander.pid!, serverPath: t.serverPath, started: begin, app: vorigeApp });
+      expect(await t.rt.stopLeftover()).toBe(false);
+      expect(await draaitNog(ander)).toBe(true);
+      // 2. het wijst naar een andere uitvoering van dezelfde llama-server, die op een ander moment begon: die blijft draaien
+      schrijf({ pid: tweede.pid!, serverPath: t.serverPath, started: { ...begin, at: begin.at - 60_000 }, app: vorigeApp });
+      expect(await t.rt.stopLeftover()).toBe(false);
+      expect(await draaitNog(tweede)).toBe(true);
+      // 3. een pid-bestand zonder begin (zoals een eerdere versie het schreef): niets
+      writeFileSync(t.pidFile, JSON.stringify({ pid: tweede.pid, serverPath: t.serverPath }));
+      expect(await t.rt.stopLeftover()).toBe(false);
+      expect(await draaitNog(tweede)).toBe(true);
+      // 4. alles klopt, maar het programma dat hem startte draait nog (hier: deze test zelf): niets
+      const zelf = await processInfo(process.pid) as ProcessInfo;
+      schrijf({ pid: eigen.pid!, serverPath: t.serverPath, started: begin, app: { pid: process.pid, started: zelf.started } });
+      expect(await t.rt.stopLeftover()).toBe(false);
+      expect(await draaitNog(eigen)).toBe(true);
+      // 5. alles klopt en het programma dat hem startte is weg: de achterblijver stopt
+      schrijf({ pid: eigen.pid!, serverPath: t.serverPath, started: begin, app: vorigeApp });
       expect(await t.rt.stopLeftover()).toBe(true);
       await weg(eigen);
       expect(eigen.signalCode).toBe('SIGKILL');
       expect(existsSync(t.pidFile)).toBe(false);
+      expect(await draaitNog(tweede)).toBe(true);
     } finally {
       eigen.kill('SIGKILL');
+      tweede.kill('SIGKILL');
       ander.kill('SIGKILL');
     }
   });

@@ -49,10 +49,50 @@ Eén leesverzoek (één foto) mag vier minuten duren; daarna breekt de app het a
 staat bij de bon dat het lezen te lang duurde. Bonnen van de telefoon en uit de bonnenmap staan meteen
 in de inbox en worden daarna op de achtergrond gelezen, één tegelijk.
 
-De server stopt als je het programma afsluit. Welk proces de app startte staat in `ocr/llama-server.pid`.
-Draait dat proces bij een volgende start nog (het programma is bijvoorbeeld hard afgebroken), dan stopt
-de app het alsnog, maar alleen als het programma achter dat proces-ID de `llama-server` uit de eigen
-`ocr/`-map is.
+De server stopt als je het programma afsluit. Welk proces de app startte staat in `ocr/llama-server.pid`,
+met het moment waarop dat proces begon en welk programma het startte. Draait dat proces bij een volgende
+start nog (het programma is bijvoorbeeld hard afgebroken), dan stopt de app het alsnog, maar alleen als
+alles klopt:
+
+- het programma achter dat proces-ID is de `llama-server` uit de eigen `ocr/`-map;
+- het proces begon precies op het moment dat is vastgelegd, zonder marge (een proces-ID wordt opnieuw
+  uitgegeven, het begin niet);
+- het proces is van dezelfde gebruiker;
+- er bestaat geen proces meer met het proces-ID van het programma dat de server startte. Bestaat dat
+  nog, dan gebeurt er niets.
+
+Is een van deze dingen niet vast te stellen, dan gebeurt er niets.
+
+**Hergebruikt proces-ID van de starter.** Is het programma dat de server startte weg, maar heeft een ander
+programma intussen hetzelfde proces-ID gekregen (te zien aan een ander begin), dan stopt de app de server
+bewust niet: liever een achterblijver laten staan dan de server van een programma dat nog draait stoppen op
+een meetverschil. De achterblijver blijft dan draaien zolang dat andere programma draait. De app probeert
+het opnieuw op twee momenten: bij het starten van het programma (niet als de administratie alleen-lezen open is), en telkens vlak voordat de ingebouwde
+herkenning een server start (bij de eerste bon na het starten van het programma, of nadat de server gestopt was, bijvoorbeeld na tien minuten zonder bonnen).
+Tussendoor is er geen periodieke controle. Na het opnieuw opstarten van de computer is de achterblijver weg.
+Hoeveel achterblijvers er bij de laatste poging zijn blijven staan, staat in de status van de runtime
+(`skippedLeftovers`); is dat meer dan nul, dan staat er bij Instellingen → Automatisch & herkenning, onder
+"Foto's van bonnen laten lezen", één regel over. De server van een programma dat aantoonbaar nog draait
+(zelfde proces-ID en zelfde begin) telt niet mee.
+
+**Het stoppen zelf.** Vlak vóór het stoppen vraagt de app het proces nog een keer op. Stoppen gaat op
+proces-ID; dat het proces-ID tussen die laatste controle en het stoppen opnieuw wordt uitgegeven, is niet
+uit te sluiten:
+
+- Linux: de controle leest `/proc` en het signaal volgt direct; het venster is de tijd tussen die twee
+  stappen in het programma.
+- macOS: de controle gaat via `ps`; het venster is de looptijd van `ps` nadat het het proces bekeek. Het
+  begin van een proces is daar alleen in hele seconden bekend.
+- Windows: het stoppen gaat met `taskkill /PID <pid> /F /FI "IMAGENAME eq llama-server.exe"`. Die opdracht
+  kijkt op het moment van beëindigen zelf of het proces `llama-server.exe` heet en doet anders niets; de
+  duur van de PowerShell-opvraag telt dus niet mee. Een andere `llama-server.exe` die precies dan hetzelfde
+  proces-ID kreeg, wordt niet onderscheiden.
+
+Het begin en de eigenaar komen op Linux
+uit `/proc`, op macOS uit `ps` en op Windows uit PowerShell (`Win32_Process`). Een pid-bestand van een
+eerdere versie (zonder het begin van het proces) wordt niet gebruikt. Opruimen en starten gebeuren na
+elkaar, nooit door elkaar; stopt het programma terwijl de server nog aan het starten is, dan komt er
+geen server meer bij.
 
 Niet ondersteund door de ingebouwde herkenning, met een duidelijke melding:
 

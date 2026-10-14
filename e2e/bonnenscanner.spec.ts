@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import jsQR from 'jsqr';
 import type { APIRequestContext, Page } from '@playwright/test';
-import { test, expect, onboard, nav, call } from './fixtures';
+import { test, expect, onboard, nav, call, emit } from './fixtures';
 import { makeJpeg } from '../tests/fixtures/jpeg';
 import { CONTENT_TYPE, ENDPOINT_PATH, decodePairing, encodeFrame, openResponse, sealRequest, type PairingPayload } from '../src/scanner/protocol';
 
@@ -204,10 +204,47 @@ test('een bon staat er meteen, ook als het lezen lang duurt: eerst "Wordt geleze
     // het lezen is klaar: de gegevens staan bij de bon
     const vandaag = new Date().toLocaleDateString('nl-NL', { timeZone: 'Europe/Amsterdam', day: '2-digit', month: '2-digit', year: 'numeric' });
     await request.post('/__ocr', { data: { klaar: ['Bouwmaat Utrecht', `Datum: ${vandaag}`, 'Gips 121,00', 'Totaal 121,00'] } });
+    // de bon staat nog open en er is niets ingevuld: de gelezen gegevens komen vanzelf in het formulier
+    const gelezen = (naam: string) => expect.poll(async () => (await call<{ original_name: string; extraction_source: string }[]>(page, 'documents.list')).find((x) => x.original_name === naam)?.extraction_source).toBe('ocr:traag');
+    await gelezen('eerste.jpg');
+    await emit(page, 'auto-processed');
+    await expect(page.getByTestId('leesstand')).toHaveText('Gelezen door traag');
+    await expect(page.getByLabel('Winkel / leverancier')).toHaveValue('Bouwmaat');
+    await expect(page.getByLabel('Totaal (incl. btw)')).toHaveValue('121,00');
+    await expect(page.getByTestId('intussen-gelezen')).toHaveCount(0);
     await nav(page, 'Aankopen & bonnetjes');
     await expect(rij('Bouwmaat')).toContainText('121,00');
     await expect(rij('Bouwmaat').getByTestId('leesstand')).toHaveCount(0);
     await expect(rij('tweede.jpg').getByTestId('leesstand')).toHaveText('Wordt gelezen…');
+
+    // de tweede bon openen; het lezen is klaar, en terwijl het scherm de gelezen gegevens ophaalt begint de
+    // gebruiker met invullen: zijn invoer blijft staan
+    await rij('tweede.jpg').getByRole('button', { name: 'Bekijken' }).click();
+    await expect(page.getByTestId('leesstand')).toHaveText('Wordt gelezen…');
+    await request.post('/__ocr', { data: { klaar: ['Hornbach Zwolle', `Datum: ${vandaag}`, 'Kit 55,00', 'Totaal 55,00'] } });
+    await gelezen('tweede.jpg');
+    let traag = true;
+    let onderweg: () => void = () => undefined;
+    const opgevraagd = new Promise<void>((r) => (onderweg = r));
+    await page.route('**/api', async (route) => {
+      if (traag && (JSON.parse(route.request().postData() ?? '{}') as { method?: string }).method === 'documents.open') {
+        onderweg();
+        await new Promise((r) => setTimeout(r, 1_500));
+      }
+      await route.continue();
+    });
+    await emit(page, 'auto-processed');
+    await opgevraagd;
+    await page.getByLabel('Winkel / leverancier').fill('Zelf ingevuld');
+    await expect(page.getByTestId('intussen-gelezen')).toContainText('Wat je zelf hebt ingevuld is blijven staan.');
+    traag = false;
+    await expect(page.getByLabel('Winkel / leverancier')).toHaveValue('Zelf ingevuld');
+    await expect(page.getByTestId('leesstand')).toHaveText('Gelezen door traag');
+    // op verzoek alsnog de gelezen gegevens
+    await page.getByRole('button', { name: 'Gelezen gegevens tonen' }).click();
+    await expect(page.getByLabel('Winkel / leverancier')).toHaveValue('Hornbach');
+    await expect(page.getByLabel('Totaal (incl. btw)')).toHaveValue('55,00');
+    await expect(page.getByTestId('intussen-gelezen')).toHaveCount(0);
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }
