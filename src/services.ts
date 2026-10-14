@@ -179,6 +179,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   // alleen-lezen (koppeling voor Claude Code/Codex): niets aanvullen, de app deed dat al bij het openen
   if (!db.readonly) {
     ledger.seedDefaultAccounts();
+    if (settings.get().legalForm === 'bv') ledger.seedBvAccounts();
     templates.seedDefaults();
     bank.ensureDefaultAccount();
   }

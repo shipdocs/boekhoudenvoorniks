@@ -398,6 +398,7 @@ export function SettingsScreen() {
         <>
           <label className="row"><input type="checkbox" checked={draft.advancedMode} onChange={(e) => set({ advancedMode: e.target.checked })} /> Toon de boekhouding voor je boekhouder (grootboek, balans en exports)</label>
           <p className="small muted">Handig voor je boekhouder. Voor dagelijks gebruik heb je dit niet nodig.</p>
+          {settings.advancedMode && <div><Button small onClick={() => go({ screen: 'expert', extra: { tab: 'rekeningen' } })}>Rekeningschema: rekeningen toevoegen of hernoemen</Button></div>}
         </>,
       )}
     </div>

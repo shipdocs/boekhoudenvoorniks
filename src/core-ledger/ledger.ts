@@ -3,7 +3,7 @@ import { tx } from '../db/database';
 import { assertCents, type Cents } from '../shared/money';
 import { addDays, assertIsoDate, formatDateNl, type IsoDate } from '../shared/dates';
 import { ValidationError } from '../shared/validation';
-import { ACCOUNTS, DEFAULT_ACCOUNTS, type AccountCategory } from './accounts';
+import { ACCOUNTS, BV_ACCOUNTS, DEFAULT_ACCOUNTS, categoryForRgs, codeRangeFor, userAccountBlocked, type AccountCategory, type AccountSeed } from './accounts';
 import { RULES_VERSION } from './rules-version';
 import rgsTaxonomy from './rgs-codes.json';
 import { settleQuestionItem } from './open-items';
@@ -12,6 +12,22 @@ import { settleQuestionItem } from './open-items';
 export const RGS_VERSION: string = rgsTaxonomy.version;
 export function rgsLabel(code: string): string | undefined {
   return (rgsTaxonomy.codes as Record<string, string>)[code];
+}
+
+/**
+ * Zoeken in de officiële RGS-lijst voor een eigen rekening: op code of op woorden uit de omschrijving.
+ * Alleen codes die je zelf mag gebruiken (geen omzet of btw); kortere (algemenere) codes eerst.
+ */
+export function searchRgs(query: string, limit = 40): { code: string; label: string }[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  const out: { code: string; label: string }[] = [];
+  for (const [code, label] of Object.entries(rgsTaxonomy.codes as Record<string, string>)) {
+    if (userAccountBlocked(code)) continue;
+    const text = `${code} ${label}`.toLowerCase();
+    if (words.every((w) => text.includes(w))) out.push({ code, label });
+  }
+  return out.sort((a, b) => a.code.length - b.code.length || a.code.localeCompare(b.code)).slice(0, limit);
 }
 
 export type EntrySource = 'factuur' | 'inkoop' | 'bank' | 'handmatig' | 'btw' | 'opening' | 'integratie';
@@ -151,22 +167,60 @@ export class Ledger {
   }
 
   seedDefaultAccounts(): void {
+    this.seedAccounts(DEFAULT_ACCOUNTS);
+  }
+
+  /** De extra rekeningen voor een bv (loon, loonheffing, rekening-courant, vpb, aandelenkapitaal); dubbel aanroepen kan geen kwaad. */
+  seedBvAccounts(): void {
+    this.seedAccounts(BV_ACCOUNTS);
+  }
+
+  private seedAccounts(accounts: AccountSeed[]): void {
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO chart_of_accounts (rgs_code, rgs_ref, code, name, category, vat_code, is_system)
        VALUES (@rgs, @ref, @code, @name, @category, @vatCode, @system)`,
     );
     const fillRef = this.db.prepare('UPDATE chart_of_accounts SET rgs_ref = ? WHERE rgs_code = ? AND rgs_ref IS NULL');
     const exists = this.db.prepare('SELECT 1 FROM chart_of_accounts WHERE rgs_code = ?');
-    const codeTaken = this.db.prepare('SELECT 1 FROM chart_of_accounts WHERE code = ?');
     tx(this.db, () => {
-      for (const a of DEFAULT_ACCOUNTS) {
+      for (const a of accounts) {
         // een nieuwe standaardrekening in een bestaande administratie: bij een bezet nummer het eerstvolgende vrije
-        let code = a.code;
-        if (!exists.get(a.rgs)) while (codeTaken.get(code)) code = String(Number(code) + 1).padStart(a.code.length, '0');
+        const code = exists.get(a.rgs) ? a.code : this.freeCode(a.code);
         insert.run({ rgs: a.rgs, ref: a.ref, code, name: a.name, category: a.category, vatCode: a.vatCode ?? null, system: a.system ? 1 : 0 });
         fillRef.run(a.ref, a.rgs);
       }
     });
+  }
+
+  /** Het eerste vrije rekeningnummer vanaf `from` (zelfde aantal cijfers). */
+  freeCode(from: string): string {
+    const taken = this.db.prepare('SELECT 1 FROM chart_of_accounts WHERE code = ?');
+    let code = from;
+    while (taken.get(code)) code = String(Number(code) + 1).padStart(from.length, '0');
+    return code;
+  }
+
+  /**
+   * Een eigen rekening (Boekhouding → Rekeningschema): de gebruiker kiest naam en officiële RGS-code; de
+   * soort volgt uit de code en het nummer is het eerste vrije in de passende reeks (of het opgegeven nummer).
+   * Geeft de invoer voor createAccount, zodat ook de kopie bij de boekhouder hem als handeling kan meesturen.
+   */
+  userAccountInput(input: { name: string; rgsRef: string; code?: string | null }): { code: string; rgs: string; rgsRef: string; name: string; category: AccountCategory } {
+    const rgsRef = input.rgsRef.trim();
+    if (!input.name.trim()) throw new LedgerError('Geef de rekening een naam');
+    if (!rgsLabel(rgsRef)) throw new LedgerError(`${rgsRef || 'Deze code'} is geen officiële RGS-code (release ${RGS_VERSION}). Kies er een uit de lijst.`);
+    const blocked = userAccountBlocked(rgsRef);
+    if (blocked) throw new LedgerError(blocked);
+    const code = input.code?.trim() || this.freeCode(codeRangeFor(rgsRef));
+    if (this.db.prepare('SELECT 1 FROM chart_of_accounts WHERE code = ?').get(code)) throw new LedgerError(`Rekeningnummer ${code} is al in gebruik`);
+    let rgs = `EIGEN-${code}`;
+    for (let n = 2; this.db.prepare('SELECT 1 FROM chart_of_accounts WHERE rgs_code = ?').get(rgs); n++) rgs = `EIGEN-${code}-${n}`;
+    return { code, rgs, rgsRef, name: input.name.trim(), category: categoryForRgs(rgsRef) };
+  }
+
+  /** Of er al op deze rekening geboekt is (dan kan hij niet weg). */
+  accountInUse(id: number): boolean {
+    return this.db.prepare('SELECT 1 FROM journal_lines WHERE account_id = ? LIMIT 1').get(id) !== undefined;
   }
 
   listAccounts(includeArchived = false): Account[] {
@@ -269,6 +323,7 @@ export class Ledger {
   archiveAccount(id: number): void {
     const account = this.getAccountById(id);
     if (account.is_system) throw new LedgerError('Systeemrekeningen kunnen niet gearchiveerd worden');
+    if (this.accountInUse(id)) throw new LedgerError(`Op ${account.code} ${account.name} is al geboekt; die rekening blijft staan. Je kunt hem wel hernoemen.`);
     this.assertAccountsEditable();
     this.db.prepare('UPDATE chart_of_accounts SET archived = 1 WHERE id = ?').run(id);
   }
