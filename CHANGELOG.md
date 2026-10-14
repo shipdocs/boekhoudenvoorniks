@@ -1,9 +1,12 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 1.4.1 — bonnen van je telefoon direct zichtbaar en sneller gelezen
+
+Reparaties voor bonnen die van je telefoon of uit de bonnenmap binnenkomen, vooral als je bonnen laat lezen op je eigen computer.
 
 ### Verbeterd
 - **Voorwaarden bijgewerkt (versie 2026-10-13).** Artikel 8 noemt nu als lijst wat je met het abonnement extra krijgt: de app voor Android, de uitwisseling met je boekhouder en de online hulp bij categorievoorstellen, en wat altijd blijft werken. De prijs en de vier gratis maanden zijn niet veranderd. Het programma vraagt je één keer opnieuw om akkoord.
+- **Btw-aangifte overnemen: vinkje per vak.** Kopieer je een bedrag uit "Bekijk berekening", dan krijgt dat vak een ✓, zodat je weet waar je bent. Onder de vakken staat een controle op het eindbedrag bij 5g. Het vinkje is alleen een geheugensteun; er wordt niets vastgelegd (#322, eerste stap).
 
 ### Opgelost
 - **Bon van je telefoon met meerdere pagina's wordt nu gelezen.** Een bon met meer dan één pagina kwam als PDF in je administratie en bleef op "nog niet uitgelezen" staan: de tekstherkenning leest foto's, geen PDF van foto's. De app leest nu elke pagina apart. Bonnen die er al staan, lees je alsnog met "Nu lezen".
@@ -29,7 +32,6 @@ Bij deze versie hoort de app BoekhoudenVoorNiks voor Android (Google Play). Je k
 
 ### Verbeterd
 - **Klusresultaat: indicatie van je eigen uurloon.** Staan er uren (eenheid "uur") op de werkbon van een klus, dan zie je onder het resultaat "ongeveer € X per uur". Het is alleen een indicatie: uren zijn geen kosten en het klusresultaat en je boekhouding veranderen niet (#326).
-- **Btw-aangifte overnemen: vinkje per vak.** Kopieer je een bedrag uit "Bekijk berekening", dan krijgt dat vak een ✓, zodat je weet waar je bent. Onder de vakken staat een controle op het eindbedrag bij 5g. Het vinkje is alleen een geheugensteun; er wordt niets vastgelegd (#322, eerste stap).
 - **Bankregel van € 0,00 vraagt niets meer.** Een regel van nul euro op je afschrift, bijvoorbeeld de controle van een betaalkaart, heeft niets om te boeken. De app zet zo'n regel nu zelf op genegeerd: hij komt niet meer als vraag "zakelijk of privé" op Vandaag en bij Bank staat erbij waarom. Wie zo'n regel toch probeerde in te delen kreeg een technische foutmelding; dat is nu een gewone uitleg.
 - **Verlegde btw bij een banktransactie: kies 9% of 21%.** Boek je een betaling als aankoop met verlegde btw (via Bank of de vraag op Vandaag), dan verschijnt nu ook daar de keuze "Tarief van wat je kocht" (standaard 21%).
 - **Goederen aan Noord-Ierland zijn een levering binnen de EU.** Voor de btw blijft Noord-Ierland bij goederen een EU-land (Belastingdienst, toelichting opgaaf ICP 2026). Een klant met land Noord-Ierland (XI) kun je nu kiezen en de keuze "Goederen aan een bedrijf in een ander EU-land" is toegestaan: rubriek 3b en opgaaf ICP met landcode XI. Uitvoer (rubriek 3a) van goederen naar Noord-Ierland weigert de app nu met een uitleg. Diensten aan Noord-Ierland blijven "klant buiten de EU"; Groot-Brittannië blijft een derde land. Bestaande facturen veranderen niet (#317).
