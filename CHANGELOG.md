@@ -1,6 +1,8 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 1.5.0 — factuurnummers die kloppen en een omschrijving bij je aankopen
+
+Na de eerste reactie van een gebruiker: doornummeren vanuit je vorige pakket werkt nu zoals je verwacht.
 
 ### Nieuw
 - **Volgende factuurnummer zelf zetten** (Instellingen → Facturen & offertes). Je ziet welk nummer je volgende factuur krijgt en je kunt het volgnummer zelf zetten, bijvoorbeeld om door te nummeren vanuit je vorige pakket. Lager dan een nummer dat al bestaat kan niet, zodat er nooit een nummer dubbel komt.

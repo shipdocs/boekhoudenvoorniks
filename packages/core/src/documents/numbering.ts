@@ -29,8 +29,9 @@ export function checkNumberFormat(format: string): string | null {
   if (!format.trim()) return 'Vul een nummerformaat in, bv. {JJJJ}-{NNNN}';
   const sequences = format.match(/\{N+\}/g) ?? [];
   const rest = format.replace(TOKENS, '');
-  if (sequences.length === 0 || /JJ|MM|NN/.test(rest)) {
-    return /[JMN]{2}/.test(rest) ? 'Zet de codes tussen accolades, bv. {JJ}{NNN} in plaats van JJ NNN' : 'Het formaat moet een volgnummer bevatten, bv. {NNNN}';
+  // letters als "ANN-" mogen gewoon in het nummer staan; alleen zonder {N…} kijken of de accolades vergeten zijn
+  if (sequences.length === 0) {
+    return /JJ|MM|NN/.test(rest) ? 'Zet de codes tussen accolades, bv. {JJ}{NNN} in plaats van JJ NNN' : 'Het formaat moet een volgnummer bevatten, bv. {NNNN}';
   }
   if (sequences.length > 1) return 'Gebruik maar één volgnummer, bv. {NNNN}';
   if (/[{}]/.test(rest)) return 'Onbekende code tussen accolades. Je kunt {JJJJ}, {JJ}, {MM} en {NNNN} gebruiken';
@@ -87,6 +88,12 @@ export function guessNumberFormat(number: string, year: number): string | null {
       prefix = `${m[1]}{JJ}${m[3]}`;
       rest = `${m[4]}${m[5]}`;
     }
+  }
+  // een maand na het jaar: 2026-03-0012 → {JJJJ}-{MM}-{NNNN}
+  const month = prefix ? /^(\D*)(0[1-9]|1[0-2])(\D+)(\d+\D*)$/.exec(rest) : null;
+  if (month) {
+    prefix += `${month[1]}{MM}${month[3]}`;
+    rest = month[4]!;
   }
   const tail = /^(\D*)(\d+)(\D*)$/.exec(rest);
   if (!tail) return null;

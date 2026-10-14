@@ -378,7 +378,7 @@ export function DocumentReview({ id }: { id: number }) {
                     {(['prive', 'vraag'] as const).map((choice) => (
                       <Button key={choice} disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
                         const res = await run(
-                          () => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: choice === 'vraag' ? 'onbekend' : 'overig', vatCode: 'geen', business: choice === 'vraag', paidWith: d.bank_match ? 'bank' : 'later' }),
+                          () => api.documents.confirm(d.id, { supplier: form.supplier, description: form.description.trim() || null, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: choice === 'vraag' ? 'onbekend' : 'overig', vatCode: 'geen', business: choice === 'vraag', paidWith: d.bank_match ? 'bank' : 'later' }),
                           choice === 'vraag' ? 'Apart gezet op "weet ik nog niet" ✓' : 'Privé — niet geboekt ✓',
                         );
                         if (res) go({ screen: 'aankopen' });

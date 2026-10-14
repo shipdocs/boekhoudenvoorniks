@@ -10,6 +10,7 @@ describe('nummerformaat controleren, lezen en raden', () => {
     expect(checkNumberFormat('{JJJJ}-{NNNN}')).toBeNull();
     expect(checkNumberFormat('{JJ}{NNN}')).toBeNull();
     expect(checkNumberFormat('INV{NNNN}')).toBeNull();
+    expect(checkNumberFormat('ANN-{NNNN}')).toBeNull();
     expect(checkNumberFormat('JJ NNN')).toMatch(/accolades/);
     expect(checkNumberFormat('{JJJJ}-NNNN')).toMatch(/accolades/);
     expect(checkNumberFormat('{JJJJ}')).toMatch(/volgnummer/);
@@ -34,6 +35,8 @@ describe('nummerformaat controleren, lezen en raden', () => {
     expect(guessNumberFormat('F26-0012', 2026)).toBe('F{JJ}-{NNNN}');
     expect(guessNumberFormat('2025-0099', 2026)).toBe('{JJJJ}-{NNNN}');
     expect(guessNumberFormat('0012', 2026)).toBe('{NNNN}');
+    expect(guessNumberFormat('2026-03-0012', 2026)).toBe('{JJJJ}-{MM}-{NNNN}');
+    expect(parseDocumentNumber('{JJJJ}-{MM}-{NNNN}', '2026-03-0012')).toEqual({ year: 2026, sequence: 12 });
     expect(guessNumberFormat('abc', 2026)).toBeNull();
   });
 });

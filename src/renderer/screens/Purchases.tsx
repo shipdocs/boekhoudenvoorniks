@@ -482,7 +482,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
       if (found === undefined) return;
       if (found) return setDuplicate({ entry, label: found.label });
     }
-    const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: description.trim() || meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, ...(isReverseCharge(vat) && vatRate === 9 ? { vatRate } : {}), paidWith, jobId, allowDuplicate: !!shown, ...(businessPct !== null ? { businessPct } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
+    const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: description.trim() || (meta.expenseCategories.find((c) => c.key === category)?.label ?? ''), categoryKey: category, grossAmount: amount!, vatCode: vat, ...(isReverseCharge(vat) && vatRate === 9 ? { vatRate } : {}), paidWith, jobId, allowDuplicate: !!shown, ...(businessPct !== null ? { businessPct } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
     if (r) {
       onDone();
       if (category === 'investering') showInvestmentSaved(investmentInfo(amount!, vat));

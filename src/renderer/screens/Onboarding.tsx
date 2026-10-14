@@ -76,6 +76,11 @@ export function Onboarding() {
 
   const finish = async (then: 'factuur' | 'home' | 'overstap') => {
     const ok = await run(async () => {
+      // eerst de nummering: weigert de app het nummer, dan is de welkomststap nog niet afgerond en kun je het verbeteren
+      if (shows('nummering') && parsedLast && parsedLast.sequence > 0) {
+        if (numberFormat !== settings.invoiceNumberFormat) await api.settings.update({ invoiceNumberFormat: numberFormat });
+        await api.settings.setNextInvoiceNumber(parsedLast.sequence + 1, parsedLast.year !== null ? `${parsedLast.year}-01-01` : today());
+      }
       // alleen opslaan wat in de getoonde stappen stond: een update mag eerdere keuzes niet overschrijven
       const patch: Partial<AppSettings> = { profile, company, autopilot, onboardingDone: true, onboardingSteps: markSeen({ ...settings, company, kor }, ids) };
       if (shows('btw')) Object.assign(patch, { kor, vatPeriod, defaultVatCode: kor ? 'vrijgesteld' : 'hoog' });
@@ -90,7 +95,6 @@ export function Onboarding() {
         const accounts = await api.bank.accounts();
         if (company.iban && accounts[0] && !accounts[0].iban) await api.bank.updateAccount(accounts[0].id, { iban: company.iban });
       }
-      if (shows('nummering') && parsedLast && parsedLast.sequence > 0) await api.settings.setNextInvoiceNumber(parsedLast.sequence + 1, parsedLast.year !== null ? `${parsedLast.year}-01-01` : today());
       // na de btw-keuze: de instapdatum markeert eerdere btw-periodes als al aangegeven
       if (shows('start') && switchMode) await api.switchover.setMode(switchMode, switchMode === 'overstapper' ? switchDate : null);
       return true;
