@@ -366,6 +366,7 @@ export function DocumentReview({ id }: { id: number }) {
                 <Field label={r?.foreign ? "Totaal in euro's (incl. btw)" : 'Totaal (incl. btw)'}><MoneyInput value={form.total} onChange={(v) => setForm({ ...form, total: v })} /></Field>
                 <Field label="Factuur- of bonnummer" hint="mag leeg"><input value={form.invoiceNumber} maxLength={60} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} /></Field>
               </div>
+              {form.business && <Field label="Wat heb je gekocht?" hint="optioneel"><input value={form.description} maxLength={200} placeholder="bv. kopieerpapier" onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>}
               {own ? (
                 <>
                   <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
@@ -377,7 +378,7 @@ export function DocumentReview({ id }: { id: number }) {
                     {(['prive', 'vraag'] as const).map((choice) => (
                       <Button key={choice} disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
                         const res = await run(
-                          () => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: choice === 'vraag' ? 'onbekend' : 'overig', vatCode: 'geen', business: choice === 'vraag', paidWith: d.bank_match ? 'bank' : 'later' }),
+                          () => api.documents.confirm(d.id, { supplier: form.supplier, description: form.description.trim() || null, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: choice === 'vraag' ? 'onbekend' : 'overig', vatCode: 'geen', business: choice === 'vraag', paidWith: d.bank_match ? 'bank' : 'later' }),
                           choice === 'vraag' ? 'Apart gezet op "weet ik nog niet" ✓' : 'Privé — niet geboekt ✓',
                         );
                         if (res) go({ screen: 'aankopen' });
@@ -467,7 +468,7 @@ export function DocumentReview({ id }: { id: number }) {
                     if (found) return setDuplicate({ entry, lead: `Lijkt op ${found.label}.${found.detail ? ` ${found.detail}` : ''}` });
                   }
                   const isInvestment = form.business && !form.splits && form.categoryKey === 'investering';
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, ...(isReverseCharge(form.vatCode) && form.vatRate === 9 ? { vatRate: 9 } : {}), business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, allowDuplicate: !!shownDuplicate, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, description: form.description.trim() || null, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, ...(isReverseCharge(form.vatCode) && form.vatRate === 9 ? { vatRate: 9 } : {}), business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, allowDuplicate: !!shownDuplicate, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
                   if (res) {
                     go({ screen: 'aankopen' });
                     if (isInvestment) showInvestmentSaved(investmentInfo(form.total!, form.vatCode, true));

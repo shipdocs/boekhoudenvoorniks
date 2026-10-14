@@ -1,5 +1,19 @@
 # Wijzigingen
 
+## 1.5.0 — factuurnummers die kloppen en een omschrijving bij je aankopen
+
+Na de eerste reactie van een gebruiker: doornummeren vanuit je vorige pakket werkt nu zoals je verwacht.
+
+### Nieuw
+- **Volgende factuurnummer zelf zetten** (Instellingen → Facturen & offertes). Je ziet welk nummer je volgende factuur krijgt en je kunt het volgnummer zelf zetten, bijvoorbeeld om door te nummeren vanuit je vorige pakket. Lager dan een nummer dat al bestaat kan niet, zodat er nooit een nummer dubbel komt.
+- **Het nummer staat al op de conceptfactuur.** Bovenaan een concept staat welk nummer de factuur krijgt als je hem definitief maakt.
+- **Omschrijving bij een aankoop.** Bij een bonnetje zonder foto en bij het controleren van een bon kun je invullen wat je gekocht hebt, bijvoorbeeld "Kopieerpapier" bij Bol.com. Die omschrijving staat in de lijst met aankopen; laat je het leeg, dan staat er zoals eerder de categorie.
+
+### Opgelost
+- **Je laatste factuurnummer wordt goed gelezen.** Vulde je bij het instellen je laatste factuurnummer in, dan maakte de app er een veel te hoog nummer van: na "2026-037" kwam 2026-6038 en na "26100" kwam 2026-6101. De app leest het nummer nu volgens je opmaak. Past het nummer niet bij de opmaak, dan stelt de app jouw eigen opmaak voor (bij "26100" is dat {JJ}{NNN}, dus de volgende wordt 26101) en zie je meteen welk nummer je volgende factuur krijgt.
+- **Een opmaak zonder accolades wordt meteen gemeld.** "JJ NNN" in plaats van "{JJ}{NNN}" werd opgeslagen en ging pas mis bij het definitief maken van een factuur. Instellingen legt nu meteen uit wat er niet klopt en slaat zo'n opmaak niet op.
+- **Openstaande facturen uit je vorige administratie tellen mee.** Voerde je bij de overstap een openstaande factuur van dit jaar in, dan kon je eerste nieuwe factuur hetzelfde nummer krijgen ("Factuurnummer bestaat al"). De nummering gaat nu verder na het hoogste nummer dat al in de app staat.
+
 ## 1.4.1 — bonnen van je telefoon direct zichtbaar en sneller gelezen
 
 Reparaties voor bonnen die van je telefoon of uit de bonnenmap binnenkomen, vooral als je bonnen laat lezen op je eigen computer.

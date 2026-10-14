@@ -9,7 +9,7 @@ import type { TemplateService } from './templates';
 import { renderDocumentHtml, type RenderableParty } from './templates';
 import { computeTotals, type DocumentTotals, type LineInput } from './totals';
 import { normalizeLines, readLines, toLineInputs, writeLines, type DocLine } from './lines';
-import { counterKey, formatDocumentNumber } from './numbering';
+import { counterKey, formatDocumentNumber, parseDocumentNumber } from './numbering';
 import { addDays, assertIsoDate, formatDateNl, today, type IsoDate } from '../shared/dates';
 import { assertCents, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
@@ -247,11 +247,11 @@ export class InvoiceService {
         }
       }
 
-      const key = counterKey('factuur', s.invoiceNumberFormat, inv.invoice_date);
-      const seq = this.settings.nextCounter(key);
-      const number = formatDocumentNumber(s.invoiceNumberFormat, inv.invoice_date, seq);
+      const next = this.nextNumber(inv.invoice_date);
+      this.settings.setCounter(next.key, next.sequence);
+      const number = next.number;
       if (this.db.prepare('SELECT 1 FROM invoices WHERE number = ?').get(number)) {
-        throw new ValidationError(`Factuurnummer ${number} bestaat al. Pas je factuurnummer aan bij Instellingen → Facturen & offertes`);
+        throw new ValidationError(`Factuurnummer ${number} bestaat al. Zet het volgende factuurnummer hoger bij Instellingen → Facturen & offertes`);
       }
       const totals = inv.totals;
       const entryId = this.postInvoice(id, inv.invoice_date, this.vatDateOption(inv.lines.map((l) => l.vat_code), inv.invoice_date, inv.delivery_date, inv.delivery_date_to), totals, relation.id, relation.name, number);
@@ -265,6 +265,47 @@ export class InvoiceService {
       if (inv.credit_of_invoice_id) this.settleCreditAgainstOriginal(id, inv.credit_of_invoice_id);
       return this.get(id);
     });
+  }
+
+  /**
+   * Het nummer dat een factuur met deze datum krijgt als je hem nu definitief maakt. Het volgnummer is
+   * één hoger dan de teller én dan het hoogste nummer in dezelfde reeks dat al in de app staat, zodat
+   * ingelezen facturen (startbalans, auditfile) meetellen en er nooit een dubbel nummer ontstaat.
+   * `format` is voor een voorbeeld bij een nog niet opgeslagen formaat in Instellingen.
+   */
+  nextNumber(date: IsoDate, format = this.settings.get().invoiceNumberFormat): { number: string; sequence: number; key: string; lowest: number } {
+    assertIsoDate(date);
+    const key = counterKey('factuur', format, date);
+    const lowest = this.highestUsed(format, date) + 1;
+    const sequence = Math.max(this.settings.peekCounter(key) + 1, lowest);
+    return { number: formatDocumentNumber(format, date, sequence), sequence, key, lowest };
+  }
+
+  /**
+   * Instellingen → "Volgende factuurnummer": de teller zo zetten dat de volgende factuur met deze datum
+   * `sequence` krijgt. Lager dan een nummer dat al bestaat kan niet: dan zou een nummer dubbel worden.
+   */
+  setNextNumber(sequence: number, date: IsoDate = today()): { number: string; sequence: number; key: string; lowest: number } {
+    if (!Number.isSafeInteger(sequence) || sequence < 1) throw new ValidationError('Vul het volgende factuurnummer in als heel getal, bv. 38');
+    const format = this.settings.get().invoiceNumberFormat;
+    const { key, lowest } = this.nextNumber(date, format);
+    if (sequence < lowest) {
+      throw new ValidationError(`Factuur ${formatDocumentNumber(format, date, lowest - 1)} bestaat al. Het volgende nummer moet minstens ${formatDocumentNumber(format, date, lowest)} zijn`);
+    }
+    this.settings.setCounter(key, sequence - 1);
+    return this.nextNumber(date, format);
+  }
+
+  /** Het hoogste volgnummer in de reeks van deze datum dat al bij een factuur in de app hoort (0 als er geen is). */
+  private highestUsed(format: string, date: IsoDate): number {
+    const year = /\{JJ(JJ)?\}/.test(format) ? Number(date.slice(0, 4)) : null;
+    const rows = this.db.prepare('SELECT number FROM invoices WHERE number IS NOT NULL').all() as { number: string }[];
+    let highest = 0;
+    for (const { number } of rows) {
+      const parsed = parseDocumentNumber(format, number);
+      if (parsed && (year === null || parsed.year === year)) highest = Math.max(highest, parsed.sequence);
+    }
+    return highest;
   }
 
   /**

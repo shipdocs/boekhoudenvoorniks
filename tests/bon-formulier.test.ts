@@ -294,7 +294,7 @@ describe('bon bekijken terwijl hij op de achtergrond gelezen wordt', () => {
   });
 
   it('het voorstel van de app: leeg bij een ongelezen bon, de gelezen gegevens bij een gelezen bon', () => {
-    expect(proposedForm(ONGELEZEN)).toEqual({ supplier: '', date: '', total: null, invoiceNumber: '', vatAmount: null, categoryKey: 'materiaal', vatCode: 'hoog', vatRate: 21, business: true, businessPct: null, paidWith: 'later', jobId: null, splits: null });
+    expect(proposedForm(ONGELEZEN)).toEqual({ supplier: '', description: '', date: '', total: null, invoiceNumber: '', vatAmount: null, categoryKey: 'materiaal', vatCode: 'hoog', vatRate: 21, business: true, businessPct: null, paidWith: 'later', jobId: null, splits: null });
     expect(proposedForm({ ...GELEZEN, proposed_paid_with: 'kas' } as Doc)).toMatchObject({ supplier: 'Bouwmaat', paidWith: 'kas', jobId: null });
     // de klus telt niet mee bij de vraag of de gebruiker iets heeft veranderd
     expect(formKey({ ...proposedForm(ONGELEZEN), jobId: 4 })).toBe(formKey(proposedForm(ONGELEZEN)));

@@ -5,6 +5,8 @@ import type { PurchaseVatCode } from './vat';
 /** Het formulier bij een bon (scherm "bon bekijken"): wat de gebruiker bevestigt. */
 export interface ReviewForm {
   supplier: string;
+  /** wat er gekocht is, bv. kopieerpapier; leeg = de categorie */
+  description: string;
   date: string;
   total: number | null;
   invoiceNumber: string;
@@ -26,6 +28,7 @@ export function proposedForm(d: ReviewDoc): ReviewForm {
   const r = d.result;
   return {
     supplier: r?.supplier?.value ?? '',
+    description: '',
     date: r?.invoiceDate?.value ?? '',
     total: r?.total?.value ?? null,
     invoiceNumber: r?.invoiceNumber?.value ?? '',

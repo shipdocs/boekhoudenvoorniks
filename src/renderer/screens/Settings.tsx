@@ -14,6 +14,7 @@ import { businessEffect } from '../../shared/business-share';
 import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 import { ONLINE_HELP } from '../../shared/online-help';
 import { PontoCard } from './PontoDialog';
+import { checkNumberFormat } from '../../documents/numbering';
 
 type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'scanner' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
 
@@ -104,8 +105,9 @@ export function SettingsScreen() {
           <div className="grid cols-3">
             <Field label="Betaaltermijn (dagen)"><input className="num" type="number" min={0} max={365} value={draft.paymentTermDays} onChange={(e) => set({ paymentTermDays: Number(e.target.value) })} /></Field>
             <Field label="Offerte geldig (dagen)"><input className="num" type="number" min={1} max={3650} value={draft.quoteValidityDays} onChange={(e) => set({ quoteValidityDays: Number(e.target.value) })} /></Field>
-            <Field label="Factuurnummer" hint="bv. {JJJJ}-{NNNN} wordt 2026-0001"><input value={draft.invoiceNumberFormat} onChange={(e) => set({ invoiceNumberFormat: e.target.value })} /></Field>
+            <Field label="Opmaak factuurnummer" hint="codes tussen accolades: {JJJJ} of {JJ} jaar, {MM} maand, {NNNN} volgnummer"><input value={draft.invoiceNumberFormat} onChange={(e) => set({ invoiceNumberFormat: e.target.value })} /></Field>
           </div>
+          <NextInvoiceNumber format={draft.invoiceNumberFormat} saved={settings.invoiceNumberFormat} />
           <Field label="Onderwerp factuur-mail"><input value={draft.invoiceEmailSubject} onChange={(e) => set({ invoiceEmailSubject: e.target.value })} /></Field>
           <Field label="Tekst factuur-mail" hint="{klant} {nummer} {bedrag} {vervaldatum} {iban} {bedrijf}"><textarea rows={6} value={draft.invoiceEmailBody} onChange={(e) => set({ invoiceEmailBody: e.target.value })} /></Field>
           <Field label="Tekst offerte-mail"><textarea rows={5} value={draft.quoteEmailBody} onChange={(e) => set({ quoteEmailBody: e.target.value })} /></Field>
@@ -987,6 +989,40 @@ function OnlineCategoryHelp({ checked, onChange }: { checked: boolean; onChange:
           </span>
         </span>
       </label>
+    </div>
+  );
+}
+
+/**
+ * Voorbeeld van de opmaak en het volgende factuurnummer zelf zetten, bv. om door te nummeren vanuit een
+ * vorig pakket. Het nummer wordt meteen opgeslagen (los van de knop Opslaan), maar alleen bij een opgeslagen opmaak.
+ */
+function NextInvoiceNumber({ format, saved }: { format: string; saved: string }) {
+  const { run, busy } = useAction();
+  const error = checkNumberFormat(format);
+  const next = useLoad(() => (error ? Promise.resolve(null) : api.settings.nextInvoiceNumber(undefined, format)), [format, error]);
+  const [sequence, setSequence] = useState('');
+  if (error) return <div className="notice warn small" role="alert" data-testid="opmaak-fout">{error}</div>;
+  const n = next.data;
+  return (
+    <div className="card flat" data-testid="volgend-factuurnummer">
+      <ErrorBox error={next.error} />
+      {n && <p style={{ margin: 0 }}>Je volgende factuur krijgt nummer <strong>{n.number}</strong>.</p>}
+      {format === saved ? (
+        <div className="row" style={{ marginTop: 10, alignItems: 'end' }}>
+          <Field label="Volgende volgnummer" hint={n ? `minstens ${n.lowest}` : undefined}>
+            <input className="num" inputMode="numeric" value={sequence} onChange={(e) => setSequence(e.target.value.replace(/\D/g, ''))} placeholder={n ? String(n.sequence) : ''} aria-label="Volgende volgnummer" />
+          </Field>
+          <Button small disabled={busy || !sequence} onClick={async () => {
+            const r = await run(() => api.settings.setNextInvoiceNumber(Number(sequence)), 'Volgende factuurnummer gezet ✓');
+            if (!r) return;
+            setSequence('');
+            await next.reload();
+          }}>Nummer zetten</Button>
+        </div>
+      ) : (
+        <p className="small muted" style={{ margin: '6px 0 0' }}>Sla eerst de nieuwe opmaak op; daarna kun je hier het volgende nummer zetten.</p>
+      )}
     </div>
   );
 }
