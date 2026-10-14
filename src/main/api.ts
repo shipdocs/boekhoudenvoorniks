@@ -1002,7 +1002,10 @@ export function createApi(s: Services, host: HostContext) {
       setSmtpPassword: (pw: string) => host.setSmtpPassword(pw),
       testSmtp: (smtp?: AppSettings['smtp'], password?: string) => host.testSmtp(smtp, password),
       counters: (year: number) => ({ factuur: s.settings.peekCounter(`factuur:${year}`), offerte: s.settings.peekCounter(`offerte:${year}`) }),
-      setInvoiceCounter: (year: number, value: number) => s.settings.setCounter(`factuur:${year}`, value),
+      /** het factuurnummer dat een factuur met deze datum nu krijgt; `format` voor een voorbeeld vóór het opslaan */
+      nextInvoiceNumber: (date?: IsoDate, format?: string) => s.invoices.nextNumber(date ?? today(), format),
+      /** "Volgende factuurnummer" in Instellingen en de welkomststappen; `date` bepaalt het jaar bij een formaat met jaartal */
+      setNextInvoiceNumber: (sequence: number, date?: IsoDate) => s.invoices.setNextNumber(sequence, date ?? today()),
     },
     /** Kostencategorieën: eigen toevoegen, aanpassen, verbergen (nooit verwijderen). */
     categories: {

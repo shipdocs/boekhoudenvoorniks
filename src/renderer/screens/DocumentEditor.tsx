@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, useAction, useApp, useLoad } from '../ui';
 import { computeTotals, type LineInput } from '../../documents/totals';
-import { addDays, today } from '../../shared/dates';
+import { addDays, isIsoDate, today } from '../../shared/dates';
 import { customerVatSituation, suggestedSalesVat, type SalesVatCode } from '../../shared/vat';
 import { CustomerMailNotice, CustomerVatHint, QuickCustomer } from './Customers';
 
@@ -52,6 +52,16 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
     api.invoices.dateWarnings(date, id).then((w) => { if (live) setDateWarnings(w); }, () => { if (live) setDateWarnings([]); });
     return () => { live = false; };
   }, [isInvoice, date, id]);
+
+  // het nummer dat een concept krijgt bij definitief maken; het jaar volgt de factuurdatum
+  const isDraft = isInvoice && (!id || (doc.data && 'invoice_date' in doc.data && doc.data.status === 'concept'));
+  const [expectedNumber, setExpectedNumber] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isDraft || !isIsoDate(date)) { setExpectedNumber(null); return; }
+    let live = true;
+    api.settings.nextInvoiceNumber(date).then((n) => { if (live) setExpectedNumber(n.number); }, () => { if (live) setExpectedNumber(null); });
+    return () => { live = false; };
+  }, [isDraft, date]);
 
   useEffect(() => {
     const d = doc.data;
@@ -123,6 +133,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           <p className="sub">
             {invoice && <StatusPill status={invoice.display_status} />} {quote && <StatusPill status={quote.status} />}{' '}
             {invoice && invoice.status !== 'concept' && invoice.open_amount > 0 && <>Nog open: <Euro cents={invoice.open_amount} /></>}
+            {expectedNumber && <span data-testid="verwacht-nummer">Krijgt nummer <strong>{expectedNumber}</strong> als je hem definitief maakt</span>}
           </p>
         </div>
         <Button kind="ghost" onClick={() => go({ screen: 'werk', extra: { tab: isInvoice ? 'facturen' : 'offertes' } })}>← Terug</Button>

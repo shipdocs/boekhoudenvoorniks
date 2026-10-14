@@ -91,7 +91,7 @@ export async function nav(page: Page, label: string | RegExp) {
 }
 
 /** De hele onboarding doorlopen zoals een nieuwe gebruiker. Eindigt op Vandaag. */
-export async function onboard(page: Page, opts: { kor?: boolean; overstap?: boolean; overstapDate?: string } = {}) {
+export async function onboard(page: Page, opts: { kor?: boolean; overstap?: boolean; overstapDate?: string; /** laatste factuurnummer uit een vorig pakket; past het niet bij de opmaak, dan de voorgestelde eigen opmaak */ lastInvoiceNumber?: string } = {}) {
   const overstap = opts.overstap || !!opts.overstapDate;
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Welkom 👋' })).toBeVisible();
@@ -139,6 +139,12 @@ export async function onboard(page: Page, opts: { kor?: boolean; overstap?: bool
     } else if (/Hoeveel mag de app zelf doen/.test(h1)) {
       await page.getByRole('button', { name: 'Verder' }).click();
     } else if (/eerder gefactureerd/.test(h1)) {
+      if (opts.lastInvoiceNumber) {
+        await field(page, 'Wat was je laatste factuurnummer dit jaar?').fill(opts.lastInvoiceNumber);
+        const own = page.getByRole('button', { name: 'Ga verder met mijn eigen opmaak' });
+        if (await own.isVisible().catch(() => false)) await own.click();
+        await expect(page.getByTestId('volgend-nummer')).toBeVisible();
+      }
       const terms = page.locator('input[type=checkbox]');
       for (const cb of await terms.all()) await cb.check();
       if (overstap) {

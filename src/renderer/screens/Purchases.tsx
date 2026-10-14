@@ -463,6 +463,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
   const { run, busy } = useAction();
   const jobs = useLoad(() => api.jobs.list({ active: true }));
   const [supplier, setSupplier] = useState('');
+  const [description, setDescription] = useState('');
   const [date, setDate] = useState(today());
   const [amount, setAmount] = useState<number | null>(null);
   const [category, setCategory] = useState('materiaal');
@@ -481,7 +482,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
       if (found === undefined) return;
       if (found) return setDuplicate({ entry, label: found.label });
     }
-    const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, ...(isReverseCharge(vat) && vatRate === 9 ? { vatRate } : {}), paidWith, jobId, allowDuplicate: !!shown, ...(businessPct !== null ? { businessPct } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
+    const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: description.trim() || meta.expenseCategories.find((c) => c.key === category)!.label, categoryKey: category, grossAmount: amount!, vatCode: vat, ...(isReverseCharge(vat) && vatRate === 9 ? { vatRate } : {}), paidWith, jobId, allowDuplicate: !!shown, ...(businessPct !== null ? { businessPct } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
     if (r) {
       onDone();
       if (category === 'investering') showInvestmentSaved(investmentInfo(amount!, vat));
@@ -494,6 +495,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
           <Field label="Waar gekocht?"><SupplierInput value={supplier} onChange={setSupplier} placeholder="bv. Gamma" autoFocus /></Field>
           <Field label="Wanneer?"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         </div>
+        <Field label="Wat heb je gekocht?" hint="optioneel"><input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="bv. kopieerpapier" maxLength={200} /></Field>
         <Field label="Bedrag op de bon" hint="inclusief btw"><MoneyInput value={amount} onChange={setAmount} /></Field>
         <CategoryChoice value={category} onChange={(c) => { setCategory(c); setVat(meta.expenseCategories.find((x) => x.key === c)?.defaultVat ?? 'hoog'); }} />
         <InvestmentHint categoryKey={category} gross={amount} vatCode={vat} onUse={() => setCategory('investering')} />

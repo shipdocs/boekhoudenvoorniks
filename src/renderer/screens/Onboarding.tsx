@@ -9,6 +9,7 @@ import { TermsBlock } from './Terms';
 import { startDateConsequences, startDateOptions } from '../../shared/switchover';
 import { isIsoDate, today } from '../../shared/dates';
 import { Logo } from '../Logo';
+import { formatDocumentNumber, guessNumberFormat, parseDocumentNumber } from '../../documents/numbering';
 
 const AUTOPILOT: [AppSettings['autopilot'], string, string][] = [
   ['voorzichtig', 'Voorzichtig', 'Ik bevestig alles zelf. De app doet voorstellen, maar boekt niets zonder mij.'],
@@ -42,6 +43,7 @@ export function Onboarding() {
   const [workspace, setWorkspace] = useState(settings.homeWorkspace);
   const [partnerHours, setPartnerHours] = useState(settings.partnerHours ? String(settings.partnerHours) : '');
   const [lastNumber, setLastNumber] = useState('');
+  const [numberFormat, setNumberFormat] = useState(settings.invoiceNumberFormat);
   // kostenposten van het beroep: standaard alles aangevinkt; opnieuw als je een ander beroep kiest
   const [costChoice, setCostChoice] = useState<{ trade: string; add: string[]; hide: string[] } | null>(null);
   const trade = meta.trades.find((t) => t.key === profile.trade);
@@ -67,13 +69,18 @@ export function Onboarding() {
   const prev = () => setIndex((i) => Math.max(0, i - 1));
 
   const overstap = shows('start') && switchMode === 'overstapper';
+  // het laatste nummer lezen volgens de opmaak: "2026-037" is 37 en "26100" bij {JJ}{NNN} is 100 (niet 6037 of 6100)
+  const parsedLast = lastNumber.trim() ? parseDocumentNumber(numberFormat, lastNumber) : null;
+  const guessedFormat = lastNumber.trim() && !parsedLast ? guessNumberFormat(lastNumber, year) : null;
+  const nextNumberPreview = parsedLast ? formatDocumentNumber(numberFormat, today(), parsedLast.year !== null && parsedLast.year < year ? 1 : parsedLast.sequence + 1) : null;
+
   const finish = async (then: 'factuur' | 'home' | 'overstap') => {
     const ok = await run(async () => {
       // alleen opslaan wat in de getoonde stappen stond: een update mag eerdere keuzes niet overschrijven
       const patch: Partial<AppSettings> = { profile, company, autopilot, onboardingDone: true, onboardingSteps: markSeen({ ...settings, company, kor }, ids) };
       if (shows('btw')) Object.assign(patch, { kor, vatPeriod, defaultVatCode: kor ? 'vrijgesteld' : 'hoog' });
       if (shows('bedrijf')) patch.smtp = { ...settings.smtp, fromName: company.name, fromEmail: settings.smtp.fromEmail || company.email };
-      if (shows('nummering')) patch.termsAcceptedVersion = TERMS_VERSION;
+      if (shows('nummering')) Object.assign(patch, { termsAcceptedVersion: TERMS_VERSION, ...(numberFormat !== settings.invoiceNumberFormat ? { invoiceNumberFormat: numberFormat } : {}) });
       if (shows('thuis')) Object.assign(patch, { phoneInternetBusinessPct: phonePct, homeWorkspace: workspace, partnerHours: Number(partnerHours) || 0 });
       if (shows('fiscaal')) Object.assign(patch, { carUse, startYear: Number(startYear) || null, startersaftrekUsed: { count: startersUsed, asOfYear: year } });
       // vóór de instellingen: mislukt dit, dan is de onboarding nog niet klaar en probeer je opnieuw (dubbel toepassen kan geen kwaad)
@@ -83,8 +90,7 @@ export function Onboarding() {
         const accounts = await api.bank.accounts();
         if (company.iban && accounts[0] && !accounts[0].iban) await api.bank.updateAccount(accounts[0].id, { iban: company.iban });
       }
-      const n = Number(lastNumber.replace(/\D/g, '').slice(-4));
-      if (lastNumber && Number.isInteger(n) && n > 0) await api.settings.setInvoiceCounter(year, n);
+      if (shows('nummering') && parsedLast && parsedLast.sequence > 0) await api.settings.setNextInvoiceNumber(parsedLast.sequence + 1, parsedLast.year !== null ? `${parsedLast.year}-01-01` : today());
       // na de btw-keuze: de instapdatum markeert eerdere btw-periodes als al aangegeven
       if (shows('start') && switchMode) await api.switchover.setMode(switchMode, switchMode === 'overstapper' ? switchDate : null);
       return true;
@@ -434,9 +440,22 @@ export function Onboarding() {
           <Field label="Wat was je laatste factuurnummer dit jaar?" hint="leeg laten als dit je eerste is">
             <input value={lastNumber} onChange={(e) => setLastNumber(e.target.value)} placeholder={`bv. ${year}-0012`} />
           </Field>
+          {nextNumberPreview && <p className="small" data-testid="volgend-nummer">Je volgende factuur wordt <strong>{nextNumberPreview}</strong>.{numberFormat !== settings.invoiceNumberFormat && <> De opmaak is {numberFormat}; die kun je later aanpassen bij Instellingen.</>}</p>}
+          {lastNumber.trim() && !parsedLast && (
+            <div className="notice warn small" role="alert">
+              {guessedFormat ? (
+                <>
+                  Dit nummer past niet bij de opmaak {numberFormat} (die geeft nummers als {formatDocumentNumber(numberFormat, today(), 1)}).
+                  <div style={{ marginTop: 8 }}><Button small kind="primary" onClick={() => setNumberFormat(guessedFormat)}>Ga verder met mijn eigen opmaak</Button></div>
+                </>
+              ) : (
+                <>Dit nummer herken ik niet. Laat het veld leeg; je kunt de opmaak en het volgende nummer later instellen bij Instellingen → Facturen & offertes.</>
+              )}
+            </div>
+          )}
           <h2>Afspraken</h2>
           <TermsBlock checked={terms} onChange={setTerms} />
-          {footer()}
+          {footer(!lastNumber.trim() || !!parsedLast)}
         </>
       )}
     </div>

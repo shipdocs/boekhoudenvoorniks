@@ -118,6 +118,8 @@ export const QUESTION_CATEGORY = 'onbekend';
 
 export interface Confirmation {
   supplier: string;
+  /** wat er gekocht is (bv. kopieerpapier); leeg = de naam van de categorie */
+  description?: string | null;
   date: IsoDate;
   total: Cents;
   invoiceNumber?: string | null;
@@ -1419,7 +1421,7 @@ export class IntakeService {
         supplierReference: c.invoiceNumber ?? null,
         invoiceDate: c.date,
         dueDate: doc.result?.dueDate?.value ?? null,
-        description: `${category.label} — ${c.supplier}`,
+        description: `${c.description?.trim() ? c.description.trim().slice(0, 200) : category.label} — ${c.supplier}`,
         attachmentPath: doc.file_path,
         jobId: c.jobId ?? null,
         documentId: id,

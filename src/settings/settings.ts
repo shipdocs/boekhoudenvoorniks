@@ -2,6 +2,7 @@ import type { IbCar } from '../tax/car-ib';
 import type { Db } from '../db/database';
 import type { PeriodType } from '../shared/dates';
 import { ValidationError, isValidEmail } from '../shared/validation';
+import { checkNumberFormat } from '../documents/numbering';
 
 export interface CompanySettings {
   name: string;
@@ -421,6 +422,13 @@ export class SettingsService {
     const candidate = { ...current, ...patch } as AppSettings;
     for (const key of ['company', 'smtp', 'profile', 'ocr'] as const) candidate[key] = { ...current[key], ...((patch[key] as object | undefined) ?? {}) } as never;
     validateSettings(candidate);
+    // alleen bij een wijziging: een eerder opgeslagen onbruikbaar formaat mag het opslaan van iets anders niet blokkeren
+    for (const key of ['invoiceNumberFormat', 'quoteNumberFormat'] as const) {
+      const format = patch[key];
+      if (format === undefined || format === current[key]) continue;
+      const fout = typeof format === 'string' ? checkNumberFormat(format) : 'Ongeldig nummerformaat';
+      if (fout) throw new ValidationError(fout);
+    }
     this.db.transaction(() => {
       for (const [key, value] of Object.entries(patch)) {
         if (!(key in DEFAULT_SETTINGS) || value === undefined) continue;
