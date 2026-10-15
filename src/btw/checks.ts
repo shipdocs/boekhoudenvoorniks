@@ -322,6 +322,8 @@ export function runVatChecks(
   // plaats van heffing af van het soort dienst (bv. werk aan een gebouw: altijd in dat land). De app
   // kent het soort prestatie niet, dus: waarschuwen dat het gecontroleerd moet worden.
   const year = end.slice(0, 4);
+  // Noord-Ierland telt mee in dezelfde drempel van € 10.000 als de EU-landen (afstandsverkoop van goederen; bevestigd door de accountant, HMRC VATNIEU3720)
+  const B2C_COUNTRIES = [...[...EU_COUNTRIES].filter((c) => c !== 'NL'), 'XI'];
   const consumerTurnover = (from: string, to: string) => (
     db
       .prepare(
@@ -330,10 +332,10 @@ export function runVatChecks(
          JOIN chart_of_accounts a ON a.id = l.account_id
          JOIN relations r ON r.id = l.relation_id
          WHERE a.rgs_code IN (?, ?) AND e.entry_date BETWEEN ? AND ? AND e.source = 'factuur'
-           AND UPPER(COALESCE(r.country, 'NL')) IN (${[...EU_COUNTRIES].filter((c) => c !== 'NL').map(() => '?').join(',')})
+           AND UPPER(COALESCE(r.country, 'NL')) IN (${B2C_COUNTRIES.map(() => '?').join(',')})
            AND COALESCE(r.vat_number, '') = ''`,
       )
-      .get(ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, from, to, ...[...EU_COUNTRIES].filter((c) => c !== 'NL')) as { s: number }
+      .get(ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, from, to, ...B2C_COUNTRIES) as { s: number }
   ).s;
   const euConsumers = consumerTurnover(`${year}-01-01`, end);
   const previousYear = String(Number(year) - 1);
@@ -348,7 +350,7 @@ export function runVatChecks(
         above
           ? `Stuur je spullen op of lever je digitale diensten, dan reken je boven ${formatEuro(EU_B2C_THRESHOLD)} in het lopende of vorige kalenderjaar de btw van het land van de klant (via de "OSS-regeling").`
           : `Voor spullen die je opstuurt en digitale diensten mag dat tot ${formatEuro(EU_B2C_THRESHOLD)} in zowel het lopende als het vorige kalenderjaar.`
-      } Voor andere diensten hangt het af van wat je doet: werk aan een huis of gebouw in dat land is bijvoorbeeld altijd belast in dat land. Dat regelt de app niet: laat je boekhouder controleren welke btw geldt.`,
+      } Klanten in Noord-Ierland tellen voor spullen mee in dezelfde grens (daar gaat het dan om Britse btw, ook via de OSS-regeling). Voor andere diensten hangt het af van wat je doet: werk aan een huis of gebouw in dat land is bijvoorbeeld altijd belast in dat land. Dat regelt de app niet: laat je boekhouder controleren welke btw geldt.`,
       count: 1,
       fingerprint: `${year}:${above ? 'boven' : 'onder'}`,
       screen: 'belasting',
