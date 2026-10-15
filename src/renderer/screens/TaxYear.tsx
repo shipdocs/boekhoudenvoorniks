@@ -511,7 +511,7 @@ function Hours({ year }: { year: number }) {
   return (
     <>
       <p className="muted">
-        Voor de zelfstandigenaftrek (en startersaftrek) moet je minstens 1.225 uur per jaar aan je bedrijf werken. {jobsOn && <>Uren op de werkbonnen van je {jw.p} tellen vanzelf mee.</>}
+        Voor de zelfstandigenaftrek (en startersaftrek) moet je minstens 1.225 uur per jaar aan je bedrijf werken. {jobsOn && <>Uren op de werkbonnen van je {jw.p} tellen vanzelf mee.</>}{' '}
         Vul hier de rest in: offertes maken, administratie, inkopen, reistijd, of gewoon al je werk, per week of per maand.
       </p>
       {t && (
