@@ -855,3 +855,18 @@ describe('ronsamenvatting RoundSummary (#253)', () => {
     expect(json).not.toContain('NL91ABNA');
   });
 });
+
+describe('vervaldatum van de toestemming (#426)', () => {
+  it('een ronde neemt de nieuwe vervaldatum van Ponto over, zodat "verlopen" na een verlenging verdwijnt', async () => {
+    await linkAccount(h);
+    // zoals het in de database stond van vóór de verlenging: verlopen
+    h.s.db.prepare("UPDATE bank_feed_accounts SET expires_at = '2026-10-01' WHERE external_id = 'acc-1'").run();
+    h.fake = [account({ expiresAt: '2027-01-15' })];
+    const summary = await h.feed.round();
+    expect(summary.accounts).toHaveLength(1);
+    expect(feedRow(h.s.db).expires_at).toBe('2027-01-15');
+    // en zonder wijziging blijft hij staan
+    await h.feed.round();
+    expect(feedRow(h.s.db).expires_at).toBe('2027-01-15');
+  });
+});
