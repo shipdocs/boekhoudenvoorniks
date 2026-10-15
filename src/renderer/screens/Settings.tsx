@@ -16,6 +16,7 @@ import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, 
 import { ONLINE_HELP } from '../../shared/online-help';
 import { PontoCard } from './PontoDialog';
 import { checkNumberFormat } from '../../documents/numbering';
+import { HANDLEIDING_URL } from '../../shared/handleiding';
 
 type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'scanner' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
 
@@ -825,7 +826,7 @@ function About() {
       <h3>BoekhoudenVoorNiks {version.data}</h3>
       <p>Gratis en open source onder de {LICENSE_NAME}. Je mag de software gebruiken, bestuderen, aanpassen en delen onder de voorwaarden van die licentie.</p>
       <p>
-        <a href="#" onClick={open(SOURCE_URL)}>Broncode</a> · <a href="#" onClick={open(TERMS_URL)}>Gebruiksvoorwaarden</a> · <a href="#" onClick={open(PRIVACY_URL)}>Privacyverklaring</a>
+        <a href="#" onClick={open(HANDLEIDING_URL)}>Handleiding</a> · <a href="#" onClick={open(SOURCE_URL)}>Broncode</a> · <a href="#" onClick={open(TERMS_URL)}>Gebruiksvoorwaarden</a> · <a href="#" onClick={open(PRIVACY_URL)}>Privacyverklaring</a>
       </p>
       <div className="row" style={{ alignItems: 'center' }}>
         <Button onClick={() => void api.app.openExternal(feedbackMailto(version.data ?? ''))}>✉️ Vraag of feedback mailen</Button>
