@@ -1406,7 +1406,7 @@ export function createApi(s: Services, host: HostContext) {
       imports: () => s.bank.imports(),
       removeImportPreview: (batchId: number) => s.bank.removeImportPreview(Number(batchId)),
       removeImport: async (batchId: number) => {
-        if (!s.settings.get().advancedMode) throw new ValidationError('Zet eerst bij Instellingen → Geavanceerd "Toon de boekhouding voor je boekhouder" aan');
+        if (!s.settings.get().advancedMode) throw new ValidationError('Zet eerst bij Instellingen → Voor de boekhouder "Toon de boekhouding voor je boekhouder" aan');
         const preview = s.bank.removeImportPreview(Number(batchId));
         if (preview.blocked) throw new ValidationError(preview.blocked);
         await host.safetyBackup?.(`voor-weghalen-afschrift-${preview.id}`);
