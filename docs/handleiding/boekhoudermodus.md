@@ -16,7 +16,7 @@ Dit hoofdstuk is voor de boekhouder of accountant die een administratie in Boekh
 2. De app legt uit dat deze functies voor wie boekhoudt zijn, en dat we geen ondersteuning geven op een administratie waarin buiten de boekhouder om in deze modus is geschreven. Vink *Ik begrijp dit* aan en kies *Aanzetten*. Dat akkoord wordt onthouden.
 3. In het menu verschijnt *Boekhouding*; bij *Bank* verschijnt de lijst *Ingelezen afschriften*.
 
-Uitzetten kan altijd met hetzelfde vinkje. Kijken (balansen, kaarten, rapporten, exports) verandert niets aan de administratie; alleen boeken, terugdraaien, rekeningen wijzigen en afschriften weghalen grijpen in.
+Uitzetten kan altijd met hetzelfde vinkje. Kijken (balansen, kaarten, rapporten, exports) verandert niets aan de administratie; alleen boeken, terugdraaien, rekeningen wijzigen en afschriften weghalen grijpen in. Die handelingen legt de app vast: bij *Instellingen → Over* staat of er ooit in de boekhoudermodus is geschreven, en het pakket voor de boekhouder heeft er een controle voor. Wat via de uitwisseling uit een antwoord van de boekhouder komt, telt daarin niet mee.
 
 ## Wat er onder Boekhouding staat
 

@@ -1668,4 +1668,14 @@ export const migrations: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_import_returned_tx ON import_returned(transaction_id);
   `,
+  `
+  -- Schrijvende handelingen in de boekhoudermodus (#427): memoriaal, terugdraaien, rekeningschema, afschrift weghalen.
+  -- Alleen additief, nooit gewist; te zien bij Instellingen → Over en in het pakket voor de boekhouder.
+  CREATE TABLE IF NOT EXISTS advanced_actions (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    detail TEXT,
+    at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];

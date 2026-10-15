@@ -8,6 +8,7 @@
 - **Geen tweede schuifbalk meer.** Op een lange pagina kreeg behalve de inhoud ook het venster zelf een schuifbalk, waardoor je de hele app (menu en al) naar een witte pagina kon schuiven. Nu schuift alleen de inhoud.
 
 ### Nieuw
+- **De app houdt bij of er in de boekhoudermodus is geschreven.** Een correctieboeking, een boeking terugdraaien, het rekeningschema wijzigen of een afschrift weghalen wordt vastgelegd (kijken niet). Bij Instellingen → Over zie je "er is nooit in geschreven" of hoe vaak en wanneer, en het pakket voor je boekhouder heeft er een controle voor. Het akkoord-venster zegt het erbij: wij geven geen advies over een boekhouding; vragen lopen via je boekhouder, en op een administratie waarin buiten de boekhouder om in deze modus is geschreven, geven we geen ondersteuning.
 - **Hulp in de app.** Onderaan het menu staat *Hulp*: die opent in je browser de pagina van de [online handleiding](https://boekhoudenvoorniks.nl/handleiding/index.html) die bij het scherm hoort waar je bent. Ook bij Instellingen → Over staat de handleiding.
 
 ## 1.7.0 — een verkeerd afschrift weer weghalen, klussen naar jouw hand, en meer grip op de btw-aangifte
