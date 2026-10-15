@@ -148,6 +148,7 @@ section { padding: 56px 0; }
 .tag.fixed { color: #a15c00; }
 .tag.tax { color: var(--good); }
 .tag.security { color: #b3261e; }
+.tag.tech { color: var(--muted); }
 @media (prefers-color-scheme: dark) {
   .tag.improved { color: #b99be6; }
   .tag.fixed { color: #e0a24d; }
