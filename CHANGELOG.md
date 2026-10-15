@@ -2,6 +2,9 @@
 
 ## Nog niet uitgebracht
 
+### Opgelost
+- **"Weet ik nog niet" bij het afsluiten of versturen van een periode.** De melding zegt nu tot welke datum het gaat ("1 boeking staat t/m 30 september nog bij 'weet ik nog niet'"), en is de boeking daarna al ingedeeld, dan zegt de app dat en hoef je niets te bevestigen. Zo klopt het weer met het pakket voor je boekhouder, dat over het hele jaar kijkt.
+
 ### Nieuw
 - **Hulp in de app.** Onderaan het menu staat *Hulp*: die opent in je browser de pagina van de [online handleiding](https://boekhoudenvoorniks.nl/handleiding/index.html) die bij het scherm hoort waar je bent. Ook bij Instellingen → Over staat de handleiding.
 

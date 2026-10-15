@@ -89,8 +89,18 @@ export class PeriodCloseService {
     if (docs.n > 0) {
       out.push({ key: 'documenten', level: 'blokkeert', title: `${docs.n} ${docs.n === 1 ? 'bon of factuur' : 'bonnen of facturen'} t/m ${formatDateNl(until)} nog niet gecontroleerd`, detail: 'Controleer ze eerst, dan tellen ze mee in deze periode. Wat later nog binnenkomt, komt in de volgende periode.', screen: 'aankopen' });
     }
+    // Wat op de einddatum nog bij "weet ik nog niet" stond. Is het daarna al ingedeeld, dan valt er niets meer te
+    // doen: dan zeggen we dat, in plaats van hetzelfde te vragen als het pakket voor het hele jaar al "niets" zegt (#430).
     const questions = accountOpenItems(this.db, ACCOUNTS.vraagposten, until);
-    if (questions.length) out.push({ key: 'vraagposten', level: 'bevestigen', title: `${questions.length} boekingen staan nog bij "weet ik nog niet"`, detail: 'Deel deze boekingen eerst in, of bevestig dat je ze met je boekhouder hebt besproken. Na het afsluiten worden correcties in de volgende open periode geboekt.', screen: 'aankopen' });
+    if (questions.length) {
+      const stillOpen = new Set(accountOpenItems(this.db, ACCOUNTS.vraagposten).map((q) => q.id));
+      const n = questions.length;
+      if (questions.every((q) => !stillOpen.has(q.id))) {
+        out.push({ key: 'vraagposten', level: 'info', title: `${n} ${n === 1 ? 'boeking stond' : 'boekingen stonden'} op ${formatDateNl(until)} nog bij "weet ik nog niet" en ${n === 1 ? 'is' : 'zijn'} daarna ingedeeld`, detail: 'Die indeling blijft in de latere periode staan. Je kunt gewoon afsluiten.' });
+      } else {
+        out.push({ key: 'vraagposten', level: 'bevestigen', title: `${n} ${n === 1 ? 'boeking staat' : 'boekingen staan'} t/m ${formatDateNl(until)} nog bij "weet ik nog niet"`, detail: 'Deel deze boekingen eerst in, of bevestig dat je ze met je boekhouder hebt besproken. Na het afsluiten worden correcties in de volgende open periode geboekt.' });
+      }
+    }
     for (const st of this.bank.importStatus()) {
       // een dag is pas gedekt als het afschrift ná die dag is ingelezen (#226): een export van de laatste dag
       // zelf mist wat er later die dag nog bij kwam
