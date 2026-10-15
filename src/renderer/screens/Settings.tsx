@@ -10,6 +10,7 @@ import { AdministrationsSettings } from './Administrations';
 import { DataFolderSettings } from './DataFolder';
 import { OfficeSettings } from './Exchange';
 import { ScannerSettings } from './Scanner';
+import { today } from '../../shared/dates';
 import { businessEffect } from '../../shared/business-share';
 import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 import { ONLINE_HELP } from '../../shared/online-help';
@@ -38,6 +39,9 @@ export function SettingsScreen() {
   const { run, busy } = useAction();
   const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'bedrijf');
   const [draft, setDraft] = useState<Settings>(settings);
+  // de boekhouding voor de boekhouder aanzetten: eerst uitleg en een akkoord (#409)
+  const [agreeing, setAgreeing] = useState(false);
+  const [understood, setUnderstood] = useState(false);
   // na zoeken naar Claude Code/Codex: het kaartje voor vragen stellen opnieuw laden
   const [aiVersion, setAiVersion] = useState(0);
   const bankAccounts = useLoad(() => api.bank.accounts());
@@ -396,8 +400,18 @@ export function SettingsScreen() {
       {tab === 'over' && <About />}
       {tab === 'geavanceerd' && section(
         <>
-          <label className="row"><input type="checkbox" checked={draft.advancedMode} onChange={(e) => set({ advancedMode: e.target.checked })} /> Toon de boekhouding voor je boekhouder (grootboek, balans en exports)</label>
+          <label className="row"><input type="checkbox" checked={draft.advancedMode} onChange={(e) => { if (e.target.checked && !draft.advancedModeAgreedAt) { setUnderstood(false); setAgreeing(true); } else set({ advancedMode: e.target.checked }); }} /> Toon de boekhouding voor je boekhouder (grootboek, balans en exports)</label>
           <p className="small muted">Handig voor je boekhouder. Voor dagelijks gebruik heb je dit niet nodig.</p>
+          {agreeing && (
+            <Modal title="Voor de boekhouder" onClose={() => setAgreeing(false)}>
+              <p>Deze functies zijn bedoeld voor wie boekhoudt. Je kunt er rechtstreeks in je boekhouding werken, en dus ook iets kapotmaken dat de app anders voor je bewaakt. Twijfel je? Raadpleeg eerst je boekhouder.</p>
+              <label className="row"><input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} /> Ik begrijp dit</label>
+              <div className="row end" style={{ marginTop: 14 }}>
+                <Button onClick={() => setAgreeing(false)}>Annuleren</Button>
+                <Button kind="primary" disabled={!understood} onClick={() => { setAgreeing(false); set({ advancedMode: true, advancedModeAgreedAt: today() }); }}>Aanzetten</Button>
+              </div>
+            </Modal>
+          )}
           {settings.advancedMode && <div><Button small onClick={() => go({ screen: 'expert', extra: { tab: 'rekeningen' } })}>Rekeningschema: rekeningen toevoegen of hernoemen</Button></div>}
         </>,
       )}

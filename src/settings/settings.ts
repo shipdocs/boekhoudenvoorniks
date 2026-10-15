@@ -136,6 +136,8 @@ export interface AppSettings {
   /** Dagen na vervaldatum waarop herinneringen gestuurd worden, bv. [7, 21]. */
   reminderDays: number[];
   advancedMode: boolean;
+  /** Wanneer de gebruiker bevestigde dat de boekhoudfuncties voor de boekhouder zijn en hij ze op eigen risico aanzet (#409); null = nog nooit. */
+  advancedModeAgreedAt: string | null;
   /** Locatie van foto's gebruiken om bonnen aan klussen te koppelen (#32). Standaard uit; alleen lokaal. */
   jobLocation: boolean;
   /** E-factuur (UBL) als bijlage meesturen met elke factuur (#24). */
@@ -266,6 +268,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   remindersEnabled: false,
   reminderDays: [7, 21],
   advancedMode: false,
+  advancedModeAgreedAt: null,
   autopilot: 'normaal',
   carUse: 'onbekend',
   carPrivateUse: null,
@@ -422,6 +425,8 @@ export class SettingsService {
     const candidate = { ...current, ...patch } as AppSettings;
     for (const key of ['company', 'smtp', 'profile', 'ocr'] as const) candidate[key] = { ...current[key], ...((patch[key] as object | undefined) ?? {}) } as never;
     validateSettings(candidate);
+    // de boekhouding voor de boekhouder gaat alleen aan na een bewuste bevestiging (#409); wie hem al aan had, houdt hem
+    if (patch.advancedMode && !current.advancedMode && !candidate.advancedModeAgreedAt) throw new ValidationError('Bevestig eerst dat je begrijpt dat de boekhoudfuncties voor de boekhouder zijn');
     // alleen bij een wijziging: een eerder opgeslagen onbruikbaar formaat mag het opslaan van iets anders niet blokkeren
     for (const key of ['invoiceNumberFormat', 'quoteNumberFormat'] as const) {
       const format = patch[key];
