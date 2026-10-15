@@ -1791,8 +1791,12 @@ export class BankService {
 
   // ---------- een ingelezen afschrift weer weghalen (#408) ----------
 
-  /** De ingelezen afschriften, nieuwste bovenaan, met wat het weghalen ervan tegenhoudt. */
-  imports(limit = 50): StatementImport[] {
+  /**
+   * De ingelezen afschriften (bestanden; rondes van de bankkoppeling niet, die zijn nooit weg te halen en komen
+   * vanzelf terug), nieuwste bovenaan, met wat het weghalen ervan tegenhoudt. Zonder limiet: een oud afschrift
+   * moet bereikbaar blijven, ook na jaren wekelijks inlezen.
+   */
+  imports(): StatementImport[] {
     const rows = this.db
       .prepare(
         `SELECT b.id, b.filename, b.source, b.imported_at AS importedAt,
@@ -1801,9 +1805,9 @@ export class BankService {
            (SELECT MAX(period_to) FROM import_batch_accounts WHERE batch_id = b.id) AS "to",
            (SELECT COUNT(*) FROM bank_transactions t WHERE t.import_batch_id = b.id) AS lines,
            (SELECT COUNT(*) FROM bank_transactions t WHERE t.import_batch_id = b.id AND t.status = 'gematcht') AS processed
-         FROM import_batches b ORDER BY b.imported_at DESC, b.id DESC LIMIT ?`,
+         FROM import_batches b WHERE b.source <> 'openbanking' ORDER BY b.imported_at DESC, b.id DESC`,
       )
-      .all(limit) as Omit<StatementImport, 'blocked'>[];
+      .all() as Omit<StatementImport, 'blocked'>[];
     return rows.map((r) => ({ ...r, blocked: this.removeBlocked(r.id, r.source) }));
   }
 

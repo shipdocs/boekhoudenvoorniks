@@ -51,6 +51,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
   // de ingelezen afschriften, om er een weg te halen (#408): alleen met de boekhouding voor de boekhouder aan
   const imports = useLoad(() => (settings.advancedMode ? api.bank.imports() : Promise.resolve([])), [settings.advancedMode]);
   const [removing, setRemoving] = useState<Awaited<ReturnType<typeof api.bank.removeImportPreview>> | null>(null);
+  const [allImports, setAllImports] = useState(false);
   const overview = useLoad(() => api.bank.balanceOverview());
   // verzamelbetalingen die er twee keer in staan (één regel én losse deelposten)
   const doubles = useLoad(() => api.bank.doubles());
@@ -88,7 +89,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
     const r = await run(() => api.bank.importFile(filename, content, m));
     if (!r) return;
     setLast(r);
-    await Promise.all([status.reload(), doubles.reload(), sames.reload()]);
+    await Promise.all([status.reload(), doubles.reload(), sames.reload(), imports.reload()]);
     if (r.warnings.length) toast(`${r.warnings.length} ${r.warnings.length === 1 ? 'regel kon' : 'regels konden'} we niet lezen (bv. ${r.warnings[0]!.charAt(0).toLowerCase()}${r.warnings[0]!.slice(1)})`, 'error');
     await txs.reload();
   };
@@ -255,7 +256,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
           <table className="list">
             <thead><tr><th>Ingelezen</th><th>Bestand</th><th>Rekening</th><th>Periode</th><th className="num">Regels</th><th><span className="sr-only">Acties</span></th></tr></thead>
             <tbody>
-              {(imports.data ?? []).map((b) => (
+              {(imports.data ?? []).slice(0, allImports ? undefined : 30).map((b) => (
                 <tr key={b.id}>
                   <td>{formatDateTime(b.importedAt)}</td>
                   <td>{b.filename ?? b.source.toUpperCase()}</td>
@@ -270,6 +271,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
               ))}
             </tbody>
           </table>
+          {!allImports && (imports.data?.length ?? 0) > 30 && <p className="small"><button className="linklike" onClick={() => setAllImports(true)}>Alle {imports.data!.length} afschriften tonen</button></p>}
         </>
       )}
       {removing && (
