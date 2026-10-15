@@ -79,6 +79,11 @@ describe('eigen rekening toevoegen', () => {
     s.ledger.post({ date: '2026-06-30', description: 'Fee juni', source: 'handmatig', lines: [{ account: fee.rgs_code, credit: 100000 }, { account: 'BVorOvr', debit: 100000 }] });
     expect(api.ledger.accountsInUse()).toContain(fee.id);
     expect(() => api.ledger.archiveAccount(fee.id)).toThrow(/al geboekt/);
+    // een extra bankrekening zonder boekingen blijft staan: de volgende bankimport boekt erop
+    const spaar = s.bank.addAccount('Spaarrekening', 'NL02ABNA0123456789');
+    const spaarAccount = s.ledger.listAccounts().find((a) => a.name === 'Bank Spaarrekening')!;
+    expect(spaar).toBeTruthy();
+    expect(() => api.ledger.archiveAccount(spaarAccount.id)).toThrow(/bankrekening/);
     api.ledger.archiveAccount(dividend.id);
     expect(s.ledger.listAccounts().some((a) => a.id === dividend.id)).toBe(false);
   });

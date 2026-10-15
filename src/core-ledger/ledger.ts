@@ -218,9 +218,21 @@ export class Ledger {
     return { code, rgs, rgsRef, name: input.name.trim(), category: categoryForRgs(rgsRef) };
   }
 
-  /** Of er al op deze rekening geboekt is (dan kan hij niet weg). */
+  /** Of er al op deze rekening geboekt is of een bankrekening aan hangt (dan kan hij niet weg). */
   accountInUse(id: number): boolean {
-    return this.db.prepare('SELECT 1 FROM journal_lines WHERE account_id = ? LIMIT 1').get(id) !== undefined;
+    return this.accountsInUse().has(id);
+  }
+
+  /** Alle rekeningen waarop geboekt is of waar een bankrekening aan hangt. */
+  accountsInUse(): Set<number> {
+    const rows = this.db.prepare('SELECT DISTINCT account_id AS id FROM journal_lines UNION SELECT account_id FROM bank_accounts').all() as { id: number }[];
+    return new Set(rows.map((r) => r.id));
+  }
+
+  /** De BV-rekeningen die er nog niet zijn, met een vrij nummer: voor de kopie bij de boekhouder, waar ze als handeling mee moeten. */
+  missingBvAccounts(): { code: string; rgs: string; rgsRef: string; name: string; category: AccountCategory }[] {
+    const exists = this.db.prepare('SELECT 1 FROM chart_of_accounts WHERE rgs_code = ?');
+    return BV_ACCOUNTS.filter((a) => !exists.get(a.rgs)).map((a) => ({ code: this.freeCode(a.code), rgs: a.rgs, rgsRef: a.ref, name: a.name, category: a.category }));
   }
 
   listAccounts(includeArchived = false): Account[] {
@@ -323,7 +335,7 @@ export class Ledger {
   archiveAccount(id: number): void {
     const account = this.getAccountById(id);
     if (account.is_system) throw new LedgerError('Systeemrekeningen kunnen niet gearchiveerd worden');
-    if (this.accountInUse(id)) throw new LedgerError(`Op ${account.code} ${account.name} is al geboekt; die rekening blijft staan. Je kunt hem wel hernoemen.`);
+    if (this.accountInUse(id)) throw new LedgerError(`Op ${account.code} ${account.name} is al geboekt of er hangt een bankrekening aan; die rekening blijft staan. Je kunt hem wel hernoemen.`);
     this.assertAccountsEditable();
     this.db.prepare('UPDATE chart_of_accounts SET archived = 1 WHERE id = ?').run(id);
   }

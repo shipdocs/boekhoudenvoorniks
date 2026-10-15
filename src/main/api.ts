@@ -996,7 +996,11 @@ export function createApi(s: Services, host: HostContext) {
         }
         const r = s.settings.update(patch);
         // bv: de rekeningen voor loon, loonheffing, rekening-courant, vpb en aandelenkapitaal komen erbij
-        if (patch.legalForm === 'bv') s.ledger.seedBvAccounts();
+        // in de kopie bij de boekhouder als handeling, zodat zijn correcties op die rekeningen ook bij de klant passen
+        if (patch.legalForm === 'bv') {
+          if (s.settings.officeCopy()) for (const input of s.ledger.missingBvAccounts()) s.exchange.act({ kind: 'rekening', input });
+          else s.ledger.seedBvAccounts();
+        }
         if (patch.ocr) host.reconfigureLocalAi();
         if (patch.autoUpdate !== undefined) host.updates?.reconfigure();
         return r;
@@ -1876,7 +1880,7 @@ export function createApi(s: Services, host: HostContext) {
       },
       searchRgs: (query: string) => searchRgs(query),
       /** welke rekeningen al gebruikt zijn: die kunnen niet weg */
-      accountsInUse: () => s.ledger.listAccounts().filter((a) => s.ledger.accountInUse(a.id)).map((a) => a.id),
+      accountsInUse: () => [...s.ledger.accountsInUse()],
       renameAccount: (id: number, name: string) => s.ledger.renameAccount(id, name),
       archiveAccount: (id: number) => s.ledger.archiveAccount(id),
       entries: (filter?: { from?: IsoDate; to?: IsoDate; source?: EntrySource; accountRgs?: string; limit?: number }) => s.ledger.listEntries(filter),
