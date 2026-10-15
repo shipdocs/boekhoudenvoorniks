@@ -3,6 +3,7 @@
 ## Nog niet uitgebracht
 
 ### Opgelost
+- **Een oudere betaling openen vanuit Zoeken gaf een leeg scherm.** Heb je meer dan 500 betalingen ingelezen, dan bleef het scherm leeg als je in Zoeken op een betaling klikte die ouder was dan de 500 nieuwste (bijvoorbeeld een genegeerde regel uit een eerder jaar). De app haalt de betaling nu zelf op, en bestaat hij niet meer, dan zegt hij dat. Het Bank-overzicht zegt er nu ook bij dat het de 500 nieuwste betalingen laat zien en dat je oudere via zoeken vindt.
 - **"Weet ik nog niet" bij het afsluiten of versturen van een periode.** De melding zegt nu tot welke datum het gaat ("1 boeking staat t/m 30 september nog bij 'weet ik nog niet'"), en is de boeking daarna al ingedeeld, dan zegt de app dat en hoef je niets te bevestigen. Zo klopt het weer met het pakket voor je boekhouder, dat over het hele jaar kijkt.
 - **Ponto: de melding "toestemming is verlopen" verdwijnt na een verlenging.** De app nam de nieuwe vervaldatum van Ponto niet over; na de eerstvolgende ronde klopt hij nu weer.
 - **Geen tweede schuifbalk meer.** Op een lange pagina kreeg behalve de inhoud ook het venster zelf een schuifbalk, waardoor je de hele app (menu en al) naar een witte pagina kon schuiven. Nu schuift alleen de inhoud.

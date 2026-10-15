@@ -16,7 +16,7 @@ import type { SendOptions } from '../documents/sending';
 import { storedPurchaseVat, storedVatWarning } from '../core-ledger/stored-purchase';
 import { expenseLines, type PurchaseInvoiceInput } from '../documents/purchases';
 import { businessEffect } from '../shared/business-share';
-import type { BookToAccountInput, SaleInput } from '../import/bank';
+import type { BankTransaction, BookToAccountInput, SaleInput } from '../import/bank';
 import { directionIssue, directions, headerSignature, oneSided, parseCsv, previewCsv, type CsvMapping } from '../import/csv';
 import { advancedUsage, recordAdvancedAction } from '../core-ledger/advanced-actions';
 import { detectFormat } from '../import/detect';
@@ -232,6 +232,11 @@ export function createApi(s: Services, host: HostContext) {
     consent.give();
   };
   const ocrConsentNeeded = (): boolean => Boolean(host.localOcr.consent && !host.localOcr.consent.given());
+  /** een betaling zoals de schermen hem tonen: met de naam van de rekening en "waar staat dit op?" */
+  const enrichTransaction = (t: BankTransaction, accounts: Map<number, string>) => {
+    const booking = s.bookedInfo.entry(t.matched_journal_entry_id);
+    return { ...t, account_name: accounts.get(t.bank_account_id) ?? null, booked_as: booking?.summary || null, vat_period: booking?.vatPeriod ?? null };
+  };
   const linkTarget = (kind: string, id: number): LinkTarget => {
     if (kind !== 'aankoop' && kind !== 'bank') throw new ValidationError('Kies een aankoop of een betaling');
     return { kind, id: Number(id) };
@@ -1519,13 +1524,15 @@ export function createApi(s: Services, host: HostContext) {
         const auto = s.inbox.autoProcess();
         return { id, autoMatched: auto.matched + auto.booked };
       },
-      /** betalingen, met "waar staat dit op?" en de naam van de rekening */
+      /** betalingen, met "waar staat dit op?" en de naam van de rekening (de 500 nieuwste) */
       transactions: (filter?: { status?: 'nieuw' | 'gematcht' | 'genegeerd'; search?: string }) => {
         const accounts = new Map(s.bank.listAccounts().map((a) => [a.id, a.name]));
-        return s.bank.list(filter).map((t) => {
-          const booking = s.bookedInfo.entry(t.matched_journal_entry_id);
-          return { ...t, account_name: accounts.get(t.bank_account_id) ?? null, booked_as: booking?.summary || null, vat_period: booking?.vatPeriod ?? null };
-        });
+        return s.bank.list(filter).map((t) => enrichTransaction(t, accounts));
+      },
+      /** één betaling, ook als die ouder is dan de 500 nieuwste van de lijst hierboven (#441) */
+      transaction: (txId: number) => {
+        const t = s.bank.get(txId);
+        return enrichTransaction(t, new Map(s.bank.listAccounts().map((a) => [a.id, a.name])));
       },
       /** voorstellen op het scherm van de betaling; ook een aankoop waar je eerder "Nee" op zei, zodat je hem alsnog kunt kiezen */
       suggestions: (txId: number) => s.matching.suggest(s.bank.get(txId), undefined, undefined, { withRejected: true }),
