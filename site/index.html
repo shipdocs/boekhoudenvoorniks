@@ -75,7 +75,7 @@
           "Periode afsluiten: afgewerkt is afgewerkt",
           "Meerdere administraties op één computer"
         ],
-        "softwareVersion": "1.6.0",
+        "softwareVersion": "1.7.0",
         "releaseNotes": "https://boekhoudenvoorniks.nl/wijzigingen.html",
         "screenshot": ["https://boekhoudenvoorniks.nl/img/vandaag.png", "https://boekhoudenvoorniks.nl/img/belasting.png", "https://boekhoudenvoorniks.nl/img/werk.png", "https://boekhoudenvoorniks.nl/img/overzicht.png"],
         "downloadUrl": "https://boekhoudenvoorniks.nl/downloaden.html",
@@ -223,7 +223,23 @@
             "name": "Welke banken worden ondersteund?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Elke bank: lees je afschrift in als CAMT.053 of MT940. Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf; bij andere banken geef je één keer aan welke kolom wat is. Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes. Vanaf versie 1.2.0 kun je optioneel ook je bank laten ophalen met Ponto, een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit; welke banken die ondersteunt, bepaalt Ponto. Afschriften blijven de basis en terugval."
+              "text": "Elke bank: lees je afschrift in als CAMT.053 of MT940. Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf; bij andere banken wijs je één keer aan welke kolom wat is, en je ziet meteen per regel hoe de app hem leest (datum, af of bij, bedrag). Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes. Optioneel laat je je bank ophalen met Ponto, en de app kan afschriften vanzelf inlezen uit je downloadmap."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Welk bestand kies ik bij mijn bank: CAMT.053, MT940 of CSV?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Kies CAMT.053 als je bank dat aanbiedt, anders MT940. Daarin staat vast of een bedrag af of bij is, en de naam en het rekeningnummer van de tegenpartij staan erbij. Een CSV werkt ook, maar daarin schrijft elke bank af en bij anders op. Vanaf versie 1.7.0 laat de app vóór het inlezen zien wat ze van een CSV maakt, en vraagt ze eerst of het klopt als alle regels dezelfde kant op gaan én de af/bij-kolom er verdacht uitziet."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Ik heb een verkeerd afschrift ingelezen. Kan ik dat ongedaan maken?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja, vanaf versie 1.7.0. Zet bij Instellingen → Voor de boekhouder 'Toon de boekhouding voor je boekhouder' aan (de app vraagt eerst een akkoord). Ga naar Bank → Ingelezen afschriften en kies Weghalen. De app laat eerst zien wat er gebeurt: verwerkte regels krijgen een tegenboeking, bonnen die erbij hingen gaan terug naar Nog controleren, en een betaling die ook in een ander afschrift staat blijft staan. Daarna maakt de app een back-up en haalt ze het afschrift helemaal weg; lees het verbeterde bestand vervolgens opnieuw in. Niet voor afschriften uit de bankkoppeling en niet in een afgesloten periode."
             }
           },
           {
@@ -232,6 +248,14 @@
             "acceptedAnswer": {
               "@type": "Answer",
               "text": "Nee. Je werkt met klanten, klussen, offertes, facturen en bonnetjes. Het programma maakt daar automatisch een dubbele boekhouding van en vraagt alleen iets als het niet zeker is."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Ik werk niet met klussen. Moet ik die gebruiken?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Nee. Vanaf versie 1.7.0 haal je bij Instellingen het vinkje 'Ik werk met klussen' weg. Dan verdwijnen het menu-item Klussen, de vraag voor welke klus bij bonnen, aankopen en ritten, en de meldingen erover; een offerte zet je na akkoord rechtstreeks om in een factuur. Je kunt het woord ook aanpassen: klus, project of opdracht."
             }
           },
           {
@@ -610,8 +634,11 @@
         <details><summary>Kan ik overstappen vanuit een ander boekhoudprogramma?</summary><p>Ja. Kies een instapdatum en lees een auditfile (XAF) uit je vorige programma in, of het overzicht van je boekhouder (kolommen- of saldibalans en openstaande facturen). Heb je een auditfile per jaar, dan zet je ze allemaal tegelijk neer. De app vult je startbalans in; jij kijkt het na.</p></details>
         <details><summary>Kan mijn bank automatisch worden opgehaald?</summary><p>Ja, vanaf versie 1.2.0 en optioneel, met Ponto: een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit, met je eigen Client ID en Client Secret. De app haalt je betalingen dan zelf op, rechtstreeks bij Ponto; ShipDocs ziet je bankgegevens niet. Een wizard leidt je in vijf stappen langs Ponto. Wat Ponto kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto. De app zegt tot welke datum de betalingen volledig zijn bijgewerkt, en afschriften inlezen blijft de basis en terugval.</p></details>
         <details><summary>Kan ik buitenlandse facturen in dollars verwerken?</summary><p>Ja. De app herkent vreemde valuta, rekent inkoopfacturen om naar euro’s en zoekt een passende eurobetaling. Een klein koersverschil bij een later gekoppelde betaling wordt apart geboekt. Voor buitenlandse btw doet de app een voorstel; bij twijfel controleer je het. Dit hoort bij het gratis programma. <a href="buitenlandse-facturen.html">Bekijk het dollarvoorbeeld</a>.</p></details>
-        <details><summary>Welke banken worden ondersteund?</summary><p>Elke bank: lees je afschrift in als CAMT.053 of MT940. Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf; bij andere banken geef je één keer aan welke kolom wat is. Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes. Vanaf versie 1.2.0 kun je optioneel ook je bank laten ophalen met Ponto, een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit; welke banken die ondersteunt, bepaalt Ponto. Afschriften blijven de basis en terugval.</p></details>
+        <details><summary>Welke banken worden ondersteund?</summary><p>Elke bank: lees je afschrift in als CAMT.053 of MT940. Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf; bij andere banken wijs je één keer aan welke kolom wat is, en je ziet meteen per regel hoe de app hem leest (datum, af of bij, bedrag). Betalingen worden automatisch gekoppeld aan je facturen en bonnetjes. Vanaf versie 1.2.0 kun je optioneel ook je bank laten ophalen met Ponto, en de app kan afschriften vanzelf inlezen uit je downloadmap. <a href="bank-automatisch.html">Lees meer over bank automatisch inlezen</a>.</p></details>
+        <details><summary>Welk bestand kies ik bij mijn bank: CAMT.053, MT940 of CSV?</summary><p>Kies CAMT.053 als je bank dat aanbiedt, anders MT940. Daarin staat vast of een bedrag af of bij is, en de naam en het rekeningnummer van de tegenpartij staan erbij. Een CSV werkt ook, maar daarin schrijft elke bank "af" en "bij" anders op. Vanaf versie 1.7.0 laat de app vóór het inlezen zien wat ze van een CSV maakt, en vraagt ze eerst of het klopt als alle regels dezelfde kant op gaan én de af/bij-kolom er verdacht uitziet. Bij de meeste banken download je het bestand bij <em>Afschriften</em> of <em>Exporteren</em> in internetbankieren.</p></details>
+        <details><summary>Ik heb een verkeerd afschrift ingelezen. Kan ik dat ongedaan maken?</summary><p>Ja, vanaf versie 1.7.0. Zet bij Instellingen → Voor de boekhouder <em>Toon de boekhouding voor je boekhouder</em> aan (de app vraagt eerst een akkoord, want hiermee werk je rechtstreeks in je boekhouding). Ga dan naar Bank → <em>Ingelezen afschriften</em> en kies bij het afschrift <em>Weghalen</em>. De app laat eerst zien wat er gebeurt: regels die je al verwerkt had krijgen een tegenboeking, bonnen die erbij hingen gaan terug naar <em>Nog controleren</em>, en een betaling die ook in een ander afschrift staat blijft gewoon staan. Daarna maakt de app een back-up en haalt ze het afschrift helemaal weg. Lees het verbeterde bestand vervolgens opnieuw in, alsof het de eerste keer is. Dit kan niet voor afschriften uit de bankkoppeling (die komen vanzelf terug) en niet als er betalingen in een afgesloten periode in staan.</p></details>
         <details><summary>Heb ik boekhoudkennis nodig?</summary><p>Nee. Je werkt met klanten, klussen, offertes, facturen en bonnetjes. Het programma maakt daar automatisch een dubbele boekhouding van en vraagt alleen iets als het niet zeker is.</p></details>
+        <details><summary>Ik werk niet met klussen. Moet ik die gebruiken?</summary><p>Nee. Vanaf versie 1.7.0 haal je bij Instellingen het vinkje <em>Ik werk met klussen</em> weg. Dan verdwijnen het menu-item Klussen, de vraag "voor welke klus" bij bonnen, aankopen en ritten, en de meldingen erover. Een offerte zet je na akkoord rechtstreeks om in een factuur. Werk je wel per opdracht maar noem je het anders, kies dan bij Instellingen het woord dat bij jou past: klus, project of opdracht.</p></details>
         <details><summary>Waar staat mijn administratie?</summary><p>Op je eigen computer, in een lokaal databasebestand. Er is geen cloud nodig. Elke dag wordt automatisch een back-up gemaakt en je kunt zelf een kopie maken op een USB-stick.</p></details>
         <details><summary>Kan mijn boekhouder ermee werken?</summary><p>Ja, en hij hoeft er zelf niet in te werken. Met één knop maak je per boekjaar een pakket voor je boekhouder: auditfile (XAF 3.2), kolommenbalans, grootboekkaarten, openstaande posten, RGS-brugstaat en al je facturen en bonnen. Dat leest hij in bij Caseware, AFAS, Visionplanner, Exact, Twinfield, Yuki of SnelStart. <a href="boekhouders.html">Meer voor boekhouders</a>.</p></details>
         <details><summary>Voor welke beroepen is het bedoeld?</summary><p>Voor zzp'ers en kleine ondernemers, met name vakmensen: stukadoors, schilders, timmerlieden, loodgieters, elektriciens en klusbedrijven. Bij het instellen kies je je vak, zodat veelgebruikte factuurregels klaarstaan.</p></details>
