@@ -1401,6 +1401,16 @@ export function createApi(s: Services, host: HostContext) {
     bank: {
       accounts: () => s.bank.listAccounts(),
       importStatus: () => s.bank.importStatus(),
+      /** De ingelezen afschriften, en er een weghalen (#408): alleen met de boekhouding voor de boekhouder aan, na een back-up. */
+      imports: () => s.bank.imports(),
+      removeImportPreview: (batchId: number) => s.bank.removeImportPreview(Number(batchId)),
+      removeImport: async (batchId: number) => {
+        if (!s.settings.get().advancedMode) throw new ValidationError('Zet eerst bij Instellingen → Geavanceerd "Toon de boekhouding voor je boekhouder" aan');
+        const preview = s.bank.removeImportPreview(Number(batchId));
+        if (preview.blocked) throw new ValidationError(preview.blocked);
+        await host.safetyBackup?.(`voor-weghalen-afschrift-${preview.id}`);
+        return s.bank.removeImport(preview.id);
+      },
       balanceOverview: () => s.inbox.balanceOverview(),
       addAccount: (name: string, iban: string | null, opts?: { pot?: boolean }) => s.bank.addAccount(name, iban, opts),
       updateAccount: (id: number, patch: { name?: string; iban?: string | null; pot?: boolean }) => s.bank.updateAccount(id, patch),

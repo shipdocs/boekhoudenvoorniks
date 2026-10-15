@@ -36,7 +36,7 @@ type PaymentDouble = Awaited<ReturnType<typeof api.bank.sameDoubles>>[number];
 
 export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feedAccountId }: { /** vanaf Vandaag: dit dubbele bedrag meteen laten zien */ double?: { lineId: number; firstPartId: number }; /** vanaf Vandaag: deze twee regels die dezelfde betaling lijken meteen laten zien */ same?: { firstId: number; secondId: number }; focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult; bankFeed?: 'credentials'; feedAccountId?: number }) {
   const { go, toast, settings, refreshBadge, meta } = useApp();
-  const { run } = useAction();
+  const { run, busy } = useAction();
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
   // zoeken in naam, omschrijving en rekeningnummer; vertraagd zodat niet elke toets een zoekopdracht is
   const [search, setSearch] = useState('');
@@ -48,6 +48,9 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
   const txs = useLoad(() => api.bank.transactions({ ...(view === 'hulp' ? { status: 'nieuw' as const } : {}), ...(query ? { search: query } : {}) }), [view, query]);
   const accounts = useLoad(() => api.bank.accounts());
   const status = useLoad(() => api.bank.importStatus());
+  // de ingelezen afschriften, om er een weg te halen (#408): alleen met de boekhouding voor de boekhouder aan
+  const imports = useLoad(() => (settings.advancedMode ? api.bank.imports() : Promise.resolve([])), [settings.advancedMode]);
+  const [removing, setRemoving] = useState<Awaited<ReturnType<typeof api.bank.removeImportPreview>> | null>(null);
   const overview = useLoad(() => api.bank.balanceOverview());
   // verzamelbetalingen die er twee keer in staan (één regel én losse deelposten)
   const doubles = useLoad(() => api.bank.doubles());
@@ -244,6 +247,67 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
 
       <StatementFolderCard />
 
+      {settings.advancedMode && (imports.data?.length ?? 0) > 0 && (
+        <>
+          <h2 style={{ marginTop: 24 }}>Ingelezen afschriften</h2>
+          <p className="small muted">Klopt een afschrift niet (bijvoorbeeld alles als "bij" ingelezen)? Dan haal je het hier weg, helemaal, en lees je het daarna opnieuw in. Wat je er al mee gedaan had, draait de app eerst terug.</p>
+          <ErrorBox error={imports.error} />
+          <table className="list">
+            <thead><tr><th>Ingelezen</th><th>Bestand</th><th>Rekening</th><th>Periode</th><th className="num">Regels</th><th><span className="sr-only">Acties</span></th></tr></thead>
+            <tbody>
+              {(imports.data ?? []).map((b) => (
+                <tr key={b.id}>
+                  <td>{formatDateTime(b.importedAt)}</td>
+                  <td>{b.filename ?? b.source.toUpperCase()}</td>
+                  <td>{b.accounts ?? '—'}</td>
+                  <td>{b.from && b.to ? <><DateNl date={b.from} /> t/m <DateNl date={b.to} /></> : '—'}</td>
+                  <td className="num">{b.lines}{b.processed > 0 && <div className="small muted">{b.processed} verwerkt</div>}</td>
+                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                    <Button small kind="ghost" disabled={!!b.blocked} title={b.blocked ?? 'Dit afschrift helemaal weghalen'} onClick={async () => { const p = await run(() => api.bank.removeImportPreview(b.id)); if (p) setRemoving(p); }}>Weghalen</Button>
+                    {b.blocked && <div className="small muted" style={{ whiteSpace: 'normal', maxWidth: 220 }}>{b.blocked}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      {removing && (
+        <Modal title="Afschrift weghalen?" onClose={() => setRemoving(null)}>
+          <p>
+            <strong>{removing.filename ?? removing.source.toUpperCase()}</strong> (ingelezen {formatDateTime(removing.importedAt)}): {removing.lines === 1 ? '1 regel gaat' : `${removing.lines} regels gaan`} eruit. Dit is niet terug te draaien; de app maakt eerst een back-up.
+          </p>
+          {removing.processed.length > 0 && (
+            <>
+              <p>{removing.processed.length === 1 ? 'Deze regel is al verwerkt en krijgt' : `Deze ${removing.processed.length} regels zijn al verwerkt en krijgen`} eerst een tegenboeking; een gekoppelde factuur of aankoop staat daarna weer open:</p>
+              <table className="list small">
+                <tbody>
+                  {removing.processed.slice(0, 20).map((t) => (
+                    <tr key={t.id}><td><DateNl date={t.date} /></td><td>{t.counterName ?? t.description}</td><td className="num"><Euro cents={t.amount} /></td></tr>
+                  ))}
+                  {removing.processed.length > 20 && <tr><td colSpan={3} className="muted">… en nog {removing.processed.length - 20}</td></tr>}
+                </tbody>
+              </table>
+            </>
+          )}
+          <ul className="small">
+            {removing.evidence > 0 && <li>{removing.evidence === 1 ? '1 bon die hier als bewijs bij hangt, gaat' : `${removing.evidence} bonnen die hier als bewijs bij hangen, gaan`} terug naar "Nog controleren".</li>}
+            {removing.skippedElsewhere > 0 && <li>{removing.skippedElsewhere === 1 ? '1 regel uit een later afschrift die hierdoor was overgeslagen, komt' : `${removing.skippedElsewhere} regels uit latere afschriften die hierdoor waren overgeslagen, komen`} er alsnog in.</li>}
+            {removing.doubles > 0 && <li>{removing.doubles === 1 ? '1 regel uit een ander afschrift die als dubbel hiervan weg was, komt' : `${removing.doubles} regels uit andere afschriften die als dubbel hiervan weg waren, komen`} terug.</li>}
+          </ul>
+          <div className="row end" style={{ marginTop: 14 }}>
+            <Button onClick={() => setRemoving(null)}>Annuleren</Button>
+            <Button kind="danger" disabled={busy} onClick={async () => {
+              const r = await run(() => api.bank.removeImport(removing.id));
+              if (!r) return;
+              setRemoving(null);
+              toast(`Afschrift weggehaald: ${r.lines} ${r.lines === 1 ? 'regel' : 'regels'}${r.undone ? `, ${r.undone} teruggedraaid` : ''}${r.restored ? `, ${r.restored} uit een later afschrift alsnog toegevoegd` : ''}`);
+              await Promise.all([txs.reload(), status.reload(), doubles.reload(), sames.reload(), imports.reload()]);
+              refreshBadge();
+            }}>Weghalen</Button>
+          </div>
+        </Modal>
+      )}
       {review && <ImportReview {...review} onClose={() => setReview(null)} onChanged={async () => { await Promise.all([txs.reload(), status.reload(), doubles.reload(), sames.reload()]); refreshBadge(); }} />}
       {openDouble && <DoubleDialog double={openDouble} onClose={() => setShowDouble(null)} onChanged={async () => { setShowDouble(null); await Promise.all([txs.reload(), status.reload(), doubles.reload()]); refreshBadge(); }} />}
       {openSame && <SameDialog double={openSame} onClose={() => setShowSame(null)} onChanged={async () => { setShowSame(null); await Promise.all([txs.reload(), status.reload(), sames.reload()]); refreshBadge(); }} />}

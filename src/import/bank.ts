@@ -159,6 +159,39 @@ export interface RemovedDuplicate extends DoubleSide {
 }
 
 /** Een regel uit een afschrift die niet is toegevoegd omdat de betaling er al stond, met die betaling ernaast. */
+/** Een ingelezen afschrift in de lijst (#408). */
+export interface StatementImport {
+  id: number;
+  filename: string | null;
+  source: string;
+  importedAt: string;
+  accounts: string | null;
+  from: IsoDate | null;
+  to: IsoDate | null;
+  lines: number;
+  processed: number;
+  /** waarom het niet weg kan, of null */
+  blocked: string | null;
+}
+
+/** Wat het weghalen van een afschrift doet (#408). */
+export interface StatementRemoval {
+  id: number;
+  filename: string | null;
+  source: string;
+  importedAt: string;
+  lines: number;
+  /** verwerkte regels: die krijgen eerst een tegenboeking */
+  processed: { id: number; date: IsoDate; amount: Cents; counterName: string | null; description: string }[];
+  /** bonnen die er als bewijs bij hangen: gaan terug naar "Nog controleren" */
+  evidence: number;
+  /** regels uit latere afschriften die hierdoor waren overgeslagen: komen er alsnog in */
+  skippedElsewhere: number;
+  /** regels uit andere afschriften die als dubbel hiervan weg waren: komen terug */
+  doubles: number;
+  blocked: string | null;
+}
+
 export interface SkippedRow {
   id: number;
   batchId: number;
@@ -1747,6 +1780,106 @@ export class BankService {
           .prepare(`UPDATE bank_transactions SET status = 'nieuw', matched_journal_entry_id = NULL WHERE id = ?`)
           .run(id);
       }
+    });
+  }
+
+  // ---------- een ingelezen afschrift weer weghalen (#408) ----------
+
+  /** De ingelezen afschriften, nieuwste bovenaan, met wat het weghalen ervan tegenhoudt. */
+  imports(limit = 50): StatementImport[] {
+    const rows = this.db
+      .prepare(
+        `SELECT b.id, b.filename, b.source, b.imported_at AS importedAt,
+           (SELECT GROUP_CONCAT(a.name, ' en ') FROM import_batch_accounts s JOIN bank_accounts a ON a.id = s.bank_account_id WHERE s.batch_id = b.id) AS accounts,
+           (SELECT MIN(period_from) FROM import_batch_accounts WHERE batch_id = b.id) AS "from",
+           (SELECT MAX(period_to) FROM import_batch_accounts WHERE batch_id = b.id) AS "to",
+           (SELECT COUNT(*) FROM bank_transactions t WHERE t.import_batch_id = b.id) AS lines,
+           (SELECT COUNT(*) FROM bank_transactions t WHERE t.import_batch_id = b.id AND t.status = 'gematcht') AS processed
+         FROM import_batches b ORDER BY b.imported_at DESC, b.id DESC LIMIT ?`,
+      )
+      .all(limit) as Omit<StatementImport, 'blocked'>[];
+    return rows.map((r) => ({ ...r, blocked: this.removeBlocked(r.id, r.source) }));
+  }
+
+  /** Waarom dit afschrift niet weg kan, of null. */
+  private removeBlocked(batchId: number, source: string): string | null {
+    if (source === 'openbanking') return 'Dit kwam via de bankkoppeling binnen; dat haalt de app bij de volgende ronde opnieuw op.';
+    const firstOpen = this.ledger.firstOpenDate();
+    if (firstOpen && this.db.prepare('SELECT 1 FROM bank_transactions WHERE import_batch_id = ? AND transaction_date < ? LIMIT 1').get(batchId, firstOpen)) {
+      return 'Er staan betalingen in uit een afgesloten periode.';
+    }
+    return null;
+  }
+
+  /** Wat het weghalen van dit afschrift doet, vóórdat je het doet. */
+  removeImportPreview(batchId: number): StatementRemoval {
+    const batch = this.db.prepare('SELECT id, filename, source, imported_at AS importedAt FROM import_batches WHERE id = ?').get(batchId) as { id: number; filename: string | null; source: string; importedAt: string } | undefined;
+    if (!batch) throw new ValidationError('Dit afschrift bestaat niet (meer)');
+    const txs = this.db
+      .prepare('SELECT id, transaction_date AS date, amount, counter_name AS counterName, description, status, duplicate_of FROM bank_transactions WHERE import_batch_id = ? ORDER BY transaction_date, id')
+      .all(batchId) as { id: number; date: IsoDate; amount: Cents; counterName: string | null; description: string; status: string; duplicate_of: number | null }[];
+    const inBatch = `SELECT id FROM bank_transactions WHERE import_batch_id = ${Number(batchId)}`;
+    const count = (sql: string, ...params: number[]) => (this.db.prepare(sql).get(...params) as { n: number }).n;
+    return {
+      ...batch,
+      lines: txs.length,
+      processed: txs.filter((t) => t.status === 'gematcht').map(({ id, date, amount, counterName, description }) => ({ id, date, amount, counterName, description })),
+      evidence: count(`SELECT COUNT(DISTINCT document_id) AS n FROM document_links WHERE bank_transaction_id IN (${inBatch})`),
+      skippedElsewhere: count(`SELECT COUNT(*) AS n FROM import_skipped WHERE batch_id <> ? AND added_transaction_id IS NULL AND matched_transaction_id IN (${inBatch})`, batchId),
+      doubles: count(`SELECT COUNT(*) AS n FROM bank_transactions WHERE import_batch_id <> ? AND duplicate_of IN (${inBatch})`, batchId),
+      blocked: this.removeBlocked(batch.id, batch.source),
+    };
+  }
+
+  /**
+   * Een ingelezen afschrift helemaal weghalen, alsof het nooit is ingelezen: de regels, de overgeslagen dubbelen,
+   * de dekking ("bijgewerkt t/m") en de import zelf. Wat er al mee gedaan was, gaat eerst netjes terug:
+   * boekingen krijgen een tegenboeking, bonnen die er als bewijs bij hingen gaan terug naar "Nog controleren",
+   * regels uit latere afschriften die hierdoor waren overgeslagen komen er alsnog in, en regels die als dubbel
+   * hiervan uit de boekhouding waren gehaald komen terug. Hetzelfde bestand opnieuw inlezen is daarna een eerste keer.
+   */
+  removeImport(batchId: number, date: IsoDate = today()): { lines: number; undone: number; restored: number } {
+    const preview = this.removeImportPreview(batchId);
+    if (preview.blocked) throw new ValidationError(preview.blocked);
+    return tx(this.db, () => {
+      const ids = (this.db.prepare('SELECT id FROM bank_transactions WHERE import_batch_id = ? ORDER BY id').all(batchId) as { id: number }[]).map((r) => r.id);
+      const list = ids.join(',') || '0';
+      // regels uit andere afschriften die als dubbel van een regel hiervan weg waren: terug (het geld stond alleen hier)
+      for (const sib of this.db.prepare(`SELECT id FROM bank_transactions WHERE import_batch_id <> ? AND duplicate_of IN (${list})`).all(batchId) as { id: number }[]) {
+        if (this.get(sib.id).duplicate_of) this.restoreDuplicate(sib.id);
+      }
+      this.db.prepare('UPDATE bank_transactions SET duplicate_of = NULL WHERE import_batch_id = ?').run(batchId);
+      // wat verwerkt was: tegenboeking, en de factuur of aankoop staat weer open
+      let undone = 0;
+      for (const id of ids) {
+        const t = this.get(id);
+        if (t.status !== 'gematcht') continue;
+        this.unmatch(id, date);
+        undone++;
+      }
+      // regels uit latere afschriften die waren overgeslagen omdat ze hier al stonden: alsnog toevoegen
+      let restored = 0;
+      for (const k of this.db.prepare(`SELECT id FROM import_skipped WHERE batch_id <> ? AND matched_transaction_id IN (${list}) ORDER BY id`).all(batchId) as { id: number }[]) {
+        const row = this.db.prepare('SELECT added_transaction_id AS added FROM import_skipped WHERE id = ?').get(k.id) as { added: number | null };
+        if (row.added) continue; // al toegevoegd, of net meegekomen met zijn verzamelboeking
+        this.addSkipped(k.id);
+        restored++;
+      }
+      this.db.prepare(`DELETE FROM import_skipped WHERE batch_id = ? OR matched_transaction_id IN (${list})`).run(batchId);
+      // bonnen die hier als bewijs bij hingen: terug naar "Nog controleren" (een kopie blijft een kopie)
+      this.db
+        .prepare(`UPDATE documents SET status = CASE WHEN duplicate_of_document_id IS NOT NULL THEN 'genegeerd' ELSE 'controle' END WHERE id IN (SELECT document_id FROM document_links WHERE bank_transaction_id IN (${list}))`)
+        .run();
+      this.db.prepare(`DELETE FROM document_links WHERE bank_transaction_id IN (${list})`).run();
+      // wat de app over deze regels onthield: overgeslagen vragen en afgehandelde dubbel-meldingen
+      const forget = this.db.prepare('DELETE FROM task_skips WHERE task_key IN (?, ?, ?) OR task_key LIKE ? OR task_key LIKE ? OR task_key LIKE ? OR task_key LIKE ?');
+      for (const id of ids) forget.run(`bank-${id}`, `bank-refund-${id}`, BankService.ignoredKey(id), `bank-double-${id}-%`, `bank-double-%-${id}`, `bank-same-${id}-%`, `bank-same-%-${id}`);
+      this.db.prepare('DELETE FROM bank_transactions WHERE import_batch_id = ?').run(batchId);
+      this.db.prepare('DELETE FROM import_batch_accounts WHERE batch_id = ?').run(batchId);
+      // stond het bestand in de downloadmap, dan vraagt de app er niet opnieuw om; slepen kan altijd
+      this.db.prepare(`UPDATE statement_files SET status = 'afgewezen', import_batch_id = NULL WHERE import_batch_id = ?`).run(batchId);
+      this.db.prepare('DELETE FROM import_batches WHERE id = ?').run(batchId);
+      return { lines: ids.length, undone, restored };
     });
   }
 
