@@ -163,13 +163,28 @@ function guessMapping(headers: string[], rows: Record<string, string>[]): CsvMap
   return {
     date,
     amount,
-    debitCredit: find(/af.?bij/i, /debet.?credit/i, /credit.?debet/i, /^d\/?c$/i),
+    debitCredit: directionColumn(headers, rows, [date, amount]),
     counterName: find(/naam/i, /name/i, /tegenpartij/i),
     counterIban: find(/tegenrekening/i, /counterparty/i, /iban.*tegen/i),
     reference: find(/kenmerk/i, /reference/i),
     description: headers.filter((h) => /omschrijving|description|mededeling/i.test(h)),
     dateFormat: detectDateFormat(sample) ?? 'YYYY-MM-DD',
   };
+}
+
+/**
+ * De kolom die zegt of een regel af of bij is: op naam ("Af Bij", "Debet/Credit"), en anders een kolom waarvan
+ * elke waarde "af" of "bij" betekent (bv. "Type" met Debit/Credit, of "Richting" met Uitgaand/Inkomend). Zonder die
+ * kolom kwam zo'n bestand er helemaal als "bij" in (#407).
+ */
+function directionColumn(headers: string[], rows: Record<string, string>[], taken: (string | undefined)[]): string | undefined {
+  const byName = headers.find((h) => [/af.?bij/i, /debet.?credit/i, /credit.?debet/i, /^d\/?c$/i, /^c\/?d$/i].some((p) => p.test(h)));
+  if (byName) return byName;
+  return headers.find((h) => {
+    if (taken.includes(h)) return false;
+    const values = rows.map((r) => (r[h] ?? '').trim()).filter(Boolean);
+    return values.length > 0 && values.every((v) => isDebitMarker(v) || isCreditMarker(v));
+  });
 }
 
 export function detectDateFormat(sample: string): string | null {
@@ -219,8 +234,36 @@ export function csvLayout(headers: string[], mapping: CsvMapping): string {
   return createHash('sha256').update(`${headerSignature(headers)}\n${JSON.stringify(used)}`).digest('hex').slice(0, 16);
 }
 
-function isDebitMarker(value: string): boolean {
-  return /^(af|d|debet|debit|dbit)$/i.test(value.trim());
+/** "af" in een Af/Bij-kolom, zoals banken en boekhoudexports het schrijven */
+export function isDebitMarker(value: string): boolean {
+  return /^(af|afschrijving|d|db|dr|debet|debit|dbit|uit|uitgaand|out|outgoing|-)$/i.test(value.trim());
+}
+
+/** "bij" in een Af/Bij-kolom */
+export function isCreditMarker(value: string): boolean {
+  return /^(bij|bijschrijving|c|cr|credit|crdt|in|inkomend|incoming|\+)$/i.test(value.trim());
+}
+
+/** Hoeveel regels af, bij en € 0 zijn: om te zien of een bestand één kant op gaat. */
+export interface Direction {
+  af: number;
+  bij: number;
+  nul: number;
+}
+
+export function directions(transactions: { amount: number }[]): Direction {
+  const d: Direction = { af: 0, bij: 0, nul: 0 };
+  for (const t of transactions) d[t.amount < 0 ? 'af' : t.amount > 0 ? 'bij' : 'nul']++;
+  return d;
+}
+
+/**
+ * Gaan alle regels (vanaf twee) dezelfde kant op? Dan is de kolom met af of bij waarschijnlijk niet goed gelezen,
+ * en dat zie je liever vóór het inlezen dan erna (#407).
+ */
+export function oneSided(d: Direction): 'af' | 'bij' | null {
+  if (d.af + d.bij < 2) return null;
+  return d.af === 0 ? 'bij' : d.bij === 0 ? 'af' : null;
 }
 
 export function parseCsv(text: string, mapping: CsvMapping): ParseResult {
@@ -250,8 +293,12 @@ export function parseCsv(text: string, mapping: CsvMapping): ParseResult {
         amount = (credit ? parseEuro(credit) : 0) - (debit ? Math.abs(parseEuro(debit)) : 0);
       } else {
         amount = parseEuro(get(mapping.amount));
-        if (mapping.debitCredit && isDebitMarker(get(mapping.debitCredit))) amount = -Math.abs(amount);
-        else if (mapping.debitCredit) amount = Math.abs(amount);
+        if (mapping.debitCredit) {
+          const marker = get(mapping.debitCredit);
+          if (isDebitMarker(marker)) amount = -Math.abs(amount);
+          else if (isCreditMarker(marker)) amount = Math.abs(amount);
+          // een onbekende waarde: het teken uit de bedragkolom blijft staan
+        }
       }
       const description = (mapping.description ?? []).map(get).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
       const counterIban = get(mapping.counterIban);
