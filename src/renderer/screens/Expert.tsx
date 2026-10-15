@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useLoad } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
 import { today } from '../../shared/dates';
 import { LedgerCardsTab, PeriodBalanceTab, RelationCardsTab, TrialBalanceTab } from './LedgerReports';
 import { AccountantPackageCard } from './AccountantPackage';
+import { ChartOfAccountsTab } from './ChartOfAccounts';
 
-type Tab = 'grootboek' | 'kaarten' | 'relaties' | 'periode' | 'journaal' | 'rapport' | 'export' | 'leveranciers' | 'controle';
+type Tab = 'rekeningen' | 'grootboek' | 'kaarten' | 'relaties' | 'periode' | 'journaal' | 'rapport' | 'export' | 'leveranciers' | 'controle';
 
 /** Expert-/boekhoudersmodus: alles wat in de normale modus verborgen blijft. */
 export function Expert() {
-  const [tab, setTab] = useState<Tab>('grootboek');
+  const { route } = useApp();
+  const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'grootboek');
   const [card, setCard] = useState<number | null>(null);
   const year = new Date().getFullYear();
   const [from, setFrom] = useState(`${year}-01-01`);
@@ -20,13 +22,15 @@ export function Expert() {
       <p className="sub">Voor de boekhouder: grootboek (RGS), journaalposten, rapportages en exports.</p>
       <div className="row" style={{ marginBottom: 16 }}>
         <div className="chips">
-          {(['grootboek', 'kaarten', 'relaties', 'periode', 'journaal', 'rapport', 'export', 'leveranciers', 'controle'] as Tab[]).map((t) => (
-            <button key={t} className={tab === t ? 'selected' : ''} onClick={() => setTab(t)}>{{ grootboek: 'Kolommenbalans', kaarten: 'Grootboekkaarten', relaties: 'Relatiekaarten', periode: 'Periodebalans', journaal: 'Journaal', rapport: 'W&V en balans', export: 'Exports', leveranciers: 'Leveranciersregels', controle: 'Controle' }[t]}</button>
+          {(['grootboek', 'kaarten', 'relaties', 'periode', 'journaal', 'rapport', 'export', 'leveranciers', 'controle', 'rekeningen'] as Tab[]).map((t) => (
+            <button key={t} className={tab === t ? 'selected' : ''} onClick={() => setTab(t)}>{{ grootboek: 'Kolommenbalans', kaarten: 'Grootboekkaarten', relaties: 'Relatiekaarten', periode: 'Periodebalans', journaal: 'Journaal', rapport: 'W&V en balans', export: 'Exports', leveranciers: 'Leveranciersregels', controle: 'Controle', rekeningen: 'Rekeningschema' }[t]}</button>
           ))}
         </div>
         <span className="grow" />
-        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Van" />
-        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Tot" />
+        {tab !== 'rekeningen' && <>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Van" />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Tot" />
+        </>}
       </div>
       {tab === 'grootboek' && <TrialBalanceTab from={from} to={to} onOpenCard={(id) => { setCard(id); setTab('kaarten'); }} />}
       {tab === 'kaarten' && <LedgerCardsTab from={from} to={to} selected={card} onSelect={setCard} />}
@@ -37,6 +41,7 @@ export function Expert() {
       {tab === 'export' && <Exports from={from} to={to} />}
       {tab === 'leveranciers' && <SupplierRules />}
       {tab === 'controle' && <Integrity />}
+      {tab === 'rekeningen' && <ChartOfAccountsTab />}
     </div>
   );
 }

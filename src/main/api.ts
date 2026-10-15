@@ -44,7 +44,7 @@ import { ONLINE_HELP } from '../shared/online-help';
 import type { OpeningInput, SectionKey } from '../onboarding/switchover';
 import type { XafApplyChoices } from '../onboarding/xaf-import';
 import { OPEN_ITEMS_TEMPLATE, type ColumnMapping } from '../import/opening-tables';
-import type { EntrySource } from '../core-ledger/ledger';
+import { searchRgs, type EntrySource } from '../core-ledger/ledger';
 import { formatDateNl, today, type IsoDate } from '../shared/dates';
 import type { HoursInput } from '../tax/mileage';
 import { rulesFor } from '../tax/income-tax';
@@ -995,6 +995,12 @@ export function createApi(s: Services, host: HostContext) {
           throw new ValidationError('Online hulp bij het indelen van bonnen is een extra functie van het abonnement. Neem eerst een abonnement.');
         }
         const r = s.settings.update(patch);
+        // bv: de rekeningen voor loon, loonheffing, rekening-courant, vpb en aandelenkapitaal komen erbij
+        // in de kopie bij de boekhouder als handeling, zodat zijn correcties op die rekeningen ook bij de klant passen
+        if (patch.legalForm === 'bv') {
+          if (s.settings.officeCopy()) for (const input of s.ledger.missingBvAccounts()) s.exchange.act({ kind: 'rekening', input });
+          else s.ledger.seedBvAccounts();
+        }
         if (patch.ocr) host.reconfigureLocalAi();
         if (patch.autoUpdate !== undefined) host.updates?.reconfigure();
         return r;
@@ -1865,6 +1871,16 @@ export function createApi(s: Services, host: HostContext) {
         s.exchange.act({ kind: 'rekening', input });
         return s.ledger.getAccount(input.rgs);
       },
+      /** eigen rekening met verplichte RGS-code; soort en nummer volgen daaruit (Boekhouding → Rekeningschema) */
+      addAccount: (input: { name: string; rgsRef: string; code?: string | null }) => {
+        const account = s.ledger.userAccountInput(input);
+        if (!s.settings.officeCopy()) return s.ledger.createAccount(account);
+        s.exchange.act({ kind: 'rekening', input: account });
+        return s.ledger.getAccount(account.rgs);
+      },
+      searchRgs: (query: string) => searchRgs(query),
+      /** welke rekeningen al gebruikt zijn: die kunnen niet weg */
+      accountsInUse: () => [...s.ledger.accountsInUse()],
       renameAccount: (id: number, name: string) => s.ledger.renameAccount(id, name),
       archiveAccount: (id: number) => s.ledger.archiveAccount(id),
       entries: (filter?: { from?: IsoDate; to?: IsoDate; source?: EntrySource; accountRgs?: string; limit?: number }) => s.ledger.listEntries(filter),

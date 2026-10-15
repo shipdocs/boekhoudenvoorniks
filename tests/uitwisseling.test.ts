@@ -331,3 +331,20 @@ describe('Vervolgcontrole vraagposten in het antwoord van de boekhouder', () => 
     expect((c.db.prepare('SELECT original_entry_id FROM question_item_settlements ORDER BY original_entry_id').all() as { original_entry_id: number }[]).some(row => row.original_entry_id === original)).toBe(true);
   });
 });
+
+describe('uitwisseling: rechtsvorm bv in de kopie bij de boekhouder', () => {
+  it('de BV-rekeningen gaan als handeling mee, zodat een loonboeking erop ook bij de klant past', async () => {
+    const profile = office();
+    const c = client(profile);
+    const exp = await c.s.exchange.createExport('2026-09-30', [], VERSION, c.bundle, ASOF);
+    const o = openAtOffice(profile, exp.file);
+    const api = createApi(o.s, { appVersion: () => VERSION, reconfigureLocalAi: () => {}, updates: null } as unknown as HostContext);
+    api.settings.update({ legalForm: 'bv' });
+    expect(o.s.exchange.actions().filter((a) => a.kind === 'rekening')).toHaveLength(14);
+    api.ledger.manualEntry({ date: '2026-09-30', description: 'Loon september', lines: [{ account: 'WPerLesSld', debit: 300000 }, { account: 'BSchBepLhe', credit: 100000 }, { account: 'BSchSalNet', credit: 200000 }] });
+    const answer = o.s.exchange.createAnswer(VERSION);
+    c.s.exchange.readAnswer(answer.file, VERSION);
+    expect(c.s.ledger.balance('BSchBepLhe')).toBe(-100000);
+    expect(c.s.ledger.getAccount('WPerLesSld').rgs_ref).toBe('WPerLesSld');
+  });
+});

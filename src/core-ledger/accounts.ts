@@ -159,6 +159,56 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
   { code: '4520', rgs: ACCOUNTS.renteBaten, ref: 'WFbeRlmObr', name: 'Ontvangen rente', category: 'kosten', system: true },
 ];
 
+/**
+ * Extra rekeningen voor een bv (holding of werkmaatschappij). Ze komen erbij zodra de rechtsvorm bv is
+ * en blijven daarna staan. Interne sleutel = de officiële RGS-code. Bewust geen dividend of deelnemingsresultaat:
+ * dat zijn jaarrekeningposten; die voeg je zo nodig zelf toe bij Boekhouding → Rekeningschema.
+ */
+export const BV_ACCOUNTS: AccountSeed[] = [
+  { code: '0400', rgs: 'BFvaDigNev', ref: 'BFvaDigNev', name: 'Deelnemingen in groepsmaatschappijen', category: 'activa' },
+  { code: '1500', rgs: 'BVorOvrRca', ref: 'BVorOvrRca', name: 'Rekening-courant directeur-grootaandeelhouder', category: 'activa' },
+  { code: '1510', rgs: 'BVorVogVr1', ref: 'BVorVogVr1', name: 'Rekening-courant groepsmaatschappij', category: 'activa' },
+  { code: '0550', rgs: 'BEivGokGea', ref: 'BEivGokGea', name: 'Aandelenkapitaal', category: 'passiva' },
+  { code: '0560', rgs: 'BEivOvrOrs', ref: 'BEivOvrOrs', name: 'Overige reserves', category: 'passiva' },
+  { code: '1650', rgs: 'BSchBepLhe', ref: 'BSchBepLhe', name: 'Af te dragen loonheffing', category: 'passiva' },
+  { code: '1660', rgs: 'BSchSalNet', ref: 'BSchSalNet', name: 'Nog te betalen nettoloon', category: 'passiva' },
+  { code: '1670', rgs: 'BSchBepVpb', ref: 'BSchBepVpb', name: 'Te betalen vennootschapsbelasting', category: 'passiva' },
+  { code: '4700', rgs: 'WPerLesSld', ref: 'WPerLesSld', name: 'Loon directeur-grootaandeelhouder', category: 'kosten' },
+  { code: '4710', rgs: 'WPerLesLon', ref: 'WPerLesLon', name: 'Lonen en salarissen', category: 'kosten' },
+  { code: '4720', rgs: 'WPerSolPsv', ref: 'WPerSolPsv', name: 'Sociale lasten', category: 'kosten' },
+  { code: '4730', rgs: 'WPerPenPen', ref: 'WPerPenPen', name: 'Pensioenlasten', category: 'kosten' },
+  { code: '4740', rgs: 'WBedOvpMaf', ref: 'WBedOvpMaf', name: 'Management fee', category: 'kosten' },
+  { code: '4900', rgs: 'WBelBgrBgr', ref: 'WBelBgrBgr', name: 'Vennootschapsbelasting', category: 'kosten' },
+];
+
+/**
+ * Waarom je zelf geen rekening met deze RGS-code kunt toevoegen, of null. Omzet en btw lopen via de
+ * btw-codes van facturen en aankopen; een eigen omzet- of btw-rekening zou de btw-aangifte en de
+ * omzetcontrole ongemerkt laten afwijken.
+ */
+export function userAccountBlocked(rgsRef: string): string | null {
+  if (rgsRef.startsWith('WOmz')) return 'Omzet boek je met een factuur of bij de bank (Omzet 21%, 9%, 0%…), niet op een eigen omzetrekening: anders klopt de btw-aangifte niet.';
+  if (rgsRef.startsWith('BSchBepBtw')) return 'Btw-rekeningen beheert de app zelf: de btw-aangifte rekent ermee.';
+  if (!/^[BW]/.test(rgsRef)) return 'Kies een RGS-code die met B (balans) of W (winst-en-verlies) begint.';
+  return null;
+}
+
+/** Soort rekening bij een RGS-code: W = winst-en-verlies (kosten, ook voor een opbrengst die geen omzet is), B = balans. */
+export function categoryForRgs(rgsRef: string): AccountCategory {
+  if (rgsRef.startsWith('W')) return 'kosten';
+  return /^B(Eiv|Sch|Las|Vrz|Ega)/.test(rgsRef) ? 'passiva' : 'activa';
+}
+
+/** Waar de app een vrij rekeningnummer begint te zoeken voor een eigen rekening met deze RGS-code. */
+export function codeRangeFor(rgsRef: string): string {
+  if (/^B(Mva|Iva|Fva|Vas)/.test(rgsRef)) return '0400';
+  if (rgsRef.startsWith('BEiv')) return '0550';
+  if (/^B(Las|Vrz|Ega)/.test(rgsRef)) return '0700';
+  if (rgsRef.startsWith('BSch')) return '1650';
+  if (rgsRef.startsWith('B')) return '1500';
+  return '4700';
+}
+
 /** Welke omzet- en BTW-rekening hoort bij een verkoop-BTW-code. */
 export const SALES_ACCOUNTS: Record<string, { revenue: string; vat?: string }> = {
   hoog: { revenue: ACCOUNTS.omzetHoog, vat: ACCOUNTS.btwAfdragenHoog },
