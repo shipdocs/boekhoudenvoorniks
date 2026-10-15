@@ -138,9 +138,23 @@ ${versions.map((v, i) => article(v, dates.get(v.version), i === 0)).join('\n\n')
     </details>`;
   const re = /<details class="release-history">[\s\S]*?\n    <\/details>/;
   if (!re.test(page)) throw new Error('site/wijzigingen.html: blok <details class="release-history"> niet gevonden');
+  // "De belangrijkste verbeteringen" bovenaan: de laatste vijf versies in één oogopslag, zodat ook dat blok nooit
+  // meer achterloopt. De zin "Goed om te weten" eronder blijft.
+  const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  const recent = versions.slice(0, 5).map((v) => `        <li><strong><a href="#v${v.version}">${v.version}</a>${dates.get(v.version) ? ` (${dateNl(dates.get(v.version))})` : ''}:</strong> ${inline(cap(v.title.replace(/\.?$/, '.')))}</li>`).join('\n');
+  const highlights = `<section class="release" aria-labelledby="hoogtepunten-title">
+      <h2 id="hoogtepunten-title">De laatste versies in één oogopslag</h2>
+      <p>We maken boekhouden stap voor stap eenvoudiger, met meer controles en duidelijkere uitleg. Dit kwam er de laatste tijd bij:</p>
+      <ul>
+${recent}
+      </ul>
+      <p><strong>Goed om te weten:</strong> automatische controles helpen fouten opsporen, maar vervangen geen controle van je eigen administratie of advies van een boekhouder. Bekijk hieronder per versie wat er precies is veranderd.</p>
+    </section>`;
+  const reHighlights = /<section class="release" aria-labelledby="hoogtepunten-title">[\s\S]*?<\/section>/;
+  if (!reHighlights.test(page)) throw new Error('site/wijzigingen.html: blok hoogtepunten niet gevonden');
   const latest = versions[0];
   const out = {
-    page: page.replace(re, () => block),
+    page: page.replace(reHighlights, () => highlights).replace(re, () => block),
     index: fs.readFileSync(INDEX, 'utf8').replace(/"softwareVersion": "[^"]+"/, `"softwareVersion": "${latest.version}"`),
     sitemap: fs.readFileSync(SITEMAP, 'utf8').replace(
       /(<loc>https:\/\/boekhoudenvoorniks\.nl\/(?:wijzigingen\.html)?<\/loc>\s*<lastmod>)[0-9-]+/g,
