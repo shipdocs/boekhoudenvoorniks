@@ -241,3 +241,22 @@ describe('Noord-Ierland (XI): goederen zijn een EU-levering (#317)', () => {
     expect(keys(s, '2026-Q3')).toContain('icp-maandelijks');
   });
 });
+
+describe('Noord-Ierland (XI): particulieren tellen mee voor de grens van € 10.000 (#317)', () => {
+  it('verkoop aan een particulier in XI telt mee en geeft de melding over particulieren in het buitenland', () => {
+    const { s } = setup();
+    const xi = s.relations.create({ name: 'Mevr. O Neill', address: 'High St 1', postcode: 'BT1 1AA', city: 'Belfast', country: 'XI', email: 'a@b.example' });
+    s.invoices.finalize(s.invoices.createDraft({ relationId: xi.id, invoiceDate: '2026-07-10', lines: [{ description: 'Webshop', quantity: 1, unitPrice: 50000, vatCode: 'hoog' }] }).id);
+    const check = s.vat.checks('2026-Q3').find((c) => c.key === 'eu-particulier')!;
+    expect(check.detail).toContain('Noord-Ierland');
+  });
+  it('XI en een EU-land samen tellen op naar boven de grens', () => {
+    const { s } = setup();
+    const xi = s.relations.create({ name: 'Mevr. O Neill', address: 'High St 1', postcode: 'BT1 1AA', city: 'Belfast', country: 'XI', email: 'a@b.example' });
+    const de = s.relations.create({ name: 'Herr Schmidt', address: 'H 1', postcode: '47533', city: 'Kleve', country: 'DE', email: 'b@c.example' });
+    s.invoices.finalize(s.invoices.createDraft({ relationId: xi.id, invoiceDate: '2026-07-10', lines: [{ description: 'Webshop', quantity: 1, unitPrice: 600000, vatCode: 'hoog' }] }).id);
+    s.invoices.finalize(s.invoices.createDraft({ relationId: de.id, invoiceDate: '2026-07-11', lines: [{ description: 'Webshop', quantity: 1, unitPrice: 500000, vatCode: 'hoog' }] }).id);
+    expect(keys(s, '2026-Q3')).toContain('oss-drempel');
+  });
+});
+
