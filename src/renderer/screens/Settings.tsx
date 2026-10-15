@@ -10,7 +10,7 @@ import { AdministrationsSettings } from './Administrations';
 import { DataFolderSettings } from './DataFolder';
 import { OfficeSettings } from './Exchange';
 import { ScannerSettings } from './Scanner';
-import { today } from '../../shared/dates';
+import { formatDateNl, today } from '../../shared/dates';
 import { businessEffect } from '../../shared/business-share';
 import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 import { ONLINE_HELP } from '../../shared/online-help';
@@ -419,7 +419,8 @@ export function SettingsScreen() {
           <p className="small muted">Handig voor je boekhouder. Voor dagelijks gebruik heb je dit niet nodig.</p>
           {agreeing && (
             <Modal title="Voor de boekhouder" onClose={() => setAgreeing(false)}>
-              <p>Deze functies zijn bedoeld voor wie boekhoudt. Je kunt er rechtstreeks in je boekhouding werken, en dus ook iets kapotmaken dat de app anders voor je bewaakt. Twijfel je? Raadpleeg eerst je boekhouder.</p>
+              <p>Deze functies zijn bedoeld voor wie boekhoudt. Je kunt er rechtstreeks in je boekhouding werken, en dus ook iets kapotmaken dat de app anders voor je bewaakt. Kijken mag altijd; boeken, terugdraaien, rekeningen wijzigen en afschriften weghalen zijn voor je boekhouder. Twijfel je? Raadpleeg eerst je boekhouder.</p>
+              <p className="small muted">Wij geven geen advies over een boekhouding: vragen over een administratie lopen via je boekhouder. Op een administratie waarin buiten de boekhouder om in deze modus is geschreven, geven we geen ondersteuning. De app houdt bij of dat gebeurd is (Instellingen → Over, en in het pakket voor je boekhouder).</p>
               <label className="row"><input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} /> Ik begrijp dit</label>
               <div className="row end" style={{ marginTop: 14 }}>
                 <Button onClick={() => setAgreeing(false)}>Annuleren</Button>
@@ -817,6 +818,7 @@ function LocalOcr({ engine }: { engine: string }) {
 
 function About() {
   const version = useLoad(() => api.app.version());
+  const advanced = useLoad(() => api.app.advancedUsage());
   const open = (url: string) => (e: { preventDefault(): void }) => {
     e.preventDefault();
     void api.app.openExternal(url);
@@ -833,6 +835,13 @@ function About() {
         <span className="small muted">naar {FEEDBACK_EMAIL}; we lezen alles en antwoorden zo snel mogelijk</span>
       </div>
       <p className="small muted">De software wordt geleverd zonder garantie. Jij blijft verantwoordelijk voor je administratie en aangiften.</p>
+      {advanced.data && (
+        <p className="small muted">
+          {advanced.data.count === 0
+            ? 'Boekhoudermodus: er is nooit in geschreven.'
+            : `Boekhoudermodus: ${advanced.data.count === 1 ? '1 handeling' : `${advanced.data.count} handelingen`} buiten de boekhouder om (eerste op ${formatDateNl(advanced.data.first!.slice(0, 10))}, laatste op ${formatDateNl(advanced.data.last!.slice(0, 10))}). Op zo'n administratie geven we geen ondersteuning; je boekhouder kan het nakijken.`}
+        </p>
+      )}
     </div>
   );
 }

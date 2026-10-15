@@ -18,6 +18,7 @@ import { expenseLines, type PurchaseInvoiceInput } from '../documents/purchases'
 import { businessEffect } from '../shared/business-share';
 import type { BookToAccountInput, SaleInput } from '../import/bank';
 import { directionIssue, directions, headerSignature, oneSided, parseCsv, previewCsv, type CsvMapping } from '../import/csv';
+import { advancedUsage, recordAdvancedAction } from '../core-ledger/advanced-actions';
 import { detectFormat } from '../import/detect';
 import { parseBankFile } from '../import/parse-file';
 import { statementHash } from '../import/statement-folder';
@@ -938,6 +939,8 @@ export function createApi(s: Services, host: HostContext) {
     },
     app: {
       version: () => host.appVersion(),
+      /** of er buiten de boekhouder om in de boekhoudermodus is geschreven (#427) */
+      advancedUsage: () => advancedUsage(s.db),
       administrationId: () => s.settings.administrationId(),
       officeCopy: () => s.settings.officeCopy(),
       checkForUpdates: () => host.checkForUpdates(),
@@ -1410,7 +1413,9 @@ export function createApi(s: Services, host: HostContext) {
         const preview = s.bank.removeImportPreview(Number(batchId));
         if (preview.blocked) throw new ValidationError(preview.blocked);
         await host.safetyBackup?.(`voor-weghalen-afschrift-${preview.id}`);
-        return s.bank.removeImport(preview.id);
+        const r = s.bank.removeImport(preview.id);
+        recordAdvancedAction(s.db, 'afschrift-weghalen', `${preview.filename ?? preview.source} (${r.lines} regels)`);
+        return r;
       },
       balanceOverview: () => s.inbox.balanceOverview(),
       addAccount: (name: string, iban: string | null, opts?: { pot?: boolean }) => s.bank.addAccount(name, iban, opts),
@@ -1897,28 +1902,53 @@ export function createApi(s: Services, host: HostContext) {
       accounts: () => s.ledger.listAccounts(),
       // in de kopie bij de boekhouder gaan deze drie als handeling mee in het antwoord aan de klant
       createAccount: (input: { code: string; rgs: string; rgsRef?: string | null; name: string; category: AccountCategory }) => {
-        if (!s.settings.officeCopy()) return s.ledger.createAccount(input);
+        if (!s.settings.officeCopy()) {
+          const account = s.ledger.createAccount(input);
+          recordAdvancedAction(s.db, 'rekening-toevoegen', `${input.code} ${input.name}`);
+          return account;
+        }
         s.exchange.act({ kind: 'rekening', input });
         return s.ledger.getAccount(input.rgs);
       },
       /** eigen rekening met verplichte RGS-code; soort en nummer volgen daaruit (Boekhouding → Rekeningschema) */
       addAccount: (input: { name: string; rgsRef: string; code?: string | null }) => {
         const account = s.ledger.userAccountInput(input);
-        if (!s.settings.officeCopy()) return s.ledger.createAccount(account);
+        if (!s.settings.officeCopy()) {
+          const created = s.ledger.createAccount(account);
+          recordAdvancedAction(s.db, 'rekening-toevoegen', `${account.code} ${account.name}`);
+          return created;
+        }
         s.exchange.act({ kind: 'rekening', input: account });
         return s.ledger.getAccount(account.rgs);
       },
       searchRgs: (query: string) => searchRgs(query),
       /** welke rekeningen al gebruikt zijn: die kunnen niet weg */
       accountsInUse: () => [...s.ledger.accountsInUse()],
-      renameAccount: (id: number, name: string) => s.ledger.renameAccount(id, name),
-      archiveAccount: (id: number) => s.ledger.archiveAccount(id),
+      renameAccount: (id: number, name: string) => {
+        const r = s.ledger.renameAccount(id, name);
+        recordAdvancedAction(s.db, 'rekening-hernoemen', `${id} → ${name}`);
+        return r;
+      },
+      archiveAccount: (id: number) => {
+        const r = s.ledger.archiveAccount(id);
+        recordAdvancedAction(s.db, 'rekening-weghalen', String(id));
+        return r;
+      },
       entries: (filter?: { from?: IsoDate; to?: IsoDate; source?: EntrySource; accountRgs?: string; limit?: number }) => s.ledger.listEntries(filter),
       balances: (from?: IsoDate, to?: IsoDate) => s.ledger.balances({ from, to }),
       questionItems: (to?: IsoDate) => accountOpenItems(s.db, ACCOUNTS.vraagposten, to),
-      manualEntry: (entry: { questionEntryId?: number; date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents; vatCode?: string | null; relationId?: number | null }[] }) =>
-        s.settings.officeCopy() ? s.exchange.act({ kind: 'memoriaal', input: entry }).entryIds[0]! : s.ledger.post({ ...entry, source: 'handmatig' }),
-      reverse: (id: number, date: IsoDate) => (s.settings.officeCopy() ? s.exchange.act({ kind: 'terugdraaien', input: { entryId: id, date } }).entryIds[0]! : s.ledger.reverse(id, date)),
+      manualEntry: (entry: { questionEntryId?: number; date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents; vatCode?: string | null; relationId?: number | null }[] }) => {
+        if (s.settings.officeCopy()) return s.exchange.act({ kind: 'memoriaal', input: entry }).entryIds[0]!;
+        const id = s.ledger.post({ ...entry, source: 'handmatig' });
+        recordAdvancedAction(s.db, 'memoriaal', `${entry.date} ${entry.description}`);
+        return id;
+      },
+      reverse: (id: number, date: IsoDate) => {
+        if (s.settings.officeCopy()) return s.exchange.act({ kind: 'terugdraaien', input: { entryId: id, date } }).entryIds[0]!;
+        const r = s.ledger.reverse(id, date);
+        recordAdvancedAction(s.db, 'terugdraaien', `boeking ${id} op ${date}`);
+        return r;
+      },
       integrity: () => s.ledger.checkIntegrity(),
       /** "Waarom bestaat deze boeking?": de gebeurtenis met bewijs (#19). */
       origin: (entryId: number) => s.events.forEntry(entryId),

@@ -1,4 +1,5 @@
 import { accountOpenItems } from '../core-ledger/open-items';
+import { advancedUsage, advancedUsageText } from '../core-ledger/advanced-actions';
 import type { Db } from '../db/database';
 import { rgsLabel, RGS_VERSION, type Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
@@ -416,6 +417,8 @@ export class AccountantPackage {
       { ok: missingDocuments.length === 0, label: 'Bij elke inkoop zit een bon of factuur', detail: missingDocuments.length ? `${missingDocuments.length} zonder document; in het pakket staan ze in documenten/index.csv` : undefined },
       { ok: accountOpenItems(this.db, ACCOUNTS.vraagposten, to).length === 0, label: 'Niets meer bij "weet ik nog niet"', detail: `${accountOpenItems(this.db, ACCOUNTS.vraagposten, to).length} afzonderlijke posten (${eur(accountOpenItems(this.db, ACCOUNTS.vraagposten, to).reduce((n, p) => n + Math.abs(p.net), 0))}) om uit te zoeken` },
       { ok: vatOpen.length === 0, label: 'Btw-aangiftes van afgelopen periodes zijn ingediend', detail: vatOpen.length ? `nog niet ingediend: ${vatOpen.map((v) => v.label).join(', ')}` : undefined },
+      // zodat de boekhouder weet of er buiten hem om rechtstreeks in de boekhouding is geschreven (#427)
+      { ok: advancedUsage(this.db).count === 0, label: 'Niet buiten de boekhouder om in de boekhoudermodus geschreven', detail: advancedUsage(this.db).count ? advancedUsageText(advancedUsage(this.db)) : undefined },
     ];
     return {
       year,
