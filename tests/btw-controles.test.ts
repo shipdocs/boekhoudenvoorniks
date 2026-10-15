@@ -205,3 +205,29 @@ describe('Investeringsaftrek en personenauto', () => {
     expect(s.taxOverview.year(2026, '2026-12-31').items.some((i) => i.key === 'kia-auto')).toBe(false);
   });
 });
+
+describe('Noord-Ierland (XI): goederen zijn een EU-levering (#317)', () => {
+  const xiCustomer = (s: S) => s.relations.create({ name: 'Belfast Ltd', address: 'High St 1', postcode: 'BT1 1AA', city: 'Belfast', country: 'XI', vat_number: 'XI123456789', email: 'info@belfast.example' });
+  function sale(s: S, vatCode: 'icp' | 'hoog', amount: number) {
+    const xi = xiCustomer(s);
+    s.invoices.finalize(s.invoices.createDraft({ relationId: xi.id, invoiceDate: '2026-07-10', lines: [{ description: 'Goederen', quantity: 1, unitPrice: amount, vatCode }] }).id);
+  }
+  it('Nederlandse btw aan een bedrijf in XI geeft de waarschuwing, met tekst voor Noord-Ierland', () => {
+    const { s } = setup();
+    sale(s, 'hoog', 10000);
+    const check = s.vat.checks('2026-Q3').find((c) => c.key === 'eu-bedrijf-met-btw')!;
+    expect(check.detail).toContain('Noord-Ierland');
+    expect(check.detail).toContain('Klant buiten de EU');
+  });
+  it('goederen met code icp geven geen waarschuwing en staan met landcode XI in de ICP-opgaaf', () => {
+    const { s } = setup();
+    sale(s, 'icp', 10000);
+    expect(keys(s, '2026-Q3')).not.toContain('eu-bedrijf-met-btw');
+    expect(s.vat.icpCsv('2026-Q3')).toContain('XI;XI123456789;"Belfast Ltd";goederen;100.00;100');
+  });
+  it('goederen aan XI tellen mee voor de ICP-kwartaalgrens', () => {
+    const { s } = setup();
+    sale(s, 'icp', ICP_MONTHLY_GOODS_LIMIT + 1);
+    expect(keys(s, '2026-Q3')).toContain('icp-maandelijks');
+  });
+});
