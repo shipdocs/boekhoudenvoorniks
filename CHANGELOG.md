@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Nieuw
+- **Hulp in de app.** Onderaan het menu staat *Hulp*: die opent in je browser de pagina van de [online handleiding](https://boekhoudenvoorniks.nl/handleiding/index.html) die bij het scherm hoort waar je bent. Ook bij Instellingen → Over staat de handleiding.
+
 ## 1.7.0 — een verkeerd afschrift weer weghalen, klussen naar jouw hand, en meer grip op de btw-aangifte
 
 Na de eerste meldingen van gebruikers: een CSV van de bank die er helemaal als "bij" in kwam en niet terug te draaien was, en klussen die niet bij ieders werk passen.

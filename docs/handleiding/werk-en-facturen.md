@@ -17,7 +17,7 @@ Gaat de klant akkoord? Open de offerte en kies *Klant is akkoord*. Werk je met [
 ## Een factuur maken
 
 1. *Werk & facturen → + Nieuwe factuur*, of vanuit een klus *Factuur maken*.
-2. Klant, datum en regels zoals bij een offerte. Bij *Datum levering of dienst* vul je in wanneer het werk was; bij een periode ook *t/m*. Dat bepaalt in welke btw-aangifte de omzet valt.
+2. Klant, datum en regels zoals bij een offerte. Bij *Datum levering of dienst* vul je in wanneer het werk was; bij een periode ook *t/m*. Dat staat op de factuur en telt voor de ICP-opgaaf bij diensten aan EU-bedrijven. In welke btw-aangifte de omzet valt, bepaalt de factuurdatum.
 3. *Versturen* maakt de factuur definitief, geeft hem zijn nummer en mailt hem. Je kunt niets meer aan een verstuurde factuur veranderen; een fout herstel je met een creditfactuur (zie hieronder).
 
 Het factuurnummer zie je al op het concept. Het volgende nummer zelf zetten, bijvoorbeeld om door te nummeren vanuit je vorige pakket, doe je bij *Instellingen → Facturen & offertes*.

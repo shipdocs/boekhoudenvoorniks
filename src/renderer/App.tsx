@@ -24,6 +24,7 @@ import { CurrentAdministration, OfficeCopyBanner } from './screens/Administratio
 import { Logo } from './Logo';
 import { UpdateBanner } from './screens/UpdateBanner';
 import { ReadOnlyBanner } from './screens/ReadOnlyBanner';
+import { handleidingUrl } from '../shared/handleiding';
 
 const DocumentReview = lazy(() => import('./screens/DocumentReview').then((module) => ({ default: module.DocumentReview })));
 const SettingsScreen = lazy(() => import('./screens/Settings').then((module) => ({ default: module.SettingsScreen })));
@@ -159,6 +160,9 @@ export function App() {
             <div className="spacer" />
             <button className={route.screen === 'instellingen' || route.screen === 'opmaak' ? 'active' : ''} onClick={() => go({ screen: 'instellingen' })}>
               <span>⚙️</span>Instellingen
+            </button>
+            <button onClick={() => void api.app.openExternal(handleidingUrl(route.screen))} title="Opent de handleiding voor dit scherm in je browser">
+              <span>❓</span>Hulp
             </button>
           </nav>
         )}

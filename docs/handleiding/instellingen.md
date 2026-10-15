@@ -30,7 +30,7 @@ Er is geen cloud en geen account. Wissel je van computer, dan zet je een back-up
 
 ## Back-ups
 
-- **Vanzelf**: de app maakt elke dag een back-up, en ook vlak voordat hij iets ingrijpends doet (een periode afsluiten, een afschrift weghalen, een update). Je hoeft hier niets voor te doen.
+- **Vanzelf**: de app maakt elke dag een back-up van de administratie die open staat (heb je er meer, dan krijgt elke administratie er een op de dag dat je hem opent), en ook vlak voordat hij iets ingrijpends doet (een periode afsluiten, een afschrift weghalen, een update). Je hoeft hier niets voor te doen.
 - **Zelf een kopie maken**: *Instellingen → Back-up, demo & updates → Back-up maken*. Zet die kopie op een USB-stick of in je eigen cloudmap. Een back-up bevat je hele administratie, mét bijlagen.
 - **Versleutelde kopie voor je boekhouder**: dezelfde plek, knop *Versleutelde kopie maken*, met een wachtwoord. Alleen met dat wachtwoord is de kopie te openen. Geef het wachtwoord apart door (bijvoorbeeld telefonisch), niet in dezelfde mail.
 - **Terugzetten**: *Back-up terugzetten…*. Kies het bestand; de app maakt eerst een kopie van wat er nu staat, zodat je altijd terug kunt.
