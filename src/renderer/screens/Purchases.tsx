@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useAppEvent, useJobWords, useLoad, type InvestmentSavedInfo } from '../ui';
+import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useAppEvent, useJobsOn, useJobWords, useLoad, type InvestmentSavedInfo } from '../ui';
 import { READING_LABEL, shownMessage } from '../../shared/reading';
 import { diffDays, formatDateNl, today } from '../../shared/dates';
 import { isReverseCharge, type PurchaseVatCode } from '../../shared/vat';
@@ -16,6 +16,7 @@ import { uploadOutcomeText } from './UploadOutcome';
 import type { BankImportStatus } from '../../import/bank';
 
 export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
+  const jobsOn = useJobsOn();
   const jw = useJobWords();
   const { go, toast } = useApp();
   const { run } = useAction();
@@ -137,7 +138,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                   {p.description} {p.attachment_path && <span title="Bewijsstuk aanwezig">📎</span>}
                   {p.vat_warning && <div className="small notice warn">{p.vat_warning}</div>}
                   {p.question && <div className="small"><span className="pill warn">nog uitzoeken</span> staat bij "weet ik nog niet", zonder btw-aftrek</div>}
-                  {p.job_id !== null && <div className="small muted">🔨 {(() => { const j = (allJobs.data ?? []).find((x) => x.id === p.job_id); return j ? `${j.relation_name} · ${j.title}` : jw.S; })()}</div>}
+                  {jobsOn && p.job_id !== null && <div className="small muted">🔨 {(() => { const j = (allJobs.data ?? []).find((x) => x.id === p.job_id); return j ? `${j.relation_name} · ${j.title}` : jw.S; })()}</div>}
                   {p.business_pct < 100 && <div className="small"><strong>{p.business_pct}% zakelijk</strong>, {100 - p.business_pct}% privé</div>}
                   {p.warranty_months ? <div className="small muted">🛡️ {warrantyText(p.invoice_date, p.warranty_months)}</div> : null}
                 </td>
@@ -155,7 +156,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                       if ((await run(async () => { await api.purchases.remove(p.id); return true; }, 'Aankoop weggehaald ✓')) !== undefined) await purchases.reload();
                     }}>Weghalen</Button>}
                     {p.question && <Button small kind="primary" onClick={() => setResolving({ id: p.id, label: `${p.relation_name ?? p.description} ${formatDateNl(p.invoice_date)}` })}>Indelen</Button>}
-                    <Button small kind="ghost" title={`Voor ${jw.welke} ${jw.s} was dit? Of algemene bedrijfskosten`} ariaLabel={`${jw.S} kiezen`} onClick={() => setJobFor(p)}>🔨</Button>
+                    {jobsOn && <Button small kind="ghost" title={`Voor ${jw.welke} ${jw.s} was dit? Of algemene bedrijfskosten`} ariaLabel={`${jw.S} kiezen`} onClick={() => setJobFor(p)}>🔨</Button>}
                     <Button small kind="ghost" title="Gebruik je dit ook privé? Stel in hoeveel zakelijk is" ariaLabel="Zakelijk deel aanpassen" onClick={() => setShare(p)}>%</Button>
                     {!p.currency && <Button small kind="ghost" title="Was deze bon in dollars of een andere munt? Dan reken je hem hier om naar euro's." ariaLabel="Omrekenen uit een andere munt" onClick={() => setFx({ id: p.id, fromDocument: false })}>💱</Button>}
                     <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={async () => {
@@ -460,6 +461,7 @@ function PayModal({ id, onClose }: { id: number; onClose: () => void }) {
 
 /** "Bonnetje zonder foto": in mensentaal, btw wordt automatisch berekend. */
 function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const jobsOn = useJobsOn();
   const jw = useJobWords();
   const { meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
@@ -515,7 +517,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
             <button className={paidWith === 'prive' ? 'selected' : ''} onClick={() => setPaidWith('prive')}>Met privégeld</button>
           </div>
         </Field>
-        {(jobs.data ?? []).length > 0 && (
+        {jobsOn && (jobs.data ?? []).length > 0 && (
           <Field label={`Voor een ${jw.s}?`} hint="optioneel">
             <select value={jobId ?? ''} onChange={(e) => setJobId(Number(e.target.value) || null)}>
               <option value="">Nee / algemeen</option>

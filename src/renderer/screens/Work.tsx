@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, Empty, ErrorBox, Euro, StatusPill, useApp, useJobWords, useLoad } from '../ui';
+import { Button, DateNl, Empty, ErrorBox, Euro, StatusPill, useApp, useJobsOn, useJobWords, useLoad } from '../ui';
 
 export function Work() {
+  const jobsOn = useJobsOn();
   const jw = useJobWords();
   const { go, route } = useApp();
   const [tab, setTab] = useState<'facturen' | 'offertes'>((route.extra?.tab as 'facturen' | 'offertes') ?? 'facturen');
@@ -79,7 +80,7 @@ export function Work() {
             search ? (
               <Empty icon="🔍" title="Geen offertes gevonden">Er zijn geen offertes die passen bij je zoekopdracht.</Empty>
             ) : (
-              <Empty icon="📄" title="Nog geen offertes">Een offerte wordt na akkoord een {jw.s}, en daarna met één klik een factuur.</Empty>
+              <Empty icon="📄" title="Nog geen offertes">{jobsOn ? `Een offerte wordt na akkoord een ${jw.s}, en daarna met één klik een factuur.` : 'Na akkoord van de klant zet je een offerte met één klik om in een factuur.'}</Empty>
             )
           ) : (
             <table className="list">

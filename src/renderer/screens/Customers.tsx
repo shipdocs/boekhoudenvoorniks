@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, StatusPill, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, StatusPill, useAction, useApp, useJobsOn, useLoad } from '../ui';
 import { EarningsPerJob } from './Jobs';
 import type { Relation, RelationInput } from '../../relations/relations';
 import { COUNTRIES, countryName } from '../../shared/countries';
@@ -121,6 +121,7 @@ export function CustomerMailNotice({ relationId }: { relationId: number | null |
 }
 
 export function CustomerDetail({ id }: { id?: number }) {
+  const jobsOn = useJobsOn();
   const { go } = useApp();
   const { run, busy } = useAction();
   const existing = useLoad(async () => (id ? api.relations.get(id) : null), [id]);
@@ -198,7 +199,7 @@ export function CustomerDetail({ id }: { id?: number }) {
       </div>
       {id && (
         <div className="dossier" style={{ marginTop: 24 }}>
-          <EarningsPerJob relationId={id} />
+          {jobsOn && <EarningsPerJob relationId={id} />}
           {(invoices.data ?? []).length > 0 && (
             <>
               <h2>Facturen</h2>

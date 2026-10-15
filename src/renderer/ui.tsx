@@ -47,6 +47,8 @@ export type Settings = Awaited<ReturnType<typeof api.settings.get>>;
 export const Ctx = createContext<AppCtx>(null as unknown as AppCtx);
 export const useApp = () => useContext(Ctx);
 /** De gekozen term voor een klus (klus, project of opdracht) met lidwoorden en meervoud (#320). */
+/** Werkt de gebruiker met klussen? Anders verdwijnen de klus-keuzes uit de schermen (#320). */
+export const useJobsOn = () => useApp().settings.jobsEnabled;
 export const useJobWords = () => jobWords(useApp().settings.jobTerm);
 
 // ---------- data laden ----------
