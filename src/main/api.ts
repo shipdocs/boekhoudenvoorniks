@@ -17,7 +17,7 @@ import { storedPurchaseVat, storedVatWarning } from '../core-ledger/stored-purch
 import { expenseLines, type PurchaseInvoiceInput } from '../documents/purchases';
 import { businessEffect } from '../shared/business-share';
 import type { BookToAccountInput, SaleInput } from '../import/bank';
-import { directions, headerSignature, oneSided, parseCsv, previewCsv, type CsvMapping } from '../import/csv';
+import { directionIssue, directions, headerSignature, oneSided, parseCsv, previewCsv, type CsvMapping } from '../import/csv';
 import { detectFormat } from '../import/detect';
 import { parseBankFile } from '../import/parse-file';
 import { statementHash } from '../import/statement-folder';
@@ -1440,13 +1440,16 @@ export function createApi(s: Services, host: HostContext) {
         const savedMapping = savedCsvMapping(content);
         const used = savedMapping ?? (csv.detectedBank ? csv.suggestedMapping : null);
         const direction = used ? directions(parseCsv(content, used).transactions) : null;
-        return { format, csv, savedMapping, direction, oneSided: direction ? oneSided(direction) : null };
+        const issue = used ? directionIssue(content, used) : null;
+        // alleen vragen als er ook een aanwijzing is dat af/bij verkeerd gelezen is; alleen afschrijvingen is normaal
+        return { format, csv, savedMapping, direction, issue, oneSided: direction && issue ? oneSided(direction) : null };
       },
       /** Zo leest de app het bestand met deze kolomtoewijzing: de eerste regels, en hoeveel af en bij (#407). */
       previewMapping: (content: string, mapping: CsvMapping) => {
         const r = parseCsv(content, mapping);
         const direction = directions(r.transactions);
-        return { rows: r.transactions.slice(0, 5), total: r.transactions.length, unreadable: r.warnings.length, direction, oneSided: oneSided(direction) };
+        const issue = directionIssue(content, mapping);
+        return { rows: r.transactions.slice(0, 5), total: r.transactions.length, unreadable: r.warnings.length, direction, issue, oneSided: issue ? oneSided(direction) : null };
       },
       importFile: (filename: string, content: string, mapping?: CsvMapping, bankAccountId?: number) => importBankFile(filename, content, mapping, bankAccountId),
       /**

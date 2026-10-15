@@ -63,7 +63,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
   const openSame = showSame ? (sames.data ?? []).find((d) => d.firstId === showSame.firstId && d.secondId === showSame.secondId) : undefined;
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
   // een bekende CSV waarin alle regels dezelfde kant op gaan: eerst vragen of dat klopt (#407)
-  const [sided, setSided] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; mapping: CsvMapping | null; side: 'af' | 'bij'; total: number } | null>(null);
+  const [sided, setSided] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; mapping: CsvMapping | null; side: 'af' | 'bij'; total: number; issue: string | null } | null>(null);
   const [last, setLast] = useState<ImportResult | null>(imported ?? null);
   // de regels die zijn overgeslagen omdat de betaling er al stond: van één import of van één rekening
   const [review, setReview] = useState<{ batchId?: number; bankAccountId?: number } | null>(skippedFor ? { bankAccountId: skippedFor } : null);
@@ -80,7 +80,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
     }
     if (preview.format === 'csv' && preview.oneSided) {
       const { af, bij } = preview.direction!;
-      return setSided({ filename: file.name, content, headers: preview.csv!.headers, rows: preview.csv!.rows, mapping: preview.savedMapping ?? preview.csv!.suggestedMapping, side: preview.oneSided, total: af + bij });
+      return setSided({ filename: file.name, content, headers: preview.csv!.headers, rows: preview.csv!.rows, mapping: preview.savedMapping ?? preview.csv!.suggestedMapping, side: preview.oneSided, total: af + bij, issue: preview.issue });
     }
     await doImport(file.name, content, preview.savedMapping ?? undefined);
   };
@@ -319,7 +319,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
         <Modal title="Klopt dit?" onClose={() => setSided(null)}>
           <p>
             Alle {sided.total} regels in dit bestand zijn <strong>{sided.side === 'bij' ? 'bijschrijvingen' : 'afschrijvingen'}</strong>; er is geen enkele {sided.side === 'bij' ? 'afschrijving' : 'bijschrijving'}.
-            Meestal betekent dit dat de kolom met “Af” of “Bij” niet goed gelezen is. Kijk dan even naar de kolommen voordat je het inleest.
+            {sided.issue ?? 'Waarschijnlijk is de kolom met “Af” of “Bij” niet goed gelezen.'} Kijk even naar de kolommen voordat je het inleest.
           </p>
           <p className="small muted">Heeft je bank ook een CAMT.053- of MT940-bestand? Kies dan liever dat: daarin staat vast wat af en bij is.</p>
           <div className="row end" style={{ marginTop: 14 }}>
@@ -753,9 +753,9 @@ function CsvMappingDialog({ headers, rows, content, suggested, onClose, onConfir
           <p className="small muted" style={{ marginTop: 6 }}>
             {parsed.total} {parsed.total === 1 ? 'regel' : 'regels'}: {parsed.direction.af} af, {parsed.direction.bij} bij{parsed.unreadable > 0 && <>, <strong>{parsed.unreadable} niet te lezen</strong> (klopt de datumkolom en het datumformaat?)</>}.
           </p>
-          {parsed.oneSided && (
+          {parsed.issue && (
             <div className="notice warn">
-              Alle regels zijn {parsed.oneSided === 'bij' ? 'bijschrijvingen' : 'afschrijvingen'}. Klopt dat niet? Kijk dan naar de kolom met “Af” of “Bij”, of naar de kolom met het bedrag.
+              {parsed.issue}{parsed.oneSided && <> Alle regels zijn nu {parsed.oneSided === 'bij' ? 'bijschrijvingen' : 'afschrijvingen'}.</>} Kijk naar de kolom met “Af” of “Bij”.
             </div>
           )}
         </>
