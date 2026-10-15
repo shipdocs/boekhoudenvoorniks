@@ -8,7 +8,7 @@ export const HANDLEIDING_URL = 'https://boekhoudenvoorniks.nl/handleiding/';
 /** scherm (Route.screen) → pagina, eventueel met anker */
 export const HANDLEIDING_PAGINAS: Record<string, string> = {
   home: 'index.html',
-  zoeken: 'index.html',
+  zoeken: 'beginnen.html#zoeken-door-alles',
   welkom: 'beginnen.html',
   werk: 'werk-en-facturen.html',
   factuur: 'werk-en-facturen.html#een-factuur-maken',

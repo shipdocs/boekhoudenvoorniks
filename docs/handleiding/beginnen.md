@@ -30,9 +30,15 @@ Daarna zie je *Alles is ingesteld ✓*. Kies *Maak mijn eerste factuur* of *Klaa
 
 Het scherm *Vandaag* laat zien wat er te doen is: een bon die je nog moet nakijken, een betaling waar de app een vraag over heeft, een btw-aangifte die eraan komt. Is er niets, dan staat er *Je bent helemaal bij ✓*. Onder *Wat wil je doen?* staan de knoppen voor het dagelijkse werk.
 
-Links staat het menu: *Werk & facturen*, *Klussen*, *Aankopen & bonnetjes*, *Klanten*, *Bank*, *Belasting*, *Hoe gaat het?* en *Instellingen*. Met *Ctrl K* zoek je door alles tegelijk: klanten, facturen, bonnen en betalingen.
+Links staat het menu: *Werk & facturen*, *Klussen*, *Aankopen & bonnetjes*, *Klanten*, *Bank*, *Belasting*, *Hoe gaat het?* en *Instellingen*. Met *Ctrl K* zoek je door alles tegelijk: klanten, facturen, bonnen en betalingen (zie [Zoeken door alles](#zoeken-door-alles)).
 
 > De app maakt elke dag vanzelf een back-up van je administratie. Waar die staat en hoe je er zelf een maakt, lees je bij [Instellingen en back-ups](instellingen.html#back-ups).
+
+## Zoeken door alles
+
+Met *Ctrl K* (of *Zoeken* bovenaan het menu) zoek je in één keer door klanten, facturen, offertes, bonnen, aankopen, betalingen en klussen. Typ een naam, een deel van een omschrijving, een bedrag (`> 400`) of een periode (`2026-09`); "Jansen > 400" mag ook. Met *Alle resultaten bekijken* open je het zoekscherm: daar zie je per resultaat van welke rekening het kwam, waar het op geboekt is, in welke btw-aangifte het zit, of er een bon bij hangt en of het nog aandacht nodig heeft. Met de knoppen erboven beperk je het tot één soort, en met *Alleen wat nog aandacht nodig heeft* zie je alleen wat nog niet af is.
+
+Klik op een resultaat om het te openen. Dat werkt ook voor oude of genegeerde betalingen die bij *Bank* niet meer in de lijst staan (die laat de 500 nieuwste zien).
 
 ## Hoe de app denkt
 
