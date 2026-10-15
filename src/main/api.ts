@@ -135,6 +135,12 @@ export interface HostContext {
     list(): { key: string; name: string; officeCopy: { office: string; exchange: number; endDate: string } | null; id: string | null; current: boolean }[];
     open(key: string): Promise<void>;
     create(name: string): Promise<string>;
+    /** de bedrijfsnaam van een administratie wijzigen, ook van een die niet open is (#444) */
+    rename(key: string, name: string): Promise<void>;
+    /** de map van een administratie naar de prullenbak; niet de eerste en niet de open administratie (#444) */
+    remove(key: string): Promise<void>;
+    /** de map van een administratie in de verkenner openen */
+    openFolder(key: string): Promise<void>;
   };
   /** een andere gegevensmap kiezen (alleen in de app zelf, en niet met een eigen map uit de omgeving) */
   dataFolder?: {
@@ -934,6 +940,9 @@ export function createApi(s: Services, host: HostContext) {
       list: () => (host.administrations ? host.administrations.list() : []),
       open: (key: string) => admins().open(String(key)),
       create: (name: string) => admins().create(String(name)),
+      rename: (key: string, name: string) => admins().rename(String(key), String(name)),
+      remove: (key: string) => admins().remove(String(key)),
+      openFolder: (key: string) => admins().openFolder(String(key)),
     },
     /** de map met alle administraties: waar hij staat, en een andere kiezen */
     dataFolder: {

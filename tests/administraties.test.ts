@@ -2,7 +2,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Administrations } from '../src/main/administrations';
+import Database from 'better-sqlite3';
+import { Administrations, readAdministrationFile, renameAdministrationFile } from '../src/main/administrations';
 
 function registry() {
   const root = mkdtempSync(join(tmpdir(), 'gb-admins-'));
@@ -61,5 +62,42 @@ describe('meerdere administraties', () => {
     expect(admins.current()).toBe('');
     expect(() => admins.dirFor('../buiten')).toThrow(/Onbekende administratie/);
     expect(() => admins.select('../buiten')).toThrow();
+  });
+
+  it('weghalen (#444): niet de eerste, niet de open administratie, en alleen een bestaande', () => {
+    const { admins, open } = registry();
+    open('', 'Stukadoorsbedrijf Piet');
+    expect(() => admins.dirToRemove('')).toThrow(/gegevensmap zelf/);
+    const a = admins.create('Tweede zaak');
+    expect(() => admins.dirToRemove(a)).toThrow(/bestaat niet/);
+    open(a, 'Tweede zaak');
+    admins.select(a);
+    expect(() => admins.dirToRemove(a)).toThrow(/staat open/);
+    admins.select('');
+    expect(admins.dirToRemove(a)).toBe(admins.dirFor(a));
+    expect(() => admins.dirToRemove('../buiten')).toThrow(/Onbekende/);
+  });
+
+  it('naam wijzigen (#444): de bedrijfsnaam in de database van een administratie die niet open is', () => {
+    const { admins } = registry();
+    const a = admins.create('Tweede zaak');
+    const file = join(admins.dirFor(a), 'boekhouding.sqlite');
+    const conn = new Database(file);
+    conn.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    conn.close();
+    // nog geen bedrijfsgegevens: de naam komt er alleen in
+    renameAdministrationFile(file, '  Bakker Bouw  ');
+    expect(readAdministrationFile(file)).toMatchObject({ name: 'Bakker Bouw' });
+    // andere bedrijfsgegevens blijven staan
+    const c2 = new Database(file);
+    c2.prepare('UPDATE settings SET value = ? WHERE key = ?').run(JSON.stringify({ name: 'Bakker Bouw', kvk: '12345678' }), 'company');
+    c2.close();
+    renameAdministrationFile(file, 'Bakker Bouw B.V.');
+    expect(readAdministrationFile(file)).toMatchObject({ name: 'Bakker Bouw B.V.' });
+    const c3 = new Database(file, { readonly: true });
+    expect(JSON.parse((c3.prepare('SELECT value FROM settings WHERE key = ?').get('company') as { value: string }).value)).toEqual({ name: 'Bakker Bouw B.V.', kvk: '12345678' });
+    c3.close();
+    expect(() => renameAdministrationFile(file, '   ')).toThrow(/Geef de administratie een naam/);
+    expect(admins.list(readAdministrationFile).map((x) => x.name)).toEqual(['Mijn administratie', 'Bakker Bouw B.V.']);
   });
 });

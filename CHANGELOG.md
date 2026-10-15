@@ -9,6 +9,7 @@
 - **Geen tweede schuifbalk meer.** Op een lange pagina kreeg behalve de inhoud ook het venster zelf een schuifbalk, waardoor je de hele app (menu en al) naar een witte pagina kon schuiven. Nu schuift alleen de inhoud.
 
 ### Nieuw
+- **Administraties beheren.** Bij Instellingen → Administraties kun je per administratie nu de naam wijzigen, de map openen (bijvoorbeeld om bij de back-ups te komen) en een administratie die je niet meer nodig hebt weghalen. Weghalen bevestig je door de naam te typen; de hele map gaat naar de prullenbak van je computer, dus je kunt hem terughalen. De open administratie en de eerste administratie (die staat in de gegevensmap zelf) kun je niet weghalen.
 - **De app houdt bij of er in de boekhoudermodus is geschreven.** Een correctieboeking, een boeking terugdraaien, het rekeningschema wijzigen of een afschrift weghalen wordt vastgelegd (kijken niet). Bij Instellingen → Over zie je "er is nooit in geschreven" of hoe vaak en wanneer, en het pakket voor je boekhouder heeft er een controle voor. Het akkoord-venster zegt het erbij: wij geven geen advies over een boekhouding; vragen lopen via je boekhouder, en op een administratie waarin buiten de boekhouder om in deze modus is geschreven, geven we geen ondersteuning.
 - **Hulp in de app.** Onderaan het menu staat *Hulp*: die opent in je browser de pagina van de [online handleiding](https://boekhoudenvoorniks.nl/handleiding/index.html) die bij het scherm hoort waar je bent. Ook bij Instellingen → Over staat de handleiding.
 

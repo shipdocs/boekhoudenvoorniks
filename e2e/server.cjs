@@ -35,7 +35,7 @@ const { createApi } = require(path.join(ROOT, 'main/main/api.js'));
 const { wipeDatabase } = require(path.join(ROOT, 'main/main/reset.js'));
 const { deleteAttachment, resolveAttachmentPath, saveAttachment } = require(path.join(ROOT, 'main/main/attachments.js'));
 const { seedDemo } = require(path.join(ROOT, 'main/demo/demo.js'));
-const { Administrations, readAdministrationFile } = require(path.join(ROOT, 'main/main/administrations.js'));
+const { Administrations, readAdministrationFile, renameAdministrationFile } = require(path.join(ROOT, 'main/main/administrations.js'));
 const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js'));
 const { createBackupBundle, extractBundle } = require(path.join(ROOT, 'main/main/backup.js'));
 const { ExchangeService, sanitizeForExchange } = require(path.join(ROOT, 'main/exchange/exchange.js'));
@@ -394,6 +394,19 @@ function init(fresh) {
         openAdmin(key);
         return key;
       },
+      async rename(key, name) {
+        const admins = new Administrations(dir);
+        if (key === admins.current()) {
+          services.settings.update({ company: { ...services.settings.get().company, name: name.trim() } });
+          return;
+        }
+        renameAdministrationFile(path.join(admins.dirFor(key), 'boekhouding.sqlite'), name);
+      },
+      // in de app gaat de map naar de prullenbak; hier (tijdelijke map) gewoon weg
+      async remove(key) {
+        fs.rmSync(new Administrations(dir).dirToRemove(key), { recursive: true, force: true });
+      },
+      async openFolder() {},
     },
     // afschriften uit de downloadmap: echt in een (tijdelijke) map kijken; "Andere map kiezen" kiest een tweede map
     statementFolder: {
