@@ -46,7 +46,7 @@ test('F01: telefoonkeuze 70% blijft gelden bij ongewijzigde bank-UI-default', as
 
 test('F03: memoriaal koppelt een gekozen vraagpost en neemt de blokkade weg', async ({ page }) => {
   await onboard(page);
-  await call(page, 'settings.update', { advancedMode: true });
+  await call(page, 'settings.update', { advancedMode: true, advancedModeAgreedAt: '2026-10-15' });
   const id = await call<number>(page, 'ledger.manualEntry', { date: '2026-09-15', description: 'Onbekende bankbetaling', lines: [{ account: 'BSchOvsVrp', debit: 10000 }, { account: 'BLiqBanRba', credit: 10000 }] });
   await page.reload();
   await nav(page, 'Boekhouding');
@@ -67,7 +67,7 @@ test('F03: memoriaal koppelt een gekozen vraagpost en neemt de blokkade weg', as
 
 test('F03: een backdated memoriaal kan een later afgeboekte vraagpost niet dubbel verbruiken', async ({ page }) => {
   await onboard(page);
-  await call(page, 'settings.update', { advancedMode: true });
+  await call(page, 'settings.update', { advancedMode: true, advancedModeAgreedAt: '2026-10-15' });
   const id = await call<number>(page, 'ledger.manualEntry', { date: '2026-09-01', description: 'Onbekende bankbetaling', lines: [{ account: 'BSchOvsVrp', debit: 10000 }, { account: 'BLiqBanRba', credit: 10000 }] });
   await call(page, 'ledger.manualEntry', { questionEntryId: id, date: '2026-09-20', description: 'Al uitgezocht', lines: [{ account: 'WBedKanTel', debit: 10000 }, { account: 'BSchOvsVrp', credit: 10000 }] });
   const before = await call<unknown[]>(page, 'ledger.entries');
