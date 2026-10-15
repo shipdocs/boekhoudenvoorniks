@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { Euro, DateNl, Empty, useApp, useJobWords, type Route } from '../ui';
+import { Euro, DateNl, Empty, useApp, useJobsOn, useJobWords, type Route } from '../ui';
 import type { SearchGroup } from '../../search/search';
 import type { JobWords } from '../../shared/job-term';
 
@@ -32,6 +32,7 @@ function routeFor(kind: string, id: number): Route {
 
 /** Zoekt terwijl je typt; een oudere, tragere zoekopdracht overschrijft de resultaten van een nieuwere niet. */
 function useSearch(q: string, limit: number): { results: SearchGroup[]; error: string | null; busy: boolean } {
+  const jobsOn = useJobsOn();
   const [results, setResults] = useState<SearchGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,7 +43,7 @@ function useSearch(q: string, limit: number): { results: SearchGroup[]; error: s
       try {
         const r = q.trim() ? await api.search.query(q, undefined, limit) : [];
         if (!current) return;
-        setResults(r);
+        setResults(jobsOn ? r : r.filter((g) => !g.key.startsWith('klus:')).map((g) => ({ ...g, links: g.links.filter((l) => l.kind !== 'klus') })));
         setError(null);
       } catch (e) {
         if (current) setError((e as Error).message);
@@ -54,7 +55,7 @@ function useSearch(q: string, limit: number): { results: SearchGroup[]; error: s
       current = false;
       clearTimeout(t);
     };
-  }, [q, limit]);
+  }, [q, limit, jobsOn]);
   return { results, error, busy };
 }
 
@@ -159,6 +160,7 @@ const KINDS: { key: string; label: string }[] = [
  * rekening, waar het op geboekt is, in welke btw-aangifte, of er een bon is, en of het nog aandacht nodig heeft.
  */
 export function SearchScreen() {
+  const jobsOn = useJobsOn();
   const jw = useJobWords();
   const { go, settings } = useApp();
   const [q, setQ] = useState(lastQuery);
@@ -180,7 +182,7 @@ export function SearchScreen() {
   return (
     <div className="page">
       <h1>Zoeken</h1>
-      <p className="sub">In betalingen, aankopen, bonnen, facturen, klanten en {jw.p}. Tip: "Preply", "Jansen &gt; 400", "Revolut 2026-07".</p>
+      <p className="sub">In betalingen, aankopen, bonnen, facturen, klanten{jobsOn && <> en {jw.p}</>}. Tip: "Preply", "Jansen &gt; 400", "Revolut 2026-07".</p>
       <input
         ref={input}
         className="search-input"
@@ -195,7 +197,7 @@ export function SearchScreen() {
         <div className="row" style={{ margin: '12px 0', gap: 12, flexWrap: 'wrap' }}>
           <div className="chips">
             <button className={kind === null ? 'selected' : ''} onClick={() => setKind(null)}>Alles ({results.length})</button>
-            {KINDS.filter((k) => counts.get(k.key)).map((k) => (
+            {KINDS.filter((k) => counts.get(k.key) && (jobsOn || k.key !== 'klus')).map((k) => (
               <button key={k.key} className={kind === k.key ? 'selected' : ''} onClick={() => setKind(k.key)}>{k.key === 'klus' ? jw.P : k.label} ({counts.get(k.key)})</button>
             ))}
           </div>

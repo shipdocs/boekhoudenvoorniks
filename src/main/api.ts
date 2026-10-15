@@ -454,7 +454,8 @@ export function createApi(s: Services, host: HostContext) {
         return { navigate: { screen: 'factuur', id: inv.id } };
       }
       case 'quote-expired:akkoord':
-        s.jobs.acceptQuote(r.quoteId!);
+        if (s.settings.get().jobsEnabled) s.jobs.acceptQuote(r.quoteId!);
+        else s.quotes.setStatus(r.quoteId!, 'geaccepteerd');
         return;
       case 'supplier-auto:ja':
         s.memory.setAutomatic(r.supplierKey!, true);

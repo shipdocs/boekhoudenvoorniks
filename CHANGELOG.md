@@ -4,6 +4,7 @@
 
 ### Nieuw
 - **Zelf kiezen hoe je een klus noemt.** Bij Instellingen kies je klus, project of opdracht. Menu, schermen, zoeken, aankopen en ritten gebruiken dan jouw woord, met de juiste lidwoorden (het project, de opdracht). Alleen de naam in de app verandert; je boekingen en facturen blijven zoals ze zijn. Meldingen op Vandaag zeggen voorlopig nog "klus".
+- **Werk je niet met klussen? Zet ze uit.** Bij Instellingen haal je het vinkje "Ik werk met klussen" weg. Dan verdwijnen het menu-item Klussen, de keuzes "voor welke klus" bij aankopen, ritten en bonnen, en de meldingen over klussen op Vandaag. Een offerte zet je dan na akkoord rechtstreeks om in een factuur. Bestaande klussen en boekingen blijven gewoon bestaan en komen terug als je het vinkje weer aanzet.
 
 ## 1.6.1 — af en bij in een CSV-afschrift zie je vóór het inlezen
 

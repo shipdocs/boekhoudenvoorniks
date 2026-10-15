@@ -363,6 +363,11 @@ export function SettingsScreen() {
               ))}
             </div>
           </Field>
+          <label className="row" style={{ alignItems: 'flex-start' }}>
+            <input type="checkbox" checked={draft.jobsEnabled} onChange={(e) => set({ jobsEnabled: e.target.checked })} />
+            <span>Ik werk met klussen (projecten)<br /><span className="small muted">Uit: het menu, de keuzes "voor welke klus" en de meldingen over klussen verdwijnen. Bestaande klussen en boekingen blijven gewoon staan.</span></span>
+          </label>
+          {draft.jobsEnabled && <>
           <Field label="Hoe noem je een klus?" hint="Alleen de naam in de app verandert; je boekingen en facturen blijven zoals ze zijn.">
             <select value={draft.jobTerm} onChange={(e) => set({ jobTerm: e.target.value as typeof draft.jobTerm })}>
               <option value="klus">Klus</option>
@@ -370,10 +375,11 @@ export function SettingsScreen() {
               <option value="opdracht">Opdracht</option>
             </select>
           </Field>
-          <label className="row" style={{ alignItems: 'flex-start' }}>
+          </>}
+          {draft.jobsEnabled && <label className="row" style={{ alignItems: 'flex-start' }}>
             <input type="checkbox" checked={draft.jobLocation} onChange={(e) => set({ jobLocation: e.target.checked })} />
             <span>Gebruik de locatie van foto's om bonnen aan {jw.p} te koppelen<br /><span className="small muted">Standaard uit. De plek uit de foto (als je telefoon die opslaat) blijft alleen op deze computer en wordt vergeleken met waar je eerder voor {jw.de} fotografeerde.</span></span>
-          </label>
+          </label>}
           <p className="small muted">Ook op "maximaal" gaat alleen automatisch wat zeker genoeg is, en een leverancier pas nadat jij daar ja op zei. Alles wat automatisch ging zie je terug op Vandaag, met de reden en een knop "Klopt niet".</p>
           <p className="muted">
             {settings.ocr.engine === 'claude-code' || settings.ocr.engine === 'codex'

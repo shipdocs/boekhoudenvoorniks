@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useAppEvent, useJobWords, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useAppEvent, useJobsOn, useJobWords, useLoad } from '../ui';
 import { NOT_READ_MESSAGE, READING_LABEL, WAITING_TO_READ_MESSAGE, shownMessage } from '../../shared/reading';
 import { BusinessShareField, CategoryChoice, InvestmentHint, ReverseRateField, SupplierInput, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
@@ -153,6 +153,7 @@ function extractionSourceLabel(source: string | null): string {
 }
 
 export function DocumentReview({ id }: { id: number }) {
+  const jobsOn = useJobsOn();
   const jw = useJobWords();
   const { go, meta, settings, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
@@ -444,7 +445,7 @@ export function DocumentReview({ id }: { id: number }) {
                       <div className="small muted">{paidWithNote(d).trim()} Weet je het zeker? Kies dan hierboven zelf hoe je betaalde.</div>
                     )}
                   </Field>
-                  {(jobs.data ?? []).length > 0 && (
+                  {jobsOn && (jobs.data ?? []).length > 0 && (
                     <Field label={`Voor een ${jw.s}?`} hint="optioneel">
                       <select value={form.jobId ?? ''} onChange={(e) => { jobSuggested.current = true; setForm({ ...form, jobId: Number(e.target.value) || null }); }}>
                         <option value="">Nee / algemeen</option>

@@ -141,7 +141,7 @@ export function App() {
             <div className="brand"><Logo width={180} /></div>
             <CurrentAdministration />
             <button className={`search-btn${route.screen === 'zoeken' ? ' active' : ''}`} onClick={() => go({ screen: 'zoeken' })} title="Zoeken (Ctrl+K voor snel zoeken)"><span>🔍</span>Zoeken<kbd>Ctrl K</kbd></button>
-            {NAV.map((n) => (
+            {NAV.filter((n) => n.screen !== 'klussen' || settings.jobsEnabled).map((n) => (
               <button key={n.screen} className={isActive(n) ? 'active' : ''} onClick={() => go({ screen: n.screen })}>
                 <span>{n.icon}</span>
                 {n.screen === 'klussen' ? jobWords(settings.jobTerm).P : n.label}
