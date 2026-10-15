@@ -27,7 +27,7 @@ describe('afschrift weghalen', () => {
     expect(s.bank.imports()).toMatchObject([{ id: a.batchId, filename: 'september.csv', lines: 2, processed: 0, blocked: null, from: '2026-09-01', to: '2026-09-02', accounts: 'Zakelijk' }]);
 
     expect(s.bank.removeImportPreview(a.batchId)).toMatchObject({ lines: 2, processed: [], evidence: 0, skippedElsewhere: 0, doubles: 0, blocked: null });
-    expect(s.bank.removeImport(a.batchId)).toEqual({ lines: 2, undone: 0, restored: 0 });
+    expect(s.bank.removeImport(a.batchId)).toEqual({ lines: 2, kept: 0, undone: 0, restored: 0 });
 
     expect(s.bank.list()).toEqual([]);
     expect(s.bank.imports()).toEqual([]);
@@ -49,7 +49,7 @@ describe('afschrift weghalen', () => {
 
     const preview = s.bank.removeImportPreview(a.batchId);
     expect(preview.processed).toMatchObject([{ id: bol.id, amount: -1000, counterName: 'Bol' }]);
-    expect(s.bank.removeImport(a.batchId)).toEqual({ lines: 2, undone: 1, restored: 0 });
+    expect(s.bank.removeImport(a.batchId)).toEqual({ lines: 2, kept: 0, undone: 1, restored: 0 });
 
     expect(db.prepare('SELECT status FROM journal_entries WHERE id = ?').get(entryId)).toEqual({ status: 'teruggedraaid' });
     expect(s.ledger.balance(ACCOUNTS.vraagposten)).toBe(0);
@@ -65,13 +65,45 @@ describe('afschrift weghalen', () => {
     expect(s.bank.skippedRows({ batchId: b.batchId })).toHaveLength(1);
 
     expect(s.bank.removeImportPreview(a.batchId)).toMatchObject({ skippedElsewhere: 1 });
-    expect(s.bank.removeImport(a.batchId)).toEqual({ lines: 1, undone: 0, restored: 1 });
+    expect(s.bank.removeImport(a.batchId)).toEqual({ lines: 1, kept: 0, undone: 0, restored: 1 });
 
     // het geld stond alleen in het eerste bestand: nu via het tweede
     expect(s.bank.list().map((t) => [t.counter_name, t.amount, t.import_batch_id]).sort()).toEqual([['Bol', -1000, b.batchId], ['Coolblue', -500, b.batchId]]);
     expect(s.bank.skippedRows({ batchId: b.batchId })).toEqual([]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM import_skipped').get()).toEqual({ n: 0 });
     expect(s.bank.imports()).toMatchObject([{ id: b.batchId, lines: 2 }]);
+  });
+
+  it('dezelfde betaling in drie soorten afschrift: na het weghalen van het eerste staat hij er één keer', () => {
+    const { s } = ready();
+    const a = s.bank.import(statement([line('2026-09-01', -1000, 'Bol')]), { filename: 'a.csv' });
+    const b = s.bank.import(statement([line('2026-09-02', -1000, 'Bol')], 'mt940'), { filename: 'b.sta' });
+    const c = s.bank.import(statement([{ ...line('2026-09-03', -1000, 'Bol'), bankId: 'C1' }], 'camt'), { filename: 'c.xml' });
+    expect([b.skipped, c.skipped]).toEqual([1, 1]);
+
+    expect(s.bank.removeImportPreview(a.batchId)).toMatchObject({ skippedElsewhere: 1 });
+    expect(s.bank.removeImport(a.batchId)).toEqual({ lines: 1, kept: 0, undone: 0, restored: 1 });
+    // één keer, uit het oudste van de twee (MT940); de CAMT-regel blijft overgeslagen, nu tegen die ene
+    expect(s.bank.list().map((t) => [t.amount, t.import_batch_id])).toEqual([[-1000, b.batchId]]);
+    expect(s.bank.skippedRows({ batchId: c.batchId }).map((k) => k.existing.id)).toEqual(s.bank.list().map((t) => t.id));
+    expect(s.bank.statementBalance()).toBe(-1000);
+  });
+
+  it('een betaling die ook in een bewaard overlappend afschrift staat, blijft staan en hoort bij dat afschrift', () => {
+    const { s, db } = ready();
+    const week = s.bank.import(statement([line('2026-09-01', -1000, 'Bol')]), { filename: 'week.csv' });
+    const month = s.bank.import(statement([line('2026-09-01', -1000, 'Bol'), line('2026-09-30', -2000, 'Coolblue')]), { filename: 'maand.csv' });
+    expect(month).toMatchObject({ imported: 1, duplicates: 1 });
+
+    expect(s.bank.removeImportPreview(week.batchId)).toMatchObject({ lines: 1, kept: 1, processed: [], skippedElsewhere: 0 });
+    expect(s.bank.removeImport(week.batchId)).toEqual({ lines: 1, kept: 1, undone: 0, restored: 0 });
+    expect(s.bank.list().map((t) => [t.transaction_date, t.amount, t.import_batch_id]).sort()).toEqual([['2026-09-01', -1000, month.batchId], ['2026-09-30', -2000, month.batchId]]);
+    expect(s.bank.statementBalance()).toBe(-3000);
+    expect(s.bank.imports()).toMatchObject([{ id: month.batchId, lines: 2, from: '2026-09-01', to: '2026-09-30' }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM import_returned').get()).toEqual({ n: 0 });
+    // en de maand daarna weghalen haalt wél alles weg
+    s.bank.removeImport(month.batchId);
+    expect(s.bank.list()).toEqual([]);
   });
 
   it('een regel uit een ander afschrift die als dubbel hiervan weg was, komt terug', () => {
@@ -125,7 +157,7 @@ describe('afschrift weghalen', () => {
     expect(s.bank.list()).toHaveLength(1);
 
     s.settings.update({ advancedMode: true, advancedModeAgreedAt: '2026-10-15' });
-    expect(await api.bank.removeImport(a.batchId)).toEqual({ lines: 1, undone: 0, restored: 0 });
+    expect(await api.bank.removeImport(a.batchId)).toEqual({ lines: 1, kept: 0, undone: 0, restored: 0 });
     expect(backups).toEqual([`voor-weghalen-afschrift-${a.batchId}`]);
     expect(s.bank.list()).toEqual([]);
   });
