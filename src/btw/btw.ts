@@ -51,7 +51,12 @@ export interface VatReport {
   corrections: VatCorrection[];
   warnings: string[];
   submittedAt: string | null;
+  /** betalingskenmerk en bedrag zoals de gebruiker ze uit Mijn Belastingdienst overnam (#322); alleen informatief */
+  payment: { reference: string | null; amount: Cents | null } | null;
 }
+
+/** Betalingskenmerk en bedrag per ingediende periode staan in de instellingen onder deze sleutel + de periode (#322). */
+const PAYMENT_KEY = 'vatPayment:';
 
 export interface IcpLine {
   relationId: number | null;
@@ -467,6 +472,7 @@ export class VatService {
       corrections,
       warnings,
       submittedAt: stored?.submitted_at ?? null,
+      payment: stored?.status === 'ingediend' ? this.paymentOf(period.key) : null,
     };
   }
 
@@ -699,11 +705,35 @@ export class VatService {
   }
 
   /** Heropent een periode (bv. als de aangifte toch nog niet verstuurd was). */
+  /**
+   * Betalingskenmerk en bedrag bij een ingediende aangifte (#322), overgenomen uit Mijn Belastingdienst. Beide optioneel
+   * (leeg of null = wissen). Het kenmerk is 16 cijfers; spaties en streepjes mogen erin. Er wordt niets door geboekt.
+   */
+  setPayment(periodKey: string, input: { reference?: string | null; amount?: Cents | null }): VatReport {
+    return tx(this.db, () => {
+      const row = this.db.prepare('SELECT status FROM vat_periods WHERE period_key = ?').get(periodKey) as { status: string } | undefined;
+      if (!row || row.status !== 'ingediend') throw new ValidationError('Leg het betalingskenmerk vast nadat je de aangifte hebt gedaan');
+      const digits = String(input.reference ?? '').replace(/[\s-]/g, '');
+      if (digits !== '' && !/^\d{16}$/.test(digits)) throw new ValidationError('Een betalingskenmerk heeft 16 cijfers');
+      const amount = input.amount ?? null;
+      if (amount !== null && (!Number.isSafeInteger(amount) || amount < 0 || amount > 100_000_000_000)) throw new ValidationError('Vul een bedrag in van 0 of meer');
+      if (digits === '' && amount === null) this.db.prepare('DELETE FROM settings WHERE key = ?').run(PAYMENT_KEY + periodKey);
+      else this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(PAYMENT_KEY + periodKey, JSON.stringify({ reference: digits === '' ? null : digits, amount }));
+      return this.calculate(periodKey);
+    });
+  }
+
+  private paymentOf(periodKey: string): VatReport['payment'] {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(PAYMENT_KEY + periodKey) as { value: string } | undefined;
+    return row ? (JSON.parse(row.value) as NonNullable<VatReport['payment']>) : null;
+  }
+
   reopen(periodKey: string): VatReport {
     return tx(this.db, () => {
       const row = this.db.prepare('SELECT * FROM vat_periods WHERE period_key = ?').get(periodKey) as { journal_entry_id: number | null; end_date: string } | undefined;
       if (!row) throw new ValidationError('Deze periode is niet ingediend');
       this.db.prepare('DELETE FROM vat_periods WHERE period_key = ?').run(periodKey);
+      this.db.prepare('DELETE FROM settings WHERE key = ?').run(PAYMENT_KEY + periodKey);
       if (row.journal_entry_id) this.ledger.reverse(row.journal_entry_id, row.end_date, `Heropening BTW-aangifte ${periodKey}`);
       return this.calculate(periodKey);
     });
