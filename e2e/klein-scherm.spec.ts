@@ -20,8 +20,11 @@ test('kleiner laptopscherm: geen scherm schuift opzij', async ({ page }) => {
       return { scroll: document.documentElement.scrollWidth > window.innerWidth + 2 || main.scrollWidth > main.clientWidth + 2, out };
     });
     if (wide.scroll || wide.out.length) overflow.push(`${s}: ${wide.out.join(', ')}`);
+    // het venster zelf mag nooit verticaal schuiven: dan schuift de hele app (menu en al) naar een witte pagina (#428)
+    const tall = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 2 || document.body.scrollHeight > window.innerHeight + 2);
+    if (tall) overflow.push(`${s}: het venster zelf schuift verticaal`);
   }
-  expect(overflow, 'schermen die breder zijn dan het venster').toEqual([]);
+  expect(overflow, 'schermen die breder zijn dan het venster, of het venster zelf laten schuiven').toEqual([]);
 });
 
 test('venster "Aankoop toevoegen" schuift niet horizontaal, ook niet met een lange btw-keuze', async ({ page }) => {
