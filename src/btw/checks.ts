@@ -301,7 +301,8 @@ export function runVatChecks(
     // Noord-Ierland (XI) is alleen voor goederen een EU-land (#317): ook daar is Nederlandse btw bij een bedrijf meestal fout.
     return c && isEuForGoods(c) && i.vat_number && i.codes.split(',').some((x) => x === 'hoog' || x === 'laag');
   });
-  const onlyNorthernIreland = euBusinessWithVat.length > 0 && euBusinessWithVat.every((i) => countryCode(i.country) === 'XI');
+  const northernIreland = euBusinessWithVat.filter((i) => countryCode(i.country) === 'XI');
+  const onlyNorthernIreland = northernIreland.length > 0 && northernIreland.length === euBusinessWithVat.length;
   if (euBusinessWithVat.length > 0) {
     const first = euBusinessWithVat[0]!;
     found.push({
@@ -310,7 +311,7 @@ export function runVatChecks(
       title: `${euBusinessWithVat.length === 1 ? `Factuur ${first.number}` : `${euBusinessWithVat.length} facturen`} aan een bedrijf in een ander EU-land met Nederlandse btw`,
       detail: onlyNorthernIreland
         ? `Noord-Ierland (zoals ${first.name}) geldt alleen voor goederen als EU-land. Lever je spullen aan een bedrijf daar, kies dan "Goederen aan een bedrijf in een ander EU-land" (rubriek 3b en opgaaf ICP). Is het een dienst, kies dan "Klant buiten de EU". Alleen bij werk aan een gebouw of grond in Nederland reken je Nederlandse btw. Klopt het niet? Maak een creditfactuur en een nieuwe factuur. Twijfel je? Vraag je boekhouder.`
-        : `Bij een bedrijf in een ander EU-land (zoals ${first.name}) verleg je de btw meestal: kies "Dienst aan een bedrijf in een ander EU-land" (of "Goederen …" als je spullen levert). Alleen bij werk aan een gebouw of grond in Nederland reken je Nederlandse btw. Klopt het niet? Maak een creditfactuur en een nieuwe factuur. Twijfel je? Vraag je boekhouder.`,
+        : `Bij een bedrijf in een ander EU-land (zoals ${first.name}) verleg je de btw meestal: kies "Dienst aan een bedrijf in een ander EU-land" (of "Goederen …" als je spullen levert). Alleen bij werk aan een gebouw of grond in Nederland reken je Nederlandse btw. Klopt het niet? Maak een creditfactuur en een nieuwe factuur. Twijfel je? Vraag je boekhouder.${northernIreland.length > 0 ? ` Let op: voor een klant in Noord-Ierland (${northernIreland[0]!.name}) geldt dat alleen voor goederen; een dienst daar kies je als "Klant buiten de EU".` : ''}`,
       count: euBusinessWithVat.length,
       fingerprint: euBusinessWithVat.map((i) => i.id).join(','),
       screen: 'werk',

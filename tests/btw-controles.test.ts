@@ -219,6 +219,16 @@ describe('Noord-Ierland (XI): goederen zijn een EU-levering (#317)', () => {
     expect(check.detail).toContain('Noord-Ierland');
     expect(check.detail).toContain('Klant buiten de EU');
   });
+  it('bij XI en een ander EU-land samen noemt de tekst ook dat een dienst aan XI buiten de EU valt', () => {
+    const { s } = setup();
+    sale(s, 'hoog', 10000);
+    const de = euCustomer(s);
+    s.invoices.finalize(s.invoices.createDraft({ relationId: de.id, invoiceDate: '2026-07-11', lines: [{ description: 'EU', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
+    const check = s.vat.checks('2026-Q3').find((c) => c.key === 'eu-bedrijf-met-btw')!;
+    expect(check.detail).toContain('Dienst aan een bedrijf in een ander EU-land');
+    expect(check.detail).toContain('Noord-Ierland');
+    expect(check.detail).toContain('Klant buiten de EU');
+  });
   it('goederen met code icp geven geen waarschuwing en staan met landcode XI in de ICP-opgaaf', () => {
     const { s } = setup();
     sale(s, 'icp', 10000);
