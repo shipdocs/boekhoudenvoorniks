@@ -1,28 +1,24 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 1.7.0 — een verkeerd afschrift weer weghalen, klussen naar jouw hand, en meer grip op de btw-aangifte
+
+Na de eerste meldingen van gebruikers: een CSV van de bank die er helemaal als "bij" in kwam en niet terug te draaien was, en klussen die niet bij ieders werk passen.
 
 ### Nieuw
+- **Een ingelezen afschrift weer weghalen** (Bank → Ingelezen afschriften; alleen met "Toon de boekhouding voor je boekhouder" aan). Klopt een afschrift niet, bijvoorbeeld omdat alles als "bij" is ingelezen, dan haal je het helemaal weg en lees je het daarna opnieuw in alsof het de eerste keer is. De app laat eerst zien wat er gebeurt en maakt een back-up. Wat je er al mee gedaan had, gaat netjes terug: verwerkte regels krijgen een tegenboeking (een gekoppelde factuur of aankoop staat weer open), bonnen die er als bewijs bij hingen gaan terug naar "Nog controleren", van regels uit latere afschriften die hierdoor waren overgeslagen komt er één alsnog in (de rest blijft overgeslagen), en regels die als dubbel hiervan weg waren komen terug. Een betaling die ook in een ander afschrift staat dat je houdt, blijft gewoon staan en hoort voortaan bij dat afschrift. Niet voor afschriften uit de bankkoppeling (die komen vanzelf terug) en niet als er betalingen in een afgesloten periode in staan.
+- **De boekhouding voor je boekhouder aanzetten vraagt eerst een akkoord.** Zet je bij Instellingen → Geavanceerd "Toon de boekhouding voor je boekhouder" aan, dan legt de app eerst uit dat die functies voor wie boekhoudt zijn en dat je er ook iets mee kapot kunt maken dat de app anders bewaakt. Pas na "Ik begrijp dit" en "Aanzetten" staat hij aan. Dat akkoord wordt onthouden; had je hem al aan, dan verandert er niets.
 - **Particulieren in Noord-Ierland tellen mee voor de grens van € 10.000.** Verkoop je spullen aan particulieren in andere EU-landen, dan telt Noord-Ierland mee in dezelfde grens. De melding over particulieren in het buitenland houdt daar nu rekening mee.
 - **Betalingskenmerk bij je btw-aangifte.** Na "Ik heb de aangifte gedaan" kun je het betalingskenmerk (16 cijfers) en het bedrag uit Mijn Belastingdienst Zakelijk invullen, om ze bij die periode terug te zien. Beide zijn optioneel en de app boekt er niets mee.
 - **Zelf kiezen hoe je een klus noemt.** Bij Instellingen kies je klus, project of opdracht. Menu, schermen, zoeken, aankopen en ritten gebruiken dan jouw woord, met de juiste lidwoorden (het project, de opdracht). Alleen de naam in de app verandert; je boekingen en facturen blijven zoals ze zijn. Meldingen op Vandaag zeggen voorlopig nog "klus".
 - **Werk je niet met klussen? Zet ze uit.** Bij Instellingen haal je het vinkje "Ik werk met klussen" weg. Dan verdwijnen het menu-item Klussen, de keuzes "voor welke klus" bij aankopen, ritten en bonnen, en de meldingen over klussen op Vandaag. Een offerte zet je dan na akkoord rechtstreeks om in een factuur. Bestaande klussen en boekingen blijven gewoon bestaan en komen terug als je het vinkje weer aanzet.
 
-## 1.6.1 — af en bij in een CSV-afschrift zie je vóór het inlezen
-
-Na een melding van een gebruiker: een CSV van zijn bank kwam er helemaal als "bij" in, en dat zag hij pas na het inlezen.
-
-### Opgelost
-- **Af en bij in een CSV beter herkend.** Schrijft je bank "Afschrijving" en "Bijschrijving", "Debit" en "Credit" (in een kolom die bijvoorbeeld "Type" heet) of "Uitgaand" en "Inkomend", dan las de app alles als "bij". De app herkent die kolom nu ook aan de waarden erin. Staat er iets in dat de app niet kent, dan blijft het teken uit de bedragkolom staan.
-
-### Nieuw
-- **Een ingelezen afschrift weer weghalen** (Bank → Ingelezen afschriften; alleen met "Toon de boekhouding voor je boekhouder" aan). Klopt een afschrift niet, bijvoorbeeld omdat alles als "bij" is ingelezen, dan haal je het helemaal weg en lees je het daarna opnieuw in alsof het de eerste keer is. De app laat eerst zien wat er gebeurt en maakt een back-up. Wat je er al mee gedaan had, gaat netjes terug: verwerkte regels krijgen een tegenboeking (een gekoppelde factuur of aankoop staat weer open), bonnen die er als bewijs bij hingen gaan terug naar "Nog controleren", van regels uit latere afschriften die hierdoor waren overgeslagen komt er één alsnog in (de rest blijft overgeslagen), en regels die als dubbel hiervan weg waren komen terug. Een betaling die ook in een ander afschrift staat dat je houdt, blijft gewoon staan en hoort voortaan bij dat afschrift. Niet voor afschriften uit de bankkoppeling (die komen vanzelf terug) en niet als er betalingen in een afgesloten periode in staan.
-- **De boekhouding voor je boekhouder aanzetten vraagt eerst een akkoord.** Zet je bij Instellingen → Geavanceerd "Toon de boekhouding voor je boekhouder" aan, dan legt de app eerst uit dat die functies voor wie boekhoudt zijn en dat je er ook iets mee kapot kunt maken dat de app anders bewaakt. Pas na "Ik begrijp dit" en "Aanzetten" staat hij aan. Dat akkoord wordt onthouden; had je hem al aan, dan verandert er niets.
-
 ### Verbeterd
 - **Je ziet vóór het inlezen wat de app ervan maakt.** Bij "Welke kolom is wat?" staat nu per regel de datum, af of bij, het bedrag en de naam zoals de app ze leest, met het aantal regels af en bij. Gaat alles dezelfde kant op, dan zie je dat meteen.
 - **Alles dezelfde kant op? Dan vraagt de app eerst of dat klopt.** Ook bij een CSV die de app al kent (een bekende bank, of kolommen die je eerder aanwees). Je kunt dan de kolommen nakijken, of bevestigen dat het klopt. Bij de overstap stuurt de app je voor zo'n bestand naar Bank.
 - **Liever CAMT.053 of MT940.** Bij Bank en in het kolomvenster staat nu dat je beter een CAMT.053- of MT940-bestand kiest als je bank dat heeft: daarin staat vast wat af en bij is.
+
+### Opgelost
+- **Af en bij in een CSV beter herkend.** Schrijft je bank "Afschrijving" en "Bijschrijving", "Debit" en "Credit" (in een kolom die bijvoorbeeld "Type" heet) of "Uitgaand" en "Inkomend", dan las de app alles als "bij". De app herkent die kolom nu ook aan de waarden erin. Staat er iets in dat de app niet kent, dan blijft het teken uit de bedragkolom staan.
 
 ## 1.6.0 — je eigen rekeningschema en rekeningen voor een bv
 
