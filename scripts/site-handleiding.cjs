@@ -27,7 +27,7 @@ const SITE_URL = 'https://boekhoudenvoorniks.nl/handleiding/';
 const HOOFDSTUKKEN = ['Beginnen', 'Dagelijks werk', 'Belasting en boekhouder', 'Problemen oplossen', 'Voor de boekhouder'];
 
 const WAARSCHUWING =
-  '<strong>Dit is de boekhoudermodus.</strong> Niet nodig en niet aan te raden voor gewone gebruikers: je werkt hier rechtstreeks in je boekhouding en kunt iets kapotmaken dat de app anders voor je bewaakt. Op een administratie waarin in deze modus is gewerkt, geven we geen ondersteuning. Twijfel je? Vraag je boekhouder.';
+  '<strong>Dit is de boekhoudermodus.</strong> Niet nodig en niet aan te raden voor gewone gebruikers: je werkt hier rechtstreeks in je boekhouding en kunt iets kapotmaken dat de app anders voor je bewaakt. Kijken mag altijd; boeken, terugdraaien, rekeningen wijzigen en afschriften weghalen zijn voor je boekhouder. Wij geven geen advies over een boekhouding: vragen over een administratie lopen via je boekhouder, die met de uitwisseling werkt. Op een administratie waarin buiten de boekhouder om in deze modus is geschreven, geven we geen ondersteuning.';
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const slug = (s) =>

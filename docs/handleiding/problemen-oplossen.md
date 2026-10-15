@@ -56,8 +56,10 @@ Die melding (SmartScreen) komt bij programma's die nog niet met een betaald cert
 
 ## Ik heb in de boekhoudermodus iets kapotgemaakt
 
-Op een administratie waarin in de boekhoudermodus is gewerkt, geven we geen ondersteuning: daar is rechtstreeks in de boekhouding ingegrepen. Zet een back-up terug van vóór dat moment (de app maakt er automatisch een vóór ingrijpende stappen), of vraag je boekhouder het recht te zetten.
+Op een administratie waarin buiten de boekhouder om in de boekhoudermodus is geschreven, geven we geen ondersteuning: daar is rechtstreeks in de boekhouding ingegrepen. Zet een back-up terug van vóór dat moment (de app maakt er automatisch een vóór ingrijpende stappen), of vraag je boekhouder het recht te zetten. Kijken in de boekhoudermodus (balans, kaarten, rapporten, exports) is nooit een probleem.
 
 ## Iets anders
 
-Kijk bij de [veelgestelde vragen](../#vragen) of mail ons: [info@shipdocs.app](mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks). Zeg erbij welke versie je gebruikt (*Instellingen → Over*) en wat je precies deed toen het misging.
+Werkt iets in de app niet zoals hier beschreven? Kijk bij de [veelgestelde vragen](../#vragen) of mail ons: [info@shipdocs.app](mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks). Zeg erbij welke versie je gebruikt (*Instellingen → Over*) en wat je precies deed toen het misging.
+
+Vragen over je boekhouding zelf (klopt deze boeking, wat moet ik aangeven, hoe los ik dit verschil op) beantwoorden we niet: daarvoor is je boekhouder. Werkt die met de [uitwisseling](boekhouder.html#de-uitwisseling), dan kan hij namens jou bij ons terecht als er iets in de app niet klopt.
