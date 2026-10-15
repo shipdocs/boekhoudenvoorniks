@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>De boekhoudermodus | Handleiding BoekhoudenVoorNiks</title>
+  <meta name="description" content="Wat er verschijnt als je &quot;Toon de boekhouding voor je boekhouder&quot; aanzet, voor wie het is, en wat je ermee kunt: kolommenbalans, grootboekkaarten, journaal, correctieboekingen, rekeningschema en exports.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/handleiding/boekhoudermodus.html">
+  <meta property="og:type" content="article">
+  <meta property="og:locale" content="nl_NL">
+  <meta property="og:site_name" content="BoekhoudenVoorNiks">
+  <meta property="og:url" content="https://boekhoudenvoorniks.nl/handleiding/boekhoudermodus.html">
+  <meta property="og:title" content="De boekhoudermodus">
+  <meta property="og:description" content="Wat er verschijnt als je &quot;Toon de boekhouding voor je boekhouder&quot; aanzet, voor wie het is, en wat je ermee kunt: kolommenbalans, grootboekkaarten, journaal, correctieboekingen, rekeningschema en exports.">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="../favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="stylesheet" href="../styles.css">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "De boekhoudermodus",
+  "description": "Wat er verschijnt als je \"Toon de boekhouding voor je boekhouder\" aanzet, voor wie het is, en wat je ermee kunt: kolommenbalans, grootboekkaarten, journaal, correctieboekingen, rekeningschema en exports.",
+  "inLanguage": "nl-NL",
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": "BoekhoudenVoorNiks",
+    "url": "https://boekhoudenvoorniks.nl/"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "ShipDocs",
+    "url": "https://shipdocs.app/"
+  },
+  "url": "https://boekhoudenvoorniks.nl/handleiding/boekhoudermodus.html"
+}
+  </script>
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="../"><picture><source srcset="../img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="../img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href=".././#functies">Functies</a>
+        <a href=".././#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="../starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="../stukadoors.html">Stukadoors</a>
+            <a href="../btw-stucwerk.html">Btw op stucwerk: 9% of 21%</a>
+            <a href="../schilders.html">Schilders</a>
+            <a href="../webdevelopers.html">Webdevelopers</a>
+            <a href="../boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="../handleiding/index.html" aria-current="page">Handleiding</a>
+        <a href="../waarom.html">Waarom</a>
+        <a href="../wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="../downloaden.html">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script src="../menu.js" defer></script>
+
+  <main class="wrap notes handleiding">
+    <p class="kruimels"><a href="index.html">Handleiding</a> › Voor de boekhouder</p>
+    <h1>De boekhoudermodus</h1>
+    <div class="boekhouder-waarschuwing" role="note"><strong>Dit is de boekhoudermodus.</strong> Niet nodig en niet aan te raden voor gewone gebruikers: je werkt hier rechtstreeks in je boekhouding en kunt iets kapotmaken dat de app anders voor je bewaakt. Op een administratie waarin in deze modus is gewerkt, geven we geen ondersteuning. Twijfel je? Vraag je boekhouder.</div>
+    <p class="lead">Wat er verschijnt als je &quot;Toon de boekhouding voor je boekhouder&quot; aanzet, voor wie het is, en wat je ermee kunt: kolommenbalans, grootboekkaarten, journaal, correctieboekingen, rekeningschema en exports.</p>
+    <nav class="inhoud" aria-label="Op deze pagina"><strong>Op deze pagina</strong><ul><li><a href="#voor-wie">Voor wie</a></li><li><a href="#aanzetten">Aanzetten</a></li><li><a href="#wat-er-onder-boekhouding-staat">Wat er onder Boekhouding staat</a></li><li><a href="#grootboek-en-btw">Grootboek en btw</a></li><li><a href="#wat-de-boekhoudermodus-niet-doet">Wat de boekhoudermodus niet doet</a></li></ul></nav>
+<h2 id="voor-wie">Voor wie</h2>
+<p>Dit hoofdstuk is voor de boekhouder of accountant die een administratie in BoekhoudenVoorNiks nakijkt of corrigeert. Een ondernemer heeft het niet nodig: alles wat je dagelijks doet, staat in de andere hoofdstukken, en de app bewaakt daar zelf dat de boekhouding klopt. In de boekhoudermodus werk je rechtstreeks in de boekhouding en kun je dat ongedaan maken.</p>
+<h2 id="aanzetten">Aanzetten</h2>
+<ol>
+<li><em>Instellingen → Voor de boekhouder → Toon de boekhouding voor je boekhouder (grootboek, balans en exports)</em>.</li>
+<li>De app legt uit dat deze functies voor wie boekhoudt zijn, en dat we geen ondersteuning geven op een administratie waarin in deze modus is gewerkt. Vink <em>Ik begrijp dit</em> aan en kies <em>Aanzetten</em>. Dat akkoord wordt onthouden.</li>
+<li>In het menu verschijnt <em>Boekhouding</em>; bij <em>Bank</em> verschijnt de lijst <em>Ingelezen afschriften</em>.</li>
+</ol>
+<p>Uitzetten kan altijd met hetzelfde vinkje. Kijken (balansen, kaarten, rapporten, exports) verandert niets aan de administratie; alleen boeken, terugdraaien, rekeningen wijzigen en afschriften weghalen grijpen in.</p>
+<h2 id="wat-er-onder-boekhouding-staat">Wat er onder Boekhouding staat</h2>
+<p>De tabbladen, met bovenaan een periode (<em>Van</em> en <em>Tot</em>):</p>
+<ul>
+<li><strong>Kolommenbalans</strong>: beginbalans, mutaties debet en credit en eindsaldo per rekening, met de controle of debet en credit gelijk zijn. Filter op balans of winst en verlies; klik op een rekening voor de kaart.</li>
+<li><strong>Grootboekkaarten</strong>: alle boekingen op één rekening, met de bron (factuur, bon, bankregel).</li>
+<li><strong>Relatiekaarten</strong>: per klant of leverancier wat er gefactureerd en betaald is.</li>
+<li><strong>Periodebalans</strong>: de balans per periode naast elkaar.</li>
+<li><strong>Journaal</strong>: alle journaalposten, met <em>Correctieboeking</em> (memoriaal) en <em>Terugdraaien</em>. Een teruggedraaide post krijgt een tegenboeking; de oorspronkelijke post blijft zichtbaar. Een correctieboeking kan een btw-code dragen en een vraagpost afboeken.</li>
+<li><strong>W&amp;V en balans</strong>: winst-en-verliesrekening en balans over de gekozen periode.</li>
+<li><strong>Exports</strong>: auditfile (XAF 3.2), kolommenbalans en journaal als bestand, los van het <a href="boekhouder.html#het-pakket-voor-je-boekhouder">pakket voor de boekhouder</a>.</li>
+<li><strong>Leveranciersregels</strong>: wat de app per leverancier heeft geleerd (categorie, btw, zakelijk deel), om te controleren en te corrigeren.</li>
+<li><strong>Controle</strong>: signalen die de app zelf vindt: uitschieters per leverancier, btw-afwijkingen, openstaande vraagposten.</li>
+<li><strong>Rekeningschema</strong>: rekeningen toevoegen met een officiële RGS-code, hernoemen, en een eigen rekening waarop nog niets geboekt is weer weghalen. Omzet- en btw-rekeningen beheert de app zelf, omdat de btw-aangifte eruit volgt. Bij een bv staan de rekeningen voor loon, rekening-courant, vennootschapsbelasting en kapitaal klaar.</li>
+</ul>
+<h2 id="grootboek-en-btw">Grootboek en btw</h2>
+<p>De app boekt op het Referentie Grootboekschema (RGS). De btw-aangifte wordt uit de btw-codes op de regels gerekend, niet uit de saldi van de btw-rekeningen; een correctieboeking met btw-code komt dus in de aangifte van de periode van de btw-datum. Na <em>Ik heb de aangifte gedaan</em> ligt die periode voor de btw vast: een latere correctie met een btw-datum in die periode schuift de app naar de eerstvolgende open periode en meldt dat.</p>
+<h2 id="wat-de-boekhoudermodus-niet-doet">Wat de boekhoudermodus niet doet</h2>
+<ul>
+<li>Geen bankregels bewerken. Een verkeerde verwerking draai je terug via <em>Ongedaan maken</em> bij de betaling, of je haalt het hele afschrift weg: <a href="afschrift-weghalen.html">Een ingelezen afschrift weghalen</a>.</li>
+<li>Geen facturen wijzigen. Een verstuurde factuur corrigeer je met een creditfactuur.</li>
+<li>Geen afgesloten periode openen. Een afsluiting is definitief; correcties komen in de volgende periode.</li>
+</ul>
+    <nav class="volgende" aria-label="Verder lezen">
+      <span>← <a href="index.html">Alle onderwerpen</a></span>
+      <span><a href="afschrift-weghalen.html">Een ingelezen afschrift weghalen</a> →</span>
+    </nav>
+    <p class="fine">Staat je vraag er niet bij? <a href="../#vragen">Veelgestelde vragen</a> · <a href="mailto:info@shipdocs.app?subject=Vraag%20over%20de%20handleiding">Mail ons</a> · Zie je een fout in deze pagina? <a href="https://github.com/shipdocs/boekhoudenvoorniks/edit/main/docs/handleiding/boekhoudermodus.html">Verbeter hem op GitHub</a>.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="../werkadministratie.html">Werkadministratie, geen boekhoudpakket</a></li>
+          <li><a href=".././#functies">Functies</a></li>
+          <li><a href=".././#prijzen">Prijzen</a></li>
+          <li><a href=".././#overstappen">Overstappen</a></li>
+          <li><a href="../bank-automatisch.html">Bank automatisch inlezen</a></li>
+          <li><a href="../btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="../buitenlandse-facturen.html">Buitenlandse facturen verwerken</a></li>
+          <li><a href="../zonder-abonnement.html">Zonder abonnement</a></li>
+          <li><a href="../offline-boekhoudprogramma.html">Offline boekhoudprogramma</a></li>
+          <li><a href="../gratis-boekhoudprogramma-downloaden.html">Gratis boekhoudprogramma downloaden</a></li>
+          <li><a href="../handleiding/index.html" aria-current="page">Handleiding</a></li>
+          <li><a href=".././#vragen">Veelgestelde vragen</a></li>
+          <li><a href="../wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="../starters.html">Starters</a></li>
+          <li><a href="../stukadoors.html">Stukadoors</a></li>
+          <li><a href="../schilders.html">Schilders</a></li>
+          <li><a href="../webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="../boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="../waarom.html">Waarom we dit maakten</a></li>
+          <li><a href="../kwaliteit.html">Hoe wij de software controleren</a></li>
+          <li><a href="../downloaden.html">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks">Vragen en feedback: mail ons</a></li>
+          <li><a href="../voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="../privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong><a href="https://shipdocs.app/">ShipDocs</a></strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a> · <button type="button" class="linkish" data-cookie-settings>Cookie-voorkeuren</button></p>
+    <div id="privacy-choice" role="dialog" aria-label="Meten van advertenties">
+      <p><strong>Mogen we meten of onze advertentie werkt?</strong> Met je toestemming laden we de Meta Pixel (Facebook en Instagram). Meta plaatst dan cookies en ziet dat je deze site bezocht. Zonder toestemming gaat er niets naar Meta. <a href="../privacy.html#website">Meer uitleg</a></p>
+      <div class="row"><button type="button" class="btn small" data-choice="ja">Toestaan</button><button type="button" class="btn small ghost" data-choice="nee">Niet toestaan</button></div>
+    </div>
+    <script src="../meta-pixel.js" defer></script>
+  </footer>
+</body>
+</html>

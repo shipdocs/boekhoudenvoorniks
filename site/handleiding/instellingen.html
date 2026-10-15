@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Instellingen en back-ups | Handleiding BoekhoudenVoorNiks</title>
+  <meta name="description" content="Wat er onder elk tabblad van Instellingen staat, waar je administratie staat, en hoe back-ups en updates werken.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/handleiding/instellingen.html">
+  <meta property="og:type" content="article">
+  <meta property="og:locale" content="nl_NL">
+  <meta property="og:site_name" content="BoekhoudenVoorNiks">
+  <meta property="og:url" content="https://boekhoudenvoorniks.nl/handleiding/instellingen.html">
+  <meta property="og:title" content="Instellingen en back-ups">
+  <meta property="og:description" content="Wat er onder elk tabblad van Instellingen staat, waar je administratie staat, en hoe back-ups en updates werken.">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="../favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="stylesheet" href="../styles.css">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Instellingen en back-ups",
+  "description": "Wat er onder elk tabblad van Instellingen staat, waar je administratie staat, en hoe back-ups en updates werken.",
+  "inLanguage": "nl-NL",
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": "BoekhoudenVoorNiks",
+    "url": "https://boekhoudenvoorniks.nl/"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "ShipDocs",
+    "url": "https://shipdocs.app/"
+  },
+  "url": "https://boekhoudenvoorniks.nl/handleiding/instellingen.html"
+}
+  </script>
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="../"><picture><source srcset="../img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="../img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href=".././#functies">Functies</a>
+        <a href=".././#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="../starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="../stukadoors.html">Stukadoors</a>
+            <a href="../btw-stucwerk.html">Btw op stucwerk: 9% of 21%</a>
+            <a href="../schilders.html">Schilders</a>
+            <a href="../webdevelopers.html">Webdevelopers</a>
+            <a href="../boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="../handleiding/index.html" aria-current="page">Handleiding</a>
+        <a href="../waarom.html">Waarom</a>
+        <a href="../wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="../downloaden.html">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script src="../menu.js" defer></script>
+
+  <main class="wrap notes handleiding">
+    <p class="kruimels"><a href="index.html">Handleiding</a> › Beginnen</p>
+    <h1>Instellingen en back-ups</h1>
+    
+    <p class="lead">Wat er onder elk tabblad van Instellingen staat, waar je administratie staat, en hoe back-ups en updates werken.</p>
+    <nav class="inhoud" aria-label="Op deze pagina"><strong>Op deze pagina</strong><ul><li><a href="#de-tabbladen">De tabbladen</a></li><li><a href="#waar-je-administratie-staat">Waar je administratie staat</a></li><li><a href="#back-ups">Back-ups</a></li><li><a href="#demo-en-opnieuw-beginnen">Demo en opnieuw beginnen</a></li><li><a href="#updates">Updates</a></li></ul></nav>
+<h2 id="de-tabbladen">De tabbladen</h2>
+<p><em>Instellingen</em> heeft bovenaan tabbladen. Verander je iets, klik dan onderaan op <em>Opslaan</em>.</p>
+<ul>
+<li><strong>Je bedrijf</strong>: naam, adres, KvK- en btw-nummer, rechtsvorm (eenmanszaak, vof of bv) en je instapdatum. Hier staat ook de overstap-hulp.</li>
+<li><strong>Facturen &amp; offertes</strong>: nummering (en het volgende nummer zelf zetten), betaaltermijn, geldigheid van offertes, herinneringen, en de opmaak van je factuur (logo, kleuren, teksten).</li>
+<li><strong>E-mail</strong>: de mailserver waarmee de app je facturen verstuurt (SMTP; de gegevens krijg je van je e-mailprovider) en een optionele kopie aan jezelf.</li>
+<li><strong>Btw</strong>: hoe vaak je aangifte doet, de kleineondernemersregeling, en je standaard btw-tarief.</li>
+<li><strong>Categorieën</strong>: de kostensoorten waarin de app je bonnen indeelt. Je kunt namen aanpassen, een eigen categorie toevoegen (<em>+ Eigen categorie</em>) of categorieën verbergen die je nooit gebruikt.</li>
+<li><strong>Koppelingen</strong>: webshop en betaaldiensten (WooCommerce, Shopify, Mollie, Stripe).</li>
+<li><strong>Telefoon &amp; bonnenmap</strong>: je telefoon koppelen voor de app voor Android, en een map op je computer waar de app bonnen uit leest. Zie <a href="telefoon.html">Telefoon</a>.</li>
+<li><strong>Automatisch &amp; herkenning</strong>: hoeveel de app zelf doet, en hoe bonnen gelezen worden (op je eigen computer, of met een hulpdienst die je zelf kiest).</li>
+<li><strong>Back-up, demo &amp; updates</strong>: zie hieronder.</li>
+<li><strong>Administraties</strong>: meer dan één bedrijf op dezelfde computer. Elke administratie heeft eigen klanten, bonnen, bank en back-ups; je wisselt met één klik.</li>
+<li><strong>Voor de boekhouder</strong>: het vinkje <em>Toon de boekhouding voor je boekhouder</em>. Dit is de <a href="boekhoudermodus.html">boekhoudermodus</a>: niet nodig voor gewoon gebruik.</li>
+<li><strong>Over</strong>: welke versie je hebt en waar je gegevens staan.</li>
+</ul>
+<h2 id="waar-je-administratie-staat">Waar je administratie staat</h2>
+<p>Alles staat op je eigen computer, in één gegevensmap met een databasebestand en de bijlagen (bonnen, facturen). Bij <em>Instellingen → Over</em> en <em>Back-up, demo &amp; updates</em> zie je het pad. Wil je de map ergens anders, bijvoorbeeld op een tweede schijf, kies dan <em>Gegevensmap wijzigen…</em>; de app verplaatst alles en controleert het.</p>
+<p>Er is geen cloud en geen account. Wissel je van computer, dan zet je een back-up terug (zie hieronder).</p>
+<h2 id="back-ups">Back-ups</h2>
+<ul>
+<li><strong>Vanzelf</strong>: de app maakt elke dag een back-up, en ook vlak voordat hij iets ingrijpends doet (een periode afsluiten, een afschrift weghalen, een update). Je hoeft hier niets voor te doen.</li>
+<li><strong>Zelf een kopie maken</strong>: <em>Instellingen → Back-up, demo &amp; updates → Back-up maken</em>. Zet die kopie op een USB-stick of in je eigen cloudmap. Een back-up bevat je hele administratie, mét bijlagen.</li>
+<li><strong>Versleutelde kopie voor je boekhouder</strong>: dezelfde plek, knop <em>Versleutelde kopie maken</em>, met een wachtwoord. Alleen met dat wachtwoord is de kopie te openen. Geef het wachtwoord apart door (bijvoorbeeld telefonisch), niet in dezelfde mail.</li>
+<li><strong>Terugzetten</strong>: <em>Back-up terugzetten…</em>. Kies het bestand; de app maakt eerst een kopie van wat er nu staat, zodat je altijd terug kunt.</li>
+</ul>
+<aside class="let-op"><p>Een back-up terugzetten vervangt je hele administratie door die van het moment van de back-up. Alles wat je daarna deed, is weg. Twijfel je? Maak eerst een nieuwe back-up.</p></aside>
+<h2 id="demo-en-opnieuw-beginnen">Demo en opnieuw beginnen</h2>
+<p>Op hetzelfde tabblad staat <em>Demo en opnieuw beginnen</em>: de demo-administratie bekijken, of helemaal opnieuw beginnen. Ook dan maakt de app eerst een back-up.</p>
+<h2 id="updates">Updates</h2>
+<p>De app kijkt zelf of er een nieuwe versie is en vertelt dat bovenaan het scherm. Bij de eerste start van een nieuwe versie maakt hij eerst een kopie van je administratie. Wat er per versie veranderd is, lees je bij <a href="../wijzigingen.html">Wat is er nieuw</a>. Je kunt automatisch bijwerken aan- of uitzetten.</p>
+    <nav class="volgende" aria-label="Verder lezen">
+      <span>← <a href="overstappen.html">Overstappen vanuit een ander programma</a></span>
+      <span><a href="index.html">Alle onderwerpen</a> →</span>
+    </nav>
+    <p class="fine">Staat je vraag er niet bij? <a href="../#vragen">Veelgestelde vragen</a> · <a href="mailto:info@shipdocs.app?subject=Vraag%20over%20de%20handleiding">Mail ons</a> · Zie je een fout in deze pagina? <a href="https://github.com/shipdocs/boekhoudenvoorniks/edit/main/docs/handleiding/instellingen.html">Verbeter hem op GitHub</a>.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="../werkadministratie.html">Werkadministratie, geen boekhoudpakket</a></li>
+          <li><a href=".././#functies">Functies</a></li>
+          <li><a href=".././#prijzen">Prijzen</a></li>
+          <li><a href=".././#overstappen">Overstappen</a></li>
+          <li><a href="../bank-automatisch.html">Bank automatisch inlezen</a></li>
+          <li><a href="../btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="../buitenlandse-facturen.html">Buitenlandse facturen verwerken</a></li>
+          <li><a href="../zonder-abonnement.html">Zonder abonnement</a></li>
+          <li><a href="../offline-boekhoudprogramma.html">Offline boekhoudprogramma</a></li>
+          <li><a href="../gratis-boekhoudprogramma-downloaden.html">Gratis boekhoudprogramma downloaden</a></li>
+          <li><a href="../handleiding/index.html" aria-current="page">Handleiding</a></li>
+          <li><a href=".././#vragen">Veelgestelde vragen</a></li>
+          <li><a href="../wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="../starters.html">Starters</a></li>
+          <li><a href="../stukadoors.html">Stukadoors</a></li>
+          <li><a href="../schilders.html">Schilders</a></li>
+          <li><a href="../webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="../boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="../waarom.html">Waarom we dit maakten</a></li>
+          <li><a href="../kwaliteit.html">Hoe wij de software controleren</a></li>
+          <li><a href="../downloaden.html">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks">Vragen en feedback: mail ons</a></li>
+          <li><a href="../voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="../privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong><a href="https://shipdocs.app/">ShipDocs</a></strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a> · <button type="button" class="linkish" data-cookie-settings>Cookie-voorkeuren</button></p>
+    <div id="privacy-choice" role="dialog" aria-label="Meten van advertenties">
+      <p><strong>Mogen we meten of onze advertentie werkt?</strong> Met je toestemming laden we de Meta Pixel (Facebook en Instagram). Meta plaatst dan cookies en ziet dat je deze site bezocht. Zonder toestemming gaat er niets naar Meta. <a href="../privacy.html#website">Meer uitleg</a></p>
+      <div class="row"><button type="button" class="btn small" data-choice="ja">Toestaan</button><button type="button" class="btn small ghost" data-choice="nee">Niet toestaan</button></div>
+    </div>
+    <script src="../meta-pixel.js" defer></script>
+  </footer>
+</body>
+</html>

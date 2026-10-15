@@ -32,7 +32,8 @@
     "e2e": "npm run rebuild:node && npm run build && playwright test",
     "e2e:only": "playwright test",
     "voorbeeldpakket": "npm run rebuild:node && npm run build:main && node scripts/voorbeeldpakket.cjs",
-    "site:menu": "node scripts/site-menu.cjs"
+    "site:menu": "node scripts/site-menu.cjs",
+    "site:handleiding": "node scripts/site-handleiding.cjs && node scripts/site-menu.cjs"
   },
   "build": {
     "appId": "app.shipdocs.gratisboekhouden",

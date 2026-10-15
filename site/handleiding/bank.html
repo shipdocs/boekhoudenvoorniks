@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bank: afschriften inlezen en betalingen uitzoeken | Handleiding BoekhoudenVoorNiks</title>
+  <meta name="description" content="Welk bestand je bij je bank downloadt, hoe je het inleest, hoe de app betalingen koppelt, en wat je doet bij een vraag, een dubbele betaling of een saldo dat niet klopt.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/handleiding/bank.html">
+  <meta property="og:type" content="article">
+  <meta property="og:locale" content="nl_NL">
+  <meta property="og:site_name" content="BoekhoudenVoorNiks">
+  <meta property="og:url" content="https://boekhoudenvoorniks.nl/handleiding/bank.html">
+  <meta property="og:title" content="Bank: afschriften inlezen en betalingen uitzoeken">
+  <meta property="og:description" content="Welk bestand je bij je bank downloadt, hoe je het inleest, hoe de app betalingen koppelt, en wat je doet bij een vraag, een dubbele betaling of een saldo dat niet klopt.">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="../favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="stylesheet" href="../styles.css">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Bank: afschriften inlezen en betalingen uitzoeken",
+  "description": "Welk bestand je bij je bank downloadt, hoe je het inleest, hoe de app betalingen koppelt, en wat je doet bij een vraag, een dubbele betaling of een saldo dat niet klopt.",
+  "inLanguage": "nl-NL",
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": "BoekhoudenVoorNiks",
+    "url": "https://boekhoudenvoorniks.nl/"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "ShipDocs",
+    "url": "https://shipdocs.app/"
+  },
+  "url": "https://boekhoudenvoorniks.nl/handleiding/bank.html"
+}
+  </script>
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="../"><picture><source srcset="../img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="../img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href=".././#functies">Functies</a>
+        <a href=".././#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="../starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="../stukadoors.html">Stukadoors</a>
+            <a href="../btw-stucwerk.html">Btw op stucwerk: 9% of 21%</a>
+            <a href="../schilders.html">Schilders</a>
+            <a href="../webdevelopers.html">Webdevelopers</a>
+            <a href="../boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="../handleiding/index.html" aria-current="page">Handleiding</a>
+        <a href="../waarom.html">Waarom</a>
+        <a href="../wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="../downloaden.html">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script src="../menu.js" defer></script>
+
+  <main class="wrap notes handleiding">
+    <p class="kruimels"><a href="index.html">Handleiding</a> › Dagelijks werk</p>
+    <h1>Bank: afschriften inlezen en betalingen uitzoeken</h1>
+    
+    <p class="lead">Welk bestand je bij je bank downloadt, hoe je het inleest, hoe de app betalingen koppelt, en wat je doet bij een vraag, een dubbele betaling of een saldo dat niet klopt.</p>
+    <nav class="inhoud" aria-label="Op deze pagina"><strong>Op deze pagina</strong><ul><li><a href="#welk-bestand-kies-ik-bij-mijn-bank">Welk bestand kies ik bij mijn bank?</a></li><li><a href="#inlezen">Inlezen</a></li><li><a href="#betalingen-uitzoeken-hulp-nodig">Betalingen uitzoeken: Hulp nodig</a></li><li><a href="#dubbele-betalingen">Dubbele betalingen</a></li><li><a href="#klopt-mijn-saldo">Klopt mijn saldo?</a></li><li><a href="#automatisch-ponto-en-de-downloadmap">Automatisch: Ponto en de downloadmap</a></li><li><a href="#een-verkeerd-afschrift-weer-weghalen">Een verkeerd afschrift weer weghalen</a></li></ul></nav>
+<h2 id="welk-bestand-kies-ik-bij-mijn-bank">Welk bestand kies ik bij mijn bank?</h2>
+<p>Download in internetbankieren een afschrift (meestal onder <em>Afschriften</em>, <em>Downloaden</em> of <em>Exporteren</em>). Kies:</p>
+<ol>
+<li><strong>CAMT.053</strong> als je bank dat heeft. Daarin staat vast wat af en bij is, met naam en rekeningnummer van de tegenpartij.</li>
+<li>Anders <strong>MT940</strong>.</li>
+<li>Anders <strong>CSV</strong>. Dat werkt ook, maar elke bank schrijft &quot;af&quot; en &quot;bij&quot; anders op; de app laat daarom vóór het inlezen zien wat hij ervan maakt.</li>
+</ol>
+<p>Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf. Je kunt ook je bank <a href="#automatisch-ponto-en-de-downloadmap">automatisch laten ophalen met Ponto</a>.</p>
+<h2 id="inlezen">Inlezen</h2>
+<ol>
+<li>Ga naar <em>Bank</em> en sleep het bestand op <em>Sleep je bankafschrift hierheen</em>.</li>
+<li>De app meldt hoeveel nieuwe betalingen erin stonden en hoeveel er al bekend waren. Hetzelfde afschrift twee keer inlezen is geen probleem: dubbele regels slaat de app over.</li>
+<li>Wat de app zelf kon koppelen (een betaling aan een factuur, een afschrijving aan een bon) is al verwerkt. De rest staat onder <em>Hulp nodig</em>.</li>
+</ol>
+<h3 id="een-csv-die-de-app-nog-niet-kent-kolommen-aanwijzen">Een CSV die de app nog niet kent: kolommen aanwijzen</h3>
+<p>De eerste keer vraagt de app <em>Welke kolom is wat?</em>: de datum (en het datumformaat), het bedrag, en als de bedragen geen minteken hebben de kolom met &quot;Af&quot; of &quot;Bij&quot;. Verder de naam, het rekeningnummer en de omschrijving. Onder <em>Zo leest de app het</em> zie je meteen per regel de datum, af of bij, het bedrag en de naam, met het aantal regels af en bij. Klopt het, kies <em>Inlezen</em>; de app onthoudt de keuze voor dit soort bestand.</p>
+<h3 id="klopt-dit">&quot;Klopt dit?&quot;</h3>
+<p>Gaan alle regels dezelfde kant op én ziet de app een aanwijzing dat af en bij verkeerd gelezen zijn (bijvoorbeeld een kolom met waarden die hij niet kent), dan vraagt hij eerst <em>Klopt dit?</em>. Kies <em>Kolommen nakijken</em> om de toewijzing te verbeteren, of <em>Ja, dit klopt: inlezen</em>. Een rustige week met alleen afschrijvingen krijgt die vraag niet.</p>
+<h2 id="betalingen-uitzoeken-hulp-nodig">Betalingen uitzoeken: Hulp nodig</h2>
+<p>Onder <em>Hulp nodig</em> staan de betalingen waar de app niet zeker van is. Klik op een betaling. De app stelt voor wat het waarschijnlijk is; je kiest:</p>
+<ul>
+<li><strong>Een factuur</strong> van jou die hiermee betaald is.</li>
+<li><strong>Een bon of aankoop</strong> die hiermee betaald is.</li>
+<li><strong>Een kostensoort</strong> (categorie) als er geen bon is of komt; typ een paar letters. Bij een uitgave met btw vul je het btw-tarief in.</li>
+<li><strong>Verkoop via een ander systeem</strong>: omzet uit een webshop of betaaldienst waarvoor je geen factuur in de app maakte.</li>
+<li><strong>Privé</strong>: geld dat niets met je bedrijf te maken heeft (een privéopname of -storting).</li>
+<li><strong>Negeren</strong>: de regel telt niet mee in je boekhouding, wel in het saldo. Bijvoorbeeld een dubbele regel of een nulbedrag.</li>
+</ul>
+<p>Een overboeking tussen je eigen rekeningen (bijvoorbeeld naar je spaarrekening of btw-potje) herkent de app zelf, als beide rekeningen in de app staan. Voeg een tweede rekening toe met <em>+ Rekening toevoegen</em>.</p>
+<p>Vergist? Open de betaling en kies <em>Ongedaan maken</em>. Je blijft op dezelfde pagina en kiest meteen wat het wel was.</p>
+<p>Met <em>Opnieuw automatisch uitzoeken</em> laat je de app nog een keer over alles heen gaan, bijvoorbeeld nadat je een stapel bonnen hebt toegevoegd.</p>
+<h2 id="dubbele-betalingen">Dubbele betalingen</h2>
+<p>Dezelfde betaling kan twee keer in de app komen, bijvoorbeeld uit een CSV en later uit een CAMT-bestand met een andere datum of naam. De app ziet dat en zegt het op <em>Vandaag</em> en bij <em>Bank</em>: <em>€ … staat er waarschijnlijk twee keer in</em>. Kies <em>Bekijken en oplossen</em>, je ziet beide regels naast elkaar en kiest welke blijft. De andere haalt de app uit je boekhouding; die blijft bewaard en kun je altijd terugzetten.</p>
+<p>Regels die de app bij het inlezen oversloeg omdat ze er al stonden, vind je met <em>Bekijken</em> bij de melding na het inlezen. Was het toch een eigen betaling? <em>Toch toevoegen</em>.</p>
+<h2 id="klopt-mijn-saldo">Klopt mijn saldo?</h2>
+<p>Bij <em>Bank</em> staat per rekening <em>Laatst ingelezen</em>, wat dat afschrift bevatte en <em>Bijgewerkt t/m</em>. Staat er een beginsaldo (knop <em>Beginsaldo</em>) en bevat je afschrift een eindsaldo, dan controleert de app of alles aansluit. Klopt het niet, dan zegt hij dat op <em>Vandaag</em> en laat hij zien welke regels zijn overgeslagen: meestal zit het verschil daar. Zie ook <a href="problemen-oplossen.html#mijn-banksaldo-klopt-niet">Problemen oplossen</a>.</p>
+<h2 id="automatisch-ponto-en-de-downloadmap">Automatisch: Ponto en de downloadmap</h2>
+<ul>
+<li><strong>Afschriften vanzelf inlezen</strong>: zet dit aan bij <em>Bank</em>. De app kijkt dan in je Downloads-map (of een map die je kiest) naar nieuwe afschriften en vraagt op <em>Vandaag</em> <em>Inlezen</em> of <em>Niet nu</em>. De app verplaatst of verwijdert nooit bestanden.</li>
+<li><strong>Bank ophalen met Ponto</strong>: een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit. Een wizard bij <em>Bank</em> leidt je er in vijf stappen langs; daarna haalt de app je betalingen zelf op, rechtstreeks bij Ponto. Afschriften blijven de basis en de terugval. Meer op <a href="../bank-automatisch.html">bank automatisch inlezen</a> en <a href="../bank-ophalen.html">Ponto</a>.</li>
+</ul>
+<h2 id="een-verkeerd-afschrift-weer-weghalen">Een verkeerd afschrift weer weghalen</h2>
+<p>Is een afschrift verkeerd ingelezen (bijvoorbeeld alles als &quot;bij&quot;)? Dan kun je het helemaal weghalen en opnieuw inlezen. Omdat dit rechtstreeks in je boekhouding ingrijpt, zit het in de boekhoudermodus: zie <a href="afschrift-weghalen.html">Een ingelezen afschrift weghalen</a>. Vraag bij twijfel je boekhouder.</p>
+    <nav class="volgende" aria-label="Verder lezen">
+      <span>← <a href="bonnetjes.html">Bonnetjes en aankopen</a></span>
+      <span><a href="klussen.html">Klussen (of projecten, of opdrachten)</a> →</span>
+    </nav>
+    <p class="fine">Staat je vraag er niet bij? <a href="../#vragen">Veelgestelde vragen</a> · <a href="mailto:info@shipdocs.app?subject=Vraag%20over%20de%20handleiding">Mail ons</a> · Zie je een fout in deze pagina? <a href="https://github.com/shipdocs/boekhoudenvoorniks/edit/main/docs/handleiding/bank.html">Verbeter hem op GitHub</a>.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="../werkadministratie.html">Werkadministratie, geen boekhoudpakket</a></li>
+          <li><a href=".././#functies">Functies</a></li>
+          <li><a href=".././#prijzen">Prijzen</a></li>
+          <li><a href=".././#overstappen">Overstappen</a></li>
+          <li><a href="../bank-automatisch.html">Bank automatisch inlezen</a></li>
+          <li><a href="../btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="../buitenlandse-facturen.html">Buitenlandse facturen verwerken</a></li>
+          <li><a href="../zonder-abonnement.html">Zonder abonnement</a></li>
+          <li><a href="../offline-boekhoudprogramma.html">Offline boekhoudprogramma</a></li>
+          <li><a href="../gratis-boekhoudprogramma-downloaden.html">Gratis boekhoudprogramma downloaden</a></li>
+          <li><a href="../handleiding/index.html" aria-current="page">Handleiding</a></li>
+          <li><a href=".././#vragen">Veelgestelde vragen</a></li>
+          <li><a href="../wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="../starters.html">Starters</a></li>
+          <li><a href="../stukadoors.html">Stukadoors</a></li>
+          <li><a href="../schilders.html">Schilders</a></li>
+          <li><a href="../webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="../boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="../waarom.html">Waarom we dit maakten</a></li>
+          <li><a href="../kwaliteit.html">Hoe wij de software controleren</a></li>
+          <li><a href="../downloaden.html">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks">Vragen en feedback: mail ons</a></li>
+          <li><a href="../voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="../privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong><a href="https://shipdocs.app/">ShipDocs</a></strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a> · <button type="button" class="linkish" data-cookie-settings>Cookie-voorkeuren</button></p>
+    <div id="privacy-choice" role="dialog" aria-label="Meten van advertenties">
+      <p><strong>Mogen we meten of onze advertentie werkt?</strong> Met je toestemming laden we de Meta Pixel (Facebook en Instagram). Meta plaatst dan cookies en ziet dat je deze site bezocht. Zonder toestemming gaat er niets naar Meta. <a href="../privacy.html#website">Meer uitleg</a></p>
+      <div class="row"><button type="button" class="btn small" data-choice="ja">Toestaan</button><button type="button" class="btn small ghost" data-choice="nee">Niet toestaan</button></div>
+    </div>
+    <script src="../meta-pixel.js" defer></script>
+  </footer>
+</body>
+</html>
