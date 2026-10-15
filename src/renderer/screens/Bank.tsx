@@ -58,6 +58,8 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
   const [showSame, setShowSame] = useState<{ firstId: number; secondId: number } | null>(same ?? null);
   const openSame = showSame ? (sames.data ?? []).find((d) => d.firstId === showSame.firstId && d.secondId === showSame.secondId) : undefined;
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
+  // een bekende CSV waarin alle regels dezelfde kant op gaan: eerst vragen of dat klopt (#407)
+  const [sided, setSided] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; mapping: CsvMapping | null; side: 'af' | 'bij'; total: number } | null>(null);
   const [last, setLast] = useState<ImportResult | null>(imported ?? null);
   // de regels die zijn overgeslagen omdat de betaling er al stond: van één import of van één rekening
   const [review, setReview] = useState<{ batchId?: number; bankAccountId?: number } | null>(skippedFor ? { bankAccountId: skippedFor } : null);
@@ -71,6 +73,10 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
     if (preview.format === 'onbekend') return toast('Dit bestand herkennen we niet. Download bij je bank een afschrift als CSV-, MT940- of CAMT-bestand (in je internetbankieren bij \'downloaden\' of \'exporteren\').', 'error');
     if (preview.format === 'csv' && !preview.csv?.detectedBank && !preview.savedMapping) {
       return setMapping({ filename: file.name, content, headers: preview.csv!.headers, rows: preview.csv!.rows, suggested: preview.csv!.suggestedMapping });
+    }
+    if (preview.format === 'csv' && preview.oneSided) {
+      const { af, bij } = preview.direction!;
+      return setSided({ filename: file.name, content, headers: preview.csv!.headers, rows: preview.csv!.rows, mapping: preview.savedMapping ?? preview.csv!.suggestedMapping, side: preview.oneSided, total: af + bij });
     }
     await doImport(file.name, content, preview.savedMapping ?? undefined);
   };
@@ -101,7 +107,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
       <DropZone accept=".csv,.txt,.sta,.940,.mt940,.xml" onFile={(f) => void importFile(f)}>
         <div style={{ fontSize: 30 }}>🏦</div>
         <strong>Sleep je bankafschrift hierheen</strong>
-        <div className="small">Download het bij je bank: internetbankieren → afschrift downloaden (CSV, MT940 of CAMT)</div>
+        <div className="small">Download het bij je bank: internetbankieren → afschrift downloaden. Het liefst CAMT.053 of MT940; CSV kan ook.</div>
       </DropZone>
 
       {last && (
@@ -242,6 +248,20 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
       {openDouble && <DoubleDialog double={openDouble} onClose={() => setShowDouble(null)} onChanged={async () => { setShowDouble(null); await Promise.all([txs.reload(), status.reload(), doubles.reload()]); refreshBadge(); }} />}
       {openSame && <SameDialog double={openSame} onClose={() => setShowSame(null)} onChanged={async () => { setShowSame(null); await Promise.all([txs.reload(), status.reload(), sames.reload()]); refreshBadge(); }} />}
       {mapping && <CsvMappingDialog {...mapping} onClose={() => setMapping(null)} onConfirm={async (m) => { const x = mapping; setMapping(null); await doImport(x.filename, x.content, m); }} />}
+      {sided && (
+        <Modal title="Klopt dit?" onClose={() => setSided(null)}>
+          <p>
+            Alle {sided.total} regels in dit bestand zijn <strong>{sided.side === 'bij' ? 'bijschrijvingen' : 'afschrijvingen'}</strong>; er is geen enkele {sided.side === 'bij' ? 'afschrijving' : 'bijschrijving'}.
+            Meestal betekent dit dat de kolom met “Af” of “Bij” niet goed gelezen is. Kijk dan even naar de kolommen voordat je het inleest.
+          </p>
+          <p className="small muted">Heeft je bank ook een CAMT.053- of MT940-bestand? Kies dan liever dat: daarin staat vast wat af en bij is.</p>
+          <div className="row end" style={{ marginTop: 14 }}>
+            <Button onClick={() => setSided(null)}>Annuleren</Button>
+            <Button onClick={async () => { const x = sided; setSided(null); await doImport(x.filename, x.content, x.mapping ?? undefined); }}>Ja, dit klopt: inlezen</Button>
+            <Button kind="primary" onClick={() => { const x = sided; setSided(null); setMapping({ filename: x.filename, content: x.content, headers: x.headers, rows: x.rows, suggested: x.mapping }); }}>Kolommen nakijken</Button>
+          </div>
+        </Modal>
+      )}
       {opening && <OpeningBalance accountId={opening.id} name={opening.name} onClose={() => setOpening(null)} />}
       {editing && <AccountDialog account={editing === 'nieuw' ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await Promise.all([status.reload(), accounts.reload()]); }} />}
     </div>
@@ -606,8 +626,16 @@ function OpeningBalance({ accountId, name, onClose }: { accountId: number; name:
   );
 }
 
-function CsvMappingDialog({ headers, rows, suggested, onClose, onConfirm }: { headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null; onClose: () => void; onConfirm: (m: CsvMapping) => void }) {
+function CsvMappingDialog({ headers, rows, content, suggested, onClose, onConfirm }: { headers: string[]; rows: Record<string, string>[]; content: string; suggested: CsvMapping | null; onClose: () => void; onConfirm: (m: CsvMapping) => void }) {
   const [m, setM] = useState<CsvMapping>(suggested ?? { date: headers[0] ?? '', amount: headers[1] ?? '', dateFormat: 'DD-MM-YYYY', description: [] });
+  // zo leest de app het met deze toewijzing: datum, af of bij, bedrag (#407)
+  const [parsed, setParsed] = useState<Awaited<ReturnType<typeof api.bank.previewMapping>> | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (!m.date || !(m.amount || m.amountDebit)) return setParsed(null);
+    api.bank.previewMapping(content, m).then((p) => { if (live) setParsed(p); }).catch(() => { if (live) setParsed(null); });
+    return () => { live = false; };
+  }, [content, m]);
   const col = (key: keyof CsvMapping, label: string, optional = true) => (
     <Field label={label}>
       <select value={(m[key] as string) ?? ''} onChange={(e) => setM({ ...m, [key]: e.target.value || undefined })}>
@@ -618,7 +646,7 @@ function CsvMappingDialog({ headers, rows, suggested, onClose, onConfirm }: { he
   );
   return (
     <Modal title="Welke kolom is wat?" wide onClose={onClose}>
-      <p className="muted small">We kennen dit bestand nog niet. Wijs één keer de kolommen aan; daarna onthouden we het.</p>
+      <p className="muted small">We kennen dit bestand nog niet. Wijs één keer de kolommen aan; daarna onthouden we het. Heeft je bank ook een CAMT.053- of MT940-bestand? Kies dan liever dat: daarin staat vast wat af en bij is.</p>
       <div className="grid cols-3">
         {col('date', 'Datum', false)}
         <Field label="Datumformaat">
@@ -638,7 +666,36 @@ function CsvMappingDialog({ headers, rows, suggested, onClose, onConfirm }: { he
           </select>
         </Field>
       </div>
-      <h3 style={{ marginTop: 16 }}>Voorbeeld</h3>
+      <h3 style={{ marginTop: 16 }}>Zo leest de app het</h3>
+      {parsed ? (
+        <>
+          <table className="list small">
+            <thead><tr><th>Datum</th><th>Af/Bij</th><th style={{ textAlign: 'right' }}>Bedrag</th><th>Naam</th><th>Omschrijving</th></tr></thead>
+            <tbody>
+              {parsed.rows.map((t, i) => (
+                <tr key={i}>
+                  <td><DateNl date={t.date} /></td>
+                  <td>{t.amount < 0 ? 'Af' : t.amount > 0 ? 'Bij' : '—'}</td>
+                  <td style={{ textAlign: 'right' }}><Euro cents={Math.abs(t.amount)} /></td>
+                  <td>{t.counterName}</td>
+                  <td>{t.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="small muted" style={{ marginTop: 6 }}>
+            {parsed.total} {parsed.total === 1 ? 'regel' : 'regels'}: {parsed.direction.af} af, {parsed.direction.bij} bij{parsed.unreadable > 0 && <>, <strong>{parsed.unreadable} niet te lezen</strong> (klopt de datumkolom en het datumformaat?)</>}.
+          </p>
+          {parsed.oneSided && (
+            <div className="notice warn">
+              Alle regels zijn {parsed.oneSided === 'bij' ? 'bijschrijvingen' : 'afschrijvingen'}. Klopt dat niet? Kijk dan naar de kolom met “Af” of “Bij”, of naar de kolom met het bedrag.
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="small muted">Kies eerst de kolom met de datum en die met het bedrag.</p>
+      )}
+      <h3 style={{ marginTop: 16 }}>Zo staat het in het bestand</h3>
       <div style={{ overflowX: 'auto' }}>
         <table className="list small">
           <thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead>

@@ -17,7 +17,7 @@ import { storedPurchaseVat, storedVatWarning } from '../core-ledger/stored-purch
 import { expenseLines, type PurchaseInvoiceInput } from '../documents/purchases';
 import { businessEffect } from '../shared/business-share';
 import type { BookToAccountInput, SaleInput } from '../import/bank';
-import { previewCsv, headerSignature, type CsvMapping } from '../import/csv';
+import { directions, headerSignature, oneSided, parseCsv, previewCsv, type CsvMapping } from '../import/csv';
 import { detectFormat } from '../import/detect';
 import { parseBankFile } from '../import/parse-file';
 import { statementHash } from '../import/statement-folder';
@@ -1417,10 +1417,25 @@ export function createApi(s: Services, host: HostContext) {
       getOpeningBalance: (bankAccountId: number) => s.bank.openingBalance(bankAccountId),
       ownTransfer: (txId: number) => s.bank.ownTransferTarget(s.bank.get(txId)),
       bookOwnTransfer: (txId: number) => s.bank.bookOwnTransfer(notHeld(txId)),
+      /**
+       * Wat de app met dit bestand gaat doen. Bij een CSV die de app al kent (bekende bank of eerder aangewezen
+       * kolommen) ook hoeveel regels af en bij zijn, en of alles één kant op gaat: dan vraagt het scherm eerst
+       * of dat klopt, in plaats van na het inlezen (#407).
+       */
       previewFile: (filename: string, content: string) => {
         const format = detectFormat(filename, content);
-        if (format !== 'csv') return { format, csv: null, savedMapping: null };
-        return { format, csv: previewCsv(content), savedMapping: savedCsvMapping(content) };
+        if (format !== 'csv') return { format, csv: null, savedMapping: null, direction: null, oneSided: null };
+        const csv = previewCsv(content);
+        const savedMapping = savedCsvMapping(content);
+        const used = savedMapping ?? (csv.detectedBank ? csv.suggestedMapping : null);
+        const direction = used ? directions(parseCsv(content, used).transactions) : null;
+        return { format, csv, savedMapping, direction, oneSided: direction ? oneSided(direction) : null };
+      },
+      /** Zo leest de app het bestand met deze kolomtoewijzing: de eerste regels, en hoeveel af en bij (#407). */
+      previewMapping: (content: string, mapping: CsvMapping) => {
+        const r = parseCsv(content, mapping);
+        const direction = directions(r.transactions);
+        return { rows: r.transactions.slice(0, 5), total: r.transactions.length, unreadable: r.warnings.length, direction, oneSided: oneSided(direction) };
       },
       importFile: (filename: string, content: string, mapping?: CsvMapping, bankAccountId?: number) => importBankFile(filename, content, mapping, bankAccountId),
       /**

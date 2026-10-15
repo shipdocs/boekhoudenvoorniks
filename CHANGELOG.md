@@ -1,5 +1,17 @@
 # Wijzigingen
 
+## 1.6.1 — af en bij in een CSV-afschrift zie je vóór het inlezen
+
+Na een melding van een gebruiker: een CSV van zijn bank kwam er helemaal als "bij" in, en dat zag hij pas na het inlezen.
+
+### Opgelost
+- **Af en bij in een CSV beter herkend.** Schrijft je bank "Afschrijving" en "Bijschrijving", "Debit" en "Credit" (in een kolom die bijvoorbeeld "Type" heet) of "Uitgaand" en "Inkomend", dan las de app alles als "bij". De app herkent die kolom nu ook aan de waarden erin. Staat er iets in dat de app niet kent, dan blijft het teken uit de bedragkolom staan.
+
+### Verbeterd
+- **Je ziet vóór het inlezen wat de app ervan maakt.** Bij "Welke kolom is wat?" staat nu per regel de datum, af of bij, het bedrag en de naam zoals de app ze leest, met het aantal regels af en bij. Gaat alles dezelfde kant op, dan zie je dat meteen.
+- **Alles dezelfde kant op? Dan vraagt de app eerst of dat klopt.** Ook bij een CSV die de app al kent (een bekende bank, of kolommen die je eerder aanwees). Je kunt dan de kolommen nakijken, of bevestigen dat het klopt. Bij de overstap stuurt de app je voor zo'n bestand naar Bank.
+- **Liever CAMT.053 of MT940.** Bij Bank en in het kolomvenster staat nu dat je beter een CAMT.053- of MT940-bestand kiest als je bank dat heeft: daarin staat vast wat af en bij is.
+
 ## 1.6.0 — je eigen rekeningschema en rekeningen voor een bv
 
 Voor wie zelf zijn boekhouding doet: rekeningen toevoegen en hernoemen, en een vaste set rekeningen als je een bv hebt.
