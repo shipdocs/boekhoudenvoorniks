@@ -78,6 +78,18 @@ export class Administrations {
   }
 
   /**
+   * De map van een administratie die weg mag (#444): niet de eerste (die is de gegevensmap zelf) en niet
+   * de open administratie. Het weghalen zelf (naar de prullenbak) doet de aanroeper.
+   */
+  dirToRemove(key: string): string {
+    if (key === '') throw new Error('De eerste administratie staat in de gegevensmap zelf en kan niet weg. Wil je opnieuw beginnen? Dat kan bij Back-up, demo & updates.');
+    const dir = this.dirFor(key);
+    if (!existsSync(join(dir, DB_FILE))) throw new Error('Deze administratie bestaat niet (meer)');
+    if (key === this.current()) throw new Error('Deze administratie staat open. Open eerst een andere, dan kun je deze weghalen.');
+    return dir;
+  }
+
+  /**
    * Een nieuwe, lege map voor een administratie met deze naam; de database maakt de aanroeper aan.
    * De sleutel komt uit de naam en is uniek ("bakker-bouw", "bakker-bouw-2").
    */
@@ -106,6 +118,25 @@ export const readAdministrationFile: AdministrationReader = (file) => {
     conn?.close();
   }
 };
+
+/**
+ * De naam van een administratie die niet open is wijzigen (#444): de bedrijfsnaam in haar eigen database,
+ * zonder migraties of iets anders aan te raken (de database kan van een nieuwere app zijn).
+ */
+export function renameAdministrationFile(file: string, name: string): void {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Geef de administratie een naam');
+  const conn = new Database(file, { fileMustExist: true });
+  try {
+    const row = conn.prepare('SELECT value FROM settings WHERE key = ?').get('company') as { value: string } | undefined;
+    const company = row ? (JSON.parse(row.value) as Record<string, unknown>) : {};
+    const value = JSON.stringify({ ...company, name: trimmed });
+    if (row) conn.prepare('UPDATE settings SET value = ? WHERE key = ?').run(value, 'company');
+    else conn.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('company', value);
+  } finally {
+    conn.close();
+  }
+}
 
 function slug(name: string): string {
   const s = name

@@ -18,7 +18,7 @@ volgorde: 30
 - **Telefoon & bonnenmap**: je telefoon koppelen voor de app voor Android, en een map op je computer waar de app bonnen uit leest. Zie [Telefoon](telefoon.html).
 - **Automatisch & herkenning**: hoeveel de app zelf doet, en hoe bonnen gelezen worden (op je eigen computer, of met een hulpdienst die je zelf kiest).
 - **Back-up, demo & updates**: zie hieronder.
-- **Administraties**: meer dan één bedrijf op dezelfde computer. Elke administratie heeft eigen klanten, bonnen, bank en back-ups; je wisselt met één klik.
+- **Administraties**: meer dan één bedrijf op dezelfde computer. Elke administratie heeft eigen klanten, bonnen, bank en back-ups; je wisselt met één klik. Per administratie kun je de naam wijzigen (dat is de bedrijfsnaam uit *Je bedrijf*), de map openen (bijvoorbeeld om bij de back-ups te komen) en een administratie die je niet meer nodig hebt weghalen: *Weghalen…*, de naam typen, en de hele map gaat naar de prullenbak van je computer, waar je hem terug kunt halen. De administratie die open staat en de eerste administratie (die staat in de gegevensmap zelf) kun je niet weghalen; wil je helemaal opnieuw beginnen, kijk dan bij *Back-up, demo & updates*.
 - **Voor de boekhouder**: het vinkje *Toon de boekhouding voor je boekhouder*. Dit is de [boekhoudermodus](boekhoudermodus.html): niet nodig voor gewoon gebruik.
 - **Over**: welke versie je hebt en waar je gegevens staan.
 

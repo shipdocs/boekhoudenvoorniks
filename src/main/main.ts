@@ -40,7 +40,7 @@ import { CHOICE_SESSION, chromiumDir, forgetMoved, handOverLocalState, markCompl
 import { chooseAfterFailedMigration, chooseAfterMove, chooseOldFolder, confirmSyncFolder, migrateWithProgress, pickDataFolder, refuseDataFolder, switchWithProgress } from './data-dir-app';
 import { DOWNLOAD_URL, isWindowsStore, mcpCommand as mcpCommandFor, migrateForStore, READ_ONLY_MESSAGE, readOnlyError, storeFallbackHint, storeAppDataNotice, findOldInstall, oldInstallPrompt, OLD_INSTALL_IGNORE_FLAG, storeFolderProblem, type StartNotice } from './windows-store';
 import { STORE_LLAMA_CPP } from '../ocr-runtime/manifest';
-import { Administrations, readAdministrationFile } from './administrations';
+import { Administrations, readAdministrationFile, renameAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
 import { generateOfficeKeys } from '../exchange/crypto';
 import { httpDateToIso, LICENSE_API_URL } from '../license/license';
@@ -743,6 +743,30 @@ function initServices(): void {
         }
         await openAdministration(key);
         return key;
+      },
+      async rename(key, name) {
+        assertWritable();
+        if (!name.trim()) throw new Error('Geef de administratie een naam');
+        if (key === administrations().current()) {
+          services.settings.update({ company: { ...services.settings.get().company, name: name.trim() } });
+          return;
+        }
+        const file = join(administrations().dirFor(key), 'boekhouding.sqlite');
+        if (!existsSync(file)) throw new Error('Deze administratie bestaat niet (meer)');
+        renameAdministrationFile(file, name);
+      },
+      async remove(key) {
+        assertWritable();
+        const dir = administrations().dirToRemove(key);
+        try {
+          await shell.trashItem(dir);
+        } catch (e) {
+          throw new Error(`Naar de prullenbak verplaatsen lukte niet (${(e as Error).message}). Je kunt de map zelf weghalen: ${dir}`);
+        }
+      },
+      async openFolder(key) {
+        const err = await shell.openPath(administrations().dirFor(key));
+        if (err) throw new Error(err);
       },
     },
     // met een eigen map uit de omgeving (tests, rooktest) valt er niets te kiezen
