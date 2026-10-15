@@ -29,6 +29,7 @@ Belangrijke feiten:
 ## Links
 
 - [Website](https://boekhoudenvoorniks.nl/): productpagina met veelgestelde vragen
+- [Handleiding](https://boekhoudenvoorniks.nl/handleiding/index.html): zo werk je met het programma, per onderwerp, met een apart hoofdstuk voor de boekhouder
 - [Werkadministratie, geen boekhoudpakket](https://boekhoudenvoorniks.nl/werkadministratie.html): waarin BoekhoudenVoorNiks zich onderscheidt
 - [Voor starters](https://boekhoudenvoorniks.nl/starters.html): checklist van KvK-inschrijving tot eerste btw-aangifte
 - [Stukadoors](https://boekhoudenvoorniks.nl/stukadoors.html), [schilders](https://boekhoudenvoorniks.nl/schilders.html) en [webdevelopers](https://boekhoudenvoorniks.nl/webdevelopers.html): per vak

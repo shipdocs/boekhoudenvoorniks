@@ -210,3 +210,30 @@ section { padding: 56px 0; }
 .fx-example strong { font-size: 32px; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .fx-example span { font-size: 15px; }
 @media (max-width: 600px) { .fx-example { grid-template-columns: 1fr; } }
+
+/* Handleiding (site/handleiding, gebouwd uit docs/handleiding met npm run site:handleiding) */
+.handleiding { max-width: 860px; }
+.handleiding .kruimels { font-size: 14px; color: var(--muted); margin: 0 0 8px; }
+.handleiding .kruimels a { color: inherit; }
+.handleiding .inhoud { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; margin: 20px 0 28px; font-size: 15px; }
+.handleiding .inhoud ul { margin: 6px 0 0; padding-left: 18px; }
+.handleiding h2 { margin-top: 36px; scroll-margin-top: 72px; }
+.handleiding h3 { margin-top: 24px; scroll-margin-top: 72px; }
+.handleiding ol, .handleiding ul { padding-left: 22px; }
+.handleiding li { margin-bottom: 6px; }
+.handleiding code, .handleiding kbd { background: var(--band); border-radius: 4px; padding: 1px 5px; font-size: 0.92em; }
+.handleiding .let-op { border-left: 4px solid var(--primary); background: var(--band); padding: 10px 16px; border-radius: 8px; margin: 18px 0; }
+.handleiding .let-op p { margin: 0; }
+.handleiding .boekhouder-waarschuwing { border: 2px solid #b3261e; background: #fff4f2; color: #4a1512; border-radius: 12px; padding: 14px 18px; margin: 0 0 24px; }
+.handleiding .boekhouder-waarschuwing strong { color: #b3261e; }
+@media (prefers-color-scheme: dark) { .handleiding .boekhouder-waarschuwing { background: #2a1917; color: #f3d9d5; } .handleiding .boekhouder-waarschuwing strong { color: #ff8a80; } }
+.handleiding .volgende { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-top: 1px solid var(--border); margin-top: 40px; padding-top: 16px; font-size: 15px; }
+.handleiding-index .zoek { width: 100%; font: inherit; font-size: 18px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); margin: 8px 0 20px; }
+.handleiding-index .hoofdstuk { margin-top: 28px; }
+.handleiding-index .hoofdstuk h2 { font-size: 20px; margin-bottom: 8px; }
+.handleiding-index .paginas { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.handleiding-index .paginas li { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; }
+.handleiding-index .paginas a { font-weight: 600; text-decoration: none; }
+.handleiding-index .paginas p { margin: 4px 0 0; color: var(--muted); font-size: 15px; }
+.handleiding-index .treffers li small { display: block; color: var(--muted); font-size: 14px; }
+.handleiding-index .hoofdstuk.boekhouder { border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }

@@ -116,6 +116,10 @@ ShipDocs, Middelweg 211, 1911 EE Uitgeest (KvK 95207341, btw NL005138041B29). Je
 
 Ja. BoekhoudenVoorNiks is open source onder de GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later). Iedereen kan de code bekijken en controleren wat het programma doet.
 
+## Handleiding
+
+De handleiding op https://boekhoudenvoorniks.nl/handleiding/index.html beschrijft per onderwerp hoe je met het programma werkt (beginnen, overstappen, instellingen en back-ups, offertes en facturen, bonnetjes, bank, klussen, telefoon, btw-aangifte, boekhouder en periodes afsluiten, problemen oplossen) en heeft een apart hoofdstuk "Voor de boekhouder" over de boekhoudermodus, met de waarschuwing dat die niet voor gewone gebruikers is en dat er geen ondersteuning is op een administratie waarin in die modus is gewerkt.
+
 ## Hoe het werkt
 
 1. Installeren en vijf vragen beantwoorden (vak, werk je alleen, bedrijfsgegevens, btw of KOR, bankrekening).
