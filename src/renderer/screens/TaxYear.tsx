@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { LinkJobModal } from './Jobs';
-import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useJobWords, useLoad } from '../ui';
 import { formatDateNl, isIsoDate, isoWeek, monthOf, today, weekOf } from '../../shared/dates';
 import type { HoursPeriod, TimeEntry } from '../../tax/mileage';
 import { ACCOUNTANT_CHECK_REASONS, ACCOUNTANT_CHECK_TITLE } from '../../shared/legal';
@@ -383,6 +383,7 @@ function SellAsset({ asset, onClose, onSaved }: { asset: AssetItem; onClose: () 
 }
 
 function Trips({ year }: { year: number }) {
+  const jw = useJobWords();
   const { settings } = useApp();
   const list = useLoad(() => api.mileage.list(year), [year]);
   const { run, busy } = useAction();
@@ -415,7 +416,7 @@ function Trips({ year }: { year: number }) {
         <Field label="Kilometers"><input value={km} onChange={(e) => setKm(e.target.value)} inputMode="decimal" style={{ width: 110 }} /></Field>
         <div style={{ flex: 1, minWidth: 200 }}><Field label="Waarheen / waarvoor"><input value={what} onChange={(e) => setWhat(e.target.value)} placeholder="bv. klant Jansen, Utrecht (heen en terug)" /></Field></div>
         {(jobs.data ?? []).some((j) => j.status !== 'geannuleerd' && j.status !== 'gefactureerd') && (
-          <Field label="Voor een klus? (optioneel)">
+          <Field label={`Voor een ${jw.s}? (optioneel)`}>
             <select value={jobId ?? ''} onChange={(e) => setJobId(Number(e.target.value) || null)}>
               <option value="">Nee / algemeen</option>
               {(jobs.data ?? []).filter((j) => ['gepland', 'bezig', 'klaar'].includes(j.status)).map((j) => <option key={j.id} value={j.id}>{j.title} — {j.relation_name}</option>)}
@@ -431,17 +432,17 @@ function Trips({ year }: { year: number }) {
             {list.data!.map((t) => (
               <tr key={t.id}>
                 <td><DateNl date={t.trip_date} /></td>
-                <td>{t.description}{t.job_id !== null && <div className="small muted">🔨 {jobName(t.job_id) ?? 'Klus'}</div>}</td>
+                <td>{t.description}{t.job_id !== null && <div className="small muted">🔨 {jobName(t.job_id) ?? jw.S}</div>}</td>
                 <td className="num">{t.km.toLocaleString('nl-NL')}</td>
                 <td className="num"><Euro cents={t.amount} /></td>
-                <td><span className="row"><Button small kind="ghost" title="Voor welke klus was deze rit? Of algemeen" ariaLabel="Klus kiezen" onClick={() => setLinking(t)}>🔨</Button><Button small kind="ghost" onClick={async () => { if (await run(async () => { await api.mileage.remove(t.id); return true; })) await list.reload(); }}>Weghalen</Button></span></td>
+                <td><span className="row"><Button small kind="ghost" title={`Voor ${jw.welke} ${jw.s} was deze rit? Of algemeen`} ariaLabel={`${jw.S} kiezen`} onClick={() => setLinking(t)}>🔨</Button><Button small kind="ghost" onClick={async () => { if (await run(async () => { await api.mileage.remove(t.id); return true; })) await list.reload(); }}>Weghalen</Button></span></td>
               </tr>
             ))}
             <tr><td /><td><strong>Totaal {year}</strong></td><td className="num"><strong>{Math.round(total.km * 10) / 10}</strong></td><td className="num"><strong><Euro cents={total.amount} /></strong></td><td /></tr>
           </tbody>
         </table>
       )}
-      {linking && <LinkJobModal title={linking.description} current={linking.job_id} onClose={() => setLinking(null)} onPick={async (to) => { const l = linking; if (await run(async () => { await api.jobs.linkTrip(l.id, to); return true; }, to === null ? 'Rit is nu algemeen ✓' : 'Rit gekoppeld aan de klus ✓')) { setLinking(null); await list.reload(); } }} />}
+      {linking && <LinkJobModal title={linking.description} current={linking.job_id} onClose={() => setLinking(null)} onPick={async (to) => { const l = linking; if (await run(async () => { await api.jobs.linkTrip(l.id, to); return true; }, to === null ? 'Rit is nu algemeen ✓' : `Rit gekoppeld aan ${jw.de} ✓`)) { setLinking(null); await list.reload(); } }} />}
     </>
   );
 }
@@ -459,6 +460,7 @@ function periodText(start: string, end: string | null): string {
 }
 
 function Hours({ year }: { year: number }) {
+  const jw = useJobWords();
   const totals = useLoad(() => api.hours.totals(year), [year]);
   const list = useLoad(() => api.hours.list(year), [year]);
   const forecast = useLoad(() => api.hours.forecast(year), [year]);
@@ -507,7 +509,7 @@ function Hours({ year }: { year: number }) {
   return (
     <>
       <p className="muted">
-        Voor de zelfstandigenaftrek (en startersaftrek) moet je minstens 1.225 uur per jaar aan je bedrijf werken. Uren op de werkbonnen van je klussen tellen vanzelf mee.
+        Voor de zelfstandigenaftrek (en startersaftrek) moet je minstens 1.225 uur per jaar aan je bedrijf werken. Uren op de werkbonnen van je {jw.p} tellen vanzelf mee.
         Vul hier de rest in: offertes maken, administratie, inkopen, reistijd, of gewoon al je werk, per week of per maand.
       </p>
       {t && (

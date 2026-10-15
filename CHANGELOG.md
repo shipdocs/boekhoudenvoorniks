@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Nieuw
+- **Zelf kiezen hoe je een klus noemt.** Bij Instellingen kies je klus, project of opdracht. Menu, schermen, zoeken, aankopen en ritten gebruiken dan jouw woord, met de juiste lidwoorden (het project, de opdracht). Alleen de naam in de app verandert; je boekingen en facturen blijven zoals ze zijn. Meldingen op Vandaag zeggen voorlopig nog "klus".
+
 ## 1.6.1 — af en bij in een CSV-afschrift zie je vóór het inlezen
 
 Na een melding van een gebruiker: een CSV van zijn bank kwam er helemaal als "bij" in, en dat zag hij pas na het inlezen.

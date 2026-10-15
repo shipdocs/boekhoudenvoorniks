@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, useAction, useApp, useJobWords, useLoad } from '../ui';
 import { computeTotals, type LineInput } from '../../documents/totals';
 import { addDays, isIsoDate, today } from '../../shared/dates';
 import { customerVatSituation, suggestedSalesVat, type SalesVatCode } from '../../shared/vat';
@@ -20,6 +20,7 @@ const toNumber = (s: string) => Number(s.replace(',', '.'));
 const KOR_SALES_VAT: string[] = ['vrijgesteld', 'icp-dienst', 'dienst-buiten-eu'];
 
 export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?: number }) {
+  const jw = useJobWords();
   const { go, meta, settings, toast, route } = useApp();
   const { run, busy } = useAction();
   const isInvoice = kind === 'factuur';
@@ -194,13 +195,13 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
             <Field label="Datum levering of dienst" hint={settings.kor ? 'Mag leeg bij de KOR, behalve als de dienst in een ander tijdvak geleverd is.' : 'Leeg = de factuurdatum. Vul in als je eerder of later leverde. Bij EU-diensten bepaalt deze datum (of het einde van de periode) het btw- en ICP-tijdvak.'}>
               <input type="date" value={deliveryDate} disabled={!editable} onChange={(e) => setDeliveryDate(e.target.value)} />
             </Field>
-            <Field label="t/m (alleen bij een periode)" hint="Bijvoorbeeld bij een klus van meerdere weken.">
+            <Field label="t/m (alleen bij een periode)" hint={`Bijvoorbeeld bij een ${jw.s} van meerdere weken.`}>
               <input type="date" value={deliveryDateTo} min={deliveryDate || undefined} disabled={!editable || !deliveryDate} onChange={(e) => setDeliveryDateTo(e.target.value)} />
             </Field>
           </div>
         )}
         <div style={{ marginTop: 12 }}>
-          <Field label={isInvoice ? 'Omschrijving / klus' : 'Waar gaat de offerte over?'} hint="bv. Woonkamer stucen">
+          <Field label={isInvoice ? `Omschrijving / ${jw.s}` : 'Waar gaat de offerte over?'} hint="bv. Woonkamer stucen">
             <input value={reference} disabled={!editable} onChange={(e) => setReference(e.target.value)} />
           </Field>
         </div>
@@ -303,7 +304,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           <>
             {quote.status !== 'gefactureerd' && <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Offerte verwijderen?') && (await run(async () => { await api.quotes.delete(quote.id); return true; }, 'Verwijderd'))) go({ screen: 'werk', extra: { tab: 'offertes' } }); }}>Verwijderen</Button>}
             {['concept', 'verzonden'].includes(quote.status) && <Button disabled={busy} onClick={async () => { await run(() => api.quotes.setStatus(quote.id, 'afgewezen')); await doc.reload(); }}>Afgewezen</Button>}
-            {['concept', 'verzonden'].includes(quote.status) && <Button disabled={busy} onClick={async () => { const j = await run(() => api.jobs.acceptQuote(quote.id), 'Klant is akkoord — er staat een klus klaar'); if (j) go({ screen: 'klus', id: j.id }); }}>Klant is akkoord</Button>}
+            {['concept', 'verzonden'].includes(quote.status) && <Button disabled={busy} onClick={async () => { const j = await run(() => api.jobs.acceptQuote(quote.id), `Klant is akkoord — er staat een ${jw.s} klaar`); if (j) go({ screen: 'klus', id: j.id }); }}>Klant is akkoord</Button>}
             {quote.status === 'geaccepteerd' && <Button disabled={busy} onClick={async () => { const inv = await run(() => api.quotes.convertToInvoice(quote.id)); if (inv) go({ screen: 'factuur', id: inv.id }); }}>Omzetten naar factuur</Button>}
             {quote.invoice_id && <Button onClick={() => go({ screen: 'factuur', id: quote.invoice_id! })}>Naar factuur</Button>}
             {['concept', 'verzonden'].includes(quote.status) && <Button kind="primary" disabled={busy} onClick={async () => { const docId = await save(); if (docId) setSending(true); }}>Versturen</Button>}
