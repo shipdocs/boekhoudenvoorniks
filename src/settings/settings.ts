@@ -146,6 +146,8 @@ export interface AppSettings {
   vatPotAccountId: number | null;
   /** Schatting inkomstenbelasting tonen (#33); altijd als schatting gemarkeerd. */
   incomeTaxEstimate: boolean;
+  /** Hoe de app een klus noemt: klus, project of opdracht (#320). */
+  jobTerm: 'klus' | 'project' | 'opdracht';
   /** Rechtsvorm; null = nog niet opgegeven (de schatting gaat dan uit van een eenmanszaak). Een bv betaalt geen inkomstenbelasting over de winst. */
   legalForm: 'eenmanszaak' | 'vof' | 'bv' | null;
   /** vof of maatschap: jouw deel van de winst in procenten (de schatting is per ondernemer) */
@@ -295,6 +297,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   nietGerealiseerdeZelfstandigenaftrek: 0,
   vatPotAccountId: null,
   legalForm: null,
+  jobTerm: 'klus',
   profitSharePct: 100,
   ibConfirmed: false,
   ibHoursCondition: null,
@@ -340,6 +343,7 @@ function validateSettings(settings: AppSettings): void {
   integerInRange(settings.nietGerealiseerdeZelfstandigenaftrek, 0, 1_000_000, 'Niet-gerealiseerde zelfstandigenaftrek');
   if (settings.startersaftrekYears !== null && (!Array.isArray(settings.startersaftrekYears) || settings.startersaftrekYears.length > 10 || settings.startersaftrekYears.some((y) => !Number.isInteger(y) || y < 1800 || y > 9999))) throw new ValidationError('Ongeldige jaren voor de startersaftrek');
   if (settings.phoneInternetBusinessPct !== null) integerInRange(settings.phoneInternetBusinessPct, 0, 100, 'Zakelijk percentage telefoon en internet');
+  if (!['klus', 'project', 'opdracht'].includes(settings.jobTerm)) throw new ValidationError('Ongeldige keuze voor de term klus, project of opdracht');
   if (!['maand', 'kwartaal', 'jaar'].includes(settings.vatPeriod)) throw new ValidationError('Ongeldige btw-periode');
   if (!['hoog', 'laag', 'nul', 'verlegd', 'vrijgesteld'].includes(settings.defaultVatCode)) throw new ValidationError('Ongeldige standaard-btw');
   if (!['voorzichtig', 'normaal', 'maximaal'].includes(settings.autopilot)) throw new ValidationError('Ongeldige automatische stand');

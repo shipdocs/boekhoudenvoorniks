@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import { jobWords } from '../shared/job-term';
 import { Ctx, type InvestmentSavedInfo, type Meta, type Route, type Settings, type Screen } from './ui';
 import { Home } from './screens/Home';
 import { Onboarding } from './screens/Onboarding';
@@ -143,7 +144,7 @@ export function App() {
             {NAV.map((n) => (
               <button key={n.screen} className={isActive(n) ? 'active' : ''} onClick={() => go({ screen: n.screen })}>
                 <span>{n.icon}</span>
-                {n.label}
+                {n.screen === 'klussen' ? jobWords(settings.jobTerm).P : n.label}
                 {n.screen === 'home' && badge > 0 && <span className="badge">{badge}</span>}
               </button>
             ))}

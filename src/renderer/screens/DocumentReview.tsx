@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useAppEvent, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useAppEvent, useJobWords, useLoad } from '../ui';
 import { NOT_READ_MESSAGE, READING_LABEL, WAITING_TO_READ_MESSAGE, shownMessage } from '../../shared/reading';
 import { BusinessShareField, CategoryChoice, InvestmentHint, ReverseRateField, SupplierInput, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
@@ -153,6 +153,7 @@ function extractionSourceLabel(source: string | null): string {
 }
 
 export function DocumentReview({ id }: { id: number }) {
+  const jw = useJobWords();
   const { go, meta, settings, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
   // de bon en de vraag die erbij openstaat, zoals ze nu op het scherm staan; ze komen er alleen via `reloadIo` (zie daar)
@@ -444,7 +445,7 @@ export function DocumentReview({ id }: { id: number }) {
                     )}
                   </Field>
                   {(jobs.data ?? []).length > 0 && (
-                    <Field label="Voor een klus?" hint="optioneel">
+                    <Field label={`Voor een ${jw.s}?`} hint="optioneel">
                       <select value={form.jobId ?? ''} onChange={(e) => { jobSuggested.current = true; setForm({ ...form, jobId: Number(e.target.value) || null }); }}>
                         <option value="">Nee / algemeen</option>
                         {jobs.data!.map((j) => <option key={j.id} value={j.id}>{j.title} — {j.relation_name}</option>)}

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useRef, useState } from 'react';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, Modal, readAsBytes, useAction, useApp, useAppEvent, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, Modal, readAsBytes, useAction, useApp, useAppEvent, useJobWords, useLoad } from '../ui';
 import type { Task } from '../../inbox/inbox';
 import type { AutomationEntry } from '../../inbox/automation-log';
 import { formatDateNl } from '../../shared/dates';
@@ -19,6 +19,7 @@ import { FetchBar } from './FetchBar';
 const DocumentPreview = lazy(() => import('./DocumentReview').then((m) => ({ default: m.DocumentPreview })));
 
 export function Home() {
+  const jw = useJobWords();
   const { go, settings, refreshBadge, toast, showInvestmentSaved } = useApp();
   const { data, error, reload } = useLoad(() => api.home.get());
   // er kwam een bon binnen (telefoon, bonnenmap) of een bon is op de achtergrond gelezen
@@ -261,7 +262,7 @@ export function Home() {
       )}
 
       {pickingJob && (
-        <Modal title="Voor welke klus was dit?" onClose={() => setPickingJob(null)}>
+        <Modal title={`Voor ${jw.welke} ${jw.s} was dit?`} onClose={() => setPickingJob(null)}>
           <p className="muted">{pickingJob.title}</p>
           <div className="choice">
             {(activeJobs.data ?? []).map((j) => (

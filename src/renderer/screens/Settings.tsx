@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad, type Settings } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useJobWords, useLoad, type Settings } from '../ui';
 import type { AppSettings } from '../../settings/settings';
 import { ResetCard } from './Reset';
 import { CategoriesDialog } from './Categories';
@@ -35,6 +35,7 @@ const TABS: [Tab, string][] = [
 ];
 
 export function SettingsScreen() {
+  const jw = useJobWords();
   const { settings, reloadSettings, route, go, meta } = useApp();
   const { run, busy } = useAction();
   const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'bedrijf');
@@ -362,9 +363,16 @@ export function SettingsScreen() {
               ))}
             </div>
           </Field>
+          <Field label="Hoe noem je een klus?" hint="Alleen de naam in de app verandert; je boekingen en facturen blijven zoals ze zijn.">
+            <select value={draft.jobTerm} onChange={(e) => set({ jobTerm: e.target.value as typeof draft.jobTerm })}>
+              <option value="klus">Klus</option>
+              <option value="project">Project</option>
+              <option value="opdracht">Opdracht</option>
+            </select>
+          </Field>
           <label className="row" style={{ alignItems: 'flex-start' }}>
             <input type="checkbox" checked={draft.jobLocation} onChange={(e) => set({ jobLocation: e.target.checked })} />
-            <span>Gebruik de locatie van foto's om bonnen aan klussen te koppelen<br /><span className="small muted">Standaard uit. De plek uit de foto (als je telefoon die opslaat) blijft alleen op deze computer en wordt vergeleken met waar je eerder voor de klus fotografeerde.</span></span>
+            <span>Gebruik de locatie van foto's om bonnen aan {jw.p} te koppelen<br /><span className="small muted">Standaard uit. De plek uit de foto (als je telefoon die opslaat) blijft alleen op deze computer en wordt vergeleken met waar je eerder voor {jw.de} fotografeerde.</span></span>
           </label>
           <p className="small muted">Ook op "maximaal" gaat alleen automatisch wat zeker genoeg is, en een leverancier pas nadat jij daar ja op zei. Alles wat automatisch ging zie je terug op Vandaag, met de reden en een knop "Klopt niet".</p>
           <p className="muted">
