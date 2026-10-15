@@ -218,10 +218,10 @@ export function DocumentReview({ id }: { id: number }) {
   // Klus-voorstel (#32): bij één actieve klus of een locatiematch alvast invullen
   useEffect(() => {
     const [best, second] = jobSuggestion.data ?? [];
-    if (jobSuggested.current || !form || !best || !d || d.status !== 'controle') return;
+    if (!jobsOn || jobSuggested.current || !form || !best || !d || d.status !== 'controle') return;
     jobSuggested.current = true;
     if (!second || best.score - second.score >= 40) setForm({ ...form, jobId: best.job.id });
-  }, [jobSuggestion.data, form, d]);
+  }, [jobsOn, jobSuggestion.data, form, d]);
 
   if (!d || !form) return <div className="page"><ErrorBox error={loadError} /></div>;
   const r = d.result;
