@@ -7,6 +7,9 @@ Na een melding van een gebruiker: een CSV van zijn bank kwam er helemaal als "bi
 ### Opgelost
 - **Af en bij in een CSV beter herkend.** Schrijft je bank "Afschrijving" en "Bijschrijving", "Debit" en "Credit" (in een kolom die bijvoorbeeld "Type" heet) of "Uitgaand" en "Inkomend", dan las de app alles als "bij". De app herkent die kolom nu ook aan de waarden erin. Staat er iets in dat de app niet kent, dan blijft het teken uit de bedragkolom staan.
 
+### Nieuw
+- **De boekhouding voor je boekhouder aanzetten vraagt eerst een akkoord.** Zet je bij Instellingen → Geavanceerd "Toon de boekhouding voor je boekhouder" aan, dan legt de app eerst uit dat die functies voor wie boekhoudt zijn en dat je er ook iets mee kapot kunt maken dat de app anders bewaakt. Pas na "Ik begrijp dit" en "Aanzetten" staat hij aan. Dat akkoord wordt onthouden; had je hem al aan, dan verandert er niets.
+
 ### Verbeterd
 - **Je ziet vóór het inlezen wat de app ervan maakt.** Bij "Welke kolom is wat?" staat nu per regel de datum, af of bij, het bedrag en de naam zoals de app ze leest, met het aantal regels af en bij. Gaat alles dezelfde kant op, dan zie je dat meteen.
 - **Alles dezelfde kant op? Dan vraagt de app eerst of dat klopt.** Ook bij een CSV die de app al kent (een bekende bank, of kolommen die je eerder aanwees). Je kunt dan de kolommen nakijken, of bevestigen dat het klopt. Bij de overstap stuurt de app je voor zo'n bestand naar Bank.
