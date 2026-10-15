@@ -46,6 +46,10 @@ Vergist? Open de betaling en kies *Ongedaan maken*. Je blijft op dezelfde pagina
 
 Met *Opnieuw automatisch uitzoeken* laat je de app nog een keer over alles heen gaan, bijvoorbeeld nadat je een stapel bonnen hebt toegevoegd.
 
+## Alle betalingen en oudere betalingen terugvinden
+
+Onder *Alle betalingen* staat alles wat je hebt ingelezen, ook wat al verwerkt of genegeerd is, met *Geboekt als* erbij. De lijst laat de 500 nieuwste betalingen zien; heb je er meer, dan zegt de app dat erbij. Een oudere betaling vind je met het zoekvak boven de lijst (naam, omschrijving of rekeningnummer) of via *Zoeken* (*Ctrl K*), dat ook op bedrag en periode zoekt. Klik erop om hem te openen, bijvoorbeeld om een genegeerde regel alsnog in te delen.
+
 ## Dubbele betalingen
 
 Dezelfde betaling kan twee keer in de app komen, bijvoorbeeld uit een CSV en later uit een CAMT-bestand met een andere datum of naam. De app ziet dat en zegt het op *Vandaag* en bij *Bank*: *€ … staat er waarschijnlijk twee keer in*. Kies *Bekijken en oplossen*, je ziet beide regels naast elkaar en kiest welke blijft. De andere haalt de app uit je boekhouding; die blijft bewaard en kun je altijd terugzetten.

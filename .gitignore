@@ -9,7 +9,9 @@ e2e-results/
 e2e-report/
 .wrangler/
 .dev.vars
-.ouroboros/artifacts/artifacts.db
+# Werkbestanden van Ouroboros (lokale AI-tooling), niet van de app
+.ouroboros/
+.ouroboros_eval_artifact.md
 
 # Interne tooling hoort in boekhoudenvoorniks-server, niet in deze repository.
 /.claude/skills/nl-boekhoud-expert/
