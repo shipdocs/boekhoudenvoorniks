@@ -1,4 +1,4 @@
-import { test, expect, startDemo, nav, acceptTerms } from './fixtures';
+import { test, expect, startDemo, nav, acceptTerms, onboard } from './fixtures';
 
 test.use({ viewport: { width: 1024, height: 680 } });
 
@@ -22,4 +22,15 @@ test('kleiner laptopscherm: geen scherm schuift opzij', async ({ page }) => {
     if (wide.scroll || wide.out.length) overflow.push(`${s}: ${wide.out.join(', ')}`);
   }
   expect(overflow, 'schermen die breder zijn dan het venster').toEqual([]);
+});
+
+test('venster "Aankoop toevoegen" schuift niet horizontaal, ook niet met een lange btw-keuze', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await onboard(page);
+  await nav(page, 'Aankopen & bonnetjes');
+  await page.getByRole('button', { name: 'Bonnetje zonder foto' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Aankoop toevoegen' });
+  await expect(dlg).toBeVisible();
+  const { client, scroll } = await dlg.evaluate((m) => ({ client: m.clientWidth, scroll: m.scrollWidth }));
+  expect(scroll, 'geen horizontale schuifbalk in het venster').toBeLessThanOrEqual(client);
 });

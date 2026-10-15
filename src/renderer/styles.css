@@ -68,7 +68,8 @@ h3 { font-size: 15px; margin: 0 0 6px; }
 .row.end { justify-content: flex-end; }
 .row.between { justify-content: space-between; }
 .grow { flex: 1; }
-.grid { display: grid; gap: 14px; }
+/* één kolom die nooit breder wordt dan de ruimte: anders rekt een lange keuzelijst (bv. de btw-keuze) een venster op en komt er een horizontale schuifbalk */
+.grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
 .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -93,6 +94,7 @@ h3 { font-size: 15px; margin: 0 0 6px; }
 label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-2); font-weight: 550; }
 label.field .hint { font-weight: 400; color: var(--muted); }
 input, select, textarea { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 8px 10px; font-size: 15px; font-weight: 400; min-width: 0; }
+select { max-width: 100%; text-overflow: ellipsis; }
 input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 textarea { min-height: 70px; resize: vertical; }
 input.num { text-align: right; font-variant-numeric: tabular-nums; }
