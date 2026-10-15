@@ -90,6 +90,14 @@
             "@type": "Answer",
             "text": "De app laat per rekening zien tot welke datum de betalingen aantoonbaar aansluiten op je afschriften. Ontbreekt er een periode, dan zegt hij dat en vraagt hij die te onderbouwen met een afschrift of een openingssaldo. Dat is niet hetzelfde als 'compleet'."
           }
+        },
+        {
+          "@type": "Question",
+          "name": "Wat als een afschrift verkeerd is ingelezen?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Vanaf versie 1.7.0 haal je het weer weg: zet bij Instellingen → Geavanceerd 'Toon de boekhouding voor je boekhouder' aan en kies bij Bank → Ingelezen afschriften de knop Weghalen. De app laat eerst zien wat er terugdraait, maakt een back-up en haalt dan alles van dat bestand weg. Daarna lees je het opnieuw in."
+          }
         }
       ]
     }
@@ -143,7 +151,7 @@
     <h2>Zo werkt de map</h2>
     <ol class="steps">
       <li><strong>Zet het aan</strong> bij Bank, onder <em>Afschriften vanzelf inlezen</em>. Standaard staat het uit.</li>
-      <li><strong>Download een afschrift</strong> bij je bank (CAMT.053, MT940 of een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut).</li>
+      <li><strong>Download een afschrift</strong> bij je bank (CAMT.053, MT940 of een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut). Kies bij voorkeur CAMT.053: daarin staat vast wat af en bij is.</li>
       <li><strong>Bevestig op Vandaag:</strong> "Nieuw afschrift gevonden: Knab zakelijk, 1 t/m 29 september". Kies <em>Inlezen</em> of <em>Niet nu</em>.</li>
       <li><strong>Klaar:</strong> de betalingen worden gekoppeld aan je facturen en bonnetjes. Er verhuist of verdwijnt nooit een bestand uit je map.</li>
     </ol>
@@ -179,6 +187,7 @@
       <details><summary>Zien jullie mijn bankgegevens?</summary><p>Nee. Gewoon ophalen gaat rechtstreeks tussen de app en Ponto. Client ID en Client Secret staan versleuteld op je eigen computer en gaan nooit mee naar je boekhouder. Alleen bij een bewuste klik op <em>Nu bijwerken</em> vraagt de app je publieke IP-adres op bij Cloudflare en stuurt het aan Ponto, omdat Ponto dat vereist; het wordt niet bewaard of gelogd.</p></details>
       <details><summary>Kan ik gewoon afschriften blijven inlezen?</summary><p>Ja. Afschriften blijven de basis en de terugval. Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen als je later Ponto aanzet.</p></details>
       <details><summary>Wat als er een periode ontbreekt?</summary><p>De app laat per rekening zien tot welke datum de betalingen aantoonbaar aansluiten op je afschriften. Ontbreekt er een periode, dan zegt hij dat en vraagt hij die te onderbouwen met een afschrift of een openingssaldo. Dat is niet hetzelfde als 'compleet'.</p></details>
+      <details><summary>Wat als een afschrift verkeerd is ingelezen?</summary><p>Vanaf versie 1.7.0 haal je het weer weg: zet bij Instellingen → Geavanceerd <em>Toon de boekhouding voor je boekhouder</em> aan en kies bij Bank → <em>Ingelezen afschriften</em> de knop <em>Weghalen</em>. De app laat eerst zien wat er terugdraait, maakt een back-up en haalt dan alles van dat bestand weg. Daarna lees je het opnieuw in. <a href="./#vragen">Meer bij de veelgestelde vragen</a>.</p></details>
     </div>
 
     <div class="cta" style="margin-top: 32px">
