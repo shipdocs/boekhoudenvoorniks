@@ -1,7 +1,7 @@
 import { VIES_URL } from '../../shared/vat';
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, Modal, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
 import { formatDateNl, today, vatDeadline } from '../../shared/dates';
 import { VAT_DISCLAIMER } from '../../shared/legal';
 import { AccountantNotice } from './TaxYear';
@@ -158,7 +158,10 @@ export function Tax({ periodKey }: { periodKey?: string }) {
               </div>
             )}
             {r.status === 'ingediend' ? (
-              <div className="notice good">✓ Je hebt deze aangifte gedaan{r.submittedAt ? ` (${formatDateNl(r.submittedAt.slice(0, 10))})` : ''}.</div>
+              <>
+                <div className="notice good">✓ Je hebt deze aangifte gedaan{r.submittedAt ? ` (${formatDateNl(r.submittedAt.slice(0, 10))})` : ''}.</div>
+                <PaymentDetails key={`${r.period.key}:${r.payment?.reference ?? ''}:${r.payment?.amount ?? ''}`} report={r} onSaved={() => void report.reload()} />
+              </>
             ) : (
               deadline && r.summary.teBetalen > 0 && <p style={{ marginTop: 14 }}>Zorg dat uiterlijk <strong>{formatDateNl(deadline)}</strong> ongeveer <strong><Euro cents={r.summary.teBetalen} /></strong> beschikbaar is.</p>
             )}
@@ -470,6 +473,29 @@ function IncomeTaxCard() {
       <p className="muted small" style={{ marginTop: 10 }}>
         <span className="clickable" onClick={() => go({ screen: 'instellingen', extra: { tab: 'btw' } })}>Werk je 1.225 uur per jaar aan je bedrijf? Aanpassen, of de schatting uitzetten</span>
       </p>
+    </div>
+  );
+}
+
+/** Na het indienen: het betalingskenmerk en bedrag uit Mijn Belastingdienst, om terug te zien (#322). Optioneel; er wordt niets door geboekt. */
+function PaymentDetails({ report: r, onSaved }: { report: { period: { key: string }; payment: { reference: string | null; amount: number | null } | null }; onSaved: () => void }) {
+  const { run, busy } = useAction();
+  const [reference, setReference] = useState(r.payment?.reference ?? '');
+  const [amount, setAmount] = useState<number | null>(r.payment?.amount ?? null);
+  const saved = r.payment?.reference ?? r.payment?.amount ?? null;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <strong>Betaling (optioneel)</strong>
+      <p className="small muted" style={{ margin: '4px 0 8px' }}>Neem het betalingskenmerk en het bedrag over uit Mijn Belastingdienst Zakelijk, dan zie je ze hier terug. De app boekt er niets mee.</p>
+      <div className="row" style={{ gap: 12, alignItems: 'flex-end' }}>
+        <Field label="Betalingskenmerk (16 cijfers)">
+          <input value={reference} onChange={(e) => setReference(e.target.value)} inputMode="numeric" placeholder="bv. 1234 5678 9012 3456" style={{ width: 230 }} />
+        </Field>
+        <Field label="Bedrag">
+          <MoneyInput value={amount} onChange={setAmount} ariaLabel="Bedrag van de betaling" />
+        </Field>
+        <Button disabled={busy} onClick={async () => { if (await run(() => api.vat.setPayment(r.period.key, { reference: reference.trim() || null, amount }), saved === null && !reference.trim() && amount === null ? undefined : 'Betaling vastgelegd ✓')) onSaved(); }}>Opslaan</Button>
+      </div>
     </div>
   );
 }

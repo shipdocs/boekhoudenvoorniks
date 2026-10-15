@@ -3,6 +3,7 @@
 ## Nog niet uitgebracht
 
 ### Nieuw
+- **Betalingskenmerk bij je btw-aangifte.** Na "Ik heb de aangifte gedaan" kun je het betalingskenmerk (16 cijfers) en het bedrag uit Mijn Belastingdienst Zakelijk invullen, om ze bij die periode terug te zien. Beide zijn optioneel en de app boekt er niets mee.
 - **Zelf kiezen hoe je een klus noemt.** Bij Instellingen kies je klus, project of opdracht. Menu, schermen, zoeken, aankopen en ritten gebruiken dan jouw woord, met de juiste lidwoorden (het project, de opdracht). Alleen de naam in de app verandert; je boekingen en facturen blijven zoals ze zijn. Meldingen op Vandaag zeggen voorlopig nog "klus".
 - **Werk je niet met klussen? Zet ze uit.** Bij Instellingen haal je het vinkje "Ik werk met klussen" weg. Dan verdwijnen het menu-item Klussen, de keuzes "voor welke klus" bij aankopen, ritten en bonnen, en de meldingen over klussen op Vandaag. Een offerte zet je dan na akkoord rechtstreeks om in een factuur. Bestaande klussen en boekingen blijven gewoon bestaan en komen terug als je het vinkje weer aanzet.
 

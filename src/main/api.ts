@@ -1861,6 +1861,7 @@ export function createApi(s: Services, host: HostContext) {
       periods: (year: number) => s.vat.listPeriods(year),
       korReverseCharge: (year: number) => s.vat.korReverseCharge(year),
       markSubmitted: (periodKey: string, alreadyFiled = false) => s.vat.markSubmitted(periodKey, { alreadyFiled: alreadyFiled === true }),
+      setPayment: (periodKey: string, input: { reference?: string | null; amount?: number | null }) => s.vat.setPayment(periodKey, input),
       reopen: (periodKey: string) => s.vat.reopen(periodKey),
       corrections: () => s.vat.corrections(),
       checks: (periodKey: string) => s.vat.checks(periodKey),
