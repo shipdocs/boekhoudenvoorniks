@@ -258,6 +258,37 @@ export function directions(transactions: { amount: number }[]): Direction {
 }
 
 /**
+ * Bewijs dat af en bij verkeerd gelezen zijn, los van de tellingen: de gekozen af/bij-kolom bevat waarden die
+ * de app niet als af of bij kent, of er is een kolom die er niet voor gekozen is maar wel alleen af en bij
+ * bevat. Zonder zo'n aanwijzing komt het teken rechtstreeks uit het bestand, en is een afschrift met alleen
+ * afschrijvingen gewoon een rustige week: daar vraagt de app niet naar (#407).
+ */
+export function directionIssue(text: string, mapping: CsvMapping): string | null {
+  const parsed = Papa.parse<Record<string, string>>(stripBom(text), { header: true, skipEmptyLines: 'greedy', transformHeader: (h) => h.trim() });
+  const headers = (parsed.meta.fields ?? []).filter(Boolean);
+  const rows = parsed.data;
+  if (mapping.debitCredit) {
+    const values = rows.map((r) => (r[mapping.debitCredit!] ?? '').trim());
+    const unknown = values.filter((v) => !isDebitMarker(v) && !isCreditMarker(v));
+    if (unknown.length === 0) return null;
+    const sample = unknown.find(Boolean);
+    return `De kolom "${mapping.debitCredit}" bevat ${unknown.length === values.length ? 'alleen' : 'ook'} waarden die de app niet als af of bij herkent${sample ? ` (bijvoorbeeld "${sample}")` : ' (lege vakjes)'}.`;
+  }
+  const used = new Set<string>();
+  for (const v of Object.values(mapping)) {
+    if (typeof v === 'string') used.add(v);
+    else if (Array.isArray(v)) v.forEach((x) => used.add(x));
+    else if (v && typeof v === 'object' && 'column' in v) used.add(v.column);
+  }
+  const candidate = headers.find((h) => {
+    if (used.has(h)) return false;
+    const values = rows.map((r) => (r[h] ?? '').trim()).filter(Boolean);
+    return values.length > 0 && values.every((v) => isDebitMarker(v) || isCreditMarker(v));
+  });
+  return candidate ? `De kolom "${candidate}" lijkt aan te geven wat af en bij is, maar is niet gekozen.` : null;
+}
+
+/**
  * Gaan alle regels (vanaf twee) dezelfde kant op? Dan is de kolom met af of bij waarschijnlijk niet goed gelezen,
  * en dat zie je liever vóór het inlezen dan erna (#407).
  */

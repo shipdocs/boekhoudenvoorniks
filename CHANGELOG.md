@@ -14,7 +14,7 @@ Na de eerste meldingen van gebruikers: een CSV van de bank die er helemaal als "
 
 ### Verbeterd
 - **Je ziet vóór het inlezen wat de app ervan maakt.** Bij "Welke kolom is wat?" staat nu per regel de datum, af of bij, het bedrag en de naam zoals de app ze leest, met het aantal regels af en bij. Gaat alles dezelfde kant op, dan zie je dat meteen.
-- **Alles dezelfde kant op? Dan vraagt de app eerst of dat klopt.** Ook bij een CSV die de app al kent (een bekende bank, of kolommen die je eerder aanwees). Je kunt dan de kolommen nakijken, of bevestigen dat het klopt. Bij de overstap stuurt de app je voor zo'n bestand naar Bank.
+- **Alles dezelfde kant op én een aanwijzing dat af/bij verkeerd gelezen is? Dan vraagt de app eerst of dat klopt.** Bijvoorbeeld als de af/bij-kolom waarden bevat die de app niet kent, of als er een kolom met af en bij in staat die niet gekozen is. Ook bij een CSV die de app al kent (een bekende bank, of kolommen die je eerder aanwees). Je kunt dan de kolommen nakijken, of bevestigen dat het klopt. Een afschrift met alleen afschrijvingen en een goede af/bij-kolom is gewoon een rustige week: daar vraagt de app niets. Bij de overstap stuurt de app je voor zo'n bestand naar Bank.
 - **Liever CAMT.053 of MT940.** Bij Bank en in het kolomvenster staat nu dat je beter een CAMT.053- of MT940-bestand kiest als je bank dat heeft: daarin staat vast wat af en bij is.
 
 ### Opgelost

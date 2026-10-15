@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { setup } from './helpers';
 import { createApi, type HostContext } from '../src/main/api';
-import { directions, oneSided, parseCsv, previewCsv } from '../src/import/csv';
+import { directionIssue, directions, oneSided, parseCsv, previewCsv } from '../src/import/csv';
 
 /**
  * Af en bij in een CSV-bankexport (#407): een gebruiker las een bestand in waarin alle regels als "bij"
@@ -49,6 +49,25 @@ describe('alles één kant op', () => {
     expect(oneSided({ af: 0, bij: 1, nul: 0 })).toBeNull();
   });
 
+  it('alleen afschrijvingen met een goede af/bij-kolom is gewoon een rustige week: geen vraag', async () => {
+    const { s, db } = setup();
+    const api = createApi(s, { appVersion: () => 'test' } as unknown as HostContext);
+    // Knab-indeling, drie keer "D": de app kent het formaat en vraagt niets
+    const knab = 'Rekeningnummer;Transactiedatum;Valutacode;CreditDebet;Bedrag;Tegenrekeningnummer;Tegenrekeninghouder;Omschrijving;Betalingskenmerk\nNL91ABNA0417164300;08-09-2026;EUR;D;15,00;;KPN;Mobiel;\nNL91ABNA0417164300;15-09-2026;EUR;D;600,00;;;Verzamelbetaling;\nNL91ABNA0417164300;18-09-2026;EUR;D;20,00;;Gamma;Verf;\n';
+    const p = await api.bank.previewFile('knab.csv', knab);
+    expect(p.csv?.detectedBank).toBe('Knab');
+    expect(p.direction).toEqual({ af: 3, bij: 0, nul: 0 });
+    expect(p.issue).toBeNull();
+    expect(p.oneSided).toBeNull();
+    // een bedragkolom met minteken en geen af/bij-kolom: het teken komt uit het bestand
+    expect(directionIssue('Datum;Bedrag;Omschrijving\n01-10-2026;-10,00;x\n02-10-2026;-20,00;y\n', { date: 'Datum', amount: 'Bedrag', dateFormat: 'DD-MM-YYYY', description: [] })).toBeNull();
+    // wel een aanwijzing: een niet-gekozen kolom die alleen af en bij bevat
+    expect(directionIssue('Datum;Bedrag;Soort;Omschrijving\n01-10-2026;10,00;Af;x\n02-10-2026;20,00;Bij;y\n', { date: 'Datum', amount: 'Bedrag', dateFormat: 'DD-MM-YYYY', description: [] })).toMatch(/"Soort".*niet gekozen/);
+    // en: de gekozen kolom bevat waarden die de app niet kent
+    expect(directionIssue('Datum;Bedrag;Soort;Omschrijving\n01-10-2026;10,00;Afgeschreven;x\n02-10-2026;20,00;Bij;y\n', { date: 'Datum', amount: 'Bedrag', debitCredit: 'Soort', dateFormat: 'DD-MM-YYYY', description: [] })).toMatch(/"Soort" bevat ook waarden.*"Afgeschreven"/);
+    db.close();
+  });
+
   it('previewFile zegt het vóór het inlezen bij een CSV die de app al kent', async () => {
     const { s, db } = setup();
     const api = createApi(s, { appVersion: () => 'test' } as unknown as HostContext);
@@ -62,10 +81,12 @@ describe('alles één kant op', () => {
     const again = await api.bank.previewFile('bank.csv', text);
     expect(again.savedMapping?.debitCredit).toBe('Omschrijving');
     expect(again.direction).toEqual({ af: 0, bij: 3, nul: 0 });
+    expect(again.issue).toMatch(/"Omschrijving" bevat alleen waarden/);
     expect(again.oneSided).toBe('bij');
     // met de juiste kolom laat de voorvertoning zien wat het wordt
     const fixed = api.bank.previewMapping(text, { ...again.savedMapping!, debitCredit: 'Soort' });
     expect(fixed.direction).toEqual({ af: 2, bij: 1, nul: 0 });
+    expect(fixed.issue).toBeNull();
     expect(fixed.oneSided).toBeNull();
     expect(fixed.rows.map((r) => r.amount)).toEqual([-1000, 2000, -500]);
     expect(fixed.unreadable).toBe(0);
