@@ -50,7 +50,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); font
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--primary); }
 
-.app { display: grid; grid-template-columns: 220px 1fr; height: 100%; overflow: hidden; }
+/* één rij van precies de vensterhoogte (minmax(0, 1fr)): anders groeit de rij mee met een lange pagina en schuift het venster zelf (#428) */
+.app { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: minmax(0, 1fr); height: 100%; overflow: hidden; }
 .nav { background: var(--surface); border-right: 1px solid var(--border); padding: 18px 12px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; }
 .nav .brand { padding: 2px 8px 14px; }
 .nav button { text-align: left; border: 0; background: none; padding: 9px 12px; border-radius: 8px; cursor: pointer; display: flex; gap: 10px; align-items: center; color: var(--text-2); }
@@ -60,7 +61,8 @@ a { color: var(--primary); }
 .nav .spacer { flex: 1; }
 .nav .badge { margin-left: auto; background: var(--bad); color: #fff; border-radius: 99px; font-size: 11px; padding: 0 7px; }
 /* min-height: 0, anders rekt een lange pagina de rij uit tot voorbij het venster en krijgt het venster een tweede schuifbalk (#428) */
-.main { overflow-y: auto; min-height: 0; padding: 28px 36px 60px; }
+.main { overflow-y: auto; min-height: 0; position: relative; padding: 28px 36px 60px; }
+/* position: relative, anders rekenen absoluut gepositioneerde elementen (zoals .sr-only) vanaf het venster en rekken ze het document op (#428) */
 .page { max-width: 1040px; margin: 0 auto; }
 .page-narrow { max-width: 720px; margin: 0 auto; }
 h1 { font-size: 26px; margin: 0 0 4px; font-weight: 650; }
