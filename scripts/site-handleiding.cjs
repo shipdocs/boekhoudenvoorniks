@@ -225,6 +225,9 @@ const ZOEK_JS = `// Zoeken in de handleiding (gebouwd door scripts/site-handleid
             }
           });
         });
+        // eerst de pagina's waarvan de titel of de kop de zoekwoorden bevat, dan de rest in leesvolgorde
+        hits.forEach(function (h, i) { var kop = (h.titel + ' ' + h.kop).toLowerCase(); h.score = woorden.filter(function (w) { return kop.indexOf(w) !== -1; }).length; h.i = i; });
+        hits.sort(function (a, b) { return b.score - a.score || a.i - b.i; });
         lijst.innerHTML = '';
         hits.slice(0, 20).forEach(function (h) {
           var li = document.createElement('li');
