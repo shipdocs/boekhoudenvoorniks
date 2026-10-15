@@ -152,6 +152,8 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
         <input className="grow" type="search" aria-label="Zoek in betalingen" placeholder="Zoek op naam, omschrijving of rekeningnummer…" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
       <ErrorBox error={txs.error} />
+      {/* de lijst is afgekapt op de 500 nieuwste (#441): zeg dat, anders lijken oudere betalingen verdwenen */}
+      {(txs.data ?? []).length >= 500 && <p className="small muted">Dit zijn de 500 nieuwste{query ? ' die hierop passen' : ''}{view === 'hulp' ? ' die nog verwerkt moeten worden' : ''}. Oudere betalingen vind je via het zoekvak hierboven of via Zoeken (Ctrl K).</p>}
       {query && (txs.data ?? []).length > 0 && (
         <p className="small muted">
           {txs.data!.length === 1 ? '1 betaling' : `${txs.data!.length} betalingen`}{view === 'hulp' ? ' die nog verwerkt moeten worden' : ''}, samen <Euro cents={txs.data!.reduce((sum, t) => sum + t.amount, 0)} sign />
@@ -870,7 +872,8 @@ function purchaseCandidateText(c: PurchaseCandidate): string {
 export function CategorizeTransaction({ id }: { id: number }) {
   const { go, meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
-  const txs = useLoad(() => api.bank.transactions({}), [id]);
+  // de betaling zelf ophalen, niet uit de lijst van de 500 nieuwste: een oudere (bv. genegeerde) betaling uit Zoeken bleef anders een leeg scherm (#441)
+  const txs = useLoad(() => api.bank.transaction(id), [id]);
   const suggestions = useLoad(() => api.bank.suggestions(id), [id]);
   const openInvoices = useLoad(() => api.invoices.list({ status: 'openstaand' }));
   const overdue = useLoad(() => api.invoices.list({ status: 'vervallen' }));
@@ -894,7 +897,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const [doubleOf, setDoubleOf] = useState<Awaited<ReturnType<typeof api.bank.duplicateCandidates>> | null>(null);
   // waarschijnlijk dezelfde betaling als een regel die er al staat (#225): eerst die vraag, daarna pas indelen
   const sames = useLoad(() => api.bank.sameDoubles());
-  const t = txs.data?.find((x) => x.id === id);
+  const t = txs.data;
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
   const held = t.status === 'nieuw' ? (sames.data ?? []).find((d) => (d.secondId === t.id && d.second.status === 'nieuw') || (d.firstId === t.id && d.second.status !== 'nieuw')) : undefined;
   /** de betalingen waar deze regel een dubbel van kan zijn; kiezen koppelt hem daaraan */
