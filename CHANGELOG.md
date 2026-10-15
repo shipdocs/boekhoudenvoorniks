@@ -1,6 +1,8 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 1.6.0 — je eigen rekeningschema en rekeningen voor een bv
+
+Voor wie zelf zijn boekhouding doet: rekeningen toevoegen en hernoemen, en een vaste set rekeningen als je een bv hebt.
 
 ### Nieuw
 - **Rekeningschema: rekeningen toevoegen en hernoemen** (Boekhouding → Rekeningschema; zet eerst bij Instellingen → Voor de boekhouder "Toon de boekhouding" aan). Bij een nieuwe rekening kies je een officiële RGS-code uit de lijst. Daaruit volgt of het een balans- of winst-en-verliesrekening is, en het nummer kiest de app zelf als je het leeg laat. Zo blijven de balans, de auditfile en het pakket voor je boekhouder kloppen. Omzet- en btw-rekeningen kun je niet zelf toevoegen, want die zouden de btw-aangifte laten afwijken. Elke rekening kun je hernoemen; een eigen rekening waarop nog niets geboekt is, kun je weer weghalen.
