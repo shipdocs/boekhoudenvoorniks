@@ -138,7 +138,9 @@ describe('afschrift weghalen', () => {
   it('niet bij een afschrift uit de bankkoppeling en niet in een afgesloten periode', () => {
     const { s } = ready();
     const feed = s.bank.import(statement([line('2026-09-01', -1000, 'Bol')], 'openbanking'));
-    expect(s.bank.imports()[0]!.blocked).toMatch(/bankkoppeling/);
+    // een ronde van de bankkoppeling staat niet in de lijst (en neemt dus geen plek in) en is niet weg te halen
+    expect(s.bank.imports()).toEqual([]);
+    expect(s.bank.removeImportPreview(feed.batchId).blocked).toMatch(/bankkoppeling/);
     expect(() => s.bank.removeImport(feed.batchId)).toThrow(/bankkoppeling/);
 
     const old = s.bank.import(statement([line('2026-03-01', -1000, 'Bol')]), { filename: 'maart.csv' });
