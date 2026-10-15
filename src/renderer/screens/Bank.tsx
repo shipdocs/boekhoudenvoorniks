@@ -275,7 +275,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
       {removing && (
         <Modal title="Afschrift weghalen?" onClose={() => setRemoving(null)}>
           <p>
-            <strong>{removing.filename ?? removing.source.toUpperCase()}</strong> (ingelezen {formatDateTime(removing.importedAt)}): {removing.lines === 1 ? '1 regel gaat' : `${removing.lines} regels gaan`} eruit. Dit is niet terug te draaien; de app maakt eerst een back-up.
+            <strong>{removing.filename ?? removing.source.toUpperCase()}</strong> (ingelezen {formatDateTime(removing.importedAt)}): {removing.lines - removing.kept === 1 ? '1 regel gaat' : `${removing.lines - removing.kept} regels gaan`} eruit. Dit is niet terug te draaien; de app maakt eerst een back-up.
           </p>
           {removing.processed.length > 0 && (
             <>
@@ -291,6 +291,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
             </>
           )}
           <ul className="small">
+            {removing.kept > 0 && <li>{removing.kept === 1 ? '1 regel staat ook in een ander afschrift en blijft' : `${removing.kept} regels staan ook in een ander afschrift en blijven`} staan.</li>}
             {removing.evidence > 0 && <li>{removing.evidence === 1 ? '1 bon die hier als bewijs bij hangt, gaat' : `${removing.evidence} bonnen die hier als bewijs bij hangen, gaan`} terug naar "Nog controleren".</li>}
             {removing.skippedElsewhere > 0 && <li>{removing.skippedElsewhere === 1 ? '1 regel uit een later afschrift die hierdoor was overgeslagen, komt' : `${removing.skippedElsewhere} regels uit latere afschriften die hierdoor waren overgeslagen, komen`} er alsnog in.</li>}
             {removing.doubles > 0 && <li>{removing.doubles === 1 ? '1 regel uit een ander afschrift die als dubbel hiervan weg was, komt' : `${removing.doubles} regels uit andere afschriften die als dubbel hiervan weg waren, komen`} terug.</li>}
@@ -301,7 +302,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
               const r = await run(() => api.bank.removeImport(removing.id));
               if (!r) return;
               setRemoving(null);
-              toast(`Afschrift weggehaald: ${r.lines} ${r.lines === 1 ? 'regel' : 'regels'}${r.undone ? `, ${r.undone} teruggedraaid` : ''}${r.restored ? `, ${r.restored} uit een later afschrift alsnog toegevoegd` : ''}`);
+              toast(`Afschrift weggehaald: ${r.lines - r.kept} ${r.lines - r.kept === 1 ? 'regel' : 'regels'}${r.kept ? `, ${r.kept} ${r.kept === 1 ? 'blijft' : 'blijven'} (staan ook in een ander afschrift)` : ''}${r.undone ? `, ${r.undone} teruggedraaid` : ''}${r.restored ? `, ${r.restored} uit een later afschrift alsnog toegevoegd` : ''}`);
               await Promise.all([txs.reload(), status.reload(), doubles.reload(), sames.reload(), imports.reload()]);
               refreshBadge();
             }}>Weghalen</Button>

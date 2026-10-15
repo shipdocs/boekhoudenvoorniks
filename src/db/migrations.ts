@@ -1657,4 +1657,15 @@ export const migrations: string[] = [
   ALTER TABLE mail_folders ADD COLUMN telefoon_uid INTEGER;
   ALTER TABLE mail_folders ADD COLUMN telefoon_pogingen INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Welk later afschrift een al bekende betaling óók bevatte (#408): haal je het afschrift weg waar hij uit kwam,
+  -- dan blijft hij staan en hoort hij voortaan bij dat andere afschrift. Alleen additief; oudere imports hebben
+  -- hier geen regels, die zijn bij het weghalen niet beschermd.
+  CREATE TABLE IF NOT EXISTS import_returned (
+    batch_id INTEGER NOT NULL REFERENCES import_batches(id),
+    transaction_id INTEGER NOT NULL REFERENCES bank_transactions(id),
+    PRIMARY KEY (batch_id, transaction_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_import_returned_tx ON import_returned(transaction_id);
+  `,
 ];
