@@ -1,12 +1,8 @@
 # Wijzigingen
 
-## Nog niet uitgebracht
+## 1.8.0 — bonnen per mail zonder instellen, en versturen met je eigen mailprogramma
 
-### Opgelost
-- **Een oudere betaling openen vanuit Zoeken gaf een leeg scherm.** Heb je meer dan 500 betalingen ingelezen, dan bleef het scherm leeg als je in Zoeken op een betaling klikte die ouder was dan de 500 nieuwste (bijvoorbeeld een genegeerde regel uit een eerder jaar). De app haalt de betaling nu zelf op, en bestaat hij niet meer, dan zegt hij dat. Het Bank-overzicht zegt er nu ook bij dat het de 500 nieuwste betalingen laat zien en dat je oudere via zoeken vindt.
-- **"Weet ik nog niet" bij het afsluiten of versturen van een periode.** De melding zegt nu tot welke datum het gaat ("1 boeking staat t/m 30 september nog bij 'weet ik nog niet'"), en is de boeking daarna al ingedeeld, dan zegt de app dat en hoef je niets te bevestigen. Zo klopt het weer met het pakket voor je boekhouder, dat over het hele jaar kijkt.
-- **Ponto: de melding "toestemming is verlopen" verdwijnt na een verlenging.** De app nam de nieuwe vervaldatum van Ponto niet over; na de eerstvolgende ronde klopt hij nu weer.
-- **Geen tweede schuifbalk meer.** Op een lange pagina kreeg behalve de inhoud ook het venster zelf een schuifbalk, waardoor je de hele app (menu en al) naar een witte pagina kon schuiven. Nu schuift alleen de inhoud.
+Mail zonder gedoe: een gratis bonnen-adres waar de app je facturen en bonnen ophaalt, en facturen versturen met het mailprogramma dat je al gebruikt. Plus administraties beheren en hulp bij elk scherm.
 
 ### Nieuw
 - **Gratis bonnen-adres.** Bij Instellingen → E-mail vraag je een eigen mailadres aan voor je bonnen en facturen, bijvoorbeeld *bakkerijpi-k7m2q@post.boekhoudenvoorniks.nl*: het begin is je bedrijfsnaam, de letters erachter maken het adres onraadbaar. Je bevestigt je e-mailadres met een link die 24 uur werkt, wij keuren de aanvraag goed, en daarna haalt de app de mail op (bij het opstarten, elk kwartier en met *Mail ophalen* op Vandaag). Je hoeft niets in te stellen. Het adres kan alleen ontvangen. De machtiging en het wachtwoord staan versleuteld in het sleutelbeheer van je computer; zonder sleutelbeheer (sommige Linux-computers) biedt de app het adres niet aan en blijft de Bonnenmap de manier. Zet je een back-up terug op een andere computer, dan neem je het adres over met een link naar je e-mailadres, en haalt de oude computer niets meer op. *Stoppen* zet het adres meteen uit; na 30 dagen wordt het verwijderd. Haal je een administratie weg, dan stopt de app het bonnen-adres eerst. Je eigen mailbox koppelen kan gewoon nog, ook naast het bonnen-adres; de app houdt per mailbox bij wat hij al heeft opgehaald. De kopie voor je boekhouder bevat het bonnen-adres niet. De privacyverklaring heeft er een eigen kopje voor.
@@ -14,6 +10,12 @@
 - **Administraties beheren.** Bij Instellingen → Administraties kun je per administratie nu de naam wijzigen, de map openen (bijvoorbeeld om bij de back-ups te komen) en een administratie die je niet meer nodig hebt weghalen. Weghalen bevestig je door de naam te typen; de hele map gaat naar de prullenbak van je computer, dus je kunt hem terughalen. De open administratie en de eerste administratie (die staat in de gegevensmap zelf) kun je niet weghalen.
 - **De app houdt bij of er in de boekhoudermodus is geschreven.** Een correctieboeking, een boeking terugdraaien, het rekeningschema wijzigen of een afschrift weghalen wordt vastgelegd (kijken niet). Bij Instellingen → Over zie je "er is nooit in geschreven" of hoe vaak en wanneer, en het pakket voor je boekhouder heeft er een controle voor. Het akkoord-venster zegt het erbij: wij geven geen advies over een boekhouding; vragen lopen via je boekhouder, en op een administratie waarin buiten de boekhouder om in deze modus is geschreven, geven we geen ondersteuning.
 - **Hulp in de app.** Onderaan het menu staat *Hulp*: die opent in je browser de pagina van de [online handleiding](https://boekhoudenvoorniks.nl/handleiding/index.html) die bij het scherm hoort waar je bent. Ook bij Instellingen → Over staat de handleiding.
+
+### Opgelost
+- **Een oudere betaling openen vanuit Zoeken gaf een leeg scherm.** Heb je meer dan 500 betalingen ingelezen, dan bleef het scherm leeg als je in Zoeken op een betaling klikte die ouder was dan de 500 nieuwste (bijvoorbeeld een genegeerde regel uit een eerder jaar). De app haalt de betaling nu zelf op, en bestaat hij niet meer, dan zegt hij dat. Het Bank-overzicht zegt er nu ook bij dat het de 500 nieuwste betalingen laat zien en dat je oudere via zoeken vindt.
+- **"Weet ik nog niet" bij het afsluiten of versturen van een periode.** De melding zegt nu tot welke datum het gaat ("1 boeking staat t/m 30 september nog bij 'weet ik nog niet'"), en is de boeking daarna al ingedeeld, dan zegt de app dat en hoef je niets te bevestigen. Zo klopt het weer met het pakket voor je boekhouder, dat over het hele jaar kijkt.
+- **Ponto: de melding "toestemming is verlopen" verdwijnt na een verlenging.** De app nam de nieuwe vervaldatum van Ponto niet over; na de eerstvolgende ronde klopt hij nu weer.
+- **Geen tweede schuifbalk meer.** Op een lange pagina kreeg behalve de inhoud ook het venster zelf een schuifbalk, waardoor je de hele app (menu en al) naar een witte pagina kon schuiven. Nu schuift alleen de inhoud.
 
 ## 1.7.0 — een verkeerd afschrift weer weghalen, klussen naar jouw hand, en meer grip op de btw-aangifte
 
