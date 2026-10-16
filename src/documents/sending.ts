@@ -67,7 +67,8 @@ export class DocumentSender {
     return { filename: safeFilename(`Offerte ${q.number} ${q.relation_name}.pdf`), content };
   }
 
-  private invoiceValues(inv: Invoice, s: AppSettings): Record<string, string> {
+  /** Dezelfde waarden voor de e-mailtekst als bij versturen via SMTP; ook voor het eigen mailprogramma (#450). */
+  invoiceValues(inv: Invoice, s: AppSettings): Record<string, string> {
     return {
       nummer: inv.number ?? '',
       klant: inv.relation_name,
@@ -174,9 +175,26 @@ export class DocumentSender {
       });
   }
 
-  /** Automatische aanmaningen: verstuurt alle verschuldigde herinneringen. */
+  /** Heeft de gebruiker een eigen mailserver (SMTP) ingesteld? Alleen dan kan de app zelf mail versturen. */
+  hasSmtp(): boolean {
+    return this.settings.get().smtp.host.trim() !== '';
+  }
+
+  /**
+   * Facturen waarvan de herinnering automatisch zou uitgaan, maar de app kan dat niet zelf doen omdat er
+   * geen SMTP is ingesteld. Die verschijnen als taak op Vandaag (#450); de app opent hier nooit een mailvenster.
+   */
+  remindersNeedingYou(asOf: IsoDate = today()): Invoice[] {
+    if (!this.settings.get().remindersEnabled || this.hasSmtp()) return [];
+    return this.dueReminders(asOf);
+  }
+
+  /**
+   * Automatische aanmaningen: verstuurt alle verschuldigde herinneringen via SMTP. Zonder SMTP gebeurt er
+   * niets (ze staan dan als taak op Vandaag) en opent de app nooit een mailprogramma of -venster.
+   */
   async runAutomaticReminders(asOf: IsoDate = today()): Promise<{ sent: number; failed: { invoiceId: number; error: string }[] }> {
-    if (!this.settings.get().remindersEnabled) return { sent: 0, failed: [] };
+    if (!this.settings.get().remindersEnabled || !this.hasSmtp()) return { sent: 0, failed: [] };
     let sent = 0;
     const failed: { invoiceId: number; error: string }[] = [];
     for (const inv of this.dueReminders(asOf)) {

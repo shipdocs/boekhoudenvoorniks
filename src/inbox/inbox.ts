@@ -319,6 +319,12 @@ export class InboxService {
   /** de gedeelde vergelijking van een betaling met een aankoop die er al staat (#221) */
   private readonly matcher: BankPurchaseMatcher;
 
+  /** facturen waarvan de herinnering automatisch zou uitgaan maar zonder SMTP niet kan (#450) */
+  private remindersNeedingYou: ((asOf: IsoDate) => number[]) | null = null;
+  setRemindersNeedingYou(fn: (asOf: IsoDate) => number[]): void {
+    this.remindersNeedingYou = fn;
+  }
+
   /** betalingen aan je eigen bedrijf en de factuur die erbij hoort (#205) */
   private own: OwnCompanyPayments | null = null;
   setOwnCompany(own: OwnCompanyPayments): void {
@@ -1430,15 +1436,19 @@ export class InboxService {
       });
     }
 
+    // zonder eigen mailserver kan de app de herinnering niet zelf versturen en opent hij ook nooit een mailvenster:
+    // dan staat hij hier, en verstuur je hem zelf vanuit de factuur (#450)
+    const needYou = new Set(this.remindersNeedingYou?.(asOf) ?? []);
     for (const inv of this.invoices.list({ status: 'vervallen' }, asOf)) {
+      const alsJezelf = needYou.has(inv.id);
       tasks.push({
         key: `overdue-${inv.id}`,
         kind: 'invoice-overdue',
         icon: '⏰',
         title: `${inv.relation_name} moet nog ${formatEuro(inv.open_amount)} betalen`,
-        question: `Factuur ${inv.number} is te laat (had betaald moeten zijn op ${formatDateNl(inv.due_date)}).`,
+        question: `Factuur ${inv.number} is te laat (had betaald moeten zijn op ${formatDateNl(inv.due_date)}).${alsJezelf ? ' De herinnering gaat niet vanzelf uit, want je hebt geen e-mailserver ingesteld. Stuur hem zelf vanuit de factuur.' : ''}`,
         amount: inv.open_amount,
-        actions: [{ id: 'herinnering', label: 'Herinnering sturen', primary: true }, { id: 'open', label: 'Bekijken' }],
+        actions: alsJezelf ? [{ id: 'open', label: 'Factuur openen', primary: true }] : [{ id: 'herinnering', label: 'Herinnering sturen', primary: true }, { id: 'open', label: 'Bekijken' }],
         ref: { invoiceId: inv.id },
       });
     }

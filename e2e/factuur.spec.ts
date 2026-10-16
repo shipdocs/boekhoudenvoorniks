@@ -27,7 +27,7 @@ test('klant aanmaken, factuur maken, versturen, betaald melden; komt in de btw',
   await page.getByRole('button', { name: 'Versturen' }).click();
   const send = page.getByRole('dialog', { name: 'Factuur versturen' });
   await expect(send.locator('input[type=email]')).toHaveValue('jansen@example.nl');
-  await send.getByRole('button', { name: 'Versturen' }).click();
+  await send.getByRole('button', { name: 'Versturen', exact: true }).click();
   await expect(page.getByText('Verstuurd ✓')).toBeVisible();
   const sent = (await (await request.post('/__sent')).json()).ok as { to: string; subject: string }[];
   expect(sent).toHaveLength(1);

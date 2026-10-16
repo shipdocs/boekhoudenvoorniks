@@ -7,6 +7,7 @@
  * POST /__reset        lege administratie (nieuwe map), voor elke test; body {"licenses":true} = licenties aan,
  *                      met een nagebootste licentie-Worker (echte Ed25519-handtekening, eigen sleutelpaar)
  * POST /__downloads    de map die in de test de Downloads-map is (leeg aangemaakt per test); de test zet er bestanden in
+ * POST /__ownmail     {"mode":"ok"|"no-handler"|"failed"|"cancelled"} stelt de nagebootste mailprogramma-handler in (#450); geeft terug welke mails hij kreeg
  * POST /__opened       de bijlagen die geopend zijn: het pad uit de database en de inhoud van het bestand (base64)
  * POST /__ponto        stelt uitsluitend de fictieve Ponto-provider in en geeft zijn veilige aanroeplog terug
  * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
@@ -290,6 +291,9 @@ async function storeFile(name, data) {
 }
 /** de bijlagen die de test "opende" (in de app: met het programma van de computer) */
 let openedAttachments = [];
+// versturen met het eigen mailprogramma (#450): wat de nagebootste handler teruggeeft en welke mails hij kreeg
+let ownMailMode = 'ok';
+let ownMailCalls = [];
 
 function init(fresh) {
   if (fresh) {
@@ -312,6 +316,15 @@ function init(fresh) {
     storeFile,
     removeFile: (p) => deleteAttachment(path.dirname(file), p),
     statementFiles: folderAccess,
+    ownMail: {
+      pdfDir: path.join(path.dirname(file), 'tijdelijke-pdf'),
+      handOver: async (msg) => {
+        ownMailCalls.push({ to: msg.to, subject: msg.subject, body: msg.body, pdfExists: fs.existsSync(msg.attachmentPath) });
+        if (ownMailMode === 'ok') return { ok: true };
+        if (ownMailMode === 'cancelled') return { ok: false, reason: 'cancelled' };
+        return { ok: false, reason: ownMailMode === 'failed' ? 'failed' : 'no-handler' };
+      },
+    },
     // alleen voor een test van het abonnement; standaard staan licenties uit ('' = uit, ook nu de app een echte sleutel heeft)
     licensePublicKey: licensing?.publicKey ?? process.env.E2E_LICENSE_PUBLIC_KEY ?? '',
   });
@@ -450,6 +463,7 @@ function init(fresh) {
       openedAttachments.push({ stored: p, content: fs.readFileSync(target).toString('base64') });
     },
     async openExternal(url) { openedAttachments.push({ url }); },
+    revealFile(p) { openedAttachments.push({ revealed: p }); },
     setSmtpPassword: (pw) => { smtpPassword = pw || null; },
     hasSmtpPassword: () => smtpPassword !== null,
     // veilige opslag zoals in de app (#249): dezelfde methode, met een veilige standaard (aan,
@@ -511,6 +525,8 @@ http
         restoreCalls = [];
         store = noStore();
         openedAttachments = [];
+        ownMailMode = 'ok';
+        ownMailCalls = [];
         ponto = defaultPonto();
         secureStorageSwitch = null;
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
@@ -528,6 +544,11 @@ http
       if (req.url === '/__sent') return res.end(JSON.stringify({ ok: sent }));
       if (req.url === '/__downloads') return res.end(JSON.stringify({ ok: downloadsDir() }));
       if (req.url === '/__restore') return res.end(JSON.stringify({ ok: restoreCalls }));
+      if (req.url === '/__ownmail') {
+        // {"mode":"ok"|"no-handler"|"failed"|"cancelled"} stelt de nagebootste handler in; zonder body: wat hij kreeg
+        if (body && JSON.parse(body).mode) ownMailMode = JSON.parse(body).mode;
+        return res.end(JSON.stringify({ ok: ownMailCalls }));
+      }
       if (req.url === '/__opened') return res.end(JSON.stringify({ ok: openedAttachments }));
       if (req.url === '/__ponto') {
         const input = body ? JSON.parse(body) : {};
