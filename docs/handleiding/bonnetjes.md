@@ -1,20 +1,55 @@
 ---
 titel: Bonnetjes en aankopen
-omschrijving: Een bon toevoegen (foto, pdf, e-factuur of via je telefoon), nakijken wat de app ervan maakte, en wat je doet met een bon die niet klopt.
+omschrijving: Een bon toevoegen (foto, pdf, e-factuur, per mail of via je telefoon), nakijken wat de app ervan maakte, en wat je doet met een bon die niet klopt.
 hoofdstuk: Dagelijks werk
 volgorde: 20
 ---
 
 ## Een bon toevoegen
 
-Ga naar *Aankopen & bonnetjes*. Je kunt een bon op vier manieren toevoegen:
+Ga naar *Aankopen & bonnetjes*. Je kunt een bon op vijf manieren toevoegen:
 
 - **Slepen**: sleep een foto, pdf of e-factuur (UBL/XML) in het scherm.
+- **Per mail**: laat leveranciers hun facturen naar je gratis bonnen-adres sturen, of stuur een bon zelf door. De app haalt ze op. Zie [Bonnen per mail](#bonnen-per-mail).
 - **Telefoon**: scan de bon met de app voor Android; hij staat meteen in de lijst. Zie [Telefoon](telefoon.html).
 - **Bonnenmap**: zet bonnen in een map op je computer; de app leest ze vanzelf. Instellen bij *Instellingen → Telefoon & bonnenmap*.
 - **Zonder foto**: *Bonnetje zonder foto* voor een bon die je kwijt bent of een uitgave zonder bon. Vul in wat je weet.
 
 E-facturen en pdf's met tekst leest de app altijd zelf. Een foto wordt gelezen door tekstherkenning op je eigen computer (de app vraagt de eerste keer of hij die mag downloaden), of door een hulpdienst die je zelf kiest bij *Instellingen → Automatisch & herkenning*.
+
+## Bonnen per mail
+
+Veel facturen komen per mail. De app kan ze zelf ophalen, op twee manieren.
+
+### Het bonnen-adres (gratis)
+
+Je krijgt een eigen mailadres voor je bonnen, bijvoorbeeld *bakkerijpi-k7m2q@post.boekhoudenvoorniks.nl*. Het begin is je bedrijfsnaam; de letters erachter zorgen dat niemand het adres kan raden. Je hoeft niets in te stellen.
+
+1. Ga naar *Instellingen → E-mail* en klik bij *Bonnen-adres (gratis)* op *Bonnen-adres aanvragen*.
+2. Kijk je e-mailadres, bedrijfsnaam en KvK-nummer na, lees wat er met je gegevens gebeurt en vink *Ik ga hiermee akkoord* aan. Klik op *Bonnen-adres aanvragen*.
+3. Je krijgt een mail met een link. Open de link en klik op *Bevestigen*. Geen mail? Kijk ook bij ongewenste mail. De link werkt 24 uur.
+4. Wij bekijken je aanvraag, meestal binnen een werkdag. Je krijgt een mail zodra je bonnen-adres klaar is, en de app ziet het vanzelf.
+5. Geef het adres aan je leveranciers. Bij het adres staat een tekst die je kunt kopiëren en doorsturen.
+
+Vanaf dan kijkt de app bij het opstarten en elk kwartier of er mail is. Op *Vandaag* staat ook de knop *Mail ophalen*. Met het bonnen-adres kun je alleen ontvangen, niet versturen. Mail die de app heeft verwerkt, staat op de server in de map *Verwerkt* en wordt na een jaar verwijderd; de bonnen zelf staan in je administratie.
+
+Het bonnen-adres kan niet zonder sleutelhanger om de inloggegevens veilig te bewaren. Op sommige Linux-computers ontbreekt die; de app zegt het dan. Gebruik daar de Bonnenmap.
+
+**Op een andere computer.** Zet je een back-up terug op een andere computer, dan zegt de app *Dit bonnen-adres hoort bij een andere computer*. Klik op *Hier gebruiken*. Je krijgt een link op het e-mailadres waarmee je het adres aanvroeg. Na bevestigen werkt het bonnen-adres op de nieuwe computer, en haalt de oude computer niets meer op.
+
+**Stoppen.** Klik bij het bonnen-adres op *Stoppen*. Het adres ontvangt dan meteen niets meer en wordt na 30 dagen met alle mail verwijderd. De bonnen die al in je administratie staan, blijven. Haal je een administratie weg bij *Instellingen → Administraties*, dan stopt de app het bonnen-adres van die administratie eerst zelf. Vraag je later opnieuw aan, dan krijg je een nieuw adres; een oud adres wordt nooit opnieuw uitgedeeld.
+
+### Je eigen mailbox koppelen
+
+Heb je al een eigen mailadres voor je administratie, bijvoorbeeld *administratie@jouwbedrijf.nl*? Koppel het bij *Instellingen → E-mail → Je eigen mailbox koppelen*. Vul de server, de gebruikersnaam en het wachtwoord in (zoek bij je provider op *IMAP-instellingen*) en klik op *Test verbinding*. Dit blijft gratis en kan naast het bonnen-adres.
+
+### Wat de app met de mail doet
+
+- **Een factuur of bon als bijlage** (pdf, foto of e-factuur): komt bij *Aankopen & bonnetjes* en wacht op jouw controle. Er wordt niets vanzelf geboekt. De mail gaat naar de map *Verwerkt*.
+- **"Je factuur staat online"** zonder bijlage: een taak op *Vandaag* om hem te downloaden.
+- **Een bon in de mail zelf** (een webshop of app zonder pdf): de app bewaart de tekst als bon.
+- **Mail van een klant**: blijft ongelezen en onaangeroerd; je krijgt een seintje op *Vandaag*.
+- **Andere mail**: blijft gewoon staan. Is het toch een bon, klik dan bij *Laatste berichten* op *Als bon bewaren*.
 
 ## Nakijken
 

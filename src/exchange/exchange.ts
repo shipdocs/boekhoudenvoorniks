@@ -396,7 +396,7 @@ export function sanitizeForExchange(db: Db): void {
     DELETE FROM secrets;
     DELETE FROM bank_feed_accounts;
     UPDATE integrations SET enabled = 0, config = '{}';
-    DELETE FROM settings WHERE key IN ('smtp', 'mailIn', 'ocr', 'exchangePartner', 'exchangeLast', 'licenseManagementKey', 'statementFolder', 'scanner', 'receiptFolder');
+    DELETE FROM settings WHERE key IN ('smtp', 'mailIn', 'ocr', 'exchangePartner', 'exchangeLast', 'licenseManagementKey', 'statementFolder', 'scanner', 'receiptFolder', 'bonnenAdres');
     DELETE FROM statement_files;
     DELETE FROM scanner_devices;
     DELETE FROM scanner_nonces;

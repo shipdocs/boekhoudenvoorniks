@@ -8,7 +8,7 @@ export function friendlyImapError(e: unknown): Error {
   const err = e as { code?: string; authenticationFailed?: boolean; responseText?: string; message?: string };
   const msg = err?.message ?? String(e);
   if (err?.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|LOGIN failed|auth/i.test(`${msg} ${err?.responseText ?? ''}`))
-    return new Error('Inloggen bij de mailbox lukt niet. Controleer je gebruikersnaam en wachtwoord (soms heb je een apart "app-wachtwoord" nodig).');
+    return Object.assign(new Error('Inloggen bij de mailbox lukt niet. Controleer je gebruikersnaam en wachtwoord (soms heb je een apart "app-wachtwoord" nodig).'), { name: 'ImapAuthError' });
   if (/ENOTFOUND|getaddrinfo/i.test(msg)) return new Error('De mailserver is niet gevonden. Controleer de servernaam, bijvoorbeeld imap.jouwprovider.nl.');
   if (/wrong version number|tls|ssl/i.test(msg)) return new Error('De beveiliging past niet bij de poort. Meestal is het SSL/TLS met poort 993.');
   if (/ECONNREFUSED|ETIMEDOUT|timeout|ECONNRESET/i.test(msg)) return new Error('De mailserver reageert niet. Controleer de server en de poort, en of je internet hebt.');
@@ -75,8 +75,8 @@ export class ImapSource implements MailSource {
   private constructor(private readonly client: ImapFlow) {}
 
   static async connect(cfg: MailInSettings, password: string | null): Promise<ImapSource> {
-    if (!cfg.host || !cfg.user) throw new Error('Vul eerst de mailserver en de gebruikersnaam in bij Instellingen → E-mail → Inkomende post.');
-    if (!password) throw new Error('Het wachtwoord van je administratie-mailbox ontbreekt. Vul het in bij Instellingen → E-mail → Inkomende post.');
+    if (!cfg.host || !cfg.user) throw new Error('Vul eerst de mailserver en de gebruikersnaam in bij Instellingen → E-mail → Je eigen mailbox koppelen.');
+    if (!password) throw new Error('Het wachtwoord van je administratie-mailbox ontbreekt. Vul het in bij Instellingen → E-mail → Je eigen mailbox koppelen.');
     const client = new ImapFlow({ host: cfg.host, port: cfg.port, secure: cfg.secure, auth: { user: cfg.user, pass: password }, logger: false, connectionTimeout: 20_000 });
     // een verbroken verbinding mag de app niet laten crashen
     client.on('error', () => undefined);
@@ -152,6 +152,19 @@ export class ImapSource implements MailSource {
     if (!exists) await this.client.mailboxCreate(target);
     const ok = await this.client.messageMove(String(uid), target, { uid: true });
     if (!ok) throw new Error('Verplaatsen lukte niet');
+  }
+
+  /**
+   * Berichten in een map die vóór `before` (JJJJ-MM-DD) binnenkwamen definitief verwijderen; geeft het aantal.
+   * Alleen voor de map "Verwerkt" van het bonnen-adres (#450: verwerkte mail hooguit een jaar op de server);
+   * de eigen mailbox van de gebruiker raakt de app nooit zo aan.
+   */
+  async deleteBefore(folder: string, before: string): Promise<number> {
+    if (!(await this.open(folder))) return 0;
+    const uids = await this.client.search({ before: new Date(`${before}T00:00:00Z`) }, { uid: true });
+    if (!uids || uids.length === 0) return 0;
+    await this.client.messageDelete(uids, { uid: true });
+    return uids.length;
   }
 
   async close(): Promise<void> {

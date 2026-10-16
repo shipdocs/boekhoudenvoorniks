@@ -19,7 +19,20 @@ export const TERMS_SUMMARY: string[] = [
   'BoekhoudenVoorNiks is gratis software, geleverd zoals hij is, zonder garantie. Met een abonnement (alleen voor ondernemers) steun je de ontwikkeling en krijg je de extra functies, nu de app voor Android, de uitwisseling met je boekhouder en de online hulp bij categorievoorstellen: de eerste 4 maanden gratis, daarna per maand opzegbaar (artikel 8). Wij zijn niet aansprakelijk voor schade (artikel 9); bij een storing lossen we het op, en anders een maand gratis.',
   'Jij blijft zelf verantwoordelijk voor je administratie en je belastingaangiften. Controleer de bedragen voordat je ze overneemt; de software geeft geen fiscaal advies.',
   'Je administratie staat alleen op je eigen computer. Maak regelmatig een back-up; je bent zelf verantwoordelijk voor de bewaarplicht van 7 jaar.',
-  'Wij ontvangen geen gegevens uit je administratie. Alleen wat jij zelf verstuurt (e-mail, koppelingen die je aanzet, een export naar je boekhouder) gaat naar buiten. Voor een abonnement bewaren wij alleen je e-mailadres, je bedrijfsgegevens voor de factuur en de betaalgegevens van Mollie.',
+  'Wij ontvangen geen gegevens uit je administratie. Alleen wat jij zelf verstuurt (e-mail, koppelingen die je aanzet, een export naar je boekhouder) gaat naar buiten. Voor een abonnement bewaren wij alleen je e-mailadres, je bedrijfsgegevens voor de factuur en de betaalgegevens van Mollie. Vraag je het gratis bonnen-adres aan, dan staat de mail die je daarheen stuurt op onze mailserver tot de app hem ophaalt (zie de privacyverklaring).',
+];
+
+/**
+ * Toestemming voor het bonnen-adres op post.boekhoudenvoorniks.nl (#450): apart van de voorwaarden en alleen
+ * gevraagd bij het aanvragen. Wie het niet aanvraagt, krijgt niets nieuws te zien. Verhoog de versie bij een
+ * inhoudelijke wijziging; de server bewaart met welke versie iemand akkoord ging.
+ */
+export const BONNEN_CONSENT_VERSION = '2026-10-16';
+export const BONNEN_CONSENT: string[] = [
+  'Het bonnen-adres is gratis en alleen om bonnen en facturen te ontvangen. Versturen kan er niet mee.',
+  'Wij bewaren je e-mailadres, je bedrijfsnaam, je KvK-nummer (als je het invult) en het nummer van je administratie. Niets uit je boekhouding.',
+  'Mail die naar je bonnen-adres gaat, staat op onze eigen mailserver in Duitsland tot de app hem ophaalt, en daarna nog hooguit een jaar. Wij kijken er niet in.',
+  'Je kunt het bonnen-adres altijd stoppen in de app. Het adres ontvangt dan meteen niets meer en wordt na 30 dagen met alle mail verwijderd.',
 ];
 
 export const VAT_DISCLAIMER =

@@ -11,7 +11,7 @@ volgorde: 30
 
 - **Je bedrijf**: naam, adres, KvK- en btw-nummer, rechtsvorm (eenmanszaak, vof of bv) en je instapdatum. Hier staat ook de overstap-hulp.
 - **Facturen & offertes**: nummering (en het volgende nummer zelf zetten), betaaltermijn, geldigheid van offertes, herinneringen, en de opmaak van je factuur (logo, kleuren, teksten).
-- **E-mail**: de mailserver waarmee de app je facturen verstuurt (SMTP; de gegevens krijg je van je e-mailprovider) en een optionele kopie aan jezelf.
+- **E-mail**: de mailserver waarmee de app je facturen verstuurt (SMTP; de gegevens krijg je van je e-mailprovider) en een optionele kopie aan jezelf. Zonder mailserver kun je versturen met je eigen mailprogramma (zie [Versturen met je eigen mailprogramma](werk-en-facturen.html#versturen-met-je-eigen-mailprogramma)). Daaronder: het gratis bonnen-adres en je eigen mailbox koppelen, voor bonnen per mail (zie [Bonnen per mail](bonnetjes.html#bonnen-per-mail)).
 - **Btw**: hoe vaak je aangifte doet, de kleineondernemersregeling, en je standaard btw-tarief.
 - **Categorieën**: de kostensoorten waarin de app je bonnen indeelt. Je kunt namen aanpassen, een eigen categorie toevoegen (*+ Eigen categorie*) of categorieën verbergen die je nooit gebruikt.
 - **Koppelingen**: webshop en betaaldiensten (WooCommerce, Shopify, Mollie, Stripe).
