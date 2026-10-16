@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { existsSync, mkdirSync, mkdtempSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -265,7 +266,9 @@ describe('Thunderbird als standaardmailprogramma (xdg-email laat daar de bijlage
     expect(compose).toContain("to='jansen@example.nl'");
     expect(compose).toContain(`subject='${msg.subject}'`);
     expect(compose).toContain(`body='${msg.body}'`);
-    expect(compose).toContain("attachment='file:///home/martin/Documents/BoekhoudenVoorNiks/Te%20versturen/factuur-1/Factuur%20%C3%A9.pdf'");
+    // het adres zoals Node het maakt (op Windows met een stationsletter; dit pad wordt alleen op Linux gebruikt)
+    expect(compose).toContain(`attachment='${pathToFileURL(tbMsg.attachmentPath).href}'`);
+    expect(compose).toContain('/Te%20versturen/factuur-1/Factuur%20%C3%A9.pdf');
   });
 
   it('kiest Thunderbird (ook als snap) rechtstreeks en xdg-email voor een ander standaardprogramma', async () => {
