@@ -179,6 +179,10 @@ describe('licentie: de laatst geziene datum', () => {
     mappen.push(map);
     const bestand = join(map, 'boekhouding.sqlite');
     const schrijfbaar = new Database(bestand);
+    // Dit is de enige test met een echt bestand: setup() draait alle migraties erop, en op de Windows-runner kost elke commit
+    // een fsync (soms tot de time-out van 30 s, #425). Voor een weggooi-bestand is veilig schrijven niet nodig.
+    schrijfbaar.pragma('journal_mode = MEMORY');
+    schrijfbaar.pragma('synchronous = OFF');
     const o = opzet({ db: schrijfbaar });
     o.s.license.install(await o.licentie(dag(5)), VANDAAG);
     o.s.license.status(dag(1));
@@ -199,7 +203,7 @@ describe('licentie: de laatst geziene datum', () => {
     } finally {
       alleenLezen.close();
     }
-  });
+  }, 60_000);
 
   it('KLOK-07 licenties uit (geen sleutel): alles mag, er wordt niets gelezen of bewaard, ook niet met een licentie en een datum in de administratie', async () => {
     const o = opzet({ zonderSleutel: true });
