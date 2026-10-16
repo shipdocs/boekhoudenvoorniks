@@ -1,13 +1,16 @@
 import { runBackgroundFeeds } from './background-feeds';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath, sep } from 'node:path';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { assertDatabaseFileNotNewer, NewerDatabaseError, openDatabase, openReadonly, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
 import { createServices, type Services } from '../services';
 import { SettingsService } from '../settings/settings';
 import { createSmtpMailer, verifySmtp } from '../documents/smtp-mailer';
+import { handOverToOwnMailProgram } from '../documents/own-mail';
+import { createWindowsMapiSender } from '../documents/mapi-sender';
 import { createApi, type Api } from './api';
 import { renderPdf } from './pdf';
 import { SafeStorageSecretStore } from './secrets';
@@ -469,6 +472,15 @@ function backupBeforeUpgrade(): void {
   }
 }
 
+/**
+ * Waar de PDF staat die je eigen mailprogramma als bijlage inleest (#450): een zichtbare map in Documenten, niet in
+ * de tijdelijke map. Een mailprogramma als snap of flatpak ziet /tmp niet (en verborgen mappen ook niet) en liet de
+ * bijlage dan stil weg.
+ */
+function ownMailPdfDir(): string {
+  return join(app.getPath('documents'), 'BoekhoudenVoorNiks', 'Te versturen');
+}
+
 let updates: Updates | null = null;
 
 function initServices(): void {
@@ -482,6 +494,24 @@ function initServices(): void {
     storeFile: storeAttachment,
     removeFile: removeAttachment,
     statementFiles: folderAccess,
+    ownMail: {
+      pdfDir: ownMailPdfDir(),
+      handOver: (msg) =>
+        handOverToOwnMailProgram(msg, {
+          platform: process.platform,
+          // los van de app: het mailprogramma blijft open ook als de app dichtgaat
+          spawn: (cmd, args) => {
+            const child = spawn(cmd, args, { shell: false, stdio: 'ignore', detached: true });
+            child.unref();
+            return child;
+          },
+          mailHandler: () =>
+            new Promise((resolve) => {
+              execFile('xdg-mime', ['query', 'default', 'x-scheme-handler/mailto'], { timeout: 3000 }, (err, stdout) => resolve(err ? null : stdout.trim() || null));
+            }),
+          mapi: process.platform === 'win32' ? createWindowsMapiSender() : null,
+        }),
+    },
   });
   localOcr = new LocalOcrRuntime(join(rootDir(), 'ocr'), {
     fetch: (url, init) => fetch(url, init) as never,
@@ -570,6 +600,11 @@ function initServices(): void {
     async openPath(path) {
       const err = await shell.openPath(resolveAttachmentPath(dataDir(), path));
       if (err) throw new Error(err);
+    },
+    revealFile(p) {
+      // alleen de tijdelijke PDF's van "versturen met je eigen mailprogramma" (#450)
+      if (!resolvePath(p).startsWith(resolvePath(ownMailPdfDir()) + sep)) throw new Error('Dit bestand kan niet getoond worden');
+      shell.showItemInFolder(p);
     },
     async openExternal(url) {
       // https, en een mail aan ons (vragen en feedback); geen andere schema's

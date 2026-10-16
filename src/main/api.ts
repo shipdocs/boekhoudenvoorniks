@@ -13,6 +13,7 @@ import type { QuoteInput, QuoteStatus } from '../documents/quotes';
 import type { DocumentTemplate, TemplateType } from '../documents/templates';
 import { renderDocumentHtml, FONTS } from '../documents/templates';
 import type { SendOptions } from '../documents/sending';
+import type { WebmailProvider } from '../documents/own-mail';
 import { storedPurchaseVat, storedVatWarning } from '../core-ledger/stored-purchase';
 import { expenseLines, type PurchaseInvoiceInput } from '../documents/purchases';
 import { businessEffect } from '../shared/business-share';
@@ -92,6 +93,8 @@ export interface HostContext {
   /** opent een bijlage; `path` is het opgeslagen bijlagepad, net als bij `readAttachment` */
   openPath(path: string): Promise<void>;
   openExternal(url: string): Promise<void>;
+  /** toont een bestand in de bestandsbeheerder (de tijdelijke PDF bij versturen met webmail, #450) */
+  revealFile(path: string): void;
   setSmtpPassword(password: string): void;
   hasSmtpPassword(): boolean;
   /** of deze computer veilige opslag (sleutelbeheer) heeft; in de app gelezen uit `SecretStore.available`, in e2e met een schakelaar (#249) */
@@ -1138,6 +1141,19 @@ export function createApi(s: Services, host: HostContext) {
       convertToInvoice: (id: number) => s.quotes.convertToInvoice(id),
       html: (id: number) => s.quotes.renderHtml(id),
       send: (id: number, opts?: SendOptions) => s.sender.sendQuote(id, opts),
+      /** met je eigen mailprogramma (#450): geeft de mail door; het document blijft zoals het was tot confirmSent */
+      sendOwnMail: (id: number, opts?: SendOptions) => s.ownMail.sendQuote(id, opts),
+      webmail: async (id: number, provider: WebmailProvider, opts?: SendOptions) => {
+        const w = await s.ownMail.webmailQuote(id, provider, opts);
+        await host.openExternal(w.url);
+        host.revealFile(w.pdfPath);
+        return true;
+      },
+      /** "Ja, verstuurd": pas nu telt de offerte als verzonden */
+      confirmSent: (id: number) => {
+        s.ownMail.confirmQuoteSent(id);
+        return true;
+      },
       savePdf: async (id: number) => {
         const pdf = await s.sender.quotePdf(id);
         return host.saveFile(pdf.filename, pdf.content, [{ name: 'PDF', extensions: ['pdf'] }]);
@@ -1158,6 +1174,19 @@ export function createApi(s: Services, host: HostContext) {
       html: (id: number) => s.invoices.renderHtml(id),
       dateWarnings: (invoiceDate: IsoDate, excludeId?: number) => s.invoices.dateWarnings(invoiceDate, excludeId),
       send: (id: number, opts?: SendOptions) => s.sender.sendInvoice(id, opts),
+      /** met je eigen mailprogramma (#450): geeft de mail door; de factuur blijft zoals hij was tot confirmSent */
+      sendOwnMail: (id: number, opts?: SendOptions) => s.ownMail.sendInvoice(id, opts),
+      webmail: async (id: number, provider: WebmailProvider, opts?: SendOptions) => {
+        const w = await s.ownMail.webmailInvoice(id, provider, opts);
+        await host.openExternal(w.url);
+        host.revealFile(w.pdfPath);
+        return true;
+      },
+      /** "Ja, verstuurd": pas nu telt de factuur als verzonden en lopen de herinneringen */
+      confirmSent: (id: number) => {
+        s.ownMail.confirmInvoiceSent(id);
+        return true;
+      },
       sendReminder: (id: number, opts?: SendOptions) => s.sender.sendReminder(id, opts),
       emailLog: (id: number) => s.sender.emailLog('factuur', id),
       savePdf: async (id: number) => {

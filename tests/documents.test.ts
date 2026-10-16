@@ -186,7 +186,7 @@ describe('verzenden', () => {
 
   it('automatische herinneringen volgens schema', async () => {
     const { s, klant, sent } = setup();
-    s.settings.update({ remindersEnabled: true, reminderDays: [7, 21] });
+    s.settings.update({ remindersEnabled: true, reminderDays: [7, 21], smtp: { ...s.settings.get().smtp, host: 'smtp.example.nl' } });
     const inv = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-01-01', lines: [stucwerk] }).id);
     expect(s.sender.dueReminders('2026-01-22')).toHaveLength(0);
     s.invoices.markSent(inv.id);

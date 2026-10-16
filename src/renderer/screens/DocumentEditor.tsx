@@ -359,29 +359,74 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
   );
 }
 
+/** Waar het versturen met het eigen mailprogramma (#450) staat: nog niets gedaan, mail doorgegeven (vraag), of niet gelukt (webmail). */
+type OwnMailStage = 'kies' | 'vraag' | 'mislukt';
+
 function SendDialog({ kind, id, defaultTo, onClose, onSent }: { kind: 'factuur' | 'offerte'; id: number; defaultTo: string; onClose: () => void; onSent: () => void }) {
   const { settings, go } = useApp();
   const { run, busy } = useAction();
   const [to, setTo] = useState(defaultTo);
+  const [stage, setStage] = useState<OwnMailStage>('kies');
   const smtpReady = !!settings.smtp.host && !!settings.smtp.fromEmail;
+  const api_ = kind === 'factuur' ? api.invoices : api.quotes;
+
+  async function eigenMailprogramma() {
+    const r = await run<{ ok: boolean; reason?: string }>(() => api_.sendOwnMail(id, { to }));
+    if (!r) return;
+    if (r.ok) setStage('vraag');
+    else if (r.reason === 'cancelled') setStage('kies'); // je sloot het mailvenster zelf: niets tonen, niets markeren
+    else setStage('mislukt');
+  }
+  async function webmail(provider: 'gmail' | 'outlook') {
+    // opent de webmail met alles ingevuld en toont de PDF in de bestandsbeheerder om erin te slepen
+    const r = await run<boolean>(() => api_.webmail(id, provider, { to }));
+    if (r) setStage('vraag');
+  }
+  const verstuurd = kind === 'factuur' ? 'Is de factuur verstuurd?' : 'Is de offerte verstuurd?';
+  const webmailKeuze = (
+    <div className="stack">
+      <div className="small"><strong>Gmail / Outlook op het web</strong></div>
+      <div className="row">
+        <Button disabled={busy || !to} onClick={() => void webmail('gmail')}>Gmail</Button>
+        <Button disabled={busy || !to} onClick={() => void webmail('outlook')}>Outlook</Button>
+      </div>
+      <p className="small muted">De {kind} staat als PDF klaar in je bestandsbeheerder. Sleep hem in het mailvenster.</p>
+    </div>
+  );
+
   return (
     <Modal title={kind === 'factuur' ? 'Factuur versturen' : 'Offerte versturen'} onClose={onClose}>
-      {!smtpReady ? (
+      {stage === 'vraag' ? (
         <>
-          <div className="notice warn">Stel eerst in via welk e-mailadres je verstuurt.</div>
-          <div className="row end"><Button kind="primary" onClick={() => go({ screen: 'instellingen', extra: { tab: 'email' } })}>Naar e-mailinstellingen</Button></div>
+          <p><strong>{verstuurd}</strong></p>
+          <p className="small muted">Pas als je op Ja klikt, telt de {kind} als verstuurd{kind === 'factuur' ? ' en gaan de betalingsherinneringen lopen' : ''}. Is de mail nog niet weg, kies dan Nog niet: er verandert niets.</p>
+          <div className="row end">
+            <Button onClick={onClose}>Nog niet</Button>
+            <Button kind="primary" disabled={busy} onClick={async () => {
+              const r = await run<boolean>(() => api_.confirmSent(id), 'Als verstuurd gemarkeerd ✓');
+              if (r) onSent();
+            }}>Ja</Button>
+          </div>
+          {webmailKeuze}
         </>
       ) : (
         <>
+          {!smtpReady && stage === 'kies' && <div className="notice warn">Je hebt geen e-mailserver ingesteld. Versturen met je eigen mailprogramma kan zonder instellingen.</div>}
+          {stage === 'mislukt' && <div className="notice warn">Je mailprogramma kon niet worden geopend.</div>}
           <Field label="Naar"><input type="email" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
           <p className="small muted">De {kind} gaat als PDF mee. {kind === 'factuur' && 'Na versturen is de factuur definitief en wordt hij automatisch in je boekhouding verwerkt.'}</p>
           <div className="row end">
             <Button onClick={onClose}>Annuleren</Button>
-            <Button kind="primary" disabled={busy || !to} onClick={async () => {
-              const r = await run<unknown>(() => (kind === 'factuur' ? api.invoices.send(id, { to }) : api.quotes.send(id, { to })), 'Verstuurd ✓');
-              if (r) onSent();
-            }}>{busy ? 'Bezig…' : 'Versturen'}</Button>
+            {!smtpReady && <Button onClick={() => go({ screen: 'instellingen', extra: { tab: 'email' } })}>Naar e-mailinstellingen</Button>}
+            <Button kind={smtpReady ? undefined : 'primary'} disabled={busy || !to} onClick={() => void eigenMailprogramma()}>Versturen met je eigen mailprogramma</Button>
+            {smtpReady && (
+              <Button kind="primary" disabled={busy || !to} onClick={async () => {
+                const r = await run<unknown>(() => (kind === 'factuur' ? api.invoices.send(id, { to }) : api.quotes.send(id, { to })), 'Verstuurd ✓');
+                if (r) onSent();
+              }}>{busy ? 'Bezig…' : 'Versturen'}</Button>
+            )}
           </div>
+          {stage === 'mislukt' && webmailKeuze}
         </>
       )}
     </Modal>

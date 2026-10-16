@@ -15,6 +15,7 @@ import { InvoiceService } from './documents/invoices';
 import { QuoteService } from './documents/quotes';
 import { PurchaseService } from './documents/purchases';
 import { DocumentSender, type Mailer, type MailMessage, type PdfRenderer } from './documents/sending';
+import { OwnMailSender, type HandoverResult, type OwnMailMessage } from './documents/own-mail';
 import { BankService } from './import/bank';
 import { StatementFolder, type FolderAccess } from './import/statement-folder';
 import { MatchingEngine } from './import/matching';
@@ -68,6 +69,8 @@ export interface ServiceDeps {
   statementFiles?: FolderAccess | null;
   /** publieke sleutel voor licenties (tests); standaard die van de licentie-Worker */
   licensePublicKey?: string;
+  /** versturen met het eigen mailprogramma (#450): geeft de mail aan het besturingssysteem; zonder is er geen mailprogramma */
+  ownMail?: { handOver: (msg: OwnMailMessage) => Promise<HandoverResult>; pdfDir?: string };
 }
 
 /** Composition root: bouwt alle modules op één database. */
@@ -94,6 +97,19 @@ export function createServices(db: Db, deps: ServiceDeps) {
   };
   const vies = new ViesService(db, integrationFetch);
   const sender = new DocumentSender(db, settings, invoices, quotes, deps.pdf, mailerFactory);
+  // versturen met het eigen mailprogramma (#450): dezelfde blokkades als elke uitgaande mail
+  const ownMail = new OwnMailSender({
+    sender,
+    settings,
+    invoices,
+    quotes,
+    guard: () => {
+      if (settings.get().demoMode) throw new Error('In de demo worden geen e-mails verstuurd. Wis de demo om echt te beginnen.');
+      if (settings.officeCopy()) throw new Error(settings.outboundBlocked()!);
+    },
+    handOver: deps.ownMail?.handOver ?? (async () => ({ ok: false, reason: 'no-handler' })),
+    pdfDir: deps.ownMail?.pdfDir,
+  });
   const bank = new BankService(db, ledger, invoices, purchases, relations, events);
   // een betaling en een aankoop waarvan de gebruiker zei dat ze niet bij elkaar horen, stelt de app niet opnieuw voor
   const purchaseMatcher = new BankPurchaseMatcher(db);
@@ -156,6 +172,8 @@ export function createServices(db: Db, deps: ServiceDeps) {
   quick.setBookedPayments(bookedPayments);
   inbox.setBookedPayments(bookedPayments);
   inbox.setOwnCompany(ownCompany);
+  // herinneringen die zonder SMTP niet vanzelf uitgaan, staan als taak op Vandaag (#450)
+  inbox.setRemindersNeedingYou((asOf) => sender.remindersNeedingYou(asOf).map((i) => i.id));
   inbox.setIntegrations(integrations);
   // afschriften uit de downloadmap (#184): standaard uit; de vraag "Inlezen?" komt op Vandaag
   const statementFolder = new StatementFolder(db, settings, bank, deps.statementFiles ?? null);
@@ -184,7 +202,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, ownCompany, statementFolder, vies, periods, yearEnd, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, jobPhotos, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed };
+  return { db, ownCompany, statementFolder, vies, periods, yearEnd, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, jobPhotos, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed, ownMail };
 }
 
 export type Services = ReturnType<typeof createServices>;
