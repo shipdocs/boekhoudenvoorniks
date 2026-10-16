@@ -599,7 +599,9 @@ http
       inflight++;
       try {
         const r = await handler(...args);
-        res.end(JSON.stringify({ ok: r === undefined ? null : r }, replace));
+        // zoals Electron: een functie die niets teruggeeft, geeft in de renderer `undefined` (geen `null`);
+        // de sleutel `ok` valt dan weg en de brug in fixtures.ts leest `undefined`
+        res.end(JSON.stringify({ ok: r }, replace));
       } catch (e) {
         res.end(JSON.stringify({ error: e.message }));
       } finally {

@@ -19,7 +19,8 @@ export function AdministrationsSettings() {
   const saveName = async () => {
     if (!renaming) return;
     const current = list.data!.find((a) => a.key === renaming.key)?.current;
-    if ((await run(() => api.administrations.rename(renaming.key, renaming.name.trim()), 'Naam gewijzigd ✓')) === undefined) return;
+    // de actie geeft niets terug: zelf `true` maken, anders lijkt gelukt op mislukt
+    if ((await run(async () => { await api.administrations.rename(renaming.key, renaming.name.trim()); return true; }, 'Naam gewijzigd ✓')) === undefined) return;
     setRenaming(null);
     await list.reload();
     // de open administratie: de naam staat ook bovenaan het menu en bij Je bedrijf
@@ -91,7 +92,7 @@ function RemoveDialog({ target, onClose, onRemoved }: { target: { key: string; n
       </Field>
       <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
         <Button kind="ghost" disabled={busy} onClick={onClose}>Annuleren</Button>
-        <Button kind="danger" disabled={busy || !matches} onClick={async () => { if ((await run(() => api.administrations.remove(target.key), 'Naar de prullenbak verplaatst ✓')) !== undefined) await onRemoved(); }}>Naar de prullenbak</Button>
+        <Button kind="danger" disabled={busy || !matches} onClick={async () => { if ((await run(async () => { await api.administrations.remove(target.key); return true; }, 'Naar de prullenbak verplaatst ✓')) !== undefined) await onRemoved(); }}>Naar de prullenbak</Button>
       </div>
     </Modal>
   );
