@@ -207,6 +207,9 @@ export class BonnenAdresService {
       if (e instanceof BonnenServerError && e.status === 403) {
         this.update({ status: 'ingetrokken' });
         this.forget();
+      } else if (e instanceof BonnenServerError && e.status === 409) {
+        // niet (meer) actief bij de server, bv. gestopt of verwijderd: de stand bijwerken, anders blijft hij hier "actief"
+        await this.verversen().catch(() => undefined);
       }
       throw e;
     }
@@ -225,15 +228,18 @@ export class BonnenAdresService {
    */
   async stoppen(): Promise<BonnenView> {
     const token = this.token();
+    let status: StoredState['status'] = token ? 'gestopt' : 'ingetrokken';
     if (token) {
       try {
         await this.server.stoppen(token);
       } catch (e) {
-        if (!(e instanceof BonnenServerError && e.status === 403)) throw e;
+        // 403: op een andere computer overgenomen; 404/409/410: bij de server al afgelopen. Dan alleen hier opruimen.
+        if (!(e instanceof BonnenServerError && [403, 404, 409, 410].includes(e.status))) throw e;
+        if (e.status === 403) status = 'ingetrokken';
       }
     }
     this.forget();
-    if (this.stored()) this.update({ status: token ? 'gestopt' : 'ingetrokken' });
+    if (this.stored()) this.update({ status });
     return this.view();
   }
 

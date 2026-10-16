@@ -360,7 +360,9 @@ let mailRun: Promise<PollResult> | null = null;
 /** Verbinden met het bonnen-adres; lukt inloggen niet (wachtwoord vervangen), dan één keer een nieuw wachtwoord vragen. */
 async function connectBonnen(): Promise<ImapSource> {
   try {
-    return await ImapSource.connect(bonnen.mailSettings(), await bonnen.wachtwoord());
+    // eerst het wachtwoord: dat vraagt zo nodig ook het adres op bij de server
+    const password = await bonnen.wachtwoord();
+    return await ImapSource.connect(bonnen.mailSettings(), password);
   } catch (e) {
     if ((e as Error).name !== 'ImapAuthError') throw e;
     return ImapSource.connect(bonnen.mailSettings(), await bonnen.wachtwoord(true));
@@ -372,9 +374,12 @@ async function pollWith(connect: () => Promise<ImapSource>, target?: typeof BONN
   try {
     const r = await services.mail.poll(source, undefined, target);
     // bonnen-adres: verwerkte mail staat hooguit een jaar op de server (privacyverklaring)
+    // (ook in de gewone map: mail zonder bon blijft daar staan, en mag er ook niet langer dan een jaar staan)
     if (expire && target) {
       const yearAgo = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
-      await source.deleteBefore(target.processedFolder, yearAgo).catch((e) => console.error('Oude mail op het bonnen-adres opruimen mislukt', (e as Error).message));
+      for (const folder of [...target.folders, target.processedFolder]) {
+        await source.deleteBefore(folder, yearAgo).catch((e) => console.error('Oude mail op het bonnen-adres opruimen mislukt', (e as Error).message));
+      }
     }
     return r;
   } finally {
@@ -386,11 +391,13 @@ async function pollWith(connect: () => Promise<ImapSource>, target?: typeof BONN
  * Eén ophaalronde: de eigen mailserver (als die is ingesteld, of als er geen bonnen-adres is, zodat de bekende
  * foutmelding blijft) en het bonnen-adres. Mislukt er één, dan gaat de ander gewoon door; daarna komt de fout.
  */
-function fetchMail(): Promise<PollResult> {
+function fetchMail(background = false): Promise<PollResult> {
   mailRun ??= (async () => {
     const s = services.settings.get();
     const rounds: (() => Promise<PollResult>)[] = [];
-    if ((s.mailIn.enabled && s.mailIn.host) || !bonnen.actief()) rounds.push(() => pollWith(() => ImapSource.connect(s.mailIn, secrets.get(IMAP_SECRET))));
+    // op de achtergrond de eigen mailbox alleen als hij compleet is ingesteld (zoals vroeger), anders geen elk-kwartier-fout
+    const ownReady = s.mailIn.enabled && Boolean(s.mailIn.host) && (!background || secrets.get(IMAP_SECRET) !== null);
+    if (ownReady || (!background && !bonnen.actief())) rounds.push(() => pollWith(() => ImapSource.connect(s.mailIn, secrets.get(IMAP_SECRET))));
     if (bonnen.actief()) rounds.push(() => pollWith(connectBonnen, BONNEN_TARGET, true));
     const total: PollResult = { documents: 0, onlineInvoices: 0, fromCustomers: 0, other: 0, errors: 0, missingFolders: [] };
     let failure: unknown = null;
@@ -424,7 +431,7 @@ async function backgroundMail(): Promise<void> {
   const own = s.mailIn.enabled && secrets.get(IMAP_SECRET) !== null;
   if (!own && !bonnen.actief()) return;
   try {
-    await fetchMail();
+    await fetchMail(true);
   } catch (e) {
     console.error('Mail ophalen mislukt', (e as Error).message);
   }

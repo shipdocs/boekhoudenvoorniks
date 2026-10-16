@@ -135,6 +135,29 @@ describe('bonnen-adres in de app', () => {
     expect(w.bonnen.vergeten().status).toBe('geen');
   });
 
+  it('beëindigd bij de server (409 bij inloggegevens): de stand wordt bijgewerkt in plaats van "actief" te blijven', async () => {
+    const w = world();
+    await w.request();
+    w.srv.setStatus('actief');
+    await w.bonnen.verversen();
+    w.srv.setStatus('verwijderd');
+    w.srv.failNext('inloggegevens', new BonnenServerError('Het bonnen-adres is nog niet klaar', 409));
+    await expect(w.bonnen.wachtwoord(true)).rejects.toThrow();
+    expect(w.bonnen.view().status).toBe('verwijderd');
+    expect(w.bonnen.actief()).toBe(false);
+  });
+
+  it('stoppen terwijl het adres al op een andere computer is overgenomen: "ingetrokken", niet "gestopt"', async () => {
+    const w = world();
+    await w.request();
+    w.srv.failNext('stoppen', new BonnenServerError('Deze computer heeft geen toegang meer', 403, true));
+    expect((await w.bonnen.stoppen()).status).toBe('ingetrokken');
+    const v = world();
+    await v.request();
+    v.srv.failNext('stoppen', new BonnenServerError('Weg', 410));
+    expect((await v.bonnen.stoppen()).status).toBe('gestopt');
+  });
+
   it('vergeten kan niet zolang het adres nog loopt', async () => {
     const w = world();
     await w.request();
