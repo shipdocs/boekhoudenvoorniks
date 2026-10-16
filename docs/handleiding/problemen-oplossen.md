@@ -53,6 +53,8 @@ Die melding (SmartScreen) komt bij programma's die nog niet met een betaald cert
 2. Installeer het programma op de nieuwe computer en kies bij de eerste start niet de demo.
 3. *Instellingen → Back-up, demo & updates → Back-up terugzetten…*.
 4. Koppel je telefoon opnieuw als je de app voor Android gebruikt.
+5. Heb je een bonnen-adres? Ga naar *Instellingen → E-mail* en klik bij het bonnen-adres op *Hier gebruiken*. Bevestig de link in je mail. Zie [Bonnen per mail](bonnetjes.html#bonnen-per-mail).
+6. Typ de wachtwoorden van je mailserver opnieuw in: die zijn versleuteld met de sleutel van de oude computer.
 
 ## Ik heb in de boekhoudermodus iets kapotgemaakt
 

@@ -10,6 +10,7 @@ import { AdministrationsSettings } from './Administrations';
 import { DataFolderSettings } from './DataFolder';
 import { OfficeSettings } from './Exchange';
 import { ScannerSettings } from './Scanner';
+import { BonnenAdres } from './BonnenAdres';
 import { formatDateNl, today } from '../../shared/dates';
 import { businessEffect } from '../../shared/business-share';
 import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
@@ -483,6 +484,7 @@ function EmailSettings({ draft, set, section }: { draft: Settings; set: (p: Part
           }}>Test verbinding</Button>
         </div>
       </div>
+      <BonnenAdres />
       <IncomingMail />
     </>
   );
@@ -530,9 +532,9 @@ function IncomingMail() {
 
   return (
     <div className="card grid" style={{ marginTop: 14 }}>
-      <h3 style={{ margin: 0 }}>Inkomende post (bonnetjes per mail)</h3>
+      <h3 style={{ margin: 0 }}>Je eigen mailbox koppelen</h3>
       <p className="small muted">
-        Maak een apart mailadres voor je administratie, bijvoorbeeld <strong>administratie@jouwbedrijf.nl</strong>, en vraag leveranciers hun facturen daarheen te sturen.
+        Heb je al een eigen mailadres voor je administratie, bijvoorbeeld <strong>administratie@jouwbedrijf.nl</strong>? Koppel het hier, dan haalt de app daar de bonnen op. Geen eigen adres? Gebruik dan het bonnen-adres hierboven.
         De app haalt de bijlagen eruit (bij het opstarten en elk kwartier) en zet ze klaar om te controleren.
       </p>
       <details>

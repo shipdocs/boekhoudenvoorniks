@@ -43,6 +43,35 @@ export interface MailSource {
   move(uid: number, target: string): Promise<void>;
 }
 
+/**
+ * Welke mailbox poll() leest. Standaard de eigen mailserver (Instellingen > E-mail). Het bonnen-adres op
+ * post.boekhoudenvoorniks.nl heeft een eigen voorvoegsel: de ophaalstand (mail_folders) en de vastgelegde
+ * mails staan dan per mailbox, niet per mapnaam, zodat "INBOX" van de ene mailbox de andere niet raakt.
+ */
+export interface MailTarget {
+  /** voor de mapnaam in mail_folders en mail_messages; '' voor de eigen mailserver */
+  prefix: string;
+  folders: string[];
+  /** verwerkte mail hierheen (alleen uit de eerste map); '' = laten staan */
+  processedFolder: string;
+  /** JJJJ-MM-DD of '' */
+  since: string;
+}
+
+/** Voorvoegsel van het bonnen-adres in mail_folders en mail_messages. */
+export const BONNEN_PREFIX = 'bonnen-adres:';
+/** Zo leest de app het bonnen-adres: alleen INBOX, verwerkte mail naar "Verwerkt". */
+export const BONNEN_TARGET: MailTarget = { prefix: BONNEN_PREFIX, folders: ['INBOX'], processedFolder: 'Verwerkt', since: '' };
+
+/** De mapnaam op de server en of het de eerste map is, voor een vastgelegde mail. */
+export function mailFolderOf(stored: string, cfg: { folder: string }): { folder: string; main: boolean; bonnen: boolean } {
+  if (stored.startsWith(BONNEN_PREFIX)) {
+    const folder = stored.slice(BONNEN_PREFIX.length);
+    return { folder, main: folder === BONNEN_TARGET.folders[0], bonnen: true };
+  }
+  return { folder: stored, main: stored === (cfg.folder || 'INBOX'), bonnen: false };
+}
+
 export type MailOutcome = 'bijlage' | 'online-factuur' | 'klant' | 'eigen' | 'overig' | 'fout';
 
 export interface MailRecord {
@@ -358,8 +387,8 @@ export class MailIntakeService {
   }
 
   /** Verwerkte mail naar de map "Verwerkt" (alleen uit de gewone map); lukt dat niet, dan blijft hij staan. */
-  private async moveProcessed(source: MailSource, uid: number, main: boolean): Promise<string | null> {
-    const target = this.settings.get().mailIn.processedFolder;
+  private async moveProcessed(source: MailSource, uid: number, main: boolean, processedFolder?: string): Promise<string | null> {
+    const target = processedFolder ?? this.settings.get().mailIn.processedFolder;
     if (!main || !target) return null;
     try {
       await source.move(uid, target);
@@ -376,8 +405,9 @@ export class MailIntakeService {
   async saveAsReceipt(source: MailSource, id: number, asOf: IsoDate = today()): Promise<MailRecord> {
     const rec = this.get(id);
     if (!['overig', 'online-factuur'].includes(rec.outcome) || rec.note === TELEFOON_NOTE) throw new Error('Deze mail is al verwerkt, of komt van een klant');
-    const box = await source.open(rec.folder);
-    if (!box) throw new Error(`De map "${rec.folder}" bestaat niet meer`);
+    const where = mailFolderOf(rec.folder, this.settings.get().mailIn);
+    const box = await source.open(where.folder);
+    if (!box) throw new Error(`De map "${where.folder}" bestaat niet meer`);
     const m = await source.fetch(rec.uid);
     const key = m?.messageId ? `id:${m.messageId}` : null;
     // hetzelfde bericht? (bij een Message-ID moet die kloppen; de UID kan intussen van een ander bericht zijn)
@@ -385,8 +415,7 @@ export class MailIntakeService {
       throw new Error('Deze mail staat niet meer op dezelfde plek (verplaatst of verwijderd). Sla hem zelf op als PDF en zet hem bij Aankopen.');
     }
     const added = await this.addBodyAsReceipt(rec.message_key, m, asOf);
-    const main = rec.folder === (this.settings.get().mailIn.folder || 'INBOX');
-    const movedTo = await this.moveProcessed(source, rec.uid, main);
+    const movedTo = await this.moveProcessed(source, rec.uid, where.main, where.bonnen ? BONNEN_TARGET.processedFolder : undefined);
     this.finish(rec.message_key, added, () =>
       this.db
         .prepare(`UPDATE mail_messages SET outcome = 'bijlage', document_ids = ?, note = ?, moved_to = ? WHERE id = ?`)
@@ -486,22 +515,24 @@ export class MailIntakeService {
     });
   }
 
-  async poll(source: MailSource, asOf: IsoDate = today()): Promise<PollResult> {
+  async poll(source: MailSource, asOf: IsoDate = today(), target?: MailTarget): Promise<PollResult> {
     const cfg = this.settings.get().mailIn;
+    const t: MailTarget = target ?? { prefix: '', folders: [cfg.folder || 'INBOX', ...cfg.extraFolders.filter((f) => f && f !== cfg.folder && f !== cfg.processedFolder)], processedFolder: cfg.processedFolder, since: cfg.since };
     const result: PollResult = { documents: 0, onlineInvoices: 0, fromCustomers: 0, other: 0, errors: 0, missingFolders: [] };
     const customers = this.customersByAddress();
     const own = this.ownAddresses();
-    const since = /^\d{4}-\d{2}-\d{2}$/.test(cfg.since) ? cfg.since : null;
-    const folders = [cfg.folder || 'INBOX', ...cfg.extraFolders.filter((f) => f && f !== cfg.folder && f !== cfg.processedFolder)];
+    const since = /^\d{4}-\d{2}-\d{2}$/.test(t.since) ? t.since : null;
     let budget = MAIL_LIMITS.maxMessagesPerPoll;
     // telefoonberichten worden alleen herkend als de route aanstaat en de scanner er is
     const telefoon = PHONE_SCANNER.available && this.telefoon?.actief() ? this.telefoon : null;
 
-    for (const [index, folder] of folders.entries()) {
+    for (const [index, serverFolder] of t.folders.entries()) {
       const main = index === 0;
-      const box = await source.open(folder);
+      // de ophaalstand en de vastgelegde mails per mailbox: bij het bonnen-adres met voorvoegsel
+      const folder = t.prefix + serverFolder;
+      const box = await source.open(serverFolder);
       if (!box) {
-        result.missingFolders.push(folder);
+        result.missingFolders.push(serverFolder);
         continue;
       }
       const state = this.db.prepare('SELECT uid_validity, last_uid FROM mail_folders WHERE folder = ?').get(folder) as { uid_validity: string; last_uid: number } | undefined;
@@ -552,7 +583,7 @@ export class MailIntakeService {
         try {
           if (telefoon && telefoonBijlagen(m.attachments).length > 0) {
             // een telefoonbericht gaat vóór de takken eigen adres en klant: de afzender, het onderwerp en de tekst tellen niet
-            if ((await this.telefoonMail(telefoon, source, folder, main, uid, key, m, setLast, result)) === 'opnieuw') break;
+            if ((await this.telefoonMail(telefoon, source, folder, main, uid, key, m, setLast, result, t.processedFolder)) === 'opnieuw') break;
             continue;
           }
           if (own.has(from) && this.isOwnDocument(m)) {
@@ -569,7 +600,7 @@ export class MailIntakeService {
             if (files.length > 0) {
               // eerst alle bijlagen bewaren en beoordelen, dan pas de mail verplaatsen
               const added = await this.addFiles(key, m, files, asOf);
-              const movedTo = await this.moveProcessed(source, uid, main);
+              const movedTo = await this.moveProcessed(source, uid, main, t.processedFolder);
               this.finish(key, added, () => this.record(key, folder, uid, m!, 'bijlage', { documentIds: added.ids, movedTo }));
               result.documents += added.ids.length;
             } else if (this.isCopyOfProcessed(m, own.has(from), own)) {
@@ -579,7 +610,7 @@ export class MailIntakeService {
             } else if (this.pdf && looksLikeReceipt(m)) {
               // de bon staat in de mail zelf (webshop, app): de tekst als PDF bewaren
               const added = await this.addBodyAsReceipt(key, m, asOf);
-              const movedTo = await this.moveProcessed(source, uid, main);
+              const movedTo = await this.moveProcessed(source, uid, main, t.processedFolder);
               this.finish(key, added, () => this.record(key, folder, uid, m!, 'bijlage', { documentIds: added.ids, movedTo, note: 'mailtekst als bon bewaard' }));
               result.documents++;
             } else {
@@ -623,6 +654,7 @@ export class MailIntakeService {
     m: MailMessage,
     setLast: (uid: number) => void,
     result: PollResult,
+    processedFolder?: string,
   ): Promise<'klaar' | 'opnieuw' | 'overgeslagen'> {
     const alle = telefoonBijlagen(m.attachments);
     const problemen: { naam: string; probleem: Probleem }[] = [];
@@ -680,7 +712,7 @@ export class MailIntakeService {
       // de mail blijft in de mailbox staan; de map gaat verder
       result.errors++;
     } else {
-      const movedTo = await this.moveProcessed(source, uid, main);
+      const movedTo = await this.moveProcessed(source, uid, main, processedFolder);
       if (movedTo) this.db.prepare('UPDATE mail_messages SET moved_to = ? WHERE message_key = ?').run(movedTo, key);
       result.other++;
     }

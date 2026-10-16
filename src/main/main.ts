@@ -35,7 +35,8 @@ import { autoUpdater } from 'electron-updater';
 import { Updates } from './updates';
 import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
-import type { PollResult } from '../mail/mail-intake';
+import { BONNEN_PREFIX, BONNEN_TARGET, type PollResult } from '../mail/mail-intake';
+import { BONNEN_TOKEN_SECRET, BonnenAdresService, BonnenServerError, httpBonnenServer } from '../mail/bonnen-adres';
 import { deleteAttachment, resolveAttachmentPath, saveAttachment } from './attachments';
 import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
@@ -62,6 +63,8 @@ let db: Db;
 let services: Services;
 let api: Api;
 let secrets: SafeStorageSecretStore;
+/** bonnen-adres op post.boekhoudenvoorniks.nl (#450) */
+let bonnen: BonnenAdresService;
 let localOcr: LocalOcrRuntime;
 /** Bonnenscanner van de open administratie: ontvangstpunt, mDNS en bonnenmap. */
 let scanner: Bonnenscanner | null = null;
@@ -354,16 +357,66 @@ function emit(event: string, payload: unknown): void {
 /** Eén ophaalronde tegelijk; een tweede verzoek wacht op de lopende. */
 let mailRun: Promise<PollResult> | null = null;
 
-function fetchMail(): Promise<PollResult> {
-  mailRun ??= (async () => {
-    const source = await ImapSource.connect(services.settings.get().mailIn, secrets.get(IMAP_SECRET));
-    try {
-      const r = await services.mail.poll(source);
-      if (r.documents + r.onlineInvoices + r.fromCustomers > 0) emit('auto-processed', r);
-      return r;
-    } finally {
-      await source.close();
+/** Verbinden met het bonnen-adres; lukt inloggen niet (wachtwoord vervangen), dan één keer een nieuw wachtwoord vragen. */
+async function connectBonnen(): Promise<ImapSource> {
+  try {
+    // eerst het wachtwoord: dat vraagt zo nodig ook het adres op bij de server
+    const password = await bonnen.wachtwoord();
+    return await ImapSource.connect(bonnen.mailSettings(), password);
+  } catch (e) {
+    if ((e as Error).name !== 'ImapAuthError') throw e;
+    return ImapSource.connect(bonnen.mailSettings(), await bonnen.wachtwoord(true));
+  }
+}
+
+async function pollWith(connect: () => Promise<ImapSource>, target?: typeof BONNEN_TARGET, expire = false): Promise<PollResult> {
+  const source = await connect();
+  try {
+    const r = await services.mail.poll(source, undefined, target);
+    // bonnen-adres: verwerkte mail staat hooguit een jaar op de server (privacyverklaring)
+    // (ook in de gewone map: mail zonder bon blijft daar staan, en mag er ook niet langer dan een jaar staan)
+    if (expire && target) {
+      const yearAgo = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
+      for (const folder of [...target.folders, target.processedFolder]) {
+        await source.deleteBefore(folder, yearAgo).catch((e) => console.error('Oude mail op het bonnen-adres opruimen mislukt', (e as Error).message));
+      }
     }
+    return r;
+  } finally {
+    await source.close();
+  }
+}
+
+/**
+ * Eén ophaalronde: de eigen mailserver (als die is ingesteld, of als er geen bonnen-adres is, zodat de bekende
+ * foutmelding blijft) en het bonnen-adres. Mislukt er één, dan gaat de ander gewoon door; daarna komt de fout.
+ */
+function fetchMail(background = false): Promise<PollResult> {
+  mailRun ??= (async () => {
+    const s = services.settings.get();
+    const rounds: (() => Promise<PollResult>)[] = [];
+    // op de achtergrond de eigen mailbox alleen als hij compleet is ingesteld (zoals vroeger), anders geen elk-kwartier-fout
+    const ownReady = s.mailIn.enabled && Boolean(s.mailIn.host) && (!background || secrets.get(IMAP_SECRET) !== null);
+    if (ownReady || (!background && !bonnen.actief())) rounds.push(() => pollWith(() => ImapSource.connect(s.mailIn, secrets.get(IMAP_SECRET))));
+    if (bonnen.actief()) rounds.push(() => pollWith(connectBonnen, BONNEN_TARGET, true));
+    const total: PollResult = { documents: 0, onlineInvoices: 0, fromCustomers: 0, other: 0, errors: 0, missingFolders: [] };
+    let failure: unknown = null;
+    for (const round of rounds) {
+      try {
+        const r = await round();
+        total.documents += r.documents;
+        total.onlineInvoices += r.onlineInvoices;
+        total.fromCustomers += r.fromCustomers;
+        total.other += r.other;
+        total.errors += r.errors;
+        total.missingFolders.push(...r.missingFolders);
+      } catch (e) {
+        failure ??= e;
+      }
+    }
+    if (total.documents + total.onlineInvoices + total.fromCustomers > 0) emit('auto-processed', total);
+    if (failure) throw failure;
+    return total;
   })().finally(() => {
     mailRun = null;
   });
@@ -372,11 +425,40 @@ function fetchMail(): Promise<PollResult> {
 
 async function backgroundMail(): Promise<void> {
   const s = services.settings.get();
-  if (!s.mailIn.enabled || services.settings.outboundBlocked() || !secrets.get(IMAP_SECRET)) return;
+  if (services.settings.outboundBlocked()) return;
+  // wacht er een bevestiging of goedkeuring, dan de stand bij de server bijwerken
+  if (bonnen.lopend()) await bonnen.verversen().catch((e) => console.error('Stand bonnen-adres ophalen mislukt', (e as Error).message));
+  const own = s.mailIn.enabled && secrets.get(IMAP_SECRET) !== null;
+  if (!own && !bonnen.actief()) return;
   try {
-    await fetchMail();
+    await fetchMail(true);
   } catch (e) {
     console.error('Mail ophalen mislukt', (e as Error).message);
+  }
+}
+
+/**
+ * Een administratie weghalen: heeft die een bonnen-adres met een machtiging op deze computer, dan eerst stoppen
+ * bij de server. Anders blijft er een adres bestaan dat niemand meer ophaalt. Lukt stoppen niet (geen internet),
+ * dan wordt de administratie niet weggehaald.
+ */
+async function stopBonnenOf(dir: string): Promise<void> {
+  const file = join(dir, 'boekhouding.sqlite');
+  if (!existsSync(file)) return;
+  let token: string | null = null;
+  const other = new Database(file, { readonly: true, fileMustExist: true });
+  try {
+    const hasSecrets = other.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'secrets'`).get();
+    if (hasSecrets) token = new SafeStorageSecretStore(other as never).get(BONNEN_TOKEN_SECRET);
+  } finally {
+    other.close();
+  }
+  if (!token) return;
+  try {
+    await httpBonnenServer(LICENSE_API_URL).stoppen(token);
+  } catch (e) {
+    if (e instanceof BonnenServerError && e.status === 403) return; // al gestopt of overgenomen
+    throw new Error(`Deze administratie heeft een bonnen-adres, en dat kon niet worden gestopt: ${(e as Error).message} De administratie is niet weggehaald.`);
   }
 }
 
@@ -513,6 +595,7 @@ function initServices(): void {
         }),
     },
   });
+  bonnen = new BonnenAdresService(db, services.settings, secrets, httpBonnenServer(LICENSE_API_URL));
   localOcr = new LocalOcrRuntime(join(rootDir(), 'ocr'), {
     fetch: (url, init) => fetch(url, init) as never,
     shrinkImage: shrinkForOcr,
@@ -616,6 +699,13 @@ function initServices(): void {
     // veilige opslag (sleutelbeheer) zoals de services die zelf ook lezen (#249, regel 6)
     secureStorage: () => secrets.available,
     testSmtp: (smtp, password) => verifySmtp(smtp ?? services.settings.get().smtp, password || secrets.get(SMTP_SECRET)),
+    bonnen: {
+      view: () => bonnen.view(),
+      aanvragen: (input) => bonnen.aanvragen(input),
+      verversen: () => bonnen.verversen(),
+      stoppen: () => bonnen.stoppen(),
+      vergeten: () => bonnen.vergeten(),
+    },
     mail: {
       setPassword: (pw) => (pw ? secrets.set(IMAP_SECRET, pw) : secrets.delete(IMAP_SECRET)),
       hasPassword: () => secrets.get(IMAP_SECRET) !== null,
@@ -632,7 +722,8 @@ function initServices(): void {
       },
       fetchNow: () => fetchMail(),
       async saveAsReceipt(id) {
-        const source = await ImapSource.connect(services.settings.get().mailIn, secrets.get(IMAP_SECRET));
+        const fromBonnen = services.mail.get(id).folder.startsWith(BONNEN_PREFIX);
+        const source = fromBonnen ? await connectBonnen() : await ImapSource.connect(services.settings.get().mailIn, secrets.get(IMAP_SECRET));
         try {
           return await services.mail.saveAsReceipt(source, id);
         } finally {
@@ -793,6 +884,7 @@ function initServices(): void {
       async remove(key) {
         assertWritable();
         const dir = administrations().dirToRemove(key);
+        await stopBonnenOf(dir);
         try {
           await shell.trashItem(dir);
         } catch (e) {

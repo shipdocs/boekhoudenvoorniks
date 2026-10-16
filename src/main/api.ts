@@ -52,6 +52,7 @@ import type { HoursInput } from '../tax/mileage';
 import { rulesFor } from '../tax/income-tax';
 import type { Cents } from '../shared/money';
 import type { PollResult } from '../mail/mail-intake';
+import type { BonnenView } from '../mail/bonnen-adres';
 import type { UpdateStatus } from './updates';
 import type { SwitchPlan } from './data-dir';
 import type { FxApplyInput } from '../fx/repair';
@@ -171,6 +172,14 @@ export interface HostContext {
     status(): UpdateStatus;
     install(): void;
     reconfigure(): void;
+  };
+  /** bonnen-adres op post.boekhoudenvoorniks.nl (#450); ontbreekt buiten Electron */
+  bonnen?: {
+    view(): BonnenView;
+    aanvragen(input: { email: string; bedrijfsnaam: string; kvk?: string; toestemming: string }): Promise<BonnenView>;
+    verversen(): Promise<BonnenView>;
+    stoppen(): Promise<BonnenView>;
+    vergeten(): BonnenView;
   };
   /** inkomende post (IMAP); ontbreekt buiten Electron */
   mail?: {
@@ -1045,8 +1054,33 @@ export function createApi(s: Services, host: HostContext) {
       applyTrade: (tradeKey: string, choice: { add: string[]; hide: string[] }) => s.categories.applyTrade(tradeKey, choice),
     },
     /** Inkomende post: een apart mailadres voor de administratie. */
+    /**
+     * Bonnen-adres op post.boekhoudenvoorniks.nl (#450): aanvragen, de stand, stoppen. Null buiten de app. Niet in de
+     * demo of in de kopie bij de boekhouder (de service weigert dan zelf ook).
+     */
+    bonnen: {
+      status: () => host.bonnen?.view() ?? null,
+      aanvragen: (input: { email: string; bedrijfsnaam: string; kvk?: string; toestemming: string }) => {
+        if (!host.bonnen) throw new Error('Het bonnen-adres kan alleen in de app');
+        const blocked = s.settings.outboundBlocked();
+        if (blocked) throw new ValidationError(blocked);
+        return host.bonnen.aanvragen(input);
+      },
+      verversen: () => {
+        if (!host.bonnen) throw new Error('Het bonnen-adres kan alleen in de app');
+        return host.bonnen.verversen();
+      },
+      stoppen: () => {
+        if (!host.bonnen) throw new Error('Het bonnen-adres kan alleen in de app');
+        return host.bonnen.stoppen();
+      },
+      vergeten: () => {
+        if (!host.bonnen) throw new Error('Het bonnen-adres kan alleen in de app');
+        return host.bonnen.vergeten();
+      },
+    },
     mail: {
-      summary: () => ({ ...s.mail.summary(), passwordSet: host.mail?.hasPassword() ?? false }),
+      summary: () => ({ ...s.mail.summary(), passwordSet: host.mail?.hasPassword() ?? false, bonnenActief: host.bonnen?.view().status === 'actief' }),
       setPassword: (pw: string) => host.mail?.setPassword(pw),
       test: (cfg?: AppSettings['mailIn'], password?: string) => {
         if (!host.mail) throw new Error('Mail ophalen kan alleen in de app');

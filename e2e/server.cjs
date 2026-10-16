@@ -21,6 +21,8 @@
  *                      de laatst getoonde QR-code terug, zodat de test zich als telefoon kan melden
  * POST /__ocr          een trage tekstherkenning nabootsen: body {"traag":true} = bonnen lezen duurt tot de test het zegt;
  *                      {"klaar":["regel", ...]} = het lopende leesverzoek geeft deze regels terug
+ * POST /__bonnen      bonnen-adres (#450): body {"status":"wacht"|"actief"|...} zet de stand bij de nagebootste server;
+ *                      geeft de aanroepen terug die de app deed
  * alles anders         bestanden uit dist/renderer
  */
 const http = require('node:http');
@@ -49,6 +51,32 @@ const { BANK_FEED } = require(path.join(ROOT, 'main/shared/bank-feed.js'));
 const Database = require('better-sqlite3');
 // Alleen deze testserver zet de nog niet vrijgegeven functie aan. Productbuilds houden de vlag uit.
 BANK_FEED.available = true;
+const { BonnenAdresService } = require(path.join(ROOT, 'main/mail/bonnen-adres.js'));
+
+/** De licentieserver voor het bonnen-adres nagebootst; de stand zet de test met POST /__bonnen. */
+const defaultBonnen = () => ({ status: 'onbevestigd', calls: [], n: 0 });
+let bonnenFake = defaultBonnen();
+const bonnenServer = {
+  async aanmelden(body, token) {
+    bonnenFake.calls.push({ op: 'aanmelden', body, token });
+    bonnenFake.status = 'onbevestigd';
+    bonnenFake.n += 1;
+    const [local, domain] = body.email.split('@');
+    return { status: 'onbevestigd', installatie: `token-${bonnenFake.n}`, email: `${local.slice(0, 1)}***@${domain}` };
+  },
+  async status(token) {
+    bonnenFake.calls.push({ op: 'status', token });
+    return { status: bonnenFake.status, ...(bonnenFake.status === 'actief' ? { adres: 'bakkerijpi-k7m2q@post.boekhoudenvoorniks.nl' } : {}) };
+  },
+  async inloggegevens() {
+    throw new Error('In de test is er geen mailserver');
+  },
+  async stoppen(token) {
+    bonnenFake.calls.push({ op: 'stoppen', token });
+    bonnenFake.status = 'gestopt';
+    return { ok: true, status: 'gestopt' };
+  },
+};
 /** het kantoor op deze "computer" (in de app: kantoor.json in de gegevensmap) */
 let officeProfile = null;
 /** geheimen per administratie (in de app: in de eigen database, versleuteld); blijven bewaard bij wisselen */
@@ -356,6 +384,13 @@ function init(fresh) {
     appVersion: () => '0.0.0-e2e',
     scanner: { service: () => current, pickFolder: async () => pickedFolder },
     licenseApi: licensing ? fakeLicenseApi() : undefined,
+    bonnen: (() => {
+      // dezelfde geheimen als de app, met de testschakelaar voor "geen sleutelhanger" (/__securestorage)
+      const base = secretsFor(file);
+      const store = { get available() { return secureStorageSwitch !== null ? secureStorageSwitch : base.available; }, get: (k) => base.get(k), set: (k, v) => base.set(k, v), delete: (k) => base.delete(k) };
+      const svc = new BonnenAdresService(db, services.settings, store, bonnenServer);
+      return { view: () => svc.view(), aanvragen: (i) => svc.aanvragen(i), verversen: () => svc.verversen(), stoppen: () => svc.stoppen(), vergeten: () => svc.vergeten() };
+    })(),
     exchange: {
       bundle: () => createBackupBundle(db, path.dirname(file), (copy) => {
         const d = new Database(copy);
@@ -528,6 +563,7 @@ http
         ownMailMode = 'ok';
         ownMailCalls = [];
         ponto = defaultPonto();
+        bonnenFake = defaultBonnen();
         secureStorageSwitch = null;
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         resetFolders();
@@ -573,6 +609,10 @@ http
       if (req.url === '/__store') {
         if (body) store = { ...store, ...JSON.parse(body) };
         return res.end(JSON.stringify({ ok: store }));
+      }
+      if (req.url === '/__bonnen') {
+        if (body && JSON.parse(body).status) bonnenFake.status = JSON.parse(body).status;
+        return res.end(JSON.stringify({ ok: bonnenFake.calls }));
       }
       if (req.url === '/__securestorage') {
         // {"on":true|false} dwingt de schakelaar; zonder body terug naar de veilige standaard
