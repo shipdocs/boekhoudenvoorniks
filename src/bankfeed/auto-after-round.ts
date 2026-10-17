@@ -18,7 +18,14 @@ export function autoProcessAfterRound(
   if (previous) return previous;
   const result: { autoMatched?: number } = {};
   processed.set(summary, result);
-  const auto = inbox.autoProcess();
+  let auto: { matched: number; booked: number };
+  try {
+    auto = inbox.autoProcess();
+  } catch (e) {
+    // mislukt: niet als verwerkt onthouden, zodat een gelijktijdige aanroep het opnieuw kan proberen
+    processed.delete(summary);
+    throw e;
+  }
   result.autoMatched = auto.matched + auto.booked;
   return { ...result, auto };
 }

@@ -169,6 +169,17 @@ describe('eerst Ponto zonder bewezen dekking, daarna een afschrift over dezelfde
     expect(r).toMatchObject({ imported: 1, skipped: 0 });
   });
 
+  it('zonder tegenrekening alleen bij dezelfde tegenpartij: een andere kaartbetaling van hetzelfde bedrag komt erbij', () => {
+    const { s, db } = scenario();
+    const account = s.bank.addAccount('Zakelijk', IBAN);
+    pontoZonderDekking(s, db, account.id, [koffie('p-uuid-1', { counterIban: undefined, counterName: 'Koffiehoek', description: 'Koffiehoek Amsterdam' })]);
+    // het afschrift heeft een andere betaling van hetzelfde bedrag, die Ponto (nog) niet had
+    const r = s.bank.import(camt([
+      koffie('BANKREF-2', { counterIban: undefined, counterName: 'Tankstation De Pomp', description: 'Tankstation De Pomp Utrecht', date: '2026-10-06' }),
+    ]), { importedAt: AT('2026-10-08') });
+    expect(r).toMatchObject({ imported: 1, skipped: 0 });
+  });
+
   it('een tweede Ponto-ronde zonder dekking vergelijkt niet op inhoud: daar beslist de Ponto-id', () => {
     const { s, db } = scenario();
     const account = s.bank.addAccount('Zakelijk', IBAN);
