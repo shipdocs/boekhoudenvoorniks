@@ -6,6 +6,8 @@ import { TERMS_VERSION } from '../../shared/legal';
 import { markSeen, pendingSteps } from '../../shared/onboarding';
 import type { AppSettings } from '../../settings/settings';
 import { TermsBlock } from './Terms';
+import { useNewAccountQuestion } from './NewAccountQuestion';
+import { STATEMENT_ACCEPT } from '../../shared/statement-files';
 import { startDateConsequences, startDateOptions } from '../../shared/switchover';
 import { isIsoDate, today } from '../../shared/dates';
 import { Logo } from '../Logo';
@@ -27,6 +29,7 @@ const AUTOPILOT: [AppSettings['autopilot'], string, string][] = [
 export function Onboarding() {
   const { meta, settings, reloadSettings, reloadMeta, go, toast } = useApp();
   const { run, busy } = useAction();
+  const { importWithQuestion, question } = useNewAccountQuestion();
   // vast bij binnenkomst: de lijst mag niet verspringen terwijl je invult
   const [steps] = useState(() => pendingSteps(settings));
   const update = settings.onboardingDone;
@@ -293,11 +296,12 @@ export function Onboarding() {
           {company.iban && !isValidIban(company.iban) && <p className="small" style={{ color: 'var(--bad)' }}>Dit rekeningnummer klopt niet.</p>}
           <h2>Bankafschrift inlezen (mag ook later)</h2>
           <p className="muted small">Download een afschrift in je internetbankieren (bij "downloaden" of "exporteren"; kies CSV, MT940 of CAMT) en sleep het hierheen. Automatisch ophalen bij je bank komt later.</p>
+          {question}
           <DropZone
-            accept=".csv,.txt,.sta,.940,.xml"
+            accept={STATEMENT_ACCEPT}
             onFile={async (file) => {
               const text = await readAsText(file);
-              const r = await run(() => api.bank.importFile(file.name, text));
+              const r = await run(() => importWithQuestion((c) => api.bank.importFile(file.name, text, undefined, c?.bankAccountId, c?.newAccount)));
               if (r) toast(`${r.imported} betalingen ingelezen`);
             }}
           >

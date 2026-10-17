@@ -402,6 +402,30 @@ export class BankService {
    * naam, anders een nieuwe. Nooit zomaar de eerste rekening: dan komt Revolut op je Knab terecht.
    * De lege standaardrekening van een nieuwe administratie wordt hergebruikt.
    */
+  /**
+   * De rekeningnummers in dit afschrift waarvoor het inlezen stil een nieuwe bankrekening zou aanmaken (#459):
+   * geen rekening met dat IBAN, en geen lege rekening (zonder IBAN) die het kan krijgen. Zo kan de app eerst
+   * vragen of dat klopt; een afschrift van je privérekening komt er dan niet ongemerkt bij. Volgt dezelfde
+   * stappen als accountForIban, zonder iets te wijzigen.
+   */
+  newAccountIbans(result: Pick<ParseResult, 'transactions' | 'balances'>): string[] {
+    const accounts = this.listAccounts();
+    const known = new Set(accounts.map((a) => a.iban).filter(Boolean));
+    // de eerste onbekende krijgt de lege rekening (of wordt de eerste rekening): dat gaat zonder vragen
+    let free = accounts.length === 0 || accounts.some((a) => !a.iban && !a.is_pot) ? 1 : 0;
+    const fresh: string[] = [];
+    // een saldo in een andere valuta slaat het inlezen over (zie hieronder): dat maakt dus ook geen rekening
+    for (const row of [...result.transactions, ...(result.balances ?? []).filter((b) => !b.currency || b.currency === 'EUR')]) {
+      const iban = row.ownIban;
+      // zonder eigen IBAN gaat het via de banknaam of naar de eerste rekening, zoals altijd
+      if (!iban || known.has(iban)) continue;
+      known.add(iban);
+      if (free > 0) free--;
+      else fresh.push(iban);
+    }
+    return fresh;
+  }
+
   private accountForBank(bank: string): BankAccount {
     const accounts = this.listAccounts();
     const named = accounts.find((a) => !a.is_pot && sameBankName(a.name, bank));
