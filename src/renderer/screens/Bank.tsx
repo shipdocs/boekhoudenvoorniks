@@ -12,6 +12,8 @@ import { diffDays, formatDateNl, toIsoDate, today } from '../../shared/dates';
 import { formatEuro } from '../../shared/money';
 import { formatForeign } from '../../shared/currency';
 import { PontoCard } from './PontoDialog';
+import { useNewAccountQuestion } from './NewAccountQuestion';
+import { STATEMENT_ACCEPT, STATEMENT_EXTENSIONS_TEXT, type NeedsAccount } from '../../shared/statement-files';
 
 /** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
 function formatDateTime(sqlite: string): string {
@@ -23,7 +25,7 @@ function staleDays(date: string): number {
   return diffDays(date, today());
 }
 
-export type ImportResult = Awaited<ReturnType<typeof api.bank.importFile>>;
+export type ImportResult = Exclude<Awaited<ReturnType<typeof api.bank.importFile>>, NeedsAccount>;
 
 /** "12 stonden er al (uit je afschrift van 1 t/m 15 september)": uit welk eerder afschrift, als dat er één is. */
 function knownFromText(known: { from: string; to: string }[]): string {
@@ -34,7 +36,7 @@ function knownFromText(known: { from: string; to: string }[]): string {
 type BatchDouble = Awaited<ReturnType<typeof api.bank.doubles>>[number];
 type PaymentDouble = Awaited<ReturnType<typeof api.bank.sameDoubles>>[number];
 
-export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feedAccountId }: { /** vanaf Vandaag: dit dubbele bedrag meteen laten zien */ double?: { lineId: number; firstPartId: number }; /** vanaf Vandaag: deze twee regels die dezelfde betaling lijken meteen laten zien */ same?: { firstId: number; secondId: number }; focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult; bankFeed?: 'credentials'; feedAccountId?: number }) {
+export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feedAccountId, statementId }: { /** vanaf Vandaag: dit dubbele bedrag meteen laten zien */ double?: { lineId: number; firstPartId: number }; /** vanaf Vandaag: deze twee regels die dezelfde betaling lijken meteen laten zien */ same?: { firstId: number; secondId: number }; focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult; bankFeed?: 'credentials'; feedAccountId?: number; /** vanaf Vandaag: een afschrift uit de downloadmap met een rekening die nog niet in de administratie staat (#459) */ statementId?: number }) {
   const { go, toast, settings, refreshBadge, meta } = useApp();
   const { run, busy } = useAction();
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
@@ -85,8 +87,14 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
     await doImport(file.name, content, preview.savedMapping ?? undefined);
   };
 
-  const doImport = async (filename: string, content: string, m?: CsvMapping) => {
-    const r = await run(() => api.bank.importFile(filename, content, m));
+  const { importWithQuestion, question } = useNewAccountQuestion();
+  const doImport = async (filename: string, content: string, m?: CsvMapping) =>
+    afterImport(await run(() => importWithQuestion((c) => api.bank.importFile(filename, content, m, c?.bankAccountId, c?.newAccount))));
+  // een afschrift uit de downloadmap waarvoor eerst de vraag "nieuwe rekening?" nodig is (#459)
+  useEffect(() => {
+    if (statementId) void run(() => importWithQuestion((c) => api.bank.importStatement(statementId, c?.bankAccountId, c?.newAccount))).then(afterImport);
+  }, [statementId]);
+  const afterImport = async (r: ImportResult | null | undefined) => {
     if (!r) return;
     setLast(r);
     await Promise.all([status.reload(), doubles.reload(), sames.reload(), imports.reload()]);
@@ -108,7 +116,8 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
         </div>
       </div>
 
-      <DropZone accept=".csv,.txt,.sta,.940,.mt940,.xml" onFile={(f) => void importFile(f)}>
+      {question}
+      <DropZone accept={STATEMENT_ACCEPT} onFile={(f) => void importFile(f)}>
         <div style={{ fontSize: 30 }}>🏦</div>
         <strong>Sleep je bankafschrift hierheen</strong>
         <div className="small">Download het bij je bank: internetbankieren → afschrift downloaden. Het liefst CAMT.053 of MT940; CSV kan ook.</div>
@@ -373,7 +382,7 @@ function StatementFolderCard() {
         {!st.enabled && ' Bij het aanzetten kijkt de app ook naar afschriften van de afgelopen 14 dagen.'}
       </p>
       <p className="small muted">
-        Alles gebeurt op je eigen computer; er gaat niets naar buiten. De app opent in deze map alleen bestanden die eindigen op .xml, .sta, .940, .txt of .csv, om te zien of het een afschrift van een van je rekeningen is. Van andere bestanden onthoudt hij alleen dat het geen afschrift is. De app verplaatst of verwijdert nooit iets in deze map.
+        Alles gebeurt op je eigen computer; er gaat niets naar buiten. De app opent in deze map alleen bestanden die eindigen op {STATEMENT_EXTENSIONS_TEXT}, om te zien of het een afschrift van een van je rekeningen is. Van andere bestanden onthoudt hij alleen dat het geen afschrift is. De app verplaatst of verwijdert nooit iets in deze map.
       </p>
     </div>
   );

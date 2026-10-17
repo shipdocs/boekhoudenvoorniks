@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { extname } from 'node:path';
+import { isStatementName } from '../shared/statement-files';
 import type { Db } from '../db/database';
 import type { SettingsService } from '../settings/settings';
 import { sameBankName } from '../shared/bank-name';
@@ -17,8 +17,6 @@ import { parseBankFile } from './parse-file';
  * verplaatst of verwijdert nooit iets in die map.
  */
 
-/** Alleen bestanden met deze extensies worden geopend om te zien of het een afschrift is. */
-export const STATEMENT_EXTENSIONS = ['.xml', '.sta', '.940', '.txt', '.csv'];
 /** Groter dan dit is geen bankafschrift. */
 export const MAX_STATEMENT_BYTES = 20 * 1024 * 1024;
 /** Bij het aanzetten kijkt de app ook naar afschriften van de afgelopen dagen. */
@@ -80,10 +78,6 @@ export function decodeStatement(data: Uint8Array): string {
 /** Dezelfde inhoud = hetzelfde afschrift, hoe het bestand ook heet. */
 export function statementHash(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
-}
-
-function isStatementName(name: string): boolean {
-  return STATEMENT_EXTENSIONS.includes(extname(name).toLowerCase());
 }
 
 export class StatementFolder {

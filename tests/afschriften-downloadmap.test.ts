@@ -277,6 +277,24 @@ describe('afschriften uit de downloadmap', () => {
     expect(t.s.bank.list()).toHaveLength(2);
   });
 
+  it('met ook een rekening die er nog niet is: eerst de vraag op het Bank-scherm, daarna pas ingelezen (#459)', async () => {
+    const t = start();
+    const other = /<Stmt>[\s\S]*<\/Stmt>/.exec(camt('NL20INGB0001234567', [{ ref: 'P1', date: '2026-09-05', amount: -10, name: 'Albert Heijn' }]))![0];
+    t.put('beide.xml', SEPTEMBER.replace('</Stmt></BkToCstmrStmt>', `</Stmt>${other}</BkToCstmrStmt>`));
+    await t.scan();
+    const a = api(t.s, t.dir);
+    const [q] = t.questions();
+    const r = (await a.home.act(q!, 'inlezen')) as unknown as { navigate: { screen: string; extra: { statementId: number } } };
+    expect(r.navigate).toEqual({ screen: 'bank', extra: { statementId: q!.ref.statementId } });
+    expect(t.s.bank.list()).toEqual([]);
+    expect(t.rows()).toEqual([{ status: 'gevonden', filename: 'beide.xml', present: 1 }]);
+    // de keuze op het Bank-scherm: een nieuwe rekening erbij
+    expect(await a.bank.importStatement(q!.ref.statementId!)).toEqual({ needsAccount: { ibans: ['NL20INGB0001234567'], single: false } });
+    expect(await a.bank.importStatement(q!.ref.statementId!, undefined, true)).toMatchObject({ imported: 3 });
+    expect(t.s.bank.listAccounts()).toHaveLength(2);
+    expect(t.rows()).toEqual([{ status: 'ingelezen', filename: 'beide.xml', present: 1 }]);
+  });
+
   it('de regel uit deel 1 geldt ook hier: een afschrift van een ander soort over dezelfde dagen geeft niets dubbel', async () => {
     const t = start();
     t.s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-01', amount: -1500, description: 'KPN', ownIban: OWN }, { date: '2026-09-29', amount: -6500, description: 'Shell', ownIban: OWN }] });

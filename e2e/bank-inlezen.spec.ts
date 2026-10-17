@@ -225,3 +225,26 @@ test('verzamelbetaling dubbel en de ene regel is al verwerkt: die gaat er niet z
   await expect(page.locator('.notice.warn')).toHaveCount(0);
   expect(problems.apiErrors).toEqual([]);
 });
+
+test('afschrift van een rekening die er nog niet is: eerst de vraag, "Niet inlezen" laat alles zoals het was (#459)', async ({ page, problems }) => {
+  await onboard(page);
+  await nav(page, 'Bank');
+  await upload(page, 'zakelijk.xml', camt([KPN], { date: '2026-09-15', amount: 100 }));
+  await expect(page.locator('.notice.good')).toContainText('1 nieuwe betaling.');
+
+  const prive = Buffer.from(camt([{ ...KPN, ref: 'P1', name: 'Albert Heijn' }], { date: '2026-09-15', amount: 50 }).toString().replace(IBAN, 'NL20INGB0001234567'));
+  await upload(page, 'prive.xml', prive);
+  const dlg = page.getByRole('dialog', { name: 'Nieuwe bankrekening?' });
+  await expect(dlg).toContainText('NL20 INGB 0001 2345 67');
+  await dlg.getByRole('button', { name: 'Niet inlezen' }).click();
+  await expect(dlg).toBeHidden();
+  expect(await call<unknown[]>(page, 'bank.accounts')).toHaveLength(1);
+  expect(await call<unknown[]>(page, 'bank.transactions', {})).toHaveLength(1);
+
+  // nog een keer, nu als nieuwe rekening
+  await upload(page, 'tweede.xml', prive);
+  await page.getByRole('dialog', { name: 'Nieuwe bankrekening?' }).getByRole('button', { name: 'Nieuwe rekening toevoegen' }).click();
+  await expect(page.locator('.notice.good')).toContainText('1 nieuwe betaling.');
+  expect(await call<unknown[]>(page, 'bank.accounts')).toHaveLength(2);
+  expect(problems.apiErrors).toEqual([]);
+});

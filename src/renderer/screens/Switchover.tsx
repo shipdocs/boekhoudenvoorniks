@@ -6,6 +6,8 @@ import { SKIPPABLE_SECTIONS, defaultBookValue, startDateConsequences, startDateO
 import type { OpeningInput, OpeningItem, OpeningKind, OpeningSuggestion, SectionKey, SwitchoverState } from '../../onboarding/switchover';
 import type { DateAdvice, ImportAnalysis, ImportFileRole, XafPlan } from '../../onboarding/xaf-import';
 import { PaymentDetails } from './PaymentDetails';
+import { useNewAccountQuestion } from './NewAccountQuestion';
+import { STATEMENT_ACCEPT } from '../../shared/statement-files';
 
 /**
  * Overstap-hulp: een lopende administratie overzetten. Hoofdstukken in gewone taal; de app boekt
@@ -486,6 +488,7 @@ function ColumnQuestions({ ask, onCancel, onDone }: { ask: Extract<ImportAnalysi
 function Banks({ state, refresh, nextButton }: SectionProps) {
   const { run, busy } = useAction();
   const { toast, go } = useApp();
+  const { importWithQuestion, question } = useNewAccountQuestion();
   const [adding, setAdding] = useState(false);
   const date = state.settings.date!;
   const beforeCount = state.banks.reduce((s, b) => s + b.beforeDate, 0);
@@ -503,7 +506,7 @@ function Banks({ state, refresh, nextButton }: SectionProps) {
       toast(`Alle regels in dit bestand zijn ${preview.oneSided === 'bij' ? 'bijschrijvingen' : 'afschrijvingen'}. Lees het in via Bank, daar kun je de kolommen nakijken.`, 'error');
       return go({ screen: 'bank' });
     }
-    const r = await run(() => api.bank.importFile(file.name, content, preview.savedMapping ?? undefined));
+    const r = await run(() => importWithQuestion((c) => api.bank.importFile(file.name, content, preview.savedMapping ?? undefined, c?.bankAccountId, c?.newAccount)));
     if (r) toast(`${r.imported} betalingen ingelezen${r.duplicates ? ` (${r.duplicates} hadden we al)` : ''}`);
     await refresh();
   };
@@ -515,7 +518,8 @@ function Banks({ state, refresh, nextButton }: SectionProps) {
         Lees je afschriften in vanaf <DateNl date={date} />, van elke zakelijke rekening. Een CAMT- of MT940-bestand is het handigst: daar staat het saldo in,
         dan rekent de app het beginsaldo zelf uit en controleert hij of er niets ontbreekt.
       </p>
-      <DropZone accept=".csv,.txt,.sta,.940,.mt940,.xml" onFile={(f) => void importFile(f)}>
+      {question}
+      <DropZone accept={STATEMENT_ACCEPT} onFile={(f) => void importFile(f)}>
         <div style={{ fontSize: 26 }}>🏦</div>
         <strong>Sleep je bankafschriften hierheen</strong>
         <div className="small">Meerdere bestanden of rekeningen? Sleep ze een voor een.</div>
