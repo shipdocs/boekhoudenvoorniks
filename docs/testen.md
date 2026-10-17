@@ -75,6 +75,34 @@ app zelf is gegenereerd.
 - fiscale juistheid van ieder denkbaar praktijkgeval: voeg daarvoor een gericht scenario en een
   handmatig gecontroleerde verwachting toe.
 
+## Fiscale wijzigingen beoordelen
+
+Leg bij een wijziging van een boekhoudregel of fiscale parameter vast welk gedrag verandert, voor
+welk belastingjaar en welke voorwaarden gelden. Onderbouw de verwachting met een primaire bron
+(bijvoorbeeld Belastingdienst, toepasselijke wettekst of RVO), inclusief raadpleegdatum en relevante
+passage of tabel. Een toelichting van een derde kan helpen bij de interpretatie, maar vervangt de
+primaire onderbouwing niet. Maak onderscheid tussen een voorstel en een vastgestelde regel.
+
+Controleer de verwachte uitkomst afzonderlijk van de implementatie:
+
+- Gebruik voor een test van een wettelijk tarief of grensbedrag een expliciete verwachting uit de
+  bron. Alleen vergelijken met dezelfde productieparameter bewijst de juistheid van die parameter
+  niet. Een test met productieparameters kan wel de toepassing ervan controleren.
+- Schrijf voor een berekening de invoer, tussenstappen, afronding en uitkomst uit, zonder de verwachte
+  uitkomst door de productiefunctie te laten genereren. Laat die berekening door de maintainer
+  beoordelen; dezelfde agent opnieuw laten rekenen is geen onafhankelijke fiscale review.
+- Neem toepasselijke grensgevallen op: net onder, op en boven een grens, uitzonderingen en een
+  jaarovergang. Behoud controles voor historische jaren als de nieuwe regel alleen later geldt.
+- Vermeld wie de verwachting heeft beoordeeld, op welke datum en op welke commit de gedraaide
+  controles betrekking hebben. Maak onderscheid tussen bronbeoordeling, geslaagde tests en een
+  externe beoordeling door een accountant of fiscalist.
+
+Leg de openbare onderbouwing bij het scenario of in de PR vast. Interne onderzoeksdossiers en het
+regelregister blijven in de private serverrepository, volgens [CONTRIBUTING.md](../CONTRIBUTING.md#publieke-en-interne-onderdelen).
+Bij ontbrekend bewijs blijft de fiscale verificatie open; een groene test maakt een aanname niet
+automatisch tot een bevestigde regel. Pas een fiscale regel niet uitsluitend op basis van een
+AI-samenvatting aan.
+
 ## Business rules en correcties
 
 `tests/business-rules-review.test.ts` bewaakt de zestien bevindingen van 4 oktober 2026.
