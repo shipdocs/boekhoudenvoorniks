@@ -2,6 +2,10 @@
 
 ## Nog niet uitgebracht
 
+### Opgelost
+- **Ponto: opgehaalde betalingen worden meteen verwerkt.** Na een ronde op de achtergrond (bij het starten en elke zes uur) koppelde en boekte de app nieuwe betalingen pas bij de volgende ronde, tot zes uur later. Nu meteen, net als bij *Nu ophalen*.
+- **Ponto, daarna een afschrift: geen dubbele betalingen meer.** Haalde Ponto voor een nieuwe rekening betalingen op en las je daarna een afschrift over dezelfde dagen in, dan kwamen dezelfde betalingen er nog eens bij (wel gemeld als "dezelfde betaling?"). Nu herkent de app ze, zoals bij een afschrift dat er al stond: ze staan bij het afschrift als overgeslagen, en met *Toch toevoegen* zet je er een terug als het toch een andere betaling was.
+
 ### Verbeterd
 - **Mail op het bonnen-adres staat hooguit 60 dagen op de server** in plaats van een jaar. De app is de plek waar je bonnen blijven; de server is alleen het doorgeefluik. Haalt de app 30 dagen lang niets op, dan krijg je een mail, en daarna heb je nog een maand.
 

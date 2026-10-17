@@ -633,6 +633,15 @@ export class BankService {
         `SELECT s.period_from AS "from", s.period_to AS "to" FROM import_batch_accounts s JOIN import_batches b ON b.id = s.batch_id
          WHERE s.bank_account_id = ? AND s.batch_id <> ? AND (CASE WHEN b.kind IS NULL THEN b.source <> ? ELSE b.kind <> ? END) AND s.period_from <= ? AND s.period_to >= ?`,
       );
+      // Betalingen van de bankkoppeling uit een ronde zonder bewezen periode: die ronde heeft geen dekkingsrij
+      // (Ponto wist hem, bankfeed.ts), dus hun dagen tellen niet als "bekende periode". Toch kunnen het dezelfde
+      // betalingen zijn als in een afschrift dat er daarna overheen komt (#459): vergelijk die dagen ook.
+      const nearUncoveredFeed = this.db.prepare(
+        `SELECT 1 FROM bank_transactions t JOIN import_batches b ON b.id = t.import_batch_id
+         WHERE t.bank_account_id = ? AND t.import_batch_id <> ? AND b.source = 'openbanking' AND ? <> 'openbanking' AND t.transaction_date BETWEEN ? AND ?
+           AND NOT EXISTS (SELECT 1 FROM import_batch_accounts s WHERE s.batch_id = t.import_batch_id AND s.bank_account_id = t.bank_account_id)
+         LIMIT 1`,
+      );
       // kandidaten voor de tegenhanger, met het soort afschrift waar ze uit kwamen
       const candidates = this.db.prepare(
         `SELECT c.id, c.transaction_date AS date, c.counter_iban AS iban, c.counter_name AS name, c.description, c.source, c.bank_id AS bankId, c.import_batch_id AS batch, b.kind, c.batch_ref AS batchRef, c.duplicate_of AS removed
@@ -752,11 +761,13 @@ export class BankService {
       // Valt deze dag in dagen die een eerder afschrift al besloeg (stap 2), of net buiten een eerder afschrift
       // van een ander soort? Daar kan dezelfde betaling een andere datum hebben (kaartbetaling van vrijdag,
       // geboekt op maandag); dan vergelijken we alleen met dat andere soort.
-      const scope = (account: BankAccount, date: IsoDate): { overlap: boolean; edge: boolean } => {
+      const scope = (account: BankAccount, date: IsoDate): { overlap: boolean; edge: boolean; feedOnly: boolean } => {
         const overlap = Boolean(inKnownPeriod.get(account.id, batchId, date, date));
-        const edge = !overlap && (nearOtherKind.all(account.id, batchId, result.source, kind, addDays(date, 7), addDays(date, -7)) as { from: IsoDate; to: IsoDate }[])
+        const nearPeriod = !overlap && (nearOtherKind.all(account.id, batchId, result.source, kind, addDays(date, 7), addDays(date, -7)) as { from: IsoDate; to: IsoDate }[])
           .some((p) => (date > p.to ? workdaysBetween(p.to, date) : workdaysBetween(date, p.from)) <= SAME_PAYMENT_WORKDAYS);
-        return { overlap, edge };
+        // alleen omdat er Ponto-regels zonder dekking in de buurt staan: dan strenger vergelijken (stap 2)
+        const feedOnly = !overlap && !nearPeriod && Boolean(nearUncoveredFeed.get(account.id, batchId, result.source, addDays(date, -7), addDays(date, 7)));
+        return { overlap, edge: nearPeriod || feedOnly, feedOnly };
       };
       /** Komt een bestaande betaling (of verzamelboeking) uit hetzelfde soort afschrift als dit bestand? */
       const fromSameKind = (c: { source: string; batch: number | null; kind: string | null }, account: BankAccount, overlap: boolean): boolean => {
@@ -802,7 +813,7 @@ export class BankService {
       const pairs: { row: number; id: number; batch: number | null; workdays: number; days: number; otherIban: number; otherParty: number }[] = [];
       for (const [row, { t, account, bankId }] of pending.entries()) {
         if (counterpart.has(row)) continue;
-        const { overlap, edge } = scope(account, t.date);
+        const { overlap, edge, feedOnly } = scope(account, t.date);
         overlaps[row] = overlap;
         if (!overlap && !edge) continue;
         const iban = t.counterIban ? normalizeIban(t.counterIban) : null;
@@ -817,6 +828,10 @@ export class BankService {
           } else if (!otherKind(c, account, overlap)) continue;
           // allebei een tegenrekening: dan moet die gelijk zijn
           if (iban && c.iban && normalizeIban(c.iban) !== iban) continue;
+          // Zonder bewezen periode (#459) alleen een Ponto-regel als tegenhanger, en zonder twee tegenrekeningen
+          // alleen bij dezelfde tegenpartij: een betaling die Ponto (nog) niet had, mag niet wegvallen tegen een
+          // andere betaling van hetzelfde bedrag.
+          if (feedOnly && (c.source !== 'openbanking' || ((!iban || !c.iban) && !sameCounterparty(other, party)))) continue;
           // twee verschillende id's uit dezelfde bron zijn per definitie twee betalingen
           if (bankId && c.bankId && c.source === result.source) continue;
           const workdays = workdaysBetween(c.date, t.date);
