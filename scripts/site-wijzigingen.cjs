@@ -6,12 +6,12 @@
  * index.html en de lastmod van / en wijzigingen.html in sitemap.xml.
  *
  * Draaien: `npm run site:wijzigingen`. Met `--check` schrijft het niets en faalt het als de site niet bij is
- * (CI). De Release-workflow draait het na elke release en commit het resultaat op main.
+ * (CI). Draai het in de release-PR: main is beschermd (#469), de Release-workflow commit er niets meer op.
  *
  * CHANGELOG.md: `## x.y.z — titel`, daaronder optioneel inleidende alinea's, dan `### Nieuw` / `### Verbeterd` /
  * `### Opgelost` (of een ander kopje) met `- ` lijsten, één niveau genest met `  - `. "Nog niet uitgebracht"
- * wordt overgeslagen. De datum is die van de git-tag `vx.y.z`; is die er nog niet, dan de datum die al op de
- * site staat, en anders vandaag.
+ * wordt overgeslagen. De datum is die al op de site staat (gezet in de release-PR); staat de versie er nog niet,
+ * dan die van de git-tag `vx.y.z`, en anders vandaag.
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -125,7 +125,7 @@ function build() {
   const dates = new Map();
   for (const v of versions) {
     const onSite = page.match(new RegExp(`<article id="v${v.version.replace(/\./g, '\\.')}"[\\s\\S]*?<time datetime="(\\d{4}-\\d{2}-\\d{2})"`));
-    dates.set(v.version, tagDate(v.version) ?? onSite?.[1] ?? new Date().toISOString().slice(0, 10));
+    dates.set(v.version, onSite?.[1] ?? tagDate(v.version) ?? new Date().toISOString().slice(0, 10));
   }
   const toc = versions.map((v) => `<a href="#v${v.version}">${v.version}</a>`).join('');
   const block = `<details class="release-history">

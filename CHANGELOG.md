@@ -7,6 +7,8 @@
 - **Ponto, daarna een afschrift: geen dubbele betalingen meer.** Haalde Ponto voor een nieuwe rekening betalingen op en las je daarna een afschrift over dezelfde dagen in, dan kwamen dezelfde betalingen er nog eens bij (wel gemeld als "dezelfde betaling?"). Nu herkent de app ze, zoals bij een afschrift dat er al stond: ze staan bij het afschrift als overgeslagen, en met *Toch toevoegen* zet je er een terug als het toch een andere betaling was.
 
 ### Verbeterd
+- **Een afschrift van een rekening die er nog niet is: eerst de vraag.** Stond er in een afschrift een rekeningnummer dat nog niet in je administratie stond, dan maakte de app daar stil een nieuwe rekening voor aan ("Rekening 4321"). Sleepte je per ongeluk het afschrift van je privérekening, dan stond dat opeens in je zakelijke boekhouding. Nu vraagt de app eerst *Nieuwe bankrekening?*, met *Nieuwe rekening toevoegen*, *Hoort bij* een rekening die je al hebt, of *Niet inlezen*. Dat geldt bij Bank, de start, de overstap-hulp en voor een afschrift uit de downloadmap. Kies je bij een afschrift uit de downloadmap *Niet inlezen*, dan telt dat als *Niet nu*.
+- **Dezelfde bestanden bij slepen en in de downloadmap.** Een MT940-afschrift dat eindigt op .mt940 kon je slepen, maar de downloadmap negeerde het; .swi werd wel herkend maar nergens aangenomen. Nu nemen alle plekken dezelfde bestanden aan: .xml, .sta, .940, .mt940, .swi, .csv, .txt en .tab.
 - **Mail op het bonnen-adres staat hooguit 60 dagen op de server** in plaats van een jaar. De app is de plek waar je bonnen blijven; de server is alleen het doorgeefluik. Haalt de app 30 dagen lang niets op, dan krijg je een mail, en daarna heb je nog een maand.
 
 ## 1.8.0 — bonnen per mail zonder instellen, en versturen met je eigen mailprogramma

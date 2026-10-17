@@ -7,6 +7,7 @@ import type { CliKind } from '../intake/ocr-cli';
 import { DOWNLOAD_SIZE, GLM_OCR, LLAMA_CPP, REQUIREMENTS } from '../ocr-runtime/manifest';
 import type { Services } from '../services';
 import { autoProcessAfterRound } from '../bankfeed/auto-after-round';
+import { needsAccount, type NeedsAccount } from '../shared/statement-files';
 import type { AppSettings } from '../settings/settings';
 import type { RelationInput } from '../relations/relations';
 import type { InvoiceDraftInput, InvoiceDisplayStatus, PaymentInput } from '../documents/invoices';
@@ -275,9 +276,23 @@ export function createApi(s: Services, host: HostContext) {
     const saved = s.db.prepare('SELECT mapping FROM csv_mappings WHERE header_signature = ?').get(headerSignature(previewCsv(content).headers)) as { mapping: string } | undefined;
     return saved ? (JSON.parse(saved.mapping) as CsvMapping) : null;
   };
-  /** Eén route voor een afschrift dat in de app is gesleept en voor een afschrift uit de downloadmap. */
-  const importBankFile = async (filename: string, content: string, mapping?: CsvMapping, bankAccountId?: number) => {
+  /**
+   * Eén route voor een afschrift dat in de app is gesleept en voor een afschrift uit de downloadmap. Staat er
+   * een rekeningnummer in waarvoor stil een nieuwe bankrekening zou ontstaan, dan leest hij nog niets in en
+   * vraagt hij eerst (#459): `needsAccount`. Daarna opnieuw met `bankAccountId` (hoort bij die rekening) of
+   * `newAccount` (toch een nieuwe rekening).
+   */
+  const importBankFile = async (filename: string, content: string, mapping?: CsvMapping, bankAccountId?: number, newAccount?: boolean) => {
     const parsed = await parseBankFile(filename, content, mapping);
+    if (!bankAccountId && !newAccount) {
+      const ibans = s.bank.newAccountIbans(parsed);
+      // "hoort bij een bestaande rekening" kan alleen als het hele afschrift van die ene rekening is
+      const single = new Set([...parsed.transactions, ...(parsed.balances ?? [])].map((t) => t.ownIban).filter(Boolean)).size === 1;
+      if (ibans.length > 0) {
+        const ask: NeedsAccount = { needsAccount: { ibans, single } };
+        return ask;
+      }
+    }
     if (mapping) {
       const sig = headerSignature(previewCsv(content).headers);
       s.db
@@ -637,6 +652,8 @@ export function createApi(s: Services, host: HostContext) {
         const file = s.statementFolder.open(r.statementId!);
         const mapping = detectFormat(file.filename, file.content) === 'csv' ? (savedCsvMapping(file.content) ?? undefined) : undefined;
         const summary = await importBankFile(file.filename, file.content, mapping);
+        // een rekening die nog niet in de administratie staat: op het Bank-scherm eerst vragen (#459)
+        if (needsAccount(summary)) return { navigate: { screen: 'bank', extra: { statementId: r.statementId! } } };
         s.statementFolder.markImported(r.statementId!, summary.batchId);
         return { navigate: { screen: 'bank', extra: { imported: summary } } };
       }
@@ -1522,7 +1539,17 @@ export function createApi(s: Services, host: HostContext) {
         const issue = directionIssue(content, mapping);
         return { rows: r.transactions.slice(0, 5), total: r.transactions.length, unreadable: r.warnings.length, direction, issue, oneSided: issue ? oneSided(direction) : null };
       },
-      importFile: (filename: string, content: string, mapping?: CsvMapping, bankAccountId?: number) => importBankFile(filename, content, mapping, bankAccountId),
+      importFile: (filename: string, content: string, mapping?: CsvMapping, bankAccountId?: number, newAccount?: boolean) => importBankFile(filename, content, mapping, bankAccountId, newAccount),
+      /** Een afschrift uit de downloadmap inlezen nadat de app heeft gevraagd bij welke rekening het hoort (#459). */
+      importStatement: async (statementId: number, bankAccountId?: number, newAccount?: boolean) => {
+        const file = s.statementFolder.open(statementId);
+        const mapping = detectFormat(file.filename, file.content) === 'csv' ? (savedCsvMapping(file.content) ?? undefined) : undefined;
+        const summary = await importBankFile(file.filename, file.content, mapping, bankAccountId, newAccount);
+        if (!needsAccount(summary)) s.statementFolder.markImported(statementId, summary.batchId);
+        return summary;
+      },
+      /** "Niet inlezen" bij de vraag om een nieuwe rekening: zoals "Niet nu" op Vandaag, dus niet meteen weer aanbieden. */
+      skipStatement: (statementId: number) => s.statementFolder.notNow(statementId),
       /**
        * Afschriften vanzelf inlezen (#184): kijkt de app in een map naar nieuwe afschriften, en in welke?
        * Standaard uit. `path` is de gekozen map, of de Downloads-map als er nog niets gekozen is.
