@@ -9,7 +9,7 @@ volgorde: 10
 
 1. Ga naar [boekhoudenvoorniks.nl/downloaden](../downloaden.html) en kies Windows of Linux. Op Windows kun je het programma ook uit de Microsoft Store halen.
 2. Start de installer. Zegt Windows "Windows heeft uw pc beveiligd"? Klik op *Meer informatie* en dan *Toch uitvoeren*. Die melding komt doordat het programma nog niet met een betaald certificaat is ondertekend; uit de Store verschijnt hij niet. Hoe je controleert of je download echt van ons is, lees je bij [Problemen oplossen](problemen-oplossen.html#windows-zegt-windows-heeft-uw-pc-beveiligd).
-3. Het programma werkt zonder account en zonder internet. Internet heb je alleen nodig om facturen te mailen, updates te krijgen en, als je dat wilt, je bank automatisch op te halen.
+3. Het programma werkt zonder account en zonder internet. Internet heb je alleen nodig om facturen te mailen, updates te krijgen, mail of je bonnen-adres op te halen, een nieuwe wisselkoers op te zoeken en, als je dat wilt, je bank automatisch op te halen.
 
 ## De eerste keer: een paar vragen
 

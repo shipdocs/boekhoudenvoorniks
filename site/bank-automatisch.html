@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bank automatisch inlezen | BoekhoudenVoorNiks</title>
-  <meta name="description" content="Je bank bijhouden zonder handwerk: de app leest afschriften die je downloadt vanzelf in vanuit een map, of haalt je betalingen op met Ponto. Gratis programma, jij houdt de controle.">
+  <title>Bankafschriften automatisch inlezen en verwerken | BoekhoudenVoorNiks</title>
+  <meta name="description" content="Bankafschriften automatisch verwerken zonder handwerk: de app vindt afschriften die je downloadt vanzelf in een map en leest ze na één klik in, of haalt je betalingen op met Ponto. Gratis programma, jij houdt de controle.">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <link rel="canonical" href="https://boekhoudenvoorniks.nl/bank-automatisch.html">
   <meta property="og:type" content="article">
@@ -12,7 +12,7 @@
   <meta property="og:site_name" content="BoekhoudenVoorNiks">
   <meta property="og:url" content="https://boekhoudenvoorniks.nl/bank-automatisch.html">
   <meta property="og:title" content="Bankafschriften automatisch inlezen">
-  <meta property="og:description" content="Je bank bijhouden zonder handwerk: de app leest afschriften die je downloadt vanzelf in vanuit een map, of haalt je betalingen op met Ponto. Gratis programma, jij houdt de controle.">
+  <meta property="og:description" content="Je bank bijhouden zonder handwerk: de app vindt afschriften die je downloadt vanzelf in een map en leest ze na één klik in, of haalt je betalingen op met Ponto. Gratis programma, jij houdt de controle.">
   <meta property="og:image" content="https://boekhoudenvoorniks.nl/img/ponto-5-status.png">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="icon" href="favicon.ico" sizes="any">
@@ -80,7 +80,7 @@
           "name": "Kan ik gewoon afschriften blijven inlezen?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Ja. Afschriften blijven de basis en de terugval. Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen als je later Ponto aanzet."
+            "text": "Ja. Afschriften blijven de basis en de terugval. Een betaling die al uit een afschrift is ingelezen, herkent de app; bij twijfel vraagt hij of het dezelfde betaling is."
           }
         },
         {
@@ -137,7 +137,7 @@
   <main class="wrap notes">
     <p class="eyebrow">Nieuw in versie 1.2.0</p>
     <h1>Je bank bijhouden zonder handwerk</h1>
-    <p class="lead">Geen bankbestanden meer zoeken en slepen. BoekhoudenVoorNiks leest je afschriften vanzelf in vanuit een map, of haalt je betalingen op met Ponto. Daarna gaat het zoals je gewend bent: betalingen worden gekoppeld aan je facturen en bonnetjes, en alleen wat niet zeker is komt als vraag op Vandaag.</p>
+    <p class="lead">Geen bankbestanden meer zoeken en slepen. BoekhoudenVoorNiks vindt je gedownloade afschriften vanzelf in een map en leest ze na één klik in, of haalt je betalingen op met Ponto. Daarna gaat het zoals je gewend bent: betalingen worden gekoppeld aan je facturen en bonnetjes, en alleen wat niet zeker is komt als vraag op Vandaag.</p>
     <div class="cta">
       <a class="btn" href="downloaden.html">Gratis downloaden voor Windows of Linux</a>
       <a class="btn ghost" href="wijzigingen.html">Wat is er nieuw</a>
@@ -154,7 +154,7 @@
       <li><strong>Zet het aan</strong> bij Bank, onder <em>Afschriften vanzelf inlezen</em>. Standaard staat het uit.</li>
       <li><strong>Download een afschrift</strong> bij je bank (CAMT.053, MT940 of een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut). Kies bij voorkeur CAMT.053: daarin staat vast wat af en bij is.</li>
       <li><strong>Bevestig op Vandaag:</strong> "Nieuw afschrift gevonden: Knab zakelijk, 1 t/m 29 september". Kies <em>Inlezen</em> of <em>Niet nu</em>.</li>
-      <li><strong>Klaar:</strong> de betalingen worden gekoppeld aan je facturen en bonnetjes. Er verhuist of verdwijnt nooit een bestand uit je map.</li>
+      <li><strong>Klaar:</strong> wat zeker is, wordt gekoppeld aan je facturen en bonnetjes; de rest komt als vraag op Vandaag. Er verhuist of verdwijnt nooit een bestand uit je map.</li>
     </ol>
 
     <h2>Zo werkt Ponto</h2>
@@ -170,7 +170,7 @@
 
     <h2>Daar kun je op rekenen</h2>
     <ul class="checks">
-      <li><strong>Geen dubbele betalingen</strong><br><span class="muted">Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen, ook niet als je later Ponto aanzet.</span></li>
+      <li><strong>Dubbele betalingen herkend</strong><br><span class="muted">Een betaling die al uit een afschrift is ingelezen, herkent de app als hij via Ponto nog eens binnenkomt. Twijfelt de app, dan vraagt hij op Bank of het dezelfde betaling is en verwerkt hij hem niet vanzelf.</span></li>
       <li><strong>Eerlijk over wat er mist</strong><br><span class="muted">Per rekening zegt de app tot welke datum de betalingen aantoonbaar aansluiten. Ontbreekt er een periode, dan vraagt hij die te onderbouwen met een afschrift of openingssaldo.</span></li>
       <li><strong>Je gegevens blijven van jou</strong><br><span class="muted">Inloggegevens voor Ponto staan versleuteld op je eigen computer. Ophalen gaat rechtstreeks tussen de app en Ponto; ShipDocs ziet niets en je boekhouder krijgt ze niet mee.</span></li>
       <li><strong>Meerdere rekeningen overzichtelijk</strong><br><span class="muted">Het startscherm toont naast het totaal ook het saldo per bankrekening.</span></li>
@@ -186,7 +186,7 @@
       <details><summary>Gaat er iets vanzelf mijn boekhouding in?</summary><p>Bij de map niet: je bevestigt eerst met <em>Inlezen</em>. Bij Ponto haalt de app betalingen vanzelf op, die als nieuwe betalingen binnenkomen. Ze worden gekoppeld aan je facturen en bonnetjes volgens dezelfde regels als bij een afschrift, en wat niet zeker is, komt als vraag op Vandaag.</p></details>
       <details><summary>Wat is Ponto en wat kost het?</summary><p>Ponto is een afzonderlijke zakelijke dienst waar je zelf een overeenkomst mee sluit. Wat het kost, welke banken het ondersteunt en of je bedrijf wordt toegelaten, bepaalt Ponto; controleer dat bij Ponto zelf. BoekhoudenVoorNiks blijft gratis.</p></details>
       <details><summary>Zien jullie mijn bankgegevens?</summary><p>Nee. Gewoon ophalen gaat rechtstreeks tussen de app en Ponto. Client ID en Client Secret staan versleuteld op je eigen computer en gaan nooit mee naar je boekhouder. Alleen bij een bewuste klik op <em>Nu bijwerken</em> vraagt de app je publieke IP-adres op bij Cloudflare en stuurt het aan Ponto, omdat Ponto dat vereist; het wordt niet bewaard of gelogd.</p></details>
-      <details><summary>Kan ik gewoon afschriften blijven inlezen?</summary><p>Ja. Afschriften blijven de basis en de terugval. Een betaling die al uit een afschrift is ingelezen, komt niet dubbel binnen als je later Ponto aanzet.</p></details>
+      <details><summary>Kan ik gewoon afschriften blijven inlezen?</summary><p>Ja. Afschriften blijven de basis en de terugval. Een betaling die al uit een afschrift is ingelezen, herkent de app; bij twijfel vraagt hij of het dezelfde betaling is.</p></details>
       <details><summary>Wat als er een periode ontbreekt?</summary><p>De app laat per rekening zien tot welke datum de betalingen aantoonbaar aansluiten op je afschriften. Ontbreekt er een periode, dan zegt hij dat en vraagt hij die te onderbouwen met een afschrift of een openingssaldo. Dat is niet hetzelfde als 'compleet'.</p></details>
       <details><summary>Wat als een afschrift verkeerd is ingelezen?</summary><p>Vanaf versie 1.7.0 haal je het weer weg: zet bij Instellingen → Voor de boekhouder <em>Toon de boekhouding voor je boekhouder</em> aan en kies bij Bank → <em>Ingelezen afschriften</em> de knop <em>Weghalen</em>. De app laat eerst zien wat er terugdraait, maakt een back-up en haalt dan alles van dat bestand weg. Daarna lees je het opnieuw in. <a href="./#vragen">Meer bij de veelgestelde vragen</a>.</p></details>
     </div>

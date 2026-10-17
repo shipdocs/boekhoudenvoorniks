@@ -13,7 +13,7 @@ Download in internetbankieren een afschrift (meestal onder *Afschriften*, *Downl
 2. Anders **MT940**.
 3. Anders **CSV**. Dat werkt ook, maar elke bank schrijft "af" en "bij" anders op; de app laat daarom vóór het inlezen zien wat hij ervan maakt.
 
-Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf. Je kunt ook je bank [automatisch laten ophalen met Ponto](#automatisch-ponto-en-de-downloadmap).
+De app neemt bestanden aan die eindigen op .xml (CAMT), .sta, .940, .mt940 of .swi (MT940), en .csv, .txt of .tab. Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf. Je kunt ook je bank [automatisch laten ophalen met Ponto](#automatisch-ponto-en-de-downloadmap).
 
 ## Inlezen
 
@@ -28,6 +28,10 @@ De eerste keer vraagt de app *Welke kolom is wat?*: de datum (en het datumformaa
 ### "Klopt dit?"
 
 Gaan alle regels dezelfde kant op én ziet de app een aanwijzing dat af en bij verkeerd gelezen zijn (bijvoorbeeld een kolom met waarden die hij niet kent), dan vraagt hij eerst *Klopt dit?*. Kies *Kolommen nakijken* om de toewijzing te verbeteren, of *Ja, dit klopt: inlezen*. Een rustige week met alleen afschrijvingen krijgt die vraag niet.
+
+### "Nieuwe bankrekening?"
+
+Staat er in het afschrift een rekeningnummer dat nog niet in je administratie staat, dan leest de app nog niets in en vraagt hij eerst *Nieuwe bankrekening?*. Is het een zakelijke rekening die erbij hoort, kies dan *Nieuwe rekening toevoegen*. Is het hetzelfde geld met een nieuw rekeningnummer (bijvoorbeeld na een overstap binnen je bank), kies dan *Hoort bij* en de rekening die je al had (die keuze staat er alleen als het hele afschrift van die ene rekening is). Is het je privérekening, kies *Niet inlezen*: er verandert dan niets. Kwam het afschrift uit de downloadmap, dan telt dat als *Niet nu*. Je allereerste afschrift krijgt die vraag niet; dat rekeningnummer komt gewoon bij je eerste rekening.
 
 ## Betalingen uitzoeken: Hulp nodig
 
