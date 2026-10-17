@@ -290,6 +290,10 @@ describe('afschriften uit de downloadmap', () => {
     expect(t.rows()).toEqual([{ status: 'gevonden', filename: 'beide.xml', present: 1 }]);
     // de keuze op het Bank-scherm: een nieuwe rekening erbij
     expect(await a.bank.importStatement(q!.ref.statementId!)).toEqual({ needsAccount: { ibans: ['NL20INGB0001234567'], single: false } });
+    // "Niet inlezen" telt als "Niet nu": vandaag niet meer gevraagd, morgen wel
+    a.bank.skipStatement(q!.ref.statementId!);
+    expect(t.questions(today())).toEqual([]);
+    expect(t.questions(addDays(today(), 1))).toHaveLength(1);
     expect(await a.bank.importStatement(q!.ref.statementId!, undefined, true)).toMatchObject({ imported: 3 });
     expect(t.s.bank.listAccounts()).toHaveLength(2);
     expect(t.rows()).toEqual([{ status: 'ingelezen', filename: 'beide.xml', present: 1 }]);

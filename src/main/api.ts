@@ -1548,6 +1548,8 @@ export function createApi(s: Services, host: HostContext) {
         if (!needsAccount(summary)) s.statementFolder.markImported(statementId, summary.batchId);
         return summary;
       },
+      /** "Niet inlezen" bij de vraag om een nieuwe rekening: zoals "Niet nu" op Vandaag, dus niet meteen weer aanbieden. */
+      skipStatement: (statementId: number) => s.statementFolder.notNow(statementId),
       /**
        * Afschriften vanzelf inlezen (#184): kijkt de app in een map naar nieuwe afschriften, en in welke?
        * Standaard uit. `path` is de gekozen map, of de Downloads-map als er nog niets gekozen is.
