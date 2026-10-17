@@ -497,11 +497,11 @@ export function runVatChecks(
     const year = Number(end.slice(0, 4));
     const rows = db
       .prepare(
-        `SELECT s.id, s.name, s.acquired_on AS date, s.cost, l.debit AS lineDebit,
+        `SELECT s.id, s.name, COALESCE(s.in_use_on, s.acquired_on) AS date, s.cost, l.debit AS lineDebit,
            (SELECT COALESCE(SUM(x.debit - x.credit), 0) FROM journal_lines x JOIN chart_of_accounts xa ON xa.id = x.account_id WHERE x.journal_entry_id = l.journal_entry_id AND xa.rgs_code = ?) AS vat,
            (SELECT COALESCE(SUM(x.debit), 0) FROM journal_lines x JOIN chart_of_accounts xa ON xa.id = x.account_id WHERE x.journal_entry_id = l.journal_entry_id AND xa.category IN ('kosten', 'activa')) AS base
          FROM assets s JOIN journal_lines l ON l.id = s.journal_line_id
-         WHERE s.status = 'actief' AND CAST(substr(s.acquired_on, 1, 4) AS INTEGER) BETWEEN ? AND ? ORDER BY s.acquired_on`,
+         WHERE s.status = 'actief' AND CAST(substr(COALESCE(s.in_use_on, s.acquired_on), 1, 4) AS INTEGER) BETWEEN ? AND ? ORDER BY COALESCE(s.in_use_on, s.acquired_on)`,
       )
       .all(ACCOUNTS.btwVoorbelasting, year - 4, year) as { id: number; name: string; date: IsoDate; cost: Cents; lineDebit: Cents; vat: Cents; base: Cents }[];
     const withVat = rows.map((r) => ({ ...r, deducted: r.base > 0 ? Math.round((r.vat * r.lineDebit) / r.base) : 0 })).filter((r) => r.deducted > 0);
@@ -522,9 +522,9 @@ export function runVatChecks(
             ? `Bij een bedrijfsmiddel waarop je btw aftrok, hoort die aftrek bij 5 jaar gebruik (het jaar van ingebruikname en de 4 jaren daarna). Gebruik je de KOR, dan zijn al je prestaties vrijgesteld en heb je geen recht op aftrek: je betaalt per jaar een vijfde van de afgetrokken btw terug. Voor ${year}: ${earlier.map((r) => `${r.name} ${formatEuro(Math.round(r.deducted / 5))}`).join('; ')}. `
             : perYear > 0 ? `Voor oudere bedrijfsmiddelen is de herziening over ${year} ${formatEuro(perYear)}: onder € 500, dus daarvoor hoef je niets terug te betalen. ` : '') +
           (thisYear.length > 0 ? `Voor ${thisYear.map((r) => r.name).join(', ')} (dit jaar in gebruik genomen) kijk je naar de volledige afgetrokken btw (${formatEuro(thisYear.reduce((n, r) => n + r.deducted, 0))}) en het deel van het jaar dat je in de KOR zat. ` : '') +
-          'Dit is een schatting op basis van de btw in je boekhouding en het aanschafjaar. Je vraagt de herziening zelf schriftelijk aan: een aangifte omzetbelasting aanvragen bij je belastingkantoor. Laat je boekhouder het bedrag bevestigen.',
+          'Dit is een schatting op basis van de btw in je boekhouding en het jaar van ingebruikname. Heb je geen aparte datum van ingebruikname ingevuld, dan gebruikt de app de aanschafdatum. Je vraagt de herziening zelf schriftelijk aan: een aangifte omzetbelasting aanvragen bij je belastingkantoor. Laat je boekhouder het bedrag bevestigen.',
         count: items.length,
-        fingerprint: `${year}:${items.map((r) => `${r.id}:${r.deducted}`).join(',')}`,
+        fingerprint: `${year}:${items.map((r) => `${r.id}:${r.date}:${r.deducted}`).join(',')}`,
         screen: 'belasting',
         items: items.map((r) => ({ kind: 'aankoop' as const, id: r.id, date: r.date, label: r.name, amount: r.deducted })),
       });
