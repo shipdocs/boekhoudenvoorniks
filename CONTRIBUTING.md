@@ -1,7 +1,11 @@
 # Bijdragen aan BoekhoudenVoorNiks
 
-Fijn dat je wilt helpen. Meld een fout of idee als [issue](https://github.com/shipdocs/boekhoudenvoorniks/issues);
-voor code: een pull request tegen `main`, met tests (`npm test`, en `npm run e2e` voor schermen).
+Fijn dat je wilt helpen. De ontwikkeling gebeurt niet in deze repository: hier komt per release de broncode
+van die versie te staan. Een fout, idee of verzoek meld je bij
+[Discussions](https://github.com/shipdocs/boekhoudenvoorniks/discussions) of via
+[info@shipdocs.app](mailto:info@shipdocs.app). Wil je code bijdragen, overleg dan eerst via een van die
+twee; een pull request tegen deze repository kan meestal niet direct worden overgenomen. Een bijdrage
+heeft tests nodig (`npm test`, en `npm run e2e` voor schermen).
 Lees eerst de ontwerpregels in de [README](README.md#ontwerpregels): boekingen komen altijd uit vaste,
 geteste regels, en de administratie blijft op de computer van de gebruiker.
 
