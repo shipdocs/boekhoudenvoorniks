@@ -27,6 +27,42 @@ describe('Bijzondere investeringssituaties: beoordelingstaken', () => {
     s.settings.update({ kor: true });
     expect(find(s, '2026-Q2', 'kor-herziening')).toBeUndefined();
   });
+  // Primaire bron, geraadpleegd 2026-10-17:
+  // https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/btw/hoe_werkt_de_btw/kleineondernemersregeling/wat-betekent-meedoen-met-de-kleineondernemersregeling/moet-ik-mijn-btw-aftrek-herzien-vanwege-de-kleineondernemersregeling
+  // De vijfjaarsperiode begint bij ingebruikname. € 4.500 / 5 = € 900 per later jaar;
+  // in het eerste gebruiksjaar wordt de volledige € 4.500 beoordeeld, niet een vijfde.
+  // Dit controleert het signaal; het berekent geen definitieve herziening bij gemengd gebruik.
+  const delayedUse = (acquiredOn: string, inUseOn: string) => {
+    const { s } = setup();
+    s.purchases.create({ invoiceDate: acquiredOn, description: 'Bus', lines: [{ account: ACCOUNTS.vervoermiddelen, netAmount: 2142857, vatCode: 'hoog', vatAmount: 450000 }] });
+    const asset = s.assets.list({}, acquiredOn)[0]!;
+    s.assets.update(asset.id, { inUseOn });
+    s.settings.update({ kor: true });
+    return s;
+  };
+  it('KOR: een oude aankoop met latere ingebruikname telt nog mee', () => {
+    const s = delayedUse('2020-01-10', '2024-01-01');
+    const check = find(s, '2026-Q4', 'kor-herziening')!;
+    expect(check.title).toContain('900,00');
+    expect(check.items).toHaveLength(1);
+    expect(check.items![0]).toMatchObject({ date: '2024-01-01', amount: 450000 });
+  });
+  it('KOR: latere ingebruikname in het aangiftejaar vraagt beoordeling van de volledige aftrek', () => {
+    const s = delayedUse('2025-01-10', '2026-01-01');
+    const check = find(s, '2026-Q4', 'kor-herziening')!;
+    expect(check.title).toContain('van dit jaar');
+    expect(check.detail).toContain('4.500,00');
+    expect(check.detail).toContain('volledige afgetrokken btw');
+  });
+  it('KOR: het vijfde gebruiksjaar telt mee, het zesde niet', () => {
+    const s = delayedUse('2020-01-10', '2022-01-01');
+    expect(find(s, '2026-Q4', 'kor-herziening')!.title).toContain('900,00');
+    expect(find(s, '2027-Q4', 'kor-herziening')).toBeUndefined();
+  });
+  it('KOR: een bedrijfsmiddel dat pas volgend jaar in gebruik komt telt nog niet mee', () => {
+    const s = delayedUse('2025-01-10', '2027-01-01');
+    expect(find(s, '2026-Q4', 'kor-herziening')).toBeUndefined();
+  });
   it('een bedrijfsmiddel naar privé geeft een vraag over de btw op de onttrekking', () => {
     const { s } = setup();
     purchase(s, '2026-01-10', 500000);

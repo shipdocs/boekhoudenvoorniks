@@ -3,6 +3,7 @@
 ## Nog niet uitgebracht
 
 ### Opgelost
+- **KOR-herziening volgt de ingebruikname.** Bij een bedrijfsmiddel dat pas later in gebruik is genomen, keek het signaal nog naar het aanschafjaar. Nu gebruikt het de ingevulde datum van ingebruikname, zodat het eerste gebruiksjaar en de vijfjaarsperiode kloppen. Zonder aparte datum blijft de aanschafdatum het uitgangspunt; de melding legt dat uit.
 - **Ponto: opgehaalde betalingen worden meteen verwerkt.** Na een ronde op de achtergrond (bij het starten en elke zes uur) koppelde en boekte de app nieuwe betalingen pas bij de volgende ronde, tot zes uur later. Nu meteen, net als bij *Nu ophalen*.
 - **Ponto, daarna een afschrift: geen dubbele betalingen meer.** Haalde Ponto voor een nieuwe rekening betalingen op en las je daarna een afschrift over dezelfde dagen in, dan kwamen dezelfde betalingen er nog eens bij (wel gemeld als "dezelfde betaling?"). Nu herkent de app ze, zoals bij een afschrift dat er al stond: ze staan bij het afschrift als overgeslagen, en met *Toch toevoegen* zet je er een terug als het toch een andere betaling was.
 
