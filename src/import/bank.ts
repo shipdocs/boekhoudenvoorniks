@@ -414,7 +414,8 @@ export class BankService {
     // de eerste onbekende krijgt de lege rekening (of wordt de eerste rekening): dat gaat zonder vragen
     let free = accounts.length === 0 || accounts.some((a) => !a.iban && !a.is_pot) ? 1 : 0;
     const fresh: string[] = [];
-    for (const row of [...result.transactions, ...(result.balances ?? [])]) {
+    // een saldo in een andere valuta slaat het inlezen over (zie hieronder): dat maakt dus ook geen rekening
+    for (const row of [...result.transactions, ...(result.balances ?? []).filter((b) => !b.currency || b.currency === 'EUR')]) {
       const iban = row.ownIban;
       // zonder eigen IBAN gaat het via de banknaam of naar de eerste rekening, zoals altijd
       if (!iban || known.has(iban)) continue;

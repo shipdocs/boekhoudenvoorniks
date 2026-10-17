@@ -72,6 +72,8 @@ describe('afschrift van een rekening die nog niet in de administratie staat (#45
     const t = start({ zakelijkIban: null });
     const row = (ownIban: string) => ({ date: '2026-09-01', amount: -100, description: 'x', ownIban });
     expect(t.s.bank.newAccountIbans({ transactions: [row(PRIVE), row(PRIVE), row(ZAKELIJK)] })).toEqual([ZAKELIJK]);
+    // een saldo in een andere valuta wordt niet ingelezen, dus daarvoor ook geen vraag
+    expect(t.s.bank.newAccountIbans({ transactions: [row(PRIVE)], balances: [{ ownIban: ZAKELIJK, date: '2026-09-01', amount: 100, currency: 'USD' }] })).toEqual([]);
     // regels zonder eigen IBAN (CSV zonder rekeningkolom) gaan zoals altijd: geen vraag
     expect(t.s.bank.newAccountIbans({ transactions: [{ date: '2026-09-01', amount: -100, description: 'x' }] })).toEqual([]);
   });
