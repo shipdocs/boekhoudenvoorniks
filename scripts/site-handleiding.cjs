@@ -265,11 +265,11 @@ ${g.docs.map((d) => `        <li data-tekst="${esc(`${d.meta.titel} ${d.meta.oms
   <title>Handleiding | BoekhoudenVoorNiks</title>
   <meta name="description" content="Zo werk je met BoekhoudenVoorNiks: beginnen, facturen en offertes, bonnetjes, bank, klussen, btw-aangifte, je boekhouder en wat je doet als iets niet klopt.">
   <meta name="robots" content="index, follow, max-image-preview:large">
-  <link rel="canonical" href="${SITE_URL}index.html">
+  <link rel="canonical" href="${SITE_URL}">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="nl_NL">
   <meta property="og:site_name" content="BoekhoudenVoorNiks">
-  <meta property="og:url" content="${SITE_URL}index.html">
+  <meta property="og:url" content="${SITE_URL}">
   <meta property="og:title" content="Handleiding BoekhoudenVoorNiks">
   <meta property="og:description" content="Zo werk je met BoekhoudenVoorNiks, stap voor stap en in gewone taal.">
   <link rel="icon" href="../favicon.svg" type="image/svg+xml">

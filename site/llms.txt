@@ -33,7 +33,7 @@ Belangrijke feiten:
 - [Werkadministratie, geen boekhoudpakket](https://boekhoudenvoorniks.nl/werkadministratie.html): waarin BoekhoudenVoorNiks zich onderscheidt
 - [Voor starters](https://boekhoudenvoorniks.nl/starters.html): checklist van KvK-inschrijving tot eerste btw-aangifte
 - [Stukadoors](https://boekhoudenvoorniks.nl/stukadoors.html), [schilders](https://boekhoudenvoorniks.nl/schilders.html) en [webdevelopers](https://boekhoudenvoorniks.nl/webdevelopers.html): per vak
-- [Bank automatisch inlezen](https://boekhoudenvoorniks.nl/bank-automatisch.html): afschriften vanzelf inlezen uit een map, of optioneel betalingen ophalen met Ponto
+- [Bank automatisch inlezen](https://boekhoudenvoorniks.nl/bank-automatisch.html): afschriften vanzelf vinden in een map en na één klik inlezen, of optioneel betalingen ophalen met Ponto
 - [Buitenlandse facturen automatisch verwerken](https://boekhoudenvoorniks.nl/buitenlandse-facturen.html): valuta, eurobetaling, koersverschillen en btw-voorstel
 - [Btw-aangifte zelf doen](https://boekhoudenvoorniks.nl/btw-aangifte.html)
 - [Zonder abonnement, offline en open source](https://boekhoudenvoorniks.nl/zonder-abonnement.html)
