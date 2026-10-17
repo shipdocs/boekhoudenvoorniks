@@ -248,3 +248,28 @@ test('afschrift van een rekening die er nog niet is: eerst de vraag, "Niet inlez
   expect(await call<unknown[]>(page, 'bank.accounts')).toHaveLength(2);
   expect(problems.apiErrors).toEqual([]);
 });
+
+test('twee afschriften van onbekende rekeningen tegelijk neergezet: de vragen één voor één, en beide worden ingelezen (#459)', async ({ page, problems }) => {
+  await onboard(page);
+  await nav(page, 'Bank');
+  await upload(page, 'zakelijk.xml', camt([KPN], { date: '2026-09-15', amount: 100 }));
+  await expect(page.locator('.notice.good')).toContainText('1 nieuwe betaling.');
+
+  const other = (iban: string, ref: string) => camt([{ ...KPN, ref }], { date: '2026-09-15', amount: 50 }).toString().replace(IBAN, iban);
+  await page.evaluate(([a, b]) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([a!], 'een.xml', { type: 'text/xml' }));
+    dt.items.add(new File([b!], 'twee.xml', { type: 'text/xml' }));
+    document.querySelector('main .dropzone')!.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, [other('NL20INGB0001234567', 'A1'), other('NL02ABNA0123456789', 'B1')]);
+
+  const dlg = page.getByRole('dialog', { name: 'Nieuwe bankrekening?' });
+  await expect(dlg).toContainText('NL20 INGB 0001 2345 67');
+  await dlg.getByRole('button', { name: 'Nieuwe rekening toevoegen' }).click();
+  // daarna de vraag voor het tweede afschrift
+  await expect(dlg).toContainText('NL02 ABNA 0123 4567 89');
+  await dlg.getByRole('button', { name: 'Nieuwe rekening toevoegen' }).click();
+  await expect(dlg).toBeHidden();
+  await expect.poll(async () => (await call<unknown[]>(page, 'bank.accounts')).length).toBe(3);
+  expect(problems.apiErrors).toEqual([]);
+});

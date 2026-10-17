@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { Button, Modal, useLoad } from '../ui';
 import { needsAccount, type NeedsAccount } from '../../shared/statement-files';
@@ -18,12 +18,18 @@ export function useNewAccountQuestion(): {
   question: ReactNode;
 } {
   const [ask, setAsk] = useState<{ ibans: string[]; single: boolean; choose: (choice: AccountChoice | null) => void } | null>(null);
+  // meerdere afschriften tegelijk neergezet: de vragen één voor één, zodat er geen inlezen blijft hangen
+  const turn = useRef<Promise<unknown>>(Promise.resolve());
+  const askUser = (needs: NeedsAccount['needsAccount']) => {
+    const answer = turn.current.then(() => new Promise<AccountChoice | null>((resolve) => setAsk({ ...needs, choose: (choice) => { setAsk(null); resolve(choice); } })));
+    turn.current = answer;
+    return answer;
+  };
 
   const importWithQuestion = async <R,>(read: (choice?: AccountChoice) => Promise<R>): Promise<Exclude<R, NeedsAccount> | null> => {
     const first = await read();
     if (!needsAccount(first)) return first as Exclude<R, NeedsAccount>;
-    const choice = await new Promise<AccountChoice | null>((resolve) => setAsk({ ...first.needsAccount, choose: resolve }));
-    setAsk(null);
+    const choice = await askUser(first.needsAccount);
     if (!choice) return null;
     const second = await read(choice);
     // met een keuze vraagt de app niet nog eens

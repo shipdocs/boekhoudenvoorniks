@@ -229,7 +229,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
           ))}
         </tbody>
       </table>
-      <p className="small muted">Een nieuwe rekening komt er ook vanzelf bij als je een afschrift inleest met een rekeningnummer dat de app nog niet kent.</p>
+      <p className="small muted">Lees je een afschrift in met een rekeningnummer dat de app nog niet kent, dan vraagt hij eerst of het een nieuwe rekening is.</p>
 
       {(overview.data ?? []).length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
