@@ -16,8 +16,13 @@ de verdere ontwikkeling en krijg je de extra functies; nu zijn dat de app voor A
 boekhouder en de online hulp bij categorievoorstellen.
 Zie [boekhoudenvoorniks.nl](https://boekhoudenvoorniks.nl) en de [voorwaarden](https://boekhoudenvoorniks.nl/voorwaarden.html).
 
-**Vragen of feedback?** Mail naar [info@shipdocs.app](mailto:info@shipdocs.app), of gebruik in de app
-Instellingen → Over → *Vraag of feedback mailen*. GitHub-issues zijn voor ontwikkelaars.
+**Vragen, ideeën of feedback?** Mail naar [info@shipdocs.app](mailto:info@shipdocs.app), gebruik in de app
+Instellingen → Over → *Vraag of feedback mailen*, of start een gesprek bij
+[Discussions](https://github.com/shipdocs/boekhoudenvoorniks/discussions).
+
+**Over deze repository.** Hier staat de broncode van elke uitgebrachte versie: per release één commit,
+met de wijzigingen uit [CHANGELOG.md](CHANGELOG.md) als uitleg. De ontwikkeling zelf (planning,
+issues, onderzoek en werk in uitvoering) gebeurt niet in het openbaar. Zie [Bijdragen](CONTRIBUTING.md).
 
 ## Wat zit erin
 
@@ -114,7 +119,7 @@ berekeningen volgen vaste regels in de code. De controle op de uitkomsten bestaa
   tests op Linux en Windows. De volledige werkwijze staat in [Testen](docs/testen.md).
 
 Daarnaast laat de maintainer regelmatig geautomatiseerd scannen op gewijzigde regelgeving. Signalen
-komen als GitHub-issues binnen en worden door de maintainer beoordeeld om te bepalen welke
+komen in een interne tracker binnen en worden door de maintainer beoordeeld om te bepalen welke
 aanpassingen nodig zijn.
 
 Het pakket is nog niet onafhankelijk gecontroleerd door een accountant of fiscalist. Deze controles
@@ -170,9 +175,9 @@ Klopt het, klik dan op **Meer informatie → Toch uitvoeren**. Op Linux: `sha256
 
 ## Releases en updates
 
-Een tag `v*`, of het handmatig starten van de workflow *Release* op main (Actions → Release → Run
-workflow), bouwt via GitHub Actions de installers voor Linux en Windows en publiceert ze als
-GitHub-release. De versie komt uit `package.json`; de tekst bij de release komt uit het CHANGELOG-deel van die versie. De geïnstalleerde app werkt zichzelf bij via `electron-updater`.
+Bij elke release komt de broncode van die versie als één commit in deze repository, met de tag `v*`.
+Die tag (of het handmatig starten van de workflow *Release* op main) bouwt via GitHub Actions de
+installers voor Linux en Windows en publiceert ze als GitHub-release. De versie komt uit `package.json`; de tekst bij de release komt uit het CHANGELOG-deel van die versie. De geïnstalleerde app werkt zichzelf bij via `electron-updater`.
 
 ## Status en open punten
 
@@ -181,13 +186,12 @@ automatisering volgde in v0.2.0, aftrekposten, de demo en teksten in gewone taal
 voor de boekhouder in 0.6.15, en de uitwisseling met de boekhouder met het abonnement in 0.7 (zie
 [CHANGELOG.md](CHANGELOG.md)). De licentieserver (Mollie) staat sinds 30 september 2026 live. De online
 hulp bij categorievoorstellen is sinds 0.7.4 beschikbaar voor abonnees, standaard uit
-(ontwerp in issue #132; evaluatie in issue #168). Versie 1.0.0 (oktober 2026) bracht de
+(ontwerp en evaluatie in de interne tracker). Versie 1.0.0 (oktober 2026) bracht de
 gedeelde gegevensmap met een eigen mapkeuze, het blokkeren van dubbele bonnen en het inlezen van
 bankafschriften zonder dubbele betalingen. Versie 1.2.0 voegde de optionele Ponto-bankkoppeling toe en versie 1.3.0 (oktober 2026)
 de uitkomsten van een boekhoudreview: bijtelling auto, oninbare facturen, jaarafsluiting, KOR-herziening en de VIES-controle
-(zie [CHANGELOG.md](CHANGELOG.md) en issue #44). Versie 1.4.0 (oktober 2026) zette het koppelen met de app voor Android aan:
-bonnen, foto's, klanten, klussen en facturen vanaf je telefoon. Openstaand werk staat als issue in GitHub,
-met labels voor prioriteit en omvang; milestones gebruiken we niet.
+(zie [CHANGELOG.md](CHANGELOG.md)). Versie 1.4.0 (oktober 2026) zette het koppelen met de app voor Android aan:
+bonnen, foto's, klanten, klussen en facturen vanaf je telefoon. Openstaand werk staat in een interne tracker.
 
 Het rekeningschema gebruikt de officiële RGS-referentiecodes (taxonomie-release 20251210, `src/core-ledger/rgs-codes.json`).
 Een test controleert elke standaardrekening tegen die lijst.
