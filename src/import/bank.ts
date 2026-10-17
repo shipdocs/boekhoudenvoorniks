@@ -633,6 +633,15 @@ export class BankService {
         `SELECT s.period_from AS "from", s.period_to AS "to" FROM import_batch_accounts s JOIN import_batches b ON b.id = s.batch_id
          WHERE s.bank_account_id = ? AND s.batch_id <> ? AND (CASE WHEN b.kind IS NULL THEN b.source <> ? ELSE b.kind <> ? END) AND s.period_from <= ? AND s.period_to >= ?`,
       );
+      // Betalingen van de bankkoppeling uit een ronde zonder bewezen periode: die ronde heeft geen dekkingsrij
+      // (Ponto wist hem, bankfeed.ts), dus hun dagen tellen niet als "bekende periode". Toch kunnen het dezelfde
+      // betalingen zijn als in een afschrift dat er daarna overheen komt (#459): vergelijk die dagen ook.
+      const nearUncoveredFeed = this.db.prepare(
+        `SELECT 1 FROM bank_transactions t JOIN import_batches b ON b.id = t.import_batch_id
+         WHERE t.bank_account_id = ? AND t.import_batch_id <> ? AND b.source = 'openbanking' AND ? <> 'openbanking' AND t.transaction_date BETWEEN ? AND ?
+           AND NOT EXISTS (SELECT 1 FROM import_batch_accounts s WHERE s.batch_id = t.import_batch_id AND s.bank_account_id = t.bank_account_id)
+         LIMIT 1`,
+      );
       // kandidaten voor de tegenhanger, met het soort afschrift waar ze uit kwamen
       const candidates = this.db.prepare(
         `SELECT c.id, c.transaction_date AS date, c.counter_iban AS iban, c.counter_name AS name, c.description, c.source, c.bank_id AS bankId, c.import_batch_id AS batch, b.kind, c.batch_ref AS batchRef, c.duplicate_of AS removed
@@ -754,8 +763,9 @@ export class BankService {
       // geboekt op maandag); dan vergelijken we alleen met dat andere soort.
       const scope = (account: BankAccount, date: IsoDate): { overlap: boolean; edge: boolean } => {
         const overlap = Boolean(inKnownPeriod.get(account.id, batchId, date, date));
-        const edge = !overlap && (nearOtherKind.all(account.id, batchId, result.source, kind, addDays(date, 7), addDays(date, -7)) as { from: IsoDate; to: IsoDate }[])
-          .some((p) => (date > p.to ? workdaysBetween(p.to, date) : workdaysBetween(date, p.from)) <= SAME_PAYMENT_WORKDAYS);
+        const edge = !overlap && ((nearOtherKind.all(account.id, batchId, result.source, kind, addDays(date, 7), addDays(date, -7)) as { from: IsoDate; to: IsoDate }[])
+          .some((p) => (date > p.to ? workdaysBetween(p.to, date) : workdaysBetween(date, p.from)) <= SAME_PAYMENT_WORKDAYS)
+          || Boolean(nearUncoveredFeed.get(account.id, batchId, result.source, addDays(date, -7), addDays(date, 7))));
         return { overlap, edge };
       };
       /** Komt een bestaande betaling (of verzamelboeking) uit hetzelfde soort afschrift als dit bestand? */

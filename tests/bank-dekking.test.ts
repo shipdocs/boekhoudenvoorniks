@@ -127,3 +127,54 @@ describe('Ponto WP3: import-opties voor dekking (#245)', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM import_batch_accounts WHERE batch_id = ?').get(leeg.batchId)).toEqual({ n: 0 });
   });
 });
+
+describe('eerst Ponto zonder bewezen dekking, daarna een afschrift over dezelfde dagen (#459)', () => {
+  const IBAN = 'NL91ABNA0417164300';
+  const camt = (transactions: NormalizedTransaction[]) => ({ source: 'camt' as const, warnings: [], transactions });
+  const koffie = (bankId: string, over: Partial<NormalizedTransaction> = {}): NormalizedTransaction =>
+    ({ date: '2026-10-05', amount: -3500, counterIban: 'NL44RABO0123456789', counterName: 'Koffiehoek', description: 'Betaling', ownIban: IBAN, bankId, ...over });
+  const klant = (bankId: string, over: Partial<NormalizedTransaction> = {}): NormalizedTransaction =>
+    ({ date: '2026-10-06', amount: 12100, counterIban: 'NL02RABO0000000001', counterName: 'Klant', description: 'Factuur 2026-0001', ownIban: IBAN, bankId, ...over });
+
+  /** Wat bankfeed.ts doet bij een ronde zonder bewezen grens: wel de betalingen, geen dekkingsrij. */
+  const pontoZonderDekking = (s: ReturnType<typeof scenario>['s'], db: ReturnType<typeof scenario>['db'], accountId: number, transactions: NormalizedTransaction[]) => {
+    const r = s.bank.import(feed(transactions), { bankAccountId: accountId, importedAt: AT('2026-10-07') });
+    db.prepare('DELETE FROM import_batch_accounts WHERE batch_id = ? AND bank_account_id = ?').run(r.batchId, accountId);
+    return r;
+  };
+
+  it('dezelfde betalingen komen er niet nog eens bij, maar staan als overgeslagen tegenover de Ponto-regels', () => {
+    const { s, db } = scenario();
+    const account = s.bank.addAccount('Zakelijk', IBAN);
+    pontoZonderDekking(s, db, account.id, [koffie('p-uuid-1'), klant('p-uuid-2')]);
+    const r = s.bank.import(camt([koffie('BANKREF-1'), klant('BANKREF-2')]), { filename: 'camt.xml', importedAt: AT('2026-10-08') });
+    expect(r).toMatchObject({ imported: 0, duplicates: 2, skipped: 2 });
+    expect((db.prepare('SELECT COUNT(*) AS n FROM bank_transactions WHERE bank_account_id = ?').get(account.id) as { n: number }).n).toBe(2);
+    expect(s.bank.paymentDoubles(account.id)).toEqual([]);
+  });
+
+  it('ook met een boekdatum een paar werkdagen later in het afschrift', () => {
+    const { s, db } = scenario();
+    const account = s.bank.addAccount('Zakelijk', IBAN);
+    pontoZonderDekking(s, db, account.id, [koffie('p-uuid-1', { date: '2026-10-02' })]); // vrijdag
+    const r = s.bank.import(camt([koffie('BANKREF-1', { date: '2026-10-05' })]), { importedAt: AT('2026-10-08') }); // maandag
+    expect(r).toMatchObject({ imported: 0, skipped: 1 });
+  });
+
+  it('een andere betaling van hetzelfde bedrag (andere tegenrekening) komt er gewoon bij', () => {
+    const { s, db } = scenario();
+    const account = s.bank.addAccount('Zakelijk', IBAN);
+    pontoZonderDekking(s, db, account.id, [koffie('p-uuid-1')]);
+    const r = s.bank.import(camt([koffie('BANKREF-1', { counterIban: 'NL69INGB0123456789', counterName: 'Bakker' })]), { importedAt: AT('2026-10-08') });
+    expect(r).toMatchObject({ imported: 1, skipped: 0 });
+  });
+
+  it('een tweede Ponto-ronde zonder dekking vergelijkt niet op inhoud: daar beslist de Ponto-id', () => {
+    const { s, db } = scenario();
+    const account = s.bank.addAccount('Zakelijk', IBAN);
+    pontoZonderDekking(s, db, account.id, [koffie('p-uuid-1')]);
+    // een tweede, echte betaling van hetzelfde bedrag bij dezelfde winkel, met een eigen Ponto-id
+    const r = pontoZonderDekking(s, db, account.id, [koffie('p-uuid-1'), koffie('p-uuid-9')]);
+    expect(r).toMatchObject({ imported: 1, duplicates: 1, skipped: 0 });
+  });
+});
