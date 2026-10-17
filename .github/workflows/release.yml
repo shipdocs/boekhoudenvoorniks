@@ -16,7 +16,6 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 # Nooit twee releases tegelijk: ze zouden bestanden in dezelfde concept-release zetten
 concurrency:
@@ -149,22 +148,5 @@ jobs:
             gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx "$f" || { echo "$f ontbreekt bij $tag" >&2; exit 1; }
           done
           gh release edit "$tag" --draft=false --latest --target "$GITHUB_SHA"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # "Wat is er nieuw" op de site uit CHANGELOG.md (#436): op main committen en de site-deploy starten. Een push met
-      # GITHUB_TOKEN start zelf geen workflow, daarom `gh workflow run`. Main is niet beschermd.
-      - name: Site bijwerken met deze versie
-        run: |
-          tag="v$(node -p "require('./package.json').version")"
-          git fetch --force --tags origin main
-          git checkout -B main origin/main
-          node scripts/site-wijzigingen.cjs
-          if git diff --quiet -- site; then echo "site was al bij"; exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add site
-          git commit -m "Site: versie ${tag#v} (automatisch uit CHANGELOG.md)"
-          git push origin main
-          gh workflow run site.yml --ref main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
