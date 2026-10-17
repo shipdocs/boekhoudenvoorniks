@@ -92,7 +92,10 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
     afterImport(await run(() => importWithQuestion((c) => api.bank.importFile(filename, content, m, c?.bankAccountId, c?.newAccount))));
   // een afschrift uit de downloadmap waarvoor eerst de vraag "nieuwe rekening?" nodig is (#459)
   useEffect(() => {
-    if (statementId) void run(() => importWithQuestion((c) => api.bank.importStatement(statementId, c?.bankAccountId, c?.newAccount))).then(afterImport);
+    if (!statementId) return;
+    void run(() => importWithQuestion((c) => api.bank.importStatement(statementId, c?.bankAccountId, c?.newAccount))).then((r) =>
+      // null: de gebruiker koos "Niet inlezen" (undefined is een fout, die al gemeld is)
+      r === null ? run(() => api.bank.skipStatement(statementId)) : afterImport(r));
   }, [statementId]);
   const afterImport = async (r: ImportResult | null | undefined) => {
     if (!r) return;

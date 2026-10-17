@@ -31,7 +31,7 @@ Gaan alle regels dezelfde kant op én ziet de app een aanwijzing dat af en bij v
 
 ### "Nieuwe bankrekening?"
 
-Staat er in het afschrift een rekeningnummer dat nog niet in je administratie staat, dan leest de app nog niets in en vraagt hij eerst *Nieuwe bankrekening?*. Is het een zakelijke rekening die erbij hoort, kies dan *Nieuwe rekening toevoegen*. Is het hetzelfde geld met een nieuw rekeningnummer (bijvoorbeeld na een overstap binnen je bank), kies dan *Hoort bij* en de rekening die je al had. Is het je privérekening, kies *Niet inlezen*: er verandert dan niets. Je allereerste afschrift krijgt die vraag niet; dat rekeningnummer komt gewoon bij je eerste rekening.
+Staat er in het afschrift een rekeningnummer dat nog niet in je administratie staat, dan leest de app nog niets in en vraagt hij eerst *Nieuwe bankrekening?*. Is het een zakelijke rekening die erbij hoort, kies dan *Nieuwe rekening toevoegen*. Is het hetzelfde geld met een nieuw rekeningnummer (bijvoorbeeld na een overstap binnen je bank), kies dan *Hoort bij* en de rekening die je al had (die keuze staat er alleen als het hele afschrift van die ene rekening is). Is het je privérekening, kies *Niet inlezen*: er verandert dan niets. Kwam het afschrift uit de downloadmap, dan telt dat als *Niet nu*. Je allereerste afschrift krijgt die vraag niet; dat rekeningnummer komt gewoon bij je eerste rekening.
 
 ## Betalingen uitzoeken: Hulp nodig
 
