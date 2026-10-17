@@ -102,7 +102,7 @@ Voor zzp'ers en kleine ondernemers, met name vakmensen: stukadoors, schilders, t
 
 ### Op welke computers werkt het?
 
-Op Windows en Linux. Het programma werkt ook zonder internetverbinding; alleen voor het versturen van e-mail en updates is internet nodig.
+Op Windows en Linux. Het dagelijkse werk (facturen, bankafschriften inlezen, bonnen nakijken, btw-overzicht) werkt zonder internet. Internet is alleen nodig voor updates, voor het versturen en ophalen van e-mail (ook het bonnen-adres), voor koppelingen die je zelf aanzet zoals Ponto of je webshop, en voor een nieuwe wisselkoers bij een buitenlandse bon.
 
 ### Windows zegt "Windows heeft uw pc beveiligd". Is dat veilig?
 
