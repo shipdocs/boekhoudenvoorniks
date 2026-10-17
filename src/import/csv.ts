@@ -117,6 +117,26 @@ export const KNOWN_FORMATS: { bank: string; match: string[]; mapping: CsvMapping
       dateFormat: 'YYYY-MM-DD',
     },
   },
+  // Revolut Business (afschrift per maand): de datums in UTC of in de tijdzone van het account, en niet elk
+  // export heeft een kolom State. Kosten apart, geen eigen IBAN in het bestand (Account is bv. "Main EUR").
+  ...['UTC', 'Europe/Amsterdam'].flatMap((tz) => [true, false].map((withState) => ({
+    bank: 'Revolut',
+    match: [`Date started (${tz})`, `Date completed (${tz})`, 'ID', 'Type', 'Description', 'Payment currency', 'Amount', 'Fee', 'Balance', ...(withState ? ['State'] : [])],
+    mapping: {
+      date: `Date completed (${tz})`,
+      amount: 'Amount',
+      fee: 'Fee',
+      counterName: 'Description',
+      counterIban: 'Beneficiary IBAN',
+      reference: 'Reference',
+      description: ['Description', 'Reference'],
+      ...(withState ? { keep: { column: 'State', values: ['COMPLETED'] } } : {}),
+      balance: 'Balance',
+      currency: 'Payment currency',
+      bank: 'Revolut',
+      dateFormat: 'YYYY-MM-DD',
+    } satisfies CsvMapping,
+  }))),
   {
     bank: 'Triodos',
     match: ['Datum', 'Rekeningnummer', 'Bedrag', 'Debet/Credit', 'Naam tegenrekening', 'Tegenrekening', 'Omschrijving'],
@@ -137,12 +157,30 @@ function stripBom(text: string): string {
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
+/**
+ * De tekst vanaf de kopregel. Sommige banken zetten er een regel boven, zoals Knab ("KNAB EXPORT;;;;;"):
+ * een regel met hooguit één gevulde cel, gevolgd door een regel met meerdere kolomnamen, gaat eraf.
+ */
+function csvBody(text: string): string {
+  let body = stripBom(text);
+  for (let i = 0; i < 3; i++) {
+    const end = body.indexOf('\n');
+    if (end < 0) break;
+    const first = body.slice(0, end).replace(/\r$/, '');
+    const next = body.slice(end + 1).split('\n', 1)[0] ?? '';
+    const cells = (line: string) => line.split(/[;,\t]/).map((c) => c.trim().replace(/^"|"$/g, '')).filter(Boolean).length;
+    if (cells(first) > 1 || cells(next) < 3) break;
+    body = body.slice(end + 1);
+  }
+  return body;
+}
+
 export function headerSignature(headers: string[]): string {
   return headers.map((h) => h.trim().toLowerCase()).join('|');
 }
 
 export function previewCsv(text: string, maxRows = 10): CsvPreview {
-  const parsed = Papa.parse<Record<string, string>>(stripBom(text), { header: true, skipEmptyLines: 'greedy', transformHeader: (h) => h.trim() });
+  const parsed = Papa.parse<Record<string, string>>(csvBody(text), { header: true, skipEmptyLines: 'greedy', transformHeader: (h) => h.trim() });
   const headers = (parsed.meta.fields ?? []).filter(Boolean);
   const known = KNOWN_FORMATS.find((f) => f.match.every((m) => headers.includes(m)));
   return {
@@ -264,7 +302,7 @@ export function directions(transactions: { amount: number }[]): Direction {
  * afschrijvingen gewoon een rustige week: daar vraagt de app niet naar (#407).
  */
 export function directionIssue(text: string, mapping: CsvMapping): string | null {
-  const parsed = Papa.parse<Record<string, string>>(stripBom(text), { header: true, skipEmptyLines: 'greedy', transformHeader: (h) => h.trim() });
+  const parsed = Papa.parse<Record<string, string>>(csvBody(text), { header: true, skipEmptyLines: 'greedy', transformHeader: (h) => h.trim() });
   const headers = (parsed.meta.fields ?? []).filter(Boolean);
   const rows = parsed.data;
   if (mapping.debitCredit) {
@@ -298,7 +336,7 @@ export function oneSided(d: Direction): 'af' | 'bij' | null {
 }
 
 export function parseCsv(text: string, mapping: CsvMapping): ParseResult {
-  const parsed = Papa.parse<Record<string, string>>(stripBom(text), { header: true, skipEmptyLines: 'greedy', transformHeader: (h) => h.trim() });
+  const parsed = Papa.parse<Record<string, string>>(csvBody(text), { header: true, skipEmptyLines: 'greedy', transformHeader: (h) => h.trim() });
   const transactions: NormalizedTransaction[] = [];
   const warnings: string[] = [];
   const skipped = new Map<string, number>();

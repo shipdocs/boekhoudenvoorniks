@@ -199,3 +199,65 @@ describe('Revolut', () => {
     expect(s.bank.listAccounts().map((a) => [a.id, a.name])).toEqual([[def.id, 'Revolut']]);
   });
 });
+
+/**
+ * Exportbestanden zoals de banken ze leveren (#459): de indeling komt uit openbare voorbeelden en documentatie
+ * (Knab-export met een regel "KNAB EXPORT" erboven, ook de variant zonder die regel en met Referentie en
+ * Boekdatum; het maandafschrift van Revolut Business). Bedragen, namen en rekeningnummers zijn verzonnen.
+ */
+describe('exportbestanden van de bank zelf', () => {
+  it('Knab met de regel "KNAB EXPORT" erboven: herkend en goed gelezen', () => {
+    const text = fixture('knab.csv').toString('utf8');
+    const preview = previewCsv(text);
+    expect(preview.detectedBank).toBe('Knab');
+    const r = parseCsv(text, preview.suggestedMapping!);
+    expect(r.warnings).toEqual([]);
+    expect(r.transactions.map((t) => [t.date, t.amount, t.counterName, t.counterIban, t.ownIban, t.description])).toEqual([
+      ['2026-09-24', -9075, 'Drukkerij Voorbeeld BV', 'NL20INGB0001234567', 'NL52KNAB0775908274', 'Factuur 563561'],
+      ['2026-09-20', 121000, 'Familie Jansen', 'NL44RABO0123456789', 'NL52KNAB0775908274', 'Factuur 2026-0001'],
+    ]);
+    expect(detectFormat('knab.csv', text)).toBe('csv');
+  });
+
+  it('Knab zonder die regel en met de kolommen Referentie en Boekdatum: ook herkend', () => {
+    const text = fixture('knab-zonder-kop.csv').toString('utf8');
+    const preview = previewCsv(text);
+    expect(preview.detectedBank).toBe('Knab');
+    expect(parseCsv(text, preview.suggestedMapping!).transactions[0]).toMatchObject({ date: '2026-09-24', amount: -9075 });
+  });
+
+  it('een eerste regel met één gevulde cel gaat er alleen af als er een kopregel onder staat', () => {
+    expect(previewCsv('Datum;Bedrag;Omschrijving\n01-09-2026;12,50;Koffie\n').headers).toEqual(['Datum', 'Bedrag', 'Omschrijving']);
+    expect(previewCsv('Mijn export\nDatum;Bedrag;Omschrijving\n01-09-2026;12,50;Koffie\n').headers).toEqual(['Datum', 'Bedrag', 'Omschrijving']);
+  });
+
+  it('Revolut Business: herkend, kosten apart, alleen euro, eindsaldo en tegenrekening', () => {
+    const text = fixture('revolut-business.csv').toString('utf8');
+    const preview = previewCsv(text);
+    expect(preview.detectedBank).toBe('Revolut');
+    const r = parseCsv(text, preview.suggestedMapping!);
+    expect(r.bank).toBe('Revolut');
+    expect(r.transactions.map((t) => [t.date, t.amount, t.counterIban])).toEqual([
+      ['2026-09-01', 50000, null],
+      ['2026-09-04', -1850, null],
+      ['2026-09-04', -35, null],
+      ['2026-09-05', -9075, 'NL20INGB0001234567'],
+    ]);
+    expect(r.transactions[3]!.description).toBe('To Drukkerij Voorbeeld BV Factuur 563561');
+    expect(r.warnings).toEqual(['1 regel in een andere valuta overgeslagen: de app boekt alleen euro\'s']);
+    expect(r.balances).toEqual([{ ownIban: null, date: '2026-09-05', amount: 39040 }]);
+  });
+
+  it('Revolut Business met State en datums in de tijdzone van het account: alleen COMPLETED', () => {
+    const text = [
+      'Date started (Europe/Amsterdam),Date completed (Europe/Amsterdam),ID,Type,State,Description,Reference,Payer,Card number,Orig currency,Orig amount,Payment currency,Amount,Fee,Balance,Account,Beneficiary IBAN',
+      '2026-09-03,2026-09-04,id1,CARD_PAYMENT,COMPLETED,Vercel,,,1234,EUR,-18.50,EUR,-18.50,0.00,481.50,Main EUR,',
+      '2026-09-05,,id2,CARD_PAYMENT,PENDING,Shell,,,1234,EUR,-60.00,EUR,-60.00,0.00,,Main EUR,',
+    ].join('\n');
+    const preview = previewCsv(text);
+    expect(preview.detectedBank).toBe('Revolut');
+    const r = parseCsv(text, preview.suggestedMapping!);
+    expect(r.transactions.map((t) => t.amount)).toEqual([-1850]);
+    expect(r.warnings[0]).toMatch(/nog in behandeling/);
+  });
+});
