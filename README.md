@@ -95,6 +95,37 @@ De oude gegevensmap wordt bij de eerste start overgezet (`src/main/data-dir.ts`)
 onder de oude naam wordt omgezet (`src/mcp/names.ts`), en de oude omgevingsvariabelen
 (`GRATIS_BOEKHOUDEN_*`) blijven werken.
 
+## Agents en boekhoudkundige controles
+
+Bij de ontwikkeling worden AI-agents ingezet onder leiding van de maintainer. Boekingen en fiscale
+berekeningen volgen vaste regels in de code. De controle op de uitkomsten bestaat uit meerdere lagen:
+
+- **Gerichte tests:** onder meer voor btw, KOR, ondernemersaftrek, bijtelling en oninbare facturen.
+  Bevindingen uit eerdere reviews zijn vastgelegd in regressietests, zodat dezelfde fouten bij latere
+  wijzigingen worden opgespoord. Zie bijvoorbeeld de [fiscale tests](tests/fiscale-audit.test.ts) en
+  [tests van boekhoudregels](tests/business-rules-review.test.ts).
+- **Een vaste proefadministratie:** facturen, inkopen en bankmutaties worden verwerkt en vergeleken
+  met vooraf vastgelegde verwachtingen voor grootboeksaldi, bankaansluiting, winst, btw en openstaande
+  posten. De [afzonderlijke handberekening](tests/proefadministratie/README.md) staat bij de testgegevens.
+  Bij een afwijking wordt eerst de oorzaak onderzocht; verwachte uitkomsten worden niet automatisch
+  aangepast om een test te laten slagen.
+- **Automatische controles bij wijzigingen:** bij pull requests draaien unit- en integratietests,
+  typecontrole, een build en kritieke financiële schermscenario's op GitHub. Bij releases draaien de
+  tests op Linux en Windows. De volledige werkwijze staat in [Testen](docs/testen.md).
+
+Daarnaast laat de maintainer regelmatig geautomatiseerd scannen op gewijzigde regelgeving. Signalen
+komen als GitHub-issues binnen en worden door de maintainer beoordeeld om te bepalen welke
+aanpassingen nodig zijn.
+
+Het pakket is nog niet onafhankelijk gecontroleerd door een accountant of fiscalist. Deze controles
+dekken niet ieder mogelijk praktijkgeval. Bespreek je administratie en aangiften met je boekhouder.
+De inkomstenbelastingberekening is bijvoorbeeld een schatting met een beperkte scope;
+gecontroleerde jaarparameters betekenen niet dat de gehele app door een fiscalist is goedgekeurd.
+
+De boekhoudregels, fiscale bronnen, tests en afgeronde reviewresultaten van de app zijn openbaar.
+Interne agentinstructies, fiscale monitoring, het interne regelregister en serverimplementaties blijven
+in de private serverrepository; zie [Bijdragen](CONTRIBUTING.md#publieke-en-interne-onderdelen).
+
 ## Ontwikkelen
 
 Vereist Node 22.12+.

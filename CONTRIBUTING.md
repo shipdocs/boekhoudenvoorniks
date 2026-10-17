@@ -5,6 +5,10 @@ voor code: een pull request tegen `main`, met tests (`npm test`, en `npm run e2e
 Lees eerst de ontwerpregels in de [README](README.md#ontwerpregels): boekingen komen altijd uit vaste,
 geteste regels, en de administratie blijft op de computer van de gebruiker.
 
+Wijzig je boekhoudregels of fiscale parameters, volg dan ook de
+[werkwijze voor fiscale wijzigingen](docs/testen.md#fiscale-wijzigingen-beoordelen): onderbouw het
+gedrag met bronnen en een afzonderlijk gecontroleerde testverwachting, met belastingjaar en beoordeling.
+
 ## Rechten op je bijdrage
 
 BoekhoudenVoorNiks wordt uitgegeven door ShipDocs (KvK 95207341) onder de
