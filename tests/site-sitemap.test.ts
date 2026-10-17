@@ -82,7 +82,9 @@ describe('sitemap.xml', () => {
 
   it('heeft een geldige lastmod (JJJJ-MM-DD, niet in de toekomst)', () => {
     const morgen = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
-    const fout = entries.filter((e) => !e.lastmod || !/^\d{4}-\d{2}-\d{2}$/.test(e.lastmod) || Number.isNaN(Date.parse(e.lastmod)) || e.lastmod > morgen);
+    // via toISOString terug naar tekst: zo valt ook een onmogelijke datum als 2026-02-31 op
+    const geldig = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().slice(0, 10) === d;
+    const fout = entries.filter((e) => !e.lastmod || !geldig(e.lastmod) || e.lastmod > morgen);
     expect(fout.map((e) => `${e.loc}: ${e.lastmod ?? 'geen lastmod'}`), 'lastmod in site/sitemap.xml').toEqual([]);
   });
 
