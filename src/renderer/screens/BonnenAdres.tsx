@@ -109,7 +109,7 @@ export function BonnenAdres() {
               <Button onClick={() => void navigator.clipboard.writeText(supplierText).then(() => toast('Gekopieerd'))}>Kopiëren</Button>
             </div>
           </Field>
-          <p className="small muted">De app kijkt bij het opstarten en elk kwartier. Verwerkte mail gaat op de server naar de map "Verwerkt" en wordt na een jaar verwijderd; de bonnen zelf staan in je administratie.</p>
+          <p className="small muted">De app kijkt bij het opstarten en elk kwartier. Verwerkte mail gaat op de server naar de map "Verwerkt". Mail op het bonnen-adres wordt 60 dagen na binnenkomst verwijderd; de bonnen zelf staan in je administratie.</p>
           <div className="row">
             <Button disabled={busy} onClick={async () => {
               const r = await run(() => api.mail.fetchNow());

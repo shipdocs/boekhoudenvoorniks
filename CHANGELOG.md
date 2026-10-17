@@ -1,5 +1,10 @@
 # Wijzigingen
 
+## Nog niet uitgebracht
+
+### Verbeterd
+- **Mail op het bonnen-adres staat hooguit 60 dagen op de server** in plaats van een jaar. De app is de plek waar je bonnen blijven; de server is alleen het doorgeefluik. Haalt de app 30 dagen lang niets op, dan krijg je een mail, en daarna heb je nog een maand.
+
 ## 1.8.0 — bonnen per mail zonder instellen, en versturen met je eigen mailprogramma
 
 Mail zonder gedoe: een gratis bonnen-adres waar de app je facturen en bonnen ophaalt, en facturen versturen met het mailprogramma dat je al gebruikt. Plus administraties beheren en hulp bij elk scherm.

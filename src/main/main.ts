@@ -37,6 +37,7 @@ import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
 import { BONNEN_PREFIX, BONNEN_TARGET, type PollResult } from '../mail/mail-intake';
 import { BONNEN_TOKEN_SECRET, BonnenAdresService, BonnenServerError, httpBonnenServer } from '../mail/bonnen-adres';
+import { BONNEN_BEWAARDAGEN } from '../shared/legal';
 import { deleteAttachment, resolveAttachmentPath, saveAttachment } from './attachments';
 import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
@@ -373,12 +374,12 @@ async function pollWith(connect: () => Promise<ImapSource>, target?: typeof BONN
   const source = await connect();
   try {
     const r = await services.mail.poll(source, undefined, target);
-    // bonnen-adres: verwerkte mail staat hooguit een jaar op de server (privacyverklaring)
-    // (ook in de gewone map: mail zonder bon blijft daar staan, en mag er ook niet langer dan een jaar staan)
+    // bonnen-adres: mail staat hooguit BONNEN_BEWAARDAGEN dagen op de server (privacyverklaring), ook in de gewone map:
+    // mail zonder bon blijft daar staan. De mailserver ruimt mail die nooit wordt opgehaald zelf op.
     if (expire && target) {
-      const yearAgo = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
+      const limit = new Date(Date.now() - BONNEN_BEWAARDAGEN * 86_400_000).toISOString().slice(0, 10);
       for (const folder of [...target.folders, target.processedFolder]) {
-        await source.deleteBefore(folder, yearAgo).catch((e) => console.error('Oude mail op het bonnen-adres opruimen mislukt', (e as Error).message));
+        await source.deleteBefore(folder, limit).catch((e) => console.error('Oude mail op het bonnen-adres opruimen mislukt', (e as Error).message));
       }
     }
     return r;

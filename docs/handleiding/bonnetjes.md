@@ -31,7 +31,7 @@ Je krijgt een eigen mailadres voor je bonnen, bijvoorbeeld *bakkerijpi-k7m2q@pos
 4. Wij bekijken je aanvraag, meestal binnen een werkdag. Je krijgt een mail zodra je bonnen-adres klaar is, en de app ziet het vanzelf.
 5. Geef het adres aan je leveranciers. Bij het adres staat een tekst die je kunt kopiëren en doorsturen.
 
-Vanaf dan kijkt de app bij het opstarten en elk kwartier of er mail is. Op *Vandaag* staat ook de knop *Mail ophalen*. Met het bonnen-adres kun je alleen ontvangen, niet versturen. Mail die de app heeft verwerkt, staat op de server in de map *Verwerkt* en wordt na een jaar verwijderd; de bonnen zelf staan in je administratie.
+Vanaf dan kijkt de app bij het opstarten en elk kwartier of er mail is. Op *Vandaag* staat ook de knop *Mail ophalen*. Met het bonnen-adres kun je alleen ontvangen, niet versturen. Mail die de app heeft verwerkt, staat op de server in de map *Verwerkt*. Alle mail op het bonnen-adres wordt 60 dagen na binnenkomst verwijderd; de bonnen zelf staan in je administratie. Haalt de app 30 dagen lang niets op (bijvoorbeeld omdat je de app niet opent), dan krijg je een mail.
 
 Het bonnen-adres kan niet zonder sleutelhanger om de inloggegevens veilig te bewaren. Op sommige Linux-computers ontbreekt die; de app zegt het dan. Gebruik daar de Bonnenmap.
 
