@@ -10,10 +10,10 @@ volgorde: 30
 Download in internetbankieren een afschrift (meestal onder *Afschriften*, *Downloaden* of *Exporteren*). Kies:
 
 1. **CAMT.053** als je bank dat heeft. Daarin staat vast wat af en bij is, met naam en rekeningnummer van de tegenpartij.
-2. Anders **MT940**.
+2. Anders **MT940**. Banken bouwen MT940 af (Rabobank heeft het aangekondigd), dus kies CAMT.053 zodra je bank het heeft.
 3. Anders **CSV**. Dat werkt ook, maar elke bank schrijft "af" en "bij" anders op; de app laat daarom vóór het inlezen zien wat hij ervan maakt.
 
-De app neemt bestanden aan die eindigen op .xml (CAMT), .sta, .940, .mt940 of .swi (MT940), en .csv, .txt of .tab. Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut herkent de app vanzelf. Je kunt ook je bank [automatisch laten ophalen met Ponto](#automatisch-ponto-en-de-downloadmap).
+De app neemt bestanden aan die eindigen op .xml (CAMT), .sta, .940, .mt940 of .swi (MT940), en .csv, .txt of .tab. Een CSV van ING, Rabobank, ABN AMRO, bunq, Knab, Triodos of Revolut (ook het maandafschrift van Revolut Business) herkent de app vanzelf. Je kunt ook je bank [automatisch laten ophalen met Ponto](#automatisch-ponto-en-de-downloadmap).
 
 ## Inlezen
 

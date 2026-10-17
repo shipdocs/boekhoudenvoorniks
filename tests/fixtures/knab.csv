@@ -1,0 +1,4 @@
+KNAB EXPORT;;;;;;;;;;;;;;
+Rekeningnummer;Transactiedatum;Valutacode;CreditDebet;Bedrag;Tegenrekeningnummer;Tegenrekeninghouder;Valutadatum;Betaalwijze;Omschrijving;Type betaling;Machtigingsnummer;Incassant ID;Adres;
+"NL52KNAB0775908274";"24-09-2026";"EUR";"D";"90,75";"NL20INGB0001234567";"Drukkerij Voorbeeld BV";"24-09-2026";"Overboeking";"Factuur 563561 ";"";"";"";"";
+"NL52KNAB0775908274";"20-09-2026";"EUR";"C";"1.210,00";"NL44RABO0123456789";"Familie Jansen";"20-09-2026";"Ontvangen betaling";"Factuur 2026-0001 ";"";"";"";"Dorpsstraat 1 1234 AB Utrecht";
