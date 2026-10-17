@@ -384,6 +384,43 @@ describe('autoProcess uitsluitend bij werkelijk nieuwe imports, maximaal één k
   });
 });
 
+describe('de achtergrondronde verwerkt nieuwe betalingen meteen (#459)', () => {
+  it('nieuwe transacties: precies één autoProcess, zonder te wachten op de volgende zesuursronde', async () => {
+    await linkAccount(h);
+    vi.spyOn(h.s.integrations, 'syncAllEnabled').mockResolvedValue({});
+    h.reads.set('acc-1', pontoRead({ transactions: [tx('2026-10-11', -3500, 'bg1')] }));
+    const spy = vi.spyOn(h.s.inbox, 'autoProcess').mockReturnValue({ matched: 1, booked: 0 });
+    const emit = vi.fn();
+    const log = vi.fn();
+    await runBackgroundFeeds(h.s, emit, log);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith('auto-processed', { matched: 1, booked: 0 });
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('geen nieuwe transacties: geen autoProcess en geen melding', async () => {
+    await linkAccount(h);
+    vi.spyOn(h.s.integrations, 'syncAllEnabled').mockResolvedValue({});
+    h.reads.set('acc-1', pontoRead({ transactions: [] }));
+    const spy = vi.spyOn(h.s.inbox, 'autoProcess');
+    const emit = vi.fn();
+    await runBackgroundFeeds(h.s, emit, vi.fn());
+    expect(spy).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('achtergrondronde en "Nu ophalen" tegelijk: samen nog steeds één autoProcess', async () => {
+    await linkAccount(h);
+    vi.spyOn(h.s.integrations, 'syncAllEnabled').mockResolvedValue({});
+    h.reads.set('acc-1', pontoRead({ transactions: [tx('2026-10-11', -3500, 'bg2')] }));
+    const spy = vi.spyOn(h.s.inbox, 'autoProcess');
+    const [, viaIpc] = await Promise.all([runBackgroundFeeds(h.s, vi.fn(), vi.fn()), h.api.bankfeed.ophalen()]);
+    expect(viaIpc.importedAny).toBe(true);
+    expect(viaIpc.autoMatched).toBeTypeOf('number');
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('gelijktijdige achtergrondronde en IPC delen één service-uitvoering (regel 9)', () => {
   it('twee overlappende ronden (achtergrond + IPC) draaien één clientronde', async () => {
     await linkAccount(h);

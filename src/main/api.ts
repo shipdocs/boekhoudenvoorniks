@@ -6,6 +6,7 @@ import type { RuntimeStatus } from '../ocr-runtime/runtime';
 import type { CliKind } from '../intake/ocr-cli';
 import { DOWNLOAD_SIZE, GLM_OCR, LLAMA_CPP, REQUIREMENTS } from '../ocr-runtime/manifest';
 import type { Services } from '../services';
+import { autoProcessAfterRound } from '../bankfeed/auto-after-round';
 import type { AppSettings } from '../settings/settings';
 import type { RelationInput } from '../relations/relations';
 import type { InvoiceDraftInput, InvoiceDisplayStatus, PaymentInput } from '../documents/invoices';
@@ -310,22 +311,10 @@ export function createApi(s: Services, host: HostContext) {
 
   // ---------- Ponto-bankfeed (#249) ----------
 
-  /**
-   * Na een feedronde met werkelijk nieuwe transacties: precies één keer automatisch verwerken
-   * (regel 4). Zonder nieuwe imports gebeurt er niets; de uitkomst gaat één keer mee in het
-   * antwoord van de route.
-   */
-  const processedFeedRounds = new WeakMap<object, { autoMatched?: number }>();
+  /** Na een feedronde met nieuwe transacties één keer automatisch verwerken (regel 4); zie autoProcessAfterRound. */
   const autoNaFeedronde = (summary: { importedAny: boolean }): { autoMatched?: number } => {
-    if (!summary.importedAny) return {};
-    const previous = processedFeedRounds.get(summary);
-    if (previous) return previous;
-    // Overlappende routes krijgen hetzelfde resultaat van de service-lock. Verwerk dat eenmaal.
-    const result: { autoMatched?: number } = {};
-    processedFeedRounds.set(summary, result);
-    const auto = s.inbox.autoProcess();
-    result.autoMatched = auto.matched + auto.booked;
-    return result;
+    const { autoMatched } = autoProcessAfterRound(s.inbox, summary);
+    return autoMatched === undefined ? {} : { autoMatched };
   };
 
   /**
