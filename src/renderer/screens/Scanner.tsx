@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { Button, Modal, useAction, useApp, useLoad } from '../ui';
+import { Button, Modal, useAction, useApp, useJobWords, useLoad } from '../ui';
 import { formatDateNl } from '../../shared/dates';
 
 type Status = NonNullable<Awaited<ReturnType<typeof api.scanner.status>>>;
@@ -63,6 +63,7 @@ function SubscriptionNotice({ abonnement }: { abonnement: Status['abonnement'] }
 }
 
 function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) {
+  const jw = useJobWords();
   const { run, busy } = useAction();
   const [firewall, setFirewall] = useState(false);
   const [pairing, setPairing] = useState<Pairing | null>(null);
@@ -95,7 +96,7 @@ function PhoneCard({ st, reload }: { st: Status; reload: () => Promise<void> }) 
     <div className="card grid">
       <h3 style={{ margin: 0 }}>Telefoon koppelen</h3>
       <p className="small muted" style={{ margin: 0 }}>
-        Met de app BoekhoudenVoorNiks voor Android (in Google Play) leg je onderweg bonnen, foto's van een klus, klanten en facturen vast. Zit je telefoon op dezelfde wifi als deze computer, dan staat het vanzelf in je administratie.
+        Met de app BoekhoudenVoorNiks voor Android (in Google Play) leg je onderweg bonnen, foto's van een {jw.s}, klanten en facturen vast. Zit je telefoon op dezelfde wifi als deze computer, dan staat het vanzelf in je administratie.
         Alles gaat versleuteld van je telefoon rechtstreeks naar deze computer: niet via internet en niet via een cloud.
       </p>
       <SubscriptionNotice abonnement={st.abonnement} />

@@ -205,3 +205,58 @@ describe('Investeringsaftrek en personenauto', () => {
     expect(s.taxOverview.year(2026, '2026-12-31').items.some((i) => i.key === 'kia-auto')).toBe(false);
   });
 });
+
+describe('Noord-Ierland (XI): goederen zijn een EU-levering (#317)', () => {
+  const xiCustomer = (s: S) => s.relations.create({ name: 'Belfast Ltd', address: 'High St 1', postcode: 'BT1 1AA', city: 'Belfast', country: 'XI', vat_number: 'XI123456789', email: 'info@belfast.example' });
+  function sale(s: S, vatCode: 'icp' | 'hoog', amount: number) {
+    const xi = xiCustomer(s);
+    s.invoices.finalize(s.invoices.createDraft({ relationId: xi.id, invoiceDate: '2026-07-10', lines: [{ description: 'Goederen', quantity: 1, unitPrice: amount, vatCode }] }).id);
+  }
+  it('Nederlandse btw aan een bedrijf in XI geeft de waarschuwing, met tekst voor Noord-Ierland', () => {
+    const { s } = setup();
+    sale(s, 'hoog', 10000);
+    const check = s.vat.checks('2026-Q3').find((c) => c.key === 'eu-bedrijf-met-btw')!;
+    expect(check.detail).toContain('Noord-Ierland');
+    expect(check.detail).toContain('Klant buiten de EU');
+  });
+  it('bij XI en een ander EU-land samen noemt de tekst ook dat een dienst aan XI buiten de EU valt', () => {
+    const { s } = setup();
+    sale(s, 'hoog', 10000);
+    const de = euCustomer(s);
+    s.invoices.finalize(s.invoices.createDraft({ relationId: de.id, invoiceDate: '2026-07-11', lines: [{ description: 'EU', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
+    const check = s.vat.checks('2026-Q3').find((c) => c.key === 'eu-bedrijf-met-btw')!;
+    expect(check.detail).toContain('Dienst aan een bedrijf in een ander EU-land');
+    expect(check.detail).toContain('Noord-Ierland');
+    expect(check.detail).toContain('Klant buiten de EU');
+  });
+  it('goederen met code icp geven geen waarschuwing en staan met landcode XI in de ICP-opgaaf', () => {
+    const { s } = setup();
+    sale(s, 'icp', 10000);
+    expect(keys(s, '2026-Q3')).not.toContain('eu-bedrijf-met-btw');
+    expect(s.vat.icpCsv('2026-Q3')).toContain('XI;XI123456789;"Belfast Ltd";goederen;100.00;100');
+  });
+  it('goederen aan XI tellen mee voor de ICP-kwartaalgrens', () => {
+    const { s } = setup();
+    sale(s, 'icp', ICP_MONTHLY_GOODS_LIMIT + 1);
+    expect(keys(s, '2026-Q3')).toContain('icp-maandelijks');
+  });
+});
+
+describe('Noord-Ierland (XI): particulieren tellen mee voor de grens van € 10.000 (#317)', () => {
+  it('verkoop aan een particulier in XI telt mee en geeft de melding over particulieren in het buitenland', () => {
+    const { s } = setup();
+    const xi = s.relations.create({ name: 'Mevr. O Neill', address: 'High St 1', postcode: 'BT1 1AA', city: 'Belfast', country: 'XI', email: 'a@b.example' });
+    s.invoices.finalize(s.invoices.createDraft({ relationId: xi.id, invoiceDate: '2026-07-10', lines: [{ description: 'Webshop', quantity: 1, unitPrice: 50000, vatCode: 'hoog' }] }).id);
+    const check = s.vat.checks('2026-Q3').find((c) => c.key === 'eu-particulier')!;
+    expect(check.detail).toContain('Noord-Ierland');
+  });
+  it('XI en een EU-land samen tellen op naar boven de grens', () => {
+    const { s } = setup();
+    const xi = s.relations.create({ name: 'Mevr. O Neill', address: 'High St 1', postcode: 'BT1 1AA', city: 'Belfast', country: 'XI', email: 'a@b.example' });
+    const de = s.relations.create({ name: 'Herr Schmidt', address: 'H 1', postcode: '47533', city: 'Kleve', country: 'DE', email: 'b@c.example' });
+    s.invoices.finalize(s.invoices.createDraft({ relationId: xi.id, invoiceDate: '2026-07-10', lines: [{ description: 'Webshop', quantity: 1, unitPrice: 600000, vatCode: 'hoog' }] }).id);
+    s.invoices.finalize(s.invoices.createDraft({ relationId: de.id, invoiceDate: '2026-07-11', lines: [{ description: 'Webshop', quantity: 1, unitPrice: 500000, vatCode: 'hoog' }] }).id);
+    expect(keys(s, '2026-Q3')).toContain('oss-drempel');
+  });
+});
+

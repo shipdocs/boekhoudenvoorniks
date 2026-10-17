@@ -1657,4 +1657,25 @@ export const migrations: string[] = [
   ALTER TABLE mail_folders ADD COLUMN telefoon_uid INTEGER;
   ALTER TABLE mail_folders ADD COLUMN telefoon_pogingen INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Welk later afschrift een al bekende betaling óók bevatte (#408): haal je het afschrift weg waar hij uit kwam,
+  -- dan blijft hij staan en hoort hij voortaan bij dat andere afschrift. Alleen additief; oudere imports hebben
+  -- hier geen regels, die zijn bij het weghalen niet beschermd.
+  CREATE TABLE IF NOT EXISTS import_returned (
+    batch_id INTEGER NOT NULL REFERENCES import_batches(id),
+    transaction_id INTEGER NOT NULL REFERENCES bank_transactions(id),
+    PRIMARY KEY (batch_id, transaction_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_import_returned_tx ON import_returned(transaction_id);
+  `,
+  `
+  -- Schrijvende handelingen in de boekhoudermodus (#427): memoriaal, terugdraaien, rekeningschema, afschrift weghalen.
+  -- Alleen additief, nooit gewist; te zien bij Instellingen → Over en in het pakket voor de boekhouder.
+  CREATE TABLE IF NOT EXISTS advanced_actions (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    detail TEXT,
+    at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];

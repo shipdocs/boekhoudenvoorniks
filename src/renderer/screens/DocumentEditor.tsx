@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, useAction, useApp, useJobsOn, useJobWords, useLoad } from '../ui';
 import { computeTotals, type LineInput } from '../../documents/totals';
 import { addDays, isIsoDate, today } from '../../shared/dates';
 import { customerVatSituation, suggestedSalesVat, type SalesVatCode } from '../../shared/vat';
@@ -20,6 +20,8 @@ const toNumber = (s: string) => Number(s.replace(',', '.'));
 const KOR_SALES_VAT: string[] = ['vrijgesteld', 'icp-dienst', 'dienst-buiten-eu'];
 
 export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?: number }) {
+  const jobsOn = useJobsOn();
+  const jw = useJobWords();
   const { go, meta, settings, toast, route } = useApp();
   const { run, busy } = useAction();
   const isInvoice = kind === 'factuur';
@@ -194,13 +196,13 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
             <Field label="Datum levering of dienst" hint={settings.kor ? 'Mag leeg bij de KOR, behalve als de dienst in een ander tijdvak geleverd is.' : 'Leeg = de factuurdatum. Vul in als je eerder of later leverde. Bij EU-diensten bepaalt deze datum (of het einde van de periode) het btw- en ICP-tijdvak.'}>
               <input type="date" value={deliveryDate} disabled={!editable} onChange={(e) => setDeliveryDate(e.target.value)} />
             </Field>
-            <Field label="t/m (alleen bij een periode)" hint="Bijvoorbeeld bij een klus van meerdere weken.">
+            <Field label="t/m (alleen bij een periode)" hint={`Bijvoorbeeld bij een ${jw.s} van meerdere weken.`}>
               <input type="date" value={deliveryDateTo} min={deliveryDate || undefined} disabled={!editable || !deliveryDate} onChange={(e) => setDeliveryDateTo(e.target.value)} />
             </Field>
           </div>
         )}
         <div style={{ marginTop: 12 }}>
-          <Field label={isInvoice ? 'Omschrijving / klus' : 'Waar gaat de offerte over?'} hint="bv. Woonkamer stucen">
+          <Field label={isInvoice ? `Omschrijving / ${jw.s}` : 'Waar gaat de offerte over?'} hint="bv. Woonkamer stucen">
             <input value={reference} disabled={!editable} onChange={(e) => setReference(e.target.value)} />
           </Field>
         </div>
@@ -303,7 +305,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           <>
             {quote.status !== 'gefactureerd' && <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Offerte verwijderen?') && (await run(async () => { await api.quotes.delete(quote.id); return true; }, 'Verwijderd'))) go({ screen: 'werk', extra: { tab: 'offertes' } }); }}>Verwijderen</Button>}
             {['concept', 'verzonden'].includes(quote.status) && <Button disabled={busy} onClick={async () => { await run(() => api.quotes.setStatus(quote.id, 'afgewezen')); await doc.reload(); }}>Afgewezen</Button>}
-            {['concept', 'verzonden'].includes(quote.status) && <Button disabled={busy} onClick={async () => { const j = await run(() => api.jobs.acceptQuote(quote.id), 'Klant is akkoord — er staat een klus klaar'); if (j) go({ screen: 'klus', id: j.id }); }}>Klant is akkoord</Button>}
+            {['concept', 'verzonden'].includes(quote.status) && <Button disabled={busy} onClick={async () => { if (!jobsOn) { await run(() => api.quotes.setStatus(quote.id, 'geaccepteerd'), 'Klant is akkoord ✓'); await doc.reload(); return; } const j = await run(() => api.jobs.acceptQuote(quote.id), `Klant is akkoord — er staat een ${jw.s} klaar`); if (j) go({ screen: 'klus', id: j.id }); }}>Klant is akkoord</Button>}
             {quote.status === 'geaccepteerd' && <Button disabled={busy} onClick={async () => { const inv = await run(() => api.quotes.convertToInvoice(quote.id)); if (inv) go({ screen: 'factuur', id: inv.id }); }}>Omzetten naar factuur</Button>}
             {quote.invoice_id && <Button onClick={() => go({ screen: 'factuur', id: quote.invoice_id! })}>Naar factuur</Button>}
             {['concept', 'verzonden'].includes(quote.status) && <Button kind="primary" disabled={busy} onClick={async () => { const docId = await save(); if (docId) setSending(true); }}>Versturen</Button>}
@@ -357,29 +359,74 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
   );
 }
 
+/** Waar het versturen met het eigen mailprogramma (#450) staat: nog niets gedaan, mail doorgegeven (vraag), of niet gelukt (webmail). */
+type OwnMailStage = 'kies' | 'vraag' | 'mislukt';
+
 function SendDialog({ kind, id, defaultTo, onClose, onSent }: { kind: 'factuur' | 'offerte'; id: number; defaultTo: string; onClose: () => void; onSent: () => void }) {
   const { settings, go } = useApp();
   const { run, busy } = useAction();
   const [to, setTo] = useState(defaultTo);
+  const [stage, setStage] = useState<OwnMailStage>('kies');
   const smtpReady = !!settings.smtp.host && !!settings.smtp.fromEmail;
+  const api_ = kind === 'factuur' ? api.invoices : api.quotes;
+
+  async function eigenMailprogramma() {
+    const r = await run<{ ok: boolean; reason?: string }>(() => api_.sendOwnMail(id, { to }));
+    if (!r) return;
+    if (r.ok) setStage('vraag');
+    else if (r.reason === 'cancelled') setStage('kies'); // je sloot het mailvenster zelf: niets tonen, niets markeren
+    else setStage('mislukt');
+  }
+  async function webmail(provider: 'gmail' | 'outlook') {
+    // opent de webmail met alles ingevuld en toont de PDF in de bestandsbeheerder om erin te slepen
+    const r = await run<boolean>(() => api_.webmail(id, provider, { to }));
+    if (r) setStage('vraag');
+  }
+  const verstuurd = kind === 'factuur' ? 'Is de factuur verstuurd?' : 'Is de offerte verstuurd?';
+  const webmailKeuze = (
+    <div className="stack">
+      <div className="small"><strong>Gmail / Outlook op het web</strong></div>
+      <div className="row">
+        <Button disabled={busy || !to} onClick={() => void webmail('gmail')}>Gmail</Button>
+        <Button disabled={busy || !to} onClick={() => void webmail('outlook')}>Outlook</Button>
+      </div>
+      <p className="small muted">De {kind} staat als PDF klaar in je bestandsbeheerder. Sleep hem in het mailvenster.</p>
+    </div>
+  );
+
   return (
     <Modal title={kind === 'factuur' ? 'Factuur versturen' : 'Offerte versturen'} onClose={onClose}>
-      {!smtpReady ? (
+      {stage === 'vraag' ? (
         <>
-          <div className="notice warn">Stel eerst in via welk e-mailadres je verstuurt.</div>
-          <div className="row end"><Button kind="primary" onClick={() => go({ screen: 'instellingen', extra: { tab: 'email' } })}>Naar e-mailinstellingen</Button></div>
+          <p><strong>{verstuurd}</strong></p>
+          <p className="small muted">Pas als je op Ja klikt, telt de {kind} als verstuurd{kind === 'factuur' ? ' en gaan de betalingsherinneringen lopen' : ''}. Is de mail nog niet weg, kies dan Nog niet: er verandert niets.</p>
+          <div className="row end">
+            <Button onClick={onClose}>Nog niet</Button>
+            <Button kind="primary" disabled={busy} onClick={async () => {
+              const r = await run<boolean>(() => api_.confirmSent(id), 'Als verstuurd gemarkeerd ✓');
+              if (r) onSent();
+            }}>Ja</Button>
+          </div>
+          {webmailKeuze}
         </>
       ) : (
         <>
+          {!smtpReady && stage === 'kies' && <div className="notice warn">Je hebt geen e-mailserver ingesteld. Versturen met je eigen mailprogramma kan zonder instellingen.</div>}
+          {stage === 'mislukt' && <div className="notice warn">Je mailprogramma kon niet worden geopend.</div>}
           <Field label="Naar"><input type="email" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
           <p className="small muted">De {kind} gaat als PDF mee. {kind === 'factuur' && 'Na versturen is de factuur definitief en wordt hij automatisch in je boekhouding verwerkt.'}</p>
           <div className="row end">
             <Button onClick={onClose}>Annuleren</Button>
-            <Button kind="primary" disabled={busy || !to} onClick={async () => {
-              const r = await run<unknown>(() => (kind === 'factuur' ? api.invoices.send(id, { to }) : api.quotes.send(id, { to })), 'Verstuurd ✓');
-              if (r) onSent();
-            }}>{busy ? 'Bezig…' : 'Versturen'}</Button>
+            {!smtpReady && <Button onClick={() => go({ screen: 'instellingen', extra: { tab: 'email' } })}>Naar e-mailinstellingen</Button>}
+            <Button kind={smtpReady ? undefined : 'primary'} disabled={busy || !to} onClick={() => void eigenMailprogramma()}>Versturen met je eigen mailprogramma</Button>
+            {smtpReady && (
+              <Button kind="primary" disabled={busy || !to} onClick={async () => {
+                const r = await run<unknown>(() => (kind === 'factuur' ? api.invoices.send(id, { to }) : api.quotes.send(id, { to })), 'Verstuurd ✓');
+                if (r) onSent();
+              }}>{busy ? 'Bezig…' : 'Versturen'}</Button>
+            )}
           </div>
+          {stage === 'mislukt' && webmailKeuze}
         </>
       )}
     </Modal>

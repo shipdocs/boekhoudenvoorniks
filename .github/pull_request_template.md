@@ -2,4 +2,5 @@
 
 - [ ] Tests toegevoegd of aangepast (`npm test`; bij schermen ook `npm run e2e`)
 - [ ] CHANGELOG.md bijgewerkt onder "Nog niet uitgebracht" (als gebruikers het merken)
+- [ ] Handleiding bijgewerkt (`docs/handleiding/`, daarna `npm run site:handleiding`) als een scherm of werkwijze verandert; anders niet van toepassing
 - [ ] Ik ga akkoord met de rechten op mijn bijdrage in [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md#rechten-op-je-bijdrage)

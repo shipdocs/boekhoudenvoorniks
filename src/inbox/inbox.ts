@@ -319,6 +319,12 @@ export class InboxService {
   /** de gedeelde vergelijking van een betaling met een aankoop die er al staat (#221) */
   private readonly matcher: BankPurchaseMatcher;
 
+  /** facturen waarvan de herinnering automatisch zou uitgaan maar zonder SMTP niet kan (#450) */
+  private remindersNeedingYou: ((asOf: IsoDate) => number[]) | null = null;
+  setRemindersNeedingYou(fn: (asOf: IsoDate) => number[]): void {
+    this.remindersNeedingYou = fn;
+  }
+
   /** betalingen aan je eigen bedrijf en de factuur die erbij hoort (#205) */
   private own: OwnCompanyPayments | null = null;
   setOwnCompany(own: OwnCompanyPayments): void {
@@ -1430,20 +1436,24 @@ export class InboxService {
       });
     }
 
+    // zonder eigen mailserver kan de app de herinnering niet zelf versturen en opent hij ook nooit een mailvenster:
+    // dan staat hij hier, en verstuur je hem zelf vanuit de factuur (#450)
+    const needYou = new Set(this.remindersNeedingYou?.(asOf) ?? []);
     for (const inv of this.invoices.list({ status: 'vervallen' }, asOf)) {
+      const alsJezelf = needYou.has(inv.id);
       tasks.push({
         key: `overdue-${inv.id}`,
         kind: 'invoice-overdue',
         icon: '⏰',
         title: `${inv.relation_name} moet nog ${formatEuro(inv.open_amount)} betalen`,
-        question: `Factuur ${inv.number} is te laat (had betaald moeten zijn op ${formatDateNl(inv.due_date)}).`,
+        question: `Factuur ${inv.number} is te laat (had betaald moeten zijn op ${formatDateNl(inv.due_date)}).${alsJezelf ? ' De herinnering gaat niet vanzelf uit, want je hebt geen e-mailserver ingesteld. Stuur hem zelf vanuit de factuur.' : ''}`,
         amount: inv.open_amount,
-        actions: [{ id: 'herinnering', label: 'Herinnering sturen', primary: true }, { id: 'open', label: 'Bekijken' }],
+        actions: alsJezelf ? [{ id: 'open', label: 'Factuur openen', primary: true }] : [{ id: 'herinnering', label: 'Herinnering sturen', primary: true }, { id: 'open', label: 'Bekijken' }],
         ref: { invoiceId: inv.id },
       });
     }
 
-    for (const job of this.jobs.list({ status: 'klaar' })) {
+    for (const job of this.settings.get().jobsEnabled ? this.jobs.list({ status: 'klaar' }) : []) {
       tasks.push({
         key: `job-${job.id}`,
         kind: 'job-done',
@@ -1469,7 +1479,7 @@ export class InboxService {
     }
 
     // Aankopen voor een klus? (#32) Alleen materiaal/gereedschap van de laatste 30 dagen zonder klus.
-    if (this.jobs.list({ active: true }).length > 0) {
+    if (this.settings.get().jobsEnabled && this.jobs.list({ active: true }).length > 0) {
       const JOB_ACCOUNTS = ['WKprInkMat', 'WBedAlkGer'];
       const recentPurchases = this.db
         .prepare(
@@ -1930,7 +1940,7 @@ export class InboxService {
       'bank-own-company:prive': OWN_HINTS.prive,
       'bank-own-company:vraag': OWN_HINTS.vraag,
       'document-review:open': 'Je ziet de bon en past aan wat niet klopt.',
-      'quote-expired:akkoord': 'Er komt een klus bij voor deze offerte; als het werk klaar is maak je de factuur.',
+      'quote-expired:akkoord': this.settings.get().jobsEnabled ? 'Er komt een klus bij voor deze offerte; als het werk klaar is maak je de factuur.' : 'De offerte staat op akkoord; als het werk klaar is zet je hem om in een factuur.',
       'quote-expired:afgewezen': 'De offerte gaat naar afgewezen. In je boekhouding verandert niets.',
       'recurring-confirm:ja': 'De app let voortaan op of de factuur en de betaling elke keer binnenkomen. Er wordt niets extra geboekt.',
       'recurring-confirm:nee': 'De app vraagt er niet meer naar.',

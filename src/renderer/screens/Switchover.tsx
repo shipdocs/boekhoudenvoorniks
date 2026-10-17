@@ -499,6 +499,10 @@ function Banks({ state, refresh, nextButton }: SectionProps) {
       toast('Dit CSV-bestand kennen we nog niet. Lees het één keer in via Bank, daar wijs je de kolommen aan.', 'error');
       return go({ screen: 'bank' });
     }
+    if (preview.format === 'csv' && preview.oneSided) {
+      toast(`Alle regels in dit bestand zijn ${preview.oneSided === 'bij' ? 'bijschrijvingen' : 'afschrijvingen'}. Lees het in via Bank, daar kun je de kolommen nakijken.`, 'error');
+      return go({ screen: 'bank' });
+    }
     const r = await run(() => api.bank.importFile(file.name, content, preview.savedMapping ?? undefined));
     if (r) toast(`${r.imported} betalingen ingelezen${r.duplicates ? ` (${r.duplicates} hadden we al)` : ''}`);
     await refresh();

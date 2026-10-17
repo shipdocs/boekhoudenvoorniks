@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="nl-NL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Handleiding | BoekhoudenVoorNiks</title>
+  <meta name="description" content="Zo werk je met BoekhoudenVoorNiks: beginnen, facturen en offertes, bonnetjes, bank, klussen, btw-aangifte, je boekhouder en wat je doet als iets niet klopt.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://boekhoudenvoorniks.nl/handleiding/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="nl_NL">
+  <meta property="og:site_name" content="BoekhoudenVoorNiks">
+  <meta property="og:url" content="https://boekhoudenvoorniks.nl/handleiding/">
+  <meta property="og:title" content="Handleiding BoekhoudenVoorNiks">
+  <meta property="og:description" content="Zo werk je met BoekhoudenVoorNiks, stap voor stap en in gewone taal.">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="../favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
+  <header class="top">
+    <div class="wrap nav">
+      <a class="brand" href="../"><picture><source srcset="../img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="../img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
+      <nav id="menu" class="menu" aria-label="Hoofdmenu">
+        <a href=".././#functies">Functies</a>
+        <a href=".././#prijzen">Prijzen</a>
+        <details class="sub">
+          <summary>Voor wie</summary>
+          <div class="panel">
+            <a href="../starters.html">Starters<span class="hint">Van KvK tot eerste btw-aangifte</span></a>
+            <a href="../stukadoors.html">Stukadoors</a>
+            <a href="../btw-stucwerk.html">Btw op stucwerk: 9% of 21%</a>
+            <a href="../schilders.html">Schilders</a>
+            <a href="../webdevelopers.html">Webdevelopers</a>
+            <a href="../boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
+          </div>
+        </details>
+        <a href="../handleiding/index.html" aria-current="page">Handleiding</a>
+        <a href="../waarom.html">Waarom</a>
+        <a href="../wijzigingen.html">Nieuw</a>
+        <a class="btn small" href="../downloaden.html">Downloaden</a>
+      </nav>
+    </div>
+  </header>
+  <script src="../menu.js" defer></script>
+
+  <main class="wrap notes handleiding handleiding-index">
+    <h1>Handleiding</h1>
+    <p class="lead">Zo werk je met BoekhoudenVoorNiks, in de woorden van de app zelf: wat je ziet, wat je klikt en wat er dan gebeurt. Geen boekhoudtermen, behalve in het laatste hoofdstuk, dat voor je boekhouder is.</p>
+    <label for="zoek" class="small">Zoek in de handleiding</label>
+    <input id="zoek" class="zoek" type="search" placeholder="Bijvoorbeeld: afschrift weghalen, btw-aangifte, bon van mijn telefoon" autocomplete="off">
+    <div id="treffers" hidden><h2>Gevonden</h2><ul class="treffers paginas"></ul><p class="fine" id="geen-treffers" hidden>Niets gevonden. Probeer een ander woord, of kijk bij <a href="problemen-oplossen.html">Problemen oplossen</a>.</p></div>
+    <div id="hoofdstukken">
+    <section class="hoofdstuk" data-hoofdstuk="Beginnen">
+      <h2>Beginnen</h2>
+      <ul class="paginas">
+        <li data-tekst="beginnen: installeren en de eerste keer starten downloaden, installeren, de vragen bij de eerste start, en wat je daarna op vandaag ziet. downloaden en installeren de eerste keer: een paar vragen vandaag: je startpunt zoeken door alles hoe de app denkt"><a href="beginnen.html">Beginnen: installeren en de eerste keer starten</a><p>Downloaden, installeren, de vragen bij de eerste start, en wat je daarna op Vandaag ziet.</p></li>
+        <li data-tekst="overstappen vanuit een ander programma een instapdatum kiezen, je vorige administratie inlezen (auditfile of overzicht van je boekhouder) en je startpositie controleren. wat overstappen betekent de overstap-hulp openen uit je vorige programma bankrekeningen controleren en klaarzetten veelgemaakte fouten"><a href="overstappen.html">Overstappen vanuit een ander programma</a><p>Een instapdatum kiezen, je vorige administratie inlezen (auditfile of overzicht van je boekhouder) en je startpositie controleren.</p></li>
+        <li data-tekst="instellingen en back-ups wat er onder elk tabblad van instellingen staat, waar je administratie staat, en hoe back-ups en updates werken. de tabbladen waar je administratie staat back-ups demo en opnieuw beginnen updates"><a href="instellingen.html">Instellingen en back-ups</a><p>Wat er onder elk tabblad van Instellingen staat, waar je administratie staat, en hoe back-ups en updates werken.</p></li>
+      </ul>
+    </section>
+    <section class="hoofdstuk" data-hoofdstuk="Dagelijks werk">
+      <h2>Dagelijks werk</h2>
+      <ul class="paginas">
+        <li data-tekst="offertes en facturen een offerte maken, de klant akkoord laten gaan, een factuur maken en versturen, en zien wie nog moet betalen. een offerte maken een factuur maken versturen met je eigen mailprogramma btw op de factuur e-factuur meesturen betaling ontvangen een factuur corrigeren: creditfactuur omzet zonder factuur klanten"><a href="werk-en-facturen.html">Offertes en facturen</a><p>Een offerte maken, de klant akkoord laten gaan, een factuur maken en versturen, en zien wie nog moet betalen.</p></li>
+        <li data-tekst="bonnetjes en aankopen een bon toevoegen (foto, pdf, e-factuur, per mail of via je telefoon), nakijken wat de app ervan maakte, en wat je doet met een bon die niet klopt. een bon toevoegen bonnen per mail het bonnen-adres (gratis) je eigen mailbox koppelen wat de app met de mail doet nakijken grote aankopen: investering of kosten? al betaald, of nog betalen garantie en klussen een bon die niet klopt"><a href="bonnetjes.html">Bonnetjes en aankopen</a><p>Een bon toevoegen (foto, pdf, e-factuur, per mail of via je telefoon), nakijken wat de app ervan maakte, en wat je doet met een bon die niet klopt.</p></li>
+        <li data-tekst="bank: afschriften inlezen en betalingen uitzoeken welk bestand je bij je bank downloadt, hoe je het inleest, hoe de app betalingen koppelt, en wat je doet bij een vraag, een dubbele betaling of een saldo dat niet klopt. welk bestand kies ik bij mijn bank? inlezen een csv die de app nog niet kent: kolommen aanwijzen &quot;klopt dit?&quot; betalingen uitzoeken: hulp nodig alle betalingen en oudere betalingen terugvinden dubbele betalingen klopt mijn saldo? automatisch: ponto en de downloadmap een verkeerd afschrift weer weghalen"><a href="bank.html">Bank: afschriften inlezen en betalingen uitzoeken</a><p>Welk bestand je bij je bank downloadt, hoe je het inleest, hoe de app betalingen koppelt, en wat je doet bij een vraag, een dubbele betaling of een saldo dat niet klopt.</p></li>
+        <li data-tekst="klussen (of projecten, of opdrachten) werk per klus bijhouden, zien wat een klus opleverde, en klussen anders noemen of helemaal uitzetten als je er niet mee werkt. wat een klus is een klus beginnen en afronden kosten, uren en ritten bij een klus wat verdien ik per klus? klussen anders noemen of uitzetten"><a href="klussen.html">Klussen (of projecten, of opdrachten)</a><p>Werk per klus bijhouden, zien wat een klus opleverde, en klussen anders noemen of helemaal uitzetten als je er niet mee werkt.</p></li>
+        <li data-tekst="je telefoon erbij: de app voor android de app op je telefoon koppelen aan het programma, bonnen scannen, foto's bij een klus maken en onderweg een factuur sturen. wat de app op je telefoon doet koppelen (één keer) als de computer uit staat wat er op de computer gebeurt"><a href="telefoon.html">Je telefoon erbij: de app voor Android</a><p>De app op je telefoon koppelen aan het programma, bonnen scannen, foto's bij een klus maken en onderweg een factuur sturen.</p></li>
+      </ul>
+    </section>
+    <section class="hoofdstuk" data-hoofdstuk="Belasting en boekhouder">
+      <h2>Belasting en boekhouder</h2>
+      <ul class="paginas">
+        <li data-tekst="btw-aangifte en inkomstenbelasting per kwartaal zien wat je invult in mijn belastingdienst zakelijk, de controles vooraf, het betalingskenmerk vastleggen, en wat de app voor de inkomstenbelasting bijhoudt. de btw-aangifte doen buitenland en bijzondere gevallen inkomstenbelasting jaarafsluiting"><a href="btw-aangifte.html">Btw-aangifte en inkomstenbelasting</a><p>Per kwartaal zien wat je invult in Mijn Belastingdienst Zakelijk, de controles vooraf, het betalingskenmerk vastleggen, en wat de app voor de inkomstenbelasting bijhoudt.</p></li>
+        <li data-tekst="je boekhouder, en periodes afsluiten het pakket voor je boekhouder maken, samenwerken via de uitwisseling, en een kwartaal of jaar afsluiten zodat er niets meer verandert. je boekhouder hoeft niet over te stappen het pakket voor je boekhouder de uitwisseling een periode afsluiten het abonnement"><a href="boekhouder.html">Je boekhouder, en periodes afsluiten</a><p>Het pakket voor je boekhouder maken, samenwerken via de uitwisseling, en een kwartaal of jaar afsluiten zodat er niets meer verandert.</p></li>
+      </ul>
+    </section>
+    <section class="hoofdstuk" data-hoofdstuk="Problemen oplossen">
+      <h2>Problemen oplossen</h2>
+      <ul class="paginas">
+        <li data-tekst="problemen oplossen wat je doet als iets niet klopt: een afschrift dat verkeerd is ingelezen, een saldo dat niet aansluit, een bon die niet gelezen wordt, een windows-melding, of een back-up terugzetten. mijn csv-afschrift kwam helemaal als &quot;bij&quot; (of &quot;af&quot;) binnen mijn banksaldo klopt niet een betaling is verkeerd verwerkt een bon wordt niet gelezen, of verkeerd windows zegt &quot;windows heeft uw pc beveiligd&quot; de app start niet of blijft hangen een back-up terugzetten ik ben overgestapt naar een andere computer ik heb in de boekhoudermodus iets kapotgemaakt iets anders"><a href="problemen-oplossen.html">Problemen oplossen</a><p>Wat je doet als iets niet klopt: een afschrift dat verkeerd is ingelezen, een saldo dat niet aansluit, een bon die niet gelezen wordt, een Windows-melding, of een back-up terugzetten.</p></li>
+      </ul>
+    </section>
+    <section class="hoofdstuk boekhouder" data-hoofdstuk="Voor de boekhouder">
+      <h2>Voor de boekhouder</h2>
+      <div class="boekhouder-waarschuwing" role="note"><strong>Dit is de boekhoudermodus.</strong> Niet nodig en niet aan te raden voor gewone gebruikers: je werkt hier rechtstreeks in je boekhouding en kunt iets kapotmaken dat de app anders voor je bewaakt. Kijken mag altijd; boeken, terugdraaien, rekeningen wijzigen en afschriften weghalen zijn voor je boekhouder. Wij geven geen advies over een boekhouding: vragen over een administratie lopen via je boekhouder, die met de uitwisseling werkt. Op een administratie waarin buiten de boekhouder om in deze modus is geschreven, geven we geen ondersteuning.</div>
+      <ul class="paginas">
+        <li data-tekst="de boekhoudermodus wat er verschijnt als je &quot;toon de boekhouding voor je boekhouder&quot; aanzet, voor wie het is, en wat je ermee kunt: kolommenbalans, grootboekkaarten, journaal, correctieboekingen, rekeningschema en exports. voor wie aanzetten wat er onder boekhouding staat grootboek en btw wat de boekhoudermodus niet doet"><a href="boekhoudermodus.html">De boekhoudermodus</a><p>Wat er verschijnt als je &quot;Toon de boekhouding voor je boekhouder&quot; aanzet, voor wie het is, en wat je ermee kunt: kolommenbalans, grootboekkaarten, journaal, correctieboekingen, rekeningschema en exports.</p></li>
+        <li data-tekst="een ingelezen afschrift weghalen een verkeerd ingelezen bankafschrift helemaal weghalen, inclusief wat er al mee gedaan was, en het daarna opnieuw inlezen. wanneer zo doe je het wat er precies gebeurt daarna controleren"><a href="afschrift-weghalen.html">Een ingelezen afschrift weghalen</a><p>Een verkeerd ingelezen bankafschrift helemaal weghalen, inclusief wat er al mee gedaan was, en het daarna opnieuw inlezen.</p></li>
+      </ul>
+    </section>
+    </div>
+    <p class="fine">De handleiding hoort bij versie 1.8.0. Mis je iets? <a href="mailto:info@shipdocs.app?subject=Handleiding">Mail ons</a>.</p>
+  </main>
+
+  <footer class="wrap foot">
+    <div class="foot-links">
+      <div>
+        <h2>Programma</h2>
+        <ul>
+          <li><a href="../werkadministratie.html">Werkadministratie, geen boekhoudpakket</a></li>
+          <li><a href=".././#functies">Functies</a></li>
+          <li><a href=".././#prijzen">Prijzen</a></li>
+          <li><a href=".././#overstappen">Overstappen</a></li>
+          <li><a href="../bank-automatisch.html">Bank automatisch inlezen</a></li>
+          <li><a href="../btw-aangifte.html">Btw-aangifte zelf doen</a></li>
+          <li><a href="../buitenlandse-facturen.html">Buitenlandse facturen verwerken</a></li>
+          <li><a href="../zonder-abonnement.html">Zonder abonnement</a></li>
+          <li><a href="../offline-boekhoudprogramma.html">Offline boekhoudprogramma</a></li>
+          <li><a href="../gratis-boekhoudprogramma-downloaden.html">Gratis boekhoudprogramma downloaden</a></li>
+          <li><a href="../handleiding/index.html" aria-current="page">Handleiding</a></li>
+          <li><a href=".././#vragen">Veelgestelde vragen</a></li>
+          <li><a href="../wijzigingen.html">Wat is er nieuw</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Voor wie</h2>
+        <ul>
+          <li><a href="../starters.html">Starters</a></li>
+          <li><a href="../stukadoors.html">Stukadoors</a></li>
+          <li><a href="../schilders.html">Schilders</a></li>
+          <li><a href="../webdevelopers.html">Webdevelopers</a></li>
+          <li><a href="../boekhouders.html">Boekhouders</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Over</h2>
+        <ul>
+          <li><a href="../waarom.html">Waarom we dit maakten</a></li>
+          <li><a href="../kwaliteit.html">Hoe wij de software controleren</a></li>
+          <li><a href="../downloaden.html">Downloaden</a></li>
+          <li><a href="https://github.com/shipdocs/boekhoudenvoorniks">Broncode (AGPL-3.0-or-later)</a></li>
+          <li><a href="mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks">Vragen en feedback: mail ons</a></li>
+          <li><a href="../voorwaarden.html">Voorwaarden</a></li>
+          <li><a href="../privacy.html">Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong><a href="https://shipdocs.app/">ShipDocs</a></strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a> · <button type="button" class="linkish" data-cookie-settings>Cookie-voorkeuren</button></p>
+    <div id="privacy-choice" role="dialog" aria-label="Meten van advertenties">
+      <p><strong>Mogen we meten of onze advertentie werkt?</strong> Met je toestemming laden we de Meta Pixel (Facebook en Instagram). Meta plaatst dan cookies en ziet dat je deze site bezocht. Zonder toestemming gaat er niets naar Meta. <a href="../privacy.html#website">Meer uitleg</a></p>
+      <div class="row"><button type="button" class="btn small" data-choice="ja">Toestaan</button><button type="button" class="btn small ghost" data-choice="nee">Niet toestaan</button></div>
+    </div>
+    <script src="../meta-pixel.js" defer></script>
+  </footer>
+  <script src="zoek.js" defer></script>
+</body>
+</html>

@@ -790,6 +790,9 @@ export class BankFeedService {
           summary.skipped.push({ pontoId: row.external_id });
           continue;
         }
+        // De vervaldatum van de toestemming zoals Ponto hem nú geeft. Werd die alleen bij het koppelen bewaard, dan
+        // bleef na een verlenging bij Ponto de oude datum staan en bleef "toestemming verlopen" op Vandaag (#426).
+        if (account.expiresAt !== row.expires_at) this.db.prepare('UPDATE bank_feed_accounts SET expires_at = ? WHERE id = ?').run(account.expiresAt, row.id);
         const imported = await this.roundAccount(row, account, client, opts);
         summary.accounts.push({ pontoId: row.external_id, bankAccountId, imported });
         if (imported > 0) summary.importedAny = true;

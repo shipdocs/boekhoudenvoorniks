@@ -6,7 +6,7 @@ import { ACCOUNTS } from '../core-ledger/accounts';
 import { formatEuro, type Cents } from '../shared/money';
 import { addDays, periodFor, type IsoDate, type Period } from '../shared/dates';
 import type { CarPrivateUse } from './car';
-import { EU_B2C_THRESHOLD, EU_COUNTRIES, countryCode } from '../shared/vat';
+import { EU_B2C_THRESHOLD, EU_COUNTRIES, countryCode, isEuForGoods } from '../shared/vat';
 import { korActive } from '../settings/settings';
 import { BankPurchaseMatcher, purchaseSupplierName, type PurchaseProbe } from '../documents/bank-purchase-match';
 
@@ -298,15 +298,20 @@ export function runVatChecks(
     .all(start, end) as { id: number; number: string; name: string; country: string; vat_number: string | null; codes: string }[];
   const euBusinessWithVat = invoices.filter((i) => {
     const c = countryCode(i.country);
-    return c && EU_COUNTRIES.has(c) && i.vat_number && i.codes.split(',').some((x) => x === 'hoog' || x === 'laag');
+    // Noord-Ierland (XI) is alleen voor goederen een EU-land (#317): ook daar is Nederlandse btw bij een bedrijf meestal fout.
+    return c && isEuForGoods(c) && i.vat_number && i.codes.split(',').some((x) => x === 'hoog' || x === 'laag');
   });
+  const northernIreland = euBusinessWithVat.filter((i) => countryCode(i.country) === 'XI');
+  const onlyNorthernIreland = northernIreland.length > 0 && northernIreland.length === euBusinessWithVat.length;
   if (euBusinessWithVat.length > 0) {
     const first = euBusinessWithVat[0]!;
     found.push({
       key: 'eu-bedrijf-met-btw',
       blocking: false,
       title: `${euBusinessWithVat.length === 1 ? `Factuur ${first.number}` : `${euBusinessWithVat.length} facturen`} aan een bedrijf in een ander EU-land met Nederlandse btw`,
-      detail: `Bij een bedrijf in een ander EU-land (zoals ${first.name}) verleg je de btw meestal: kies "Dienst aan een bedrijf in een ander EU-land" (of "Goederen …" als je spullen levert). Alleen bij werk aan een gebouw of grond in Nederland reken je Nederlandse btw. Klopt het niet? Maak een creditfactuur en een nieuwe factuur. Twijfel je? Vraag je boekhouder.`,
+      detail: onlyNorthernIreland
+        ? `Noord-Ierland (zoals ${first.name}) geldt alleen voor goederen als EU-land. Lever je spullen aan een bedrijf daar, kies dan "Goederen aan een bedrijf in een ander EU-land" (rubriek 3b en opgaaf ICP). Is het een dienst, kies dan "Klant buiten de EU". Alleen bij werk aan een gebouw of grond in Nederland reken je Nederlandse btw. Klopt het niet? Maak een creditfactuur en een nieuwe factuur. Twijfel je? Vraag je boekhouder.`
+        : `Bij een bedrijf in een ander EU-land (zoals ${first.name}) verleg je de btw meestal: kies "Dienst aan een bedrijf in een ander EU-land" (of "Goederen …" als je spullen levert). Alleen bij werk aan een gebouw of grond in Nederland reken je Nederlandse btw. Klopt het niet? Maak een creditfactuur en een nieuwe factuur. Twijfel je? Vraag je boekhouder.${northernIreland.length > 0 ? ` Let op: voor een klant in Noord-Ierland (${northernIreland[0]!.name}) geldt dat alleen voor goederen; een dienst daar kies je als "Klant buiten de EU".` : ''}`,
       count: euBusinessWithVat.length,
       fingerprint: euBusinessWithVat.map((i) => i.id).join(','),
       screen: 'werk',
@@ -317,6 +322,8 @@ export function runVatChecks(
   // plaats van heffing af van het soort dienst (bv. werk aan een gebouw: altijd in dat land). De app
   // kent het soort prestatie niet, dus: waarschuwen dat het gecontroleerd moet worden.
   const year = end.slice(0, 4);
+  // Noord-Ierland telt mee in dezelfde drempel van € 10.000 als de EU-landen (afstandsverkoop van goederen; bevestigd door de accountant, HMRC VATNIEU3720)
+  const B2C_COUNTRIES = [...[...EU_COUNTRIES].filter((c) => c !== 'NL'), 'XI'];
   const consumerTurnover = (from: string, to: string) => (
     db
       .prepare(
@@ -325,10 +332,10 @@ export function runVatChecks(
          JOIN chart_of_accounts a ON a.id = l.account_id
          JOIN relations r ON r.id = l.relation_id
          WHERE a.rgs_code IN (?, ?) AND e.entry_date BETWEEN ? AND ? AND e.source = 'factuur'
-           AND UPPER(COALESCE(r.country, 'NL')) IN (${[...EU_COUNTRIES].filter((c) => c !== 'NL').map(() => '?').join(',')})
+           AND UPPER(COALESCE(r.country, 'NL')) IN (${B2C_COUNTRIES.map(() => '?').join(',')})
            AND COALESCE(r.vat_number, '') = ''`,
       )
-      .get(ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, from, to, ...[...EU_COUNTRIES].filter((c) => c !== 'NL')) as { s: number }
+      .get(ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, from, to, ...B2C_COUNTRIES) as { s: number }
   ).s;
   const euConsumers = consumerTurnover(`${year}-01-01`, end);
   const previousYear = String(Number(year) - 1);
@@ -343,7 +350,7 @@ export function runVatChecks(
         above
           ? `Stuur je spullen op of lever je digitale diensten, dan reken je boven ${formatEuro(EU_B2C_THRESHOLD)} in het lopende of vorige kalenderjaar de btw van het land van de klant (via de "OSS-regeling").`
           : `Voor spullen die je opstuurt en digitale diensten mag dat tot ${formatEuro(EU_B2C_THRESHOLD)} in zowel het lopende als het vorige kalenderjaar.`
-      } Voor andere diensten hangt het af van wat je doet: werk aan een huis of gebouw in dat land is bijvoorbeeld altijd belast in dat land. Dat regelt de app niet: laat je boekhouder controleren welke btw geldt.`,
+      } Klanten in Noord-Ierland tellen voor spullen mee in dezelfde grens (daar gaat het dan om Britse btw, ook via de OSS-regeling). Voor andere diensten hangt het af van wat je doet: werk aan een huis of gebouw in dat land is bijvoorbeeld altijd belast in dat land. Dat regelt de app niet: laat je boekhouder controleren welke btw geldt.`,
       count: 1,
       fingerprint: `${year}:${above ? 'boven' : 'onder'}`,
       screen: 'belasting',

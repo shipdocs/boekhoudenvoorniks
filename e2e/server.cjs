@@ -7,6 +7,7 @@
  * POST /__reset        lege administratie (nieuwe map), voor elke test; body {"licenses":true} = licenties aan,
  *                      met een nagebootste licentie-Worker (echte Ed25519-handtekening, eigen sleutelpaar)
  * POST /__downloads    de map die in de test de Downloads-map is (leeg aangemaakt per test); de test zet er bestanden in
+ * POST /__ownmail     {"mode":"ok"|"no-handler"|"failed"|"cancelled"} stelt de nagebootste mailprogramma-handler in (#450); geeft terug welke mails hij kreeg
  * POST /__opened       de bijlagen die geopend zijn: het pad uit de database en de inhoud van het bestand (base64)
  * POST /__ponto        stelt uitsluitend de fictieve Ponto-provider in en geeft zijn veilige aanroeplog terug
  * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
@@ -20,6 +21,8 @@
  *                      de laatst getoonde QR-code terug, zodat de test zich als telefoon kan melden
  * POST /__ocr          een trage tekstherkenning nabootsen: body {"traag":true} = bonnen lezen duurt tot de test het zegt;
  *                      {"klaar":["regel", ...]} = het lopende leesverzoek geeft deze regels terug
+ * POST /__bonnen      bonnen-adres (#450): body {"status":"wacht"|"actief"|...} zet de stand bij de nagebootste server;
+ *                      geeft de aanroepen terug die de app deed
  * alles anders         bestanden uit dist/renderer
  */
 const http = require('node:http');
@@ -35,7 +38,7 @@ const { createApi } = require(path.join(ROOT, 'main/main/api.js'));
 const { wipeDatabase } = require(path.join(ROOT, 'main/main/reset.js'));
 const { deleteAttachment, resolveAttachmentPath, saveAttachment } = require(path.join(ROOT, 'main/main/attachments.js'));
 const { seedDemo } = require(path.join(ROOT, 'main/demo/demo.js'));
-const { Administrations, readAdministrationFile } = require(path.join(ROOT, 'main/main/administrations.js'));
+const { Administrations, readAdministrationFile, renameAdministrationFile } = require(path.join(ROOT, 'main/main/administrations.js'));
 const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js'));
 const { createBackupBundle, extractBundle } = require(path.join(ROOT, 'main/main/backup.js'));
 const { ExchangeService, sanitizeForExchange } = require(path.join(ROOT, 'main/exchange/exchange.js'));
@@ -48,6 +51,32 @@ const { BANK_FEED } = require(path.join(ROOT, 'main/shared/bank-feed.js'));
 const Database = require('better-sqlite3');
 // Alleen deze testserver zet de nog niet vrijgegeven functie aan. Productbuilds houden de vlag uit.
 BANK_FEED.available = true;
+const { BonnenAdresService } = require(path.join(ROOT, 'main/mail/bonnen-adres.js'));
+
+/** De licentieserver voor het bonnen-adres nagebootst; de stand zet de test met POST /__bonnen. */
+const defaultBonnen = () => ({ status: 'onbevestigd', calls: [], n: 0 });
+let bonnenFake = defaultBonnen();
+const bonnenServer = {
+  async aanmelden(body, token) {
+    bonnenFake.calls.push({ op: 'aanmelden', body, token });
+    bonnenFake.status = 'onbevestigd';
+    bonnenFake.n += 1;
+    const [local, domain] = body.email.split('@');
+    return { status: 'onbevestigd', installatie: `token-${bonnenFake.n}`, email: `${local.slice(0, 1)}***@${domain}` };
+  },
+  async status(token) {
+    bonnenFake.calls.push({ op: 'status', token });
+    return { status: bonnenFake.status, ...(bonnenFake.status === 'actief' ? { adres: 'bakkerijpi-k7m2q@post.boekhoudenvoorniks.nl' } : {}) };
+  },
+  async inloggegevens() {
+    throw new Error('In de test is er geen mailserver');
+  },
+  async stoppen(token) {
+    bonnenFake.calls.push({ op: 'stoppen', token });
+    bonnenFake.status = 'gestopt';
+    return { ok: true, status: 'gestopt' };
+  },
+};
 /** het kantoor op deze "computer" (in de app: kantoor.json in de gegevensmap) */
 let officeProfile = null;
 /** geheimen per administratie (in de app: in de eigen database, versleuteld); blijven bewaard bij wisselen */
@@ -290,6 +319,9 @@ async function storeFile(name, data) {
 }
 /** de bijlagen die de test "opende" (in de app: met het programma van de computer) */
 let openedAttachments = [];
+// versturen met het eigen mailprogramma (#450): wat de nagebootste handler teruggeeft en welke mails hij kreeg
+let ownMailMode = 'ok';
+let ownMailCalls = [];
 
 function init(fresh) {
   if (fresh) {
@@ -312,6 +344,15 @@ function init(fresh) {
     storeFile,
     removeFile: (p) => deleteAttachment(path.dirname(file), p),
     statementFiles: folderAccess,
+    ownMail: {
+      pdfDir: path.join(path.dirname(file), 'tijdelijke-pdf'),
+      handOver: async (msg) => {
+        ownMailCalls.push({ to: msg.to, subject: msg.subject, body: msg.body, pdfExists: fs.existsSync(msg.attachmentPath) });
+        if (ownMailMode === 'ok') return { ok: true };
+        if (ownMailMode === 'cancelled') return { ok: false, reason: 'cancelled' };
+        return { ok: false, reason: ownMailMode === 'failed' ? 'failed' : 'no-handler' };
+      },
+    },
     // alleen voor een test van het abonnement; standaard staan licenties uit ('' = uit, ook nu de app een echte sleutel heeft)
     licensePublicKey: licensing?.publicKey ?? process.env.E2E_LICENSE_PUBLIC_KEY ?? '',
   });
@@ -343,6 +384,13 @@ function init(fresh) {
     appVersion: () => '0.0.0-e2e',
     scanner: { service: () => current, pickFolder: async () => pickedFolder },
     licenseApi: licensing ? fakeLicenseApi() : undefined,
+    bonnen: (() => {
+      // dezelfde geheimen als de app, met de testschakelaar voor "geen sleutelhanger" (/__securestorage)
+      const base = secretsFor(file);
+      const store = { get available() { return secureStorageSwitch !== null ? secureStorageSwitch : base.available; }, get: (k) => base.get(k), set: (k, v) => base.set(k, v), delete: (k) => base.delete(k) };
+      const svc = new BonnenAdresService(db, services.settings, store, bonnenServer);
+      return { view: () => svc.view(), aanvragen: (i) => svc.aanvragen(i), verversen: () => svc.verversen(), stoppen: () => svc.stoppen(), vergeten: () => svc.vergeten() };
+    })(),
     exchange: {
       bundle: () => createBackupBundle(db, path.dirname(file), (copy) => {
         const d = new Database(copy);
@@ -394,6 +442,19 @@ function init(fresh) {
         openAdmin(key);
         return key;
       },
+      async rename(key, name) {
+        const admins = new Administrations(dir);
+        if (key === admins.current()) {
+          services.settings.update({ company: { ...services.settings.get().company, name: name.trim() } });
+          return;
+        }
+        renameAdministrationFile(path.join(admins.dirFor(key), 'boekhouding.sqlite'), name);
+      },
+      // in de app gaat de map naar de prullenbak; hier (tijdelijke map) gewoon weg
+      async remove(key) {
+        fs.rmSync(new Administrations(dir).dirToRemove(key), { recursive: true, force: true });
+      },
+      async openFolder() {},
     },
     // afschriften uit de downloadmap: echt in een (tijdelijke) map kijken; "Andere map kiezen" kiest een tweede map
     statementFolder: {
@@ -437,6 +498,7 @@ function init(fresh) {
       openedAttachments.push({ stored: p, content: fs.readFileSync(target).toString('base64') });
     },
     async openExternal(url) { openedAttachments.push({ url }); },
+    revealFile(p) { openedAttachments.push({ revealed: p }); },
     setSmtpPassword: (pw) => { smtpPassword = pw || null; },
     hasSmtpPassword: () => smtpPassword !== null,
     // veilige opslag zoals in de app (#249): dezelfde methode, met een veilige standaard (aan,
@@ -498,7 +560,10 @@ http
         restoreCalls = [];
         store = noStore();
         openedAttachments = [];
+        ownMailMode = 'ok';
+        ownMailCalls = [];
         ponto = defaultPonto();
+        bonnenFake = defaultBonnen();
         secureStorageSwitch = null;
         licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
         resetFolders();
@@ -515,6 +580,11 @@ http
       if (req.url === '/__sent') return res.end(JSON.stringify({ ok: sent }));
       if (req.url === '/__downloads') return res.end(JSON.stringify({ ok: downloadsDir() }));
       if (req.url === '/__restore') return res.end(JSON.stringify({ ok: restoreCalls }));
+      if (req.url === '/__ownmail') {
+        // {"mode":"ok"|"no-handler"|"failed"|"cancelled"} stelt de nagebootste handler in; zonder body: wat hij kreeg
+        if (body && JSON.parse(body).mode) ownMailMode = JSON.parse(body).mode;
+        return res.end(JSON.stringify({ ok: ownMailCalls }));
+      }
       if (req.url === '/__opened') return res.end(JSON.stringify({ ok: openedAttachments }));
       if (req.url === '/__ponto') {
         const input = body ? JSON.parse(body) : {};
@@ -539,6 +609,10 @@ http
       if (req.url === '/__store') {
         if (body) store = { ...store, ...JSON.parse(body) };
         return res.end(JSON.stringify({ ok: store }));
+      }
+      if (req.url === '/__bonnen') {
+        if (body && JSON.parse(body).status) bonnenFake.status = JSON.parse(body).status;
+        return res.end(JSON.stringify({ ok: bonnenFake.calls }));
       }
       if (req.url === '/__securestorage') {
         // {"on":true|false} dwingt de schakelaar; zonder body terug naar de veilige standaard
@@ -586,7 +660,9 @@ http
       inflight++;
       try {
         const r = await handler(...args);
-        res.end(JSON.stringify({ ok: r === undefined ? null : r }, replace));
+        // zoals Electron: een functie die niets teruggeeft, geeft in de renderer `undefined` (geen `null`);
+        // de sleutel `ok` valt dan weg en de brug in fixtures.ts leest `undefined`
+        res.end(JSON.stringify({ ok: r }, replace));
       } catch (e) {
         res.end(JSON.stringify({ error: e.message }));
       } finally {

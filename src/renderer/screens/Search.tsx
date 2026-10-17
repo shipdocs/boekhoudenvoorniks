@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { Euro, DateNl, Empty, useApp, type Route } from '../ui';
+import { Euro, DateNl, Empty, useApp, useJobsOn, useJobWords, type Route } from '../ui';
 import type { SearchGroup } from '../../search/search';
+import type { JobWords } from '../../shared/job-term';
 
 const KIND_LABEL: Record<string, string> = { document: '📷 Document', factuur: '💰 Factuur', offerte: '📄 Offerte', relatie: '👤 Klant/leverancier', bank: '🏦 Betaling', klus: '🔨 Klus', inkoop: '🧾 Aankoop', boeking: '📚 Boeking' };
+
+const kindLabel = (kind: string, jw: JobWords): string | undefined => (kind === 'klus' ? `🔨 ${jw.S}` : KIND_LABEL[kind]);
 
 /** Snippet met [[treffer]] → gemarkeerde tekst, zonder HTML te injecteren. */
 function Snippet({ text }: { text: string }) {
@@ -29,6 +32,7 @@ function routeFor(kind: string, id: number): Route {
 
 /** Zoekt terwijl je typt; een oudere, tragere zoekopdracht overschrijft de resultaten van een nieuwere niet. */
 function useSearch(q: string, limit: number): { results: SearchGroup[]; error: string | null; busy: boolean } {
+  const jobsOn = useJobsOn();
   const [results, setResults] = useState<SearchGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,7 +43,7 @@ function useSearch(q: string, limit: number): { results: SearchGroup[]; error: s
       try {
         const r = q.trim() ? await api.search.query(q, undefined, limit) : [];
         if (!current) return;
-        setResults(r);
+        setResults(jobsOn ? r : r.filter((g) => !g.key.startsWith('klus:')).map((g) => ({ ...g, links: g.links.filter((l) => l.kind !== 'klus') })));
         setError(null);
       } catch (e) {
         if (current) setError((e as Error).message);
@@ -51,7 +55,7 @@ function useSearch(q: string, limit: number): { results: SearchGroup[]; error: s
       current = false;
       clearTimeout(t);
     };
-  }, [q, limit]);
+  }, [q, limit, jobsOn]);
   return { results, error, busy };
 }
 
@@ -73,6 +77,7 @@ let lastQuery = '';
 
 /** Eén zoekbalk over alles (#26). Ctrl+K. Tip: "> 400", "2026-09". Het hele overzicht staat in het zoekscherm. */
 export function SearchOverlay({ onClose }: { onClose: () => void }) {
+  const jw = useJobWords();
   const { go, settings } = useApp();
   const [q, setQ] = useState('');
   const { results, error } = useSearch(q, 50);
@@ -110,7 +115,7 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
           {results.map((g) => (
             <div key={g.key} className="search-group">
               <button className="search-main" onClick={() => open(g.hits[0]!.kind, g.hits[0]!.id)}>
-                <span className="small muted">{KIND_LABEL[g.hits[0]!.kind]}</span>
+                <span className="small muted">{kindLabel(g.hits[0]!.kind, jw)}</span>
                 <strong>{g.title}</strong>
                 <span className="grow" />
                 {g.date && <span className="small muted"><DateNl date={g.date} /></span>}
@@ -122,7 +127,7 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
               {otherLinks(g, settings.advancedMode).length > 0 && (
                 <div className="row small" style={{ gap: 6, flexWrap: 'wrap' }}>
                   {otherLinks(g, settings.advancedMode).map((l) => (
-                    <button key={`${l.kind}${l.id}`} className="chip-link" onClick={() => open(l.kind, l.id)}>{KIND_LABEL[l.kind]}: {l.label}</button>
+                    <button key={`${l.kind}${l.id}`} className="chip-link" onClick={() => open(l.kind, l.id)}>{kindLabel(l.kind, jw)}: {l.label}</button>
                   ))}
                 </div>
               )}
@@ -155,6 +160,8 @@ const KINDS: { key: string; label: string }[] = [
  * rekening, waar het op geboekt is, in welke btw-aangifte, of er een bon is, en of het nog aandacht nodig heeft.
  */
 export function SearchScreen() {
+  const jobsOn = useJobsOn();
+  const jw = useJobWords();
   const { go, settings } = useApp();
   const [q, setQ] = useState(lastQuery);
   const [kind, setKind] = useState<string | null>(null);
@@ -175,7 +182,7 @@ export function SearchScreen() {
   return (
     <div className="page">
       <h1>Zoeken</h1>
-      <p className="sub">In betalingen, aankopen, bonnen, facturen, klanten en klussen. Tip: "Preply", "Jansen &gt; 400", "Revolut 2026-07".</p>
+      <p className="sub">In betalingen, aankopen, bonnen, facturen, klanten{jobsOn && <> en {jw.p}</>}. Tip: "Preply", "Jansen &gt; 400", "Revolut 2026-07".</p>
       <input
         ref={input}
         className="search-input"
@@ -190,8 +197,8 @@ export function SearchScreen() {
         <div className="row" style={{ margin: '12px 0', gap: 12, flexWrap: 'wrap' }}>
           <div className="chips">
             <button className={kind === null ? 'selected' : ''} onClick={() => setKind(null)}>Alles ({results.length})</button>
-            {KINDS.filter((k) => counts.get(k.key)).map((k) => (
-              <button key={k.key} className={kind === k.key ? 'selected' : ''} onClick={() => setKind(k.key)}>{k.label} ({counts.get(k.key)})</button>
+            {KINDS.filter((k) => counts.get(k.key) && (jobsOn || k.key !== 'klus')).map((k) => (
+              <button key={k.key} className={kind === k.key ? 'selected' : ''} onClick={() => setKind(k.key)}>{k.key === 'klus' ? jw.P : k.label} ({counts.get(k.key)})</button>
             ))}
           </div>
           <label className="row small"><input type="checkbox" checked={attention} onChange={(e) => setAttention(e.target.checked)} /> Alleen wat nog aandacht nodig heeft</label>
@@ -215,14 +222,14 @@ export function SearchScreen() {
                   <tr key={g.key} className="clickable" onClick={() => go(routeFor(hit.kind, hit.id))}>
                     <td>{g.date ? <DateNl date={g.date} /> : '—'}</td>
                     <td>
-                      <span className="small muted">{KIND_LABEL[kindOf(g)] ?? KIND_LABEL[hit.kind]}</span> <strong>{g.title}</strong>
+                      <span className="small muted">{kindLabel(kindOf(g), jw) ?? kindLabel(hit.kind, jw)}</span> <strong>{g.title}</strong>
                       {i?.counterparty && i.counterparty !== g.title && <span className="muted"> · {i.counterparty}</span>}
                       <div className="small muted"><Snippet text={hit.snippet} /></div>
                       {g.warranty && <div className="small">🛡️ {g.warranty}</div>}
                       {otherLinks(g, settings.advancedMode).length > 0 && (
                         <div className="row small" style={{ gap: 6, flexWrap: 'wrap', marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
                           {otherLinks(g, settings.advancedMode).map((l) => (
-                            <button key={`${l.kind}${l.id}`} className="chip-link" onClick={() => go(routeFor(l.kind, l.id))}>{KIND_LABEL[l.kind]}: {l.label}</button>
+                            <button key={`${l.kind}${l.id}`} className="chip-link" onClick={() => go(routeFor(l.kind, l.id))}>{kindLabel(l.kind, jw)}: {l.label}</button>
                           ))}
                         </div>
                       )}

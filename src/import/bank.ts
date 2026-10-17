@@ -159,6 +159,41 @@ export interface RemovedDuplicate extends DoubleSide {
 }
 
 /** Een regel uit een afschrift die niet is toegevoegd omdat de betaling er al stond, met die betaling ernaast. */
+/** Een ingelezen afschrift in de lijst (#408). */
+export interface StatementImport {
+  id: number;
+  filename: string | null;
+  source: string;
+  importedAt: string;
+  accounts: string | null;
+  from: IsoDate | null;
+  to: IsoDate | null;
+  lines: number;
+  processed: number;
+  /** waarom het niet weg kan, of null */
+  blocked: string | null;
+}
+
+/** Wat het weghalen van een afschrift doet (#408). */
+export interface StatementRemoval {
+  id: number;
+  filename: string | null;
+  source: string;
+  importedAt: string;
+  lines: number;
+  /** regels die ook in een ander bewaard afschrift staan: die blijven, en horen voortaan bij dat afschrift */
+  kept: number;
+  /** verwerkte regels (van wat weggaat): die krijgen eerst een tegenboeking */
+  processed: { id: number; date: IsoDate; amount: Cents; counterName: string | null; description: string }[];
+  /** bonnen die er als bewijs bij hangen: gaan terug naar "Nog controleren" */
+  evidence: number;
+  /** regels uit latere afschriften die hierdoor waren overgeslagen: komen er alsnog in */
+  skippedElsewhere: number;
+  /** regels uit andere afschriften die als dubbel hiervan weg waren: komen terug */
+  doubles: number;
+  blocked: string | null;
+}
+
 export interface SkippedRow {
   id: number;
   batchId: number;
@@ -585,6 +620,8 @@ export class BankService {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const byHash = this.db.prepare('SELECT id, bank_id, batch_ref, import_batch_id AS batch, bank_account_id AS account, amount, transaction_date AS date FROM bank_transactions WHERE dedup_hash = ?');
+      // dit bestand bevat een betaling die er al stond: onthouden, voor als dat eerdere afschrift ooit weggehaald wordt (#408)
+      const insertReturned = this.db.prepare('INSERT OR IGNORE INTO import_returned (batch_id, transaction_id) VALUES (?, ?)');
       const skippedByHash = this.db.prepare(
         `SELECT k.matched_transaction_id AS matched, t.import_batch_id AS batch, t.bank_account_id AS account, k.amount, k.transaction_date AS date
          FROM import_skipped k JOIN bank_transactions t ON t.id = k.matched_transaction_id WHERE k.dedup_hash = ?`,
@@ -595,6 +632,15 @@ export class BankService {
       const nearOtherKind = this.db.prepare(
         `SELECT s.period_from AS "from", s.period_to AS "to" FROM import_batch_accounts s JOIN import_batches b ON b.id = s.batch_id
          WHERE s.bank_account_id = ? AND s.batch_id <> ? AND (CASE WHEN b.kind IS NULL THEN b.source <> ? ELSE b.kind <> ? END) AND s.period_from <= ? AND s.period_to >= ?`,
+      );
+      // Betalingen van de bankkoppeling uit een ronde zonder bewezen periode: die ronde heeft geen dekkingsrij
+      // (Ponto wist hem, bankfeed.ts), dus hun dagen tellen niet als "bekende periode". Toch kunnen het dezelfde
+      // betalingen zijn als in een afschrift dat er daarna overheen komt (#459): vergelijk die dagen ook.
+      const nearUncoveredFeed = this.db.prepare(
+        `SELECT 1 FROM bank_transactions t JOIN import_batches b ON b.id = t.import_batch_id
+         WHERE t.bank_account_id = ? AND t.import_batch_id <> ? AND b.source = 'openbanking' AND ? <> 'openbanking' AND t.transaction_date BETWEEN ? AND ?
+           AND NOT EXISTS (SELECT 1 FROM import_batch_accounts s WHERE s.batch_id = t.import_batch_id AND s.bank_account_id = t.bank_account_id)
+         LIMIT 1`,
       );
       // kandidaten voor de tegenhanger, met het soort afschrift waar ze uit kwamen
       const candidates = this.db.prepare(
@@ -679,6 +725,7 @@ export class BankService {
         if (existing) {
           taken.add(existing.id);
           known(existing.batch, existing.account);
+          insertReturned.run(batchId, existing.id);
           if (existing.batch !== null) returned.set(`${existing.batch}|${existing.account}`, (returned.get(`${existing.batch}|${existing.account}`) ?? new Set()).add(existing.id));
           // de hash bewijst dat dit dezelfde id van de bank is: bij een oude regel alsnog vastleggen
           if (bankId && !existing.bank_id) this.db.prepare('UPDATE bank_transactions SET bank_id = ? WHERE id = ? AND bank_id IS NULL').run(bankId, existing.id);
@@ -687,6 +734,7 @@ export class BankService {
         } else if (again) {
           // eerder overgeslagen: weer tegen dezelfde tegenhanger
           known(again.batch, again.account);
+          insertReturned.run(batchId, again.matched);
         }
         if (existing || again || hashesInFile.has(hash)) {
           duplicates++;
@@ -713,11 +761,13 @@ export class BankService {
       // Valt deze dag in dagen die een eerder afschrift al besloeg (stap 2), of net buiten een eerder afschrift
       // van een ander soort? Daar kan dezelfde betaling een andere datum hebben (kaartbetaling van vrijdag,
       // geboekt op maandag); dan vergelijken we alleen met dat andere soort.
-      const scope = (account: BankAccount, date: IsoDate): { overlap: boolean; edge: boolean } => {
+      const scope = (account: BankAccount, date: IsoDate): { overlap: boolean; edge: boolean; feedOnly: boolean } => {
         const overlap = Boolean(inKnownPeriod.get(account.id, batchId, date, date));
-        const edge = !overlap && (nearOtherKind.all(account.id, batchId, result.source, kind, addDays(date, 7), addDays(date, -7)) as { from: IsoDate; to: IsoDate }[])
+        const nearPeriod = !overlap && (nearOtherKind.all(account.id, batchId, result.source, kind, addDays(date, 7), addDays(date, -7)) as { from: IsoDate; to: IsoDate }[])
           .some((p) => (date > p.to ? workdaysBetween(p.to, date) : workdaysBetween(date, p.from)) <= SAME_PAYMENT_WORKDAYS);
-        return { overlap, edge };
+        // alleen omdat er Ponto-regels zonder dekking in de buurt staan: dan strenger vergelijken (stap 2)
+        const feedOnly = !overlap && !nearPeriod && Boolean(nearUncoveredFeed.get(account.id, batchId, result.source, addDays(date, -7), addDays(date, 7)));
+        return { overlap, edge: nearPeriod || feedOnly, feedOnly };
       };
       /** Komt een bestaande betaling (of verzamelboeking) uit hetzelfde soort afschrift als dit bestand? */
       const fromSameKind = (c: { source: string; batch: number | null; kind: string | null }, account: BankAccount, overlap: boolean): boolean => {
@@ -763,7 +813,7 @@ export class BankService {
       const pairs: { row: number; id: number; batch: number | null; workdays: number; days: number; otherIban: number; otherParty: number }[] = [];
       for (const [row, { t, account, bankId }] of pending.entries()) {
         if (counterpart.has(row)) continue;
-        const { overlap, edge } = scope(account, t.date);
+        const { overlap, edge, feedOnly } = scope(account, t.date);
         overlaps[row] = overlap;
         if (!overlap && !edge) continue;
         const iban = t.counterIban ? normalizeIban(t.counterIban) : null;
@@ -778,6 +828,10 @@ export class BankService {
           } else if (!otherKind(c, account, overlap)) continue;
           // allebei een tegenrekening: dan moet die gelijk zijn
           if (iban && c.iban && normalizeIban(c.iban) !== iban) continue;
+          // Zonder bewezen periode (#459) alleen een Ponto-regel als tegenhanger, en zonder twee tegenrekeningen
+          // alleen bij dezelfde tegenpartij: een betaling die Ponto (nog) niet had, mag niet wegvallen tegen een
+          // andere betaling van hetzelfde bedrag.
+          if (feedOnly && (c.source !== 'openbanking' || ((!iban || !c.iban) && !sameCounterparty(other, party)))) continue;
           // twee verschillende id's uit dezelfde bron zijn per definitie twee betalingen
           if (bankId && c.bankId && c.source === result.source) continue;
           const workdays = workdaysBetween(c.date, t.date);
@@ -1747,6 +1801,151 @@ export class BankService {
           .prepare(`UPDATE bank_transactions SET status = 'nieuw', matched_journal_entry_id = NULL WHERE id = ?`)
           .run(id);
       }
+    });
+  }
+
+  // ---------- een ingelezen afschrift weer weghalen (#408) ----------
+
+  /**
+   * De ingelezen afschriften (bestanden; rondes van de bankkoppeling niet, die zijn nooit weg te halen en komen
+   * vanzelf terug), nieuwste bovenaan, met wat het weghalen ervan tegenhoudt. Zonder limiet: een oud afschrift
+   * moet bereikbaar blijven, ook na jaren wekelijks inlezen.
+   */
+  imports(): StatementImport[] {
+    const rows = this.db
+      .prepare(
+        `SELECT b.id, b.filename, b.source, b.imported_at AS importedAt,
+           (SELECT GROUP_CONCAT(a.name, ' en ') FROM import_batch_accounts s JOIN bank_accounts a ON a.id = s.bank_account_id WHERE s.batch_id = b.id) AS accounts,
+           (SELECT MIN(period_from) FROM import_batch_accounts WHERE batch_id = b.id) AS "from",
+           (SELECT MAX(period_to) FROM import_batch_accounts WHERE batch_id = b.id) AS "to",
+           (SELECT COUNT(*) FROM bank_transactions t WHERE t.import_batch_id = b.id) AS lines,
+           (SELECT COUNT(*) FROM bank_transactions t WHERE t.import_batch_id = b.id AND t.status = 'gematcht') AS processed
+         FROM import_batches b WHERE b.source <> 'openbanking' ORDER BY b.imported_at DESC, b.id DESC`,
+      )
+      .all() as Omit<StatementImport, 'blocked'>[];
+    return rows.map((r) => ({ ...r, blocked: this.removeBlocked(r.id, r.source) }));
+  }
+
+  /** Waarom dit afschrift niet weg kan, of null. */
+  private removeBlocked(batchId: number, source: string): string | null {
+    if (source === 'openbanking') return 'Dit kwam via de bankkoppeling binnen; dat haalt de app bij de volgende ronde opnieuw op.';
+    const firstOpen = this.ledger.firstOpenDate();
+    if (firstOpen && this.db.prepare('SELECT 1 FROM bank_transactions WHERE import_batch_id = ? AND transaction_date < ? LIMIT 1').get(batchId, firstOpen)) {
+      return 'Er staan betalingen in uit een afgesloten periode.';
+    }
+    return null;
+  }
+
+  /**
+   * Per regel van een afschrift: blijft hij, of gaat hij weg? Een regel die een later (bewaard) afschrift óók
+   * bevatte (import_returned) blijft staan en hoort voortaan bij het oudste van die afschriften: het geld
+   * staat immers nog op een afschrift dat je houdt.
+   */
+  private removalPlan(batchId: number): { keep: { id: number; batch: number; account: number }[]; drop: number[] } {
+    const rows = this.db
+      .prepare(
+        `SELECT t.id, t.bank_account_id AS account,
+           (SELECT r.batch_id FROM import_returned r WHERE r.transaction_id = t.id AND r.batch_id <> t.import_batch_id ORDER BY r.batch_id LIMIT 1) AS other
+         FROM bank_transactions t WHERE t.import_batch_id = ? ORDER BY t.id`,
+      )
+      .all(batchId) as { id: number; account: number; other: number | null }[];
+    return {
+      keep: rows.filter((r) => r.other !== null).map((r) => ({ id: r.id, batch: r.other!, account: r.account })),
+      drop: rows.filter((r) => r.other === null).map((r) => r.id),
+    };
+  }
+
+  /** Wat het weghalen van dit afschrift doet, vóórdat je het doet. */
+  removeImportPreview(batchId: number): StatementRemoval {
+    const batch = this.db.prepare('SELECT id, filename, source, imported_at AS importedAt FROM import_batches WHERE id = ?').get(batchId) as { id: number; filename: string | null; source: string; importedAt: string } | undefined;
+    if (!batch) throw new ValidationError('Dit afschrift bestaat niet (meer)');
+    const { keep, drop } = this.removalPlan(batchId);
+    const list = drop.join(',') || '0';
+    const txs = this.db
+      .prepare(`SELECT id, transaction_date AS date, amount, counter_name AS counterName, description, status FROM bank_transactions WHERE id IN (${list}) ORDER BY transaction_date, id`)
+      .all() as { id: number; date: IsoDate; amount: Cents; counterName: string | null; description: string; status: string }[];
+    const count = (sql: string, ...params: number[]) => (this.db.prepare(sql).get(...params) as { n: number }).n;
+    return {
+      ...batch,
+      lines: keep.length + drop.length,
+      kept: keep.length,
+      processed: txs.filter((t) => t.status === 'gematcht').map(({ id, date, amount, counterName, description }) => ({ id, date, amount, counterName, description })),
+      evidence: count(`SELECT COUNT(DISTINCT document_id) AS n FROM document_links WHERE bank_transaction_id IN (${list})`),
+      skippedElsewhere: count(`SELECT COUNT(DISTINCT matched_transaction_id) AS n FROM import_skipped WHERE batch_id <> ? AND added_transaction_id IS NULL AND matched_transaction_id IN (${list})`, batchId),
+      doubles: count(`SELECT COUNT(*) AS n FROM bank_transactions WHERE import_batch_id <> ? AND duplicate_of IN (${list})`, batchId),
+      blocked: this.removeBlocked(batch.id, batch.source),
+    };
+  }
+
+  /**
+   * Een ingelezen afschrift helemaal weghalen, alsof het nooit is ingelezen: de regels, de overgeslagen dubbelen,
+   * de dekking ("bijgewerkt t/m") en de import zelf. Een regel die een ander bewaard afschrift óók bevatte, blijft
+   * staan en hoort voortaan bij dat afschrift. Wat er met de rest al gedaan was, gaat eerst netjes terug:
+   * boekingen krijgen een tegenboeking, bonnen die er als bewijs bij hingen gaan terug naar "Nog controleren",
+   * van de regels uit latere afschriften die hierdoor waren overgeslagen komt er één alsnog in (de andere blijven
+   * overgeslagen, nu tegen die ene), en regels die als dubbel hiervan uit de boekhouding waren gehaald komen terug.
+   * Hetzelfde bestand opnieuw inlezen is daarna een eerste keer.
+   */
+  removeImport(batchId: number, date: IsoDate = today()): { lines: number; kept: number; undone: number; restored: number } {
+    const preview = this.removeImportPreview(batchId);
+    if (preview.blocked) throw new ValidationError(preview.blocked);
+    return tx(this.db, () => {
+      const { keep, drop } = this.removalPlan(batchId);
+      const list = drop.join(',') || '0';
+      // regels die ook in een ander bewaard afschrift staan: blijven, en tellen daar voortaan als eigen regel
+      for (const k of keep) {
+        this.db.prepare('UPDATE bank_transactions SET import_batch_id = ? WHERE id = ?').run(k.batch, k.id);
+        this.db.prepare('DELETE FROM import_returned WHERE batch_id = ? AND transaction_id = ?').run(k.batch, k.id);
+        this.db.prepare('UPDATE import_batches SET imported_count = imported_count + 1, duplicate_count = MAX(duplicate_count - 1, 0) WHERE id = ?').run(k.batch);
+        this.db.prepare('UPDATE import_batch_accounts SET imported = imported + 1, duplicates = MAX(duplicates - 1, 0) WHERE batch_id = ? AND bank_account_id = ?').run(k.batch, k.account);
+      }
+      // regels uit andere afschriften die als dubbel van een regel hiervan weg waren: terug (het geld stond alleen hier)
+      for (const sib of this.db.prepare(`SELECT id FROM bank_transactions WHERE import_batch_id <> ? AND duplicate_of IN (${list})`).all(batchId) as { id: number }[]) {
+        if (this.get(sib.id).duplicate_of) this.restoreDuplicate(sib.id);
+      }
+      this.db.prepare(`UPDATE bank_transactions SET duplicate_of = NULL WHERE id IN (${list})`).run();
+      // wat verwerkt was: tegenboeking, en de factuur of aankoop staat weer open
+      let undone = 0;
+      for (const id of drop) {
+        if (this.get(id).status !== 'gematcht') continue;
+        this.unmatch(id, date);
+        undone++;
+      }
+      // Regels uit latere afschriften die waren overgeslagen omdat ze hier al stonden: het geld stond alleen hier,
+      // dus één ervan komt alsnog in (uit het oudste van die afschriften). De andere blijven overgeslagen, nu tegen
+      // die ene: anders staat dezelfde betaling er zo vaak in als er afschriften van zijn.
+      let restored = 0;
+      for (const id of drop) {
+        const skipped = this.db.prepare('SELECT id, added_transaction_id AS added FROM import_skipped WHERE batch_id <> ? AND matched_transaction_id = ? ORDER BY batch_id, id').all(batchId, id) as { id: number; added: number | null }[];
+        // al eerder door de gebruiker met "Toch toevoegen" teruggezet: die regel staat er al en is de vervanger
+        let replacement: number | null = skipped.find((k) => k.added)?.added ?? null;
+        for (const k of skipped) {
+          const row = this.db.prepare('SELECT added_transaction_id AS added FROM import_skipped WHERE id = ?').get(k.id) as { added: number | null };
+          if (row.added) continue; // net meegekomen met zijn verzamelboeking
+          if (replacement === null) {
+            replacement = this.addSkipped(k.id);
+            restored++;
+          }
+        }
+        if (replacement !== null) this.db.prepare('UPDATE import_skipped SET matched_transaction_id = ? WHERE matched_transaction_id = ? AND added_transaction_id IS NULL').run(replacement, id);
+        this.db.prepare('DELETE FROM import_skipped WHERE matched_transaction_id = ?').run(id);
+      }
+      this.db.prepare('DELETE FROM import_skipped WHERE batch_id = ?').run(batchId);
+      // bonnen die hier als bewijs bij hingen: terug naar "Nog controleren" (een kopie blijft een kopie)
+      this.db
+        .prepare(`UPDATE documents SET status = CASE WHEN duplicate_of_document_id IS NOT NULL THEN 'genegeerd' ELSE 'controle' END WHERE id IN (SELECT document_id FROM document_links WHERE bank_transaction_id IN (${list}))`)
+        .run();
+      this.db.prepare(`DELETE FROM document_links WHERE bank_transaction_id IN (${list})`).run();
+      // wat de app over deze regels onthield: overgeslagen vragen en afgehandelde dubbel-meldingen
+      const forget = this.db.prepare('DELETE FROM task_skips WHERE task_key IN (?, ?, ?) OR task_key LIKE ? OR task_key LIKE ? OR task_key LIKE ? OR task_key LIKE ?');
+      for (const id of drop) forget.run(`bank-${id}`, `bank-refund-${id}`, BankService.ignoredKey(id), `bank-double-${id}-%`, `bank-double-%-${id}`, `bank-same-${id}-%`, `bank-same-%-${id}`);
+      this.db.prepare(`DELETE FROM import_returned WHERE batch_id = ? OR transaction_id IN (${list})`).run(batchId);
+      this.db.prepare(`DELETE FROM bank_transactions WHERE id IN (${list})`).run();
+      this.db.prepare('DELETE FROM import_batch_accounts WHERE batch_id = ?').run(batchId);
+      // stond het bestand in de downloadmap, dan vraagt de app er niet opnieuw om; slepen kan altijd
+      this.db.prepare(`UPDATE statement_files SET status = 'afgewezen', import_batch_id = NULL WHERE import_batch_id = ?`).run(batchId);
+      this.db.prepare('DELETE FROM import_batches WHERE id = ?').run(batchId);
+      return { lines: keep.length + drop.length, kept: keep.length, undone, restored };
     });
   }
 

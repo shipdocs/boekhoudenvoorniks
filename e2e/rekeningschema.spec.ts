@@ -2,7 +2,7 @@ import { test, expect, onboard, nav, call, field } from './fixtures';
 
 test('bv: BV-rekeningen erbij, eigen rekening toevoegen met RGS-code, hernoemen en gebruiken in een memoriaal', async ({ page, problems }) => {
   await onboard(page);
-  await call(page, 'settings.update', { advancedMode: true, legalForm: 'bv' });
+  await call(page, 'settings.update', { advancedMode: true, advancedModeAgreedAt: '2026-10-15', legalForm: 'bv' });
   await page.reload();
   await nav(page, 'Boekhouding');
   await page.getByRole('button', { name: 'Rekeningschema', exact: true }).click();

@@ -1,13 +1,16 @@
 import { runBackgroundFeeds } from './background-feeds';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath, sep } from 'node:path';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { assertDatabaseFileNotNewer, NewerDatabaseError, openDatabase, openReadonly, type Db } from '../db/database';
 import { LedgerError } from '../core-ledger/ledger';
 import { createServices, type Services } from '../services';
 import { SettingsService } from '../settings/settings';
 import { createSmtpMailer, verifySmtp } from '../documents/smtp-mailer';
+import { handOverToOwnMailProgram } from '../documents/own-mail';
+import { createWindowsMapiSender } from '../documents/mapi-sender';
 import { createApi, type Api } from './api';
 import { renderPdf } from './pdf';
 import { SafeStorageSecretStore } from './secrets';
@@ -32,7 +35,9 @@ import { autoUpdater } from 'electron-updater';
 import { Updates } from './updates';
 import { startMcp } from '../mcp/start';
 import { hasOldMcp, mcpCommands } from '../mcp/names';
-import type { PollResult } from '../mail/mail-intake';
+import { BONNEN_PREFIX, BONNEN_TARGET, type PollResult } from '../mail/mail-intake';
+import { BONNEN_TOKEN_SECRET, BonnenAdresService, BonnenServerError, httpBonnenServer } from '../mail/bonnen-adres';
+import { BONNEN_BEWAARDAGEN } from '../shared/legal';
 import { deleteAttachment, resolveAttachmentPath, saveAttachment } from './attachments';
 import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
@@ -40,7 +45,7 @@ import { CHOICE_SESSION, chromiumDir, forgetMoved, handOverLocalState, markCompl
 import { chooseAfterFailedMigration, chooseAfterMove, chooseOldFolder, confirmSyncFolder, migrateWithProgress, pickDataFolder, refuseDataFolder, switchWithProgress } from './data-dir-app';
 import { DOWNLOAD_URL, isWindowsStore, mcpCommand as mcpCommandFor, migrateForStore, READ_ONLY_MESSAGE, readOnlyError, storeFallbackHint, storeAppDataNotice, findOldInstall, oldInstallPrompt, OLD_INSTALL_IGNORE_FLAG, storeFolderProblem, type StartNotice } from './windows-store';
 import { STORE_LLAMA_CPP } from '../ocr-runtime/manifest';
-import { Administrations, readAdministrationFile } from './administrations';
+import { Administrations, readAdministrationFile, renameAdministrationFile } from './administrations';
 import { ExchangeService, sanitizeForExchange, type OfficeProfile } from '../exchange/exchange';
 import { generateOfficeKeys } from '../exchange/crypto';
 import { httpDateToIso, LICENSE_API_URL } from '../license/license';
@@ -59,6 +64,8 @@ let db: Db;
 let services: Services;
 let api: Api;
 let secrets: SafeStorageSecretStore;
+/** bonnen-adres op post.boekhoudenvoorniks.nl (#450) */
+let bonnen: BonnenAdresService;
 let localOcr: LocalOcrRuntime;
 /** Bonnenscanner van de open administratie: ontvangstpunt, mDNS en bonnenmap. */
 let scanner: Bonnenscanner | null = null;
@@ -351,16 +358,66 @@ function emit(event: string, payload: unknown): void {
 /** Eén ophaalronde tegelijk; een tweede verzoek wacht op de lopende. */
 let mailRun: Promise<PollResult> | null = null;
 
-function fetchMail(): Promise<PollResult> {
-  mailRun ??= (async () => {
-    const source = await ImapSource.connect(services.settings.get().mailIn, secrets.get(IMAP_SECRET));
-    try {
-      const r = await services.mail.poll(source);
-      if (r.documents + r.onlineInvoices + r.fromCustomers > 0) emit('auto-processed', r);
-      return r;
-    } finally {
-      await source.close();
+/** Verbinden met het bonnen-adres; lukt inloggen niet (wachtwoord vervangen), dan één keer een nieuw wachtwoord vragen. */
+async function connectBonnen(): Promise<ImapSource> {
+  try {
+    // eerst het wachtwoord: dat vraagt zo nodig ook het adres op bij de server
+    const password = await bonnen.wachtwoord();
+    return await ImapSource.connect(bonnen.mailSettings(), password);
+  } catch (e) {
+    if ((e as Error).name !== 'ImapAuthError') throw e;
+    return ImapSource.connect(bonnen.mailSettings(), await bonnen.wachtwoord(true));
+  }
+}
+
+async function pollWith(connect: () => Promise<ImapSource>, target?: typeof BONNEN_TARGET, expire = false): Promise<PollResult> {
+  const source = await connect();
+  try {
+    const r = await services.mail.poll(source, undefined, target);
+    // bonnen-adres: mail staat hooguit BONNEN_BEWAARDAGEN dagen op de server (privacyverklaring), ook in de gewone map:
+    // mail zonder bon blijft daar staan. De mailserver ruimt mail die nooit wordt opgehaald zelf op.
+    if (expire && target) {
+      const limit = new Date(Date.now() - BONNEN_BEWAARDAGEN * 86_400_000).toISOString().slice(0, 10);
+      for (const folder of [...target.folders, target.processedFolder]) {
+        await source.deleteBefore(folder, limit).catch((e) => console.error('Oude mail op het bonnen-adres opruimen mislukt', (e as Error).message));
+      }
     }
+    return r;
+  } finally {
+    await source.close();
+  }
+}
+
+/**
+ * Eén ophaalronde: de eigen mailserver (als die is ingesteld, of als er geen bonnen-adres is, zodat de bekende
+ * foutmelding blijft) en het bonnen-adres. Mislukt er één, dan gaat de ander gewoon door; daarna komt de fout.
+ */
+function fetchMail(background = false): Promise<PollResult> {
+  mailRun ??= (async () => {
+    const s = services.settings.get();
+    const rounds: (() => Promise<PollResult>)[] = [];
+    // op de achtergrond de eigen mailbox alleen als hij compleet is ingesteld (zoals vroeger), anders geen elk-kwartier-fout
+    const ownReady = s.mailIn.enabled && Boolean(s.mailIn.host) && (!background || secrets.get(IMAP_SECRET) !== null);
+    if (ownReady || (!background && !bonnen.actief())) rounds.push(() => pollWith(() => ImapSource.connect(s.mailIn, secrets.get(IMAP_SECRET))));
+    if (bonnen.actief()) rounds.push(() => pollWith(connectBonnen, BONNEN_TARGET, true));
+    const total: PollResult = { documents: 0, onlineInvoices: 0, fromCustomers: 0, other: 0, errors: 0, missingFolders: [] };
+    let failure: unknown = null;
+    for (const round of rounds) {
+      try {
+        const r = await round();
+        total.documents += r.documents;
+        total.onlineInvoices += r.onlineInvoices;
+        total.fromCustomers += r.fromCustomers;
+        total.other += r.other;
+        total.errors += r.errors;
+        total.missingFolders.push(...r.missingFolders);
+      } catch (e) {
+        failure ??= e;
+      }
+    }
+    if (total.documents + total.onlineInvoices + total.fromCustomers > 0) emit('auto-processed', total);
+    if (failure) throw failure;
+    return total;
   })().finally(() => {
     mailRun = null;
   });
@@ -369,11 +426,40 @@ function fetchMail(): Promise<PollResult> {
 
 async function backgroundMail(): Promise<void> {
   const s = services.settings.get();
-  if (!s.mailIn.enabled || services.settings.outboundBlocked() || !secrets.get(IMAP_SECRET)) return;
+  if (services.settings.outboundBlocked()) return;
+  // wacht er een bevestiging of goedkeuring, dan de stand bij de server bijwerken
+  if (bonnen.lopend()) await bonnen.verversen().catch((e) => console.error('Stand bonnen-adres ophalen mislukt', (e as Error).message));
+  const own = s.mailIn.enabled && secrets.get(IMAP_SECRET) !== null;
+  if (!own && !bonnen.actief()) return;
   try {
-    await fetchMail();
+    await fetchMail(true);
   } catch (e) {
     console.error('Mail ophalen mislukt', (e as Error).message);
+  }
+}
+
+/**
+ * Een administratie weghalen: heeft die een bonnen-adres met een machtiging op deze computer, dan eerst stoppen
+ * bij de server. Anders blijft er een adres bestaan dat niemand meer ophaalt. Lukt stoppen niet (geen internet),
+ * dan wordt de administratie niet weggehaald.
+ */
+async function stopBonnenOf(dir: string): Promise<void> {
+  const file = join(dir, 'boekhouding.sqlite');
+  if (!existsSync(file)) return;
+  let token: string | null = null;
+  const other = new Database(file, { readonly: true, fileMustExist: true });
+  try {
+    const hasSecrets = other.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'secrets'`).get();
+    if (hasSecrets) token = new SafeStorageSecretStore(other as never).get(BONNEN_TOKEN_SECRET);
+  } finally {
+    other.close();
+  }
+  if (!token) return;
+  try {
+    await httpBonnenServer(LICENSE_API_URL).stoppen(token);
+  } catch (e) {
+    if (e instanceof BonnenServerError && e.status === 403) return; // al gestopt of overgenomen
+    throw new Error(`Deze administratie heeft een bonnen-adres, en dat kon niet worden gestopt: ${(e as Error).message} De administratie is niet weggehaald.`);
   }
 }
 
@@ -469,6 +555,15 @@ function backupBeforeUpgrade(): void {
   }
 }
 
+/**
+ * Waar de PDF staat die je eigen mailprogramma als bijlage inleest (#450): een zichtbare map in Documenten, niet in
+ * de tijdelijke map. Een mailprogramma als snap of flatpak ziet /tmp niet (en verborgen mappen ook niet) en liet de
+ * bijlage dan stil weg.
+ */
+function ownMailPdfDir(): string {
+  return join(app.getPath('documents'), 'BoekhoudenVoorNiks', 'Te versturen');
+}
+
 let updates: Updates | null = null;
 
 function initServices(): void {
@@ -482,7 +577,26 @@ function initServices(): void {
     storeFile: storeAttachment,
     removeFile: removeAttachment,
     statementFiles: folderAccess,
+    ownMail: {
+      pdfDir: ownMailPdfDir(),
+      handOver: (msg) =>
+        handOverToOwnMailProgram(msg, {
+          platform: process.platform,
+          // los van de app: het mailprogramma blijft open ook als de app dichtgaat
+          spawn: (cmd, args) => {
+            const child = spawn(cmd, args, { shell: false, stdio: 'ignore', detached: true });
+            child.unref();
+            return child;
+          },
+          mailHandler: () =>
+            new Promise((resolve) => {
+              execFile('xdg-mime', ['query', 'default', 'x-scheme-handler/mailto'], { timeout: 3000 }, (err, stdout) => resolve(err ? null : stdout.trim() || null));
+            }),
+          mapi: process.platform === 'win32' ? createWindowsMapiSender() : null,
+        }),
+    },
   });
+  bonnen = new BonnenAdresService(db, services.settings, secrets, httpBonnenServer(LICENSE_API_URL));
   localOcr = new LocalOcrRuntime(join(rootDir(), 'ocr'), {
     fetch: (url, init) => fetch(url, init) as never,
     shrinkImage: shrinkForOcr,
@@ -571,6 +685,11 @@ function initServices(): void {
       const err = await shell.openPath(resolveAttachmentPath(dataDir(), path));
       if (err) throw new Error(err);
     },
+    revealFile(p) {
+      // alleen de tijdelijke PDF's van "versturen met je eigen mailprogramma" (#450)
+      if (!resolvePath(p).startsWith(resolvePath(ownMailPdfDir()) + sep)) throw new Error('Dit bestand kan niet getoond worden');
+      shell.showItemInFolder(p);
+    },
     async openExternal(url) {
       // https, en een mail aan ons (vragen en feedback); geen andere schema's
       if (!/^https:\/\//.test(url) && !/^mailto:info@shipdocs\.app(\?|$)/.test(url)) throw new Error('Alleen https-links');
@@ -581,6 +700,13 @@ function initServices(): void {
     // veilige opslag (sleutelbeheer) zoals de services die zelf ook lezen (#249, regel 6)
     secureStorage: () => secrets.available,
     testSmtp: (smtp, password) => verifySmtp(smtp ?? services.settings.get().smtp, password || secrets.get(SMTP_SECRET)),
+    bonnen: {
+      view: () => bonnen.view(),
+      aanvragen: (input) => bonnen.aanvragen(input),
+      verversen: () => bonnen.verversen(),
+      stoppen: () => bonnen.stoppen(),
+      vergeten: () => bonnen.vergeten(),
+    },
     mail: {
       setPassword: (pw) => (pw ? secrets.set(IMAP_SECRET, pw) : secrets.delete(IMAP_SECRET)),
       hasPassword: () => secrets.get(IMAP_SECRET) !== null,
@@ -597,7 +723,8 @@ function initServices(): void {
       },
       fetchNow: () => fetchMail(),
       async saveAsReceipt(id) {
-        const source = await ImapSource.connect(services.settings.get().mailIn, secrets.get(IMAP_SECRET));
+        const fromBonnen = services.mail.get(id).folder.startsWith(BONNEN_PREFIX);
+        const source = fromBonnen ? await connectBonnen() : await ImapSource.connect(services.settings.get().mailIn, secrets.get(IMAP_SECRET));
         try {
           return await services.mail.saveAsReceipt(source, id);
         } finally {
@@ -743,6 +870,31 @@ function initServices(): void {
         }
         await openAdministration(key);
         return key;
+      },
+      async rename(key, name) {
+        assertWritable();
+        if (!name.trim()) throw new Error('Geef de administratie een naam');
+        if (key === administrations().current()) {
+          services.settings.update({ company: { ...services.settings.get().company, name: name.trim() } });
+          return;
+        }
+        const file = join(administrations().dirFor(key), 'boekhouding.sqlite');
+        if (!existsSync(file)) throw new Error('Deze administratie bestaat niet (meer)');
+        renameAdministrationFile(file, name);
+      },
+      async remove(key) {
+        assertWritable();
+        const dir = administrations().dirToRemove(key);
+        await stopBonnenOf(dir);
+        try {
+          await shell.trashItem(dir);
+        } catch (e) {
+          throw new Error(`Naar de prullenbak verplaatsen lukte niet (${(e as Error).message}). Je kunt de map zelf weghalen: ${dir}`);
+        }
+      },
+      async openFolder(key) {
+        const err = await shell.openPath(administrations().dirFor(key));
+        if (err) throw new Error(err);
       },
     },
     // met een eigen map uit de omgeving (tests, rooktest) valt er niets te kiezen

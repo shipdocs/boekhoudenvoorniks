@@ -2,7 +2,7 @@ import { test, expect, onboard, nav, call } from './fixtures';
 
 test('rapporten voor de boekhouder: kolommenbalans, kaarten, relatiekaarten en periodebalans', async ({ page }) => {
   await onboard(page);
-  await call(page, 'settings.update', { advancedMode: true });
+  await call(page, 'settings.update', { advancedMode: true, advancedModeAgreedAt: '2026-10-15' });
   await page.reload();
   await call(page, 'purchases.recordExpense', { date: '2026-02-01', supplierName: 'Gamma', description: 'Materiaal', categoryKey: 'materiaal', grossAmount: 12100, vatCode: 'hoog', paidWith: 'prive' });
   await page.reload();

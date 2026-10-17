@@ -33,6 +33,7 @@
             <a href="boekhouders.html">Boekhouders<span class="hint">Pakket en uitwisseling</span></a>
           </div>
         </details>
+        <a href="handleiding/index.html">Handleiding</a>
         <a href="waarom.html">Waarom</a>
         <a href="wijzigingen.html">Nieuw</a>
         <a class="btn small" href="downloaden.html">Downloaden</a>
@@ -42,7 +43,7 @@
   <script src="menu.js" defer></script>
   <main class="wrap legal">
     <h1>Privacyverklaring</h1>
-    <p class="muted">Versie 2026-10-15 · geldig vanaf 15 oktober 2026</p>
+    <p class="muted">Versie 2026-10-17 · geldig vanaf 17 oktober 2026 (het bonnen-adres; mail daar hooguit 60 dagen; wisselkoersen en de download van de tekstherkenning erbij; de Android-app scant zonder Google)</p>
 
     <h2>Kort gezegd</h2>
     <p><strong>Je administratie blijft op je eigen computer.</strong> Wij ontvangen geen gegevens over je klanten, facturen, bonnetjes of bank. (Alleen als je met een abonnement zelf de online hulp bij categorievoorstellen aanzet, gaan de winkelnaam en artikelomschrijvingen van een onbekende bon naar onze server; zie hieronder.) Er is geen account en er is geen cloud. Neem je een abonnement voor de uitwisseling met je boekhouder, dan bewaren wij alleen wat nodig is om te betalen en te factureren (zie hieronder).</p>
@@ -56,10 +57,12 @@
       <li><strong>E-mail:</strong> facturen en offertes gaan via de mailserver die jij zelf instelt, naar de ontvanger die jij kiest. Wij zien ze niet.</li>
       <li><strong>Koppelingen die jij aanzet</strong> (bijvoorbeeld een webshop of betaalprovider): het programma haalt daar met jouw eigen sleutels gegevens op. Dat verkeer gaat rechtstreeks tussen jouw computer en die dienst.</li>
       <li><strong>Btw-nummer controleren in VIES (alleen als je zelf op "Controleer nu in VIES" klikt):</strong> het programma stuurt dan dat ene btw-nummer rechtstreeks vanaf jouw computer naar VIES, de gratis controledienst van de Europese Commissie (<code>ec.europa.eu</code>), en ontvangt of het nummer geldig is, met de naam en het adres als de lidstaat die openbaar maakt. De Europese Commissie ziet daarbij je IP-adres en het btw-nummer. Wij ontvangen niets. Het programma bewaart de uitslag met de datum op je eigen computer, als bewijs bij een levering zonder btw. Het gebeurt nooit vanzelf.</li>
+      <li><strong>Wisselkoersen (alleen bij een bon of factuur in een andere munt):</strong> het programma vraagt de Europese Centrale Bank (<code>data-api.ecb.europa.eu</code>) om de koers van die munt op die datum. Er gaat alleen de munt en de datum mee; de ECB ziet daarbij je IP-adres. Opgehaalde koersen worden bewaard op je eigen computer, zodat dezelfde koers niet opnieuw wordt opgevraagd.</li>
       <li><strong>Bank automatisch ophalen met Ponto (alleen als je die koppeling zelf instelt):</strong> Ponto is een afzonderlijke zakelijke dienst. Je sluit zelf een overeenkomst met Ponto en maakt in Ponto zelf een eigen koppeling aan, met een eigen Client ID en Client Secret. Wij hebben geen account of sleutels van jou bij Ponto en ontvangen geen bankgegevens, geen Client ID en geen Client Secret. Bij het gewoon ophalen praat het programma rechtstreeks met Ponto: het stuurt jouw Client ID en Client Secret om in te loggen en ontvangt van Ponto de gegevens van de rekeningen die je koppelde (naam, rekeningnummer, saldo en betalingen). Wat Ponto en je bank met je gegevens doen, staat in hun eigen voorwaarden en privacyverklaring. Alleen als je bewust op <em>Nu bijwerken</em> klikt, vraagt het programma eerst eenmalig je publieke IP-adres op bij Cloudflare (<code>www.cloudflare.com/cdn-cgi/trace</code>, een openbare dienst van Cloudflare, niet onze server) en stuurt dat IP-adres aan Ponto, omdat Ponto het vereist om de bijwerking te starten. Cloudflare ziet daarbij dus je IP-adres. Wij ontvangen en bewaren dat IP-adres niet, en het programma bewaart en logt het ook niet. Je afschriften blijven de basis: je kunt altijd een afschrift blijven inlezen.</li>
-      <li><strong>Tekstherkenning en lokale slimme herkenning:</strong> als je die aanzet, draaien ze op je eigen computer. Het programma accepteert daarvoor alleen adressen op je eigen computer (localhost), zodat bonnetjes je computer niet verlaten.</li>
+      <li><strong>Tekstherkenning en lokale slimme herkenning:</strong> als je die aanzet, draaien ze op je eigen computer. Het programma accepteert daarvoor alleen adressen op je eigen computer (localhost), zodat bonnetjes je computer niet verlaten. De ingebouwde tekstherkenning download je eenmalig, als je daarvoor kiest: het model van Hugging Face (<code>huggingface.co</code>) en het programma llama.cpp van GitHub. Die diensten zien daarbij je IP-adres; er gaan geen bonnetjes mee.</li>
       <li><strong>Online hulp bij categorievoorstellen (alleen met abonnement, standaard uit):</strong> als je dit zelf aanzet en de app bij een onbekende winkel niet weet waar een bon voor was, stuurt het programma de naam van de winkel, maximaal 15 korte artikelomschrijvingen (bedragen, rekeningnummers en e-mailadressen haalt het er eerst uit) en de namen van je kostencategorieën naar onze server bij Cloudflare. Die laat het model JEV van TypeSafe (via Cloudflare Workers AI) één categorie kiezen en stuurt alleen die keuze terug. Het nummer van je administratie en je beheersleutel gaan mee om je abonnement te controleren, maar niet naar het model. Foto's, PDF's, bedragen, btw-nummers, klantgegevens en je administratie gaan nooit mee. Wij bewaren de vraag niet: onze server en de AI-gateway loggen of bewaren de inhoud niet (geen cache, geen payloadlogs); wij houden alleen per administratie per dag bij hoeveel vragen er zijn gesteld, voor het maximum. Volgens Cloudflare bewaart het model zelf niets (zero data retention). Wat je daarna bevestigt of aanpast, onthoudt het programma alleen op je eigen computer.</li>
       <li><strong>Uitwisseling met je boekhouder:</strong> de export gaat per e-mail (via jouw eigen mailserver) of als bestand rechtstreeks van jou naar je boekhouder, versleuteld zodat alleen zijn kantoor hem kan openen. Zijn antwoord komt op dezelfde manier terug. Het gaat niet via ons, en wij kunnen het niet lezen.</li>
+      <li><strong>Bonnen-adres (alleen als je het zelf aanvraagt):</strong> het programma vraagt het adres aan bij onze licentieserver, vraagt daar de stand en de inloggegevens op, en haalt de mail op bij onze eigen mailserver (<code>mx.post.boekhoudenvoorniks.nl</code>). Zie <a href="#bonnen-adres">Het bonnen-adres</a>.</li>
       <li><strong>Licentie voor het abonnement:</strong> alleen als je een abonnement hebt (gehad), vraagt het programma bij onze licentieserver of je licentie nog geldig is. Het stuurt daarbij het nummer van je administratie en een willekeurige beheersleutel mee. De sleutel blijft lokaal in je administratie; onze server bewaart alleen een niet-terugrekenbare hash om te controleren dat alleen jouw app de licentie kan ophalen of het abonnement kan opzeggen.</li>
     </ul>
     <p>Het programma bevat geen advertenties, geen trackers en geen gebruiksstatistieken.</p>
@@ -100,8 +103,31 @@
     </ul>
     <p><strong>Buiten de Europese Unie:</strong> Cloudflare en GitHub zijn Amerikaanse bedrijven. Bij het tonen van deze website, het draaien van onze servers en het aanbieden van updates kunnen gegevens zoals je IP-adres daardoor in de Verenigde Staten worden verwerkt. Beide zijn gecertificeerd onder het EU-VS Data Privacy Framework, waardoor die doorgifte volgens de Europese Commissie een passend beschermingsniveau heeft. De database van onze licentieserver staat in West-Europa.</p>
 
+    <h2 id="bonnen-adres">Het bonnen-adres</h2>
+    <p>Het bonnen-adres is een gratis, eigen mailadres op <code>post.boekhoudenvoorniks.nl</code> om bonnen en facturen te ontvangen. Je vraagt het zelf aan in het programma; zonder aanvraag gebeurt er niets. Met het adres kun je alleen ontvangen, niet versturen.</p>
+    <p>Voor het bonnen-adres verwerken wij:</p>
+    <ul>
+      <li>je e-mailadres, om de bevestigingslink en berichten over je adres te sturen;</li>
+      <li>je bedrijfsnaam en, als je het invult, je KvK-nummer, om de aanvraag te beoordelen (het begin van je bedrijfsnaam staat ook in het adres);</li>
+      <li>het nummer van je administratie (een willekeurige code) en een niet-terugrekenbare hash van een willekeurige machtiging per computer, zodat alleen jouw programma de mail kan ophalen;</li>
+      <li>met welke versie van de uitleg je akkoord ging, en wanneer je aanvroeg, bevestigde en wanneer wij goedkeurden;</li>
+      <li>de mail die naar je bonnen-adres wordt gestuurd, met de bijlagen.</li>
+    </ul>
+    <p><strong>Waarvoor en op welke grondslag:</strong> het bonnen-adres leveren zoals jij het aanvroeg (uitvoering van de overeenkomst), en misbruik tegengaan, bijvoorbeeld door aanvragen te controleren en per adres een grens te stellen (ons gerechtvaardigd belang). Wij kijken niet in de mail. De mailserver controleert binnenkomende mail automatisch op spam.</p>
+    <p><strong>Wie het nog meer verwerkt:</strong> onze mailserver draait bij <a href="https://www.hetzner.com/legal/privacy-policy/">Hetzner Online GmbH</a> in Duitsland. De aanvraag loopt via onze licentieserver bij Cloudflare (zie <a href="#website">hierboven</a>).</p>
+    <p><strong>Hoe lang:</strong></p>
+    <ul>
+      <li>mail op het bonnen-adres: hooguit 60 dagen na binnenkomst, ook als het programma hem nog niet ophaalde (na 30 dagen zonder ophalen krijg je een mail);</li>
+      <li>stop je het bonnen-adres (of haal je de administratie weg), dan ontvangt het adres meteen niets meer en wordt de mailbox met alle mail na 30 dagen verwijderd;</li>
+      <li>je aanvraag, je e-mailadres en je bedrijfsgegevens: zolang het adres bestaat, en daarna nog een jaar; een aanvraag die je nooit bevestigde, vervalt na 7 dagen en wordt een jaar later verwijderd;</li>
+      <li>de bevestigingslinks: 7 dagen nadat ze verlopen zijn;</li>
+      <li>het adres zelf (alleen het adres): blijvend, zodat het nooit opnieuw aan iemand anders wordt gegeven;</li>
+      <li>wie een aanvraag goedkeurde of weigerde, en wanneer: 2 jaar.</li>
+    </ul>
+
     <h2>Wachtwoorden en sleutels</h2>
     <p>Wachtwoorden en API-sleutels worden versleuteld opgeslagen met het beveiligde sleutelbeheer van je besturingssysteem.</p>
+    <p>Dat geldt ook voor de machtiging en het wachtwoord van het bonnen-adres. Op een computer zonder sleutelbeheer (sommige Linux-computers) biedt het programma het bonnen-adres daarom niet aan. Op een andere computer zijn ze niet te lezen: daar neem je het bonnen-adres over met een link naar je e-mailadres, waarna de vorige computer geen toegang meer heeft.</p>
     <p>Dat geldt ook voor het Client ID en het Client Secret van Ponto: beide worden als geheim bewaard en nooit als gewone instelling. Ze staan versleuteld in je administratie en dus ook in je eigen back-ups, maar ze zijn niet bedoeld om op een andere computer te lezen; na terugzetten plak je ze opnieuw. In het pakket of de kopie die je naar je boekhouder stuurt, staan ze niet, en ook de Ponto-koppeling zelf niet. Met <em>Ontkoppelen</em> verwijdert de app beide gegevens en de koppeling van je computer; je bestaande betalingen blijven staan. De koppeling in Ponto zelf verwijder je daarna zelf in Ponto.</p>
 
     <h2 id="website">Deze website</h2>
@@ -130,6 +156,7 @@
           <li><a href="zonder-abonnement.html">Zonder abonnement</a></li>
           <li><a href="offline-boekhoudprogramma.html">Offline boekhoudprogramma</a></li>
           <li><a href="gratis-boekhoudprogramma-downloaden.html">Gratis boekhoudprogramma downloaden</a></li>
+          <li><a href="handleiding/index.html">Handleiding</a></li>
           <li><a href="./#vragen">Veelgestelde vragen</a></li>
           <li><a href="wijzigingen.html">Wat is er nieuw</a></li>
         </ul>
@@ -157,7 +184,7 @@
         </ul>
       </div>
     </div>
-    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a> · <button type="button" class="linkish" data-cookie-settings>Cookie-voorkeuren</button></p>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong><a href="https://shipdocs.app/">ShipDocs</a></strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a> · <button type="button" class="linkish" data-cookie-settings>Cookie-voorkeuren</button></p>
     <div id="privacy-choice" role="dialog" aria-label="Meten van advertenties">
       <p><strong>Mogen we meten of onze advertentie werkt?</strong> Met je toestemming laden we de Meta Pixel (Facebook en Instagram). Meta plaatst dan cookies en ziet dat je deze site bezocht. Zonder toestemming gaat er niets naar Meta. <a href="privacy.html#website">Meer uitleg</a></p>
       <div class="row"><button type="button" class="btn small" data-choice="ja">Toestaan</button><button type="button" class="btn small ghost" data-choice="nee">Niet toestaan</button></div>

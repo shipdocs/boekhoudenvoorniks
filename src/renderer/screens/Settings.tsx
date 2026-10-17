@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad, type Settings } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useJobWords, useLoad, type Settings } from '../ui';
 import type { AppSettings } from '../../settings/settings';
 import { ResetCard } from './Reset';
 import { CategoriesDialog } from './Categories';
@@ -10,11 +10,14 @@ import { AdministrationsSettings } from './Administrations';
 import { DataFolderSettings } from './DataFolder';
 import { OfficeSettings } from './Exchange';
 import { ScannerSettings } from './Scanner';
+import { BonnenAdres } from './BonnenAdres';
+import { formatDateNl, today } from '../../shared/dates';
 import { businessEffect } from '../../shared/business-share';
 import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 import { ONLINE_HELP } from '../../shared/online-help';
 import { PontoCard } from './PontoDialog';
 import { checkNumberFormat } from '../../documents/numbering';
+import { HANDLEIDING_URL } from '../../shared/handleiding';
 
 type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'scanner' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
 
@@ -34,10 +37,14 @@ const TABS: [Tab, string][] = [
 ];
 
 export function SettingsScreen() {
+  const jw = useJobWords();
   const { settings, reloadSettings, route, go, meta } = useApp();
   const { run, busy } = useAction();
   const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'bedrijf');
   const [draft, setDraft] = useState<Settings>(settings);
+  // de boekhouding voor de boekhouder aanzetten: eerst uitleg en een akkoord (#409)
+  const [agreeing, setAgreeing] = useState(false);
+  const [understood, setUnderstood] = useState(false);
   // na zoeken naar Claude Code/Codex: het kaartje voor vragen stellen opnieuw laden
   const [aiVersion, setAiVersion] = useState(0);
   const bankAccounts = useLoad(() => api.bank.accounts());
@@ -359,9 +366,22 @@ export function SettingsScreen() {
             </div>
           </Field>
           <label className="row" style={{ alignItems: 'flex-start' }}>
-            <input type="checkbox" checked={draft.jobLocation} onChange={(e) => set({ jobLocation: e.target.checked })} />
-            <span>Gebruik de locatie van foto's om bonnen aan klussen te koppelen<br /><span className="small muted">Standaard uit. De plek uit de foto (als je telefoon die opslaat) blijft alleen op deze computer en wordt vergeleken met waar je eerder voor de klus fotografeerde.</span></span>
+            <input type="checkbox" checked={draft.jobsEnabled} onChange={(e) => set({ jobsEnabled: e.target.checked })} />
+            <span>Ik werk met klussen (projecten)<br /><span className="small muted">Uit: het menu, de keuzes "voor welke klus" en de meldingen over klussen verdwijnen. Bestaande klussen en boekingen blijven gewoon staan.</span></span>
           </label>
+          {draft.jobsEnabled && <>
+          <Field label="Hoe noem je een klus?" hint="Alleen de naam in de app verandert; je boekingen en facturen blijven zoals ze zijn.">
+            <select value={draft.jobTerm} onChange={(e) => set({ jobTerm: e.target.value as typeof draft.jobTerm })}>
+              <option value="klus">Klus</option>
+              <option value="project">Project</option>
+              <option value="opdracht">Opdracht</option>
+            </select>
+          </Field>
+          </>}
+          {draft.jobsEnabled && <label className="row" style={{ alignItems: 'flex-start' }}>
+            <input type="checkbox" checked={draft.jobLocation} onChange={(e) => set({ jobLocation: e.target.checked })} />
+            <span>Gebruik de locatie van foto's om bonnen aan {jw.p} te koppelen<br /><span className="small muted">Standaard uit. De plek uit de foto (als je telefoon die opslaat) blijft alleen op deze computer en wordt vergeleken met waar je eerder voor {jw.de} fotografeerde.</span></span>
+          </label>}
           <p className="small muted">Ook op "maximaal" gaat alleen automatisch wat zeker genoeg is, en een leverancier pas nadat jij daar ja op zei. Alles wat automatisch ging zie je terug op Vandaag, met de reden en een knop "Klopt niet".</p>
           <p className="muted">
             {settings.ocr.engine === 'claude-code' || settings.ocr.engine === 'codex'
@@ -396,8 +416,19 @@ export function SettingsScreen() {
       {tab === 'over' && <About />}
       {tab === 'geavanceerd' && section(
         <>
-          <label className="row"><input type="checkbox" checked={draft.advancedMode} onChange={(e) => set({ advancedMode: e.target.checked })} /> Toon de boekhouding voor je boekhouder (grootboek, balans en exports)</label>
+          <label className="row"><input type="checkbox" checked={draft.advancedMode} onChange={(e) => { if (e.target.checked && !draft.advancedModeAgreedAt) { setUnderstood(false); setAgreeing(true); } else set({ advancedMode: e.target.checked }); }} /> Toon de boekhouding voor je boekhouder (grootboek, balans en exports)</label>
           <p className="small muted">Handig voor je boekhouder. Voor dagelijks gebruik heb je dit niet nodig.</p>
+          {agreeing && (
+            <Modal title="Voor de boekhouder" onClose={() => setAgreeing(false)}>
+              <p>Deze functies zijn bedoeld voor wie boekhoudt. Je kunt er rechtstreeks in je boekhouding werken, en dus ook iets kapotmaken dat de app anders voor je bewaakt. Kijken mag altijd; boeken, terugdraaien, rekeningen wijzigen en afschriften weghalen zijn voor je boekhouder. Twijfel je? Raadpleeg eerst je boekhouder.</p>
+              <p className="small muted">Wij geven geen advies over een boekhouding: vragen over een administratie lopen via je boekhouder. Op een administratie waarin buiten de boekhouder om in deze modus is geschreven, geven we geen ondersteuning. De app houdt bij of dat gebeurd is (Instellingen → Over, en in het pakket voor je boekhouder).</p>
+              <label className="row"><input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} /> Ik begrijp dit</label>
+              <div className="row end" style={{ marginTop: 14 }}>
+                <Button onClick={() => setAgreeing(false)}>Annuleren</Button>
+                <Button kind="primary" disabled={!understood} onClick={() => { setAgreeing(false); set({ advancedMode: true, advancedModeAgreedAt: today() }); }}>Aanzetten</Button>
+              </div>
+            </Modal>
+          )}
           {settings.advancedMode && <div><Button small onClick={() => go({ screen: 'expert', extra: { tab: 'rekeningen' } })}>Rekeningschema: rekeningen toevoegen of hernoemen</Button></div>}
         </>,
       )}
@@ -453,6 +484,7 @@ function EmailSettings({ draft, set, section }: { draft: Settings; set: (p: Part
           }}>Test verbinding</Button>
         </div>
       </div>
+      <BonnenAdres />
       <IncomingMail />
     </>
   );
@@ -500,9 +532,9 @@ function IncomingMail() {
 
   return (
     <div className="card grid" style={{ marginTop: 14 }}>
-      <h3 style={{ margin: 0 }}>Inkomende post (bonnetjes per mail)</h3>
+      <h3 style={{ margin: 0 }}>Je eigen mailbox koppelen</h3>
       <p className="small muted">
-        Maak een apart mailadres voor je administratie, bijvoorbeeld <strong>administratie@jouwbedrijf.nl</strong>, en vraag leveranciers hun facturen daarheen te sturen.
+        Heb je al een eigen mailadres voor je administratie, bijvoorbeeld <strong>administratie@jouwbedrijf.nl</strong>? Koppel het hier, dan haalt de app daar de bonnen op. Geen eigen adres? Gebruik dan het bonnen-adres hierboven.
         De app haalt de bijlagen eruit (bij het opstarten en elk kwartier) en zet ze klaar om te controleren.
       </p>
       <details>
@@ -788,6 +820,7 @@ function LocalOcr({ engine }: { engine: string }) {
 
 function About() {
   const version = useLoad(() => api.app.version());
+  const advanced = useLoad(() => api.app.advancedUsage());
   const open = (url: string) => (e: { preventDefault(): void }) => {
     e.preventDefault();
     void api.app.openExternal(url);
@@ -797,13 +830,20 @@ function About() {
       <h3>BoekhoudenVoorNiks {version.data}</h3>
       <p>Gratis en open source onder de {LICENSE_NAME}. Je mag de software gebruiken, bestuderen, aanpassen en delen onder de voorwaarden van die licentie.</p>
       <p>
-        <a href="#" onClick={open(SOURCE_URL)}>Broncode</a> · <a href="#" onClick={open(TERMS_URL)}>Gebruiksvoorwaarden</a> · <a href="#" onClick={open(PRIVACY_URL)}>Privacyverklaring</a>
+        <a href="#" onClick={open(HANDLEIDING_URL)}>Handleiding</a> · <a href="#" onClick={open(SOURCE_URL)}>Broncode</a> · <a href="#" onClick={open(TERMS_URL)}>Gebruiksvoorwaarden</a> · <a href="#" onClick={open(PRIVACY_URL)}>Privacyverklaring</a>
       </p>
       <div className="row" style={{ alignItems: 'center' }}>
         <Button onClick={() => void api.app.openExternal(feedbackMailto(version.data ?? ''))}>✉️ Vraag of feedback mailen</Button>
         <span className="small muted">naar {FEEDBACK_EMAIL}; we lezen alles en antwoorden zo snel mogelijk</span>
       </div>
       <p className="small muted">De software wordt geleverd zonder garantie. Jij blijft verantwoordelijk voor je administratie en aangiften.</p>
+      {advanced.data && (
+        <p className="small muted">
+          {advanced.data.count === 0
+            ? 'Boekhoudermodus: er is nooit in geschreven.'
+            : `Boekhoudermodus: ${advanced.data.count === 1 ? '1 handeling' : `${advanced.data.count} handelingen`} buiten de boekhouder om (eerste op ${formatDateNl(advanced.data.first!.slice(0, 10))}, laatste op ${formatDateNl(advanced.data.last!.slice(0, 10))}). Op zo'n administratie geven we geen ondersteuning; je boekhouder kan het nakijken.`}
+        </p>
+      )}
     </div>
   );
 }

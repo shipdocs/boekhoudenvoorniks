@@ -6,6 +6,7 @@ import type { RuntimeStatus } from '../ocr-runtime/runtime';
 import type { CliKind } from '../intake/ocr-cli';
 import { DOWNLOAD_SIZE, GLM_OCR, LLAMA_CPP, REQUIREMENTS } from '../ocr-runtime/manifest';
 import type { Services } from '../services';
+import { autoProcessAfterRound } from '../bankfeed/auto-after-round';
 import type { AppSettings } from '../settings/settings';
 import type { RelationInput } from '../relations/relations';
 import type { InvoiceDraftInput, InvoiceDisplayStatus, PaymentInput } from '../documents/invoices';
@@ -13,11 +14,13 @@ import type { QuoteInput, QuoteStatus } from '../documents/quotes';
 import type { DocumentTemplate, TemplateType } from '../documents/templates';
 import { renderDocumentHtml, FONTS } from '../documents/templates';
 import type { SendOptions } from '../documents/sending';
+import type { WebmailProvider } from '../documents/own-mail';
 import { storedPurchaseVat, storedVatWarning } from '../core-ledger/stored-purchase';
 import { expenseLines, type PurchaseInvoiceInput } from '../documents/purchases';
 import { businessEffect } from '../shared/business-share';
-import type { BookToAccountInput, SaleInput } from '../import/bank';
-import { previewCsv, headerSignature, type CsvMapping } from '../import/csv';
+import type { BankTransaction, BookToAccountInput, SaleInput } from '../import/bank';
+import { directionIssue, directions, headerSignature, oneSided, parseCsv, previewCsv, type CsvMapping } from '../import/csv';
+import { advancedUsage, recordAdvancedAction } from '../core-ledger/advanced-actions';
 import { detectFormat } from '../import/detect';
 import { parseBankFile } from '../import/parse-file';
 import { statementHash } from '../import/statement-folder';
@@ -50,6 +53,7 @@ import type { HoursInput } from '../tax/mileage';
 import { rulesFor } from '../tax/income-tax';
 import type { Cents } from '../shared/money';
 import type { PollResult } from '../mail/mail-intake';
+import type { BonnenView } from '../mail/bonnen-adres';
 import type { UpdateStatus } from './updates';
 import type { SwitchPlan } from './data-dir';
 import type { FxApplyInput } from '../fx/repair';
@@ -91,6 +95,8 @@ export interface HostContext {
   /** opent een bijlage; `path` is het opgeslagen bijlagepad, net als bij `readAttachment` */
   openPath(path: string): Promise<void>;
   openExternal(url: string): Promise<void>;
+  /** toont een bestand in de bestandsbeheerder (de tijdelijke PDF bij versturen met webmail, #450) */
+  revealFile(path: string): void;
   setSmtpPassword(password: string): void;
   hasSmtpPassword(): boolean;
   /** of deze computer veilige opslag (sleutelbeheer) heeft; in de app gelezen uit `SecretStore.available`, in e2e met een schakelaar (#249) */
@@ -134,6 +140,12 @@ export interface HostContext {
     list(): { key: string; name: string; officeCopy: { office: string; exchange: number; endDate: string } | null; id: string | null; current: boolean }[];
     open(key: string): Promise<void>;
     create(name: string): Promise<string>;
+    /** de bedrijfsnaam van een administratie wijzigen, ook van een die niet open is (#444) */
+    rename(key: string, name: string): Promise<void>;
+    /** de map van een administratie naar de prullenbak; niet de eerste en niet de open administratie (#444) */
+    remove(key: string): Promise<void>;
+    /** de map van een administratie in de verkenner openen */
+    openFolder(key: string): Promise<void>;
   };
   /** een andere gegevensmap kiezen (alleen in de app zelf, en niet met een eigen map uit de omgeving) */
   dataFolder?: {
@@ -161,6 +173,14 @@ export interface HostContext {
     status(): UpdateStatus;
     install(): void;
     reconfigure(): void;
+  };
+  /** bonnen-adres op post.boekhoudenvoorniks.nl (#450); ontbreekt buiten Electron */
+  bonnen?: {
+    view(): BonnenView;
+    aanvragen(input: { email: string; bedrijfsnaam: string; kvk?: string; toestemming: string }): Promise<BonnenView>;
+    verversen(): Promise<BonnenView>;
+    stoppen(): Promise<BonnenView>;
+    vergeten(): BonnenView;
   };
   /** inkomende post (IMAP); ontbreekt buiten Electron */
   mail?: {
@@ -231,6 +251,11 @@ export function createApi(s: Services, host: HostContext) {
     consent.give();
   };
   const ocrConsentNeeded = (): boolean => Boolean(host.localOcr.consent && !host.localOcr.consent.given());
+  /** een betaling zoals de schermen hem tonen: met de naam van de rekening en "waar staat dit op?" */
+  const enrichTransaction = (t: BankTransaction, accounts: Map<number, string>) => {
+    const booking = s.bookedInfo.entry(t.matched_journal_entry_id);
+    return { ...t, account_name: accounts.get(t.bank_account_id) ?? null, booked_as: booking?.summary || null, vat_period: booking?.vatPeriod ?? null };
+  };
   const linkTarget = (kind: string, id: number): LinkTarget => {
     if (kind !== 'aankoop' && kind !== 'bank') throw new ValidationError('Kies een aankoop of een betaling');
     return { kind, id: Number(id) };
@@ -286,22 +311,10 @@ export function createApi(s: Services, host: HostContext) {
 
   // ---------- Ponto-bankfeed (#249) ----------
 
-  /**
-   * Na een feedronde met werkelijk nieuwe transacties: precies één keer automatisch verwerken
-   * (regel 4). Zonder nieuwe imports gebeurt er niets; de uitkomst gaat één keer mee in het
-   * antwoord van de route.
-   */
-  const processedFeedRounds = new WeakMap<object, { autoMatched?: number }>();
+  /** Na een feedronde met nieuwe transacties één keer automatisch verwerken (regel 4); zie autoProcessAfterRound. */
   const autoNaFeedronde = (summary: { importedAny: boolean }): { autoMatched?: number } => {
-    if (!summary.importedAny) return {};
-    const previous = processedFeedRounds.get(summary);
-    if (previous) return previous;
-    // Overlappende routes krijgen hetzelfde resultaat van de service-lock. Verwerk dat eenmaal.
-    const result: { autoMatched?: number } = {};
-    processedFeedRounds.set(summary, result);
-    const auto = s.inbox.autoProcess();
-    result.autoMatched = auto.matched + auto.booked;
-    return result;
+    const { autoMatched } = autoProcessAfterRound(s.inbox, summary);
+    return autoMatched === undefined ? {} : { autoMatched };
   };
 
   /**
@@ -454,7 +467,8 @@ export function createApi(s: Services, host: HostContext) {
         return { navigate: { screen: 'factuur', id: inv.id } };
       }
       case 'quote-expired:akkoord':
-        s.jobs.acceptQuote(r.quoteId!);
+        if (s.settings.get().jobsEnabled) s.jobs.acceptQuote(r.quoteId!);
+        else s.quotes.setStatus(r.quoteId!, 'geaccepteerd');
         return;
       case 'supplier-auto:ja':
         s.memory.setAutomatic(r.supplierKey!, true);
@@ -927,6 +941,9 @@ export function createApi(s: Services, host: HostContext) {
       list: () => (host.administrations ? host.administrations.list() : []),
       open: (key: string) => admins().open(String(key)),
       create: (name: string) => admins().create(String(name)),
+      rename: (key: string, name: string) => admins().rename(String(key), String(name)),
+      remove: (key: string) => admins().remove(String(key)),
+      openFolder: (key: string) => admins().openFolder(String(key)),
     },
     /** de map met alle administraties: waar hij staat, en een andere kiezen */
     dataFolder: {
@@ -937,6 +954,8 @@ export function createApi(s: Services, host: HostContext) {
     },
     app: {
       version: () => host.appVersion(),
+      /** of er buiten de boekhouder om in de boekhoudermodus is geschreven (#427) */
+      advancedUsage: () => advancedUsage(s.db),
       administrationId: () => s.settings.administrationId(),
       officeCopy: () => s.settings.officeCopy(),
       checkForUpdates: () => host.checkForUpdates(),
@@ -1024,8 +1043,33 @@ export function createApi(s: Services, host: HostContext) {
       applyTrade: (tradeKey: string, choice: { add: string[]; hide: string[] }) => s.categories.applyTrade(tradeKey, choice),
     },
     /** Inkomende post: een apart mailadres voor de administratie. */
+    /**
+     * Bonnen-adres op post.boekhoudenvoorniks.nl (#450): aanvragen, de stand, stoppen. Null buiten de app. Niet in de
+     * demo of in de kopie bij de boekhouder (de service weigert dan zelf ook).
+     */
+    bonnen: {
+      status: () => host.bonnen?.view() ?? null,
+      aanvragen: (input: { email: string; bedrijfsnaam: string; kvk?: string; toestemming: string }) => {
+        if (!host.bonnen) throw new Error('Het bonnen-adres kan alleen in de app');
+        const blocked = s.settings.outboundBlocked();
+        if (blocked) throw new ValidationError(blocked);
+        return host.bonnen.aanvragen(input);
+      },
+      verversen: () => {
+        if (!host.bonnen) throw new Error('Het bonnen-adres kan alleen in de app');
+        return host.bonnen.verversen();
+      },
+      stoppen: () => {
+        if (!host.bonnen) throw new Error('Het bonnen-adres kan alleen in de app');
+        return host.bonnen.stoppen();
+      },
+      vergeten: () => {
+        if (!host.bonnen) throw new Error('Het bonnen-adres kan alleen in de app');
+        return host.bonnen.vergeten();
+      },
+    },
     mail: {
-      summary: () => ({ ...s.mail.summary(), passwordSet: host.mail?.hasPassword() ?? false }),
+      summary: () => ({ ...s.mail.summary(), passwordSet: host.mail?.hasPassword() ?? false, bonnenActief: host.bonnen?.view().status === 'actief' }),
       setPassword: (pw: string) => host.mail?.setPassword(pw),
       test: (cfg?: AppSettings['mailIn'], password?: string) => {
         if (!host.mail) throw new Error('Mail ophalen kan alleen in de app');
@@ -1120,6 +1164,19 @@ export function createApi(s: Services, host: HostContext) {
       convertToInvoice: (id: number) => s.quotes.convertToInvoice(id),
       html: (id: number) => s.quotes.renderHtml(id),
       send: (id: number, opts?: SendOptions) => s.sender.sendQuote(id, opts),
+      /** met je eigen mailprogramma (#450): geeft de mail door; het document blijft zoals het was tot confirmSent */
+      sendOwnMail: (id: number, opts?: SendOptions) => s.ownMail.sendQuote(id, opts),
+      webmail: async (id: number, provider: WebmailProvider, opts?: SendOptions) => {
+        const w = await s.ownMail.webmailQuote(id, provider, opts);
+        await host.openExternal(w.url);
+        host.revealFile(w.pdfPath);
+        return true;
+      },
+      /** "Ja, verstuurd": pas nu telt de offerte als verzonden */
+      confirmSent: (id: number) => {
+        s.ownMail.confirmQuoteSent(id);
+        return true;
+      },
       savePdf: async (id: number) => {
         const pdf = await s.sender.quotePdf(id);
         return host.saveFile(pdf.filename, pdf.content, [{ name: 'PDF', extensions: ['pdf'] }]);
@@ -1140,6 +1197,19 @@ export function createApi(s: Services, host: HostContext) {
       html: (id: number) => s.invoices.renderHtml(id),
       dateWarnings: (invoiceDate: IsoDate, excludeId?: number) => s.invoices.dateWarnings(invoiceDate, excludeId),
       send: (id: number, opts?: SendOptions) => s.sender.sendInvoice(id, opts),
+      /** met je eigen mailprogramma (#450): geeft de mail door; de factuur blijft zoals hij was tot confirmSent */
+      sendOwnMail: (id: number, opts?: SendOptions) => s.ownMail.sendInvoice(id, opts),
+      webmail: async (id: number, provider: WebmailProvider, opts?: SendOptions) => {
+        const w = await s.ownMail.webmailInvoice(id, provider, opts);
+        await host.openExternal(w.url);
+        host.revealFile(w.pdfPath);
+        return true;
+      },
+      /** "Ja, verstuurd": pas nu telt de factuur als verzonden en lopen de herinneringen */
+      confirmSent: (id: number) => {
+        s.ownMail.confirmInvoiceSent(id);
+        return true;
+      },
       sendReminder: (id: number, opts?: SendOptions) => s.sender.sendReminder(id, opts),
       emailLog: (id: number) => s.sender.emailLog('factuur', id),
       savePdf: async (id: number) => {
@@ -1401,6 +1471,18 @@ export function createApi(s: Services, host: HostContext) {
     bank: {
       accounts: () => s.bank.listAccounts(),
       importStatus: () => s.bank.importStatus(),
+      /** De ingelezen afschriften, en er een weghalen (#408): alleen met de boekhouding voor de boekhouder aan, na een back-up. */
+      imports: () => s.bank.imports(),
+      removeImportPreview: (batchId: number) => s.bank.removeImportPreview(Number(batchId)),
+      removeImport: async (batchId: number) => {
+        if (!s.settings.get().advancedMode) throw new ValidationError('Zet eerst bij Instellingen → Voor de boekhouder "Toon de boekhouding voor je boekhouder" aan');
+        const preview = s.bank.removeImportPreview(Number(batchId));
+        if (preview.blocked) throw new ValidationError(preview.blocked);
+        await host.safetyBackup?.(`voor-weghalen-afschrift-${preview.id}`);
+        const r = s.bank.removeImport(preview.id);
+        recordAdvancedAction(s.db, 'afschrift-weghalen', `${preview.filename ?? preview.source} (${r.lines} regels)`);
+        return r;
+      },
       balanceOverview: () => s.inbox.balanceOverview(),
       addAccount: (name: string, iban: string | null, opts?: { pot?: boolean }) => s.bank.addAccount(name, iban, opts),
       updateAccount: (id: number, patch: { name?: string; iban?: string | null; pot?: boolean }) => s.bank.updateAccount(id, patch),
@@ -1417,10 +1499,28 @@ export function createApi(s: Services, host: HostContext) {
       getOpeningBalance: (bankAccountId: number) => s.bank.openingBalance(bankAccountId),
       ownTransfer: (txId: number) => s.bank.ownTransferTarget(s.bank.get(txId)),
       bookOwnTransfer: (txId: number) => s.bank.bookOwnTransfer(notHeld(txId)),
+      /**
+       * Wat de app met dit bestand gaat doen. Bij een CSV die de app al kent (bekende bank of eerder aangewezen
+       * kolommen) ook hoeveel regels af en bij zijn, en of alles één kant op gaat: dan vraagt het scherm eerst
+       * of dat klopt, in plaats van na het inlezen (#407).
+       */
       previewFile: (filename: string, content: string) => {
         const format = detectFormat(filename, content);
-        if (format !== 'csv') return { format, csv: null, savedMapping: null };
-        return { format, csv: previewCsv(content), savedMapping: savedCsvMapping(content) };
+        if (format !== 'csv') return { format, csv: null, savedMapping: null, direction: null, oneSided: null };
+        const csv = previewCsv(content);
+        const savedMapping = savedCsvMapping(content);
+        const used = savedMapping ?? (csv.detectedBank ? csv.suggestedMapping : null);
+        const direction = used ? directions(parseCsv(content, used).transactions) : null;
+        const issue = used ? directionIssue(content, used) : null;
+        // alleen vragen als er ook een aanwijzing is dat af/bij verkeerd gelezen is; alleen afschrijvingen is normaal
+        return { format, csv, savedMapping, direction, issue, oneSided: direction && issue ? oneSided(direction) : null };
+      },
+      /** Zo leest de app het bestand met deze kolomtoewijzing: de eerste regels, en hoeveel af en bij (#407). */
+      previewMapping: (content: string, mapping: CsvMapping) => {
+        const r = parseCsv(content, mapping);
+        const direction = directions(r.transactions);
+        const issue = directionIssue(content, mapping);
+        return { rows: r.transactions.slice(0, 5), total: r.transactions.length, unreadable: r.warnings.length, direction, issue, oneSided: issue ? oneSided(direction) : null };
       },
       importFile: (filename: string, content: string, mapping?: CsvMapping, bankAccountId?: number) => importBankFile(filename, content, mapping, bankAccountId),
       /**
@@ -1485,13 +1585,15 @@ export function createApi(s: Services, host: HostContext) {
         const auto = s.inbox.autoProcess();
         return { id, autoMatched: auto.matched + auto.booked };
       },
-      /** betalingen, met "waar staat dit op?" en de naam van de rekening */
+      /** betalingen, met "waar staat dit op?" en de naam van de rekening (de 500 nieuwste) */
       transactions: (filter?: { status?: 'nieuw' | 'gematcht' | 'genegeerd'; search?: string }) => {
         const accounts = new Map(s.bank.listAccounts().map((a) => [a.id, a.name]));
-        return s.bank.list(filter).map((t) => {
-          const booking = s.bookedInfo.entry(t.matched_journal_entry_id);
-          return { ...t, account_name: accounts.get(t.bank_account_id) ?? null, booked_as: booking?.summary || null, vat_period: booking?.vatPeriod ?? null };
-        });
+        return s.bank.list(filter).map((t) => enrichTransaction(t, accounts));
+      },
+      /** één betaling, ook als die ouder is dan de 500 nieuwste van de lijst hierboven (#441) */
+      transaction: (txId: number) => {
+        const t = s.bank.get(txId);
+        return enrichTransaction(t, new Map(s.bank.listAccounts().map((a) => [a.id, a.name])));
       },
       /** voorstellen op het scherm van de betaling; ook een aankoop waar je eerder "Nee" op zei, zodat je hem alsnog kunt kiezen */
       suggestions: (txId: number) => s.matching.suggest(s.bank.get(txId), undefined, undefined, { withRejected: true }),
@@ -1835,6 +1937,7 @@ export function createApi(s: Services, host: HostContext) {
       periods: (year: number) => s.vat.listPeriods(year),
       korReverseCharge: (year: number) => s.vat.korReverseCharge(year),
       markSubmitted: (periodKey: string, alreadyFiled = false) => s.vat.markSubmitted(periodKey, { alreadyFiled: alreadyFiled === true }),
+      setPayment: (periodKey: string, input: { reference?: string | null; amount?: number | null }) => s.vat.setPayment(periodKey, input),
       reopen: (periodKey: string) => s.vat.reopen(periodKey),
       corrections: () => s.vat.corrections(),
       checks: (periodKey: string) => s.vat.checks(periodKey),
@@ -1867,28 +1970,53 @@ export function createApi(s: Services, host: HostContext) {
       accounts: () => s.ledger.listAccounts(),
       // in de kopie bij de boekhouder gaan deze drie als handeling mee in het antwoord aan de klant
       createAccount: (input: { code: string; rgs: string; rgsRef?: string | null; name: string; category: AccountCategory }) => {
-        if (!s.settings.officeCopy()) return s.ledger.createAccount(input);
+        if (!s.settings.officeCopy()) {
+          const account = s.ledger.createAccount(input);
+          recordAdvancedAction(s.db, 'rekening-toevoegen', `${input.code} ${input.name}`);
+          return account;
+        }
         s.exchange.act({ kind: 'rekening', input });
         return s.ledger.getAccount(input.rgs);
       },
       /** eigen rekening met verplichte RGS-code; soort en nummer volgen daaruit (Boekhouding → Rekeningschema) */
       addAccount: (input: { name: string; rgsRef: string; code?: string | null }) => {
         const account = s.ledger.userAccountInput(input);
-        if (!s.settings.officeCopy()) return s.ledger.createAccount(account);
+        if (!s.settings.officeCopy()) {
+          const created = s.ledger.createAccount(account);
+          recordAdvancedAction(s.db, 'rekening-toevoegen', `${account.code} ${account.name}`);
+          return created;
+        }
         s.exchange.act({ kind: 'rekening', input: account });
         return s.ledger.getAccount(account.rgs);
       },
       searchRgs: (query: string) => searchRgs(query),
       /** welke rekeningen al gebruikt zijn: die kunnen niet weg */
       accountsInUse: () => [...s.ledger.accountsInUse()],
-      renameAccount: (id: number, name: string) => s.ledger.renameAccount(id, name),
-      archiveAccount: (id: number) => s.ledger.archiveAccount(id),
+      renameAccount: (id: number, name: string) => {
+        const r = s.ledger.renameAccount(id, name);
+        recordAdvancedAction(s.db, 'rekening-hernoemen', `${id} → ${name}`);
+        return r;
+      },
+      archiveAccount: (id: number) => {
+        const r = s.ledger.archiveAccount(id);
+        recordAdvancedAction(s.db, 'rekening-weghalen', String(id));
+        return r;
+      },
       entries: (filter?: { from?: IsoDate; to?: IsoDate; source?: EntrySource; accountRgs?: string; limit?: number }) => s.ledger.listEntries(filter),
       balances: (from?: IsoDate, to?: IsoDate) => s.ledger.balances({ from, to }),
       questionItems: (to?: IsoDate) => accountOpenItems(s.db, ACCOUNTS.vraagposten, to),
-      manualEntry: (entry: { questionEntryId?: number; date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents; vatCode?: string | null; relationId?: number | null }[] }) =>
-        s.settings.officeCopy() ? s.exchange.act({ kind: 'memoriaal', input: entry }).entryIds[0]! : s.ledger.post({ ...entry, source: 'handmatig' }),
-      reverse: (id: number, date: IsoDate) => (s.settings.officeCopy() ? s.exchange.act({ kind: 'terugdraaien', input: { entryId: id, date } }).entryIds[0]! : s.ledger.reverse(id, date)),
+      manualEntry: (entry: { questionEntryId?: number; date: IsoDate; description: string; lines: { account: string; debit?: Cents; credit?: Cents; vatCode?: string | null; relationId?: number | null }[] }) => {
+        if (s.settings.officeCopy()) return s.exchange.act({ kind: 'memoriaal', input: entry }).entryIds[0]!;
+        const id = s.ledger.post({ ...entry, source: 'handmatig' });
+        recordAdvancedAction(s.db, 'memoriaal', `${entry.date} ${entry.description}`);
+        return id;
+      },
+      reverse: (id: number, date: IsoDate) => {
+        if (s.settings.officeCopy()) return s.exchange.act({ kind: 'terugdraaien', input: { entryId: id, date } }).entryIds[0]!;
+        const r = s.ledger.reverse(id, date);
+        recordAdvancedAction(s.db, 'terugdraaien', `boeking ${id} op ${date}`);
+        return r;
+      },
       integrity: () => s.ledger.checkIntegrity(),
       /** "Waarom bestaat deze boeking?": de gebeurtenis met bewijs (#19). */
       origin: (entryId: number) => s.events.forEntry(entryId),

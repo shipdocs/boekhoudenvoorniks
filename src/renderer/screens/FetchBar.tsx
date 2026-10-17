@@ -8,9 +8,10 @@ type Source = 'mail' | 'bank';
 /** Knoppen op Vandaag om mail en bank op te halen; alleen zichtbaar voor wat is ingesteld. */
 export function FetchBar({ onFetched }: { onFetched(): void | Promise<void> }) {
   const { settings } = useApp();
-  const mailOn = settings.mailIn.enabled;
   const bank = useLoad(() => api.bankfeed.status());
-  const mail = useLoad(async () => (mailOn ? api.mail.summary() : null), [mailOn]);
+  // eigen mailbox of het bonnen-adres (#450): allebei via "Mail ophalen"
+  const mail = useLoad(() => api.mail.summary(), [settings.mailIn.enabled]);
+  const mailOn = settings.mailIn.enabled || Boolean(mail.data?.bonnenActief);
   const [busy, setBusy] = useState<Source | null>(null);
   const [result, setResult] = useState<(FetchOutcome & { at: Date }) | null>(null);
   const bankOn = Boolean(bank.data?.configured && bank.data.accounts.some((a) => a.status === 'actief'));

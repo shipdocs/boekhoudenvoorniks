@@ -36,7 +36,7 @@ type PaymentDouble = Awaited<ReturnType<typeof api.bank.sameDoubles>>[number];
 
 export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feedAccountId }: { /** vanaf Vandaag: dit dubbele bedrag meteen laten zien */ double?: { lineId: number; firstPartId: number }; /** vanaf Vandaag: deze twee regels die dezelfde betaling lijken meteen laten zien */ same?: { firstId: number; secondId: number }; focus?: number; /** rekening waarvan de overgeslagen regels meteen open moeten (vanaf Vandaag: het saldo klopt niet) */ skippedFor?: number; /** net ingelezen vanaf Vandaag (afschrift uit de downloadmap): de samenvatting tonen */ imported?: ImportResult; bankFeed?: 'credentials'; feedAccountId?: number }) {
   const { go, toast, settings, refreshBadge, meta } = useApp();
-  const { run } = useAction();
+  const { run, busy } = useAction();
   const [view, setView] = useState<'hulp' | 'alles'>('hulp');
   // zoeken in naam, omschrijving en rekeningnummer; vertraagd zodat niet elke toets een zoekopdracht is
   const [search, setSearch] = useState('');
@@ -48,6 +48,10 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
   const txs = useLoad(() => api.bank.transactions({ ...(view === 'hulp' ? { status: 'nieuw' as const } : {}), ...(query ? { search: query } : {}) }), [view, query]);
   const accounts = useLoad(() => api.bank.accounts());
   const status = useLoad(() => api.bank.importStatus());
+  // de ingelezen afschriften, om er een weg te halen (#408): alleen met de boekhouding voor de boekhouder aan
+  const imports = useLoad(() => (settings.advancedMode ? api.bank.imports() : Promise.resolve([])), [settings.advancedMode]);
+  const [removing, setRemoving] = useState<Awaited<ReturnType<typeof api.bank.removeImportPreview>> | null>(null);
+  const [allImports, setAllImports] = useState(false);
   const overview = useLoad(() => api.bank.balanceOverview());
   // verzamelbetalingen die er twee keer in staan (één regel én losse deelposten)
   const doubles = useLoad(() => api.bank.doubles());
@@ -58,6 +62,8 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
   const [showSame, setShowSame] = useState<{ firstId: number; secondId: number } | null>(same ?? null);
   const openSame = showSame ? (sames.data ?? []).find((d) => d.firstId === showSame.firstId && d.secondId === showSame.secondId) : undefined;
   const [mapping, setMapping] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null } | null>(null);
+  // een bekende CSV waarin alle regels dezelfde kant op gaan: eerst vragen of dat klopt (#407)
+  const [sided, setSided] = useState<{ filename: string; content: string; headers: string[]; rows: Record<string, string>[]; mapping: CsvMapping | null; side: 'af' | 'bij'; total: number; issue: string | null } | null>(null);
   const [last, setLast] = useState<ImportResult | null>(imported ?? null);
   // de regels die zijn overgeslagen omdat de betaling er al stond: van één import of van één rekening
   const [review, setReview] = useState<{ batchId?: number; bankAccountId?: number } | null>(skippedFor ? { bankAccountId: skippedFor } : null);
@@ -72,6 +78,10 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
     if (preview.format === 'csv' && !preview.csv?.detectedBank && !preview.savedMapping) {
       return setMapping({ filename: file.name, content, headers: preview.csv!.headers, rows: preview.csv!.rows, suggested: preview.csv!.suggestedMapping });
     }
+    if (preview.format === 'csv' && preview.oneSided) {
+      const { af, bij } = preview.direction!;
+      return setSided({ filename: file.name, content, headers: preview.csv!.headers, rows: preview.csv!.rows, mapping: preview.savedMapping ?? preview.csv!.suggestedMapping, side: preview.oneSided, total: af + bij, issue: preview.issue });
+    }
     await doImport(file.name, content, preview.savedMapping ?? undefined);
   };
 
@@ -79,7 +89,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
     const r = await run(() => api.bank.importFile(filename, content, m));
     if (!r) return;
     setLast(r);
-    await Promise.all([status.reload(), doubles.reload(), sames.reload()]);
+    await Promise.all([status.reload(), doubles.reload(), sames.reload(), imports.reload()]);
     if (r.warnings.length) toast(`${r.warnings.length} ${r.warnings.length === 1 ? 'regel kon' : 'regels konden'} we niet lezen (bv. ${r.warnings[0]!.charAt(0).toLowerCase()}${r.warnings[0]!.slice(1)})`, 'error');
     await txs.reload();
   };
@@ -101,7 +111,7 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
       <DropZone accept=".csv,.txt,.sta,.940,.mt940,.xml" onFile={(f) => void importFile(f)}>
         <div style={{ fontSize: 30 }}>🏦</div>
         <strong>Sleep je bankafschrift hierheen</strong>
-        <div className="small">Download het bij je bank: internetbankieren → afschrift downloaden (CSV, MT940 of CAMT)</div>
+        <div className="small">Download het bij je bank: internetbankieren → afschrift downloaden. Het liefst CAMT.053 of MT940; CSV kan ook.</div>
       </DropZone>
 
       {last && (
@@ -142,6 +152,8 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
         <input className="grow" type="search" aria-label="Zoek in betalingen" placeholder="Zoek op naam, omschrijving of rekeningnummer…" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
       <ErrorBox error={txs.error} />
+      {/* de lijst is afgekapt op de 500 nieuwste (#441): zeg dat, anders lijken oudere betalingen verdwenen */}
+      {(txs.data ?? []).length >= 500 && <p className="small muted">Dit zijn de 500 nieuwste{query ? ' die hierop passen' : ''}{view === 'hulp' ? ' die nog verwerkt moeten worden' : ''}. Oudere betalingen vind je via het zoekvak hierboven of via Zoeken (Ctrl K).</p>}
       {query && (txs.data ?? []).length > 0 && (
         <p className="small muted">
           {txs.data!.length === 1 ? '1 betaling' : `${txs.data!.length} betalingen`}{view === 'hulp' ? ' die nog verwerkt moeten worden' : ''}, samen <Euro cents={txs.data!.reduce((sum, t) => sum + t.amount, 0)} sign />
@@ -238,10 +250,87 @@ export function Bank({ focus, skippedFor, imported, double, same, bankFeed, feed
 
       <StatementFolderCard />
 
+      {settings.advancedMode && (imports.data?.length ?? 0) > 0 && (
+        <>
+          <h2 style={{ marginTop: 24 }}>Ingelezen afschriften</h2>
+          <p className="small muted">Klopt een afschrift niet (bijvoorbeeld alles als "bij" ingelezen)? Dan haal je het hier weg, helemaal, en lees je het daarna opnieuw in. Wat je er al mee gedaan had, draait de app eerst terug.</p>
+          <ErrorBox error={imports.error} />
+          <table className="list">
+            <thead><tr><th>Ingelezen</th><th>Bestand</th><th>Rekening</th><th>Periode</th><th className="num">Regels</th><th><span className="sr-only">Acties</span></th></tr></thead>
+            <tbody>
+              {(imports.data ?? []).slice(0, allImports ? undefined : 30).map((b) => (
+                <tr key={b.id}>
+                  <td>{formatDateTime(b.importedAt)}</td>
+                  <td>{b.filename ?? b.source.toUpperCase()}</td>
+                  <td>{b.accounts ?? '—'}</td>
+                  <td>{b.from && b.to ? <><DateNl date={b.from} /> t/m <DateNl date={b.to} /></> : '—'}</td>
+                  <td className="num">{b.lines}{b.processed > 0 && <div className="small muted">{b.processed} verwerkt</div>}</td>
+                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                    <Button small kind="ghost" disabled={!!b.blocked} title={b.blocked ?? 'Dit afschrift helemaal weghalen'} onClick={async () => { const p = await run(() => api.bank.removeImportPreview(b.id)); if (p) setRemoving(p); }}>Weghalen</Button>
+                    {b.blocked && <div className="small muted" style={{ whiteSpace: 'normal', maxWidth: 220 }}>{b.blocked}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!allImports && (imports.data?.length ?? 0) > 30 && <p className="small"><button className="linklike" onClick={() => setAllImports(true)}>Alle {imports.data!.length} afschriften tonen</button></p>}
+        </>
+      )}
+      {removing && (
+        <Modal title="Afschrift weghalen?" onClose={() => setRemoving(null)}>
+          <p>
+            <strong>{removing.filename ?? removing.source.toUpperCase()}</strong> (ingelezen {formatDateTime(removing.importedAt)}): {removing.lines - removing.kept === 1 ? '1 regel gaat' : `${removing.lines - removing.kept} regels gaan`} eruit. Dit is niet terug te draaien; de app maakt eerst een back-up.
+          </p>
+          {removing.processed.length > 0 && (
+            <>
+              <p>{removing.processed.length === 1 ? 'Deze regel is al verwerkt en krijgt' : `Deze ${removing.processed.length} regels zijn al verwerkt en krijgen`} eerst een tegenboeking; een gekoppelde factuur of aankoop staat daarna weer open:</p>
+              <table className="list small">
+                <tbody>
+                  {removing.processed.slice(0, 20).map((t) => (
+                    <tr key={t.id}><td><DateNl date={t.date} /></td><td>{t.counterName ?? t.description}</td><td className="num"><Euro cents={t.amount} /></td></tr>
+                  ))}
+                  {removing.processed.length > 20 && <tr><td colSpan={3} className="muted">… en nog {removing.processed.length - 20}</td></tr>}
+                </tbody>
+              </table>
+            </>
+          )}
+          <ul className="small">
+            {removing.kept > 0 && <li>{removing.kept === 1 ? '1 regel staat ook in een ander afschrift en blijft' : `${removing.kept} regels staan ook in een ander afschrift en blijven`} staan.</li>}
+            {removing.evidence > 0 && <li>{removing.evidence === 1 ? '1 bon die hier als bewijs bij hangt, gaat' : `${removing.evidence} bonnen die hier als bewijs bij hangen, gaan`} terug naar "Nog controleren".</li>}
+            {removing.skippedElsewhere > 0 && <li>{removing.skippedElsewhere === 1 ? '1 regel uit een later afschrift die hierdoor was overgeslagen, komt' : `${removing.skippedElsewhere} regels uit latere afschriften die hierdoor waren overgeslagen, komen`} er alsnog in.</li>}
+            {removing.doubles > 0 && <li>{removing.doubles === 1 ? '1 regel uit een ander afschrift die als dubbel hiervan weg was, komt' : `${removing.doubles} regels uit andere afschriften die als dubbel hiervan weg waren, komen`} terug.</li>}
+          </ul>
+          <div className="row end" style={{ marginTop: 14 }}>
+            <Button onClick={() => setRemoving(null)}>Annuleren</Button>
+            <Button kind="danger" disabled={busy} onClick={async () => {
+              const r = await run(() => api.bank.removeImport(removing.id));
+              if (!r) return;
+              setRemoving(null);
+              toast(`Afschrift weggehaald: ${r.lines - r.kept} ${r.lines - r.kept === 1 ? 'regel' : 'regels'}${r.kept ? `, ${r.kept} ${r.kept === 1 ? 'blijft' : 'blijven'} (staan ook in een ander afschrift)` : ''}${r.undone ? `, ${r.undone} teruggedraaid` : ''}${r.restored ? `, ${r.restored} uit een later afschrift alsnog toegevoegd` : ''}`);
+              await Promise.all([txs.reload(), status.reload(), doubles.reload(), sames.reload(), imports.reload()]);
+              refreshBadge();
+            }}>Weghalen</Button>
+          </div>
+        </Modal>
+      )}
       {review && <ImportReview {...review} onClose={() => setReview(null)} onChanged={async () => { await Promise.all([txs.reload(), status.reload(), doubles.reload(), sames.reload()]); refreshBadge(); }} />}
       {openDouble && <DoubleDialog double={openDouble} onClose={() => setShowDouble(null)} onChanged={async () => { setShowDouble(null); await Promise.all([txs.reload(), status.reload(), doubles.reload()]); refreshBadge(); }} />}
       {openSame && <SameDialog double={openSame} onClose={() => setShowSame(null)} onChanged={async () => { setShowSame(null); await Promise.all([txs.reload(), status.reload(), sames.reload()]); refreshBadge(); }} />}
       {mapping && <CsvMappingDialog {...mapping} onClose={() => setMapping(null)} onConfirm={async (m) => { const x = mapping; setMapping(null); await doImport(x.filename, x.content, m); }} />}
+      {sided && (
+        <Modal title="Klopt dit?" onClose={() => setSided(null)}>
+          <p>
+            Alle {sided.total} regels in dit bestand zijn <strong>{sided.side === 'bij' ? 'bijschrijvingen' : 'afschrijvingen'}</strong>; er is geen enkele {sided.side === 'bij' ? 'afschrijving' : 'bijschrijving'}.
+            {sided.issue ?? 'Waarschijnlijk is de kolom met “Af” of “Bij” niet goed gelezen.'} Kijk even naar de kolommen voordat je het inleest.
+          </p>
+          <p className="small muted">Heeft je bank ook een CAMT.053- of MT940-bestand? Kies dan liever dat: daarin staat vast wat af en bij is.</p>
+          <div className="row end" style={{ marginTop: 14 }}>
+            <Button onClick={() => setSided(null)}>Annuleren</Button>
+            <Button onClick={async () => { const x = sided; setSided(null); await doImport(x.filename, x.content, x.mapping ?? undefined); }}>Ja, dit klopt: inlezen</Button>
+            <Button kind="primary" onClick={() => { const x = sided; setSided(null); setMapping({ filename: x.filename, content: x.content, headers: x.headers, rows: x.rows, suggested: x.mapping }); }}>Kolommen nakijken</Button>
+          </div>
+        </Modal>
+      )}
       {opening && <OpeningBalance accountId={opening.id} name={opening.name} onClose={() => setOpening(null)} />}
       {editing && <AccountDialog account={editing === 'nieuw' ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await Promise.all([status.reload(), accounts.reload()]); }} />}
     </div>
@@ -606,8 +695,16 @@ function OpeningBalance({ accountId, name, onClose }: { accountId: number; name:
   );
 }
 
-function CsvMappingDialog({ headers, rows, suggested, onClose, onConfirm }: { headers: string[]; rows: Record<string, string>[]; suggested: CsvMapping | null; onClose: () => void; onConfirm: (m: CsvMapping) => void }) {
+function CsvMappingDialog({ headers, rows, content, suggested, onClose, onConfirm }: { headers: string[]; rows: Record<string, string>[]; content: string; suggested: CsvMapping | null; onClose: () => void; onConfirm: (m: CsvMapping) => void }) {
   const [m, setM] = useState<CsvMapping>(suggested ?? { date: headers[0] ?? '', amount: headers[1] ?? '', dateFormat: 'DD-MM-YYYY', description: [] });
+  // zo leest de app het met deze toewijzing: datum, af of bij, bedrag (#407)
+  const [parsed, setParsed] = useState<Awaited<ReturnType<typeof api.bank.previewMapping>> | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (!m.date || !(m.amount || m.amountDebit)) return setParsed(null);
+    api.bank.previewMapping(content, m).then((p) => { if (live) setParsed(p); }).catch(() => { if (live) setParsed(null); });
+    return () => { live = false; };
+  }, [content, m]);
   const col = (key: keyof CsvMapping, label: string, optional = true) => (
     <Field label={label}>
       <select value={(m[key] as string) ?? ''} onChange={(e) => setM({ ...m, [key]: e.target.value || undefined })}>
@@ -618,7 +715,7 @@ function CsvMappingDialog({ headers, rows, suggested, onClose, onConfirm }: { he
   );
   return (
     <Modal title="Welke kolom is wat?" wide onClose={onClose}>
-      <p className="muted small">We kennen dit bestand nog niet. Wijs één keer de kolommen aan; daarna onthouden we het.</p>
+      <p className="muted small">We kennen dit bestand nog niet. Wijs één keer de kolommen aan; daarna onthouden we het. Heeft je bank ook een CAMT.053- of MT940-bestand? Kies dan liever dat: daarin staat vast wat af en bij is.</p>
       <div className="grid cols-3">
         {col('date', 'Datum', false)}
         <Field label="Datumformaat">
@@ -638,7 +735,36 @@ function CsvMappingDialog({ headers, rows, suggested, onClose, onConfirm }: { he
           </select>
         </Field>
       </div>
-      <h3 style={{ marginTop: 16 }}>Voorbeeld</h3>
+      <h3 style={{ marginTop: 16 }}>Zo leest de app het</h3>
+      {parsed ? (
+        <>
+          <table className="list small">
+            <thead><tr><th>Datum</th><th>Af/Bij</th><th style={{ textAlign: 'right' }}>Bedrag</th><th>Naam</th><th>Omschrijving</th></tr></thead>
+            <tbody>
+              {parsed.rows.map((t, i) => (
+                <tr key={i}>
+                  <td><DateNl date={t.date} /></td>
+                  <td>{t.amount < 0 ? 'Af' : t.amount > 0 ? 'Bij' : '—'}</td>
+                  <td style={{ textAlign: 'right' }}><Euro cents={Math.abs(t.amount)} /></td>
+                  <td>{t.counterName}</td>
+                  <td>{t.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="small muted" style={{ marginTop: 6 }}>
+            {parsed.total} {parsed.total === 1 ? 'regel' : 'regels'}: {parsed.direction.af} af, {parsed.direction.bij} bij{parsed.unreadable > 0 && <>, <strong>{parsed.unreadable} niet te lezen</strong> (klopt de datumkolom en het datumformaat?)</>}.
+          </p>
+          {parsed.issue && (
+            <div className="notice warn">
+              {parsed.issue}{parsed.oneSided && <> Alle regels zijn nu {parsed.oneSided === 'bij' ? 'bijschrijvingen' : 'afschrijvingen'}.</>} Kijk naar de kolom met “Af” of “Bij”.
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="small muted">Kies eerst de kolom met de datum en die met het bedrag.</p>
+      )}
+      <h3 style={{ marginTop: 16 }}>Zo staat het in het bestand</h3>
       <div style={{ overflowX: 'auto' }}>
         <table className="list small">
           <thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead>
@@ -746,7 +872,8 @@ function purchaseCandidateText(c: PurchaseCandidate): string {
 export function CategorizeTransaction({ id }: { id: number }) {
   const { go, meta, showInvestmentSaved } = useApp();
   const { run, busy } = useAction();
-  const txs = useLoad(() => api.bank.transactions({}), [id]);
+  // de betaling zelf ophalen, niet uit de lijst van de 500 nieuwste: een oudere (bv. genegeerde) betaling uit Zoeken bleef anders een leeg scherm (#441)
+  const txs = useLoad(() => api.bank.transaction(id), [id]);
   const suggestions = useLoad(() => api.bank.suggestions(id), [id]);
   const openInvoices = useLoad(() => api.invoices.list({ status: 'openstaand' }));
   const overdue = useLoad(() => api.invoices.list({ status: 'vervallen' }));
@@ -770,7 +897,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const [doubleOf, setDoubleOf] = useState<Awaited<ReturnType<typeof api.bank.duplicateCandidates>> | null>(null);
   // waarschijnlijk dezelfde betaling als een regel die er al staat (#225): eerst die vraag, daarna pas indelen
   const sames = useLoad(() => api.bank.sameDoubles());
-  const t = txs.data?.find((x) => x.id === id);
+  const t = txs.data;
   if (!t) return <div className="page"><ErrorBox error={txs.error} /></div>;
   const held = t.status === 'nieuw' ? (sames.data ?? []).find((d) => (d.secondId === t.id && d.second.status === 'nieuw') || (d.firstId === t.id && d.second.status !== 'nieuw')) : undefined;
   /** de betalingen waar deze regel een dubbel van kan zijn; kiezen koppelt hem daaraan */

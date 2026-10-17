@@ -56,7 +56,7 @@ test('uitwisseling: uitnodigen, versturen, corrigeren bij de boekhouder, antwoor
   await expect(banner.getByText(/Kopie van Stukadoorsbedrijf Piet voor Kantoor De Vries/)).toBeVisible();
 
   // corrigeren in de expertmodus, zoals een boekhouder dat doet
-  await call(page, 'settings.update', { advancedMode: true });
+  await call(page, 'settings.update', { advancedMode: true, advancedModeAgreedAt: '2026-10-15' });
   await page.reload();
   await nav(page, 'Boekhouding');
   await page.locator('input[type=date]').first().fill(`${until.slice(0, 4)}-01-01`);

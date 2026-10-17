@@ -28,6 +28,7 @@ const MENU = [
       { href: 'boekhouders.html', label: 'Boekhouders', hint: 'Pakket en uitwisseling' },
     ],
   },
+  { href: 'handleiding/index.html', label: 'Handleiding' },
   { href: 'waarom.html', label: 'Waarom' },
   { href: 'wijzigingen.html', label: 'Nieuw' },
 ];
@@ -47,6 +48,7 @@ const FOOTER = [
       { href: 'zonder-abonnement.html', label: 'Zonder abonnement' },
       { href: 'offline-boekhoudprogramma.html', label: 'Offline boekhoudprogramma' },
       { href: 'gratis-boekhoudprogramma-downloaden.html', label: 'Gratis boekhoudprogramma downloaden' },
+      { href: 'handleiding/index.html', label: 'Handleiding' },
       { href: './#vragen', label: 'Veelgestelde vragen' },
       { href: 'wijzigingen.html', label: 'Wat is er nieuw' },
     ],
@@ -77,77 +79,90 @@ const FOOTER = [
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-function link(item, page, extra = '') {
-  const current = item.href === page ? ' aria-current="page"' : '';
+/** Een pad vanaf de siteroot, gezien vanaf een pagina in `base` ('' voor de root, '../' voor een submap). */
+const rel = (href, base) => (/^(https?:|mailto:|tel:)/.test(href) ? href : href === './' ? (base || './') : base + href);
+
+function link(item, page, base = '', extra = '') {
+  const current = item.href === page || (page.startsWith('handleiding/') && item.href === 'handleiding/index.html') ? ' aria-current="page"' : '';
   const hint = item.hint ? `<span class="hint">${esc(item.hint)}</span>` : '';
-  return `<a href="${item.href}"${current}${extra}>${esc(item.label)}${hint}</a>`;
+  return `<a href="${rel(item.href, base)}"${current}${extra}>${esc(item.label)}${hint}</a>`;
 }
 
-function header(page) {
+function header(page, base = '') {
   const lines = [];
   for (const item of MENU) {
     if (!item.items) {
-      lines.push(`        ${link(item, page)}`);
+      lines.push(`        ${link(item, page, base)}`);
       continue;
     }
     const inGroup = item.items.some((i) => i.href === page);
     lines.push(`        <details class="sub"${inGroup ? ' data-current' : ''}>`);
     lines.push(`          <summary>${esc(item.label)}</summary>`);
     lines.push('          <div class="panel">');
-    for (const sub of item.items) lines.push(`            ${link(sub, page)}`);
+    for (const sub of item.items) lines.push(`            ${link(sub, page, base)}`);
     lines.push('          </div>');
     lines.push('        </details>');
   }
   return `<!-- Menu en voettekst staan in scripts/site-menu.cjs; bijwerken met: npm run site:menu -->
   <header class="top">
     <div class="wrap nav">
-      <a class="brand" href="./"><picture><source srcset="img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
+      <a class="brand" href="${base || './'}"><picture><source srcset="${base}img/logo-compact-wit.svg" media="(prefers-color-scheme: dark)"><img src="${base}img/logo-compact-website-blauw.svg" alt="BoekhoudenVoorNiks" width="258" height="54"></picture></a>
       <button class="menu-button" type="button" aria-expanded="false" aria-controls="menu" aria-label="Menu"><span></span><span></span><span></span></button>
       <nav id="menu" class="menu" aria-label="Hoofdmenu">
 ${lines.join('\n')}
-        <a class="btn small" href="${DOWNLOAD}">Downloaden</a>
+        <a class="btn small" href="${base}${DOWNLOAD}">Downloaden</a>
       </nav>
     </div>
   </header>
-  <script src="menu.js" defer></script>`;
+  <script src="${base}menu.js" defer></script>`;
 }
 
-function footer(page) {
+function footer(page, base = '') {
   const cols = FOOTER.map((col) => {
-    const items = col.items.map((i) => `          <li>${link(i, page)}</li>`).join('\n');
+    const items = col.items.map((i) => `          <li>${link(i, page, base)}</li>`).join('\n');
     return `      <div>\n        <h2>${esc(col.title)}</h2>\n        <ul>\n${items}\n        </ul>\n      </div>`;
   }).join('\n');
   return `<footer class="wrap foot">
     <div class="foot-links">
 ${cols}
     </div>
-    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong>ShipDocs</strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a> · <button type="button" class="linkish" data-cookie-settings>Cookie-voorkeuren</button></p>
+    <p class="foot-legal">BoekhoudenVoorNiks is een product van <strong><a href="https://shipdocs.app/">ShipDocs</a></strong> · Middelweg 211, 1911 EE Uitgeest · KvK 95207341 · btw NL005138041B29 · <a href="mailto:info@shipdocs.app">info@shipdocs.app</a> · <a href="tel:+31203695765">+31 20 369 5765</a> · <button type="button" class="linkish" data-cookie-settings>Cookie-voorkeuren</button></p>
     <div id="privacy-choice" role="dialog" aria-label="Meten van advertenties">
-      <p><strong>Mogen we meten of onze advertentie werkt?</strong> Met je toestemming laden we de Meta Pixel (Facebook en Instagram). Meta plaatst dan cookies en ziet dat je deze site bezocht. Zonder toestemming gaat er niets naar Meta. <a href="privacy.html#website">Meer uitleg</a></p>
+      <p><strong>Mogen we meten of onze advertentie werkt?</strong> Met je toestemming laden we de Meta Pixel (Facebook en Instagram). Meta plaatst dan cookies en ziet dat je deze site bezocht. Zonder toestemming gaat er niets naar Meta. <a href="${base}privacy.html#website">Meer uitleg</a></p>
       <div class="row"><button type="button" class="btn small" data-choice="ja">Toestaan</button><button type="button" class="btn small ghost" data-choice="nee">Niet toestaan</button></div>
     </div>
-    <script src="meta-pixel.js" defer></script>
+    <script src="${base}meta-pixel.js" defer></script>
   </footer>`;
 }
 
-const HEADER_RE = /(?:[ \t]*<!-- Menu en voettekst[^\n]*-->\n)?[ \t]*<header class="top">[\s\S]*?<\/header>(?:\n[ \t]*<script src="menu\.js" defer><\/script>)?(?:\n[ \t]*<script>\n[ \t]*\(function \(\) \{\n[ \t]*var top = document\.querySelector\('\.top'\)[\s\S]*?<\/script>)?/;
+const HEADER_RE = /(?:[ \t]*<!-- Menu en voettekst[^\n]*-->\n)?[ \t]*<header class="top">[\s\S]*?<\/header>(?:\n[ \t]*<script src="(?:\.\.\/)?menu\.js" defer><\/script>)?(?:\n[ \t]*<script>\n[ \t]*\(function \(\) \{\n[ \t]*var top = document\.querySelector\('\.top'\)[\s\S]*?<\/script>)?/;
 const FOOTER_RE = /[ \t]*<footer class="wrap foot">[\s\S]*?<\/footer>/;
 
-let changed = 0;
-for (const file of fs.readdirSync(SITE).filter((f) => f.endsWith('.html')).sort()) {
-  const page = file === 'index.html' ? './' : file;
-  const before = fs.readFileSync(path.join(SITE, file), 'utf8');
-  if (!HEADER_RE.test(before) || !FOOTER_RE.test(before)) {
-    console.error(`${file}: geen <header class="top"> of <footer class="wrap foot"> gevonden, overgeslagen`);
-    continue;
+function main() {
+  let changed = 0;
+  // de root en de handleiding (submap, dus links met ../)
+  const dirs = [{ dir: SITE, base: '', prefix: '' }, { dir: path.join(SITE, 'handleiding'), base: '../', prefix: 'handleiding/' }];
+  for (const { dir, base, prefix } of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.html')).sort()) {
+      const page = !prefix && file === 'index.html' ? './' : prefix + file;
+      const before = fs.readFileSync(path.join(dir, file), 'utf8');
+      if (!HEADER_RE.test(before) || !FOOTER_RE.test(before)) {
+        console.error(`${prefix}${file}: geen <header class="top"> of <footer class="wrap foot"> gevonden, overgeslagen`);
+        continue;
+      }
+      const after = before
+        .replace(HEADER_RE, () => `  ${header(page, base)}`)
+        .replace(FOOTER_RE, () => `  ${footer(page, base)}`);
+      if (after !== before) {
+        fs.writeFileSync(path.join(dir, file), after);
+        changed++;
+        console.log(`${prefix}${file}: bijgewerkt`);
+      }
+    }
   }
-  const after = before
-    .replace(HEADER_RE, () => `  ${header(page)}`)
-    .replace(FOOTER_RE, () => `  ${footer(page)}`);
-  if (after !== before) {
-    fs.writeFileSync(path.join(SITE, file), after);
-    changed++;
-    console.log(`${file}: bijgewerkt`);
-  }
+  console.log(`${changed} pagina('s) bijgewerkt`);
 }
-console.log(`${changed} pagina('s) bijgewerkt`);
+
+module.exports = { header, footer };
+if (require.main === module) main();

@@ -18,6 +18,8 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - run: npm run typecheck
+      # de site-pagina "Wat is er nieuw" moet gelijk zijn aan CHANGELOG.md (#436): niet met de hand bewerken
+      - run: node scripts/site-wijzigingen.cjs --check
       - run: npm test
       - run: npm run build
 
