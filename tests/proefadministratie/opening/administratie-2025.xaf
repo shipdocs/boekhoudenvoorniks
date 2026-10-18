@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<auditfile xmlns="http://www.auditfiles.nl/XAF/3.2">
+  <header>
+    <fiscalYear>2025</fiscalYear>
+    <startDate>2025-01-01</startDate>
+    <endDate>2025-12-31</endDate>
+    <curCode>EUR</curCode>
+    <softwareDesc>Proefpakket</softwareDesc>
+    <softwareVersion>1</softwareVersion>
+  </header>
+  <company>
+    <companyIdent>12345678</companyIdent>
+    <companyName>Proefbedrijf</companyName>
+    <customersSuppliers>
+      <customerSupplier>
+        <custSupID>C1</custSupID><custSupName>Oude Klant BV</custSupName><custSupTp>C</custSupTp>
+      </customerSupplier>
+      <customerSupplier>
+        <custSupID>S1</custSupID><custSupName>Oude Leverancier BV</custSupName><custSupTp>S</custSupTp>
+      </customerSupplier>
+    </customersSuppliers>
+    <generalLedger>
+      <ledgerAccount><accID>0500</accID><accDesc>Eigen vermogen</accDesc><accTp>B</accTp></ledgerAccount>
+      <ledgerAccount><accID>1100</accID><accDesc>Bank</accDesc><accTp>B</accTp></ledgerAccount>
+      <ledgerAccount><accID>1300</accID><accDesc>Debiteuren</accDesc><accTp>B</accTp></ledgerAccount>
+      <ledgerAccount><accID>1500</accID><accDesc>Af te dragen omzetbelasting</accDesc><accTp>B</accTp></ledgerAccount>
+      <ledgerAccount><accID>1520</accID><accDesc>Voorbelasting</accDesc><accTp>B</accTp></ledgerAccount>
+      <ledgerAccount><accID>1600</accID><accDesc>Crediteuren</accDesc><accTp>B</accTp></ledgerAccount>
+      <ledgerAccount><accID>7000</accID><accDesc>Inkoop materialen</accDesc><accTp>P</accTp></ledgerAccount>
+      <ledgerAccount><accID>8000</accID><accDesc>Omzet 21%</accDesc><accTp>P</accTp></ledgerAccount>
+    </generalLedger>
+    <openingBalance>
+      <opBalDate>2025-01-01</opBalDate><linesCount>2</linesCount><totalDebit>10000.00</totalDebit><totalCredit>10000.00</totalCredit>
+      <obLine><nr>1</nr><accID>1100</accID><amnt>10000.00</amnt><amntTp>D</amntTp></obLine>
+      <obLine><nr>2</nr><accID>0500</accID><amnt>10000.00</amnt><amntTp>C</amntTp></obLine>
+    </openingBalance>
+    <transactions>
+      <journal>
+        <jrnID>BNK</jrnID><desc>Bank</desc><jrnTp>B</jrnTp><bankAccNr>NL91ABNA0417164300</bankAccNr>
+      </journal>
+      <journal>
+        <jrnID>VRK</jrnID><desc>Verkoop</desc><jrnTp>S</jrnTp>
+        <transaction>
+          <nr>1</nr><desc>Factuur 2025-010</desc><trDt>2025-12-15</trDt>
+          <trLine><accID>1300</accID><amnt>1210.00</amnt><amntTp>D</amntTp><custSupID>C1</custSupID><invRef>2025-010</invRef></trLine>
+          <trLine><accID>8000</accID><amnt>1000.00</amnt><amntTp>C</amntTp><vat><vatID>1</vatID><vatPerc>21</vatPerc><vatAmnt>210.00</vatAmnt><vatAmntTp>C</vatAmntTp></vat></trLine>
+          <trLine><accID>1500</accID><amnt>210.00</amnt><amntTp>C</amntTp></trLine>
+        </transaction>
+      </journal>
+      <journal>
+        <jrnID>INK</jrnID><desc>Inkoop</desc><jrnTp>P</jrnTp>
+        <transaction>
+          <nr>2</nr><desc>Materialen december</desc><trDt>2025-12-20</trDt>
+          <trLine><accID>7000</accID><amnt>500.00</amnt><amntTp>D</amntTp><vat><vatID>2</vatID><vatPerc>21</vatPerc><vatAmnt>105.00</vatAmnt><vatAmntTp>D</vatAmntTp></vat></trLine>
+          <trLine><accID>1520</accID><amnt>105.00</amnt><amntTp>D</amntTp></trLine>
+          <trLine><accID>1600</accID><amnt>605.00</amnt><amntTp>C</amntTp><custSupID>S1</custSupID><invRef>LEVER-2025-12</invRef></trLine>
+        </transaction>
+      </journal>
+    </transactions>
+  </company>
+</auditfile>

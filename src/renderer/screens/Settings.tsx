@@ -1,0 +1,1069 @@
+import { useEffect, useState, type ReactNode } from 'react';
+import { api } from '../api';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useJobWords, useLoad, type Settings } from '../ui';
+import type { AppSettings } from '../../settings/settings';
+import { ResetCard } from './Reset';
+import { CategoriesDialog } from './Categories';
+import { LocalOcrConsent, ReaderChoice } from './Reader';
+import { AssistantCard } from './Assistant';
+import { AdministrationsSettings } from './Administrations';
+import { DataFolderSettings } from './DataFolder';
+import { OfficeSettings } from './Exchange';
+import { ScannerSettings } from './Scanner';
+import { BonnenAdres } from './BonnenAdres';
+import { formatDateNl, today } from '../../shared/dates';
+import { businessEffect } from '../../shared/business-share';
+import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
+import { ONLINE_HELP } from '../../shared/online-help';
+import { PontoCard } from './PontoDialog';
+import { checkNumberFormat } from '../../documents/numbering';
+import { HANDLEIDING_URL } from '../../shared/handleiding';
+
+type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'scanner' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
+
+const TABS: [Tab, string][] = [
+  ['bedrijf', 'Je bedrijf'],
+  ['facturen', 'Facturen & offertes'],
+  ['email', 'E-mail'],
+  ['btw', 'Btw'],
+  ['categorieen', 'Categorieën'],
+  ['koppelingen', 'Koppelingen'],
+  ['scanner', 'Bonnenmap'],
+  ['ai', 'Automatisch & herkenning'],
+  ['backup', 'Back-up, demo & updates'],
+  ['administraties', 'Administraties'],
+  ['geavanceerd', 'Voor de boekhouder'],
+  ['over', 'Over'],
+];
+
+export function SettingsScreen() {
+  const jw = useJobWords();
+  const { settings, reloadSettings, route, go, meta } = useApp();
+  const { run, busy } = useAction();
+  const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'bedrijf');
+  const [draft, setDraft] = useState<Settings>(settings);
+  // de boekhouding voor de boekhouder aanzetten: eerst uitleg en een akkoord (#409)
+  const [agreeing, setAgreeing] = useState(false);
+  const [understood, setUnderstood] = useState(false);
+  // na zoeken naar Claude Code/Codex: het kaartje voor vragen stellen opnieuw laden
+  const [aiVersion, setAiVersion] = useState(0);
+  const bankAccounts = useLoad(() => api.bank.accounts());
+  // de keuze voor het lezen van bonnen wordt direct opgeslagen: in het concept meenemen, anders zet
+  // "Opslaan" van iets anders hem terug
+  useEffect(() => {
+    setDraft((d) => ({ ...d, ocr: { ...d.ocr, engine: settings.ocr.engine, url: settings.ocr.url, askedReader: settings.ocr.askedReader, claudeCodePath: settings.ocr.claudeCodePath, codexPath: settings.ocr.codexPath, assistantsSearched: settings.ocr.assistantsSearched } }));
+  }, [settings.ocr.engine, settings.ocr.url, settings.ocr.askedReader, settings.ocr.claudeCodePath, settings.ocr.codexPath, settings.ocr.assistantsSearched]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
+  const set = (patch: Partial<AppSettings>) => setDraft({ ...draft, ...patch });
+  const save = async () => {
+    const { smtpPasswordSet: _ignored, ...rest } = draft;
+    if ((await run(() => api.settings.update(rest), 'Opgeslagen')) !== undefined) await reloadSettings();
+  };
+
+  const section = (content: ReactNode) => (
+    <>
+      <div className="card grid">{content}</div>
+      {dirty && (
+        <div className="row end" style={{ marginTop: 12 }}>
+          <Button onClick={() => setDraft(settings)}>Annuleren</Button>
+          <Button kind="primary" disabled={busy} onClick={() => void save()}>Opslaan</Button>
+        </div>
+      )}
+    </>
+  );
+
+  return (
+    <div className="page">
+      <h1>Instellingen</h1>
+      <div className="chips" style={{ margin: '12px 0 18px' }}>
+        {TABS.map(([k, l]) => <button key={k} className={tab === k ? 'selected' : ''} onClick={() => setTab(k)}>{k === 'scanner' && meta.phoneScanner ? 'Telefoon & bonnenmap' : l}</button>)}
+      </div>
+
+      {tab === 'administraties' && <><AdministrationsSettings /><DataFolderSettings /><OfficeSettings /></>}
+
+      {tab === 'bedrijf' && section(
+        <>
+          <div className="grid cols-2">
+            <Field label="Bedrijfsnaam"><input value={draft.company.name} onChange={(e) => set({ company: { ...draft.company, name: e.target.value } })} /></Field>
+            <Field label="Je voornaam" hint="voor de begroeting"><input value={draft.profile.firstName} onChange={(e) => set({ profile: { ...draft.profile, firstName: e.target.value } })} /></Field>
+          </div>
+          <Field label="Adres"><input value={draft.company.address} onChange={(e) => set({ company: { ...draft.company, address: e.target.value } })} /></Field>
+          <div className="grid cols-2">
+            <Field label="Postcode"><input value={draft.company.postcode} onChange={(e) => set({ company: { ...draft.company, postcode: e.target.value } })} /></Field>
+            <Field label="Plaats"><input value={draft.company.city} onChange={(e) => set({ company: { ...draft.company, city: e.target.value } })} /></Field>
+            <Field label="E-mail"><input value={draft.company.email} onChange={(e) => set({ company: { ...draft.company, email: e.target.value } })} /></Field>
+            <Field label="Telefoon"><input value={draft.company.phone} onChange={(e) => set({ company: { ...draft.company, phone: e.target.value } })} /></Field>
+            <Field label="Website"><input value={draft.company.website} onChange={(e) => set({ company: { ...draft.company, website: e.target.value } })} /></Field>
+            <Field label="KvK-nummer"><input value={draft.company.kvkNumber} onChange={(e) => set({ company: { ...draft.company, kvkNumber: e.target.value } })} /></Field>
+            <Field label="IBAN"><input value={draft.company.iban} onChange={(e) => set({ company: { ...draft.company, iban: e.target.value } })} /></Field>
+            <Field label="BIC" hint="optioneel"><input value={draft.company.bic} onChange={(e) => set({ company: { ...draft.company, bic: e.target.value } })} /></Field>
+          </div>
+          <div className="card flat" style={{ marginTop: 14 }}>
+            <strong>Had je al een administratie?</strong>
+            <p className="small muted" style={{ margin: '4px 0 10px' }}>Bijvoorbeeld in een ander programma, in Excel of bij je boekhouder. De overstap-hulp zet je saldo, openstaande facturen en wat je al had erin.</p>
+            <Button small onClick={() => go({ screen: 'overstap' })}>{settings.switchover.mode === 'overstapper' ? 'Naar de overstap-hulp' : 'Overstap-hulp openen'}</Button>
+          </div>
+        </>,
+      )}
+
+      {tab === 'facturen' && section(
+        <>
+          <label className="row"><input type="checkbox" checked={draft.sendUbl} onChange={(e) => set({ sendUbl: e.target.checked })} /> Stuur ook een e-factuur mee: een bestand dat het boekhoudprogramma van je klant zelf kan inlezen (zonder overtypen)</label>
+          <div className="grid cols-3">
+            <Field label="Betaaltermijn (dagen)"><input className="num" type="number" min={0} max={365} value={draft.paymentTermDays} onChange={(e) => set({ paymentTermDays: Number(e.target.value) })} /></Field>
+            <Field label="Offerte geldig (dagen)"><input className="num" type="number" min={1} max={3650} value={draft.quoteValidityDays} onChange={(e) => set({ quoteValidityDays: Number(e.target.value) })} /></Field>
+            <Field label="Opmaak factuurnummer" hint="codes tussen accolades: {JJJJ} of {JJ} jaar, {MM} maand, {NNNN} volgnummer"><input value={draft.invoiceNumberFormat} onChange={(e) => set({ invoiceNumberFormat: e.target.value })} /></Field>
+          </div>
+          <NextInvoiceNumber format={draft.invoiceNumberFormat} saved={settings.invoiceNumberFormat} />
+          <Field label="Onderwerp factuur-mail"><input value={draft.invoiceEmailSubject} onChange={(e) => set({ invoiceEmailSubject: e.target.value })} /></Field>
+          <Field label="Tekst factuur-mail" hint="{klant} {nummer} {bedrag} {vervaldatum} {iban} {bedrijf}"><textarea rows={6} value={draft.invoiceEmailBody} onChange={(e) => set({ invoiceEmailBody: e.target.value })} /></Field>
+          <Field label="Tekst offerte-mail"><textarea rows={5} value={draft.quoteEmailBody} onChange={(e) => set({ quoteEmailBody: e.target.value })} /></Field>
+          <h3>Herinneringen</h3>
+          <label className="row"><input type="checkbox" checked={draft.remindersEnabled} onChange={(e) => set({ remindersEnabled: e.target.checked })} /> Automatisch een vriendelijke herinnering sturen als een klant te laat is</label>
+          <Field label="Na hoeveel dagen te laat?" hint="bv. 7, 21"><input value={draft.reminderDays.join(', ')} onChange={(e) => set({ reminderDays: e.target.value.split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n >= 0) })} /></Field>
+          <Field label="Tekst herinnering"><textarea rows={6} value={draft.reminderEmailBody} onChange={(e) => set({ reminderEmailBody: e.target.value })} /></Field>
+          <div><Button onClick={() => go({ screen: 'opmaak' })}>🎨 Opmaak van facturen en offertes aanpassen</Button></div>
+        </>,
+      )}
+
+      {tab === 'email' && <EmailSettings draft={draft} set={set} section={section} />}
+
+      {tab === 'categorieen' && (
+        <>
+          <CategoriesCard />
+          <BusinessShareCard />
+        </>
+      )}
+
+      {tab === 'btw' && section(
+        <>
+          <label className="row"><input type="checkbox" checked={draft.kor} onChange={(e) => set({ kor: e.target.checked, defaultVatCode: e.target.checked ? 'vrijgesteld' : 'hoog' })} /> Ik gebruik de kleineondernemersregeling (KOR)</label>
+          {draft.kor !== settings.kor && (
+            <p className="small muted">
+              {draft.kor
+                ? 'Met de KOR krijg je geen btw meer terug op je aankopen; de app telt die btw vanaf nu bij je kosten. Heb je de afgelopen jaren btw teruggekregen op een investering (zoals een bus of machine)? Dan moet je misschien een deel terugbetalen (herziening). Vraag je boekhouder.'
+                : 'Stop je met de KOR, dan reken je weer btw en krijg je btw op aankopen weer terug. Voor investeringen van de afgelopen jaren kun je misschien alsnog een deel terugkrijgen (herziening). Vraag je boekhouder.'}
+            </p>
+          )}
+          {!draft.kor && (
+            <div className="grid cols-2">
+              <Field label="Btw-identificatienummer"><input value={draft.company.vatNumber} onChange={(e) => set({ company: { ...draft.company, vatNumber: e.target.value } })} /></Field>
+              {draft.advancedMode && <Field label="Omzetbelastingnummer" hint="staat bij de Belastingdienst; voor de XBRL-testexport, niet op je facturen (zonder NL)"><input value={draft.company.omzetbelastingNumber} onChange={(e) => set({ company: { ...draft.company, omzetbelastingNumber: e.target.value } })} placeholder="123456789B01" /></Field>}
+              <Field label="Aangifte doen per">
+                <select value={draft.vatPeriod} onChange={(e) => set({ vatPeriod: e.target.value as AppSettings['vatPeriod'] })}>
+                  <option value="kwartaal">Kwartaal</option><option value="maand">Maand</option><option value="jaar">Jaar</option>
+                </select>
+              </Field>
+              <Field label="Belastingpotje" hint="een (spaar)rekening waar je de btw opzij zet">
+                <select value={draft.vatPotAccountId ?? ''} onChange={(e) => set({ vatPotAccountId: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">Geen potje</option>
+                  {(bankAccounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.iban ? ` (${a.iban})` : ''}</option>)}
+                </select>
+              </Field>
+              <Field label="Standaard btw op nieuwe regels">
+                <select value={draft.defaultVatCode} onChange={(e) => set({ defaultVatCode: e.target.value as AppSettings['defaultVatCode'] })}>
+                  <option value="hoog">21%</option><option value="laag">9%</option><option value="nul">0%</option><option value="verlegd">Btw verlegd (klant regelt de btw)</option>
+                </select>
+              </Field>
+            </div>
+          )}
+          <h3>Inkomstenbelasting</h3>
+          <Field label="Rechtsvorm" hint="de schatting is voor een ondernemer in de inkomstenbelasting">
+            <select value={draft.legalForm ?? ''} onChange={(e) => set({ legalForm: (e.target.value || null) as typeof draft.legalForm })}>
+              <option value="">Nog niet opgegeven (eenmanszaak of zzp)</option>
+              <option value="eenmanszaak">Eenmanszaak of zzp</option>
+              <option value="vof">Vof of maatschap</option>
+              <option value="bv">Bv (geen schatting inkomstenbelasting)</option>
+            </select>
+          </Field>
+          {draft.legalForm === 'vof' && (
+            <Field label="Jouw deel van de winst (%)" hint="de winst wordt verdeeld over de vennoten; ieder betaalt over zijn eigen deel">
+              <input inputMode="numeric" value={draft.profitSharePct} onChange={(e) => set({ profitSharePct: Math.min(100, Number(e.target.value.replace(/\D/g, '').slice(0, 3)) || 0) })} />
+            </Field>
+          )}
+          {draft.legalForm === 'bv' && <p className="small muted">Een bv betaalt vennootschapsbelasting over de winst; jij betaalt inkomstenbelasting over je loon als directeur. De app maakt daar geen schatting van; vraag je boekhouder.</p>}
+          {draft.legalForm !== 'bv' && <>
+            <label className="row"><input type="checkbox" checked={draft.ibConfirmed} onChange={(e) => set({ ibConfirmed: e.target.checked })} /> Ik ben ondernemer voor de inkomstenbelasting (bij twijfel: check dit met mijn boekhouder)</label>
+            <p className="small muted">Dat hangt onder meer af van zelfstandigheid, winstverwachting en ondernemersrisico. Het urencriterium is een aparte voorwaarde voor sommige aftrekposten. Zolang dit niet is bevestigd, rekent de schatting zonder ondernemersaftrek, mkb-winstvrijstelling en KIA.</p>
+          </>}
+          <label className="row"><input type="checkbox" checked={draft.incomeTaxEstimate} onChange={(e) => set({ incomeTaxEstimate: e.target.checked })} /> Toon een schatting van de inkomstenbelasting</label>
+          {draft.incomeTaxEstimate && draft.legalForm !== 'bv' && <>
+            <label className="row"><input type="checkbox" checked={draft.urencriterium} onChange={(e) => set({ urencriterium: e.target.checked })} /> Ik werk minstens 1.225 uur in dit kalenderjaar aan mijn onderneming(en)</label>
+            {draft.urencriterium && <Field label="Welke situatie past bij jouw werktijd?" hint="ook bij starten in de loop van het jaar geldt 1.225 uur; de tweede voorwaarde heeft een uitzondering voor starters">
+              <select value={draft.ibHoursCondition ?? ''} onChange={(e) => set({ ibHoursCondition: (e.target.value || null) as AppSettings['ibHoursCondition'] })}>
+                <option value="">Nog niet bevestigd / geen van beide</option>
+                <option value="meerderheid">Meer tijd aan mijn bedrijf dan aan ander werk</option>
+                <option value="starter">Ik was in minstens één van de vorige vijf kalenderjaren geen ondernemer</option>
+              </select>
+            </Field>}
+            <p className="small muted">De schatting gaat uit van iemand onder de AOW-leeftijd die het hele jaar in Nederland belasting en volksverzekeringen betaalt, met alleen deze ondernemingswinst. Is jouw situatie anders? Zet de schatting uit en laat je boekhouder rekenen.</p>
+          </>}
+          <Field label="Waarmee rijd je zakelijk?">
+            <select value={draft.carUse} onChange={(e) => set({ carUse: e.target.value as AppSettings['carUse'] })}>
+              <option value="onbekend">Nog niet opgegeven</option>
+              <option value="prive">Mijn privéauto (aftrek per kilometer)</option>
+              <option value="zakelijk">Een bus of auto van de zaak</option>
+              <option value="geen">Ik rijd niet zakelijk</option>
+            </select>
+          </Field>
+          {draft.carUse === 'prive' && <p className="small muted">Tanken en parkeren tellen dan als privé; je zakelijke kilometers vul je in bij Belasting → Aftrek → Kilometers.</p>}
+          {draft.carUse === 'zakelijk' && (
+            <div className="card" style={{ marginBottom: 12 }}>
+              <Field label="Rijd je er ook privé mee?" hint="woon-werk telt voor de btw als zakelijk">
+                <select value={draft.carPrivateUse === null ? '' : draft.carPrivateUse ? 'ja' : 'nee'} onChange={(e) => set({ carPrivateUse: e.target.value === '' ? null : e.target.value === 'ja' })}>
+                  <option value="">Nog niet opgegeven</option>
+                  <option value="ja">Ja, ik rijd er ook privé mee</option>
+                  <option value="nee">Nee, alleen zakelijk (bijvoorbeeld een bestelbus)</option>
+                </select>
+              </Field>
+              {draft.carPrivateUse && (
+                <>
+                  <div className="grid cols-2">
+                    <Field label="Cataloguswaarde" hint="nieuwprijs incl. btw en bpm; staat bij de RDW of vraag je dealer">
+                      <MoneyInput value={draft.carCatalogValue} onChange={(v) => set({ carCatalogValue: v })} />
+                    </Field>
+                    <Field label="Sinds wanneer gebruik je deze auto?" hint="voor je bedrijf; de maand is nodig voor het eerste jaar">
+                      <div className="row">
+                        <select value={draft.carInUseMonth ?? ''} onChange={(e) => set({ carInUseMonth: Number(e.target.value) || null })} aria-label="Maand">
+                          <option value="">Maand</option>
+                          {['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'].map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                        </select>
+                        <input inputMode="numeric" value={draft.carInUseSince ?? ''} onChange={(e) => set({ carInUseSince: Number(e.target.value) || null })} placeholder={String(new Date().getFullYear())} aria-label="Jaar" />
+                      </div>
+                    </Field>
+                  </div>
+                  <Field label="Bijtellingspercentage voor de inkomstenbelasting" hint="standaard 22%; een zuinige of elektrische auto kan lager zijn, zie je kentekenbewijs of de Belastingdienst">
+                    <input inputMode="numeric" value={draft.carBijtellingPct ?? ''} onChange={(e) => set({ carBijtellingPct: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) })} placeholder="22" aria-label="Bijtellingspercentage" />
+                  </Field>
+                  <div className="grid cols-2">
+                    <Field label="Eerste tenaamstelling van de auto" hint="voor de grens van 16 jaar (daarna andere bijtelling)">
+                      <input type="date" value={draft.carRegisteredOn ?? ''} onChange={(e) => set({ carRegisteredOn: e.target.value || null })} />
+                    </Field>
+                    <Field label="Tot wanneer gebruik je deze auto?" hint="leeg = nog steeds">
+                      <input type="date" value={draft.carInUseUntil ?? ''} onChange={(e) => set({ carInUseUntil: e.target.value || null })} />
+                    </Field>
+                  </div>
+                  {draft.carRegisteredOn && new Date().getFullYear() - Number(draft.carRegisteredOn.slice(0, 4)) >= 16 && (
+                    <Field label="Waarde in het economisch verkeer (dagwaarde)" hint="een auto ouder dan 16 jaar: 35% van deze waarde in plaats van 22% van de cataloguswaarde">
+                      <MoneyInput value={draft.carMarketValue} onChange={(v) => set({ carMarketValue: v })} />
+                    </Field>
+                  )}
+                  {draft.carsExtra.map((c, i) => (
+                    <div key={i} className="card" style={{ marginTop: 8 }}>
+                      <div className="grid cols-2">
+                        <Field label="Naam of kenteken"><input value={c.name} onChange={(e) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} /></Field>
+                        <Field label="Cataloguswaarde"><MoneyInput value={c.catalogValue} onChange={(v) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, catalogValue: v ?? 0 } : x)) })} /></Field>
+                        <Field label="In gebruik vanaf"><input type="date" value={c.inUseFrom} onChange={(e) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, inUseFrom: e.target.value } : x)) })} /></Field>
+                        <Field label="In gebruik tot" hint="leeg = nog steeds"><input type="date" value={c.inUseUntil ?? ''} onChange={(e) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, inUseUntil: e.target.value || null } : x)) })} /></Field>
+                        <Field label="Eerste tenaamstelling"><input type="date" value={c.registeredOn ?? ''} onChange={(e) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, registeredOn: e.target.value || null } : x)) })} /></Field>
+                        <Field label="Bijtellingspercentage"><input inputMode="numeric" value={c.pct ?? ''} placeholder="22" onChange={(e) => set({ carsExtra: draft.carsExtra.map((x, j) => (j === i ? { ...x, pct: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) } : x)) })} /></Field>
+                      </div>
+                      <Button small kind="ghost" onClick={() => set({ carsExtra: draft.carsExtra.filter((_, j) => j !== i) })}>Deze auto verwijderen</Button>
+                    </div>
+                  ))}
+                  <div><Button small onClick={() => set({ carsExtra: [...draft.carsExtra, { name: '', catalogValue: 0, pct: null, inUseFrom: `${new Date().getFullYear()}-01-01`, inUseUntil: null, registeredOn: null, marketValue: null }] })}>+ Nog een auto van de zaak</Button></div>
+                  <div className="grid cols-2">
+                    <Field label="Kreeg je btw terug op de auto of de kosten?" hint="bij aankoop, of op brandstof en onderhoud">
+                      <select value={draft.carVatDeducted === null ? '' : draft.carVatDeducted ? 'ja' : 'nee'} onChange={(e) => set({ carVatDeducted: e.target.value === '' ? null : e.target.value === 'ja' })}>
+                        <option value="">Nog niet opgegeven</option>
+                        <option value="ja">Ja</option>
+                        <option value="nee">Nee (bijvoorbeeld een occasion zonder btw, en geen btw op de kosten)</option>
+                      </select>
+                    </Field>
+                    {draft.carVatDeducted && <>
+                      <Field label="Heb je bij de aanschaf btw afgetrokken?" hint="Los van de btw op brandstof en onderhoud. Zonder aanschaf-btw geldt 1,5%.">
+                        <select value={draft.carPurchaseVatDeducted === null ? '' : draft.carPurchaseVatDeducted ? 'ja' : 'nee'} onChange={e => set({ carPurchaseVatDeducted: e.target.value === '' ? null : e.target.value === 'ja', ...(e.target.value !== 'ja' ? { carPurchaseVatAmount: null } : {}) })}>
+                          <option value="">Afleiden uit de aankoop in deze administratie</option><option value="ja">Ja</option><option value="nee">Nee (bijvoorbeeld marge-auto of lease)</option>
+                        </select>
+                      </Field>
+                      {draft.carPurchaseVatDeducted === true && <Field label="Afgetrokken btw bij aanschaf" hint="Laat leeg als de aanschaf volledig in deze administratie staat.">
+                        <MoneyInput value={draft.carPurchaseVatAmount} onChange={v => set({ carPurchaseVatAmount: v })} />
+                      </Field>}
+                      <Field label="Btw op autokosten buiten deze administratie" hint="Het volledige afgetrokken bedrag over onderhoud en gebruik voor het aangegeven jaar; laat leeg om de boekingen te gebruiken.">
+                        <div className="row"><input aria-label="Jaar autokosten-btw" type="number" min="1800" max="9999" value={draft.carCostVatOverride?.year ?? new Date().getFullYear()} disabled={!draft.carCostVatOverride} onChange={e => draft.carCostVatOverride && set({ carCostVatOverride: { ...draft.carCostVatOverride, year: Number(e.target.value) } })} />
+                        <MoneyInput value={draft.carCostVatOverride?.amount ?? null} onChange={v => set({ carCostVatOverride: v === null ? null : { year: draft.carCostVatOverride?.year ?? new Date().getFullYear(), amount: v } })} /></div>
+                      </Field>
+                    </>}
+                    {draft.carVatDeducted && (
+                      <Field label="Hoe reken je het privégebruik?" hint="vraag je boekhouder als je twijfelt">
+                        <select value={draft.carVatMethod ?? ''} onChange={(e) => set({ carVatMethod: (e.target.value || null) as AppSettings['carVatMethod'] })}>
+                          <option value="">Nog niet opgegeven</option>
+                          <option value="forfait">Vast percentage van de cataloguswaarde (forfait)</option>
+                          <option value="werkelijk">Mijn echte privékilometers (rittenadministratie)</option>
+                        </select>
+                      </Field>
+                    )}
+                  </div>
+                  <p className="small muted">
+                    {draft.carVatDeducted === false
+                      ? 'Heb je geen btw teruggekregen op de auto en de kosten? Dan betaal je ook geen btw over het privégebruik.'
+                      : draft.carVatMethod === 'werkelijk'
+                        ? 'Met je echte privékilometers rekent je boekhouder de btw uit; die komt in je laatste aangifte van het jaar.'
+                        : 'Met het forfait betaal je één keer per jaar btw, in je laatste aangifte van het jaar: 2,7% van de cataloguswaarde (vanaf het 5e jaar na ingebruikname 1,5%; in het eerste jaar naar rato). Zonder aanschaf-btw geldt 1,5%. De correctie is begrensd op de afgetrokken btw op autokosten, plus tijdens de eerste vijf jaren een vijfde van de aanschaf-btw. De app zet dat voor je klaar. Betaal je een eigen bijdrage? Vraag je boekhouder of het forfait klopt.'}{' '}
+                    Daarnaast telt privégebruik mee voor de inkomstenbelasting (bijtelling). Dat rekent de app niet uit: vraag je boekhouder.
+                  </p>
+                </>
+              )}
+              {draft.carPrivateUse === false && <p className="small muted">Rijd je toch meer dan 500 km per jaar privé? Dan betaal je btw over dat privégebruik en telt het mee voor de inkomstenbelasting. Vraag je boekhouder.</p>}
+            </div>
+          )}
+          <div className="grid cols-2">
+            <Field label="In welk jaar ben je gestart?" hint="voor de startersaftrek">
+              <input value={draft.startYear ?? ''} onChange={(e) => set({ startYear: e.target.value ? Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || null : null })} placeholder="bv. 2024" inputMode="numeric" />
+            </Field>
+            {draft.startYear && new Date().getFullYear() - draft.startYear < 5 && (
+              <Field label="In welke jaren gebruikte je de startersaftrek?" hint="zoals in je aangiftes; vraag je boekhouder als je het niet weet">
+                <div className="row" style={{ flexWrap: 'wrap' }}>
+                  {Array.from({ length: new Date().getFullYear() - draft.startYear }, (_, i) => draft.startYear! + i).map((y) => {
+                    const years = draft.startersaftrekYears ?? [];
+                    return (
+                      <label key={y} className="row">
+                        <input type="checkbox" checked={years.includes(y)} onChange={(e) => set({ startersaftrekYears: e.target.checked ? [...years, y].sort() : years.filter((x) => x !== y) })} /> {y}
+                      </label>
+                    );
+                  })}
+                  {new Date().getFullYear() === draft.startYear && <span className="small muted">Je bent dit jaar gestart.</span>}
+                </div>
+              </Field>
+            )}
+          </div>
+          {draft.urencriterium && (
+            <Field label="Aftrek voor zelfstandigen uit eerdere jaren die nog openstaat" hint="niet-gerealiseerde zelfstandigenaftrek; staat op je aanslag. Meestal € 0">
+              <input value={draft.nietGerealiseerdeZelfstandigenaftrek || ''} onChange={(e) => set({ nietGerealiseerdeZelfstandigenaftrek: Number(e.target.value.replace(/\D/g, '').slice(0, 7)) || 0 })} placeholder="0" inputMode="numeric" />
+            </Field>
+          )}
+          <div className="grid cols-2">
+            <Field label="Zakelijk deel telefoon & internet" hint="het privédeel telt niet als kosten. Voor één leverancier (bijv. Odido)? Stel dat liever in bij Categorieën, dan klopt ook de btw meteen">
+              <select value={draft.phoneInternetBusinessPct ?? 100} onChange={(e) => set({ phoneInternetBusinessPct: Number(e.target.value) })}>
+                {[100, 90, 75, 50, 25, 0].map((p) => <option key={p} value={p}>{p}%</option>)}
+              </select>
+            </Field>
+            <Field label="Werkplek thuis">
+              <select value={draft.homeWorkspace ?? 'geen'} onChange={(e) => set({ homeWorkspace: e.target.value as AppSettings['homeWorkspace'] })}>
+                <option value="geen">Geen</option>
+                <option value="thuis">Een plek in huis</option>
+                <option value="zelfstandig">Eigen ingang en sanitair</option>
+              </select>
+            </Field>
+          </div>
+          <Field label="Uren dat je partner onbetaald meewerkt, per jaar" hint="vanaf 525 uur krijg je extra aftrek (meewerkaftrek)">
+            <input value={draft.partnerHours || ''} onChange={(e) => set({ partnerHours: Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || 0 })} placeholder="0" inputMode="numeric" />
+          </Field>
+          {draft.partnerHours >= 525 && <p className="small muted">Meewerkaftrek krijg je alleen als je partner geen of een lage vergoeding krijgt (minder dan € 5.000 per jaar) en jullie niet samen de onderneming hebben. Klopt dat niet? Vraag je boekhouder.</p>}
+          <p className="muted small">Altijd een schatting: de app kent alleen de winst uit je bedrijf, niet je partner, hypotheek of ander inkomen.</p>
+        </>,
+      )}
+
+      {tab === 'koppelingen' && <Integrations showPonto={meta.bankFeed} />}
+      {tab === 'scanner' && <ScannerSettings />}
+      {tab === 'ai' && section(
+        <>
+          <Field label="Hoe automatisch?" hint="wat de app zelf mag afhandelen">
+            <div className="chips">
+              {([['voorzichtig', 'Voorzichtig: ik bevestig alles zelf'], ['normaal', 'Normaal'], ['maximaal', 'Maximaal: de app doet meer zelf']] as const).map(([k, l]) => (
+                <button key={k} className={draft.autopilot === k ? 'selected' : ''} onClick={() => set({ autopilot: k })}>{l}</button>
+              ))}
+            </div>
+          </Field>
+          <label className="row" style={{ alignItems: 'flex-start' }}>
+            <input type="checkbox" checked={draft.jobsEnabled} onChange={(e) => set({ jobsEnabled: e.target.checked })} />
+            <span>Ik werk met klussen (projecten)<br /><span className="small muted">Uit: het menu, de keuzes "voor welke klus" en de meldingen over klussen verdwijnen. Bestaande klussen en boekingen blijven gewoon staan.</span></span>
+          </label>
+          {draft.jobsEnabled && <>
+          <Field label="Hoe noem je een klus?" hint="Alleen de naam in de app verandert; je boekingen en facturen blijven zoals ze zijn.">
+            <select value={draft.jobTerm} onChange={(e) => set({ jobTerm: e.target.value as typeof draft.jobTerm })}>
+              <option value="klus">Klus</option>
+              <option value="project">Project</option>
+              <option value="opdracht">Opdracht</option>
+            </select>
+          </Field>
+          </>}
+          {draft.jobsEnabled && <label className="row" style={{ alignItems: 'flex-start' }}>
+            <input type="checkbox" checked={draft.jobLocation} onChange={(e) => set({ jobLocation: e.target.checked })} />
+            <span>Gebruik de locatie van foto's om bonnen aan {jw.p} te koppelen<br /><span className="small muted">Standaard uit. De plek uit de foto (als je telefoon die opslaat) blijft alleen op deze computer en wordt vergeleken met waar je eerder voor {jw.de} fotografeerde.</span></span>
+          </label>}
+          <p className="small muted">Ook op "maximaal" gaat alleen automatisch wat zeker genoeg is, en een leverancier pas nadat jij daar ja op zei. Alles wat automatisch ging zie je terug op Vandaag, met de reden en een knop "Klopt niet".</p>
+          <p className="muted">
+            {settings.ocr.engine === 'claude-code' || settings.ocr.engine === 'codex'
+              ? `Foto's van bonnen gaan naar ${settings.ocr.engine === 'codex' ? 'OpenAI (Codex)' : 'Anthropic (Claude Code)'} om gelezen te worden. Al het andere blijft op je eigen computer.`
+              : 'Alles draait op je eigen computer; documenten gaan nergens naartoe.'}{' '}
+            E-facturen en PDF's met tekst leest de app altijd zelf.
+          </p>
+          <ReaderChoice context="instellingen" onToolsChanged={() => setAiVersion((v) => v + 1)} />
+          {settings.ocr.engine === 'ingebouwd' && <LocalOcr engine={draft.ocr.engine} />}
+          <AssistantCard key={aiVersion} />
+          {ONLINE_HELP.available && <OnlineCategoryHelp checked={draft.ocr.onlineCategoryHelp} onChange={(on) => set({ ocr: { ...draft.ocr, onlineCategoryHelp: on } })} />}
+          {settings.advancedMode && (
+          <details style={{ marginTop: 12 }}>
+            <summary className="small">Voor technische gebruikers: eigen herkenningsdienst of lokale AI</summary>
+          <div className="grid cols-2">
+            <Field label="Lokale tekstherkenning (OCR)" hint="adres van de OCR-dienst op deze computer"><input value={draft.ocr.url} onChange={(e) => set({ ocr: { ...draft.ocr, url: e.target.value } })} placeholder="http://127.0.0.1:8765" /></Field>
+            <Field label="OCR-model"><select value={draft.ocr.engine} onChange={(e) => set({ ocr: { ...draft.ocr, engine: e.target.value } })}><option value="ingebouwd">Ingebouwd (GLM-OCR)</option><option value="glm-ocr">GLM-OCR</option><option value="paddleocr-vl">PaddleOCR-VL</option><option value="grm-ocr">GRM-OCR</option><option value="anders">Anders</option></select></Field>
+            <Field label="Lokale AI voor herkennen van aankopen" hint="Ollama-adres, optioneel"><input value={draft.ocr.llmUrl} onChange={(e) => set({ ocr: { ...draft.ocr, llmUrl: e.target.value } })} placeholder="http://127.0.0.1:11434" /></Field>
+            <Field label="AI-model"><input value={draft.ocr.llmModel} onChange={(e) => set({ ocr: { ...draft.ocr, llmModel: e.target.value } })} placeholder="bv. qwen2.5:3b" /></Field>
+          </div>
+          <p className="small muted">De AI doet alleen voorstellen ("dit lijkt gereedschap"). De boeking zelf wordt altijd door vaste regels gemaakt.{ONLINE_HELP.available && draft.ocr.onlineCategoryHelp ? ' Staat de online hulp aan, dan wordt deze AI niet gebruikt.' : ''}</p>
+          </details>
+          )}
+        </>,
+      )}
+      {tab === 'backup' && (
+        <>
+          <BackupSettings />
+          <ResetCard />
+        </>
+      )}
+      {tab === 'over' && <About />}
+      {tab === 'geavanceerd' && section(
+        <>
+          <label className="row"><input type="checkbox" checked={draft.advancedMode} onChange={(e) => { if (e.target.checked && !draft.advancedModeAgreedAt) { setUnderstood(false); setAgreeing(true); } else set({ advancedMode: e.target.checked }); }} /> Toon de boekhouding voor je boekhouder (grootboek, balans en exports)</label>
+          <p className="small muted">Handig voor je boekhouder. Voor dagelijks gebruik heb je dit niet nodig.</p>
+          {agreeing && (
+            <Modal title="Voor de boekhouder" onClose={() => setAgreeing(false)}>
+              <p>Deze functies zijn bedoeld voor wie boekhoudt. Je kunt er rechtstreeks in je boekhouding werken, en dus ook iets kapotmaken dat de app anders voor je bewaakt. Kijken mag altijd; boeken, terugdraaien, rekeningen wijzigen en afschriften weghalen zijn voor je boekhouder. Twijfel je? Raadpleeg eerst je boekhouder.</p>
+              <p className="small muted">Wij geven geen advies over een boekhouding: vragen over een administratie lopen via je boekhouder. Op een administratie waarin buiten de boekhouder om in deze modus is geschreven, geven we geen ondersteuning. De app houdt bij of dat gebeurd is (Instellingen → Over, en in het pakket voor je boekhouder).</p>
+              <label className="row"><input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} /> Ik begrijp dit</label>
+              <div className="row end" style={{ marginTop: 14 }}>
+                <Button onClick={() => setAgreeing(false)}>Annuleren</Button>
+                <Button kind="primary" disabled={!understood} onClick={() => { setAgreeing(false); set({ advancedMode: true, advancedModeAgreedAt: today() }); }}>Aanzetten</Button>
+              </div>
+            </Modal>
+          )}
+          {settings.advancedMode && <div><Button small onClick={() => go({ screen: 'expert', extra: { tab: 'rekeningen' } })}>Rekeningschema: rekeningen toevoegen of hernoemen</Button></div>}
+        </>,
+      )}
+    </div>
+  );
+}
+
+function EmailSettings({ draft, set, section }: { draft: Settings; set: (p: Partial<AppSettings>) => void; section: (c: ReactNode) => ReactNode }) {
+  const { run, busy } = useAction();
+  const { reloadSettings } = useApp();
+  const [pw, setPw] = useState('');
+  return (
+    <>
+      {section(
+        <>
+          <p className="muted small">Facturen worden verstuurd via je eigen e-mailadres. De gegevens (server en poort) vind je bij je e-mailprovider: zoek op "SMTP-instellingen".</p>
+          <div className="grid cols-3">
+            <Field label="Server"><input value={draft.smtp.host} onChange={(e) => set({ smtp: { ...draft.smtp, host: e.target.value } })} placeholder="smtp.jouwprovider.nl" /></Field>
+            <Field label="Poort"><input className="num" type="number" min={1} max={65535} value={draft.smtp.port} onChange={(e) => set({ smtp: { ...draft.smtp, port: Number(e.target.value) } })} /></Field>
+            <Field label="Beveiliging" hint="neem over wat je provider zegt; meestal 587"><select value={draft.smtp.secure ? 'ssl' : 'starttls'} onChange={(e) => {
+              const secure = e.target.value === 'ssl';
+              // standaardpoort meeschuiven, maar een zelf ingevulde poort laten staan
+              const port = draft.smtp.port === (secure ? 587 : 465) ? (secure ? 465 : 587) : draft.smtp.port;
+              set({ smtp: { ...draft.smtp, secure, port } });
+            }}><option value="starttls">STARTTLS (587)</option><option value="ssl">SSL/TLS (465)</option></select></Field>
+            <Field label="Gebruikersnaam"><input value={draft.smtp.user} onChange={(e) => set({ smtp: { ...draft.smtp, user: e.target.value } })} /></Field>
+            <Field label="Afzendernaam"><input value={draft.smtp.fromName} onChange={(e) => set({ smtp: { ...draft.smtp, fromName: e.target.value } })} /></Field>
+            <Field label="Afzenderadres"><input value={draft.smtp.fromEmail} onChange={(e) => set({ smtp: { ...draft.smtp, fromEmail: e.target.value } })} /></Field>
+            <Field label="Stuur mij een stille kopie op" hint="optioneel, e-mailadres"><input value={draft.smtp.bcc} onChange={(e) => set({ smtp: { ...draft.smtp, bcc: e.target.value } })} /></Field>
+            <Field label="Antwoorden gaan naar" hint="optioneel: als een klant op je factuur antwoordt, komt dat hier binnen"><input value={draft.smtp.replyTo} placeholder="bv. je gewone mailadres" onChange={(e) => set({ smtp: { ...draft.smtp, replyTo: e.target.value } })} /></Field>
+          </div>
+          {(() => {
+            // tikfout in het afzenderadres (bv. .ap i.p.v. .app) valt op als het domein afwijkt van de gebruikersnaam
+            const domain = (s: string) => (s.includes('@') ? s.split('@').pop()!.trim().toLowerCase() : '');
+            const from = domain(draft.smtp.fromEmail);
+            const user = domain(draft.smtp.user);
+            return from && user && from !== user ? (
+              <div className="notice warn small">Het afzenderadres eindigt op <strong>@{from}</strong>, je gebruikersnaam op <strong>@{user}</strong>. Klopt dat? Een tikfout in het afzenderadres zorgt dat klanten niet kunnen antwoorden, of dat je mail als spam wordt gezien.</div>
+            ) : null;
+          })()}
+        </>,
+      )}
+      <div className="card grid" style={{ marginTop: 14 }}>
+        <Field label="Wachtwoord" hint={draft.smtpPasswordSet ? 'is ingesteld — veilig opgeslagen' : 'wordt versleuteld opgeslagen'}>
+          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} />
+        </Field>
+        <div className="row">
+          <Button disabled={busy || !pw} onClick={async () => { await run(() => api.settings.setSmtpPassword(pw), 'Wachtwoord opgeslagen'); setPw(''); await reloadSettings(); }}>Wachtwoord opslaan</Button>
+          <Button disabled={busy} onClick={async () => {
+            // test met wat er nu is ingevuld; een ingetypt wachtwoord wordt na een geslaagde test meteen bewaard
+            const ok = await run(async () => { await api.settings.testSmtp(draft.smtp, pw || undefined); return true; }, pw ? 'Verbinding werkt ✓ en het wachtwoord is opgeslagen' : 'Verbinding werkt ✓');
+            if (ok && pw) { await api.settings.setSmtpPassword(pw); setPw(''); await reloadSettings(); }
+          }}>Test verbinding</Button>
+        </div>
+      </div>
+      <BonnenAdres />
+      <IncomingMail />
+    </>
+  );
+}
+
+const OUTCOME_LABEL: Record<string, string> = {
+  bijlage: 'bonnetje/factuur opgehaald',
+  'online-factuur': 'factuur staat online',
+  klant: 'van een klant (niet aangeraakt)',
+  eigen: 'kopie van je eigen factuur of offerte',
+  overig: 'niets mee gedaan',
+  fout: 'kon niet gelezen worden',
+};
+
+/**
+ * Inkomende post: een apart mailadres voor de administratie. Eigen opslaan-knop, los van de
+ * uitgaande mail erboven.
+ */
+function IncomingMail() {
+  const { settings, reloadSettings, toast } = useApp();
+  const { run, busy } = useAction();
+  const status = useLoad(() => api.mail.summary());
+  const [cfg, setCfg] = useState(settings.mailIn);
+  const [pw, setPw] = useState('');
+  const [folders, setFolders] = useState<string[] | null>(null);
+  const change = (patch: Partial<typeof cfg>) => setCfg({ ...cfg, ...patch });
+  const dirty = JSON.stringify(cfg) !== JSON.stringify(settings.mailIn);
+  const save = async (next = cfg) => {
+    // eerste keer aanzetten: alleen mail van de laatste 30 dagen, geen jaren archief
+    const since = next.since || new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+    const ok = await run(async () => {
+      await api.settings.update({ mailIn: { ...next, since } });
+      if (pw) await api.mail.setPassword(pw);
+      return true;
+    }, 'Opgeslagen');
+    if (ok) {
+      setCfg({ ...next, since });
+      setPw('');
+      await reloadSettings();
+      await status.reload();
+    }
+  };
+  const address = cfg.user.includes('@') ? cfg.user : 'administratie@jouwbedrijf.nl';
+  const supplierText = `Wilt u vanaf nu uw facturen sturen naar ${address}? Graag als PDF-bijlage of e-factuur (UBL). Alvast bedankt!`;
+
+  return (
+    <div className="card grid" style={{ marginTop: 14 }}>
+      <h3 style={{ margin: 0 }}>Je eigen mailbox koppelen</h3>
+      <p className="small muted">
+        Heb je al een eigen mailadres voor je administratie, bijvoorbeeld <strong>administratie@jouwbedrijf.nl</strong>? Koppel het hier, dan haalt de app daar de bonnen op. Geen eigen adres? Gebruik dan het bonnen-adres hierboven.
+        De app haalt de bijlagen eruit (bij het opstarten en elk kwartier) en zet ze klaar om te controleren.
+      </p>
+      <details>
+        <summary className="small">Wat gebeurt er met de mail?</summary>
+        <ul className="small">
+          <li><strong>Met een factuur of bon als bijlage</strong> (PDF, foto of e-factuur): komt bij Aankopen &amp; bonnetjes, wacht op jouw controle. Er wordt niets vanzelf geboekt. De mail gaat naar de map "{cfg.processedFolder || 'Verwerkt'}".</li>
+          <li><strong>"Je factuur staat online"</strong> zonder bijlage: een taak op Vandaag om hem te downloaden.</li>
+          <li><strong>Van een klant</strong>: blijft ongelezen en onaangeroerd in je mailbox; je krijgt een seintje op Vandaag.</li>
+          <li><strong>Andere mail</strong>: blijft gewoon staan.</li>
+          <li>Er wordt <strong>nooit mail verwijderd</strong>, en gelezen of gearchiveerde mail wordt niet dubbel verwerkt: de app onthoudt welke berichten hij al zag.</li>
+        </ul>
+      </details>
+      <label className="row"><input type="checkbox" checked={cfg.enabled} onChange={(e) => change({ enabled: e.target.checked })} /> Bonnetjes en facturen uit deze mailbox ophalen</label>
+      <div className="grid cols-3">
+        <Field label="Server" hint="zoek bij je provider op 'IMAP-instellingen'"><input value={cfg.host} placeholder="imap.jouwprovider.nl" onChange={(e) => change({ host: e.target.value.trim() })} /></Field>
+        <Field label="Poort"><input className="num" type="number" value={cfg.port} onChange={(e) => change({ port: Number(e.target.value) })} /></Field>
+        <Field label="Beveiliging"><select value={cfg.secure ? 'ssl' : 'starttls'} onChange={(e) => {
+          const secure = e.target.value === 'ssl';
+          change({ secure, port: cfg.port === (secure ? 143 : 993) ? (secure ? 993 : 143) : cfg.port });
+        }}><option value="ssl">SSL/TLS (993)</option><option value="starttls">STARTTLS (143)</option></select></Field>
+        <Field label="Gebruikersnaam" hint="meestal het mailadres"><input value={cfg.user} onChange={(e) => change({ user: e.target.value.trim() })} /></Field>
+        <Field label="Wachtwoord" hint={status.data?.passwordSet ? 'is ingesteld — veilig opgeslagen' : 'wordt versleuteld opgeslagen'}><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
+        <Field label="Verwerkte mail naar map" hint="leeg = laten staan"><input value={cfg.processedFolder} onChange={(e) => change({ processedFolder: e.target.value })} /></Field>
+      </div>
+      <Field label="Ook doorzoeken" hint="bv. je archiefmap, voor mail die je al had opgeruimd; daar wordt nooit iets verplaatst">
+        {folders ? (
+          <div className="chips">
+            {folders.filter((f) => f !== cfg.folder && f !== cfg.processedFolder).map((f) => {
+              const on = cfg.extraFolders.includes(f);
+              return <button key={f} className={on ? 'selected' : ''} onClick={() => change({ extraFolders: on ? cfg.extraFolders.filter((x) => x !== f) : [...cfg.extraFolders, f] })}>{f}</button>;
+            })}
+          </div>
+        ) : (
+          <span className="small muted">{cfg.extraFolders.length ? cfg.extraFolders.join(', ') : 'Klik op "Test verbinding" om je mappen te zien.'}</span>
+        )}
+      </Field>
+      <Field label="Mail vanaf" hint="oudere mail wordt overgeslagen"><input type="date" value={cfg.since} onChange={(e) => change({ since: e.target.value })} style={{ maxWidth: 200 }} /></Field>
+      <div className="row">
+        <Button kind="primary" disabled={busy || (!dirty && !pw)} onClick={() => void save()}>Opslaan</Button>
+        <Button disabled={busy || !cfg.host || !cfg.user} onClick={async () => {
+          const r = await run(() => api.mail.test(cfg, pw || undefined), pw ? 'Verbinding werkt ✓ en het wachtwoord is opgeslagen' : 'Verbinding werkt ✓');
+          if (r) { setFolders(r.folders); setPw(''); await status.reload(); }
+        }}>Test verbinding</Button>
+        <Button disabled={busy || dirty || !settings.mailIn.enabled} title={dirty ? 'Eerst opslaan' : undefined} onClick={async () => {
+          const r = await run(() => api.mail.fetchNow());
+          if (r) {
+            const parts = [`${r.documents} ${r.documents === 1 ? 'bonnetje' : 'bonnetjes'}`, r.onlineInvoices && `${r.onlineInvoices} online`, r.fromCustomers && `${r.fromCustomers} van klanten`, r.other && `${r.other} zonder factuur of bon (blijft staan)`, r.errors && `${r.errors} niet te lezen`].filter(Boolean);
+            toast(`Mail opgehaald: ${parts.join(', ')}${r.missingFolders.length ? `. Map niet gevonden: ${r.missingFolders.join(', ')}` : ''}`);
+            await status.reload();
+          }
+        }}>Nu ophalen</Button>
+      </div>
+      {status.data?.lastChecked && (
+        <div className="small muted">
+          Laatst gekeken: {status.data.lastChecked.replace('T', ' ').slice(0, 16)} · {status.data.counts.bijlage} opgehaald · {status.data.counts['online-factuur']} online · {status.data.counts.klant} van klanten · {status.data.counts.overig + status.data.counts.eigen} overige
+        </div>
+      )}
+      {status.data && status.data.recent.length > 0 && (
+        <details>
+          <summary className="small">Laatste berichten</summary>
+          <table className="list small">
+            <tbody>
+              {status.data.recent.map((m) => (
+                <tr key={m.id}>
+                  <td><DateNl date={m.received_on} /></td><td>{m.from_name || m.from_address}</td><td>{m.subject}</td>
+                  <td className="muted">{m.note ?? OUTCOME_LABEL[m.outcome]}</td>
+                  <td>
+                    {(m.outcome === 'overig' || m.outcome === 'online-factuur') && (
+                      <Button small disabled={busy} title="De tekst van de mail als bon bewaren (de app haalt hem nog één keer op)" onClick={async () => {
+                        if ((await run(() => api.mail.saveAsReceipt(m.id), 'Bewaard als bon. Je vindt hem bij Aankopen & bonnetjes.')) !== undefined) await status.reload();
+                      }}>Als bon bewaren</Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+      <Field label="Tekst voor je leveranciers" hint="kopieer en stuur door">
+        <div className="row" style={{ flexWrap: 'nowrap' }}>
+          <input className="grow" readOnly value={supplierText} onFocus={(e) => e.target.select()} />
+          <Button onClick={() => void navigator.clipboard.writeText(supplierText).then(() => toast('Gekopieerd'))}>Kopiëren</Button>
+        </div>
+      </Field>
+    </div>
+  );
+}
+
+function Integrations({ showPonto }: { showPonto: boolean }) {
+  const { run, busy } = useAction();
+  const list = useLoad(() => api.integrations.list());
+  const [values, setValues] = useState<Record<string, Record<string, string>>>({});
+  return (
+    <div className="grid">
+      {showPonto && <PontoCard />}
+      <p className="muted">Twee soorten koppelingen. Een <strong>omzetbron</strong> (webshop of Mollie Facturen) maakt van betaalde bestellingen/facturen automatisch omzet. Een <strong>betaalprovider</strong> (Mollie, Stripe) boekt alleen de uitbetaling en de kosten, zodat de bijschrijving op je bank klopt — daarvoor moet de omzet al ergens anders geboekt zijn. Gebruik je Mollie of Stripe zonder omzetbron hieronder, boek je omzet dan handmatig via "Verkoop via een ander systeem" bij de bank.</p>
+      <ErrorBox error={list.error} />
+      {(list.data ?? []).map((s) => {
+        const id = s.definition.id;
+        const v = values[id] ?? {};
+        return (
+          <div key={id} className="card grid">
+            <div className="row between">
+              <div><h3>{s.definition.label}</h3><div className="muted small">{s.definition.description}</div></div>
+              {s.enabled && <span className="pill good">actief</span>}
+            </div>
+            <div className="grid cols-2">
+              {s.definition.fields.map((f) => (
+                <Field key={f.key} label={f.label} hint={f.help}>
+                  {f.type === 'select' ? <select value={v[f.key] ?? s.config[f.key] ?? 'onbekend'} onChange={(e) => setValues({ ...values, [id]: { ...v, [f.key]: e.target.value } })}>
+                    {f.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select> : <input type={f.type === 'secret' ? 'password' : 'text'} placeholder={f.type === 'secret' && s.secretsSet[f.key] ? '•••••• (ingesteld)' : f.placeholder} value={v[f.key] ?? (f.type === 'secret' ? '' : s.config[f.key] ?? '')} onChange={(e) => setValues({ ...values, [id]: { ...v, [f.key]: e.target.value } })} />}
+                </Field>
+              ))}
+            </div>
+            {s.lastError && <div className="notice bad small">{s.lastError}</div>}
+            {s.lastSyncAt && <div className="small muted">Laatst bijgewerkt: <DateNl date={s.lastSyncAt.slice(0, 10)} /></div>}
+            <div className="row">
+              <Button kind="primary" disabled={busy} onClick={async () => { await run(() => api.integrations.configure(id, v, true), 'Opgeslagen'); await list.reload(); }}>{s.enabled ? 'Opslaan' : 'Koppelen'}</Button>
+              {s.enabled && <Button disabled={busy} onClick={async () => { const r = await run(() => api.integrations.sync(id)); if (r) alert(`${r.created} verwerkt, ${r.skipped} overgeslagen${r.messages.length ? '\n\n' + r.messages.join('\n') : ''}`); await list.reload(); }}>Nu bijwerken</Button>}
+              {s.enabled && <Button kind="danger" disabled={busy} onClick={async () => { await run(() => api.integrations.disconnect(id)); await list.reload(); }}>Ontkoppelen</Button>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BackupSettings() {
+  const { run, busy } = useAction();
+  const { settings, reloadSettings } = useApp();
+  const version = useLoad(() => api.app.version());
+  const distribution = useLoad(() => api.app.distribution());
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [restorePw, setRestorePw] = useState('');
+  return (
+    <div className="card grid">
+      <p>Je administratie staat op deze computer. Er wordt elke dag automatisch een complete back-up gemaakt met je boekhouding, facturen en bonnen (de laatste 14 dagen). Maak af en toe ook een kopie op een USB-stick of in je eigen cloudmap.</p>
+      <div className="row">
+        <Button kind="primary" disabled={busy} onClick={() => void run(() => api.app.backup(), 'Back-up opgeslagen')}>Back-up maken</Button>
+        <Button disabled={busy} onClick={() => void run(() => api.app.restore(restorePw || undefined))}>Back-up terugzetten…</Button>
+        <input type="password" placeholder="wachtwoord (alleen bij versleutelde back-up)" value={restorePw} onChange={(e) => setRestorePw(e.target.value)} style={{ minWidth: 280 }} />
+      </div>
+      <h3>Versleutelde kopie voor je boekhouder</h3>
+      <p className="small muted">Maakt een kopie van je hele administratie die alleen met het wachtwoord te openen is, in BoekhoudenVoorNiks via "Back-up terugzetten". Geef het wachtwoord apart door (bijvoorbeeld telefonisch), niet in dezelfde mail.</p>
+      <div className="row">
+        <input type="password" placeholder="wachtwoord (min. 10 tekens)" value={pw} onChange={(e) => setPw(e.target.value)} />
+        <input type="password" placeholder="herhaal wachtwoord" value={pw2} onChange={(e) => setPw2(e.target.value)} />
+        <Button disabled={busy || pw.length < 10 || pw !== pw2} onClick={async () => { const r = await run(() => api.app.exportEncrypted(pw), 'Versleutelde kopie opgeslagen'); if (r) { setPw(''); setPw2(''); } }}>Versleutelde kopie maken</Button>
+      </div>
+      <h3>Updates</h3>
+      {distribution.data?.store ? (
+        <>
+          <p className="small muted">Je hebt de versie uit de Microsoft Store. Nieuwe versies komen vanzelf via de Store; je hoeft hier niets voor te doen. Je administratie blijft daarbij gewoon staan.</p>
+          <div className="row">
+            <span className="muted">Versie {version.data}</span>
+          </div>
+        </>
+      ) : (
+      <>
+      <label className="row">
+        <input type="checkbox" checked={settings.autoUpdate} disabled={busy} onChange={async (e) => {
+          const autoUpdate = e.target.checked;
+          if ((await run(() => api.settings.update({ autoUpdate }), autoUpdate ? 'Automatisch bijwerken staat aan' : 'Automatisch bijwerken staat uit')) !== undefined) await reloadSettings();
+        }} />
+        Automatisch bijwerken (aanbevolen)
+      </label>
+      <p className="small muted">
+        {settings.autoUpdate
+          ? 'Nieuwe versies worden op de achtergrond gedownload en geïnstalleerd als je de app sluit. Vlak daarvoor maakt de app een kopie van je administratie. Je krijgt bovenaan een melding als er een klaarstaat.'
+          : 'De app zoekt niet zelf naar nieuwe versies en blijft zoals hij is. Wil je toch bijwerken, klik dan op "Zoek naar updates".'}
+      </p>
+      <div className="row">
+        <span className="muted">Versie {version.data}</span>
+        <Button disabled={busy} onClick={async () => { const r = await run(() => api.app.checkForUpdates()); if (r) alert(r); }}>Zoek naar updates</Button>
+      </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+/** Ingebouwde tekstherkenning (#9): één klik om te downloaden, daarna alles lokaal. */
+function LocalOcr({ engine }: { engine: string }) {
+  const { run, busy } = useAction();
+  const { reloadSettings, toast } = useApp();
+  const info = useLoad(() => api.localOcr.info());
+  const status = useLoad(() => api.localOcr.status());
+  const st = status.data;
+  const downloading = st?.state === 'downloaden';
+  const [askConsent, setAskConsent] = useState(false);
+  // tijdens het downloaden de voortgang volgen; klaar = direct in gebruik nemen
+  useEffect(() => {
+    if (!downloading) return;
+    // één ronde tegelijk: een trage status-aanroep mag niet overlappen met de volgende
+    let busyTick = false;
+    let finished = false;
+    const t = setInterval(async () => {
+      if (busyTick || finished) return;
+      busyTick = true;
+      try {
+        const next = await api.localOcr.status();
+        if (next.state === 'geinstalleerd') {
+          finished = true;
+          await api.localOcr.use();
+          await reloadSettings();
+          toast('Slimme herkenning is klaar ✓');
+        }
+        await status.reload();
+      } finally {
+        busyTick = false;
+      }
+    }, 1000);
+    return () => {
+      finished = true;
+      clearInterval(t);
+    };
+  }, [downloading]);
+  if (!st || !info.data) return null;
+  const mb = (n: number) => `${Math.round(n / 1_000_000).toLocaleString('nl-NL')} MB`;
+  const installed = st.state === 'geinstalleerd' || st.state === 'actief' || st.state === 'starten';
+  return (
+    <div className="card" style={{ marginTop: 10 }}>
+      <h3 style={{ marginTop: 0 }}>Slimme herkenning van bonnetjes</h3>
+      {!installed && !downloading && (
+        <>
+          <p className="small">Lees foto's van bonnen automatisch uit. Eenmalig downloaden (± {mb(info.data.downloadSize)}); daarna werkt het zonder internet en blijven je documenten op deze computer.</p>
+          <p className="small muted">{info.data.requirements}</p>
+          {st.state === 'fout' && <div className="notice warn small">{st.error}</div>}
+          <Button kind="primary" disabled={busy} onClick={async () => {
+            // versie uit de Microsoft Store: eerst uitdrukkelijk ja zeggen tegen het downloaden en starten
+            if (info.data?.consentNeeded) return setAskConsent(true);
+            await run(() => api.localOcr.install());
+            await status.reload();
+          }}>
+            {st.state === 'fout' ? 'Opnieuw proberen' : 'Slimme herkenning installeren'}
+          </Button>
+          {askConsent && (
+            <LocalOcrConsent
+              downloadSize={info.data.downloadSize}
+              runtimeVersion={info.data.runtimeVersion}
+              onCancel={() => setAskConsent(false)}
+              onAgree={async () => {
+                setAskConsent(false);
+                await run(() => api.localOcr.install(true));
+                await info.reload();
+                await status.reload();
+              }}
+            />
+          )}
+        </>
+      )}
+      {downloading && (
+        <>
+          <p className="small">Bezig met downloaden{st.progress?.file ? ` (${st.progress.file})` : ''}… Je kunt gewoon doorwerken.</p>
+          <progress max={st.progress?.total || 1} value={st.progress?.done ?? 0} style={{ width: '100%' }} />
+          <p className="small muted">{st.progress ? `${mb(st.progress.done)} van ${mb(st.progress.total)}` : ''}</p>
+        </>
+      )}
+      {installed && (
+        <>
+          <p className="small">✓ Geïnstalleerd ({info.data.model}{st.llamaVersion ? `, runtime ${st.llamaVersion}` : ''}). {engine === 'ingebouwd' ? 'In gebruik voor foto\'s van bonnen.' : 'Niet in gebruik: je gebruikt een eigen OCR-dienst.'}</p>
+          <div className="row">
+            {engine !== 'ingebouwd' && <Button small onClick={async () => { await run(() => api.localOcr.use()); await reloadSettings(); }}>Gebruiken</Button>}
+            <Button small disabled={busy} onClick={async () => {
+              if (!confirm('Slimme herkenning verwijderen? Foto\'s van bonnen vul je daarna weer zelf in.')) return;
+              await run(() => api.localOcr.uninstall(), 'Verwijderd');
+              await reloadSettings();
+              await status.reload();
+            }}>Verwijderen</Button>
+          </div>
+        </>
+      )}
+      <p className="small muted" style={{ marginTop: 8 }}>
+        Model: {info.data.model} ({info.data.modelLicense}-licentie) · Runtime: {info.data.runtime} ({info.data.runtimeLicense}-licentie). Beide mogen vrij gebruikt en verspreid worden.
+      </p>
+    </div>
+  );
+}
+
+function About() {
+  const version = useLoad(() => api.app.version());
+  const advanced = useLoad(() => api.app.advancedUsage());
+  const open = (url: string) => (e: { preventDefault(): void }) => {
+    e.preventDefault();
+    void api.app.openExternal(url);
+  };
+  return (
+    <div className="card grid">
+      <h3>BoekhoudenVoorNiks {version.data}</h3>
+      <p>Gratis en open source onder de {LICENSE_NAME}. Je mag de software gebruiken, bestuderen, aanpassen en delen onder de voorwaarden van die licentie.</p>
+      <p>
+        <a href="#" onClick={open(HANDLEIDING_URL)}>Handleiding</a> · <a href="#" onClick={open(SOURCE_URL)}>Broncode</a> · <a href="#" onClick={open(TERMS_URL)}>Gebruiksvoorwaarden</a> · <a href="#" onClick={open(PRIVACY_URL)}>Privacyverklaring</a>
+      </p>
+      <div className="row" style={{ alignItems: 'center' }}>
+        <Button onClick={() => void api.app.openExternal(feedbackMailto(version.data ?? ''))}>✉️ Vraag of feedback mailen</Button>
+        <span className="small muted">naar {FEEDBACK_EMAIL}; we lezen alles en antwoorden zo snel mogelijk</span>
+      </div>
+      <p className="small muted">De software wordt geleverd zonder garantie. Jij blijft verantwoordelijk voor je administratie en aangiften.</p>
+      {advanced.data && (
+        <p className="small muted">
+          {advanced.data.count === 0
+            ? 'Boekhoudermodus: er is nooit in geschreven.'
+            : `Boekhoudermodus: ${advanced.data.count === 1 ? '1 handeling' : `${advanced.data.count} handelingen`} buiten de boekhouder om (eerste op ${formatDateNl(advanced.data.first!.slice(0, 10))}, laatste op ${formatDateNl(advanced.data.last!.slice(0, 10))}). Op zo'n administratie geven we geen ondersteuning; je boekhouder kan het nakijken.`}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Instellingen → Categorieën: dezelfde lijst als achter "Aanpassen" bij het boeken. */
+/**
+ * Gemengd gebruik per leverancier: welk deel is zakelijk (Dropbox 50%, Odido 75%)? Geen regel = 100%.
+ * Bij het boeken gaat het privédeel naar privé, zonder btw-aftrek. Eerdere boekingen pas je aan in een
+ * lijst die je eerst kunt nakijken: per boeking zie je wat er verandert, je kunt het percentage
+ * aanpassen en je bevestigt zelf.
+ */
+function BusinessShareCard() {
+  const { run, busy } = useAction();
+  const shares = useLoad(() => api.businessShare.list());
+  const [name, setName] = useState('');
+  const [pct, setPct] = useState('50');
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [review, setReview] = useState<string | null>(null);
+  const valid = (v: string) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 100;
+  const save = async (n: string, value: string): Promise<boolean> => {
+    if (!valid(value)) return false;
+    const r = await run(() => api.businessShare.set(n, Number(value)), 'Opgeslagen ✓');
+    if (r === undefined) return false;
+    setEdits({});
+    await shares.reload();
+    return true;
+  };
+  return (
+    <div className="card grid">
+      <h3 style={{ margin: 0 }}>Gemengd gebruik: zakelijk deel per leverancier</h3>
+      <p className="small muted" style={{ margin: 0 }}>
+        Gebruik je iets ook privé, zoals Dropbox, Google One of je telefoon? Geef hier het zakelijke deel op. Het privédeel telt niet als kosten en de btw erover trek je niet af. Bij een betaling of bon vraagt de app het ook. Niets opgegeven betekent 100% zakelijk.
+      </p>
+      {(shares.data ?? []).length > 0 && (
+        <table className="list small">
+          <tbody>
+            {shares.data!.map((r) => (
+              <tr key={r.supplier_key}>
+                <td>{r.display_name}</td>
+                <td style={{ width: 140 }}>
+                  <input type="number" min={1} max={100} style={{ width: 70 }} value={edits[r.supplier_key] ?? String(r.pct)} onChange={(e) => setEdits({ ...edits, [r.supplier_key]: e.target.value })} /> %
+                </td>
+                <td className="right">
+                  <Button small disabled={busy || !valid(edits[r.supplier_key] ?? String(r.pct))} onClick={() => void save(r.display_name, edits[r.supplier_key] ?? String(r.pct))}>Opslaan</Button>{' '}
+                  <Button small kind="primary" disabled={busy} onClick={() => setReview(r.display_name)}>Boekingen bekijken</Button>{' '}
+                  <Button small kind="ghost" disabled={busy} onClick={async () => { if (await save(r.display_name, '100')) setReview(r.display_name); }}>Weer 100%…</Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="row" style={{ gap: 8, alignItems: 'end' }}>
+        <Field label="Leverancier"><input value={name} placeholder="bv. Dropbox" onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="Zakelijk deel"><span><input type="number" min={1} max={100} style={{ width: 80 }} value={pct} onChange={(e) => setPct(e.target.value)} /> %</span></Field>
+        <Button kind="primary" disabled={busy || name.trim().length < 2 || !valid(pct)} onClick={async () => { const n = name.trim(); if (await save(n, pct)) { setName(''); setReview(n); } }}>Opslaan en boekingen bekijken</Button>
+      </div>
+      <p className="small muted" style={{ margin: 0 }}>De app gebruikt de naam zoals die op je bankafschrift of bon staat. Er wordt niets aan eerdere boekingen veranderd voordat jij het in de lijst bevestigt.</p>
+      {review && <BusinessShareReview name={review} onClose={() => { setReview(null); void shares.reload(); }} />}
+    </div>
+  );
+}
+
+/** Alle geboekte uitgaven van één leverancier: nakijken, percentage per boeking aanpassen, bevestigen. */
+function BusinessShareReview({ name, onClose }: { name: string; onClose: () => void }) {
+  const { run, busy } = useAction();
+  const data = useLoad(() => api.businessShare.lines(name), [name]);
+  const [pcts, setPcts] = useState<Record<string, string>>({});
+  const [skip, setSkip] = useState<Record<string, boolean>>({});
+  const [done, setDone] = useState<string | null>(null);
+  const lines = data.data ?? [];
+  const keyOf = (l: { kind: string; refId: number }) => `${l.kind}:${l.refId}`;
+  const rows = lines.map((l) => {
+    const raw = pcts[keyOf(l)] ?? String(l.proposedPct);
+    const ok = Number.isInteger(Number(raw)) && Number(raw) >= 1 && Number(raw) <= 100;
+    const newPct = ok ? Number(raw) : l.currentPct;
+    const after = businessEffect(l.parts, newPct, l.noVatDeduction);
+    const changes = ok && !l.vatWarning && newPct !== l.currentPct;
+    return { l, raw, ok, newPct, after, changes, selected: changes && !skip[keyOf(l)] };
+  });
+  const selected = rows.filter((r) => r.selected);
+  const sum = (f: (r: (typeof rows)[number]) => number) => selected.reduce((t, r) => t + f(r), 0);
+  const dKosten = sum((r) => r.after.kosten - r.l.now.kosten);
+  const dBtw = sum((r) => (r.l.reverseCharge ? 0 : r.after.btw - r.l.now.btw));
+  const filedCount = selected.filter((r) => r.l.filedPeriod).length;
+  return (
+    <Modal title={`Boekingen van ${name}`} onClose={onClose} wide>
+      {data.loading && <p>Even laden…</p>}
+      {!data.loading && lines.length === 0 && <p>Geen geboekte uitgaven gevonden voor {name}. Gebruik de naam zoals die op je bankafschrift of bon staat.</p>}
+      {lines.length > 0 && (
+        <>
+          <p className="small muted" style={{ marginTop: 0 }}>
+            Kijk na welk deel zakelijk is per boeking. Vinkjes staan aan bij boekingen die veranderen; vul een ander percentage in als één boeking anders was. Er verandert pas iets als je onderaan bevestigt.
+          </p>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="list small">
+              <thead>
+                <tr><th></th><th>Datum</th><th>Omschrijving</th><th className="right">Bedrag</th><th>Nu</th><th>Wordt</th><th className="right">Kosten nu → straks</th><th className="right">Btw-aftrek nu → straks</th></tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={keyOf(r.l)} className={r.changes ? '' : 'muted'}>
+                    <td><input type="checkbox" disabled={!r.changes} checked={r.selected} onChange={(e) => setSkip({ ...skip, [keyOf(r.l)]: !e.target.checked })} aria-label="Meenemen" /></td>
+                    <td><DateNl date={r.l.date} /></td>
+                    <td>{r.l.description}{r.l.vatWarning && <div className="small notice warn">{r.l.vatWarning}</div>}{r.l.filedPeriod && <div className="small muted">periode al ingediend ({r.l.filedPeriod.replace("-", " ")})</div>}</td>
+                    <td className="right"><Euro cents={r.l.gross} /></td>
+                    <td>{r.l.currentPct}%</td>
+                    <td><input type="number" min={1} max={100} style={{ width: 64 }} value={r.raw} onChange={(e) => setPcts({ ...pcts, [keyOf(r.l)]: e.target.value })} aria-label="Nieuw zakelijk deel" /> %</td>
+                    <td className="right"><Euro cents={r.l.now.kosten} /> → <Euro cents={r.after.kosten} /></td>
+                    <td className="right">{r.l.reverseCharge ? <span className="muted">verlegd, per saldo € 0</span> : <><Euro cents={r.l.now.btw} /> → <Euro cents={r.after.btw} /></>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ marginBottom: 4 }}>
+            {selected.length === 0 ? 'Er verandert niets.' : (
+              <>
+                <strong>{selected.length} {selected.length === 1 ? 'boeking' : 'boekingen'}</strong> aanpassen: kosten <Euro cents={dKosten} />, btw-aftrek <Euro cents={dBtw} />.
+                {filedCount > 0 && ` ${filedCount} ${filedCount === 1 ? 'valt' : 'vallen'} in een periode die al is ingediend; dat verschil komt in je volgende aangifte.`}
+              </>
+            )}
+          </p>
+          <p className="small muted" style={{ marginTop: 0 }}>Het privédeel gaat naar je privé-opnamen. De oude boeking krijgt een tegenboeking; niets wordt verwijderd.</p>
+        </>
+      )}
+      {done && <p role="status"><strong>{done}</strong></p>}
+      <div className="row end" style={{ marginTop: 12 }}>
+        <Button onClick={onClose}>Sluiten</Button>
+        <Button
+          kind="primary"
+          disabled={busy || selected.length === 0}
+          onClick={async () => {
+            const r = await run(() => api.businessShare.applyLines(selected.map((x) => ({ kind: x.l.kind, refId: x.l.refId, pct: x.newPct }))));
+            if (r) {
+              setDone(`${r.changed} ${r.changed === 1 ? 'boeking' : 'boekingen'} aangepast${r.skipped ? `, ${r.skipped} overgeslagen (${r.errors.join('; ')})` : ''} ✓`);
+              setPcts({});
+              setSkip({});
+              await data.reload();
+            }
+          }}
+        >
+          {selected.length === 0 ? 'Bevestigen' : `Bevestig ${selected.length} ${selected.length === 1 ? 'boeking' : 'boekingen'}`}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function CategoriesCard() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="card grid">
+      <p>
+        Bij een betaling of bon kies je waar het voor was, bijvoorbeeld Materiaal of Telefoon &amp; internet. Mist er iets, of heet het bij jou anders?
+        Voeg een eigen categorie toe of pas de naam, uitleg en btw aan. Categorieën die je niet gebruikt kun je verbergen.
+      </p>
+      <p className="small muted">Veilig: er wordt nooit iets verwijderd en eerdere boekingen veranderen niet mee.</p>
+      <div className="row end"><Button kind="primary" onClick={() => setOpen(true)}>Categorieën bekijken en aanpassen</Button></div>
+      {open && <CategoriesDialog onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+/**
+ * Online hulp bij categorievoorstellen (JEV via Cloudflare, #132): standaard uit, alleen met een actief
+ * abonnement. De tekst zegt precies wat er naar buiten gaat.
+ */
+function OnlineCategoryHelp({ checked, onChange }: { checked: boolean; onChange: (on: boolean) => void }) {
+  const license = useLoad(() => api.license.status());
+  const active = license.data?.state === 'actief';
+  // uitzetten kan altijd; aanzetten alleen met een abonnement
+  const disabled = !checked && !active;
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <label className="row" style={{ alignItems: 'flex-start' }}>
+        <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} aria-describedby="online-hulp-uitleg" />
+        <span>
+          <strong>Online hulp bij het indelen van bonnen</strong>
+          <br />
+          <span id="online-hulp-uitleg" className="small muted">
+            Standaard uit. Weet de app niet waar een bon voor was, dan vraagt hij het na bij onze server. Daarvoor gaan alleen de naam van de winkel en de namen van de artikelen mee. Er gaat niets mee waaraan jij of je klanten te herkennen zijn: geen naam of adres, geen rekeningnummer, geen bedragen en geen foto's. We bewaren de vraag ook niet. Jij bevestigt of past het voorstel aan, en de app onthoudt jouw keuze voor de volgende keer. Staat dit aan, dan wordt de AI op je computer niet gebruikt.
+            {!active && <><br /><strong>Hoort bij het abonnement</strong> (Hoe gaat het? &gt; Uitwisseling met je boekhouder).</>}
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
+/**
+ * Voorbeeld van de opmaak en het volgende factuurnummer zelf zetten, bv. om door te nummeren vanuit een
+ * vorig pakket. Het nummer wordt meteen opgeslagen (los van de knop Opslaan), maar alleen bij een opgeslagen opmaak.
+ */
+function NextInvoiceNumber({ format, saved }: { format: string; saved: string }) {
+  const { run, busy } = useAction();
+  const error = checkNumberFormat(format);
+  const next = useLoad(() => (error ? Promise.resolve(null) : api.settings.nextInvoiceNumber(undefined, format)), [format, error]);
+  const [sequence, setSequence] = useState('');
+  if (error) return <div className="notice warn small" role="alert" data-testid="opmaak-fout">{error}</div>;
+  const n = next.data;
+  return (
+    <div className="card flat" data-testid="volgend-factuurnummer">
+      <ErrorBox error={next.error} />
+      {n && <p style={{ margin: 0 }}>Je volgende factuur krijgt nummer <strong>{n.number}</strong>.</p>}
+      {format === saved ? (
+        <div className="row" style={{ marginTop: 10, alignItems: 'end' }}>
+          <Field label="Volgende volgnummer" hint={n ? `minstens ${n.lowest}` : undefined}>
+            <input className="num" inputMode="numeric" value={sequence} onChange={(e) => setSequence(e.target.value.replace(/\D/g, ''))} placeholder={n ? String(n.sequence) : ''} aria-label="Volgende volgnummer" />
+          </Field>
+          <Button small disabled={busy || !sequence} onClick={async () => {
+            const r = await run(() => api.settings.setNextInvoiceNumber(Number(sequence)), 'Volgende factuurnummer gezet ✓');
+            if (!r) return;
+            setSequence('');
+            await next.reload();
+          }}>Nummer zetten</Button>
+        </div>
+      ) : (
+        <p className="small muted" style={{ margin: '6px 0 0' }}>Sla eerst de nieuwe opmaak op; daarna kun je hier het volgende nummer zetten.</p>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,234 @@
+import { useState } from 'react';
+import { api } from '../api';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
+import { today } from '../../shared/dates';
+import { LedgerCardsTab, PeriodBalanceTab, RelationCardsTab, TrialBalanceTab } from './LedgerReports';
+import { AccountantPackageCard } from './AccountantPackage';
+import { ChartOfAccountsTab } from './ChartOfAccounts';
+
+type Tab = 'rekeningen' | 'grootboek' | 'kaarten' | 'relaties' | 'periode' | 'journaal' | 'rapport' | 'export' | 'leveranciers' | 'controle';
+
+/** Expert-/boekhoudersmodus: alles wat in de normale modus verborgen blijft. */
+export function Expert() {
+  const { route } = useApp();
+  const [tab, setTab] = useState<Tab>((route.extra?.tab as Tab) ?? 'grootboek');
+  const [card, setCard] = useState<number | null>(null);
+  const year = new Date().getFullYear();
+  const [from, setFrom] = useState(`${year}-01-01`);
+  const [to, setTo] = useState(`${year}-12-31`);
+  return (
+    <div className="page">
+      <h1>Boekhouding</h1>
+      <p className="sub">Voor de boekhouder: grootboek (RGS), journaalposten, rapportages en exports.</p>
+      <div className="row" style={{ marginBottom: 16 }}>
+        <div className="chips">
+          {(['grootboek', 'kaarten', 'relaties', 'periode', 'journaal', 'rapport', 'export', 'leveranciers', 'controle', 'rekeningen'] as Tab[]).map((t) => (
+            <button key={t} className={tab === t ? 'selected' : ''} onClick={() => setTab(t)}>{{ grootboek: 'Kolommenbalans', kaarten: 'Grootboekkaarten', relaties: 'Relatiekaarten', periode: 'Periodebalans', journaal: 'Journaal', rapport: 'W&V en balans', export: 'Exports', leveranciers: 'Leveranciersregels', controle: 'Controle', rekeningen: 'Rekeningschema' }[t]}</button>
+          ))}
+        </div>
+        <span className="grow" />
+        {tab !== 'rekeningen' && <>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Van" />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Tot" />
+        </>}
+      </div>
+      {tab === 'grootboek' && <TrialBalanceTab from={from} to={to} onOpenCard={(id) => { setCard(id); setTab('kaarten'); }} />}
+      {tab === 'kaarten' && <LedgerCardsTab from={from} to={to} selected={card} onSelect={setCard} />}
+      {tab === 'relaties' && <RelationCardsTab from={from} to={to} />}
+      {tab === 'periode' && <PeriodBalanceTab year={Number(from.slice(0, 4)) || year} />}
+      {tab === 'journaal' && <Journal from={from} to={to} />}
+      {tab === 'rapport' && <Reports from={from} to={to} />}
+      {tab === 'export' && <Exports from={from} to={to} />}
+      {tab === 'leveranciers' && <SupplierRules />}
+      {tab === 'controle' && <Integrity />}
+      {tab === 'rekeningen' && <ChartOfAccountsTab />}
+    </div>
+  );
+}
+
+function Journal({ from, to }: { from: string; to: string }) {
+  const { run } = useAction();
+  const entries = useLoad(() => api.ledger.entries({ from, to, limit: 300 }), [from, to]);
+  // in de kopie bij de boekhouder: elke definitieve post in de periode mag terug, op zijn eigen datum
+  const copy = useLoad(() => api.app.officeCopy());
+  const canReverse = (e: { status: string; reverses_entry_id: number | null; source: string; entry_date: string }) =>
+    e.status === 'definitief' && !e.reverses_entry_id && (copy.data ? e.entry_date <= copy.data.endDate && e.source !== 'btw' : e.source === 'handmatig');
+  const [manual, setManual] = useState(false);
+  return (
+    <>
+      <div className="row end" style={{ marginBottom: 10 }}><Button onClick={() => setManual(true)}>Correctieboeking</Button></div>
+      <ErrorBox error={entries.error} />
+      {(entries.data ?? []).map((e) => (
+        <div key={e.id} className="card flat" style={{ marginBottom: 8, padding: '10px 14px', opacity: e.status === 'teruggedraaid' ? 0.6 : 1 }}>
+          <div className="row between small">
+            <span><strong>#{e.id}</strong> <DateNl date={e.entry_date} /> · {e.description} <span className="pill">{e.source}</span> {e.status === 'teruggedraaid' && <span className="pill warn">teruggedraaid</span>}{e.reverses_entry_id && <span className="pill">correctie op #{e.reverses_entry_id}</span>}</span>
+            {canReverse(e) && <Button small kind="ghost" onClick={async () => { if (confirm('Tegenboeking maken?')) { await run(() => api.ledger.reverse(e.id, copy.data ? e.entry_date : today()), 'Tegenboeking gemaakt'); await entries.reload(); } }}>Terugdraaien</Button>}
+          </div>
+          <Origin entryId={e.id} />
+          <table style={{ width: '100%' }} className="small">
+            <tbody>
+              {e.lines.map((l) => (
+                <tr key={l.id}><td style={{ width: 70 }}>{l.account_code}</td><td>{l.account_name}{l.vat_code ? <span className="muted"> · btw {l.vat_code}</span> : ''}</td><td className="num" style={{ width: 110 }}>{l.debit ? <Euro cents={l.debit} /> : ''}</td><td className="num" style={{ width: 110 }}>{l.credit ? <Euro cents={l.credit} /> : ''}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+      {manual && <ManualEntry defaultDate={copy.data?.endDate} onClose={() => setManual(false)} onDone={async () => { setManual(false); await entries.reload(); }} />}
+    </>
+  );
+}
+
+/** `defaultDate`: in de kopie bij de boekhouder de einddatum van de uitwisseling (correcties horen in die periode). */
+function ManualEntry({ onClose, onDone, defaultDate }: { onClose: () => void; onDone: () => void; defaultDate?: string }) {
+  const accounts = useLoad(() => api.ledger.accounts());
+  const { run, busy } = useAction();
+  const [date, setDate] = useState(defaultDate ?? today());
+  const [description, setDescription] = useState('');
+  const [questionEntryId, setQuestionEntryId] = useState<number | undefined>();
+  const questions = useLoad(() => api.ledger.questionItems(date), [date]);
+  const [reverseCharge, setReverseCharge] = useState(false);
+  const [lines, setLines] = useState<{ account: string; debit: number | null; credit: number | null; vatCode?: string }[]>([{ account: '', debit: null, credit: null }, { account: '', debit: null, credit: null }]);
+  const d = lines.reduce((s, l) => s + (l.debit ?? 0), 0);
+  const c = lines.reduce((s, l) => s + (l.credit ?? 0), 0);
+  return (
+    <Modal title="Correctieboeking (memoriaal)" wide onClose={onClose}>
+      <div className="grid cols-2">
+        <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Omschrijving"><input value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
+      </div>
+      <table style={{ width: '100%', marginTop: 12 }}>
+        <tbody>
+          {lines.map((l, i) => (
+            <tr key={i}>
+              <td><select value={l.account} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, account: e.target.value } : x)))}><option value="">Rekening…</option>{(accounts.data ?? []).map((a) => <option key={a.id} value={a.rgs_code}>{a.code} {a.name}</option>)}</select></td>
+              <td><MoneyInput value={l.debit} placeholder="debet" onChange={(v) => setLines(lines.map((x, j) => (j === i ? { ...x, debit: v } : x)))} /></td>
+              <td><MoneyInput value={l.credit} placeholder="credit" onChange={(v) => setLines(lines.map((x, j) => (j === i ? { ...x, credit: v } : x)))} /></td>
+              {reverseCharge && <td><select value={l.vatCode ?? ''} aria-label="Btw-code" title="Alleen voor verlegde btw: de grondslag in de aangifte komt uit deze code" onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, vatCode: e.target.value || undefined } : x)))}><option value="">Geen btw-code</option><option value="verlegd">Verlegd (binnenland, 2a)</option><option value="eu">Verlegd, EU (4b)</option><option value="buiten-eu">Verlegd, buiten de EU (4a)</option></select></td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <label className="row small" style={{ marginTop: 8 }}><input type="checkbox" checked={reverseCharge} onChange={(e) => { setReverseCharge(e.target.checked); if (!e.target.checked) setLines(lines.map((x) => ({ ...x, vatCode: undefined }))); }} /> Deze correctie bevat verlegde btw (grondslag voor rubriek 2a, 4a of 4b)</label>
+      {reverseCharge && <p className="small muted">Verlegde btw: kies de code op de kostenregel (debet) en boek ook de verschuldigde btw (21% of 9%) credit op "Af te dragen BTW verlegd", en eventueel de voorbelasting debet.</p>}
+      <div className="row between" style={{ marginTop: 10 }}>
+        <Button small onClick={() => setLines([...lines, { account: '', debit: null, credit: null }])}>+ Regel</Button>
+        <span className={d === c ? 'pill good' : 'pill bad'}>Debet <Euro cents={d} /> · Credit <Euro cents={c} /></span>
+      </div>
+      <Field label="Welke vraagpost boek je af?" hint="Kies alleen een post die bij deze correctie hoort. Boek op Vraagposten het tegengestelde bedrag.">
+        <select value={questionEntryId ?? ''} onChange={e => setQuestionEntryId(e.target.value ? Number(e.target.value) : undefined)}><option value="">Geen koppeling</option>{(questions.data ?? []).map(q => <option key={q.id} value={q.id}>#{q.id} · {q.entry_date} · {q.description}</option>)}</select>
+      </Field>
+      <ErrorBox error={questions.error} />
+      <div className="row end" style={{ marginTop: 14 }}>
+        <Button onClick={onClose}>Annuleren</Button>
+        <Button kind="primary" disabled={busy || d !== c || d === 0 || !description} onClick={async () => {
+          const r = await run(() => api.ledger.manualEntry({ questionEntryId, date, description, lines: lines.filter((l) => l.account && (l.debit || l.credit)).map((l) => ({ account: l.account, debit: l.debit ?? undefined, credit: l.credit ?? undefined, ...(l.vatCode ? { vatCode: l.vatCode } : {}) })) }), 'Geboekt');
+          if (r !== undefined) onDone();
+        }}>Boeken</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function Reports({ from, to }: { from: string; to: string }) {
+  const r = useLoad(() => api.dashboard.reports(from, to), [from, to]);
+  if (!r.data) return <ErrorBox error={r.error} />;
+  const x = r.data;
+  return (
+    <div className="grid cols-2">
+      <div className="card">
+        <h3>Winst- en verliesrekening</h3>
+        <table className="sumtable small" style={{ maxWidth: 'none' }}>
+          <tbody>
+            {x.pnl.filter((b) => b.balance).map((b) => <tr key={b.account_id}><td>{b.name}</td><td><Euro cents={-b.balance} /></td></tr>)}
+            <tr className="total"><td>Resultaat</td><td><Euro cents={x.profit} /></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div className="card">
+        <h3>Balans per {to}</h3>
+        <table className="sumtable small" style={{ maxWidth: 'none' }}>
+          <tbody>
+            {x.balance.filter((b) => b.balance).map((b) => <tr key={b.account_id}><td>{b.name} <span className="muted">({b.category})</span></td><td><Euro cents={b.balance} /></td></tr>)}
+          </tbody>
+        </table>
+        <p className="small muted">Positief = debet (bezittingen), negatief = credit (schulden/eigen vermogen). Het resultaat van deze periode staat nog op de W&V; dat van eerdere jaren zit in het eigen vermogen.</p>
+      </div>
+    </div>
+  );
+}
+
+function Exports({ from, to }: { from: string; to: string }) {
+  const { run, busy } = useAction();
+  return (
+    <div className="grid">
+    <AccountantPackageCard defaultYear={Number(from.slice(0, 4)) || undefined} />
+    <div className="card grid">
+      <p>Losse exports over de gekozen periode. Het grootboekschema volgt RGS, zodat elk boekhoudpakket het kan inlezen.</p>
+      <div className="row">
+        <Button disabled={busy} onClick={() => void run(() => api.exports.auditfile(from, to), 'Auditfile opgeslagen')}>Auditfile (XAF 3.2)</Button>
+        <Button disabled={busy} onClick={() => void run(() => api.exports.journal(from, to), 'Opgeslagen')}>Journaal (CSV)</Button>
+        <Button disabled={busy} onClick={() => void run(() => api.exports.trialBalance(from, to), 'Opgeslagen')}>Saldibalans (CSV)</Button>
+      </div>
+    </div>
+    </div>
+  );
+}
+
+function SupplierRules() {
+  const { run } = useAction();
+  const rules = useLoad(() => api.documents.suppliers());
+  const stats = useLoad(() => api.home.decisionStats());
+  return (
+    <>
+      <p className="muted">Wat de app heeft geleerd van je bevestigingen. Na 3 gelijke bevestigingen vragen we of een leverancier voortaan automatisch mag. Alleen na jouw ja gebeurt dat.</p>
+      <table className="list small">
+        <thead><tr><th>Leverancier</th><th>Categorie</th><th>BTW</th><th>Zakelijk</th><th className="num">Bevestigd</th><th>Verwerking</th><th><span className="sr-only">Acties</span></th></tr></thead>
+        <tbody>
+          {(rules.data ?? []).map((r) => (
+            <tr key={r.supplier_key}><td>{r.display_name}</td><td>{r.category_key}</td><td>{r.vat_code}</td><td>{r.business ? 'ja' : 'privé'}</td><td className="num">{r.confirmations}×</td><td>{r.auto_approved === 1 ? 'automatisch' : r.auto_approved === -1 ? 'altijd vragen' : 'vragen'}</td><td>{r.auto_approved === 1 ? <Button small kind="ghost" onClick={async () => { await run(() => api.documents.setSupplierAutomatic(r.supplier_key, false)); await rules.reload(); }}>Weer vragen</Button> : null}<Button small kind="ghost" onClick={async () => { await run(() => api.documents.forgetSupplier(r.supplier_key)); await rules.reload(); }}>Vergeten</Button></td></tr>
+          ))}
+        </tbody>
+      </table>
+      <h3>Hoe vaak klopte het automatisch?</h3>
+      <p className="muted small">Per soort beslissing: hoe vaak de app het zelf deed en hoe vaak jij "Klopt niet" koos. Basis om drempels bij te stellen.</p>
+      <table className="list small">
+        <thead><tr><th>Beslissing</th><th className="num">Automatisch</th><th className="num">Gecorrigeerd</th></tr></thead>
+        <tbody>
+          {(stats.data ?? []).map((x) => <tr key={x.kind}><td>{x.kind}</td><td className="num">{x.automatic}</td><td className="num">{x.corrected}</td></tr>)}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+function Integrity() {
+  const r = useLoad(() => api.ledger.integrity());
+  if (!r.data) return <ErrorBox error={r.error} />;
+  return (
+    <div className={`notice ${r.data.balanced ? 'good' : 'bad'}`}>
+      {r.data.balanced ? '✓ Alle journaalposten zijn in balans.' : `Let op: ${r.data.unbalancedEntries.length} journaalposten zijn niet in balans.`} Totaal debet <Euro cents={r.data.totalDebit} />, credit <Euro cents={r.data.totalCredit} />.
+    </div>
+  );
+}
+
+const EVIDENCE_LABEL: Record<string, string> = { document: 'document', bank: 'banktransactie', factuur: 'factuur', inkoop: 'inkoop', antwoord: 'jouw antwoord', bron: 'bron' };
+
+/** Herkomst van een post: de gebeurtenis, de regelversie en het bewijs (#19). */
+function Origin({ entryId }: { entryId: number }) {
+  const [open, setOpen] = useState(false);
+  const origin = useLoad(async () => (open ? api.ledger.origin(entryId) : null), [open, entryId]);
+  const o = origin.data;
+  return (
+    <div className="small">
+      <button className="linklike" onClick={() => setOpen(!open)}>Herkomst</button>
+      {open && o && (
+        <div className="muted">
+          Gebeurtenis #{o.id} ({o.type}{o.status === 'vervangen' ? ', vervangen' : ''}), regels {o.rules_version}
+          {o.supersedes_event_id ? `, vervangt #${o.supersedes_event_id}` : ''} · bewijs:{' '}
+          {o.evidence.length ? o.evidence.map((x) => `${EVIDENCE_LABEL[x.kind] ?? x.kind}${x.refId ? ` #${x.refId}` : ''}${x.note && x.kind === 'antwoord' ? ` ("${x.note}")` : ''}`).join(', ') : 'geen'}
+        </div>
+      )}
+    </div>
+  );
+}

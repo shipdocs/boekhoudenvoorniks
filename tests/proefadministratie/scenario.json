@@ -1,0 +1,59 @@
+{
+  "startDate": "2026-01-01",
+  "period": {
+    "from": "2026-01-01",
+    "to": "2026-03-31",
+    "vat": "2026-Q1"
+  },
+  "sales": [
+    {
+      "key": "verkoop-hoog-betaald",
+      "customer": "Familie Jansen",
+      "invoiceDate": "2026-01-10",
+      "description": "Stucwerk woonkamer",
+      "unitPrice": 100000,
+      "vatCode": "hoog"
+    },
+    {
+      "key": "verkoop-laag-open",
+      "customer": "Bouwbedrijf De Vries BV",
+      "invoiceDate": "2026-02-10",
+      "description": "Schilderwerk woning ouder dan twee jaar",
+      "unitPrice": 50000,
+      "vatCode": "laag"
+    }
+  ],
+  "purchases": [
+    {
+      "file": "bouwmaat-materialen.xml",
+      "categoryKey": "materiaal",
+      "vatCode": "hoog",
+      "paidWith": "later"
+    },
+    {
+      "file": "software-prive-betaald.xml",
+      "categoryKey": "software",
+      "vatCode": "hoog",
+      "paidWith": "prive"
+    },
+    {
+      "file": "gereedschap-open.xml",
+      "categoryKey": "gereedschap",
+      "vatCode": "hoog",
+      "paidWith": "later"
+    },
+    {
+      "file": "onderaannemer-verlegd-open.xml",
+      "categoryKey": "onderaannemer",
+      "vatCode": "verlegd",
+      "paidWith": "later"
+    }
+  ],
+  "bankActions": [
+    { "bankId": "BANK-001", "action": "match-opening-sale", "reference": "2025-010" },
+    { "bankId": "BANK-002", "action": "match-sale", "reference": "verkoop-hoog-betaald" },
+    { "bankId": "BANK-003", "action": "match-opening-purchase", "reference": "LEVER-2025-12" },
+    { "bankId": "BANK-004", "action": "match-purchase", "reference": "BM-2026-001" },
+    { "bankId": "BANK-005", "action": "book-account", "account": "WFbeBan", "vatCode": "geen" }
+  ]
+}

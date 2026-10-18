@@ -1,0 +1,689 @@
+/**
+ * Testserver voor de end-to-end tests: dezelfde services en api als de app (uit dist/), maar via
+ * HTTP in plaats van Electron-IPC. De renderer draait in een gewone browser; e2e/fixtures.ts zet
+ * daar een window.bridge neer die naar deze server praat.
+ *
+ * POST /api            { method, args }  → { ok } of { error }
+ * POST /__reset        lege administratie (nieuwe map), voor elke test; body {"licenses":true} = licenties aan,
+ *                      met een nagebootste licentie-Worker (echte Ed25519-handtekening, eigen sleutelpaar)
+ * POST /__downloads    de map die in de test de Downloads-map is (leeg aangemaakt per test); de test zet er bestanden in
+ * POST /__ownmail     {"mode":"ok"|"no-handler"|"failed"|"cancelled"} stelt de nagebootste mailprogramma-handler in (#450); geeft terug welke mails hij kreeg
+ * POST /__opened       de bijlagen die geopend zijn: het pad uit de database en de inhoud van het bestand (base64)
+ * POST /__ponto        stelt uitsluitend de fictieve Ponto-provider in en geeft zijn veilige aanroeplog terug
+ * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
+ * POST /__store        de versie uit de Microsoft Store nabootsen: body {"on":true} en eventueel "readOnly";
+ *                      geeft terug wat er gebeurde (toestemming voor lokaal lezen, "Opnieuw proberen")
+ * POST /__datafolder   body {"pick":{"name","kind"}} = de map die het keuzevenster "teruggeeft" (kind: leeg, vol of
+ *                      compleet; null = annuleren), {"custom":true} = de app werkt uit een zelf gekozen map,
+ *                      {"oldStandard":true} = in de standaardmap staat nog een administratie; geeft wat er bevestigd is
+ *                      {"phoneScanner":true} = telefoon koppelen aan (staat standaard uit, zoals in de app)
+ * POST /__scanner      bonnenscanner: body {"folder": "..."} = de map die "Map kiezen…" oplevert; geeft de tekst van
+ *                      de laatst getoonde QR-code terug, zodat de test zich als telefoon kan melden
+ * POST /__ocr          een trage tekstherkenning nabootsen: body {"traag":true} = bonnen lezen duurt tot de test het zegt;
+ *                      {"klaar":["regel", ...]} = het lopende leesverzoek geeft deze regels terug
+ * POST /__bonnen      bonnen-adres (#450): body {"status":"wacht"|"actief"|...} zet de stand bij de nagebootste server;
+ *                      geeft de aanroepen terug die de app deed
+ * alles anders         bestanden uit dist/renderer
+ */
+const http = require('node:http');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const ROOT = path.join(__dirname, '..', 'dist');
+const { openDatabase } = require(path.join(ROOT, 'main/db/database.js'));
+const { createServices, MemorySecretStore } = require(path.join(ROOT, 'main/services.js'));
+const { createApi } = require(path.join(ROOT, 'main/main/api.js'));
+const { wipeDatabase } = require(path.join(ROOT, 'main/main/reset.js'));
+const { deleteAttachment, resolveAttachmentPath, saveAttachment } = require(path.join(ROOT, 'main/main/attachments.js'));
+const { seedDemo } = require(path.join(ROOT, 'main/demo/demo.js'));
+const { Administrations, readAdministrationFile, renameAdministrationFile } = require(path.join(ROOT, 'main/main/administrations.js'));
+const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js'));
+const { createBackupBundle, extractBundle } = require(path.join(ROOT, 'main/main/backup.js'));
+const { ExchangeService, sanitizeForExchange } = require(path.join(ROOT, 'main/exchange/exchange.js'));
+const { generateOfficeKeys } = require(path.join(ROOT, 'main/exchange/crypto.js'));
+const { folderAccess } = require(path.join(ROOT, 'main/main/statement-files.js'));
+const { markComplete, planSwitch, sharedDataDir } = require(path.join(ROOT, 'main/main/data-dir.js'));
+const { Bonnenscanner } = require(path.join(ROOT, 'main/scanner/scanner.js'));
+const { PHONE_SCANNER } = require(path.join(ROOT, 'main/shared/phone-scanner.js'));
+const { BANK_FEED } = require(path.join(ROOT, 'main/shared/bank-feed.js'));
+const Database = require('better-sqlite3');
+// Alleen deze testserver zet de nog niet vrijgegeven functie aan. Productbuilds houden de vlag uit.
+BANK_FEED.available = true;
+const { BonnenAdresService } = require(path.join(ROOT, 'main/mail/bonnen-adres.js'));
+
+/** De licentieserver voor het bonnen-adres nagebootst; de stand zet de test met POST /__bonnen. */
+const defaultBonnen = () => ({ status: 'onbevestigd', calls: [], n: 0 });
+let bonnenFake = defaultBonnen();
+const bonnenServer = {
+  async aanmelden(body, token) {
+    bonnenFake.calls.push({ op: 'aanmelden', body, token });
+    bonnenFake.status = 'onbevestigd';
+    bonnenFake.n += 1;
+    const [local, domain] = body.email.split('@');
+    return { status: 'onbevestigd', installatie: `token-${bonnenFake.n}`, email: `${local.slice(0, 1)}***@${domain}` };
+  },
+  async status(token) {
+    bonnenFake.calls.push({ op: 'status', token });
+    return { status: bonnenFake.status, ...(bonnenFake.status === 'actief' ? { adres: 'bakkerijpi-k7m2q@post.boekhoudenvoorniks.nl' } : {}) };
+  },
+  async inloggegevens() {
+    throw new Error('In de test is er geen mailserver');
+  },
+  async stoppen(token) {
+    bonnenFake.calls.push({ op: 'stoppen', token });
+    bonnenFake.status = 'gestopt';
+    return { ok: true, status: 'gestopt' };
+  },
+};
+/** het kantoor op deze "computer" (in de app: kantoor.json in de gegevensmap) */
+let officeProfile = null;
+/** geheimen per administratie (in de app: in de eigen database, versleuteld); blijven bewaard bij wisselen */
+let secretStores = new Map();
+const secretsFor = (dbFile) => {
+  if (!secretStores.has(dbFile)) secretStores.set(dbFile, new MemorySecretStore());
+  return secretStores.get(dbFile);
+};
+
+/**
+ * Bonnenscanner: het echte ontvangstpunt, in de test alleen op 127.0.0.1 (zonder mDNS). `scannerPlatform`
+ * doet alsof de app op Windows draait (uitleg over de firewall); `pickedFolder` is wat het keuzevenster geeft.
+ */
+let scanner = null;
+let lastPairing = null;
+let pickedFolder = null;
+let scannerPlatform = 'linux';
+/** leesverzoeken van de trage test-OCR (zie /__ocr) die nog op antwoord wachten */
+let ocrPending = [];
+/** testschakelaar voor veilige opslag (#249): null = zoals de host zelf (standaard aan) */
+let secureStorageSwitch = null;
+const datePlus = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+const defaultPonto = () => ({
+  clientId: 'e2e-client',
+  clientSecret: 'e2e-secret',
+  scope: 'ai',
+  publicIp: '198.51.100.7',
+  accounts: [{
+    id: 'ponto-zakelijk', iban: 'NL91ABNA0417164300', name: 'Ponto zakelijke rekening',
+    currency: 'EUR', balance: '1000.00', balanceAt: '2026-10-02T08:00:00.000Z',
+    detailsSynchronizedAt: '2026-10-02T08:00:00.000Z', expiresAt: datePlus(7), deprecated: false,
+  }],
+  transactions: { 'ponto-zakelijk': [{ id: 'ponto-tx-1', date: '2026-10-01', amount: '-12.34', name: 'E2E leverancier', iban: 'NL44RABO0123456789', description: 'E2E aankoop' }] },
+  synchronizedAt: { 'ponto-zakelijk': '2026-10-02T08:05:00.000Z' },
+  pagination: { pageSize: 100, incomplete: false },
+  sync: {
+    accountTransactions: { status: 'success', pendingPolls: 0 },
+    accountDetails: { status: 'success', pendingPolls: 0 },
+  },
+  errors: {},
+  calls: [],
+  synchronizations: new Map(),
+  nextSync: 1,
+});
+let ponto = defaultPonto();
+
+const jsonResponse = (status, value) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+const accountResource = (account) => ({
+  id: account.id,
+  type: 'account',
+  attributes: {
+    referenceType: 'IBAN', reference: account.iban, description: account.name, holderName: 'E2E Holding B.V.',
+    currency: account.currency ?? 'EUR', currentBalance: account.balance ?? null,
+    currentBalanceReferenceDate: account.balanceAt ?? null, authorizationExpirationExpectedAt: account.expiresAt ?? null,
+    deprecated: Boolean(account.deprecated),
+  },
+  meta: { account: { synchronizedAt: account.detailsSynchronizedAt ?? null, availability: account.availability ?? 'available' } },
+});
+const transactionResource = (entry) => ({
+  id: entry.id, type: 'transaction', attributes: {
+    executionDate: entry.date, valueDate: entry.date, amount: entry.amount, currency: entry.currency ?? 'EUR',
+    remittanceInformationType: 'unstructured', remittanceInformation: entry.description ?? '',
+    counterpartName: entry.name ?? null, counterpartReference: entry.iban ?? null, endToEndId: entry.reference ?? null,
+  },
+});
+
+/** Volledig lokale Ponto/Cloudflare-nep. Het log bevat bewust nooit headers, credentials, tokens of IP-adressen. */
+async function pontoFetch(input, init = {}) {
+  const url = new URL(String(input));
+  const method = init.method ?? 'GET';
+  if (url.origin === 'https://www.cloudflare.com' && url.pathname === '/cdn-cgi/trace') {
+    ponto.calls.push({ method, path: 'cloudflare-trace' });
+    return new Response(`fl=tests\nip=${ponto.publicIp}\nts=0\n`, { status: 200 });
+  }
+  if (url.origin !== 'https://api.myponto.com') throw new Error('geen netwerk in e2e-tests');
+  if (url.pathname === '/oauth2/token' && method === 'POST') {
+    ponto.calls.push({ method, path: 'token' });
+    if (ponto.errors.token) return jsonResponse(ponto.errors.token, { errors: [] });
+    const auth = new Headers(init.headers).get('Authorization') ?? '';
+    const expected = `Basic ${Buffer.from(`${ponto.clientId}:${ponto.clientSecret}`).toString('base64')}`;
+    if (auth !== expected) return jsonResponse(401, { errors: [{ title: 'ongeldige credentials' }] });
+    return jsonResponse(200, { access_token: 'e2e-token', token_type: 'Bearer', expires_in: 3600, scope: ponto.scope });
+  }
+  if (url.pathname === '/accounts' && method === 'GET') {
+    ponto.calls.push({ method, path: 'accounts' });
+    if (ponto.errors.accounts) return jsonResponse(ponto.errors.accounts, { errors: [] });
+    return jsonResponse(200, { data: ponto.accounts.map(accountResource) });
+  }
+  const accountMatch = url.pathname.match(/^\/accounts\/([^/]+)$/);
+  if (accountMatch && method === 'GET') {
+    ponto.calls.push({ method, path: 'account', accountId: accountMatch[1] });
+    if (ponto.errors.account) return jsonResponse(ponto.errors.account, { errors: [] });
+    const account = ponto.accounts.find((item) => item.id === decodeURIComponent(accountMatch[1]));
+    return account ? jsonResponse(200, { data: accountResource(account) }) : jsonResponse(404, { errors: [] });
+  }
+  const transactionMatch = url.pathname.match(/^\/accounts\/([^/]+)\/transactions$/);
+  if (transactionMatch && method === 'GET') {
+    const accountId = decodeURIComponent(transactionMatch[1]);
+    const all = ponto.transactions[accountId] ?? [];
+    const cursor = Number(url.searchParams.get('page[cursor]') ?? 0);
+    const size = Math.max(1, Number(ponto.pagination.pageSize) || 100);
+    const page = all.slice(cursor, cursor + size);
+    const more = cursor + size < all.length;
+    ponto.calls.push({ method, path: 'transactions', accountId, cursor });
+    if (ponto.errors.transactions) return jsonResponse(ponto.errors.transactions, { errors: [] });
+    const next = more
+      ? ponto.pagination.incomplete
+        ? `https://example.invalid/accounts/${accountId}/transactions?page[cursor]=${cursor + size}`
+        : `https://api.myponto.com/accounts/${accountId}/transactions?page[limit]=100&page[cursor]=${cursor + size}`
+      : undefined;
+    return jsonResponse(200, {
+      data: page.map(transactionResource),
+      meta: {
+        synchronizedAt: ponto.synchronizedAt[accountId] ?? null,
+        latestSynchronization: { id: `latest-${accountId}`, type: 'synchronization', attributes: { status: 'success', subtype: 'accountTransactions', errors: [] } },
+      },
+      ...(next ? { links: { next } } : {}),
+    });
+  }
+  if (url.pathname === '/synchronizations' && method === 'POST') {
+    const parsed = JSON.parse(String(init.body));
+    const attributes = parsed?.data?.attributes ?? {};
+    const subtype = attributes.subtype;
+    const cfg = ponto.sync[subtype];
+    ponto.calls.push({ method, path: 'synchronizations', accountId: attributes.resourceId, subtype });
+    if (!cfg) return jsonResponse(400, { errors: [] });
+    if (cfg.startStatus) return jsonResponse(cfg.startStatus, { errors: [] });
+    const id = `e2e-sync-${ponto.nextSync++}`;
+    ponto.synchronizations.set(id, { subtype, polls: 0 });
+    return jsonResponse(200, { data: { id, type: 'synchronization' } });
+  }
+  const syncMatch = url.pathname.match(/^\/synchronizations\/([^/]+)$/);
+  if (syncMatch && method === 'GET') {
+    const sync = ponto.synchronizations.get(decodeURIComponent(syncMatch[1]));
+    if (!sync) return jsonResponse(404, { errors: [] });
+    const cfg = ponto.sync[sync.subtype];
+    sync.polls += 1;
+    const status = sync.polls <= (cfg.pendingPolls ?? 0) ? 'running' : cfg.status;
+    ponto.calls.push({ method, path: 'synchronization', subtype: sync.subtype, status });
+    return jsonResponse(200, { data: { id: syncMatch[1], type: 'synchronization', attributes: { status, errors: status === 'error' ? ['fictieve synchronisatiefout'] : [] } } });
+  }
+  return jsonResponse(404, { errors: [] });
+}
+
+/** zoals de app: de huidige administratie sluiten en een andere openen */
+function openAdmin(key) {
+  const admins = new Administrations(dir);
+  admins.select(key);
+  void scanner?.stop();
+  db.close();
+  file = path.join(admins.dirFor(key), 'boekhouding.sqlite');
+  init(false);
+}
+
+/**
+ * Nagebootste licentie-Worker voor de test van het abonnement: zelfde tokenformaat
+ * (`<payload>.<handtekening>`, base64url, Ed25519 over de payloadtekst), zodat de app hem echt controleert.
+ */
+let licensing = null;
+function makeLicensing() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  return { publicKey: publicKey.export({ format: 'jwk' }).x, privateKey, accounts: new Map(), lastStarted: null };
+}
+const isoAddDays = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+function signLicense(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${body}.${crypto.sign(null, Buffer.from(body, 'ascii'), licensing.privateKey).toString('base64url')}`;
+}
+function fakeLicenseApi() {
+  const account = (administratie, managementKey) => {
+    const a = licensing.accounts.get(administratie);
+    if (a && a.managementKey !== managementKey) throw new Error('De licentieserver gaf een fout (403); probeer het later opnieuw');
+    return a;
+  };
+  return {
+    async price() {
+      return { bedrag: '9.00', inclusiefBtw: '10.89', valuta: 'EUR', per: 'maand', btw: 'exclusief', proefMaanden: 4 };
+    },
+    async start(input) {
+      if (!/^[A-Za-z0-9_-]{43}$/.test(input.managementKey)) throw new Error('Ongeldige beheersleutel');
+      const a = account(input.administratie, input.managementKey);
+      if (a?.paid && !a.cancelled) return { al: true };
+      licensing.accounts.set(input.administratie, { ...input, paid: false, cancelled: false });
+      licensing.lastStarted = input.administratie;
+      return { checkout: 'https://www.mollie.com/checkout/test-e2e' };
+    },
+    async fetch(administratie, managementKey) {
+      const a = account(administratie, managementKey);
+      if (!a?.paid) return null;
+      return signLicense({ v: 1, product: 'uitwisseling', administratie, email: a.email, validUntil: isoAddDays(37), issuedAt: isoAddDays(0), ...(a.cancelled ? { cancelled: true } : {}) });
+    },
+    async cancel(administratie, managementKey) {
+      const a = account(administratie, managementKey);
+      if (!a?.paid) throw new Error('Geen abonnement gevonden voor deze administratie');
+      a.cancelled = true;
+      return { betaaldTot: isoAddDays(30), geldigTot: isoAddDays(37) };
+    },
+  };
+}
+
+const PORT = Number(process.env.E2E_PORT || 5190);
+let dir, file, db, services, api;
+/** api-verzoeken die nog lopen: een reset wacht tot ze klaar zijn */
+let inflight = 0;
+/** wat de app "verstuurde" (e-mail) en "opsloeg" (bestanden), voor controles in de tests */
+let sent = [];
+/** nagebootste update-status (POST /__update), en of "Nu herstarten" is aangeklikt */
+let updateStatus = { state: 'uit', version: null, notes: null, percent: null, error: null };
+let updateInstalled = false;
+/** aanroepen van "Back-up terugzetten" (in de test annuleert de gebruiker het keuzevenster) */
+let restoreCalls = [];
+/** nagebootste versie uit de Microsoft Store (POST /__store) */
+const noStore = () => ({ on: false, readOnly: false, consent: false, installs: 0, retried: false });
+let store = noStore();
+
+const downloadsDir = () => path.join(dir, 'Downloads');
+/**
+ * Gegevensmap wijzigen: de echte beoordeling van de gekozen map (planSwitch), op echte mappen in een
+ * nagebootste thuismap. Alleen het keuzevenster en de herstart van de app zijn vervangen.
+ */
+let folders = null;
+function resetFolders() {
+  if (folders) fs.rmSync(folders.root, { recursive: true, force: true });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gb-e2e-mappen-'));
+  folders = { root, home: path.join(root, 'home'), custom: false, pick: null, plan: null, applied: null };
+  fs.mkdirSync(folders.home);
+}
+/** een map met een complete (lege) administratie */
+function completeFolder(p) {
+  fs.mkdirSync(p, { recursive: true });
+  openDatabase(path.join(p, 'boekhouding.sqlite')).close();
+  markComplete(p);
+}
+const planFolder = (chosen, copyToStandard) => planSwitch({ home: folders.home, current: dir, chosen, copyToStandard });
+
+/** zoals de app: bijlagen in de map van de open administratie, met het relatieve pad in de database */
+async function storeFile(name, data) {
+  return saveAttachment(path.dirname(file), name, data);
+}
+/** de bijlagen die de test "opende" (in de app: met het programma van de computer) */
+let openedAttachments = [];
+// versturen met het eigen mailprogramma (#450): wat de nagebootste handler teruggeeft en welke mails hij kreeg
+let ownMailMode = 'ok';
+let ownMailCalls = [];
+
+function init(fresh) {
+  if (fresh) {
+    try { db?.close(); } catch { /* al dicht */ }
+    // de vorige (tijdelijke) administratie opruimen
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gb-e2e-'));
+    secretStores = new Map();
+    officeProfile = null;
+    file = path.join(dir, 'boekhouding.sqlite');
+    // de "Downloads-map" van deze test: buiten de administratie, zoals in het echt
+    fs.mkdirSync(downloadsDir(), { recursive: true });
+  }
+  db = openDatabase(file);
+  services = createServices(db, {
+    pdf: async (html) => Buffer.from(`%PDF-1.4 test ${html.length}`),
+    mailerFactory: async () => ({ send: async (m) => { sent.push({ to: m.to, subject: m.subject }); return { messageId: `<e2e-${sent.length}@test>` }; } }),
+    secrets: secretsFor(file),
+    fetch: pontoFetch,
+    storeFile,
+    removeFile: (p) => deleteAttachment(path.dirname(file), p),
+    statementFiles: folderAccess,
+    ownMail: {
+      pdfDir: path.join(path.dirname(file), 'tijdelijke-pdf'),
+      handOver: async (msg) => {
+        ownMailCalls.push({ to: msg.to, subject: msg.subject, body: msg.body, pdfExists: fs.existsSync(msg.attachmentPath) });
+        if (ownMailMode === 'ok') return { ok: true };
+        if (ownMailMode === 'cancelled') return { ok: false, reason: 'cancelled' };
+        return { ok: false, reason: ownMailMode === 'failed' ? 'failed' : 'no-handler' };
+      },
+    },
+    // alleen voor een test van het abonnement; standaard staan licenties uit ('' = uit, ook nu de app een echte sleutel heeft)
+    licensePublicKey: licensing?.publicKey ?? process.env.E2E_LICENSE_PUBLIC_KEY ?? '',
+  });
+  let smtpPassword = null;
+  scanner = new Bonnenscanner({
+    db,
+    secrets: secretsFor(file),
+    intake: services.intake,
+    settings: services.settings,
+    // zoals in de app: koppelen en gegevens naar de telefoon horen bij het abonnement (alleen merkbaar met {"licenses":true})
+    license: services.license,
+    spoolDir: path.join(path.dirname(file), 'bonnenscanner'),
+    readAttachment: (p) => fs.readFileSync(resolveAttachmentPath(path.dirname(file), p)),
+    // zoals in de app: de map van de administratie, waar foto's van de telefoon onder bijlagen/ komen
+    adminDir: path.dirname(file),
+    protectedDirs: [dir],
+    interfaces: () => [{ address: '127.0.0.1', netmask: '255.0.0.0' }],
+    platform: scannerPlatform,
+  });
+  const pair = scanner.pair.bind(scanner);
+  scanner.pair = async () => {
+    const p = await pair();
+    lastPairing = p.payload;
+    return p;
+  };
+  const current = scanner;
+  void current.start();
+  api = createApi(services, {
+    appVersion: () => '0.0.0-e2e',
+    scanner: { service: () => current, pickFolder: async () => pickedFolder },
+    licenseApi: licensing ? fakeLicenseApi() : undefined,
+    bonnen: (() => {
+      // dezelfde geheimen als de app, met de testschakelaar voor "geen sleutelhanger" (/__securestorage)
+      const base = secretsFor(file);
+      const store = { get available() { return secureStorageSwitch !== null ? secureStorageSwitch : base.available; }, get: (k) => base.get(k), set: (k, v) => base.set(k, v), delete: (k) => base.delete(k) };
+      const svc = new BonnenAdresService(db, services.settings, store, bonnenServer);
+      return { view: () => svc.view(), aanvragen: (i) => svc.aanvragen(i), verversen: () => svc.verversen(), stoppen: () => svc.stoppen(), vergeten: () => svc.vergeten() };
+    })(),
+    exchange: {
+      bundle: () => createBackupBundle(db, path.dirname(file), (copy) => {
+        const d = new Database(copy);
+        try { sanitizeForExchange(d); } finally { d.close(); }
+      }),
+      office: () => officeProfile,
+      // zoals saveOffice in src/main/main.ts: `newKey` = bewust een nieuwe kantoorsleutel
+      saveOffice({ office, email, newKey, keys }) {
+        officeProfile = { office, email, ...(keys ?? (newKey ? null : officeProfile) ?? generateOfficeKeys()) };
+        officeProfile.office = office;
+        officeProfile.email = email;
+        return officeProfile;
+      },
+      // zoals openClientExport in src/main/main.ts
+      async openClientExport(data) {
+        if (!officeProfile) throw new Error('Vul eerst de naam van je kantoor in (Instellingen > Administraties)');
+        const opened = ExchangeService.openExport(officeProfile, data, '0.0.0-e2e');
+        const result = { company: opened.meta.company, exchange: opened.header.uitwisseling, endDate: opened.header.einddatum };
+        const admins = new Administrations(dir);
+        const existing = admins.list(readAdministrationFile).find((a) => a.id === opened.header.administratie && a.officeCopy?.exchange === opened.header.uitwisseling);
+        if (existing) {
+          openAdmin(existing.key);
+          return result;
+        }
+        const key = admins.create(`${opened.meta.company} uitwisseling ${opened.header.uitwisseling}`);
+        extractBundle(opened.bundle, admins.dirFor(key));
+        const copyDb = openDatabase(path.join(admins.dirFor(key), 'boekhouding.sqlite'));
+        const copyFile = path.join(admins.dirFor(key), 'boekhouding.sqlite');
+        const copy = createServices(copyDb, { pdf: async () => Buffer.from(''), mailerFactory: async () => { throw new Error('geen mail'); }, secrets: secretsFor(copyFile), fetch: async () => { throw new Error('geen netwerk'); }, storeFile });
+        copy.exchange.initCopy(opened.header, opened.meta, officeProfile.office);
+        copyDb.close();
+        openAdmin(key);
+        return result;
+      },
+    },
+    // zoals de app: `dir` is de gegevensmap, extra administraties in administraties/<sleutel>/
+    administrations: {
+      list: () => new Administrations(dir).list(readAdministrationFile),
+      async open(key) {
+        openAdmin(key);
+      },
+      async create(name) {
+        const admins = new Administrations(dir);
+        const key = admins.create(name);
+        const fresh = openDatabase(path.join(admins.dirFor(key), 'boekhouding.sqlite'));
+        const settings = new SettingsService(fresh);
+        settings.update({ company: { ...settings.get().company, name } });
+        fresh.close();
+        openAdmin(key);
+        return key;
+      },
+      async rename(key, name) {
+        const admins = new Administrations(dir);
+        if (key === admins.current()) {
+          services.settings.update({ company: { ...services.settings.get().company, name: name.trim() } });
+          return;
+        }
+        renameAdministrationFile(path.join(admins.dirFor(key), 'boekhouding.sqlite'), name);
+      },
+      // in de app gaat de map naar de prullenbak; hier (tijdelijke map) gewoon weg
+      async remove(key) {
+        fs.rmSync(new Administrations(dir).dirToRemove(key), { recursive: true, force: true });
+      },
+      async openFolder() {},
+    },
+    // afschriften uit de downloadmap: echt in een (tijdelijke) map kijken; "Andere map kiezen" kiest een tweede map
+    statementFolder: {
+      defaultPath: () => downloadsDir(),
+      async choose() {
+        const other = path.join(dir, 'Andere map');
+        fs.mkdirSync(other, { recursive: true });
+        return other;
+      },
+      reconfigure() {},
+    },
+    dataFolder: {
+      info: () => ({ dir, standard: folders.custom ? sharedDataDir(folders.home) : dir, isStandard: !folders.custom }),
+      async choose() { return folders.pick ? (folders.plan = planFolder(folders.pick)) : null; },
+      chooseStandard: () => (folders.plan = planFolder(sharedDataDir(folders.home), true)),
+      // zoals de app: opnieuw beoordelen, het verzoek vastleggen; de herstart blijft hier achterwege
+      async apply() {
+        const plan = planFolder(folders.plan.dir, folders.plan.standard && folders.plan.action === 'kopieren');
+        if (plan.problem) throw new Error(plan.problem);
+        folders.applied = { target: plan.dir, action: plan.action };
+      },
+    },
+    async checkForUpdates() { return 'Je hebt de nieuwste versie.'; },
+    get windowsStore() { return store.on; },
+    readOnly: () => store.readOnly,
+    retryDataMove() { store.retried = true; },
+    // echt wegschrijven: de tests lezen bv. een uitnodiging of export terug
+    async saveFile(name, content) {
+      const p = path.join(dir, 'bewaard', name);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, content);
+      return p;
+    },
+    storeAttachment: storeFile,
+    readAttachment: (p) => fs.readFileSync(resolveAttachmentPath(path.dirname(file), p)),
+    reconfigureLocalAi() {},
+    // zoals de app: alleen een bijlage van de open administratie, en het bestand moet er staan
+    async openPath(p) {
+      const target = resolveAttachmentPath(path.dirname(file), p);
+      if (!fs.existsSync(target)) throw new Error('Het bestand is niet gevonden');
+      openedAttachments.push({ stored: p, content: fs.readFileSync(target).toString('base64') });
+    },
+    async openExternal(url) { openedAttachments.push({ url }); },
+    revealFile(p) { openedAttachments.push({ revealed: p }); },
+    setSmtpPassword: (pw) => { smtpPassword = pw || null; },
+    hasSmtpPassword: () => smtpPassword !== null,
+    // veilige opslag zoals in de app (#249): dezelfde methode, met een veilige standaard (aan,
+    // zoals MemorySecretStore) en een testschakelaar via POST /__securestorage
+    secureStorage: () => secureStorageSwitch !== null ? secureStorageSwitch : secretsFor(file).available,
+    async testSmtp() { throw new Error('Geen mailserver in de test'); },
+    async backupNow() { return path.join(dir, 'backup.sqlite'); },
+    async restoreBackup(password) { restoreCalls.push(password ?? null); return false; },
+    async exportEncrypted() { return path.join(dir, 'export.gbbackup'); },
+    updates: {
+      status: () => updateStatus,
+      install: () => { updateInstalled = true; },
+      reconfigure: () => { updateStatus = { ...updateStatus, state: updateStatus.state === 'klaar' ? 'klaar' : services.settings.get().autoUpdate ? 'wacht' : 'uit' }; },
+    },
+    // in de test "staat" alleen Claude Code op de computer (nep); gezocht wordt pas na de knop
+    findCli: (kind) => (kind === 'claude-code' ? '/opt/claude/bin/claude' : null),
+    programExists: (p) => p === '/opt/claude/bin/claude',
+    pickProgram: async () => null,
+    checkCli: async () => 'Claude Code werkt ✓',
+    openLoginTerminal: async () => 'Claude Code is geopend in een terminal.',
+    mcpCommand: () => ({ command: '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', args: ['--mcp'] }),
+    localOcr: {
+      status: () => ({ state: 'niet-geinstalleerd' }),
+      install: () => { store.installs++; return { state: 'niet-geinstalleerd' }; },
+      uninstall: async () => ({ state: 'niet-geinstalleerd' }),
+      // zoals de app: alleen in de Store-versie is toestemming nodig
+      get consent() { return store.on ? { runtimeVersion: 'b0000', given: () => store.consent, give: () => { store.consent = true; } } : undefined; },
+    },
+    async resetData(withDemo) {
+      await current.stop();
+      const backup = await wipeDatabase(db, file, path.join(dir, 'backups'));
+      init(false);
+      if (withDemo) seedDemo(services);
+      return { backup };
+    },
+  });
+}
+resetFolders();
+init(true);
+
+/** Uint8Array/Buffer over JSON: { __bytes: base64 } */
+const revive = (_k, v) => (v && typeof v === 'object' && typeof v.__bytes === 'string' ? new Uint8Array(Buffer.from(v.__bytes, 'base64')) : v);
+const replace = (_k, v) => (v && v.type === 'Buffer' && Array.isArray(v.data) ? { __bytes: Buffer.from(v.data).toString('base64') } : v instanceof Uint8Array ? { __bytes: Buffer.from(v).toString('base64') } : v);
+
+const TYPES = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json', '.wasm': 'application/wasm', '.mjs': 'text/javascript' };
+
+http
+  .createServer(async (req, res) => {
+    if (req.method === 'POST') {
+      let body = '';
+      for await (const c of req) body += c;
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/__reset') {
+        // niet midden in een verzoek van de vorige test de database wisselen
+        for (let i = 0; inflight > 0 && i < 100; i++) await new Promise((r) => setTimeout(r, 50));
+        sent = [];
+        updateStatus = { state: 'uit', version: null, notes: null, percent: null, error: null };
+        updateInstalled = false;
+        restoreCalls = [];
+        store = noStore();
+        openedAttachments = [];
+        ownMailMode = 'ok';
+        ownMailCalls = [];
+        ponto = defaultPonto();
+        bonnenFake = defaultBonnen();
+        secureStorageSwitch = null;
+        licensing = body && JSON.parse(body).licenses ? makeLicensing() : null;
+        resetFolders();
+        await scanner?.stop();
+        ocrPending = [];
+        lastPairing = null;
+        pickedFolder = null;
+        scannerPlatform = (body && JSON.parse(body).scannerPlatform) || 'linux';
+        // telefoon koppelen staat uit (zoals in de app) tot een test het zelf aanzet: {"phoneScanner":true}
+        PHONE_SCANNER.available = Boolean(body && JSON.parse(body).phoneScanner);
+        init(true);
+        return res.end('{"ok":true}');
+      }
+      if (req.url === '/__sent') return res.end(JSON.stringify({ ok: sent }));
+      if (req.url === '/__downloads') return res.end(JSON.stringify({ ok: downloadsDir() }));
+      if (req.url === '/__restore') return res.end(JSON.stringify({ ok: restoreCalls }));
+      if (req.url === '/__ownmail') {
+        // {"mode":"ok"|"no-handler"|"failed"|"cancelled"} stelt de nagebootste handler in; zonder body: wat hij kreeg
+        if (body && JSON.parse(body).mode) ownMailMode = JSON.parse(body).mode;
+        return res.end(JSON.stringify({ ok: ownMailCalls }));
+      }
+      if (req.url === '/__opened') return res.end(JSON.stringify({ ok: openedAttachments }));
+      if (req.url === '/__ponto') {
+        const input = body ? JSON.parse(body) : {};
+        if (input.reset) ponto = defaultPonto();
+        if (input.clientId !== undefined) ponto.clientId = String(input.clientId);
+        if (input.clientSecret !== undefined) ponto.clientSecret = String(input.clientSecret);
+        if (input.scope !== undefined) ponto.scope = String(input.scope);
+        if (input.publicIp !== undefined) ponto.publicIp = String(input.publicIp);
+        if (input.accounts) ponto.accounts = input.accounts;
+        if (input.transactions) ponto.transactions = input.transactions;
+        if (input.synchronizedAt) ponto.synchronizedAt = input.synchronizedAt;
+        if (input.pagination) ponto.pagination = { ...ponto.pagination, ...input.pagination };
+        if (input.sync) ponto.sync = { ...ponto.sync, ...input.sync };
+        if (input.errors) ponto.errors = { ...ponto.errors, ...input.errors };
+        return res.end(JSON.stringify({ ok: { calls: ponto.calls, accounts: ponto.accounts.map((account) => ({ id: account.id })), sync: ponto.sync } }));
+      }
+      if (req.url === '/__pay') {
+        const a = licensing?.accounts.get(licensing.lastStarted);
+        if (a) a.paid = true;
+        return res.end(JSON.stringify({ ok: licensing ? [...licensing.accounts.values()].map(({ managementKey: _k, ...rest }) => rest) : null }));
+      }
+      if (req.url === '/__store') {
+        if (body) store = { ...store, ...JSON.parse(body) };
+        return res.end(JSON.stringify({ ok: store }));
+      }
+      if (req.url === '/__bonnen') {
+        if (body && JSON.parse(body).status) bonnenFake.status = JSON.parse(body).status;
+        return res.end(JSON.stringify({ ok: bonnenFake.calls }));
+      }
+      if (req.url === '/__securestorage') {
+        // {"on":true|false} dwingt de schakelaar; zonder body terug naar de veilige standaard
+        secureStorageSwitch = body && JSON.parse(body).on !== undefined ? Boolean(JSON.parse(body).on) : null;
+        if (body && JSON.parse(body).on === undefined) secureStorageSwitch = null;
+        return res.end(JSON.stringify({ ok: secureStorageSwitch }));
+      }
+      if (req.url === '/__datafolder') {
+        const input = body ? JSON.parse(body) : {};
+        if (input.custom !== undefined) folders.custom = !!input.custom;
+        if (input.oldStandard) completeFolder(sharedDataDir(folders.home));
+        if (input.pick !== undefined) {
+          folders.pick = input.pick ? path.join(folders.root, input.pick.name) : null;
+          if (input.pick?.kind === 'compleet') completeFolder(folders.pick);
+          else if (input.pick) fs.mkdirSync(folders.pick, { recursive: true });
+          if (input.pick?.kind === 'vol') fs.writeFileSync(path.join(folders.pick, 'vakantie.jpg'), 'foto');
+        }
+        return res.end(JSON.stringify({ ok: { applied: folders.applied, root: folders.root } }));
+      }
+      if (req.url === '/__ocr') {
+        const input = body ? JSON.parse(body) : {};
+        if (input.traag) {
+          services.intake.setOcrProvider({
+            id: 'traag',
+            label: 'Trage test-OCR',
+            available: async () => true,
+            recognize: () => new Promise((resolve) => ocrPending.push(resolve)),
+          });
+        }
+        if (input.klaar) ocrPending.shift()?.({ items: input.klaar.map((text, i) => ({ text, page: 1, bbox: [10, 20 + i * 20, 300, 34 + i * 20], confidence: 0.97 })) });
+        return res.end(JSON.stringify({ ok: { wachtend: ocrPending.length } }));
+      }
+      if (req.url === '/__scanner') {
+        if (body && 'folder' in JSON.parse(body)) pickedFolder = JSON.parse(body).folder;
+        return res.end(JSON.stringify({ ok: { payload: lastPairing } }));
+      }
+      if (req.url === '/__update') {
+        if (body) updateStatus = { ...updateStatus, ...JSON.parse(body) };
+        return res.end(JSON.stringify({ ok: { status: updateStatus, installed: updateInstalled } }));
+      }
+      const { method, args } = JSON.parse(body, revive);
+      const [ns, fn] = String(method).split('.');
+      const handler = Object.hasOwn(api, ns) && Object.hasOwn(api[ns], fn) ? api[ns][fn] : null;
+      if (typeof handler !== 'function') return res.end(JSON.stringify({ error: `Onbekende functie: ${method}` }));
+      inflight++;
+      try {
+        const r = await handler(...args);
+        // zoals Electron: een functie die niets teruggeeft, geeft in de renderer `undefined` (geen `null`);
+        // de sleutel `ok` valt dan weg en de brug in fixtures.ts leest `undefined`
+        res.end(JSON.stringify({ ok: r }, replace));
+      } catch (e) {
+        res.end(JSON.stringify({ error: e.message }));
+      } finally {
+        inflight--;
+      }
+      return;
+    }
+    const rel = req.url === '/' ? 'index.html' : decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '');
+    const p = path.join(ROOT, 'renderer', rel);
+    if (!p.startsWith(path.join(ROOT, 'renderer')) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) {
+      res.statusCode = 404;
+      return res.end();
+    }
+    res.setHeader('content-type', TYPES[path.extname(p)] ?? 'application/octet-stream');
+    res.end(fs.readFileSync(p));
+  })
+  .listen(PORT, () => console.log(`e2e-server op http://localhost:${PORT}`));
+
+process.on('exit', () => {
+  try { db?.close(); } catch { /* al dicht */ }
+  if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  if (folders) fs.rmSync(folders.root, { recursive: true, force: true });
+});
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));

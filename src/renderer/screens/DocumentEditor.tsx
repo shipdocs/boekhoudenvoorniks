@@ -1,0 +1,483 @@
+import { useEffect, useMemo, useState } from 'react';
+import { api } from '../api';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, useAction, useApp, useJobsOn, useJobWords, useLoad } from '../ui';
+import { computeTotals, type LineInput } from '../../documents/totals';
+import { addDays, isIsoDate, today } from '../../shared/dates';
+import { customerVatSituation, suggestedSalesVat, type SalesVatCode } from '../../shared/vat';
+import { CustomerMailNotice, CustomerVatHint, QuickCustomer } from './Customers';
+
+interface EditLine {
+  description: string;
+  quantity: string;
+  unit: string;
+  unitPrice: number | null;
+  vatCode: SalesVatCode;
+}
+
+const toNumber = (s: string) => Number(s.replace(',', '.'));
+
+// onder de KOR: vrijgesteld, of een dienst die elders belast is (EU-dienst met verlegging, klant buiten de EU)
+const KOR_SALES_VAT: string[] = ['vrijgesteld', 'icp-dienst', 'dienst-buiten-eu'];
+
+export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?: number }) {
+  const jobsOn = useJobsOn();
+  const jw = useJobWords();
+  const { go, meta, settings, toast, route } = useApp();
+  const { run, busy } = useAction();
+  const isInvoice = kind === 'factuur';
+  const relations = useLoad(() => api.relations.list({ type: 'klant' }));
+  const templates = useLoad(() => api.templates.list(kind));
+  const doc = useLoad(async () => (id ? (isInvoice ? await api.invoices.get(id) : await api.quotes.get(id)) : null), [id]);
+  const [newCustomer, setNewCustomer] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [payment, setPayment] = useState(false);
+  // "Versturen" op een nieuwe factuur/offerte: eerst opslaan, dan opent het verstuurvenster op het opgeslagen document
+  const [sending, setSending] = useState(Boolean(route.extra?.send));
+
+  const defaultVat: SalesVatCode = settings.kor ? 'vrijgesteld' : settings.defaultVatCode;
+  const trade = meta.trades.find((t) => t.key === settings.profile.trade);
+  const [relationId, setRelationId] = useState<number | null>(null);
+  const [date, setDate] = useState(today());
+  const [secondDate, setSecondDate] = useState('');
+  const [reference, setReference] = useState('');
+  const [dateWarnings, setDateWarnings] = useState<string[]>([]);
+  const [deliveryDate, setDeliveryDate] = useState('');
+  const [deliveryDateTo, setDeliveryDateTo] = useState('');
+  const [intro, setIntro] = useState('');
+  const [notes, setNotes] = useState('');
+  const [templateId, setTemplateId] = useState<number | null>(null);
+  const [lines, setLines] = useState<EditLine[]>([{ description: '', quantity: '1', unit: '', unitPrice: null, vatCode: defaultVat }]);
+
+  useEffect(() => {
+    if (!isInvoice || !date) { setDateWarnings([]); return; }
+    let live = true;
+    api.invoices.dateWarnings(date, id).then((w) => { if (live) setDateWarnings(w); }, () => { if (live) setDateWarnings([]); });
+    return () => { live = false; };
+  }, [isInvoice, date, id]);
+
+  // het nummer dat een concept krijgt bij definitief maken; het jaar volgt de factuurdatum
+  const isDraft = isInvoice && (!id || (doc.data && 'invoice_date' in doc.data && doc.data.status === 'concept'));
+  const [expectedNumber, setExpectedNumber] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isDraft || !isIsoDate(date)) { setExpectedNumber(null); return; }
+    let live = true;
+    api.settings.nextInvoiceNumber(date).then((n) => { if (live) setExpectedNumber(n.number); }, () => { if (live) setExpectedNumber(null); });
+    return () => { live = false; };
+  }, [isDraft, date]);
+
+  useEffect(() => {
+    const d = doc.data;
+    if (!d) return;
+    setRelationId(d.relation_id);
+    setDate('invoice_date' in d ? d.invoice_date : d.quote_date);
+    setSecondDate('due_date' in d ? d.due_date : d.valid_until);
+    setReference(d.reference ?? '');
+    setDeliveryDate('delivery_date' in d ? d.delivery_date ?? '' : '');
+    setDeliveryDateTo('delivery_date_to' in d ? d.delivery_date_to ?? '' : '');
+    setIntro(d.intro ?? '');
+    setNotes(d.notes ?? '');
+    setTemplateId(d.template_id);
+    setLines(d.lines.map((l) => ({ description: l.description, quantity: String(l.quantity).replace('.', ','), unit: l.unit ?? '', unitPrice: l.unit_price, vatCode: l.vat_code as SalesVatCode })));
+  }, [doc.data]);
+
+  const editable = !doc.data || (isInvoice ? doc.data.status === 'concept' : ['concept', 'verzonden'].includes(doc.data.status));
+  const lineInputs: LineInput[] = lines
+    .filter((l) => l.description.trim() && l.unitPrice !== null && Number.isFinite(toNumber(l.quantity)) && toNumber(l.quantity) !== 0)
+    .map((l) => ({ description: l.description, quantity: toNumber(l.quantity), unit: l.unit || null, unitPrice: l.unitPrice!, vatCode: l.vatCode }));
+  const totals = useMemo(() => computeTotals(lineInputs.length ? lineInputs : []), [JSON.stringify(lineInputs)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setLine = (i: number, patch: Partial<EditLine>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+
+  const save = async (then?: 'send'): Promise<number | undefined> => {
+    if (!relationId) {
+      toast('Kies eerst een klant', 'error');
+      return;
+    }
+    const payload = {
+      relationId,
+      reference: reference || null,
+      intro: intro || null,
+      notes: notes || null,
+      templateId,
+      lines: lineInputs,
+    };
+    const r = await run(async () => {
+      if (isInvoice) {
+        const p = { ...payload, invoiceDate: date, dueDate: secondDate || undefined, deliveryDate: deliveryDate || null, deliveryDateTo: deliveryDate && deliveryDateTo ? deliveryDateTo : null };
+        return id ? api.invoices.updateDraft(id, p) : api.invoices.createDraft(p);
+      }
+      const p = { ...payload, quoteDate: date, validUntil: secondDate || undefined };
+      return id ? api.quotes.update(id, p) : api.quotes.create(p);
+    }, 'Opgeslagen');
+    if (r && !id) go({ screen: kind, id: r.id, extra: then ? { send: true } : undefined });
+    else await doc.reload();
+    return r?.id;
+  };
+
+  const showPreview = async () => {
+    const docId = editable ? await save() : id;
+    if (!docId) return;
+    const html = await run(() => (isInvoice ? api.invoices.html(docId) : api.quotes.html(docId)));
+    if (html) setPreview(html);
+  };
+
+  const d = doc.data;
+  const invoice = d && 'invoice_date' in d ? d : null;
+  const quote = d && 'quote_date' in d ? d : null;
+
+  return (
+    <div className="page">
+      <div className="row between">
+        <div>
+          <h1>
+            {isInvoice ? (invoice?.totals.total ?? 0) < 0 ? 'Creditfactuur (draait een factuur terug)' : 'Factuur' : 'Offerte'} {d && 'number' in d && d.number ? d.number : id ? '(concept)' : ''}
+          </h1>
+          <p className="sub">
+            {invoice && <StatusPill status={invoice.display_status} />} {quote && <StatusPill status={quote.status} />}{' '}
+            {invoice && invoice.status !== 'concept' && invoice.open_amount > 0 && <>Nog open: <Euro cents={invoice.open_amount} /></>}
+            {expectedNumber && <span data-testid="verwacht-nummer">Krijgt nummer <strong>{expectedNumber}</strong> als je hem definitief maakt</span>}
+          </p>
+        </div>
+        <Button kind="ghost" onClick={() => go({ screen: 'werk', extra: { tab: isInvoice ? 'facturen' : 'offertes' } })}>← Terug</Button>
+      </div>
+      <ErrorBox error={doc.error} />
+      {invoice?.is_opening ? (
+        <div className="notice row between">
+          <span>Deze factuur komt uit je vorige administratie: hier staat alleen wat er nog open staat. Omzet en btw zaten al in je vorige boekhouding.</span>
+          <Button small onClick={() => go({ screen: 'overstap', extra: { section: 'klanten' } })}>Aanpassen in de overstap-hulp</Button>
+        </div>
+      ) : null}
+      {id && <CustomerMailNotice relationId={relationId} />}
+      {!isInvoice && editable && (
+        <p className="notice small">
+          Een offerte is een prijsvoorstel: nog geen factuur en nog niets in je boekhouding. Stuur hem naar je klant. Zegt de klant ja? Klik dan op <strong>Klant is akkoord</strong>; daarna maak je er met één klik een factuur van.
+        </p>
+      )}
+
+      <div className="card">
+        <div className="grid cols-3">
+          <Field label="Klant">
+            <div className="row" style={{ flexWrap: 'nowrap' }}>
+              <select className="grow" value={relationId ?? ''} disabled={!editable} onChange={(e) => setRelationId(Number(e.target.value) || null)}>
+                <option value="">Kies een klant…</option>
+                {(relations.data ?? []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+              {editable && <Button small onClick={() => setNewCustomer(true)}>+ Nieuw</Button>}
+            </div>
+          </Field>
+          <Field label={isInvoice ? 'Factuurdatum' : 'Datum'}>
+            <input type="date" value={date} disabled={!editable} onChange={(e) => setDate(e.target.value)} />
+          </Field>
+          <Field label={isInvoice ? 'Betalen vóór' : 'Geldig tot'} hint={`standaard ${isInvoice ? settings.paymentTermDays : settings.quoteValidityDays} dagen`}>
+            <input type="date" value={secondDate || (date ? addDays(date, isInvoice ? settings.paymentTermDays : settings.quoteValidityDays) : '')} disabled={!editable} onChange={(e) => setSecondDate(e.target.value)} />
+          </Field>
+        </div>
+        {editable && !settings.kor && (() => {
+          const rel = (relations.data ?? []).find((r) => r.id === relationId);
+          if (!rel || customerVatSituation(rel.country, rel.vat_number) === 'nl') return null;
+          const suggested = suggestedSalesVat(customerVatSituation(rel.country, rel.vat_number));
+          const label = suggested ? meta.salesVat.find((v) => v.code === suggested)?.pickLabel ?? suggested : null;
+          return (
+            <div style={{ marginTop: 12 }}>
+              <CustomerVatHint country={rel.country} vatNumber={rel.vat_number} relationId={rel.id} />
+              {suggested && lines.some((l) => l.vatCode !== suggested) && (
+                <Button small onClick={() => setLines((ls) => ls.map((l) => ({ ...l, vatCode: suggested })))}>Zet alle regels op "{label}"</Button>
+              )}
+            </div>
+          );
+        })()}
+        {isInvoice && editable && dateWarnings.length > 0 && (
+          <div className="notice warn" style={{ marginTop: 12 }}>
+            {dateWarnings.map((w) => <div key={w} className="small">{w}</div>)}
+          </div>
+        )}
+        {isInvoice && (
+          <div className="row" style={{ marginTop: 12 }}>
+            <Field label="Datum levering of dienst" hint={settings.kor ? 'Mag leeg bij de KOR, behalve als de dienst in een ander tijdvak geleverd is.' : 'Leeg = de factuurdatum. Vul in als je eerder of later leverde. Bij EU-diensten bepaalt deze datum (of het einde van de periode) het btw- en ICP-tijdvak.'}>
+              <input type="date" value={deliveryDate} disabled={!editable} onChange={(e) => setDeliveryDate(e.target.value)} />
+            </Field>
+            <Field label="t/m (alleen bij een periode)" hint={`Bijvoorbeeld bij een ${jw.s} van meerdere weken.`}>
+              <input type="date" value={deliveryDateTo} min={deliveryDate || undefined} disabled={!editable || !deliveryDate} onChange={(e) => setDeliveryDateTo(e.target.value)} />
+            </Field>
+          </div>
+        )}
+        <div style={{ marginTop: 12 }}>
+          <Field label={isInvoice ? `Omschrijving / ${jw.s}` : 'Waar gaat de offerte over?'} hint="bv. Woonkamer stucen">
+            <input value={reference} disabled={!editable} onChange={(e) => setReference(e.target.value)} />
+          </Field>
+        </div>
+
+        <h2>{isInvoice ? 'Wat heb je gedaan?' : 'Wat ga je doen?'}</h2>
+        <div className="lines-scroll">
+        <table className="lines-table" style={{ width: '100%' }}>
+          <thead>
+            <tr className="small muted"><td>Omschrijving</td><td style={{ width: 80 }}>Aantal</td><td style={{ width: 80 }}>Eenheid</td><td style={{ width: 120 }}>Prijs</td><td style={{ width: 190 }}>Btw</td><td style={{ width: 110 }} className="num">Totaal</td><td style={{ width: 36 }} /></tr>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => {
+              const q = toNumber(l.quantity);
+              const lineTotal = l.unitPrice !== null && Number.isFinite(q) ? Math.round(q * l.unitPrice) : null;
+              return (
+                <tr key={i}>
+                  <td><input aria-label={`Omschrijving regel ${i + 1}`} value={l.description} disabled={!editable} onChange={(e) => setLine(i, { description: e.target.value })} placeholder="bv. Stucwerk wanden" /></td>
+                  <td><input aria-label={`Aantal regel ${i + 1}`} className="num" value={l.quantity} disabled={!editable} onChange={(e) => setLine(i, { quantity: e.target.value })} /></td>
+                  <td><input aria-label={`Eenheid regel ${i + 1}`} value={l.unit} disabled={!editable} onChange={(e) => setLine(i, { unit: e.target.value })} placeholder="m²" /></td>
+                  <td>{editable ? <MoneyInput ariaLabel={`Prijs regel ${i + 1}`} value={l.unitPrice} onChange={(v) => setLine(i, { unitPrice: v })} /> : <Euro cents={l.unitPrice} />}</td>
+                  <td>
+                    <select aria-label={`Btw regel ${i + 1}`} value={l.vatCode} disabled={!editable} onChange={(e) => setLine(i, { vatCode: e.target.value as SalesVatCode })}>
+                      {meta.salesVat.filter((v) => !settings.kor || KOR_SALES_VAT.includes(v.code) || v.code === l.vatCode).map((v) => <option key={v.code} value={v.code}>{v.pickLabel ?? v.label}</option>)}
+                    </select>
+                  </td>
+                  <td className="num"><Euro cents={lineTotal} /></td>
+                  <td>{editable && lines.length > 1 && <Button kind="ghost" small title="Regel verwijderen" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>✕</Button>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        </div>
+        {editable && (
+          <div className="row" style={{ marginTop: 8 }}>
+            <Button small onClick={() => setLines((ls) => [...ls, { description: '', quantity: '1', unit: '', unitPrice: null, vatCode: defaultVat }])}>+ Regel</Button>
+            {trade?.items.map((it) => (
+              <Button key={it.description} small kind="ghost" title={it.note} onClick={() => setLines((ls) => [...ls.filter((l) => l.description || l.unitPrice), { description: it.description, quantity: '1', unit: it.unit, unitPrice: null, vatCode: settings.kor ? 'vrijgesteld' : it.vatCode }])}>
+                + {it.description}
+              </Button>
+            ))}
+          </div>
+        )}
+        {lines.some((l) => l.vatCode === 'laag') && trade?.items.find((i) => i.note) && <p className="small muted">ℹ️ {trade.items.find((i) => i.note)!.note}</p>}
+        {lines.some((l) => l.vatCode === 'verlegd') && <p className="small muted">ℹ️ Btw verlegd gebruik je alleen als de wet dat voorschrijft, bijvoorbeeld als onderaannemer in de bouw: jij rekent geen btw, je klant regelt die. Alleen een btw-nummer van je klant is niet genoeg. Het btw-nummer van je klant moet wel op de factuur.</p>}
+        {lines.some((l) => l.vatCode === 'icp' || l.vatCode === 'icp-dienst') && <p className="small muted">ℹ️ Bedrijf in een ander EU-land: kies "goederen" als je spullen levert die naar dat land gaan, en "dienst" voor werk of advies. Dat moet kloppen voor de opgave aan de Belastingdienst. Werk je aan een gebouw of grond? Dan gelden andere regels: vraag je boekhouder.</p>}
+        {lines.some((l) => l.vatCode === 'export' || l.vatCode === 'dienst-buiten-eu') && <p className="small muted">ℹ️ Klant buiten de EU: spullen die de EU uitgaan zijn "goederen" (0%, in je aangifte). Een dienst aan een bedrijf buiten de EU komt niet in je Nederlandse aangifte. Is de klant een particulier, of werk je aan een gebouw in Nederland? Vraag je boekhouder welke btw geldt.</p>}
+
+        <div className="row end" style={{ marginTop: 16 }}>
+          <table className="sumtable">
+            <tbody>
+              <tr><td>Totaal zonder btw</td><td><Euro cents={totals.subtotal} /></td></tr>
+              {totals.groups.filter((g) => g.percentage > 0).map((g) => <tr key={g.vatCode}><td>Btw {g.percentage}%</td><td><Euro cents={g.vat} /></td></tr>)}
+              <tr className="total"><td>Totaal</td><td><Euro cents={totals.total} /></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="grid cols-2" style={{ marginTop: 12 }}>
+          <Field label="Tekst boven de regels" hint="optioneel"><textarea value={intro} disabled={!editable} onChange={(e) => setIntro(e.target.value)} placeholder={isInvoice ? 'bv. Bedankt voor de opdracht.' : 'bv. Bedankt voor je aanvraag. Hieronder de prijs voor het werk dat we bespraken.'} /></Field>
+          <Field label="Opmerking onderaan" hint="optioneel"><textarea value={notes} disabled={!editable} onChange={(e) => setNotes(e.target.value)} placeholder={isInvoice ? '' : 'bv. Inclusief materiaal. Na akkoord plannen we het werk in.'} /></Field>
+        </div>
+        {/* opmaak: de standaard is goed; alleen wie een eigen opmaak heeft gemaakt, kiest hier */}
+        {(templates.data ?? []).length > 1 && (
+          <details style={{ marginTop: 10 }}>
+            <summary className="small muted">Andere opmaak kiezen ({(templates.data ?? []).find((t) => t.id === templateId)?.name ?? 'standaard'})</summary>
+            <select value={templateId ?? ''} disabled={!editable} onChange={(e) => setTemplateId(Number(e.target.value) || null)} style={{ marginTop: 8, maxWidth: 360 }}>
+              <option value="">Standaard</option>
+              {(templates.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </details>
+        )}
+      </div>
+
+      <div className="row" style={{ marginTop: 16 }}>
+        {editable && <Button disabled={busy} onClick={() => void save()}>Opslaan</Button>}
+        {!invoice?.is_opening && <Button disabled={busy} onClick={() => void showPreview()}>Voorbeeld</Button>}
+        {id && !invoice?.is_opening && <Button disabled={busy} onClick={() => void run(() => (isInvoice ? api.invoices.savePdf(id) : api.quotes.savePdf(id)), 'PDF opgeslagen')}>PDF opslaan</Button>}
+        {id && isInvoice && invoice && invoice.status !== 'concept' && !invoice.is_opening && <Button disabled={busy} title="Een bestand dat boekhoudprogramma's zonder overtypen inlezen" onClick={() => void run(() => api.invoices.saveUbl(id), 'E-factuur opgeslagen')}>E-factuur (XML)</Button>}
+        <span className="grow" />
+        {!id && <Button kind="primary" disabled={busy} title="Slaat op en opent het verstuurvenster" onClick={() => void save('send')}>Versturen</Button>}
+        {isInvoice && invoice?.status === 'concept' && (
+          <>
+            <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Deze factuur (nog niet verstuurd) verwijderen?') && (await run(async () => { await api.invoices.deleteDraft(invoice.id); return true; }, 'Verwijderd'))) go({ screen: 'werk' }); }}>Verwijderen</Button>
+            <Button disabled={busy} onClick={async () => { if (confirm('Definitief maken zonder te mailen? Je kunt de factuur daarna niet meer wijzigen.')) { await run(() => api.invoices.finalize(invoice.id), 'Factuur is definitief'); await doc.reload(); } }}>Definitief maken</Button>
+            <Button kind="primary" disabled={busy} onClick={async () => { const docId = await save(); if (docId) setSending(true); }}>Versturen</Button>
+          </>
+        )}
+        {isInvoice && invoice && invoice.status !== 'concept' && (
+          <>
+            {!invoice.credit_of_invoice_id && !invoice.is_opening && invoice.total! > 0 && <Button disabled={busy} onClick={async () => { const c = await run(() => api.invoices.creditNote(invoice.id)); if (c) go({ screen: 'factuur', id: c.id }); }}>Factuur terugdraaien (creditfactuur)</Button>}
+            {invoice.status === 'verzonden' && invoice.open_amount > 0 && Math.abs(invoice.open_amount) <= 500 && invoice.amount_paid > 0 && <Button disabled={busy} onClick={async () => { await run(() => api.invoices.writeOff(invoice.id), 'Klein verschil laten vallen ✓'); await doc.reload(); }}>Klein verschil laten vallen</Button>}
+            {invoice.status === 'verzonden' && invoice.open_amount > 0 && (invoice.vat_total ?? 0) > 0 && !invoice.credit_of_invoice_id && <Button disabled={busy} title="Geen betaling meer te verwachten, of een jaar na de vervaldatum: omzet en btw gaan terug in je aangifte" onClick={async () => { if (!window.confirm('Deze factuur afboeken als oninbaar? De omzet en de btw over het openstaande deel gaan terug in de btw-aangifte van deze periode. Komt er later alsnog betaling, dan geeft de app de btw over dat deel opnieuw aan.')) return; await run(() => api.invoices.writeOffBadDebt(invoice.id, new Date().toISOString().slice(0, 10)), 'Afgeboekt als oninbaar ✓'); await doc.reload(); }}>Afboeken als oninbaar</Button>}
+            {invoice.display_status === 'vervallen' && <Button disabled={busy} onClick={async () => { await run(() => api.invoices.sendReminder(invoice.id), 'Herinnering verstuurd'); await doc.reload(); }}>Herinnering sturen</Button>}
+            {invoice.status === 'verzonden' && <Button disabled={busy} onClick={() => setPayment(true)}>Betaling ontvangen</Button>}
+            {!invoice.is_opening && <Button kind="primary" disabled={busy} onClick={() => setSending(true)}>{invoice.sent_at ? 'Opnieuw versturen' : 'Versturen'}</Button>}
+          </>
+        )}
+        {quote && (
+          <>
+            {quote.status !== 'gefactureerd' && <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Offerte verwijderen?') && (await run(async () => { await api.quotes.delete(quote.id); return true; }, 'Verwijderd'))) go({ screen: 'werk', extra: { tab: 'offertes' } }); }}>Verwijderen</Button>}
+            {['concept', 'verzonden'].includes(quote.status) && <Button disabled={busy} onClick={async () => { await run(() => api.quotes.setStatus(quote.id, 'afgewezen')); await doc.reload(); }}>Afgewezen</Button>}
+            {['concept', 'verzonden'].includes(quote.status) && <Button disabled={busy} onClick={async () => { if (!jobsOn) { await run(() => api.quotes.setStatus(quote.id, 'geaccepteerd'), 'Klant is akkoord ✓'); await doc.reload(); return; } const j = await run(() => api.jobs.acceptQuote(quote.id), `Klant is akkoord — er staat een ${jw.s} klaar`); if (j) go({ screen: 'klus', id: j.id }); }}>Klant is akkoord</Button>}
+            {quote.status === 'geaccepteerd' && <Button disabled={busy} onClick={async () => { const inv = await run(() => api.quotes.convertToInvoice(quote.id)); if (inv) go({ screen: 'factuur', id: inv.id }); }}>Omzetten naar factuur</Button>}
+            {quote.invoice_id && <Button onClick={() => go({ screen: 'factuur', id: quote.invoice_id! })}>Naar factuur</Button>}
+            {['concept', 'verzonden'].includes(quote.status) && <Button kind="primary" disabled={busy} onClick={async () => { const docId = await save(); if (docId) setSending(true); }}>Versturen</Button>}
+          </>
+        )}
+      </div>
+
+      {invoice && invoice.status !== 'concept' && <EmailLog id={invoice.id} />}
+
+      {newCustomer && (
+        <QuickCustomer
+          onClose={() => setNewCustomer(false)}
+          onCreated={async (r) => {
+            setNewCustomer(false);
+            await relations.reload();
+            setRelationId(r.id);
+          }}
+        />
+      )}
+      {preview && (
+        <Modal title="Voorbeeld" wide onClose={() => setPreview(null)}>
+          <iframe className="preview-frame" sandbox="" srcDoc={preview} title="Voorbeeld" />
+        </Modal>
+      )}
+      {/* pas openen als het document geladen is: anders blijft "Naar" leeg (het adres van de klant komt uit het document);
+          lukt laden niet, dan toch openen (adres zelf invullen) */}
+      {sending && id && (d || doc.error) && (
+        <SendDialog
+          kind={kind}
+          id={id}
+          defaultTo={d?.relation_email ?? ''}
+          onClose={() => setSending(false)}
+          onSent={async () => {
+            setSending(false);
+            await doc.reload();
+          }}
+        />
+      )}
+      {payment && invoice && (
+        <PaymentDialog
+          invoiceId={invoice.id}
+          open={invoice.open_amount}
+          onClose={() => setPayment(false)}
+          onDone={async () => {
+            setPayment(false);
+            await doc.reload();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Waar het versturen met het eigen mailprogramma (#450) staat: nog niets gedaan, mail doorgegeven (vraag), of niet gelukt (webmail). */
+type OwnMailStage = 'kies' | 'vraag' | 'mislukt';
+
+function SendDialog({ kind, id, defaultTo, onClose, onSent }: { kind: 'factuur' | 'offerte'; id: number; defaultTo: string; onClose: () => void; onSent: () => void }) {
+  const { settings, go } = useApp();
+  const { run, busy } = useAction();
+  const [to, setTo] = useState(defaultTo);
+  const [stage, setStage] = useState<OwnMailStage>('kies');
+  const smtpReady = !!settings.smtp.host && !!settings.smtp.fromEmail;
+  const api_ = kind === 'factuur' ? api.invoices : api.quotes;
+
+  async function eigenMailprogramma() {
+    const r = await run<{ ok: boolean; reason?: string }>(() => api_.sendOwnMail(id, { to }));
+    if (!r) return;
+    if (r.ok) setStage('vraag');
+    else if (r.reason === 'cancelled') setStage('kies'); // je sloot het mailvenster zelf: niets tonen, niets markeren
+    else setStage('mislukt');
+  }
+  async function webmail(provider: 'gmail' | 'outlook') {
+    // opent de webmail met alles ingevuld en toont de PDF in de bestandsbeheerder om erin te slepen
+    const r = await run<boolean>(() => api_.webmail(id, provider, { to }));
+    if (r) setStage('vraag');
+  }
+  const verstuurd = kind === 'factuur' ? 'Is de factuur verstuurd?' : 'Is de offerte verstuurd?';
+  const webmailKeuze = (
+    <div className="stack">
+      <div className="small"><strong>Gmail / Outlook op het web</strong></div>
+      <div className="row">
+        <Button disabled={busy || !to} onClick={() => void webmail('gmail')}>Gmail</Button>
+        <Button disabled={busy || !to} onClick={() => void webmail('outlook')}>Outlook</Button>
+      </div>
+      <p className="small muted">De {kind} staat als PDF klaar in je bestandsbeheerder. Sleep hem in het mailvenster.</p>
+    </div>
+  );
+
+  return (
+    <Modal title={kind === 'factuur' ? 'Factuur versturen' : 'Offerte versturen'} onClose={onClose}>
+      {stage === 'vraag' ? (
+        <>
+          <p><strong>{verstuurd}</strong></p>
+          <p className="small muted">Pas als je op Ja klikt, telt de {kind} als verstuurd{kind === 'factuur' ? ' en gaan de betalingsherinneringen lopen' : ''}. Is de mail nog niet weg, kies dan Nog niet: er verandert niets.</p>
+          <div className="row end">
+            <Button onClick={onClose}>Nog niet</Button>
+            <Button kind="primary" disabled={busy} onClick={async () => {
+              const r = await run<boolean>(() => api_.confirmSent(id), 'Als verstuurd gemarkeerd ✓');
+              if (r) onSent();
+            }}>Ja</Button>
+          </div>
+          {webmailKeuze}
+        </>
+      ) : (
+        <>
+          {!smtpReady && stage === 'kies' && <div className="notice warn">Je hebt geen e-mailserver ingesteld. Versturen met je eigen mailprogramma kan zonder instellingen.</div>}
+          {stage === 'mislukt' && <div className="notice warn">Je mailprogramma kon niet worden geopend.</div>}
+          <Field label="Naar"><input type="email" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
+          <p className="small muted">De {kind} gaat als PDF mee. {kind === 'factuur' && 'Na versturen is de factuur definitief en wordt hij automatisch in je boekhouding verwerkt.'}</p>
+          <div className="row end">
+            <Button onClick={onClose}>Annuleren</Button>
+            {!smtpReady && <Button onClick={() => go({ screen: 'instellingen', extra: { tab: 'email' } })}>Naar e-mailinstellingen</Button>}
+            <Button kind={smtpReady ? undefined : 'primary'} disabled={busy || !to} onClick={() => void eigenMailprogramma()}>Versturen met je eigen mailprogramma</Button>
+            {smtpReady && (
+              <Button kind="primary" disabled={busy || !to} onClick={async () => {
+                const r = await run<unknown>(() => (kind === 'factuur' ? api.invoices.send(id, { to }) : api.quotes.send(id, { to })), 'Verstuurd ✓');
+                if (r) onSent();
+              }}>{busy ? 'Bezig…' : 'Versturen'}</Button>
+            )}
+          </div>
+          {stage === 'mislukt' && webmailKeuze}
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function PaymentDialog({ invoiceId, open, onClose, onDone }: { invoiceId: number; open: number; onClose: () => void; onDone: () => void }) {
+  const { run, busy } = useAction();
+  const [amount, setAmount] = useState<number | null>(open);
+  const [date, setDate] = useState(today());
+  const [how, setHow] = useState<'kas' | 'bank'>('kas');
+  return (
+    <Modal title="Betaling ontvangen" onClose={onClose}>
+      <p className="muted small">Betaald via de bank? Dan hoef je niets te doen: als je je bankafschrift inleest, koppelen we de betaling automatisch.</p>
+      <div className="grid cols-2">
+        <Field label="Bedrag"><MoneyInput value={amount} onChange={setAmount} /></Field>
+        <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      </div>
+      <div className="chips" style={{ margin: '12px 0' }}>
+        <button className={how === 'kas' ? 'selected' : ''} onClick={() => setHow('kas')}>Contant / pin bij mij</button>
+        <button className={how === 'bank' ? 'selected' : ''} onClick={() => setHow('bank')}>Op de bank</button>
+      </div>
+      <div className="row end">
+        <Button onClick={onClose}>Annuleren</Button>
+        <Button kind="primary" disabled={busy || !amount} onClick={async () => {
+          const r = await run(() => (how === 'kas' ? api.invoices.paidCash(invoiceId, amount!, date) : api.invoices.registerPayment(invoiceId, { amount: amount!, date })), 'Betaling verwerkt');
+          if (r) onDone();
+        }}>Opslaan</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function EmailLog({ id }: { id: number }) {
+  const log = useLoad(() => api.invoices.emailLog(id), [id]);
+  if (!log.data?.length) return null;
+  return (
+    <>
+      <h2>Verstuurd</h2>
+      <table className="list">
+        <tbody>
+          {log.data.map((l) => (
+            <tr key={l.id}>
+              <td>{l.document_type === 'herinnering' ? 'Herinnering' : 'Factuur'}</td>
+              <td>{l.recipient}</td>
+              <td><DateNl date={l.sent_at.slice(0, 10)} /></td>
+              <td>{l.status === 'verzonden' ? <span className="pill good">verstuurd</span> : <span className="pill bad" title={l.error ?? ''}>mislukt</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}

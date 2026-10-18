@@ -1,0 +1,53 @@
+== blok ==
+{
+  "versie": "73a1eb49f9b59e53",
+  "gegevens": {
+    "naam": "Stukadoorsbedrijf Piet",
+    "adres": "Kalkweg 1",
+    "postcode": "1234 AB",
+    "plaats": "Utrecht",
+    "land": "NL",
+    "email": "piet@example.nl",
+    "telefoon": "06-12345678",
+    "website": "",
+    "kvk_nummer": "12345678",
+    "btw_nummer": "NL123456789B01",
+    "iban": "NL91ABNA0417164300",
+    "bic": ""
+  },
+  "kor": false,
+  "betaaltermijn_dagen": 14,
+  "factuur": {
+    "kleuren": {
+      "primary": "#1f4e79",
+      "text": "#1d1d1f",
+      "muted": "#6b6b70",
+      "accentBg": "#f2f6fa"
+    },
+    "lettertype": "Helvetica, Arial, sans-serif",
+    "logo": null,
+    "tekstblokken": [
+      {
+        "titel": "Voorwaarden",
+        "tekst": "Op al onze werkzaamheden zijn onze algemene voorwaarden van toepassing."
+      }
+    ],
+    "html_template": null
+  }
+}
+
+== kop ==
+**Het blok bedrijf (`bedrijf`).**
+
+== lezer ==
+`leesBedrijf` en de grenzen `BEDRIJF_LIMIETEN`
+
+== privacygrens ==
+**Privacygrens.** Er gaat alleen deze whitelist uit de administratie: klanten van het type klant of beide
+en projecten, met precies de velden hierboven; de regeltabel; de aliassen; en, alleen op de eerste pagina, het
+blok `bedrijf` met precies de sleutels hierboven. Nooit leveranciers, het type, `paid_with`, interne id's,
+boekingen, facturen, instellingen of geheimen (mail, koppelingen, licentie, betalingsgegevens), en niet de
+bankgegevens van de administratie, **op de enige plek na**: het IBAN en de BIC in het blok `bedrijf`, want die
+staan op elke factuur. Ook het omzetbelastingnummer gaat niet mee. Een project dat aan een leverancier hangt
+wordt **niet** geleverd; een project zonder bekende klant wel (`klant` is `null`). (Het IBAN van een klant is
+een klantveld en gaat dus wel mee.)
