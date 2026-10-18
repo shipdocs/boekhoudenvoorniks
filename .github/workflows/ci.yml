@@ -1,0 +1,214 @@
+name: CI
+
+# In een private repository draait CI alleen met de hand (Run workflow); daar draaien dezelfde controles lokaal
+# met `npm run controle`. In de openbare repo draait CI gewoon bij elke push en pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm run typecheck
+      # de site-pagina "Wat is er nieuw" moet gelijk zijn aan CHANGELOG.md: niet met de hand bewerken.
+      # Zonder de website (de openbare broncode) slaat deze stap over.
+      - if: github.event.repository.private
+        run: node scripts/site-wijzigingen.cjs --check
+      - run: npm test
+      - run: npm run build
+
+  financial-browser-smoke:
+    # Kleine, verplichte set kritieke schermflows; de volledige e2e-suite blijft lokaal.
+    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npx playwright install --with-deps chromium
+      - run: npm run rebuild:node
+      - run: npm run build
+      - name: Kritieke boekhoudflows in de browser
+        run: npx playwright test e2e/factuur.spec.ts e2e/bank-bonnetjes.spec.ts e2e/periode-afsluiten.spec.ts
+      - name: Bewaar foutinformatie
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: financial-browser-smoke
+          path: |
+            e2e-results/
+            e2e-report/
+          retention-days: 7
+
+  # De gegevensmap en het overzetten ervan (tests/data-dir.test.ts) gedragen zich op Windows anders:
+  # bestandssloten, schijfletters en backslashes. Daarom draaien die tests ook daar, samen met die van de
+  # Store-versie (tests/windows-store.test.ts: zelf een map kiezen, alleen-lezen openen, het manifest).
+  data-dir-windows:
+    # alleen na het mergen (push naar main): voor Windows is er lokaal geen vervanger, maar bij elke
+    # pull request is het niet nodig. De Release-workflow draait de tests op Windows ook nog zelf.
+    if: ${{ (github.event_name == 'push' && !github.event.repository.private) || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm run rebuild:node
+      # de rekenkern eerst bouwen: vitest draait hier kaal (zonder npm test, dat bouwt hem zelf)
+      - run: npm run build:kern
+      # de hele suite: de Release-workflow draait hem ook op Windows, dus een test die alleen daar faalt
+      # moet hier al zichtbaar zijn en niet pas bij het uitbrengen
+      - run: npx vitest run
+
+  # Website-Worker (workers/site): eigen package met wrangler. Bundelen met een dry-run (geen account
+  # nodig, er wordt niets gedeployd). Niet in de openbare broncode: die heeft geen website.
+  site-worker:
+    if: ${{ github.event.repository.private && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: workers/site/package-lock.json
+      - run: npm ci
+      - run: npm run check
+
+  # De volledige browsertest-suite blijft lokaal; de kritieke financiële schermflows draaien hierboven ook in CI.
+
+  # Verpakt de app en start hem echt: vangt ontbrekende runtime-afhankelijkheden in het installatiepakket.
+  package-smoke:
+    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx electron-builder --linux --dir --publish never
+      - name: Rooktest verpakte app
+        run: BOEKHOUDENVOORNIKS_SMOKE_TEST=1 BOEKHOUDENVOORNIKS_DATA="$RUNNER_TEMP/smoke" timeout 120 xvfb-run -a release/linux-unpacked/boekhoudenvoorniks --no-sandbox
+      # Een installatie van vóór de gedeelde gegevensmap nabootsen: de verpakte app zet de oude map over
+      # naar ~/BoekhoudenVoorNiks en start daarna gewoon vanuit de nieuwe map.
+      - name: Rooktest overzetten van de gegevensmap
+        run: |
+          app() { BOEKHOUDENVOORNIKS_SMOKE_TEST=1 timeout 120 xvfb-run -a release/linux-unpacked/boekhoudenvoorniks --no-sandbox; }
+          old="$HOME/.config/boekhoudenvoorniks"
+          BOEKHOUDENVOORNIKS_DATA="$old" app
+          test -f "$old/boekhouding.sqlite"
+          app
+          test -f "$HOME/BoekhoudenVoorNiks/migratie-klaar"
+          test -f "$HOME/BoekhoudenVoorNiks/boekhouding.sqlite"
+          test ! -e "$old"
+          ls -d "$old".gemigreerd-*
+          app
+
+  # Op Windows met de echte installers: rooktest, en waar de oude installer beschikbaar is ook een upgrade
+  # vanaf de vorige release. De nieuwe installer is als artefact te downloaden om de upgrade ook met de hand te proberen.
+  # Er wordt niets gepubliceerd.
+  package-smoke-windows:
+    # alleen na het mergen (push naar main): voor Windows is er lokaal geen vervanger, maar bij elke
+    # pull request is het niet nodig. De Release-workflow draait de tests op Windows ook nog zelf.
+    if: ${{ (github.event_name == 'push' && !github.event.repository.private) || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx electron-builder --win --publish never
+      - name: Rooktest verpakte app
+        shell: pwsh
+        run: |
+          $env:BOEKHOUDENVOORNIKS_SMOKE_TEST = '1'
+          $env:BOEKHOUDENVOORNIKS_DATA = "$env:RUNNER_TEMP\smoke"
+          $p = Start-Process -FilePath "release\win-unpacked\BoekhoudenVoorNiks.exe" -PassThru -NoNewWindow
+          $null = $p.Handle  # nodig zodat ExitCode na afloop beschikbaar is
+          try {
+            Wait-Process -Id $p.Id -Timeout 120 -ErrorAction Stop
+          } catch {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            throw 'Rooktest mislukt: de app sloot niet binnen 120 seconden af'
+          }
+          $p.WaitForExit()
+          if ($p.ExitCode -ne 0) { throw "Rooktest mislukt (exit $($p.ExitCode))" }
+      # De echte upgrade: 0.7.5 (de laatste release met de gegevens in AppData) installeren, een
+      # administratie laten aanmaken, de nieuwe installer eroverheen en het overzetten controleren.
+      # De oude installer en het testscript staan niet in de openbare broncode; daar slaat deze stap over.
+      - name: Upgrade-test vanaf 0.7.5 met de NSIS-installers
+        if: github.event.repository.private
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download upgradetest-0.7.5 --repo ${{ github.repository }} --pattern "BoekhoudenVoorNiks-Setup-0.7.5.exe" --dir "$env:RUNNER_TEMP"
+          if ($LASTEXITCODE -ne 0) { throw 'De installer van 0.7.5 is niet te downloaden' }
+          $new = (Get-ChildItem release -Filter "*Setup*.exe" | Select-Object -First 1).FullName
+          $version = node -p "require('./package.json').version"
+          node scripts/upgrade-test-windows.cjs "$env:RUNNER_TEMP\BoekhoudenVoorNiks-Setup-0.7.5.exe" "$new" $version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release/*.exe
+          retention-days: 7
+
+  # De versie voor de Microsoft Store (MSIX/appx): een eigen job, los van de NSIS-installer hierboven.
+  # Het pakket is niet ondertekend (dat doet de Store na certificering) en wordt nergens gepubliceerd; het
+  # is alleen als artefact te downloaden, voor de proef op Windows en het uploaden naar Partner Center.
+  package-store-windows:
+    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Store-pakket bouwen
+        run: npx electron-builder --win appx --publish never --x64
+      # De vaste identiteit uit Partner Center, de pakketversie en de alias voor de koppeling (--mcp)
+      - name: Manifest in het pakket controleren
+        run: node scripts/store-manifest.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store-pakket
+          path: release/*.appx
+          if-no-files-found: error
+          retention-days: 7

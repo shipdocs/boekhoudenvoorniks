@@ -1,0 +1,230 @@
+/**
+ * Standaard grootboekschema voor zzp/kleine ondernemers, gekoppeld aan RGS (Referentie GrootboekSchema).
+ *
+ * Twee soorten codes:
+ *  - `rgs` (kolom `rgs_code`): de INTERNE, vaste sleutel van een rekening. Historisch lijken deze op
+ *    RGS-codes, maar het zijn geen officiële codes. Nooit wijzigen: de code verwijst ernaar.
+ *  - `ref` (kolom `rgs_ref`): de OFFICIËLE RGS-referentiecode (RGS-taxonomie release 20251210,
+ *    zie `rgs-codes.json`). Deze gaat mee in exports (auditfile, CSV) en wordt getest tegen de
+ *    officiële lijst (tests/rgs.test.ts).
+ */
+export type AccountCategory = 'activa' | 'passiva' | 'omzet' | 'kosten' | 'btw';
+
+export interface AccountSeed {
+  code: string;
+  rgs: string;
+  /** officiële RGS-referentiecode */
+  ref: string;
+  name: string;
+  category: AccountCategory;
+  vatCode?: string;
+  system?: boolean;
+}
+
+/** Vaste sleutels die de app intern gebruikt; nooit hernoemen. */
+export const ACCOUNTS = {
+  kas: 'BLiqKas',
+  bank: 'BLiqBanRba',
+  kruisposten: 'BLiqKru',
+  tussenrekeningPsp: 'BLiqKruPsp',
+  debiteuren: 'BVorDebHad',
+  crediteuren: 'BSchCreHac',
+  eigenVermogen: 'BEivKap',
+  priveOpnamen: 'BEivPriPrv',
+  priveStortingen: 'BEivPriStr',
+  btwAfdragenHoog: 'BSchBepBtwAfdHoo',
+  btwAfdragenLaag: 'BSchBepBtwAfdLaa',
+  btwAfdragenVerlegd: 'BSchBepBtwAfdVer',
+  btwAfdragenEu: 'BSchBepBtwAfdEu',
+  btwAfdragenBuitenEu: 'BSchBepBtwAfdBui',
+  btwVoorbelasting: 'BSchBepBtwVoo',
+  btwAfrekening: 'BSchBepBtwAfr',
+  /** 1d: btw over privégebruik (auto van de zaak) */
+  btwPriveGebruik: 'BSchBepBtwPri',
+  /** kosten: de btw-correctie privégebruik auto */
+  btwPriveAuto: 'WBedAutBop',
+  omzetHoog: 'WOmzNopOlh',
+  omzetLaag: 'WOmzNopOll',
+  omzetNul: 'WOmzNopOln',
+  omzetVerlegd: 'WOmzNopOlv',
+  omzetVrijgesteld: 'WOmzNopOvr',
+  omzetIcp: 'WOmzNopOic',
+  omzetExport: 'WOmzNopOex',
+  omzetIcpDienst: 'WOmzNopOid',
+  omzetDienstBuitenEu: 'WOmzNopObd',
+  inkoopMaterialen: 'WKprInkMat',
+  bankkosten: 'WFbeBan',
+  renteBaten: 'WFbeRlmObr',
+  betalingsverschillen: 'WBedAlkBev',
+  koersverschillen: 'WFbeWisWis',
+  vraagposten: 'BSchOvsVrp',
+  uitbesteedWerk: 'WKprKuwKuw',
+  inventaris: 'BMvaBedIna',
+  vervoermiddelen: 'BMvaTraVrt',
+  cumAfschrijvingInventaris: 'BMvaBedCae',
+  cumAfschrijvingVervoer: 'BMvaTraCae',
+  afschrijvingInventaris: 'WAfsAmvBei',
+  afschrijvingVervoer: 'WAfsAmvTev',
+  boekresultaat: 'WAfsRvmBei',
+  kilometervergoeding: 'WBedAutKil',
+  representatie: 'WBedVkkRep',
+  /** beginbalans: lening (bv. voor de bus), borg of voorschot, en andere schulden */
+  leningen: 'BLasLen',
+  overigeVorderingen: 'BVorOvr',
+  overigeSchulden: 'BSchOvr',
+  /** jaarafsluiting: posten die bij het volgende jaar horen (of nog niet gefactureerd zijn) */
+  vooruitbetaaldeKosten: 'BVorOvrVkv',
+  nogTeBetalenKosten: 'BSchOvrNtb',
+  voorraad: 'BVrdHan',
+  onderhandenWerk: 'BVrdOwe',
+  voorraadmutatie: 'WKprVom',
+  onderhandenWerkMutatie: 'WWivWow',
+} as const;
+
+export const DEFAULT_ACCOUNTS: AccountSeed[] = [
+  // Activa
+  { code: '1000', rgs: ACCOUNTS.kas, ref: 'BLimKasKas', name: 'Kas', category: 'activa', system: true },
+  { code: '1100', rgs: ACCOUNTS.bank, ref: 'BLimBanRba', name: 'Bank', category: 'activa', system: true },
+  { code: '1190', rgs: ACCOUNTS.kruisposten, ref: 'BLimKruSto', name: 'Kruisposten', category: 'activa', system: true },
+  { code: '1195', rgs: ACCOUNTS.tussenrekeningPsp, ref: 'BVorTusTonTcv', name: 'Tussenrekening betaalprovider', category: 'activa', system: true },
+  { code: '1300', rgs: ACCOUNTS.debiteuren, ref: 'BVorDebHad', name: 'Debiteuren', category: 'activa', system: true },
+  { code: '0200', rgs: 'BMvaTraVrt', ref: 'BMvaTevVvp', name: 'Vervoermiddelen', category: 'activa' },
+  { code: '0210', rgs: 'BMvaTraCae', ref: 'BMvaTevCae', name: 'Afschrijving vervoermiddelen (cumulatief)', category: 'activa', system: true },
+  { code: '0300', rgs: 'BMvaBedIna', ref: 'BMvaBeiVvp', name: 'Inventaris en gereedschap', category: 'activa' },
+  { code: '0310', rgs: 'BMvaBedCae', ref: 'BMvaBeiCae', name: 'Afschrijving inventaris en gereedschap (cumulatief)', category: 'activa', system: true },
+  { code: '1590', rgs: ACCOUNTS.overigeVorderingen, ref: 'BVorOvrOvk', name: 'Overige vorderingen (borg, voorschot)', category: 'activa', system: true },
+
+  // Passiva
+  { code: '0500', rgs: ACCOUNTS.eigenVermogen, ref: 'BEivKapOnd', name: 'Eigen vermogen', category: 'passiva', system: true },
+  { code: '0510', rgs: ACCOUNTS.priveOpnamen, ref: 'BEivKapProOvp', name: 'Privé-opnamen', category: 'passiva', system: true },
+  { code: '0520', rgs: ACCOUNTS.priveStortingen, ref: 'BEivKapPrsOps', name: 'Privé-stortingen', category: 'passiva', system: true },
+  { code: '0700', rgs: ACCOUNTS.leningen, ref: 'BLasSakLvl', name: 'Leningen', category: 'passiva', system: true },
+  { code: '1595', rgs: ACCOUNTS.vooruitbetaaldeKosten, ref: 'BVorOvrOvk', name: 'Vooruitbetaalde kosten', category: 'activa', system: true },
+  { code: '1330', rgs: ACCOUNTS.voorraad, ref: 'BVrdHanVoo', name: 'Voorraad', category: 'activa', system: true },
+  { code: '1340', rgs: ACCOUNTS.onderhandenWerk, ref: 'BVrdOweVoo', name: 'Onderhanden werk', category: 'activa', system: true },
+  { code: '1685', rgs: ACCOUNTS.nogTeBetalenKosten, ref: 'BSchOvsOvs', name: 'Nog te betalen kosten', category: 'passiva', system: true },
+  { code: '1680', rgs: ACCOUNTS.overigeSchulden, ref: 'BSchOvsOvs', name: 'Overige schulden', category: 'passiva', system: true },
+  { code: '1600', rgs: ACCOUNTS.crediteuren, ref: 'BSchCreHac', name: 'Crediteuren', category: 'passiva', system: true },
+  { code: '1690', rgs: ACCOUNTS.vraagposten, ref: 'BSchTusTovTvp', name: 'Vraagposten (nog uitzoeken)', category: 'passiva', system: true },
+
+  // BTW
+  { code: '1710', rgs: ACCOUNTS.btwAfdragenHoog, ref: 'BSchBepBtwOla', name: 'Af te dragen BTW hoog', category: 'btw', vatCode: 'hoog', system: true },
+  { code: '1720', rgs: ACCOUNTS.btwAfdragenLaag, ref: 'BSchBepBtwOlt', name: 'Af te dragen BTW laag', category: 'btw', vatCode: 'laag', system: true },
+  { code: '1730', rgs: ACCOUNTS.btwAfdragenVerlegd, ref: 'BSchBepBtwOlw', name: 'Af te dragen BTW verlegd (inkoop)', category: 'btw', vatCode: 'verlegd', system: true },
+  { code: '1735', rgs: ACCOUNTS.btwAfdragenEu, ref: 'BSchBepBtwOlu', name: 'Af te dragen BTW verlegd uit de EU (4b)', category: 'btw', vatCode: 'eu', system: true },
+  { code: '1736', rgs: ACCOUNTS.btwAfdragenBuitenEu, ref: 'BSchBepBtwOlb', name: 'Af te dragen BTW verlegd van buiten de EU (4a)', category: 'btw', vatCode: 'buiten-eu', system: true },
+  { code: '1740', rgs: ACCOUNTS.btwVoorbelasting, ref: 'BSchBepBtwVoo', name: 'Voorbelasting', category: 'btw', vatCode: 'voorbelasting', system: true },
+  { code: '1745', rgs: ACCOUNTS.btwPriveGebruik, ref: 'BSchBepBtwOop', name: 'Af te dragen btw privégebruik (1d)', category: 'btw', system: true },
+  { code: '1750', rgs: ACCOUNTS.btwAfrekening, ref: 'BSchBepBtwAfo', name: 'Af te dragen omzetbelasting (aangifte)', category: 'btw', system: true },
+
+  // Omzet
+  { code: '8000', rgs: ACCOUNTS.omzetHoog, ref: 'WOmzNodOdh', name: 'Omzet 21%', category: 'omzet', vatCode: 'hoog', system: true },
+  { code: '8010', rgs: ACCOUNTS.omzetLaag, ref: 'WOmzNodOdl', name: 'Omzet 9%', category: 'omzet', vatCode: 'laag', system: true },
+  { code: '8020', rgs: ACCOUNTS.omzetNul, ref: 'WOmzNodOdg', name: 'Omzet 0%', category: 'omzet', vatCode: 'nul', system: true },
+  { code: '8030', rgs: ACCOUNTS.omzetVerlegd, ref: 'WOmzNodOdg', name: 'Omzet BTW verlegd', category: 'omzet', vatCode: 'verlegd', system: true },
+  { code: '8040', rgs: ACCOUNTS.omzetVrijgesteld, ref: 'WOmzNodNod', name: 'Omzet vrijgesteld / KOR', category: 'omzet', vatCode: 'vrijgesteld', system: true },
+  { code: '8050', rgs: ACCOUNTS.omzetIcp, ref: 'WOmzNodOdi', name: 'Omzet EU-bedrijven (ICP, 3b)', category: 'omzet', vatCode: 'icp', system: true },
+  { code: '8060', rgs: ACCOUNTS.omzetExport, ref: 'WOmzNodOdb', name: 'Omzet uitvoer buiten de EU (3a)', category: 'omzet', vatCode: 'export', system: true },
+  { code: '8055', rgs: ACCOUNTS.omzetIcpDienst, ref: 'WOmzNodOdi', name: 'Omzet diensten EU-bedrijven (ICP, 3b)', category: 'omzet', vatCode: 'icp-dienst', system: true },
+  { code: '8070', rgs: ACCOUNTS.omzetDienstBuitenEu, ref: 'WOmzNodNod', name: 'Omzet diensten buiten de EU (niet in NL belast)', category: 'omzet', vatCode: 'dienst-buiten-eu', system: true },
+
+  // Kosten
+  { code: '7000', rgs: ACCOUNTS.inkoopMaterialen, ref: 'WKprInpInp', name: 'Inkoop materialen', category: 'kosten', system: true },
+  { code: '7100', rgs: ACCOUNTS.uitbesteedWerk, ref: 'WKprKuwKuw', name: 'Uitbesteed werk (onderaannemers)', category: 'kosten', system: true },
+  { code: '4000', rgs: 'WBedHuiHur', ref: 'WBedHuiBeh', name: 'Huur bedrijfsruimte', category: 'kosten' },
+  { code: '4100', rgs: 'WBedAutBra', ref: 'WBedAutBra', name: 'Autokosten (brandstof)', category: 'kosten' },
+  { code: '4110', rgs: 'WBedAutOnd', ref: 'WBedAutRoa', name: 'Autokosten (onderhoud & verzekering)', category: 'kosten' },
+  { code: '4200', rgs: 'WBedKanKan', ref: 'WBedKanKan', name: 'Kantoorkosten', category: 'kosten' },
+  { code: '4210', rgs: 'WBedKanTel', ref: 'WBedKanTef', name: 'Telefoon & internet', category: 'kosten' },
+  { code: '4220', rgs: 'WBedKanSof', ref: 'WBedKanSof', name: 'Software & abonnementen', category: 'kosten' },
+  { code: '4300', rgs: 'WBedVkkRec', ref: 'WBedVkkRea', name: 'Reclame & marketing', category: 'kosten' },
+  { code: '4400', rgs: 'WBedAlkGer', ref: 'WBedEemGsk', name: 'Klein gereedschap', category: 'kosten' },
+  { code: '4410', rgs: 'WBedAlkVer', ref: 'WBedAssOva', name: 'Verzekeringen', category: 'kosten' },
+  { code: '4420', rgs: 'WBedAlkAdv', ref: 'WBedAeaAdv', name: 'Advieskosten (boekhouder)', category: 'kosten' },
+  { code: '4430', rgs: 'WBedAlkWkl', ref: 'WBedOvpWkv', name: 'Werkkleding', category: 'kosten' },
+  { code: '4490', rgs: 'WBedAlkOvr', ref: 'WBedAlkOal', name: 'Overige algemene kosten', category: 'kosten' },
+  { code: '4495', rgs: ACCOUNTS.betalingsverschillen, ref: 'WBedAdlBet', name: 'Betalingsverschillen', category: 'kosten', system: true },
+  { code: '4130', rgs: ACCOUNTS.btwPriveAuto, ref: 'WBedAutBop', name: 'Btw privégebruik auto van de zaak', category: 'kosten', system: true },
+  { code: '4120', rgs: ACCOUNTS.kilometervergoeding, ref: 'WBedAutKil', name: 'Kilometervergoeding privéauto', category: 'kosten', system: true },
+  { code: '4320', rgs: ACCOUNTS.representatie, ref: 'WBedVkkRep', name: 'Representatie, etentjes en relatiegeschenken', category: 'kosten' },
+  { code: '4600', rgs: ACCOUNTS.afschrijvingInventaris, ref: 'WAfsAmvBei', name: 'Afschrijving inventaris en gereedschap', category: 'kosten', system: true },
+  { code: '4610', rgs: ACCOUNTS.afschrijvingVervoer, ref: 'WAfsAmvTev', name: 'Afschrijving vervoermiddelen', category: 'kosten', system: true },
+  { code: '4620', rgs: ACCOUNTS.boekresultaat, ref: 'WAfsRvmBei', name: 'Boekresultaat verkochte bedrijfsmiddelen', category: 'kosten', system: true },
+  { code: '4500', rgs: ACCOUNTS.bankkosten, ref: 'WBedAdlBan', name: 'Bankkosten', category: 'kosten', system: true },
+  // verschil tussen de koers op de factuur en wat de bank echt afschreef (#74)
+  { code: '4510', rgs: ACCOUNTS.koersverschillen, ref: 'WFbeWisWis', name: 'Koersverschillen', category: 'kosten', system: true },
+  // rente van de bank: geen omzet en geen btw, wel winst (staat bij de financiële baten en lasten, net als bankkosten)
+  { code: '7050', rgs: ACCOUNTS.voorraadmutatie, ref: 'WKprVom', name: 'Voorraadmutatie', category: 'kosten', system: true },
+  { code: '7060', rgs: ACCOUNTS.onderhandenWerkMutatie, ref: 'WWivWow', name: 'Wijziging onderhanden werk', category: 'kosten', system: true },
+  { code: '4520', rgs: ACCOUNTS.renteBaten, ref: 'WFbeRlmObr', name: 'Ontvangen rente', category: 'kosten', system: true },
+];
+
+/**
+ * Extra rekeningen voor een bv (holding of werkmaatschappij). Ze komen erbij zodra de rechtsvorm bv is
+ * en blijven daarna staan. Interne sleutel = de officiële RGS-code. Bewust geen dividend of deelnemingsresultaat:
+ * dat zijn jaarrekeningposten; die voeg je zo nodig zelf toe bij Boekhouding → Rekeningschema.
+ */
+export const BV_ACCOUNTS: AccountSeed[] = [
+  { code: '0400', rgs: 'BFvaDigNev', ref: 'BFvaDigNev', name: 'Deelnemingen in groepsmaatschappijen', category: 'activa' },
+  { code: '1500', rgs: 'BVorOvrRca', ref: 'BVorOvrRca', name: 'Rekening-courant directeur-grootaandeelhouder', category: 'activa' },
+  { code: '1510', rgs: 'BVorVogVr1', ref: 'BVorVogVr1', name: 'Rekening-courant groepsmaatschappij', category: 'activa' },
+  { code: '0550', rgs: 'BEivGokGea', ref: 'BEivGokGea', name: 'Aandelenkapitaal', category: 'passiva' },
+  { code: '0560', rgs: 'BEivOvrOrs', ref: 'BEivOvrOrs', name: 'Overige reserves', category: 'passiva' },
+  { code: '1650', rgs: 'BSchBepLhe', ref: 'BSchBepLhe', name: 'Af te dragen loonheffing', category: 'passiva' },
+  { code: '1660', rgs: 'BSchSalNet', ref: 'BSchSalNet', name: 'Nog te betalen nettoloon', category: 'passiva' },
+  { code: '1670', rgs: 'BSchBepVpb', ref: 'BSchBepVpb', name: 'Te betalen vennootschapsbelasting', category: 'passiva' },
+  { code: '4700', rgs: 'WPerLesSld', ref: 'WPerLesSld', name: 'Loon directeur-grootaandeelhouder', category: 'kosten' },
+  { code: '4710', rgs: 'WPerLesLon', ref: 'WPerLesLon', name: 'Lonen en salarissen', category: 'kosten' },
+  { code: '4720', rgs: 'WPerSolPsv', ref: 'WPerSolPsv', name: 'Sociale lasten', category: 'kosten' },
+  { code: '4730', rgs: 'WPerPenPen', ref: 'WPerPenPen', name: 'Pensioenlasten', category: 'kosten' },
+  { code: '4740', rgs: 'WBedOvpMaf', ref: 'WBedOvpMaf', name: 'Management fee', category: 'kosten' },
+  { code: '4900', rgs: 'WBelBgrBgr', ref: 'WBelBgrBgr', name: 'Vennootschapsbelasting', category: 'kosten' },
+];
+
+/**
+ * Waarom je zelf geen rekening met deze RGS-code kunt toevoegen, of null. Omzet en btw lopen via de
+ * btw-codes van facturen en aankopen; een eigen omzet- of btw-rekening zou de btw-aangifte en de
+ * omzetcontrole ongemerkt laten afwijken.
+ */
+export function userAccountBlocked(rgsRef: string): string | null {
+  if (rgsRef.startsWith('WOmz')) return 'Omzet boek je met een factuur of bij de bank (Omzet 21%, 9%, 0%…), niet op een eigen omzetrekening: anders klopt de btw-aangifte niet.';
+  if (rgsRef.startsWith('BSchBepBtw')) return 'Btw-rekeningen beheert de app zelf: de btw-aangifte rekent ermee.';
+  if (!/^[BW]/.test(rgsRef)) return 'Kies een RGS-code die met B (balans) of W (winst-en-verlies) begint.';
+  return null;
+}
+
+/** Soort rekening bij een RGS-code: W = winst-en-verlies (kosten, ook voor een opbrengst die geen omzet is), B = balans. */
+export function categoryForRgs(rgsRef: string): AccountCategory {
+  if (rgsRef.startsWith('W')) return 'kosten';
+  return /^B(Eiv|Sch|Las|Vrz|Ega)/.test(rgsRef) ? 'passiva' : 'activa';
+}
+
+/** Waar de app een vrij rekeningnummer begint te zoeken voor een eigen rekening met deze RGS-code. */
+export function codeRangeFor(rgsRef: string): string {
+  if (/^B(Mva|Iva|Fva|Vas)/.test(rgsRef)) return '0400';
+  if (rgsRef.startsWith('BEiv')) return '0550';
+  if (/^B(Las|Vrz|Ega)/.test(rgsRef)) return '0700';
+  if (rgsRef.startsWith('BSch')) return '1650';
+  if (rgsRef.startsWith('B')) return '1500';
+  return '4700';
+}
+
+/** Welke omzet- en BTW-rekening hoort bij een verkoop-BTW-code. */
+export const SALES_ACCOUNTS: Record<string, { revenue: string; vat?: string }> = {
+  hoog: { revenue: ACCOUNTS.omzetHoog, vat: ACCOUNTS.btwAfdragenHoog },
+  laag: { revenue: ACCOUNTS.omzetLaag, vat: ACCOUNTS.btwAfdragenLaag },
+  nul: { revenue: ACCOUNTS.omzetNul },
+  verlegd: { revenue: ACCOUNTS.omzetVerlegd },
+  vrijgesteld: { revenue: ACCOUNTS.omzetVrijgesteld },
+  icp: { revenue: ACCOUNTS.omzetIcp },
+  export: { revenue: ACCOUNTS.omzetExport },
+  'icp-dienst': { revenue: ACCOUNTS.omzetIcpDienst },
+  'dienst-buiten-eu': { revenue: ACCOUNTS.omzetDienstBuitenEu },
+};
+
+/** Op welke rekening de verlegde btw (af te dragen) komt, per inkoop-btw-code. */
+export const REVERSE_CHARGE_ACCOUNTS: Record<'verlegd' | 'eu' | 'buiten-eu', string> = {
+  verlegd: ACCOUNTS.btwAfdragenVerlegd,
+  eu: ACCOUNTS.btwAfdragenEu,
+  'buiten-eu': ACCOUNTS.btwAfdragenBuitenEu,
+};

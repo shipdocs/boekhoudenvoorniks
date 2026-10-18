@@ -1,0 +1,473 @@
+import type { IbCar } from '../tax/car-ib';
+import type { Db } from '../db/database';
+import type { PeriodType } from '../shared/dates';
+import { ValidationError, isValidEmail } from '../shared/validation';
+import { checkNumberFormat } from '../documents/numbering';
+
+export interface CompanySettings {
+  name: string;
+  address: string;
+  postcode: string;
+  city: string;
+  country: string;
+  email: string;
+  phone: string;
+  website: string;
+  kvkNumber: string;
+  vatNumber: string;
+  /** Nummer voor contact/aangifte bij de Belastingdienst; niet het btw-id op facturen. */
+  omzetbelastingNumber: string;
+  iban: string;
+  bic: string;
+}
+
+export interface SmtpSettings {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  fromName: string;
+  fromEmail: string;
+  bcc: string;
+  /** "Antwoorden gaan naar": waar klanten op reageren (leeg = het afzenderadres) */
+  replyTo: string;
+}
+
+/**
+ * Inkomende post (IMAP): een apart mailadres voor de administratie. De app haalt bijlagen op als
+ * bonnetje; mail van klanten en andere mail blijft onaangeroerd (ook de gelezen-status).
+ */
+export interface MailInSettings {
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  /** de map die de app leest (meestal INBOX) */
+  folder: string;
+  /** ook deze mappen doorzoeken, bv. een archiefmap; daar wordt nooit iets verplaatst */
+  extraFolders: string[];
+  /** verwerkte mail met bijlage verplaatsen naar deze map (nooit verwijderen); leeg = laten staan */
+  processedFolder: string;
+  /** alleen mail vanaf deze datum (JJJJ-MM-DD); zo haalt de eerste keer geen jaren oude mail op */
+  since: string;
+}
+
+export interface BusinessProfile {
+  trade: string;
+  worksAlone: boolean;
+  hasBusinessAccount: boolean;
+  /** Voornaam voor de begroeting */
+  firstName: string;
+}
+
+export interface OcrSettings {
+  /** lokale OCR-sidecar, bv. http://127.0.0.1:8765 — leeg = uit */
+  url: string;
+  /** 'ingebouwd' (lokaal), 'claude-code', 'codex', of een eigen dienst (glm-ocr, …) */
+  engine: string;
+  /** de keuze "hoe wil je bonnen laten lezen?" is al gesteld (ook bij "zelf invullen") */
+  askedReader: boolean;
+  /**
+   * Waar Claude Code en Codex staan: alleen gezocht of gekozen als de gebruiker daarom vraagt
+   * ("Zoek op deze computer" of "Kies zelf"). Leeg = niet gevonden of nog niet gezocht.
+   */
+  claudeCodePath: string;
+  codexPath: string;
+  /** de gebruiker heeft (minstens één keer) laten zoeken */
+  assistantsSearched: boolean;
+  /** optionele lokale LLM (Ollama-compatibel) voor classificatievoorstellen — leeg = uit */
+  llmUrl: string;
+  llmModel: string;
+  /**
+   * Online hulp bij categorievoorstellen (JEV via Cloudflare, #132). Standaard uit; alleen met een actief
+   * abonnement. Aan = vervangt de lokale AI, zodat er nooit ongemerkt twee tegelijk meedoen.
+   */
+  onlineCategoryHelp: boolean;
+}
+
+/**
+ * Overstappen met een lopende administratie. Vanaf `date` (de instapdatum) boekt de app alles zelf;
+ * wat er daarvóór was, staat als startbalans in de app (zie onboarding/switchover.ts).
+ */
+export interface SwitchoverSettings {
+  /** null = nog niet gevraagd; 'nieuw' = net begonnen (of al ingericht); 'overstapper' = had al een administratie */
+  mode: 'nieuw' | 'overstapper' | null;
+  date: string | null;
+  /** 'klaar' als de gebruiker de startpositie heeft bevestigd */
+  status: 'concept' | 'klaar';
+  /** bedragen zijn nog voorlopig (bv. de jaarrekening van vorig jaar is nog niet klaar) */
+  provisional: boolean;
+  /** btw-periodes vóór de instapdatum die de app als "al aangegeven" heeft gemarkeerd */
+  filedElsewhere: string[];
+  /** banktransacties waarvan de gebruiker zei: geen betaling voor iets van vóór de instapdatum */
+  dismissed: number[];
+  /** bankrekeningen waarvan de gebruiker het beginsaldo op de instapdatum bevestigde (ook als dat € 0 is) */
+  bankConfirmed: number[];
+  /** per bankrekening: een saldo dat de gebruiker opgaf om te controleren (voor CSV zonder saldo) */
+  bankChecks: Record<string, { date: string; amount: number }>;
+  /** bankrekeningen waarvan het beginsaldo uit een auditfile/kolommenbalans kwam (opnieuw inlezen zet ze eerst terug) */
+  xafBanks?: number[];
+  /** eigen vermogen volgens de balans van de boekhouder (centen), om te vergelijken */
+  accountantEquity: number | null;
+  /** hoofdstukken waarvan de gebruiker zei: had ik niet (geen openstaande facturen, geen bus, …) */
+  skipped?: string[];
+  /** bankrekeningen die de gebruiker vanaf de instapdatum niet meer gebruikt (beginsaldo € 0, geen afschriften nodig) */
+  unusedBanks?: number[];
+}
+
+export interface AppSettings {
+  company: CompanySettings;
+  profile: BusinessProfile;
+  ocr: OcrSettings;
+  smtp: SmtpSettings;
+  mailIn: MailInSettings;
+  /** nieuwe versies automatisch downloaden en installeren bij afsluiten (standaard aan) */
+  autoUpdate: boolean;
+  paymentTermDays: number;
+  quoteValidityDays: number;
+  invoiceNumberFormat: string;
+  quoteNumberFormat: string;
+  vatPeriod: PeriodType;
+  /** Kleineondernemersregeling: geen BTW rekenen/aangeven. */
+  kor: boolean;
+  defaultVatCode: 'hoog' | 'laag' | 'nul' | 'verlegd' | 'vrijgesteld';
+  remindersEnabled: boolean;
+  /** Dagen na vervaldatum waarop herinneringen gestuurd worden, bv. [7, 21]. */
+  reminderDays: number[];
+  advancedMode: boolean;
+  /** Wanneer de gebruiker bevestigde dat de boekhoudfuncties voor de boekhouder zijn en hij ze op eigen risico aanzet (#409); null = nog nooit. */
+  advancedModeAgreedAt: string | null;
+  /** Locatie van foto's gebruiken om bonnen aan klussen te koppelen (#32). Standaard uit; alleen lokaal. */
+  jobLocation: boolean;
+  /** E-factuur (UBL) als bijlage meesturen met elke factuur (#24). */
+  sendUbl: boolean;
+  /** Bankrekening (bank_accounts.id) die dient als belastingpotje (#33), of null. */
+  vatPotAccountId: number | null;
+  /** Schatting inkomstenbelasting tonen (#33); altijd als schatting gemarkeerd. */
+  incomeTaxEstimate: boolean;
+  /** Hoe de app een klus noemt: klus, project of opdracht (#320). */
+  jobTerm: 'klus' | 'project' | 'opdracht';
+  /** Werk je met klussen? Uit: menu, koppelkeuzes en meldingen over klussen verdwijnen; bestaande klussen en boekingen blijven staan (#320). */
+  jobsEnabled: boolean;
+  /** Rechtsvorm; null = nog niet opgegeven (de schatting gaat dan uit van een eenmanszaak). Een bv betaalt geen inkomstenbelasting over de winst. */
+  legalForm: 'eenmanszaak' | 'vof' | 'bv' | null;
+  /** vof of maatschap: jouw deel van de winst in procenten (de schatting is per ondernemer) */
+  profitSharePct: number;
+  /** Bevestigd ondernemerschap voor de inkomstenbelasting; urencriterium staat afzonderlijk. */
+  ibConfirmed: boolean;
+  /** Tweede voorwaarde urencriterium: meerderheid werktijd, of bevestigde starteruitzondering. */
+  ibHoursCondition: 'meerderheid' | 'starter' | null;
+  /** Voldoe ik aan het urencriterium (1.225 uur)? Bepaalt of de zelfstandigenaftrek meetelt in de schatting. */
+  urencriterium: boolean;
+  /**
+   * Waarmee rijd je zakelijk? 'prive' = privéauto: tanken en parkeren tellen als privé, zakelijke
+   * kilometers geven € per km aftrek. 'zakelijk' = bus/auto van de zaak (kosten aftrekbaar).
+   */
+  carUse: 'onbekend' | 'prive' | 'zakelijk' | 'geen';
+  /** auto van de zaak: rijd je er ook privé mee? (null = nog niet gevraagd) — voor de btw-correctie */
+  carPrivateUse: boolean | null;
+  /** cataloguswaarde van de auto van de zaak, incl. btw en bpm (centen) */
+  carCatalogValue: number | null;
+  /** bijtellingspercentage privégebruik voor de IB (bv. 22); null = standaard 22% */
+  carBijtellingPct: number | null;
+  /** datum eerste tenaamstelling van de auto (voor de grens van 16 jaar bij de bijtelling) */
+  carRegisteredOn: string | null;
+  /** waarde in het economisch verkeer (dagwaarde), voor een auto ouder dan 16 jaar */
+  carMarketValue: number | null;
+  /** tot wanneer je de auto gebruikte (leeg = nog steeds) */
+  carInUseUntil: string | null;
+  /** nog een auto van de zaak, bijvoorbeeld een vervangende of een tweede auto in hetzelfde jaar */
+  carsExtra: IbCar[];
+  /**
+   * Trok je btw af op de aanschaf of de kosten van de auto? (null = nog niet gevraagd) Zonder aftrek
+   * (bijvoorbeeld een marge-auto en geen aftrek op de kosten) is er geen btw-correctie.
+   */
+  carVatDeducted: boolean | null;
+  /** Alleen de aanschaf; geen aanschaf-btw betekent 1,5% forfait. */
+  carPurchaseVatDeducted: boolean | null;
+  /** Aftrek bij aanschaf buiten deze administratie; null = afleiden uit de boekingen. */
+  carPurchaseVatAmount: number | null;
+  /** Jaar en werkelijke aftrek op autokosten, als aanvulling buiten deze administratie. */
+  carCostVatOverride: { year: number; amount: number } | null;
+  /** Btw-correctie privégebruik: forfait (2,7%/1,5%) of werkelijk privégebruik uit een rittenadministratie. */
+  carVatMethod: 'forfait' | 'werkelijk' | null;
+  /** jaar waarin de auto in gebruik is genomen voor je bedrijf */
+  carInUseSince: number | null;
+  /** maand (1–12) van ingebruikname; alleen nodig voor het eerste jaar (naar rato) */
+  carInUseMonth: number | null;
+  /** jaar waarin je onderneming begon (voor de startersaftrek), of null */
+  startYear: number | null;
+  /** hoe vaak je de startersaftrek al gebruikte vóór `asOfYear` (zo opgegeven door de gebruiker) */
+  startersaftrekUsed: { count: number; asOfYear: number };
+  /**
+   * Jaren waarin je de startersaftrek echt gebruikte (zoals in je aangiftes), of null als dat nog
+   * niet is opgegeven. Gaat boven de aanname "sinds opgeven elk jaar gebruikt".
+   */
+  startersaftrekYears: number[] | null;
+  /**
+   * Niet-gerealiseerde zelfstandigenaftrek uit eerdere jaren die je nog mag verrekenen, in hele euro's
+   * (staat op je aanslag; zelf bijhouden wat al verrekend is).
+   */
+  nietGerealiseerdeZelfstandigenaftrek: number;
+  /**
+   * Zakelijk deel van telefoon & internet in procenten (null = nog niet opgegeven, dan 100%).
+   * Het privédeel telt bij de winst en de btw daarover mag je niet aftrekken.
+   */
+  phoneInternetBusinessPct: number | null;
+  /** Werkplek thuis: 'geen', een plek in huis ('thuis'), of een zelfstandige werkruimte (eigen ingang en sanitair). */
+  homeWorkspace: 'geen' | 'thuis' | 'zelfstandig' | null;
+  /** Uren die je partner onbetaald meewerkt in het bedrijf (meewerkaftrek), per jaar. */
+  partnerHours: number;
+  /** jaar waarin de gebruiker bevestigde dat de IB-berekeningen door een boekhouder gecontroleerd moeten worden */
+  taxCheckAcknowledgedYear: number;
+  /** Hoe automatisch: voorzichtig (niets zelf), normaal, maximaal (iets lagere drempels). */
+  autopilot: 'voorzichtig' | 'normaal' | 'maximaal';
+  switchover: SwitchoverSettings;
+  onboardingDone: boolean;
+  /** Per onboardingstap de versie die de gebruiker gezien heeft (zie shared/onboarding.ts). */
+  onboardingSteps: Record<string, number>;
+  /** "Aan de slag"-lijstje op Vandaag verborgen */
+  checklistHidden: boolean;
+  /** Deze administratie is de demo: voorbeelddata, er gaat geen e-mail naar buiten. */
+  demoMode: boolean;
+  /** versie van de voorwaarden waarmee akkoord is gegeven (leeg = nog niet) */
+  termsAcceptedVersion: string;
+  invoiceEmailSubject: string;
+  invoiceEmailBody: string;
+  quoteEmailSubject: string;
+  quoteEmailBody: string;
+  reminderEmailSubject: string;
+  reminderEmailBody: string;
+}
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  company: {
+    name: '',
+    address: '',
+    postcode: '',
+    city: '',
+    country: 'NL',
+    email: '',
+    phone: '',
+    website: '',
+    kvkNumber: '',
+    vatNumber: '',
+    omzetbelastingNumber: '',
+    iban: '',
+    bic: '',
+  },
+  profile: { trade: '', worksAlone: true, hasBusinessAccount: true, firstName: '' },
+  ocr: { url: '', engine: 'glm-ocr', askedReader: false, claudeCodePath: '', codexPath: '', assistantsSearched: false, llmUrl: '', llmModel: '', onlineCategoryHelp: false },
+  smtp: { host: '', port: 587, secure: false, user: '', fromName: '', fromEmail: '', bcc: '', replyTo: '' },
+  mailIn: { enabled: false, host: '', port: 993, secure: true, user: '', folder: 'INBOX', extraFolders: [], processedFolder: 'Verwerkt', since: '' },
+  autoUpdate: true,
+  paymentTermDays: 14,
+  quoteValidityDays: 30,
+  invoiceNumberFormat: '{JJJJ}-{NNNN}',
+  quoteNumberFormat: 'OFF-{JJJJ}-{NNNN}',
+  vatPeriod: 'kwartaal',
+  kor: false,
+  defaultVatCode: 'hoog',
+  remindersEnabled: false,
+  reminderDays: [7, 21],
+  advancedMode: false,
+  advancedModeAgreedAt: null,
+  autopilot: 'normaal',
+  carUse: 'onbekend',
+  carPrivateUse: null,
+  carCatalogValue: null,
+  carBijtellingPct: null,
+  carRegisteredOn: null,
+  carMarketValue: null,
+  carInUseUntil: null,
+  carsExtra: [],
+  carVatDeducted: null,
+  carPurchaseVatDeducted: null,
+  carPurchaseVatAmount: null,
+  carCostVatOverride: null,
+  carVatMethod: null,
+  carInUseSince: null,
+  carInUseMonth: null,
+  phoneInternetBusinessPct: null,
+  homeWorkspace: null,
+  partnerHours: 0,
+  taxCheckAcknowledgedYear: 0,
+  startYear: null,
+  startersaftrekUsed: { count: 0, asOfYear: 0 },
+  startersaftrekYears: null,
+  nietGerealiseerdeZelfstandigenaftrek: 0,
+  vatPotAccountId: null,
+  legalForm: null,
+  jobTerm: 'klus',
+  jobsEnabled: true,
+  profitSharePct: 100,
+  ibConfirmed: false,
+  ibHoursCondition: null,
+  incomeTaxEstimate: true,
+  urencriterium: false,
+  sendUbl: true,
+  jobLocation: false,
+  switchover: { mode: null, date: null, status: 'concept', provisional: false, filedElsewhere: [], dismissed: [], bankConfirmed: [], bankChecks: {}, accountantEquity: null },
+  onboardingDone: false,
+  onboardingSteps: {},
+  checklistHidden: false,
+  demoMode: false,
+  termsAcceptedVersion: '',
+  invoiceEmailSubject: 'Factuur {nummer} van {bedrijf}',
+  invoiceEmailBody:
+    'Beste {klant},\n\nIn de bijlage vindt u factuur {nummer} voor een bedrag van {bedrag}.\nWij verzoeken u vriendelijk dit bedrag vóór {vervaldatum} over te maken op {iban} o.v.v. het factuurnummer.\n\nMet vriendelijke groet,\n{bedrijf}',
+  quoteEmailSubject: 'Offerte {nummer} van {bedrijf}',
+  quoteEmailBody:
+    'Beste {klant},\n\nIn de bijlage vindt u offerte {nummer} voor een bedrag van {bedrag}. De offerte is geldig tot {geldig_tot}.\n\nMet vriendelijke groet,\n{bedrijf}',
+  reminderEmailSubject: 'Herinnering: factuur {nummer} van {bedrijf}',
+  reminderEmailBody:
+    'Beste {klant},\n\nVolgens onze administratie staat factuur {nummer} van {bedrag} nog open; de vervaldatum was {vervaldatum}.\nWilt u het openstaande bedrag van {openstaand} zo snel mogelijk overmaken op {iban} o.v.v. het factuurnummer? Heeft u al betaald, dan kunt u deze herinnering als niet verzonden beschouwen.\n\nMet vriendelijke groet,\n{bedrijf}',
+};
+
+function integerInRange(value: number, min: number, max: number, label: string): void {
+  if (!Number.isInteger(value) || value < min || value > max) throw new ValidationError(`${label} moet een heel getal tussen ${min} en ${max} zijn`);
+}
+
+function validateSettings(settings: AppSettings): void {
+  if (settings.ibHoursCondition !== null && !['meerderheid', 'starter'].includes(settings.ibHoursCondition)) throw new ValidationError('Ongeldige keuze voor het urencriterium');
+  if (typeof settings.ibConfirmed !== 'boolean' || typeof settings.urencriterium !== 'boolean') throw new ValidationError('Bevestig ondernemerschap en het urencriterium met ja of nee');
+  if (settings.carPurchaseVatDeducted !== null && typeof settings.carPurchaseVatDeducted !== 'boolean') throw new ValidationError('Geef aan of er aanschaf-btw is afgetrokken');
+  if (settings.carPurchaseVatAmount !== null) integerInRange(settings.carPurchaseVatAmount, 0, 100000000000, 'Afgetrokken aanschaf-btw');
+  if (settings.carCostVatOverride !== null) {
+    integerInRange(settings.carCostVatOverride.year, 1800, 9999, 'Jaar autokosten-btw');
+    integerInRange(settings.carCostVatOverride.amount, 0, 100000000000, 'Afgetrokken autokosten-btw');
+  }
+  integerInRange(settings.paymentTermDays, 0, 365, 'Betaaltermijn');
+  integerInRange(settings.quoteValidityDays, 1, 3650, 'Geldigheid offerte');
+  integerInRange(settings.smtp.port, 1, 65535, 'SMTP-poort');
+  integerInRange(settings.partnerHours, 0, 8784, 'Partneruren');
+  if (settings.startYear !== null) integerInRange(settings.startYear, 1800, new Date().getFullYear() + 1, 'Startjaar');
+  integerInRange(settings.nietGerealiseerdeZelfstandigenaftrek, 0, 1_000_000, 'Niet-gerealiseerde zelfstandigenaftrek');
+  if (settings.startersaftrekYears !== null && (!Array.isArray(settings.startersaftrekYears) || settings.startersaftrekYears.length > 10 || settings.startersaftrekYears.some((y) => !Number.isInteger(y) || y < 1800 || y > 9999))) throw new ValidationError('Ongeldige jaren voor de startersaftrek');
+  if (settings.phoneInternetBusinessPct !== null) integerInRange(settings.phoneInternetBusinessPct, 0, 100, 'Zakelijk percentage telefoon en internet');
+  if (typeof settings.jobsEnabled !== 'boolean') throw new ValidationError('Kies met ja of nee of je met klussen werkt');
+  if (!['klus', 'project', 'opdracht'].includes(settings.jobTerm)) throw new ValidationError('Ongeldige keuze voor de term klus, project of opdracht');
+  if (!['maand', 'kwartaal', 'jaar'].includes(settings.vatPeriod)) throw new ValidationError('Ongeldige btw-periode');
+  if (!['hoog', 'laag', 'nul', 'verlegd', 'vrijgesteld'].includes(settings.defaultVatCode)) throw new ValidationError('Ongeldige standaard-btw');
+  if (!['voorzichtig', 'normaal', 'maximaal'].includes(settings.autopilot)) throw new ValidationError('Ongeldige automatische stand');
+  if (!['onbekend', 'prive', 'zakelijk', 'geen'].includes(settings.carUse)) throw new ValidationError('Ongeldige keuze voor zakelijk vervoer');
+  if (settings.reminderDays.length > 12 || settings.reminderDays.some((day) => !Number.isInteger(day) || day < 0 || day > 365)) throw new ValidationError('Herinneringsdagen moeten hele getallen tussen 0 en 365 zijn');
+  if (settings.smtp.fromEmail && !isValidEmail(settings.smtp.fromEmail)) throw new ValidationError('Het afzenderadres is geen geldig e-mailadres');
+  if (settings.smtp.bcc && !isValidEmail(settings.smtp.bcc)) throw new ValidationError('Het BCC-adres is geen geldig e-mailadres');
+  for (const [label, value] of [['Bedrijfsnaam', settings.company.name], ['SMTP-server', settings.smtp.host], ['E-mailtekst', settings.invoiceEmailBody]] as const) {
+    if (value.length > 20_000) throw new ValidationError(`${label} is te lang`);
+  }
+}
+
+/** Staat de kleineondernemersregeling aan? (dan geen recht op aftrek van voorbelasting) */
+export function korActive(db: Db): boolean {
+  const row = db.prepare(`SELECT value FROM settings WHERE key = 'kor'`).get() as { value: string } | undefined;
+  return row ? JSON.parse(row.value) === true : DEFAULT_SETTINGS.kor;
+}
+
+/**
+ * Deze administratie is een werkkopie bij de boekhouder (kantoormodus): er gaat niets naar buiten
+ * (e-mail, post ophalen, koppelingen) en de app boekt niets zelf. Staat in de administratie zelf,
+ * niet in de gewone instellingen, zodat hij niet per ongeluk uit te zetten is.
+ */
+export interface OfficeCopy {
+  /** naam van het kantoor dat de kopie heeft */
+  office: string;
+  /** uitwisselingsnummer van de export waar deze kopie uit komt */
+  exchange: number;
+  /** alles t/m deze datum is de periode van de uitwisseling */
+  endDate: string;
+}
+
+export class SettingsService {
+  constructor(private readonly db: Db) {}
+
+  /** Vaste identiteit van deze administratie (UUID, migratie 21). */
+  administrationId(): string {
+    const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'administrationId'`).get() as { value: string } | undefined;
+    if (!row) throw new Error('Deze administratie heeft geen identiteit; open hem eerst één keer in de app');
+    return JSON.parse(row.value) as string;
+  }
+
+  officeCopy(): OfficeCopy | null {
+    const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'officeCopy'`).get() as { value: string } | undefined;
+    return row ? (JSON.parse(row.value) as OfficeCopy) : null;
+  }
+
+  /** Alleen voor het inlezen van een export bij de boekhouder. */
+  markOfficeCopy(copy: OfficeCopy): void {
+    this.db.prepare(`INSERT INTO settings (key, value) VALUES ('officeCopy', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(copy));
+  }
+
+  /**
+   * Waarom er niets naar buiten mag (e-mail, post ophalen, koppelingen), of null als het wel mag.
+   * Eén plek voor de demo en de kantoormodus; de services controleren dit zelf.
+   */
+  outboundBlocked(): string | null {
+    if (this.get().demoMode) return 'In de demo gaat er niets naar buiten. Wis de demo om echt te beginnen.';
+    const copy = this.officeCopy();
+    if (copy) return `Dit is de kopie voor ${copy.office} (uitwisseling ${copy.exchange}): er gaat niets naar buiten.`;
+    return null;
+  }
+
+  get(): AppSettings {
+    const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
+    const stored: Record<string, unknown> = {};
+    for (const r of rows) stored[r.key] = JSON.parse(r.value);
+    return {
+      ...DEFAULT_SETTINGS,
+      ...stored,
+      company: { ...DEFAULT_SETTINGS.company, ...((stored.company as object) ?? {}) },
+      smtp: { ...DEFAULT_SETTINGS.smtp, ...((stored.smtp as object) ?? {}) },
+      mailIn: { ...DEFAULT_SETTINGS.mailIn, ...((stored.mailIn as object) ?? {}) },
+      profile: { ...DEFAULT_SETTINGS.profile, ...((stored.profile as object) ?? {}) },
+      ocr: { ...DEFAULT_SETTINGS.ocr, ...((stored.ocr as object) ?? {}) },
+      switchover: { ...DEFAULT_SETTINGS.switchover, ...((stored.switchover as object) ?? {}) },
+    } as AppSettings;
+  }
+
+  update(patch: Partial<AppSettings>): AppSettings {
+    const upsert = this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+    const current = this.get();
+    const candidate = { ...current, ...patch } as AppSettings;
+    for (const key of ['company', 'smtp', 'profile', 'ocr'] as const) candidate[key] = { ...current[key], ...((patch[key] as object | undefined) ?? {}) } as never;
+    validateSettings(candidate);
+    // de boekhouding voor de boekhouder gaat alleen aan na een bewuste bevestiging (#409); wie hem al aan had, houdt hem
+    if (patch.advancedMode && !current.advancedMode && !candidate.advancedModeAgreedAt) throw new ValidationError('Bevestig eerst dat je begrijpt dat de boekhoudfuncties voor de boekhouder zijn');
+    // alleen bij een wijziging: een eerder opgeslagen onbruikbaar formaat mag het opslaan van iets anders niet blokkeren
+    for (const key of ['invoiceNumberFormat', 'quoteNumberFormat'] as const) {
+      const format = patch[key];
+      if (format === undefined || format === current[key]) continue;
+      const fout = typeof format === 'string' ? checkNumberFormat(format) : 'Ongeldig nummerformaat';
+      if (fout) throw new ValidationError(fout);
+    }
+    this.db.transaction(() => {
+      for (const [key, value] of Object.entries(patch)) {
+        if (!(key in DEFAULT_SETTINGS) || value === undefined) continue;
+        const merged = ['company', 'smtp', 'mailIn', 'profile', 'ocr', 'switchover'].includes(key) ? { ...(current[key as keyof AppSettings] as object), ...(value as object) } : value;
+        upsert.run(key, JSON.stringify(merged));
+      }
+    })();
+    return this.get();
+  }
+
+  /** Interne tellers (factuurnummers e.d.) — niet via update() bereikbaar. */
+  nextCounter(name: string): number {
+    const key = `counter:${name}`;
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+    const next = (row ? Number(JSON.parse(row.value)) : 0) + 1;
+    this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, JSON.stringify(next));
+    return next;
+  }
+
+  peekCounter(name: string): number {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(`counter:${name}`) as { value: string } | undefined;
+    return row ? Number(JSON.parse(row.value)) : 0;
+  }
+
+  setCounter(name: string, value: number): void {
+    if (!Number.isInteger(value) || value < 0) throw new Error('Vul je laatste factuurnummer in als getal');
+    this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(`counter:${name}`, JSON.stringify(value));
+  }
+}

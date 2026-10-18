@@ -1,0 +1,496 @@
+import { lazy, Suspense, useRef, useState } from 'react';
+import { api } from '../api';
+import { Button, ErrorBox, Euro, Modal, readAsBytes, useAction, useApp, useAppEvent, useJobWords, useLoad } from '../ui';
+import type { Task } from '../../inbox/inbox';
+import type { AutomationEntry } from '../../inbox/automation-log';
+import { formatDateNl } from '../../shared/dates';
+import { CategoryPicker } from './Bank';
+import { investmentInfo } from './Purchases';
+import { hasOnboardingUpdate } from '../../shared/onboarding';
+import { CheckLines } from './CheckLines';
+import { PaymentDetails } from './PaymentDetails';
+import { CheckItems } from './CheckItems';
+import type { CheckItem } from '../../btw/checks';
+import type { UploadResult } from '../../intake/intake';
+import { UploadBlocked } from './UploadOutcome';
+import { FetchBar } from './FetchBar';
+
+// bon bekijken: pas laden als je er een opent (PDF.js is groot)
+const DocumentPreview = lazy(() => import('./DocumentReview').then((m) => ({ default: m.DocumentPreview })));
+
+export function Home() {
+  const jw = useJobWords();
+  const { go, settings, refreshBadge, toast, showInvestmentSaved } = useApp();
+  const { data, error, reload } = useLoad(() => api.home.get());
+  // er kwam een bon binnen (telefoon, bonnenmap) of een bon is op de achtergrond gelezen
+  useAppEvent('auto-processed', () => void reload());
+  const ib = useLoad(() => api.incomeTax.estimate());
+  const { run, busy } = useAction();
+  const [picking, setPicking] = useState<Task | null>(null);
+  const [pickingJob, setPickingJob] = useState<Task | null>(null);
+  // controle over een saldo: eerst de boekingen laten zien die het bedrag vormen
+  const [checkLines, setCheckLines] = useState<Task | null>(null);
+  const activeJobs = useLoad(async () => (pickingJob ? api.jobs.list({ active: true }) : []), [pickingJob]);
+  const [showAll, setShowAll] = useState(false);
+  const [why, setWhy] = useState<string | null>(null);
+  // een betaling bekijken: alle gegevens van de bank en eerdere betalingen aan dezelfde partij
+  const [viewing, setViewing] = useState<Task | null>(null);
+  const [checkItems, setCheckItems] = useState<{ task: Task; items: CheckItem[]; detail: string } | null>(null);
+  const [monthOpen, setMonthOpen] = useState(false);
+  // factuur bij een bestaande afschrijving (vaste lasten): bestand kiezen en direct koppelen
+  const evidenceInput = useRef<HTMLInputElement>(null);
+  const evidenceFor = useRef<number | null>(null);
+  const [blocked, setBlocked] = useState<{ result: UploadResult; txId: number } | null>(null);
+  const addEvidence = async (file: File) => {
+    const txId = evidenceFor.current;
+    if (txId === null) return;
+    const bytes = await readAsBytes(file);
+    const r = await run(() => api.documents.addEvidence(file.name, bytes, txId));
+    if (!r) return;
+    // stond het bestand er al in, of hoort dezelfde bon al bij iets anders: niets gekoppeld, laten zien waarom
+    if (r.already_present || r.blocked) setBlocked({ result: r, txId });
+    else toast('Bewijs gekoppeld — niet opnieuw geboekt ✓');
+    await reload();
+    refreshBadge();
+  };
+
+  const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number; vatRate?: 9 | 21 }) => {
+    if (task.kind === 'vat-check' && actionId === 'open' && task.ref.account) return setCheckLines(task);
+    // een controle over losse betalingen of aankopen: eerst laten zien welke het zijn
+    if (task.kind === 'vat-check' && actionId === 'open' && task.ref.periodKey) {
+      const check = (await api.vat.checks(task.ref.periodKey)).find((c) => c.key === task.ref.checkKey);
+      if (check?.items?.length) return setCheckItems({ task, items: check.items, detail: check.detail });
+    }
+    // `?? {}`: ook een actie zonder antwoord telt als gelukt (undefined = fout)
+    const r = await run(async () => (await api.home.act(task, actionId, payload)) ?? {});
+    if (r && !('navigate' in r && r.navigate)) {
+      // investering bevestigd: uitleg wat er nu gebeurt en wat je nog moet doen
+      if (task.kind === 'investment-check' && actionId === 'ja' && task.amount) showInvestmentSaved({ net: Math.abs(task.amount), vat: 0 });
+      else if (payload?.categoryKey === 'investering' && task.amount) showInvestmentSaved(investmentInfo(Math.abs(task.amount), payload.vatCode ?? 'hoog'));
+    }
+    if (r && 'navigate' in r && r.navigate) {
+      if (r.navigate.screen === 'categorie') return setPicking(task);
+      if (r.navigate.screen === 'klus-kiezen') return setPickingJob(task);
+      if (r.navigate.screen === 'betaling') return go({ screen: 'categorie', id: r.navigate.id });
+      if (r.navigate.screen === 'bewijs') {
+        evidenceFor.current = r.navigate.id as number;
+        return evidenceInput.current?.click();
+      }
+      return go({ screen: r.navigate.screen as never, id: r.navigate.id, extra: r.navigate.extra });
+    }
+    await reload();
+    refreshBadge();
+  };
+
+  /** "Alle 5 bevestigen": de hoofdknop voor elke taak in dezelfde groep (#20, #29) */
+  const actGroup = async (group: Task[]) => {
+    // Taken die toch een scherm nodig hebben (bv. een bonnetje met ontbrekende gegevens) blijven staan.
+    const needsLook: Task[] = [];
+    for (const t of group) {
+      const primary = t.actions.find((a) => a.primary);
+      if (!primary) continue;
+      const r = await run(() => api.home.act(t, primary.id));
+      if (r && r.navigate) needsLook.push(t);
+    }
+    await reload();
+    refreshBadge();
+    if (needsLook.length > 0) {
+      toast(`${needsLook.length} ${needsLook.length === 1 ? 'kon' : 'konden'} niet in één keer; bekijk ${needsLook.length === 1 ? 'die' : 'ze'} apart.`);
+    }
+  };
+
+  if (!data) return <div className="page"><ErrorBox error={error} /></div>;
+  const name = settings.profile.firstName;
+  const tasks = showAll ? data.tasks : data.tasks.slice(0, 6);
+  const groups = new Map<string, Task[]>();
+  for (const t of data.tasks) if (t.group) groups.set(t.group.key, [...(groups.get(t.group.key) ?? []), t]);
+  const shownGroup = new Set<string>();
+
+  return (
+    <div className="page">
+      <input ref={evidenceInput} type="file" accept=".pdf,.xml,.jpg,.jpeg,.png,.webp,.heic" hidden onChange={(e) => {
+        const f = e.target.files?.[0];
+        e.target.value = '';
+        if (f) void addEvidence(f);
+      }} />
+      <h1>
+        {data.greeting}
+        {name ? ` ${name}` : ''} 👋
+      </h1>
+
+      <div className="hero">
+        <div className="card">
+          <div className="value"><Euro cents={data.money.bank} /></div>
+          <div className="label">op de bank{data.bankUpdatedTo ? ` · bijgewerkt t/m ${formatDateNl(data.bankUpdatedTo)}` : ''}</div>
+          {data.money.bankAccounts.length > 1 && (
+            <div className="small muted" style={{ marginTop: 6 }}>
+              {data.money.bankAccounts.map((a) => (
+                <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span>{a.name}</span>
+                  <span><Euro cents={a.balance} /></span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="card clickable" onClick={() => go({ screen: 'werk', extra: { filter: 'open' } })}>
+          <div className="value"><Euro cents={data.money.toReceive} /></div>
+          <div className="label">nog te ontvangen van klanten</div>
+        </div>
+        <div className="card clickable" onClick={() => go({ screen: 'belasting' })}>
+          <div className="value">± <Euro cents={data.money.vatReserve} /></div>
+          <div className="label">apart houden voor btw</div>
+          {data.money.vatPot && (
+            <div className="small" style={{ marginTop: 6 }}>
+              🐷 <Euro cents={data.money.vatPot.setAside} /> in {data.money.vatPot.account}
+              {data.money.vatPot.stillToReserve > 0 ? <> · nog <strong><Euro cents={data.money.vatPot.stillToReserve} /></strong> opzijzetten</> : ' · genoeg opzij ✓'}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <p className="muted small" style={{ marginTop: -6 }}>
+        Vrij te besteden: <strong><Euro cents={data.money.freeToSpend} /></strong> <span>(wat op de bank staat, min btw en rekeningen die je nog moet betalen)</span>
+        {ib.data && ib.data.reserveToDate > 0 && (
+          <>
+            {' · '}
+            <span className="clickable" title={ib.data.disclaimer} onClick={() => go({ screen: 'belasting' })}>
+              zet ook ± <Euro cents={ib.data.reserveToDate} /> apart voor inkomstenbelasting <em>(schatting)</em>
+            </span>
+          </>
+        )}
+      </p>
+
+      <GettingStarted />
+
+      <FetchBar onFetched={async () => { await reload(); refreshBadge(); }} />
+
+      <h2>Wat wil je doen?</h2>
+      <div className="actions4">
+        <button className="btn big" onClick={() => go({ screen: 'werk' })}><span className="emoji">💰</span>Werk / factuur</button>
+        <button className="btn big" onClick={() => go({ screen: 'aankopen' })}><span className="emoji">🧾</span>Aankoop / bonnetje</button>
+        <button className="btn big" onClick={() => go({ screen: 'klanten' })}><span className="emoji">👤</span>Klanten</button>
+        <button className="btn big" onClick={() => go({ screen: 'belasting' })}><span className="emoji">📮</span>Belasting</button>
+      </div>
+
+      <h2>{data.upToDate ? 'Je bent helemaal bij ✓' : data.tasks.length === 1 ? 'Nog 1 ding en je bent klaar' : `Nog ${data.tasks.length} dingen en je bent klaar`}</h2>
+      {data.upToDate ? (
+        <div className="card done-box">
+          <div className="check">✓</div>
+          <strong>Geen actie nodig</strong>
+          <div>
+            <ul className="checklist">
+              {data.checklist.map((c) => (
+                <li key={c.label} className={c.ok ? 'ok' : 'no'}>{c.label}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0 }}>
+          {tasks.map((t) => {
+            const group = t.group ? groups.get(t.group.key) ?? [] : [];
+            const header = t.group && group.length > 1 && !shownGroup.has(t.group.key);
+            if (t.group && header) shownGroup.add(t.group.key);
+            return (
+            <div key={t.key}>
+            {header && (
+              <div className="task group-head">
+                <div className="grow small"><strong>{group.length}×</strong> {t.group!.label}</div>
+                <Button small kind="primary" disabled={busy} onClick={() => void actGroup(group)}>Alle {group.length} bevestigen</Button>
+              </div>
+            )}
+            <div className="task">
+              <div className="icon" aria-hidden>{t.icon}</div>
+              <div className="grow">
+                <div className="title">
+                  {t.ref.bankTransactionId || t.ref.documentId || t.ref.purchaseId ? (
+                    <button className="linklike title-link" title={t.ref.documentId && !t.ref.bankTransactionId ? 'Bekijk de bon' : 'Bekijk alle gegevens van deze betaling'} onClick={() => setViewing(t)}>{t.title}</button>
+                  ) : t.title}
+                </div>
+                <div className="q">
+                  {t.question}
+                  {(t.why || t.actions.some((a) => a.hint)) && <> <button className="linklike small" aria-expanded={why === t.key} onClick={() => setWhy(why === t.key ? null : t.key)}>{t.why ? 'Waarom? Wat gebeurt er?' : 'Wat gebeurt er?'}</button></>}
+                </div>
+                {why === t.key && (
+                  <div className="small muted">
+                    {t.why && <div>{t.why}</div>}
+                    <ActionHints task={t} />
+                  </div>
+                )}
+              </div>
+              <div className="row">
+                {t.actions.map((a) => (
+                  <Button key={a.id} kind={a.primary ? 'primary' : undefined} small disabled={busy} title={a.hint} onClick={() => void act(t, a.id)}>
+                    {a.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            </div>
+            );
+          })}
+          {data.tasks.length > 6 && !showAll && (
+            <div className="task"><Button kind="ghost" onClick={() => setShowAll(true)}>Toon alle {data.tasks.length}</Button></div>
+          )}
+        </div>
+      )}
+
+      <div className="card month-counts" style={{ marginTop: 18 }}>
+        <strong>Deze maand</strong>
+        <div className="row">
+          <span>🟢 {data.monthCounts.automatic} automatisch verwerkt</span>
+          <span>🟡 {data.monthCounts.byUser} door jou gecontroleerd</span>
+          <span>🔴 {data.monthCounts.attention} {data.monthCounts.attention === 1 ? 'heeft' : 'hebben'} nog aandacht</span>
+        </div>
+        {data.monthCounts.automatic > 0 && <Button small kind="ghost" onClick={() => setMonthOpen(true)}>Wat de app deze maand zelf deed</Button>}
+      </div>
+
+      {data.automated.length > 0 && (
+        <details className="card" style={{ marginTop: 12 }}>
+          <summary><strong>Automatisch gedaan</strong> <span className="muted small">({data.automated.length} deze week)</span></summary>
+          <AutomationList items={data.automated} expert={settings.advancedMode} onChanged={async () => { await reload(); refreshBadge(); }} />
+        </details>
+      )}
+
+      {monthOpen && <MonthModal expert={settings.advancedMode} onClose={() => setMonthOpen(false)} onChanged={async () => { await reload(); refreshBadge(); }} />}
+
+      {data.vat.estimate !== 0 && (
+        <p className="muted small" style={{ marginTop: 18 }}>
+          Btw {data.vat.periodLabel} tot nu toe: <Euro cents={data.vat.estimate} />. Aangifte doen vóór {data.vat.deadlineLabel}.
+        </p>
+      )}
+
+      {pickingJob && (
+        <Modal title={`Voor ${jw.welke} ${jw.s} was dit?`} onClose={() => setPickingJob(null)}>
+          <p className="muted">{pickingJob.title}</p>
+          <div className="choice">
+            {(activeJobs.data ?? []).map((j) => (
+              <button key={j.id} onClick={async () => { const t = pickingJob; setPickingJob(null); await act(t, 'anders', { jobId: j.id }); }}>
+                {j.relation_name} · {j.title}
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {viewing && !viewing.ref.bankTransactionId && viewing.ref.documentId && (
+        <Modal title="Bon bekijken" wide onClose={() => setViewing(null)}>
+          <Suspense fallback={<p className="muted">Laden…</p>}>
+            <DocumentPreview id={viewing.ref.documentId} />
+          </Suspense>
+          <div className="q" style={{ marginTop: 12 }}>{viewing.question}</div>
+          <ActionHints task={viewing} />
+          <div className="row end" style={{ marginTop: 8 }}>
+            <Button onClick={() => setViewing(null)}>Later</Button>
+            {viewing.actions.map((a) => (
+              <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={async () => { const t = viewing; setViewing(null); await act(t, a.id); }}>{a.label}</Button>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {viewing && !viewing.ref.bankTransactionId && !viewing.ref.documentId && viewing.ref.purchaseId && (
+        <Modal title="Aankoop bekijken" onClose={() => setViewing(null)}>
+          <PurchaseInfo purchaseId={viewing.ref.purchaseId} />
+          <div className="q" style={{ marginTop: 12 }}>{viewing.question}</div>
+          <ActionHints task={viewing} />
+          <div className="row end" style={{ marginTop: 8 }}>
+            <Button onClick={() => setViewing(null)}>Later</Button>
+            {viewing.actions.map((a) => (
+              <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={async () => { const t = viewing; setViewing(null); await act(t, a.id); }}>{a.label}</Button>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {viewing && viewing.ref.bankTransactionId && (
+        <PaymentModal
+          task={viewing}
+          txId={viewing.ref.bankTransactionId}
+          busy={busy}
+          onClose={() => setViewing(null)}
+          onAct={async (actionId) => { const t = viewing; setViewing(null); await act(t, actionId); }}
+        />
+      )}
+
+      {blocked && <UploadBlocked result={blocked.result} target={{ kind: 'bank', id: blocked.txId }} onClose={() => setBlocked(null)} onChanged={async () => { await reload(); refreshBadge(); }} />}
+      {checkItems && (
+        <Modal title={checkItems.task.title} onClose={() => setCheckItems(null)}>
+          <p className="muted small">{checkItems.detail}</p>
+          <CheckItems items={checkItems.items} onOpen={() => setCheckItems(null)} onChanged={async () => { setCheckItems(null); await reload(); refreshBadge(); }} />
+          <div className="row end" style={{ marginTop: 10 }}><Button onClick={() => setCheckItems(null)}>Sluiten</Button></div>
+        </Modal>
+      )}
+      {checkLines && (
+        <CheckLines account={checkLines.ref.account!} upTo={checkLines.ref.upTo} title={checkLines.title} hint={checkLines.question} onClose={() => { setCheckLines(null); void reload(); refreshBadge(); }} />
+      )}
+      {picking && (
+        <Modal title="Waar was deze betaling voor?" onClose={() => setPicking(null)}>
+          <p className="muted">{picking.title}</p>
+          {picking.ref.bankTransactionId && (
+            <details className="small" style={{ marginBottom: 10 }}>
+              <summary>Alle gegevens van deze betaling</summary>
+              <PaymentDetails txId={picking.ref.bankTransactionId} />
+            </details>
+          )}
+          <CategoryPicker
+            txId={picking.ref.bankTransactionId}
+            amount={picking.amount !== undefined ? Math.abs(picking.amount) : undefined}
+            initial={picking.ref.categoryKey}
+            onPick={async (categoryKey, vatCode, businessPct, vatRate) => {
+              const t = picking;
+              setPicking(null);
+              await act(t, t.kind === 'bank-business' ? 'zakelijk' : 'anders', { categoryKey, vatCode, businessPct, vatRate });
+            }}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/** Lijst van automatische verwerkingen met "Waarom?" en [Klopt niet] (#28, #29). */
+function AutomationList({ items, expert, onChanged }: { items: AutomationEntry[]; expert: boolean; onChanged: () => Promise<void> }) {
+  const { run, busy } = useAction();
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <ul className="small automation-list">
+      {items.map((a) => (
+        <li key={a.id} className={a.status === 'klopt_niet' ? 'muted' : ''}>
+          <div className="row between">
+            <span>{a.status === 'klopt_niet' ? <s>{a.summary}</s> : a.summary}</span>
+            <span className="row">
+              <button className="linklike" onClick={() => setOpen(open === a.id ? null : a.id)}>Waarom?</button>
+              {a.status === 'auto' && (
+                <Button small kind="ghost" disabled={busy} onClick={async () => {
+                  if (!confirm('Terugdraaien? Dan vraagt de app het je weer op Vandaag, en voortaan ook.')) return;
+                  await run(() => api.home.correct(a.id), 'Teruggedraaid');
+                  await onChanged();
+                }}>Klopt niet</Button>
+              )}
+            </span>
+          </div>
+          {open === a.id && (
+            <div className="muted">
+              {a.reason}
+              {expert && a.details?.expert && <div className="mono">{a.details.expert}</div>}
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function MonthModal({ expert, onClose, onChanged }: { expert: boolean; onClose: () => void; onChanged: () => Promise<void> }) {
+  const month = useLoad(() => api.home.month());
+  const m = month.data;
+  return (
+    <Modal title="Wat de app deze maand zelf deed" onClose={onClose}>
+      <ErrorBox error={month.error} />
+      {m && (
+        <>
+          <p className="muted small">{m.automatic.length} automatisch · {m.byUser.length} door jou gecontroleerd · {m.attention} nog aandacht</p>
+          <AutomationList items={m.automatic} expert={expert} onChanged={async () => { await month.reload(); await onChanged(); }} />
+        </>
+      )}
+    </Modal>
+  );
+}
+
+/**
+ * "Aan de slag": wordt uit de administratie zelf afgeleid (api.onboarding.checklist), dus vinkt
+ * zichzelf af zodra je iets gedaan hebt, waar in de app ook. Verdwijnt als alles klaar is.
+ */
+function GettingStarted() {
+  const { go, settings, reloadSettings } = useApp();
+  const { data } = useLoad(() => api.onboarding.checklist());
+  const { run } = useAction();
+  const update = hasOnboardingUpdate(settings);
+  const open = data?.filter((i) => !i.done) ?? [];
+  const showList = !settings.checklistHidden && !settings.demoMode && data && open.length > 0;
+  if (!update && !showList) return null;
+  const hide = async () => {
+    if ((await run(() => api.settings.update({ checklistHidden: true }))) !== undefined) await reloadSettings();
+  };
+  return (
+    <>
+      {update && (
+        <div className="notice row between">
+          <span>✨ Er is iets nieuws om in te stellen.</span>
+          <Button small kind="primary" onClick={() => go({ screen: 'welkom' })}>Bekijken</Button>
+        </div>
+      )}
+      {showList && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div className="row between">
+            <h3 style={{ margin: 0 }}>Aan de slag · {data.length - open.length} van {data.length} klaar</h3>
+            <Button small kind="ghost" onClick={() => void hide()} title="Niet meer tonen">Verbergen</Button>
+          </div>
+          <ul className="checklist" style={{ display: 'block' }}>
+            {data.map((i) => (
+              <li key={i.key} className={i.done ? 'ok' : 'no'}>
+                {i.done ? (
+                  <span className="muted">{i.label}</span>
+                ) : (
+                  <a href="#" onClick={(e) => { e.preventDefault(); go({ screen: i.screen, extra: i.screen === 'instellingen' ? { tab: i.key === 'email' ? 'email' : 'bedrijf' } : undefined }); }}>
+                    {i.label}
+                  </a>
+                )}
+                {!i.done && i.hint && <span className="small muted"> · {i.hint}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Eén betaling met alles wat de bank erover gaf, zodat je kunt beoordelen wat het was. */
+function PaymentModal({ task, txId, busy, onClose, onAct }: { task: Task; txId: number; busy: boolean; onClose: () => void; onAct: (actionId: string) => Promise<void> }) {
+  return (
+    <Modal title="Betaling bekijken" onClose={onClose}>
+      <PaymentDetails txId={txId} proposal={{ invoiceId: task.ref.invoiceId, purchaseId: task.ref.purchaseId }} />
+      <p className="small muted">
+            Weet je het nog steeds niet? Zoek de factuur of het bonnetje op in je mail of bij de leverancier (bij PayPal: in je PayPal-overzicht op dezelfde datum en hetzelfde bedrag).
+            Alle betalingen staan ook bij <strong>Bank</strong>.
+      </p>
+      <div className="q" style={{ marginTop: 12 }}>{task.question}</div>
+      <ActionHints task={task} />
+      <div className="row end" style={{ marginTop: 8 }}>
+        <Button onClick={onClose}>Later</Button>
+        {task.actions.map((a) => (
+          <Button key={a.id} kind={a.primary ? 'primary' : undefined} disabled={busy} onClick={() => void onAct(a.id)}>{a.label}</Button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+/** Een aankoop met de bon, om te beoordelen of het een investering is of bij een klus hoort. */
+function PurchaseInfo({ purchaseId }: { purchaseId: number }) {
+  const { data, error } = useLoad(() => api.bank.proposal({ purchaseId }), [purchaseId]);
+  if (!data) return <ErrorBox error={error} />;
+  return (
+    <>
+      <table className="list details"><tbody>
+        <tr><th>Leverancier</th><td>{data.relation ?? 'onbekend'}{data.number ? ` · ${data.number}` : ''}</td></tr>
+        <tr><th>Datum</th><td>{formatDateNl(data.date)}</td></tr>
+        <tr><th>Bedrag</th><td><Euro cents={data.total} /></td></tr>
+        {'description' in data && data.description && <tr><th>Omschrijving</th><td style={{ whiteSpace: 'pre-wrap' }}>{data.description}</td></tr>}
+      </tbody></table>
+      {data.attachmentPath ? <Button small onClick={() => void api.app.openAttachment(data.attachmentPath!)}>Bon of factuur openen</Button> : <p className="small muted">Er zit geen bon bij deze aankoop.</p>}
+    </>
+  );
+}
+
+/** Per knop wat hij doet ("Zakelijk: wordt geboekt als …"), zodat je weet wat je kiest. */
+function ActionHints({ task }: { task: Task }) {
+  const hinted = task.actions.filter((a) => a.hint);
+  if (hinted.length === 0) return null;
+  return (
+    <ul className="small muted action-hints">
+      {hinted.map((a) => <li key={a.id}><strong>{a.label}:</strong> {a.hint}</li>)}
+    </ul>
+  );
+}

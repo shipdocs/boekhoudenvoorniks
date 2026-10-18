@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <GrpHdr><MsgId>PROEF-2026-Q1</MsgId><CreDtTm>2026-03-31T18:00:00</CreDtTm></GrpHdr>
+    <Stmt>
+      <Id>PROEF-2026-Q1</Id>
+      <Acct><Id><IBAN>NL91ABNA0417164300</IBAN></Id></Acct>
+      <Bal><Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp><Amt Ccy="EUR">11560.50</Amt><CdtDbtInd>CRDT</CdtDbtInd><Dt><Dt>2026-03-31</Dt></Dt></Bal>
+      <Ntry><Amt Ccy="EUR">1210.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><Dt>2026-01-05</Dt></BookgDt><AcctSvcrRef>BANK-001</AcctSvcrRef><NtryDtls><TxDtls><Refs><EndToEndId>BANK-001</EndToEndId></Refs><RltdPties><Dbtr><Nm>Oude Klant BV</Nm></Dbtr></RltdPties><RmtInf><Ustrd>Factuur 2025-010</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+      <Ntry><Amt Ccy="EUR">1210.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><Dt>2026-01-15</Dt></BookgDt><AcctSvcrRef>BANK-002</AcctSvcrRef><NtryDtls><TxDtls><Refs><EndToEndId>BANK-002</EndToEndId></Refs><RltdPties><Dbtr><Nm>Familie Jansen</Nm></Dbtr><DbtrAcct><Id><IBAN>NL44RABO0123456789</IBAN></Id></DbtrAcct></RltdPties><RmtInf><Ustrd>Betaling stucwerk woonkamer</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+      <Ntry><Amt Ccy="EUR">605.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><Dt>2026-01-18</Dt></BookgDt><AcctSvcrRef>BANK-003</AcctSvcrRef><NtryDtls><TxDtls><Refs><EndToEndId>BANK-003</EndToEndId></Refs><RltdPties><Cdtr><Nm>Oude Leverancier BV</Nm></Cdtr></RltdPties><RmtInf><Ustrd>Rekening LEVER-2025-12</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+      <Ntry><Amt Ccy="EUR">242.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><Dt>2026-01-20</Dt></BookgDt><AcctSvcrRef>BANK-004</AcctSvcrRef><NtryDtls><TxDtls><Refs><EndToEndId>BANK-004</EndToEndId></Refs><RltdPties><Cdtr><Nm>Bouwmaat Utrecht BV</Nm></Cdtr></RltdPties><RmtInf><Ustrd>Factuur BM-2026-001</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+      <Ntry><Amt Ccy="EUR">12.50</Amt><CdtDbtInd>DBIT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><Dt>2026-03-31</Dt></BookgDt><AcctSvcrRef>BANK-005</AcctSvcrRef><NtryDtls><TxDtls><Refs><EndToEndId>BANK-005</EndToEndId></Refs><RltdPties><Cdtr><Nm>ABN AMRO</Nm></Cdtr></RltdPties><RmtInf><Ustrd>Kosten zakelijke rekening</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>

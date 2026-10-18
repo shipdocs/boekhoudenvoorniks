@@ -1,0 +1,2930 @@
+{
+  "versie": 1,
+  "soort": "golden-testvectoren gedeelde rekenkern",
+  "gegenereerdUit": {
+    "pakket": "@gratis-boekhouden/kern",
+    "pakketversie": "1.3.0",
+    "commit": "124bc53",
+    "datum": "2026-10-06",
+    "methode": "karakterisering — de verwachte uitvoer is letterlijk door computeTotals uit packages/core/src berekend, niet handmatig nagekomen"
+  },
+  "uitleg": "Elke vector roept computeTotals(invoer.lines) aan uit de gedeelde kern en vergelijkt het volledige resultaat met \"verwacht\" (lines: regelnetto in invoervolgorde; groups: dezelfde sortering als de kern — percentage aflopend, dan vatCode; subtotal, vatTotal, total). Bedragen zijn centen als gehele getallen; quantity mag een decimaal aantal zijn. Het bestand is puur data: geen code, geen Node-API's.",
+  "vectors": [
+    {
+      "id": "afronding-half-product-1505",
+      "categorie": "afronding",
+      "omschrijving": "Regelbedrag 1,5 × 10,03 eindigt op een halve cent",
+      "toelichting": "1,5 × 1003 = 1504,5 → half-van-nul naar 1505; btw 21% over 1505 = 316,05 → 316.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Advieswerkzaamheden",
+            "quantity": 1.5,
+            "unit": "uur",
+            "unitPrice": 1003,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1505
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1505,
+            "vat": 316
+          }
+        ],
+        "subtotal": 1505,
+        "vatTotal": 316,
+        "total": 1821
+      }
+    },
+    {
+      "id": "afronding-half-product-18",
+      "categorie": "afronding",
+      "omschrijving": "Klein bedrag 0,07 × 2,50 eindigt op een halve cent",
+      "toelichting": "0,07 × 250 = 17,5 → 18; btw 21% over 18 = 3,78 → 4.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Portie snoep",
+            "quantity": 0.07,
+            "unit": "stuks",
+            "unitPrice": 250,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 18
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 18,
+            "vat": 4
+          }
+        ],
+        "subtotal": 18,
+        "vatTotal": 4,
+        "total": 22
+      }
+    },
+    {
+      "id": "afronding-half-product-2083",
+      "categorie": "afronding",
+      "omschrijving": "Regelbedrag 2,5 × 8,33 eindigt op een halve cent",
+      "toelichting": "2,5 × 833 = 2082,5 → 2083; btw 9% over 2083 = 187,47 → 187.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Losse verkoop",
+            "quantity": 2.5,
+            "unit": "stuks",
+            "unitPrice": 833,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 2083
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 2083,
+            "vat": 187
+          }
+        ],
+        "subtotal": 2083,
+        "vatTotal": 187,
+        "total": 2270
+      }
+    },
+    {
+      "id": "afronding-epsilon-029x50",
+      "categorie": "afronding",
+      "omschrijving": "Float-artefact 0,29 × 0,50",
+      "toelichting": "Product is 14,499999999999998; de 1e-9-epsilon maakt er 15 van (zonder epsilon geeft Math.round 14); btw 21% over 15 = 3,15 → 3.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Losse verkoop",
+            "quantity": 0.29,
+            "unit": "stuks",
+            "unitPrice": 50,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 15
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 15,
+            "vat": 3
+          }
+        ],
+        "subtotal": 15,
+        "vatTotal": 3,
+        "total": 18
+      }
+    },
+    {
+      "id": "afronding-epsilon-029x750",
+      "categorie": "afronding",
+      "omschrijving": "Float-artefact 0,29 × 7,50",
+      "toelichting": "Product is 217,49999999999997; met epsilon 218 (zonder epsilon 217); btw 21% over 218 = 45,78 → 46.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Losse verkoop",
+            "quantity": 0.29,
+            "unit": "stuks",
+            "unitPrice": 750,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 218
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 218,
+            "vat": 46
+          }
+        ],
+        "subtotal": 218,
+        "vatTotal": 46,
+        "total": 264
+      }
+    },
+    {
+      "id": "afronding-epsilon-029x1450",
+      "categorie": "afronding",
+      "omschrijving": "Float-artefact 0,29 × 14,50 bij 9% btw",
+      "toelichting": "Product is 420,49999999999994; met epsilon 421; btw 9% over 421 = 37,89 → 38.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Losse verkoop",
+            "quantity": 0.29,
+            "unit": "stuks",
+            "unitPrice": 1450,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 421
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 421,
+            "vat": 38
+          }
+        ],
+        "subtotal": 421,
+        "vatTotal": 38,
+        "total": 459
+      }
+    },
+    {
+      "id": "afronding-epsilon-een-derde",
+      "categorie": "afronding",
+      "omschrijving": "Eén-derde-hoeveelheid geeft een float-artefact",
+      "toelichting": "0,333… × 3003 landt rond 1001; het verwachte resultaat is letterlijk wat de kern er vandaag van maakt.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Abonnementsdeel",
+            "quantity": 0.3333333333333333,
+            "unit": "stuks",
+            "unitPrice": 3003,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1001
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1001,
+            "vat": 210
+          }
+        ],
+        "subtotal": 1001,
+        "vatTotal": 210,
+        "total": 1211
+      }
+    },
+    {
+      "id": "afronding-btw-half-21",
+      "categorie": "afronding",
+      "omschrijving": "Btw bij 21% eindigt op een halve cent (10,5)",
+      "toelichting": "Btw per groep: 21% over 50 = 10,5 → 11.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Klein item",
+            "quantity": 1,
+            "unitPrice": 50,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 50
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 50,
+            "vat": 11
+          }
+        ],
+        "subtotal": 50,
+        "vatTotal": 11,
+        "total": 61
+      }
+    },
+    {
+      "id": "afronding-btw-half-9",
+      "categorie": "afronding",
+      "omschrijving": "Btw bij 9% eindigt op een halve cent (40,5)",
+      "toelichting": "9% over 450 = 40,5 → 41.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Kaartje",
+            "quantity": 1,
+            "unitPrice": 450,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 450
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 450,
+            "vat": 41
+          }
+        ],
+        "subtotal": 450,
+        "vatTotal": 41,
+        "total": 491
+      }
+    },
+    {
+      "id": "afronding-btw-onder-de-helft",
+      "categorie": "afronding",
+      "omschrijving": "Btw van 210,42 rondt naar beneden",
+      "toelichting": "21% over 1002 = 210,42 → 210.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Boek",
+            "quantity": 1,
+            "unitPrice": 1002,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1002
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1002,
+            "vat": 210
+          }
+        ],
+        "subtotal": 1002,
+        "vatTotal": 210,
+        "total": 1212
+      }
+    },
+    {
+      "id": "afronding-btw-boven-de-helft",
+      "categorie": "afronding",
+      "omschrijving": "Btw van 211,47 rondt naar boven",
+      "toelichting": "21% over 1007 = 211,47 → 211.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Boek (hardcover)",
+            "quantity": 1,
+            "unitPrice": 1007,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1007
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1007,
+            "vat": 211
+          }
+        ],
+        "subtotal": 1007,
+        "vatTotal": 211,
+        "total": 1218
+      }
+    },
+    {
+      "id": "afronding-btw-net-geheel",
+      "categorie": "afronding",
+      "omschrijving": "Btw van 21,21 rondt naar beneden",
+      "toelichting": "21% over 101 = 21,21 → 21.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Item",
+            "quantity": 1,
+            "unitPrice": 101,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 101
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 101,
+            "vat": 21
+          }
+        ],
+        "subtotal": 101,
+        "vatTotal": 21,
+        "total": 122
+      }
+    },
+    {
+      "id": "afronding-grote-aantallen",
+      "categorie": "afronding",
+      "omschrijving": "Grote hoeveelheid; btw over de groepssom net onder de halve cent",
+      "toelichting": "21% over 333333 = 69999,93 → 70000.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Bulkpartij",
+            "quantity": 333,
+            "unit": "stuks",
+            "unitPrice": 1001,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 333333
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 333333,
+            "vat": 70000
+          }
+        ],
+        "subtotal": 333333,
+        "vatTotal": 70000,
+        "total": 403333
+      }
+    },
+    {
+      "id": "afronding-btw-naar-nul",
+      "categorie": "afronding",
+      "omschrijving": "Btw van 0,21 rondt naar 0",
+      "toelichting": "21% over 1 = 0,21 → 0; totaal gelijk aan subtotaal.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Stickertje",
+            "quantity": 1,
+            "unitPrice": 1,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1,
+            "vat": 0
+          }
+        ],
+        "subtotal": 1,
+        "vatTotal": 0,
+        "total": 1
+      }
+    },
+    {
+      "id": "tarieven-hoog-en-laag",
+      "categorie": "meerdere tarieven",
+      "omschrijving": "Factuur met 21% en 9% naast elkaar",
+      "toelichting": "Ijkvoorbeeld uit tests/kern.test.ts: btw per tariefgroep over de som (221 + 90), niet per regel.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Advieswerkzaamheden",
+            "quantity": 1,
+            "unit": "uur",
+            "unitPrice": 1050,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Materialen",
+            "quantity": 2,
+            "unit": "stuks",
+            "unitPrice": 500,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1050
+          },
+          {
+            "net": 1000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1050,
+            "vat": 221
+          },
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 1000,
+            "vat": 90
+          }
+        ],
+        "subtotal": 2050,
+        "vatTotal": 311,
+        "total": 2361
+      }
+    },
+    {
+      "id": "tarieven-hoog-laag-nul",
+      "categorie": "meerdere tarieven",
+      "omschrijving": "Factuur met 21%, 9% en 0% naast elkaar",
+      "toelichting": "Drie groepen; volgorde op percentage aflopend: hoog, laag, nul.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Werkzaamheden",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Materialen",
+            "quantity": 1,
+            "unitPrice": 500,
+            "vatCode": "laag"
+          },
+          {
+            "description": "Doorgegeven kosten",
+            "quantity": 1,
+            "unitPrice": 250,
+            "vatCode": "nul"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1000
+          },
+          {
+            "net": 500
+          },
+          {
+            "net": 250
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1000,
+            "vat": 210
+          },
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 500,
+            "vat": 45
+          },
+          {
+            "vatCode": "nul",
+            "percentage": 0,
+            "label": "0%",
+            "net": 250,
+            "vat": 0
+          }
+        ],
+        "subtotal": 1750,
+        "vatTotal": 255,
+        "total": 2005
+      }
+    },
+    {
+      "id": "tarieven-som-voor-btw-21",
+      "categorie": "meerdere tarieven",
+      "omschrijving": "Twee halve-cent-regels in één groep: btw over de som",
+      "toelichting": "21% over som 100 = 21; per regel afgerond zou 11 + 11 = 22 zijn — precies het verschil dat de groepsberekening voorkomt.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Klein item A",
+            "quantity": 1,
+            "unitPrice": 50,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Klein item B",
+            "quantity": 1,
+            "unitPrice": 50,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 50
+          },
+          {
+            "net": 50
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 100,
+            "vat": 21
+          }
+        ],
+        "subtotal": 100,
+        "vatTotal": 21,
+        "total": 121
+      }
+    },
+    {
+      "id": "tarieven-som-voor-btw-9",
+      "categorie": "meerdere tarieven",
+      "omschrijving": "Twee 9%-regels waarvan de som op een halve cent uitkomt",
+      "toelichting": "9% over som 450 = 40,5 → 41; per regel zou 20 + 20 = 40 zijn.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Kaartje A",
+            "quantity": 1,
+            "unitPrice": 225,
+            "vatCode": "laag"
+          },
+          {
+            "description": "Kaartje B",
+            "quantity": 1,
+            "unitPrice": 225,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 225
+          },
+          {
+            "net": 225
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 450,
+            "vat": 41
+          }
+        ],
+        "subtotal": 450,
+        "vatTotal": 41,
+        "total": 491
+      }
+    },
+    {
+      "id": "tarieven-drie-regels-een-groep",
+      "categorie": "meerdere tarieven",
+      "omschrijving": "Drie regels, één tariefgroep",
+      "toelichting": "Groepnetto 600, btw 126.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Post 1",
+            "quantity": 1,
+            "unitPrice": 100,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Post 2",
+            "quantity": 1,
+            "unitPrice": 200,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Post 3",
+            "quantity": 1,
+            "unitPrice": 300,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 100
+          },
+          {
+            "net": 200
+          },
+          {
+            "net": 300
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 600,
+            "vat": 126
+          }
+        ],
+        "subtotal": 600,
+        "vatTotal": 126,
+        "total": 726
+      }
+    },
+    {
+      "id": "tarieven-vijf-regels-een-groep",
+      "categorie": "meerdere tarieven",
+      "omschrijving": "Vijf regels, één tariefgroep, btw boven de halve cent",
+      "toelichting": "Groepnetto 1051, btw 21% = 220,71 → 221.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Post 1",
+            "quantity": 1,
+            "unitPrice": 100,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Post 2",
+            "quantity": 1,
+            "unitPrice": 200,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Post 3",
+            "quantity": 1,
+            "unitPrice": 300,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Post 4",
+            "quantity": 1,
+            "unitPrice": 400,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Post 5",
+            "quantity": 1,
+            "unitPrice": 51,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 100
+          },
+          {
+            "net": 200
+          },
+          {
+            "net": 300
+          },
+          {
+            "net": 400
+          },
+          {
+            "net": 51
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1051,
+            "vat": 221
+          }
+        ],
+        "subtotal": 1051,
+        "vatTotal": 221,
+        "total": 1272
+      }
+    },
+    {
+      "id": "tarieven-historisch-tarief-6",
+      "categorie": "meerdere tarieven",
+      "omschrijving": "Oude factuur met het 6%-lage tarief (vóór 2019)",
+      "toelichting": "Het percentage staat per regel opgeslagen zodat tariefwijzigingen oude documenten niet raken; vatPercentage 6 overheerst.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Oude opdracht",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "laag",
+            "vatPercentage": 6
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 6,
+            "label": "9% (laag)",
+            "net": 1000,
+            "vat": 60
+          }
+        ],
+        "subtotal": 1000,
+        "vatTotal": 60,
+        "total": 1060
+      }
+    },
+    {
+      "id": "tarieven-historisch-en-huidig",
+      "categorie": "meerdere tarieven",
+      "omschrijving": "Zelfde btw-code met twee percentages geeft twee groepen",
+      "toelichting": "Groepen keyen op code én percentage (laag:6 en laag:9); volgorde op percentage aflopend.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Oude opdracht",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "laag",
+            "vatPercentage": 6
+          },
+          {
+            "description": "Huidige opdracht",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1000
+          },
+          {
+            "net": 1000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 1000,
+            "vat": 90
+          },
+          {
+            "vatCode": "laag",
+            "percentage": 6,
+            "label": "9% (laag)",
+            "net": 1000,
+            "vat": 60
+          }
+        ],
+        "subtotal": 2000,
+        "vatTotal": 150,
+        "total": 2150
+      }
+    },
+    {
+      "id": "tarieven-override-gelijk-aan-standaard",
+      "categorie": "meerdere tarieven",
+      "omschrijving": "Expliciet vatPercentage gelijk aan de standaard valt in dezelfde groep",
+      "toelichting": "Beide regels vallen in groep laag:9; het netto telt op vóór de btw.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Post 1",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "laag"
+          },
+          {
+            "description": "Post 2",
+            "quantity": 1,
+            "unitPrice": 500,
+            "vatCode": "laag",
+            "vatPercentage": 9
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1000
+          },
+          {
+            "net": 500
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 1500,
+            "vat": 135
+          }
+        ],
+        "subtotal": 1500,
+        "vatTotal": 135,
+        "total": 1635
+      }
+    },
+    {
+      "id": "tarieven-groepvolgorde",
+      "categorie": "meerdere tarieven",
+      "omschrijving": "Groepen staan op percentage aflopend",
+      "toelichting": "Invoervolgorde is nul, hoog, laag; de groepen komen eruit als hoog (21%), laag (9%), nul (0%).",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Vrijgestelde post",
+            "quantity": 1,
+            "unitPrice": 250,
+            "vatCode": "nul"
+          },
+          {
+            "description": "Werkzaamheden",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Materialen",
+            "quantity": 1,
+            "unitPrice": 500,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 250
+          },
+          {
+            "net": 1000
+          },
+          {
+            "net": 500
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1000,
+            "vat": 210
+          },
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 500,
+            "vat": 45
+          },
+          {
+            "vatCode": "nul",
+            "percentage": 0,
+            "label": "0%",
+            "net": 250,
+            "vat": 0
+          }
+        ],
+        "subtotal": 1750,
+        "vatTotal": 255,
+        "total": 2005
+      }
+    },
+    {
+      "id": "kor-enkele-regel",
+      "categorie": "KOR",
+      "omschrijving": "KOR-ondernemer factureert zonder btw",
+      "toelichting": "Code vrijgesteld = 0% btw, rubriek \"-\"; totaal gelijk aan subtotaal.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienst (kleinenondernemersregeling)",
+            "quantity": 1,
+            "unitPrice": 25000,
+            "vatCode": "vrijgesteld"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 25000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "vrijgesteld",
+            "percentage": 0,
+            "label": "Vrijgesteld / KOR",
+            "net": 25000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 25000,
+        "vatTotal": 0,
+        "total": 25000
+      }
+    },
+    {
+      "id": "kor-meerdere-regels",
+      "categorie": "KOR",
+      "omschrijving": "Meerdere vrijgestelde regels tellen op zonder btw",
+      "toelichting": "Groepnetto 17625, btw 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienstdeel 1",
+            "quantity": 1,
+            "unitPrice": 15000,
+            "vatCode": "vrijgesteld"
+          },
+          {
+            "description": "Dienstdeel 2",
+            "quantity": 1,
+            "unitPrice": 2500,
+            "vatCode": "vrijgesteld"
+          },
+          {
+            "description": "Materiaalkosten",
+            "quantity": 1,
+            "unitPrice": 125,
+            "vatCode": "vrijgesteld"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 15000
+          },
+          {
+            "net": 2500
+          },
+          {
+            "net": 125
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "vrijgesteld",
+            "percentage": 0,
+            "label": "Vrijgesteld / KOR",
+            "net": 17625,
+            "vat": 0
+          }
+        ],
+        "subtotal": 17625,
+        "vatTotal": 0,
+        "total": 17625
+      }
+    },
+    {
+      "id": "kor-met-hoog-tarief",
+      "categorie": "KOR",
+      "omschrijving": "KOR-ondernemer die ook btw-plichtig werk factureert",
+      "toelichting": "Twee groepen: vrijgesteld 0% en hoog 21%; alleen over de hoog-groep valt btw.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienst (KOR)",
+            "quantity": 1,
+            "unitPrice": 20000,
+            "vatCode": "vrijgesteld"
+          },
+          {
+            "description": "Winkelpartij",
+            "quantity": 1,
+            "unitPrice": 500,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 20000
+          },
+          {
+            "net": 500
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 500,
+            "vat": 105
+          },
+          {
+            "vatCode": "vrijgesteld",
+            "percentage": 0,
+            "label": "Vrijgesteld / KOR",
+            "net": 20000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 20500,
+        "vatTotal": 105,
+        "total": 20605
+      }
+    },
+    {
+      "id": "kor-kleine-centen",
+      "categorie": "KOR",
+      "omschrijving": "Kleine vrijgestelde bedragen in centen",
+      "toelichting": "Netto 3 cent, btw 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Los item",
+            "quantity": 3,
+            "unit": "stuks",
+            "unitPrice": 1,
+            "vatCode": "vrijgesteld"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 3
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "vrijgesteld",
+            "percentage": 0,
+            "label": "Vrijgesteld / KOR",
+            "net": 3,
+            "vat": 0
+          }
+        ],
+        "subtotal": 3,
+        "vatTotal": 0,
+        "total": 3
+      }
+    },
+    {
+      "id": "kor-hoog-bedrag",
+      "categorie": "KOR",
+      "omschrijving": "Groot vrijgesteld bedrag vlak onder de KOR-omzetgrens van € 20.000",
+      "toelichting": "Netto 1999999 cent, btw 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Jaarfactuur",
+            "quantity": 1,
+            "unitPrice": 1999999,
+            "vatCode": "vrijgesteld"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1999999
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "vrijgesteld",
+            "percentage": 0,
+            "label": "Vrijgesteld / KOR",
+            "net": 1999999,
+            "vat": 0
+          }
+        ],
+        "subtotal": 1999999,
+        "vatTotal": 0,
+        "total": 1999999
+      }
+    },
+    {
+      "id": "kor-met-korting",
+      "categorie": "KOR",
+      "omschrijving": "Korting op een vrijgestelde factuur",
+      "toelichting": "Groepnetto 2500, btw 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienst (KOR)",
+            "quantity": 1,
+            "unitPrice": 3000,
+            "vatCode": "vrijgesteld"
+          },
+          {
+            "description": "Korting",
+            "quantity": 1,
+            "unitPrice": -500,
+            "vatCode": "vrijgesteld"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 3000
+          },
+          {
+            "net": -500
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "vrijgesteld",
+            "percentage": 0,
+            "label": "Vrijgesteld / KOR",
+            "net": 2500,
+            "vat": 0
+          }
+        ],
+        "subtotal": 2500,
+        "vatTotal": 0,
+        "total": 2500
+      }
+    },
+    {
+      "id": "verlegd-onderaannemer",
+      "categorie": "verlegd",
+      "omschrijving": "Verlegde btw bij onderaannemerschap",
+      "toelichting": "Verkoop-code verlegd = 0% btw op de factuur (de klant regelt de btw); rubriek 1e.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Onderaannemerswerk",
+            "quantity": 1,
+            "unitPrice": 50000,
+            "vatCode": "verlegd"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 50000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "verlegd",
+            "percentage": 0,
+            "label": "BTW verlegd",
+            "net": 50000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 50000,
+        "vatTotal": 0,
+        "total": 50000
+      }
+    },
+    {
+      "id": "verlegd-met-hoog",
+      "categorie": "verlegd",
+      "omschrijving": "Verlegd werk naast gewoon 21%-werk",
+      "toelichting": "Twee groepen: verlegd 0% (30000, btw 0) en hoog 21% (1000, btw 210).",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Onderaannemerswerk",
+            "quantity": 1,
+            "unitPrice": 30000,
+            "vatCode": "verlegd"
+          },
+          {
+            "description": "Eigen materiaal",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 30000
+          },
+          {
+            "net": 1000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1000,
+            "vat": 210
+          },
+          {
+            "vatCode": "verlegd",
+            "percentage": 0,
+            "label": "BTW verlegd",
+            "net": 30000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 31000,
+        "vatTotal": 210,
+        "total": 31210
+      }
+    },
+    {
+      "id": "verlegd-met-laag",
+      "categorie": "verlegd",
+      "omschrijving": "Verlegd werk naast 9%-werk",
+      "toelichting": "Twee groepen: verlegd 0% en laag 9% over 800 = 72.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Onderaannemerswerk",
+            "quantity": 1,
+            "unitPrice": 12000,
+            "vatCode": "verlegd"
+          },
+          {
+            "description": "Materialen",
+            "quantity": 1,
+            "unitPrice": 800,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 12000
+          },
+          {
+            "net": 800
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 800,
+            "vat": 72
+          },
+          {
+            "vatCode": "verlegd",
+            "percentage": 0,
+            "label": "BTW verlegd",
+            "net": 12000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 12800,
+        "vatTotal": 72,
+        "total": 12872
+      }
+    },
+    {
+      "id": "verlegd-groot-werk",
+      "categorie": "verlegd",
+      "omschrijving": "Groot verlegd werk met een halve hoeveelheid",
+      "toelichting": "2,5 × 100000 = 250000 exact; btw 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Hoofdaanneming",
+            "quantity": 2.5,
+            "unit": "uur",
+            "unitPrice": 100000,
+            "vatCode": "verlegd"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 250000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "verlegd",
+            "percentage": 0,
+            "label": "BTW verlegd",
+            "net": 250000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 250000,
+        "vatTotal": 0,
+        "total": 250000
+      }
+    },
+    {
+      "id": "verlegd-twee-regels",
+      "categorie": "verlegd",
+      "omschrijving": "Twee verlegde regels tellen op in één groep",
+      "toelichting": "Groepnetto 30000, btw 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Deelopdracht 1",
+            "quantity": 1,
+            "unitPrice": 15000,
+            "vatCode": "verlegd"
+          },
+          {
+            "description": "Deelopdracht 2",
+            "quantity": 2,
+            "unit": "stuks",
+            "unitPrice": 7500,
+            "vatCode": "verlegd"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 15000
+          },
+          {
+            "net": 15000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "verlegd",
+            "percentage": 0,
+            "label": "BTW verlegd",
+            "net": 30000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 30000,
+        "vatTotal": 0,
+        "total": 30000
+      }
+    },
+    {
+      "id": "icp-goederen-enkele-regel",
+      "categorie": "icp",
+      "omschrijving": "Intracommunautaire levering van goederen naar een EU-bedrijf",
+      "toelichting": "Code icp = 0% btw, rubriek 3b, ICP-opgaaf; btw-nummer klant op de factuur.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Levering naar Duitsland",
+            "quantity": 1,
+            "unitPrice": 12000,
+            "vatCode": "icp"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 12000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "icp",
+            "percentage": 0,
+            "label": "Intracommunautaire levering (0%)",
+            "net": 12000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 12000,
+        "vatTotal": 0,
+        "total": 12000
+      }
+    },
+    {
+      "id": "icp-dienst-enkele-regel",
+      "categorie": "icp",
+      "omschrijving": "Dienst aan een bedrijf in een ander EU-land (btw verlegd, art. 196)",
+      "toelichting": "Code icp-dienst = 0% btw, rubriek 3b.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Consultancy België",
+            "quantity": 1,
+            "unit": "uur",
+            "unitPrice": 8500,
+            "vatCode": "icp-dienst"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 8500
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "icp-dienst",
+            "percentage": 0,
+            "label": "Btw verlegd (dienst EU)",
+            "net": 8500,
+            "vat": 0
+          }
+        ],
+        "subtotal": 8500,
+        "vatTotal": 0,
+        "total": 8500
+      }
+    },
+    {
+      "id": "icp-goederen-en-dienst",
+      "categorie": "icp",
+      "omschrijving": "Goederen én dienst naar het buitenland in één factuur",
+      "toelichting": "Twee 0%-groepen (icp en icp-dienst), gesorteerd op vatCode: icp vóór icp-dienst.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Levering naar Frankrijk",
+            "quantity": 1,
+            "unitPrice": 12000,
+            "vatCode": "icp"
+          },
+          {
+            "description": "Installatie op locatie",
+            "quantity": 1,
+            "unit": "uur",
+            "unitPrice": 3400,
+            "vatCode": "icp-dienst"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 12000
+          },
+          {
+            "net": 3400
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "icp",
+            "percentage": 0,
+            "label": "Intracommunautaire levering (0%)",
+            "net": 12000,
+            "vat": 0
+          },
+          {
+            "vatCode": "icp-dienst",
+            "percentage": 0,
+            "label": "Btw verlegd (dienst EU)",
+            "net": 3400,
+            "vat": 0
+          }
+        ],
+        "subtotal": 15400,
+        "vatTotal": 0,
+        "total": 15400
+      }
+    },
+    {
+      "id": "icp-met-hoog",
+      "categorie": "icp",
+      "omschrijving": "ICP-levering naast Nederlandse 21%-post",
+      "toelichting": "Alleen de hoog-groep levert btw op: 21% over 500 = 105.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Levering naar Spanje",
+            "quantity": 1,
+            "unitPrice": 20000,
+            "vatCode": "icp"
+          },
+          {
+            "description": "Verzending binnen Nederland",
+            "quantity": 1,
+            "unitPrice": 500,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 20000
+          },
+          {
+            "net": 500
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 500,
+            "vat": 105
+          },
+          {
+            "vatCode": "icp",
+            "percentage": 0,
+            "label": "Intracommunautaire levering (0%)",
+            "net": 20000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 20500,
+        "vatTotal": 105,
+        "total": 20605
+      }
+    },
+    {
+      "id": "icp-dienst-met-laag",
+      "categorie": "icp",
+      "omschrijving": "ICP-dienst naast Nederlandse 9%-post",
+      "toelichting": "9% over 2000 = 180; icp-dienst 0%.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienst naar Duitsland",
+            "quantity": 1,
+            "unitPrice": 6000,
+            "vatCode": "icp-dienst"
+          },
+          {
+            "description": "Materialen",
+            "quantity": 1,
+            "unitPrice": 2000,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 6000
+          },
+          {
+            "net": 2000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 2000,
+            "vat": 180
+          },
+          {
+            "vatCode": "icp-dienst",
+            "percentage": 0,
+            "label": "Btw verlegd (dienst EU)",
+            "net": 6000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 8000,
+        "vatTotal": 180,
+        "total": 8180
+      }
+    },
+    {
+      "id": "icp-dienst-met-verlegd",
+      "categorie": "icp",
+      "omschrijving": "ICP-dienst naast verlegd binnenlands werk",
+      "toelichting": "Beide 0%-groepen bestaan naast elkaar; volgorde op vatCode: icp-dienst vóór verlegd.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienst naar België",
+            "quantity": 1,
+            "unitPrice": 5000,
+            "vatCode": "icp-dienst"
+          },
+          {
+            "description": "Onderaannemerswerk NL",
+            "quantity": 1,
+            "unitPrice": 4000,
+            "vatCode": "verlegd"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 5000
+          },
+          {
+            "net": 4000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "icp-dienst",
+            "percentage": 0,
+            "label": "Btw verlegd (dienst EU)",
+            "net": 5000,
+            "vat": 0
+          },
+          {
+            "vatCode": "verlegd",
+            "percentage": 0,
+            "label": "BTW verlegd",
+            "net": 4000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 9000,
+        "vatTotal": 0,
+        "total": 9000
+      }
+    },
+    {
+      "id": "icp-meerdere-leveringen",
+      "categorie": "icp",
+      "omschrijving": "Meerdere ICP-leveringen tellen op in één groep",
+      "toelichting": "Groepnetto 7500, btw 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Levering week 1",
+            "quantity": 1,
+            "unitPrice": 2500,
+            "vatCode": "icp"
+          },
+          {
+            "description": "Levering week 2",
+            "quantity": 2,
+            "unit": "stuks",
+            "unitPrice": 2500,
+            "vatCode": "icp"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 2500
+          },
+          {
+            "net": 5000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "icp",
+            "percentage": 0,
+            "label": "Intracommunautaire levering (0%)",
+            "net": 7500,
+            "vat": 0
+          }
+        ],
+        "subtotal": 7500,
+        "vatTotal": 0,
+        "total": 7500
+      }
+    },
+    {
+      "id": "export-enkele-regel",
+      "categorie": "export",
+      "omschrijving": "Uitvoer van goederen buiten de EU",
+      "toelichting": "Code export = 0% btw, rubriek 3a.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Levering naar de VS",
+            "quantity": 1,
+            "unitPrice": 15000,
+            "vatCode": "export"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 15000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "export",
+            "percentage": 0,
+            "label": "Uitvoer goederen buiten de EU (0%)",
+            "net": 15000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 15000,
+        "vatTotal": 0,
+        "total": 15000
+      }
+    },
+    {
+      "id": "export-met-hoog",
+      "categorie": "export",
+      "omschrijving": "Export naast Nederlandse 21%-post met een halve-cent-btw",
+      "toelichting": "21% over 750 = 157,5 → 158 (half-van-nul); exportgroep 0%.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Levering naar Canada",
+            "quantity": 1,
+            "unitPrice": 15000,
+            "vatCode": "export"
+          },
+          {
+            "description": "Verzendkosten NL",
+            "quantity": 1,
+            "unitPrice": 750,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 15000
+          },
+          {
+            "net": 750
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 750,
+            "vat": 158
+          },
+          {
+            "vatCode": "export",
+            "percentage": 0,
+            "label": "Uitvoer goederen buiten de EU (0%)",
+            "net": 15000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 15750,
+        "vatTotal": 158,
+        "total": 15908
+      }
+    },
+    {
+      "id": "export-met-laag",
+      "categorie": "export",
+      "omschrijving": "Export naast Nederlandse 9%-post",
+      "toelichting": "9% over 1200 = 108; exportgroep 0%.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Levering naar Zwitserland",
+            "quantity": 1,
+            "unitPrice": 9000,
+            "vatCode": "export"
+          },
+          {
+            "description": "Verpakkingsmateriaal",
+            "quantity": 1,
+            "unitPrice": 1200,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 9000
+          },
+          {
+            "net": 1200
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 1200,
+            "vat": 108
+          },
+          {
+            "vatCode": "export",
+            "percentage": 0,
+            "label": "Uitvoer goederen buiten de EU (0%)",
+            "net": 9000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 10200,
+        "vatTotal": 108,
+        "total": 10308
+      }
+    },
+    {
+      "id": "export-twee-regels",
+      "categorie": "export",
+      "omschrijving": "Twee exportregels tellen op in één groep",
+      "toelichting": "Groepnetto 15000, btw 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Levering deel 1",
+            "quantity": 2,
+            "unit": "stuks",
+            "unitPrice": 6500,
+            "vatCode": "export"
+          },
+          {
+            "description": "Levering deel 2",
+            "quantity": 1,
+            "unitPrice": 2000,
+            "vatCode": "export"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 13000
+          },
+          {
+            "net": 2000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "export",
+            "percentage": 0,
+            "label": "Uitvoer goederen buiten de EU (0%)",
+            "net": 15000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 15000,
+        "vatTotal": 0,
+        "total": 15000
+      }
+    },
+    {
+      "id": "creditnota-volledig-hoog",
+      "categorie": "creditnota",
+      "omschrijving": "Volledige creditnota van een 21%-factuur",
+      "toelichting": "Netto -1050; btw 21% over -1050 = -220,5 → -221 (half van nul af, dus omlaag).",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Credit: advieswerkzaamheden",
+            "quantity": -1,
+            "unit": "uur",
+            "unitPrice": 1050,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": -1050
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": -1050,
+            "vat": -221
+          }
+        ],
+        "subtotal": -1050,
+        "vatTotal": -221,
+        "total": -1271
+      }
+    },
+    {
+      "id": "creditnota-twee-tarieven",
+      "categorie": "creditnota",
+      "omschrijving": "Creditnota van een factuur met twee tarieven",
+      "toelichting": "Groepen hoog (-1050, btw -221) en laag (-1000, btw -90); btwTotaal -311.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Credit: advieswerkzaamheden",
+            "quantity": -1,
+            "unit": "uur",
+            "unitPrice": 1050,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Credit: materialen",
+            "quantity": -2,
+            "unit": "stuks",
+            "unitPrice": 500,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": -1050
+          },
+          {
+            "net": -1000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": -1050,
+            "vat": -221
+          },
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": -1000,
+            "vat": -90
+          }
+        ],
+        "subtotal": -2050,
+        "vatTotal": -311,
+        "total": -2361
+      }
+    },
+    {
+      "id": "creditnota-btw-half-negatief",
+      "categorie": "creditnota",
+      "omschrijving": "Negatieve btw die op een halve cent uitkomt",
+      "toelichting": "21% over -50 = -10,5 → -11 (half van nul af).",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Credit: klein item",
+            "quantity": -1,
+            "unitPrice": 50,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": -50
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": -50,
+            "vat": -11
+          }
+        ],
+        "subtotal": -50,
+        "vatTotal": -11,
+        "total": -61
+      }
+    },
+    {
+      "id": "creditnota-epsilon-negatief",
+      "categorie": "creditnota",
+      "omschrijving": "Negatieve regel met float-artefact",
+      "toelichting": "Product -0,29 × 750 = -217,49999999999997; met epsilon -218 (half van nul af); btw 21% over -218 = -45,78 → -46.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Credit: losse verkoop",
+            "quantity": -0.29,
+            "unit": "stuks",
+            "unitPrice": 750,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": -218
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": -218,
+            "vat": -46
+          }
+        ],
+        "subtotal": -218,
+        "vatTotal": -46,
+        "total": -264
+      }
+    },
+    {
+      "id": "creditnota-met-correctie",
+      "categorie": "creditnota",
+      "omschrijving": "Creditregel met een positieve correctie in dezelfde groep",
+      "toelichting": "Som -300 vóór btw; 21% over -300 = -63.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Credit: post",
+            "quantity": -1,
+            "unitPrice": 500,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Correctie: post",
+            "quantity": 1,
+            "unitPrice": 200,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": -500
+          },
+          {
+            "net": 200
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": -300,
+            "vat": -63
+          }
+        ],
+        "subtotal": -300,
+        "vatTotal": -63,
+        "total": -363
+      }
+    },
+    {
+      "id": "creditnota-deelcredit-laag",
+      "categorie": "creditnota",
+      "omschrijving": "Deelcredit bij 9% die op een halve cent uitkomt",
+      "toelichting": "9% over -450 = -40,5 → -41.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Credit: kaartje",
+            "quantity": -1,
+            "unitPrice": 450,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": -450
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": -450,
+            "vat": -41
+          }
+        ],
+        "subtotal": -450,
+        "vatTotal": -41,
+        "total": -491
+      }
+    },
+    {
+      "id": "creditnota-van-icp-factuur",
+      "categorie": "creditnota",
+      "omschrijving": "Creditnota van een 0%-ICP-levering",
+      "toelichting": "Netto -9900, btw 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Credit: levering Frankrijk",
+            "quantity": -1,
+            "unitPrice": 9900,
+            "vatCode": "icp"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": -9900
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "icp",
+            "percentage": 0,
+            "label": "Intracommunautaire levering (0%)",
+            "net": -9900,
+            "vat": 0
+          }
+        ],
+        "subtotal": -9900,
+        "vatTotal": 0,
+        "total": -9900
+      }
+    },
+    {
+      "id": "korting-hoog-zelfde-groep",
+      "categorie": "korting",
+      "omschrijving": "Korting binnen dezelfde 21%-groep",
+      "toelichting": "Som 1000 - 100 = 900; btw 189. Korting telt mee in de groepssom vóór de btw.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienst",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Korting",
+            "quantity": 1,
+            "unitPrice": -100,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1000
+          },
+          {
+            "net": -100
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 900,
+            "vat": 189
+          }
+        ],
+        "subtotal": 900,
+        "vatTotal": 189,
+        "total": 1089
+      }
+    },
+    {
+      "id": "korting-100-procent",
+      "categorie": "korting",
+      "omschrijving": "Volledige korting: alles valt weg",
+      "toelichting": "Netto 0, btw 0, totaal 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienst",
+            "quantity": 1,
+            "unitPrice": 500,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Korting",
+            "quantity": 1,
+            "unitPrice": -500,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 500
+          },
+          {
+            "net": -500
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 0,
+            "vat": 0
+          }
+        ],
+        "subtotal": 0,
+        "vatTotal": 0,
+        "total": 0
+      }
+    },
+    {
+      "id": "korting-laag",
+      "categorie": "korting",
+      "omschrijving": "Korting binnen de 9%-groep",
+      "toelichting": "Som 750; 9% over 750 = 67,5 → 68.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Artikel",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "laag"
+          },
+          {
+            "description": "Korting",
+            "quantity": 1,
+            "unitPrice": -250,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1000
+          },
+          {
+            "net": -250
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 750,
+            "vat": 68
+          }
+        ],
+        "subtotal": 750,
+        "vatTotal": 68,
+        "total": 818
+      }
+    },
+    {
+      "id": "korting-btw-half-overblijft",
+      "categorie": "korting",
+      "omschrijving": "Korting laat een groepnetto achter waarvan de btw op een halve cent uitkomt",
+      "toelichting": "Som 250 - 200 = 50; 21% over 50 = 10,5 → 11.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Artikel",
+            "quantity": 1,
+            "unitPrice": 250,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Korting",
+            "quantity": 1,
+            "unitPrice": -200,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 250
+          },
+          {
+            "net": -200
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 50,
+            "vat": 11
+          }
+        ],
+        "subtotal": 50,
+        "vatTotal": 11,
+        "total": 61
+      }
+    },
+    {
+      "id": "korting-drie-regels",
+      "categorie": "korting",
+      "omschrijving": "Korting tussen meerdere gewone regels",
+      "toelichting": "Som 300 + 200 - 100 = 400; btw 84.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Post 1",
+            "quantity": 1,
+            "unitPrice": 300,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Post 2",
+            "quantity": 1,
+            "unitPrice": 200,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Korting",
+            "quantity": 1,
+            "unitPrice": -100,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 300
+          },
+          {
+            "net": 200
+          },
+          {
+            "net": -100
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 400,
+            "vat": 84
+          }
+        ],
+        "subtotal": 400,
+        "vatTotal": 84,
+        "total": 484
+      }
+    },
+    {
+      "id": "korting-twee-tarieven",
+      "categorie": "korting",
+      "omschrijving": "Korting per tariefgroep meegeteld",
+      "toelichting": "Hoog-groep 900 → 189; laag-groep 750 → 67,5 → 68; btwTotaal 257.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienst",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Korting dienst",
+            "quantity": 1,
+            "unitPrice": -100,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Artikel",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "laag"
+          },
+          {
+            "description": "Korting artikel",
+            "quantity": 1,
+            "unitPrice": -250,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1000
+          },
+          {
+            "net": -100
+          },
+          {
+            "net": 1000
+          },
+          {
+            "net": -250
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 900,
+            "vat": 189
+          },
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 750,
+            "vat": 68
+          }
+        ],
+        "subtotal": 1650,
+        "vatTotal": 257,
+        "total": 1907
+      }
+    },
+    {
+      "id": "korting-negatieve-hoeveelheid",
+      "categorie": "korting",
+      "omschrijving": "Korting ingevoerd als negatieve hoeveelheid",
+      "toelichting": "-1 × 250 = -250; 21% over -250 = -52,5 → -53 (half van nul af).",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Correctieregel",
+            "quantity": -1,
+            "unit": "stuks",
+            "unitPrice": 250,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": -250
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": -250,
+            "vat": -53
+          }
+        ],
+        "subtotal": -250,
+        "vatTotal": -53,
+        "total": -303
+      }
+    },
+    {
+      "id": "korting-negatieve-prijs",
+      "categorie": "korting",
+      "omschrijving": "Korting ingevoerd als negatieve prijs per eenheid",
+      "toelichting": "1 × -250 = -250; zelfde uitkomst als negatieve hoeveelheid.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Correctieregel",
+            "quantity": 1,
+            "unit": "stuks",
+            "unitPrice": -250,
+            "vatCode": "hoog"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": -250
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": -250,
+            "vat": -53
+          }
+        ],
+        "subtotal": -250,
+        "vatTotal": -53,
+        "total": -303
+      }
+    },
+    {
+      "id": "korting-op-nul-tarief",
+      "categorie": "korting",
+      "omschrijving": "Korting op een 0%-regel",
+      "toelichting": "Som 800, btw 0.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Doorgegeven kosten",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "nul"
+          },
+          {
+            "description": "Korting",
+            "quantity": 1,
+            "unitPrice": -200,
+            "vatCode": "nul"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1000
+          },
+          {
+            "net": -200
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "nul",
+            "percentage": 0,
+            "label": "0%",
+            "net": 800,
+            "vat": 0
+          }
+        ],
+        "subtotal": 800,
+        "vatTotal": 0,
+        "total": 800
+      }
+    },
+    {
+      "id": "nul-tarief-enkele-regel",
+      "categorie": "nul-tarief",
+      "omschrijving": "Verkoop met 0%-code",
+      "toelichting": "Code nul = 0% btw, rubriek 1e.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Vrijgestelde levering",
+            "quantity": 1,
+            "unitPrice": 1000,
+            "vatCode": "nul"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "nul",
+            "percentage": 0,
+            "label": "0%",
+            "net": 1000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 1000,
+        "vatTotal": 0,
+        "total": 1000
+      }
+    },
+    {
+      "id": "dienst-buiten-eu-enkele-regel",
+      "categorie": "dienst-buiten-eu",
+      "omschrijving": "Dienst aan een bedrijf buiten de EU",
+      "toelichting": "Code dienst-buiten-eu = 0% btw en niet in de Nederlandse aangifte (rubriek \"-\").",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienst naar de VS",
+            "quantity": 1,
+            "unit": "uur",
+            "unitPrice": 9000,
+            "vatCode": "dienst-buiten-eu"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 9000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "dienst-buiten-eu",
+            "percentage": 0,
+            "label": "Niet belast in Nederland",
+            "net": 9000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 9000,
+        "vatTotal": 0,
+        "total": 9000
+      }
+    },
+    {
+      "id": "dienst-buiten-eu-en-export",
+      "categorie": "dienst-buiten-eu",
+      "omschrijving": "Dienst buiten de EU naast goederenexport",
+      "toelichting": "Twee 0%-groepen; volgorde op vatCode: dienst-buiten-eu vóór export.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Dienst naar de VS",
+            "quantity": 1,
+            "unit": "uur",
+            "unitPrice": 9000,
+            "vatCode": "dienst-buiten-eu"
+          },
+          {
+            "description": "Levering naar de VS",
+            "quantity": 1,
+            "unitPrice": 6000,
+            "vatCode": "export"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 9000
+          },
+          {
+            "net": 6000
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "dienst-buiten-eu",
+            "percentage": 0,
+            "label": "Niet belast in Nederland",
+            "net": 9000,
+            "vat": 0
+          },
+          {
+            "vatCode": "export",
+            "percentage": 0,
+            "label": "Uitvoer goederen buiten de EU (0%)",
+            "net": 6000,
+            "vat": 0
+          }
+        ],
+        "subtotal": 15000,
+        "vatTotal": 0,
+        "total": 15000
+      }
+    },
+    {
+      "id": "grote-bedragen",
+      "categorie": "grote-bedragen",
+      "omschrijving": "Grote factuur met miljoenen-centen",
+      "toelichting": "21% over 1234567 = 259259,07 → 259259; nul-groep levert geen btw.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Grote opdracht",
+            "quantity": 1,
+            "unitPrice": 1234567,
+            "vatCode": "hoog"
+          },
+          {
+            "description": "Doorgegeven licentie",
+            "quantity": 1,
+            "unitPrice": 7654321,
+            "vatCode": "nul"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 1234567
+          },
+          {
+            "net": 7654321
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "hoog",
+            "percentage": 21,
+            "label": "21% (hoog)",
+            "net": 1234567,
+            "vat": 259259
+          },
+          {
+            "vatCode": "nul",
+            "percentage": 0,
+            "label": "0%",
+            "net": 7654321,
+            "vat": 0
+          }
+        ],
+        "subtotal": 8888888,
+        "vatTotal": 259259,
+        "total": 9148147
+      }
+    },
+    {
+      "id": "kleine-bedragen-laag",
+      "categorie": "kleine-bedragen",
+      "omschrijving": "Btw van 0,99 bij 9% rondt naar 1",
+      "toelichting": "9% over 11 = 0,99 → 1.",
+      "invoer": {
+        "lines": [
+          {
+            "description": "Mini-artikel",
+            "quantity": 1,
+            "unitPrice": 11,
+            "vatCode": "laag"
+          }
+        ]
+      },
+      "verwacht": {
+        "lines": [
+          {
+            "net": 11
+          }
+        ],
+        "groups": [
+          {
+            "vatCode": "laag",
+            "percentage": 9,
+            "label": "9% (laag)",
+            "net": 11,
+            "vat": 1
+          }
+        ],
+        "subtotal": 11,
+        "vatTotal": 1,
+        "total": 12
+      }
+    }
+  ],
+  "categorieen": [
+    "afronding",
+    "meerdere tarieven",
+    "KOR",
+    "verlegd",
+    "icp",
+    "export",
+    "creditnota",
+    "korting",
+    "nul-tarief",
+    "dienst-buiten-eu",
+    "grote-bedragen",
+    "kleine-bedragen"
+  ]
+}

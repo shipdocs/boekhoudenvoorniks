@@ -1,0 +1,162 @@
+{
+  "name": "gratis-boekhouden",
+  "version": "1.8.1",
+  "description": "Gratis boekhouding voor zzp en mkb: offertes, facturen, bankimport en BTW-overzicht op een echte dubbele boekhouding.",
+  "author": "Martin <info@shipdocs.app>",
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "main": "dist/main/main/main.js",
+  "scripts": {
+    "build": "npm run build:main && npm run build:renderer",
+    "build:kern": "tsc -p packages/core/tsconfig.json",
+    "build:main": "npm run build:kern && tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "start": "npm run build && npm run rebuild:electron && electron .",
+    "dev": "npm run build:main && npm run rebuild:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "typecheck": "npm run build:kern && tsc -p tsconfig.json --noEmit",
+    "controle": "node scripts/controle.cjs",
+    "test": "npm run rebuild:node && npm run build:kern && vitest run",
+    "test:proefadministratie": "npm run rebuild:node && npm run build:kern && vitest run tests/proefadministratie/proefadministratie.test.ts",
+    "test:watch": "npm run build:kern && vitest",
+    "test:golden": "npm run build:kern && node scripts/golden-kern.mjs",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "rebuild:electron": "electron-builder install-app-deps",
+    "dist": "npm run build && electron-builder --linux --win",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:store": "npm run build && electron-builder --win appx --publish never --x64",
+    "benchmark:ocr": "npm run build:main && node dist/main/tools/ocr-benchmark.js",
+    "leveranciers:nsi": "npm run build:main && node dist/main/tools/leveranciers-nsi.js",
+    "voorwaarden:pdf": "node scripts/voorwaarden-pdf.cjs",
+    "benchmark:jev": "npm run build:main && node dist/main/tools/jev-benchmark.js",
+    "benchmark:maak": "npm run build:main && electron dist/main/tools/render-benchmark.js",
+    "e2e": "npm run rebuild:node && npm run build && playwright test",
+    "e2e:only": "playwright test",
+    "voorbeeldpakket": "npm run rebuild:node && npm run build:main && node scripts/voorbeeldpakket.cjs",
+    "site:menu": "node scripts/site-menu.cjs",
+    "site:handleiding": "node scripts/site-handleiding.cjs && node scripts/site-menu.cjs",
+    "site:wijzigingen": "node scripts/site-wijzigingen.cjs"
+  },
+  "build": {
+    "appId": "app.shipdocs.gratisboekhouden",
+    "productName": "BoekhoudenVoorNiks",
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "!**/.ouroboros/**",
+      "!**/.ouroboros_eval_artifact.md"
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "executableName": "boekhoudenvoorniks",
+      "icon": "build/icons",
+      "syncDesktopName": true,
+      "synopsis": "Gratis boekhouding voor zzp en vakmensen",
+      "maintainer": "Martin <info@shipdocs.app>"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "shipdocs",
+        "repo": "boekhoudenvoorniks",
+        "releaseType": "draft"
+      }
+    ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "BoekhoudenVoorNiks"
+    },
+    "appx": {
+      "identityName": "ShipDocs.BoekhoudenVoorNiks",
+      "publisher": "CN=B884F2A1-35F1-4BD8-9EB7-F2746D9FB427",
+      "publisherDisplayName": "ShipDocs",
+      "applicationId": "BoekhoudenVoorNiks",
+      "displayName": "BoekhoudenVoorNiks",
+      "languages": [
+        "nl-NL"
+      ],
+      "backgroundColor": "#f6f7f9",
+      "minVersion": "10.0.18362.0",
+      "maxVersionTested": "10.0.26100.0",
+      "customManifestPath": "appxmanifest.xml",
+      "customExtensionsPath": "build/appx-extensions.xml",
+      "artifactName": "BoekhoudenVoorNiks-Store-${version}-${arch}.${ext}"
+    }
+  },
+  "dependencies": {
+    "@gratis-boekhouden/kern": "file:packages/core",
+    "better-sqlite3": "^13.0.3",
+    "electron-updater": "^6.8.9",
+    "fast-xml-parser": "^5.11.1",
+    "imapflow": "^2.0.7",
+    "koffi": "3.3.3",
+    "mailparser": "^3.9.28",
+    "mt940-js": "^1.0.0",
+    "multicast-dns": "^7.2.5",
+    "nodemailer": "^10.0.10",
+    "papaparse": "^5.7.0",
+    "pdfjs-dist": "^6.3.289",
+    "qrcode": "^1.5.4",
+    "tslib": "^2.8.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "1.56",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/mailparser": "^3.4.6",
+    "@types/multicast-dns": "^7.2.4",
+    "@types/node": "^22.20.4",
+    "@types/nodemailer": "^8.0.2",
+    "@types/papaparse": "^5.5.2",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "jsqr": "^1.4.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2",
+    "wait-on": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "homepage": "https://boekhoudenvoorniks.nl/",
+  "desktopName": "boekhoudenvoorniks.desktop",
+  "overrides": {
+    "playwright-core": "1.56.1"
+  }
+}

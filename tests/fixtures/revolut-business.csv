@@ -1,0 +1,5 @@
+Date started (UTC),Date completed (UTC),ID,Type,Description,Reference,Payer,Card number,Orig currency,Orig amount,Payment currency,Amount,Fee,Balance,Account,Beneficiary account number,Beneficiary sort code or routing number,Beneficiary IBAN,Beneficiary BIC
+2026-09-01,2026-09-01,0a1b2c3d-0001,TOPUP,Money added from NL44RABO0123456789,,Voorbeeld BV,,EUR,500.00,EUR,500.00,0.00,500.00,Main EUR,,,,
+2026-09-03,2026-09-04,0a1b2c3d-0002,CARD_PAYMENT,Vercel,,,459999******1234,USD,-20.00,EUR,-18.50,0.35,481.15,Main EUR,,,,
+2026-09-05,2026-09-05,0a1b2c3d-0003,TRANSFER,To Drukkerij Voorbeeld BV,Factuur 563561,,,EUR,-90.75,EUR,-90.75,0.00,390.40,Main EUR,,,NL20INGB0001234567,INGBNL2A
+2026-09-06,2026-09-06,0a1b2c3d-0004,CARD_PAYMENT,Hotel in USD,,,459999******1234,USD,-100.00,USD,-100.00,0.00,0.00,Main USD,,,,

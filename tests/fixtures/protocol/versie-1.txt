@@ -1,0 +1,44 @@
+== qr ==
+{"bvn":"scanner","v":1,"pc":"oKGio6SlpqeoqaqrrK2urw","apparaat":"3q2-7wAAAAAAAAAAAAAAAQ","sleutel":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8","poort":51234,"adressen":["192.168.1.35"]}
+
+== hallo ==
+{"soort":"hallo","tijd":1790848800000,"naam":"Pixel van Piet","app":"1.0.0"}
+
+== hallo-antwoord ==
+{"ok":true,"soort":"hallo","pc":"oKGio6SlpqeoqaqrrK2urw","pcTijd":1790848800123,"limieten":{"fotos":10,"fotoBytes":19922944,"notitie":1000}}
+
+== bon ==
+{"soort":"bon","tijd":1790848800000,"id":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","betaalwijze":"contant","notitie":"Schroeven voor de klus bij Jansen","locatie":{"lat":52.0907,"lon":5.1214},"fotos":[{"grootte":412345},{"grootte":398112}]}
+
+== bon-antwoord ==
+{"ok":true,"soort":"bon","id":"3f2b8c1e-5d4a-4e6f-9a7b-0c1d2e3f4a5b","al":false}
+
+== voorbeeld-waarden ==
+sleutel      000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+             (in de QR-code: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8)
+apparaat-ID  a0a1a2a3a4a5a6a7a8a9aaabacadaeaf
+             (in de QR-code: oKGio6SlpqeoqaqrrK2urw)
+nonce        101112131415161718191a1b
+
+== voorbeeld-json ==
+{"soort":"hallo","tijd":1790848800000,"naam":"Pixel van Piet","app":"1.0.0"}
+
+== voorbeeld-inhoud ==
+0000004c7b22736f6f7274223a2268616c6c6f222c2274696a64223a313739303834383830303030302c226e61616d
+223a22506978656c2076616e2050696574222c22617070223a22312e302e30227d
+
+== voorbeeld-verzoek ==
+42564e530101a0a1a2a3a4a5a6a7a8a9aaabacadaeaf101112131415161718191a1b7dfe985a32eb49dca5077c3f355b
+0132bb3c212c37e023d88d9dc05d6f636deb68dd6f3bc5965edf4e1ab03febf97e39299e171a9bee35d2ca7f5411a3fe
+c11f27d41d4239ce290e4fb11bcef6f1cac3e176e4ee5617eb65598ce6d0b2cfabd8
+
+== voorbeeld-antwoord ==
+42564e530102a0a1a2a3a4a5a6a7a8a9aaabacadaeaf202122232425262728292a2ba918c91b4ea26e7c6f196eecb277
+9b8ba46bd6bee5ef0dcc40d405766bb07c3a13bc873ced1450f721995af3753d7afe8407d5efad5e0051ad531b2f2981
+6ce9b913af29bab584faa9508f46d72e5c1cc57663598e11bca4052acb14be8b6763
+
+== grens-bericht ==
+Hooguit 20 MiB (20.971.520 bytes).
+
+== grens-fotos ==
+Alle foto's samen hooguit 19 MiB (19.922.944 bytes).

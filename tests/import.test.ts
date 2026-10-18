@@ -1,0 +1,263 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { setup } from './helpers';
+import { parseCsv, previewCsv } from '../src/import/csv';
+import { parseMt940, parseField86 } from '../src/import/mt940';
+import { parseCamt053 } from '../src/import/camt053';
+import { detectFormat } from '../src/import/detect';
+import { ACCOUNTS } from '../src/core-ledger/accounts';
+
+const fixture = (name: string) => readFileSync(join(__dirname, 'fixtures', name));
+
+describe('parsers', () => {
+  it('herkent ING CSV en parseert af/bij', () => {
+    const text = fixture('ing.csv').toString('utf8');
+    const preview = previewCsv(text);
+    expect(preview.detectedBank).toBe('ING');
+    const r = parseCsv(text, preview.suggestedMapping!);
+    expect(r.warnings).toEqual([]);
+    expect(r.transactions).toHaveLength(3);
+    expect(r.transactions[0]).toMatchObject({ date: '2026-09-15', amount: 93643, counterIban: 'NL44RABO0123456789', ownIban: 'NL91ABNA0417164300' });
+    expect(r.transactions[1]!.amount).toBe(-6500);
+  });
+
+  it('herkent Rabobank CSV', () => {
+    const text = fixture('rabo.csv').toString('utf8');
+    const preview = previewCsv(text);
+    expect(preview.detectedBank).toBe('Rabobank');
+    const r = parseCsv(text, preview.suggestedMapping!);
+    expect(r.transactions.map((t) => t.amount)).toEqual([121000, -1250]);
+    expect(r.transactions[0]!.description).toContain('2026-0002');
+  });
+
+  it('MT940 via mt940-js met gestructureerd veld 86', async () => {
+    const r = await parseMt940(fixture('statement.sta'));
+    expect(r.transactions).toHaveLength(2);
+    expect(r.transactions[0]).toMatchObject({ date: '2026-09-01', amount: 12100, counterIban: 'NL44RABO0123456789', counterName: 'Familie Jansen', description: 'Factuur 2026-0003' });
+    expect(r.transactions[1]).toMatchObject({ amount: -3025, counterName: 'Gamma Utrecht' });
+    expect(parseField86('Vrije tekst zonder tags').description).toBe('Vrije tekst zonder tags');
+  });
+
+  it('CAMT.053, alleen geboekte posten', () => {
+    const r = parseCamt053(fixture('camt053.xml').toString('utf8'));
+    expect(r.transactions).toHaveLength(2);
+    expect(r.transactions[0]).toMatchObject({ date: '2026-09-29', amount: 24200, counterName: 'Familie Jansen', description: 'factuur 2026-0004', reference: null, bankId: 'REF-1' });
+    expect(r.transactions[1]).toMatchObject({ amount: -1500, counterName: 'KPN' });
+  });
+
+  it('detecteert formaat', () => {
+    expect(detectFormat('x.xml', fixture('camt053.xml').toString())).toBe('camt');
+    expect(detectFormat('x.sta', fixture('statement.sta').toString())).toBe('mt940');
+    expect(detectFormat('x.csv', fixture('ing.csv').toString())).toBe('csv');
+  });
+});
+
+describe('bankimport en matching', () => {
+  it('ontdubbelt bij opnieuw importeren, maar behoudt identieke transacties binnen één bestand', () => {
+    const { s } = setup();
+    const text = fixture('ing.csv').toString('utf8');
+    const parsed = parseCsv(text, previewCsv(text).suggestedMapping!);
+    expect(s.bank.import(parsed)).toMatchObject({ imported: 3, duplicates: 0 });
+    expect(s.bank.import(parsed)).toMatchObject({ imported: 0, duplicates: 3 });
+    expect(s.bank.listAccounts()[0]!.iban).toBe('NL91ABNA0417164300');
+  });
+
+  it('koppelt automatisch op bedrag + factuurnummer en leert het IBAN van de klant', () => {
+    const { s, klant, aannemer } = setup();
+    s.relations.update(klant.id, { iban: null });
+    const inv = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-01', lines: [{ description: 'Stucwerk', quantity: 1, unitPrice: 77391, vatCode: 'hoog' }] }).id);
+    expect(inv.total).toBe(93643);
+    // tweede open factuur met hetzelfde bedrag, andere klant: het nummer moet de doorslag geven
+    s.invoices.finalize(s.invoices.createDraft({ relationId: aannemer.id, invoiceDate: '2026-09-02', lines: [{ description: 'Stucwerk', quantity: 1, unitPrice: 77391, vatCode: 'hoog' }] }).id);
+    const text = fixture('ing.csv').toString('utf8');
+    s.bank.import(parseCsv(text, previewCsv(text).suggestedMapping!));
+    const r = s.matching.autoMatch('2026-09-30');
+    expect(r.matched).toBe(1);
+    expect(s.invoices.get(inv.id).status).toBe('betaald');
+    expect(s.relations.get(klant.id).iban).toBe('NL44RABO0123456789');
+    expect(s.ledger.balance(ACCOUNTS.bank)).toBe(93643);
+  });
+
+  it('twijfelgevallen worden niet automatisch gekoppeld', () => {
+    const { s, klant, aannemer } = setup();
+    for (const rel of [klant, aannemer]) {
+      s.invoices.finalize(s.invoices.createDraft({ relationId: rel.id, invoiceDate: '2026-09-01', lines: [{ description: 'x', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
+    }
+    s.relations.update(klant.id, { iban: null });
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-10', amount: 12100, description: 'betaling', counterName: 'Onbekend' }] });
+    expect(s.matching.autoMatch('2026-09-30').matched).toBe(0);
+    const t = s.bank.list({ status: 'nieuw' })[0]!;
+    expect(s.matching.suggest(t).filter((x) => x.kind === 'factuur')).toHaveLength(2);
+  });
+
+  it('boekt kosten met BTW-splitsing en leert de categorie', () => {
+    const { s } = setup();
+    s.bank.import({
+      source: 'csv',
+      warnings: [],
+      transactions: [
+        { date: '2026-09-16', amount: -6500, description: 'Tanken', counterName: 'SHELL STATION' },
+        { date: '2026-10-16', amount: -7260, description: 'Tanken', counterName: 'SHELL STATION' },
+      ],
+    });
+    const [later, first] = s.bank.list();
+    s.bank.bookToAccount(first!.id, { account: 'WBedAutBra', vatCode: 'hoog' });
+    expect(s.ledger.balance('WBedAutBra')).toBe(5372);
+    expect(s.ledger.balance(ACCOUNTS.btwVoorbelasting)).toBe(1128);
+    expect(s.ledger.balance(ACCOUNTS.bank)).toBe(-6500);
+    const suggestion = s.matching.suggest(later!).find((x) => x.kind === 'rekening');
+    expect(suggestion).toMatchObject({ account: 'WBedAutBra', vatCode: 'hoog' });
+    // ongedaan maken via tegenboeking
+    s.bank.unmatch(first!.id, '2026-09-17');
+    expect(s.bank.get(first!.id).status).toBe('nieuw');
+    expect(s.ledger.balance('WBedAutBra')).toBe(0);
+  });
+
+  it('bonnetje eerst, bank later: koppelt aan de inkoopfactuur', () => {
+    const { s } = setup();
+    const p = s.quick.recordExpense({ date: '2026-09-02', supplierName: 'Gamma Utrecht', supplierReference: 'Bon 4411', description: 'Verf', categoryKey: 'materiaal', grossAmount: 3025, vatCode: 'hoog', paidWith: 'bank' });
+    expect(p.status).toBe('open');
+    s.bank.import({ source: 'mt940', warnings: [], transactions: [{ date: '2026-09-02', amount: -3025, description: 'Bon 4411 verf', counterName: 'Gamma Utrecht' }] });
+    expect(s.matching.autoMatch().matched).toBe(1);
+    expect(s.purchases.get(p.id).status).toBe('betaald');
+    expect(s.ledger.balance(ACCOUNTS.crediteuren)).toBe(0);
+  });
+
+  it('koppelt een uitgaande terugbetaling aan een open creditfactuur', () => {
+    const { s, klant } = setup();
+    const original = s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-01', lines: [{ description: 'x', quantity: 1, unitPrice: 10000, vatCode: 'hoog' }] }).id);
+    s.invoices.registerPayment(original.id, { amount: original.total!, date: '2026-09-03' });
+    const credit = s.invoices.finalize(s.invoices.createCreditNote(original.id).id);
+    expect(credit.open_amount).toBe(-12100);
+    s.bank.import({ source: 'csv', warnings: [], transactions: [{ date: '2026-09-10', amount: -12100, description: `Terugbetaling ${credit.number}`, counterName: klant.name, counterIban: klant.iban }] });
+    const transaction = s.bank.list({ status: 'nieuw' })[0]!;
+    expect(s.matching.suggest(transaction)[0]).toMatchObject({ kind: 'factuur', invoiceId: credit.id });
+    s.bank.matchInvoice(transaction.id, credit.id);
+    expect(s.invoices.get(credit.id).status).toBe('betaald');
+    expect(s.bank.get(transaction.id).matched_invoice_id).toBe(credit.id);
+    expect(s.ledger.balance(ACCOUNTS.debiteuren)).toBe(0);
+  });
+
+  it('privé betaald en beginsaldo', () => {
+    const { s } = setup();
+    s.quick.recordExpense({ date: '2026-09-02', description: 'Telefoon', categoryKey: 'telefoon', grossAmount: 2420, vatCode: 'hoog', paidWith: 'prive' });
+    expect(s.ledger.balance(ACCOUNTS.priveStortingen)).toBe(-2420);
+    s.bank.setOpeningBalance(s.bank.listAccounts()[0]!.id, 250000, '2026-01-01');
+    expect(s.dashboard.get('2026-09-30').bank.ledgerBalance).toBe(250000);
+  });
+});
+
+describe('Revolut', () => {
+  const text = () => fixture('revolut.csv').toString('utf8');
+
+  it('herkent de export: alleen voltooid, boekdatum, kosten apart, eindsaldo', () => {
+    const preview = previewCsv(text());
+    expect(preview.detectedBank).toBe('Revolut');
+    const r = parseCsv(text(), preview.suggestedMapping!);
+    expect(r.transactions.map((t) => [t.date, t.amount, t.description])).toEqual([
+      ['2026-01-02', 10000, 'Money added via IDEAL'],
+      ['2026-01-04', -2000, 'Vercel'],
+      ['2026-01-04', -35, 'Kosten: Vercel'],
+      ['2026-01-05', -2500, 'Supabase'],
+      ['2026-01-05', -2500, 'Supabase'],
+    ]);
+    expect(r.transactions[2]!.counterName).toBe('Revolut');
+    // teruggedraaid en in behandeling niet; eindsaldo = saldo na de laatste voltooide euro-regel
+    const sum = r.transactions.reduce((n, t) => n + t.amount, 0);
+    expect(r.balances).toEqual([{ ownIban: null, date: '2026-01-05', amount: 2965 }]);
+    expect(sum).toBe(2965);
+    expect(r.warnings).toEqual([
+      "1 regel in een andere valuta overgeslagen: de app boekt alleen euro's",
+      '1 betaling is nog in behandeling: die komen mee met een volgende export',
+    ]);
+    expect(r.bank).toBe('Revolut');
+  });
+
+  it('komt op de rekening Revolut, niet op de eerste rekening; opnieuw inlezen geeft geen dubbele', () => {
+    const { s } = setup();
+    const knab = s.bank.ensureDefaultAccount();
+    s.bank.updateAccount(knab.id, { name: 'Knab zakelijk', iban: 'NL68KNAB0123456789' });
+    const parsed = () => parseCsv(text(), previewCsv(text()).suggestedMapping!);
+    const first = s.bank.import(parsed());
+    const revolut = s.bank.listAccounts().find((a) => a.name === 'Revolut')!;
+    expect(revolut).toBeDefined();
+    expect(revolut.id).not.toBe(knab.id);
+    expect(revolut.is_pot).toBe(0);
+    expect(first.periods).toEqual([{ bankAccountId: revolut.id, from: '2026-01-02', to: '2026-01-05' }]);
+    expect(s.bank.list().filter((t) => t.bank_account_id === knab.id)).toHaveLength(0);
+    const again = s.bank.import(parsed());
+    expect(again.imported).toBe(0);
+    expect(again.duplicates).toBe(5);
+    expect(s.bank.listAccounts().filter((a) => a.name === 'Revolut')).toHaveLength(1);
+  });
+
+  it('nieuwe administratie: de lege standaardrekening wordt Revolut', () => {
+    const { s } = setup();
+    const def = s.bank.ensureDefaultAccount();
+    s.bank.import(parseCsv(text(), previewCsv(text()).suggestedMapping!));
+    expect(s.bank.listAccounts().map((a) => [a.id, a.name])).toEqual([[def.id, 'Revolut']]);
+  });
+});
+
+/**
+ * Exportbestanden zoals de banken ze leveren (#459): de indeling komt uit openbare voorbeelden en documentatie
+ * (Knab-export met een regel "KNAB EXPORT" erboven, ook de variant zonder die regel en met Referentie en
+ * Boekdatum; het maandafschrift van Revolut Business). Bedragen, namen en rekeningnummers zijn verzonnen.
+ */
+describe('exportbestanden van de bank zelf', () => {
+  it('Knab met de regel "KNAB EXPORT" erboven: herkend en goed gelezen', () => {
+    const text = fixture('knab.csv').toString('utf8');
+    const preview = previewCsv(text);
+    expect(preview.detectedBank).toBe('Knab');
+    const r = parseCsv(text, preview.suggestedMapping!);
+    expect(r.warnings).toEqual([]);
+    expect(r.transactions.map((t) => [t.date, t.amount, t.counterName, t.counterIban, t.ownIban, t.description])).toEqual([
+      ['2026-09-24', -9075, 'Drukkerij Voorbeeld BV', 'NL20INGB0001234567', 'NL68KNAB0123456789', 'Factuur 563561'],
+      ['2026-09-20', 121000, 'Familie Jansen', 'NL44RABO0123456789', 'NL68KNAB0123456789', 'Factuur 2026-0001'],
+    ]);
+    expect(detectFormat('knab.csv', text)).toBe('csv');
+  });
+
+  it('Knab zonder die regel en met de kolommen Referentie en Boekdatum: ook herkend', () => {
+    const text = fixture('knab-zonder-kop.csv').toString('utf8');
+    const preview = previewCsv(text);
+    expect(preview.detectedBank).toBe('Knab');
+    expect(parseCsv(text, preview.suggestedMapping!).transactions[0]).toMatchObject({ date: '2026-09-24', amount: -9075 });
+  });
+
+  it('een eerste regel met één gevulde cel gaat er alleen af als er een kopregel onder staat', () => {
+    expect(previewCsv('Datum;Bedrag;Omschrijving\n01-09-2026;12,50;Koffie\n').headers).toEqual(['Datum', 'Bedrag', 'Omschrijving']);
+    expect(previewCsv('Mijn export\nDatum;Bedrag;Omschrijving\n01-09-2026;12,50;Koffie\n').headers).toEqual(['Datum', 'Bedrag', 'Omschrijving']);
+  });
+
+  it('Revolut Business: herkend, kosten apart, alleen euro, eindsaldo en tegenrekening', () => {
+    const text = fixture('revolut-business.csv').toString('utf8');
+    const preview = previewCsv(text);
+    expect(preview.detectedBank).toBe('Revolut');
+    const r = parseCsv(text, preview.suggestedMapping!);
+    expect(r.bank).toBe('Revolut');
+    expect(r.transactions.map((t) => [t.date, t.amount, t.counterIban])).toEqual([
+      ['2026-09-01', 50000, null],
+      ['2026-09-04', -1850, null],
+      ['2026-09-04', -35, null],
+      ['2026-09-05', -9075, 'NL20INGB0001234567'],
+    ]);
+    expect(r.transactions[3]!.description).toBe('To Drukkerij Voorbeeld BV Factuur 563561');
+    expect(r.warnings).toEqual(['1 regel in een andere valuta overgeslagen: de app boekt alleen euro\'s']);
+    expect(r.balances).toEqual([{ ownIban: null, date: '2026-09-05', amount: 39040 }]);
+  });
+
+  it('Revolut Business met State en datums in de tijdzone van het account: alleen COMPLETED', () => {
+    const text = [
+      'Date started (Europe/Amsterdam),Date completed (Europe/Amsterdam),ID,Type,State,Description,Reference,Payer,Card number,Orig currency,Orig amount,Payment currency,Amount,Fee,Balance,Account,Beneficiary IBAN',
+      '2026-09-03,2026-09-04,id1,CARD_PAYMENT,COMPLETED,Vercel,,,1234,EUR,-18.50,EUR,-18.50,0.00,481.50,Main EUR,',
+      '2026-09-05,,id2,CARD_PAYMENT,PENDING,Shell,,,1234,EUR,-60.00,EUR,-60.00,0.00,,Main EUR,',
+    ].join('\n');
+    const preview = previewCsv(text);
+    expect(preview.detectedBank).toBe('Revolut');
+    const r = parseCsv(text, preview.suggestedMapping!);
+    expect(r.transactions.map((t) => t.amount)).toEqual([-1850]);
+    expect(r.warnings[0]).toMatch(/nog in behandeling/);
+  });
+});

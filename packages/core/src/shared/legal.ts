@@ -1,0 +1,55 @@
+/**
+ * Juridische teksten die in de app getoond worden. De volledige teksten staan op de website
+ * (site/voorwaarden.html en site/privacy.html). Verhoog TERMS_VERSION bij een inhoudelijke wijziging:
+ * gebruikers moeten dan opnieuw akkoord geven.
+ */
+export const TERMS_VERSION = '2026-10-13';
+export const TERMS_URL = 'https://boekhoudenvoorniks.nl/voorwaarden.html';
+/** De voorwaarden als PDF, om te bewaren (artikel 8.3). */
+export const TERMS_PDF_URL = 'https://boekhoudenvoorniks.nl/voorwaarden.pdf';
+export const PRIVACY_URL = 'https://boekhoudenvoorniks.nl/privacy.html';
+export const SOURCE_URL = 'https://github.com/shipdocs/boekhoudenvoorniks';
+/** Vragen en feedback: gewoon per mail (GitHub-issues zijn voor ontwikkelaars). */
+export const FEEDBACK_EMAIL = 'info@shipdocs.app';
+export const feedbackMailto = (version: string) =>
+  `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(`Vraag over BoekhoudenVoorNiks ${version}`.trim())}&body=${encodeURIComponent(`\n\n\n(BoekhoudenVoorNiks ${version})`)}`;
+export const LICENSE_NAME = 'GNU Affero General Public License v3.0 of later (AGPL-3.0-or-later)';
+
+export const TERMS_SUMMARY: string[] = [
+  'BoekhoudenVoorNiks is gratis software, geleverd zoals hij is, zonder garantie. Met een abonnement (alleen voor ondernemers) steun je de ontwikkeling en krijg je de extra functies, nu de app voor Android, de uitwisseling met je boekhouder en de online hulp bij categorievoorstellen: de eerste 4 maanden gratis, daarna per maand opzegbaar (artikel 8). Wij zijn niet aansprakelijk voor schade (artikel 9); bij een storing lossen we het op, en anders een maand gratis.',
+  'Jij blijft zelf verantwoordelijk voor je administratie en je belastingaangiften. Controleer de bedragen voordat je ze overneemt; de software geeft geen fiscaal advies.',
+  'Je administratie staat alleen op je eigen computer. Maak regelmatig een back-up; je bent zelf verantwoordelijk voor de bewaarplicht van 7 jaar.',
+  'Wij ontvangen geen gegevens uit je administratie. Alleen wat jij zelf verstuurt (e-mail, koppelingen die je aanzet, een export naar je boekhouder) gaat naar buiten. Voor een abonnement bewaren wij alleen je e-mailadres, je bedrijfsgegevens voor de factuur en de betaalgegevens van Mollie. Vraag je het gratis bonnen-adres aan, dan staat de mail die je daarheen stuurt op onze mailserver tot de app hem ophaalt (zie de privacyverklaring).',
+];
+
+/**
+ * Toestemming voor het bonnen-adres op post.boekhoudenvoorniks.nl (#450): apart van de voorwaarden en alleen
+ * gevraagd bij het aanvragen. Wie het niet aanvraagt, krijgt niets nieuws te zien. Verhoog de versie bij een
+ * inhoudelijke wijziging; de server bewaart met welke versie iemand akkoord ging.
+ */
+export const BONNEN_CONSENT_VERSION = '2026-10-17';
+/** Zo lang staat mail op het bonnen-adres hooguit (vanaf binnenkomst); daarna verwijderen de app en de mailserver hem. */
+export const BONNEN_BEWAARDAGEN = 60;
+export const BONNEN_CONSENT: string[] = [
+  'Het bonnen-adres is gratis en alleen om bonnen en facturen te ontvangen. Versturen kan er niet mee.',
+  'Wij bewaren je e-mailadres, je bedrijfsnaam, je KvK-nummer (als je het invult) en het nummer van je administratie. Niets uit je boekhouding.',
+  'Mail die naar je bonnen-adres gaat, staat op onze eigen mailserver in Duitsland tot de app hem ophaalt, en hooguit 60 dagen na binnenkomst. Haalt de app hem niet op, dan krijg je na 30 dagen een mail. Wij kijken er niet in.',
+  'Je kunt het bonnen-adres altijd stoppen in de app. Het adres ontvangt dan meteen niets meer en wordt na 30 dagen met alle mail verwijderd.',
+];
+
+export const VAT_DISCLAIMER =
+  'Deze berekening is gemaakt op basis van je eigen boekingen. Controleer de bedragen voordat je ze overneemt in je aangifte; jij blijft verantwoordelijk voor de juistheid.';
+
+/**
+ * Alles wat de app voor de inkomstenbelasting uitrekent, moet de gebruiker laten controleren door een
+ * boekhouder of accountant. Dat zeggen we overal waar een IB-bedrag staat, en eenmaal per jaar
+ * vragen we om te bevestigen dat de gebruiker dat begrijpt.
+ */
+export const ACCOUNTANT_CHECK_TITLE = 'Laat dit altijd controleren door een boekhouder of accountant';
+
+export const ACCOUNTANT_CHECK_REASONS: string[] = [
+  'De regels voor ondernemers veranderen elk jaar, soms halverwege. Een boekhouder kent de nieuwste regels; deze app loopt daar misschien achter.',
+  'De software kan fouten bevatten, en de uitkomst hangt af van wat jij hebt ingevoerd en gekozen. Een kleine vergissing kan veel geld kosten.',
+  'De app kent alleen je bedrijf. Je partner, je huis, ander inkomen, spaargeld en persoonlijke aftrekposten tellen ook mee.',
+  'Jij bent verantwoordelijk voor je aangifte. Een controle door een deskundige voorkomt naheffingen en boetes, en levert vaak meer aftrek op dan het kost.',
+];

@@ -1,0 +1,39 @@
+import { test, expect, startDemo, nav, acceptTerms, onboard } from './fixtures';
+
+test.use({ viewport: { width: 1024, height: 680 } });
+
+test('kleiner laptopscherm: geen scherm schuift opzij', async ({ page }) => {
+  test.setTimeout(90_000);
+  await startDemo(page);
+  const overflow: string[] = [];
+  for (const s of ['Vandaag', 'Werk & facturen', 'Klussen', 'Aankopen & bonnetjes', 'Klanten', 'Bank', 'Belasting', 'Hoe gaat het?', 'Instellingen']) {
+    await nav(page, s);
+    await acceptTerms(page);
+    await page.waitForLoadState('networkidle');
+    // breder dan het venster = de gebruiker moet horizontaal schuiven
+    const wide = await page.evaluate(() => {
+      const main = document.querySelector('main')!;
+      const out = [...main.querySelectorAll<HTMLElement>('*')]
+        .filter((el) => el.getBoundingClientRect().right > window.innerWidth + 2 && getComputedStyle(el).position !== 'fixed' && !el.closest('.lines-scroll'))
+        .slice(0, 3)
+        .map((el) => `${el.tagName.toLowerCase()}.${el.className}`.slice(0, 60));
+      return { scroll: document.documentElement.scrollWidth > window.innerWidth + 2 || main.scrollWidth > main.clientWidth + 2, out };
+    });
+    if (wide.scroll || wide.out.length) overflow.push(`${s}: ${wide.out.join(', ')}`);
+    // het venster zelf mag nooit verticaal schuiven: dan schuift de hele app (menu en al) naar een witte pagina (#428)
+    const tall = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 2 || document.body.scrollHeight > window.innerHeight + 2);
+    if (tall) overflow.push(`${s}: het venster zelf schuift verticaal`);
+  }
+  expect(overflow, 'schermen die breder zijn dan het venster, of het venster zelf laten schuiven').toEqual([]);
+});
+
+test('venster "Aankoop toevoegen" schuift niet horizontaal, ook niet met een lange btw-keuze', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await onboard(page);
+  await nav(page, 'Aankopen & bonnetjes');
+  await page.getByRole('button', { name: 'Bonnetje zonder foto' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Aankoop toevoegen' });
+  await expect(dlg).toBeVisible();
+  const { client, scroll } = await dlg.evaluate((m) => ({ client: m.clientWidth, scroll: m.scrollWidth }));
+  expect(scroll, 'geen horizontale schuifbalk in het venster').toBeLessThanOrEqual(client);
+});

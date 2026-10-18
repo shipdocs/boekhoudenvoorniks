@@ -1,0 +1,7 @@
+/**
+ * Online hulp bij categorievoorstellen (JEV via de assistent-Worker, die niet in deze repository staat).
+ * Aan sinds 0.7.4. Zet op false als de assistent-Worker uit moet en de
+ * instelling niet te zien mag zijn; de kill switch van de Worker (ENABLED) is de snelle weg. Uit = de instelling is onzichtbaar, niet aan te zetten,
+ * en een eerder aangezette instelling wordt genegeerd. Een object, zodat de tests het kunnen omzetten.
+ */
+export const ONLINE_HELP = { available: true };

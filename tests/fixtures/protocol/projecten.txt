@@ -1,0 +1,23 @@
+== antwoord-wacht ==
+{"ok":true,"soort":"wijziging","entiteit":"project","uuid":"7c9e6679-7425-40de-944b-e07fc1f90ae7","revisie":1,"uitkomst":"wacht"}
+
+== fout-project-onbekend ==
+{"ok":false,"fout":"project-onbekend"}
+
+== fout-wachtrij-vol ==
+{"ok":false,"fout":"wachtrij-vol"}
+
+== fout-klus-gekoppeld ==
+`fout: "klus-gekoppeld"`
+
+== veld-titel ==
+| `titel` | titel |
+
+== veld-datums ==
+| `startdatum`, `einddatum` | startdatum, einddatum |
+
+== veld-gearchiveerd ==
+| `gearchiveerd` | gearchiveerd | `0` of `1` |
+
+== nooit-verwijderd ==
+Een rij wordt **nooit verwijderd**
