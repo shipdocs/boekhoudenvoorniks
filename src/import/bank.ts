@@ -9,7 +9,8 @@ import { ACCOUNTS, SALES_ACCOUNTS } from '../core-ledger/accounts';
 import type { InvoiceService } from '../documents/invoices';
 import type { PurchaseService } from '../documents/purchases';
 import { businessPct, type BankCategoriePayload } from '../core-ledger/rules';
-import { businessShareFor, setBusinessShare } from '../intake/business-share';
+import { businessShareFor, businessSharePartner, setBusinessShare } from '../intake/business-share';
+import { privateAccountsIn, vofSetup } from '../closing/profit-allocation';
 import type { EventService } from '../core-ledger/events';
 import type { RelationsService } from '../relations/relations';
 import { EU_COUNTRIES, PURCHASE_VAT_RATES, SALES_VAT_RATES, countryCode, customerVatSituation, isPurchaseVatCode, isSalesVatCode, reverseChargeRate, suggestedSalesVat, vatNumberMatchesCountry, type SalesVatCode } from '../shared/vat';
@@ -247,6 +248,8 @@ export interface BookToAccountInput {
    * is opgegeven, anders 100. Wordt onthouden voor deze tegenpartij.
    */
   businessPct?: number;
+  /** vof met vennoten: van welke vennoot het privédeel is (bij een zakelijk deel onder 100%) */
+  partnerNo?: number | null;
 }
 
 export interface SaleInput {
@@ -1719,8 +1722,10 @@ export class BankService {
       const account = target.category === 'omzet' && isSalesVatCode(vatCode) ? SALES_ACCOUNTS[vatCode]?.revenue ?? target.rgs_code : target.rgs_code;
       // Hetzelfde zakelijke deel bij aankoop en terugbetaling van kosten of bedrijfsmiddelen.
       const expense = target.category === 'kosten' || (target.category === 'activa' && (t.amount < 0 || target.rgs_code === ACCOUNTS.inventaris || target.rgs_code === ACCOUNTS.vervoermiddelen));
-      if (input.businessPct !== undefined && expense && t.counter_name) setBusinessShare(this.db, t.counter_name, input.businessPct);
+      if (input.businessPct !== undefined && expense && t.counter_name) setBusinessShare(this.db, t.counter_name, input.businessPct, input.partnerNo);
       const pct = expense ? businessPct(input.businessPct ?? businessShareFor(this.db, t.counter_name)) : 100;
+      // vof met vennoten: het privédeel gaat naar de gekozen (of bij deze tegenpartij onthouden) vennoot
+      const privateAccount = pct < 100 && vofSetup(this.db) ? privateAccountsIn(this.db, input.partnerNo ?? businessSharePartner(this.db, t.counter_name)).drawings : undefined;
       const payload: BankCategoriePayload = {
         bankTransactionId: txId,
         date: t.transaction_date,
@@ -1733,6 +1738,7 @@ export class BankService {
         relationId,
         description,
         ...(expense && (pct < 100 || input.businessPct !== undefined) ? { businessPct: pct } : {}),
+        ...(privateAccount ? { privateAccount } : {}),
         ...(input.channel?.trim() ? { channel: input.channel.trim().slice(0, 60) } : {}),
         // KOR: geen aftrek van voorbelasting op kosten
         ...(target.category !== 'omzet' && korActive(this.db) ? { noVatDeduction: true } : {}),
@@ -1747,7 +1753,7 @@ export class BankService {
    * Andere categorie of btw-keuze voor een al geboekte transactie (#19): de gebeurtenis wordt
    * vervangen, de oude post krijgt een tegenboeking en de nieuwe wordt opnieuw gecompileerd.
    */
-  reclassify(txId: number, change: { account: string; vatCode?: string; vatRate?: number; description?: string; businessPct?: number }, reason = 'andere categorie'): number {
+  reclassify(txId: number, change: { account: string; vatCode?: string; vatRate?: number; description?: string; businessPct?: number; partnerNo?: number | null }, reason = 'andere categorie'): number {
     const t = this.get(txId);
     if (t.status !== 'gematcht' || !t.matched_journal_entry_id || t.matched_invoice_id || t.matched_purchase_invoice_id) {
       throw new ValidationError('Alleen een betaling waar je zelf een soort kosten bij koos, kun je zo aanpassen');
@@ -1776,6 +1782,10 @@ export class BankService {
       const pct = businessPct(change.businessPct);
       if (pct < 100) payload.businessPct = pct;
       else payload.businessPct = pct;
+    }
+    // Ook een andere categorie of btw-keuze behoudt het privédeel van de oude gebeurtenis.
+    if (businessPct(payload.businessPct) < 100 && vofSetup(this.db) && (change.partnerNo != null || !payload.privateAccount)) {
+      payload.privateAccount = privateAccountsIn(this.db, change.partnerNo ?? businessSharePartner(this.db, t.counter_name)).drawings;
     }
     return tx(this.db, () => {
       const { entryId } = this.events.replace(event.id, { type: 'bank-categorie', payload }, reason);

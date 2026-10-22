@@ -12,6 +12,7 @@ import { PURCHASE_VAT_RATES, SALES_VAT_RATES, isPurchaseVatCode, isReverseCharge
 import { assertIsoDate, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
+import { privateAccountsIn } from '../closing/profit-allocation';
 import type { BookedPayments } from '../documents/booked-payment';
 import type { DuplicateMatch, ManualPurchase } from '../intake/intake';
 
@@ -33,6 +34,8 @@ export interface ExpenseInput {
   jobId?: number | null;
   /** zakelijk deel in procenten (1–100); weglaten = wat eerder voor deze leverancier gold, anders 100 */
   businessPct?: number;
+  /** vof met vennoten: van welke vennoot het privé is (privé betaald of een privédeel) */
+  partnerNo?: number | null;
   /** "Toch toevoegen": de gebruiker zag dat er al een aankoop of bon staat die erop lijkt (#224) */
   allowDuplicate?: boolean;
 }
@@ -107,13 +110,14 @@ export class QuickActions {
         attachmentPath: input.attachmentPath ?? null,
         jobId: input.jobId ?? null,
         businessPct: input.businessPct,
+        ...(input.partnerNo != null ? { partnerNo: input.partnerNo } : {}),
         lines: [{ account: category.account, netAmount: net, vatCode: input.vatCode, vatAmount: vat, ...(vatRate ? { vatRate } : {}), description: input.description }],
       });
       if (input.paidWith !== 'bank') {
         this.purchases.registerPayment(purchase.id, {
           amount: purchase.total,
           date: input.date,
-          moneyAccount: input.paidWith === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen,
+          moneyAccount: input.paidWith === 'kas' ? ACCOUNTS.kas : privateAccountsIn(this.db, input.partnerNo).contributions,
         });
       }
       return this.purchases.get(purchase.id);
@@ -129,8 +133,10 @@ export class QuickActions {
    * Staat er een afschrijving die bij deze aankoop past nog onverwerkt op een eigen rekening (#222), dan
    * kan het alleen met `separate` ("Nee, apart betaald"): die afschrijving hoort dan niet bij deze aankoop.
    */
-  payPurchaseWith(id: number, via: 'prive' | 'kas', opts: { always?: boolean; separate?: boolean } = {}): { paid: PurchaseInvoice[]; skipped: PurchaseInvoice[] } {
+  payPurchaseWith(id: number, via: 'prive' | 'kas', opts: { always?: boolean; separate?: boolean; partnerNo?: number | null } = {}): { paid: PurchaseInvoice[]; skipped: PurchaseInvoice[] } {
     return tx(this.db, () => {
+      // vof met vennoten: privé betaald door welke vennoot (zonder keuze een fout, vóór er iets verandert)
+      const prive = via === 'prive' ? privateAccountsIn(this.db, opts.partnerNo) : null;
       const p = this.purchases.get(id);
       if (p.status !== 'open' || p.open_amount <= 0) throw new ValidationError('Deze rekening staat al op betaald');
       const pending = this.booked?.findPending(p) ?? [];
@@ -144,9 +150,9 @@ export class QuickActions {
       const others = all ? this.purchases.list({ status: 'open' }).filter((x) => x.id !== p.id && x.relation_id === p.relation_id && x.open_amount > 0) : [];
       // de betaling staat al op een eigen rekening, geboekt of nog niet verwerkt: die rekening blijft open
       const skipped = others.filter((x) => !!this.booked?.find(x) || (this.booked?.findPending(x).length ?? 0) > 0);
-      const moneyAccount = via === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen;
+      const moneyAccount = prive ? prive.contributions : ACCOUNTS.kas;
       const paid = [p, ...others.filter((x) => !skipped.includes(x))].map((t) => this.purchases.registerPayment(t.id, { amount: t.open_amount, date: t.invoice_date, moneyAccount }));
-      if (all && skipped.length === 0) this.relations.setPaidWith(p.relation_id!, via);
+      if (all && skipped.length === 0) this.relations.setPaidWith(p.relation_id!, via, prive?.partnerNo ?? null);
       return { paid, skipped };
     });
   }
@@ -172,14 +178,15 @@ export class QuickActions {
   }
 
   /** Geld van de zakelijke kas privé opgenomen, of privé geld in de zaak gestopt. */
-  recordPrivate(direction: 'opname' | 'storting', amount: Cents, date: IsoDate, via: 'kas' | 'bank' = 'kas'): number {
+  recordPrivate(direction: 'opname' | 'storting', amount: Cents, date: IsoDate, via: 'kas' | 'bank' = 'kas', partnerNo?: number | null): number {
     const money = via === 'kas' ? ACCOUNTS.kas : ACCOUNTS.bank;
+    const prive = privateAccountsIn(this.db, partnerNo);
     const signed = direction === 'storting' ? amount : -amount;
     return this.ledger.post({
       date,
-      description: direction === 'opname' ? 'Privé-opname' : 'Privé-storting',
+      description: `${direction === 'opname' ? 'Privé-opname' : 'Privé-storting'}${prive.name ? ` ${prive.name}` : ''}`,
       source: 'handmatig',
-      lines: [signedLine(money, signed)!, signedLine(direction === 'opname' ? ACCOUNTS.priveOpnamen : ACCOUNTS.priveStortingen, -signed)!],
+      lines: [signedLine(money, signed)!, signedLine(direction === 'opname' ? prive.drawings : prive.contributions, -signed)!],
     });
   }
 }

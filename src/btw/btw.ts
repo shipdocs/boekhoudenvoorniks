@@ -1,4 +1,5 @@
 import { accountOpenItems } from '../core-ledger/open-items';
+import { allDrawingsKeys } from '../shared/partners';
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
@@ -9,6 +10,9 @@ import { addDays, periodFor, periodFromKey, today, type IsoDate, type Period } f
 import { runVatChecks, skipKey, type VatCheck } from './checks';
 import { carPrivateUseFromLedger, carPrivateUseEntries, type CarPrivateUse } from './car';
 import { normalizeVatNumber, ValidationError } from '../shared/validation';
+
+/** Privé-opnamen van alle vennoten (zonder vennoten alleen de gewone): het privédeel van verlegde btw telt mee in de grondslag. */
+const DRAWINGS = new Set(allDrawingsKeys());
 
 /**
  * BTW-engine. Leest uitsluitend uit journal_lines (via de BTW-code per regel en de
@@ -299,7 +303,7 @@ export class VatService {
     }[];
     const byEntry = new Map<number, VatDetailLine>();
     for (const r of rows) {
-      const omzet = s.omzet?.includes(r.rgs_code) ? r.net : s.inkoop && r.vat_code !== null && s.inkoop.includes(r.vat_code) && (r.category === 'kosten' || r.category === 'activa' || r.rgs_code === ACCOUNTS.priveOpnamen) ? -r.net : 0;
+      const omzet = s.omzet?.includes(r.rgs_code) ? r.net : s.inkoop && r.vat_code !== null && s.inkoop.includes(r.vat_code) && (r.category === 'kosten' || r.category === 'activa' || DRAWINGS.has(r.rgs_code)) ? -r.net : 0;
       const btw = s.btw?.includes(r.rgs_code) ? r.net * (s.btwSign ?? 1) : 0;
       if (omzet === 0 && btw === 0) continue;
       const line = byEntry.get(r.id) ?? {
@@ -379,7 +383,7 @@ export class VatService {
     const omzetNul = byAccount(ACCOUNTS.omzetNul) + byAccount(ACCOUNTS.omzetVerlegd);
     const omzetVrijgesteld = byAccount(ACCOUNTS.omzetVrijgesteld);
     // 2a: grondslag = kosten/activa-regels met btw-code 'verlegd' (debet, dus −net)
-    const inkoopGrondslag = (code: string) => 0 - rows.filter((r) => r.vat_code === code && (r.category === 'kosten' || r.category === 'activa' || r.rgs_code === ACCOUNTS.priveOpnamen)).reduce((s, r) => s + r.net, 0) || 0;
+    const inkoopGrondslag = (code: string) => 0 - rows.filter((r) => r.vat_code === code && (r.category === 'kosten' || r.category === 'activa' || DRAWINGS.has(r.rgs_code))).reduce((s, r) => s + r.net, 0) || 0;
     const verlegdInkoop = inkoopGrondslag('verlegd');
     const btwVerlegd = byAccount(ACCOUNTS.btwAfdragenVerlegd);
     // buitenland (#16): 3a uitvoer, 3b EU-bedrijven (ICP), 4a/4b verlegde inkoop van buiten/binnen de EU

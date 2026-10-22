@@ -211,7 +211,7 @@ export class InvoiceService {
 
   deleteDraft(id: number): void {
     const inv = this.row(id);
-    if (inv.status !== 'concept') throw new ValidationError('Een verstuurde factuur moet je 7 jaar bewaren en kun je niet verwijderen. Draai hem terug met "Factuur terugdraaien".');
+    if (inv.status !== 'concept') throw new ValidationError('Een verstuurde factuur moet je minstens 7 jaar bewaren en kun je niet verwijderen. Draai hem terug met "Factuur terugdraaien".');
     tx(this.db, () => {
       this.db.prepare('UPDATE quotes SET status = ? WHERE id = ? AND status = ?').run('geaccepteerd', inv.quote_id, 'gefactureerd');
       // werkbonregels komen weer vrij, en de klus is weer "klaar" als er geen andere factuur meer is (#32)

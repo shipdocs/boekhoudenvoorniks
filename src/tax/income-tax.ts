@@ -1,7 +1,9 @@
 import type { Db } from '../db/database';
+import { ownProfitSharePct, partnersActive } from '../shared/partners';
 import type { AppSettings, SettingsService } from '../settings/settings';
 import { periodFor, today, type IsoDate } from '../shared/dates';
 import type { Cents } from '../shared/money';
+import { resultBetween } from '../reports/opening-balance';
 import type { AssetService } from './assets';
 import type { TaxOverviewService } from './overview';
 
@@ -286,26 +288,22 @@ export const NOT_INCLUDED = [
 
 /** Winst (omzet − kosten) volgens het grootboek tussen twee datums, in centen. */
 export function profitBetween(db: Db, from: IsoDate, to: IsoDate): Cents {
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(CASE WHEN a.category = 'omzet' THEN l.credit - l.debit WHEN a.category = 'kosten' THEN l.credit - l.debit END), 0) AS p
-       FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
-       JOIN chart_of_accounts a ON a.id = l.account_id
-       WHERE e.entry_date BETWEEN ? AND ?`,
-    )
-    .get(from, to) as { p: number };
-  return row.p;
+  return resultBetween(db, from, to);
 }
 
 /** Wat de schatting veronderstelt zolang de gebruiker het niet heeft bevestigd. */
-export function assumptionsFor(s: Pick<AppSettings, 'legalForm' | 'ibConfirmed' | 'urencriterium' | 'ibHoursCondition' | 'profitSharePct'>): string[] {
+export function assumptionsFor(s: Pick<AppSettings, 'legalForm' | 'ibConfirmed' | 'urencriterium' | 'ibHoursCondition' | 'profitSharePct'> & Partial<Pick<AppSettings, 'partners' | 'ibPartnerNo' | 'partnerAllocationFromYear'>>): string[] {
   const out: string[] = [];
   if (!s.ibConfirmed) {
     out.push('Je hebt nog niet bevestigd dat je ondernemer voor de inkomstenbelasting bent. De schatting rekent daarom zonder ondernemersaftrek, mkb-winstvrijstelling en KIA. Het urencriterium is een aparte voorwaarde.');
   }
   if (s.urencriterium && !s.ibHoursCondition) out.push('Bevestig ook dat je meer dan de helft van je werktijd aan je onderneming besteedt, of dat de starteruitzondering geldt. Tot dan rekent de schatting zonder aftrek voor zelfstandigen.');
   if (s.legalForm === null) out.push('Je rechtsvorm is niet opgegeven; de schatting gaat uit van een eenmanszaak (of zzp zonder bv).');
-  if (s.legalForm === 'vof') out.push(`Vof of maatschap: de schatting rekent met jouw deel van de winst (${s.profitSharePct}%). De aftrekposten (investeringen, bijtellingen) zijn niet verdeeld; laat je boekhouder dat nakijken.`);
+  if (s.legalForm === 'vof') {
+    const p = { partners: [], ibPartnerNo: 1, partnerAllocationFromYear: null, ...s };
+    const me = partnersActive(p) ? p.partners.find((x) => x.no === p.ibPartnerNo) : undefined;
+    out.push(`Vof of maatschap: de schatting rekent met ${me ? `het deel van ${me.name}` : 'jouw deel'} van de winst (${ownProfitSharePct(p).toLocaleString('nl-NL')}%). De aftrekposten (investeringen, bijtellingen) zijn niet verdeeld; laat je boekhouder dat nakijken.`);
+  }
   return out;
 }
 
@@ -331,7 +329,7 @@ export class IncomeTaxService {
     const y = Number(asOf.slice(0, 4));
     const daysInYear = (Date.UTC(y + 1, 0, 1) - Date.UTC(y, 0, 1)) / 86400000;
     const elapsed = Math.min(daysInYear, Math.max(1, (Date.parse(asOf) - Date.UTC(y, 0, 1)) / 86400000 + 1));
-    const share = s.legalForm === 'vof' ? Math.min(100, Math.max(0, s.profitSharePct)) / 100 : 1;
+    const share = ownProfitSharePct(s) / 100;
     const profitToDate = Math.round(this.profit(year.start, asOf) * share);
     const adj = this.fiscal?.overview.adjustments(y, asOf);
     // afschrijving wordt pas na afloop van het jaar geboekt: de verwachting voor het hele jaar gaat er zo af

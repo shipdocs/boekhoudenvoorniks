@@ -2,6 +2,22 @@
 
 ## Nog niet uitgebracht
 
+## 1.9.0 — vof en maatschap met eigen vermogen per vennoot, en ideeën insturen
+
+Een vof of maatschap houdt nu het eigen vermogen per vennoot bij: privé per vennoot, de winst naar winstaandeel bij de jaarafsluiting, en de balans per vennoot. Op de website stuur je ideeën in en stem je mee. Verder klopt de bewaarplicht in de voorwaarden beter, rekent de KOR-herziening vanaf de ingebruikname en geeft tekstherkenning zonder internet een duidelijke melding.
+
+### Nieuw
+- **Vof en maatschap: eigen vermogen per vennoot.** Bij *Instellingen → Je bedrijf* stel je 2 tot 5 vennoten in, met naam en winstaandeel (samen 100%). De eerste vennoot houdt de rekeningen die er al waren; voor de anderen komen er rekeningen bij met de RGS-codes voor firmant 2 tot en met 5. Kies je bij een betaling *Privé*, dan vraagt de app welke vennoot het was; dat geldt ook bij bonnen, kilometers, het zakelijke deel van een uitgave en een investering die naar privé gaat. Zonder vennoot boekt de app niets privé. Bij de jaarafsluiting gaat de winst naar rato naar elke vennoot, en na het afsluiten ligt die verdeling vast. De balans in de boekhoudermodus toont het eigen vermogen per vennoot. Bij het overstappen en uit een auditfile vul je het beginkapitaal per vennoot in, en de schatting van de inkomstenbelasting rekent met het deel van de vennoot die je kiest. Stel je niets in, dan blijft alles zoals het was. Bij een eenmanszaak of bv verandert er niets.
+- **Ideeën insturen en erop stemmen.** Op de nieuwe pagina [Ideeën en wensen](https://boekhoudenvoorniks.nl/ideeen.html) stuur je zonder account een idee in, of stem je op de ideeën van anderen. Zo zie je wat het meest gevraagd wordt en wat we gaan bouwen. Elk idee lezen we eerst, daarna komt het op de pagina. Laat je je e-mailadres achter, dan krijg je één mail als het idee in een nieuwe versie zit; daarna wissen we je adres. Zet je het vinkje *Jullie mogen contact met me opnemen* aan, dan kunnen we je ook mailen met een vraag over je idee. In de app staat bij *Instellingen → Over* de knop *Idee of wens*.
+
+### Verbeterd
+- **Bewaarplicht: minstens 7 jaar, soms 10.** De app en de voorwaarden zeiden "7 jaar" zonder uitzondering. Voor gegevens over onroerende zaken (zoals een eigen bedrijfspand) en voor verkopen via de Unie- of Invoerregeling geldt 10 jaar, en de termijn begint pas als een gegeven niet meer actueel is. Artikel 6 van de voorwaarden legt dat nu uit, met een link naar de Belastingdienst. Het is een verduidelijking: je hoeft de voorwaarden niet opnieuw te accepteren.
+
+### Opgelost
+- **KOR-herziening: duidelijk voor welke bedrijfsmiddelen de schatting geldt.** De melding over de herziening van btw-aftrek rekende met 5 jaar en een vijfde per jaar, zonder te zeggen dat dat alleen voor roerende bedrijfsmiddelen geldt (zoals een bus, machine of laptop). Voor een pand of grond loopt de herziening over 10 jaar en betaal je per jaar een tiende terug. De melding en de handleiding zeggen dat nu; dat bedrag rekent de app niet uit, laat het je boekhouder doen.
+- **KOR: btw-herziening rekent vanaf de ingebruikname.** Gebruik je de kleineondernemersregeling, dan loopt de herziening van eerder afgetrokken btw op een bedrijfsmiddel over 5 jaar: het jaar van ingebruikname en de 4 jaren daarna. De app rekende die periode vanaf de aanschafdatum; nu vanaf de datum van ingebruikname (heb je die niet apart ingevuld, dan nog de aanschafdatum). Zo sluit het geschatte herzieningsbedrag beter aan op de regels van de Belastingdienst.
+- **Tekstherkenning kiezen zonder internet: een duidelijke melding.** Koos je *Op deze computer* terwijl je geen internet had, dan stond er bij Instellingen alleen "fetch failed", en bij de bon niets. Nu staat er op beide plekken dat downloaden zonder internet nu niet lukt, dat de download later verdergaat waar hij bleef, en dat je foto's tot die tijd zelf invult. Bij de bon staat ook de knop *Opnieuw proberen*.
+
 ## 1.8.1 — bankafschriften van Knab en Revolut Business vanzelf herkend, en Ponto zonder dubbele betalingen
 
 Afschriften inlezen gaat soepeler: Knab- en Revolut Business-CSV worden vanzelf herkend, een onbekend rekeningnummer levert eerst een vraag op, en Ponto en een afschrift over dezelfde dagen geven geen dubbele betalingen meer.

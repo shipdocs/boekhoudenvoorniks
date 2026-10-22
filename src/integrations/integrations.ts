@@ -1,4 +1,6 @@
 import type { Db } from '../db/database';
+import { privateAccountsIn } from '../closing/profit-allocation';
+import { allContributionsKeys } from '../shared/partners';
 import { tx } from '../db/database';
 import type { Ledger, PostLine } from '../core-ledger/ledger';
 import { signedLine } from '../core-ledger/ledger';
@@ -538,7 +540,7 @@ export class IntegrationService {
    *    `bankTransactionId` is de bankregel die hij zag) of 'neutraal-betaaldienst' (het komt nog van de
    *    betaaldienst). Wordt de boeking later teruggedraaid, dan komt de vraag terug.
    */
-  answerQuestion(id: number, answer: SaleAnswer, bankTransactionId?: number): void {
+  answerQuestion(id: number, answer: SaleAnswer, bankTransactionId?: number, partnerNo?: number | null): void {
     tx(this.db, () => {
       const row = this.db.prepare(`SELECT source, reason, order_data, answer, ${OPEN_QUESTION} AS open FROM integration_questions WHERE id = ?`).get(Number(id)) as { source: string; reason: SaleReason; order_data: string; answer: string | null; open: number } | undefined;
       if (!row) throw new ValidationError('Deze vraag bestaat niet (meer)');
@@ -548,7 +550,7 @@ export class IntegrationService {
         void this.db.prepare(`UPDATE integration_questions SET answer = ?, journal_entry_id = ?, answered_at = datetime('now') WHERE id = ?`).run(answer, entryId, Number(id));
       let order = JSON.parse(row.order_data) as ExternalOrder;
       if (answer === 'niet' || answer === 'zelf') return done();
-      if (answer === 'neutraal' || answer === 'neutraal-bank' || answer === 'neutraal-betaaldienst') return done(this.bookNeutral(row.source, order, answer, bankTransactionId));
+      if (answer === 'neutraal' || answer === 'neutraal-bank' || answer === 'neutraal-betaaldienst') return done(this.bookNeutral(row.source, order, answer, bankTransactionId, partnerNo));
       if (answer === 'verkoop') {
         if (this.bookOrManual(row.source, order, [], Number(id)) === 'geboekt') done();
         return;
@@ -571,8 +573,10 @@ export class IntegrationService {
    * Nooit stil via de tussenrekening als er geld op de bank staat dat de betaling kan zijn: dan bleef die
    * bankregel open staan en kwam het geld er een tweede keer in.
    */
-  private bookNeutral(source: string, order: ExternalOrder, answer: NeutralAnswer, bankTransactionId?: number): number {
+  private bookNeutral(source: string, order: ExternalOrder, answer: NeutralAnswer, bankTransactionId?: number, partnerNo?: number | null): number {
     const total = paidTotal(order);
+    // vof met vennoten: het geld is een privé-storting van de vennoot die kocht (zonder keuze een fout)
+    const prive = privateAccountsIn(this.db, partnerNo);
     const description = `Verkoop aan je eigen bedrijf (${order.number}): geen omzet`;
     const found = this.neutralBankRow(order);
     let bank: BankCandidate | null = null;
@@ -587,19 +591,20 @@ export class IntegrationService {
     }
     if (bank?.status === 'gematcht') {
       // zelf al als privé-storting ingedeeld: dan is er niets meer te boeken
+      const keys = allContributionsKeys();
       const asPrivate = this.db
-        .prepare('SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = ? AND a.rgs_code = ?')
-        .get(bank.matched_journal_entry_id, ACCOUNTS.priveStortingen);
+        .prepare(`SELECT 1 FROM journal_lines l JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.journal_entry_id = ? AND a.rgs_code IN (${keys.map(() => '?').join(', ')})`)
+        .get(bank.matched_journal_entry_id, ...keys);
       if (asPrivate && bank.matched_journal_entry_id) return bank.matched_journal_entry_id;
       throw new ValidationError(`De bankbetaling van ${formatEuro(total)} (${bank.transaction_date}) is al geboekt. Zet die boeking eerst terug op 'nieuw' en kies daarna opnieuw.`);
     }
-    if (bank && this.bank) return this.bank.bookToAccount(bank.id, { account: ACCOUNTS.priveStortingen, description });
+    if (bank && this.bank) return this.bank.bookToAccount(bank.id, { account: prive.contributions, description });
     return this.ledger.post({
       date: order.date,
       description,
       source: 'integratie',
       sourceRef: `eigen-verkoop:${source}:${order.externalId}`,
-      lines: [signedLine(ACCOUNTS.tussenrekeningPsp, total)!, signedLine(ACCOUNTS.priveStortingen, -total)!],
+      lines: [signedLine(ACCOUNTS.tussenrekeningPsp, total)!, signedLine(prive.contributions, -total)!],
     });
   }
 

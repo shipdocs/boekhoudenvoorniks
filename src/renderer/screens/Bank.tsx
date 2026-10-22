@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, PartnerSelect, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
 import type { CsvMapping } from '../../import/csv';
 import { isReverseCharge, saleVatText, type PurchaseVatCode, type SalesVatCode } from '../../shared/vat';
 import { selectedBusinessPct } from '../../shared/business-share';
@@ -13,6 +13,7 @@ import { formatEuro } from '../../shared/money';
 import { formatForeign } from '../../shared/currency';
 import { PontoCard } from './PontoDialog';
 import { useNewAccountQuestion } from './NewAccountQuestion';
+import { partnerAccounts, partnersActive } from '../../shared/partners';
 import { STATEMENT_ACCEPT, STATEMENT_EXTENSIONS_TEXT, type NeedsAccount } from '../../shared/statement-files';
 
 /** SQLite-tijdstip (UTC) → lokale datum en tijd, bv. "25 september 2026, 23:10". */
@@ -792,7 +793,7 @@ function CsvMappingDialog({ headers, rows, content, suggested, onClose, onConfir
 }
 
 /** Categoriekeuze in mensentaal (kosten + overige bestemmingen). */
-export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { initial?: string; onPick: (categoryKey: string, vatCode: string, businessPct?: number, vatRate?: 9 | 21) => void; incoming?: boolean; /** betaald bedrag (positief), voor de investeringshint */ amount?: number; /** de betaling: voor het zakelijke deel dat eerder voor deze tegenpartij is opgegeven */ txId?: number }) {
+export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { initial?: string; onPick: (categoryKey: string, vatCode: string, businessPct?: number, vatRate?: 9 | 21, partnerNo?: number) => void; incoming?: boolean; /** betaald bedrag (positief), voor de investeringshint */ amount?: number; /** de betaling: voor het zakelijke deel dat eerder voor deze tegenpartij is opgegeven */ txId?: number }) {
   const { meta } = useApp();
   const share = useLoad(() => (txId !== undefined && !incoming ? api.bank.businessShare(txId) : Promise.resolve(null)), [txId]);
   const [pctInput, setPctInput] = useState<string | null>(null);
@@ -803,6 +804,8 @@ export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { in
   const [vat, setVat] = useState<PurchaseVatCode>(meta.expenseCategories.find((c) => c.key === (initial ?? 'materiaal'))?.defaultVat ?? 'hoog');
   // null = niet aangeraakt: bij een al geboekte betaling blijft dan het eerder gekozen tarief staan
   const [vatRate, setVatRate] = useState<9 | 21 | null>(null);
+  // vof met vennoten: van wie het privédeel is (leeg: de vennoot die bij deze partij onthouden is)
+  const [partnerNo, setPartnerNo] = useState<number | null>(null);
   return (
     <div className="grid">
       <Field label={incoming ? 'Waar was dit geld voor?' : 'Waar was deze betaling voor?'}>
@@ -822,7 +825,8 @@ export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { in
           </span>
         </Field>
       )}
-      <div className="row end"><Button kind="primary" disabled={!pctOk} onClick={() => onPick(cat, vat, selectedBusinessPct(pctInput === null ? null : pctNumber, share.data?.pct), !incoming && isReverseCharge(vat) ? vatRate ?? undefined : undefined)}>Opslaan</Button></div>
+      {txId !== undefined && !incoming && pctOk && pctNumber < 100 && <PartnerSelect label="Van welke vennoot is het privédeel?" hint="leeg: de vennoot die bij deze partij onthouden is" value={partnerNo} onChange={setPartnerNo} />}
+      <div className="row end"><Button kind="primary" disabled={!pctOk} onClick={() => onPick(cat, vat, selectedBusinessPct(pctInput === null ? null : pctNumber, share.data?.pct), !incoming && isReverseCharge(vat) ? vatRate ?? undefined : undefined, pctNumber < 100 && partnerNo !== null ? partnerNo : undefined)}>Opslaan</Button></div>
     </div>
   );
 }
@@ -881,8 +885,26 @@ function purchaseCandidateText(c: PurchaseCandidate): string {
   return `Aankoop ${c.supplier ? `bij ${c.supplier}` : `"${c.description}"`} van ${formatDateNl(c.date)}, ${amount}, ${paid}${c.question ? ', staat op "weet ik nog niet"' : ''}`;
 }
 
+/** Vof of maatschap: kiezen van welke vennoot een privébetaling was (op Vandaag, na "Privé"). */
+export function PartnerChoice({ amount, busy, onPick }: { amount: number; busy: boolean; onPick: (partnerNo: number) => void }) {
+  const { settings } = useApp();
+  const partners = partnersActive(settings) ? settings.partners : [];
+  return (
+    <div className="choice" data-testid="vennoot-kiezen">
+      {partners.map((p) => (
+        <button key={p.no} disabled={busy} onClick={() => onPick(p.no)}>
+          {p.name}
+          <div className="hint">{amount < 0 ? `Komt op de privé-opnamen van ${p.name}` : `Komt op de privé-stortingen van ${p.name}`}</div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function CategorizeTransaction({ id }: { id: number }) {
-  const { go, meta, showInvestmentSaved } = useApp();
+  const { go, meta, showInvestmentSaved, settings } = useApp();
+  // vof of maatschap met vennoten: bij privé kiezen welke vennoot
+  const partners = partnersActive(settings) ? settings.partners : [];
   const { run, busy } = useAction();
   // de betaling zelf ophalen, niet uit de lijst van de 500 nieuwste: een oudere (bv. genegeerde) betaling uit Zoeken bleef anders een leeg scherm (#441)
   const txs = useLoad(() => api.bank.transaction(id), [id]);
@@ -969,7 +991,8 @@ export function CategorizeTransaction({ id }: { id: number }) {
             Meestal is dit privé: je betaalt jezelf. Bij "weet ik nog niet" blijft het open staan en houdt het je btw-aangifte tegen.
           </div>
           <div className="row" style={{ marginTop: 8 }}>
-            <Button small kind="primary" disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'prive'))}>Privé</Button>
+            {partners.length === 0 && <Button small kind="primary" disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'prive'))}>Privé</Button>}
+            {partners.map((p) => <Button key={`own-${p.no}`} small kind="primary" disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'prive', p.no))}>Privé van {p.name}</Button>)}
             <Button small disabled={busy} onClick={() => void done(api.bank.settleOwnCompany(t.id, 'vraag'))}>Weet ik nog niet: vraag mijn boekhouder</Button>
             <span className="small muted">
               {ownCompany.data.documentId || ownCompany.data.purchaseId
@@ -1075,7 +1098,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
           )}
           {recat && (
             <div style={{ marginTop: 12 }}>
-              <CategoryPicker txId={t.id} amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode, businessPct, vatRate) => void done(api.bank.reclassify(t.id, categoryKey, vatCode, businessPct, vatRate), inv(categoryKey, vatCode))} />
+              <CategoryPicker txId={t.id} amount={Math.abs(t.amount)} onPick={(categoryKey, vatCode, businessPct, vatRate, partnerNo) => void done(api.bank.reclassify(t.id, categoryKey, vatCode, businessPct, vatRate, partnerNo), inv(categoryKey, vatCode))} />
               <p className="small muted">De app draait de oude keuze terug en verwerkt de nieuwe. Had je de btw-aangifte al gedaan? Dan komt het verschil vanzelf in je volgende aangifte.</p>
             </div>
           )}
@@ -1165,12 +1188,23 @@ export function CategorizeTransaction({ id }: { id: number }) {
                       onPick={(categoryKey, vatCode) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode }))}
                     />
                     <p className="small muted">Kies dezelfde categorie en btw als bij de oorspronkelijke aankoop.</p>
-                    <Button small disabled={busy} onClick={() => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'prive'))}>
+                    {partners.length === 0 && <Button small disabled={busy} onClick={() => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'prive'))}>
                       Het was een privé-aankoop
-                    </Button>
+                    </Button>}
+                    {partners.map((p) => (
+                      <Button key={`prive-${p.no}`} small disabled={busy} onClick={() => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'prive', { partnerNo: p.no }))}>
+                        Privé-aankoop van {p.name}
+                      </Button>
+                    ))}
                   </div>
                 )}
-                {['omzet', 'rente', 'prive-storting', 'btw', 'overboeking', 'onbekend'].map((key) => meta.otherDestinations.find((d) => d.key === key)!).map((d) => (
+                {partners.map((p) => (
+                  <button key={`storting-${p.no}`} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: partnerAccounts(p.no).contributions, description: `Privé gestort door ${p.name}` }))}>
+                    Privé gestort door {p.name}
+                    <div className="hint">Eigen geld van {p.name} in de zaak: geen omzet</div>
+                  </button>
+                ))}
+                {['omzet', 'rente', ...(partners.length === 0 ? ['prive-storting'] : []), 'btw', 'overboeking', 'onbekend'].map((key) => meta.otherDestinations.find((d) => d.key === key)!).map((d) => (
                   <Fragment key={d.key}>
                     <button disabled={busy} className={d.key === 'omzet' && sale ? 'selected' : ''} aria-expanded={d.key === 'omzet' ? sale : undefined} onClick={() => (d.key === 'omzet' ? setSale(!sale) : void done(api.bank.book(t.id, { account: d.account })))}>
                       {d.label}
@@ -1204,11 +1238,17 @@ export function CategorizeTransaction({ id }: { id: number }) {
                     const s = (suggestions.data ?? []).find((x) => x.kind === 'rekening');
                     return s && s.kind === 'rekening' ? (meta.expenseCategories.find((c) => c.account === s.account && !c.key.startsWith('eigen-')) ?? meta.expenseCategories.find((c) => c.account === s.account))?.key : undefined;
                   })()}
-                  onPick={(categoryKey, vatCode, businessPct, vatRate) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode, businessPct, vatRate }), inv(categoryKey, vatCode))}
+                  onPick={(categoryKey, vatCode, businessPct, vatRate, partnerNo) => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'zakelijk', { categoryKey, vatCode, businessPct, vatRate, ...(partnerNo !== undefined ? { partnerNo } : {}) }), inv(categoryKey, vatCode))}
                 />
               </div>
               <div className="choice" style={{ marginTop: 12 }}>
-                <button disabled={busy} onClick={() => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'prive'))}>Nee, dit was privé</button>
+                {partners.length === 0 && <button disabled={busy} onClick={() => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'prive'))}>Nee, dit was privé</button>}
+                {partners.map((p) => (
+                  <button key={`prive-${p.no}`} disabled={busy} onClick={() => void done(api.home.act({ key: '', kind: 'bank-business', icon: '', title: '', question: '', actions: [], ref: { bankTransactionId: t.id } }, 'prive', { partnerNo: p.no }))}>
+                    Nee, privé van {p.name}
+                    <div className="hint">Komt op de privé-opnamen van {p.name}</div>
+                  </button>
+                ))}
                 {(pots.data ?? []).filter((p) => p.id !== t.bank_account_id).map((p) => (
                   <button key={`pot-${p.id}`} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: p.rgs_code, description: `Naar potje ${p.name}` }))}>
                     Naar potje {p.name}

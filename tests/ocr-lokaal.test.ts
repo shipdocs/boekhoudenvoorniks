@@ -131,6 +131,16 @@ describe('ingebouwde tekstherkenning: installeren (#9)', () => {
     expect(fetch.calls.some((u) => u.includes('/releases/tags/'))).toBe(false);
   });
 
+  it('zonder internet: een begrijpelijke melding in plaats van "fetch failed"', async () => {
+    // zo faalt fetch in Node/Electron zonder netwerk
+    const offline = (async () => { throw new TypeError('fetch failed', { cause: Object.assign(new Error('getaddrinfo ENOTFOUND api.github.com'), { code: 'ENOTFOUND' }) }); }) as never;
+    const rt = new LocalOcrRuntime(mkdtempSync(join(tmpdir(), 'ocr-')), { fetch: offline, extract: fakeExtract, platform: 'linux', arch: 'x64', model });
+    await expect(rt.install()).rejects.toThrow(/^Geen verbinding met internet/);
+    expect(rt.status()).toMatchObject({ state: 'fout' });
+    expect(rt.status().error).toMatch(/^Geen verbinding met internet: downloaden lukt nu niet\./);
+    expect(rt.status().error).not.toMatch(/fetch failed/);
+  });
+
   it('een beschadigde download wordt geweigerd', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ocr-'));
     const rt = new LocalOcrRuntime(dir, { fetch: fakeFetch({ corrupt: true }), extract: fakeExtract, platform: 'linux', arch: 'x64', model });

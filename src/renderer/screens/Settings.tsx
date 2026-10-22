@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useJobWords, useLoad, type Settings } from '../ui';
+import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, PartnerSelect, useAction, useApp, useJobWords, useLoad, usePartners, type Settings } from '../ui';
 import type { AppSettings } from '../../settings/settings';
 import { ResetCard } from './Reset';
 import { CategoriesDialog } from './Categories';
@@ -13,11 +13,12 @@ import { ScannerSettings } from './Scanner';
 import { BonnenAdres } from './BonnenAdres';
 import { formatDateNl, today } from '../../shared/dates';
 import { businessEffect } from '../../shared/business-share';
-import { FEEDBACK_EMAIL, feedbackMailto, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
+import { FEEDBACK_EMAIL, feedbackMailto, IDEEEN_URL, LICENSE_NAME, PRIVACY_URL, SOURCE_URL, TERMS_URL } from '../../shared/legal';
 import { ONLINE_HELP } from '../../shared/online-help';
 import { PontoCard } from './PontoDialog';
 import { checkNumberFormat } from '../../documents/numbering';
 import { HANDLEIDING_URL } from '../../shared/handleiding';
+import { MAX_PARTNERS, MIN_PARTNERS, defaultPartners, partnersProblem, type Partner } from '../../shared/partners';
 
 type Tab = 'bedrijf' | 'facturen' | 'email' | 'btw' | 'categorieen' | 'koppelingen' | 'scanner' | 'ai' | 'backup' | 'administraties' | 'geavanceerd' | 'over';
 
@@ -176,11 +177,7 @@ export function SettingsScreen() {
               <option value="bv">Bv (geen schatting inkomstenbelasting)</option>
             </select>
           </Field>
-          {draft.legalForm === 'vof' && (
-            <Field label="Jouw deel van de winst (%)" hint="de winst wordt verdeeld over de vennoten; ieder betaalt over zijn eigen deel">
-              <input inputMode="numeric" value={draft.profitSharePct} onChange={(e) => set({ profitSharePct: Math.min(100, Number(e.target.value.replace(/\D/g, '').slice(0, 3)) || 0) })} />
-            </Field>
-          )}
+          {draft.legalForm === 'vof' && <PartnersSettings draft={draft} saved={settings} set={set} />}
           {draft.legalForm === 'bv' && <p className="small muted">Een bv betaalt vennootschapsbelasting over de winst; jij betaalt inkomstenbelasting over je loon als directeur. De app maakt daar geen schatting van; vraag je boekhouder.</p>}
           {draft.legalForm !== 'bv' && <>
             <label className="row"><input type="checkbox" checked={draft.ibConfirmed} onChange={(e) => set({ ibConfirmed: e.target.checked })} /> Ik ben ondernemer voor de inkomstenbelasting (bij twijfel: check dit met mijn boekhouder)</label>
@@ -836,6 +833,10 @@ function About() {
         <Button onClick={() => void api.app.openExternal(feedbackMailto(version.data ?? ''))}>✉️ Vraag of feedback mailen</Button>
         <span className="small muted">naar {FEEDBACK_EMAIL}; we lezen alles en antwoorden zo snel mogelijk</span>
       </div>
+      <div className="row" style={{ alignItems: 'center' }}>
+        <Button onClick={() => void api.app.openExternal(IDEEEN_URL)}>💡 Idee of wens</Button>
+        <span className="small muted">op onze website: stuur een idee in of stem op die van anderen</span>
+      </div>
       <p className="small muted">De software wordt geleverd zonder garantie. Jij blijft verantwoordelijk voor je administratie en aangiften.</p>
       {advanced.data && (
         <p className="small muted">
@@ -862,10 +863,13 @@ function BusinessShareCard() {
   const [pct, setPct] = useState('50');
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [review, setReview] = useState<string | null>(null);
+  // vof met vennoten: van welke vennoot het privédeel is; geldt voor wat je hier opslaat (leeg: wat al gekozen was)
+  const partners = usePartners();
+  const [partnerNo, setPartnerNo] = useState<number | null>(null);
   const valid = (v: string) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 100;
   const save = async (n: string, value: string): Promise<boolean> => {
     if (!valid(value)) return false;
-    const r = await run(() => api.businessShare.set(n, Number(value)), 'Opgeslagen ✓');
+    const r = await run(() => api.businessShare.set(n, Number(value), false, partnerNo), 'Opgeslagen ✓');
     if (r === undefined) return false;
     setEdits({});
     await shares.reload();
@@ -882,7 +886,7 @@ function BusinessShareCard() {
           <tbody>
             {shares.data!.map((r) => (
               <tr key={r.supplier_key}>
-                <td>{r.display_name}</td>
+                <td>{r.display_name}{partners.length > 0 && <span className="muted"> · privédeel {partners.find((p) => p.no === r.partner_no)?.name ?? 'nog geen vennoot'}</span>}</td>
                 <td style={{ width: 140 }}>
                   <input type="number" min={1} max={100} style={{ width: 70 }} value={edits[r.supplier_key] ?? String(r.pct)} onChange={(e) => setEdits({ ...edits, [r.supplier_key]: e.target.value })} /> %
                 </td>
@@ -896,6 +900,7 @@ function BusinessShareCard() {
           </tbody>
         </table>
       )}
+      <PartnerSelect label="Privédeel van welke vennoot?" hint="geldt voor wat je hierna opslaat; leeg = zoals het al stond" value={partnerNo} onChange={setPartnerNo} />
       <div className="row" style={{ gap: 8, alignItems: 'end' }}>
         <Field label="Leverancier"><input value={name} placeholder="bv. Dropbox" onChange={(e) => setName(e.target.value)} /></Field>
         <Field label="Zakelijk deel"><span><input type="number" min={1} max={100} style={{ width: 80 }} value={pct} onChange={(e) => setPct(e.target.value)} /> %</span></Field>
@@ -1064,6 +1069,79 @@ function NextInvoiceNumber({ format, saved }: { format: string; saved: string })
       ) : (
         <p className="small muted" style={{ margin: '6px 0 0' }}>Sla eerst de nieuwe opmaak op; daarna kun je hier het volgende nummer zetten.</p>
       )}
+    </div>
+  );
+}
+
+/** Een percentage met hooguit twee decimalen (komma of punt), of null als het geen getal is. */
+function parsePct(text: string): number | null {
+  const t = text.replace(',', '.').trim();
+  if (!/^\d{1,3}(\.\d{0,2})?$/.test(t)) return null;
+  return Number(t);
+}
+
+/**
+ * Vof of maatschap: de vennoten met naam en winstaandeel. Zolang ze niet zijn ingesteld werkt de administratie zoals
+ * altijd (één eigen vermogen, het oude veld "jouw deel van de winst"); instellen is een bewuste keuze.
+ */
+function PartnersSettings({ draft, saved, set }: { draft: Settings; saved: Settings; set: (patch: Partial<AppSettings>) => void }) {
+  const partners = draft.partners ?? [];
+  const [texts, setTexts] = useState<string[]>(partners.map((p) => String(p.sharePct).replace('.', ',')));
+  useEffect(() => setTexts((draft.partners ?? []).map((p) => String(p.sharePct).replace('.', ','))), [draft.partners?.length]);
+  const year = Number(today().slice(0, 4));
+  const savedCount = saved.legalForm === 'vof' ? (saved.partners ?? []).length : 0;
+  const update = (list: Partner[]) => set({ partners: list.map((p, i) => ({ ...p, no: i + 1 })) });
+  if (partners.length === 0) {
+    return (
+      <>
+        <Field label="Jouw deel van de winst (%)" hint="de winst wordt verdeeld over de vennoten; ieder betaalt over zijn eigen deel">
+          <input inputMode="numeric" value={draft.profitSharePct} onChange={(e) => set({ profitSharePct: Math.min(100, Number(e.target.value.replace(/\D/g, '').slice(0, 3)) || 0) })} />
+        </Field>
+        <div className="notice small" data-testid="vennoten-instellen">
+          <strong>Eigen vermogen per vennoot bijhouden?</strong> Dan krijgt elke vennoot een eigen kapitaalrekening met privé-opnamen en -stortingen, vraagt de app bij een privébetaling van wie die was, en verdeelt hij de winst naar winstaandeel. Wat nu op Eigen vermogen, Privé-opnamen en Privé-stortingen staat, blijft staan en wordt van de eerste vennoot; je kunt het daarna verdelen bij Overstappen (beginbalans) of met een memoriaalboeking.
+          <div className="row" style={{ marginTop: 8 }}>
+            <Button small kind="primary" onClick={() => set({ partners: defaultPartners(draft), partnerAllocationFromYear: draft.partnerAllocationFromYear ?? year, ibPartnerNo: 1 })}>Vennoten instellen</Button>
+          </div>
+        </div>
+      </>
+    );
+  }
+  const problem = partnersProblem(partners);
+  return (
+    <div className="card flat" data-testid="vennoten">
+      <strong>Vennoten</strong>
+      <p className="small muted">Naam en winstaandeel per vennoot (samen 100%). De eerste vennoot gebruikt de rekeningen die er al waren; voor de anderen komen er rekeningen bij (RGS firmant 2 t/m {MAX_PARTNERS}).</p>
+      {partners.map((p, i) => (
+        <div key={p.no} className="row" style={{ gap: 8, alignItems: 'end', marginBottom: 6 }}>
+          <Field label={`Vennoot ${p.no}`}><input aria-label={`Naam vennoot ${p.no}`} value={p.name} onChange={(e) => update(partners.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} /></Field>
+          <Field label="Winstaandeel (%)">
+            <input
+              aria-label={`Winstaandeel vennoot ${p.no}`}
+              inputMode="decimal"
+              value={texts[i] ?? ''}
+              onChange={(e) => {
+                const next = [...texts];
+                next[i] = e.target.value;
+                setTexts(next);
+                const pct = parsePct(e.target.value);
+                if (pct !== null) update(partners.map((x, j) => (j === i ? { ...x, sharePct: pct } : x)));
+              }}
+            />
+          </Field>
+          {i === partners.length - 1 && partners.length > MIN_PARTNERS && i >= savedCount && <Button small kind="ghost" onClick={() => update(partners.slice(0, -1))}>Weghalen</Button>}
+        </div>
+      ))}
+      {partners.length < MAX_PARTNERS && <Button small onClick={() => update([...partners, { no: partners.length + 1, name: '', sharePct: 0 }])}>Vennoot toevoegen</Button>}
+      {savedCount === 0 && <div className="row" style={{ marginTop: 6 }}><Button small kind="ghost" onClick={() => set({ partners: [] })}>Toch niet per vennoot</Button></div>}
+      {problem && <p className="small" role="alert" style={{ color: 'var(--danger, #b00020)' }}>{problem}</p>}
+      <Field label="Winst verdelen vanaf boekjaar" hint="eerdere jaren: de winst blijft bij de eerste vennoot, zoals het stond. Afgesloten jaren veranderen nooit meer.">
+        <input inputMode="numeric" value={draft.partnerAllocationFromYear ?? ''} onChange={(e) => set({ partnerAllocationFromYear: Number(e.target.value.replace(/\D/g, '').slice(0, 4)) || null })} />
+      </Field>
+      <Field label="Schatting inkomstenbelasting voor" hint="de schatting is per ondernemer: met het winstaandeel van deze vennoot">
+        <select value={draft.ibPartnerNo} onChange={(e) => set({ ibPartnerNo: Number(e.target.value) })}>
+          {partners.map((p) => <option key={p.no} value={p.no}>{p.name || `Vennoot ${p.no}`}</option>)}
+        </select>
+      </Field>
     </div>
   );
 }

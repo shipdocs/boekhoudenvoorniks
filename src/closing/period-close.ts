@@ -1,3 +1,6 @@
+import { allocateResult, freezeClosedYears, releaseOpenYears, sharesForYear, vofSetup } from './profit-allocation';
+import { allContributionsKeys, partnerAccounts } from '../shared/partners';
+import { resultBetween } from '../reports/opening-balance';
 import { accountOpenItems } from '../core-ledger/open-items';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import type { Db } from '../db/database';
@@ -137,11 +140,11 @@ export class PeriodCloseService {
       const big = this.db
         .prepare(
           `SELECT e.entry_date AS date, SUM(l.credit - l.debit) AS amount FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts a ON a.id = l.account_id
-           WHERE a.rgs_code = ? AND e.entry_date BETWEEN ? AND ? AND e.reverses_entry_id IS NULL
+           WHERE a.rgs_code IN (${allContributionsKeys().map(() => '?').join(', ')}) AND e.entry_date BETWEEN ? AND ? AND e.reverses_entry_id IS NULL
              AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reverses_entry_id = e.id)
            GROUP BY e.id HAVING SUM(l.credit - l.debit) >= ? ORDER BY e.entry_date`,
         )
-        .all(ACCOUNTS.priveStortingen, `${until.slice(0, 4)}-01-01`, until, PRIVE_DEPOSIT_NOTICE) as { date: IsoDate; amount: number }[];
+        .all(...allContributionsKeys(), `${until.slice(0, 4)}-01-01`, until, PRIVE_DEPOSIT_NOTICE) as { date: IsoDate; amount: number }[];
       out.push({
         key: 'prive',
         level: 'info',
@@ -150,6 +153,41 @@ export class PeriodCloseService {
           `Dat is ${formatEuro(prive.opnames - prive.stortingen)} per saldo uit je bedrijf (opnames min stortingen).` +
           (big.length ? ` Grote stortingen: ${big.map((b) => `${formatDateNl(b.date)} ${formatEuro(b.amount)}`).join('; ')}. De Belastingdienst vraagt bij zo'n storting waar het geld vandaan komt: bewaar daar een bewijs van (bijvoorbeeld een afschrift van je spaarrekening).` : ''),
       });
+    }
+    // Vof met vennoten: privé per vennoot en (bij het jaareinde) hoe de winst over de kapitaalrekeningen gaat
+    const setup = vofSetup(this.db);
+    if (setup) {
+      const yearStart = `${until.slice(0, 4)}-01-01`;
+      const others = setup.partners.filter((p) => p.no !== 1); // vennoot 1 staat hierboven bij Privé
+      const keys = others.flatMap((p) => [partnerAccounts(p.no).drawings, partnerAccounts(p.no).contributions]);
+      const sums = new Map(
+        keys.length === 0
+          ? []
+          : (this.db
+              .prepare(`SELECT c.rgs_code AS rgs, SUM(l.debit - l.credit) AS s FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts c ON c.id = l.account_id WHERE c.rgs_code IN (${keys.map(() => '?').join(', ')}) AND e.entry_date BETWEEN ? AND ? GROUP BY c.rgs_code`)
+              .all(...keys, yearStart, until) as { rgs: string; s: number }[]).map((r) => [r.rgs, r.s] as const),
+      );
+      const perPartner = others
+        .map((p) => ({ p, opnames: sums.get(partnerAccounts(p.no).drawings) ?? 0, stortingen: -(sums.get(partnerAccounts(p.no).contributions) ?? 0) }))
+        .filter((x) => x.opnames !== 0 || x.stortingen !== 0);
+      if (perPartner.length > 0) {
+        out.push({ key: 'prive-vennoten', level: 'info', title: `Privé dit jaar per vennoot`, detail: perPartner.map((x) => `${x.p.name}: ${formatEuro(x.opnames)} opgenomen, ${formatEuro(x.stortingen)} gestort`).join('; ') + '. Vennoot 1 staat hierboven bij Privé.' });
+      }
+      if (until.slice(5) === '12-31') {
+        const year = Number(until.slice(0, 4));
+        // alles wat in dit jaar op omzet en kosten staat, ook een beginbalansboeking op 1 januari: precies wat
+        // de beginbalans van volgend jaar verdeelt (reports/opening-balance.ts)
+        const result = resultBetween(this.db, yearStart, until);
+        const shares = sharesForYear(this.db, setup, year);
+        const parts = allocateResult(-result, shares).map((x) => ({ no: x.no, amount: -x.amount }));
+        const name = (no: number) => setup.partners.find((p) => p.no === no)?.name ?? `Vennoot ${no}`;
+        out.push({
+          key: 'winstverdeling',
+          level: 'info',
+          title: `Winstverdeling ${year}: ${formatEuro(result)} ${result < 0 ? 'verlies' : 'winst'} over de vennoten`,
+          detail: `${parts.map((x) => `${name(x.no)} ${(shares.find((s) => s.no === x.no)!.bp / 100).toLocaleString('nl-NL')}%: ${formatEuro(x.amount)}`).join('; ')}. Dit komt op de kapitaalrekening van elke vennoot; na het afsluiten ligt deze verdeling voor ${year} vast.`,
+        });
+      }
     }
     // Jaarafsluiting: posten zonder bon of betaling die de winst van het jaar veranderen (boekhoudkundig: overlopende posten, voorraad, onderhanden werk)
     if (until.slice(5) === '12-31') {
@@ -174,11 +212,18 @@ export class PeriodCloseService {
     return out;
   }
 
+  /** Vof met vennoten: de winstverdeling van een jaar dat nu vastligt, verandert niet meer (eenmanszaak en bv: niets). */
+  private freezeProfitShares(): void {
+    const setup = vofSetup(this.db);
+    if (setup) freezeClosedYears(this.db, setup);
+  }
+
   /** Definitief afsluiten t/m deze datum. Kan niet ongedaan gemaakt worden. */
   close(until: IsoDate, confirmed: string[] = [], asOf: IsoDate = today()): PeriodStatus {
     return tx(this.db, () => {
       this.assertCanLock(until, confirmed, asOf);
       this.db.prepare(`INSERT INTO ledger_locks (until_date, kind, closed_at) VALUES (?, 'afgesloten', datetime('now'))`).run(until);
+      this.freezeProfitShares();
       return this.status();
     });
   }
@@ -189,6 +234,7 @@ export class PeriodCloseService {
     return tx(this.db, () => {
       this.assertCanLock(until, confirmed, asOf);
       this.db.prepare(`INSERT INTO ledger_locks (until_date, kind, exchange_no) VALUES (?, 'uitwisseling', ?)`).run(until, no);
+      this.freezeProfitShares();
       return this.status();
     });
   }
@@ -199,6 +245,7 @@ export class PeriodCloseService {
       const ex = this.ledger.periodLock().exchange;
       if (!ex || ex.no !== no) throw new ValidationError(`Er loopt geen uitwisseling ${no}`);
       this.db.prepare(`UPDATE ledger_locks SET kind = 'afgesloten', closed_at = datetime('now') WHERE kind = 'uitwisseling'`).run();
+      this.syncPartnerNames();
       return this.status();
     });
   }
@@ -207,8 +254,17 @@ export class PeriodCloseService {
   abortExchange(): PeriodStatus {
     return tx(this.db, () => {
       this.db.prepare(`DELETE FROM ledger_locks WHERE kind = 'uitwisseling'`).run();
+      // wat bij de uitwisseling voor de winstverdeling vastgelegd werd, geldt voor een weer open jaar niet meer
+      releaseOpenYears(this.db);
+      this.syncPartnerNames();
       return this.status();
     });
+  }
+
+  /** Vof met vennoten: een naam die tijdens de uitwisseling veranderde, komt nu ook op de rekeningen. */
+  private syncPartnerNames(): void {
+    const setup = vofSetup(this.db);
+    if (setup) this.ledger.renamePartnerAccounts(setup.partners);
   }
 
   /**

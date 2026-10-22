@@ -58,7 +58,43 @@ export function TrialBalanceTab({ from, to, onOpenCard }: { from: string; to: st
       </table>
       {data.data && rows.length === 0 && <p className="muted">Geen boekingen in deze periode.</p>}
       <p className="small muted">Positief is debet, negatief is credit. De beginbalans is de stand aan het begin van de periode; rekeningen voor winst en verlies beginnen op nul. Klik op een rekening voor de kaart.</p>
+      <PartnerEquityCard year={Number(from.slice(0, 4))} />
     </>
+  );
+}
+
+/** Vof of maatschap: het eigen vermogen per vennoot over het boekjaar (niets zonder vennoten). */
+export function PartnerEquityCard({ year }: { year: number }) {
+  const data = useLoad(() => api.reports.partnerEquity(year), [year]);
+  const d = data.data;
+  if (!d) return <ErrorBox error={data.error} />;
+  const t = d.totals;
+  return (
+    <div className="card" data-testid="vermogen-per-vennoot" style={{ marginTop: 14 }}>
+      <h3 style={{ marginTop: 0 }}>Eigen vermogen per vennoot {year}</h3>
+      <table className="list small">
+        <thead><tr><th>Vennoot</th><th className="num">Aandeel</th><th className="num">Begin</th><th className="num">Gestort</th><th className="num">Opgenomen</th><th className="num">Overig</th><th className="num">Aandeel resultaat</th><th className="num">Eind</th></tr></thead>
+        <tbody>
+          {d.rows.map((r) => (
+            <tr key={r.no}>
+              <td>{r.name}{r.capitalAccount && <div className="muted">{r.capitalAccount.code} {r.capitalAccount.name}</div>}</td>
+              <td className="num">{r.sharePct.toLocaleString('nl-NL')}%{r.fixed && <div className="muted">vastgelegd</div>}</td>
+              <td className="num"><Amount cents={r.opening} /></td><td className="num"><Amount cents={r.contributions} /></td><td className="num"><Amount cents={r.drawings} /></td>
+              <td className="num"><Amount cents={r.other} /></td><td className="num"><Amount cents={r.profitShare} /></td><td className="num"><Amount cents={r.closing} /></td>
+            </tr>
+          ))}
+          <tr style={{ fontWeight: 600 }}>
+            <td>Totaal</td><td></td>
+            <td className="num"><Amount cents={t.opening} /></td><td className="num"><Amount cents={t.contributions} /></td><td className="num"><Amount cents={t.drawings} /></td>
+            <td className="num"><Amount cents={t.other} /></td><td className="num"><Amount cents={t.profitShare} /></td><td className="num"><Amount cents={t.closing} /></td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="small muted">
+        Bedragen zijn vermogen (positief = van de vennoot). Het resultaat van {year} ({d.result < 0 ? 'verlies' : 'winst'} <Euro cents={Math.abs(d.result)} />) wordt naar winstaandeel over de kapitaalrekeningen verdeeld; het eindkapitaal is de beginbalans van {year + 1}.
+        {d.rows.some((r) => r.fixed) ? ` De verdeling van ${year} is vastgelegd bij het afsluiten.` : ` Zolang ${year} niet is afgesloten, volgt de verdeling je instellingen.`}
+      </p>
+    </div>
   );
 }
 

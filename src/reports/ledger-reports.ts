@@ -2,7 +2,9 @@ import type { Db } from '../db/database';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import type { Cents } from '../shared/money';
 import type { IsoDate } from '../shared/dates';
-import { OPENING_ON_FROM, openingBalance } from './opening-balance';
+import { OPENING_ON_FROM, openingBalance, resultBetween } from './opening-balance';
+import { allocateResult, sharesForYear, vofSetup } from '../closing/profit-allocation';
+import { partnerAccounts } from '../shared/partners';
 
 /** Rapporten uit het grootboek voor de boekhouder: kolommenbalans, kaarten en periodebalans. */
 
@@ -83,6 +85,31 @@ export interface PeriodBalance {
   granularity: 'maand' | 'kwartaal';
   labels: string[];
   rows: { accountId: number; code: string; name: string; kind: 'balans' | 'resultaat'; opening: Cents; periods: Cents[]; closing: Cents }[];
+}
+
+/** Eigen vermogen per vennoot van een vof of maatschap over één boekjaar (bedragen positief = vermogen). */
+export interface PartnerEquity {
+  year: number;
+  /** het boekjaar is (nog) niet om: het aandeel in de winst is het resultaat tot nu toe */
+  rows: {
+    no: number;
+    name: string;
+    /** winstaandeel dat voor dit jaar geldt, in procenten */
+    sharePct: number;
+    /** vastgelegd bij het afsluiten (verandert niet meer) of volgens de huidige vennoten */
+    fixed: boolean;
+    capitalAccount: { id: number; code: string; name: string } | null;
+    opening: Cents;
+    /** andere boekingen direct op de kapitaalrekening in dit jaar (bijvoorbeeld het verdelen van het beginvermogen) */
+    other: Cents;
+    contributions: Cents;
+    drawings: Cents;
+    profitShare: Cents;
+    closing: Cents;
+  }[];
+  totals: { opening: Cents; other: Cents; contributions: Cents; drawings: Cents; profitShare: Cents; closing: Cents };
+  /** resultaat van het jaar (winst positief) */
+  result: Cents;
 }
 
 const kindOf = (category: string): 'balans' | 'resultaat' => (category === 'omzet' || category === 'kosten' ? 'resultaat' : 'balans');
@@ -200,6 +227,62 @@ export class LedgerReports {
       .all(relationId, ACCOUNTS.debiteuren, ACCOUNTS.crediteuren, from, to) as { entryId: number; date: string; description: string; source: string; sourceRef: string | null; status: string; reverses: number | null; account: string; debit: number; credit: number }[];
     const card = this.card({ id: 0, code: '', name: summary.name }, 'balans', opening, rows);
     return { relation: summary, opening, lines: card.lines.map((l, i) => ({ ...l, account: rows[i]!.account })) };
+  }
+
+  /**
+   * Eigen vermogen per vennoot over een boekjaar: beginkapitaal, stortingen, opnamen, aandeel in het resultaat en
+   * eindkapitaal. Het eindkapitaal is gelijk aan de beginbalans van het volgende jaar. null zonder vennoten.
+   */
+  partnerEquity(year: number): PartnerEquity | null {
+    const setup = vofSetup(this.db);
+    if (!setup) return null;
+    const from = `${year}-01-01`;
+    const to = `${year}-12-31`;
+    const before = this.openings(from);
+    const fixed = (this.db.prepare('SELECT 1 FROM vof_winstverdeling WHERE jaar = ? LIMIT 1').get(year)) !== undefined;
+    const shares = sharesForYear(this.db, setup, year);
+    const result = resultBetween(this.db, from, to, from); // winst positief; een beginbalansboeking op 1 januari zit in het begin
+    const parts = new Map(allocateResult(-result, shares).map((p) => [p.no, 0 - p.amount]));
+    const nos = [...new Set([...setup.partners.map((p) => p.no), ...shares.map((s) => s.no)])].sort((a, b) => a - b);
+    // alle vennotenrekeningen in één keer: de rekening zelf en de mutaties van dit jaar (debet − credit)
+    const keys = nos.flatMap((no) => { const k = partnerAccounts(no); return [k.capital, k.drawings, k.contributions]; });
+    const marks = keys.map(() => '?').join(', ');
+    const accounts = new Map((this.db.prepare(`SELECT id, code, name, rgs_code FROM chart_of_accounts WHERE rgs_code IN (${marks})`).all(...keys) as { id: number; code: string; name: string; rgs_code: string }[]).map((a) => [a.rgs_code, { id: a.id, code: a.code, name: a.name }]));
+    const moves = new Map(
+      (this.db
+        .prepare(`SELECT c.rgs_code AS rgs, SUM(l.debit - l.credit) AS s FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id JOIN chart_of_accounts c ON c.id = l.account_id WHERE c.rgs_code IN (${marks}) AND e.entry_date BETWEEN ? AND ? AND NOT ${OPENING_ON_FROM} GROUP BY c.rgs_code`)
+        .all(...keys, from, to, from) as { rgs: string; s: number }[]).map((r) => [r.rgs, r.s]),
+    );
+    const sum = (rgs: string) => moves.get(rgs) ?? 0;
+    const rows = nos.map((no) => {
+      const k = partnerAccounts(no);
+      const account = accounts.get(k.capital);
+      const opening = account ? 0 - (before.get(account.id) ?? 0) : 0;
+      const other = 0 - sum(k.capital);
+      const contributions = 0 - sum(k.contributions);
+      const drawings = sum(k.drawings);
+      const profitShare = parts.get(no) ?? 0;
+      return {
+        no,
+        name: setup.partners.find((p) => p.no === no)?.name ?? `Vennoot ${no}`,
+        sharePct: (shares.find((s) => s.no === no)?.bp ?? 0) / 100,
+        fixed,
+        capitalAccount: account ?? null,
+        opening,
+        other,
+        contributions,
+        drawings,
+        profitShare,
+        closing: opening + other + contributions - drawings + profitShare,
+      };
+    });
+    const total = (f: (r: (typeof rows)[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    return {
+      year,
+      rows,
+      totals: { opening: total((r) => r.opening), other: total((r) => r.other), contributions: total((r) => r.contributions), drawings: total((r) => r.drawings), profitShare: total((r) => r.profitShare), closing: total((r) => r.closing) },
+      result,
+    };
   }
 
   /** Mutaties per maand of kwartaal voor het hele jaar, met beginbalans en eindstand. */

@@ -8,6 +8,8 @@
  *    zie `rgs-codes.json`). Deze gaat mee in exports (auditfile, CSV) en wordt getest tegen de
  *    officiële lijst (tests/rgs.test.ts).
  */
+import { partnerAccountNames, partnerAccounts } from '../shared/partners';
+
 export type AccountCategory = 'activa' | 'passiva' | 'omzet' | 'kosten' | 'btw';
 
 export interface AccountSeed {
@@ -180,6 +182,22 @@ export const BV_ACCOUNTS: AccountSeed[] = [
   { code: '4740', rgs: 'WBedOvpMaf', ref: 'WBedOvpMaf', name: 'Management fee', category: 'kosten' },
   { code: '4900', rgs: 'WBelBgrBgr', ref: 'WBelBgrBgr', name: 'Vennootschapsbelasting', category: 'kosten' },
 ];
+
+/**
+ * De rekeningen van vennoot 2 t/m 5 van een vof of maatschap (RGS firmant 2 t/m 5): kapitaal, privé-opnamen en
+ * privé-stortingen. Vennoot 1 gebruikt de gewone rekeningen Eigen vermogen, Privé-opnamen en Privé-stortingen.
+ * Ze komen erbij zodra de vennoten zijn ingesteld en blijven daarna staan.
+ */
+export function partnerAccountSeeds(no: number, name: string): AccountSeed[] {
+  if (no < 2) return [];
+  const a = partnerAccounts(no);
+  const n = partnerAccountNames(name);
+  return [
+    { code: a.capitalCode, rgs: a.capital, ref: a.capitalRef, name: n.capital, category: 'passiva', system: true },
+    { code: a.drawingsCode, rgs: a.drawings, ref: a.drawingsRef, name: n.drawings, category: 'passiva', system: true },
+    { code: a.contributionsCode, rgs: a.contributions, ref: a.contributionsRef, name: n.contributions, category: 'passiva', system: true },
+  ];
+}
 
 /**
  * Waarom je zelf geen rekening met deze RGS-code kunt toevoegen, of null. Omzet en btw lopen via de

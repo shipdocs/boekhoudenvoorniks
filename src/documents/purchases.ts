@@ -12,9 +12,10 @@ import { korActive } from '../settings/settings';
 export type { PurchaseLineInput } from '../core-ledger/rules';
 export { expenseLines, purchaseVat } from '../core-ledger/rules';
 import { businessPct, expenseLines, purchaseVat, type InkoopPayload, type PurchaseLineInput } from '../core-ledger/rules';
-import { businessShareFor, setBusinessShare } from '../intake/business-share';
+import { businessShareFor, businessSharePartner, setBusinessShare } from '../intake/business-share';
 import type { EventService, Evidence } from '../core-ledger/events';
 import { forgetRejections } from './bank-purchase-match';
+import { privateAccountsIn, vofSetup } from '../closing/profit-allocation';
 
 export interface PurchaseInvoiceInput {
   relationId?: number | null;
@@ -29,6 +30,8 @@ export interface PurchaseInvoiceInput {
    * Het privédeel telt niet als kosten en de btw erover wordt niet afgetrokken.
    */
   businessPct?: number;
+  /** vof met vennoten: van welke vennoot het privédeel is (verplicht als er een privédeel is) */
+  partnerNo?: number | null;
   jobId?: number | null;
   documentId?: number | null;
   externalSource?: string | null;
@@ -89,8 +92,10 @@ export class PurchaseService {
       // de factuur zelf blijft wat hij is; het zakelijke deel bepaalt alleen wat er als kosten en voorbelasting geboekt wordt
       const booking = expenseLines(input.lines, ACCOUNTS.crediteuren, input.relationId ?? null, input.supplierReference ?? undefined, { noVatDeduction });
       const supplier = input.relationId ? (this.db.prepare('SELECT name FROM relations WHERE id = ?').get(input.relationId) as { name: string } | undefined)?.name : undefined;
-      if (input.businessPct !== undefined && supplier) setBusinessShare(this.db, supplier, input.businessPct);
+      if (input.businessPct !== undefined && supplier) setBusinessShare(this.db, supplier, input.businessPct, input.partnerNo);
       const pct = businessPct(input.businessPct ?? businessShareFor(this.db, supplier));
+      // het privédeel: van de gekozen vennoot, anders van de vennoot die bij deze leverancier onthouden is
+      const privateAccount = pct < 100 ? this.partnerDrawings(input.partnerNo ?? businessSharePartner(this.db, supplier)) : undefined;
       const vatPaid = booking.payable - booking.net;
       const result = this.db
         .prepare(
@@ -104,7 +109,7 @@ export class PurchaseService {
       const { entryId } = this.events.record(
         {
           type: 'inkoop',
-          payload: { purchaseId: id, date: input.invoiceDate, description: input.description.trim(), relationId: input.relationId ?? null, supplierReference: input.supplierReference ?? null, lines: input.lines, ...(noVatDeduction ? { noVatDeduction } : {}), ...(pct < 100 || input.businessPct !== undefined ? { businessPct: pct } : {}) },
+          payload: { purchaseId: id, date: input.invoiceDate, description: input.description.trim(), relationId: input.relationId ?? null, supplierReference: input.supplierReference ?? null, lines: input.lines, ...(noVatDeduction ? { noVatDeduction } : {}), ...(pct < 100 || input.businessPct !== undefined ? { businessPct: pct } : {}), ...(privateAccount ? { privateAccount } : {}) },
         },
         evidence,
         { jobId: input.jobId ?? null },
@@ -158,8 +163,17 @@ export class PurchaseService {
   }
 
   /** Ander zakelijk deel voor een geboekte inkoop (gemengd gebruik): tegenboeking + nieuwe post. */
-  setBusinessPct(id: number, pct: number, reason = 'zakelijk deel aangepast'): PurchaseInvoice {
-    return this.rewrite(id, (old) => old, reason, { samePayable: true, businessPct: pct });
+  setBusinessPct(id: number, pct: number, reason = 'zakelijk deel aangepast', partnerNo?: number | null): PurchaseInvoice {
+    return this.rewrite(id, (old) => old, reason, { samePayable: true, businessPct: pct, partnerNo });
+  }
+
+  /**
+   * Vof met vennoten: de privé-opnamen van de vennoot voor het privédeel (zonder keuze een fout). Zonder vennoten
+   * undefined: dan blijft de gebeurtenis zoals altijd en gaat het privédeel naar de gewone privé-opnamen.
+   */
+  private partnerDrawings(partnerNo: number | null | undefined): string | undefined {
+    if (!vofSetup(this.db)) return undefined;
+    return privateAccountsIn(this.db, partnerNo).drawings;
   }
 
   /**
@@ -184,7 +198,7 @@ export class PurchaseService {
   }
 
   /** Vervangt de regels van een geboekte inkoop: tegenboeking + nieuwe post (#19). */
-  private rewrite(id: number, next: (old: PurchaseLineInput[]) => PurchaseLineInput[], reason: string, opts: { samePayable: boolean; businessPct?: number }): PurchaseInvoice {
+  private rewrite(id: number, next: (old: PurchaseLineInput[]) => PurchaseLineInput[], reason: string, opts: { samePayable: boolean; businessPct?: number; partnerNo?: number | null }): PurchaseInvoice {
     return tx(this.db, () => {
       const p = this.get(id);
       if (p.is_opening) throw new ValidationError('Deze rekening komt uit je vorige administratie. Pas hem aan in de overstap-hulp');
@@ -202,6 +216,11 @@ export class PurchaseService {
         const pct = businessPct(opts.businessPct);
         if (pct < 100) payload.businessPct = pct;
         else payload.businessPct = pct;
+      }
+      // Ook omrekenen of herindelen kan een nieuw privédeel boeken uit een oude gebeurtenis zonder vennoot.
+      if (businessPct(payload.businessPct) < 100 && (opts.partnerNo != null || !payload.privateAccount)) {
+        const account = this.partnerDrawings(opts.partnerNo ?? businessSharePartner(this.db, p.relation_name));
+        if (account) payload.privateAccount = account;
       }
       const { entryId } = this.events.replace(event.id, { type: 'inkoop', payload }, reason);
       this.db

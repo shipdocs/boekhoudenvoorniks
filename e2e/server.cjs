@@ -12,6 +12,7 @@
  * POST /__ponto        stelt uitsluitend de fictieve Ponto-provider in en geeft zijn veilige aanroeplog terug
  * POST /__pay          de laatst gestarte betaling "betaald" (zoals de Mollie-webhook); geeft de abonnementen
  * POST /__store        de versie uit de Microsoft Store nabootsen: body {"on":true} en eventueel "readOnly";
+ *                      {"offline":true} = het downloaden van de tekstherkenning mislukt zoals zonder internet;
  *                      geeft terug wat er gebeurde (toestemming voor lokaal lezen, "Opnieuw proberen")
  * POST /__datafolder   body {"pick":{"name","kind"}} = de map die het keuzevenster "teruggeeft" (kind: leeg, vol of
  *                      compleet; null = annuleren), {"custom":true} = de app werkt uit een zelf gekozen map,
@@ -42,6 +43,7 @@ const { Administrations, readAdministrationFile, renameAdministrationFile } = re
 const { SettingsService } = require(path.join(ROOT, 'main/settings/settings.js'));
 const { createBackupBundle, extractBundle } = require(path.join(ROOT, 'main/main/backup.js'));
 const { ExchangeService, sanitizeForExchange } = require(path.join(ROOT, 'main/exchange/exchange.js'));
+const { downloadErrorMessage } = require(path.join(ROOT, 'main/ocr-runtime/runtime.js'));
 const { generateOfficeKeys } = require(path.join(ROOT, 'main/exchange/crypto.js'));
 const { folderAccess } = require(path.join(ROOT, 'main/main/statement-files.js'));
 const { markComplete, planSwitch, sharedDataDir } = require(path.join(ROOT, 'main/main/data-dir.js'));
@@ -290,7 +292,7 @@ let updateInstalled = false;
 /** aanroepen van "Back-up terugzetten" (in de test annuleert de gebruiker het keuzevenster) */
 let restoreCalls = [];
 /** nagebootste versie uit de Microsoft Store (POST /__store) */
-const noStore = () => ({ on: false, readOnly: false, consent: false, installs: 0, retried: false });
+const noStore = () => ({ on: false, readOnly: false, consent: false, installs: 0, retried: false, offline: false, ocrError: null });
 let store = noStore();
 
 const downloadsDir = () => path.join(dir, 'Downloads');
@@ -521,8 +523,13 @@ function init(fresh) {
     openLoginTerminal: async () => 'Claude Code is geopend in een terminal.',
     mcpCommand: () => ({ command: '/opt/BoekhoudenVoorNiks/boekhoudenvoorniks', args: ['--mcp'] }),
     localOcr: {
-      status: () => ({ state: 'niet-geinstalleerd' }),
-      install: () => { store.installs++; return { state: 'niet-geinstalleerd' }; },
+      status: () => (store.ocrError ? { state: 'fout', error: store.ocrError } : { state: 'niet-geinstalleerd' }),
+      install: () => {
+        store.installs++;
+        // zonder internet faalt fetch zo; de melding komt uit de echte runtime
+        if (store.offline) store.ocrError = downloadErrorMessage(new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } }));
+        return store.ocrError ? { state: 'fout', error: store.ocrError } : { state: 'niet-geinstalleerd' };
+      },
       uninstall: async () => ({ state: 'niet-geinstalleerd' }),
       // zoals de app: alleen in de Store-versie is toestemming nodig
       get consent() { return store.on ? { runtimeVersion: 'b0000', given: () => store.consent, give: () => { store.consent = true; } } : undefined; },

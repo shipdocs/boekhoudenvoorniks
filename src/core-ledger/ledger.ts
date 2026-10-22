@@ -3,7 +3,8 @@ import { tx } from '../db/database';
 import { assertCents, type Cents } from '../shared/money';
 import { addDays, assertIsoDate, formatDateNl, type IsoDate } from '../shared/dates';
 import { ValidationError } from '../shared/validation';
-import { ACCOUNTS, BV_ACCOUNTS, DEFAULT_ACCOUNTS, categoryForRgs, codeRangeFor, userAccountBlocked, type AccountCategory, type AccountSeed } from './accounts';
+import { ACCOUNTS, BV_ACCOUNTS, DEFAULT_ACCOUNTS, categoryForRgs, codeRangeFor, partnerAccountSeeds, userAccountBlocked, type AccountCategory, type AccountSeed } from './accounts';
+import { partnerAccountNames, partnerAccounts, type Partner } from '../shared/partners';
 import { RULES_VERSION } from './rules-version';
 import rgsTaxonomy from './rgs-codes.json';
 import { settleQuestionItem } from './open-items';
@@ -173,6 +174,39 @@ export class Ledger {
   /** De extra rekeningen voor een bv (loon, loonheffing, rekening-courant, vpb, aandelenkapitaal); dubbel aanroepen kan geen kwaad. */
   seedBvAccounts(): void {
     this.seedAccounts(BV_ACCOUNTS);
+  }
+
+  /**
+   * Vof of maatschap: de rekeningen van vennoot 2 t/m n erbij (vennoot 1 heeft de gewone), en de namen van alle
+   * vennotenrekeningen bijwerken naar de naam van de vennoot. Dubbel aanroepen kan geen kwaad; er verdwijnt nooit een rekening.
+   */
+  seedPartnerAccounts(partners: Partner[]): void {
+    this.seedAccounts(partners.flatMap((p) => partnerAccountSeeds(p.no, p.name)));
+    this.renamePartnerAccounts(partners);
+  }
+
+  /**
+   * Alleen de standaardnamen ("Eigen vermogen", "Privé-opnamen …") volgen de naam van de vennoot; een eigen naam blijft
+   * staan. Niet in de kopie bij de boekhouder en niet tijdens een uitwisseling: na de uitwisseling roept de
+   * periode-afsluiting dit opnieuw aan, zodat een naam die in de tussentijd veranderde toch doorkomt.
+   */
+  renamePartnerAccounts(partners: Partner[]): void {
+    if (this.writeGuard?.() || this.periodLock().exchange) return;
+    const rename = this.db.prepare('UPDATE chart_of_accounts SET name = ? WHERE rgs_code = ? AND (name = ? OR name LIKE ?)');
+    tx(this.db, () => {
+      for (const p of partners) {
+        const keys = partnerAccounts(p.no);
+        const names = partnerAccountNames(p.name);
+        const base = partnerAccountNames('');
+        for (const k of ['capital', 'drawings', 'contributions'] as const) rename.run(names[k], keys[k], base[k], `${base[k]} %`);
+      }
+    });
+  }
+
+  /** De vennotenrekeningen die er nog niet zijn: voor de kopie bij de boekhouder, waar ze als handeling mee moeten. */
+  missingPartnerAccounts(partners: Partner[]): { code: string; rgs: string; rgsRef: string; name: string; category: AccountCategory }[] {
+    const exists = this.db.prepare('SELECT 1 FROM chart_of_accounts WHERE rgs_code = ?');
+    return partners.flatMap((p) => partnerAccountSeeds(p.no, p.name)).filter((a) => !exists.get(a.rgs)).map((a) => ({ code: this.freeCode(a.code), rgs: a.rgs, rgsRef: a.ref, name: a.name, category: a.category }));
   }
 
   private seedAccounts(accounts: AccountSeed[]): void {

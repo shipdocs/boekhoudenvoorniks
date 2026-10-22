@@ -108,6 +108,15 @@ export function ReaderChoice({ context, reason, onDone, onToolsChanged }: { cont
   // bij een bon: al gekozen, maar deze bon is nog niet gelezen (bv. mislukt of net gekozen)
   if (context === 'bon' && o.asked && !localBusy) {
     if (selected === 'zelf') return null;
+    // gekozen voor op deze computer, maar het downloaden mislukte (bijvoorbeeld zonder internet): zeg dat, niet alleen "nog niet uitgelezen"
+    if (selected === 'lokaal' && o.local.state === 'fout') {
+      return (
+        <div className="notice warn" data-testid="lokaal-mislukt">
+          {o.local.error ?? 'Het downloaden van de tekstherkenning is mislukt.'}{' '}
+          <Button small disabled={busy} onClick={() => void choose('lokaal')}>Opnieuw proberen</Button>
+        </div>
+      );
+    }
     return (
       <div className="notice">
         {reason ?? 'Deze bon is nog niet uitgelezen.'}{' '}

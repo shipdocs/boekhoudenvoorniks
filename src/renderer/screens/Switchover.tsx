@@ -1096,6 +1096,7 @@ function Position({ state, refresh, onSection }: SectionProps & { onSection: (s:
           {p.winstTotNu !== null && <div className="small" style={{ marginTop: 6 }}>Waarvan winst van 1 januari tot <DateNl date={date} />: <Euro cents={p.winstTotNu} /></div>}
         </div>
       )}
+      {p?.perVennoot && <PartnerEquity key={p.perVennoot.map((v) => `${v.no}:${v.amount}`).join(',')} state={state} refresh={refresh} perVennoot={p.perVennoot} />}
       {state.startOfYear && (
         <details style={{ marginTop: 14 }} open={state.settings.accountantEquity !== null}>
           <summary>Heb je de balans van je boekhouder? Vergelijk het eigen vermogen</summary>
@@ -1146,6 +1147,36 @@ function Position({ state, refresh, onSection }: SectionProps & { onSection: (s:
       </div>
       {problems.length > 0 && <p className="small muted" style={{ textAlign: 'right' }}>Los eerst de rode punten op.</p>}
     </>
+  );
+}
+
+/**
+ * Vof met vennoten: het beginkapitaal per vennoot. Vennoot 2 en verder vul je in (van de balans van je boekhouder of
+ * uit je auditfile); vennoot 1 houdt de rest. Het totaal verandert niet. Het scherm geeft een key mee met de
+ * bedragen: na een auditfile, een andere datum of opslaan begint het formulier opnieuw met wat in de boeken staat.
+ */
+function PartnerEquity({ state, refresh, perVennoot }: { state: SwitchoverState; refresh: SectionProps['refresh']; perVennoot: NonNullable<NonNullable<SwitchoverState['position']>['perVennoot']> }) {
+  const { run, busy } = useAction();
+  const [amounts, setAmounts] = useState<Record<number, number | null>>(Object.fromEntries(perVennoot.filter((v) => v.no > 1).map((v) => [v.no, v.amount])));
+  const others = perVennoot.filter((v) => v.no > 1);
+  const first = perVennoot.find((v) => v.no === 1)!;
+  const total = perVennoot.reduce((t, v) => t + v.amount, 0);
+  const restFirst = total - others.reduce((t, v) => t + (amounts[v.no] ?? 0), 0);
+  return (
+    <div className="card" style={{ marginTop: 14 }} data-testid="kapitaal-per-vennoot">
+      <h3 style={{ marginTop: 0 }}>Kapitaal per vennoot op <DateNl date={state.settings.date!} /></h3>
+      <p className="small muted">Neem het kapitaal per vennoot over van de balans van je boekhouder of je vorige programma (zonder de winst van dit jaar tot nu toe: die verdeelt de app bij de jaarafsluiting). {first.name} krijgt de rest.</p>
+      {others.map((v) => (
+        <div key={v.no} className="row between" style={{ gap: 8 }}>
+          <span>{v.name}</span>
+          <MoneyInput value={amounts[v.no] ?? null} onChange={(x) => setAmounts({ ...amounts, [v.no]: x })} ariaLabel={`Kapitaal ${v.name}`} />
+        </div>
+      ))}
+      <div className="row between" style={{ marginTop: 6 }}><span>{first.name} (de rest)</span><Euro cents={restFirst} /></div>
+      <div className="row end" style={{ marginTop: 8 }}>
+        <Button small disabled={busy} onClick={async () => { const r = await run(() => api.switchover.setPartnerEquity(others.map((v) => ({ no: v.no, amount: amounts[v.no] ?? 0 }))), 'Kapitaal per vennoot opgeslagen'); if (r) await refresh(r); }}>Opslaan</Button>
+      </div>
+    </div>
   );
 }
 

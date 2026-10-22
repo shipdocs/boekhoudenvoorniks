@@ -5,6 +5,7 @@ import { addDays, addMonths, assertIsoDate, diffDays, monthOf, weekOf, type IsoD
 import type { Cents } from '../shared/money';
 import { ValidationError } from '../shared/validation';
 import { rulesFor } from './income-tax';
+import { privateAccountsIn } from '../closing/profit-allocation';
 
 export interface Trip {
   id: number;
@@ -107,25 +108,27 @@ export class MileageService {
     private readonly ledger: Ledger,
   ) {}
 
-  add(input: { date: IsoDate; km: number; description: string; jobId?: number | null }): Trip {
+  /** `partnerNo`: vof met vennoten, wie de rit met privévervoer reed (verplicht): de vergoeding is een privé-storting van die vennoot. */
+  add(input: { date: IsoDate; km: number; description: string; jobId?: number | null; partnerNo?: number | null }): Trip {
     assertIsoDate(input.date, 'datum');
     if (!(input.km > 0) || input.km > 5000) throw new ValidationError('Vul het aantal kilometers in (meer dan 0)');
     if (!input.description.trim()) throw new ValidationError('Waar ging de rit naartoe?');
     const km = Math.round(input.km * 10) / 10;
     const rate = rulesFor(Number(input.date.slice(0, 4))).rules.kmRate;
     const amount = Math.round(km * rate);
+    const prive = privateAccountsIn(this.db, input.partnerNo);
     return tx(this.db, () => {
       const id = Number(
         this.db.prepare('INSERT INTO trips (trip_date, km, description, job_id, rate) VALUES (?, ?, ?, ?, ?)').run(input.date, km, input.description.trim(), input.jobId ?? null, rate).lastInsertRowid,
       );
       const entryId = this.ledger.post({
         date: input.date,
-        description: `Zakelijke rit ${km} km: ${input.description.trim()}`,
+        description: `Zakelijke rit ${km} km${prive.name ? ` (${prive.name})` : ''}: ${input.description.trim()}`,
         source: 'handmatig',
         sourceRef: `km:${id}`,
         lines: [
           { account: ACCOUNTS.kilometervergoeding, debit: amount },
-          { account: ACCOUNTS.priveStortingen, credit: amount },
+          { account: prive.contributions, credit: amount },
         ],
       });
       this.db.prepare('UPDATE trips SET journal_entry_id = ? WHERE id = ?').run(entryId, id);

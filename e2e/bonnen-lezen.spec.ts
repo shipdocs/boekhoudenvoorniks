@@ -37,6 +37,28 @@ test('eerste foto van een bon: kiezen hoe de app bonnen leest, met uitleg', asyn
   await expect(page.getByRole('button', { name: /Uit: ik vul bonnen zelf in/ })).toHaveClass(/selected/);
 });
 
+test('lezen op deze computer kiezen zonder internet: de bon zegt dat downloaden nu niet lukt', async ({ page, request }) => {
+  await request.post('/__store', { data: { offline: true } });
+  await onboard(page);
+  await nav(page, 'Aankopen & bonnetjes');
+  await page.locator('main input[type=file]').first().setInputFiles({ name: 'bon.png', mimeType: 'image/png', buffer: PNG });
+  await page.getByRole('button', { name: 'Bekijken' }).first().click();
+  await page.getByRole('button', { name: /Op deze computer/ }).click();
+
+  const notice = page.getByTestId('lokaal-mislukt');
+  await expect(notice).toContainText('Geen verbinding met internet: downloaden lukt nu niet.');
+  await expect(notice).toContainText("Tot die tijd vul je foto's van bonnen zelf in.");
+  await expect(notice).not.toContainText('fetch failed');
+  // opnieuw proberen start het downloaden opnieuw
+  await notice.getByRole('button', { name: 'Opnieuw proberen' }).click();
+  await expect.poll(async () => (await (await request.post('/__store', { data: '' })).json()).ok.installs).toBe(2);
+
+  // in Instellingen staat dezelfde melding
+  await nav(page, 'Instellingen');
+  await page.getByRole('button', { name: 'Automatisch & herkenning' }).click();
+  await expect(page.getByText('Geen verbinding met internet: downloaden lukt nu niet.')).toBeVisible();
+});
+
 test('vragen stellen via Claude Code of Codex: eerst zoeken, dan uitleg en de opdracht', async ({ page }) => {
   await onboard(page);
   await nav(page, 'Instellingen');

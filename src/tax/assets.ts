@@ -1,4 +1,5 @@
 import { tx, type Db } from '../db/database';
+import { privateAccountsIn } from '../closing/profit-allocation';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { NON_DEDUCTIBLE_VAT } from '../core-ledger/rules';
 import type { Ledger, PostLine } from '../core-ledger/ledger';
@@ -387,8 +388,10 @@ export class AssetService {
    * dan de waarde in het economisch verkeer; die wordt als privé-opname geboekt tegen boekresultaat.
    * Btw over de onttrekking (als er btw is afgetrokken) boekt de app niet: dat gaat via de boekhouder.
    */
-  dispose(id: number, date: IsoDate, proceeds: Cents, kind: 'verkocht' | 'prive' = 'verkocht'): Asset {
+  dispose(id: number, date: IsoDate, proceeds: Cents, kind: 'verkocht' | 'prive' = 'verkocht', partnerNo?: number | null): Asset {
     const a = this.row(id);
+    // vof met vennoten: naar privé van welke vennoot (zonder keuze een fout, vóór er iets geboekt wordt)
+    const prive = kind === 'prive' && proceeds > 0 ? privateAccountsIn(this.db, partnerNo) : null;
     if (a.status !== 'actief') throw new ValidationError('Deze investering is al verkocht of weggedaan');
     if (date < a.acquired_on) throw new ValidationError('De verkoopdatum ligt vóór de aankoop');
     if (!Number.isSafeInteger(proceeds) || proceeds < 0) throw new ValidationError(kind === 'prive' ? 'Vul in wat het nu waard is' : 'Vul de verkoopprijs in (0 als je het wegdoet)');
@@ -449,8 +452,8 @@ export class AssetService {
       const lines: PostLine[] = [{ account: a.account_rgs, credit: a.cost, description: a.name }];
       if (booked > 0) lines.push({ account: acc.cumulative, debit: booked, description: a.name });
       if (a.cost - booked > 0) lines.push({ account: ACCOUNTS.boekresultaat, debit: a.cost - booked, description: `Boekwaarde ${a.name}` });
-      if (kind === 'prive' && proceeds > 0) {
-        lines.push({ account: ACCOUNTS.priveOpnamen, debit: proceeds, description: `Naar privé: ${a.name}` }, { account: ACCOUNTS.boekresultaat, credit: proceeds, description: `Waarde naar privé: ${a.name}` });
+      if (prive) {
+        lines.push({ account: prive.drawings, debit: proceeds, description: `Naar privé${prive.name ? ` ${prive.name}` : ''}: ${a.name}` }, { account: ACCOUNTS.boekresultaat, credit: proceeds, description: `Waarde naar privé: ${a.name}` });
       }
       const entryId = this.ledger.post({ date, description: `${kind === 'prive' ? 'Naar privé' : 'Verkocht / buiten gebruik'}: ${a.name}`, source: 'handmatig', sourceRef: `desinvestering:${a.id}`, lines });
       this.db.prepare(`UPDATE assets SET status = 'verkocht', disposed_on = ?, proceeds = ?, disposal_entry_id = ?, disposal_kind = ? WHERE id = ?`).run(date, proceeds, entryId, kind, a.id);

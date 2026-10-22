@@ -291,10 +291,18 @@ export class RelationsService {
     return this.get(id);
   }
 
+  /** Vof met vennoten: van welke vennoot "altijd privé" bij deze leverancier is, of null. */
+  paidWithPartner(id: number): number | null {
+    return (this.db.prepare('SELECT partner_no FROM relation_paid_with_partner WHERE relation_id = ?').get(id) as { partner_no: number } | undefined)?.partner_no ?? null;
+  }
+
   /** "Deze betaal ik altijd privé/contant": nieuwe rekeningen van deze leverancier staan meteen op betaald. */
-  setPaidWith(id: number, paidWith: 'kas' | 'prive' | null): Relation {
+  setPaidWith(id: number, paidWith: 'kas' | 'prive' | null, partnerNo: number | null = null): Relation {
     this.get(id);
     this.db.prepare('UPDATE relations SET paid_with = ? WHERE id = ?').run(paidWith, id);
+    // vof met vennoten: bij "altijd privé" ook van welke vennoot
+    this.db.prepare('DELETE FROM relation_paid_with_partner WHERE relation_id = ?').run(id);
+    if (paidWith === 'prive' && partnerNo != null) this.db.prepare('INSERT INTO relation_paid_with_partner (relation_id, partner_no) VALUES (?, ?)').run(id, partnerNo);
     return this.get(id);
   }
 
