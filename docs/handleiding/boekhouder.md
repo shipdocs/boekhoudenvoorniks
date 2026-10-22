@@ -38,6 +38,8 @@ Klaar met een kwartaal of een jaar? Sluit het af, dan verandert er niets meer aa
 2. De app laat zien wat er nog moet: betalingen verwerken, bonnen controleren, afschriften tot en met de einddatum inlezen. Sommige punten blokkeren, andere bevestig je bewust.
 3. De app maakt een back-up en kies je *Definitief afsluiten*.
 
+Bij een vof of maatschap met vennoten toont de lijst ook de privé-opnamen en -stortingen per vennoot, en (bij een afsluiting op 31 december) hoe de winst over de vennoten wordt verdeeld. Na het afsluiten ligt die verdeling vast. In de boekhoudermodus staat bij de balans en de saldibalans *Eigen vermogen per vennoot*: begin, stortingen, opnamen, aandeel in het resultaat en eind per vennoot.
+
 > Afsluiten kan niet ongedaan gemaakt worden. Een bon of betaling die later nog binnenkomt voor die periode, zet de app in de volgende periode, met uitleg.
 
 ## Het abonnement

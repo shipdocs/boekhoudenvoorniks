@@ -41,7 +41,7 @@ Onder *Hulp nodig* staan de betalingen waar de app niet zeker van is. Klik op ee
 - **Een bon of aankoop** die hiermee betaald is.
 - **Een kostensoort** (categorie) als er geen bon is of komt; typ een paar letters. Bij een uitgave met btw vul je het btw-tarief in.
 - **Verkoop via een ander systeem**: omzet uit een webshop of betaaldienst waarvoor je geen factuur in de app maakte.
-- **Privé**: geld dat niets met je bedrijf te maken heeft (een privéopname of -storting).
+- **Privé**: geld dat niets met je bedrijf te maken heeft (een privéopname of -storting). Heb je een vof of maatschap met [vennoten](instellingen.html#vof-of-maatschap-eigen-vermogen-per-vennoot), dan vraagt de app eerst welke vennoot het opnam of stortte (*Nee, privé van …*, *Privé gestort door …*); het bedrag komt op de privérekening van die vennoot. Ook bij bonnen, kilometers en het zakelijke deel vraagt de app van welke vennoot het privé is: zie [privé per vennoot](instellingen.html#prive-per-vennoot). Een winkel of persoon die je steeds als privé indeelt, boekt de app bij vennoten niet vanzelf: hij weet niet van wie het was, dus vraagt hij het elke keer.
 - **Negeren**: de regel telt niet mee in je boekhouding, wel in het saldo. Bijvoorbeeld een dubbele regel of een nulbedrag.
 
 Een overboeking tussen je eigen rekeningen (bijvoorbeeld naar je spaarrekening of btw-potje) herkent de app zelf, als beide rekeningen in de app staan. Voeg een tweede rekening toe met *+ Rekening toevoegen*.

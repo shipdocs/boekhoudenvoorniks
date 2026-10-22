@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, readAsBytes, useAction, useApp, useAppEvent, useJobsOn, useJobWords, useLoad, type InvestmentSavedInfo } from '../ui';
+import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, PartnerSelect, StatusPill, readAsBytes, useAction, useApp, useAppEvent, useJobsOn, useJobWords, useLoad, usePartners, type InvestmentSavedInfo } from '../ui';
 import { READING_LABEL, shownMessage } from '../../shared/reading';
 import { diffDays, formatDateNl, today } from '../../shared/dates';
 import { isReverseCharge, type PurchaseVatCode } from '../../shared/vat';
@@ -324,6 +324,9 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
   const [via, setVia] = useState<'prive' | 'kas' | 'bank'>('prive');
   const [bankAccountId, setBankAccountId] = useState<number | null>(null);
   const [always, setAlways] = useState(false);
+  // vof met vennoten: privé betaald door welke vennoot
+  const [partnerNo, setPartnerNo] = useState<number | null>(null);
+  const needsPartner = usePartners().length > 0;
   // "Nee, apart betaald" bij een afschrijving die nog niet verwerkt is: die hoort niet bij deze aankoop
   const [separate, setSeparate] = useState(false);
   // staat dezelfde betaling al op een van je rekeningen (geboekt als kosten, of nog niet verwerkt)? Dan eerst vragen (anders dubbel)
@@ -399,10 +402,11 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
             Voortaan altijd zo bij {name}{others > 0 && <> (ook de {others === 1 ? 'andere open rekening' : `${others} andere open rekeningen`})</>}
           </label>
         )}
+        {via === 'prive' && <PartnerSelect label="Betaald door welke vennoot?" value={partnerNo} onChange={setPartnerNo} />}
       </div>
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
-        <Button kind="primary" disabled={busy} onClick={async () => {
+        <Button kind="primary" disabled={busy || (via === 'prive' && needsPartner && partnerNo === null)} onClick={async () => {
           if (via === 'bank') {
             if (bankAccountId === null) return;
             if ((await run(() => api.purchases.expectOnBank(p.id, bankAccountId))) === undefined) return;
@@ -410,7 +414,7 @@ function PaidElsewhereModal({ purchase: p, others, onClose, onDone }: { purchase
             await onDone();
             return;
           }
-          const r = await run(() => api.purchases.paidWith(p.id, via, { always, ...(separate ? { separate } : {}) }));
+          const r = await run(() => api.purchases.paidWith(p.id, via, { always, ...(separate ? { separate } : {}), ...(via === 'prive' && partnerNo !== null ? { partnerNo } : {}) }));
           if (!r) return;
           toast(r.paid.length === 1 ? 'Op betaald gezet ✓' : `${r.paid.length} rekeningen op betaald gezet ✓`);
           if (r.skipped.length > 0) {
@@ -476,6 +480,10 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
   const [paidWith, setPaidWith] = useState<'bank' | 'kas' | 'prive'>('bank');
   const [jobId, setJobId] = useState<number | null>(null);
   const [businessPct, setBusinessPct] = useState<number | null>(null);
+  // vof met vennoten: van wie het privé is (met privégeld betaald, of het privédeel bij gemengd gebruik)
+  const [partnerNo, setPartnerNo] = useState<number | null>(null);
+  const privateUsed = paidWith === 'prive' || (businessPct !== null && businessPct < 100);
+  const needsPartner = usePartners().length > 0 && paidWith === 'prive';
   // lijkt op een aankoop of bon die er al staat (#224): eerst de vraag, pas na "Toch toevoegen" opslaan
   const entry = `${supplier.trim()}|${date}|${amount}`;
   const [duplicate, setDuplicate] = useState<{ entry: string; label: string } | null>(null);
@@ -486,7 +494,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
       if (found === undefined) return;
       if (found) return setDuplicate({ entry, label: found.label });
     }
-    const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: description.trim() || (meta.expenseCategories.find((c) => c.key === category)?.label ?? ''), categoryKey: category, grossAmount: amount!, vatCode: vat, ...(isReverseCharge(vat) && vatRate === 9 ? { vatRate } : {}), paidWith, jobId, allowDuplicate: !!shown, ...(businessPct !== null ? { businessPct } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
+    const r = await run(() => api.purchases.recordExpense({ date, supplierName: supplier || null, description: description.trim() || (meta.expenseCategories.find((c) => c.key === category)?.label ?? ''), categoryKey: category, grossAmount: amount!, vatCode: vat, ...(isReverseCharge(vat) && vatRate === 9 ? { vatRate } : {}), paidWith, jobId, allowDuplicate: !!shown, ...(businessPct !== null ? { businessPct } : {}), ...(privateUsed && partnerNo !== null ? { partnerNo } : {}) }), category === 'investering' ? undefined : 'Aankoop verwerkt ✓');
     if (r) {
       onDone();
       if (category === 'investering') showInvestmentSaved(investmentInfo(amount!, vat));
@@ -517,6 +525,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
             <button className={paidWith === 'prive' ? 'selected' : ''} onClick={() => setPaidWith('prive')}>Met privégeld</button>
           </div>
         </Field>
+        {privateUsed && <PartnerSelect label={paidWith === 'prive' ? 'Betaald door welke vennoot?' : 'Van welke vennoot is het privédeel?'} {...(paidWith !== 'prive' ? { hint: 'leeg: de vennoot die bij deze leverancier onthouden is' } : {})} value={partnerNo} onChange={setPartnerNo} />}
         {jobsOn && (jobs.data ?? []).length > 0 && (
           <Field label={`Voor een ${jw.s}?`} hint="optioneel">
             <select value={jobId ?? ''} onChange={(e) => setJobId(Number(e.target.value) || null)}>
@@ -534,7 +543,7 @@ function ManualExpense({ onClose, onDone }: { onClose: () => void; onDone: () =>
       )}
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
-        <Button kind="primary" disabled={busy || !amount} onClick={save}>{shown ? 'Toch toevoegen' : 'Opslaan'}</Button>
+        <Button kind="primary" disabled={busy || !amount || (needsPartner && partnerNo === null)} onClick={save}>{shown ? 'Toch toevoegen' : 'Opslaan'}</Button>
       </div>
     </Modal>
   );
@@ -596,6 +605,8 @@ function ShareModal({ purchase, onClose, onDone }: { purchase: { id: number; rel
   const { run, busy } = useAction();
   const [pct, setPct] = useState(String(purchase.business_pct));
   const [remember, setRemember] = useState(Boolean(purchase.relation_name));
+  // vof met vennoten: van wie het privédeel is (leeg: zoals eerder gekozen of bij de leverancier onthouden)
+  const [partnerNo, setPartnerNo] = useState<number | null>(null);
   const n = Number(pct);
   const ok = Number.isInteger(n) && n >= 1 && n <= 100;
   const net = purchase.total - purchase.vat_total;
@@ -617,9 +628,10 @@ function ShareModal({ purchase, onClose, onDone }: { purchase: { id: number; rel
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Onthoud voor {purchase.relation_name} (volgende keer vanzelf)
         </label>
       )}
+      {ok && n < 100 && <PartnerSelect label="Van welke vennoot is het privédeel?" hint="leeg: zoals eerder gekozen" value={partnerNo} onChange={setPartnerNo} />}
       <div className="row end" style={{ marginTop: 16 }}>
         <Button onClick={onClose}>Annuleren</Button>
-        <Button kind="primary" disabled={busy || !ok || n === purchase.business_pct} onClick={async () => { if ((await run(async () => { await api.purchases.setBusinessPct(purchase.id, n, remember); return true; }, 'Aangepast ✓')) !== undefined) await onDone(); }}>Opslaan</Button>
+        <Button kind="primary" disabled={busy || !ok || n === purchase.business_pct} onClick={async () => { if ((await run(async () => { await api.purchases.setBusinessPct(purchase.id, n, remember, partnerNo); return true; }, 'Aangepast ✓')) !== undefined) await onDone(); }}>Opslaan</Button>
       </div>
     </Modal>
   );
@@ -694,7 +706,7 @@ export function InvestmentSaved({ info, onClose }: { info: InvestmentSavedInfo; 
       </ul>
       <h3>Wat jij moet doen</h3>
       <ul style={{ marginTop: 0, paddingLeft: 18 }}>
-        <li>{info.hasAttachment ? 'Niets voor de bon: die is al in de app bewaard.' : 'Bewaar de bon of factuur. Dat moet 7 jaar; voeg hem het liefst toe in de app.'}</li>
+        <li>{info.hasAttachment ? 'Niets voor de bon: die is al in de app bewaard.' : 'Bewaar de bon of factuur. Dat moet minstens 7 jaar; voeg hem het liefst toe in de app.'}</li>
         <li>Verkoop je het, of gooi je het weg? Zet dat dan bij Belasting → Aftrek → Investeringen (knop "Verkocht…"). De app rekent de rest uit.</li>
         <li>Laat bij je aangifte je boekhouder of accountant meekijken, zoals altijd.</li>
       </ul>

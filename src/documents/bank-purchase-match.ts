@@ -6,6 +6,7 @@ import { withinFx } from '../shared/currency';
 import { addDays, diffDays, formatDateNl, type IsoDate } from '../shared/dates';
 import { formatEuro, type Cents } from '../shared/money';
 import { normalizeIban, ValidationError } from '../shared/validation';
+import { allContributionsKeys } from '../shared/partners';
 import { supplierKey } from '../intake/supplier-memory';
 
 /**
@@ -357,6 +358,7 @@ export class BankPurchaseMatcher {
 
   /** Betalingen met privégeld of contant (geen bank) die nog gelden, per aankoop; of van één aankoop. */
   private elsewhere(purchaseId?: number): Map<number, ElsewherePayment[]> {
+    const prive = allContributionsKeys();
     const rows = this.db
       .prepare(
         `SELECT e.source_ref, e.id, e.entry_date AS date, SUM(l.debit) AS amount,
@@ -364,10 +366,10 @@ export class BankPurchaseMatcher {
            FROM journal_entries e
            JOIN journal_lines l ON l.journal_entry_id = e.id JOIN chart_of_accounts a ON a.id = l.account_id
           WHERE ${purchaseId === undefined ? `e.source_ref LIKE 'purchase:%'` : 'e.source_ref = @ref'} AND e.status <> 'teruggedraaid' AND e.reverses_entry_id IS NULL AND a.rgs_code = @crediteuren
-            AND EXISTS (SELECT 1 FROM journal_lines m JOIN chart_of_accounts b ON b.id = m.account_id WHERE m.journal_entry_id = e.id AND b.rgs_code IN (@prive, @kas))
+            AND EXISTS (SELECT 1 FROM journal_lines m JOIN chart_of_accounts b ON b.id = m.account_id WHERE m.journal_entry_id = e.id AND b.rgs_code IN (${prive.map((_, i) => `@prive${i}`).join(', ')}, @kas))
           GROUP BY e.id ORDER BY e.id`,
       )
-      .all({ kas: ACCOUNTS.kas, crediteuren: ACCOUNTS.crediteuren, prive: ACCOUNTS.priveStortingen, ...(purchaseId === undefined ? {} : { ref: `purchase:${purchaseId}` }) }) as (ElsewherePayment & { source_ref: string })[];
+      .all({ kas: ACCOUNTS.kas, crediteuren: ACCOUNTS.crediteuren, ...Object.fromEntries(prive.map((key, i) => [`prive${i}`, key])), ...(purchaseId === undefined ? {} : { ref: `purchase:${purchaseId}` }) }) as (ElsewherePayment & { source_ref: string })[];
     const out = new Map<number, ElsewherePayment[]>();
     for (const { source_ref, ...payment } of rows) {
       const id = Number(source_ref.slice('purchase:'.length));

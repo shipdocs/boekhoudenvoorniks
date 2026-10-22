@@ -9,6 +9,7 @@ import { ACCOUNTS } from '../core-ledger/accounts';
 import { diffDays } from '../shared/dates';
 import { ValidationError } from '../shared/validation';
 import { BankPurchaseMatcher, type PurchaseIndex } from './bank-purchase-match';
+import { privateAccountsIn } from '../closing/profit-allocation';
 
 /** Privé, of apart op "weet ik nog niet" (Vraagposten, zonder btw-aftrek): de twee keuzes bij iets van je eigen bedrijf. */
 export type OwnCompanyChoice = 'prive' | 'vraag';
@@ -102,15 +103,18 @@ export class OwnCompanyPayments {
    * zonder factuur gaat de betaling zelf naar Vraagposten. De factuur blijft altijd bewaard. Past er een
    * andere aankoop sterk bij deze betaling, dan eerst die vraag: anders komt de betaling er los naast (#230).
    */
-  settle(bankTransactionId: number, choice: OwnCompanyChoice): void {
+  settle(bankTransactionId: number, choice: OwnCompanyChoice, partnerNo?: number | null): void {
     if (choice !== 'prive' && choice !== 'vraag') throw new ValidationError('Kies "Privé" of "Weet ik nog niet"');
     tx(this.db, () => {
+      // vof met vennoten: privé van welke vennoot (zonder keuze een fout, vóór er iets verandert)
+      const prive = choice === 'prive' ? privateAccountsIn(this.db, partnerNo) : null;
+      const label = `Privé${prive?.name ? ` ${prive.name}` : ''}`;
       const m = this.match(this.bank.get(bankTransactionId));
       if (!m) throw new ValidationError('Deze betaling is intussen anders verwerkt. Kijk het opnieuw na.');
       if (m.mustAnswer) this.matcher.assertAnswered(m.transaction);
       const name = this.identity()!.name.trim();
       if (m.document) {
-        if (!this.intake.settleOwn(m.document.id, choice, bankTransactionId)) throw new ValidationError('Bij de factuur ontbreekt het bedrag of de datum. Open de factuur en vul dat eerst in.');
+        if (!this.intake.settleOwn(m.document.id, choice, bankTransactionId, prive?.partnerNo ?? null)) throw new ValidationError('Bij de factuur ontbreekt het bedrag of de datum. Open de factuur en vul dat eerst in.');
         return;
       }
       if (m.purchase) {
@@ -118,13 +122,13 @@ export class OwnCompanyPayments {
         // toch privé: de aankoop op "weet ik nog niet" vervalt en de factuur wordt het bewijs bij de betaling
         const files = this.intake.links.forTarget({ kind: 'aankoop', id: m.purchase.id });
         this.purchases.cancel(m.purchase.id, m.purchase.invoice_date);
-        this.bank.bookToAccount(bankTransactionId, { account: ACCOUNTS.priveOpnamen, description: `Privé: ${name}` });
+        this.bank.bookToAccount(bankTransactionId, { account: prive!.drawings, description: `${label}: ${name}` });
         this.intake.moveToBank(files, bankTransactionId, 'gebruiker');
         return;
       }
       this.bank.bookToAccount(
         bankTransactionId,
-        choice === 'prive' ? { account: ACCOUNTS.priveOpnamen, description: `Privé: ${name}` } : { account: ACCOUNTS.vraagposten, vatCode: 'geen', description: `Nog uitzoeken — ${name}` },
+        prive ? { account: prive.drawings, description: `${label}: ${name}` } : { account: ACCOUNTS.vraagposten, vatCode: 'geen', description: `Nog uitzoeken — ${name}` },
       );
       if (m.settledDocumentId !== null) this.intake.linkExisting(m.settledDocumentId, { kind: 'bank', id: bankTransactionId });
     });

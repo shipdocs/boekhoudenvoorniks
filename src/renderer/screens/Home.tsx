@@ -4,7 +4,7 @@ import { Button, ErrorBox, Euro, Modal, readAsBytes, useAction, useApp, useAppEv
 import type { Task } from '../../inbox/inbox';
 import type { AutomationEntry } from '../../inbox/automation-log';
 import { formatDateNl } from '../../shared/dates';
-import { CategoryPicker } from './Bank';
+import { CategoryPicker, PartnerChoice } from './Bank';
 import { investmentInfo } from './Purchases';
 import { hasOnboardingUpdate } from '../../shared/onboarding';
 import { CheckLines } from './CheckLines';
@@ -54,7 +54,9 @@ export function Home() {
     refreshBadge();
   };
 
-  const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number; vatRate?: 9 | 21 }) => {
+  // vof of maatschap: bij "Privé" eerst kiezen welke vennoot
+  const [pickingPartner, setPickingPartner] = useState<{ task: Task; actionId: string } | null>(null);
+  const act = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number; vatRate?: 9 | 21; partnerNo?: number }) => {
     if (task.kind === 'vat-check' && actionId === 'open' && task.ref.account) return setCheckLines(task);
     // een controle over losse betalingen of aankopen: eerst laten zien welke het zijn
     if (task.kind === 'vat-check' && actionId === 'open' && task.ref.periodKey) {
@@ -71,6 +73,8 @@ export function Home() {
     if (r && 'navigate' in r && r.navigate) {
       if (r.navigate.screen === 'categorie') return setPicking(task);
       if (r.navigate.screen === 'klus-kiezen') return setPickingJob(task);
+      // daarna dezelfde actie opnieuw, nu met de vennoot (privé, of een verkoop aan je eigen bedrijf)
+      if (r.navigate.screen === 'vennoot-kiezen') return setPickingPartner({ task, actionId: String(r.navigate.extra?.actionId ?? actionId) });
       if (r.navigate.screen === 'betaling') return go({ screen: 'categorie', id: r.navigate.id });
       if (r.navigate.screen === 'bewijs') {
         evidenceFor.current = r.navigate.id as number;
@@ -323,6 +327,12 @@ export function Home() {
       {checkLines && (
         <CheckLines account={checkLines.ref.account!} upTo={checkLines.ref.upTo} title={checkLines.title} hint={checkLines.question} onClose={() => { setCheckLines(null); void reload(); refreshBadge(); }} />
       )}
+      {pickingPartner && (
+        <Modal title="Van welke vennoot was dit privé?" onClose={() => setPickingPartner(null)}>
+          <p className="muted">{pickingPartner.task.title}</p>
+          <PartnerChoice amount={pickingPartner.task.kind.startsWith('sale-') ? Math.abs(pickingPartner.task.amount ?? 0) : pickingPartner.task.kind === 'document-review' ? -Math.abs(pickingPartner.task.amount ?? 0) : pickingPartner.task.amount ?? 0} busy={busy} onPick={async (partnerNo) => { const p = pickingPartner; setPickingPartner(null); await act(p.task, p.actionId, { partnerNo }); }} />
+        </Modal>
+      )}
       {picking && (
         <Modal title="Waar was deze betaling voor?" onClose={() => setPicking(null)}>
           <p className="muted">{picking.title}</p>
@@ -336,10 +346,10 @@ export function Home() {
             txId={picking.ref.bankTransactionId}
             amount={picking.amount !== undefined ? Math.abs(picking.amount) : undefined}
             initial={picking.ref.categoryKey}
-            onPick={async (categoryKey, vatCode, businessPct, vatRate) => {
+            onPick={async (categoryKey, vatCode, businessPct, vatRate, partnerNo) => {
               const t = picking;
               setPicking(null);
-              await act(t, t.kind === 'bank-business' ? 'zakelijk' : 'anders', { categoryKey, vatCode, businessPct, vatRate });
+              await act(t, t.kind === 'bank-business' ? 'zakelijk' : 'anders', { categoryKey, vatCode, businessPct, vatRate, ...(partnerNo !== undefined ? { partnerNo } : {}) });
             }}
           />
         </Modal>

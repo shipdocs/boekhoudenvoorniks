@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { LinkJobModal } from './Jobs';
-import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useJobsOn, useJobWords, useLoad } from '../ui';
+import { Button, DateNl, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, PartnerSelect, useAction, useApp, useJobsOn, useJobWords, useLoad, usePartners } from '../ui';
 import { formatDateNl, isIsoDate, isoWeek, monthOf, today, weekOf } from '../../shared/dates';
 import type { HoursPeriod, TimeEntry } from '../../tax/mileage';
 import { ACCOUNTANT_CHECK_REASONS, ACCOUNTANT_CHECK_TITLE } from '../../shared/legal';
@@ -350,8 +350,11 @@ function SellAsset({ asset, onClose, onSaved }: { asset: AssetItem; onClose: () 
   const [date, setDate] = useState(today());
   const [price, setPrice] = useState<number | null>(0);
   const [kind, setKind] = useState<'verkocht' | 'prive'>('verkocht');
+  // vof met vennoten: naar privé van welke vennoot
+  const [partnerNo, setPartnerNo] = useState<number | null>(null);
+  const needsPartner = usePartners().length > 0 && kind === 'prive' && (price ?? 0) > 0;
   const save = async () => {
-    const r = await run(() => api.assets.dispose(asset.id, date, price ?? 0, kind), 'Verwerkt');
+    const r = await run(() => api.assets.dispose(asset.id, date, price ?? 0, kind, kind === 'prive' ? partnerNo : null), 'Verwerkt');
     if (r) onSaved();
   };
   return (
@@ -367,6 +370,7 @@ function SellAsset({ asset, onClose, onSaved }: { asset: AssetItem; onClose: () 
             ? <Field label="Verkoopprijs excl. btw" hint="0 als je het weggooit"><MoneyInput value={price} onChange={setPrice} /></Field>
             : <Field label="Wat is het nu waard?" hint="wat je er bij verkoop voor zou krijgen"><MoneyInput value={price} onChange={setPrice} /></Field>}
         </div>
+        {kind === 'prive' && <PartnerSelect label="Welke vennoot neemt het mee naar privé?" value={partnerNo} onChange={setPartnerNo} />}
         <p className="small muted">
           {kind === 'verkocht'
             ? 'De app telt de kosten tot de verkoopdatum en haalt het uit je lijst. Heb je het verkocht? Maak dan ook een gewone factuur voor de koper (met btw): die zorgt voor de opbrengst.'
@@ -376,7 +380,7 @@ function SellAsset({ asset, onClose, onSaved }: { asset: AssetItem; onClose: () 
       </div>
       <div className="row end" style={{ marginTop: 14 }}>
         <Button onClick={onClose}>Annuleren</Button>
-        <Button kind="primary" disabled={busy} onClick={() => void save()}>Verwerken</Button>
+        <Button kind="primary" disabled={busy || (needsPartner && partnerNo === null)} onClick={() => void save()}>Verwerken</Button>
       </div>
     </Modal>
   );
@@ -392,11 +396,14 @@ function Trips({ year }: { year: number }) {
   const [km, setKm] = useState('');
   const [what, setWhat] = useState('');
   const [jobId, setJobId] = useState<number | null>(null);
+  // vof met vennoten: wie reed (de vergoeding is een privé-storting van die vennoot); blijft staan voor de volgende rit
+  const [partnerNo, setPartnerNo] = useState<number | null>(null);
+  const needsPartner = usePartners().length > 0;
   const [linking, setLinking] = useState<{ id: number; description: string; job_id: number | null } | null>(null);
   const jobs = useLoad(() => api.jobs.list());
   const jobName = (id: number | null) => { const j = (jobs.data ?? []).find((x) => x.id === id); return j ? `${j.relation_name} · ${j.title}` : null; };
   const add = async () => {
-    const r = await run(() => api.mileage.add({ date, km: Number(km.replace(',', '.')), description: what, jobId }), 'Rit toegevoegd');
+    const r = await run(() => api.mileage.add({ date, km: Number(km.replace(',', '.')), description: what, jobId, ...(partnerNo !== null ? { partnerNo } : {}) }), 'Rit toegevoegd');
     if (r) {
       setKm('');
       setWhat('');
@@ -424,7 +431,8 @@ function Trips({ year }: { year: number }) {
             </select>
           </Field>
         )}
-        <Button kind="primary" disabled={busy || !km || !what} onClick={() => void add()}>Toevoegen</Button>
+        <PartnerSelect label="Wie reed?" value={partnerNo} onChange={setPartnerNo} />
+        <Button kind="primary" disabled={busy || !km || !what || (needsPartner && partnerNo === null)} onClick={() => void add()}>Toevoegen</Button>
       </div>
       {(list.data ?? []).length > 0 && (
         <table className="list" style={{ marginTop: 12 }}>

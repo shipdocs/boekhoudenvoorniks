@@ -1,3 +1,4 @@
+import { partnersActive } from '../shared/partners';
 import { tx, type Db } from '../db/database';
 import type { BankService } from '../import/bank';
 import type { RelationsService } from '../relations/relations';
@@ -118,6 +119,11 @@ export interface XafPlan {
   relations: { total: number; fresh: number };
   /** wat er van jou in de zaak zat volgens de auditfile (bezittingen min schulden); null bij een lijst met openstaande posten */
   equity: Cents | null;
+  /**
+   * Vof: het kapitaal van firmant 2 t/m 5 volgens de RGS-codes in de auditfile (BEivKa2… t/m BEivKa5…, inclusief hun
+   * privé-opnamen en -stortingen), positief = vermogen. Leeg als de auditfile geen firmanten kent.
+   */
+  partnerEquity: { no: number; amount: Cents }[];
   /** bij openstaande posten: sluit het totaal aan op de startbalans? */
   check?: string | null;
   accounts: { id: string; name: string; rgs: string | null; class: XafClass; balance: Cents }[];
@@ -133,6 +139,18 @@ export interface XafApplyChoices {
 }
 
 // ---------- rekeningen herkennen ----------
+
+/** Kapitaal per firmant 2 t/m 5 uit de RGS-codes (BEivKa2… t/m BEivKa5…); credit = vermogen, dus positief. */
+export function partnerEquityFrom(accounts: { rgs: string | null; balance: Cents }[]): { no: number; amount: Cents }[] {
+  const out: { no: number; amount: Cents }[] = [];
+  for (let no = 2; no <= 5; no++) {
+    const rows = accounts.filter((a) => a.rgs?.startsWith(`BEivKa${no}`));
+    if (rows.length === 0) continue;
+    const amount = -rows.reduce((t, a) => t + a.balance, 0);
+    if (amount !== 0) out.push({ no, amount });
+  }
+  return out;
+}
 
 const has = (s: string, re: RegExp) => re.test(s.toLowerCase());
 
@@ -475,6 +493,7 @@ export class XafImportService {
       proposals,
       relations: { total: 0, fresh: 0 },
       equity: null,
+      partnerEquity: [],
       check: parts.join(' '),
       accounts: [],
       warnings: unreadable.length ? [`${unreadable.length} ${unreadable.length === 1 ? 'regel heeft een bedrag' : 'regels hebben een bedrag'} dat de app niet kan lezen; die staan hieronder niet: ${unreadable.slice(0, 3).join(', ')}${unreadable.length > 3 ? ', …' : ''}`] : [],
@@ -745,6 +764,10 @@ export class XafImportService {
     }
 
     const equity = xaf.accounts.filter((a) => isBalance(cls.get(a.id)!) && cls.get(a.id) !== 'eigen-vermogen').reduce((t, a) => t + (balance.get(a.id) ?? 0), 0);
+    const partnerEquity = partnerEquityFrom(xaf.accounts.map((a) => ({ rgs: a.rgs, balance: balance.get(a.id) ?? 0 })));
+    if (partnerEquity.length > 0 && !partnersActive(this.settings.get())) {
+      warnings.push('De auditfile heeft eigen vermogen per firmant (vof). Stel eerst je vennoten in bij Instellingen → Je bedrijf en lees het bestand daarna opnieuw in; dan neemt de app het kapitaal per vennoot over.');
+    }
     const known = new Set(this.relations.list({ includeArchived: true }).map((r) => r.name.toLowerCase()));
     return {
       kind: xaf.version === 'kolommenbalans' || xaf.version === 'saldibalans' ? xaf.version : 'auditfile',
@@ -755,6 +778,7 @@ export class XafImportService {
       proposals,
       relations: { total: xaf.relations.length, fresh: xaf.relations.filter((r) => !known.has(r.name.toLowerCase())).length },
       equity,
+      partnerEquity,
       accounts: xaf.accounts.map((a) => ({ id: a.id, name: a.name, rgs: a.rgs, class: cls.get(a.id)!, balance: balance.get(a.id) ?? 0 })).filter((a) => a.balance !== 0),
       warnings,
     };
@@ -820,6 +844,12 @@ export class XafImportService {
         this.switchover.save(p.input, existing?.id);
       }
       this.switchover.setAccountantEquity(plan.equity);
+      // vof met vennoten: het kapitaal van firmant 2 en verder over van vennoot 1 (het totaal blijft gelijk)
+      const s2 = this.settings.get();
+      if (partnersActive(s2)) {
+        const known = plan.partnerEquity.filter((p) => s2.partners.some((x) => x.no === p.no));
+        if (known.length > 0 || (s2.switchover.partnerEquityEntry ?? null) !== null) this.switchover.setPartnerEquity(known);
+      }
     });
     return this.switchover.state();
   }

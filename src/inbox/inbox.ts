@@ -3,6 +3,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
+import { allDrawingsKeys, partnerOfPrivateKey, partnersActive, privateAccountsFor } from '../shared/partners';
 import type { BalanceCheck, BankService, BankTransaction, BookToAccountInput, SaleInput } from '../import/bank';
 import type { MatchingEngine } from '../import/matching';
 import type { InvoiceService } from '../documents/invoices';
@@ -610,6 +611,7 @@ export class InboxService {
     let waiting: Set<number> | null = null;
     // waarschijnlijk dezelfde betaling als een regel die er al staat (#225): niet vanzelf boeken, eerst de melding
     const held = this.bank.heldAsDouble();
+    const partnersVof = this.needsPartnerChoice();
     for (const t of this.bank.list({ status: 'nieuw', limit: 5000 })) {
       if (t.amount >= 0 || !t.counter_name || held.has(t.id)) continue;
       if (firstOpen && t.transaction_date < firstOpen) continue; // vergrendelde periode: niet boeken
@@ -620,6 +622,8 @@ export class InboxService {
       if (this.own?.isOwnPayment(t)) continue; // betaling aan je eigen bedrijf (#205): nooit vanzelf, altijd de vraag
       const rule = this.memory.get(t.counter_name);
       if (!this.memory.isAutomatic(rule)) continue;
+      // vof met vennoten: de regel onthoudt niet welke vennoot, dus privé blijft de vraag (niet stil overslaan)
+      if (!rule!.business && partnersVof) continue;
       // privéauto: tanken en parkeren nooit automatisch als zakelijke kosten
       if (rule!.business && this.fuelIsPrivate(rule!.category_key)) continue;
       // Kan deze betaling bij een aankoop horen die er al staat (open, of op privé of contant betaald gezet)?
@@ -705,10 +709,11 @@ export class InboxService {
     return n;
   }
 
-  private bookCategory(t: BankTransaction, categoryKey: string, vatCode: string, business: boolean, learn: boolean, businessPct?: number, vatRate?: 9 | 21): void {
+  private bookCategory(t: BankTransaction, categoryKey: string, vatCode: string, business: boolean, learn: boolean, businessPct?: number, vatRate?: 9 | 21, partnerNo?: number): void {
     const name = t.counter_name ?? t.description;
     if (!business) {
-      this.bank.bookToAccount(t.id, { account: t.amount < 0 ? ACCOUNTS.priveOpnamen : ACCOUNTS.priveStortingen, description: `Privé: ${name}` });
+      const prive = this.privateAccounts(partnerNo);
+      this.bank.bookToAccount(t.id, { account: t.amount < 0 ? prive.drawings : prive.contributions, description: `Privé${prive.name ? ` ${prive.name}` : ''}: ${name}` });
     } else {
       const category = this.categories.find(categoryKey);
       if (!category) throw new Error(`Onbekende categorie ${categoryKey}`);
@@ -736,12 +741,17 @@ export class InboxService {
     }
     const m = this.own?.match(t);
     if (m && !m.mustAnswer) {
-      const choice = account === ACCOUNTS.vraagposten ? 'vraag' : account === ACCOUNTS.priveOpnamen ? 'prive' : null;
+      // privé (van welke vennoot dan ook) of "weet ik nog niet": de factuur van je eigen bedrijf gaat mee
+      const drawings = account && allDrawingsKeys().includes(account);
+      const choice = account === ACCOUNTS.vraagposten ? 'vraag' : drawings ? 'prive' : null;
       if (choice) {
-        this.own!.settle(t.id, choice);
+        const partnerNo = choice === 'prive' && this.needsPartnerChoice() ? partnerOfPrivateKey(account!) : null;
+        this.own!.settle(t.id, choice, partnerNo);
         return 'gedaan';
       }
-      if (m.document || m.purchase) throw new ValidationError('Bij deze betaling hoort een factuur van je eigen bedrijf. Kies "Privé" of "Weet ik nog niet": de factuur gaat dan mee.');
+      if (m.document || m.purchase) {
+        throw new ValidationError('Bij deze betaling hoort een factuur van je eigen bedrijf. Kies "Privé" of "Weet ik nog niet": de factuur gaat dan mee.');
+      }
     }
     this.matcher.assertAnswered(t, account);
     return 'door';
@@ -777,14 +787,28 @@ export class InboxService {
     return this.bank.bookToAccount(bankTransactionId, { account: ACCOUNTS.kruisposten, description: `Uitbetaling ${provider}` });
   }
 
+  /**
+   * Op welke privérekeningen een privébetaling komt. Vof of maatschap met vennoten: die van de gekozen vennoot
+   * (zonder keuze een fout: het scherm vraagt eerst welke vennoot). Anders de gewone privé-opnamen en -stortingen.
+   */
+  privateAccounts(partnerNo?: number): { drawings: string; contributions: string; name: string | null } {
+    return privateAccountsFor(this.settings.get(), partnerNo);
+  }
+
+  /** Moet de gebruiker bij "Privé" eerst kiezen welke vennoot? (vof of maatschap met vennoten) */
+  needsPartnerChoice(): boolean {
+    return partnersActive(this.settings.get());
+  }
+
   /** De gebruiker beantwoordt een vraag uit de inbox. */
-  answerBank(bankTransactionId: number, answer: { business: boolean; categoryKey?: string; vatCode?: string; businessPct?: number; vatRate?: 9 | 21 }): void {
+  answerBank(bankTransactionId: number, answer: { business: boolean; categoryKey?: string; vatCode?: string; businessPct?: number; vatRate?: 9 | 21; partnerNo?: number }): void {
     const t = this.bank.get(bankTransactionId);
     const category = answer.categoryKey ?? 'overig';
+    const prive = answer.business ? null : this.privateAccounts(answer.partnerNo);
     // betaling aan je eigen bedrijf, privé: al afgehandeld met de factuur erbij; je eigen bedrijf wordt niet onthouden
-    if (this.guardBank(t, answer.business ? this.categories.find(category)?.account : ACCOUNTS.priveOpnamen) === 'gedaan') return;
+    if (this.guardBank(t, answer.business ? this.categories.find(category)?.account : prive!.drawings) === 'gedaan') return;
     const vatCode = answer.vatCode ?? this.categories.find(category)?.defaultVat ?? 'hoog';
-    this.bookCategory(t, category, vatCode, answer.business, true, answer.businessPct, answer.vatRate);
+    this.bookCategory(t, category, vatCode, answer.business, true, answer.businessPct, answer.vatRate, answer.partnerNo);
   }
 
   /** Met een privéauto zijn autokosten (tanken, parkeren, onderhoud) privé: je krijgt een bedrag per zakelijke km. */
@@ -1697,7 +1721,10 @@ export class InboxService {
       }
     }
     const askAfter = autoAfterConfirmations(s.autopilot);
+    const partnersVof = partnersActive(s);
     for (const rule of Number.isFinite(askAfter) ? this.memory.pendingApprovals(askAfter) : []) {
+      // vof met vennoten: privé kan niet vanzelf (welke vennoot?), dus ook niet aanbieden
+      if (!rule.business && partnersVof) continue;
       const label = rule.business ? this.categories.label(rule.category_key) : 'privé';
       tasks.push({
         key: `supplier-auto-${rule.supplier_key}`,

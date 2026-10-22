@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { businessShareFor, businessSharePartner } from './business-share';
+import { privateAccountsIn, vofSetup } from '../closing/profit-allocation';
 import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import type { PurchaseService, PurchaseLineInput } from '../documents/purchases';
@@ -139,6 +141,11 @@ export interface Confirmation {
   businessPct?: number;
   /** "Toch boeken": de gebruiker zag dat er al een aankoop of bon staat die lijkt op wat hij hier heeft verbeterd (#224) */
   allowDuplicate?: boolean;
+  /**
+   * Vof met vennoten: van welke vennoot het privé is (privé betaald, privé van de zakelijke rekening, privédeel of
+   * een privé-deel van de bon). Verplicht zodra er iets privé geboekt wordt; anders weigert de app.
+   */
+  partnerNo?: number | null;
 }
 
 type Row = Omit<IntakeDocument, 'result' | 'classification' | 'issues' | 'bank_match' | 'bank_match_strong' | 'decisions' | 'link' | 'outcome' | 'reading'> & { result: string | null; classification: string | null; issues: string; decisions: string | null };
@@ -416,7 +423,7 @@ export class IntakeService {
    * (Vraagposten, zonder btw-aftrek). Hoort er een afschrijving bij, dan gaat die in dezelfde keuze mee.
    * Ontbreekt het bedrag of de datum, dan null: de gebruiker vult dat eerst zelf in.
    */
-  settleOwn(id: number, choice: 'prive' | 'vraag', bankTransactionId?: number): IntakeDocument | null {
+  settleOwn(id: number, choice: 'prive' | 'vraag', bankTransactionId?: number, partnerNo?: number | null): IntakeDocument | null {
     const doc = this.get(id);
     if (!this.ownIssue(doc)) throw new ValidationError('Deze bon is intussen anders beoordeeld. Bekijk hem opnieuw.');
     const r = doc.result;
@@ -424,7 +431,7 @@ export class IntakeService {
     const supplier = this.ownIdentity()?.name.trim() || r.supplier?.value || doc.original_name;
     return this.confirm(
       id,
-      { supplier, date: r.invoiceDate.value, total: r.total.value, invoiceNumber: r.invoiceNumber?.value ?? null, categoryKey: choice === 'vraag' ? QUESTION_CATEGORY : 'overig', vatCode: 'geen', business: choice === 'vraag', paidWith: 'bank' },
+      { supplier, date: r.invoiceDate.value, total: r.total.value, invoiceNumber: r.invoiceNumber?.value ?? null, categoryKey: choice === 'vraag' ? QUESTION_CATEGORY : 'overig', vatCode: 'geen', business: choice === 'vraag', paidWith: 'bank', ...(partnerNo != null ? { partnerNo } : {}) },
       { bankTransactionId },
     );
   }
@@ -1108,7 +1115,7 @@ export class IntakeService {
     });
     if (!judged) return this.get(id);
     const { classification, level, decisions, signals, bankMatch } = judged;
-    if (opts.autoConfirm !== false && level === 'HIGH' && allCertain(decisions) && result.supplier && result.total && result.invoiceDate) {
+    if (opts.autoConfirm !== false && level === 'HIGH' && allCertain(decisions) && result.supplier && result.total && result.invoiceDate && !this.needsPartnerFor(result.supplier.value, classification.business)) {
       this.confirm(id, {
         supplier: result.supplier.value,
         date: result.invoiceDate.value,
@@ -1130,6 +1137,16 @@ export class IntakeService {
       for (const d of decisions) countDecision(this.db, d.kind, 'automatic');
     }
     return this.get(id);
+  }
+
+  /**
+   * Vof met vennoten: zou vanzelf verwerken iets privé boeken zonder dat bekend is van welke vennoot? Dan niet
+   * vanzelf: de bon blijft staan en bij het nakijken kiest de gebruiker de vennoot.
+   */
+  private needsPartnerFor(supplier: string, business: boolean): boolean {
+    if (!vofSetup(this.db)) return false;
+    if (!business) return true;
+    return businessShareFor(this.db, supplier) < 100 && businessSharePartner(this.db, supplier) === null;
   }
 
   /** De aankoop of betaling waar een gevonden kopie bij hoort; null als die nog nergens bij hoort. */
@@ -1405,7 +1422,10 @@ export class IntakeService {
       const bankTx = found && (found.amount === -c.total || (doc.result?.foreign && withinFx(-found.amount, c.total))) ? found : null;
       if (!c.business) {
         // privé: niet in de boekhouding; als het van de zakelijke rekening betaald is → privé-opname
-        if (bankTx) this.bank.bookToAccount(bankTx.id, { account: ACCOUNTS.priveOpnamen, description: `Privé: ${c.supplier}` });
+        if (bankTx) {
+          const prive = privateAccountsIn(this.db, c.partnerNo);
+          this.bank.bookToAccount(bankTx.id, { account: prive.drawings, description: `Privé${prive.name ? ` ${prive.name}` : ''}: ${c.supplier}` });
+        }
         this.db.prepare(`UPDATE documents SET status = 'genegeerd' WHERE id = ?`).run(id);
         // factuur van je eigen bedrijf: hij blijft als bewijs bij de betaling staan, zodat ze samen terug te vinden zijn
         if (ownInvoice && bankTx) {
@@ -1427,6 +1447,7 @@ export class IntakeService {
         documentId: id,
         payeeIban: doc.result?.supplierIban?.value ?? null,
         businessPct: c.businessPct,
+        ...(c.partnerNo != null ? { partnerNo: c.partnerNo } : {}),
         lines,
         foreign: doc.result?.foreign ? { currency: doc.result.foreign.currency, total: doc.result.foreign.total, rate: doc.result.foreign.total / c.total } : null,
       });
@@ -1435,9 +1456,14 @@ export class IntakeService {
         // niet op de zakelijke rekening gevonden: leverancier die je altijd privé/contant betaalt → meteen betaald.
         // Staat er toch een afschrijving die erbij past (bedrag, leverancier en datum) op een eigen rekening te
         // wachten (#222), dan blijft de aankoop open: bij die betaling vraagt de app of ze bij elkaar horen.
-        const usual = c.paidWith === 'later' && relation.paid_with && !this.awaitsDebit(purchase.id) ? relation.paid_with : null;
+        // Vof met vennoten: "altijd privé" alleen met de vennoot die erbij onthouden is (of nu gekozen); anders blijft hij open
+        const usualPartner = c.partnerNo ?? this.relations.paidWithPartner(relation.id);
+        const usual = c.paidWith === 'later' && relation.paid_with && !this.awaitsDebit(purchase.id) && (relation.paid_with !== 'prive' || !vofSetup(this.db) || usualPartner != null) ? relation.paid_with : null;
         const paidWith = c.paidWith === 'later' ? usual : c.paidWith === 'bank' ? null : c.paidWith;
-        if (paidWith) this.purchases.registerPayment(purchase.id, { amount: purchase.total, date: c.date, moneyAccount: paidWith === 'kas' ? ACCOUNTS.kas : ACCOUNTS.priveStortingen });
+        if (paidWith) {
+          const moneyAccount = paidWith === 'kas' ? ACCOUNTS.kas : privateAccountsIn(this.db, c.paidWith === 'prive' ? c.partnerNo : usualPartner).contributions;
+          this.purchases.registerPayment(purchase.id, { amount: purchase.total, date: c.date, moneyAccount });
+        }
       }
       // de aankoop is uit dit document geboekt; kopieën die erop wachtten horen er nu ook bij (niets extra geboekt)
       const target: LinkTarget = { kind: 'aankoop', id: purchase.id };
@@ -1493,7 +1519,7 @@ export class IntakeService {
       return c.splits.map((sp) => {
         const vatCode = codeFor(sp.vatRate);
         const rate = (isReverseCharge(vatCode) ? vatRate : undefined) ?? PURCHASE_VAT_RATES[vatCode].percentage;
-        if (sp.categoryKey === 'prive') return { account: ACCOUNTS.priveOpnamen, netAmount: sp.gross, vatCode: 'geen' as const, description: 'Privé-deel van de bon' };
+        if (sp.categoryKey === 'prive') return { account: privateAccountsIn(this.db, c.partnerNo).drawings, netAmount: sp.gross, vatCode: 'geen' as const, description: 'Privé-deel van de bon' };
         const cat = this.categories.find(sp.categoryKey);
         if (!cat) throw new ValidationError('Kies bij elk deel waar het voor was');
         const { net, vat } = splitGross(sp.gross, rate, isReverseCharge(vatCode));

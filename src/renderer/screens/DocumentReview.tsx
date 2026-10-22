@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { api } from '../api';
-import { Button, ErrorBox, Euro, Field, MoneyInput, useAction, useApp, useAppEvent, useJobsOn, useJobWords, useLoad } from '../ui';
+import { Button, ErrorBox, Euro, Field, MoneyInput, PartnerSelect, useAction, useApp, useAppEvent, useJobsOn, useJobWords, useLoad, usePartners } from '../ui';
 import { NOT_READ_MESSAGE, READING_LABEL, WAITING_TO_READ_MESSAGE, shownMessage } from '../../shared/reading';
 import { BusinessShareField, CategoryChoice, InvestmentHint, ReverseRateField, SupplierInput, investmentInfo } from './Purchases';
 import type { Field as DocField } from '../../intake/types';
@@ -165,6 +165,9 @@ export function DocumentReview({ id }: { id: number }) {
   const jobSuggested = useRef(false);
   const [active, setActive] = useState<string | null>(null);
   const [form, setForm] = useState<ReviewForm | null>(null);
+  // vof met vennoten: van welke vennoot het privé op deze bon is
+  const [partnerNo, setPartnerNo] = useState<number | null>(null);
+  const hasPartners = usePartners().length > 0;
   // de verbeterde gegevens lijken op een aankoop of bon die er al staat (#224): eerst de vraag, pas na "Toch boeken" verwerken
   const [duplicate, setDuplicate] = useState<{ entry: string; lead: string } | null>(null);
 
@@ -241,6 +244,10 @@ export function DocumentReview({ id }: { id: number }) {
   const defaultVat = form.total === null ? null : docVat ?? Math.round((form.total * rate) / (100 + rate));
   // wat je in het veld ziet, is wat er geboekt wordt
   const showVat = form.business && !form.splits && (form.vatCode === 'hoog' || form.vatCode === 'laag');
+  // vof met vennoten: gaat er iets naar privé? Verplicht: privé van de zakelijke rekening, met privégeld betaald of een
+  // privé-deel van de bon. Bij gemengd gebruik mag het leeg (dan de vennoot die bij de leverancier onthouden is).
+  const partnerRequired = hasPartners && ((!form.business && !!d.bank_match) || (form.business && form.paidWith === 'prive') || (form.business && !!form.splits?.some((x) => x.categoryKey === 'prive')));
+  const privateOnBon = hasPartners && (partnerRequired || (form.business && !form.splits && form.businessPct !== null && form.businessPct < 100));
   const activeField = fields.find((f) => f.key === active)?.field ?? (active?.startsWith('line-') ? r?.lines?.[Number(active.slice(5))] ?? null : null);
   // de vraag die eerst een antwoord nodig heeft: "dezelfde aankoop?" of "alleen als bewijs koppelen?"
   const proposal = d.status === 'controle' ? view?.pending ?? null : null;
@@ -375,12 +382,13 @@ export function DocumentReview({ id }: { id: number }) {
                     <li><strong>Privé:</strong> komt niet in je boekhouding als kosten{d.bank_match ? '; de betaling op de bank telt als privé-opname' : ''}.</li>
                     <li><strong>Weet ik nog niet:</strong> staat apart op vraagposten, zonder btw-aftrek{d.bank_match ? ', met de betaling eraan gekoppeld' : ''}. Je boekhouder zoekt het uit.</li>
                   </ul>
+                  {d.bank_match && <PartnerSelect label="Bij Privé: van welke vennoot?" value={partnerNo} onChange={setPartnerNo} />}
                   <div className="row end">
                     <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
                     {(['prive', 'vraag'] as const).map((choice) => (
-                      <Button key={choice} disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
+                      <Button key={choice} disabled={busy || !form.supplier || !form.date || !form.total || (choice === 'prive' && hasPartners && !!d.bank_match && partnerNo === null)} onClick={async () => {
                         const res = await run(
-                          () => api.documents.confirm(d.id, { supplier: form.supplier, description: form.description.trim() || null, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: choice === 'vraag' ? 'onbekend' : 'overig', vatCode: 'geen', business: choice === 'vraag', paidWith: d.bank_match ? 'bank' : 'later' }),
+                          () => api.documents.confirm(d.id, { supplier: form.supplier, description: form.description.trim() || null, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, categoryKey: choice === 'vraag' ? 'onbekend' : 'overig', vatCode: 'geen', business: choice === 'vraag', paidWith: d.bank_match ? 'bank' : 'later', ...(choice === 'prive' && partnerNo !== null ? { partnerNo } : {}) }),
                           choice === 'vraag' ? 'Apart gezet op "weet ik nog niet" ✓' : 'Privé — niet geboekt ✓',
                         );
                         if (res) go({ screen: 'aankopen' });
@@ -455,6 +463,7 @@ export function DocumentReview({ id }: { id: number }) {
                   )}
                 </>
               )}
+              {privateOnBon && <PartnerSelect label={partnerRequired ? 'Privé van welke vennoot?' : 'Van welke vennoot is het privédeel?'} {...(partnerRequired ? {} : { hint: 'leeg: de vennoot die bij deze leverancier onthouden is' })} value={partnerNo} onChange={setPartnerNo} />}
               {shownDuplicate && (
                 <div className="notice warn" role="alert" data-testid="mogelijk-dubbel" style={{ marginBottom: 12 }}>
                   <strong>Staat deze aankoop er al in?</strong>
@@ -463,14 +472,14 @@ export function DocumentReview({ id }: { id: number }) {
               )}
               <div className="row end">
                 <Button kind="ghost" onClick={async () => { await run(() => api.documents.ignore(d.id)); go({ screen: 'aankopen' }); }}>Negeren</Button>
-                <Button kind="primary" disabled={busy || !form.supplier || !form.date || !form.total} onClick={async () => {
+                <Button kind="primary" disabled={busy || !form.supplier || !form.date || !form.total || (hasPartners && partnerRequired && partnerNo === null)} onClick={async () => {
                   if (!shownDuplicate) {
                     const found = await run(() => api.documents.duplicateOf(d.id, { supplier: form.supplier, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, business: form.business }));
                     if (found === undefined) return;
                     if (found) return setDuplicate({ entry, lead: `Lijkt op ${found.label}.${found.detail ? ` ${found.detail}` : ''}` });
                   }
                   const isInvestment = form.business && !form.splits && form.categoryKey === 'investering';
-                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, description: form.description.trim() || null, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, ...(isReverseCharge(form.vatCode) && form.vatRate === 9 ? { vatRate: 9 } : {}), business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, allowDuplicate: !!shownDuplicate, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
+                  const res = await run(() => api.documents.confirm(d.id, { supplier: form.supplier, description: form.description.trim() || null, date: form.date, total: form.total!, invoiceNumber: form.invoiceNumber || null, vatAmount: form.vatAmount ?? (showVat ? defaultVat : null), categoryKey: form.categoryKey, vatCode: form.vatCode, ...(isReverseCharge(form.vatCode) && form.vatRate === 9 ? { vatRate: 9 } : {}), business: form.business, paidWith: form.paidWith, jobId: form.jobId, splits: form.splits, allowDuplicate: !!shownDuplicate, ...(form.businessPct !== null && !form.splits ? { businessPct: form.businessPct } : {}), ...(privateOnBon && partnerNo !== null ? { partnerNo } : {}) }), isInvestment ? undefined : form.business ? 'Nieuwe aankoop geboekt ✓' : 'Privé — niet geboekt ✓');
                   if (res) {
                     go({ screen: 'aankopen' });
                     if (isInvestment) showInvestmentSaved(investmentInfo(form.total!, form.vatCode, true));

@@ -293,6 +293,22 @@ function inTurn<T>(key: string, work: () => Promise<T>): Promise<T> {
 }
 
 /** De start is afgebroken omdat de runtime intussen gestopt is (afsluiten, administratie wisselen, verwijderen). */
+/** Foutcodes van Node/undici als er geen (goede) verbinding is. */
+const NETWORK_CODES = /^(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT)$/;
+
+/**
+ * De melding bij een mislukte download. Zonder internet geeft fetch alleen "fetch failed" (of
+ * "terminated" als de verbinding halverwege wegvalt); dat zegt een gebruiker niets.
+ */
+export function downloadErrorMessage(e: unknown): string {
+  const err = e as (Error & { code?: string; cause?: { code?: string } }) | undefined;
+  const code = err?.cause?.code ?? err?.code ?? '';
+  if (NETWORK_CODES.test(code) || err?.message === 'fetch failed' || err?.message === 'terminated') {
+    return "Geen verbinding met internet: downloaden lukt nu niet. Probeer het opnieuw als je weer online bent; wat al binnen is, hoeft niet opnieuw. Tot die tijd vul je foto's van bonnen zelf in. PDF's met tekst en e-facturen leest de app gewoon.";
+  }
+  return err?.message ?? String(e);
+}
+
 export class OcrStoppedError extends Error {
   constructor() {
     super('De tekstherkenning is gestopt.');
@@ -484,9 +500,10 @@ export class LocalOcrRuntime {
       writeFileSync(join(this.dir, 'installed.json'), JSON.stringify(installed, null, 2));
       this.status_ = { state: 'geinstalleerd', progress: null, error: null, llamaVersion: release.tag_name, model: this.model.label };
     } catch (e) {
-      const message = this.withHint((e as Error).message);
+      const plain = downloadErrorMessage(e);
+      const message = this.withHint(plain);
       this.status_ = { ...this.status_, state: 'fout', progress: null, error: message };
-      throw this.deps.failureHint ? new Error(message) : e;
+      throw this.deps.failureHint || plain !== (e as Error)?.message ? new Error(message, { cause: e }) : e;
     }
   }
 

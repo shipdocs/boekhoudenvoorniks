@@ -1,4 +1,5 @@
 import type { Db } from '../db/database';
+import { ownProfitSharePct } from '../shared/partners';
 import { carBijtellingForYear, CAR_STANDARD_PCT, type IbCar } from './car-ib';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import type { AppSettings, SettingsService } from '../settings/settings';
@@ -223,7 +224,7 @@ export class TaxOverviewService {
     const to = running ? asOf : `${year}-12-31`;
     const adj = this.adjustments(year, asOf);
     const profitBooked = profitBetween(this.db, `${year}-01-01`, to);
-    const share = s.legalForm === 'vof' ? Math.min(100, Math.max(0, s.profitSharePct)) / 100 : 1;
+    const share = ownProfitSharePct(s) / 100;
     const profit = Math.round((profitBooked - adj.unbookedDepreciation) * share);
     const km = { ...this.mileage.totals(year), rate: rules.kmRate };
     const h = this.hours.totals(year);

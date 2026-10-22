@@ -1678,4 +1678,31 @@ export const migrations: string[] = [
     at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  `
+  -- Vof of maatschap: de winstverdeling van een boekjaar ligt vast zodra dat jaar is afgesloten of bij de boekhouder
+  -- ligt. Een latere wijziging van de vennoten of hun winstaandeel verandert dan alleen open jaren. Aandeel in
+  -- basispunten (100% = 10000), vennoot = RGS-firmantnummer 1 t/m 5. Alleen additief: een nieuwe, lege tabel; een
+  -- eenmanszaak of bv krijgt hier nooit regels.
+  CREATE TABLE IF NOT EXISTS vof_winstverdeling (
+    jaar INTEGER NOT NULL,
+    vennoot INTEGER NOT NULL CHECK (vennoot BETWEEN 1 AND 5),
+    aandeel_bp INTEGER NOT NULL CHECK (aandeel_bp BETWEEN 0 AND 10000),
+    vastgelegd_op TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (jaar, vennoot)
+  );
+  `,
+  `
+  -- Vof of maatschap met vennoten: wat de app onthoudt en daarna vanzelf privé boekt, onthoudt ook van welke vennoot
+  -- het is: het privédeel bij gemengd gebruik (zakelijk deel per leverancier) en "deze betaal ik altijd privé".
+  -- Alleen additief: twee nieuwe, lege tabellen; geen regel = geen vennoot gekozen (eenmanszaak, bv, of van vóór de
+  -- vennoten). De bestaande tabellen blijven zoals ze zijn.
+  CREATE TABLE IF NOT EXISTS supplier_business_share_partner (
+    supplier_key TEXT PRIMARY KEY,
+    partner_no INTEGER NOT NULL CHECK (partner_no BETWEEN 1 AND 5)
+  );
+  CREATE TABLE IF NOT EXISTS relation_paid_with_partner (
+    relation_id INTEGER PRIMARY KEY REFERENCES relations(id),
+    partner_no INTEGER NOT NULL CHECK (partner_no BETWEEN 1 AND 5)
+  );
+  `,
 ];

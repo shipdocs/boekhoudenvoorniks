@@ -29,7 +29,7 @@ Open de betaling bij *Bank* en kies *Ongedaan maken*. De boeking wordt teruggedr
 ## Een bon wordt niet gelezen, of verkeerd
 
 - **Foto onscherp of schuin**: maak een nieuwe foto, liefst recht van boven met de hele bon in beeld. Of vul de velden zelf in; dat is bij een kleine bon sneller.
-- **Lezen staat uit**: bij *Instellingen → Automatisch & herkenning* kies je hoe bonnen gelezen worden. Op je eigen computer lezen vraagt eenmalig een download.
+- **Lezen staat uit**: bij *Instellingen → Automatisch & herkenning* kies je hoe bonnen gelezen worden. Op je eigen computer lezen vraagt eenmalig een download. Heb je op dat moment geen internet, dan zegt de app dat het downloaden nu niet lukt. Zodra je weer internet hebt, gaat de download verder waar hij bleef, of je kiest bij de bon *Opnieuw proberen*. Tot die tijd vul je de gegevens van een foto zelf in.
 - **Verkeerde categorie of btw**: pas het aan bij *Even controleren*; de app leert ervan voor de volgende bon van die leverancier.
 - **Bon staat er dubbel in**: open de kopie en kies *Negeren*.
 
@@ -62,6 +62,6 @@ Op een administratie waarin buiten de boekhouder om in de boekhoudermodus is ges
 
 ## Iets anders
 
-Werkt iets in de app niet zoals hier beschreven? Kijk bij de [veelgestelde vragen](../#vragen) of mail ons: [info@shipdocs.app](mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks). Zeg erbij welke versie je gebruikt (*Instellingen → Over*) en wat je precies deed toen het misging.
+Werkt iets in de app niet zoals hier beschreven? Kijk bij de [veelgestelde vragen](../#vragen) of mail ons: [info@shipdocs.app](mailto:info@shipdocs.app?subject=Vraag%20over%20BoekhoudenVoorNiks). Zeg erbij welke versie je gebruikt (*Instellingen → Over*) en wat je precies deed toen het misging. Mis je iets in het programma? Zet het op de pagina met [ideeën en wensen](../ideeen.html), of stem daar op een idee dat er al staat.
 
 Vragen over je boekhouding zelf (klopt deze boeking, wat moet ik aangeven, hoe los ik dit verschil op) beantwoorden we niet: daarvoor is je boekhouder. Werkt die met de [uitwisseling](boekhouder.html#de-uitwisseling), dan kan hij namens jou bij ons terecht als er iets in de app niet klopt.

@@ -1,4 +1,5 @@
 import type { Db } from '../db/database';
+import { allDrawingsKeys } from '../shared/partners';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { periodFor, type PeriodType } from '../shared/dates';
 import type { Cents } from '../shared/money';
@@ -71,8 +72,10 @@ export class BookedInfo {
     // gemengd gebruik: het privédeel is geen aparte post, maar "40% zakelijk"
     const shared = this.db.prepare(`SELECT json_extract(ev.payload, '$.businessPct') AS pct FROM journal_entries e JOIN events ev ON ev.id = e.event_id WHERE e.id = ?`).get(entryId) as { pct: number | null } | undefined;
     const businessPct = shared?.pct ?? null;
-    const privateName = this.db.prepare('SELECT name FROM chart_of_accounts WHERE rgs_code = ?').get(ACCOUNTS.priveOpnamen) as { name: string } | undefined;
-    const list = [...lines.values()].filter((l) => l.amount !== 0 && !(businessPct !== null && l.account === privateName?.name));
+    // het privédeel staat op de privé-opnamen (bij vennoten: van een van hen)
+    const keys = allDrawingsKeys();
+    const privateNames = new Set((this.db.prepare(`SELECT name FROM chart_of_accounts WHERE rgs_code IN (${keys.map(() => '?').join(', ')})`).all(...keys) as { name: string }[]).map((r) => r.name));
+    const list = [...lines.values()].filter((l) => l.amount !== 0 && !(businessPct !== null && privateNames.has(l.account)));
     const summary = list.length === 0 ? '' : list.length === 1 ? [list[0]!.account, list[0]!.vat, businessPct !== null ? `${businessPct}% zakelijk` : null].filter(Boolean).join(' · ') : list.map((l) => l.account).join(' + ');
     const hasVat = rows.some((r) => r.category === 'btw');
     let vatPeriod: BookingInfo['vatPeriod'] = null;

@@ -1,4 +1,5 @@
 import { ValidationError } from '../shared/validation';
+import { allContributionsKeys } from '../shared/partners';
 import type { Db } from '../db/database';
 import { parseEuro, type Cents } from '../shared/money';
 import { addMonths, diffDays, today, type IsoDate } from '../shared/dates';
@@ -241,7 +242,7 @@ export class SearchService {
         // niet via de bank betaald: privé of contant (de betaling staat tegen Privé-stortingen of Kas)
         const elsewhere = bank ? null : one<{ rgs_code: string }>(
           `SELECT a.rgs_code FROM journal_entries e JOIN journal_lines l ON l.journal_entry_id = e.id JOIN chart_of_accounts a ON a.id = l.account_id
-            WHERE e.source_ref = ? AND e.status <> 'teruggedraaid' AND e.reverses_entry_id IS NULL AND a.rgs_code IN (?, ?) LIMIT 1`, `purchase:${id}`, ACCOUNTS.priveStortingen, ACCOUNTS.kas);
+            WHERE e.source_ref = ? AND e.status <> 'teruggedraaid' AND e.reverses_entry_id IS NULL AND a.rgs_code IN (${[...allContributionsKeys(), ACCOUNTS.kas].map(() => '?').join(', ')}) LIMIT 1`, `purchase:${id}`, ...allContributionsKeys(), ACCOUNTS.kas);
         return {
           status: p.status === 'betaald' ? 'Betaald' : p.amount_paid > 0 ? 'Deels betaald' : 'Nog te betalen',
           attention: p.status !== 'betaald',

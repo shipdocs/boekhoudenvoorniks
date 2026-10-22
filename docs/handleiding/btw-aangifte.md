@@ -25,6 +25,13 @@ Na *Ik heb de aangifte gedaan* ligt de periode vast voor de btw. Een bon of corr
 - **Inkoop uit het buitenland**: bij een bon in dollars of een andere valuta rekent de app om naar euro's en doet hij een voorstel voor de btw (rubriek 4a/4b). Controleer dat bij twijfel.
 - **Kleineondernemersregeling (KOR)**: zet je die aan bij *Instellingen → Btw*, dan reken je geen btw en hoef je normaal geen aangifte te doen. Btw op je inkopen telt bij de kosten. Let op: btw die naar jou verlegd is (bijvoorbeeld een dienst van een buitenlands bedrijf) blijf je verschuldigd, zonder aftrek; de app zet die per kwartaal op het btw-scherm, zodat je weet dat je voor die periode wél aangifte doet. De app houdt ook de omzetgrens in de gaten en waarschuwt op tijd.
 
+Bij de KOR kan de app ook vragen om de btw-aftrek op een bedrijfsmiddel te beoordelen. Het signaal
+gebruikt de ingevulde datum van ingebruikname; zonder aparte datum gebruikt het de aanschafdatum.
+In het eerste gebruiksjaar vraagt de melding om beoordeling van de volledige afgetrokken btw en het
+gebruik in dat jaar. De geschatte bedragen gaan uit van een roerend bedrijfsmiddel (zoals een bus, machine
+of laptop): 5 jaar, een vijfde per jaar. Voor een pand of grond loopt de herziening over 10 jaar, een tiende
+per jaar; dat rekent de app niet uit. De app boekt deze herziening niet automatisch: laat je boekhouder het bedrag bevestigen.
+
 ## Inkomstenbelasting
 
 *Belasting → Inkomstenbelasting* geeft per jaar een schatting van wat je aan inkomstenbelasting kwijt bent, op basis van je winst en de aftrekposten die de app bijhoudt: afschrijving op investeringen, kleinschaligheidsinvesteringsaftrek, zakelijke kilometers, zelfstandigen- en startersaftrek, en het zakelijke deel van telefoon, internet en werkplek. Hier houd je ook je uren bij voor het urencriterium.

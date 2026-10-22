@@ -1,4 +1,5 @@
 import { jobWords } from '../shared/job-term';
+import { partnersActive } from '../shared/partners';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { formatEuro, parseEuro } from '../shared/money';
 import { formatDateNl } from '../shared/dates';
@@ -299,4 +300,27 @@ export function readAsText(file: File): Promise<string> {
 
 export async function readAsBytes(file: File): Promise<Uint8Array> {
   return new Uint8Array(await file.arrayBuffer());
+}
+
+/** Vof of maatschap met vennoten? Dan moet bij privé gekozen worden van welke vennoot. */
+export function usePartners(): { no: number; name: string }[] {
+  const { settings } = useApp();
+  return partnersActive(settings) ? settings.partners : [];
+}
+
+/**
+ * Vof of maatschap met vennoten: kiezen van welke vennoot iets privé is. Zonder vennoten toont hij niets.
+ * Geen standaardkeuze: wie het was, kiest de gebruiker zelf (de app weigert privé zonder vennoot).
+ */
+export function PartnerSelect({ value, onChange, label = 'Privé van welke vennoot?', hint }: { value: number | null; onChange: (no: number | null) => void; label?: string; hint?: string }) {
+  const partners = usePartners();
+  if (partners.length === 0) return null;
+  return (
+    <Field label={label} {...(hint ? { hint } : {})}>
+      <select data-testid="vennoot-select" value={value ?? ''} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}>
+        <option value="">Kies een vennoot</option>
+        {partners.map((p) => <option key={p.no} value={p.no}>{p.name}</option>)}
+      </select>
+    </Field>
+  );
 }

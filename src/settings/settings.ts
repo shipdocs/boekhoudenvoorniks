@@ -3,6 +3,8 @@ import type { Db } from '../db/database';
 import type { PeriodType } from '../shared/dates';
 import { ValidationError, isValidEmail } from '../shared/validation';
 import { checkNumberFormat } from '../documents/numbering';
+import { partnersActive, partnersProblem, shareBp, type Partner } from '../shared/partners';
+import { freezeClosedYears, partnerHasHistory, vofSetup } from '../closing/profit-allocation';
 
 export interface CompanySettings {
   name: string;
@@ -114,6 +116,10 @@ export interface SwitchoverSettings {
   skipped?: string[];
   /** bankrekeningen die de gebruiker vanaf de instapdatum niet meer gebruikt (beginsaldo € 0, geen afschriften nodig) */
   unusedBanks?: number[];
+  /** vof: het beginkapitaal van vennoot 2 en verder op de instapdatum (centen, positief = vermogen); vennoot 1 krijgt de rest */
+  partnerEquity?: { no: number; amount: number }[];
+  /** de beginbalansboeking die dat kapitaal van vennoot 1 naar de anderen overboekt */
+  partnerEquityEntry?: number | null;
 }
 
 export interface AppSettings {
@@ -152,8 +158,18 @@ export interface AppSettings {
   jobsEnabled: boolean;
   /** Rechtsvorm; null = nog niet opgegeven (de schatting gaat dan uit van een eenmanszaak). Een bv betaalt geen inkomstenbelasting over de winst. */
   legalForm: 'eenmanszaak' | 'vof' | 'bv' | null;
-  /** vof of maatschap: jouw deel van de winst in procenten (de schatting is per ondernemer) */
+  /** vof of maatschap: jouw deel van de winst in procenten (de schatting is per ondernemer). Met vennoten: het aandeel van `ibPartnerNo`. */
   profitSharePct: number;
+  /**
+   * Vof of maatschap: de vennoten met naam en winstaandeel (samen 100%). Leeg = nog niet ingesteld: dan blijft er
+   * één eigen vermogen, zoals vóór deze instelling. Per vennoot komen er een kapitaalrekening en privé-opnamen
+   * en -stortingen bij (RGS firmant 1 t/m 5, zie shared/partners.ts).
+   */
+  partners: Partner[];
+  /** Vanaf dit boekjaar wordt de winst over de vennoten verdeeld; daarvóór gaat hij naar vennoot 1 (zoals het was). */
+  partnerAllocationFromYear: number | null;
+  /** Voor welke vennoot de schatting van de inkomstenbelasting is (die is per ondernemer). */
+  ibPartnerNo: number;
   /** Bevestigd ondernemerschap voor de inkomstenbelasting; urencriterium staat afzonderlijk. */
   ibConfirmed: boolean;
   /** Tweede voorwaarde urencriterium: meerderheid werktijd, of bevestigde starteruitzondering. */
@@ -302,6 +318,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   jobTerm: 'klus',
   jobsEnabled: true,
   profitSharePct: 100,
+  partners: [],
+  partnerAllocationFromYear: null,
+  ibPartnerNo: 1,
   ibConfirmed: false,
   ibHoursCondition: null,
   incomeTaxEstimate: true,
@@ -355,6 +374,15 @@ function validateSettings(settings: AppSettings): void {
   if (settings.reminderDays.length > 12 || settings.reminderDays.some((day) => !Number.isInteger(day) || day < 0 || day > 365)) throw new ValidationError('Herinneringsdagen moeten hele getallen tussen 0 en 365 zijn');
   if (settings.smtp.fromEmail && !isValidEmail(settings.smtp.fromEmail)) throw new ValidationError('Het afzenderadres is geen geldig e-mailadres');
   if (settings.smtp.bcc && !isValidEmail(settings.smtp.bcc)) throw new ValidationError('Het BCC-adres is geen geldig e-mailadres');
+  if (!Array.isArray(settings.partners)) throw new ValidationError('Ongeldige lijst met vennoten');
+  if (settings.partners.length > 0) {
+    if (settings.legalForm !== 'vof') throw new ValidationError('Vennoten horen bij een vof of maatschap');
+    const problem = partnersProblem(settings.partners);
+    if (problem) throw new ValidationError(problem);
+    if (settings.partnerAllocationFromYear === null) throw new ValidationError('Kies vanaf welk boekjaar de winst over de vennoten wordt verdeeld');
+    integerInRange(settings.partnerAllocationFromYear, 1800, 9999, 'Boekjaar winstverdeling');
+    if (!settings.partners.some((p) => p.no === settings.ibPartnerNo)) throw new ValidationError('Kies voor welke vennoot de schatting van de inkomstenbelasting is');
+  }
   for (const [label, value] of [['Bedrijfsnaam', settings.company.name], ['SMTP-server', settings.smtp.host], ['E-mailtekst', settings.invoiceEmailBody]] as const) {
     if (value.length > 20_000) throw new ValidationError(`${label} is te lang`);
   }
@@ -432,7 +460,20 @@ export class SettingsService {
     const current = this.get();
     const candidate = { ...current, ...patch } as AppSettings;
     for (const key of ['company', 'smtp', 'profile', 'ocr'] as const) candidate[key] = { ...current[key], ...((patch[key] as object | undefined) ?? {}) } as never;
+    // een andere rechtsvorm dan vof: geen vennoten (de controle hieronder bewaakt dat er niets verloren gaat)
+    if (candidate.legalForm !== 'vof' && Array.isArray(candidate.partners) && candidate.partners.length > 0) {
+      candidate.partners = [];
+      patch = { ...patch, partners: [] };
+    }
     validateSettings(candidate);
+    const partnerChange = this.partnerChange(current, candidate);
+    if (partnerChange) {
+      // het winstaandeel voor de schatting volgt de vennoot waarvoor de schatting is
+      if (partnersActive(candidate)) {
+        const me = candidate.partners.find((p) => p.no === candidate.ibPartnerNo)!;
+        patch = { ...patch, profitSharePct: me.sharePct };
+      }
+    }
     // de boekhouding voor de boekhouder gaat alleen aan na een bewuste bevestiging (#409); wie hem al aan had, houdt hem
     if (patch.advancedMode && !current.advancedMode && !candidate.advancedModeAgreedAt) throw new ValidationError('Bevestig eerst dat je begrijpt dat de boekhoudfuncties voor de boekhouder zijn');
     // alleen bij een wijziging: een eerder opgeslagen onbruikbaar formaat mag het opslaan van iets anders niet blokkeren
@@ -443,6 +484,8 @@ export class SettingsService {
       if (fout) throw new ValidationError(fout);
     }
     this.db.transaction(() => {
+      // afgesloten jaren (en wat bij de boekhouder ligt) houden de verdeling van vóór deze wijziging
+      if (partnerChange) freezeClosedYears(this.db, vofSetup(this.db));
       for (const [key, value] of Object.entries(patch)) {
         if (!(key in DEFAULT_SETTINGS) || value === undefined) continue;
         const merged = ['company', 'smtp', 'mailIn', 'profile', 'ocr', 'switchover'].includes(key) ? { ...(current[key as keyof AppSettings] as object), ...(value as object) } : value;
@@ -450,6 +493,40 @@ export class SettingsService {
       }
     })();
     return this.get();
+  }
+
+  /**
+   * Verandert deze wijziging iets aan de vennoten of de verdeling? Gooit een fout als een vennoot met geschiedenis
+   * zou verdwijnen (minder vennoten, of geen vof meer): zijn vermogen zou dan ongemerkt bij een ander komen.
+   */
+  private partnerChange(current: AppSettings, candidate: AppSettings): boolean {
+    const shape = (x: AppSettings) => JSON.stringify([partnersActive(x) ? x.partners.map((p) => [p.no, p.name.trim(), shareBp(p.sharePct)]) : [], partnersActive(x) ? x.partnerAllocationFromYear : null, x.ibPartnerNo]);
+    if (shape(current) === shape(candidate)) return false;
+    const before = partnersActive(current) ? current.partners : [];
+    const afterList = partnersActive(candidate) ? candidate.partners : [];
+    const after = new Set(afterList.map((p) => p.no));
+    const setup = vofSetup(this.db);
+    // het nummer hoort bij de vennoot zodra hij geschiedenis heeft: zijn naam op een ander nummer zetten
+    // (vennoten omwisselen) zou zijn kapitaal, privé en winstaandelen ongemerkt aan een ander geven
+    const norm = (name: string) => name.trim().toLocaleLowerCase('nl-NL');
+    for (const p of before) {
+      const moved = afterList.find((q) => q.no !== p.no && norm(q.name) === norm(p.name));
+      const taken = afterList.find((q) => q.no === p.no && before.some((o) => o.no !== p.no && norm(o.name) === norm(q.name)));
+      if ((moved || taken) && partnerHasHistory(this.db, p.no, setup)) {
+        throw new ValidationError(
+          `${p.name} heeft al boekingen of een deel van de winst als vennoot ${p.no}. Die plaats kan niet naar een andere vennoot; pas alleen de naam of het aandeel aan.`,
+        );
+      }
+    }
+    for (const p of before) {
+      if (p.no === 1 || after.has(p.no)) continue;
+      if (partnerHasHistory(this.db, p.no, setup)) {
+        throw new ValidationError(
+          `${p.name} heeft al boekingen of een deel van de winst in deze administratie. Een vennoot die uittreedt (of een andere rechtsvorm) regel je met je boekhouder: zijn vermogen moet eerst worden afgerekend of overgeboekt.`,
+        );
+      }
+    }
+    return true;
   }
 
   /** Interne tellers (factuurnummers e.d.) — niet via update() bereikbaar. */

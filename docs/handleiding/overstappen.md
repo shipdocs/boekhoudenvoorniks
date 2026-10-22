@@ -26,6 +26,10 @@ De overstap-hulp werkt in hoofdstukken. Elk hoofdstuk heeft een knop *Verder* en
 
 De app laat per hoofdstuk zien *Wat de app overneemt* en vraagt alleen door waar het nodig is, bijvoorbeeld *Hoeveel jaar gebruik je het nog?* bij gereedschap of een bus.
 
+## Vof of maatschap: kapitaal per vennoot
+
+Houdt de app het [eigen vermogen per vennoot](instellingen.html#vof-of-maatschap-eigen-vermogen-per-vennoot) bij, dan staat bij *Bekijk je startpositie* ook *Kapitaal per vennoot op* je instapdatum. Vul het beginkapitaal in van de tweede vennoot en verder (van de balans van je boekhouder of je vorige programma); de eerste vennoot krijgt de rest. Het totale eigen vermogen verandert daar niet door. Een auditfile met de RGS-codes voor firmant 2 tot en met 5 vult dit zelf in. Pas je het later aan, dan draait de app de vorige boeking eerst terug.
+
 ## Bankrekeningen
 
 Vul per rekening het IBAN en het saldo op de instapdatum in (*Datum saldo*). Lees daarna je eerste afschrift in; de app controleert of het saldo aansluit. Een rekening die je niet meer gebruikt: *Deze rekening gebruik ik niet*.

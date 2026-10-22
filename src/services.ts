@@ -38,6 +38,7 @@ import { Classifier, type LlmClassifier } from './intake/classify';
 import { IntakeService } from './intake/intake';
 import type { OcrProvider } from './intake/ocr';
 import { JobService } from './jobs/jobs';
+import { partnersActive } from './shared/partners';
 import { JobPhotos } from './jobs/photos';
 import { InboxService } from './inbox/inbox';
 import { ChecklistService } from './onboarding/checklist';
@@ -198,6 +199,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
   if (!db.readonly) {
     ledger.seedDefaultAccounts();
     if (settings.get().legalForm === 'bv') ledger.seedBvAccounts();
+    if (partnersActive(settings.get())) ledger.seedPartnerAccounts(settings.get().partners);
     templates.seedDefaults();
     bank.ensureDefaultAccount();
   }

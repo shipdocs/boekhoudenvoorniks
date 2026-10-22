@@ -11,6 +11,7 @@ import { ValidationError } from '../shared/validation';
 import { parseUblSalesInvoice } from '../intake/ubl';
 import { SKIPPABLE_SECTIONS } from '../shared/switchover';
 import { forgetRejections } from '../documents/bank-purchase-match';
+import { allPartnerPrivateKeys, MAX_PARTNERS, partnerAccounts, partnersActive } from '../shared/partners';
 
 /**
  * Overstappen met een lopende administratie.
@@ -96,6 +97,11 @@ export interface OpeningPosition {
   winstTotNu: Cents | null;
   /** wat er van jou in de zaak zit: bezittingen min schulden */
   eigenVermogen: Cents;
+  /**
+   * Vof met vennoten: het beginkapitaal per vennoot (vennoot 1 = de rest). Samen met de winst tot nu toe is dat het
+   * eigen vermogen hierboven. null zonder vennoten.
+   */
+  perVennoot: { no: number; name: string; amount: Cents }[] | null;
 }
 
 export interface BankStatus {
@@ -249,6 +255,7 @@ export class SwitchoverService {
         throw new ValidationError('Je hebt al een startbalans ingevuld. Haal die eerst weg in de overstap-hulp');
       }
       tx(this.db, () => {
+        if (this.cfg().partnerEquityEntry) this.setPartnerEquity([]);
         this.reopenFiledElsewhere();
         this.update({ mode: 'nieuw', date: null, filedElsewhere: [] });
       });
@@ -311,6 +318,7 @@ export class SwitchoverService {
       }
       this.save(item.data, item.id);
     }
+    if (this.cfg().partnerEquityEntry) this.setPartnerEquity(this.cfg().partnerEquity ?? []);
   }
 
   confirm(opts: { provisional?: boolean } = {}): SwitchoverState {
@@ -840,8 +848,9 @@ export class SwitchoverService {
     const schulden: PositionLine[] = [];
     let btw = 0;
     let winst = 0;
+    const equityKeys = new Set([...Array.from({ length: MAX_PARTNERS }, (_, i) => partnerAccounts(i + 1).capital), ...allPartnerPrivateKeys().map((p) => p.key)]);
     for (const r of rows) {
-      if (r.rgs_code === ACCOUNTS.eigenVermogen) continue;
+      if (equityKeys.has(r.rgs_code)) continue;
       if (r.category === 'omzet' || r.category === 'kosten') {
         winst -= r.balance;
         continue;
@@ -863,7 +872,50 @@ export class SwitchoverService {
       schulden,
       winstTotNu: date.endsWith('-01-01') ? null : winst,
       eigenVermogen: total(bezittingen) - total(schulden),
+      perVennoot: this.partnerPosition(rows),
     };
+  }
+
+  /** Beginkapitaal per vennoot uit de beginbalansboekingen (credit = vermogen). */
+  private partnerPosition(rows: { rgs_code: string; balance: Cents }[]): OpeningPosition['perVennoot'] {
+    const s = this.settings.get();
+    if (!partnersActive(s)) return null;
+    const capital = (no: number) => -rows.filter((r) => r.rgs_code === partnerAccounts(no).capital).reduce((t, r) => t + r.balance, 0);
+    return s.partners.map((p) => ({ no: p.no, name: p.name, amount: capital(p.no) }));
+  }
+
+  /**
+   * Vof met vennoten: het beginkapitaal van vennoot 2 en verder op de instapdatum (uit de balans van je boekhouder
+   * of je vorige programma, zonder de winst van dit jaar tot nu toe). De app boekt dat in één beginbalansboeking over
+   * van het eigen vermogen (vennoot 1) naar hun kapitaalrekening; vennoot 1 houdt de rest. Het totaal verandert niet.
+   * Opnieuw opslaan draait de vorige boeking eerst terug.
+   */
+  setPartnerEquity(amounts: { no: number; amount: Cents }[]): SwitchoverState {
+    const s = this.settings.get();
+    if (!partnersActive(s)) throw new ValidationError('Stel eerst je vennoten in (Instellingen → Je bedrijf)');
+    const date = this.date();
+    const clean = amounts.filter((a) => a.amount !== 0);
+    for (const a of clean) {
+      if (!Number.isSafeInteger(a.amount)) throw new ValidationError('Vul het kapitaal in als bedrag');
+      if (a.no === 1 || !s.partners.some((p) => p.no === a.no)) throw new ValidationError('Vul het kapitaal in van vennoot 2 en verder; de eerste vennoot krijgt de rest');
+    }
+    tx(this.db, () => {
+      const prev = this.cfg().partnerEquityEntry ?? null;
+      if (prev) {
+        const e = this.db.prepare('SELECT entry_date, status FROM journal_entries WHERE id = ?').get(prev) as { entry_date: IsoDate; status: string } | undefined;
+        if (e && e.status === 'definitief') this.ledger.reverse(prev, e.entry_date, 'Startbalans aangepast: kapitaal per vennoot');
+      }
+      let entry: number | null = null;
+      if (clean.length > 0) {
+        const lines = clean.map((a) => signedLine(partnerAccounts(a.no).capital, -a.amount)!);
+        const total = clean.reduce((t, a) => t + a.amount, 0);
+        const own = signedLine(ACCOUNTS.eigenVermogen, total);
+        if (own) lines.push(own);
+        entry = this.ledger.post({ date, description: 'Beginbalans: kapitaal per vennoot', source: 'opening', sourceRef: 'overstap:vennoten', lines });
+      }
+      this.update({ partnerEquity: clean, partnerEquityEntry: entry });
+    });
+    return this.state();
   }
 
   requirements(): Requirement[] {

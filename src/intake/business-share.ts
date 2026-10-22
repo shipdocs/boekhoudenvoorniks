@@ -9,12 +9,15 @@ import type { Ledger } from '../core-ledger/ledger';
 import type { BankService } from '../import/bank';
 import type { PurchaseService } from '../documents/purchases';
 import { supplierKey } from './supplier-memory';
+import { privateAccountsIn } from '../closing/profit-allocation';
 
 export interface BusinessShare {
   supplier_key: string;
   display_name: string;
   /** zakelijk deel in procenten (1–99) */
   pct: number;
+  /** vof met vennoten: van welke vennoot het privédeel is (null: niet gekozen) */
+  partner_no: number | null;
 }
 
 /** Zakelijk deel van een leverancier of tegenpartij, of 100 (alles zakelijk) als er niets is opgegeven. */
@@ -25,12 +28,24 @@ export function businessShareFor(db: Db, name: string | null | undefined): numbe
   return row?.pct ?? 100;
 }
 
-/** Legt het zakelijke deel van een leverancier vast; 100 haalt de regel weg (standaard). */
-export function setBusinessShare(db: Db, name: string, pct: number): void {
+/** Vof met vennoten: van welke vennoot het privédeel van deze leverancier is, of null. */
+export function businessSharePartner(db: Db, name: string | null | undefined): number | null {
+  const key = name ? supplierKey(name) : '';
+  if (!key) return null;
+  const row = db.prepare('SELECT partner_no FROM supplier_business_share_partner WHERE supplier_key = ?').get(key) as { partner_no: number } | undefined;
+  return row?.partner_no ?? null;
+}
+
+/**
+ * Legt het zakelijke deel van een leverancier vast; 100 haalt de regel weg (standaard). `partnerNo`: bij vennoten
+ * van wie het privédeel is; weglaten houdt de eerder gekozen vennoot.
+ */
+export function setBusinessShare(db: Db, name: string, pct: number, partnerNo?: number | null): void {
   const key = supplierKey(name);
   if (!key) return;
   const p = businessPct(pct);
   if (p === 100) {
+    db.prepare('DELETE FROM supplier_business_share_partner WHERE supplier_key = ?').run(key);
     db.prepare('DELETE FROM supplier_business_share WHERE supplier_key = ?').run(key);
     return;
   }
@@ -38,10 +53,15 @@ export function setBusinessShare(db: Db, name: string, pct: number): void {
     `INSERT INTO supplier_business_share (supplier_key, display_name, pct) VALUES (?, ?, ?)
      ON CONFLICT(supplier_key) DO UPDATE SET pct = excluded.pct, display_name = excluded.display_name, updated_at = datetime('now')`,
   ).run(key, name.trim(), p);
+  if (partnerNo != null) {
+    db.prepare(`INSERT INTO supplier_business_share_partner (supplier_key, partner_no) VALUES (?, ?) ON CONFLICT(supplier_key) DO UPDATE SET partner_no = excluded.partner_no`).run(key, partnerNo);
+  }
 }
 
 export function listBusinessShares(db: Db): BusinessShare[] {
-  return db.prepare('SELECT supplier_key, display_name, pct FROM supplier_business_share ORDER BY display_name COLLATE NOCASE').all() as BusinessShare[];
+  return db
+    .prepare('SELECT s.supplier_key, s.display_name, s.pct, p.partner_no FROM supplier_business_share s LEFT JOIN supplier_business_share_partner p ON p.supplier_key = s.supplier_key ORDER BY s.display_name COLLATE NOCASE')
+    .all() as BusinessShare[];
 }
 
 /**
@@ -146,7 +166,7 @@ export class BusinessShareService {
   }
 
   /** Past de gekozen boekingen aan (tegenboeking + nieuwe post). Alles in één transactie: of alles, of niets. */
-  applyLines(items: { kind: 'bank' | 'inkoop'; refId: number; pct: number }[]): BusinessShareResult {
+  applyLines(items: { kind: 'bank' | 'inkoop'; refId: number; pct: number }[], partnerNo?: number | null): BusinessShareResult {
     return tx(this.db, () => {
       const result: BusinessShareResult = { changed: 0, skipped: 0, errors: [] };
       for (const it of items) {
@@ -160,7 +180,7 @@ export class BusinessShareService {
             continue;
           }
           if ((ev.businessPct ?? 100) === pct) continue;
-          this.purchases.setBusinessPct(it.refId, pct);
+          this.purchases.setBusinessPct(it.refId, pct, 'zakelijk deel aangepast', partnerNo);
         } else {
           const ev = this.db.prepare(`SELECT payload FROM events WHERE type = 'bank-categorie' AND status = 'actief' AND json_extract(payload, '$.bankTransactionId') = ?`).get(it.refId) as { payload: string } | undefined;
           if (!ev) {
@@ -170,7 +190,7 @@ export class BusinessShareService {
           }
           const p = JSON.parse(ev.payload) as BankCategoriePayload;
           if ((p.businessPct ?? 100) === pct) continue;
-          this.bank.reclassify(it.refId, { account: p.account, businessPct: pct }, 'zakelijk deel aangepast');
+          this.bank.reclassify(it.refId, { account: p.account, businessPct: pct, partnerNo }, 'zakelijk deel aangepast');
         }
         result.changed++;
       }
@@ -187,9 +207,11 @@ export class BusinessShareService {
   }
 
   /** Legt het percentage vast; met `applyExisting` gaan ook de al geboekte uitgaven van deze leverancier mee. */
-  set(name: string, pct: number, opts: { applyExisting?: boolean } = {}): { pct: number; changed: number; skipped: number } {
+  set(name: string, pct: number, opts: { applyExisting?: boolean; partnerNo?: number | null } = {}): { pct: number; changed: number; skipped: number } {
     return tx(this.db, () => {
-      setBusinessShare(this.db, name, pct);
+      // vof met vennoten: een privédeel hoort bij een vennoot; die onthoudt de app bij de leverancier
+      if (businessPct(pct) < 100) privateAccountsIn(this.db, opts.partnerNo ?? businessSharePartner(this.db, name));
+      setBusinessShare(this.db, name, pct, opts.partnerNo);
       return { pct: this.get(name), ...(opts.applyExisting ? this.apply(name) : { changed: 0, skipped: 0 }) };
     });
   }

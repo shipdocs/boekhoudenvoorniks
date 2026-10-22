@@ -78,7 +78,7 @@ export function ResetCard() {
                 <strong>Al je facturen, klanten, bonnetjes, bankgegevens en instellingen worden verwijderd.</strong> Er wordt eerst automatisch een kopie gemaakt in de map met back-ups,
                 zodat je hem via "Back-up terugzetten" terug kunt halen.
               </p>
-              <p className="small muted">Let op: je bent wettelijk verplicht je administratie 7 jaar te bewaren. Maak voor de zekerheid ook zelf een back-up.</p>
+              <p className="small muted">Let op: je bent wettelijk verplicht je administratie minstens 7 jaar te bewaren (soms 10 jaar). Maak voor de zekerheid ook zelf een back-up.</p>
               <label className="grid small">
                 Typ {CONFIRM_WORD} om te bevestigen
                 <input value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus />

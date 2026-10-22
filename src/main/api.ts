@@ -75,6 +75,7 @@ import { MAX_VERVALLEN_PER_MARKERING, ReeksBewaking, REDEN_NIET_GEBRUIKT, REDEN_
 import { dubbelTaakKey, huidigVoorstel, openVoorstellen, voegVoorstelSamen, wijsVoorstelAf, zoekDubbelen, type SamenvoegUitslag } from '../relations/dubbelen';
 import { SyncOntvangst } from '../sync/ontvangst';
 import { YEAR_END_KINDS, type YearEndKind } from '../closing/year-end';
+import { PARTNER_REQUIRED, partnersActive } from '../shared/partners';
 
 /** Een id van buiten (het scherm): een veilig geheel getal groter dan 0, anders een Nederlandse fout. */
 function photoInt(value: unknown, naam: string): number {
@@ -378,7 +379,11 @@ export function createApi(s: Services, host: HostContext) {
   };
 
   /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
-  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number; vatRate?: 9 | 21 }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
+  const doAct = async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number; vatRate?: 9 | 21; partnerNo?: number }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
+    // vof of maatschap met vennoten: een privékeuze zonder vennoot opent eerst de keuze, daarna dezelfde actie opnieuw
+    const needsPartner = () => payload?.partnerNo === undefined && s.inbox.needsPartnerChoice();
+    const pickPartner = (again: string, id?: number) => ({ navigate: { screen: 'vennoot-kiezen', ...(id !== undefined ? { id } : {}), extra: { actionId: again } } });
+    const partner = payload?.partnerNo !== undefined ? { partnerNo: payload.partnerNo } : {};
     const r = task.ref;
     // een vastgehouden regel heeft geen eigen taak; kwam de knop van een lijst van vóór de melding, dan eerst die vraag
     if (r.bankTransactionId && task.kind.startsWith('bank-')) notHeld(r.bankTransactionId);
@@ -414,7 +419,9 @@ export function createApi(s: Services, host: HostContext) {
         s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: r.categoryKey, vatCode: r.vatCode });
         return;
       case 'bank-business:prive':
-        s.inbox.answerBank(r.bankTransactionId!, { business: false, categoryKey: r.categoryKey ?? 'overig', vatCode: 'geen' });
+        // vof of maatschap met vennoten: eerst kiezen welke vennoot het privé opnam of stortte
+        if (needsPartner()) return pickPartner('prive', r.bankTransactionId);
+        s.inbox.answerBank(r.bankTransactionId!, { business: false, categoryKey: r.categoryKey ?? 'overig', vatCode: 'geen', ...(payload?.partnerNo !== undefined ? { partnerNo: payload.partnerNo } : {}) });
         return;
       case 'bank-business:zakelijk':
         if (!payload?.categoryKey && r.categoryKey) {
@@ -425,7 +432,7 @@ export function createApi(s: Services, host: HostContext) {
       // falls through
       case 'bank-category:anders':
         if (payload?.categoryKey) {
-          s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: payload.categoryKey, vatCode: payload.vatCode, businessPct: payload.businessPct, vatRate: payload.vatRate });
+          s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: payload.categoryKey, vatCode: payload.vatCode, businessPct: payload.businessPct, vatRate: payload.vatRate, ...partner });
           return;
         }
         return { navigate: { screen: 'categorie', id: r.bankTransactionId } };
@@ -436,17 +443,24 @@ export function createApi(s: Services, host: HostContext) {
         // alleen het voorstel dat de gebruiker zag: is het intussen veranderd (opnieuw gelezen, betaling gekoppeld), dan niet uitvoeren
         if (r.proposal !== undefined && r.proposal !== documentProposal(d)) throw new ValidationError('Het voorstel voor deze bon is intussen veranderd. Bekijk hem opnieuw.');
         if (d.status !== 'controle') throw new ValidationError('Deze bon is al verwerkt');
-        s.intake.confirm(d.id, {
-          supplier: res.supplier.value,
-          date: res.invoiceDate.value,
-          total: res.total.value,
-          invoiceNumber: res.invoiceNumber?.value ?? null,
-          categoryKey: d.classification.categoryKey,
-          vatCode: d.classification.vatCode,
-          business: d.classification.business,
-          // de betaalwijze van de telefoon (contant, privé) is het voorstel; anders de bank of later
-          paidWith: proposedPaidWith(d),
-        });
+        try {
+          s.intake.confirm(d.id, {
+            supplier: res.supplier.value,
+            date: res.invoiceDate.value,
+            total: res.total.value,
+            invoiceNumber: res.invoiceNumber?.value ?? null,
+            categoryKey: d.classification.categoryKey,
+            vatCode: d.classification.vatCode,
+            business: d.classification.business,
+            // de betaalwijze van de telefoon (contant, privé) is het voorstel; anders de bank of later
+            paidWith: proposedPaidWith(d),
+            ...partner,
+          });
+        } catch (e) {
+          // vof met vennoten: er gaat iets naar privé, maar van welke vennoot? Dat kies je bij de bon
+          if (e instanceof ValidationError && e.message === PARTNER_REQUIRED) return { navigate: { screen: 'document', id: d.id } };
+          throw e;
+        }
         return;
       }
       case 'document-review:dubbel':
@@ -461,11 +475,13 @@ export function createApi(s: Services, host: HostContext) {
       case 'document-review:prive':
       case 'document-review:vraag':
         // factuur van je eigen bedrijf (#205): privé of "weet ik nog niet"; ontbreekt er iets, dan eerst de bon openen
-        if (!s.intake.settleOwn(r.documentId!, actionId === 'prive' ? 'prive' : 'vraag')) return { navigate: { screen: 'document', id: r.documentId } };
+        if (actionId === 'prive' && needsPartner()) return pickPartner('prive');
+        if (!s.intake.settleOwn(r.documentId!, actionId === 'prive' ? 'prive' : 'vraag', undefined, payload?.partnerNo)) return { navigate: { screen: 'document', id: r.documentId } };
         return;
       case 'bank-own-company:prive':
       case 'bank-own-company:vraag':
-        s.ownCompany.settle(r.bankTransactionId!, actionId === 'prive' ? 'prive' : 'vraag');
+        if (actionId === 'prive' && needsPartner()) return pickPartner('prive', r.bankTransactionId);
+        s.ownCompany.settle(r.bankTransactionId!, actionId === 'prive' ? 'prive' : 'vraag', payload?.partnerNo);
         return;
       case 'bank-own-company:open':
         return r.documentId ? { navigate: { screen: 'document', id: r.documentId } } : { navigate: { screen: 'betaling', id: r.bankTransactionId } };
@@ -602,7 +618,9 @@ export function createApi(s: Services, host: HostContext) {
         // btw, een teruggedraaide factuur opnieuw inlezen, of een verkoop die de app niet kan inlezen en die je
         // zelf boekt (#228). Past het antwoord niet meer bij de vraag, dan een melding
         // bij "dit is het geld op de bank" gaat de bankregel mee die de gebruiker zag: is dat intussen een andere, dan gebeurt er niets
-        s.integrations.answerQuestion(r.questionId!, actionId as SaleAnswer, actionId === 'neutraal-bank' ? r.bankTransactionId : undefined);
+        // geen omzet maar een privé-storting: bij vennoten eerst van wie
+        if (actionId.startsWith('neutraal') && needsPartner()) return pickPartner(actionId);
+        s.integrations.answerQuestion(r.questionId!, actionId as SaleAnswer, actionId === 'neutraal-bank' ? r.bankTransactionId : undefined, payload?.partnerNo);
         return;
       case 'bank-pot:klopt':
       case 'bank-own:klopt':
@@ -1037,6 +1055,11 @@ export function createApi(s: Services, host: HostContext) {
           if (s.settings.officeCopy()) for (const input of s.ledger.missingBvAccounts()) s.exchange.act({ kind: 'rekening', input });
           else s.ledger.seedBvAccounts();
         }
+        // vof of maatschap: per vennoot een kapitaalrekening met privé-opnamen en -stortingen (vennoot 1 heeft de gewone)
+        if (patch.partners !== undefined && partnersActive(r)) {
+          if (s.settings.officeCopy()) for (const input of s.ledger.missingPartnerAccounts(r.partners)) s.exchange.act({ kind: 'rekening', input });
+          else s.ledger.seedPartnerAccounts(r.partners);
+        }
         if (patch.ocr) host.reconfigureLocalAi();
         if (patch.autoUpdate !== undefined) host.updates?.reconfigure();
         return r;
@@ -1247,7 +1270,7 @@ export function createApi(s: Services, host: HostContext) {
         return s.inbox.home();
       },
       /** Voert een knop uit een inbox-taak uit. Retourneert optioneel een scherm om te openen. */
-      act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number; vatRate?: 9 | 21 }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
+      act: async (task: Task, actionId: string, payload?: { categoryKey?: string; vatCode?: string; jobId?: number; businessPct?: number; vatRate?: 9 | 21; partnerNo?: number }): Promise<{ navigate?: { screen: string; id?: number | string; extra?: Record<string, unknown> } } | void> => {
         const current = currentFeedTask(task, actionId);
         const result = await doAct(current, actionId, payload);
         if (!result?.navigate) s.inbox.recordUserAction(current, actionId);
@@ -1385,10 +1408,10 @@ export function createApi(s: Services, host: HostContext) {
         return s.purchases.resolveQuestion(Number(id), { account: category.account, vatCode, description: category.label });
       },
       /** Zakelijk deel van één aankoop aanpassen; `remember`: voortaan ook voor deze leverancier. */
-      setBusinessPct: (id: number, pct: number, remember?: boolean) => {
+      setBusinessPct: (id: number, pct: number, remember?: boolean, partnerNo?: number | null) => {
         const p = s.purchases.get(id);
-        if (remember && p.relation_name) s.businessShare.set(p.relation_name, pct);
-        return s.purchases.setBusinessPct(id, pct);
+        if (remember && p.relation_name) s.businessShare.set(p.relation_name, pct, { partnerNo });
+        return s.purchases.setBusinessPct(id, pct, undefined, partnerNo);
       },
       /**
        * Lijkt de aankoop op een aankoop of bon die er al staat (#224)? Dan komt er niets bij tot de gebruiker
@@ -1411,7 +1434,7 @@ export function createApi(s: Services, host: HostContext) {
        */
       paymentQr: (id: number, confirmNewIban = false) => purchasePaymentQr(s.purchases, id, confirmNewIban),
       /** Niet van de zakelijke rekening betaald maar privé of contant; `always`: voortaan bij deze leverancier. */
-      paidWith: (id: number, via: 'prive' | 'kas', opts?: { always?: boolean; separate?: boolean }) => s.quick.payPurchaseWith(id, via, opts),
+      paidWith: (id: number, via: 'prive' | 'kas', opts?: { always?: boolean; separate?: boolean; partnerNo?: number | null }) => s.quick.payPurchaseWith(id, via, opts),
       /** "Al betaald, via je bank" (#239): onthouden, niets boeken */
       expectOnBank: (id: number, bankAccountId: number) => s.purchases.expectOnBank(id, bankAccountId, today()),
       clearExpectedOnBank: (id: number) => s.purchases.clearExpectedOnBank(id),
@@ -1453,7 +1476,7 @@ export function createApi(s: Services, host: HostContext) {
     },
     quick: {
       cashSale: (input: CashSaleInput) => s.quick.recordCashSale(input),
-      privateTransfer: (direction: 'opname' | 'storting', amount: Cents, date: IsoDate, via: 'kas' | 'bank') => s.quick.recordPrivate(direction, amount, date, via),
+      privateTransfer: (direction: 'opname' | 'storting', amount: Cents, date: IsoDate, via: 'kas' | 'bank', partnerNo?: number | null) => s.quick.recordPrivate(direction, amount, date, via, partnerNo),
     },
     templates: {
       list: (type?: TemplateType) => s.templates.list(type),
@@ -1644,7 +1667,7 @@ export function createApi(s: Services, host: HostContext) {
         return m ? { documentId: m.document?.id ?? null, purchaseId: m.purchase?.id ?? null, settledDocumentId: m.settledDocumentId } : null;
       },
       /** De keuze bij een betaling aan je eigen bedrijf: privé of "weet ik nog niet", voor de betaling en de factuur samen. */
-      settleOwnCompany: (txId: number, choice: 'prive' | 'vraag') => s.ownCompany.settle(notHeld(txId), choice),
+      settleOwnCompany: (txId: number, choice: 'prive' | 'vraag', partnerNo?: number | null) => s.ownCompany.settle(notHeld(txId), choice, partnerNo),
       matchInvoice: (txId: number, invoiceId: number) => s.bank.matchInvoice(notHeld(txId), invoiceId),
       matchPurchase: (txId: number, purchaseId: number) => s.bank.matchPurchase(notHeld(txId), purchaseId),
       /**
@@ -1731,14 +1754,14 @@ export function createApi(s: Services, host: HostContext) {
       /** negeren; met `duplicateOf` als dubbele regel van die betaling: dan telt hij ook in het saldo niet mee (#225) */
       ignore: (txId: number, duplicateOf?: number | null) => s.bank.ignore(txId, duplicateOf),
       /** Andere categorie voor een al geboekte betaling: tegenboeking + nieuwe boeking (#19), en leren. */
-      reclassify: (txId: number, categoryKey: string, vatCode: string, businessPct?: number, vatRate?: 9 | 21) => {
+      reclassify: (txId: number, categoryKey: string, vatCode: string, businessPct?: number, vatRate?: 9 | 21, partnerNo?: number | null) => {
         const category = s.categories.find(categoryKey);
         if (!category) throw new Error('Onbekende categorie');
         // lijkt er een aankoop bij te horen die er al staat, dan eerst die vraag: anders tellen de kosten twee keer
         s.bookedPayments.assertNoDouble(Number(txId));
         // boeken en leren in één transactie: nooit een gewijzigde boeking met een mislukte leerstap
         return tx(s.db, () => {
-          const entryId = s.bank.reclassify(txId, { account: category.account, vatCode, ...(businessPct !== undefined ? { businessPct } : {}), ...(vatRate !== undefined ? { vatRate } : {}) }, `categorie gewijzigd naar ${category.label.toLowerCase()}`);
+          const entryId = s.bank.reclassify(txId, { account: category.account, vatCode, ...(businessPct !== undefined ? { businessPct } : {}), ...(vatRate !== undefined ? { vatRate } : {}), ...(partnerNo != null ? { partnerNo } : {}) }, `categorie gewijzigd naar ${category.label.toLowerCase()}`);
           const t = s.bank.get(txId);
           if (t.counter_name && supplierKey(t.counter_name)) s.memory.learn(t.counter_name, { categoryKey, vatCode, business: true });
           return entryId;
@@ -1760,16 +1783,18 @@ export function createApi(s: Services, host: HostContext) {
       relations: (to: IsoDate) => s.ledgerReports.relations(to),
       relationCard: (relationId: number, from: IsoDate, to: IsoDate) => s.ledgerReports.relationCard(relationId, from, to),
       periodBalance: (year: number, granularity: 'maand' | 'kwartaal') => s.ledgerReports.periodBalance(year, granularity),
+      /** vof of maatschap: eigen vermogen per vennoot (null zonder vennoten) */
+      partnerEquity: (year: number) => s.ledgerReports.partnerEquity(year),
     },
     /** Gemengd gebruik: zakelijk deel per leverancier (Dropbox 50%, Odido 75%, …). Geen regel = 100%. */
     businessShare: {
       list: () => s.businessShare.list(),
       get: (name: string) => s.businessShare.get(name),
-      set: (name: string, pct: number, applyExisting?: boolean) => s.businessShare.set(name, pct, { applyExisting }),
+      set: (name: string, pct: number, applyExisting?: boolean, partnerNo?: number | null) => s.businessShare.set(name, pct, { applyExisting, partnerNo }),
       /** Alle geboekte uitgaven van een leverancier, om na te kijken. */
       lines: (name: string) => s.businessShare.lines(name),
       /** Past de gekozen boekingen aan (na jouw bevestiging in de lijst). */
-      applyLines: (items: { kind: 'bank' | 'inkoop'; refId: number; pct: number }[]) => s.businessShare.applyLines(items),
+      applyLines: (items: { kind: 'bank' | 'inkoop'; refId: number; pct: number }[], partnerNo?: number | null) => s.businessShare.applyLines(items, partnerNo),
     },
     switchover: {
       state: () => s.switchover.state(),
@@ -1783,6 +1808,8 @@ export function createApi(s: Services, host: HostContext) {
       acceptSuggestion: (txId: number, overrides?: { relationName?: string; number?: string; invoiceDate?: IsoDate }) => (s.switchover.acceptSuggestion(txId, overrides), s.switchover.state()),
       dismissSuggestion: (txId: number) => (s.switchover.dismissSuggestion(txId), s.switchover.state()),
       setAccountantEquity: (amount: Cents | null) => s.switchover.setAccountantEquity(amount),
+      /** vof: het beginkapitaal van vennoot 2 en verder op de instapdatum; vennoot 1 houdt de rest */
+      setPartnerEquity: (amounts: { no: number; amount: Cents }[]) => s.switchover.setPartnerEquity(amounts),
       confirm: (opts?: { provisional?: boolean }) => s.switchover.confirm(opts),
       reopen: () => s.switchover.reopen(),
       skipSection: (key: SectionKey, skip?: boolean) => s.switchover.skipSection(key, skip),
@@ -1809,12 +1836,12 @@ export function createApi(s: Services, host: HostContext) {
       allocateCredit: (lineId: number, assetId: number) => s.assets.allocateCredit(lineId, assetId),
       list: () => s.assets.list(),
       update: (id: number, patch: { name?: string; lifetimeMonths?: number; residual?: Cents; kiaExcluded?: boolean; bookInApp?: boolean; inUseOn?: IsoDate | null }) => s.assets.update(id, patch),
-      dispose: (id: number, date: IsoDate, proceeds: Cents, kind?: 'verkocht' | 'prive') => s.assets.dispose(id, date, proceeds, kind),
+      dispose: (id: number, date: IsoDate, proceeds: Cents, kind?: 'verkocht' | 'prive', partnerNo?: number | null) => s.assets.dispose(id, date, proceeds, kind, partnerNo),
       bookDue: () => s.assets.bookDue(),
     },
     mileage: {
       list: (year: number) => s.mileage.list(year),
-      add: (input: { date: IsoDate; km: number; description: string; jobId?: number | null }) => s.mileage.add(input),
+      add: (input: { date: IsoDate; km: number; description: string; jobId?: number | null; partnerNo?: number | null }) => s.mileage.add(input),
       remove: (id: number) => s.mileage.remove(id),
     },
     hours: {
@@ -1878,7 +1905,7 @@ export function createApi(s: Services, host: HostContext) {
           current: ocr.engine === 'ingebouwd' ? (consentNeeded ? 'geen' : 'ingebouwd') : ocr.engine === 'claude-code' || ocr.engine === 'codex' ? ocr.engine : ocr.url ? 'eigen' : 'geen',
           asked: ocr.askedReader,
           // skippedLeftovers: een leesprogramma van een vorige keer dat bij het opruimen is blijven staan (zie LocalOcrRuntime)
-          local: { state: local.state, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS, consentNeeded, runtimeVersion: host.localOcr.consent?.runtimeVersion ?? null, skippedLeftovers: local.skippedLeftovers ?? 0 },
+          local: { state: local.state, error: local.error, downloadSize: DOWNLOAD_SIZE, requirements: REQUIREMENTS, consentNeeded, runtimeVersion: host.localOcr.consent?.runtimeVersion ?? null, skippedLeftovers: local.skippedLeftovers ?? 0 },
           claudeCode: storedCli('claude-code'),
           codex: storedCli('codex'),
           searched: ocr.assistantsSearched,

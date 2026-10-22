@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../api';
 import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
 import { today } from '../../shared/dates';
-import { LedgerCardsTab, PeriodBalanceTab, RelationCardsTab, TrialBalanceTab } from './LedgerReports';
+import { LedgerCardsTab, PartnerEquityCard, PeriodBalanceTab, RelationCardsTab, TrialBalanceTab } from './LedgerReports';
 import { AccountantPackageCard } from './AccountantPackage';
 import { ChartOfAccountsTab } from './ChartOfAccounts';
 
@@ -154,6 +154,7 @@ function Reports({ from, to }: { from: string; to: string }) {
         </table>
         <p className="small muted">Positief = debet (bezittingen), negatief = credit (schulden/eigen vermogen). Het resultaat van deze periode staat nog op de W&V; dat van eerdere jaren zit in het eigen vermogen.</p>
       </div>
+      <div style={{ gridColumn: '1 / -1' }}><PartnerEquityCard year={Number(to.slice(0, 4))} /></div>
     </div>
   );
 }
