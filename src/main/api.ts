@@ -54,7 +54,7 @@ import type { HoursInput } from '../tax/mileage';
 import { rulesFor } from '../tax/income-tax';
 import type { Cents } from '../shared/money';
 import type { PollResult } from '../mail/mail-intake';
-import type { BonnenView } from '../mail/bonnen-adres';
+import type { BonnenAanvraag, BonnenView } from '../mail/bonnen-adres';
 import type { UpdateStatus } from './updates';
 import type { SwitchPlan } from './data-dir';
 import type { FxApplyInput } from '../fx/repair';
@@ -179,7 +179,7 @@ export interface HostContext {
   /** bonnen-adres op post.boekhoudenvoorniks.nl (#450); ontbreekt buiten Electron */
   bonnen?: {
     view(): BonnenView;
-    aanvragen(input: { email: string; bedrijfsnaam: string; kvk?: string; toestemming: string }): Promise<BonnenView>;
+    aanvragen(input: BonnenAanvraag): Promise<BonnenView>;
     verversen(): Promise<BonnenView>;
     stoppen(): Promise<BonnenView>;
     vergeten(): BonnenView;
@@ -1089,7 +1089,7 @@ export function createApi(s: Services, host: HostContext) {
      */
     bonnen: {
       status: () => host.bonnen?.view() ?? null,
-      aanvragen: (input: { email: string; bedrijfsnaam: string; kvk?: string; toestemming: string }) => {
+      aanvragen: (input: BonnenAanvraag) => {
         if (!host.bonnen) throw new Error('Het bonnen-adres kan alleen in de app');
         const blocked = s.settings.outboundBlocked();
         if (blocked) throw new ValidationError(blocked);

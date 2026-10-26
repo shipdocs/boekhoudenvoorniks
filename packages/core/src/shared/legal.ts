@@ -29,14 +29,14 @@ export const TERMS_SUMMARY: string[] = [
  * gevraagd bij het aanvragen. Wie het niet aanvraagt, krijgt niets nieuws te zien. Verhoog de versie bij een
  * inhoudelijke wijziging; de server bewaart met welke versie iemand akkoord ging.
  */
-export const BONNEN_CONSENT_VERSION = '2026-10-17';
+export const BONNEN_CONSENT_VERSION = '2026-10-26';
 /** Zo lang staat mail op het bonnen-adres hooguit (vanaf binnenkomst); daarna verwijderen de app en de mailserver hem. */
 export const BONNEN_BEWAARDAGEN = 60;
 export const BONNEN_CONSENT: string[] = [
   'Het bonnen-adres is gratis en alleen om bonnen en facturen te ontvangen. Versturen kan er niet mee.',
-  'Wij bewaren je e-mailadres, je bedrijfsnaam, je KvK-nummer (als je het invult) en het nummer van je administratie. Niets uit je boekhouding.',
-  'Mail die naar je bonnen-adres gaat, staat op onze eigen mailserver in Duitsland tot de app hem ophaalt, en hooguit 60 dagen na binnenkomst. Haalt de app hem niet op, dan krijg je na 30 dagen een mail. Wij kijken er niet in.',
-  'Je kunt het bonnen-adres altijd stoppen in de app. Het adres ontvangt dan meteen niets meer en wordt na 30 dagen met alle mail verwijderd.',
+  'Wij bewaren je e-mailadres, bedrijfsnaam, KvK-nummer, voor- en achternaam, telefoonnummer (mag je leeg laten) en administratienummer. Daarmee beoordelen we je aanvraag, controleren we dat je bij het bedrijf hoort en nemen we contact op bij een vraag of misbruik. Niets uit je boekhouding.',
+  'Mail die naar je bonnen-adres gaat, staat op onze eigen mailserver in Duitsland, ook nadat de app hem heeft opgehaald, en wordt 60 dagen na binnenkomst verwijderd. Haalt de app lange tijd niets op, dan krijg je na 30 dagen in de regel een mail. Wij kijken er niet in.',
+  'Je kunt het bonnen-adres altijd stoppen in de app. Het adres ontvangt dan meteen niets meer en wordt na 30 dagen met alle mail verwijderd. Naam, telefoon en KvK-nummer bewaren we nog 6 maanden vanaf de dag dat je stopt, de rest van je aanvraag een jaar.',
 ];
 
 export const VAT_DISCLAIMER =

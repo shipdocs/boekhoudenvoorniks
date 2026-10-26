@@ -16,22 +16,30 @@ export function BonnenAdres() {
   const [email, setEmail] = useState(settings.company.email);
   const [name, setName] = useState(settings.company.name);
   const [kvk, setKvk] = useState(settings.company.kvkNumber);
+  const [firstName, setFirstName] = useState(settings.profile.firstName);
+  const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState(settings.company.phone);
   const [agreed, setAgreed] = useState(false);
   const v = state.data;
   if (v === null) return null;
   if (!v) return <ErrorBox error={state.error} />;
+  // op een andere computer overnemen: alleen e-mailadres en bedrijfsnaam, de server heeft de rest al
+  const overnemen = v.status === 'andere-computer';
 
   const refresh = async () => {
     const r = await run(() => api.bonnen.verversen());
     if (r) await state.reload();
   };
   const request = async () => {
-    const r = await run(() => api.bonnen.aanvragen({ email, bedrijfsnaam: name, kvk, toestemming: v.toestemmingVersie }));
+    const r = await run(() => api.bonnen.aanvragen(overnemen
+      ? { email, bedrijfsnaam: name, toestemming: v.toestemmingVersie, overnemen: true }
+      : { email, bedrijfsnaam: name, kvk, voornaam: firstName, achternaam: lastName, telefoon: phone, toestemming: v.toestemmingVersie }));
     if (r) {
       setForm(false);
       setAgreed(false);
-      await state.reload();
     }
+    // ook bij een fout: de server kan gezegd hebben dat het adres niet meer bestaat (de app vergat de stand, dan volgt het volledige formulier)
+    await state.reload();
   };
   const stop = async (question: string) => {
     if (!confirm(question)) return;
@@ -45,16 +53,23 @@ export function BonnenAdres() {
       <div className="grid cols-3">
         <Field label="Jouw e-mailadres" hint="hier komt de bevestigingslink"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
         <Field label="Bedrijfsnaam" hint="het begin komt in je adres"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <Field label="KvK-nummer" hint="mag leeg"><input value={kvk} onChange={(e) => setKvk(e.target.value)} /></Field>
+        {!overnemen && <Field label="KvK-nummer" hint="8 cijfers; geen KvK-nummer? mail stacy@shipdocs.app"><input value={kvk} onChange={(e) => setKvk(e.target.value)} /></Field>}
       </div>
+      {!overnemen && (
+        <div className="grid cols-3">
+          <Field label="Voornaam"><input value={firstName} onChange={(e) => setFirstName(e.target.value)} /></Field>
+          <Field label="Achternaam"><input value={lastName} onChange={(e) => setLastName(e.target.value)} /></Field>
+          <Field label="Telefoon (mag leeg)" hint="zodat we je kunnen bellen bij een vraag over je aanvraag"><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
+        </div>
+      )}
       <div className="small">
         <strong>Goed om te weten</strong>
         <ul>{BONNEN_CONSENT.map((t) => <li key={t}>{t}</li>)}</ul>
         Meer in de <a href="#" onClick={(e) => { e.preventDefault(); void api.app.openExternal(`${PRIVACY_URL}#bonnen-adres`); }}>privacyverklaring</a>.
       </div>
-      <label className="row"><input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} /> Ik ga hiermee akkoord</label>
+      <label className="row"><input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} /> Ik heb dit gelezen en ga akkoord met deze afspraken voor het bonnen-adres</label>
       <div className="row">
-        <Button kind="primary" disabled={busy || !agreed || !email || !name} onClick={() => void request()}>Bonnen-adres aanvragen</Button>
+        <Button kind="primary" disabled={busy || !agreed || !email || !name || (!overnemen && (!kvk.trim() || !firstName.trim() || !lastName.trim()))} onClick={() => void request()}>Bonnen-adres aanvragen</Button>
         {v.status !== 'geen' && <Button kind="ghost" disabled={busy} onClick={() => setForm(false)}>Annuleren</Button>}
       </div>
     </div>

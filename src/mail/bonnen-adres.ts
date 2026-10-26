@@ -53,23 +53,93 @@ export interface BonnenView {
   toestemmingVersie: string;
 }
 
+/** Wat naar de server gaat. Bij overnemen op een andere computer ontbreken kvk, namen en telefoon en staat `overnemen: true`. */
+export interface BonnenAanmelding {
+  administratie: string;
+  email: string;
+  bedrijfsnaam: string;
+  kvk?: string;
+  voornaam?: string;
+  achternaam?: string;
+  /** leeg ("") als de gebruiker het niet invult */
+  telefoon?: string;
+  toestemming: string;
+  overnemen?: true;
+}
+
+/** Het aanvraagformulier. Met `overnemen` (stand 'andere-computer') worden kvk, namen en telefoon niet gevraagd en niet meegestuurd. */
+export interface BonnenAanvraag {
+  email: string;
+  bedrijfsnaam: string;
+  kvk?: string;
+  voornaam?: string;
+  achternaam?: string;
+  telefoon?: string;
+  toestemming: string;
+  overnemen?: boolean;
+}
+
 /** De licentieserver; in main.ts met fetch, in de tests nagebootst. */
 export interface BonnenServer {
-  aanmelden(body: { administratie: string; email: string; bedrijfsnaam: string; kvk: string; toestemming: string }, token: string | null): Promise<{ status: 'onbevestigd' | 'overnemen'; installatie: string; email: string }>;
+  aanmelden(body: BonnenAanmelding, token: string | null): Promise<{ status: 'onbevestigd' | 'overnemen'; installatie: string; email: string }>;
   status(token: string): Promise<{ status: string; adres?: string }>;
   inloggegevens(token: string): Promise<{ adres: string; server: string; poort: number; gebruiker: string; wachtwoord: string }>;
   stoppen(token: string): Promise<{ ok: true; status: string }>;
 }
 
-/** Fout van de server, met de HTTP-status (403 met `ingetrokken`: deze computer heeft geen toegang meer). */
+/**
+ * Fout van de server, met de HTTP-status (403 met `ingetrokken`: deze computer heeft geen toegang meer) en
+ * eventueel een `code` van de server (bv. `app_bijwerken`). De melding is altijd de `fout` van de server.
+ */
 export class BonnenServerError extends Error {
   constructor(
     message: string,
     readonly status: number,
     readonly ingetrokken = false,
+    readonly code?: string,
   ) {
     super(message);
   }
+}
+
+/** KvK-nummer: spaties weg, precies 8 cijfers. Null als het niet klopt (ook bij ruwe invoer langer dan 20 tekens). Gelijk aan de licentieserver. */
+export function normalizeKvk(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length > 20) return null;
+  const kvk = raw.replace(/\s/g, '');
+  return /^\d{8}$/.test(kvk) ? kvk : null;
+}
+
+/**
+ * Telefoonnummer in compacte vorm, of null. Spaties en streepjes vallen weg; daarna geldig als NL (0, dan 1-9,
+ * samen 10 cijfers) of internationaal (+ of 00, landcode zonder 0 vooraan, 8 t/m 15 cijfers; 00 wordt +).
+ * Begint het met 00, dan is het altijd internationaal. Ruwe invoer langer dan 50 tekens wordt geweigerd.
+ * Gelijk aan de licentieserver.
+ */
+export function normalizePhone(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length > 50) return null;
+  const s = raw.replace(/[\s-]/g, '');
+  if (s.startsWith('00') || s.startsWith('+')) {
+    const intl = s.startsWith('00') ? `+${s.slice(2)}` : s;
+    return /^\+[1-9]\d{7,14}$/.test(intl) ? intl : null;
+  }
+  return /^0[1-9]\d{8}$/.test(s) ? s : null;
+}
+
+/** Telefoon is optioneel: leeg is undefined, null of (tot 50 tekens) een string met alleen spaties en streepjes. Gelijk aan de licentieserver. */
+export function isPhoneEmpty(raw: unknown): boolean {
+  if (raw === undefined || raw === null) return true;
+  return typeof raw === 'string' && raw.length <= 50 && raw.replace(/[\s-]/g, '') === '';
+}
+
+const KVK_VERPLICHT = 'Vul je KvK-nummer in (8 cijfers). Zonder KvK-nummer kunnen we je geen bonnen-adres geven. Heb je geen KvK-nummer? Mail dan naar stacy@shipdocs.app.';
+const TELEFOON_ONGELDIG = 'Vul een geldig telefoonnummer in, bijvoorbeeld 06 12345678 of +32 470 12 34 56';
+
+/** Voor- of achternaam: getrimd, verplicht, hooguit 100 tekens (langer wordt geweigerd, niet afgekapt). */
+function naam(raw: unknown, label: 'voornaam' | 'achternaam'): string {
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  if (!v) throw new Error(`Vul je ${label} in`);
+  if (v.length > 100) throw new Error(`Je ${label} is te lang (hooguit 100 tekens)`);
+  return v;
 }
 
 const LIVE: StoredState['status'][] = ['onbevestigd', 'overnemen', 'wacht', 'actief'];
@@ -150,17 +220,45 @@ export class BonnenAdresService {
    * Aanvragen, of (als deze administratie al een adres heeft) overnemen op deze computer. De oude machtiging
    * gaat mee: dan mag de server een nog niet bevestigde aanvraag van deze computer vervangen.
    */
-  async aanvragen(input: { email: string; bedrijfsnaam: string; kvk?: string; toestemming: string }): Promise<BonnenView> {
+  async aanvragen(input: BonnenAanvraag): Promise<BonnenView> {
     const reden = this.blocked();
     if (reden) throw new Error(reden);
-    if (input.toestemming !== BONNEN_CONSENT_VERSION) throw new Error('Geef eerst toestemming voor het bonnen-adres');
+    // volgorde gelijk aan de server: e-mail, bedrijfsnaam, akkoord; bij een nieuwe aanvraag daarna KvK, namen, telefoon
     const email = input.email.trim();
     const bedrijfsnaam = input.bedrijfsnaam.trim();
-    const kvk = (input.kvk ?? '').replace(/\s/g, '');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Vul een geldig e-mailadres in');
     if (!bedrijfsnaam) throw new Error('Vul je bedrijfsnaam in');
-    if (kvk && !/^\d{8}$/.test(kvk)) throw new Error('Een KvK-nummer heeft 8 cijfers');
-    const r = await this.server.aanmelden({ administratie: this.settings.administrationId(), email, bedrijfsnaam, kvk, toestemming: input.toestemming }, this.token());
+    if (input.toestemming !== BONNEN_CONSENT_VERSION) throw new Error('Ga eerst akkoord met de afspraken voor het bonnen-adres');
+    const basis = { administratie: this.settings.administrationId(), email, bedrijfsnaam, toestemming: input.toestemming };
+    let body: BonnenAanmelding;
+    if (input.overnemen) {
+      body = { ...basis, overnemen: true };
+    } else {
+      if (typeof input.kvk !== 'string' || !input.kvk.replace(/\s/g, '')) throw new Error(KVK_VERPLICHT);
+      const kvk = normalizeKvk(input.kvk);
+      if (!kvk) throw new Error('Een KvK-nummer heeft 8 cijfers');
+      const voornaam = naam(input.voornaam, 'voornaam');
+      const achternaam = naam(input.achternaam, 'achternaam');
+      // telefoon mag leeg: dan "" naar de server; al het andere moet kloppen (gelijk aan de server)
+      let telefoon = '';
+      if (!isPhoneEmpty(input.telefoon)) {
+        const t = normalizePhone(input.telefoon);
+        if (!t) throw new Error(TELEFOON_ONGELDIG);
+        telefoon = t;
+      }
+      body = { ...basis, kvk, voornaam, achternaam, telefoon };
+    }
+    let r: Awaited<ReturnType<BonnenServer['aanmelden']>>;
+    try {
+      r = await this.server.aanmelden(body, this.token());
+    } catch (e) {
+      // de aanvraag bestaat niet meer bij de server: lokaal vergeten, dan verschijnt het volledige aanvraagformulier
+      if (input.overnemen && e instanceof BonnenServerError && e.status === 409 && e.code === 'geen_adres') {
+        this.forget();
+        this.db.prepare('DELETE FROM settings WHERE key = ?').run(STATE_KEY);
+      }
+      throw e;
+    }
     this.forget();
     this.secrets.set(BONNEN_TOKEN_SECRET, r.installatie);
     const at = this.now().toISOString();
@@ -269,8 +367,8 @@ export function httpBonnenServer(baseUrl: string, fetchImpl: typeof fetch = fetc
     } catch {
       throw new Error('De server van BoekhoudenVoorNiks is niet te bereiken. Heb je internet? Probeer het later opnieuw.');
     }
-    const data = (await res.json().catch(() => ({}))) as T & { fout?: string; ingetrokken?: boolean };
-    if (!res.ok) throw new BonnenServerError(data.fout ?? `De server gaf een fout (${res.status}); probeer het later opnieuw`, res.status, data.ingetrokken === true);
+    const data = (await res.json().catch(() => ({}))) as T & { fout?: string; ingetrokken?: boolean; code?: string };
+    if (!res.ok) throw new BonnenServerError(data.fout ?? `De server gaf een fout (${res.status}); probeer het later opnieuw`, res.status, data.ingetrokken === true, typeof data.code === 'string' ? data.code : undefined);
     return data;
   }
   return {
