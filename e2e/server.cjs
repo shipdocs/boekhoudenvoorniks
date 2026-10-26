@@ -22,7 +22,10 @@
  *                      de laatst getoonde QR-code terug, zodat de test zich als telefoon kan melden
  * POST /__ocr          een trage tekstherkenning nabootsen: body {"traag":true} = bonnen lezen duurt tot de test het zegt;
  *                      {"klaar":["regel", ...]} = het lopende leesverzoek geeft deze regels terug
- * POST /__bonnen      bonnen-adres (#450): body {"status":"wacht"|"actief"|...} zet de stand bij de nagebootste server;
+ * POST /__bonnen      bonnen-adres (#450): body {"status":"wacht"|"actief"|...} zet de stand bij de nagebootste server,
+ *                      {"weiger":true|false} laat aanmelden de weigering "app_bijwerken" geven (400) of weer slagen;
+ *                      {"geenAdres":true} laat overnemen het 409 "geen_adres" geven (het adres bestaat niet meer);
+ *                      {"andereComputer":true} haalt de machtiging weg en laat aanmelden "overnemen" geven;
  *                      geeft de aanroepen terug die de app deed
  * alles anders         bestanden uit dist/renderer
  */
@@ -53,18 +56,23 @@ const { BANK_FEED } = require(path.join(ROOT, 'main/shared/bank-feed.js'));
 const Database = require('better-sqlite3');
 // Alleen deze testserver zet de nog niet vrijgegeven functie aan. Productbuilds houden de vlag uit.
 BANK_FEED.available = true;
-const { BonnenAdresService } = require(path.join(ROOT, 'main/mail/bonnen-adres.js'));
+const { BonnenAdresService, BonnenServerError, BONNEN_TOKEN_SECRET } = require(path.join(ROOT, 'main/mail/bonnen-adres.js'));
 
 /** De licentieserver voor het bonnen-adres nagebootst; de stand zet de test met POST /__bonnen. */
-const defaultBonnen = () => ({ status: 'onbevestigd', calls: [], n: 0 });
+const defaultBonnen = () => ({ status: 'onbevestigd', calls: [], n: 0, weiger: false, overnemen: false, geenAdres: false });
 let bonnenFake = defaultBonnen();
+let bonnenSecrets = null;
 const bonnenServer = {
   async aanmelden(body, token) {
     bonnenFake.calls.push({ op: 'aanmelden', body, token });
-    bonnenFake.status = 'onbevestigd';
+    if (bonnenFake.weiger) throw new BonnenServerError('Werk de app bij naar de nieuwste versie om een bonnen-adres aan te vragen.', 400, false, 'app_bijwerken');
+    if (bonnenFake.geenAdres && body.overnemen) throw new BonnenServerError('Dit bonnen-adres bestaat niet meer. Vraag een nieuw bonnen-adres aan.', 409, false, 'geen_adres');
+    // bij een verdwenen adres is een aanvraag zonder overnemen gewoon een nieuwe, onbevestigde aanvraag
+    const status = bonnenFake.overnemen && !(bonnenFake.geenAdres && !body.overnemen) ? 'overnemen' : 'onbevestigd';
+    bonnenFake.status = status;
     bonnenFake.n += 1;
     const [local, domain] = body.email.split('@');
-    return { status: 'onbevestigd', installatie: `token-${bonnenFake.n}`, email: `${local.slice(0, 1)}***@${domain}` };
+    return { status, installatie: `token-${bonnenFake.n}`, email: `${local.slice(0, 1)}***@${domain}` };
   },
   async status(token) {
     bonnenFake.calls.push({ op: 'status', token });
@@ -390,6 +398,7 @@ function init(fresh) {
       // dezelfde geheimen als de app, met de testschakelaar voor "geen sleutelhanger" (/__securestorage)
       const base = secretsFor(file);
       const store = { get available() { return secureStorageSwitch !== null ? secureStorageSwitch : base.available; }, get: (k) => base.get(k), set: (k, v) => base.set(k, v), delete: (k) => base.delete(k) };
+      bonnenSecrets = store;
       const svc = new BonnenAdresService(db, services.settings, store, bonnenServer);
       return { view: () => svc.view(), aanvragen: (i) => svc.aanvragen(i), verversen: () => svc.verversen(), stoppen: () => svc.stoppen(), vergeten: () => svc.vergeten() };
     })(),
@@ -619,6 +628,12 @@ http
       }
       if (req.url === '/__bonnen') {
         if (body && JSON.parse(body).status) bonnenFake.status = JSON.parse(body).status;
+        if (body && JSON.parse(body).weiger !== undefined) bonnenFake.weiger = Boolean(JSON.parse(body).weiger);
+        if (body && JSON.parse(body).geenAdres !== undefined) bonnenFake.geenAdres = Boolean(JSON.parse(body).geenAdres);
+        if (body && JSON.parse(body).andereComputer) {
+          bonnenSecrets.delete(BONNEN_TOKEN_SECRET);
+          bonnenFake.overnemen = true;
+        }
         return res.end(JSON.stringify({ ok: bonnenFake.calls }));
       }
       if (req.url === '/__securestorage') {

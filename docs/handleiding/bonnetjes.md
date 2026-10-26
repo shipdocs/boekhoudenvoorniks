@@ -26,7 +26,7 @@ Veel facturen komen per mail. De app kan ze zelf ophalen, op twee manieren.
 Je krijgt een eigen mailadres voor je bonnen, bijvoorbeeld *bakkerijpi-k7m2q@post.boekhoudenvoorniks.nl*. Het begin is je bedrijfsnaam; de letters erachter zorgen dat niemand het adres kan raden. Je hoeft niets in te stellen.
 
 1. Ga naar *Instellingen → E-mail* en klik bij *Bonnen-adres (gratis)* op *Bonnen-adres aanvragen*.
-2. Kijk je e-mailadres, bedrijfsnaam en KvK-nummer na, lees wat er met je gegevens gebeurt en vink *Ik ga hiermee akkoord* aan. Klik op *Bonnen-adres aanvragen*.
+2. Kijk je e-mailadres, bedrijfsnaam en KvK-nummer (8 cijfers) na, vul je voornaam en achternaam in en, als je wilt, je telefoonnummer (mag leeg), lees wat er met je gegevens gebeurt en vink *Ik heb dit gelezen en ga akkoord met deze afspraken voor het bonnen-adres* aan. Zonder KvK-nummer kunnen we je geen bonnen-adres geven; mail dan naar stacy@shipdocs.app. Neem je het adres over op een andere computer, dan vul je alleen je e-mailadres en bedrijfsnaam in. Klik op *Bonnen-adres aanvragen*.
 3. Je krijgt een mail met een link. Open de link en klik op *Bevestigen*. Geen mail? Kijk ook bij ongewenste mail. De link werkt 24 uur.
 4. Wij bekijken je aanvraag, meestal binnen een werkdag. Je krijgt een mail zodra je bonnen-adres klaar is, en de app ziet het vanzelf.
 5. Geef het adres aan je leveranciers. Bij het adres staat een tekst die je kunt kopiëren en doorsturen.
@@ -35,7 +35,7 @@ Vanaf dan kijkt de app bij het opstarten en elk kwartier of er mail is. Op *Vand
 
 Het bonnen-adres kan niet zonder sleutelhanger om de inloggegevens veilig te bewaren. Op sommige Linux-computers ontbreekt die; de app zegt het dan. Gebruik daar de Bonnenmap.
 
-**Op een andere computer.** Zet je een back-up terug op een andere computer, dan zegt de app *Dit bonnen-adres hoort bij een andere computer*. Klik op *Hier gebruiken*. Je krijgt een link op het e-mailadres waarmee je het adres aanvroeg. Na bevestigen werkt het bonnen-adres op de nieuwe computer, en haalt de oude computer niets meer op.
+**Op een andere computer.** Zet je een back-up terug op een andere computer, dan zegt de app *Dit bonnen-adres hoort bij een andere computer*. Klik op *Hier gebruiken* en vul het formulier in. Je krijgt een link op het e-mailadres waarmee je het adres aanvroeg. Na bevestigen werkt het bonnen-adres op de nieuwe computer, en haalt de oude computer niets meer op.
 
 **Stoppen.** Klik bij het bonnen-adres op *Stoppen*. Het adres ontvangt dan meteen niets meer en wordt na 30 dagen met alle mail verwijderd. De bonnen die al in je administratie staan, blijven. Haal je een administratie weg bij *Instellingen → Administraties*, dan stopt de app het bonnen-adres van die administratie eerst zelf. Vraag je later opnieuw aan, dan krijg je een nieuw adres; een oud adres wordt nooit opnieuw uitgedeeld.
 
