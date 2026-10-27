@@ -8,7 +8,7 @@ volgorde: 10
 ## De btw-aangifte doen
 
 1. Ga naar *Belasting* en kies het kwartaal (of de maand). Je ziet je omzet, de btw die je ontving en de btw die je terugkrijgt.
-2. **Controleer wat de app vindt**: betalingen die nog niet zijn uitgezocht, uitgaven zonder bon, een negatieve kas, een factuur zonder btw-nummer bij btw verlegd. Los het op, of sla het bewust over.
+2. **Controleer wat de app vindt**: betalingen die nog niet zijn uitgezocht, uitgaven zonder bon, een negatieve kas, een factuur zonder btw-nummer bij btw verlegd. Los het op met *Oplossen*. Klopt het toch, kies dan *Bewust overslaan* en vul in waarom (bijvoorbeeld "bon kwijt, bedrag klopt wel"). Verandert er later iets aan, dan komt de controle terug.
 3. **Neem de bedragen over** in Mijn Belastingdienst Zakelijk. Per rubriek staat wat je invult: 1a en 1b (omzet 21% en 9%), 1d (privégebruik, bijvoorbeeld de auto van de zaak), 1e (0% en vrijgesteld), 2a (naar jou verlegd), 3a (uitvoer buiten de EU), 3b (EU-bedrijven), 4a en 4b (inkoop uit het buitenland), 5a, 5b (voorbelasting) en 5g. Klik op een bedrag om te zien waar het vandaan komt en om het te kopiëren.
 4. Kies *Ik heb de aangifte gedaan*. Je kunt dan het **betalingskenmerk** (16 cijfers) en het bedrag uit Mijn Belastingdienst Zakelijk vastleggen, zodat je ze bij die periode terugvindt. De app boekt er niets mee; de betaling zelf komt via je bank binnen.
 5. **Betaal op tijd**: uiterlijk de laatste dag van de maand na het kwartaal. *Vandaag* laat tot die tijd zien hoeveel je apart moet houden.

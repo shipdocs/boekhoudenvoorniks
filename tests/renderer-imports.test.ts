@@ -59,4 +59,16 @@ describe('renderer-imports', () => {
     for (const f of files(join(ROOT, 'renderer'))) walk(f, []);
     expect(problems).toEqual([]);
   });
+
+  it('geen window.prompt(): Electron kent die niet (geeft altijd null), gebruik AskText', () => {
+    const rendererDir = join(ROOT, 'renderer');
+    const uses = files(rendererDir).flatMap((f) =>
+      readFileSync(f, 'utf8')
+        .split('\n')
+        .map((line, i) => ({ line, at: `${f.slice(ROOT.length + 1)}:${i + 1}` }))
+        .filter(({ line }) => /(^|[^\w.])(window\.)?prompt\(/.test(line) && !/^\s*(\*|\/\/)/.test(line))
+        .map(({ at }) => at),
+    );
+    expect(uses).toEqual([]);
+  });
 });

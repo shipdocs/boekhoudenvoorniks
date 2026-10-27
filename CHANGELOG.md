@@ -2,6 +2,17 @@
 
 ## Nog niet uitgebracht
 
+## 1.9.2 — Definitief maken bewaart je wijzigingen, en Bewust overslaan werkt weer
+
+Een conceptfactuur die je meteen definitief maakt, houdt nu de datum en andere wijzigingen die je net invulde. Bij de btw-controles werkt *Bewust overslaan* weer, en een creditfactuur noemt ook de datum van de oorspronkelijke factuur.
+
+### Verbeterd
+- **Creditfactuur: de verwijzing noemt ook de datum van de oorspronkelijke factuur, en een eerdere datum geeft een waarschuwing.** De verwijzing luidt nu bijvoorbeeld "Creditering van factuur 2026-0012 van 3 oktober 2026". Een creditfactuur krijgt de datum waarop je hem verstuurt; kies je een eerdere datum, dan zegt de app dat de oorspronkelijke factuur al in de verwijzing staat en dat de btw-correctie in het tijdvak van de creditfactuur komt. Een gele melding bij de factuurdatum vraagt de app nog een keer na bij *Definitief maken* en *Versturen*.
+
+### Opgelost
+- **Definitief maken bewaart wat je net hebt veranderd.** Paste je in een conceptfactuur de datum (of iets anders) aan en klikte je meteen op *Definitief maken*, dan werd de factuur definitief zoals hij het laatst was opgeslagen, bijvoorbeeld met de datum van vandaag. De app slaat nu eerst op.
+- **Bewust overslaan bij de btw-controles werkt weer.** De knop vroeg om een reden in een venster dat in de app niet verscheen, en deed daardoor niets. Je vult de reden nu in een venster in de app in. Hetzelfde gold voor de garantie vastleggen bij een aankoop (🛡️).
+
 ## 1.9.1 — bonnen-adres met naam, telefoon en KvK, en duidelijker wat we bewaren
 
 Bij het aanvragen van een bonnen-adres vul je nu je naam en KvK-nummer in (telefoon mag leeg), en de uitleg en privacyverklaring zeggen precies welke gegevens we bewaren, waarom en hoe lang.

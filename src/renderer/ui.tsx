@@ -200,6 +200,28 @@ export function Modal({ title, children, onClose, wide }: { title: string; child
   );
 }
 
+/**
+ * Vraagt één tekst in een venster. In plaats van window.prompt(): dat bestaat niet in Electron (geeft altijd null),
+ * waardoor een knop met prompt() in de app niets doet.
+ */
+export function AskText({ title, label, initial = '', placeholder, submitLabel = 'OK', onSubmit, onClose }: { title: string; label: string; initial?: string; placeholder?: string; submitLabel?: string; onSubmit: (value: string) => void | Promise<void>; onClose: () => void }) {
+  const [value, setValue] = useState(initial);
+  return (
+    <Modal title={title} onClose={onClose}>
+      <form onSubmit={(e) => { e.preventDefault(); void onSubmit(value); }}>
+        <Field label={label}>
+          <input autoFocus value={value} placeholder={placeholder} onChange={(e) => setValue(e.target.value)} />
+        </Field>
+        <div className="row" style={{ marginTop: 14 }}>
+          <span className="grow" />
+          <Button onClick={onClose}>Annuleren</Button>
+          <Button kind="primary" type="submit">{submitLabel}</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function Empty({ icon, title, children }: { icon: string; title: string; children?: ReactNode }) {
   return (
     <div className="card done-box">

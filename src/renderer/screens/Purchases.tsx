@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, PartnerSelect, StatusPill, readAsBytes, useAction, useApp, useAppEvent, useJobsOn, useJobWords, useLoad, usePartners, type InvestmentSavedInfo } from '../ui';
+import { AskText, Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, PartnerSelect, StatusPill, readAsBytes, useAction, useApp, useAppEvent, useJobsOn, useJobWords, useLoad, usePartners, type InvestmentSavedInfo } from '../ui';
 import { READING_LABEL, shownMessage } from '../../shared/reading';
 import { diffDays, formatDateNl, today } from '../../shared/dates';
 import { isReverseCharge, type PurchaseVatCode } from '../../shared/vat';
@@ -41,6 +41,14 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
   const [resolving, setResolving] = useState<{ id: number; label: string } | null>(null);
   // bij welke klus hoort deze aankoop (kostenplaats)
   const [jobFor, setJobFor] = useState<PurchaseInvoice | null>(null);
+  const [warranty, setWarranty] = useState<PurchaseInvoice | null>(null);
+  const saveWarranty = async (p: PurchaseInvoice, v: string) => {
+    const months = v.trim() ? Number(v.trim().replace(',', '.')) : null;
+    if (months !== null && !Number.isFinite(months)) return toast('Vul een aantal maanden in, bv. 24', 'error');
+    if ((await run(async () => { await api.search.setWarranty(p.id, months); return true; })) === undefined) return;
+    setWarranty(null);
+    await purchases.reload();
+  };
   const allJobs = useLoad(() => api.jobs.list());
   const foreign = useLoad(() => api.valuta.candidates());
 
@@ -159,14 +167,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
                     {jobsOn && <Button small kind="ghost" title={`Voor ${jw.welke} ${jw.s} was dit? Of algemene bedrijfskosten`} ariaLabel={`${jw.S} kiezen`} onClick={() => setJobFor(p)}>🔨</Button>}
                     <Button small kind="ghost" title="Gebruik je dit ook privé? Stel in hoeveel zakelijk is" ariaLabel="Zakelijk deel aanpassen" onClick={() => setShare(p)}>%</Button>
                     {!p.currency && <Button small kind="ghost" title="Was deze bon in dollars of een andere munt? Dan reken je hem hier om naar euro's." ariaLabel="Omrekenen uit een andere munt" onClick={() => setFx({ id: p.id, fromDocument: false })}>💱</Button>}
-                    <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={async () => {
-                      const v = prompt('Hoeveel maanden garantie? (leeg = geen)', p.warranty_months ? String(p.warranty_months) : '24');
-                      if (v === null) return;
-                      const months = v.trim() ? Number(v.trim().replace(',', '.')) : null;
-                      if (months !== null && !Number.isFinite(months)) return toast('Vul een aantal maanden in, bv. 24', 'error');
-                      await run(() => api.search.setWarranty(p.id, months));
-                      await purchases.reload();
-                    }}>🛡️</Button>
+                    <Button small kind="ghost" title="Garantie: hoeveel maanden? (dan weet je later of je nog garantie hebt)" ariaLabel="Garantie vastleggen" onClick={() => setWarranty(p)}>🛡️</Button>
                   </span>
                 </td>
               </tr>
@@ -180,6 +181,7 @@ export function Purchases({ pay: payInitial }: { pay?: number } = {}) {
       {jobFor && <LinkJobModal title={`${jobFor.relation_name ?? jobFor.description} ${formatDateNl(jobFor.invoice_date)}`} current={jobFor.job_id} onClose={() => setJobFor(null)} onPick={async (to) => { const ok = await run(async () => { await api.jobs.linkPurchase(jobFor.id, to); return true; }, to === null ? 'Aankoop is nu algemeen ✓' : `Aankoop gekoppeld aan ${jw.de} ✓`); if (ok) { setJobFor(null); await purchases.reload(); } }} />}
       {resolving && <ResolveQuestionModal purchase={resolving} onClose={() => setResolving(null)} onDone={async () => { setResolving(null); await purchases.reload(); }} />}
       {paidElsewhere && <PaidElsewhereModal purchase={paidElsewhere} others={(purchases.data ?? []).filter((x) => x.id !== paidElsewhere.id && x.relation_id !== null && x.relation_id === paidElsewhere.relation_id && x.status === 'open' && x.open_amount > 0).length} onClose={() => setPaidElsewhere(null)} onDone={async () => { setPaidElsewhere(null); await purchases.reload(); }} />}
+      {warranty && <AskText title="Garantie" label="Hoeveel maanden garantie? (leeg = geen)" initial={warranty.warranty_months ? String(warranty.warranty_months) : '24'} submitLabel="Bewaren" onClose={() => setWarranty(null)} onSubmit={(v) => saveWarranty(warranty, v)} />}
       {fx && <ForeignModal purchaseId={fx.id} fromDocument={fx.fromDocument} onClose={() => setFx(null)} onDone={async () => { setFx(null); await foreign.reload(); await purchases.reload(); }} />}
     </div>
   );
