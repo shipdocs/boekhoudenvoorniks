@@ -72,6 +72,19 @@ describe('#280 waarschuwing bij de factuurdatum', () => {
     const { s } = setup();
     expect(() => s.invoices.dateWarnings('2026-13-40')).toThrow();
   });
+  it('een creditfactuur met een datum vóór vandaag krijgt een eigen signaal; vandaag niet', () => {
+    const { s, klant } = setup();
+    const first = inv(s, klant.id, '2026-04-01', 10000);
+    const credit = s.invoices.createCreditNote(first.id);
+    expect(credit.reference).toBe('Creditering van factuur ' + first.number + ' van 1 april 2026');
+    const w = s.invoices.dateWarnings('2026-04-01', credit.id, '2026-10-04');
+    expect(w).toHaveLength(1);
+    expect(w[0]).toContain('Een creditfactuur krijgt de datum waarop je hem verstuurt');
+    expect(s.invoices.dateWarnings('2026-10-04', credit.id, '2026-10-04')).toEqual([]);
+    // een gewone factuur met een eerdere datum krijgt dat signaal niet
+    const draft = s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-01', lines: [{ description: 'x', quantity: 1, unitPrice: 1, vatCode: 'hoog' }] });
+    expect(s.invoices.dateWarnings('2026-09-01', draft.id, '2026-10-04')).toEqual([]);
+  });
 });
 
 describe('#281 kosten tegenover vorig jaar', () => {

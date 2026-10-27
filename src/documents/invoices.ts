@@ -609,7 +609,8 @@ export class InvoiceService {
   /**
    * Waarschuwingen bij de datum van een nieuwe of aangepaste factuur: een datum in de toekomst of vóór de
    * datum van de vorige definitieve factuur (de nummers lopen dan niet in datumvolgorde). Alleen een signaal. Een telefoonfactuur heeft een eigen
-   * nummerreeks en telt hier niet mee.
+   * nummerreeks en telt hier niet mee. Een creditfactuur met een datum vóór vandaag krijgt een eigen signaal: de
+   * factuurdatum is de dag van uitreiking, de oorspronkelijke factuur staat al in de verwijzing.
    */
   dateWarnings(invoiceDate: IsoDate, excludeId?: number, asOf: IsoDate = today()): string[] {
     assertIsoDate(invoiceDate, 'factuurdatum');
@@ -622,6 +623,10 @@ export class InvoiceService {
       .get(excludeId ?? null) as { number: string; invoice_date: IsoDate } | undefined;
     if (last && invoiceDate < last.invoice_date) {
       out.push(`Factuur ${last.number} heeft een latere datum (${formatDateNl(last.invoice_date)}). Je nieuwe factuur krijgt een hoger nummer maar een eerdere datum; dat mag, maar controleer of de datum klopt.`);
+    }
+    const credit = excludeId === undefined ? undefined : (this.db.prepare('SELECT credit_of_invoice_id FROM invoices WHERE id = ?').get(excludeId) as { credit_of_invoice_id: number | null } | undefined);
+    if (credit?.credit_of_invoice_id && invoiceDate < asOf) {
+      out.push('Een creditfactuur krijgt de datum waarop je hem verstuurt, niet de datum van de oorspronkelijke factuur; die staat al in de verwijzing. De btw-correctie komt in het tijdvak van de creditfactuur. Kies alleen een eerdere datum als je deze creditfactuur toen al hebt verstuurd.');
     }
     return out;
   }
@@ -683,7 +688,7 @@ export class InvoiceService {
     if (existing) throw new ValidationError('Deze factuur is al teruggedraaid');
     const draft = this.createDraft({
       relationId: inv.relation_id,
-      reference: `Creditering van factuur ${inv.number}`,
+      reference: `Creditering van factuur ${inv.number} van ${formatDateNl(inv.invoice_date)}`,
       templateId: inv.template_id,
       lines: toLineInputs(inv.lines).map((l) => ({ ...l, quantity: -l.quantity })),
     });

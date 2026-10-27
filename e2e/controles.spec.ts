@@ -32,3 +32,21 @@ test('"weet ik nog niet" oplossen: de betalingen zien en opnieuw indelen', async
   await nav(page, 'Belasting');
   await expect(page.locator('ul.checks li', { hasText: 'weet ik nog niet' })).toHaveCount(0);
 });
+
+test('blokkerende controle bewust overslaan: reden in een venster in de app', async ({ page }) => {
+  await onboard(page);
+  await nav(page, 'Bank');
+  await page.locator('main input[type=file]').first().setInputFiles({ name: 'afschrift.csv', mimeType: 'text/csv', buffer: CSV });
+  await page.locator('table.list tbody tr', { hasText: /SHELL/i }).first().click();
+  await page.getByRole('button', { name: 'Weet ik nog niet (later uitzoeken)' }).click();
+  await expect(page.getByText('Verwerkt ✓').last()).toBeVisible();
+
+  await nav(page, 'Belasting');
+  const row = page.locator('ul.checks li', { hasText: 'weet ik nog niet' });
+  await row.getByRole('button', { name: 'Bewust overslaan' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Bewust overslaan' });
+  await dlg.getByRole('textbox').fill('alleen privébetalingen');
+  await dlg.getByRole('button', { name: 'Overslaan' }).click();
+  await expect(dlg).toBeHidden();
+  await expect(row).toContainText('(bewust overgeslagen)');
+});

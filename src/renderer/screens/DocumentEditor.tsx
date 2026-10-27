@@ -114,6 +114,21 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
     return r?.id;
   };
 
+  /** De datumwaarschuwingen nog één keer, vóór een factuur definitief wordt; zonder waarschuwingen alleen `question`. */
+  const confirmDate = (question: string | null): boolean => {
+    const text = [...(isInvoice ? dateWarnings : []), ...(question ? [question] : [])].join('\n\n');
+    return !text || confirm(text);
+  };
+
+  // eerst opslaan: wat je na het laatste opslaan veranderde (datum, klant, regels) gaat anders verloren
+  const finalize = async () => {
+    if (!confirmDate('Definitief maken zonder te mailen? Je kunt de factuur daarna niet meer wijzigen.')) return;
+    const docId = await save();
+    if (!docId) return;
+    await run(() => api.invoices.finalize(docId), 'Factuur is definitief');
+    await doc.reload();
+  };
+
   const showPreview = async () => {
     const docId = editable ? await save() : id;
     if (!docId) return;
@@ -283,12 +298,12 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         {id && !invoice?.is_opening && <Button disabled={busy} onClick={() => void run(() => (isInvoice ? api.invoices.savePdf(id) : api.quotes.savePdf(id)), 'PDF opgeslagen')}>PDF opslaan</Button>}
         {id && isInvoice && invoice && invoice.status !== 'concept' && !invoice.is_opening && <Button disabled={busy} title="Een bestand dat boekhoudprogramma's zonder overtypen inlezen" onClick={() => void run(() => api.invoices.saveUbl(id), 'E-factuur opgeslagen')}>E-factuur (XML)</Button>}
         <span className="grow" />
-        {!id && <Button kind="primary" disabled={busy} title="Slaat op en opent het verstuurvenster" onClick={() => void save('send')}>Versturen</Button>}
+        {!id && <Button kind="primary" disabled={busy} title="Slaat op en opent het verstuurvenster" onClick={() => { if (confirmDate(dateWarnings.length ? 'Toch versturen?' : null)) void save('send'); }}>Versturen</Button>}
         {isInvoice && invoice?.status === 'concept' && (
           <>
             <Button kind="danger" disabled={busy} onClick={async () => { if (confirm('Deze factuur (nog niet verstuurd) verwijderen?') && (await run(async () => { await api.invoices.deleteDraft(invoice.id); return true; }, 'Verwijderd'))) go({ screen: 'werk' }); }}>Verwijderen</Button>
-            <Button disabled={busy} onClick={async () => { if (confirm('Definitief maken zonder te mailen? Je kunt de factuur daarna niet meer wijzigen.')) { await run(() => api.invoices.finalize(invoice.id), 'Factuur is definitief'); await doc.reload(); } }}>Definitief maken</Button>
-            <Button kind="primary" disabled={busy} onClick={async () => { const docId = await save(); if (docId) setSending(true); }}>Versturen</Button>
+            <Button disabled={busy} onClick={() => void finalize()}>Definitief maken</Button>
+            <Button kind="primary" disabled={busy} onClick={async () => { if (!confirmDate(dateWarnings.length ? 'Toch versturen?' : null)) return; const docId = await save(); if (docId) setSending(true); }}>Versturen</Button>
           </>
         )}
         {isInvoice && invoice && invoice.status !== 'concept' && (

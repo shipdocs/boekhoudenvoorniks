@@ -1,7 +1,7 @@
 import { VIES_URL } from '../../shared/vat';
 import { useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
+import { AskText, Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, useAction, useApp, useLoad } from '../ui';
 import { formatDateNl, today, vatDeadline } from '../../shared/dates';
 import { VAT_DISCLAIMER } from '../../shared/legal';
 import { AccountantNotice } from './TaxYear';
@@ -59,6 +59,13 @@ export function Tax({ periodKey }: { periodKey?: string }) {
   const [copied, setCopied] = useState<ReadonlySet<string>>(new Set());
   const [detail, setDetail] = useState<{ code: string; title: string } | null>(null);
   const [checkLines, setCheckLines] = useState<{ account: string; upTo?: string; title: string; hint: string } | null>(null);
+  /** blokkerende controle die je bewust overslaat: eerst de reden vragen */
+  const [skipping, setSkipping] = useState<{ period: string; key: string; title: string } | null>(null);
+  const skip = async (period: string, checkKey: string, reason: string) => {
+    if ((await run(async () => { await api.vat.skipCheck(period, checkKey, reason); return true; })) === undefined) return;
+    setSkipping(null);
+    await checks.reload();
+  };
 
   if (settings.kor) {
     return (
@@ -194,12 +201,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
                           ) : (
                             <Button small onClick={() => (c.account ? setCheckLines({ account: c.account.rgs, upTo: c.account.upTo, title: c.title, hint: c.detail }) : c.screen === 'belasting' ? setDetails(true) : go({ screen: c.screen as never, extra: c.screen === 'instellingen' ? { tab: 'btw' } : undefined }))}>{c.screen === 'belasting' ? 'Bekijk berekening' : 'Oplossen'}</Button>
                           )}
-                          <Button small kind="ghost" disabled={busy} onClick={async () => {
-                            const reason = c.blocking ? prompt('Waarom sla je dit over? (bv. "bon kwijt, bedrag klopt wel")') : '';
-                            if (reason === null) return;
-                            await run(() => api.vat.skipCheck(r.period.key, c.key, reason));
-                            await checks.reload();
-                          }}>{c.blocking ? 'Bewust overslaan' : 'Klopt'}</Button>
+                          <Button small kind="ghost" disabled={busy} onClick={() => (c.blocking ? setSkipping({ period: r.period.key, key: c.key, title: c.title }) : void skip(r.period.key, c.key, ''))}>{c.blocking ? 'Bewust overslaan' : 'Klopt'}</Button>
                         </span>
                       )}
                     </li>
@@ -255,6 +257,7 @@ export function Tax({ periodKey }: { periodKey?: string }) {
             </div>
           )}
           <IcpCard periodKey={r.period.key} />
+          {skipping && <AskText title="Bewust overslaan" label={`Waarom sla je "${skipping.title}" over?`} placeholder='bv. "bon kwijt, bedrag klopt wel"' submitLabel="Overslaan" onClose={() => setSkipping(null)} onSubmit={(reason) => skip(skipping.period, skipping.key, reason)} />}
           {checkLines && <CheckLines {...checkLines} onClose={() => { setCheckLines(null); void checks.reload(); void report.reload(); }} />}
           {detail && <VatDetails periodKey={r.period.key} code={detail.code} title={detail.title} onClose={() => setDetail(null)} />}
         </>

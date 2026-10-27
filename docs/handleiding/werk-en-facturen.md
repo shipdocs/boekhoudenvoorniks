@@ -19,6 +19,9 @@ Gaat de klant akkoord? Open de offerte en kies *Klant is akkoord*. Werk je met [
 1. *Werk & facturen → + Nieuwe factuur*, of vanuit een klus *Factuur maken*.
 2. Klant, datum en regels zoals bij een offerte. Bij *Datum levering of dienst* vul je in wanneer het werk was; bij een periode ook *t/m*. Dat staat op de factuur en telt voor de ICP-opgaaf bij diensten aan EU-bedrijven. In welke btw-aangifte de omzet valt, bepaalt de factuurdatum.
 3. *Versturen* maakt de factuur definitief, geeft hem zijn nummer en mailt hem, via je eigen e-mailserver of met je eigen mailprogramma (zie hieronder). Je kunt niets meer aan een verstuurde factuur veranderen; een fout herstel je met een creditfactuur (zie hieronder).
+4. Mail je de factuur zelf, of heb je hem al eerder verstuurd? Kies dan *Definitief maken*. De factuur krijgt zijn nummer, maar de app mailt niets. Wat je in het concept hebt veranderd, slaat de app eerst op.
+
+De factuurdatum is de dag waarop je de factuur verstuurt. Een eerdere datum kan, bijvoorbeeld als je de factuur al eerder op papier gaf. Ligt de datum vóór die van je vorige factuur of in de toekomst, dan zie je een gele melding, en die vraagt de app nog een keer na voordat de factuur definitief wordt.
 
 Het factuurnummer zie je al op het concept. Het volgende nummer zelf zetten, bijvoorbeeld om door te nummeren vanuit je vorige pakket, doe je bij *Instellingen → Facturen & offertes*.
 
@@ -54,7 +57,7 @@ Bij *Hoe gaat het?* staat *Wie moet nog betalen?* met alle openstaande facturen.
 
 ## Een factuur corrigeren: creditfactuur
 
-Open de factuur en kies *Factuur terugdraaien (creditfactuur)*. Je kunt de hele factuur crediteren of een deel. De creditfactuur krijgt een eigen nummer en verrekent de btw netjes in de juiste periode. Een factuur die niet meer betaald gaat worden, kies je *Afboeken als oninbaar*: de btw die je al afdroeg, krijg je dan in de aangifte terug.
+Open de factuur en kies *Factuur terugdraaien (creditfactuur)*. Je kunt de hele factuur crediteren of een deel. De creditfactuur krijgt een eigen nummer en verwijst naar de oorspronkelijke factuur, met het nummer en de datum daarvan. Als datum houd je de dag waarop je de creditfactuur verstuurt, niet de datum van de oorspronkelijke factuur: de btw-correctie komt in het tijdvak van de creditfactuur. Kies je toch een eerdere datum, dan waarschuwt de app. Een factuur die niet meer betaald gaat worden, kies je *Afboeken als oninbaar*: de btw die je al afdroeg, krijg je dan in de aangifte terug.
 
 ## Omzet zonder factuur
 
