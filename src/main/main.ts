@@ -1,3 +1,4 @@
+import { blockAiInOfficeCopy, ocrAllowed } from '../settings/ocr-policy';
 import { runBackgroundFeeds } from './background-feeds';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, safeStorage, session, shell } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -38,7 +39,7 @@ import { hasOldMcp, mcpCommands } from '../mcp/names';
 import { BONNEN_PREFIX, BONNEN_TARGET, type PollResult } from '../mail/mail-intake';
 import { BONNEN_TOKEN_SECRET, BonnenAdresService, BonnenServerError, httpBonnenServer } from '../mail/bonnen-adres';
 import { BONNEN_BEWAARDAGEN } from '../shared/legal';
-import { deleteAttachment, resolveAttachmentPath, saveAttachment } from './attachments';
+import { deleteAttachment, resolveAttachmentPath, resolveOpenableAttachment, saveAttachment } from './attachments';
 import { folderAccess } from './statement-files';
 import { StatementWatch } from './statement-watch';
 import { CHOICE_SESSION, chromiumDir, forgetMoved, handOverLocalState, markComplete, noteMoved, planSwitch, resolveDataDir, sameDir, resolveForMcp, sharedDataDir, takeSwitchRequest, writeChoice, writeSwitchRequest, type DataDirResolution, type MigrationOutcome, type SwitchAction, type SwitchOutcome, type SwitchPlan } from './data-dir';
@@ -332,6 +333,7 @@ async function registerMcp(kind: 'claude-code' | 'codex', cli: string) {
 
 /** Na de naamswijziging: een koppeling onder de oude naam wijst naar het oude programma; zet hem om. */
 async function migrateMcp(): Promise<void> {
+  if (!ocrAllowed(services.settings)) return;
   const s = services.settings.get().ocr;
   for (const [kind, stored] of [['claude-code', s.claudeCodePath], ['codex', s.codexPath]] as const) {
     if (!hasOldMcp(kind, app.getPath('home'))) continue;
@@ -493,6 +495,8 @@ const localFetch: FetchLike = (url, init) => fetch(url, init);
 
 /** Lokale OCR/LLM volgens de instellingen (alleen localhost). */
 function configureLocalAi(): void {
+  // kantoorkopie: een opgeslagen programma, leesdienst of LLM (ook uit een oude, ongeschoonde kopie) wordt nooit gebruikt
+  if (blockAiInOfficeCopy(services, () => localOcr.stop())) return;
   const { ocr } = services.settings.get();
   try {
     if (ocr.engine === 'claude-code' || ocr.engine === 'codex') {
@@ -682,7 +686,7 @@ function initServices(): void {
       },
     },
     async openPath(path) {
-      const err = await shell.openPath(resolveAttachmentPath(dataDir(), path));
+      const err = await shell.openPath(resolveOpenableAttachment(dataDir(), path));
       if (err) throw new Error(err);
     },
     revealFile(p) {

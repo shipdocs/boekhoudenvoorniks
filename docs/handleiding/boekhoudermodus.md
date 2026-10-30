@@ -1,6 +1,6 @@
 ---
 titel: De boekhoudermodus
-omschrijving: Wat er verschijnt als je "Toon de boekhouding voor je boekhouder" aanzet, voor wie het is, en wat je ermee kunt: kolommenbalans, grootboekkaarten, journaal, correctieboekingen, rekeningschema en exports.
+omschrijving: Wat er verschijnt als je de boekhouding voor je boekhouder aanzet, voor wie het is, en wat je ermee kunt: kolommenbalans, journaal, correcties en exports.
 hoofdstuk: Voor de boekhouder
 volgorde: 10
 boekhouder: ja

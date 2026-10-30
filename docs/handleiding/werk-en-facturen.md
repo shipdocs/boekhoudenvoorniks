@@ -45,6 +45,8 @@ Pas bij *Ja* telt de factuur of offerte als verstuurd, en beginnen bij een factu
 
 Per regel kies je 21%, 9%, 0%, *btw verlegd* of *vrijgesteld*. Bij btw verlegd eist de app het btw-nummer van de klant op de factuur. Bij een klant buiten Nederland stelt de app het juiste tarief voor en legt uit waarom; meer daarover bij [Btw-aangifte](btw-aangifte.html#buitenland-en-bijzondere-gevallen).
 
+**Schilder of stukadoor.** Kies je dit vak, dan staan de regels voor schilder- of stukadoorswerk klaar met 9% btw: dat geldt voor woningen die ouder zijn dan 2 jaar, ook over de gebruikte materialen, het voorbereiden en de voorbehandeling. Ook *Verf en materiaal*, *Materiaal* en *Voorrijkosten* staan dan op 9%. Voorrijkosten nemen het tarief over van het werk dat al op de factuur staat. Staat er werk tegen verschillende tarieven, dan kiest de app niet: de voorrijkosten krijgen 9% en een melding vraagt je het tarief zelf na te kijken. Hoort het voorrijden bij allebei, verdeel het bedrag dan over twee regels, of reken 21% over het geheel. Werk dat te ver van schilderen of stukadoren afstaat, zoals ramen, deuren en kozijnen vervangen of gipswanden plaatsen, valt onder 21%: kies dat tarief zelf bij die regel. Een losse rekening voor alleen voorrijden valt niet onder het 9%-tarief; vraag je boekhouder. De app stelt een tarief voor, jij blijft per regel zelf kiezen.
+
 ### E-factuur meesturen
 
 Bij *Instellingen → Facturen & offertes* kun je bij elke factuur een e-factuur (UBL) meesturen: een bestand dat boekhoudprogramma's zonder overtypen inlezen. Handig voor zakelijke klanten.

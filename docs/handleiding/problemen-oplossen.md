@@ -1,6 +1,6 @@
 ---
 titel: Problemen oplossen
-omschrijving: Wat je doet als iets niet klopt: een afschrift dat verkeerd is ingelezen, een saldo dat niet aansluit, een bon die niet gelezen wordt, een Windows-melding, of een back-up terugzetten.
+omschrijving: Wat je doet als iets niet klopt: een verkeerd ingelezen afschrift, een saldo dat niet aansluit, een bon die niet gelezen wordt of een back-up terugzetten.
 hoofdstuk: Problemen oplossen
 volgorde: 10
 ---

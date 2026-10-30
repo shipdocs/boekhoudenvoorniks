@@ -50,7 +50,9 @@ export const PURCHASE_VAT_RATES: Record<PurchaseVatCode, VatRateInfo> = {
   nul: { code: 'nul', label: '0%', percentage: 0, rubriek: '-' },
   verlegd: { code: 'verlegd', label: 'Btw verlegd naar mij in Nederland (ook werk aan een Nederlands pand door een buitenlandse leverancier)', percentage: 21, rubriek: '2a' },
   eu: { code: 'eu', label: 'Buitenlandse leverancier in de EU, geen btw op de factuur (bv. Google, Meta)', percentage: 21, rubriek: '4b' },
-  'buiten-eu': { code: 'buiten-eu', label: 'Leverancier buiten de EU, geen btw op de factuur', percentage: 21, rubriek: '4a' },
+  // Alleen diensten (software, advies, advertenties) en invoer met een vergunning artikel 23 horen in 4a; spullen zonder
+  // die vergunning betaal je bij de Douane (zie de btw-controle "invoer-4a")
+  'buiten-eu': { code: 'buiten-eu', label: 'Dienst van een leverancier buiten de EU, geen btw op de factuur (bv. software, AI-tools)', percentage: 21, rubriek: '4a' },
   geen: { code: 'geen', label: 'Geen btw', percentage: 0, rubriek: '-' },
 };
 

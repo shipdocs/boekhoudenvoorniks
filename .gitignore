@@ -13,9 +13,7 @@ e2e-report/
 /.claude/settings.local.json
 .ouroboros/
 .ouroboros_eval_artifact.md
-/.claude/skills/nl-boekhoud-expert/
 /internal/
-/docs/fiscaal/
 .env
 .env.*
 !.env.example

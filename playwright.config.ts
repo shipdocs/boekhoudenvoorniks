@@ -14,6 +14,8 @@ export default defineConfig({
   timeout: 45_000,
   expect: { timeout: 7_000 },
   retries: 0,
+  // Een achtergebleven `.only` mag in CI nooit de rest van de schermflows overslaan.
+  forbidOnly: !!process.env.CI,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never', outputFolder: 'e2e-report' }]] : [['list']],
   use: {
     baseURL: `http://localhost:${PORT}`,

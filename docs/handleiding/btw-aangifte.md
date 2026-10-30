@@ -1,6 +1,6 @@
 ---
 titel: Btw-aangifte en inkomstenbelasting
-omschrijving: Per kwartaal zien wat je invult in Mijn Belastingdienst Zakelijk, de controles vooraf, het betalingskenmerk vastleggen, en wat de app voor de inkomstenbelasting bijhoudt.
+omschrijving: Per kwartaal zien wat je invult bij Mijn Belastingdienst Zakelijk, de controles vooraf, het betalingskenmerk en de inkomstenbelasting.
 hoofdstuk: Belasting en boekhouder
 volgorde: 10
 ---
@@ -23,6 +23,7 @@ Na *Ik heb de aangifte gedaan* ligt de periode vast voor de btw. Een bon of corr
 - **Klant in een ander EU-land**: bij een bedrijf stelt de app *btw verlegd* voor en komt de verkoop in de ICP-opgaaf (*Verkopen aan EU-bedrijven*), goederen en diensten apart. Bij een particulier geldt tot € 10.000 per jaar Nederlandse btw; daarboven de btw van het land van de klant (Noord-Ierland telt hierin mee voor goederen).
 - **Klant buiten de EU**: meestal 0% of buiten de btw; de app legt per geval uit wat hij voorstelt.
 - **Inkoop uit het buitenland**: bij een bon in dollars of een andere valuta rekent de app om naar euro's en doet hij een voorstel voor de btw (rubriek 4a/4b). Controleer dat bij twijfel.
+- **Spullen van buiten de EU** (bijvoorbeeld gereedschap uit China of de VS): de btw daarover betaal je bij de Douane, vaak via de koerier (DHL, UPS, PostNL). Die btw trek je af met het invoerdocument of de koeriersfactuur. Alleen met een *vergunning artikel 23* geef je de btw in je aangifte aan (rubriek 4a). Zet je zo'n aankoop toch op *Dienst van een leverancier buiten de EU*, dan telt de btw dubbel; de btw-controle meldt dat en met *Niet in 4a* bij *Aankopen* zet je de aankoop op geen btw. Een dienst van buiten de EU (software, AI-tools, advies) hoort wél in 4a. Met de KOR kun je de btw bij invoer niet verleggen.
 - **Kleineondernemersregeling (KOR)**: zet je die aan bij *Instellingen → Btw*, dan reken je geen btw en hoef je normaal geen aangifte te doen. Btw op je inkopen telt bij de kosten. Let op: btw die naar jou verlegd is (bijvoorbeeld een dienst van een buitenlands bedrijf) blijf je verschuldigd, zonder aftrek; de app zet die per kwartaal op het btw-scherm, zodat je weet dat je voor die periode wél aangifte doet. De app houdt ook de omzetgrens in de gaten en waarschuwt op tijd.
 
 Bij de KOR kan de app ook vragen om de btw-aftrek op een bedrijfsmiddel te beoordelen. Het signaal
@@ -30,13 +31,20 @@ gebruikt de ingevulde datum van ingebruikname; zonder aparte datum gebruikt het 
 In het eerste gebruiksjaar vraagt de melding om beoordeling van de volledige afgetrokken btw en het
 gebruik in dat jaar. De geschatte bedragen gaan uit van een roerend bedrijfsmiddel (zoals een bus, machine
 of laptop): 5 jaar, een vijfde per jaar. Voor een pand of grond loopt de herziening over 10 jaar, een tiende
-per jaar; dat rekent de app niet uit. De app boekt deze herziening niet automatisch: laat je boekhouder het bedrag bevestigen.
+per jaar; dat rekent de app niet uit. Sinds 2026 tellen ook grote verbouwings- en onderhoudsdiensten aan een pand vanaf
+€ 30.000 (bijvoorbeeld schilderwerk, isolatie of dakrenovatie) mee, met dezelfde 5 jaar en een vijfde per jaar; de app
+neemt daarvoor elke aankoop van kosten vanaf € 30.000 waarop je btw aftrok, met de factuurdatum als ingebruikname, en
+vraagt of het om werk aan een pand ging. De app boekt deze herziening niet automatisch: laat je boekhouder het bedrag bevestigen.
 
 ## Inkomstenbelasting
 
 *Belasting → Inkomstenbelasting* geeft per jaar een schatting van wat je aan inkomstenbelasting kwijt bent, op basis van je winst en de aftrekposten die de app bijhoudt: afschrijving op investeringen, kleinschaligheidsinvesteringsaftrek, zakelijke kilometers, zelfstandigen- en startersaftrek, en het zakelijke deel van telefoon, internet en werkplek. Hier houd je ook je uren bij voor het urencriterium.
 
 Het is een schatting om geen verrassing te krijgen; de definitieve aangifte doe je zelf of met je boekhouder.
+
+Voor kilometers met je eigen auto rekent de app in 2026 met € 0,25 per kilometer, zoals de Belastingdienst publiceert. Dat bedrag staat in het Belastingplan 2027 (met terugwerkende kracht tot 1 januari 2026) en is pas definitief als dat is aangenomen; tot die tijd staat in de wet nog € 0,23. Het jaaroverzicht zegt dat erbij.
+
+Gebruik je de KOR en stuur je een factuur met *Dienst aan een bedrijf in een ander EU-land*? Die dienst valt buiten de Nederlandse KOR: je klant rekent de btw in zijn eigen land af en je factureert zonder btw met "btw verlegd" en beide btw-nummers. Over die dienst geef je in Nederland geen btw aan, en als KOR-ondernemer hoef je geen opgaaf ICP te doen. De app meldt dit bij de btw-controles; laat je boekhouder bevestigen dat de factuur klopt.
 
 ## Jaarafsluiting
 

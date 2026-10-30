@@ -2,8 +2,9 @@
  * Beroepsprofielen voor onboarding: verstandige standaarden per vak, zodat de gebruiker
  * zo min mogelijk hoeft in te stellen. Tarieven zijn VOORSTELLEN die de gebruiker per regel ziet.
  *
- * LET OP: het 9%-tarief voor arbeid bij schilderen/stukadoren/behangen van woningen ouder dan
- * 2 jaar moet meegenomen worden in de fiscale review (zie GitHub-issue).
+ * Schilderen en stukadoren van woningen ouder dan 2 jaar valt onder 9%, inclusief de gebruikte
+ * materialen, het voorbereiden en de voorbehandeling (Belastingdienst, "Btw-tarief schilderen" en
+ * "Btw-tarief stukadoren"). Werk dat daar te ver van afstaat is 21%; de gebruiker kiest per regel.
  */
 import type { PurchaseVatCode } from './vat';
 
@@ -22,7 +23,14 @@ export interface TradeCost {
 export interface TradePreset {
   key: string;
   label: string;
-  items: { description: string; unit: string; vatCode: 'hoog' | 'laag'; note?: string }[];
+  items: {
+    description: string;
+    unit: string;
+    vatCode: 'hoog' | 'laag';
+    note?: string;
+    /** neemt het tarief over van de regels die al op de factuur staan (bijkomende kosten van het werk) */
+    followsMain?: boolean;
+  }[];
   /** kostenposten die we in de onboarding voorstellen (aangevinkt) */
   costs: TradeCost[];
   /** ingebouwde categorieën die dit vak zelden gebruikt: voorstel om te verbergen */
@@ -42,7 +50,10 @@ const TECHNIEK_COSTS: TradeCost[] = [
   { label: 'Cursussen en vakliteratuur', hint: 'opleiding, bijscholing, vakbladen', groupKey: 'overig' },
 ];
 
-const RENOVATIE_NOTE = '9% geldt voor het arbeidsloon bij woningen die ouder zijn dan 2 jaar; materiaal is 21%.';
+const RENOVATIE_NOTE =
+  '9% geldt voor schilder- en stukadoorswerk aan woningen die ouder zijn dan 2 jaar, ook over de gebruikte materialen, het voorbereiden en de voorbehandeling. ' +
+  'Werk dat daar te ver van afstaat, zoals ramen, deuren en kozijnen vervangen of gipswanden plaatsen, is 21%: kies dan zelf 21% voor die regel. ' +
+  "Voorrijkosten bij zo'n klus volgen hetzelfde tarief; een losse rekening voor alleen voorrijden valt daar niet onder (vraag je boekhouder).";
 
 export const TRADES: TradePreset[] = [
   {
@@ -51,8 +62,8 @@ export const TRADES: TradePreset[] = [
     items: [
       { description: 'Stucwerk wanden (arbeid)', unit: 'm²', vatCode: 'laag', note: RENOVATIE_NOTE },
       { description: 'Plafond spuiten (arbeid)', unit: 'm²', vatCode: 'laag', note: RENOVATIE_NOTE },
-      { description: 'Materiaal', unit: 'totaal', vatCode: 'hoog' },
-      { description: 'Voorrijkosten', unit: 'keer', vatCode: 'hoog' },
+      { description: 'Materiaal', unit: 'totaal', vatCode: 'laag', note: RENOVATIE_NOTE },
+      { description: 'Voorrijkosten', unit: 'keer', vatCode: 'laag', note: RENOVATIE_NOTE, followsMain: true },
     ],
     costs: BOUW_COSTS,
     hide: [],
@@ -63,7 +74,7 @@ export const TRADES: TradePreset[] = [
     items: [
       { description: 'Schilderwerk binnen (arbeid)', unit: 'm²', vatCode: 'laag', note: RENOVATIE_NOTE },
       { description: 'Schilderwerk buiten (arbeid)', unit: 'uur', vatCode: 'laag', note: RENOVATIE_NOTE },
-      { description: 'Verf en materiaal', unit: 'totaal', vatCode: 'hoog' },
+      { description: 'Verf en materiaal', unit: 'totaal', vatCode: 'laag', note: RENOVATIE_NOTE },
     ],
     costs: BOUW_COSTS,
     hide: [],
@@ -99,3 +110,25 @@ export const TRADES: TradePreset[] = [
     hide: [],
   },
 ];
+
+/** De verschillende tarieven van het echte werk op de factuur; bijkomende kosten (zoals voorrijkosten) tellen niet mee. */
+export function workVatCodes<V extends string>(trade: TradePreset, lines: { description: string; vatCode: V }[]): V[] {
+  const work = lines.filter((l) => l.description && !trade.items.some((x) => x.followsMain && x.description === l.description));
+  return [...new Set(work.map((l) => l.vatCode))];
+}
+
+/**
+ * Het tarief waarmee een voorstelregel op de factuur komt. Bijkomende kosten (zoals voorrijkosten)
+ * nemen het tarief over van het werk dat al op de factuur staat. Staat er nog niets, of staat er werk
+ * tegen verschillende tarieven, dan geldt het voorgestelde tarief van de regel zelf: de app kiest dan
+ * niet en DocumentEditor vraagt de gebruiker het tarief na te kijken.
+ */
+export function presetVatCode<V extends string>(
+  trade: TradePreset,
+  item: TradePreset['items'][number],
+  existing: { description: string; vatCode: V }[],
+): V | TradePreset['items'][number]['vatCode'] {
+  if (!item.followsMain) return item.vatCode;
+  const codes = workVatCodes(trade, existing);
+  return codes.length === 1 ? codes[0]! : item.vatCode;
+}

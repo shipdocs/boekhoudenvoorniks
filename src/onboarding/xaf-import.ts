@@ -4,7 +4,7 @@ import type { BankService } from '../import/bank';
 import type { RelationsService } from '../relations/relations';
 import type { SettingsService } from '../settings/settings';
 import { parseXaf, XafError, type XafAccount, type XafFile, type XafLine, type XafRelation } from '../import/xaf';
-import { readXlsx } from '../import/xlsx';
+import { readXlsx, XlsxFout } from '../import/xlsx';
 import { isTrialBalance, parseTrialBalance } from '../import/trial-balance';
 import {
   detectKind, openItemRows, saldibalansToXaf, suggestColumns, tablesFromCsv, tablesFromWorkbook, titleDate,
@@ -399,7 +399,8 @@ export class XafImportService {
       let wb;
       try {
         wb = readXlsx(file);
-      } catch {
+      } catch (err) {
+        if (err instanceof XlsxFout) throw new XafError(err.message);
         throw new XafError('Dit bestand kunnen we niet lezen. Gebruik een auditfile (.xaf), of een overzicht als Excel (.xlsx) of CSV.');
       }
       if (isTrialBalance(wb)) return { type: 'xaf', kind: 'kolommenbalans', xaf: parseTrialBalance(wb) };

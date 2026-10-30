@@ -8,10 +8,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,9 +66,10 @@ jobs:
   # bestandssloten, schijfletters en backslashes. Daarom draaien die tests ook daar, samen met die van de
   # Store-versie (tests/windows-store.test.ts: zelf een map kiezen, alleen-lezen openen, het manifest).
   data-dir-windows:
-    # alleen na het mergen (push naar main): voor Windows is er lokaal geen vervanger, maar bij elke
-    # pull request is het niet nodig. De Release-workflow draait de tests op Windows ook nog zelf.
-    if: ${{ (github.event_name == 'push' && !github.event.repository.private) || github.event_name == 'workflow_dispatch' }}
+    # Alleen in de openbare repo: daar draait dezelfde controle gratis op een publieke runner. In een
+    # private repository draait deze Windows-job niet; lokaal is er geen Windows-vervanger. Public:
+    # push en handmatig, net als voorheen.
+    if: ${{ !github.event.repository.private && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +91,7 @@ jobs:
   # nodig, er wordt niets gedeployd). Niet in de openbare broncode: die heeft geen website.
   site-worker:
     if: ${{ github.event.repository.private && github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: workers/site
@@ -133,13 +138,13 @@ jobs:
           ls -d "$old".gemigreerd-*
           app
 
-  # Op Windows met de echte installers: rooktest, en waar de oude installer beschikbaar is ook een upgrade
-  # vanaf de vorige release. De nieuwe installer is als artefact te downloaden om de upgrade ook met de hand te proberen.
+  # Op Windows met de echte installers: rooktest. De installer is als artefact te downloaden om hem ook met de hand te proberen.
   # Er wordt niets gepubliceerd.
   package-smoke-windows:
-    # alleen na het mergen (push naar main): voor Windows is er lokaal geen vervanger, maar bij elke
-    # pull request is het niet nodig. De Release-workflow draait de tests op Windows ook nog zelf.
-    if: ${{ (github.event_name == 'push' && !github.event.repository.private) || github.event_name == 'workflow_dispatch' }}
+    # Alleen in de openbare repo: daar draait dezelfde rooktest gratis op een publieke runner. In een
+    # private repository draait deze Windows-job niet; de Release-workflow draait de Windows-tests ook
+    # nog zelf. Public: push en handmatig, net als voorheen.
+    if: ${{ !github.event.repository.private && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -166,20 +171,6 @@ jobs:
           }
           $p.WaitForExit()
           if ($p.ExitCode -ne 0) { throw "Rooktest mislukt (exit $($p.ExitCode))" }
-      # De echte upgrade: 0.7.5 (de laatste release met de gegevens in AppData) installeren, een
-      # administratie laten aanmaken, de nieuwe installer eroverheen en het overzetten controleren.
-      # De oude installer en het testscript staan niet in de openbare broncode; daar slaat deze stap over.
-      - name: Upgrade-test vanaf 0.7.5 met de NSIS-installers
-        if: github.event.repository.private
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download upgradetest-0.7.5 --repo ${{ github.repository }} --pattern "BoekhoudenVoorNiks-Setup-0.7.5.exe" --dir "$env:RUNNER_TEMP"
-          if ($LASTEXITCODE -ne 0) { throw 'De installer van 0.7.5 is niet te downloaden' }
-          $new = (Get-ChildItem release -Filter "*Setup*.exe" | Select-Object -First 1).FullName
-          $version = node -p "require('./package.json').version"
-          node scripts/upgrade-test-windows.cjs "$env:RUNNER_TEMP\BoekhoudenVoorNiks-Setup-0.7.5.exe" "$new" $version
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
@@ -190,7 +181,8 @@ jobs:
   # Het pakket is niet ondertekend (dat doet de Store na certificering) en wordt nergens gepubliceerd; het
   # is alleen als artefact te downloaden, voor de proef op Windows en het uploaden naar Partner Center.
   package-store-windows:
-    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
+    # Alleen in de openbare repo: daar draait dezelfde Store-controle gratis op een publieke runner.
+    if: ${{ !github.event.repository.private }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:

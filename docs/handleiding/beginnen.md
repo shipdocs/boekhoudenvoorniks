@@ -1,5 +1,5 @@
 ---
-titel: Beginnen: installeren en de eerste keer starten
+titel: Beginnen: installeren en starten
 omschrijving: Downloaden, installeren, de vragen bij de eerste start, en wat je daarna op Vandaag ziet.
 hoofdstuk: Beginnen
 volgorde: 10

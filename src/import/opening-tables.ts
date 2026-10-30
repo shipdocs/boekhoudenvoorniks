@@ -54,37 +54,48 @@ const FIELDS: Record<TableKind, { field: string; question: string; required: boo
 
 // ---------- lezen ----------
 
+/** Posities (rijen x kolommen) die het opbouwen van tabellen per bestand mag toewijzen. */
+const MAX_TABLE_POSITIONS = 2_000_000;
+
 const cell = (v: unknown) => String(v ?? '').trim();
+
+/** Kopnamen en titelregels zijn kort; afkappen houdt het samenvoegen voor herkenning begrensd. */
+const MAX_KOPLENGTE = 200;
+const kopcel = (v: unknown) => cell(v).slice(0, MAX_KOPLENGTE);
 
 /**
  * De kopregel: de eerste rij met kolomnamen die de app herkent; anders de eerste rij met minstens
  * twee tekstcellen. Titelregels erboven (bedrijfsnaam, periode) worden overgeslagen.
  */
-function toTable(sheet: string, raw: string[][]): Table | null {
+function toTable(sheet: string, raw: string[][], budget: { left: number }): Table | null {
   const candidates: number[] = [];
   for (let r = 0; r < Math.min(raw.length, 25); r++) {
     const texts = (raw[r] ?? []).map(cell).filter((c) => c && !/^-?[\d.,]+$/.test(c));
     if (texts.length >= 2) candidates.push(r);
   }
-  const make = (r: number): Table => {
-    const row = (raw[r] ?? []).map(cell);
-    const width = row.length;
-    const rows = raw.slice(r + 1).map((x) => Array.from({ length: width }, (_, i) => cell(x?.[i]))).filter((x) => x.some(Boolean));
-    return { sheet, title: raw.slice(0, r).flat().map(cell).filter(Boolean), headers: row, rows };
-  };
-  const tables = candidates.map(make);
-  return tables.find((t) => detectKind(t) !== null) ?? tables[0] ?? null;
+  // Eerst de kopregel kiezen (zonder kopieën), daarna alleen die ene tabel opbouwen.
+  const headerOf = (r: number) => (raw[r] ?? []).map(kopcel);
+  const r = candidates.find((c) => detectKind({ sheet, title: [], headers: headerOf(c), rows: [] }) !== null) ?? candidates[0];
+  if (r === undefined) return null;
+  const headers = headerOf(r);
+  const width = headers.length;
+  // Lege rijen eerst weglaten (sparse sheets); rijen x breedte van het hele bestand tellen vóór de allocatie.
+  const body = raw.slice(r + 1).filter((x) => x?.some((c) => cell(c)));
+  if ((budget.left -= body.length * width) < 0) throw new XafError('Dit bestand heeft te veel rijen of kolommen om in te lezen');
+  const rows = body.map((x) => Array.from({ length: width }, (_, i) => cell(x?.[i])));
+  return { sheet, title: raw.slice(0, r).flat().map(kopcel).filter(Boolean), headers, rows };
 }
 
 export function tablesFromCsv(text: string): Table[] {
   const clean = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   const parsed = Papa.parse<string[]>(clean, { skipEmptyLines: 'greedy' });
-  const t = toTable('CSV', parsed.data);
+  const t = toTable('CSV', parsed.data, { left: MAX_TABLE_POSITIONS });
   return t ? [t] : [];
 }
 
 export function tablesFromWorkbook(wb: Workbook): Table[] {
-  return wb.sheets.map((s) => toTable(s.name, s.rows)).filter((t): t is Table => t !== null);
+  const budget = { left: MAX_TABLE_POSITIONS };
+  return wb.sheets.map((s) => toTable(s.name, s.rows, budget)).filter((t): t is Table => t !== null);
 }
 
 // ---------- herkennen ----------

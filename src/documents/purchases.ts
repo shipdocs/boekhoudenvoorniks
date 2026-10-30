@@ -3,7 +3,7 @@ import type { Db } from '../db/database';
 import { tx } from '../db/database';
 import { Ledger, signedLine, type PostLine } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
-import { PURCHASE_VAT_RATES, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
+import { PURCHASE_VAT_RATES, isPurchaseVatCode, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
 import { assertIsoDate, type IsoDate } from '../shared/dates';
 import { assertCents, formatEuro, roundHalfAwayFromZero, type Cents } from '../shared/money';
 import { isValidIban, normalizeIban, ValidationError } from '../shared/validation';
@@ -127,6 +127,16 @@ export class PurchaseService {
    */
   reclassify(id: number, lines: PurchaseLineInput[], reason = 'andere categorie'): PurchaseInvoice {
     return this.rewrite(id, () => lines, reason, { samePayable: true });
+  }
+
+  /**
+   * Andere btw-keuze voor een geboekte inkoop, met dezelfde rekening en hetzelfde nettobedrag: bijvoorbeeld spullen van
+   * buiten de EU die ten onrechte als verlegd in 4a stonden (de btw betaal je bij de Douane) naar "geen btw". Tegenboeking
+   * + nieuwe post; het te betalen bedrag mag niet veranderen als er al betaald is.
+   */
+  setVatCode(id: number, vatCode: PurchaseVatCode): PurchaseInvoice {
+    if (!isPurchaseVatCode(vatCode)) throw new ValidationError('Kies een btw-keuze');
+    return this.rewrite(id, (old) => old.map(({ vatAmount: _vat, vatRate: _rate, ...l }) => ({ ...l, vatCode })), `btw-keuze gewijzigd naar ${PURCHASE_VAT_RATES[vatCode].label.toLowerCase()}`, { samePayable: true });
   }
 
   /** Staat (een deel van) deze aankoop nog op Vraagposten ("weet ik nog niet")? */
