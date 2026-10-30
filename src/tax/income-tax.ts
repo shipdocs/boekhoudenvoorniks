@@ -80,6 +80,8 @@ export const INCOME_TAX_RULES: IncomeTaxRules[] = [
     startersaftrek: 2123,
     kia: { min: 2901, pct: 0.28, pctUpTo: 71683, fixed: 20072, fixedUpTo: 132746, phaseOutRate: 0.0756, phaseOutUpTo: 398236, minPerAsset: 450 },
     desinvesteringDrempel: 2900,
+    // € 0,25 volgens belastingdienst.nl; wettelijk pas na aanname van het Belastingplan 2027 (terugwerkend tot 1-1-2026),
+    // de wet (art. 3.15/3.17, toestand 2026-01-01) noemt € 0,23. Maandcontrole fiscaal register 2026-10-30.
     kmRate: 25,
     representatie: { deductible: 0.8, drempel: 5700 },
     urencriterium: 1225,

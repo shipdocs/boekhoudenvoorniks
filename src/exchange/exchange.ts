@@ -123,6 +123,8 @@ export class ExchangeService {
   initCopy(header: PackageHeader, meta: ExportMeta, office: string): void {
     tx(this.db, () => {
       if (this.settings.administrationId() !== header.administratie) throw new ValidationError('Deze kopie hoort niet bij deze export');
+      // wat de afzender meestuurde is niet te vertrouwen: geen programmapaden, koppelingen of geheimen van de afzender overnemen
+      sanitizeForExchange(this.db);
       // bij de boekhouder ligt de periode niet vast: hij boekt er juist in
       this.periods.abortExchange();
       this.settings.markOfficeCopy({ office, exchange: header.uitwisseling, endDate: header.einddatum });

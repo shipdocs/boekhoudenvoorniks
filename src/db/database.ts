@@ -58,6 +58,41 @@ export function openDatabase(filename: string, log: (message: string) => void = 
   }
 }
 
+type SchemaObject = { type: string; name: string; sql: string };
+
+const dropSql = (o: { type: string; name: string }) => `DROP ${o.type === 'view' ? 'VIEW' : 'TRIGGER'} "${o.name.replace(/"/g, '""')}"`;
+
+/**
+ * Maakt een ontvangen database (export van een klant) onschadelijk, als allereerste stap en vóór iedere
+ * schrijfactie of migratie: de versie moet gelijk zijn aan de huidige schemaversie (er draaien dus geen
+ * migraties), alle triggers en views gaan weg, ongeacht hun naam, en de eigen triggers en views komen
+ * terug uit het vertrouwde schema (een lege database met de eigen migraties).
+ */
+export function schoonOntvangenDatabase(filename: string): void {
+  const fresh = new Database(':memory:');
+  let trusted: SchemaObject[];
+  try {
+    migrate(fresh);
+    trusted = fresh.prepare(`SELECT type, name, sql FROM sqlite_master WHERE type IN ('trigger', 'view') ORDER BY rowid`).all() as SchemaObject[];
+  } finally {
+    fresh.close();
+  }
+  const db = new Database(filename, { fileMustExist: true });
+  try {
+    // geen triggers laten afgaan en geen vreemde schema-objecten laten uitvoeren bij het wijzigen van het schema
+    db.pragma('trusted_schema = OFF');
+    const version = db.pragma('user_version', { simple: true }) as number;
+    if (version !== migrations.length) throw new Error('Deze export hoort niet bij deze versie van de app. Vraag de klant de export opnieuw te maken met dezelfde versie.');
+    const found = db.prepare(`SELECT type, name FROM sqlite_master WHERE type IN ('trigger', 'view')`).all() as SchemaObject[];
+    db.transaction(() => {
+      for (const o of found) db.exec(dropSql(o));
+      for (const o of trusted) db.exec(o.sql);
+    })();
+  } finally {
+    db.close();
+  }
+}
+
 /**
  * Bijlagepaden uit een oudere versie (absoluut) omzetten naar relatieve paden. Dat gebeurt bij elke
  * keer openen en niet in een migratie: een migratie draait één keer, terwijl een oudere versie van de

@@ -14,18 +14,22 @@ export interface Problems {
  */
 export const test = base.extend<{ problems: Problems }>({
   problems: [async ({ page, request }, use, testInfo) => {
-    await request.post('/__reset');
+    const reset = await request.post('/__reset');
+    expect(reset.ok(), `POST /__reset gaf status ${reset.status()}`).toBe(true);
+    expect(await reset.json(), 'POST /__reset gaf geen ok').toEqual({ ok: true });
     const problems: Problems = { pageErrors: [], consoleErrors: [], apiErrors: [] };
     page.on('pageerror', (e) => problems.pageErrors.push(e.message));
     page.on('console', (m) => {
       if (m.type() !== 'error') return;
-      // favicon e.d. bestaat niet op de testserver
-      if (/Failed to load resource/.test(m.text())) return;
+      // De browser vraagt zelf om /favicon.ico als een pagina er geen heeft; de testserver
+      // heeft dat bestand niet. Alleen die bekende, onschuldige 404 slaan we over: een
+      // ontbrekend script, stylesheet of plaatje moet de test nu wél laten falen.
+      if (/Failed to load resource/.test(m.text()) && /\/favicon\.ico(?:\?|$)/.test(m.location().url)) return;
       // het factuurvoorbeeld staat bewust in een iframe zonder scripts (sandbox); onze eigen
       // addInitScript hieronder probeert daar ook te draaien en wordt terecht geblokkeerd.
       // In de echte app is er geen init-script, dus dit is alleen een melding van de testopzet.
       if (/Blocked script execution in 'about:srcdoc'.*sandboxed/.test(m.text())) return;
-      problems.consoleErrors.push(m.text());
+      problems.consoleErrors.push(`${m.text()}${m.location().url ? ` (${m.location().url})` : ''}`);
     });
     await page.exposeFunction('__e2eApiError', (method: string, error: string) => problems.apiErrors.push({ method, error }));
     await page.addInitScript(() => {

@@ -1,6 +1,6 @@
 ---
-titel: Bank: afschriften inlezen en betalingen uitzoeken
-omschrijving: Welk bestand je bij je bank downloadt, hoe je het inleest, hoe de app betalingen koppelt, en wat je doet bij een vraag, een dubbele betaling of een saldo dat niet klopt.
+titel: Bank: afschriften inlezen en betalingen
+omschrijving: Welk bestand je bij je bank downloadt, hoe je het inleest, hoe betalingen worden gekoppeld en wat je doet bij een vraag of een saldo dat niet klopt.
 hoofdstuk: Dagelijks werk
 volgorde: 30
 ---

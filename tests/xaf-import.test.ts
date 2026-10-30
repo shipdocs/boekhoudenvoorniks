@@ -321,3 +321,15 @@ describe('meerdere auditfiles tegelijk (een per jaar)', () => {
     expect(acquisitionDate([f25], ['0100'], '2025-12-31')).toBeNull();
   });
 });
+
+describe('limietfouten bij een Excel-bestand', () => {
+  it('toont de eigen melding bij te veel kolommen, niet de algemene leesfout', () => {
+    const { s } = setup();
+    const rijen = Array.from({ length: 100_001 }, () => ['a']);
+    expect(() => s.xafImport.analyzeFile(makeXlsx([{ name: 'Blad', rows: rijen }]))).toThrow('te veel rijen of kolommen');
+  });
+  it('houdt de algemene melding voor een bestand dat geen Excel is', () => {
+    const { s } = setup();
+    expect(() => s.xafImport.analyzeFile(new Uint8Array([1, 2, 3, 4]))).toThrow(/niet lezen/);
+  });
+});

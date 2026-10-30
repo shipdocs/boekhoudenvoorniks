@@ -29,7 +29,7 @@ Node-versie voordat Vitest start.
 ## Wat draait waar
 
 - **Lokaal, vóór een wijziging erin gaat**: `npm run controle` en, als je schermen raakt, `npm run e2e`. De volledige browsertest-suite draait lokaal.
-- **Op GitHub**: Linux-controles (unit-tests met build en de rooktest van de verpakte app), een kleine set kritieke financiële Playwright-schermflows (facturen, bank/bonnen en periodeafsluiting) en de Windows-controles waar lokaal geen vervanger voor is: de hele unit-suite op Windows en het Store-pakket.
+- **Op GitHub**: bij elke push en pull request de Linux-controles (unit-tests met build en de rooktest van de verpakte app), een kleine set kritieke financiële Playwright-schermflows (facturen, bank/bonnen en periodeafsluiting) en het Windows-Store-pakket. De overige Windows-controles (de hele unit-suite op Windows en de rooktest van de verpakte Windows-app) draaien pas na een push naar `main`, niet bij een pull request.
 - **Bij een release**: de Release-workflow draait de tests op Linux en Windows nog een keer en publiceert alleen als beide slagen.
 
 Gebruik Node 22 ook als de systeemversie ouder is. Met de lokale nvm-installatie kan dat bijvoorbeeld
@@ -113,3 +113,11 @@ De scannertest voor een verhuizing naar `127.0.0.2` controleert eerst met een on
 of de testomgeving dat tweede loopback-adres kan bereiken. Als de transportlaag alle lokale verzoeken
 naar `127.0.0.1` stuurt, wordt uitsluitend deze netwerkproef met een expliciete reden overgeslagen.
 Op een normale Linux-/Windows-host blijft de echte scannerproef actief.
+
+## Beroepen en btw-voorstellen
+
+`tests/beroepen-btw.test.ts` controleert de voorgestelde tarieven voor schilders en stukadoors,
+ook het overnemen van het tarief van het werk door de voorrijkosten. `e2e/beroepen-btw.spec.ts`
+controleert de echte factuurknoppen voor werk, materiaal en voorrijkosten, en handmatig gekozen
+21% of btw verlegd. De KOR-varianten bewijzen alleen dat alle voorstelregels dan vrijgesteld zijn.
+Deze tests bewijzen geen fiscale juistheid buiten de genoemde voorwaarden.

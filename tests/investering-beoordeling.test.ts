@@ -97,3 +97,92 @@ describe('Bijzondere investeringssituaties: beoordelingstaken', () => {
     expect(find(s, '2025-Q4', 'investering-credit-later')).toBeUndefined();
   });
 });
+
+// Primaire bronnen, geraadpleegd 2026-10-30: Uitvoeringsbeschikking omzetbelasting 1968, art. 13 lid 1 onder c en lid 3
+// (BWBR0002634, toestand 2026-01-01): "investeringsdiensten waarvan de vergoeding ten minste € 30.000 bedraagt" worden
+// herzien "in elk van de vier boekjaren, volgende op dat waarin de ondernemer (...) de investeringsdienst is gaan gebruiken",
+// "telkens voor een vijfde gedeelte". Belastingdienst, "Nieuw vanaf 2026: Herziening btw-aftrek bij investeringsdiensten":
+// geldt voor diensten die vanaf 1 januari 2026 voor het eerst in gebruik worden genomen. Verwachtingen met de hand:
+// € 35.000 × 21% = € 7.350 afgetrokken; een vijfde = € 1.470 per later jaar. € 30.000 × 21% = € 6.300; een vijfde = € 1.260.
+describe('KOR-herziening: investeringsdiensten aan een pand vanaf € 30.000 (sinds 2026)', () => {
+  const service = (s: ReturnType<typeof setup>['s'], date: string, net: number, name = 'Dakrenovatie') => s.purchases.create({
+    invoiceDate: date, description: name,
+    lines: [{ account: 'WBedAlkOvr', netAmount: net, vatCode: 'hoog', vatAmount: Math.round(net * 0.21) }],
+  });
+  it('een dienst van € 35.000 uit 2026 telt in 2027 mee voor een vijfde van de afgetrokken btw', () => {
+    const { s } = setup();
+    const p = service(s, '2026-03-15', 3500000);
+    expect(find(s, '2027-Q4', 'kor-herziening')).toBeUndefined(); // zonder KOR niets
+    s.settings.update({ kor: true });
+    const c = find(s, '2027-Q4', 'kor-herziening')!;
+    expect(c.title).toContain('1.470,00');
+    expect(c.detail).toContain('verbouwings- en onderhoudsdiensten aan een pand vanaf € 30.000');
+    expect(c.detail).toContain('Dakrenovatie (15 maart 2026)');
+    expect(c.detail).toContain('werk aan een pand');
+    expect(c.items).toEqual([{ kind: 'aankoop', id: p.id, date: '2026-03-15', label: 'Dakrenovatie', amount: 735000 }]);
+  });
+  it('precies € 30.000 telt mee, € 29.999 niet', () => {
+    const { s } = setup();
+    service(s, '2026-03-15', 3000000, 'Schilderwerk');
+    s.settings.update({ kor: true });
+    expect(find(s, '2027-Q4', 'kor-herziening')!.title).toContain('1.260,00');
+    const other = setup().s;
+    service(other, '2026-03-15', 2999900, 'Schilderwerk');
+    other.settings.update({ kor: true });
+    expect(find(other, '2027-Q4', 'kor-herziening')).toBeUndefined();
+  });
+  it('een dienst uit 2025 valt buiten de regeling', () => {
+    const { s } = setup();
+    service(s, '2025-11-01', 3500000);
+    s.settings.update({ kor: true });
+    expect(find(s, '2026-Q4', 'kor-herziening')).toBeUndefined();
+    expect(find(s, '2027-Q4', 'kor-herziening')).toBeUndefined();
+  });
+  it('in het jaar van de dienst zelf vraagt de melding om beoordeling van de volledige aftrek', () => {
+    const { s } = setup();
+    service(s, '2026-03-15', 3500000);
+    s.settings.update({ kor: true });
+    const c = find(s, '2026-Q4', 'kor-herziening')!;
+    expect(c.title).toContain('van dit jaar');
+    expect(c.detail).toContain('7.350,00');
+  });
+  it('het vijfde jaar telt mee, het zesde niet', () => {
+    const { s } = setup();
+    service(s, '2026-03-15', 3500000);
+    s.settings.update({ kor: true });
+    expect(find(s, '2030-Q4', 'kor-herziening')!.title).toContain('1.470,00');
+    expect(find(s, '2031-Q4', 'kor-herziening')).toBeUndefined();
+  });
+  it('bedrijfsmiddel en dienst tellen samen voor de € 500-grens en het jaarbedrag', () => {
+    const { s } = setup();
+    // bus 2024: € 4.500 btw → € 900 per jaar; dienst 2026: € 1.470 per jaar; samen € 2.370 in 2027
+    s.purchases.create({ invoiceDate: '2024-01-10', description: 'Bus', lines: [{ account: ACCOUNTS.vervoermiddelen, netAmount: 2142857, vatCode: 'hoog', vatAmount: 450000 }] });
+    s.assets.sync('2024-01-11');
+    service(s, '2026-03-15', 3500000);
+    s.settings.update({ kor: true });
+    const c = find(s, '2027-Q4', 'kor-herziening')!;
+    expect(c.title).toContain('2.370,00');
+    expect(c.items).toHaveLength(2);
+    // twee kleine posten die alleen samen boven € 500 komen: machine € 1.050 btw (€ 210) + dienst € 30.000 (€ 1.260) → melding
+    const t = setup().s;
+    purchase(t, '2026-03-01', 500000);
+    t.assets.sync('2026-03-02');
+    service(t, '2026-03-15', 3000000);
+    t.settings.update({ kor: true });
+    expect(find(t, '2027-Q4', 'kor-herziening')!.title).toContain('1.470,00');
+  });
+  it('de vingerafdruk blijft gelijk bij ongewijzigde gegevens en verschilt tussen bedrijfsmiddel en dienst', () => {
+    const { s } = setup();
+    service(s, '2026-03-15', 3500000);
+    s.settings.update({ kor: true });
+    const a = find(s, '2027-Q4', 'kor-herziening')!.fingerprint;
+    expect(find(s, '2027-Q4', 'kor-herziening')!.fingerprint).toBe(a);
+    expect(a).toMatch(/^2027:d\d+:2026-03-15:735000$/);
+  });
+  it('zonder afgetrokken btw (aankoop onder de KOR) telt de dienst niet mee', () => {
+    const { s } = setup();
+    s.settings.update({ kor: true });
+    service(s, '2026-03-15', 3500000);
+    expect(find(s, '2027-Q4', 'kor-herziening')).toBeUndefined();
+  });
+});

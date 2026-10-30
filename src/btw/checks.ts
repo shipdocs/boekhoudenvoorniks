@@ -4,7 +4,7 @@ import type { Db } from '../db/database';
 import type { Ledger } from '../core-ledger/ledger';
 import { ACCOUNTS } from '../core-ledger/accounts';
 import { formatEuro, type Cents } from '../shared/money';
-import { addDays, periodFor, type IsoDate, type Period } from '../shared/dates';
+import { addDays, formatDateNl, periodFor, type IsoDate, type Period } from '../shared/dates';
 import type { CarPrivateUse } from './car';
 import { EU_B2C_THRESHOLD, EU_COUNTRIES, countryCode, isEuForGoods } from '../shared/vat';
 import { korActive } from '../settings/settings';
@@ -67,6 +67,13 @@ export const KOR_WARN_FROM: Cents = 1600000;
 const KOR_TURNOVER_ACCOUNTS = [ACCOUNTS.omzetHoog, ACCOUNTS.omzetLaag, ACCOUNTS.omzetNul, ACCOUNTS.omzetVerlegd, ACCOUNTS.omzetVrijgesteld, ACCOUNTS.omzetExport, ACCOUNTS.omzetIcp];
 /** Een afwijking tussen btw en omzet tot dit bedrag is afronding, geen fout. */
 export const RATE_TOLERANCE: Cents = 100;
+/**
+ * Herziening van de btw-aftrek op investeringsdiensten (grote verbouwings- en onderhoudsdiensten aan een pand): vanaf een
+ * vergoeding van € 30.000, voor diensten die vanaf 1 januari 2026 in gebruik zijn genomen (art. 13 lid 1 onder c
+ * Uitvoeringsbeschikking omzetbelasting 1968, toestand 2026-01-01; geen overgangsrecht voor oudere diensten).
+ */
+export const HERZIENING_DIENST_MIN: Cents = 3000000;
+export const HERZIENING_DIENST_VANAF = 2026;
 
 /** Per kwartaal telt wanneer er geleverd is (de factuurdatum), niet in welke aangifte een late correctie terechtkomt. */
 function icpGoodsBetween(db: Db, from: IsoDate, to: IsoDate): Cents {
@@ -117,6 +124,26 @@ export function rateMismatches(db: Db, start: IsoDate, end: IsoDate): { entryId:
     }
   }
   return out;
+}
+
+/**
+ * Rekeningen voor spullen (geen diensten): materiaal, gereedschap, kantoorartikelen, werkkleding en bedrijfsmiddelen.
+ * Software, abonnementen en advies vallen erbuiten; dat zijn diensten, en die horen wel in 4a.
+ */
+const GOODS_ACCOUNTS = [ACCOUNTS.inkoopMaterialen, 'WBedAlkGer', 'WBedKanKan', 'WBedAlkWkl'];
+
+/** Aankopen in het tijdvak met spullen van buiten de EU, geboekt als verlegd in 4a (code 'buiten-eu'). */
+export function outsideEuGoods(db: Db, start: IsoDate, end: IsoDate): { id: number; date: IsoDate; label: string; amount: Cents }[] {
+  return db
+    .prepare(
+      `SELECT p.id, p.invoice_date AS date, COALESCE(r.name, p.description) AS label, SUM(l.net_amount) AS amount
+       FROM purchase_invoices p JOIN purchase_invoice_lines l ON l.purchase_invoice_id = p.id
+       JOIN chart_of_accounts a ON a.id = l.account_id LEFT JOIN relations r ON r.id = p.relation_id
+       WHERE l.vat_code = 'buiten-eu' AND (a.category = 'activa' OR a.rgs_code IN (${GOODS_ACCOUNTS.map(() => '?').join(', ')}))
+         AND p.invoice_date BETWEEN ? AND ?
+       GROUP BY p.id ORDER BY p.invoice_date, p.id`,
+    )
+    .all(...GOODS_ACCOUNTS, start, end) as { id: number; date: IsoDate; label: string; amount: Cents }[];
 }
 
 export function skipKey(periodKey: string, checkKey: string): string {
@@ -467,8 +494,11 @@ export function runVatChecks(
     }
   }
 
-  // KOR en een EU-dienst: die valt buiten de Nederlandse KOR (belast in het land van de klant, btw verlegd). Dan horen
-  // btw-aangifte en ICP-opgaaf erbij; dat toont de app voor KOR-gebruikers niet vanzelf.
+  // KOR en een EU-dienst: die valt buiten de Nederlandse KOR (belast in het land van de klant, btw verlegd naar de klant).
+  // De opgaaf ICP hoeft een KOR-ondernemer niet te doen: art. 37a lid 1 Wet OB 1968 zondert "die bedoeld in artikel 25a,
+  // eerste lid" uit (wetten.overheid.nl BWBR0002629, toestand 2026-01-01, geraadpleegd 2026-10-30). Over een dienst die in
+  // het land van de klant belast is, geef je in Nederland geen btw aan. De melding zet de gebruiker niet aan het werk met
+  // een aangifte die niet hoeft, maar vraagt wel om de factuureisen en een controle door de boekhouder.
   if (korActive(db)) {
     const eu = db
       .prepare(
@@ -481,12 +511,34 @@ export function runVatChecks(
         key: 'kor-eu-dienst',
         blocking: false,
         title: `${eu.length === 1 ? `Factuur ${eu[0]!.number}` : `${eu.length} facturen`} met een dienst aan een bedrijf in een ander EU-land: de KOR geldt daar niet voor`,
-        detail: 'Een dienst die in het land van de klant belast is, valt buiten de Nederlandse KOR. Je factureert hem zonder btw met "btw verlegd" en beide btw-nummers. Voor zulke diensten doe je wel btw-aangifte en de opgaaf intracommunautaire prestaties (ICP). Die overzichten maakt de app voor KOR-gebruikers niet vanzelf: laat je boekhouder dit doen, of zoek de btw-aangifte op in Mijn Belastingdienst Zakelijk.',
+        detail: 'Een dienst die in het land van de klant belast is, valt buiten de Nederlandse KOR: je klant rekent de btw daar zelf af. Je factureert hem zonder btw, met "btw verlegd" en beide btw-nummers. Over deze dienst geef je in Nederland geen btw aan, en als KOR-ondernemer hoef je geen opgaaf intracommunautaire prestaties (ICP) te doen (artikel 37a Wet op de omzetbelasting zondert de KOR daarvan uit). De app maakt voor KOR-gebruikers geen btw-aangifte of ICP-overzicht. Laat je boekhouder bevestigen dat de dienst in het land van de klant belast is en dat je factuur klopt.',
         count: eu.length,
         fingerprint: `${end.slice(0, 4)}:${eu.map((e) => e.id).join(',')}`,
         screen: 'belasting',
       });
     }
+  }
+
+  // Spullen van buiten de EU in 4a. Bij invoer betaal je de btw normaal bij de Douane (vaak via de koerier) en trek je
+  // die af als voorbelasting; alleen met een vergunning artikel 23 geef je hem aan in de aangifte (4a). Gewone invoer
+  // óók in 4a geeft dubbele voorbelasting. Met de KOR geldt artikel 23 niet (art. 23 lid 5 Wet OB 1968).
+  // (belastingdienst.nl, Aangifte doen als u goederen invoert vanuit landen buiten de EU, en wetten.overheid.nl
+  // BWBR0002629 art. 23, toestand 2026-01-01; geraadpleegd 2026-10-30)
+  const importGoods = outsideEuGoods(db, start, end);
+  if (importGoods.length > 0) {
+    const kor = korActive(db);
+    found.push({
+      key: 'invoer-4a',
+      blocking: kor,
+      title: `${importGoods.length === 1 ? `Spullen van ${importGoods[0]!.label}` : `${importGoods.length} aankopen van spullen`} van buiten de EU staan als "btw verlegd" in rubriek 4a`,
+      detail: kor
+        ? 'Met de KOR kun je geen btw bij invoer verleggen (de vergunning artikel 23 geldt dan niet). Je betaalt die btw bij de Douane of de koerier en krijgt hem niet terug. Zet deze aankopen op "Geen btw" (Aankopen → Indelen), of laat je boekhouder ernaar kijken. Ging het om een dienst, zoals software of een abonnement? Sla dit dan over.'
+        : 'Spullen die van buiten de EU naar Nederland komen horen alleen in 4a als je een vergunning artikel 23 hebt. Zonder die vergunning betaal je de btw bij de Douane of de koerier (bv. DHL, UPS, PostNL). Die btw trek je af met het invoerdocument of de koeriersfactuur; staat de aankoop daarnaast ook in 4a, dan telt de btw dubbel. Zet de aankoop dan op "Geen btw" (Aankopen → Indelen). Heb je de vergunning, of ging het om een dienst? Sla dit dan over.',
+      count: importGoods.length,
+      fingerprint: importGoods.map((p) => `${p.id}:${p.amount}`).join(','),
+      screen: 'aankopen',
+      items: importGoods.map((p) => ({ kind: 'aankoop' as const, id: p.id, date: p.date, label: p.label, amount: -p.amount })),
+    });
   }
 
   // Bijzondere investeringssituaties: de app signaleert en vraagt om beoordeling, en herberekent niets stilzwijgend.
@@ -507,13 +559,35 @@ export function runVatChecks(
          WHERE s.status = 'actief' AND CAST(substr(COALESCE(s.in_use_on, s.acquired_on), 1, 4) AS INTEGER) BETWEEN ? AND ? ORDER BY COALESCE(s.in_use_on, s.acquired_on)`,
       )
       .all(ACCOUNTS.btwVoorbelasting, year - 4, year) as { id: number; name: string; date: IsoDate; cost: Cents; lineDebit: Cents; vat: Cents; base: Cents }[];
-    const withVat = rows.map((r) => ({ ...r, deducted: r.base > 0 ? Math.round((r.vat * r.lineDebit) / r.base) : 0 })).filter((r) => r.deducted > 0);
+    const assetsWithVat = rows.map((r) => ({ ...r, kind: 'activum' as const, deducted: r.base > 0 ? Math.round((r.vat * r.lineDebit) / r.base) : 0 })).filter((r) => r.deducted > 0);
+    // Investeringsdiensten: grote verbouwings- en onderhoudsdiensten aan een pand (schilderwerk, isolatie, dakrenovatie) met een
+    // vergoeding van ten minste € 30.000 worden sinds 1 januari 2026 net als roerende zaken herzien: de vier boekjaren na
+    // ingebruikname, telkens een vijfde (art. 13 lid 1 onder c en lid 3 Uitvoeringsbeschikking omzetbelasting 1968, toestand
+    // 2026-01-01; belastingdienst.nl "Nieuw vanaf 2026: Herziening btw-aftrek bij investeringsdiensten", geraadpleegd 2026-10-30).
+    // De app kent geen apart kenmerk "werk aan een pand": elke kostenregel vanaf € 30.000 waarop btw is afgetrokken telt mee, met de
+    // factuurdatum als ingebruikname, en de melding vraagt of het om werk aan een pand ging. Diensten van vóór 2026 vallen erbuiten.
+    const serviceRows = year >= HERZIENING_DIENST_VANAF
+      ? (db
+          .prepare(
+            `SELECT p.id, COALESCE(r.name, p.description) AS name, p.invoice_date AS date, l.debit AS lineDebit,
+               (SELECT COALESCE(SUM(x.debit - x.credit), 0) FROM journal_lines x JOIN chart_of_accounts xa ON xa.id = x.account_id WHERE x.journal_entry_id = l.journal_entry_id AND xa.rgs_code = ?) AS vat,
+               (SELECT COALESCE(SUM(x.debit), 0) FROM journal_lines x JOIN chart_of_accounts xa ON xa.id = x.account_id WHERE x.journal_entry_id = l.journal_entry_id AND xa.category IN ('kosten', 'activa')) AS base
+             FROM purchase_invoices p JOIN journal_lines l ON l.journal_entry_id = p.journal_entry_id
+             JOIN chart_of_accounts a ON a.id = l.account_id LEFT JOIN relations r ON r.id = p.relation_id
+             WHERE a.category = 'kosten' AND l.debit >= ? AND p.is_opening = 0
+               AND CAST(substr(p.invoice_date, 1, 4) AS INTEGER) BETWEEN ? AND ? ORDER BY p.invoice_date, p.id`,
+          )
+          .all(ACCOUNTS.btwVoorbelasting, HERZIENING_DIENST_MIN, Math.max(year - 4, HERZIENING_DIENST_VANAF), year) as { id: number; name: string; date: IsoDate; lineDebit: Cents; vat: Cents; base: Cents }[])
+      : [];
+    const servicesWithVat = serviceRows.map((r) => ({ ...r, kind: 'dienst' as const, deducted: r.base > 0 ? Math.round((r.vat * r.lineDebit) / r.base) : 0 })).filter((r) => r.deducted > 0);
+    const withVat = [...assetsWithVat, ...servicesWithVat];
     const earlier = withVat.filter((r) => Number(r.date.slice(0, 4)) < year);
     const thisYear = withVat.filter((r) => Number(r.date.slice(0, 4)) === year);
     const perYear = earlier.reduce((n, r) => n + Math.round(r.deducted / 5), 0);
     const KOR_HERZIENING_DREMPEL: Cents = 50000;
     if (perYear >= KOR_HERZIENING_DREMPEL || thisYear.length > 0) {
       const items = [...earlier, ...thisYear];
+      const services = items.filter((r) => r.kind === 'dienst');
       found.push({
         key: 'kor-herziening',
         blocking: false,
@@ -525,9 +599,12 @@ export function runVatChecks(
             ? `Bij een roerend bedrijfsmiddel (zoals een bus, machine of laptop) waarop je btw aftrok, hoort die aftrek bij 5 jaar gebruik (het jaar van ingebruikname en de 4 jaren daarna). Gebruik je de KOR, dan zijn al je prestaties vrijgesteld en heb je geen recht op aftrek: je betaalt per jaar een vijfde van de afgetrokken btw terug. Voor ${year}: ${earlier.map((r) => `${r.name} ${formatEuro(Math.round(r.deducted / 5))}`).join('; ')}. `
             : perYear > 0 ? `Voor oudere bedrijfsmiddelen is de herziening over ${year} ${formatEuro(perYear)}: onder € 500, dus daarvoor hoef je niets terug te betalen. ` : '') +
           (thisYear.length > 0 ? `Voor ${thisYear.map((r) => r.name).join(', ')} (dit jaar in gebruik genomen) kijk je naar de volledige afgetrokken btw (${formatEuro(thisYear.reduce((n, r) => n + r.deducted, 0))}) en het deel van het jaar dat je in de KOR zat. ` : '') +
+          (services.length > 0
+            ? `Ook grote verbouwings- en onderhoudsdiensten aan een pand vanaf € 30.000 (bijvoorbeeld schilderwerk, isolatie of dakrenovatie) tellen sinds 2026 mee, met dezelfde 5 jaar en een vijfde per jaar: ${services.map((r) => `${r.name} (${formatDateNl(r.date)})`).join(', ')}. De app neemt daarvoor de factuurdatum als ingebruikname. Ging het niet om werk aan een pand, of was de dienst al vóór 2026 klaar? Dan telt hij niet mee: sla dit over of laat je boekhouder het nakijken. `
+            : '') +
           'Dit is een schatting op basis van de btw in je boekhouding en het jaar van ingebruikname. Heb je geen aparte datum van ingebruikname ingevuld, dan gebruikt de app de aanschafdatum. Gaat het om een pand of grond (een onroerende zaak)? Dan loopt de herziening over 10 jaar (het jaar van ingebruikname en de 9 jaren daarna) en betaal je per jaar een tiende terug; dat rekent de app niet uit. Je vraagt de herziening zelf schriftelijk aan: een aangifte omzetbelasting aanvragen bij je belastingkantoor. Laat je boekhouder het bedrag bevestigen.',
         count: items.length,
-        fingerprint: `${year}:${items.map((r) => `${r.id}:${r.date}:${r.deducted}`).join(',')}`,
+        fingerprint: `${year}:${items.map((r) => `${r.kind === 'dienst' ? 'd' : ''}${r.id}:${r.date}:${r.deducted}`).join(',')}`,
         screen: 'belasting',
         items: items.map((r) => ({ kind: 'aankoop' as const, id: r.id, date: r.date, label: r.name, amount: r.deducted })),
       });

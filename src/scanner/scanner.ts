@@ -505,6 +505,8 @@ export class Bonnenscanner {
   /** Na een herstart: bonnen die nog op de tekstherkenning wachtten, alsnog lezen. */
   private resumeReading(): void {
     if (!this.deps.readAttachment) return;
+    // in de kopie bij de boekhouder wordt niets gelezen: de tekstherkenning is daar niet van de afzender
+    if (this.deps.settings.officeCopy()) return;
     try {
       for (const d of this.deps.intake.waitingToRead()) {
         this.readInBackground(this.deps.intake.get(d.id), this.spool.hasDocument(d.id) ? 'telefoon' : 'bonnenmap');

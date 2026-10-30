@@ -91,7 +91,10 @@ describe('KOR: uitvoer en EU-diensten', () => {
     s.invoices.finalize(draft(s, de(s).id, 'icp-dienst').id);
     const c = s.vat.checks('2026-Q2').find((x) => x.key === 'kor-eu-dienst')!;
     expect(c).toMatchObject({ blocking: false });
-    expect(c.detail).toContain('ICP');
+    // art. 37a lid 1 Wet OB 1968 (toestand 2026-01-01): de ondernemer "uitgezonderd die bedoeld in artikel 25a, eerste lid"
+    // (de KOR) dient de lijst (opgaaf ICP) in; een KOR-ondernemer dus niet. De melding mag dat niet omgekeerd zeggen.
+    expect(c.detail).toContain('hoef je geen opgaaf intracommunautaire prestaties (ICP) te doen');
+    expect(c.detail).not.toContain('doe je wel btw-aangifte');
     expect(s.inbox.tasks('2026-07-05').some((t) => t.kind === 'vat-check' && t.key.endsWith('kor-eu-dienst'))).toBe(true);
   });
   it('zonder EU-dienst geen melding', () => {

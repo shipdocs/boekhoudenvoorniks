@@ -1,6 +1,7 @@
+import { ocrAllowed } from '../settings/ocr-policy';
 import { accountOpenItems } from '../core-ledger/open-items';
 import { ValidationError } from '../shared/validation';
-import { isPurchaseVatCode } from '../shared/vat';
+import { isPurchaseVatCode, isReverseCharge, type PurchaseVatCode } from '../shared/vat';
 import { TERMS_VERSION } from '../shared/legal';
 import type { RuntimeStatus } from '../ocr-runtime/runtime';
 import type { CliKind } from '../intake/ocr-cli';
@@ -266,8 +267,13 @@ export function createApi(s: Services, host: HostContext) {
     if (kind !== 'claude-code' && kind !== 'codex') throw new Error('Onbekend programma');
     return kind;
   };
+  /** in de kopie van een klant start de app geen programma en roept hij geen leesdienst aan */
+  const requireOwnReader = () => {
+    if (!ocrAllowed(s.settings)) throw new ValidationError('Dit is de kopie van een klant: bonnen lezen en Claude Code of Codex gebruiken doet de klant zelf.');
+  };
   /** het onthouden pad van Claude Code of Codex, als het programma er nog is */
   const storedCli = (kind: CliKind): string | null => {
+    if (!ocrAllowed(s.settings)) return null;
     const ocr = s.settings.get().ocr;
     const path = kind === 'codex' ? ocr.codexPath : ocr.claudeCodePath;
     return path && (host.programExists?.(path) ?? true) ? path : null;
@@ -1376,6 +1382,8 @@ export function createApi(s: Services, host: HostContext) {
     },
     purchases: {
       repayInputVat: (id: number, date: IsoDate) => s.purchases.repayInputVat(Number(id), date),
+      /** andere btw-keuze (bv. spullen van buiten de EU uit 4a halen: de btw betaal je bij de Douane) */
+      setVatCode: (id: number, vatCode: string) => s.purchases.setVatCode(Number(id), vatCode as PurchaseVatCode),
       /** met hoe hij betaald is: de bankrekening, "privé betaald" of "contant" */
       list: (filter?: { status?: 'open' | 'betaald' }) => {
         const list = s.purchases.list(filter);
@@ -1390,6 +1398,8 @@ export function createApi(s: Services, host: HostContext) {
             paid_via: p.amount_paid > 0 ? s.search.infoFor(`inkoop:${p.id}`)?.paidVia ?? null : null,
             business_pct: pct,
             vat_warning: ev ? storedVatWarning(ev.lines) : null,
+            /** verlegde btw (2a/4a/4b): welke code; null bij gewone btw of een oudere boeking */
+            reverse_charge: ev?.lines.map((l) => l.vatCode).find(isReverseCharge) ?? null,
             /** btw die je terugkrijgt bij dit zakelijke deel (bij verlegde btw: niet apart getoond) */
             vat_deductible: eff && pct < 100 ? eff.btw : p.vat_total,
             business_amount: eff && pct < 100 ? eff.kosten + eff.btw : null,
@@ -1860,6 +1870,7 @@ export function createApi(s: Services, host: HostContext) {
      */
     assistantTools: {
       search: () => {
+        requireOwnReader();
         const ocr = s.settings.get().ocr;
         const claude = host.findCli?.('claude-code') ?? null;
         const codex = host.findCli?.('codex') ?? null;
@@ -1868,6 +1879,7 @@ export function createApi(s: Services, host: HostContext) {
         return { claudeCode: claude, codex };
       },
       pick: async (kind: string) => {
+        requireOwnReader();
         const k = cliKind(kind);
         if (!host.pickProgram) throw new Error('Kan alleen in de app zelf');
         const path = await host.pickProgram(`Waar staat ${k === 'codex' ? 'Codex' : 'Claude Code'}?`);
@@ -1879,12 +1891,14 @@ export function createApi(s: Services, host: HostContext) {
         return path;
       },
       check: async (kind: string) => {
+        requireOwnReader();
         const k = cliKind(kind);
         const cli = storedCli(k);
         if (!cli || !host.checkCli) throw new Error('Zoek eerst Claude Code of Codex op deze computer.');
         return host.checkCli(k, cli);
       },
       openLogin: async (kind: string) => {
+        requireOwnReader();
         const k = cliKind(kind);
         const cli = storedCli(k);
         if (!cli || !host.openLoginTerminal) throw new Error('Zoek eerst Claude Code of Codex op deze computer.');
@@ -1932,6 +1946,7 @@ export function createApi(s: Services, host: HostContext) {
       },
       /** bonnen die nog niet uitgelezen zijn, nu (opnieuw) laten lezen */
       rereadPending: async () => {
+        requireOwnReader();
         let read = 0;
         const docs = s.intake.unread();
         // dezelfde rij als de bonnen die op de achtergrond gelezen worden: één bon tegelijk, en nooit dezelfde bon twee keer
@@ -1955,6 +1970,7 @@ export function createApi(s: Services, host: HostContext) {
       },
       connect: async (kind: string) => {
         if (kind !== 'claude-code' && kind !== 'codex') throw new Error('Onbekend programma');
+        requireOwnReader();
         if (!host.connectMcp) throw new Error('Kan alleen in de app zelf');
         const cli = storedCli(kind);
         if (!cli) throw new Error('Zoek eerst Claude Code of Codex op deze computer.');

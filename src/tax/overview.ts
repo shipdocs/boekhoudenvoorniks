@@ -462,7 +462,11 @@ export class TaxOverviewService {
         key: 'km',
         label: 'Kilometers met je eigen auto',
         amount: null,
-        explain: `${km.km.toLocaleString('nl-NL')} km × € ${(rules.kmRate / 100).toFixed(2).replace('.', ',')} = ${eur(km.amount)}. Dat zit al in je winst.`,
+        explain:
+          `${km.km.toLocaleString('nl-NL')} km × € ${(rules.kmRate / 100).toFixed(2).replace('.', ',')} = ${eur(km.amount)}. Dat zit al in je winst.` +
+          // € 0,25 voor 2026 staat in het Belastingplan 2027 (kst-37022-2, met terugwerkende kracht tot 1 januari 2026) en op
+          // belastingdienst.nl; de wet zelf (art. 3.15/3.17 Wet IB 2001, toestand 2026) noemt nog € 0,23. Tot het is aangenomen is het bedrag voorlopig.
+          (year === 2026 ? ' € 0,25 geldt voor 2026 als het Belastingplan 2027 wordt aangenomen (met terugwerkende kracht); tot die tijd staat in de wet € 0,23. De schatting rekent met € 0,25.' : ''),
         status: km.trips > 0 ? 'ok' : 'info',
       });
     }

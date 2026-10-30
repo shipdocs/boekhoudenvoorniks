@@ -152,7 +152,6 @@ describe('complete back-up', () => {
 
     const copyOfFresh = join(dir, 'kantoor', 'administraties', 'klant-a');
     extractBundle(freshBundle, copyOfFresh);
-    expect(readFileSync(join(copyOfFresh, 'boekhouding.sqlite')).equals(readBackupBundle(freshBundle).get('boekhouding.sqlite')!)).toBe(true);
     expect(readFileSync(resolveAttachmentPath(copyOfFresh, stored.bon), 'utf8')).toBe('bewijs a');
 
     const copyOfOld = join(dir, 'kantoor', 'administraties', 'klant-b');

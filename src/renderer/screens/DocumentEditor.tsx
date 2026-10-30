@@ -4,6 +4,7 @@ import { Button, DateNl, ErrorBox, Euro, Field, Modal, MoneyInput, StatusPill, u
 import { computeTotals, type LineInput } from '../../documents/totals';
 import { addDays, isIsoDate, today } from '../../shared/dates';
 import { customerVatSituation, suggestedSalesVat, type SalesVatCode } from '../../shared/vat';
+import { presetVatCode, workVatCodes } from '../../shared/trades';
 import { CustomerMailNotice, CustomerVatHint, QuickCustomer } from './Customers';
 
 interface EditLine {
@@ -255,13 +256,17 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
           <div className="row" style={{ marginTop: 8 }}>
             <Button small onClick={() => setLines((ls) => [...ls, { description: '', quantity: '1', unit: '', unitPrice: null, vatCode: defaultVat }])}>+ Regel</Button>
             {trade?.items.map((it) => (
-              <Button key={it.description} small kind="ghost" title={it.note} onClick={() => setLines((ls) => [...ls.filter((l) => l.description || l.unitPrice), { description: it.description, quantity: '1', unit: it.unit, unitPrice: null, vatCode: settings.kor ? 'vrijgesteld' : it.vatCode }])}>
+              <Button key={it.description} small kind="ghost" title={it.note} onClick={() => setLines((ls) => {
+                const filled = ls.filter((l) => l.description || l.unitPrice);
+                return [...filled, { description: it.description, quantity: '1', unit: it.unit, unitPrice: null, vatCode: settings.kor ? 'vrijgesteld' : presetVatCode(trade, it, filled) }];
+              })}>
                 + {it.description}
               </Button>
             ))}
           </div>
         )}
         {lines.some((l) => l.vatCode === 'laag') && trade?.items.find((i) => i.note) && <p className="small muted">ℹ️ {trade.items.find((i) => i.note)!.note}</p>}
+        {!settings.kor && trade && lines.some((l) => trade.items.some((x) => x.followsMain && x.description === l.description)) && workVatCodes(trade, lines).length > 1 && <p className="small muted">⚠️ Op deze factuur staat werk tegen verschillende btw-tarieven. Kijk het tarief van de voorrijkosten zelf na: hoort het voorrijden bij één klus, kies dan het tarief van die klus. Hoort het bij allebei, verdeel het bedrag dan over twee regels, of reken 21% over het geheel.</p>}
         {lines.some((l) => l.vatCode === 'verlegd') && <p className="small muted">ℹ️ Btw verlegd gebruik je alleen als de wet dat voorschrijft, bijvoorbeeld als onderaannemer in de bouw: jij rekent geen btw, je klant regelt die. Alleen een btw-nummer van je klant is niet genoeg. Het btw-nummer van je klant moet wel op de factuur.</p>}
         {lines.some((l) => l.vatCode === 'icp' || l.vatCode === 'icp-dienst') && <p className="small muted">ℹ️ Bedrijf in een ander EU-land: kies "goederen" als je spullen levert die naar dat land gaan, en "dienst" voor werk of advies. Dat moet kloppen voor de opgave aan de Belastingdienst. Werk je aan een gebouw of grond? Dan gelden andere regels: vraag je boekhouder.</p>}
         {lines.some((l) => l.vatCode === 'export' || l.vatCode === 'dienst-buiten-eu') && <p className="small muted">ℹ️ Klant buiten de EU: spullen die de EU uitgaan zijn "goederen" (0%, in je aangifte). Een dienst aan een bedrijf buiten de EU komt niet in je Nederlandse aangifte. Is de klant een particulier, of werk je aan een gebouw in Nederland? Vraag je boekhouder welke btw geldt.</p>}

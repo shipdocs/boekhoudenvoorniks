@@ -3,7 +3,8 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
-import type { Db } from '../db/database';
+import { schoonOntvangenDatabase, type Db } from '../db/database';
+import { isAllowedAttachmentName } from './attachments';
 import { relativeAttachmentPath, relativizeAttachmentPaths, storedAttachmentPaths } from '../db/attachment-paths';
 
 const BUNDLE_MAGIC = Buffer.from('GBBUNDLE');
@@ -70,6 +71,18 @@ export async function createBackupBundle(db: Db, dataRoot: string, prepare?: (da
 export function isBackupBundle(data: Buffer): boolean {
   return data.length >= BUNDLE_MAGIC.length + 5 && data.subarray(0, BUNDLE_MAGIC.length).equals(BUNDLE_MAGIC);
 }
+
+/**
+ * Een ontvangen bundel is niet te vertrouwen: we schrijven alleen de vaste database en bijlagen onder exact
+ * `bijlagen/` (hoofdlettergevoelig, zoals createBackupBundle ze maakt) met een toegestane extensie weg.
+ * Padcomponenten met `:` (Windows-stroom) of eindigend op punt of spatie worden overgeslagen.
+ */
+const isBlockedEntry = (path: string): boolean => {
+  if (path === 'boekhouding.sqlite') return false;
+  const parts = path.split('/');
+  if (parts.length < 2 || parts[0] !== 'bijlagen') return true;
+  return parts.some((part) => part.includes(':') || /[. ]$/.test(part)) || !isAllowedAttachmentName(path);
+};
 
 export function readBackupBundle(data: Buffer): Map<string, Buffer> {
   if (!isBackupBundle(data)) throw new Error('Dit is geen complete back-up van BoekhoudenVoorNiks');
@@ -199,6 +212,7 @@ export function restoreCompleteBackup(data: Buffer, target: string, dataRoot: st
   mkdirSync(stage, { recursive: true });
   try {
     for (const [path, content] of entries) {
+      if (isBlockedEntry(path)) continue;
       const destination = join(stage, ...path.split('/'));
       const rel = relative(stage, resolve(destination));
       if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Back-up bevat een onveilig bestandspad');
@@ -235,6 +249,7 @@ export function extractBundle(data: Buffer, dir: string): void {
   if (existsSync(target)) throw new Error('Hier staat al een administratie');
   mkdirSync(dir, { recursive: true });
   for (const [path, content] of entries) {
+    if (isBlockedEntry(path)) continue;
     const destination = join(dir, ...path.split('/'));
     const rel = relative(dir, resolve(destination));
     if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Bundel bevat een onveilig bestandspad');
@@ -242,6 +257,8 @@ export function extractBundle(data: Buffer, dir: string): void {
     writeFileSync(destination, content, { mode: 0o600 });
   }
   validateBackup(target);
+  // een ontvangen database is niet te vertrouwen: eerst onschadelijk maken, vóór rebase of migraties
+  schoonOntvangenDatabase(target);
   mkdirSync(join(dir, 'bijlagen'), { recursive: true });
   rebaseAttachmentPaths(target, dir);
 }
