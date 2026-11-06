@@ -37,6 +37,14 @@ De tabbladen, met bovenaan een periode (*Van* en *Tot*):
 
 De app boekt op het Referentie Grootboekschema (RGS). De btw-aangifte wordt uit de btw-codes op de regels gerekend, niet uit de saldi van de btw-rekeningen; een correctieboeking met btw-code komt dus in de aangifte van de periode van de btw-datum. Na *Ik heb de aangifte gedaan* ligt die periode voor de btw vast: een latere correctie met een btw-datum in die periode schuift de app naar de eerstvolgende open periode en meldt dat.
 
+## Een betaling op een balansrekening
+
+Bij *Bank* staat in de boekhoudermodus onder elke betaling die nog uitgezocht moet worden de keuze *Balansrekening (boekhouder)*. Daarmee zet je een betaling rechtstreeks op een balansrekening, zonder btw en zonder zakelijk deel: bijvoorbeeld een lening die binnenkomt of wordt afgelost, een waarborgsom, de rekening-courant met de directeur of een schuld die bij een [correctieboeking](#wat-er-onder-boekhouding-staat) op de balans kwam. Kies de rekening uit de lijst, zet er eventueel een omschrijving bij en kies *Op deze rekening zetten*. De journaalpost is bank aan de gekozen rekening (of andersom bij geld dat binnenkomt).
+
+De lijst bevat alleen balansrekeningen zonder eigen stroom in de app. Bank, kas, kruisposten, klanten, leveranciers, btw, privé, eigen vermogen, bedrijfsmiddelen en voorraad staan er niet in: daar heeft het bankscherm eigen knoppen voor, zodat de btw-aangifte, de openstaande facturen en de afschrijvingen blijven kloppen. Een eigen rekening die je bij *Rekeningschema* toevoegt met een RGS-code voor activa of passiva, staat er wel in. Gewone gebruikers zien deze keuze niet; bij een bv staan *Nettoloon betaald*, *Loonheffing betaald* en *Vennootschapsbelasting betaald* wél voor iedereen klaar.
+
+Vergist? *Ongedaan maken* bij de betaling werkt zoals bij elke andere keuze.
+
 ## Wat de boekhoudermodus niet doet
 
 - Geen bankregels bewerken. Een verkeerde verwerking draai je terug via *Ongedaan maken* bij de betaling, of je haalt het hele afschrift weg: [Een ingelezen afschrift weghalen](afschrift-weghalen.html).

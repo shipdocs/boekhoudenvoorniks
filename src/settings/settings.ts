@@ -158,6 +158,11 @@ export interface AppSettings {
   jobsEnabled: boolean;
   /** Rechtsvorm; null = nog niet opgegeven (de schatting gaat dan uit van een eenmanszaak). Een bv betaalt geen inkomstenbelasting over de winst. */
   legalForm: 'eenmanszaak' | 'vof' | 'bv' | null;
+  /**
+   * Bv: het maandloon van de directeur-grootaandeelhouder volgens de loonstrook (centen), voor het maandvoorstel
+   * "Loon boeken" op Vandaag. null = geen loon boeken. `vanaf` is de eerste maand (JJJJ-MM).
+   */
+  loon: { bruto: number; loonheffing: number; netto: number; vanaf: string } | null;
   /** vof of maatschap: jouw deel van de winst in procenten (de schatting is per ondernemer). Met vennoten: het aandeel van `ibPartnerNo`. */
   profitSharePct: number;
   /**
@@ -315,6 +320,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   nietGerealiseerdeZelfstandigenaftrek: 0,
   vatPotAccountId: null,
   legalForm: null,
+  loon: null,
   jobTerm: 'klus',
   jobsEnabled: true,
   profitSharePct: 100,
@@ -349,6 +355,16 @@ function integerInRange(value: number, min: number, max: number, label: string):
 }
 
 function validateSettings(settings: AppSettings): void {
+  if (settings.loon !== null && settings.loon !== undefined) {
+    if (settings.legalForm !== 'bv') throw new ValidationError('Loon boeken hoort bij een bv; bij een eenmanszaak of vof is wat je opneemt privé');
+    const l = settings.loon;
+    if (typeof l !== 'object' || l === null) throw new ValidationError('Ongeldige looninstelling');
+    integerInRange(l.bruto, 1, 100000000000, 'Brutoloon');
+    integerInRange(l.loonheffing, 0, 100000000000, 'Loonheffing');
+    integerInRange(l.netto, 1, 100000000000, 'Nettoloon');
+    if (l.loonheffing + l.netto !== l.bruto) throw new ValidationError('Bruto moet gelijk zijn aan loonheffing plus netto. Andere inhoudingen (bv. pensioenpremie) boek je apart met een correctieboeking');
+    if (typeof l.vanaf !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(l.vanaf)) throw new ValidationError('Kies vanaf welke maand het loon geboekt wordt');
+  }
   if (settings.ibHoursCondition !== null && !['meerderheid', 'starter'].includes(settings.ibHoursCondition)) throw new ValidationError('Ongeldige keuze voor het urencriterium');
   if (typeof settings.ibConfirmed !== 'boolean' || typeof settings.urencriterium !== 'boolean') throw new ValidationError('Bevestig ondernemerschap en het urencriterium met ja of nee');
   if (settings.carPurchaseVatDeducted !== null && typeof settings.carPurchaseVatDeducted !== 'boolean') throw new ValidationError('Geef aan of er aanschaf-btw is afgetrokken');

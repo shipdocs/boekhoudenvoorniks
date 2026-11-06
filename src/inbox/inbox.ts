@@ -83,6 +83,7 @@ const MAP_PROBLEEM_TEKST: Record<(typeof MAP_SOORTEN)[number], { een: string; me
 
 export type TaskKind =
   | 'setup'
+  | 'loon'
   | 'bank-invoice'
   | 'bank-purchase'
   | 'bank-purchase-paid'
@@ -138,7 +139,8 @@ export type TaskKind =
   | 'sale-own-company'
   | 'sale-vat-mode'
   | 'sale-reread'
-  | 'sale-manual';
+  | 'sale-manual'
+  | 'sale-outside-eu';
 
 export interface TaskAction {
   id: string;
@@ -345,6 +347,12 @@ export class InboxService {
 
   /** het abonnement, voor de melding bij een gekoppelde telefoon (alleen de toestand zoals ze in de administratie staat) */
   private license: Pick<LicenseService, 'status'> | null = null;
+  /** loon bij een bv (src/tax/loon.ts): het maandvoorstel op Vandaag */
+  private loon: { pendingMonths(asOf: IsoDate): { month: string; label: string }[]; active(): { bruto: Cents; loonheffing: Cents; netto: Cents } | null } | null = null;
+  setLoon(loon: NonNullable<InboxService['loon']>): void {
+    this.loon = loon;
+  }
+
   setLicense(license: Pick<LicenseService, 'status'>): void {
     this.license = license;
   }
@@ -843,6 +851,25 @@ export class InboxService {
     /** facturen van het eigen bedrijf die samen met hun betaling één taak zijn */
     const ownDocuments = new Set<number>();
     const s = this.settings.get();
+    // bv: het loon van de directeur, elke maand na bevestiging (nooit vanzelf; de loonstrook komt van elders)
+    const loon = this.loon?.active() ?? null;
+    if (loon) {
+      for (const { month, label } of this.loon!.pendingMonths(asOf)) {
+        tasks.push({
+          key: `loon-${month}`,
+          kind: 'loon',
+          icon: '💶',
+          title: `Loon ${label} boeken`,
+          question: `Zelfde bedragen als op de loonstrook van vorige keer: bruto ${formatEuro(loon.bruto)}, loonheffing ${formatEuro(loon.loonheffing)}, netto ${formatEuro(loon.netto)}. Klopt dat voor ${label}?`,
+          actions: [
+            { id: 'ja', label: 'Ja, boek het loon', primary: true, hint: 'Loon directeur-grootaandeelhouder aan af te dragen loonheffing en nog te betalen nettoloon; de betalingen kies je daarna op het bankscherm' },
+            { id: 'aanpassen', label: 'Bedragen aanpassen', hint: 'Naar Instellingen → Btw (bij de rechtsvorm); daarna komt dit voorstel terug met de nieuwe bedragen' },
+          ],
+          priority: 2,
+          ref: { periodKey: month },
+        });
+      }
+    }
     if (!s.onboardingDone || !s.company.name) {
       tasks.push({ key: 'setup', kind: 'setup', icon: '👋', title: 'Maak je bedrijf compleet', question: 'We hebben nog een paar gegevens nodig voor je facturen.', actions: [{ id: 'open', label: 'Afronden', primary: true }], ref: {} });
     }
@@ -1385,6 +1412,23 @@ export class InboxService {
           question: `${q.label} gaf een betaalde factuur door ${sale}, maar de app kan hem niet inlezen: ${q.signals.join(' en ')}. De app raadt niet en heeft niets geboekt. Boek deze verkoop zelf: maak de factuur in de app, of verwerk het geld als het op je bank binnenkomt als "Verkoop via een ander systeem". Kies daarna "Ik boek hem zelf".`,
           amount: q.total ?? undefined,
           actions: [{ id: 'zelf', label: 'Ik boek hem zelf', primary: true }],
+          priority: 2,
+          ref: { questionId: q.id },
+        });
+      } else if (q.reason === 'buitenland') {
+        // Mollie en webshops zeggen niet of het een dienst of goederen was, en dat bepaalt de btw-soort: niet raden
+        tasks.push({
+          key: `sale-outside-eu-${q.id}`,
+          kind: 'sale-outside-eu',
+          icon: '🌍',
+          title: `${q.label}: verkoop aan een klant buiten de EU`,
+          question: `${q.label} gaf een betaalde factuur door ${sale}, zonder btw. De klant is een bedrijf buiten de EU. Was het een dienst (bijvoorbeeld software, advies of een abonnement) of waren het goederen? Dan leest de app de factuur in als betaald via ${q.label}. Een volgende factuur aan deze klant gaat daarna vanzelf zo.`,
+          amount: q.total ?? undefined,
+          actions: [
+            { id: 'dienst-buiten-eu', label: 'Dienst aan een bedrijf buiten de EU', primary: true },
+            { id: 'export', label: 'Goederen naar buiten de EU' },
+            { id: 'zelf', label: 'Ik boek hem zelf' },
+          ],
           priority: 2,
           ref: { questionId: q.id },
         });
@@ -1988,6 +2032,9 @@ export class InboxService {
       'sale-vat-mode:exclusief': 'De btw komt boven op de prijzen van de regels.',
       'sale-vat-mode:zelf': 'De app leest deze verkoop niet in en vraagt er niet meer naar. Er wordt niets geboekt: dat doe je zelf.',
       'sale-manual:zelf': 'De melding verdwijnt en de app leest deze verkoop niet meer in. Er wordt niets geboekt: dat doe je zelf.',
+      'sale-outside-eu:dienst-buiten-eu': 'Wordt een betaalde factuur met "niet belast in Nederland". Telt mee als omzet, maar niet in de btw-aangifte.',
+      'sale-outside-eu:export': 'Wordt een betaalde factuur met 0% uitvoer (rubriek 3a). Bewaar het bewijs dat de goederen de EU uit gingen.',
+      'sale-outside-eu:zelf': 'De melding verdwijnt en de app leest deze verkoop niet meer in. Er wordt niets geboekt: dat doe je zelf.',
       'sale-reread:opnieuw': 'De factuur komt er opnieuw in zoals de app hem nu leest. De teruggedraaide factuur en de creditfactuur blijven staan; de betaling van toen gaat weer van de betaaldienst af.',
       'sale-reread:niet': 'Er verandert niets. De app vraagt het niet meer.',
       'job-link:ja': 'De kosten tellen mee bij deze klus.',

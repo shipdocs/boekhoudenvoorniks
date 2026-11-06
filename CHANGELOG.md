@@ -2,6 +2,20 @@
 
 ## Nog niet uitgebracht
 
+## 1.10.0 — Loon voor de bv, balansrekeningen voor de boekhouder en Mollie-facturen uit het buitenland
+
+Heb je een bv, dan stelt de app elke maand het loon van de directeur voor en kies je bij *Bank* de betaling van nettoloon, loonheffing of vennootschapsbelasting. In de boekhoudermodus zet je een betaling rechtstreeks op een balansrekening, een categorie vind je door een paar letters te typen, en facturen uit Mollie of je webshop aan een bedrijf buiten de EU worden weer ingelezen.
+
+### Nieuw
+- **Bv: het loon van de directeur komt elke maand als voorstel op Vandaag, en de betalingen kies je op het bankscherm.** Vul bij *Instellingen → Btw* (rechtsvorm bv) het bruto, de loonheffing en het netto van de loonstrook in. Vanaf de 20e vraagt *Vandaag* elke maand *Loon [maand] boeken?*; pas na *Ja* boekt de app loon directeur-grootaandeelhouder aan af te dragen loonheffing en nog te betalen nettoloon, op de laatste dag van die maand. Bij *Bank* staan voor een bv de keuzes *Nettoloon betaald*, *Loonheffing betaald* en *Vennootschapsbelasting betaald*: geen kosten en geen btw, ze halen de schuld van de balans. De app boekt nooit loon zonder je bevestiging, en de loonstrook zelf blijft van je salarisadministratie.
+- **Boekhoudermodus: een betaling rechtstreeks op een balansrekening zetten.** Bij *Bank* staat onder elke betaling de keuze *Balansrekening (boekhouder)*, voor een lening, een waarborgsom, de rekening-courant met de directeur of een andere balanspost zonder eigen knop. Zonder btw en zonder zakelijk deel. Bank, kas, klanten, leveranciers, btw, privé, eigen vermogen, bedrijfsmiddelen en voorraad staan niet in de lijst: die houden hun eigen knoppen, zodat de aangifte en de openstaande facturen blijven kloppen. Gewone gebruikers zien deze keuze niet.
+
+### Verbeterd
+- **Een categorie kiezen gaat sneller: typ een paar letters.** Boven de knoppen *Waar was dit voor?* staat een zoekvak dat de knoppen filtert op naam en uitleg (bijvoorbeeld "verf" vindt *Materiaal*). Staat er niets bij, dan verwijst de app naar *+ Eigen categorie*. De gekozen categorie blijft altijd staan.
+
+### Opgelost
+- **Facturen uit Mollie of je webshop aan een bedrijf buiten de EU worden weer ingelezen.** Zo'n verkoop bleef op *Vandaag* staan met "boek deze verkoop zelf", terwijl de factuur al in Mollie of je webshop stond. Nu vraagt *Vandaag* of het een dienst of goederen waren, en leest de app de factuur daarna in als betaald via de betaaldienst: een dienst als *niet belast in Nederland* (niet in de btw-aangifte), goederen als uitvoer (rubriek 3a). Volgende facturen aan dezelfde klant gaan vanzelf zo. Een verkoop die al op *Vandaag* wachtte, krijgt de nieuwe vraag zodra je de koppeling bijwerkt. Particulieren buiten de EU, klanten in andere EU-landen en orders met btw boek je nog zelf.
+
 ## 1.9.3 — Btw-controles voor spullen van buiten de EU en grote verbouwingen, en veiliger inlezen
 
 De btw-controles vóór je aangifte letten nu op spullen van buiten de EU die ten onrechte in rubriek 4a staan en op grote verbouwings- en onderhoudsdiensten aan een pand onder de KOR. Schilders en stukadoors krijgen 9% ook op materiaal en voorrijkosten, de KOR-melding bij een dienst aan een EU-bedrijf klopt weer, en het inlezen van een ontvangen administratie of een Excel-bestand is veiliger.

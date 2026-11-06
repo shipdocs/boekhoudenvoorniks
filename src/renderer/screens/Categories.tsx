@@ -12,12 +12,28 @@ type CategoryView = Awaited<ReturnType<typeof api.categories.all>>['categories']
 export function CategoryChips({ value, onChange }: { value: string; onChange: (key: string, defaultVat: PurchaseVatCode) => void }) {
   const { meta } = useApp();
   const [dialog, setDialog] = useState<'nieuw' | 'beheer' | null>(null);
+  // typen filtert de knoppen op naam en uitleg; de gekozen categorie blijft altijd staan
+  const [search, setSearch] = useState('');
+  const needle = search.trim().toLowerCase();
+  const matches = (c: { key: string; label: string; hint: string }) => !needle || c.key === value || c.label.toLowerCase().includes(needle) || c.hint.toLowerCase().includes(needle);
+  const shown = meta.expenseCategories.filter(matches);
   return (
     <>
+      {meta.expenseCategories.length > 8 && (
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Zoek een categorie, bv. verf of telefoon"
+          aria-label="Zoek een categorie"
+          style={{ marginBottom: 6 }}
+        />
+      )}
       <div className="chips">
-        {meta.expenseCategories.map((c) => (
+        {shown.map((c) => (
           <button key={c.key} className={value === c.key ? 'selected' : ''} title={c.hint} onClick={() => onChange(c.key, c.defaultVat)}>{c.label}</button>
         ))}
+        {needle && shown.length <= 1 && <span className="small muted">Geen categorie met "{search.trim()}"; maak er een met + Eigen categorie.</span>}
         <button className="ghost" title="Een categorie die er nog niet bij staat" onClick={() => setDialog('nieuw')}>+ Eigen categorie</button>
         <button className="ghost" title="Namen, uitleg en btw aanpassen, of categorieën verbergen" onClick={() => setDialog('beheer')}>✎ Aanpassen</button>
       </div>

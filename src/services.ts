@@ -54,6 +54,7 @@ import { OwnCompanyPayments } from './documents/own-company';
 import { BookedInfo } from './search/booked-info';
 import { BankFeedService } from './bankfeed/bankfeed';
 import { PontoClient } from './integrations/ponto';
+import { LoonService } from './tax/loon';
 
 export interface ServiceDeps {
   pdf: PdfRenderer;
@@ -163,6 +164,9 @@ export function createServices(db: Db, deps: ServiceDeps) {
   const investments = new InvestmentCheck(db, purchases, bank);
   const mail = new MailIntakeService(db, settings, intake, async (html) => new Uint8Array(await deps.pdf(html)));
   const inbox = new InboxService(db, ledger, settings, bank, matching, invoices, quotes, jobs, intake, memory, vat, purchases, recurring, categories, investments, mail);
+  // bv: het maandloon van de directeur als voorstel op Vandaag (nooit vanzelf geboekt)
+  const loon = new LoonService(db, ledger, settings);
+  inbox.setLoon(loon);
   // vreemde valuta in wat er al stond (#74): bonnen en aankopen van vóór 0.3.9 omrekenen
   const fxRepair = new FxRepair(db, fx, intake, purchases, bank);
   inbox.setFxRepair(fxRepair);
@@ -204,7 +208,7 @@ export function createServices(db: Db, deps: ServiceDeps) {
     bank.ensureDefaultAccount();
   }
 
-  return { db, ownCompany, statementFolder, vies, periods, yearEnd, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, jobPhotos, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed, ownMail };
+  return { db, ownCompany, statementFolder, vies, periods, yearEnd, exchange, license, sendMail, fx, fxRepair, bookedPayments, bookedInfo, ledger, categories, mail, events, recurring, search, incomeTax, settings, relations, templates, invoices, quotes, purchases, sender, bank, matching, vat, dashboard, quick, integrations, exports, accountantPackage, memory, businessShare, ledgerReports, classifier, intake, jobs, jobPhotos, inbox, checklist, switchover, xafImport, investments, assets, mileage, hours, taxOverview, bankFeed, ownMail, loon };
 }
 
 export type Services = ReturnType<typeof createServices>;

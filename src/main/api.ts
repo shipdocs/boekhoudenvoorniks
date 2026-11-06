@@ -416,6 +416,12 @@ export function createApi(s: Services, host: HostContext) {
       case 'vat-due:ingediend':
         s.vat.markSubmitted(r.periodKey!, { alreadyFiled: true });
         return;
+      // bv: het loon van een maand boeken met de ingestelde bedragen, of eerst de bedragen aanpassen
+      case 'loon:ja':
+        s.loon.book(r.periodKey!);
+        return;
+      case 'loon:aanpassen':
+        return { navigate: { screen: 'instellingen', extra: { tab: 'btw' } } };
       case 'bank-sale:klopt':
         s.inbox.bookSale(r.bankTransactionId!);
         return;
@@ -618,6 +624,9 @@ export function createApi(s: Services, host: HostContext) {
       case 'sale-vat-mode:exclusief':
       case 'sale-vat-mode:zelf':
       case 'sale-manual:zelf':
+      case 'sale-outside-eu:dienst-buiten-eu':
+      case 'sale-outside-eu:export':
+      case 'sale-outside-eu:zelf':
       case 'sale-reread:opnieuw':
       case 'sale-reread:niet':
         // verkoop uit een koppeling die op een keuze wacht: aan je eigen bedrijf (#231), prijzen met of zonder
@@ -1288,6 +1297,11 @@ export function createApi(s: Services, host: HostContext) {
       decisionStats: () => decisionStats(s.db),
       autoProcess: () => s.inbox.autoProcess(),
     },
+    /** Loon bij een bv (src/tax/loon.ts): maandvoorstel op Vandaag, hier het overzicht en zelf boeken. */
+    loon: {
+      status: () => ({ active: s.loon.active(), booked: s.loon.bookedMonths(), pending: s.loon.pendingMonths(today()) }),
+      book: (month: string, amounts?: { bruto: number; loonheffing: number; netto: number }) => s.loon.book(String(month), amounts),
+    },
     jobs: {
       list: (filter?: { status?: JobStatus; active?: boolean }) => s.jobs.list(filter),
       get: (id: number) => s.jobs.get(id),
@@ -1704,6 +1718,14 @@ export function createApi(s: Services, host: HostContext) {
        * betaling aan je eigen bedrijf op privé of "weet ik nog niet" gaat samen met de factuur ervan (dan null).
        */
       book: (txId: number, input: BookToAccountInput) => s.inbox.bookBank(txId, input),
+      /** boekhoudermodus: de balansrekeningen zonder eigen stroom waar je een betaling op kunt zetten */
+      balanceAccounts: () => s.bank.balanceAccounts().map((a) => ({ rgs: a.rgs_code, code: a.code, name: a.name, category: a.category })),
+      /** een betaling op zo'n balansrekening zetten (zonder btw en zonder zakelijk deel), na dezelfde controles als elke bankkeuze */
+      bookBalance: (txId: number, rgs: string, description?: string | null) => {
+        const account = s.bank.balanceAccounts().find((a) => a.rgs_code === String(rgs));
+        if (!account) throw new ValidationError('Kies een balansrekening uit de lijst; bank, kas, klanten, leveranciers, btw en privé hebben hun eigen knoppen');
+        return s.inbox.bookBank(Number(txId), { account: account.rgs_code, vatCode: 'geen', balance: true, ...(description?.trim() ? { description: description.trim() } : {}) });
+      },
       /**
        * Hoort deze afschrijving bij een aankoop die er al staat (#221)? De aankopen die erbij passen, voor de
        * kaart op het bankscherm. `strong`: eerst kiezen, daarna pas iets anders; `oneClick`: precies één

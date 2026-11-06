@@ -9,10 +9,10 @@ volgorde: 30
 
 *Instellingen* heeft bovenaan tabbladen. Verander je iets, klik dan onderaan op *Opslaan*.
 
-- **Je bedrijf**: naam, adres, KvK- en btw-nummer, rechtsvorm (eenmanszaak, vof of bv) en je instapdatum. Hier staat ook de overstap-hulp.
+- **Je bedrijf**: naam, adres, KvK- en btw-nummer en je instapdatum. Hier staat ook de overstap-hulp.
 - **Facturen & offertes**: nummering (en het volgende nummer zelf zetten), betaaltermijn, geldigheid van offertes, herinneringen, en de opmaak van je factuur (logo, kleuren, teksten).
 - **E-mail**: de mailserver waarmee de app je facturen verstuurt (SMTP; de gegevens krijg je van je e-mailprovider) en een optionele kopie aan jezelf. Zonder mailserver kun je versturen met je eigen mailprogramma (zie [Versturen met je eigen mailprogramma](werk-en-facturen.html#versturen-met-je-eigen-mailprogramma)). Daaronder: het gratis bonnen-adres en je eigen mailbox koppelen, voor bonnen per mail (zie [Bonnen per mail](bonnetjes.html#bonnen-per-mail)).
-- **Btw**: hoe vaak je aangifte doet, de kleineondernemersregeling, en je standaard btw-tarief.
+- **Btw**: hoe vaak je aangifte doet, de kleineondernemersregeling, je standaard btw-tarief, en onder *Inkomstenbelasting* je rechtsvorm (eenmanszaak, vof of bv) met de schatting; bij een bv het [loon van de directeur](#bv-loon-van-de-directeur).
 - **Categorieën**: de kostensoorten waarin de app je bonnen indeelt. Je kunt namen aanpassen, een eigen categorie toevoegen (*+ Eigen categorie*) of categorieën verbergen die je nooit gebruikt.
 - **Koppelingen**: webshop en betaaldiensten (WooCommerce, Shopify, Mollie, Stripe).
 - **Telefoon & bonnenmap**: je telefoon koppelen voor de app voor Android, en een map op je computer waar de app bonnen uit leest. Zie [Telefoon](telefoon.html).
@@ -26,7 +26,7 @@ volgorde: 30
 
 Heb je een vof of maatschap, dan kan de app het eigen vermogen per vennoot bijhouden. Dat is een keuze: zolang je het niet instelt, werkt de app zoals altijd, met één eigen vermogen en *Jouw deel van de winst* voor de schatting van de inkomstenbelasting.
 
-1. *Instellingen → Je bedrijf*, rechtsvorm *Vof*. Bij *Eigen vermogen per vennoot bijhouden?* kies je *Vennoten instellen*.
+1. *Instellingen → Btw*, rechtsvorm *Vof*. Bij *Eigen vermogen per vennoot bijhouden?* kies je *Vennoten instellen*.
 2. Vul per vennoot de naam en het winstaandeel in (2 tot 5 vennoten, samen precies 100%, hooguit 2 cijfers achter de komma). Met *Vennoot toevoegen* komt er een bij.
 3. *Winst verdelen vanaf boekjaar*: vanaf dit jaar verdeelt de app de winst over de vennoten. De winst van eerdere jaren blijft bij de eerste vennoot, zoals het stond.
 4. *Schatting inkomstenbelasting voor*: de schatting is per persoon; kies voor wie (met diens winstaandeel).
@@ -50,6 +50,19 @@ Alles wat privé is, komt op de privérekening van één vennoot. De app kiest d
 - **Vandaag**: bij een verkoop aan of factuur van je eigen bedrijf vraagt de app het eerst.
 
 Een bon die anders vanzelf verwerkt zou worden, maar waarbij iets privé is, blijft staan tot je hem nakijkt en de vennoot kiest. Een eenmanszaak of bv merkt hier niets van.
+
+## Bv: loon van de directeur
+
+Heb je een bv (rechtsvorm *Bv* onder *Instellingen → Btw*), dan betaalt de bv jou elke maand loon volgens de loonstrook van je salarisadministratie. De app maakt die loonstrook niet, maar kan het loon wel elke maand als voorstel klaarzetten, zodat de kosten en de schulden op de juiste maand staan.
+
+1. *Instellingen → Btw*, rechtsvorm *Bv*. Vink *Ik krijg elke maand loon uit de bv* aan.
+2. Vul van de loonstrook het *bruto*, de *loonheffing* en het *netto* per maand in. Bruto is loonheffing plus netto; anders kun je niet opslaan.
+3. *Vanaf welke maand*: de eerste maand die de app voorstelt. Eerdere maanden komen niet terug.
+4. *Opslaan*.
+
+Vanaf de 20e van elke maand staat op *Vandaag* de vraag *Loon [maand] boeken*, met de bedragen erbij. Kies *Ja, boek het loon*: de app boekt op de laatste dag van die maand *Loon directeur-grootaandeelhouder* (kosten) aan *Af te dragen loonheffing* en *Nog te betalen nettoloon* (schulden). De app boekt nooit zonder die bevestiging. Wijken de bedragen een keer af, kies dan *Bedragen aanpassen*: je komt bij de instelling, en het voorstel komt terug met de nieuwe bedragen. Een maand die je al geboekt hebt, komt niet opnieuw; draai je de boeking terug in de [boekhoudermodus](boekhoudermodus.html), dan wel.
+
+De betalingen kies je daarna bij *Bank*: *Nettoloon betaald* voor de overboeking naar je privérekening en *Loonheffing betaald* voor de aangifte loonheffingen aan de Belastingdienst. Die halen de schulden weer weg en tellen niet nog een keer als kosten. Zo staat *Vennootschapsbelasting betaald* er ook, voor een (voorlopige) aanslag. Pensioenpremie, een auto van de zaak op de loonstrook of andere inhoudingen boekt je boekhouder met een correctieboeking; de app rekent geen loonbelasting uit en doet geen aangifte loonheffingen.
 
 ## Waar je administratie staat
 

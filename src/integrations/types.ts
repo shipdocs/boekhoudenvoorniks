@@ -58,6 +58,11 @@ export interface ExternalOrder {
    * verkoop zelf (#228).
    */
   unreadable?: string;
+  /**
+   * Klant buiten de EU, zonder btw op de order: welke btw-soort de regels krijgen, zoals de gebruiker koos (een dienst
+   * of goederen). Zonder deze keuze boekt de app niets: de bron zegt niet wat er verkocht is.
+   */
+  vatCode?: 'dienst-buiten-eu' | 'export';
 }
 
 /** Een uitbetaling van een betaalprovider naar de bank. */

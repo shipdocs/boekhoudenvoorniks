@@ -166,6 +166,14 @@ export const DEFAULT_ACCOUNTS: AccountSeed[] = [
  * en blijven daarna staan. Interne sleutel = de officiële RGS-code. Bewust geen dividend of deelnemingsresultaat:
  * dat zijn jaarrekeningposten; die voeg je zo nodig zelf toe bij Boekhouding → Rekeningschema.
  */
+/** De rekeningen van de loonboeking bij een bv (uit BV_ACCOUNTS): loon DGA aan af te dragen loonheffing en nog te betalen nettoloon. */
+export const BV_LOON = {
+  loonDga: 'WPerLesSld',
+  loonheffing: 'BSchBepLhe',
+  nettoloon: 'BSchSalNet',
+  vpb: 'BSchBepVpb',
+} as const;
+
 export const BV_ACCOUNTS: AccountSeed[] = [
   { code: '0400', rgs: 'BFvaDigNev', ref: 'BFvaDigNev', name: 'Deelnemingen in groepsmaatschappijen', category: 'activa' },
   { code: '1500', rgs: 'BVorOvrRca', ref: 'BVorOvrRca', name: 'Rekening-courant directeur-grootaandeelhouder', category: 'activa' },
