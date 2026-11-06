@@ -5,7 +5,7 @@ import { tx } from '../db/database';
 import type { Ledger, PostLine } from '../core-ledger/ledger';
 import { signedLine } from '../core-ledger/ledger';
 import { ACCOUNTS, REVERSE_CHARGE_ACCOUNTS } from '../core-ledger/accounts';
-import { PURCHASE_VAT_RATES } from '../shared/vat';
+import { PURCHASE_VAT_RATES, customerVatSituation } from '../shared/vat';
 import { formatEuro, roundHalfAwayFromZero } from '../shared/money';
 import { diffDays } from '../shared/dates';
 import { NON_DEDUCTIBLE_VAT } from '../core-ledger/rules';
@@ -16,7 +16,7 @@ import type { SalesVatCode } from '../shared/vat';
 import type { BankService } from '../import/bank';
 import { computeTotals } from '../documents/totals';
 import { detectOwnCustomer, sameCompanyName, type OwnIdentity } from '../intake/own-company';
-import { ValidationError } from '../shared/validation';
+import { ValidationError, normalizeVatNumber } from '../shared/validation';
 import type { Cents } from '../shared/money';
 import { WOOCOMMERCE, fetchWooOrders } from './woocommerce';
 import { SHOPIFY, fetchShopifyOrders } from './shopify';
@@ -55,7 +55,17 @@ function vatCodeFor(pct: number): SalesVatCode {
   return 'nul';
 }
 
+/**
+ * Een bedrijf buiten de EU zonder btw op de order: dat kan de app inlezen, zodra de gebruiker zegt of het een dienst
+ * of goederen zijn (`vatCode`). Een particulier buiten de EU of een order met btw blijft een verkoop die je zelf boekt.
+ */
+function outsideEuBusiness(order: ExternalOrder): boolean {
+  const c = order.customer;
+  return !!c.country && customerVatSituation(c.country, c.vatNumber) === 'buiten-eu' && !!(c.vatNumber?.trim() || c.kvkNumber?.trim()) && order.lines.every((l) => l.vatPercentage === 0);
+}
+
 function foreignOrderIssue(order: ExternalOrder): string | null {
+  if (order.vatCode && outsideEuBusiness(order)) return null;
   return order.customer.country && order.customer.country.toUpperCase() !== 'NL'
     ? 'de klant zit buiten Nederland. Controleer de plaats van levering en het btw-tarief en boek deze verkoop zelf. Buitenlandse btw en OSS verwerkt deze koppeling niet'
     : null;
@@ -63,7 +73,7 @@ function foreignOrderIssue(order: ExternalOrder): string | null {
 
 /** De regels van een order zoals ze op de factuur komen. */
 function invoiceLines(order: ExternalOrder) {
-  return order.lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unitPriceExVat, vatCode: vatCodeFor(l.vatPercentage), vatPercentage: l.vatPercentage }));
+  return order.lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unitPriceExVat, vatCode: order.vatCode && l.vatPercentage === 0 ? order.vatCode : vatCodeFor(l.vatPercentage), vatPercentage: l.vatPercentage }));
 }
 
 /** Het totaal van de factuur die de app van deze order maakt. */
@@ -98,18 +108,20 @@ function priceFits(order: ExternalOrder): { inclusief: boolean; exclusief: boole
  * 'opnieuw' = de factuur is in de app teruggedraaid en wordt nu anders gelezen (#228), 'btw' = onbekend of
  * de prijzen inclusief btw zijn (#228), 'eigen-bedrijf' = de klant is je eigen bedrijf (#231), 'zelf' = de app
  * kan de verkoop niet betrouwbaar inlezen (het totaal past niet bij de regels, of een btw-tarief of korting is
- * niet te lezen): de gebruiker boekt hem zelf en sluit de melding af (#228).
+ * niet te lezen): de gebruiker boekt hem zelf en sluit de melding af (#228), 'buitenland' = een bedrijf buiten de EU
+ * zonder btw op de order: de gebruiker zegt of het een dienst of goederen zijn.
  */
-export type SaleReason = 'opnieuw' | 'btw' | 'eigen-bedrijf' | 'zelf';
+export type SaleReason = 'opnieuw' | 'btw' | 'eigen-bedrijf' | 'zelf' | 'buitenland';
 /**
  * De antwoorden, per vraag: opnieuw inlezen of niet, prijzen inclusief of exclusief btw, geen omzet of toch een
  * gewone verkoop. Bij "geen omzet" met geld op de bank dat de betaling kan zijn, zegt de gebruiker erbij of dat
  * dit geld is ('neutraal-bank') of dat het nog van de betaaldienst komt ('neutraal-betaaldienst'). 'zelf': de
- * gebruiker boekt de verkoop zelf; de app leest hem niet in en vraagt er niet meer naar.
+ * gebruiker boekt de verkoop zelf; de app leest hem niet in en vraagt er niet meer naar. 'dienst-buiten-eu' / 'export':
+ * de btw-soort bij een bedrijf buiten de EU.
  */
-export type SaleAnswer = 'opnieuw' | 'niet' | 'inclusief' | 'exclusief' | 'neutraal' | 'neutraal-bank' | 'neutraal-betaaldienst' | 'verkoop' | 'zelf';
+export type SaleAnswer = 'opnieuw' | 'niet' | 'inclusief' | 'exclusief' | 'neutraal' | 'neutraal-bank' | 'neutraal-betaaldienst' | 'verkoop' | 'zelf' | 'dienst-buiten-eu' | 'export';
 type NeutralAnswer = Extract<SaleAnswer, `neutraal${string}`>;
-const ANSWERS: Record<SaleReason, SaleAnswer[]> = { opnieuw: ['opnieuw', 'niet'], btw: ['inclusief', 'exclusief', 'zelf'], 'eigen-bedrijf': ['neutraal', 'neutraal-bank', 'neutraal-betaaldienst', 'verkoop'], zelf: ['zelf'] };
+const ANSWERS: Record<SaleReason, SaleAnswer[]> = { opnieuw: ['opnieuw', 'niet'], btw: ['inclusief', 'exclusief', 'zelf'], 'eigen-bedrijf': ['neutraal', 'neutraal-bank', 'neutraal-betaaldienst', 'verkoop'], zelf: ['zelf'], buitenland: ['dienst-buiten-eu', 'export', 'zelf'] };
 
 /**
  * Een vraag is open zolang er geen antwoord is, en opnieuw als de boeking van "geen omzet" is teruggedraaid
@@ -248,6 +260,7 @@ export class IntegrationService {
     try {
       const cfg = this.values(id);
       const since = this.state(id).lastSyncAt;
+      this.askOutsideEu(id);
       let result: SyncResult;
       if (id === 'woocommerce') {
         result = this.importOrders(id, await fetchWooOrders(this.fetchImpl, { url: cfg.url!, consumerKey: cfg.consumerKey!, consumerSecret: cfg.consumerSecret! }, since));
@@ -330,7 +343,9 @@ export class IntegrationService {
         result.messages.push(
           outcome === 'btw'
             ? `Order ${order.number}: de app weet niet of de prijzen inclusief of exclusief btw zijn. Niets geboekt; kies het op Vandaag.`
-            : outcome === 'zelf'
+            : outcome === 'buitenland'
+              ? `Order ${order.number}: de klant zit buiten de EU. Niets geboekt; kies op Vandaag of het een dienst of goederen zijn, dan leest de app hem in.`
+              : outcome === 'zelf'
               ? `Order ${order.number}: niet ingelezen. Niets geboekt; op Vandaag staat waarom en wat je kunt doen.`
               : `Order ${order.number}: de klant is je eigen bedrijf. Niet als omzet geboekt; kies op Vandaag wat het was.`,
         );
@@ -351,6 +366,16 @@ export class IntegrationService {
       return 'zelf' as const;
     };
     if (order.unreadable) return manual(order.unreadable);
+    if (!order.vatCode && outsideEuBusiness(order)) {
+      // dezelfde klant al eens zo ingelezen: net als toen, anders eerst de vraag
+      const earlier = this.earlierOutsideEu(source, order);
+      if (!earlier) {
+        this.hold(source, order, 'buitenland', [], questionId);
+        return 'buitenland';
+      }
+      order = { ...order, vatCode: earlier };
+      messages.push(`Order ${order.number}: ${earlier === 'export' ? 'goederen naar' : 'dienst aan'} een klant buiten de EU, net als de vorige keer bij ${order.customer.name}.`);
+    }
     const foreignIssue = foreignOrderIssue(order);
     if (foreignIssue) return manual(foreignIssue);
     if (order.pricesUnknown) {
@@ -387,6 +412,30 @@ export class IntegrationService {
     }
     this.bookOrder(source, order, messages);
     return 'geboekt';
+  }
+
+  /** Wat de gebruiker eerder koos bij een order van dezelfde klant buiten de EU (zelfde btw-nummer, of anders zelfde naam). */
+  private earlierOutsideEu(source: string, order: ExternalOrder): 'dienst-buiten-eu' | 'export' | null {
+    const rows = this.db.prepare(`SELECT answer, order_data FROM integration_questions WHERE source = ? AND reason = 'buitenland' AND answer IN ('dienst-buiten-eu', 'export') ORDER BY id DESC`).all(source) as { answer: 'dienst-buiten-eu' | 'export'; order_data: string }[];
+    const c = order.customer;
+    const vat = normalizeVatNumber(c.vatNumber ?? '');
+    const same = (o: ExternalOrder['customer']) => {
+      const other = normalizeVatNumber(o.vatNumber ?? '');
+      return vat && other ? vat === other : o.name.trim().toLowerCase() === c.name.trim().toLowerCase() && o.country === c.country;
+    };
+    return rows.find((r) => same((JSON.parse(r.order_data) as ExternalOrder).customer))?.answer ?? null;
+  }
+
+  /**
+   * Verkopen aan een bedrijf buiten de EU die de app vroeger altijd zelf liet boeken en nog op Vandaag staan: die
+   * worden de vraag "dienst of goederen?", zodat de koppeling ze alsnog inleest.
+   */
+  private askOutsideEu(source: string): void {
+    const rows = this.db.prepare(`SELECT id, order_data FROM integration_questions WHERE source = ? AND reason = 'zelf' AND answer IS NULL`).all(source) as { id: number; order_data: string }[];
+    for (const r of rows) {
+      const order = JSON.parse(r.order_data) as ExternalOrder;
+      if (!order.unreadable && outsideEuBusiness(order)) this.db.prepare(`UPDATE integration_questions SET reason = 'buitenland', signals = '[]' WHERE id = ?`).run(r.id);
+    }
   }
 
   private ownSale(order: ExternalOrder) {
@@ -461,7 +510,7 @@ export class IntegrationService {
       const relation =
         (c.email ? this.relations.findByEmail(c.email) : undefined) ??
         this.relations.create({ name: c.name, email: c.email, address: c.address, postcode: c.postcode, city: c.city, country: c.country ?? 'NL', vat_number: c.vatNumber ?? undefined, type: 'klant' });
-      if (c.country && c.country !== 'NL' && order.lines.some((l) => l.vatPercentage === 0)) {
+      if (!order.vatCode && c.country && c.country !== 'NL' && order.lines.some((l) => l.vatPercentage === 0)) {
         messages.push(`Order ${order.number}: buitenlandse klant met 0% BTW — controleer of dit ICP (rubriek 3b) of OSS is.`);
       }
       const draft = this.invoices.createDraft({
@@ -531,6 +580,8 @@ export class IntegrationService {
    *  - 'inclusief' / 'exclusief' (#228): hoe de prijzen per regel bedoeld zijn. Past dat niet bij wat er
    *    betaald is, dan een melding in gewone taal en blijft de vraag staan.
    *  - 'zelf' (#228): de gebruiker boekt de verkoop zelf; de app boekt niets en vraagt er niet meer naar.
+   *  - 'dienst-buiten-eu' / 'export': een bedrijf buiten de EU kocht een dienst of goederen; de factuur krijgt die
+   *    btw-soort. Een volgende order van dezelfde klant leest de app daarna vanzelf zo in.
    *  - 'verkoop' / 'neutraal' (#231), bij een verkoop aan je eigen bedrijf. 'verkoop': toch een gewone betaalde
    *    factuur, met omzet en btw. 'neutraal': geen factuur, geen omzet en geen btw; het geld dat de betaaldienst
    *    ervoor uitbetaalt telt als privé-storting. Dat staat op de tussenrekening, net als bij een gewone
@@ -556,6 +607,7 @@ export class IntegrationService {
         return;
       }
       if (answer === 'opnieuw') this.releaseReversed(row.source, order);
+      else if (answer === 'dienst-buiten-eu' || answer === 'export') order = { ...order, vatCode: answer };
       else {
         if (!priceFits(order)[answer]) {
           const total = answer === 'inclusief' ? linesTotal(order.lines) : invoiceTotal(order);

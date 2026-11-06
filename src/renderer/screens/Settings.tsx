@@ -178,7 +178,30 @@ export function SettingsScreen() {
             </select>
           </Field>
           {draft.legalForm === 'vof' && <PartnersSettings draft={draft} saved={settings} set={set} />}
-          {draft.legalForm === 'bv' && <p className="small muted">Een bv betaalt vennootschapsbelasting over de winst; jij betaalt inkomstenbelasting over je loon als directeur. De app maakt daar geen schatting van; vraag je boekhouder.</p>}
+          {draft.legalForm === 'bv' && <>
+            <p className="small muted">Een bv betaalt vennootschapsbelasting over de winst; jij betaalt inkomstenbelasting over je loon als directeur. De app maakt daar geen schatting van; vraag je boekhouder.</p>
+            <h3>Loon van de directeur</h3>
+            <label className="row"><input type="checkbox" checked={draft.loon !== null} onChange={(e) => set({ loon: e.target.checked ? { bruto: 0, loonheffing: 0, netto: 0, vanaf: new Date().toISOString().slice(0, 7) } : null })} /> Ik krijg elke maand loon uit de bv: zet het loon als voorstel op Vandaag</label>
+            {draft.loon && (
+              <div className="grid cols-2" data-testid="loon-instellingen">
+                <Field label="Bruto per maand" hint="van de loonstrook">
+                  <MoneyInput value={draft.loon.bruto} onChange={(v) => set({ loon: { ...draft.loon!, bruto: v ?? 0 } })} />
+                </Field>
+                <Field label="Loonheffing per maand" hint="loonbelasting en premies die de bv afdraagt">
+                  <MoneyInput value={draft.loon.loonheffing} onChange={(v) => set({ loon: { ...draft.loon!, loonheffing: v ?? 0 } })} />
+                </Field>
+                <Field label="Netto per maand" hint="wat je op je privérekening krijgt; bruto = loonheffing + netto">
+                  <MoneyInput value={draft.loon.netto} onChange={(v) => set({ loon: { ...draft.loon!, netto: v ?? 0 } })} />
+                </Field>
+                <Field label="Vanaf welke maand" hint="eerdere maanden komen niet terug">
+                  <input type="month" value={draft.loon.vanaf} onChange={(e) => set({ loon: { ...draft.loon!, vanaf: e.target.value } })} />
+                </Field>
+                <p className="small muted" style={{ gridColumn: '1 / -1', margin: 0 }}>
+                  Elke maand vanaf de 20e staat op Vandaag de vraag "Loon {'{maand}'} boeken?". Pas na <em>Ja</em> boekt de app: loon directeur-grootaandeelhouder aan af te dragen loonheffing en nog te betalen nettoloon. Op het bankscherm kies je daarna <em>Nettoloon betaald</em> en <em>Loonheffing betaald</em>. De loonstrook zelf komt van je salarisadministratie; pensioenpremie en andere inhoudingen boek je apart (boekhoudermodus, correctieboeking).
+                </p>
+              </div>
+            )}
+          </>}
           {draft.legalForm !== 'bv' && <>
             <label className="row"><input type="checkbox" checked={draft.ibConfirmed} onChange={(e) => set({ ibConfirmed: e.target.checked })} /> Ik ben ondernemer voor de inkomstenbelasting (bij twijfel: check dit met mijn boekhouder)</label>
             <p className="small muted">Dat hangt onder meer af van zelfstandigheid, winstverwachting en ondernemersrisico. Het urencriterium is een aparte voorwaarde voor sommige aftrekposten. Zolang dit niet is bevestigd, rekent de schatting zonder ondernemersaftrek, mkb-winstvrijstelling en KIA.</p>

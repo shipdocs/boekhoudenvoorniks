@@ -901,6 +901,49 @@ export function PartnerChoice({ amount, busy, onPick }: { amount: number; busy: 
   );
 }
 
+/**
+ * Boekhoudermodus: een betaling op een balansrekening zetten (rekening-courant, lening, waarborgsom, loonheffing, …),
+ * zonder btw en zonder zakelijk deel. De lijst bevat alleen rekeningen zonder eigen stroom in de app; de rest heeft
+ * eigen knoppen. Gewone gebruikers zien deze keuze niet.
+ */
+function BalanceChoice({ txId, busy, onBook }: { txId: number; busy: boolean; onBook: (rgs: string, description: string) => void }) {
+  const accounts = useLoad(() => api.bank.balanceAccounts(), [txId]);
+  const [open, setOpen] = useState(false);
+  const [rgs, setRgs] = useState('');
+  const [description, setDescription] = useState('');
+  const list = accounts.data ?? [];
+  return (
+    <>
+      <button disabled={busy} className={open ? 'selected' : ''} aria-expanded={open} data-testid="balansrekening" onClick={() => setOpen(!open)}>
+        Balansrekening (boekhouder)
+        <div className="hint">Geen kosten en geen omzet: bijvoorbeeld de rekening-courant met de directeur, een lening, een waarborgsom of af te dragen loonheffing. Zonder btw.</div>
+      </button>
+      {open && (
+        <div className="card flat">
+          <Field label="Welke balansrekening?" hint="alleen rekeningen zonder eigen knop; bank, kas, klanten, leveranciers, btw en privé kies je hierboven">
+            <select value={rgs} onChange={(e) => setRgs(e.target.value)} aria-label="Balansrekening">
+              <option value="">Kies een rekening…</option>
+              {list.map((a) => <option key={a.rgs} value={a.rgs}>{a.code} {a.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Omschrijving (mag leeg)" hint="anders de omschrijving van de bank">
+            <input value={description} maxLength={120} onChange={(e) => setDescription(e.target.value)} />
+          </Field>
+          <ErrorBox error={accounts.error} />
+          <div className="row end"><Button kind="primary" disabled={busy || !rgs} onClick={() => onBook(rgs, description)}>Op deze rekening zetten</Button></div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Bv: de betalingen die bij de loonboeking horen (nettoloon, loonheffing) en de vennootschapsbelasting; elk op zijn balansrekening. */
+const BV_PAYMENT_CHOICES = [
+  { rgs: 'BSchSalNet', label: 'Nettoloon betaald', hint: 'Het loon van de directeur dat je na "Loon boeken" nog moest betalen: haalt de schuld "nog te betalen nettoloon" weg. Geen kosten (die staan al bij het loon) en geen btw', description: 'Nettoloon betaald' },
+  { rgs: 'BSchBepLhe', label: 'Loonheffing betaald', hint: 'De aangifte loonheffingen betaald aan de Belastingdienst: haalt de schuld "af te dragen loonheffing" weg. Geen kosten en geen btw', description: 'Loonheffing betaald' },
+  { rgs: 'BSchBepVpb', label: 'Vennootschapsbelasting betaald', hint: 'Een (voorlopige) aanslag vennootschapsbelasting betaald: komt op "te betalen vennootschapsbelasting". De aanslag zelf boekt je boekhouder met een correctieboeking', description: 'Vennootschapsbelasting betaald' },
+] as const;
+
 export function CategorizeTransaction({ id }: { id: number }) {
   const { go, meta, showInvestmentSaved, settings } = useApp();
   // vof of maatschap met vennoten: bij privé kiezen welke vennoot
@@ -1216,6 +1259,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
                     )}
                   </Fragment>
                 ))}
+                {settings.advancedMode && <BalanceChoice txId={t.id} busy={busy} onBook={(rgs, description) => void done(api.bank.bookBalance(t.id, rgs, description))} />}
               </div>
             </>
           ) : (
@@ -1255,12 +1299,19 @@ export function CategorizeTransaction({ id }: { id: number }) {
                     <div className="hint">Geld opzij gezet binnen je eigen bank: geen kosten</div>
                   </button>
                 ))}
+                {settings.legalForm === 'bv' && BV_PAYMENT_CHOICES.map((c) => (
+                  <button key={c.rgs} disabled={busy} data-testid={`bv-${c.rgs}`} onClick={() => void done(api.bank.bookBalance(t.id, c.rgs, c.description))}>
+                    {c.label}
+                    <div className="hint">{c.hint}</div>
+                  </button>
+                ))}
                 {meta.otherDestinations.filter((d) => ['btw', 'overboeking', 'onbekend'].includes(d.key)).map((d) => (
                   <button key={d.key} disabled={busy} onClick={() => void done(api.bank.book(t.id, { account: d.account }))}>
                     {d.label}
                     {'hint' in d && d.hint && <div className="hint">{d.hint}</div>}
                   </button>
                 ))}
+                {settings.advancedMode && <BalanceChoice txId={t.id} busy={busy} onBook={(rgs, description) => void done(api.bank.bookBalance(t.id, rgs, description))} />}
               </div>
             </>
           )}

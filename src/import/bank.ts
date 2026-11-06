@@ -243,6 +243,8 @@ export interface BookToAccountInput {
   jobId?: number | null;
   /** verkoop via een ander systeem (Mollie, webshop, kassa) */
   channel?: string | null;
+  /** balansrekening (boekhoudermodus, loon bij een bv): geen kosten, dus geen zakelijk deel en geen btw */
+  balance?: boolean;
   /**
    * Zakelijk deel van een uitgave in procenten (1–100). Weglaten = wat eerder voor deze tegenpartij
    * is opgegeven, anders 100. Wordt onthouden voor deze tegenpartij.
@@ -1704,6 +1706,31 @@ export class BankService {
   }
 
   /**
+   * Balansrekeningen die je in de boekhoudermodus (en bij loon van een bv) bij een betaling kunt kiezen: alleen
+   * rekeningen zonder eigen stroom in de app. Bank, kas, kruisposten, debiteuren, crediteuren, btw, vraagposten,
+   * eigen vermogen/privé en bedrijfsmiddelen hebben eigen knoppen en controles en blijven buiten de lijst.
+   */
+  balanceAccounts(): ReturnType<Ledger['listAccounts']> {
+    const own = new Set((this.db.prepare('SELECT account_id FROM bank_accounts').all() as { account_id: number }[]).map((r) => r.account_id));
+    const blocked = new Set<string>([ACCOUNTS.kas, ACCOUNTS.bank, ACCOUNTS.kruisposten, ACCOUNTS.tussenrekeningPsp, ACCOUNTS.debiteuren, ACCOUNTS.crediteuren, ACCOUNTS.vraagposten]);
+    return this.ledger
+      .listAccounts()
+      .filter((a) => (a.category === 'activa' || a.category === 'passiva') && !own.has(a.id) && !blocked.has(a.rgs_code))
+      // liquide middelen, eigen vermogen en privé, bedrijfsmiddelen, voorraad en onderhanden werk: eigen stroom
+      .filter((a) => !/^(BLiq|BEiv|BMva|BVrd)/.test(a.rgs_code));
+  }
+
+  /**
+   * Een betaling op een balansrekening uit `balanceAccounts()` zetten (boekhoudermodus): zonder btw en zonder
+   * zakelijk deel. Bijvoorbeeld het nettoloon van de directeur van een bv, de aflossing van een lening of een waarborgsom.
+   */
+  bookBalance(txId: number, rgs: string, description?: string | null): number {
+    const account = this.balanceAccounts().find((a) => a.rgs_code === rgs);
+    if (!account) throw new ValidationError('Kies een balansrekening uit de lijst; bank, kas, klanten, leveranciers, btw en privé hebben hun eigen knoppen');
+    return this.bookToAccount(txId, { account: rgs, vatCode: 'geen', balance: true, ...(description?.trim() ? { description: description.trim() } : {}) });
+  }
+
+  /**
    * Boekt een transactie direct op een grootboekrekening ("kantoorkosten", "privé", …),
    * inclusief BTW-splitsing. De gebruiker ziet alleen een categorie en een BTW-keuze.
    */
@@ -1721,7 +1748,7 @@ export class BankService {
       // omzet komt op de omzetrekening die bij de btw hoort (21%, 0% buiten de EU, …): zo belandt het in de juiste rubriek
       const account = target.category === 'omzet' && isSalesVatCode(vatCode) ? SALES_ACCOUNTS[vatCode]?.revenue ?? target.rgs_code : target.rgs_code;
       // Hetzelfde zakelijke deel bij aankoop en terugbetaling van kosten of bedrijfsmiddelen.
-      const expense = target.category === 'kosten' || (target.category === 'activa' && (t.amount < 0 || target.rgs_code === ACCOUNTS.inventaris || target.rgs_code === ACCOUNTS.vervoermiddelen));
+      const expense = !input.balance && (target.category === 'kosten' || (target.category === 'activa' && (t.amount < 0 || target.rgs_code === ACCOUNTS.inventaris || target.rgs_code === ACCOUNTS.vervoermiddelen)));
       if (input.businessPct !== undefined && expense && t.counter_name) setBusinessShare(this.db, t.counter_name, input.businessPct, input.partnerNo);
       const pct = expense ? businessPct(input.businessPct ?? businessShareFor(this.db, t.counter_name)) : 100;
       // vof met vennoten: het privédeel gaat naar de gekozen (of bij deze tegenpartij onthouden) vennoot
