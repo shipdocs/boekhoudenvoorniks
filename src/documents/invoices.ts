@@ -228,8 +228,10 @@ export class InvoiceService {
   /**
    * Maakt een concept definitief: ken een doorlopend factuurnummer toe, bevries klant- en
    * bedrijfsgegevens en totalen, en boek automatisch de journaalpost. Alles in één transactie.
+   * `number`: een factuur die al buiten de app bestaat (bv. uit Mollie Facturen) houdt zijn eigen nummer; de
+   * nummerreeks van de app blijft dan onaangeroerd.
    */
-  finalize(id: number): Invoice {
+  finalize(id: number, opts: { number?: string } = {}): Invoice {
     return tx(this.db, () => {
       const inv = this.get(id);
       if (inv.status !== 'concept') throw new ValidationError(`Factuur ${inv.number} is al definitief`);
@@ -247,11 +249,13 @@ export class InvoiceService {
         }
       }
 
-      const next = this.nextNumber(inv.invoice_date);
-      this.settings.setCounter(next.key, next.sequence);
-      const number = next.number;
+      const external = opts.number?.trim();
+      if (external !== undefined && !external) throw new ValidationError('Deze factuur heeft geen factuurnummer');
+      const next = external ? null : this.nextNumber(inv.invoice_date);
+      if (next) this.settings.setCounter(next.key, next.sequence);
+      const number = external ?? next!.number;
       if (this.db.prepare('SELECT 1 FROM invoices WHERE number = ?').get(number)) {
-        throw new ValidationError(`Factuurnummer ${number} bestaat al. Zet het volgende factuurnummer hoger bij Instellingen → Facturen & offertes`);
+        throw new ValidationError(external ? `Factuurnummer ${number} staat al in de app` : `Factuurnummer ${number} bestaat al. Zet het volgende factuurnummer hoger bij Instellingen → Facturen & offertes`);
       }
       const totals = inv.totals;
       const entryId = this.postInvoice(id, inv.invoice_date, this.vatDateOption(inv.lines.map((l) => l.vat_code), inv.invoice_date, inv.delivery_date, inv.delivery_date_to), totals, relation.id, relation.name, number);

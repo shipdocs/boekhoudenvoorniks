@@ -76,6 +76,11 @@ function invoiceLines(order: ExternalOrder) {
   return order.lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unitPriceExVat, vatCode: order.vatCode && l.vatPercentage === 0 ? order.vatCode : vatCodeFor(l.vatPercentage), vatPercentage: l.vatPercentage }));
 }
 
+/** De dag waarop voor de order betaald is. */
+function paidOn(order: ExternalOrder): string {
+  return order.paidDate ?? order.date;
+}
+
 /** Het totaal van de factuur die de app van deze order maakt. */
 function invoiceTotal(order: ExternalOrder): Cents {
   return computeTotals(invoiceLines(order)).total;
@@ -267,10 +272,11 @@ export class IntegrationService {
       } else if (id === 'shopify') {
         result = this.importOrders(id, await fetchShopifyOrders(this.fetchImpl, { shop: cfg.shop!, accessToken: cfg.accessToken! }, since));
       } else if (id === 'mollie-facturen') {
-        // een teruggedraaide factuur is niet "bekend": die leest de app opnieuw, ook als hij verder terug staat
-        const reversed = this.reversedOrders(id);
-        const known = new Set([...this.knownOrders(id)].filter((x) => !reversed.has(x)));
-        result = this.importOrders(id, await fetchMollieSalesInvoices(this.fetchImpl, { apiKey: cfg.apiKey! }, known, reversed));
+        // een teruggedraaide factuur en een factuur die in de app nog open staat zijn niet "bekend": die leest de
+        // app opnieuw, ook als ze verder terug staan
+        const wanted = new Set([...this.reversedOrders(id), ...this.openDocuments(id)]);
+        const known = new Set([...this.knownOrders(id)].filter((x) => !wanted.has(x)));
+        result = this.importOrders(id, await fetchMollieSalesInvoices(this.fetchImpl, { apiKey: cfg.apiKey! }, known, wanted));
       } else if (id === 'mollie') {
         result = this.importPayouts(id, await fetchMollieSettlements(this.fetchImpl, { apiKey: cfg.apiKey! }, this.knownPayouts(id)));
       } else {
@@ -304,11 +310,12 @@ export class IntegrationService {
    * inclusief btw zijn, een teruggedraaide factuur die nu anders gelezen wordt, of een order die de app niet
    * betrouwbaar kan inlezen, bv. doordat het totaal niet bij de regels past (#228). Die wachten als vraag of
    * melding op Vandaag, en er is dan nog niets geboekt. Zo ziet de gebruiker het ook als de app vanzelf bijwerkt.
+   * Een verstuurde factuur uit de bron (`document`) komt er ook in als hij nog niet betaald is: dan als open factuur.
    */
   importOrders(source: string, orders: ExternalOrder[]): SyncResult {
     const result: SyncResult = { created: 0, skipped: 0, messages: [] };
     for (const order of orders) {
-      if (!order.paid) {
+      if (!order.paid && !order.document) {
         result.skipped++;
         continue;
       }
@@ -325,9 +332,14 @@ export class IntegrationService {
       const existing = this.db.prepare('SELECT id, total FROM invoices WHERE external_source = ? AND external_id = ?').get(source, order.externalId) as { id: number; total: Cents | null } | undefined;
       if (existing) {
         result.skipped++;
+        if (this.paidViaProvider(source, existing.id, order)) result.messages.push(`Factuur ${order.number}: betaald via ${this.definition(source).label}.`);
         // teruggedraaid en nu anders gelezen: eerst vragen, want je kunt de factuur intussen zelf opnieuw gemaakt hebben
         const changes = this.rereadChanges(existing, order);
-        if (changes) {
+        // het nummer van de factuur staat al in de app (de teruggedraaide kopie): een tweede keer kan niet
+        if (changes && order.document && this.db.prepare('SELECT 1 FROM invoices WHERE number = ?').get(order.number)) {
+          this.hold(source, order, 'zelf', [`factuur ${order.number} is in de app teruggedraaid en wordt nu anders gelezen (${changes.join(' en ')}), maar het nummer staat al in de app en kan er niet twee keer in. Boek de verbetering zelf`]);
+          result.messages.push(`Factuur ${order.number}: teruggedraaid en nu anders gelezen. Op Vandaag staat wat je kunt doen.`);
+        } else if (changes) {
           this.hold(source, order, 'opnieuw', changes);
           result.messages.push(`Order ${order.number}: de factuur is teruggedraaid en wordt nu anders gelezen. Kies op Vandaag of de app hem opnieuw inleest.`);
         }
@@ -388,6 +400,8 @@ export class IntegrationService {
       return 'btw';
     }
     const ownSale = this.ownSale(order);
+    // "geen omzet" boekt het geld als privé-storting; van een factuur die nog niet betaald is, is er geen geld
+    if (ownSale && !order.paid) return manual('de klant is je eigen bedrijf en de factuur is nog niet betaald');
     if (ownSale) {
       this.hold(source, order, 'eigen-bedrijf', ownSale.signals, questionId);
       return 'eigen-bedrijf';
@@ -503,6 +517,10 @@ export class IntegrationService {
    * Eén order als definitieve, betaalde factuur: verrekend met de bankregel als die er al staat, anders via
    * de tussenrekening. Geeft de bron zelf op wat er betaald is (#228), dan is dat het bedrag van de betaling:
    * een cent verschil met de factuur door afronden wordt een afrondingsverschil; bij meer boekt de app niets.
+   * Een factuur die al buiten de app bestaat (`document`) houdt zijn nummer, datum en vervaldatum. Betaald is hij
+   * alleen met een bankregel die erbij past, of als het geld via de betaaldienst ging; anders blijft hij open en
+   * koppel je hem aan de betaling zodra die op de bank staat. Zo staat er nooit geld op de tussenrekening dat de
+   * betaaldienst niet uitbetaalt.
    */
   private bookOrder(source: string, order: ExternalOrder, messages: string[]): void {
     tx(this.db, () => {
@@ -516,29 +534,31 @@ export class IntegrationService {
       const draft = this.invoices.createDraft({
         relationId: relation.id,
         invoiceDate: order.date,
-        dueDate: order.date,
-        reference: `Webshoporder ${order.number}`,
+        dueDate: order.document ? (order.dueDate ?? order.date) : order.date,
+        reference: order.document ? null : `Webshoporder ${order.number}`,
         externalSource: source,
         externalId: order.externalId,
         lines: invoiceLines(order),
       });
-      const inv = this.invoices.finalize(draft.id);
+      const inv = this.invoices.finalize(draft.id, order.document ? { number: order.number } : {});
       const paid = order.total ?? inv.total!;
       const difference = inv.total! - paid;
       // meer dan een cent per regel is geen afronden meer (bv. een korting die de app niet las): niet raden
       if (Math.abs(difference) > order.lines.length) {
         throw new Error(`overgeslagen: de regels tellen op tot ${formatEuro(inv.total!)}, maar er is ${formatEuro(paid)} betaald (bijvoorbeeld door een korting). De app raadt niet: boek deze verkoop zelf`);
       }
-      const bank = this.bankPaymentFor(order, paid)?.row;
+      // een factuur die nog niet betaald is: open, de betaling komt later
+      const bank = order.paid ? this.bankPaymentFor(order, paid)?.row : undefined;
       if (bank?.status === 'gematcht') {
         // rollback: deze order is al als omzet geboekt via de bank; een factuur erbij telt de omzet dubbel
         throw new Error(`overgeslagen: de bankbetaling van ${formatEuro(paid)} (${bank.transaction_date}) is al als verkoop geboekt. Zet die boeking terug op 'nieuw' en lees de order daarna opnieuw in, dan wordt de factuur direct met de bank verrekend`);
       }
-      const date = bank ? bank.transaction_date : order.date;
+      if (order.document && !bank && !(order.paid && order.paidVia === 'betaaldienst')) return;
+      const date = bank ? bank.transaction_date : paidOn(order);
       if (bank) {
         this.invoices.registerPayment(inv.id, { amount: paid, date, moneyAccount: bank.rgs_code, bankTransactionId: bank.id, description: `Ontvangst ${bank.counter_name ?? ''} factuur`.replace(/\s+/g, ' ') });
       } else {
-        this.invoices.registerPayment(inv.id, { amount: paid, date, moneyAccount: ACCOUNTS.tussenrekeningPsp, description: `Betaling webshoporder ${order.number}` });
+        this.invoices.registerPayment(inv.id, { amount: paid, date, moneyAccount: ACCOUNTS.tussenrekeningPsp, description: `Betaling ${order.document ? "factuur" : "webshoporder"} ${order.number}` });
       }
       if (difference !== 0) {
         this.invoices.registerPayment(inv.id, { amount: difference, date, moneyAccount: ACCOUNTS.betalingsverschillen, description: `Afrondingsverschil webshoporder ${order.number}` });
@@ -652,7 +672,7 @@ export class IntegrationService {
     }
     if (bank && this.bank) return this.bank.bookToAccount(bank.id, { account: prive.contributions, description });
     return this.ledger.post({
-      date: order.date,
+      date: paidOn(order),
       description,
       source: 'integratie',
       sourceRef: `eigen-verkoop:${source}:${order.externalId}`,
@@ -685,7 +705,7 @@ export class IntegrationService {
     const rows = this.bankRows(paidTotal(order));
     const number = String(order.number).trim();
     const word = number ? new RegExp(`(^|[^\\w-])${number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\w-]|$)`, 'i') : null;
-    const near = (r: BankCandidate) => Math.abs(diffDays(order.date, r.transaction_date)) <= BANK_WINDOW_DAYS;
+    const near = (r: BankCandidate) => Math.abs(diffDays(paidOn(order), r.transaction_date)) <= BANK_WINDOW_DAYS;
     const byNumber = rows.filter((r) => word?.test(`${r.description ?? ''} ${r.reference ?? ''}`));
     const only = byNumber.length === 1 ? byNumber[0]! : null;
     if (only && number.replace(/[^a-z0-9]/gi, '').length >= 4 && near(only) && !this.fromOtherCustomer(only)) return { row: only, sure: true };
@@ -730,13 +750,32 @@ export class IntegrationService {
     const byNumber = rows.filter((r) => `${r.description ?? ''} ${r.reference ?? ''}`.toLowerCase().includes(number));
     const name = order.customer.name.trim().toLowerCase();
     const days = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
-    const byName = rows.filter((r) => name && (r.counter_name ?? '').trim().toLowerCase() === name && days(r.transaction_date, order.date) <= 10);
+    const byName = rows.filter((r) => name && (r.counter_name ?? '').trim().toLowerCase() === name && days(r.transaction_date, paidOn(order)) <= 10);
     // liever een nog niet verwerkte bankregel; die verrekent de factuur zonder dubbele omzet
     const pick = (list: typeof rows) => list.find((r) => r.status !== 'gematcht') ?? list[0];
     const numbered = pick(byNumber);
     if (numbered) return { row: numbered, by: 'nummer' as const };
     const named = pick(byName);
     return named ? { row: named, by: 'naam' as const } : undefined;
+  }
+
+  /**
+   * Een factuur uit de bron die in de app al open staat en die volgens de bron intussen via de betaaldienst betaald
+   * is: de betaling via de tussenrekening, zodat de uitbetaling daarna aansluit. Alleen als er nog niets op betaald
+   * is en het bedrag klopt; een betaling via de bank koppel je bij Bank. Geeft true als er iets geboekt is.
+   */
+  private paidViaProvider(source: string, invoiceId: number, order: ExternalOrder): boolean {
+    if (!order.document || !order.paid || order.paidVia !== 'betaaldienst') return false;
+    const inv = this.db.prepare(`SELECT status, total, amount_paid FROM invoices WHERE id = ?`).get(invoiceId) as { status: string; total: Cents | null; amount_paid: Cents } | undefined;
+    if (!inv || inv.status !== 'verzonden' || inv.amount_paid !== 0 || inv.total === null || paidTotal(order) !== inv.total) return false;
+    this.invoices.registerPayment(invoiceId, { amount: inv.total, date: paidOn(order), moneyAccount: ACCOUNTS.tussenrekeningPsp, description: `Betaling via ${this.definition(source).label} factuur ${order.number}` });
+    return true;
+  }
+
+  /** Facturen uit de bron die in de app nog open staan: die bekijkt de app opnieuw, voor het geval ze intussen betaald zijn. */
+  private openDocuments(source: string): Set<string> {
+    const rows = this.db.prepare(`SELECT external_id FROM invoices WHERE external_source = ? AND status = 'verzonden' AND amount_paid = 0 AND credit_of_invoice_id IS NULL`).all(source) as { external_id: string }[];
+    return new Set(rows.map((r) => r.external_id));
   }
 
   /** Orders die er al zijn: als factuur, of als vraag aan de gebruiker (ook als die "geen omzet" koos). */

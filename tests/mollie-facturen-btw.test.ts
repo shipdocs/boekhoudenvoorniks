@@ -41,6 +41,8 @@ const invoice = (over: Record<string, unknown> = {}): MollieInvoice =>
     totalAmount: eur('10.89'),
     issuedAt: '2026-09-01T00:00:00Z',
     paidAt: '2026-09-03T00:00:00Z',
+    // via de betaallink van Mollie: het geld ging via Mollie
+    paymentDetails: { source: 'payment-link' },
     createdAt: '2026-09-01T00:00:00Z',
     ...over,
   }) as MollieInvoice;
@@ -310,8 +312,8 @@ describe('Mollie Facturen: vatMode (#228)', () => {
 });
 
 describe('een factuur die te hoog is ingelezen verbeteren: terugdraaien en opnieuw inlezen (#228)', () => {
-  /** zoals de vorige versie hem inlas: € 10,89 als prijs exclusief btw, dus € 13,18 */
-  const teHoog = (): ExternalOrder => ({ ...mapMollieSalesInvoice(invoice({ vatMode: 'exclusive', totalAmount: undefined })), total: undefined });
+  /** zoals een oude versie hem inlas: € 10,89 als prijs exclusief btw, dus € 13,18, met een nummer uit de eigen reeks */
+  const teHoog = (): ExternalOrder => ({ ...mapMollieSalesInvoice(invoice({ vatMode: 'exclusive', totalAmount: undefined })), total: undefined, document: false });
   function oud(invoices: unknown[] = [invoice()], calls: string[] = []) {
     const ctx = withMollie(invoices, calls);
     expect(ctx.s.integrations.importOrders('mollie-facturen', [teHoog()])).toMatchObject({ created: 1 });
@@ -392,7 +394,7 @@ describe('een factuur die te hoog is ingelezen verbeteren: terugdraaien en opnie
     const { s, api, tasks, books } = withMollie([tien]);
     // eerst gewoon als omzet ingelezen: factuur € 10,01, € 10,00 bij de betaaldienst en een cent afrondingsverschil
     s.integrations.setOwnCompany(() => null, s.bank);
-    s.integrations.importOrders('mollie-facturen', [mapMollieSalesInvoice(tien)]);
+    s.integrations.importOrders('mollie-facturen', [{ ...mapMollieSalesInvoice(tien), document: false }]);
     expect(s.invoices.list()[0]).toMatchObject({ total: 1001, open_amount: 0 });
     expect(books().betaaldienst).toBe(1000);
     expect(s.ledger.balance(ACCOUNTS.betalingsverschillen)).toBe(1);
@@ -435,7 +437,7 @@ describe('een factuur die te hoog is ingelezen verbeteren: terugdraaien en opnie
     const { s, api, tasks, books } = ctx;
     // zoals de vorige versie: te hoog, en gewoon als omzet aan de klant "Stukadoorsbedrijf Piet"
     s.integrations.setOwnCompany(() => null, s.bank);
-    s.integrations.importOrders('mollie-facturen', [{ ...mapMollieSalesInvoice(invoice({ vatMode: 'exclusive', totalAmount: undefined, recipient: eigen })), total: undefined }]);
+    s.integrations.importOrders('mollie-facturen', [{ ...mapMollieSalesInvoice(invoice({ vatMode: 'exclusive', totalAmount: undefined, recipient: eigen })), total: undefined, document: false }]);
     s.integrations.setOwnCompany(() => ({ name: 'Stukadoorsbedrijf Piet', vatNumber: 'NL123456789B01', kvkNumber: '12345678', ibans: [], email: 'piet@example.nl' }), s.bank);
     reverse(s, s.invoices.list()[0]!.id);
     await s.integrations.sync('mollie-facturen');

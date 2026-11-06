@@ -37,7 +37,24 @@ export interface IntegrationDefinition {
 export interface ExternalOrder {
   externalId: string;
   number: string;
+  /** de factuurdatum; bij een webshoporder de dag van de verkoop */
   date: string;
+  /** wanneer er betaald is, als dat een andere dag is dan `date` (bv. een Mollie-factuur die later betaald werd) */
+  paidDate?: string;
+  /** de vervaldatum, als de bron die opgeeft */
+  dueDate?: string;
+  /**
+   * De order is al een verstuurde factuur buiten de app (Mollie Facturen): een document met eigen nummer en datum.
+   * De app neemt hem over zoals hij is, ook als hij nog niet betaald is, en geeft hem geen nummer uit de eigen
+   * reeks. Bij een webshoporder maakt de app zelf de factuur, en alleen van een betaalde order.
+   */
+  document?: boolean;
+  /**
+   * Bij een betaalde `document`-factuur: hoe er betaald is. 'betaaldienst' = het geld kwam binnen bij de betaaldienst
+   * (die het later uitbetaalt), 'elders' = de factuur is daar alleen op betaald gezet (bv. na een overboeking op je
+   * bank). Onbekend: de app gaat ervan uit dat het geld nog op de bank moet binnenkomen.
+   */
+  paidVia?: 'betaaldienst' | 'elders';
   customer: { name: string; email: string | null; address: string | null; postcode: string | null; city: string | null; country: string | null; vatNumber: string | null; kvkNumber?: string | null };
   lines: { description: string; quantity: number; unitPriceExVat: Cents; vatPercentage: number }[];
   paid: boolean;

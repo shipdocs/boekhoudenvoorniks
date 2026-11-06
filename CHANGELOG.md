@@ -2,6 +2,17 @@
 
 ## Nog niet uitgebracht
 
+## 1.10.1 — Facturen uit Mollie zoals ze in Mollie staan
+
+Een factuur die je in Mollie maakt, komt in de app met hetzelfde nummer, dezelfde factuurdatum en dezelfde vervaldatum, ook als hij nog niet betaald is. Op betaald staat hij pas als het geld echt binnen is: via Mollie, of als overboeking op je bank.
+
+### Verbeterd
+- **Facturen uit Mollie komen in de app zoals ze in Mollie staan, ook als ze nog niet betaald zijn.** Een factuur die je in Mollie hebt verstuurd, is een echte factuur. De app neemt hem nu over met het nummer, de factuurdatum en de vervaldatum uit Mollie, en geeft hem geen nummer meer uit de eigen reeks van de app. Een factuur die nog niet betaald is, staat in de app als open factuur. Concepten en geannuleerde facturen neemt de app niet over.
+- **Een factuur die in Mollie alleen op betaald is gezet, staat in de app pas op betaald als het geld op je bank staat.** Betaalde je klant met een overboeking en zette je de factuur in Mollie zelf op betaald, dan is dat geld niet via Mollie gegaan. De app boekt het daarom niet meer bij Mollie, waar het nooit wordt uitbetaald. De factuur blijft open, en zodra de overboeking bij *Bank* binnenkomt, stelt de app voor hem aan die factuur te koppelen. Staat de overboeking er al, dan koppelt de app hem meteen. Betaalde de klant via de betaallink van Mollie, dan gaat de betaling zoals voorheen via Mollie, ook als dat pas na het inlezen gebeurt. Wat al in de app staat, verandert niet.
+
+### Opgelost
+- **Een factuur uit Mollie krijgt in de app weer de factuurdatum uit Mollie.** De app nam de dag waarop de factuur betaald werd als factuurdatum. Een factuur van 21 oktober die op 5 november betaald werd, stond zo in de app op 5 november. Nu neemt de app de factuurdatum over zoals hij in Mollie staat, en boekt de betaling op de dag van betalen. Facturen die al in de app staan, veranderen niet.
+
 ## 1.10.0 — Loon voor de bv, balansrekeningen voor de boekhouder en Mollie-facturen uit het buitenland
 
 Heb je een bv, dan stelt de app elke maand het loon van de directeur voor en kies je bij *Bank* de betaling van nettoloon, loonheffing of vennootschapsbelasting. In de boekhoudermodus zet je een betaling rechtstreeks op een balansrekening, een categorie vind je door een paar letters te typen, en facturen uit Mollie of je webshop aan een bedrijf buiten de EU worden weer ingelezen.
