@@ -120,7 +120,10 @@ interface MollieSalesInvoice {
   totalAmount?: MollieAmount | null;
   issuedAt: string | null;
   paidAt: string | null;
+  dueAt?: string | null;
   createdAt: string;
+  /** hoe de factuur betaald is; 'manual' = in Mollie op betaald gezet, het geld ging niet via Mollie */
+  paymentDetails?: { source?: string | null } | null;
 }
 
 /**
@@ -172,11 +175,18 @@ export function mapMollieSalesInvoice(inv: MollieSalesInvoice): ExternalOrder {
   const contradicted = !inv.vatMode && stated !== undefined && stated === linesTotal(lines) && Math.abs(linesTotalWithVat(lines) - stated) > lines.length;
   const mode = contradicted ? 'niet opgegeven' : inv.vatMode || 'exclusive';
   const total = stated ?? (mode === 'inclusive' ? linesTotal(lines) : undefined);
+  // de app neemt het nummer van de factuur over; zonder nummer is er niets om over te nemen
+  if (!inv.invoiceNumber?.trim()) unreadable ??= 'Mollie gaf geen factuurnummer door';
   const name = r.type === 'business' ? r.organizationName || r.email || 'Klant' : [r.givenName, r.familyName].filter(Boolean).join(' ') || r.email || 'Klant';
   return {
     externalId: inv.id,
     number: inv.invoiceNumber ?? inv.id,
-    date: (inv.paidAt ?? inv.issuedAt ?? inv.createdAt).slice(0, 10),
+    // de factuur bestaat al in Mollie: zijn eigen datum, niet de dag van betalen
+    date: (inv.issuedAt ?? inv.createdAt).slice(0, 10),
+    ...(inv.paidAt ? { paidDate: inv.paidAt.slice(0, 10) } : {}),
+    ...(inv.dueAt ? { dueDate: inv.dueAt.slice(0, 10) } : {}),
+    document: true,
+    ...(inv.status === 'paid' && inv.paymentDetails?.source ? { paidVia: inv.paymentDetails.source === 'manual' ? ('elders' as const) : ('betaaldienst' as const) } : {}),
     customer: {
       name,
       email: r.email,
@@ -207,10 +217,17 @@ function discountAmount(d: MollieDiscount | null | undefined, base: Cents): Cent
 }
 
 /**
+ * Facturen die verstuurd zijn: een bestaand document, betaald of niet. Een concept, een e-factuur die nog
+ * onderweg is of mislukte, en een geannuleerde factuur niet.
+ */
+const ISSUED = new Set(['issued', 'overdue', 'pending-payment', 'payment-reversed', 'paid']);
+
+/**
  * Mollie sorteert nieuwste eerst (zoals bij settlements): stopt zodra een al bekende factuur
  * langskomt. De lijst kent geen datum- of statusfilter, dus overige statussen worden hier al geknipt.
- * `wanted`: facturen die in de app zijn teruggedraaid en opnieuw bekeken moeten worden (#228); die staan
- * verder terug, dus de app leest door tot hij ze heeft gehad.
+ * `wanted`: facturen die de app opnieuw moet bekijken en die verder terug kunnen staan, dus de app leest door
+ * tot hij ze heeft gehad: in de app teruggedraaide facturen (#228), en facturen die in de app nog open staan
+ * (misschien zijn ze intussen via Mollie betaald).
  */
 export async function fetchMollieSalesInvoices(fetchImpl: FetchLike, cfg: { apiKey: string }, knownIds: Set<string>, wanted: Set<string> = new Set()): Promise<ExternalOrder[]> {
   const out: ExternalOrder[] = [];
@@ -225,7 +242,7 @@ export async function fetchMollieSalesInvoices(fetchImpl: FetchLike, cfg: { apiK
         continue;
       }
       pending.delete(inv.id);
-      if (inv.status === 'paid') out.push(mapMollieSalesInvoice(inv));
+      if (ISSUED.has(inv.status)) out.push(mapMollieSalesInvoice(inv));
     }
     url = reachedKnown && pending.size === 0 ? null : page._links.next?.href ?? null;
   }

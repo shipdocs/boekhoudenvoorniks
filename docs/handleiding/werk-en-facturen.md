@@ -63,7 +63,7 @@ Open de factuur en kies *Factuur terugdraaien (creditfactuur)*. Je kunt de hele 
 
 ## Omzet zonder factuur
 
-Krijg je geld binnen uit een webshop, via Mollie of Stripe, of van een ander systeem waarin je al factureerde? Dan maak je geen factuur in de app. Bij de betaling bij *Bank* kies je *Verkoop via een ander systeem*; de app vraagt het btw-tarief en het nummer van de factuur uit dat systeem. Koppelingen voor webshops en betaaldiensten staan bij *Instellingen → Koppelingen*. Is de klant van een gekoppelde verkoop een bedrijf buiten de EU, zonder btw op de factuur? Dan vraagt *Vandaag* één keer of het een dienst of goederen waren; daarna leest de app de factuur in, en volgende facturen aan die klant gaan vanzelf zo.
+Krijg je geld binnen uit een webshop, via Mollie of Stripe, of van een ander systeem waarin je al factureerde? Dan maak je geen factuur in de app. Bij de betaling bij *Bank* kies je *Verkoop via een ander systeem*; de app vraagt het btw-tarief en het nummer van de factuur uit dat systeem. Koppelingen voor webshops en betaaldiensten staan bij *Instellingen → Koppelingen*. Maak je je facturen in Mollie, dan neemt de koppeling *Mollie Facturen* ze over zoals ze daar staan: met hetzelfde nummer en dezelfde datum, en ook als ze nog niet betaald zijn. Betaalt de klant via de betaallink van Mollie, dan staat de factuur vanzelf op betaald. Betaalt hij met een overboeking, dan koppel je die bij *Bank* aan de factuur; dat de factuur in Mollie op betaald staat, is niet genoeg. Is de klant van een gekoppelde verkoop een bedrijf buiten de EU, zonder btw op de factuur? Dan vraagt *Vandaag* één keer of het een dienst of goederen waren; daarna leest de app de factuur in, en volgende facturen aan die klant gaan vanzelf zo.
 
 ## Klanten
 

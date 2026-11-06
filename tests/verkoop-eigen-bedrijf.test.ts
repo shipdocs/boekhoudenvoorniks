@@ -31,6 +31,8 @@ const mollieInvoice = (recipient: Record<string, unknown> = {}) => ({
   lines: [{ description: 'Proefabonnement', quantity: 1, vatRate: '21.00', unitPrice: { value: '9.00', currency: 'EUR' } }],
   issuedAt: '2026-09-10T00:00:00Z',
   paidAt: '2026-09-10T00:00:00Z',
+  // via de betaallink van Mollie: het geld ging via Mollie
+  paymentDetails: { source: 'payment-link' },
   createdAt: '2026-09-10T00:00:00Z',
 });
 

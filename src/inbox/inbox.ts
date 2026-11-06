@@ -1422,7 +1422,7 @@ export class InboxService {
           kind: 'sale-outside-eu',
           icon: '🌍',
           title: `${q.label}: verkoop aan een klant buiten de EU`,
-          question: `${q.label} gaf een betaalde factuur door ${sale}, zonder btw. De klant is een bedrijf buiten de EU. Was het een dienst (bijvoorbeeld software, advies of een abonnement) of waren het goederen? Dan leest de app de factuur in als betaald via ${q.label}. Een volgende factuur aan deze klant gaat daarna vanzelf zo.`,
+          question: `${q.label} gaf een betaalde factuur door ${sale}, zonder btw. De klant is een bedrijf buiten de EU. Was het een dienst (bijvoorbeeld software, advies of een abonnement) of waren het goederen? Dan leest de app de factuur in. Een volgende factuur aan deze klant gaat daarna vanzelf zo.`,
           amount: q.total ?? undefined,
           actions: [
             { id: 'dienst-buiten-eu', label: 'Dienst aan een bedrijf buiten de EU', primary: true },

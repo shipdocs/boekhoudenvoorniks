@@ -129,6 +129,8 @@ describe('integraties (fase 3)', () => {
       lines: [{ description: 'AIS-abonnement september', quantity: 1, vatRate: '21.00', unitPrice: { value: '100.00', currency: 'EUR' } }],
       issuedAt: '2026-09-01T00:00:00Z',
       paidAt: '2026-09-03T00:00:00Z',
+      // via de betaallink van Mollie: het geld ging via Mollie
+      paymentDetails: { source: 'payment-link' },
       createdAt: '2026-09-01T00:00:00Z',
     };
     const draft = { ...invoice, id: 'invoice_2', invoiceNumber: 'I-0043', status: 'draft', paidAt: null };
@@ -140,7 +142,7 @@ describe('integraties (fase 3)', () => {
       amount: { value: '116.11', currency: 'EUR' },
       periods: { '2026': { '09': { revenue: [{ amountGross: { value: '121.00', currency: 'EUR' } }], costs: [{ amountNet: { value: '4.04', currency: 'EUR' }, amountVat: { value: '0.85', currency: 'EUR' }, amountGross: { value: '4.89', currency: 'EUR' } }] } } },
     };
-    const { s } = setup({
+    const { s, db } = setup({
       fetch: mockFetch({
         'api.mollie.com/v2/sales-invoices': { _embedded: { invoices: [invoice, draft] }, _links: { next: null } },
         'api.mollie.com/v2/settlements': { _embedded: { settlements: [settlement] }, _links: { next: null } },
@@ -151,6 +153,8 @@ describe('integraties (fase 3)', () => {
     expect(r).toMatchObject({ created: 1, skipped: 0 });
     const inv = s.invoices.list()[0]!;
     expect(inv).toMatchObject({ total: 12100, status: 'betaald' });
+    // de factuur bestaat al in Mollie: zijn eigen datum, niet de dag waarop hij betaald werd
+    expect(db.prepare('SELECT invoice_date, paid_at FROM invoices WHERE id = ?').get(inv.id)).toEqual({ invoice_date: '2026-09-01', paid_at: '2026-09-03' });
     expect(s.relations.list().find((x) => x.name === 'Scheepvaartbedrijf De Vries')).toMatchObject({ vat_number: 'NL004455667B01', email: 'info@devries.nl' });
     expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(12100);
     // een tweede sync maakt geen dubbele factuur
