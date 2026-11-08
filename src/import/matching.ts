@@ -59,9 +59,10 @@ export class MatchingEngine {
   /**
    * `withRejected`: ook een aankoop waar de gebruiker bij deze betaling eerder "Nee" op zei. Alleen voor
    * het scherm van de betaling zelf: daar kan hij hem alsnog kiezen (een vergissing, of eerst willen
-   * kijken). Vanzelf koppelen en de vragen op Vandaag slaan zo'n paar altijd over.
+   * kijken). Vanzelf koppelen en de vragen op Vandaag slaan zo'n paar altijd over. `withManual`: ook een factuur
+   * die al met de hand als betaald "op de bank" staat; de bankbetaling vervangt dan die handmatige betaling.
    */
-  suggest(t: BankTransaction, openInvoices?: InvoiceSummary[], openPurchases?: PurchaseInvoice[], opts: { withRejected?: boolean } = {}): Suggestion[] {
+  suggest(t: BankTransaction, openInvoices?: InvoiceSummary[], openPurchases?: PurchaseInvoice[], opts: { withRejected?: boolean; withManual?: boolean } = {}): Suggestion[] {
     const text = `${t.description} ${t.reference ?? ''}`;
     const out: Suggestion[] = [];
 
@@ -77,6 +78,20 @@ export class MatchingEngine {
         if (t.counter_iban && rel.iban && t.counter_iban === rel.iban) (score += 50, reasons.push('rekeningnummer van de klant'));
         else if (nameSimilar(t.counter_name, inv.relation_name)) (score += 15, reasons.push('naam lijkt op klant'));
         if (score >= 40) out.push({ kind: 'factuur', invoiceId: inv.id, label: `Factuur ${inv.number} — ${inv.relation_name} · ${formatEuro(inv.open_amount)} open, factuurdatum ${formatDateNl(inv.invoice_date)}`, score, reasons });
+      }
+      // Facturen die al met de hand als betaald "op de bank" staan: deze bankbetaling kan daarvoor in de plaats komen.
+      // Alleen op het scherm van de betaling zelf, nooit vanzelf.
+      if (opts.withManual) {
+        for (const inv of this.invoices.listManuallyPaidByBank()) {
+          if (inv.manual.amount !== t.amount || inv.open_amount >= t.amount) continue;
+          const reasons = ['bedrag klopt met de betaling die je met de hand invoerde'];
+          let score = 50;
+          if (mentionsNumber(text, inv.number)) (score += 60, reasons.push(`factuurnummer ${inv.number} staat in de omschrijving`));
+          const rel = this.relations.get(inv.relation_id);
+          if (t.counter_iban && rel.iban && t.counter_iban === rel.iban) (score += 50, reasons.push('rekeningnummer van de klant'));
+          else if (nameSimilar(t.counter_name, inv.relation_name)) (score += 15, reasons.push('naam lijkt op klant'));
+          if (score >= 65) out.push({ kind: 'factuur', invoiceId: inv.id, label: `Factuur ${inv.number} — ${inv.relation_name} · met de hand als betaald ingevoerd op ${formatDateNl(inv.manual.date)}; deze bankbetaling komt ervoor in de plaats`, score, reasons });
+        }
       }
     } else {
       for (const inv of openInvoices ?? this.invoices.listOpen()) {

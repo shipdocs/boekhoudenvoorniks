@@ -73,6 +73,16 @@ export interface Invoice extends InvoiceRow {
   days_overdue: number;
 }
 
+/** Een betaling die met de hand is ingevoerd (niet uit een afschrift of koppeling). */
+export interface ManualPayment {
+  journalEntryId: number;
+  date: IsoDate;
+  amount: Cents;
+  description: string;
+  /** contant/pin (kas) of "op de bank" zonder bankregel */
+  via: 'kas' | 'bank';
+}
+
 export interface InvoiceSummary {
   id: number;
   number: string | null;
@@ -631,6 +641,70 @@ export class InvoiceService {
     const credit = excludeId === undefined ? undefined : (this.db.prepare('SELECT credit_of_invoice_id FROM invoices WHERE id = ?').get(excludeId) as { credit_of_invoice_id: number | null } | undefined);
     if (credit?.credit_of_invoice_id && invoiceDate < asOf) {
       out.push('Een creditfactuur krijgt de datum waarop je hem verstuurt, niet de datum van de oorspronkelijke factuur; die staat al in de verwijzing. De btw-correctie komt in het tijdvak van de creditfactuur. Kies alleen een eerdere datum als je deze creditfactuur toen al hebt verstuurd.');
+    }
+    return out;
+  }
+
+  /**
+   * Betalingen die met de hand zijn ingevoerd ("Betaling ontvangen": contant/pin of "op de bank") en niet aan een
+   * regel van een afschrift hangen. Die kun je ongedaan maken; een betaling uit een afschrift maak je ongedaan
+   * bij die bankregel zelf. Betalingen van een koppeling (webshop, betaalprovider) tellen hier niet mee.
+   */
+  manualPayments(id: number): ManualPayment[] {
+    this.row(id);
+    const rows = this.db
+      .prepare(
+        `SELECT e.id AS journalEntryId, e.entry_date AS date, e.description, a.rgs_code, l.debit - l.credit AS amount
+         FROM journal_entries e
+         JOIN journal_lines l ON l.journal_entry_id = e.id
+         JOIN chart_of_accounts a ON a.id = l.account_id
+         WHERE e.source = 'bank' AND e.source_ref = ? AND e.status = 'definitief' AND e.reverses_entry_id IS NULL
+           AND a.rgs_code IN (?, ?)
+           AND NOT EXISTS (SELECT 1 FROM bank_transactions b WHERE b.matched_journal_entry_id = e.id)
+         ORDER BY e.entry_date, e.id`,
+      )
+      .all(`invoice:${id}`, ACCOUNTS.bank, ACCOUNTS.kas) as { journalEntryId: number; date: IsoDate; description: string; rgs_code: string; amount: Cents }[];
+    return rows.map((r) => ({ journalEntryId: r.journalEntryId, date: r.date, description: r.description, amount: r.amount, via: r.rgs_code === ACCOUNTS.kas ? 'kas' : 'bank' }));
+  }
+
+  /**
+   * "Betaling ongedaan maken": draait een met de hand ingevoerde betaling terug met een tegenboeking. De factuur
+   * staat daarna weer (deels) open, de omzet en de btw blijven zoals ze waren. Daarna kun je bijvoorbeeld de
+   * echte bankbetaling uit je afschrift aan de factuur koppelen.
+   */
+  undoManualPayment(id: number, journalEntryId: number, date: IsoDate = today()): Invoice {
+    assertIsoDate(date, 'datum');
+    return tx(this.db, () => {
+      const payment = this.manualPayments(id).find((p) => p.journalEntryId === journalEntryId);
+      if (!payment) throw new ValidationError('Deze betaling is niet met de hand ingevoerd, of al ongedaan gemaakt. Een betaling uit je afschrift maak je ongedaan bij die regel bij Bank.');
+      if (this.db.prepare('SELECT 1 FROM invoice_writeoffs WHERE invoice_id = ?').get(id)) throw new ValidationError('Deze factuur is (deels) als oninbaar afgeboekt. Een betaling daarvan kan de app niet zomaar terugdraaien.');
+      return this.undoPayment(id, payment.amount, journalEntryId, date);
+    });
+  }
+
+  /**
+   * Facturen die (deels) betaald zijn met een betaling die met de hand als "op de bank" is ingevoerd. Komt de echte
+   * betaling later uit het afschrift, dan kan die ervoor in de plaats komen (zie `BankService.matchInvoice`).
+   */
+  listManuallyPaidByBank(): (InvoiceSummary & { manual: ManualPayment })[] {
+    const ids = this.db
+      .prepare(
+        `SELECT DISTINCT CAST(substr(e.source_ref, 9) AS INTEGER) AS id
+         FROM journal_entries e
+         JOIN journal_lines l ON l.journal_entry_id = e.id
+         JOIN chart_of_accounts a ON a.id = l.account_id
+         WHERE e.source = 'bank' AND e.source_ref LIKE 'invoice:%' AND e.status = 'definitief' AND e.reverses_entry_id IS NULL
+           AND a.rgs_code = ?
+           AND NOT EXISTS (SELECT 1 FROM bank_transactions b WHERE b.matched_journal_entry_id = e.id)`,
+      )
+      .all(ACCOUNTS.bank) as { id: number }[];
+    if (!ids.length) return [];
+    const wanted = new Set(ids.map((r) => r.id));
+    const out: (InvoiceSummary & { manual: ManualPayment })[] = [];
+    for (const inv of this.list()) {
+      if (!wanted.has(inv.id)) continue;
+      const manual = this.manualPayments(inv.id).filter((p) => p.via === 'bank').at(-1);
+      if (manual && manual.amount > 0) out.push({ ...inv, manual });
     }
     return out;
   }
