@@ -1559,6 +1559,13 @@ export class BankService {
     if (t.amount > 0 && invoice.credit_of_invoice_id) throw new ValidationError('Deze ontvangst kan niet aan een creditfactuur worden gekoppeld');
     const account = this.getAccount(t.bank_account_id);
     tx(this.db, () => {
+      // Al met de hand als betaald "op de bank" ingevoerd, en nu komt de echte betaling uit het afschrift: die komt
+      // ervoor in de plaats. Eerst de handmatige betaling terugdraaien, anders telt het geld dubbel (en lijkt de klant
+      // te veel betaald te hebben). De omzet verandert niet: die staat op de factuur zelf.
+      if (t.amount > 0 && !invoice.credit_of_invoice_id && invoice.open_amount < t.amount) {
+        const manual = this.invoices.manualPayments(invoiceId).find((p) => p.via === 'bank' && p.amount === t.amount);
+        if (manual) this.invoices.undoManualPayment(invoiceId, manual.journalEntryId, t.transaction_date);
+      }
       const inv = this.invoices.registerPayment(invoiceId, {
         amount: t.amount,
         date: t.transaction_date,

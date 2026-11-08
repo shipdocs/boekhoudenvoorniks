@@ -2,6 +2,14 @@
 
 ## Nog niet uitgebracht
 
+## 1.10.2 — Een handmatige betaling ongedaan maken
+
+Zette je een verkoopfactuur met de hand op betaald, en komt de echte betaling later uit je afschrift? Dan maak je de handmatige betaling ongedaan, of laat je de bankbetaling ervoor in de plaats komen. Het geld telt niet dubbel, en je omzet en btw blijven zoals ze waren.
+
+### Opgelost
+- **Een met de hand ingevoerde betaling van een factuur kun je ongedaan maken.** Op de factuur staat onder *Met de hand ingevoerde betalingen* elke betaling die je met *Betaling ontvangen* invoerde (contant, pin of op de bank), met de knop *Ongedaan maken*. De app draait de betaling terug met een tegenboeking en de factuur staat weer open. Een betaling uit je afschrift maak je zoals voorheen ongedaan bij die regel bij *Bank*.
+- **Een factuur die met de hand als betaald op de bank staat, kun je bij *Bank* alsnog aan de echte betaling koppelen.** Zo'n factuur stond niet meer in de lijst, omdat hij al betaald was. Nu staat hij bij een betaling met hetzelfde bedrag onder *Al met de hand als betaald ingevoerd*, en als voorstel op het scherm van de betaling. Kies je hem, dan komt de bankbetaling in de plaats van je handmatige betaling: het geld staat er één keer en de klant staat niet op te veel betaald. Dit doet de app alleen als jij hem kiest, nooit vanzelf. Staat de factuur nog deels open, dan telt een betaling zoals voorheen als een volgende termijn.
+
 ## 1.10.1 — Facturen uit Mollie zoals ze in Mollie staan
 
 Een factuur die je in Mollie maakt, komt in de app met hetzelfde nummer, dezelfde factuurdatum en dezelfde vervaldatum, ook als hij nog niet betaald is. Op betaald staat hij pas als het geld echt binnen is: via Mollie, of als overboeking op je bank.

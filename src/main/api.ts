@@ -1247,6 +1247,11 @@ export function createApi(s: Services, host: HostContext) {
       creditNote: (id: number) => s.invoices.createCreditNote(id),
       registerPayment: (id: number, payment: PaymentInput) => s.invoices.registerPayment(id, payment),
       paidCash: (id: number, amount: Cents, date: IsoDate) => s.quick.customerPaidCash(id, amount, date),
+      /** met de hand ingevoerde betalingen (contant/pin of "op de bank" zonder bankregel): die kun je ongedaan maken */
+      manualPayments: (id: number) => s.invoices.manualPayments(id),
+      undoManualPayment: (id: number, journalEntryId: number) => s.invoices.undoManualPayment(id, journalEntryId),
+      /** facturen die met de hand als betaald "op de bank" staan: bij Bank kan de echte betaling ervoor in de plaats komen */
+      manuallyPaidByBank: () => s.invoices.listManuallyPaidByBank(),
       writeOff: (id: number) => s.invoices.writeOffRemainder(id),
       writeOffBadDebt: (id: number, date: IsoDate) => s.invoices.writeOffBadDebt(id, date),
       html: (id: number) => s.invoices.renderHtml(id),
@@ -1670,7 +1675,7 @@ export function createApi(s: Services, host: HostContext) {
         return enrichTransaction(t, new Map(s.bank.listAccounts().map((a) => [a.id, a.name])));
       },
       /** voorstellen op het scherm van de betaling; ook een aankoop waar je eerder "Nee" op zei, zodat je hem alsnog kunt kiezen */
-      suggestions: (txId: number) => s.matching.suggest(s.bank.get(txId), undefined, undefined, { withRejected: true }),
+      suggestions: (txId: number) => s.matching.suggest(s.bank.get(txId), undefined, undefined, { withRejected: true, withManual: true }),
       /** alle gegevens van één betaling, met eerdere betalingen aan dezelfde partij */
       details: (txId: number) => s.bank.details(txId),
       /** de factuur of aankoop die de app bij een betaling voorstelt, om te vergelijken */

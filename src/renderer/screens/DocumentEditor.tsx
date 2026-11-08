@@ -333,6 +333,7 @@ export function DocumentEditor({ kind, id }: { kind: 'factuur' | 'offerte'; id?:
         )}
       </div>
 
+      {invoice && invoice.status !== 'concept' && <ManualPayments id={invoice.id} paidKey={invoice.amount_paid} onChanged={() => void doc.reload()} />}
       {invoice && invoice.status !== 'concept' && <EmailLog id={invoice.id} />}
 
       {newCustomer && (
@@ -477,6 +478,40 @@ function PaymentDialog({ invoiceId, open, onClose, onDone }: { invoiceId: number
         }}>Opslaan</Button>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Met de hand ingevoerde betalingen ("Betaling ontvangen"), met "Ongedaan maken". Bijvoorbeeld: als betaald gezet,
+ * en later komt de echte betaling uit het afschrift. Na ongedaan maken staat de factuur weer open; de omzet en de
+ * btw blijven staan.
+ */
+function ManualPayments({ id, paidKey, onChanged }: { id: number; paidKey: number; onChanged: () => void }) {
+  const list = useLoad(() => api.invoices.manualPayments(id), [id, paidKey]);
+  const { run, busy } = useAction();
+  if (!list.data?.length) return null;
+  return (
+    <>
+      <h2>Met de hand ingevoerde betalingen</h2>
+      <p className="muted small">Klopt een betaling niet, of staat de echte betaling inmiddels bij Bank? Maak hem ongedaan: de factuur staat dan weer open en je kunt de bankbetaling koppelen. De omzet en de btw veranderen niet.</p>
+      <table className="list">
+        <tbody>
+          {list.data.map((p) => (
+            <tr key={p.journalEntryId}>
+              <td><DateNl date={p.date} /></td>
+              <td>{p.via === 'kas' ? 'Contant / pin' : 'Op de bank (met de hand)'}</td>
+              <td className="num"><Euro cents={p.amount} /></td>
+              <td className="num">
+                <Button small disabled={busy} onClick={async () => {
+                  if (!confirm('Deze betaling ongedaan maken? De factuur staat daarna weer open. De omzet en de btw blijven zoals ze zijn.')) return;
+                  if (await run(() => api.invoices.undoManualPayment(id, p.journalEntryId), 'Betaling ongedaan gemaakt. De factuur staat weer open.')) onChanged();
+                }}>Ongedaan maken</Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   );
 }
 

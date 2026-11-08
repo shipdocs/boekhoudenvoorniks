@@ -954,6 +954,8 @@ export function CategorizeTransaction({ id }: { id: number }) {
   const suggestions = useLoad(() => api.bank.suggestions(id), [id]);
   const openInvoices = useLoad(() => api.invoices.list({ status: 'openstaand' }));
   const overdue = useLoad(() => api.invoices.list({ status: 'vervallen' }));
+  // al met de hand als betaald "op de bank" ingevoerd: deze bankbetaling kan daarvoor in de plaats komen
+  const manuallyPaid = useLoad(() => api.invoices.manuallyPaidByBank());
   const [recat, setRecat] = useState(false);
   const [sale, setSale] = useState(false);
   // geld terug van een leverancier (refund): onder welke kosten viel de aankoop?
@@ -994,6 +996,7 @@ export function CategorizeTransaction({ id }: { id: number }) {
   /** categorie gekozen: bij een investering daarna uitleg tonen (met de gekozen btw) */
   const inv = (categoryKey: string, vatCode: string) => (categoryKey === 'investering' ? vatCode : undefined);
   const invoices = [...(overdue.data ?? []), ...(openInvoices.data ?? [])];
+  const replaceable = t.amount > 0 ? (manuallyPaid.data ?? []).filter((i) => i.open_amount <= 0 && i.manual.amount === t.amount) : [];
   const linked = t.status === 'nieuw' ? purchaseQuestion.data ?? null : null;
   const credits = t.status === 'nieuw' && t.amount > 0 ? creditNotes.data ?? [] : [];
   // een creditnota van een leverancier met dit bedrag: geld terug daarvan is geen omzet (#227)
@@ -1190,11 +1193,16 @@ export function CategorizeTransaction({ id }: { id: number }) {
                 </div>
               )}
               <h2>{previousSale.data ? 'Of was het iets anders?' : 'Waar is dit geld voor?'}</h2>
-              {invoices.length > 0 && (
+              {(invoices.length > 0 || replaceable.length > 0) && (
                 <Field label="Betaling van een factuur">
                   <select defaultValue="" onChange={(e) => e.target.value && void done(api.bank.matchInvoice(t.id, Number(e.target.value)))}>
                     <option value="">Kies de factuur…</option>
                     {invoices.map((i) => <option key={i.id} value={i.id}>{i.number} — {i.relation_name} — {(i.open_amount / 100).toFixed(2).replace('.', ',')}</option>)}
+                    {replaceable.length > 0 && (
+                      <optgroup label="Al met de hand als betaald ingevoerd (deze betaling komt ervoor in de plaats)">
+                        {replaceable.map((i) => <option key={i.id} value={i.id}>{i.number} — {i.relation_name} — {(i.manual.amount / 100).toFixed(2).replace('.', ',')}</option>)}
+                      </optgroup>
+                    )}
                   </select>
                 </Field>
               )}

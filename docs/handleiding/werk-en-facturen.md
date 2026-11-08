@@ -55,6 +55,8 @@ Bij *Instellingen → Facturen & offertes* kun je bij elke factuur een e-factuur
 
 Meestal hoef je niets te doen: lees je [bankafschrift](bank.html) in en de app koppelt de betaling aan de factuur. Is er contant of op een andere manier betaald, open dan de factuur en kies *Betaling ontvangen*.
 
+Klopt een betaling die je zo met de hand invoerde niet, of staat de echte betaling inmiddels bij *Bank*? Open de factuur: onder *Met de hand ingevoerde betalingen* kies je *Ongedaan maken*. De factuur staat dan weer open, en je omzet en btw blijven zoals ze waren. Bij *Bank* kun je een factuur die met de hand als betaald *op de bank* staat ook direct kiezen, onder *Al met de hand als betaald ingevoerd*: de bankbetaling komt dan in de plaats van je handmatige betaling, zodat het geld niet dubbel telt.
+
 Bij *Hoe gaat het?* staat *Wie moet nog betalen?* met alle openstaande facturen. Herinneringen gaan automatisch na de dagen die je bij *Instellingen → Facturen & offertes* instelt, als je dat aanzet.
 
 ## Een factuur corrigeren: creditfactuur
