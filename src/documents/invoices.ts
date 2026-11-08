@@ -684,7 +684,8 @@ export class InvoiceService {
 
   /**
    * Facturen die (deels) betaald zijn met een betaling die met de hand als "op de bank" is ingevoerd. Komt de echte
-   * betaling later uit het afschrift, dan kan die ervoor in de plaats komen (zie `BankService.matchInvoice`).
+   * betaling later uit het afschrift, dan kan die ervoor in de plaats komen (zie `BankService.matchInvoice`). Niet een
+   * factuur met een afboeking als oninbaar: daarvan draait de app een betaling niet zomaar terug.
    */
   listManuallyPaidByBank(): (InvoiceSummary & { manual: ManualPayment })[] {
     const ids = this.db
@@ -695,7 +696,8 @@ export class InvoiceService {
          JOIN chart_of_accounts a ON a.id = l.account_id
          WHERE e.source = 'bank' AND e.source_ref LIKE 'invoice:%' AND e.status = 'definitief' AND e.reverses_entry_id IS NULL
            AND a.rgs_code = ?
-           AND NOT EXISTS (SELECT 1 FROM bank_transactions b WHERE b.matched_journal_entry_id = e.id)`,
+           AND NOT EXISTS (SELECT 1 FROM bank_transactions b WHERE b.matched_journal_entry_id = e.id)
+           AND NOT EXISTS (SELECT 1 FROM invoice_writeoffs w WHERE w.invoice_id = CAST(substr(e.source_ref, 9) AS INTEGER))`,
       )
       .all(ACCOUNTS.bank) as { id: number }[];
     if (!ids.length) return [];

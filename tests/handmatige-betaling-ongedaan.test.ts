@@ -71,4 +71,14 @@ describe('een met de hand ingevoerde betaling van een verkoopfactuur', () => {
     s.bank.unmatch(t.id, '2026-09-10');
     expect(s.invoices.get(inv.id).open_amount).toBe(12100);
   });
+
+  it('een factuur met een afboeking als oninbaar komt niet in de lijst om te vervangen (terugdraaien mag daar niet)', () => {
+    const { s, klant } = setup();
+    const inv = factuur(s, klant.id);
+    s.invoices.registerPayment(inv.id, { amount: 6000, date: '2026-09-05' });
+    s.invoices.writeOffBadDebt(inv.id, '2026-10-01');
+    expect(s.invoices.manualPayments(inv.id)).toHaveLength(1);
+    expect(s.invoices.listManuallyPaidByBank()).toEqual([]);
+    expect(() => s.invoices.undoManualPayment(inv.id, s.invoices.manualPayments(inv.id)[0]!.journalEntryId)).toThrow(/oninbaar/);
+  });
 });
