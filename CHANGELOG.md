@@ -2,7 +2,7 @@
 
 ## Nog niet uitgebracht
 
-## 1.10.3 — Mollie-facturen weer op betaald
+## 1.10.4 — Mollie-facturen weer op betaald
 
 Een factuur die je in Mollie maakt en die via Mollie betaald wordt, staat in de app weer op betaald via Mollie.
 

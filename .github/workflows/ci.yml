@@ -15,7 +15,7 @@ concurrency:
 jobs:
   test:
     if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
-    runs-on: ${{ vars.LINUX_RUNNER && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ${{ vars.LINUX_RUNNER && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,7 +36,7 @@ jobs:
   financial-browser-smoke:
     # Kleine, verplichte set kritieke schermflows; de volledige e2e-suite blijft lokaal.
     if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -91,7 +91,7 @@ jobs:
   # nodig, er wordt niets gedeployd). Niet in de openbare broncode: die heeft geen website.
   site-worker:
     if: ${{ github.event.repository.private && github.event_name == 'workflow_dispatch' }}
-    runs-on: ${{ vars.LINUX_RUNNER && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ${{ vars.LINUX_RUNNER && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-24.04' }}
     defaults:
       run:
         working-directory: workers/site
@@ -110,7 +110,7 @@ jobs:
   # Verpakt de app en start hem echt: vangt ontbrekende runtime-afhankelijkheden in het installatiepakket.
   package-smoke:
     if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

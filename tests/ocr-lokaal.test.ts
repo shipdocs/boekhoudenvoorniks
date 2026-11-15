@@ -858,9 +858,12 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
 
   it.runIf(process.platform === 'linux')('met echte processen: alleen de eigen achterblijver stopt', async () => {
     const t = await geinstalleerd({ processInfo: undefined });
-    // een echt programma op de plek van llama-server (de nagebootste download is een script)
-    copyFileSync('/bin/sleep', t.serverPath);
+    // een echt programma op de plek van llama-server (de nagebootste download is een script). Een kopie van Node, niet van
+    // /bin/sleep: sommige systemen (zoals Ubuntu 26.04 met de Rust-coreutils) hebben één programma voor alle commando's,
+    // dat onder een andere naam meteen stopt.
+    copyFileSync(process.execPath, t.serverPath);
     chmodSync(t.serverPath, 0o755);
+    const wacht = ['-e', 'setTimeout(() => {}, 60_000)'];
     const weg = (kind: ChildProcess) => new Promise<void>((resolve) => (kind.exitCode !== null || kind.signalCode !== null ? resolve() : kind.once('exit', () => resolve())));
     const draaitNog = async (kind: ChildProcess) => {
       await new Promise((r) => setTimeout(r, 100));
@@ -871,8 +874,8 @@ describe('ingebouwde tekstherkenning: de server stopt met de app', () => {
     const vorigeApp = { pid: vorige.pid!, started: (await processInfo(vorige.pid!) as ProcessInfo).started };
     vorige.kill('SIGKILL');
     await weg(vorige);
-    const eigen = echtProces(t.serverPath, ['60'], { stdio: 'ignore' });
-    const tweede = echtProces(t.serverPath, ['60'], { stdio: 'ignore' });
+    const eigen = echtProces(t.serverPath, wacht, { stdio: 'ignore' });
+    const tweede = echtProces(t.serverPath, wacht, { stdio: 'ignore' });
     const ander = echtProces('/bin/sleep', ['60'], { stdio: 'ignore' });
     const schrijf = (record: PidRecord) => writeFileSync(t.pidFile, JSON.stringify({ version: 2, servers: [record] }));
     try {
