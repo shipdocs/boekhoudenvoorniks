@@ -62,6 +62,22 @@ describe('Mollie Facturen: de factuur zoals hij in Mollie staat', () => {
     expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(12100);
   });
 
+  it('zoals de API het geeft (lijst met betalingen, gekoppeld aan een Mollie-betaling): betaald via de tussenrekening', async () => {
+    const paymentDetails = [{ source: 'payment', sourceReference: 'tr_voorbeeld123', paidAt: '2026-11-05T10:00:00+00:00' }];
+    const { s, row, sync } = withMollie([factuur({ status: 'paid', paidAt: '2026-11-05T10:00:00Z', paymentDetails })]);
+    await sync();
+    expect(row()).toMatchObject({ status: 'betaald', paid_at: '2026-11-05' });
+    expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(12100);
+  });
+
+  it('lijst met betalingen waarvan de laatste handmatig: open, niets op de tussenrekening', async () => {
+    const paymentDetails = [{ source: 'payment-link', sourceReference: 'pl_voorbeeld' }, { source: 'manual' }];
+    const { s, row, sync } = withMollie([factuur({ status: 'paid', paidAt: '2026-11-05T10:00:00Z', paymentDetails })]);
+    await sync();
+    expect(row()).toMatchObject({ status: 'verzonden', amount_paid: 0 });
+    expect(s.ledger.balance(ACCOUNTS.tussenrekeningPsp)).toBe(0);
+  });
+
   it.each([
     ['in Mollie op betaald gezet', { source: 'manual' }],
     ['zonder opgave hoe er betaald is', undefined],

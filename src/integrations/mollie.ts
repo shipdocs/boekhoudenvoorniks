@@ -122,8 +122,22 @@ interface MollieSalesInvoice {
   paidAt: string | null;
   dueAt?: string | null;
   createdAt: string;
-  /** hoe de factuur betaald is; 'manual' = in Mollie op betaald gezet, het geld ging niet via Mollie */
-  paymentDetails?: { source?: string | null } | null;
+  /**
+   * hoe de factuur betaald is; 'manual' = in Mollie op betaald gezet, het geld ging niet via Mollie. De API geeft
+   * een lijst (één regel per betaling, bv. `[{ source: 'payment', sourceReference: 'tr_…' }]`); oudere voorbeelden
+   * in de documentatie tonen één object. Beide worden gelezen; bij een lijst telt de laatste betaling.
+   */
+  paymentDetails?: MolliePaymentDetail | MolliePaymentDetail[] | null;
+}
+interface MolliePaymentDetail {
+  source?: string | null;
+  sourceReference?: string | null;
+}
+
+/** De bron van de (laatste) betaling van een factuur, ongeacht of Mollie een object of een lijst gaf. */
+function paymentSource(details: MollieSalesInvoice['paymentDetails']): string | null {
+  const d = Array.isArray(details) ? details[details.length - 1] : details;
+  return d?.source ?? null;
 }
 
 /**
@@ -186,7 +200,7 @@ export function mapMollieSalesInvoice(inv: MollieSalesInvoice): ExternalOrder {
     ...(inv.paidAt ? { paidDate: inv.paidAt.slice(0, 10) } : {}),
     ...(inv.dueAt ? { dueDate: inv.dueAt.slice(0, 10) } : {}),
     document: true,
-    ...(inv.status === 'paid' && inv.paymentDetails?.source ? { paidVia: inv.paymentDetails.source === 'manual' ? ('elders' as const) : ('betaaldienst' as const) } : {}),
+    ...(inv.status === 'paid' && paymentSource(inv.paymentDetails) ? { paidVia: paymentSource(inv.paymentDetails) === 'manual' ? ('elders' as const) : ('betaaldienst' as const) } : {}),
     customer: {
       name,
       email: r.email,

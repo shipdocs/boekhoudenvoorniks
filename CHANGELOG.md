@@ -2,6 +2,13 @@
 
 ## Nog niet uitgebracht
 
+## 1.10.3 — Mollie-facturen weer op betaald
+
+Een factuur die je in Mollie maakt en die via Mollie betaald wordt, staat in de app weer op betaald via Mollie.
+
+### Opgelost
+- **Een factuur uit Mollie die via Mollie betaald is, staat in de app weer op betaald.** Mollie geeft bij een betaalde factuur een lijst met betalingen terug. De app las alleen een losse opgave en zag daardoor niet dat het geld via Mollie was gegaan: zo'n factuur bleef open staan en het bedrag kwam niet bij Mollie te staan. Nu leest de app de lijst en kijkt naar de laatste betaling. Ging die via Mollie (betaallink of betaling), dan staat de factuur op betaald via Mollie; is hij in Mollie alleen op betaald gezet, dan blijft hij zoals voorheen open tot het geld op je bank staat.
+
 ## 1.10.2 — Een handmatige betaling ongedaan maken
 
 Zette je een verkoopfactuur met de hand op betaald, en komt de echte betaling later uit je afschrift? Dan maak je de handmatige betaling ongedaan, of laat je de bankbetaling ervoor in de plaats komen. Het geld telt niet dubbel, en je omzet en btw blijven zoals ze waren.
