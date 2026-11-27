@@ -67,7 +67,15 @@ export class MatchingEngine {
     const out: Suggestion[] = [];
 
     if (t.amount > 0) {
+      // Noemt de omschrijving het nummer van een andere factuur (en niet dat van deze), dan gaat de betaling over
+      // die andere factuur, ook als het bedrag en de klant hier kloppen: geen voorstel, en dus ook niet vanzelf.
+      let mentioned: Set<number> | null = null;
+      const aboutOther = (id: number): boolean => {
+        mentioned ??= new Set(this.invoices.knownNumbers().filter((k) => k.numbers.some((n) => mentionsNumber(text, n))).map((k) => k.id));
+        return mentioned.size > 0 && !mentioned.has(id);
+      };
       for (const inv of openInvoices ?? this.invoices.listOpen()) {
+        if (aboutOther(inv.id)) continue;
         const reasons: string[] = [];
         let score = 0;
         if (inv.open_amount === t.amount) (score += 50, reasons.push('bedrag klopt'));

@@ -1705,4 +1705,14 @@ export const migrations: string[] = [
     partner_no INTEGER NOT NULL CHECK (partner_no BETWEEN 1 AND 5)
   );
   `,
+  `
+  -- Een bon en een betaling die de app niet zeker aan elkaar kon koppelen (het bedrag wijkt af door de koers, of de naam
+  -- op het afschrift is anders): de gebruiker zei op Vandaag dat ze bij elkaar horen. Die betaling gaat dan mee als de
+  -- bon geboekt wordt. Alleen additief: een nieuwe, lege tabel.
+  CREATE TABLE IF NOT EXISTS document_bank_choices (
+    document_id INTEGER PRIMARY KEY REFERENCES documents(id),
+    bank_transaction_id INTEGER NOT NULL REFERENCES bank_transactions(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];

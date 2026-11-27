@@ -862,6 +862,18 @@ export class InvoiceService {
     return open;
   }
 
+  /**
+   * De nummers waaronder elke definitieve factuur bekend is: het factuurnummer, en bij een webshoporder ook het
+   * ordernummer (bv. het nummer van Mollie). Zo ziet de bankkoppeling dat een betaling over een andere factuur gaat.
+   */
+  knownNumbers(): { id: number; numbers: string[] }[] {
+    const rows = this.db.prepare(`SELECT id, number, reference FROM invoices WHERE status <> 'concept'`).all() as { id: number; number: string | null; reference: string | null }[];
+    return rows.map((r) => {
+      const order = r.reference ? /^Webshoporder\s+(\S+)$/i.exec(r.reference.trim())?.[1] ?? null : null;
+      return { id: r.id, numbers: [r.number, order].filter((n): n is string => Boolean(n)) };
+    });
+  }
+
   /** Openstaande (definitieve, niet volledig betaalde) facturen — voor matching en dashboard. */
   listOpen(asOf: IsoDate = today()): InvoiceSummary[] {
     return this.list({ to: asOf }, asOf).filter((i) => i.status === 'verzonden' && i.open_amount !== 0);

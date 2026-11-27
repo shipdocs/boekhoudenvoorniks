@@ -1303,6 +1303,52 @@ export class IntakeService {
    * de bon liggen (hetzelfde venster als overal waar de app een betaling en een aankoop vergelijkt).
    * Een regel die als waarschijnlijke dubbel wordt vastgehouden, telt niet mee.
    */
+  /** De betaling die de gebruiker bij deze bon koos ("Ja, hoort erbij"), zolang die nog niet verwerkt is. */
+  private chosenPayment(id: number): BankTransaction | null {
+    const row = this.db.prepare('SELECT bank_transaction_id AS txId FROM document_bank_choices WHERE document_id = ?').get(id) as { txId: number } | undefined;
+    if (!row) return null;
+    const t = this.db.prepare('SELECT id FROM bank_transactions WHERE id = ?').get(row.txId) ? this.bank.get(row.txId) : null;
+    return t && t.status === 'nieuw' && t.amount < 0 ? t : null;
+  }
+
+  /**
+   * Een betaling die misschien bij deze bon hoort, maar te onzeker om vanzelf te koppelen: het bedrag is gelijk (of
+   * binnen de koersmarge bij een bon in een andere munt) en de datum past, maar de naam op het afschrift is anders of
+   * het bedrag wijkt te veel af. Alleen als er precies één zo'n betaling is, en niet als de gebruiker dit paar al
+   * afwees. Op Vandaag wordt dat de vraag "Hoort deze betaling bij de bon?".
+   */
+  possiblePayment(doc: IntakeDocument): BankTransaction | null {
+    const r = doc.result;
+    if (doc.status !== 'controle' || doc.bank_match || !r?.total || !r.invoiceDate) return null;
+    const total = r.total.value;
+    if (total <= 0) return null;
+    const rejected = this.rejected(doc.id, r);
+    const held = this.bank.heldAsDouble();
+    const fits = this.bank.list({ status: 'nieuw', limit: 2000 }).filter((t) => {
+      if (t.amount >= 0 || held.has(t.id) || rejected.has(`pay:${t.id}`)) return false;
+      const amountFits = -t.amount === total || (Boolean(r.foreign) && withinFx(-t.amount, total));
+      return amountFits && dateFits({ invoice_date: r.invoiceDate!.value, due_date: r.dueDate?.value ?? null }, t.transaction_date);
+    });
+    return fits.length === 1 ? fits[0]! : null;
+  }
+
+  /** "Ja, hoort erbij": deze betaling gaat mee als de bon geboekt wordt. */
+  choosePayment(id: number, bankTransactionId: number): IntakeDocument {
+    const doc = this.get(id);
+    if (doc.status !== 'controle') throw new ValidationError('Deze bon is al verwerkt');
+    const t = this.bank.get(bankTransactionId);
+    if (t.status !== 'nieuw' || t.amount >= 0) throw new ValidationError('Deze betaling is intussen anders verwerkt. Kijk het opnieuw na.');
+    this.db.prepare(`INSERT INTO document_bank_choices (document_id, bank_transaction_id) VALUES (?, ?)
+      ON CONFLICT(document_id) DO UPDATE SET bank_transaction_id = excluded.bank_transaction_id, created_at = datetime('now')`).run(id, bankTransactionId);
+    return this.get(id);
+  }
+
+  /** "Nee": dit paar niet meer voorstellen (zolang de bon hetzelfde gelezen is). */
+  rejectPayment(id: number, bankTransactionId: number): void {
+    const doc = this.get(id);
+    this.reject(id, `pay:${bankTransactionId}`, doc.result);
+  }
+
   findBankMatch(result: DocumentResult): BankTransaction | null {
     if (!result.total) return null;
     const foreign = Boolean(result.foreign);
@@ -1568,7 +1614,8 @@ export class IntakeService {
     const result = row.result ? (JSON.parse(row.result) as DocumentResult) : null;
     const issues = JSON.parse(row.issues) as Issue[];
     const link = this.links.forDocument(id);
-    const bankMatch = row.status === 'verwerkt' || !result ? null : (issues.some((i) => i.field === OWN_COMPANY_ISSUE) ? this.findOwnPayment(result) : null) ?? this.findBankMatch(result);
+    const chosen = row.status === 'verwerkt' || !result ? null : this.chosenPayment(id);
+    const bankMatch = row.status === 'verwerkt' || !result ? null : (issues.some((i) => i.field === OWN_COMPANY_ISSUE) ? this.findOwnPayment(result) : null) ?? chosen ?? this.findBankMatch(result);
     const probe = bankMatch && result ? probeOfDocument(result) : null;
     return {
       ...row,
@@ -1579,7 +1626,8 @@ export class IntakeService {
       decisions: row.decisions ? (JSON.parse(row.decisions) as Decision[]) : null,
       bank_match: bankMatch,
       // dezelfde maatstaf als `awaitsDebit` bij het boeken: bedrag, leverancier en datum
-      bank_match_strong: Boolean(bankMatch && probe && fitOf(bankMatch, probe, 'open')?.strength === 'sterk'),
+      // door de gebruiker gekozen: zo zeker als het maar kan
+      bank_match_strong: Boolean(bankMatch && (bankMatch === chosen || (probe && fitOf(bankMatch, probe, 'open')?.strength === 'sterk'))),
       link,
       outcome: this.links.outcome({ ...row, issues }, link),
     };

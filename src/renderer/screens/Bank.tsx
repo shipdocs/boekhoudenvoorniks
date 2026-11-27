@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, PartnerSelect, StatusPill, readAsText, useAction, useApp, useLoad } from '../ui';
+import { Button, DateNl, DropZone, Empty, ErrorBox, Euro, Field, Modal, MoneyInput, PartnerSelect, StatusPill, readAsBytes, readAsText, useAction, useApp, useLoad } from '../ui';
 import type { CsvMapping } from '../../import/csv';
 import { isReverseCharge, saleVatText, type PurchaseVatCode, type SalesVatCode } from '../../shared/vat';
 import { selectedBusinessPct } from '../../shared/business-share';
@@ -793,7 +793,25 @@ function CsvMappingDialog({ headers, rows, content, suggested, onClose, onConfir
 }
 
 /** Categoriekeuze in mensentaal (kosten + overige bestemmingen). */
-export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { initial?: string; onPick: (categoryKey: string, vatCode: string, businessPct?: number, vatRate?: 9 | 21, partnerNo?: number) => void; incoming?: boolean; /** betaald bedrag (positief), voor de investeringshint */ amount?: number; /** de betaling: voor het zakelijke deel dat eerder voor deze tegenpartij is opgegeven */ txId?: number }) {
+/** Het antwoord op "Heb je de bon of factuur?" bij een afschrijving die nog niet verwerkt is. */
+type ReceiptAnswer = 'geen' | 'zeker' | null;
+
+export function CategoryPicker({ initial, onPick, incoming, amount, txId, askReceipt, onLater }: {
+  initial?: string;
+  onPick: (categoryKey: string, vatCode: string, businessPct?: number, vatRate?: 9 | 21, partnerNo?: number) => void;
+  incoming?: boolean;
+  /** betaald bedrag (positief), voor de investeringshint */
+  amount?: number;
+  /** de betaling: voor het zakelijke deel dat eerder voor deze tegenpartij is opgegeven */
+  txId?: number;
+  /**
+   * Een afschrijving die nog niet verwerkt is: eerst vragen of er een bon is. Zonder bon of factuur geen btw-aftrek;
+   * het tarief kies je pas met de bon erbij, of als je zeker weet wat erop stond.
+   */
+  askReceipt?: boolean;
+  /** "De bon komt nog": de betaling een tijd niet vragen (alleen waar dat kan, bv. op Vandaag) */
+  onLater?: () => void;
+}) {
   const { meta } = useApp();
   const share = useLoad(() => (txId !== undefined && !incoming ? api.bank.businessShare(txId) : Promise.resolve(null)), [txId]);
   const [pctInput, setPctInput] = useState<string | null>(null);
@@ -806,18 +824,80 @@ export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { in
   const [vatRate, setVatRate] = useState<9 | 21 | null>(null);
   // vof met vennoten: van wie het privédeel is (leeg: de vennoot die bij deze partij onthouden is)
   const [partnerNo, setPartnerNo] = useState<number | null>(null);
+  // "Heb je de bon of factuur?": alleen bij een afschrijving die nog niet verwerkt is
+  const asking = Boolean(askReceipt && !incoming && txId !== undefined);
+  const receipt = useLoad(() => (asking ? api.bank.receipt(txId!) : Promise.resolve(null)), [txId, asking]);
+  const [answer, setAnswer] = useState<ReceiptAnswer>(null);
+  const [receiptNote, setReceiptNote] = useState<string | null>(null);
+  const { run, busy } = useAction();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const hasReceipt = Boolean(receipt.data);
+  const showVat = !asking || hasReceipt || answer === 'zeker';
+  // zonder bon: boeken zonder btw-aftrek
+  const usedVat: PurchaseVatCode = asking && !hasReceipt && answer === 'geen' ? 'geen' : vat;
+  const answered = !asking || hasReceipt || answer !== null;
+  const addReceipt = async (file: File) => {
+    const bytes = await readAsBytes(file);
+    const r = await run(() => api.documents.addEvidence(file.name, bytes, txId!));
+    if (!r) return;
+    if (r.already_present || r.blocked) setReceiptNote('Deze bon staat al in de app of hoort bij iets anders. Kijk hem na bij Bonnetjes.');
+    else setReceiptNote(null);
+    await receipt.reload();
+  };
   return (
     <div className="grid">
       <Field label={incoming ? 'Waar was dit geld voor?' : 'Waar was deze betaling voor?'}>
         <CategoryChips value={cat} onChange={(key, defaultVat) => { setCat(key); setVat(defaultVat); }} />
       </Field>
-      {!incoming && <InvestmentHint categoryKey={cat} gross={amount} vatCode={vat} onUse={() => { setCat('investering'); setVat('hoog'); }} />}
-      <Field label="Stond er btw op?" hint="Kijk op de bon of factuur. Geen bon? Meestal 21%; verzekeringen, bankkosten en de overheid rekenen geen btw">
-        <select value={vat} onChange={(e) => setVat(e.target.value as PurchaseVatCode)}>
-          {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
-        </select>
-      </Field>
-      {!incoming && <ReverseRateField vatCode={vat} value={vatRate ?? 21} onChange={setVatRate} />}
+      {!incoming && <InvestmentHint categoryKey={cat} gross={amount} vatCode={usedVat} onUse={() => { setCat('investering'); setVat('hoog'); }} />}
+      {asking && (
+        <input ref={fileInput} type="file" accept=".pdf,.xml,.jpg,.jpeg,.png,.webp,.heic" hidden data-testid="bon-bestand" onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (f) void addReceipt(f);
+        }} />
+      )}
+      {asking && hasReceipt && (
+        <p className="small" style={{ margin: 0 }} data-testid="bon-gekoppeld">
+          📎 Bon bij deze betaling: <button className="linklike" onClick={() => void api.app.openAttachment(receipt.data!.file_path)}>{receipt.data!.original_name}</button>
+        </p>
+      )}
+      {asking && !hasReceipt && !receipt.loading && (
+        // geen <Field>: dat is een <label>, en knoppen in een label vangen elkaars klikken
+        <div className="field" role="group" aria-labelledby="bon-vraag-kop">
+          <span id="bon-vraag-kop">Heb je de bon of factuur? <span className="hint">— Zonder bon of factuur mag je geen btw aftrekken.</span></span>
+          <div className="choice" data-testid="bon-vraag">
+            <button disabled={busy} onClick={() => fileInput.current?.click()}>
+              📎 Ja, bon toevoegen
+              <div className="hint">Kies het bestand. Daarna vul je de btw in die op de bon staat.</div>
+            </button>
+            {onLater && (
+              <button disabled={busy} onClick={onLater}>
+                ⏳ De bon komt nog
+                <div className="hint">De app vraagt het je over een week opnieuw. Komt de bon eerder binnen, dan gaat de betaling met de bon mee.</div>
+              </button>
+            )}
+            <button className={answer === 'geen' ? 'selected' : ''} disabled={busy} onClick={() => setAnswer('geen')}>
+              Nee, geen bon
+              <div className="hint">Geboekt zonder btw-aftrek.</div>
+            </button>
+            <button className={answer === 'zeker' ? 'selected' : ''} disabled={busy} onClick={() => setAnswer('zeker')}>
+              Toch btw kiezen
+              <div className="hint">Alleen als je zeker weet wat er op de factuur stond. Je boekhouder of de Belastingdienst kan erom vragen.</div>
+            </button>
+          </div>
+          {receiptNote && <p className="small" role="alert" style={{ margin: '6px 0 0' }}>{receiptNote}</p>}
+          {answer === 'geen' && <p className="small muted" style={{ margin: '6px 0 0' }}>Vind je de bon later terug? Voeg hem toe bij de betaling en kies dan opnieuw de categorie en de btw.</p>}
+        </div>
+      )}
+      {showVat && (
+        <Field label="Stond er btw op?" hint={asking && !hasReceipt ? 'Kies wat er op de factuur staat. Verzekeringen, bankkosten en de overheid rekenen geen btw.' : 'Kijk op de bon of factuur. Verzekeringen, bankkosten en de overheid rekenen geen btw.'}>
+          <select value={vat} onChange={(e) => setVat(e.target.value as PurchaseVatCode)}>
+            {meta.purchaseVat.map((v) => <option key={v.code} value={v.code}>{v.label}</option>)}
+          </select>
+        </Field>
+      )}
+      {!incoming && showVat && <ReverseRateField vatCode={vat} value={vatRate ?? 21} onChange={setVatRate} />}
       {txId !== undefined && !incoming && (
         <Field label="Hoeveel daarvan is zakelijk?" hint={pctNumber < 100 && pctOk ? `Het privédeel (${100 - pctNumber}%) telt niet als kosten en de btw erover trek je niet af. De app onthoudt dit voor ${share.data?.name ?? 'deze partij'}.` : 'Laat je 100 ongewijzigd, dan gebruikt de app je algemene instellingen voor telefoon en internet. Vul een percentage in om voor deze betaling een eigen keuze vast te leggen.'}>
           <span className="row" style={{ gap: 6, alignItems: 'center' }}>
@@ -826,7 +906,7 @@ export function CategoryPicker({ initial, onPick, incoming, amount, txId }: { in
         </Field>
       )}
       {txId !== undefined && !incoming && pctOk && pctNumber < 100 && <PartnerSelect label="Van welke vennoot is het privédeel?" hint="leeg: de vennoot die bij deze partij onthouden is" value={partnerNo} onChange={setPartnerNo} />}
-      <div className="row end"><Button kind="primary" disabled={!pctOk} onClick={() => onPick(cat, vat, selectedBusinessPct(pctInput === null ? null : pctNumber, share.data?.pct), !incoming && isReverseCharge(vat) ? vatRate ?? undefined : undefined, pctNumber < 100 && partnerNo !== null ? partnerNo : undefined)}>Opslaan</Button></div>
+      <div className="row end"><Button kind="primary" disabled={!pctOk || !answered || busy} onClick={() => onPick(cat, usedVat, selectedBusinessPct(pctInput === null ? null : pctNumber, share.data?.pct), !incoming && isReverseCharge(usedVat) ? vatRate ?? undefined : undefined, pctNumber < 100 && partnerNo !== null ? partnerNo : undefined)}>Opslaan</Button></div>
     </div>
   );
 }
@@ -1285,6 +1365,8 @@ export function CategorizeTransaction({ id }: { id: number }) {
                 <CategoryPicker
                   txId={t.id}
                   amount={Math.abs(t.amount)}
+                  askReceipt={t.status === 'nieuw'}
+                  onLater={t.status === 'nieuw' ? () => void done(api.bank.waitForReceipt(t.id)) : undefined}
                   key={String(suggestions.data?.length)}
                   initial={(() => {
                     const s = (suggestions.data ?? []).find((x) => x.kind === 'rekening');

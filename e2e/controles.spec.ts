@@ -26,6 +26,7 @@ test('"weet ik nog niet" oplossen: de betalingen zien en opnieuw indelen', async
   await page.getByRole('button', { name: 'Ongedaan maken' }).click();
   await expect(page.getByRole('heading', { name: 'Was dit zakelijk?' })).toBeVisible();
   await page.locator('.chips button', { hasText: 'Materiaal' }).first().click();
+  await page.getByTestId('bon-vraag').getByRole('button', { name: /Nee, geen bon/ }).click();
   await page.getByRole('button', { name: 'Opslaan', exact: true }).click();
   await expect(page.getByText('Verwerkt ✓').last()).toBeVisible();
 

@@ -17,6 +17,7 @@ import { FetchBar } from './FetchBar';
 
 // bon bekijken: pas laden als je er een opent (PDF.js is groot)
 const DocumentPreview = lazy(() => import('./DocumentReview').then((m) => ({ default: m.DocumentPreview })));
+const DocumentThumb = lazy(() => import('./DocumentReview').then((m) => ({ default: m.DocumentThumb })));
 
 export function Home() {
   const jw = useJobWords();
@@ -205,7 +206,16 @@ export function Home() {
               </div>
             )}
             <div className="task">
-              <div className="icon" aria-hidden>{t.icon}</div>
+              {t.ref.documentId ? (
+                // de bon zelf op de kaart: zo zie je bij het voorstel meteen welke bon het is
+                <button className="doc-thumb" data-testid="bon-voorbeeld" aria-label="Bekijk de bon" title="Bekijk de bon" onClick={() => setViewing(t)}>
+                  <Suspense fallback={<span className="doc-thumb-empty" aria-hidden>🧾</span>}>
+                    <DocumentThumb id={t.ref.documentId} />
+                  </Suspense>
+                </button>
+              ) : (
+                <div className="icon" aria-hidden>{t.icon}</div>
+              )}
               <div className="grow">
                 <div className="title">
                   {t.ref.bankTransactionId || t.ref.documentId || t.ref.purchaseId ? (
@@ -216,6 +226,13 @@ export function Home() {
                   {t.question}
                   {(t.why || t.actions.some((a) => a.hint)) && <> <button className="linklike small" aria-expanded={why === t.key} onClick={() => setWhy(why === t.key ? null : t.key)}>{t.why ? 'Waarom? Wat gebeurt er?' : 'Wat gebeurt er?'}</button></>}
                 </div>
+                {t.payment && (
+                  <div className="small task-payment" data-testid="bon-betaling">
+                    {t.payment.possible
+                      ? <>🏦 Betaling van {formatDateNl(t.payment.date)}: <Euro cents={Math.abs(t.payment.amount)} /> aan {t.payment.name}.</>
+                      : <>🏦 Hoort bij je betaling van {formatDateNl(t.payment.date)}: <Euro cents={Math.abs(t.payment.amount)} /> aan {t.payment.name}. Die gaat mee als je de bon boekt.</>}
+                  </div>
+                )}
                 {why === t.key && (
                   <div className="small muted">
                     {t.why && <div>{t.why}</div>}
@@ -284,6 +301,9 @@ export function Home() {
             <DocumentPreview id={viewing.ref.documentId} />
           </Suspense>
           <div className="q" style={{ marginTop: 12 }}>{viewing.question}</div>
+          {viewing.payment && <p className="small" style={{ margin: '6px 0 0' }}>{viewing.payment.possible
+            ? <>🏦 Betaling van {formatDateNl(viewing.payment.date)}: <Euro cents={Math.abs(viewing.payment.amount)} /> aan {viewing.payment.name}.</>
+            : <>🏦 Hoort bij je betaling van {formatDateNl(viewing.payment.date)}: <Euro cents={Math.abs(viewing.payment.amount)} /> aan {viewing.payment.name}. Die gaat mee als je de bon boekt.</>}</p>}
           <ActionHints task={viewing} />
           <div className="row end" style={{ marginTop: 8 }}>
             <Button onClick={() => setViewing(null)}>Later</Button>
@@ -346,6 +366,15 @@ export function Home() {
             txId={picking.ref.bankTransactionId}
             amount={picking.amount !== undefined ? Math.abs(picking.amount) : undefined}
             initial={picking.ref.categoryKey}
+            askReceipt={(picking.amount ?? 0) < 0}
+            onLater={async () => {
+              const t = picking;
+              setPicking(null);
+              const until = await run(() => api.bank.waitForReceipt(t.ref.bankTransactionId!));
+              if (until) toast(`We vragen het je op ${formatDateNl(until)} weer`);
+              await reload();
+              refreshBadge();
+            }}
             onPick={async (categoryKey, vatCode, businessPct, vatRate, partnerNo) => {
               const t = picking;
               setPicking(null);

@@ -215,6 +215,8 @@ describe('vanzelf boeken: nooit losse kosten naast een aankoop die er al staat',
     const otherAt = tasks.findIndex((x) => x.ref.bankTransactionId === other.id);
     expect(docAt).toBeGreaterThanOrEqual(0);
     expect(otherAt).toBeGreaterThan(docAt);
+    // de betaling die met de bon meegaat, staat op dezelfde kaart
+    expect(tasks[docAt]!.payment).toEqual({ date: '2026-09-11', amount: -12100, name: 'Snelpay Kassa' });
     // de bon genegeerd: de betaling krijgt weer haar eigen vraag
     s.intake.ignore(d.id);
     expect(bankTasks(s, t.id)).toHaveLength(1);

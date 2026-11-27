@@ -2,6 +2,18 @@
 
 ## Nog niet uitgebracht
 
+## 1.11.0 — De bon bij elke betaling
+
+Op Vandaag zie je de bon zelf, met de betaling die erbij hoort. Bij een betaling zonder bon vraagt de app eerst of je de bon hebt, in plaats van te gokken naar het btw-tarief: zonder factuur geen btw-aftrek. En past een bon bijna bij een betaling, bijvoorbeeld door de koers van je bank, dan vraagt de app of ze bij elkaar horen.
+
+### Verbeterd
+- **Een bon en een betaling die bijna passen, vraagt de app als één vraag.** Rekende je bank een andere koers dan op de factuur, of staat er een andere naam op je afschrift (bijvoorbeeld van een betaaldienst), dan koppelde de app de bon en de betaling niet, en stonden ze los van elkaar op Vandaag. Nu staat de betaling op de kaart van de bon met de vraag *Hoort deze betaling bij de bon?*. Bij *Ja* gaat de betaling mee als je de bon boekt; een verschil door de koers wordt een koersverschil. Bij *Nee* komen ze apart terug.
+- **Op Vandaag zie je de bon zelf, met de betaling die erbij hoort.** Een bon die op controle wacht, staat met een kleine afbeelding op de kaart; klik erop om hem groot te bekijken. Past de bon bij een betaling op je bank, dan staat die betaling op dezelfde kaart. Zo zie je bij het voorstel meteen welke bon het is en welke betaling er bij het boeken meegaat.
+- **Bij een betaling zonder bon vraagt de app niet meer naar het btw-tarief.** Kies je bij een afschrijving *Zakelijk*, dan vraagt de app eerst *Heb je de bon of factuur?*. Met de bon erbij vul je de btw in die erop staat. Komt de bon nog, dan vraagt de app het over een week opnieuw. Zonder bon boekt de app de kosten zonder btw-aftrek, want zonder factuur mag je geen btw aftrekken. Weet je zeker wat er op de factuur stond, dan kies je het tarief toch zelf. Bij een bekende winkel boekte *Zakelijk* eerst meteen met 21% btw; dat gebeurt nu alleen nog als de bon al bij de betaling hangt.
+
+### Opgelost
+- **Een betaling die het nummer van een andere factuur noemt, gaat niet meer vanzelf naar de verkeerde factuur.** Betaalde een klant twee keer hetzelfde bedrag, en stond de eerste factuur al op betaald (bijvoorbeeld via Mollie), dan kon de app de betaling van die eerste factuur vanzelf koppelen aan de tweede, nog openstaande factuur: alleen omdat het bedrag en de klant klopten. De betaling van de tweede factuur bleef dan zonder factuur staan. Nu kijkt de app eerst naar het factuurnummer in de omschrijving (ook het ordernummer van een webshop of Mollie): noemt de betaling een andere factuur, dan stelt de app deze factuur niet voor en koppelt hij niets vanzelf.
+
 ## 1.10.5 — Eerst de bon, dan de betaling
 
 Op Vandaag staan bonnen nu boven de vragen over je bankbetalingen. Hoort een betaling bij een bon die nog wacht, dan vraagt de app er niet apart naar: bij het boeken van de bon gaat de betaling mee.

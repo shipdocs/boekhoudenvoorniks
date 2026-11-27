@@ -79,6 +79,9 @@ import { YEAR_END_KINDS, type YearEndKind } from '../closing/year-end';
 import { PARTNER_REQUIRED, partnersActive } from '../shared/partners';
 
 /** Een id van buiten (het scherm): een veilig geheel getal groter dan 0, anders een Nederlandse fout. */
+/** Trek je met deze btw-keuze btw af (21% of 9%)? Dan hoort er een bon of factuur bij. */
+const deductsVat = (vatCode: string | undefined): boolean => vatCode === 'hoog' || vatCode === 'laag';
+
 function photoInt(value: unknown, naam: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) throw new ValidationError(`${naam} moet een geheel getal groter dan 0 zijn`);
   return value;
@@ -436,8 +439,9 @@ export function createApi(s: Services, host: HostContext) {
         s.inbox.answerBank(r.bankTransactionId!, { business: false, categoryKey: r.categoryKey ?? 'overig', vatCode: 'geen', ...(payload?.partnerNo !== undefined ? { partnerNo: payload.partnerNo } : {}) });
         return;
       case 'bank-business:zakelijk':
-        if (!payload?.categoryKey && r.categoryKey) {
-          // bekende leverancier: één klik is genoeg
+        // Bekende leverancier: één klik is genoeg, behalve als je daarmee btw zou aftrekken zonder bon. Dan eerst
+        // de vraag of je de bon hebt (zonder factuur geen btw-aftrek).
+        if (!payload?.categoryKey && r.categoryKey && !(deductsVat(r.vatCode) && !r.documentId)) {
           s.inbox.answerBank(r.bankTransactionId!, { business: true, categoryKey: r.categoryKey, vatCode: r.vatCode });
           return;
         }
@@ -448,6 +452,15 @@ export function createApi(s: Services, host: HostContext) {
           return;
         }
         return { navigate: { screen: 'categorie', id: r.bankTransactionId } };
+      // "Hoort deze betaling bij de bon?" (een betaling die misschien past: koers, andere naam)
+      case 'document-review:betaling-ja':
+      case 'document-review:betaling-nee': {
+        const txId = Number(/^pay:(\d+)$/.exec(r.candidate ?? '')?.[1]);
+        if (!txId) throw new ValidationError('Deze vraag is intussen veranderd. Bekijk de bon opnieuw.');
+        if (actionId === 'betaling-ja') s.intake.choosePayment(r.documentId!, txId);
+        else s.intake.rejectPayment(r.documentId!, txId);
+        return;
+      }
       case 'document-review:klopt': {
         const d = s.intake.get(r.documentId!);
         const res = d.result;
@@ -1554,6 +1567,10 @@ export function createApi(s: Services, host: HostContext) {
       },
       balanceOverview: () => s.inbox.balanceOverview(),
       addAccount: (name: string, iban: string | null, opts?: { pot?: boolean }) => s.bank.addAccount(name, iban, opts),
+      /** "De bon komt nog": deze afschrijving een week niet op Vandaag vragen; geeft de datum terug waarop hij terugkomt. */
+      waitForReceipt: (txId: number) => s.inbox.waitForReceipt(Number(txId)),
+      /** De bon of factuur die al aan deze betaling hangt, als die er is. */
+      receipt: (txId: number) => s.intake.links.forTarget({ kind: 'bank', id: Number(txId) })[0] ?? null,
       updateAccount: (id: number, patch: { name?: string; iban?: string | null; pot?: boolean }) => s.bank.updateAccount(id, patch),
       removableAccount: (id: number) => s.bank.removable(id),
       removeAccount: (id: number) => {

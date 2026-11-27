@@ -26,7 +26,11 @@ import { PRIVATE_CAR_CATEGORIES, type CategoryLookup } from '../shared/categorie
 import { findKnownSupplier, KNOWN_SUPPLIERS } from '../intake/suppliers';
 import { addDays, diffDays, formatDateNl, isIsoDate, periodFor, today, vatDeadline, type IsoDate } from '../shared/dates';
 
+/** Zo lang vraagt Vandaag niet naar een afschrijving waarvan je zei dat de bon nog komt. */
+export const RECEIPT_WAIT_DAYS = 7;
+
 /** Na zoveel dagen zonder nieuwe bankgegevens vragen we om een afschrift in te lezen. */
+
 export const BANK_STALE_DAYS = 14;
 /** Zoveel dagen vóór de vervaldatum herinneren we aan het betalen van een rekening. */
 export const PAY_REMINDER_DAYS = 3;
@@ -175,6 +179,8 @@ export interface Task {
   group?: { key: string; label: string };
   /** "Waarom?": waarom we dit voorstellen */
   why?: string;
+  /** de betaling op de bank die bij deze bon hoort en meegaat als je de bon boekt (op dezelfde kaart getoond) */
+  payment?: { date: IsoDate; amount: Cents; name: string; /** nog niet zeker: de vraag is of hij erbij hoort */ possible?: boolean };
   ref: { relationId?: number; questionId?: number; lineId?: number; seriesId?: number; checkKey?: string; bankAccountId?: number; feedAccountId?: number; statementId?: number; doubleLineId?: number; doublePartId?: number; sameFirstId?: number; sameSecondId?: number; bankTransactionId?: number; invoiceId?: number; purchaseId?: number; documentId?: number; noticeId?: number; mailId?: number; account?: string; upTo?: string; jobId?: number; quoteId?: number; periodKey?: string; supplierKey?: string; categoryKey?: string; vatCode?: string;
     /** het getoonde voorstel (bon): "Ja" voert alleen dit uit, niet een intussen gewijzigd voorstel (#132) */
     proposal?: string;
@@ -389,6 +395,29 @@ export class InboxService {
       if (st && (st.completeTo ?? '') < p.expected_on_bank_since!) out.set(p.id, st.name);
     }
     return out;
+  }
+
+  /**
+   * "De bon komt nog": een afschrijving zonder bon een week niet vragen. Komt de bon intussen binnen en past
+   * hij bij de betaling, dan neemt de bon de betaling mee; anders komt de vraag na die week terug.
+   */
+  waitForReceipt(bankTransactionId: number, asOf: IsoDate = today(), days = RECEIPT_WAIT_DAYS): IsoDate {
+    const t = this.bank.get(bankTransactionId);
+    if (t.status !== 'nieuw' || t.amount >= 0) throw new ValidationError('Deze betaling is al verwerkt of is geen afschrijving');
+    const until = addDays(asOf, days);
+    this.skipTask(`bon-komt-${bankTransactionId}`, until);
+    return until;
+  }
+
+  private waitingForReceipt(bankTransactionId: number, asOf: IsoDate): boolean {
+    const row = this.db.prepare(`SELECT reason FROM task_skips WHERE task_key = ? AND fingerprint = 'x'`).get(`bon-komt-${bankTransactionId}`) as { reason: string } | undefined;
+    return Boolean(row && row.reason > asOf);
+  }
+
+  /** Hangt er al een bon of factuur aan deze betaling (bv. via "Bon toevoegen")? */
+  private receiptOf(bankTransactionId: number): number | undefined {
+    const row = this.db.prepare(`SELECT document_id FROM document_links WHERE bank_transaction_id = ? ORDER BY is_primary DESC, document_id LIMIT 1`).get(bankTransactionId) as { document_id: number } | undefined;
+    return row?.document_id;
   }
 
   private isSkipped(key: string): boolean {
@@ -855,6 +884,22 @@ export class InboxService {
     const reviewDocs = this.intake.list('controle');
     const docForPayment = new Map<number, number>();
     for (const d of reviewDocs) if (d.bank_match) docForPayment.set(d.bank_match.id, d.id);
+    // Een bon zonder zekere betaling, terwijl er precies één betaling is die misschien past (koers, andere naam): één
+    // vraag op de kaart van de bon, "Hoort deze betaling erbij?", en geen losse vraag bij die betaling.
+    const possibleFor = new Map<number, BankTransaction>();
+    const claims = new Map<number, number>();
+    for (const d of reviewDocs) {
+      if (d.bank_match || d.issues.some((i) => i.severity === 'fout') || this.intake.pending(d) || this.intake.ownIssue(d)) continue;
+      const p = this.intake.possiblePayment(d);
+      if (!p || docForPayment.has(p.id)) continue;
+      possibleFor.set(d.id, p);
+      claims.set(p.id, (claims.get(p.id) ?? 0) + 1);
+    }
+    for (const [docId, p] of possibleFor) {
+      // twee bonnen voor dezelfde betaling: geen van beide voorstellen
+      if (claims.get(p.id)! > 1) possibleFor.delete(docId);
+      else docForPayment.set(p.id, docId);
+    }
     // bv: het loon van de directeur, elke maand na bevestiging (nooit vanzelf; de loonstrook komt van elders)
     const loon = this.loon?.active() ?? null;
     if (loon) {
@@ -996,6 +1041,8 @@ export class InboxService {
       // betaling mee; wordt de bon genegeerd of past hij toch niet, dan komt de vraag hier vanzelf terug.
       const waitingDoc = docForPayment.get(t.id);
       if (waitingDoc !== undefined && !ownDocuments.has(waitingDoc)) continue;
+      // "De bon komt nog": die week niet vragen
+      if (t.amount < 0 && this.waitingForReceipt(t.id, asOf)) continue;
       // hoort deze afschrijving bij een aankoop die er al staat? Eerst die vraag, vóór een soort kosten.
       // Past de aankoop maar zwak (alleen het bedrag), dan gaat een open creditfactuur waar de betaling bij
       // lijkt te horen voor: een terugbetaling aan een klant.
@@ -1100,7 +1147,7 @@ export class InboxService {
           actions: [{ id: 'klopt', label: 'Klopt', primary: true }, { id: 'anders', label: 'Iets anders' }],
           group: { key: `bank-category:${supplierKey(who)}:${sug.categoryKey}`, label: `Alle ${who}: ${label}` },
           why: sug.why,
-          ref: { bankTransactionId: t.id, categoryKey: sug.categoryKey, vatCode: sug.vatCode },
+          ref: { bankTransactionId: t.id, categoryKey: sug.categoryKey, vatCode: sug.vatCode, documentId: this.receiptOf(t.id) },
         });
       } else {
         const guess = sug ? this.categories.label(sug.categoryKey) : null;
@@ -1115,7 +1162,7 @@ export class InboxService {
             ? [{ id: 'prive', label: 'Privé', primary: true }, { id: 'zakelijk', label: 'Toch zakelijk' }]
             : [{ id: 'zakelijk', label: 'Zakelijk', primary: true }, { id: 'prive', label: 'Privé' }],
           why: sug && !sug.business && this.fuelIsPrivate(sug.categoryKey) ? sug.why : undefined,
-          ref: { bankTransactionId: t.id, categoryKey: sug?.categoryKey, vatCode: sug?.vatCode },
+          ref: { bankTransactionId: t.id, categoryKey: sug?.categoryKey, vatCode: sug?.vatCode, documentId: this.receiptOf(t.id) },
         });
       }
     }
@@ -1328,6 +1375,27 @@ export class InboxService {
       // een datum in de toekomst (#224) is verkeerd gelezen: eerst bekijken, niet met één klik boeken
       const bad = pending ? d.issues.find((i) => i.field === pending.kind) : own ?? d.issues.find((i) => i.severity === 'fout') ?? futureDateIssue(d.issues) ?? undefined;
       const name = d.result?.supplier?.value ?? d.original_name;
+      const possible = !bad ? possibleFor.get(d.id) : undefined;
+      if (possible) {
+        const total = d.result!.total!.value;
+        const diff = -possible.amount - total;
+        tasks.push({
+          key: `doc-${d.id}`,
+          kind: 'document-review',
+          icon: '📷',
+          title: `${name} ${formatEuro(total)}`,
+          question: `Hoort deze betaling bij de bon? ${diff !== 0 ? `Het bedrag wijkt ${formatEuro(Math.abs(diff))} af van de bon${d.result?.foreign ? ', waarschijnlijk door de koers van je bank' : ''}.` : 'Het bedrag en de datum passen, maar de naam op je afschrift is anders dan op de bon.'}`,
+          amount: total,
+          actions: [
+            { id: 'betaling-ja', label: 'Ja, hoort erbij', primary: true, hint: 'De betaling gaat mee als je de bon boekt; de app vraagt er niet apart naar. Een verschil door de koers boekt de app als koersverschil.' },
+            { id: 'betaling-nee', label: 'Nee', hint: 'De app stelt dit niet meer voor. De bon en de betaling komen apart terug.' },
+            { id: 'open', label: 'Bekijken' },
+          ],
+          payment: { date: possible.transaction_date, amount: possible.amount, name: possible.counter_name || possible.description || 'Onbekend', possible: true },
+          ref: { documentId: d.id, candidate: `pay:${possible.id}` },
+        });
+        continue;
+      }
       const paid = pending?.kind === 'evidence' && pending.target ? `Op ${formatDateNl(pending.target.date)} is ${formatEuro(pending.target.amount)} betaald aan ${pending.target.supplier}. ` : '';
       tasks.push({
         key: `doc-${d.id}`,
@@ -1341,6 +1409,8 @@ export class InboxService {
           : own?.suggestion.level === 'zeker' && d.result?.total && d.result.invoiceDate ? ownCompanyActions()
           : bad ? [{ id: 'open', label: 'Bekijken', primary: true }] : [{ id: 'klopt', label: 'Ja', primary: true }, { id: 'open', label: 'Aanpassen' }],
         group: bad ? undefined : { key: 'document-klopt', label: 'Alle bonnetjes bevestigen' },
+        // de betaling die met de bon meegaat; niet bij de vraag "dezelfde aankoop?" of een factuur van je eigen bedrijf
+        ...(d.bank_match && !pending && !own && proposedPaidWith(d) === 'bank' ? { payment: { date: d.bank_match.transaction_date, amount: d.bank_match.amount, name: d.bank_match.counter_name || d.bank_match.description || 'Onbekend' } } : {}),
         why: own ? `Omdat ${own.suggestion.signals.join(', ')}.` : d.classification ? `Omdat ${d.classification.reasons.map((x) => x.replace(/bewijsstuk bij banktransactie #\d+/, 'bon bij een betaling')).join(', ')}.` : undefined,
         ref: { documentId: d.id, categoryKey: d.classification?.business === false ? undefined : d.classification?.categoryKey, proposal: documentProposal(d), candidate: pending?.candidate },
       });

@@ -53,7 +53,7 @@ Heb je al een eigen mailadres voor je administratie, bijvoorbeeld *administratie
 
 ## Nakijken
 
-Bij een duidelijke bon vult de app alles in en verwerkt hij hem, afhankelijk van hoeveel de app van jou zelf mag doen. Twijfelt hij, dan staat de bon bij *Even controleren* en op *Vandaag*. Op *Vandaag* staan bonnen boven de vragen over je bankbetalingen: staat de betaling van de bon al op je bank, dan vraagt de app daar niet apart naar, want bij *Boeken* gaat de betaling mee. Open de bon en kijk de velden na:
+Bij een duidelijke bon vult de app alles in en verwerkt hij hem, afhankelijk van hoeveel de app van jou zelf mag doen. Twijfelt hij, dan staat de bon bij *Even controleren* en op *Vandaag*. Op *Vandaag* staan bonnen boven de vragen over je bankbetalingen: staat de betaling van de bon al op je bank, dan vraagt de app daar niet apart naar, want bij *Boeken* gaat de betaling mee. Op de kaart zie je de bon zelf; klik erop om hem groot te bekijken. Hoort de bon bij een betaling op je bank, dan staat die betaling eronder: datum, bedrag en naam zoals op je afschrift. Is de app niet zeker, bijvoorbeeld omdat je bank een andere koers rekende of omdat er een andere naam op je afschrift staat, dan vraagt hij *Hoort deze betaling bij de bon?*. Kies *Ja, hoort erbij*: dan gaat de betaling mee als je de bon boekt, en een verschil door de koers boekt de app als koersverschil. Kies *Nee*: dan stelt de app dit niet meer voor en komen de bon en de betaling apart terug. Open de bon en kijk de velden na:
 
 - **Winkel / leverancier**, **Datum**, **Factuur- of bonnummer**.
 - **Wat heb je gekocht?** De categorie bepaalt in welke kostensoort het komt. Typ een paar letters; de app leert van je keuzes.

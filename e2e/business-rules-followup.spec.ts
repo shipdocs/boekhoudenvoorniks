@@ -37,6 +37,8 @@ test('F01: telefoonkeuze 70% blijft gelden bij ongewijzigde bank-UI-default', as
   await page.getByRole('button', { name: 'Telefoon & internet', exact: true }).click();
   const percentage = page.locator('label.field', { hasText: 'Hoeveel daarvan is zakelijk?' }).locator('input');
   await expect(percentage).toHaveValue('100');
+  // de factuur van de provider staat online: zeker 21% btw
+  await page.getByTestId('bon-vraag').getByRole('button', { name: /Toch btw kiezen/ }).click();
   // Het percentageveld is niet gewijzigd.
   await page.getByRole('button', { name: 'Opslaan', exact: true }).click();
   await expect(page.getByText('Verwerkt ✓').last()).toBeVisible();

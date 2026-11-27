@@ -64,21 +64,18 @@ function PdfPage({ doc, number, onSize }: { doc: PDFDocumentProxy; number: numbe
 }
 
 /** Toont het document (alle pagina's onder elkaar); tekent een markering rond het geselecteerde veld (bbox). */
-function DocumentView({ id, mime, highlight, pageSizes }: { id: number; mime: string; highlight: { bbox?: Box; page?: number } | null; pageSizes?: { width: number; height: number }[] }) {
-  const file = useLoad(() => api.documents.file(id), [id]);
+/** Een PDF (base64) geopend met PDF.js; `broken` als hij niet te openen is. */
+function usePdf(base64: string | undefined, mime: string, onReset?: () => void): { pdf: PDFDocumentProxy | null; broken: boolean } {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
-  const [natural, setNatural] = useState<Record<number, { width: number; height: number }>>({});
   const [broken, setBroken] = useState(false);
-  const pages = useRef<Record<number, HTMLDivElement | null>>({});
-
   useEffect(() => {
-    if (!file.data || mime !== 'application/pdf') return;
+    if (!base64 || mime !== 'application/pdf') return;
     let cancelled = false;
     let task: PDFDocumentLoadingTask | null = null;
     void (async () => {
       const pdfjs = await import('pdfjs-dist');
       pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-      task = pdfjs.getDocument({ data: Uint8Array.from(atob(file.data!.base64), (c) => c.charCodeAt(0)) });
+      task = pdfjs.getDocument({ data: Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)) });
       const doc = await task.promise;
       if (!cancelled) setPdf(doc);
     })().catch(() => {
@@ -87,11 +84,36 @@ function DocumentView({ id, mime, highlight, pageSizes }: { id: number; mime: st
     return () => {
       cancelled = true;
       setPdf(null);
-      setNatural({});
       setBroken(false);
+      onReset?.();
       void task?.destroy();
     };
-  }, [file.data, mime]);
+    // onReset is elke render nieuw; alleen opnieuw bij een ander bestand
+  }, [base64, mime]);
+  return { pdf, broken };
+}
+
+/**
+ * De bon klein, voor op een kaart op Vandaag: de eerste pagina of de foto. Zo zie je bij het voorstel meteen
+ * welke bon het is; klikken opent hem groot (de knop eromheen doet dat).
+ */
+export function DocumentThumb({ id }: { id: number }) {
+  const doc = useLoad(() => api.documents.get(id), [id]);
+  const file = useLoad(() => api.documents.file(id), [id]);
+  const mime = doc.data?.mime_type ?? '';
+  const { pdf, broken } = usePdf(file.data?.base64, mime);
+  if (!doc.data || !file.data) return <span className="doc-thumb-empty" aria-hidden>🧾</span>;
+  if (mime === 'application/xml') return <span className="doc-thumb-empty" title="E-factuur">📄</span>;
+  if (mime !== 'application/pdf') return <img src={`data:${mime};base64,${file.data.base64}`} alt={`Bon: ${doc.data.original_name}`} />;
+  if (broken || !pdf) return <span className="doc-thumb-empty" aria-hidden>🧾</span>;
+  return <PdfPage doc={pdf} number={1} onSize={() => undefined} />;
+}
+
+function DocumentView({ id, mime, highlight, pageSizes }: { id: number; mime: string; highlight: { bbox?: Box; page?: number } | null; pageSizes?: { width: number; height: number }[] }) {
+  const file = useLoad(() => api.documents.file(id), [id]);
+  const [natural, setNatural] = useState<Record<number, { width: number; height: number }>>({});
+  const { pdf, broken } = usePdf(file.data?.base64, mime, () => setNatural({}));
+  const pages = useRef<Record<number, HTMLDivElement | null>>({});
 
   // markering op een andere pagina: daarheen scrollen
   const highlightPage = highlight?.bbox ? highlight.page ?? 1 : null;

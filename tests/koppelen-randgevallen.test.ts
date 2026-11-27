@@ -521,3 +521,34 @@ describe('na de review: de uitleg bij "Ja, vaste last" zegt wat er gebeurt', () 
     expect(s.inbox.home('2026-08-05').automated.find((a) => a.kind === 'bank-auto')!.reason).toContain('hebt gezegd dat dit voortaan automatisch mag');
   });
 });
+
+describe('een betaling die het nummer van een andere factuur noemt', () => {
+  it('gaat niet vanzelf naar een open factuur met hetzelfde bedrag; de betaling die dát nummer noemt wel', () => {
+    const { s } = world();
+    const klant = s.relations.create({ type: 'klant', name: 'Zeewaarts Logistiek AG', iban: 'DE89370400440532013000', address: 'Havenweg 1', postcode: '6300', city: 'Zug', country: 'CH', vat_number: 'CHE-123.456.789' });
+    const factuur = (date: string) => s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: date, lines: [{ description: 'Maandabonnement', quantity: 1, unitPrice: 50000, vatCode: 'dienst-buiten-eu' }] }).id);
+    const eerste = factuur('2026-09-05');
+    const tweede = factuur('2026-09-20');
+    // de eerste is al voldaan (bv. via de betaaldienst); de tweede staat nog open
+    s.invoices.registerPayment(eerste.id, { amount: 50000, date: '2026-09-05', moneyAccount: ACCOUNTS.tussenrekeningPsp });
+    const oud = line(s, '2026-09-06', 50000, 'Zeewaarts Logistiek AG', { description: eerste.number!, counterIban: 'DE89370400440532013000' });
+    const nieuw = line(s, '2026-09-26', 50000, 'Zeewaarts Logistiek AG', { description: tweede.number!, counterIban: 'DE89370400440532013000' });
+    expect(s.matching.suggest(oud).filter((x) => x.kind === 'factuur')).toEqual([]);
+    expect(s.matching.autoMatch('2026-09-28').matched).toBe(1);
+    expect(s.bank.get(oud.id).status).toBe('nieuw');
+    expect(s.bank.get(nieuw.id)).toMatchObject({ status: 'gematcht', matched_invoice_id: tweede.id });
+  });
+
+  it('het ordernummer van een webshoporder telt ook als nummer van die factuur', () => {
+    const { s } = world();
+    const klant = s.relations.create({ type: 'klant', name: 'Zeewaarts Logistiek AG', iban: 'DE89370400440532013000', address: 'Havenweg 1', postcode: '6300', city: 'Zug', country: 'CH', vat_number: 'CHE-123.456.789' });
+    const draft = s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-05', reference: 'Webshoporder WS-2026-00117', lines: [{ description: 'Maandabonnement', quantity: 1, unitPrice: 50000, vatCode: 'dienst-buiten-eu' }] });
+    const order = s.invoices.finalize(draft.id);
+    s.invoices.registerPayment(order.id, { amount: 50000, date: '2026-09-05', moneyAccount: ACCOUNTS.tussenrekeningPsp });
+    s.invoices.finalize(s.invoices.createDraft({ relationId: klant.id, invoiceDate: '2026-09-20', lines: [{ description: 'Maandabonnement', quantity: 1, unitPrice: 50000, vatCode: 'dienst-buiten-eu' }] }).id);
+    expect(s.invoices.knownNumbers().find((k) => k.id === order.id)!.numbers).toContain('WS-2026-00117');
+    const t = line(s, '2026-09-06', 50000, 'Zeewaarts Logistiek AG', { description: 'WS-2026-00117', counterIban: 'DE89370400440532013000' });
+    expect(s.matching.suggest(t).filter((x) => x.kind === 'factuur')).toEqual([]);
+    expect(s.matching.autoMatch('2026-09-28').matched).toBe(0);
+  });
+});

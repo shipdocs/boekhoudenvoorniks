@@ -39,7 +39,13 @@ Onder *Hulp nodig* staan de betalingen waar de app niet zeker van is. Klik op ee
 
 - **Een factuur** van jou die hiermee betaald is.
 - **Een bon of aankoop** die hiermee betaald is.
-- **Een kostensoort** (categorie) als er geen bon is of komt; typ een paar letters. Bij een uitgave met btw vul je het btw-tarief in.
+- **Een kostensoort** (categorie) als er geen bon is of komt; typ een paar letters. Daarna vraagt de app *Heb je de bon of factuur?*:
+  - *Ja, bon toevoegen*: kies het bestand. De bon hoort dan bij de betaling, en je vult de btw in die erop staat.
+  - *De bon komt nog*: de app vraagt het je over een week opnieuw. Komt de bon eerder binnen en past hij bij de betaling, dan gaat de betaling met de bon mee.
+  - *Nee, geen bon*: de app boekt de kosten zonder btw-aftrek. Zonder bon of factuur mag je geen btw aftrekken. Vind je de bon later terug, voeg hem dan toe bij de betaling en kies opnieuw de categorie en de btw.
+  - *Toch btw kiezen*: alleen als je zeker weet wat er op de factuur stond. Je boekhouder of de Belastingdienst kan om de factuur vragen.
+
+  Op *Vandaag* werkt het net zo: kies je bij een betaling *Zakelijk*, dan stelt de app dezelfde vraag. Bij een bekende winkel boekt *Zakelijk* alleen meteen als er al een bon bij de betaling hangt, of als er geen btw af te trekken valt (bijvoorbeeld een verzekering).
 - **Verkoop via een ander systeem**: omzet uit een webshop of betaaldienst waarvoor je geen factuur in de app maakte.
 - **Privé**: geld dat niets met je bedrijf te maken heeft (een privéopname of -storting). Heb je een vof of maatschap met [vennoten](instellingen.html#vof-of-maatschap-eigen-vermogen-per-vennoot), dan vraagt de app eerst welke vennoot het opnam of stortte (*Nee, privé van …*, *Privé gestort door …*); het bedrag komt op de privérekening van die vennoot. Ook bij bonnen, kilometers en het zakelijke deel vraagt de app van welke vennoot het privé is: zie [privé per vennoot](instellingen.html#prive-per-vennoot). Een winkel of persoon die je steeds als privé indeelt, boekt de app bij vennoten niet vanzelf: hij weet niet van wie het was, dus vraagt hij het elke keer.
 - **Negeren**: de regel telt niet mee in je boekhouding, wel in het saldo. Bijvoorbeeld een dubbele regel of een nulbedrag.

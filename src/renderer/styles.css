@@ -143,6 +143,12 @@ table.list tr.clickable:hover td { background: var(--surface-2); }
 .task { display: flex; gap: 14px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .task:last-child { border-bottom: 0; }
 .task .icon { font-size: 22px; width: 30px; text-align: center; }
+/* de bon klein op een kaart op Vandaag; klikken opent hem groot */
+.task .doc-thumb { flex: none; width: 64px; height: 84px; padding: 0; overflow: hidden; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; display: flex; align-items: flex-start; justify-content: center; }
+.task .doc-thumb:hover, .task .doc-thumb:focus-visible { border-color: var(--primary); }
+.task .doc-thumb img, .task .doc-thumb canvas { display: block; width: 100%; height: auto; }
+.task .doc-thumb-empty { font-size: 22px; align-self: center; }
+.task .task-payment { margin-top: 4px; }
 .task .title { font-weight: 600; }
 .task .q { color: var(--text-2); font-size: 14px; }
 .done-box { text-align: center; padding: 26px; }

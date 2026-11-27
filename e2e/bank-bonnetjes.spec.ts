@@ -21,6 +21,9 @@ test('bankafschrift inlezen en een betaling indelen met een eigen categorie', as
   await dlg.getByRole('button', { name: 'Opslaan' }).click();
   await expect(dlg).toBeHidden();
   await expect(page.locator('.chips button.selected')).toHaveText('Tanken aggregaat');
+  // zonder antwoord op de bonvraag kan opslaan nog niet
+  await expect(page.getByRole('button', { name: 'Opslaan', exact: true })).toBeDisabled();
+  await page.getByTestId('bon-vraag').getByRole('button', { name: /Nee, geen bon/ }).click();
   await page.getByRole('button', { name: 'Opslaan', exact: true }).click();
   await expect(page.getByText('Verwerkt ✓').last()).toBeVisible();
   // de categorie is er ook bij de bonnetjes
