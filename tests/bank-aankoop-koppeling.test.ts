@@ -198,6 +198,27 @@ describe('vanzelf boeken: nooit losse kosten naast een aankoop die er al staat',
     expect(s.inbox.autoProcess('2026-09-28')).toEqual({ matched: 0, booked: 0 });
     expect(financialSnapshot(ctx)).toEqual(before);
   });
+
+  it('op Vandaag eerst de bon: geen losse vraag over de betaling zolang de bon die meeneemt', async () => {
+    const lines = ['Kantoorhal', 'Datum: 10-09-2026', 'Ordners 100,00', 'BTW 21% 100,00 21,00', 'Totaal 121,00'];
+    const ocr: OcrProvider = { id: 'test', label: 'Test OCR', available: async () => true, recognize: async () => ({ items: lines.map((text, i) => ({ text, page: 1, bbox: [10, 20 + i * 20, 300, 34 + i * 20] as [number, number, number, number], confidence: 0.97 })) }) };
+    const { s } = setup({ ocr });
+    s.settings.update({ onboardingDone: true, company: { ...s.settings.get().company, name: 'Testbedrijf' } });
+    const other = debit(s, '2026-09-09', 2500, 'Lunchzaak Hoek');
+    const d = await s.intake.add('bon.jpg', new Uint8Array([7]), '2026-09-10');
+    const t = debit(s, '2026-09-11', 12100, 'Snelpay Kassa');
+    expect(s.intake.get(d.id)).toMatchObject({ status: 'controle', bank_match: { id: t.id } });
+    const tasks = s.inbox.tasks('2026-09-28');
+    expect(bankTasks(s, t.id)).toEqual([]);
+    // een betaling zonder bon blijft gewoon een vraag, maar ná de bon
+    const docAt = tasks.findIndex((x) => x.kind === 'document-review' && x.ref.documentId === d.id);
+    const otherAt = tasks.findIndex((x) => x.ref.bankTransactionId === other.id);
+    expect(docAt).toBeGreaterThanOrEqual(0);
+    expect(otherAt).toBeGreaterThan(docAt);
+    // de bon genegeerd: de betaling krijgt weer haar eigen vraag
+    s.intake.ignore(d.id);
+    expect(bankTasks(s, t.id)).toHaveLength(1);
+  });
 });
 
 describe('de vraag bij een nieuwe afschrijving', () => {

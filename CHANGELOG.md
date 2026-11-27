@@ -2,6 +2,16 @@
 
 ## Nog niet uitgebracht
 
+## 1.10.5 — Eerst de bon, dan de betaling
+
+Op Vandaag staan bonnen nu boven de vragen over je bankbetalingen. Hoort een betaling bij een bon die nog wacht, dan vraagt de app er niet apart naar: bij het boeken van de bon gaat de betaling mee.
+
+### Opgelost
+- **Een factuur met "Sold through" koppelt weer aan de kaartbetaling.** Op sommige buitenlandse facturen staat de verkoper als "Sold through Link, LLC". De app las dat hele stuk als naam, herkende de betaling "Link.com* …" op je afschrift daardoor niet, en koppelde de bon niet aan de betaling als het bedrag door de koers iets afweek. Nu leest de app "Link, LLC" als verkoper (ook bij "Sold by" en "Verkocht door"). Een bon die al binnen is, verbeter je zelf: zet de leverancier op de naam zonder "Sold through".
+
+### Verbeterd
+- **Op Vandaag eerst de bonnen, dan de bankbetalingen.** Kwam er een betaling binnen waarvan de bon nog op controle wachtte, dan vroeg de app naar die betaling (zakelijk of privé, welke btw) zonder dat je de bon erbij zag. Nu staan de bonnen bovenaan, en vraagt de app niet apart naar een betaling die bij een bon hoort: bij het boeken van de bon gaat de betaling mee. Negeer je de bon, of past hij toch niet, dan komt de vraag over de betaling vanzelf terug.
+
 ## 1.10.4 — Mollie-facturen weer op betaald
 
 Een factuur die je in Mollie maakt en die via Mollie betaald wordt, staat in de app weer op betaald via Mollie.
@@ -118,7 +128,7 @@ Mail zonder gedoe: een gratis bonnen-adres waar de app je facturen en bonnen oph
 - **Versturen met je eigen mailprogramma.** Bij een factuur of offerte kies je nu naast het gewone versturen ook *Versturen met je eigen mailprogramma*. De app opent je standaardmailprogramma (op Windows via Simple MAPI, op Linux via `xdg-email`) met ontvanger, onderwerp, tekst en de pdf als bijlage. Je hebt geen e-mailserver of extra account nodig. Daarna vraagt de app *Is de factuur verstuurd?*: pas bij *Ja* telt de factuur of offerte als verstuurd en beginnen de herinneringen te lopen; bij *Nog niet*, het sluiten van de vraag of het mailvenster verandert er niets. Lukt het openen niet (of is er geen mailprogramma), dan kun je *Gmail / Outlook op het web* kiezen: dat opent het schrijfvenster met alles ingevuld en toont de pdf in je bestandsbeheerder. Automatische herinneringen openen nooit een mailvenster: zonder e-mailserver staan ze als taak op Vandaag. Voor Windows komt er één klein onderdeel bij (koffi, voor de Simple MAPI-aanroep). De pdf staat daarbij in *Documenten → BoekhoudenVoorNiks → Te versturen* (en wordt na 30 dagen opgeruimd), omdat een mailprogramma als snap of flatpak de tijdelijke map niet ziet en de bijlage anders stil wegliet. Is Thunderbird je standaardprogramma, dan opent de app het rechtstreeks, omdat `xdg-email` daar de bijlage laat vallen. Geprobeerd met een echt mailprogramma op Windows en met Thunderbird op Linux.
 - **Administraties beheren.** Bij Instellingen → Administraties kun je per administratie nu de naam wijzigen, de map openen (bijvoorbeeld om bij de back-ups te komen) en een administratie die je niet meer nodig hebt weghalen. Weghalen bevestig je door de naam te typen; de hele map gaat naar de prullenbak van je computer, dus je kunt hem terughalen. De open administratie en de eerste administratie (die staat in de gegevensmap zelf) kun je niet weghalen.
 - **De app houdt bij of er in de boekhoudermodus is geschreven.** Een correctieboeking, een boeking terugdraaien, het rekeningschema wijzigen of een afschrift weghalen wordt vastgelegd (kijken niet). Bij Instellingen → Over zie je "er is nooit in geschreven" of hoe vaak en wanneer, en het pakket voor je boekhouder heeft er een controle voor. Het akkoord-venster zegt het erbij: wij geven geen advies over een boekhouding; vragen lopen via je boekhouder, en op een administratie waarin buiten de boekhouder om in deze modus is geschreven, geven we geen ondersteuning.
-- **Hulp in de app.** Onderaan het menu staat *Hulp*: die opent in je browser de pagina van de [online handleiding](https://boekhoudenvoorniks.nl/handleiding/index.html) die bij het scherm hoort waar je bent. Ook bij Instellingen → Over staat de handleiding.
+- **Hulp in de app.** Onderaan het menu staat *Hulp*: die opent in je browser de pagina van de [online handleiding](https://boekhoudenvoorniks.nl/handleiding/) die bij het scherm hoort waar je bent. Ook bij Instellingen → Over staat de handleiding.
 
 ### Opgelost
 - **Een oudere betaling openen vanuit Zoeken gaf een leeg scherm.** Heb je meer dan 500 betalingen ingelezen, dan bleef het scherm leeg als je in Zoeken op een betaling klikte die ouder was dan de 500 nieuwste (bijvoorbeeld een genegeerde regel uit een eerder jaar). De app haalt de betaling nu zelf op, en bestaat hij niet meer, dan zegt hij dat. Het Bank-overzicht zegt er nu ook bij dat het de 500 nieuwste betalingen laat zien en dat je oudere via zoeken vindt.

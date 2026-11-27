@@ -851,6 +851,10 @@ export class InboxService {
     /** facturen van het eigen bedrijf die samen met hun betaling één taak zijn */
     const ownDocuments = new Set<number>();
     const s = this.settings.get();
+    // bonnen die nog op controle wachten; staat de betaling ervan al op de bank, dan neemt de bon die straks mee
+    const reviewDocs = this.intake.list('controle');
+    const docForPayment = new Map<number, number>();
+    for (const d of reviewDocs) if (d.bank_match) docForPayment.set(d.bank_match.id, d.id);
     // bv: het loon van de directeur, elke maand na bevestiging (nooit vanzelf; de loonstrook komt van elders)
     const loon = this.loon?.active() ?? null;
     if (loon) {
@@ -987,6 +991,11 @@ export class InboxService {
         });
         continue;
       }
+      // Eerst de bon, dan de betaling: wacht er een bon op controle die bij deze betaling past, dan geen
+      // aparte vraag (zakelijk of privé, btw) zonder de bon erbij. Bij het bevestigen van de bon gaat de
+      // betaling mee; wordt de bon genegeerd of past hij toch niet, dan komt de vraag hier vanzelf terug.
+      const waitingDoc = docForPayment.get(t.id);
+      if (waitingDoc !== undefined && !ownDocuments.has(waitingDoc)) continue;
       // hoort deze afschrijving bij een aankoop die er al staat? Eerst die vraag, vóór een soort kosten.
       // Past de aankoop maar zwak (alleen het bedrag), dan gaat een open creditfactuur waar de betaling bij
       // lijkt te horen voor: een terugbetaling aan een klant.
@@ -1309,7 +1318,7 @@ export class InboxService {
       }
     }
 
-    for (const d of this.intake.list('controle')) {
+    for (const d of reviewDocs) {
       // de factuur van je eigen bedrijf staat al samen met zijn betaling in de lijst
       if (ownDocuments.has(d.id)) continue;
       // eerst de vraag of de bon bij iets hoort dat er al staat (#179): niets koppelen of boeken zonder antwoord
@@ -1870,9 +1879,11 @@ export class InboxService {
         ref: { periodKey: c.periodKey },
       });
     }
-    // stabiel sorteren op prioriteit; binnen een prioriteit blijft de volgorde gelijk
+    // stabiel sorteren op prioriteit; binnen een prioriteit eerst de bonnen (die nemen hun betaling mee),
+    // daarna de rest in dezelfde volgorde
     for (const t of tasks) this.explainActions(t);
-    return tasks.map((t, i) => ({ t, i })).sort((a, b) => (a.t.priority ?? 2) - (b.t.priority ?? 2) || a.i - b.i).map((x) => x.t);
+    const stage = (t: Task) => (t.kind === 'document-review' ? 0 : 1);
+    return tasks.map((t, i) => ({ t, i })).sort((a, b) => (a.t.priority ?? 2) - (b.t.priority ?? 2) || stage(a.t) - stage(b.t) || a.i - b.i).map((x) => x.t);
   }
 
   /**

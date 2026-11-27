@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseDocumentText, toLines } from '../src/intake/text-parser';
 import { vatFromDocument } from '../src/intake/classify';
+import { sameSupplierName } from '../src/documents/bank-purchase-match';
 import { setup } from './helpers';
 import { makePdf } from './pdf';
 import type { FetchLike } from '../src/integrations/types';
@@ -39,6 +40,13 @@ describe('facturen van Stripe', () => {
     expect(r.total?.value).toBe(1800);
     expect(r.currency.value).toBe('USD');
     expect(r.supplierCountry?.value).toBe('US');
+  });
+
+  it('"Sold through Link, LLC": de verkoper is Link, LLC, en de kaartbetaling "Link.com* …" past bij die naam', () => {
+    const r = parse(invoice.map((l) => l.replace('Voorbeeld Cloud Services, Inc dba Wolkje (@wolkje)', 'Sold through Link, LLC')));
+    expect(r.supplier?.value).toBe('Link, LLC');
+    expect(sameSupplierName(r.supplier!.value, 'Link.com* Voorbeeldlab')).toBe(true);
+    expect(parse(invoice.map((l) => l.replace('Voorbeeld Cloud Services, Inc dba Wolkje (@wolkje)', 'Verkocht door Wolkje B.V.'))).supplier?.value).toBe('Wolkje B.V.');
   });
 
   it('zonder "dba": de naam zoals hij er staat', () => {

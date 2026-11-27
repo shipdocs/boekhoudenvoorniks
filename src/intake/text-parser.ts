@@ -118,9 +118,11 @@ const BILL_TO = /^(.*?)\s*\b(?:bill(?:ed)?\s+to|invoice\s+to|factuur\s+aan|rechn
 /** Kopjes, geen naam van een leverancier */
 const LABEL_LINE = /factuur|\bbon\b|kassabon|invoice|receipt|rechnung|datum|\bdate\b|nummer|number|\bdue\b|pagina|page|bill to|ship to|account\s*id|billing\s*period|company\s*name|team\s*name|customer|klantnummer|\b(?:vat|btw|gst|ein)\b|\b(?:betaald|paid|bezahlt)\s+(?:op|on|am)\b/i;
 
-/** Naam van de verkoper links van "Bill to": zonder @handle; bij "X dba Y" de handelsnaam Y. */
+/** Naam van de verkoper links van "Bill to": zonder @handle; bij "X dba Y" de handelsnaam Y; zonder het kopje "Sold through". */
 function sellerName(raw: string): string | null {
   let name = raw.replace(/\(?@[\w.-]+\)?/g, ' ');
+  // "Sold through Link, LLC": de verkoper is Link, LLC; "Sold through" is een kopje, geen deel van de naam
+  name = name.replace(/^\s*(?:sold\s+(?:through|by|via)|verkocht\s+(?:door|via)|verkauft\s+(?:durch|über|von))\s*:?\s+/i, '');
   const dba = /\bd\/?b\/?a\b\.?\s+(.+)$/i.exec(name);
   if (dba) name = dba[1]!;
   name = name.replace(/\s+/g, ' ').trim().replace(/[,;:]+$/, '');
