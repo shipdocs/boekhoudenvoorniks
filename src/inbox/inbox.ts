@@ -235,6 +235,8 @@ export interface HomeData {
   bankUpdatedTo: IsoDate | null;
   vat: { periodLabel: string; deadline: IsoDate; deadlineLabel: string; estimate: Cents };
   tasks: Task[];
+  /** bonnen die nog niet op Vandaag staan, omdat de betaling ervan morgen pas van de bank komt (`waitsForBank`) */
+  waitingForBank: number;
   checklist: { label: string; ok: boolean }[];
   upToDate: boolean;
   processedToday: { bankChecked: number };
@@ -294,6 +296,27 @@ const ownCompanyActions = (primaryPrive = false): TaskAction[] => [
 ];
 /** Hoe een aankoop buiten de bank om betaald is, in woorden (null = deels privé, deels contant). */
 const paidElsewhere = (via: 'prive' | 'kas' | null): string => (via === 'kas' ? 'contant betaald' : via === 'prive' ? 'betaald met privégeld' : 'betaald met privégeld of contant');
+/** Zoveel dagen na de datum van een bon wacht hij hooguit op de betaling van de bank (`waitsForBank`). */
+export const BANK_WAIT_DAYS = 3;
+
+/**
+ * Wacht deze bon nog op zijn betaling? De bank loopt een dag achter: een bon van vandaag heeft zijn betaling pas
+ * morgen. Wie de bon nu boekt, krijgt een aankoop die "moet nog betaald" lijkt en morgen een losse vraag bij de
+ * betaling. Daarom staat zo'n bon pas op Vandaag als de bankgegevens tot en met de dag van de bon compleet zijn
+ * (`bankTo`), of uiterlijk `BANK_WAIT_DAYS` dagen na die dag (wie maar af en toe een afschrift inleest). Meteen
+ * zichtbaar: contant, privé of later betaald, een rekening met een latere vervaldatum, of als er nog nooit een
+ * afschrift is ingelezen.
+ */
+export function waitsForBank(d: Pick<IntakeDocument, 'bank_match' | 'proposed_paid_with' | 'result'>, asOf: IsoDate, bankTo: IsoDate | null): boolean {
+  if (d.bank_match || !bankTo) return false;
+  if (d.proposed_paid_with && d.proposed_paid_with !== 'bank') return false;
+  const date = d.result?.invoiceDate?.value;
+  if (!date || !isIsoDate(date)) return false;
+  const due = d.result?.dueDate?.value;
+  if (due && due > date) return false;
+  return bankTo < date && asOf <= addDays(date, BANK_WAIT_DAYS);
+}
+
 /** Waarom de app bij een betaling aan je eigen bedrijf Privé voorstelt. */
 const OWN_PRIVATE_WHY = 'Je betaalt dan jezelf: geen kosten en geen btw terug. Daarom stelt de app Privé voor. Bij "weet ik nog niet" blijft het open staan en houdt het je btw-aangifte tegen.';
 const OWN_HINTS = {
@@ -873,7 +896,8 @@ export class InboxService {
     return null;
   }
 
-  tasks(asOf: IsoDate = today()): Task[] {
+  /** `waiting`: krijgt de bonnen die nog op de bank wachten (zie `waitsForBank`); die staan niet in de lijst. */
+  tasks(asOf: IsoDate = today(), waiting?: number[]): Task[] {
     // in de kopie bij de boekhouder zijn de vragen van de klant niet aan hem; zijn werk staat in de balk
     if (this.settings.officeCopy()) return [];
     const tasks: Task[] = [];
@@ -1365,6 +1389,7 @@ export class InboxService {
       }
     }
 
+    const bankTo = this.bankCompleteTo();
     for (const d of reviewDocs) {
       // de factuur van je eigen bedrijf staat al samen met zijn betaling in de lijst
       if (ownDocuments.has(d.id)) continue;
@@ -1376,6 +1401,11 @@ export class InboxService {
       const bad = pending ? d.issues.find((i) => i.field === pending.kind) : own ?? d.issues.find((i) => i.severity === 'fout') ?? futureDateIssue(d.issues) ?? undefined;
       const name = d.result?.supplier?.value ?? d.original_name;
       const possible = !bad ? possibleFor.get(d.id) : undefined;
+      // de bank loopt een dag achter: eerst de betaling afwachten, dan staan bon en betaling samen op één kaart
+      if (!bad && !pending && !own && !possible && waitsForBank(d, asOf, bankTo)) {
+        waiting?.push(d.id);
+        continue;
+      }
       if (possible) {
         const total = d.result!.total!.value;
         const diff = -possible.amount - total;
@@ -2313,9 +2343,15 @@ export class InboxService {
     });
   }
 
+  /** t/m welke dag de bankgegevens compleet zijn, over alle rekeningen; null als er nog nooit iets is ingelezen */
+  private bankCompleteTo(): IsoDate | null {
+    return this.bank.importStatus().map((st) => st.completeTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
+  }
+
   home(asOf: IsoDate = today()): HomeData {
     const s = this.settings.get();
-    const tasks = this.tasks(asOf);
+    const waiting: number[] = [];
+    const tasks = this.tasks(asOf, waiting);
     const bankAccounts = this.bank.listAccounts();
     const ledgerBank = bankAccounts.reduce((sum, a) => sum + this.ledger.balance(a.rgs_code), 0);
     const pendingRows = this.db.prepare(`SELECT bank_account_id AS id, COALESCE(SUM(amount), 0) AS s FROM bank_transactions WHERE status = 'nieuw' GROUP BY bank_account_id`).all() as { id: number; s: number }[];
@@ -2335,8 +2371,7 @@ export class InboxService {
     const current = this.vat.currentPeriod(asOf);
     const deadline = vatDeadline(current.end, s.vatPeriod);
     const kinds = new Set(tasks.map((t) => t.kind));
-    const status = this.bank.importStatus();
-    const bankUpdatedTo = status.map((st) => st.completeTo).filter((d): d is string => !!d).sort().at(-1) ?? null;
+    const bankUpdatedTo = this.bankCompleteTo();
     const checklist = [
       { label: 'Bankgegevens bijgewerkt', ok: !kinds.has('bank-stale') && !kinds.has('bank-balance') && !kinds.has('bank-statement') && !kinds.has('bank-double') && !kinds.has('bank-same') && !kinds.has('feed-expired') && !kinds.has('feed-credentials') && !kinds.has('feed-account-gone') && !kinds.has('feed-silent') && !kinds.has('feed-balance') },
       { label: 'Alle betalingen verwerkt', ok: ![...kinds].some((k) => k.startsWith('bank-') && !['bank-stale', 'bank-balance', 'bank-statement', 'bank-double', 'bank-same'].includes(k)) },
@@ -2351,6 +2386,7 @@ export class InboxService {
       bankUpdatedTo,
       vat: { periodLabel: current.label, deadline, deadlineLabel: formatDateNl(deadline), estimate: this.vat.calculate(current.key).summary.teBetalen },
       tasks,
+      waitingForBank: waiting.length,
       checklist,
       upToDate: tasks.length === 0,
       processedToday: { bankChecked: (this.db.prepare(`SELECT COUNT(*) AS n FROM bank_transactions WHERE date(created_at) = date('now')`).get() as { n: number }).n },

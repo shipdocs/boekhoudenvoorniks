@@ -179,6 +179,12 @@ export function Home() {
       </div>
 
       <h2>{data.upToDate ? 'Je bent helemaal bij ✓' : data.tasks.length === 1 ? 'Nog 1 ding en je bent klaar' : `Nog ${data.tasks.length} dingen en je bent klaar`}</h2>
+      {data.waitingForBank > 0 && (
+        <p className="muted small" data-testid="bon-wacht" style={{ marginTop: -6 }}>
+          ⏳ {data.waitingForBank === 1 ? '1 bon wacht' : `${data.waitingForBank} bonnen wachten`} op je bank: de betaling komt meestal een dag later binnen. Dan zie je bon en betaling hier samen.{' '}
+          <Button kind="ghost" onClick={() => go({ screen: 'aankopen' })}>Nu al verwerken</Button>
+        </p>
+      )}
       {data.upToDate ? (
         <div className="card done-box">
           <div className="check">✓</div>

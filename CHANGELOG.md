@@ -2,6 +2,13 @@
 
 ## Nog niet uitgebracht
 
+## 1.11.1 — De bon wacht op je bank
+
+De betaling van een bon komt meestal een dag later van je bank binnen. Een bon van vandaag wacht daarom even op Vandaag, zodat je bon en betaling samen ziet en één vraag beantwoordt.
+
+### Verbeterd
+- **Een bon van vandaag wacht op Vandaag even op je bank.** De betaling van een bon komt meestal een dag later van je bank binnen. Boekte je de bon meteen, dan stond de aankoop op *moet nog betaald*, en kwam er de volgende dag een losse vraag bij de betaling. Nu staat zo'n bon pas op Vandaag als je bank bij is, met de betaling op dezelfde kaart. Tot die tijd zie je *1 bon wacht op je bank*, met een knop om hem toch nu al te verwerken. Komt er na 3 dagen geen nieuw afschrift, dan staat de bon er toch. Contant of privé betaald, of een factuur die je nog moet betalen, staat er meteen.
+
 ## 1.11.0 — De bon bij elke betaling
 
 Op Vandaag zie je de bon zelf, met de betaling die erbij hoort. Bij een betaling zonder bon vraagt de app eerst of je de bon hebt, in plaats van te gokken naar het btw-tarief: zonder factuur geen btw-aftrek. En past een bon bijna bij een betaling, bijvoorbeeld door de koers van je bank, dan vraagt de app of ze bij elkaar horen.
